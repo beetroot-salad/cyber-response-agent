@@ -10,9 +10,9 @@ def _gate():
     return import_lint_lib("lint_hand_rolled_name_resolution")
 
 
-def _findings(source: str, rel: str = "defender/tests/test_made_up.py"):
+def _findings(source: str):
     gate = _gate()
-    return gate._findings_for(ast.parse(source), source, rel)
+    return gate._findings_for(ast.parse(source), source, "defender/tests/test_made_up.py")
 
 
 REAL_SOURCE_HEADER = (

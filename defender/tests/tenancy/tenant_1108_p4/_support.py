@@ -1,41 +1,13 @@
-"""Shared machinery for #1108 P4's contract (slice S0): the fixture tenant as a real tenant repo,
-published for real through P3's delivery path (O11: "fixtures obtain exports through one helper
-that git-inits the fixture tenant and publishes for real").
+"""Shared machinery for #1108 P4: the fixture tenant as a real tenant repo, published for real
+through P3's delivery path.
 
-Built on P3's machinery (`tenant_1108_delivery/`), imported, never copied: a real clone, a bare
-remote served over smart HTTP (`GitHTTP`, Bearer-authenticated as Forgejo is), the forge's HTTP
-API fake (`ForgeHTTP`), the issuer fake (`VaultHTTP`, whose `identity()` is P3's real
-`ForgejoIdentity` over it), and P3's operator-style tenant placement (`place_tenant`). Nothing
-here implements P4 policy: it plants trees, lands commits on the fake origin as a human merge
-would, and calls P3's real `TenantDelivery.open(...).publish()`. Every judgement (fresh or stale,
-what a run copies, what a publish child reports) is the code under test's.
+Built on P3's `tenant_1108_delivery/` helpers, imported, never copied: a real clone, a bare remote
+served over smart HTTP (`GitHTTP`, Bearer-authenticated as Forgejo is), the forge API fake
+(`ForgeHTTP`), the issuer fake (`VaultHTTP`) and P3's `place_tenant`. Nothing here implements P4
+policy: it plants trees, lands commits on the fake origin as a human merge would, and calls P3's
+real `TenantDelivery.open(...).publish()`; every judgement is the code under test's.
 
-Interface (other slices code against this; ask the orchestrator for changes):
-
-    FIXTURE, FIXTURE_AGENT, FIXTURE_SETTINGS     # knowledge/tenant-fixture/{,agent,settings}
-    FIXTURE_TENANT_ID, OTHER_TENANT_ID, OTHER_LESSON
-    published_tenant(scratch, *, root, tenant_id=FIXTURE_TENANT_ID, files=None, agent=None,
-                     repo_name="fixture") -> ContextManager[PublishedTenant]
-    place_fixture(root, tenant_id=FIXTURE_TENANT_ID, *, files=None, agent=None) -> Path
-    publish_placed(scratch, *, root, tenant_id, repo_name=None) -> ContextManager[PublishedTenant]
-                                                  # an ALREADY-placed tenant, current content; re-callable
-    publish_once(scratch, *, root, tenant_id, repo_name=None) -> PublishedTenant  # server closed after
-    second_tenant(first, *, tenant_id=OTHER_TENANT_ID, files=None, repo_name="other")
-                     -> ContextManager[PublishedTenant]
-    PublishedTenant: .tenant .tenant_id .data_root .clone .remote .origin .forge .vault
-                     .identity .server .scratch .export .commit .p3
-                     .open_delivery(**options) -> TenantDelivery
-                     .publish(**options) -> TenantExport
-                     .merge(files, message="human merge") -> str (new origin main)
-                     .origin_main() -> str
-    current_commit(tenant) -> str | None          # raw `<T>/exports/current`, no parsing policy
-    export_dir(tenant, commit) -> Path            # `<T>/exports/<commit>/`
-    bind_forge(t, *, origin=None, audience=ISSUER_AUDIENCE, issuer_role=None,
-               issuer_config=None) -> dict
-                                                  # writes row `forge: {origin, audience, issuer_role}`
-    unbind_forge(t) -> None                       # removes the row's `forge` field
-    fixture_agent_files() -> dict[str, bytes]     # the committed fixture's agent/ files
-    pytest fixture `p4_tenant` (conftest.py): a PublishedTenant under the test's own data root
+The pytest fixture `p4_tenant` (conftest.py) is a `PublishedTenant` under the test's own data root.
 """
 from __future__ import annotations
 
@@ -68,10 +40,8 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     target,
 )
 
-#: The committed fixture tenant (`knowledge/tenant-fixture/`): settings + minimal made-up agent
-#: content (decision 4). It carries no `agent/.tenant-id`: the same tree is set up under several
-#: ids (`_data_root_1078.set_up_tenant`, `fixture_tenant(tenant_id)`), so the id is written when
-#: a tenant is placed, never committed in the fixture.
+#: The committed fixture tenant (`knowledge/tenant-fixture/`). It carries no `agent/.tenant-id`:
+#: the same tree is placed under several ids, so the id is written at placement.
 FIXTURE = tenants.FIXTURE
 FIXTURE_AGENT = tenants.FIXTURE_AGENT
 FIXTURE_SETTINGS = tenants.FIXTURE_SETTINGS
@@ -106,19 +76,15 @@ def _write_files(checkout: Path, files: Files | None) -> None:
 
 @dataclass(frozen=True, eq=False)
 class PublishedTenant:
-    """An accepted tenant whose clone is a real git repo holding the committed fixture tenant
-    (plus any `files`), with a live loopback origin, a forge fake and an issuer fake, published
-    once for real: `<T>/exports/<commit>/` exists and `<T>/exports/current` names it.
+    """An accepted tenant whose clone is a real git repo holding the fixture (plus any `files`),
+    with a live loopback origin, a forge fake and an issuer fake, published once for real.
 
-    Fault seams, all P3's fakes: `server` (the origin's `GitHTTP`: `.refuse`, `.on_service`
-    returning a `Trickle`), `forge` (`ForgeHTTP`: `.fault`, `.protection`), `vault` (the
-    issuer's `VaultHTTP`: `.status`, `.body`, `.calls`). `identity` is the FIRST publish's
-    `ForgejoIdentity`; it caches its token and the fake clock never moves, so it would never ask
-    the issuer again: `open_delivery` therefore builds a fresh `vault.identity()` per call, and an
-    issuer fault is set on `vault` before the next `open_delivery`/`publish`.
-
-    `p3` is P3's `(tenant, bare remote, None)` repo tuple (no legacy credential file is written),
-    so P3's own helpers (`push_to_remote`, `merge_on_remote`, `delivery`, ...) apply."""
+    Fault seams are P3's fakes: `server` (`GitHTTP`: `.refuse`, `.on_service` returning a
+    `Trickle`), `forge` (`ForgeHTTP`: `.fault`, `.protection`), `vault` (`VaultHTTP`: `.status`,
+    `.body`, `.calls`). `identity` is the first publish's; it caches its token under a clock that
+    never moves, so `open_delivery` builds a fresh `vault.identity()` per call: set an issuer
+    fault on `vault` before the next `open_delivery`/`publish`. `p3` is P3's
+    `(tenant, bare remote, None)` repo tuple, so P3's helpers (`push_to_remote`, ...) apply."""
 
     tenant: Any
     data_root: Path
@@ -143,10 +109,9 @@ class PublishedTenant:
         return self.export.commit
 
     def open_delivery(self, **options: Any) -> Any:
-        """P3's real `TenantDelivery.open` for this tenant: this checkout's `defender/`, the forge
-        fake's client, a fresh identity over the issuer fake (`vault.identity()`, so a fault set
-        on `vault` is seen) and the clone's configured origin; any of them overridable by keyword
-        (e.g. `client=` another forge's, `network_timeout=`)."""
+        """P3's real `TenantDelivery.open` for this tenant over the forge fake's client, a fresh
+        `vault.identity()` (so a fault set on `vault` is seen) and the clone's origin; any of them
+        overridable by keyword."""
         options.setdefault("defender_dir", DEFENDER)
         options.setdefault("client", self.forge.client)
         if "identity" not in options:
@@ -159,11 +124,9 @@ class PublishedTenant:
         return self.open_delivery(**options).publish()
 
     def merge(self, files: Files, message: str = "human merge") -> str:
-        """A merged PR: one commit on the fake origin's `main` writing `files` (repo-relative;
-        `None` deletes), landed from a fresh checkout as a human merge would. The clone and the
-        exports are untouched until something publishes. Returns the new `main` commit.
-
-        For raw tree entries (a link, a gitlink) use P3's
+        """A human-merged PR: one commit on the fake origin's `main` writing `files` (`None`
+        deletes); the clone and exports are untouched until something publishes. Returns the new
+        `main` commit. For raw tree entries (a link, a gitlink) use P3's
         `push_to_remote(self.p3, self.scratch, edit, stage=False)` with `index_entry`."""
         return push_to_remote(self.p3, self.scratch, lambda w: _write_files(w, files), message)
 
@@ -174,11 +137,9 @@ class PublishedTenant:
 
 def place_fixture(root: Path, tenant_id: str = FIXTURE_TENANT_ID, *,
                   files: Files | None = None, agent: Path | None = None) -> Path:
-    """Set up `tenant_id` under the data root `root` the way an operator does (P3's
-    `place_tenant`: the knowledge folder, `agent/.tenant-id` naming it, the row), with the
-    committed fixture's `settings/` and `agent/` (or, with `agent=`, that directory's tree as
-    `agent/`, e.g. a golden replay's own agent content), then `files` written over them
-    (repo-relative; `None` deletes). Returns the knowledge folder. Publishes nothing."""
+    """Place `tenant_id` under `root` as an operator does (P3's `place_tenant`) with the fixture's
+    `settings/` and `agent/` (or the `agent=` directory's tree), then `files` written over them.
+    Returns the knowledge folder; publishes nothing."""
     root = Path(root)
     knowledge = tenants.place_tenant(root, tenant_id)
     marker = (knowledge / "agent" / ".tenant-id").read_bytes()
@@ -194,20 +155,14 @@ def place_fixture(root: Path, tenant_id: str = FIXTURE_TENANT_ID, *,
 @contextlib.contextmanager
 def publish_placed(scratch: Path, *, root: Path, tenant_id: str,
                    repo_name: str | None = None) -> Iterator[PublishedTenant]:
-    """Publish for real a tenant ALREADY placed under `root` (its knowledge folder, its
-    `agent/.tenant-id` and its row exist; e.g. `place_fixture`, `_tenants1106.place_tenant`, or a
-    suite's own planter), with whatever content the folder holds now.
+    """Publish for real a tenant already placed under `root`, with whatever its folder holds now.
 
-    The knowledge folder becomes (or stays) a git repo on `main`; everything in it is committed
-    (nothing when it is unchanged since the last call). The commit goes to the bare remote
-    `<scratch>/tenants/<repo_name>.git` (default name: the tenant id), served by P3's `GitHTTP`
-    as `origin` for the length of the context, and P3's real `TenantDelivery.open(...).publish()`
-    exports it and points `current` at it. Calling it again for the same tenant (same `scratch`)
-    publishes the folder's new content as a fast-forward on the same remote.
-
-    P3's publish refusals propagate (`DeliveryRefused`: a link or special entry, a missing or
-    foreign `agent/.tenant-id`), as does acceptance's (`TenantRefused`): a caller that plants a
-    deliberately broken tenant decides what a failed publish means for its scenario."""
+    The folder becomes (or stays) a git repo on `main` with everything committed; the commit goes
+    to the bare remote `<scratch>/tenants/<repo_name>.git` (default name: the tenant id), served
+    as `origin` for the context, and P3's real publish exports it and points `current` at it.
+    Calling it again (same `scratch`) publishes new content as a fast-forward. P3's
+    `DeliveryRefused` and acceptance's `TenantRefused` propagate: a caller planting a broken
+    tenant decides what a failed publish means."""
     root, scratch = Path(root), Path(scratch)
     name = repo_name if repo_name is not None else tenant_id
     tenant = tenants.accept(root, tenant_id)
@@ -249,12 +204,10 @@ def publish_placed(scratch: Path, *, root: Path, tenant_id: str,
         server.close()
 
 
-def publish_once(scratch: Path, *, root: Path, tenant_id: str,
-                 repo_name: str | None = None) -> PublishedTenant:
-    """`publish_placed` for a caller that needs only the export: publishes and closes the
-    origin server again. The returned value's `export`, `commit`, `tenant` and `merge` stay
-    usable; `server` is closed, so `publish()` needs another `publish_placed`/`publish_once`."""
-    with publish_placed(scratch, root=root, tenant_id=tenant_id, repo_name=repo_name) as done:
+def publish_once(scratch: Path, *, root: Path, tenant_id: str) -> PublishedTenant:
+    """`publish_placed` for a caller that needs only the export: the origin server is closed on
+    return, so `publish()` needs another `publish_placed`/`publish_once`."""
+    with publish_placed(scratch, root=root, tenant_id=tenant_id) as done:
         return done
 
 
@@ -262,28 +215,25 @@ def publish_once(scratch: Path, *, root: Path, tenant_id: str,
 def published_tenant(scratch: Path, *, root: Path, tenant_id: str = FIXTURE_TENANT_ID,
                      files: Files | None = None, agent: Path | None = None,
                      repo_name: str = "fixture") -> Iterator[PublishedTenant]:
-    """The fixture tenant set up under the data root `root` (`place_fixture`) and published for
-    real (`publish_placed`): the clone holds one commit on `main`, exported, `current` naming it.
-
-    `scratch` holds the served remotes and merge checkouts; keep it apart from `root`. `root`
-    must not already hold `tenant_id` (do not combine with the `d9_tenant` fixture or
-    `fixture_tenant()` on one id). The server lives until the context exits."""
+    """`place_fixture` then `publish_placed`: the clone holds one commit on `main`, exported and
+    named by `current`. Keep `scratch` (served remotes, merge checkouts) apart from `root`; `root`
+    must not already hold `tenant_id` (don't combine with `d9_tenant` or `fixture_tenant()` on
+    one id)."""
     place_fixture(root, tenant_id, files=files, agent=agent)
     with publish_placed(scratch, root=root, tenant_id=tenant_id, repo_name=repo_name) as done:
         yield done
 
 
 @contextlib.contextmanager
-def second_tenant(first: PublishedTenant, *, tenant_id: str = OTHER_TENANT_ID,
-                  files: Files | None = None,
-                  repo_name: str = "other") -> Iterator[PublishedTenant]:
+def second_tenant(first: PublishedTenant, *,
+                  files: Files | None = None) -> Iterator[PublishedTenant]:
     """Another tenant under `first`'s data root, from the same fixture content plus
     `OTHER_LESSON` (unless `files` is given), with its own remote, origin server, forge fake and
     issuer fake, published for real."""
     if files is None:
         files = dict([OTHER_LESSON])
-    with published_tenant(first.scratch, root=first.data_root, tenant_id=tenant_id,
-                          files=files, repo_name=repo_name) as other:
+    with published_tenant(first.scratch, root=first.data_root, tenant_id=OTHER_TENANT_ID,
+                          files=files, repo_name="other") as other:
         yield other
 
 
@@ -305,19 +255,15 @@ def _row_path(t: PublishedTenant) -> Path:
     return Path(location_path(t.tenant.row_path))
 
 
-def bind_forge(t: PublishedTenant, *, origin: str | None = None,
-               audience: str = ISSUER_AUDIENCE, issuer_role: str | None = None,
+def bind_forge(t: PublishedTenant, *, origin: str | None = None, issuer_role: str | None = None,
                issuer_config: Path | None = None) -> dict:
-    """Write the forge binding r3's data model gives the tenant row (`<T>/tenant.json` gains
-    `forge: {origin, audience, issuer_role, issuer_config}`; operator config, not secret) and
-    return it. Defaults agree with the fakes: `t.origin`, the issuer fake's audience, the role
-    `VaultHTTP.identity()` uses (`tenant-<id>`), and an issuer client config path beside the
-    data root (`<data root>/../operator/issuer.json`; a test that logs in for real writes its
-    config there or passes its own). Other row fields are kept. `published_tenant` never binds:
-    P3's publish does not read the binding."""
+    """Write the tenant row's `forge: {origin, audience, issuer_role, issuer_config}` binding and
+    return it; other row fields are kept. Defaults agree with the fakes (`t.origin`, the fake's
+    audience, role `tenant-<id>`) and name `default_issuer_config(t)`, where a test that logs in
+    for real writes its config. `published_tenant` never binds: P3's publish does not read it."""
     if issuer_config is None:
         issuer_config = default_issuer_config(t)
-    binding = {"origin": t.origin if origin is None else origin, "audience": audience,
+    binding = {"origin": t.origin if origin is None else origin, "audience": ISSUER_AUDIENCE,
                "issuer_role": f"tenant-{t.tenant_id}" if issuer_role is None else issuer_role,
                "issuer_config": str(Path(issuer_config).absolute())}
     path = _row_path(t)
@@ -346,9 +292,8 @@ def fixture_agent_files() -> dict[str, bytes]:
 
 
 def committed_blobs(clone: Path, rev: str, pathspec: str) -> dict[str, bytes]:
-    """Every regular-file blob under `pathspec` at `rev` in `clone`, by repo-relative path, with
-    its stored bytes: git's own read of the commit (`ls-tree -r`, then `cat-file blob` each),
-    which no worktree entry can redirect."""
+    """Every regular-file blob under `pathspec` at `rev`, by repo-relative path: git's own read
+    of the commit, which no worktree entry can redirect."""
     from defender import _git
 
     listing = _git.git_bytes(["--literal-pathspecs", "ls-tree", "-r", "-z", "--full-name", rev,
@@ -370,10 +315,8 @@ __all__ = [
     "OTHER_LESSON",
     "OTHER_TENANT_ID",
     "ForgeHTTP",
-    "GitHTTP",
     "PublishedTenant",
     "Trickle",
-    "VaultHTTP",
     "agent_blobs",
     "bind_forge",
     "current_commit",
@@ -388,6 +331,5 @@ __all__ = [
     "published_tenant",
     "push_to_remote",
     "second_tenant",
-    "target",
     "unbind_forge",
 ]

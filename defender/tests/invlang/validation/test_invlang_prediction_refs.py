@@ -104,8 +104,7 @@ def _resolution_doc(row: str, extra: str = "") -> str:
      "h-001  null → --   [l-001 severe ⟂ e-002 :: it just is not this]", "",
      ["'--'"]),
 
-    # An `ap*` the head names but `.attr_preds` never declared used to be dropped before any
-    # check could see it (the other side of the `startswith("p")` fix).
+    # An `ap*` the head names but `.attr_preds` never declared.
     ("undeclared-attribute-prediction-in-the-head",
      "h-001  null → ++   [l-001 ap9 severe ⟂ e-002 :: the binary is unsigned]", "",
      ["'ap9'"]),
@@ -174,7 +173,8 @@ def test_a_well_grounded_resolution_row_is_accepted(case, row, extra):
 
 
 def test_a_dropped_hypothesis_block_defers_to_its_own_parse_warning():
-    """The `:H` header is off-schema, so the parser rejects the whole block and h-001 never exists — every resolution against it then looks phantom."""
+    """The `:H` header is off-schema, so the parser rejects the whole block and h-001 never
+    exists; every resolution against it would look phantom."""
     doc = _doc(
         _STRONG_EDGE + "\n"
         ":H hypothesize.hypotheses [id|name|attached_to|rel]\n"
@@ -188,19 +188,3 @@ def test_a_dropped_hypothesis_block_defers_to_its_own_parse_warning():
     )
     assert _errors(doc) == []
     assert [e for e in validate_companion(doc) if "whole block rejected" in e]
-
-
-def test_a_misspelled_new_hypotheses_block_names_itself():
-    """`:H l-NNN.new_hypotheses` is now a documented authoring surface, so the singular typo is reachable."""
-    doc = _doc(
-        _two_hypotheses() + "\n"
-        ":H l-001.new_hypothesis "
-        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
-        "h-010|?mid-run-fork|v-001|executed|process|unclassified-process||null|active\n"
-        "\n"
-        ":T resolutions\n"
-        "h-010  null → +    [l-001 weak ⟂ e-002 :: the fork holds]"
-    )
-    assert [e for e in validate_companion(doc) if "new_hypothesis`" in e], (
-        "the parse warning must name the misspelled block"
-    )

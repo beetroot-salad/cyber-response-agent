@@ -1,4 +1,4 @@
-"""#747 — `RunTainted` is a systemic fault. (The drain-worktree quarantine rows are retired by #1108 P4; see below.)"""
+"""#747 — `RunTainted` is a systemic fault."""
 from __future__ import annotations
 
 import sys
@@ -12,19 +12,13 @@ from defender.learning.core.faults import SYSTEMIC_FAULTS, run_or_dead_letter  #
 from defender.box import RunTainted  # noqa: E402
 
 
-# The drain-worktree quarantine rows of #747 (the tainted tree archived as an inert tar with a
-# manifest, capped by refusal, never evicting; the taint propagating with nothing pushed) are
-# retired by #1108 P4 (OD12 class i): the P4 drain cuts no worktree and never scrubs its draft
-# (amendment 3 C3), so no drain tree is tainted or archived. A link or special file in a draft
-# refuses its claim whole (tenant_1108_delivery/test_changes.py::
-# test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole), a claim reset never
-# follows a box's links (::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links).
-# `RunTainted` stays systemic for the investigation run dir's scrub, below.
+# The drain cuts no worktree, so no drain tree is tainted or archived: a link or special file in
+# a draft refuses its claim whole, and a claim reset never follows a box's links (both pinned in
+# tenant_1108_delivery/test_changes.py). `RunTainted` stays systemic for the run dir's scrub.
 
 
 def test_run_tainted_is_a_systemic_fault(tmp_path):
-    """d_taint_is_systemic (#747, O3 + M2) — `RunTainted` is classified with the systemic faults,
-    which has two consequences and both are wanted."""
+    """Both consequences are wanted: the stage exits 2, and no item is dead-lettered."""
     from defender.learning.core.cli import _run_stage
 
     assert RunTainted in SYSTEMIC_FAULTS

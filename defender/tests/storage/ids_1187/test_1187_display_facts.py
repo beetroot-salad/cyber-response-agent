@@ -78,7 +78,7 @@ def _shows_time(page: str, instant: _dt.datetime) -> bool:
     """The page shows `instant` to the minute, either `YYYY-MM-DDTHH:MM` or `YYYY-MM-DD HH:MM`."""
     return re.search(
         rf"{instant:%Y-%m-%d}[T ]{instant:%H:%M}", page) is not None
-# O7 — run setup stamps the display facts
+# run setup stamps the display facts
 
 @pytest.mark.parametrize(("alert_name", "folder", "label"), ALERTS)
 def test_run_setup_stamps_display_facts_without_encoding_them_in_identity(
@@ -100,7 +100,7 @@ def test_run_setup_stamps_display_facts_without_encoding_them_in_identity(
         assert f"{moment:%Y%m%dt%H%M%Sz}" not in name.casefold()
 
 
-# O7 — the run page shows them
+# the run page shows them
 
 @pytest.mark.parametrize("source", ["setup", "rewritten"])
 def test_the_run_page_reads_its_display_facts_only_from_the_stamp(tmp_path, data_root, source):
@@ -145,7 +145,7 @@ def test_unusable_display_facts_never_stop_the_page(tmp_path, data_root, started
     _rewrite_stamp(run, started_at=started, alert_label=label)
     page = _page(run)
     assert "<html" in page, "the page did not render over unusable display facts"
-# O7 — the stamp's reader keeps the facts and survives bad ones
+# the stamp's reader keeps the facts and survives bad ones
 
 @pytest.mark.parametrize(("changes", "expected"), [
     ({"started_at": "2031-03-04T05:06:07Z", "alert_label": "planted-label-xyz"},
@@ -165,10 +165,10 @@ def test_the_stamp_reader_preserves_the_record_over_display_fact_changes(
     assert wire["tenant_id"] == H.T_ID, "the rest of the record survived"
     for key, value in expected.items():
         assert wire.get(key) == value
-# N5 — no decision compares the display facts (the fork check's field table)
+# no decision compares the display facts (the fork check's field table)
 
 #: The fork check's classes that are NOT compared (`learning/branch/cli.py`'s
-#: `STAMP_FIELD_CLASSES`, #1204 D4): a field in either is recorded and never judged.
+#: `STAMP_FIELD_CLASSES`): a field in either is recorded and never judged.
 NOT_COMPARED = frozenset({"informational", "expected_to_differ"})
 
 
@@ -181,7 +181,7 @@ def test_the_fork_checks_field_table_never_compares_the_display_facts():
         assert STAMP_FIELD_CLASSES.get(fact) in NOT_COMPARED, (
             f"{fact} is classed {STAMP_FIELD_CLASSES.get(fact)!r}; a display fact is never "
             f"compared ({sorted(NOT_COMPARED)})")
-# R1b — the launcher's family stamp
+# the launcher's family stamp
 
 def _arg(argv: list[str], flag: str) -> str:
     return argv[argv.index(flag) + 1]
@@ -215,7 +215,7 @@ def _launch(root: Path, monkeypatch: Any, *, edits: dict[str, dict[str, Any]] | 
     P.roots(root, monkeypatch)
     monkeypatch.setenv(P.DATA_ROOT_ENV, str(root / "data-root"))
     est, src = P.launch_source(root, source_run_id=X.new_id())
-    # The natural container in #1187's shape: no `_tenant.json` (R1).
+    # The natural container holds no `_tenant.json`.
     (src.parent / "_tenant.json").unlink(missing_ok=True)
     siblings = _Siblings(edits)
     got = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name), spawn=siblings)

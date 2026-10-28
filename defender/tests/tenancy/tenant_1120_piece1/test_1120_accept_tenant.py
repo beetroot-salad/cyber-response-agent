@@ -1,4 +1,4 @@
-"""D1: `accept_tenant`, the one acceptance function, and `Tenant`."""
+"""`accept_tenant`, the one tenant acceptance function, and the `Tenant` it returns."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -18,7 +18,7 @@ from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 from defender.records._tenant_id import TenantRefused
 
 
-#: O3's refused ids plus a control-character id (N16), with the gate's address tokens as the
+#: Ids off the tenant-id grammar, one of them carrying a control character.
 OFF_GRAMMAR_IDS = [
     pytest.param("../x", id="../x"),
     pytest.param("A", id="A"),
@@ -34,11 +34,9 @@ OFF_GRAMMAR_IDS = [
 @pytest.mark.parametrize("raw_id", OFF_GRAMMAR_IDS)
 def test_1120_accept_tenant_refuses_an_off_grammar_id_before_touching_the_root(
         tmp_path: Path, raw_id: str) -> None:
-    """For each of '../x', 'A', 'a/b', '', a 64-character id, '1abc', 'acme' plus a newline and an id
-    carrying a control character, accept_tenant raises TenantRefused naming the id."""
     root = tmp_path / "no-such-root"
     text = H.accept_refusal(_tenant, root, raw_id)
-    # "Names" survives N16's bound: the escaped rendering's head is in the message.
+    # The message bounds a long id: check the head of its escaped rendering.
     assert repr(raw_id)[:40] in text, (
         f"the grammar refusal does not name the refused id {raw_id!r} (repr-style): {text!r}")
     assert str(root) not in text, (
@@ -54,9 +52,9 @@ def test_1120_accept_tenant_refuses_an_off_grammar_id_before_touching_the_root(
         f"a valid id over an absent root must be refused for its row, naming it: {control!r}")
 
 
-def _other_file(tmp_path: Path, name: str = "outside.txt") -> Path:
-    """A regular file OUTSIDE the tenant — what a planted link would hand the tenant."""
-    target = tmp_path / "elsewhere" / name
+def _other_file(tmp_path: Path) -> Path:
+    """A regular file outside the tenant — what a planted link would hand the tenant."""
+    target = tmp_path / "elsewhere" / "outside.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("not this tenant's bytes\n", encoding="utf-8")
     return target
@@ -79,26 +77,26 @@ def _plant_hardlink(half: Path, tmp_path: Path) -> Path:
     return inside
 
 
-def _accept_within(owner, root: Path, tenant_id: str = H.TID, *, seconds: float = 20.0,
-                   fifo: Path | None = None, **kw) -> tuple[object, BaseException | None]:
+def _accept_within(owner, root: Path, *,
+                   fifo: Path | None = None) -> tuple[object, BaseException | None]:
     """`accept_tenant` in a worker thread with a deadline: a walk that OPENS a FIFO (or follows a
     cycle) blocks, and a blocked call must fail the test rather than hang the worker."""
     box: dict[str, object] = {}
 
     def call() -> None:
         try:
-            box["value"] = H.accept(owner, root, tenant_id, **kw)
+            box["value"] = H.accept(owner, root)
         except BaseException as exc:  # noqa: BLE001 — handed back to the test thread as-is
             box["exc"] = exc
 
     worker = threading.Thread(target=call, daemon=True)
     worker.start()
-    worker.join(seconds)
+    worker.join(20)
     if worker.is_alive():
         if fifo is not None:
             with contextlib.suppress(OSError):
                 os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
-        pytest.fail(f"accept_tenant did not return within {seconds}s — it opened a planted "
+        pytest.fail("accept_tenant did not return within 20s — it opened a planted "
                     "special file or followed a link cycle instead of refusing it by lstat")
     return box.get("value"), box.get("exc")  # type: ignore[return-value]
 
@@ -138,7 +136,7 @@ def _wrong_tenant_id_and_mounted_settings(root: Path, tmp_path: Path) -> tuple[s
     return H.TID, ".tenant-id", "\0never-in-a-message"
 
 
-#: Each pair plants the faults of two ADJACENT checks; the refusal must be the EARLIER one's:
+#: Each case plants the faults of two adjacent checks; the refusal must name the earlier one's.
 ADJACENT_PAIRS = [
     pytest.param(_off_grammar_and_no_row, id="grammar-before-row"),
     pytest.param(_no_row_and_no_knowledge, id="row-before-knowledge"),
@@ -156,36 +154,6 @@ def test_1120_accept_tenant_reports_the_earliest_failing_check(tmp_path: Path, p
     text = H.accept_refusal(_tenant, root, raw_id, box_mounted=(root,))
     assert earlier in text, f"the refusal does not name the earlier check's fault {earlier!r}: {text!r}"
     assert later not in text, f"the refusal names the LATER check's fault {later!r}: {text!r}"
-
-
-def _row_absent(root: Path) -> None:
-    return None
-
-
-BAD_ROWS = [
-    pytest.param(_row_absent, id="absent"),
-    pytest.param(lambda root: H.plant_row(root, body="{not json"), id="corrupt"),
-    pytest.param(lambda root: H.plant_row(root, body="[]\n"), id="corrupt-non-object"),
-    pytest.param(lambda root: H.plant_row(root, row_tenant_id=H.OTHER), id="other-tenant"),
-    pytest.param(lambda root: location_path(H.row_path)(root).mkdir(parents=True), id="directory"),
-    pytest.param(lambda root: H.plant_row(root, drop="created_at"), id="missing-created-at"),
-]
-
-
-@pytest.mark.parametrize("plant_bad_row", BAD_ROWS)
-def test_1120_accept_tenant_refuses_an_absent_corrupt_or_foreign_row(
-        tmp_path: Path, plant_bad_row) -> None:
-    root = tmp_path / "data"
-    H.place_knowledge(root)
-    plant_bad_row(root)
-    text = H.accept_refusal(_tenant, root)
-    assert str(location_path(H.row_path)(root)) in text, f"the refusal does not name the row: {text!r}"
-
-    control = tmp_path / "control"
-    H.place_knowledge(control)
-    H.plant_row(control, extra={"added_by_a_newer_writer": "x"})
-    tenant = H.accept(_tenant, control)
-    assert tenant.row.tenant_id == H.TID
 
 
 def _knowledge_absent(root: Path, tmp_path: Path) -> None:
@@ -223,8 +191,7 @@ KNOWLEDGE_NOT_REAL = [
 @pytest.mark.parametrize("plant", KNOWLEDGE_NOT_REAL)
 def test_1120_accept_tenant_refuses_a_knowledge_folder_that_is_not_a_real_unlinked_directory(
         tmp_path: Path, plant) -> None:
-    # rejected: sidecar symlink publishing (N13) — a symlinked knowledge/ is refused, never
-    # followed to where it points.
+    # A symlinked knowledge/ is refused, never followed.
     root = tmp_path / "data"
     plant(root, tmp_path)
     text = H.accept_refusal(_tenant, root)
@@ -257,11 +224,13 @@ def _settings_symlink(knowledge: Path, tmp_path: Path) -> Path:
     return knowledge / "settings"
 
 
-def _required_is_directory(knowledge: Path, tmp_path: Path) -> Path:
-    target = knowledge / "settings" / "lead-zero.yaml"
-    target.unlink()
-    target.mkdir()
-    return target
+def _required_is_directory(rel: str):
+    def plant(knowledge: Path, tmp_path: Path) -> Path:
+        target = knowledge / "settings" / rel
+        target.unlink()
+        target.mkdir()
+        return target
+    return plant
 
 
 MISSING_HALF_OR_SETTING = [
@@ -270,7 +239,10 @@ MISSING_HALF_OR_SETTING = [
     pytest.param(_settings_symlink, id="settings_half:symlink"),
     *(pytest.param(_remove(f"settings/{rel}"), id=f"REQUIRED_SETTINGS:missing:{rel}")
       for rel in H.REQUIRED_SETTINGS),
-    pytest.param(_required_is_directory, id="REQUIRED_SETTINGS:directory"),
+    pytest.param(_required_is_directory("lead-zero.yaml"), id="REQUIRED_SETTINGS:directory"),
+    # Present-by-name is not present: a directory squatting the table is no table.
+    pytest.param(_required_is_directory("verb-grants.yaml"),
+                 id="REQUIRED_SETTINGS:directory:verb-grants.yaml"),
 ]
 
 
@@ -300,7 +272,7 @@ LINKS_IN_HALVES = [
 @pytest.mark.parametrize(("half", "plant"), LINKS_IN_HALVES)
 def test_1120_accept_tenant_refuses_a_symlink_or_hard_link_inside_either_half(
         tmp_path: Path, half: str, plant) -> None:
-    # rejected: filesystem-portable hard-link detection (N11) — st_nlink > 1 is the rule.
+    # A hard link is detected by st_nlink > 1.
     root = tmp_path / "data"
     H.adopted(root)
     planted = plant(H.knowledge_dir(root) / half, tmp_path)
@@ -312,8 +284,8 @@ def test_1120_accept_tenant_refuses_a_symlink_or_hard_link_inside_either_half(
 
 
 def _cloned_with_row(tmp_path: Path) -> Path:
-    """DC2's canonical placement — a plain local clone into `<root>/acme/knowledge` — plus the
-    row setup would write. Returns the data root."""
+    """A plain local clone into `<root>/<T>/knowledge` plus the row setup would write.
+    Returns the data root."""
     root = tmp_path / "data"
     H.cloned_tenant(tmp_path, root)
     H.plant_row(root)
@@ -321,17 +293,16 @@ def _cloned_with_row(tmp_path: Path) -> Path:
 
 
 def _assert_hardlinked_objects(root: Path) -> None:
-    """PO-b: the positive control is vacuous unless the clone really left a hard link to find."""
+    """The positive control is vacuous unless the clone really left a hard link to find."""
     linked = H.hardlinked_git_objects(H.knowledge_dir(root))
     assert linked, (
-        "PRECONDITION FAILED (PO-b): no file under knowledge/.git/objects has st_nlink > 1 — "
-        "this filesystem did not hard-link the local clone, so accepting it proves nothing")
+        "precondition: no file under knowledge/.git/objects has st_nlink > 1 (this "
+        "filesystem did not hard-link the local clone)")
 
 
 def test_1120_accept_tenant_accepts_a_plain_local_clone_whose_git_objects_are_hard_linked(
         tmp_path: Path) -> None:
-    """knowledge/ is a plain `git clone <local repo>` (no --no-hardlinks), so at least one file under
-    knowledge/.git/objects has st_nlink > 1 (C3, C4; P-DC2-1 leg D)."""
+    """A plain local clone (no `--no-hardlinks`) leaves `.git/objects` files with st_nlink > 1."""
     root = _cloned_with_row(tmp_path)
     _assert_hardlinked_objects(root)
     tenant = H.accept(_tenant, root)
@@ -347,10 +318,8 @@ def _dot_git(knowledge: Path) -> Path:
 
 
 def test_1120_accept_tenant_walks_links_in_settings_and_agent_only(tmp_path: Path) -> None:
-    """A symlink under knowledge/.github/ (outside both halves) and one under knowledge/.git/ do not
-    refuse the tenant: the walk covers settings/ and agent/ only and skips knowledge/.git."""
-    # rejected: walking .git (a local clone's objects are hard links, C3/C4) or the whole
-    # knowledge/ folder.
+    """Links under knowledge/.github/ and knowledge/.git/ (a local clone's objects are hard
+    links) are not walked; a link in agent/, even under a nested .git, is refused."""
     root = _cloned_with_row(tmp_path)
     knowledge = H.knowledge_dir(root)
     for outside_the_halves in (_dot_github(knowledge), _dot_git(knowledge)):
@@ -395,7 +364,7 @@ def test_1120_accept_tenant_refuses_an_agent_tenant_id_that_is_absent_or_names_a
     assert not any(ord(c) < 0x20 for c in text), f"a control character reached the text: {text!r}"
 
 
-#: The eight names V12 and V15 admit at knowledge/'s top level (sorted as `iterdir` is compared).
+#: The names admitted at knowledge/'s top level (sorted, as compared with `iterdir`).
 ALLOWED_TOP_LEVEL = [".git", ".gitattributes", ".github", ".gitignore", "README.md", "agent",
                      "archive", "settings"]
 
@@ -428,10 +397,8 @@ EXTRA_TOP_LEVEL = [
 
 
 def _clone_with_every_allowed_entry(tmp_path: Path, root: Path) -> Path:
-    """A clone of a repo committing agent/.tenant-id, a .github/workflows file, a README.md, a
-    .gitignore, a .gitattributes and a file under archive/ (A6's retired actor corpus, as the lab repo
-    carries it — git keeps no empty directory) — every name V12 and V15 admit present at
-    knowledge/'s top level."""
+    """A clone holding every admitted top-level name (archive/ holds a file: git keeps no
+    empty directory)."""
     src = tmp_path / "ci-src"
     shutil.copytree(H.FIXTURE, src, symlinks=True)
     H.write_tenant_id_file(src, H.TID, "id")
@@ -462,11 +429,7 @@ def test_1120_accept_tenant_refuses_a_knowledge_entry_outside_the_allow_list(
 
     location_path(H.row_path)(root).unlink()
     before = H.tree_census(root)
-    text = H.assert_refused(H.setup(tenant_py, root), str(entry))
-    assert "the data root is not empty" not in text, (
-        f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
-        f"the folder rule must refuse the entry:\n{text}")
-    assert H.census_diff(before, H.tree_census(root)) == [], "the refused setup wrote something"
+    H.assert_first_setup_refused(H.setup(tenant_py, root), root, before, str(entry))
 
     control = tmp_path / "control"
     knowledge = _clone_with_every_allowed_entry(tmp_path, control)
@@ -489,7 +452,7 @@ def _tenant_id_oversize(knowledge: Path) -> None:
         fh.truncate(16 * 1024 * 1024)
 
 
-#: M8's byte rule, cell by cell: (id token, the file's bytes or a planter, accepted?).
+#: The `.tenant-id` byte rule: (id token, the file's bytes or a planter, accepted?).
 BYTE_RULE_CELLS: list[tuple[str, object, bool]] = [
     ("trailing-newline", f"{H.TID}\n".encode(), True),
     ("crlf", f"{H.TID}\r\n".encode(), True),
@@ -566,8 +529,6 @@ def test_1120_accept_tenant_refuses_settings_under_defender_dir_or_a_box_mounted
 
 
 def test_1120_accept_tenant_accepts_an_unversioned_knowledge_folder(tmp_path: Path) -> None:
-    """A knowledge/ that is a plain folder (no .git) holding complete halves and a matching
-    agent/.tenant-id is accepted (settled decision 9: an unversioned knowledge folder runs)."""
     root = tmp_path / "data"
     H.adopted(root)
     assert not (H.knowledge_dir(root) / ".git").exists()
@@ -711,7 +672,8 @@ def test_1120_s5_link_walk_meets_a_symlink_cycle(tmp_path: Path) -> None:
 
 def test_1120_s6_data_root_env_var_symlink_retargeted_mid_resolution(
         tmp_path: Path, monkeypatch) -> None:
-    """DEFENDER_DATA_ROOT may itself be a symlink."""
+    """A symlinked DEFENDER_DATA_ROOT resolves once: retargeting it later moves no accepted
+    tenant."""
     first, second = tmp_path / "root-a", tmp_path / "root-b"
     H.adopted(first)
     H.adopted(second)

@@ -48,9 +48,7 @@ def test_a_malformed_committed_verdict_is_marked_not_coerced(tmp_path):
         answers = _reader_answers(run_dir)
         assert answers == unknown, (
             f"{spelling!r} is read differently from a value that was never a member: "
-            f"{ {k: v for k, v in answers.items() if unknown[k] != v} } — a verdict that only "
-            f"becomes a member after something strips or folds it is exactly the close no "
-            f"reader can tell from a clean one"
+            f"{ {k: v for k, v in answers.items() if unknown[k] != v} }"
         )
         assert not any(v == ("ok", "malicious") for v in answers.values()), (
             f"a reader coerced {spelling!r} into the member it resembles: {answers}"

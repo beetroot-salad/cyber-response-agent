@@ -51,8 +51,8 @@ from ._scenarios import (
 
 @pytest.mark.parametrize("style", MERGE_STYLES)
 def test_revert_peels_back_through_the_agents_changes_to_none_left(repo, tmp_path, style):
-    """R1 (D-peel): each revert undoes the newest agent change whose result `main` still holds
-    exactly and which has no merged revert."""
+    """Each revert undoes the newest agent change whose result `main` still holds exactly and
+    which has no merged revert."""
     _agent_wrote(repo, tmp_path, _FIRST, _SECOND, _FIRST)
     peeled = [_revert_and_merge(repo, tmp_path, _LEARNED, "learned", style) for _ in range(2)]
     main = git(repo[1], "rev-parse", "main")
@@ -69,7 +69,7 @@ def test_revert_peels_back_through_the_agents_changes_to_none_left(repo, tmp_pat
 
 
 def test_a_revert_whose_pr_was_closed_refuses_the_next_and_skips_nothing(repo, tmp_path):
-    """R1 with D-closed: a revert PR closed unmerged is a rejection."""
+    """A revert PR closed unmerged is a rejection."""
     _agent_wrote(repo, tmp_path, _FIRST, _SECOND, _FIRST)
     http = ForgeHTTP()
     opened(delivery(repo, http).revert(_LEARNED, "learned"), None)
@@ -97,8 +97,8 @@ def test_a_revert_whose_pr_is_open_answers_that_pr(repo, tmp_path):
 
 
 def test_each_lesson_of_one_batch_has_its_own_revert(repo, tmp_path):
-    """R1 / C1: the record holds one row per lesson per batch, and a revert is recorded against
-    its row."""
+    """The record holds one row per lesson per batch, and a revert is recorded against its
+    row."""
     writer = delivery(repo, ForgeHTTP())
     batch = writer.start_batch("two", lanes=LANES)
     lane = batch.draft_root / "agent/lessons"
@@ -116,7 +116,7 @@ def test_each_lesson_of_one_batch_has_its_own_revert(repo, tmp_path):
 
 
 def test_a_closed_fork_pr_at_the_revert_commit_is_not_the_reverts(repo, tmp_path):
-    """R1 / C1: every PR the revert's lookup considers is filtered by the base repository's id."""
+    """Every PR the revert's lookup considers is filtered by the base repository's id."""
     _agent_wrote(repo, tmp_path, _FIRST, _SECOND)
     http = ForgeHTTP()
     d = delivery(repo, http)
@@ -136,8 +136,8 @@ def test_a_closed_fork_pr_at_the_revert_commit_is_not_the_reverts(repo, tmp_path
 
 
 def test_a_revert_whose_pr_was_created_but_unanswered_is_found_not_made_again(repo, tmp_path):
-    """R1 / C1 (orchestrator ruling): the revert commit is recorded against its row as soon as it
-    exists, before any push, and its PR is found by that commit."""
+    """The revert commit is recorded against its row as soon as it exists, before any push,
+    and its PR is found by that commit."""
     _agent_wrote(repo, tmp_path, _FIRST, _SECOND)
     with pytest.raises(target().DeliveryRefused):
         delivery(repo, _AnswerLost()).revert(_LEARNED, "learned")
@@ -177,7 +177,7 @@ def test_a_revert_that_never_got_a_pr_is_made_again(repo, tmp_path, failure):
 
 @pytest.mark.parametrize("style", MERGE_STYLES)
 def test_a_lesson_created_then_changed_within_one_batch_reverts_to_absent(repo, tmp_path, style):
-    """R9: the record holds one row per lesson per batch, its net change."""
+    """The record holds one row per lesson per batch: its net change."""
     writer = delivery(repo, ForgeHTTP())
     batch = writer.start_batch("written-twice", lanes=LANES)
     for words in (_FIRST, _SECOND):
@@ -192,7 +192,6 @@ def test_a_lesson_created_then_changed_within_one_batch_reverts_to_absent(repo, 
 
 @pytest.mark.parametrize("style", MERGE_STYLES)
 def test_revert_deletes_a_lesson_the_commit_maker_created(repo, tmp_path, style):
-    """Revert deletes a lesson the commit maker created."""
     merged_agent_lesson(repo, tmp_path, "created", _LEARNED, b"the agent's lesson\n", style)
     advance_remote(repo, tmp_path)
     tip = _reverted(repo, _LEARNED, "learned")
@@ -212,8 +211,7 @@ def test_revert_restores_what_a_lesson_held_before_the_commit_maker_changed_it(r
 @pytest.mark.parametrize("history", [(b"first\n", b"second\n"), (b"first\n", b"second\n", b"first\n")],
                          ids=["changed-once", "back-to-the-first-bytes"])
 def test_revert_undoes_only_the_latest_of_several_commit_maker_changes(repo, tmp_path, history):
-    """Choice 5 (orchestrator ruling): the commit-maker created a lesson, then changed it in
-    later batches, all merged."""
+    """The commit-maker created a lesson, then changed it in later batches, all merged."""
     for number, words in enumerate(history):
         merged_agent_lesson(repo, tmp_path, f"batch-{number}", _LEARNED, words)
     tip = _reverted(repo, _LEARNED, "learned")
@@ -222,8 +220,8 @@ def test_revert_undoes_only_the_latest_of_several_commit_maker_changes(repo, tmp
 
 
 def test_revert_undoes_one_lesson_of_a_claim_that_wrote_several(repo, tmp_path):
-    """Flow 4 / O-C: a revert is a change set for the one lesson named, made by the commit-maker,
-    never an undoing of the agent's whole commit."""
+    """A revert is a change set for the one lesson named, made by the commit-maker, never an
+    undoing of the agent's whole commit."""
     writer = delivery(repo, ForgeHTTP())
     batch = writer.start_batch("several", lanes=LANES)
     lane = batch.draft_root / "agent/lessons"
@@ -238,8 +236,8 @@ def test_revert_undoes_one_lesson_of_a_claim_that_wrote_several(repo, tmp_path):
 
 
 def test_revert_ignores_a_later_commit_maker_change_whose_pr_is_still_open(repo, tmp_path):
-    """Choice 5 (orchestrator ruling): the change a revert undoes is the most recent commit-maker
-    change to the lesson whose resulting bytes equal `main`'s."""
+    """The change a revert undoes is the most recent commit-maker change to the lesson whose
+    resulting bytes equal `main`'s."""
     merged_agent_lesson(repo, tmp_path, "created", _LEARNED, b"the agent's merged words\n")
     writer = delivery(repo, ForgeHTTP())
     batch = writer.start_batch("unmerged", lanes=LANES)
@@ -251,7 +249,7 @@ def test_revert_ignores_a_later_commit_maker_change_whose_pr_is_still_open(repo,
 
 
 def test_revert_proceeds_when_main_again_holds_exactly_the_agents_bytes(repo, tmp_path):
-    """Choice 5 (orchestrator ruling): the test is content, not history."""
+    """Main's content decides, not its history."""
     agent_bytes = b"seed, as the agent rewrote it\n"
     merged_agent_lesson(repo, tmp_path, "changed", "agent/lessons/seed.md", agent_bytes)
     push_to_remote(repo, tmp_path, lambda c: _write(c / "agent/lessons/seed.md", "a human's edit\n"))
@@ -261,7 +259,6 @@ def test_revert_proceeds_when_main_again_holds_exactly_the_agents_bytes(repo, tm
 
 
 def test_revert_recreates_a_lesson_the_commit_maker_deleted(repo, tmp_path):
-    """Revert recreates a lesson the commit maker deleted."""
     merged_agent_lesson(repo, tmp_path, "deleted", "agent/lessons/seed.md", None)
     tip = _reverted(repo, "agent/lessons/seed.md", "seed")
     assert _name_status(repo[1], tip) == {"agent/lessons/seed.md": "A"}
@@ -276,7 +273,6 @@ def test_revert_recreates_a_lesson_the_commit_maker_deleted(repo, tmp_path):
 ], ids=["agent-created", "agent-changed", "same-length-edit", "appended-edit"])
 def test_revert_refuses_a_lesson_changed_on_main_since_the_commit_maker_wrote_it(
         repo, tmp_path, path, edit):
-    """Revert refuses a lesson changed on main since the commit maker wrote it."""
     agent_words = b"the agent's words\n"
     assert len(agent_words) == len(b"the human's words\n")
     assert b"the agent's words\nand a human's addition\n".startswith(agent_words)
@@ -293,7 +289,6 @@ def test_revert_refuses_a_lesson_the_commit_maker_never_wrote(repo, tmp_path, pa
 
 
 def test_a_later_process_reverts_by_the_commit_maker_record(repo, tmp_path):
-    """A later process reverts by the commit maker record."""
     remote = repo[1]
     merged_agent_lesson(repo, tmp_path, "changed", "agent/lessons/seed.md", b"seed, as the agent rewrote it\n")
     main = git(remote, "rev-parse", "main")
@@ -310,8 +305,8 @@ def test_a_later_process_reverts_by_the_commit_maker_record(repo, tmp_path):
 
 
 def test_a_later_process_refuses_to_revert_a_lesson_changed_on_main(repo, tmp_path):
-    """Choice 5 across processes: after a human edit on `main` of the commit-maker's merged
-    lesson, a revert from a fresh process refuses with nothing pushed or requested."""
+    """After a human edit on `main` of the commit-maker's merged lesson, a revert from a fresh
+    process refuses with nothing pushed or requested."""
     remote = repo[1]
     merged_agent_lesson(repo, tmp_path, "written", _LEARNED, b"the agent's words\n")
     push_to_remote(repo, tmp_path, lambda c: _write(c / _LEARNED, "a human's later edit\n"))
@@ -324,7 +319,6 @@ def test_a_later_process_refuses_to_revert_a_lesson_changed_on_main(repo, tmp_pa
 
 
 def test_revert_refuses_a_commit_laid_on_its_branch_by_a_clone_hook(repo, tmp_path):
-    """Revert refuses a commit laid on its branch by a clone hook."""
     tenant, remote, _ = repo
     merged_agent_lesson(repo, tmp_path, "learned", _LEARNED, b"the agent's lesson\n")
     http = ForgeHTTP()
@@ -345,7 +339,7 @@ def test_revert_refuses_a_commit_laid_on_its_branch_by_a_clone_hook(repo, tmp_pa
 
 
 def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo, tmp_path):
-    """O-C on the revert route, with no hook: a revert pushes its branch, then its PR request
+    """The revert route, with no hook: a revert pushes its branch, then its PR request
     fails."""
     tenant, remote, _ = repo
     merged_agent_lesson(repo, tmp_path, "learned", _LEARNED, b"the agent's lesson\n")
@@ -357,7 +351,7 @@ def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo, tmp_path
         d.revert(_LEARNED, "learned")
     remaining = sorted(set(_branches(remote)) - before)
     if not remaining:
-        return  # the failed request left no branch to lay a commit on (choice 16)
+        return  # the failed request left no branch to lay a commit on
     branch = remaining[0]
     made = git(remote, "rev-parse", branch)
     planted = plant_raw_commit(tenant.knowledge, branch, "agent/lessons/raw.md",
@@ -373,7 +367,6 @@ def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo, tmp_path
                                   "agent/lessons/\ud800.md"],
                          ids=["tenant-id", "settings", "absent", "traversal", "lone-surrogate"])
 def test_revert_refuses_a_path_that_is_not_a_lesson_on_main(repo, path):
-    """Revert refuses a path that is not a lesson on main."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     with pytest.raises(target().DeliveryRefused):

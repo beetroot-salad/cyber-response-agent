@@ -21,8 +21,8 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 CONTROL, B, C, D = "alpha", "bravo", "charlie", "delta"
 FAMILY = S.FAMILY
 
-#: More episodes beside `S.EPISODE_ID`, for scenarios that need two or more: UUIDs, as every
-#: episode id after #1187 (declared change 1).
+#: More episode ids beside `S.EPISODE_ID` (UUIDs, like every episode id), for scenarios that
+#: need two or more.
 EP2 = fixture_uuid("fresh-case-n60")
 EP3 = fixture_uuid("fresh-case-n61")
 
@@ -33,14 +33,13 @@ NOT_MEASURED_REASON = S.COINED["row.not_measured_reason"]
 DRAWS_DISAGREE = S.COINED["row.draws_disagree"]
 DRAWS = S.COINED["row.draws"]
 
-#: main's not-graded stamp field — "unchanged in kind" by the design's data model.
+#: The not-graded stamp field.
 STAMP = S.STAMP
 
-#: The record fields the design retires from judge.yaml (d00a names these three).
+#: The retired judge.yaml record fields.
 RETIRED_ON_RECORD = ("verdict_word", "episode_outcome", "family_outcome")
 
-#: The page's per-world state words and the queue words a queueing refusal names (`S.COINED`;
-#: "not enqueued" is N10's own phrase).
+#: The page's per-world state words and the queue words a queueing refusal names (`S.COINED`).
 WORDS = {k: S.COINED[k] for k in ("page.in_progress", "page.graded", "page.ungraded",
                                   "page.not_enqueued", "refusal.defender_queue",
                                   "refusal.questioner_queue")}
@@ -97,7 +96,7 @@ def _inv(label: str, tag: str, *, contrast: Sequence[str] | None = None) -> dict
 
 def _nowhere(n: Any) -> list[str]:
     """Contrast pointers into files neither archive holds: every pointer unresolved, so the
-    finding is dropped (A13: it keeps its filed index)."""
+    finding is dropped (it keeps its filed index)."""
     return [S.conduct(B, f"nowhere-{n}.md"), S.conduct(CONTROL, f"nowhere-{n}.md")]
 
 
@@ -134,8 +133,7 @@ def _named_gap(built: S.Built, label: str, i: int) -> dict:
 
 
 def _blocked(label: str) -> tuple[Any, ...]:
-    """The blocked-call key of `label`'s refused `edr lookup` (A2/A7: run, system, verb,
-    params)."""
+    """The blocked-call key of `label`'s refused `edr lookup` (run, system, verb, params)."""
     return (label, "edr", "lookup", S.canonical({"entity": f"sent-{label}"}))
 
 
@@ -154,7 +152,7 @@ def _row(record: Mapping[str, Any], label: str) -> dict:
 
 
 def _state_of(record: Mapping[str, Any], who: str) -> Any:
-    """The A6 state of world `who`'s row, or of the family's row (`who == FAMILY`)."""
+    """The commit state of world `who`'s row, or of the family's row (`who == FAMILY`)."""
     if who == FAMILY:
         fam = record.get(S.FAMILY_ROW)
         return fam.get(S.STATE_KEY) if isinstance(fam, dict) else None
@@ -200,10 +198,6 @@ def _ids(rows: Iterable[Mapping[str, Any]]) -> list[str]:
 
 def _bytes_of(paths: Iterable[Path]) -> dict[str, bytes]:
     return {p.name: p.read_bytes() for p in paths}
-
-
-_VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
-                        "meta", "source", "track", "wbr"})
 
 
 def _without(text: str, *episode_ids: str) -> str:
@@ -304,13 +298,12 @@ class Watch:
         self.seen.append(Seen(event, who, kind, S.record(self.built), self._queue(DEFENDER_Q),
                               self._queue(QUESTIONER_Q)))
 
-    def first(self, event: str, who: str, kind: str | None = None) -> Seen:
+    def first(self, event: str, who: str) -> Seen:
         for s in self.seen:
-            if s.event == event and s.who == who and (kind is None or s.kind == kind):
+            if s.event == event and s.who == who:
                 return s
         raise AssertionError(f"the pass made no {event} for {who!r}"
-                             + (f" on the {kind} queue" if kind else "")
-                             + f"; it made {[(s.event, s.who, s.kind) for s in self.seen]}")
+                             f"; it made {[(s.event, s.who, s.kind) for s in self.seen]}")
 
     def __call__(self, prompt: str, **kw: Any) -> str:
         label, n, _attempt = self.judge.coordinate(kw.get("agent_id", "judge"))
@@ -364,14 +357,13 @@ def _stopped(built: Any, watch: Watch, **kw: Any) -> BaseException:
     raise AssertionError("the pass was expected to stop at its planted fault and finished")
 
 
-def _left_queueing(tmp_path: Path, episode_id: str, *, spare: str,
-                   reply: dict | None = None) -> S.Built:
+def _left_queueing(tmp_path: Path, episode_id: str, *, spare: str) -> S.Built:
     """An episode whose first pass stopped after world bravo's defender append and before its
     flip (the flip write refused): bravo's row is left `queueing`, charlie and the family have
     none. Returns the episode with the plant cleared."""
     built = _built(tmp_path, episode_id=episode_id)
     flip = Refuse(tmp_path / spare, built.ep / "judge.yaml")
-    watch = Watch(built, S.judge({B: reply or _reply(inv=[_inv(B, "left")])}),
+    watch = Watch(built, S.judge({B: _reply(inv=[_inv(B, "left")])}),
                   after_append={(B, DEFENDER_Q): flip})
     _stopped(built, watch)
     flip.clear()
@@ -484,8 +476,8 @@ def test_1234_world_row_commits_queueing_then_appends_then_queued(tmp_path):
     assert after.get(S.FAMILY_ROW) == final.get(S.FAMILY_ROW)
 
 
-#: A judge.yaml as the pre-change writer (main at 463833df) wrote it: world bravo completed no
-#: draw (so main would grade it again and carry charlie's row), charlie graded.
+#: A judge.yaml as the pre-#1234 writer wrote it: world bravo completed no draw, charlie
+#: graded.
 _PRE_CHANGE_RECORD = {
     "worlds": [
         {"world": B, "declared": "malicious", "verdict": "malicious", "resolution_moved": True,
@@ -633,7 +625,7 @@ def test_1234_am_pass_stops_after_queueing_before_or_between_appends(tmp_path):
 
 
 def test_1234_rerun_when_draw_files_are_complete_on_disk_but_judge_yaml_is_absent(tmp_path):
-    """judge.yaml decides (A6): with no row for the world the pass regrades it and overwrites its draw
+    """judge.yaml decides: with no row for the world the pass regrades it and overwrites its draw
     files; draw files on disk are not trusted."""
     built = _built(tmp_path)
     stale = {(B, n): _reply(inv=[_inv(B, f"stale-{n}")]) for n in range(2)}
@@ -695,8 +687,8 @@ def test_1234_judge_yaml_cannot_be_written_after_rows_were_queued(tmp_path):
 
 
 def test_1234_not_graded_stamp_then_the_control_is_repaired(tmp_path):
-    """The re-run grades normally; the stamp is replaced, with recorded rows carried verbatim (A6); nothing
-    else of the stamp remains."""
+    """The re-run grades normally; the stamp is replaced, with recorded rows carried verbatim;
+    nothing else of the stamp remains."""
     built = _built(tmp_path)
     S.grade(built, S.judge({B: _reply(inv=[_inv(B, "kept")])}, fail={C}))
     graded = _row(S.record(built), B)
@@ -757,7 +749,7 @@ _G05_PROCESSES, _G05_EPISODES_EACH = 4, 3
 
 
 def _g05_episode_id(k: int) -> str:
-    return fixture_uuid(f"fresh-case-n{70 + k}")  # a UUID, as every episode id after #1187
+    return fixture_uuid(f"fresh-case-n{70 + k}")  # a UUID, like every episode id
 
 
 def _g05_judge(k: int) -> S.RoutedJudge:
@@ -850,7 +842,7 @@ def test_1234_per_world_appends_while_the_drain_retires_lose_no_row(tmp_path):
     learning_state = S.sym(S.STATE, "LearningState")
 
     class Unlocked(learning_state):
-        """The positive control's one fault (GT-2's): the per-channel append lock removed."""
+        """The positive control's one fault: the per-channel append lock removed."""
 
         def _append_lock(self, channel: Any, timeout: Any) -> Any:  # noqa: ARG002 — the lock's own signature
             return contextlib.nullcontext()
@@ -874,7 +866,7 @@ def test_1234_per_world_appends_while_the_drain_retires_lose_no_row(tmp_path):
     control = _g05_round(tmp_path, "unlocked", Unlocked)
     assert control["exitcodes"] == [0] * _G05_PROCESSES, control["exitcodes"]
     assert control["missing"] or control["twice"] or control["unreadable"], (
-        "with the append lock removed no row was lost — this race cannot fail")
+        "control: with the append lock removed no row was lost")
 
 
 @contextlib.contextmanager
@@ -899,9 +891,7 @@ def _gate_config(tmp_path: Path, *, questioner: bool) -> Iterator[tuple[Any, Pat
         corpus.mkdir(parents=True, exist_ok=True)
         yield cfg, corpus
     finally:
-        close = getattr(trees, "close", None)
-        if close is not None:
-            close()
+        trees.close()
 
 
 def _author_lesson(corpus: Path, name: str, finding_id: str) -> None:
@@ -943,8 +933,8 @@ def test_1234_questioner_dedup_and_gate_resolve_per_draw_ids_with_skipped_indexe
     assert built.finding_id(FAMILY, 0, 0) in _ids(to_author)
     assert not held
 
-    # The record-less path, the reachable way (R7 (b)): a pre-change pass queued bravo's world
-    # row at the colliding id and stopped before writing judge.yaml; then a new-code pass.
+    # The record-less path, the reachable way: a pre-#1234 pass queued bravo's world row at the
+    # colliding id and stopped before writing judge.yaml; then a current pass.
     other = _built(tmp_path, episode_id=EP3)
     fid = other.finding_id(B, 0, 0)
     old = S.pre_change_world_row(fid, finding=f"{_claim(B, 'old')} — stopped early")

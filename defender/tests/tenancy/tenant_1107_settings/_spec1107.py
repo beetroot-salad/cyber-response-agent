@@ -1,4 +1,4 @@
-"""Shared machinery for #1107's spec — "the tenant settings record". NO test scripts."""
+"""Shared helpers for the #1107 tenant-settings-record tests (no test functions)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base
@@ -31,35 +31,26 @@ TEMPLATE_DIR = T1106.TEMPLATE_DIR
 mod = T1106.mod
 
 # ======================================================================================
-# Coined names (see the module docstring) — one edit each if the implementation differs.
+# Names the tests share — one edit each if the implementation renames one.
 # ======================================================================================
 
-#: The field `VerbContext` and `AgentDeps` carry the record under (§7 F0, human: "a field named
-#: tenant in place of settings_dir").
+#: The field `VerbContext` and `AgentDeps` carry the record under.
 RECORD_FIELD = "tenant"
-#: The keyword a transport call names the secrets its one child needs under (coined).
-SECRETS_KW = "secrets"
-#: The reference-key suffix (F10, auto: stays `_SECRET_REF`).
-SECRET_REF_SUFFIX = "_SECRET_REF"
-#: The one implemented access method (D2).
+#: The one implemented access method.
 DOCKER_EXEC = T1106.DOCKER_EXEC
-#: The per-tenant secret store's file name, under `settings/` (D3).
+#: The per-tenant secret store's file name, under `settings/`.
 SECRETS_ENV = "secrets.env"
-#: The new lint's program name (O7).
+#: The env lint's program name.
 ENV_LINT = "lint_tenant_env_reads"
-#: The page's ticket-line word for a receipt it will not trust (NF-26, demand text).
+#: The page's ticket-line word for a receipt it will not trust.
 RECEIPT_UNREADABLE = "receipt unreadable"
-#: The fault text a system with no folder raises, at base and after (CX5).
+#: The fault text a system with no folder raises.
 NOT_CONFIGURED = "this tenant's settings do not configure this system"
-#: The parameter / field the record replaces (design: `settings_dir` retires from `VerbContext`,
-#: `AgentDeps` and every function taking `settings_dir=`, G8/CX12).
+#: The retired parameter/field the record replaces (on `VerbContext`, `AgentDeps` and every
+#: function that took `settings_dir=`).
 RETIRED_FIELD = "settings_dir"
-#: The keyword the replay helper chain stops taking (d_grants_through_tenant_config).
+#: A keyword the replay helper chain must not take (grants come through the tenant).
 GRANTS_KW = "grants"
-#: The env lint's inline suppression token, in either spelling (coined; the repo's other lints
-#: spell theirs `# lint-monkeypatch: ok — <reason>`). o7_lint_clean_empty_allowlist asserts no
-#: swept file carries it.
-ENV_LINT_SUPPRESSION = re.compile(r"lint[-_]tenant[-_]env[-_]reads\s*:", re.I)
 #: The config-shaped variables a developer's shell might carry, cleared before a branch launch so
 #: a value either side of an assertion is the one the test put there.
 BRANCH_CONFIG_VARS: tuple[str, ...] = (
@@ -69,21 +60,21 @@ BRANCH_CONFIG_VARS: tuple[str, ...] = (
 
 
 def run_tenant_mod() -> Any:
-    """`defender.systems.run_tenant` — the record's module (d1096: the four types live here)."""
+    """`defender.systems.run_tenant` — the record's module, where its four types live."""
     return mod("systems.run_tenant")
 
 
 def record_type(name: str) -> type:
-    """One of `SystemConfig`, `ElasticSettings`, `CaseMapping`, `SecretLookup` — asserted to BE a
-    class the record's module defines (d1096), so a test that asks where a type lives, or
-    whether a value is one, can never read an absent or stand-in name as an answer."""
+    """One of `SystemConfig`, `ElasticSettings`, `CaseMapping`, `SecretLookup` — asserted to be a
+    class the record's module defines, so a test that asks where a type lives, or whether a
+    value is one, can never read an absent or stand-in name as an answer."""
     cls = getattr(run_tenant_mod(), name, None)
     assert isinstance(cls, type), f"systems.run_tenant does not define the record type {name}: {cls!r}"
     return cls
 
 
 def config_fault() -> type:
-    """`ConfigFault` — the adapters' own class, exit 2 (CX5)."""
+    """`ConfigFault` — the adapters' own class, exit 2."""
     return mod("kit.faults").ConfigFault
 
 
@@ -108,10 +99,6 @@ def settings_pointer() -> str:
 #: Each system folder's key prefix, as the adapters spell it.
 PREFIX = T1106.PREFIX
 
-#: The six docker-exec-curl stub systems (`_stub_transport.load_config`'s three-key template).
-STUB_SYSTEMS: tuple[str, ...] = (
-    "cmdb", "identity", "ticket", "case-history", "change-mgmt", "threat-intel")
-
 context_name = T1106.context_name
 es_container = T1106.es_container
 kibana_container = T1106.kibana_container
@@ -119,27 +106,23 @@ kibana_container = T1106.kibana_container
 
 def config_texts(marker: str, *, events_index: str | None = None,
                  alerts_index: str | None = None) -> dict[str, str]:
-    """One COMPLETE post-#1107 `config.env` per system, host-state's new one included.
-
-    Since #1256 that is `_tenants1106.config_texts` itself: it writes every system, access
-    method and elastic's containers included, because a system whose settings check fails is
-    down from run start. A scenario about one fault must not ride on eight."""
+    """One complete `config.env` per system (`_tenants1106.config_texts`), access method and
+    elastic's containers included: a system whose settings check fails is down from run start,
+    and a scenario about one fault must not ride on eight."""
     return T1106.config_texts(marker, events_index=events_index, alerts_index=alerts_index)
 
 
 def plant(root: Path, tenant_id: str = PLAYGROUND_ID, *, marker: str = "t1107",
           configs: dict[str, str] | None = None, secrets: str | Mapping[str, str] | None = None,
           table: str = T1106.TABLE_A, **kw: Any) -> Path:
-    """Set a complete #1107 tenant up under the data root `root` and return its knowledge
-    folder `root/<tenant_id>/knowledge/` (#1120: the settings half is `<folder>/settings`).
+    """Plant a complete tenant under the data root `root`; return its knowledge folder
+    `root/<tenant_id>/knowledge/` (settings half: `<folder>/settings`).
 
-    A knowledge folder already there (`_spec1078.tenant_source` places the committed fixture's)
-    has its content replaced whole, so every value the tenant carries is this call's; its
-    `.git` is kept (#1108 P4), so the folder stays the one repository an earlier publish pushed
-    and the next publish is a fast-forward on the same remote. `configs` replaces the
-    per-system `config.env` set (default `config_texts(marker)`); `secrets` writes
-    `settings/secrets.env` (a mapping is rendered `KEY="value"` per line). The rest (`table`,
-    `omit`, `lead_zero`, …) is `_tenants1106.plant_tenant`'s."""
+    An existing knowledge folder has its content replaced whole but keeps its `.git`, so the
+    next publish is a fast-forward on the same remote. `configs` replaces the per-system
+    `config.env` set (default `config_texts(marker)`); `secrets` writes `settings/secrets.env`
+    (a mapping renders as `KEY="value"` lines). Other keywords go to
+    `_tenants1106.plant_tenant`."""
     import shutil
 
     knowledge = Path(root) / tenant_id / "knowledge"
@@ -213,8 +196,8 @@ def render_env(entries: str | Mapping[str, str]) -> str:
 
 
 def write_secrets(folder: Path, entries: str | bytes | Mapping[str, str]) -> Path:
-    """Write `settings/secrets.env` — a real file, by replace (write then rename), the way D3's
-    guide tells an operator to rotate one (NF-12)."""
+    """Write `settings/secrets.env` — a real file, by replace (write then rename), the way the
+    operator guide rotates one."""
     path = secrets_path(folder)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{SECRETS_ENV}.{uuid.uuid4().hex}")
@@ -236,14 +219,14 @@ def resolve(root: Path, tenant_id: str = PLAYGROUND_ID, *, dispatches_lead_zero:
         dispatches_lead_zero=dispatches_lead_zero, **kw)
 
 
-def tenant_folder_of(root: Path, tenant_id: str = PLAYGROUND_ID) -> Any:
-    """The accepted `Tenant` for a planted tenant (the replay harness's `tenant=` input)."""
-    return T1106.accept(Path(root), tenant_id)
+def tenant_folder_of(root: Path) -> Any:
+    """The accepted `Tenant` for the planted tenant (the replay harness's `tenant=` input)."""
+    return T1106.accept(Path(root), PLAYGROUND_ID)
 
 
 def _require_data_root(root: Path) -> None:
-    """#1120: an entry point reads its tenants from `DEFENDER_DATA_ROOT` alone (there is no
-    tenants-root flag), so a test drives one over a tenant planted under THIS test's data root."""
+    """An entry point reads its tenants from `DEFENDER_DATA_ROOT` alone (there is no
+    tenants-root flag), so a test drives one over a tenant planted under this test's data root."""
     from defender.tests.support.shared.contracts import _data_root_1078
 
     here = _data_root_1078.current_data_root()
@@ -256,7 +239,7 @@ def _require_data_root(root: Path) -> None:
 # ======================================================================================
 
 def verb_context(record: Any, run_dir: Path, env: Mapping[str, str], **kw: Any) -> Any:
-    """A `VerbContext` carrying `record` in its `tenant` field (F0), with no `settings_dir`."""
+    """A `VerbContext` carrying `record` in its `tenant` field, with no `settings_dir`."""
     fields = {"defender_dir": DEFENDER, "run_dir": Path(run_dir), "env": env,
               RECORD_FIELD: record}
     fields.update(kw)
@@ -264,54 +247,27 @@ def verb_context(record: Any, run_dir: Path, env: Mapping[str, str], **kw: Any) 
 
 
 def record_on(ctx: Any) -> Any:
-    """The record a context carries (F0's field)."""
+    """The record a context carries."""
     return getattr(ctx, RECORD_FIELD)
-
-
-def launch_branch(src: Path, data_root: Path, **seams: Any) -> tuple[Any, BaseException | None]:
-    """The REAL branch launcher (`learning.branch.cli.main`) over the source run `src`, whose
-    tenant is planted under `data_root` (this test's), every seam faked (`_triplet_947`'s fakes,
-    no role preflight) unless handed in. Returns `(rc, None)` or `(None, the SystemExit it
-    refused with)`."""
-    _require_data_root(data_root)
-    from defender.tests.support.learning.branch import _triplet_947 as t947
-
-    fakes: dict[str, Any] = {
-        "spawn": t947.FakeSpawn(), "questioner": t947.FakeAgent(),
-        "live_tree": t947.source_capture(), "preflight": t947.no_preflight}
-    fakes.update(seams)
-    argv = [str(src), str(t947.BRANCH_MESSAGE_ID), *t947.retired_continuation_argv()]
-    try:
-        return mod("cli.learning.branch").main(argv, **fakes), None
-    except SystemExit as refused:
-        return None, refused
-
-
-def with_mapping(fn: Any, *args: Any, mapping: Any, **kw: Any) -> Any:
-    """Call one `case_ticket` mapping consumer with the record's mapping under the coined
-    `mapping=` keyword (the design says only "take the mapping instead of settings_dir")."""
-    return fn(*args, mapping=mapping, **kw)
 
 
 def open_reporter(mapping: Any) -> str:
     """The `open.reporter` a record's `ticket_mapping` carries — the value a snapshot test plants
-    distinct per edit and watches flow out (`_tenants1106.mapping_text(reporter=...)`). It was
-    the `released.status` read through `case_ticket.release_predicate` until #1221's amendment
-    removed the predicate; the reporter is a field the open leg actually sends."""
+    distinct per edit and watches flow out (`_tenants1106.mapping_text(reporter=...)`); the
+    open leg sends it."""
     return mapping["open"]["reporter"]
 
 
 # ======================================================================================
-# The docker CLI, faked on PATH (CX8, executed): `subprocess.run(..., env=E)` resolves
-# `docker` on E's PATH, so a shim there receives the transport's argv and the child's whole
-# environment. No runner seam, no monkeypatch (F5, auto).
+# The docker CLI, faked on PATH: `subprocess.run(..., env=E)` resolves `docker` on E's PATH,
+# so a shim there receives the transport's argv and the child's whole environment (no runner
+# seam, no monkeypatch).
 # ======================================================================================
 
-#: Secret-looking variables this process INHERITED (name -> sha256 of its value), snapshotted at
-#: import, before any test plants its own. The shim logs such a variable's value as
-#: `INHERITED_REDACTED` when it still equals the inherited one, so a real token on the box running
-#: the suite never lands in a test's call log; a value a test planted never matches, and the
-#: variable's NAME is still logged (a scrub test asks whether the name reached the child).
+#: Secret-looking variables this process inherited (name -> sha256 of its value), snapshotted at
+#: import. The shim logs such a value as `INHERITED_REDACTED` while it still equals the inherited
+#: one, so a real token on the box running the suite never lands in a call log; a planted value
+#: never matches, and the name is still logged (a scrub test asks whether it reached the child).
 _SECRETISH = re.compile(r"(?i)(KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH)")
 _INHERITED_SECRETS: dict[str, str] = {
     k: hashlib.sha256(v.encode("utf-8", "surrogateescape")).hexdigest()
@@ -354,29 +310,22 @@ def answer(stdout: str = "{}", status: str | None = "200", *, rc: int = 0,
     return {"stdout": stdout, "status": status, "rc": rc, "stderr": stderr}
 
 
-#: An unknown docker context, as the real client answers it (G23: unknown -> rc 1 'context not
-#: found'; RG3: the same for a dash-leading name, taken literally).
+#: An unknown docker context, as the real client answers it: rc 1, "context not found" (a
+#: dash-leading name is taken literally).
 def context_not_found(name: str) -> dict[str, Any]:
     return answer("", None, rc=1, stderr=(
         f'unable to resolve docker endpoint: context "{name}": context not found\n'))
 
 
-# The transport's real failure shapes (AP3, executed — 82-author-probes.md): every transient
-# docker-exec / curl failure exits non-zero WITH a short diagnostic stderr, and none of them repeats
-# the request or its headers (AP2, refuted: the transport never passes -v/--trace). curl's own
-# failures still print the `-w` status line (`"\n000"`); a daemon refusal prints nothing to stdout.
+# The transport's real failure shapes: every transient docker-exec/curl failure exits non-zero
+# with a short diagnostic stderr that never repeats the request or its headers (the transport
+# never passes -v/--trace). curl's own failures still print the `-w` status line (`"\n000"`); a
+# daemon refusal prints nothing to stdout.
 
-def curl_refused(host: str, port: int = 8080) -> dict[str, Any]:
-    """curl could not connect (rc=7)."""
-    return answer("", "000", rc=7, stderr=(
-        f"curl: (7) Failed to connect to {host} port {port} after 0 ms: "
-        "Could not connect to server\n"))
-
-
-def curl_timed_out(ms: int = 3001) -> dict[str, Any]:
+def curl_timed_out() -> dict[str, Any]:
     """curl's `--max-time` expired against a target that accepted and never answered (rc=28)."""
     return answer("", "000", rc=28, stderr=(
-        f"curl: (28) Operation timed out after {ms} milliseconds with 0 bytes received"))
+        "curl: (28) Operation timed out after 3001 milliseconds with 0 bytes received"))
 
 
 def no_such_container(name: str) -> dict[str, Any]:
@@ -384,10 +333,10 @@ def no_such_container(name: str) -> dict[str, Any]:
     return answer("", None, rc=1, stderr=f"Error response from daemon: No such container: {name}")
 
 
-def container_not_running(container_id: str = "3f2a9c1e7b44") -> dict[str, Any]:
+def container_not_running() -> dict[str, Any]:
     """`docker exec` into a stopped container (rc=1, the daemon's own text)."""
     return answer("", None, rc=1,
-                  stderr=f"Error response from daemon: container {container_id} is not running")
+                  stderr="Error response from daemon: container 3f2a9c1e7b44 is not running")
 
 
 class DockerShim:
@@ -434,8 +383,8 @@ class DockerShim:
 
 
 def context_of(argv: list[str]) -> str | None:
-    """The `--context` value a docker argv carries — the next token, or `--context=<v>` (RG3:
-    docker reads both shapes as a literal name). `None` when absent."""
+    """The `--context` value a docker argv carries — the next token, or `--context=<v>`
+    (docker reads both shapes as a literal name). `None` when absent."""
     for i, tok in enumerate(argv):
         if tok == "--context" and i + 1 < len(argv):
             return argv[i + 1]
@@ -469,23 +418,21 @@ def curl_url(argv: list[str]) -> str | None:
 
 
 # ======================================================================================
-# run.py main, through its injection seams (the #1078 `Recorder` shape).
+# run.py main, through its injection seams.
 # ======================================================================================
 
 def run_py() -> Any:
     return mod("run")
 
 
-def run_argv(alert: Path, data_root: Path, *, tenant_id: str = PLAYGROUND_ID,
-             update_ticket: bool = False, extra: Iterable[str] = ()) -> list[str]:
-    """`run.py`'s argv for `tenant_id`, planted under `data_root` (this test's). #1279 (O5):
-    `run.py` takes no run id, so this has no `run_id` parameter; a run's id is the name of the
-    folder its `RunRecorder` builds."""
+def run_argv(alert: Path, data_root: Path, *, update_ticket: bool = False) -> list[str]:
+    """`run.py`'s argv for the playground tenant, planted under `data_root` (this test's).
+    `run.py` takes no run id: a run's id is the name of the folder its `RunRecorder` builds."""
     _require_data_root(data_root)
-    argv = [str(alert), "--tenant", tenant_id]
+    argv = [str(alert), "--tenant", PLAYGROUND_ID]
     if update_ticket:
         argv.append("--update-ticket")
-    return [*argv, *extra]
+    return argv
 
 
 def plant_alert(where: Path, *, alert_id: str = "a-1107") -> Path:
@@ -499,20 +446,19 @@ def plant_alert(where: Path, *, alert_id: str = "a-1107") -> Path:
 
 
 class RunRecorder:
-    """ONE fake per `run.main` seam, each RECORDING what it was handed — it decides nothing.
+    """One recording fake per `run.main` seam; it decides nothing.
 
     `materialize` builds the run dir where told, with a real (empty) session store behind its
-    pointer so the REAL page renderer (`run_common.visualize`, the default `visualize` seam) can
+    pointer so the real page renderer (`run_common.visualize`, the default `visualize` seam) can
     render it; `lifecycle` returns `summary` (the run-end record the ticket lane reads:
-    `truncated_by`, `closed_before_cut`). `visualize` is left to production unless a test asks
-    for the recording one (`seams(record_visualize=True)`)."""
+    `truncated_by`, `closed_before_cut`). `seams()` leaves `visualize` to production; a test
+    that wants the recording one hands `visualize=rec.visualize` itself."""
 
     def __init__(self, run_dir_at: Path, *, summary: Mapping[str, Any] | None = None,
                  before_lifecycle: Any = None) -> None:
-        # #1187 (declared change 1): a run id is a canonical UUID — the folder's name is the
-        # run's id, so a readable last segment is a LABEL and the folder is
-        # `fixture_uuid(<label>)` beside it (a UUID passes as it is). Read the folder back off
-        # `run_dir_at`, never off the label.
+        # A run id is a canonical UUID: a readable last segment is a label and the folder is
+        # `fixture_uuid(<label>)` (a UUID passes as is). Read the folder back off `run_dir_at`,
+        # never off the label.
         run_dir_at = Path(run_dir_at)
         if not is_fixture_uuid_shape(run_dir_at.name):
             run_dir_at = run_dir_at.parent / fixture_uuid(run_dir_at.name)
@@ -532,7 +478,7 @@ class RunRecorder:
         self.order.append("materialize")
         run_dir = self.run_dir_at
         run_dir.mkdir(parents=True, exist_ok=True)
-        # The front door settles the alert once (#1222 A1): the folder holds it in the input
+        # The front door settles the alert once (#1222): the folder holds it in the input
         # directory with its record, the facts derived through the planted tenant's mapping.
         from defender.tests.support.storage._alert_plant import plant_alert as _plant_with_record
 
@@ -556,12 +502,9 @@ class RunRecorder:
         self.order.append("enqueue")
         return False
 
-    def seams(self, *, record_visualize: bool = False) -> dict[str, Any]:
-        s: dict[str, Any] = {"preflight": self.preflight, "materialize": self.materialize,
-                             "lifecycle": self.lifecycle, "enqueue": self.enqueue}
-        if record_visualize:
-            s["visualize"] = self.visualize
-        return s
+    def seams(self) -> dict[str, Any]:
+        return {"preflight": self.preflight, "materialize": self.materialize,
+                "lifecycle": self.lifecycle, "enqueue": self.enqueue}
 
 
 def seed_session_store(run_dir: Path) -> None:
@@ -573,12 +516,12 @@ def seed_session_store(run_dir: Path) -> None:
 
 
 def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | None, Any]:
-    """Drive the REAL `run.main` over `argv` with `rec`'s seams (plus `seams`). Returns
+    """Drive the real `run.main` over `argv` with `rec`'s seams (plus `seams`). Returns
     `(exit status, None)` or `(None, the SystemExit it refused with)`.
 
-    #1108 P4 (OD14, O11): an in-process `run.main` is handed its launch-time publish; unless the
-    caller passes its own, it is the in-process stand-in that publishes the tenant's folder for
-    real when `run.main` launches it (`_launch_publish_p4`), so the run reads an export."""
+    Unless the caller passes its own, the launch-time publish is `_launch_publish_p4`'s
+    in-process stand-in, which publishes the tenant's folder for real, so the run reads an
+    export."""
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
     try:
@@ -588,26 +531,18 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
 
 
 # ======================================================================================
-# The ticket writer and its receipt (O6).
+# The ticket writer and its receipt.
 # ======================================================================================
 
 def ticket_writer() -> Any:
     return mod("investigation.ticket_writer")
 
 
-def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
-                defender_dir: Path = DEFENDER, **kw: Any) -> Any:
-    """`record_case_ticket` as run.py calls it after #1107: the record, the defender dir and the
-    run env handed in (coined keywords `tenant=`, `defender_dir=`, `env=`; F6, human)."""
+def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str], **kw: Any) -> Any:
+    """`record_case_ticket` as run.py calls it: the record, the defender dir and the run env
+    handed in (`tenant=`, `defender_dir=`, `env=`)."""
     return ticket_writer().record_case_ticket(
-        _run_handle_1165(Path(run_dir)), tenant=record, defender_dir=defender_dir, env=dict(env), **kw)
-
-
-def open_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
-              defender_dir: Path = DEFENDER, **kw: Any) -> Any:
-    """`open_case_ticket`, same coined keywords as `record_step`."""
-    return ticket_writer().open_case_ticket(
-        _run_handle_1165(Path(run_dir)), tenant=record, defender_dir=defender_dir, env=dict(env), **kw)
+        _run_handle_1165(Path(run_dir)), tenant=record, defender_dir=DEFENDER, env=dict(env), **kw)
 
 
 def receipt_path(run_dir: Path) -> Path:
@@ -623,26 +558,25 @@ def receipt(run_dir: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-#: The shim answers a run's two store calls: the open leg's create, then the record step's one
-#: comment POST (#1221's amendment: the writer reads nothing back first). Canned in curl's
-#: body + status-line shape (the transport's own contract); the last answer repeats.
+#: The shim's answers to a run's two store calls: the open leg's create, then the record step's
+#: one comment POST (the writer reads nothing back first). Canned in curl's body + status-line
+#: shape; the last answer repeats.
 def store_answers_ok(key: str) -> list[dict[str, Any]]:
     return [answer(json.dumps({"key": key}), "201"),
             answer(json.dumps({"id": 1}), "201")]
 
 
 # ======================================================================================
-# The run page (O6's page line; NF-26; PG-2/PG-2a).
+# The run page.
 # ======================================================================================
 
 def render_page(run_dir: Path, *, update_ticket: bool) -> str:
-    """Render the page the way run.py does after teardown — `run_common.visualize`, the default
-    `visualize` seam — handing it run.py's own `--update-ticket` flag as an ARGUMENT (PG-2a,
-    coined keyword `update_ticket=`), and return the page's HTML."""
+    """Render the page as run.py does after teardown (`run_common.visualize`, handed run.py's
+    `--update-ticket` flag as `update_ticket=`) and return its HTML."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
     run = _run_handle_1165(Path(run_dir))
-    tenant = set_up_tenant(current_data_root())  # #1279 A4: the accepted Tenant rides beside the run
+    tenant = set_up_tenant(current_data_root())  # the accepted Tenant rides beside the run
     mod("run_common").visualize(run, tenant=tenant, update_ticket=update_ticket)
     return page_html(run_dir)
 
@@ -653,12 +587,12 @@ def page_html(run_dir: Path) -> str:
 
 
 # ======================================================================================
-# The env lint (O7) — a program loaded fresh by path, the way CI reaches it.
+# The env lint — a program loaded fresh by path, the way CI reaches it.
 # ======================================================================================
 
 def env_lint() -> Any:
     """A fresh copy of `tooling/lint/lint_tenant_env_reads.py` — asserted to exist first, so a
-    missing lint reads as the demand's own failure, not as a loader crash."""
+    missing lint fails as such, not as a loader crash."""
     path = LINT_DIR / f"{ENV_LINT}.py"
     assert path.is_file(), f"the env lint does not exist: {path}"
     return load_module(path, name=f"{ENV_LINT}_{uuid.uuid4().hex[:8]}")
@@ -666,7 +600,7 @@ def env_lint() -> Any:
 
 def run_env_lint(root: Path | None = None) -> tuple[int, str]:
     """Run the lint's `main(argv)` — over the checkout (`root=None`, argv `[]`) or over a planted
-    tree laid out like the repo (`--root <tree>`, coined) — and return `(exit, output)`."""
+    tree laid out like the repo (`--root <tree>`) — and return `(exit, output)`."""
     lint = env_lint()
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -683,7 +617,7 @@ def plant_module(root: Path, rel: str, text: str) -> Path:
 
 
 # ======================================================================================
-# Surfaces a value must not reach (O4, O6, NF-20): read, never judged here.
+# Surfaces a value must not reach: read, never judged here.
 # ======================================================================================
 
 def files_under(root: Path) -> list[Path]:

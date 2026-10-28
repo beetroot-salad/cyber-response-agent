@@ -10,9 +10,8 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Isolate configured episode and learning roots under tmp_path."""
+    """Isolate the configured runs and learning roots under tmp_path."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     T.isolate_learning_state(tmp_path, monkeypatch)
 
 
@@ -20,7 +19,7 @@ def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anyt
         tmp_path, capsys):
     from defender.cli.learning import branch as branch_entry
 
-    _base, src = location_path(T.runs_base)(tmp_path, pre_snapshot=True, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
+    _base, src = T.runs_base(tmp_path, pre_snapshot=True, published=True)  # a branch launch needs a published tenant, whose commit it pins
     questioner = T.FakeAgent()  # no replies: a call it should never get fails loudly
     spawn = T.FakeSpawn()
     preflights: list[tuple] = []
@@ -34,8 +33,7 @@ def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anyt
     before = set(episodes.glob("*"))
     try:
         got: object = branch_entry.main(
-            ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-             *T.retired_continuation_argv()],
+            ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
             spawn=spawn, questioner=questioner, preflight=recording_preflight,
             live_tree=T.source_capture())
     except (SystemExit, AssertionError, *T.refusals()) as refused:

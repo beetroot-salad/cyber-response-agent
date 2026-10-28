@@ -9,6 +9,10 @@ from typing import Any
 import pytest
 
 
+from defender import providers
+from defender.investigation import driver
+from defender.providers import ProviderDown
+from defender.providers.openai_compat import OpenAICompatProvider
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.runtime.providers import _spec1243 as P
 
@@ -23,7 +27,7 @@ def _raised(fn: Any) -> BaseException:
 
 
 def _down(exc: BaseException) -> Any:
-    assert isinstance(exc, P.provider_down_cls()), (
+    assert isinstance(exc, ProviderDown), (
         f"an exhausted retry raised {type(exc).__name__}: {exc!r}, not ProviderDown")
     return exc
 
@@ -79,8 +83,7 @@ def test_o1_at_most_four_wire_attempts_then_provider_down_from_the_original() ->
 
 
 def test_o1_provider_down_after_no_response_says_no_status() -> None:
-    """O1: exhausted on no response, `ProviderDown.status` is None ("no response"), and the
-    original timeout is its cause."""
+    """`ProviderDown.status` is None ("no response"), and the last timeout is its cause."""
     t = P.Timeline()
     fake = P.Attempts(P.Plan(exc=P.no_response, fail_from=1), timeline=t)
     wrapped = P.with_retries(P.function_model(fake), t.policy())
@@ -157,7 +160,7 @@ def test_o1_a_retry_after_that_is_not_a_number_of_seconds_is_never_a_crash(heade
     except BaseException as e:  # noqa: BLE001 — which one is the observation
         ended = e
     if isinstance(ended, BaseException):
-        assert isinstance(ended, P.provider_down_cls()), (
+        assert isinstance(ended, ProviderDown), (
             f"Retry-After: {header!r} on a 429 ended the request with {type(ended).__name__}: "
             f"{ended!r} after {fake.attempts} attempt(s) — neither a retry nor ProviderDown")
         assert may_stop, (
@@ -193,15 +196,15 @@ def test_o1_backoff_exists_and_grows() -> None:
 
 
 def test_o1_backoff_has_jitter() -> None:
-    """O1 (R4): the wait depends on the policy's jitter — two jitter values give two waits."""
+    """The wait depends on the policy's jitter: two jitter values give two waits."""
     low = _first_wait(lambda: P.http_error(503), jitter=0.1)
     high = _first_wait(lambda: P.http_error(503), jitter=0.9)
     assert low != high, f"jitter 0.1 and 0.9 gave the same first wait ({low}s): no jitter"
 
 
 def test_o1_each_request_retries_on_its_own_window() -> None:
-    """N2 (R6): the window and the attempt count belong to each request, not to the wrapper —
-    a second request 700 s (fake) after the first still gets its retry."""
+    """The window and the attempt count belong to each request, not to the wrapper: a second
+    request 700 s (fake) after the first still gets its retry."""
     t = P.Timeline()
     fake = P.Attempts(P.Plan(fail=frozenset({2})), timeline=t)
     wrapped = P.with_retries(P.function_model(fake), t.policy())
@@ -230,8 +233,8 @@ def test_n2_a_request_after_provider_down_retries_on_its_own() -> None:
       lambda: P.http_error(502)), 502),
 ], ids=["5xx-then-timeout", "timeouts-then-529", "mixed-ending-502"])
 def test_o1_provider_down_names_the_last_failure(plan: tuple[Any, ...], last_status: int | None) -> None:
-    """Design: `ProviderDown` carries "the LAST status or 'no response'" — the failure the
-    provider ended on, not the first one it met — and is raised from that last error."""
+    """`ProviderDown` carries the last status (or no response), not the first, and is raised
+    from that last error."""
     t = P.Timeline()
     fake = P.Attempts(P.steps(*plan), timeline=t)
     wrapped = P.with_retries(P.function_model(fake), t.policy())
@@ -243,9 +246,9 @@ def test_o1_provider_down_names_the_last_failure(plan: tuple[Any, ...], last_sta
 
 
 def test_p2_provider_down_is_an_ordinary_exception() -> None:
-    """P2 (R5): `ProviderDown` is an `Exception`, so every caller's existing `except Exception`
-    catch-all outside a run (oracle, learning stage) still decides what it means."""
-    assert issubclass(P.provider_down_cls(), Exception)
+    """`ProviderDown` is an `Exception`, so every caller's existing `except Exception` catch-all
+    outside a run (oracle, learning stage) still decides what it means."""
+    assert issubclass(ProviderDown, Exception)
 
 
 @pytest.mark.parametrize("hang_s", [250.0, 400.0, 550.0])
@@ -265,7 +268,7 @@ def test_o1_no_attempt_starts_ten_minutes_after_the_first_began(hang_s: float) -
 
 
 def test_o1_short_hangs_still_get_all_four_attempts() -> None:
-    """O1 positive control for the window: attempts that time out quickly (10 s) all start inside
+    """Positive control for the window: attempts that time out quickly (10 s) all start inside
     10 minutes, so the bound of 4 is reached."""
     t = P.Timeline()
     fake = P.Attempts(P.Plan(exc=P.no_response, fail_from=1), timeline=t, hang_s=10.0)
@@ -294,8 +297,8 @@ def test_o1_each_retry_logs_one_warning(caplog: pytest.LogCaptureFixture) -> Non
 
 
 def test_o1_a_retry_after_no_response_logs_its_warning_too(caplog: pytest.LogCaptureFixture) -> None:
-    """O1: "each retry logs one warning line" — a retry after NO response (a timeout) as much
-    as one after a status: one line, naming the call site, the attempt (2/4) and the wait."""
+    """A retry after no response (a timeout) logs its one line as a retry after a status does,
+    naming the call site, the attempt (2/4) and the wait."""
     caplog.set_level(logging.WARNING)
     t = P.Timeline()
     fake = P.Attempts(P.first_n(1, P.no_response), timeline=t)
@@ -456,8 +459,8 @@ def test_o1_the_default_policy_waits_and_reads_time_for_real() -> None:
 
 
 def test_o1_the_default_policy_jitters() -> None:
-    """D1/O1 ("with jitter"): the default policy's jitter is a random draw in [0, 1) — not a
-    constant, which would put every concurrent lead's retries in lockstep."""
+    """The default policy's jitter is a random draw in [0, 1), not a constant, which would put
+    every concurrent lead's retries in lockstep."""
     jitter = P.retry_policy().jitter
     draws = [jitter() for _ in range(16)]
     assert all(0.0 <= d < 1.0 for d in draws), f"default jitter outside [0, 1): {draws}"
@@ -466,8 +469,8 @@ def test_o1_the_default_policy_jitters() -> None:
 
 @pytest.mark.parametrize("status", P.NOT_RETRIED_STATUSES)
 def test_o2_other_4xx_are_not_retried_and_propagate_unchanged(status: int) -> None:
-    """O2 + scenario 6: every other 4xx (part 2's) gets one attempt and propagates as the very
-    error the model raised — not a `ProviderDown`."""
+    """Every other 4xx gets one attempt and propagates as the very error the model raised, not
+    a `ProviderDown`."""
     t = P.Timeline()
     fake = P.Attempts(P.Plan(exc=lambda: P.http_error(status), fail_from=1), timeline=t)
     wrapped = P.with_retries(P.function_model(fake), t.policy())
@@ -483,7 +486,7 @@ def test_o2_other_4xx_are_not_retried_and_propagate_unchanged(status: int) -> No
     lambda: S.unexpected_behavior("model misbehaved"),
 ], ids=["runtime-error", "unexpected-behavior"])
 def test_o2_non_provider_errors_are_not_retried(make: Any) -> None:
-    """O2: an error that is not a provider failure gets one attempt and propagates unchanged."""
+    """An error that is not a provider failure gets one attempt and propagates unchanged."""
     t = P.Timeline()
     fake = P.Attempts(P.Plan(exc=make, fail_from=1), timeline=t)
     wrapped = P.with_retries(P.function_model(fake), t.policy())
@@ -508,8 +511,8 @@ def test_o2_a_rejection_after_a_temporary_failure_propagates_unchanged(first: An
 
 
 def test_p3_a_retried_request_is_one_request_against_the_limit() -> None:
-    """P3 (C3): two temporary failures then a success count as ONE request against the request
-    limit, and the history processors run once."""
+    """Two temporary failures then a success count as one request against the request limit,
+    and the history processors run once."""
     from pydantic_ai.capabilities import ProcessHistory
     from pydantic_ai.usage import UsageLimits
 
@@ -565,11 +568,11 @@ def test_p3_scenario1_a_lead_retried_twice_runs_as_if_it_never_failed(tmp_path: 
     assert clean_log, "the clean run logged no response for the lead"
     assert len(retried_log) == len(clean_log), (
         f"the retried lead logged {len(retried_log)} responses, the clean one {len(clean_log)}: "
-        "a retry wrote a wire record of its own (P3: one record per request)")
+        "a retry wrote a wire record of its own")
     assert (retried["d"].summary or {}).get("requests") == (clean["d"].summary or {}).get("requests"), (
         "the retried run counted a different number of model requests than the clean run")
     assert P.session_rows(retried["stores"][-1].path) == P.session_rows(clean["stores"][-1].path), (
-        "the retried run stored different rows than the clean run (P3: one set of store rows)")
+        "the retried run stored different rows than the clean run")
 
 
 def _wire_run(model: Any) -> Any:
@@ -580,25 +583,25 @@ def _wire_run(model: Any) -> Any:
 
 
 def test_p1_the_anthropic_builder_makes_one_wire_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
-    """P1: the Anthropic provider builder's client does not retry — a 503 reaches the fake
-    provider exactly once through it (the client's own default is 3, C1)."""
+    """The builder's client does not retry (the client library's own default is 3): a 503
+    reaches the fake provider exactly once."""
     with P.FakeProvider([P.wire_error(503)]) as fake:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k-1243")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", fake.url)
-        model = P.providers().ANTHROPIC.build_model(P.ANTHROPIC_NAME)
+        model = providers.ANTHROPIC.build_model(P.ANTHROPIC_NAME)
         with pytest.raises(Exception):  # noqa: B017, PT011 — the count is the observation
             _wire_run(model)
     assert len(fake.hits) == 1, f"the Anthropic client made {len(fake.hits)} wire attempts on a 503"
 
 
 def test_p1_the_openai_compatible_builder_makes_one_wire_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
-    """P1: the OpenAI-compatible provider builder's client does not retry — a 503 reaches the
-    fake provider exactly once (the client's own default is 3, C1)."""
-    cls = P.sym("providers.openai_compat", "OpenAICompatProvider")
+    """The builder's client does not retry (the client library's own default is 3): a 503
+    reaches the fake provider exactly once."""
     with P.FakeProvider([P.WireAnswer(503, {"error": {"message": "overloaded"}})]) as fake:
         monkeypatch.setenv("T1243_API_KEY", "k-1243")
-        provider = cls(id="t1243", base_url=f"{fake.url}/v1", api_key_var="T1243_API_KEY",
-                       aliases={}, main_effort="low", gather_effort="none")
+        provider = OpenAICompatProvider(id="t1243", base_url=f"{fake.url}/v1",
+                                        api_key_var="T1243_API_KEY", aliases={},
+                                        main_effort="low", gather_effort="none")
         model = provider.build_model("t1243:m")
         with pytest.raises(Exception):  # noqa: B017, PT011 — the count is the observation
             _wire_run(model)
@@ -608,14 +611,14 @@ def test_p1_the_openai_compatible_builder_makes_one_wire_attempt(monkeypatch: py
 @pytest.mark.parametrize("which", ["DEFAULT_MODEL", "DEFAULT_GATHER_MODEL"])
 def test_p1_the_shared_builder_retries_the_default_openai_compatible_models(
         which: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    name = P.sym("investigation.driver", which)
-    provider = P.providers().provider_for(name)
-    assert isinstance(provider, P.sym("providers.openai_compat", "OpenAICompatProvider")), (
+    name = getattr(driver, which)
+    provider = providers.provider_for(name)
+    assert isinstance(provider, OpenAICompatProvider), (
         f"{which}={name!r} is no longer an OpenAI-compatible model; this test is about that path")
     monkeypatch.setenv(provider.api_key_var, "k-1243")
     with P.RefusingProxy() as proxy:
         P.through_proxy(monkeypatch, proxy)
-        built = P.providers().build_for_effort(name, None, retry=P.instant_policy())
+        built = providers.build_for_effort(name, None, retry=P.instant_policy())
         caught = _raised(lambda: _wire_run(built.model))
     assert proxy.hits, (
         f"{name}'s request never reached the proxy (raised {caught!r}): this test's channel "
@@ -629,12 +632,12 @@ def test_p1_the_shared_builder_retries_the_default_openai_compatible_models(
 
 def test_p1_the_retrier_recovers_an_openai_compatible_request_on_the_wire(
         monkeypatch: pytest.MonkeyPatch) -> None:
-    cls = P.sym("providers.openai_compat", "OpenAICompatProvider")
     overloaded = P.WireAnswer(503, {"error": {"message": "overloaded"}})
     with P.FakeProvider([overloaded, overloaded, P.WireAnswer(200, P.OPENAI_OK)]) as fake:
         monkeypatch.setenv("T1243_API_KEY", "k-1243")
-        provider = cls(id="t1243", base_url=f"{fake.url}/v1", api_key_var="T1243_API_KEY",
-                       aliases={}, main_effort="low", gather_effort="none")
+        provider = OpenAICompatProvider(id="t1243", base_url=f"{fake.url}/v1",
+                                        api_key_var="T1243_API_KEY", aliases={},
+                                        main_effort="low", gather_effort="none")
         result = _wire_run(P.with_retries(provider.build_model("t1243:m"), P.instant_policy()))
     assert result.output == "wire-ok"
     assert len(fake.hits) == 3, f"{len(fake.hits)} wire attempts; two 503s then an answer is 3"
@@ -644,7 +647,7 @@ def test_p1_the_shared_builder_retries_exactly_four_times_on_the_wire(monkeypatc
     with P.FakeProvider([P.wire_error(503, retry_after="0")]) as fake:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k-1243")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", fake.url)
-        built = P.providers().build_for_effort(P.ANTHROPIC_NAME, None, retry=P.instant_policy())
+        built = providers.build_for_effort(P.ANTHROPIC_NAME, None, retry=P.instant_policy())
         caught = _raised(lambda: _wire_run(built.model))
     down = _down(caught)
     assert len(fake.hits) == P.MAX_ATTEMPTS, f"{len(fake.hits)} wire attempts; the bound is 4"
@@ -652,13 +655,12 @@ def test_p1_the_shared_builder_retries_exactly_four_times_on_the_wire(monkeypatc
 
 
 def test_p1_the_shared_builder_recovers_after_temporary_failures(monkeypatch: pytest.MonkeyPatch) -> None:
-    """P1/O1 + scenario 1 at the wire: two 529s then a good answer — the caller gets the answer,
-    after exactly 3 wire attempts."""
+    """Two 529s then a good answer: the caller gets the answer after exactly 3 wire attempts."""
     answers = [P.wire_error(529), P.wire_error(529), P.WireAnswer(200, P.ANTHROPIC_OK)]
     with P.FakeProvider(answers) as fake:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k-1243")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", fake.url)
-        built = P.providers().build_for_effort(P.ANTHROPIC_NAME, None, retry=P.instant_policy())
+        built = providers.build_for_effort(P.ANTHROPIC_NAME, None, retry=P.instant_policy())
         result = _wire_run(built.model)
     assert result.output == "wire-ok"
     assert len(fake.hits) == 3
@@ -669,14 +671,14 @@ def test_p1_the_shared_builder_reads_retry_after_off_the_wire(monkeypatch: pytes
     own_t = P.Timeline()
     with P.FakeProvider([P.wire_error(429), P.WireAnswer(200, P.ANTHROPIC_OK)]) as plain:
         monkeypatch.setenv("ANTHROPIC_BASE_URL", plain.url)
-        _wire_run(P.providers().build_for_effort(P.ANTHROPIC_NAME, None, retry=own_t.policy()).model)
+        _wire_run(providers.build_for_effort(P.ANTHROPIC_NAME, None, retry=own_t.policy()).model)
     assert own_t.waits, "the retrier never waited after a header-less 429"
     header = int(own_t.waits[0]) + 100
     t = P.Timeline()
     answers = [P.wire_error(429, retry_after=str(header)), P.WireAnswer(200, P.ANTHROPIC_OK)]
     with P.FakeProvider(answers) as fake:
         monkeypatch.setenv("ANTHROPIC_BASE_URL", fake.url)
-        built = P.providers().build_for_effort(P.ANTHROPIC_NAME, None, retry=t.policy())
+        built = providers.build_for_effort(P.ANTHROPIC_NAME, None, retry=t.policy())
         _wire_run(built.model)
     assert len(fake.hits) == 2
     assert t.waits, "the retrier never waited after a 429"
@@ -684,11 +686,11 @@ def test_p1_the_shared_builder_reads_retry_after_off_the_wire(monkeypatch: pytes
 
 
 def test_p1_the_shared_builder_retries_a_refused_connection(monkeypatch: pytest.MonkeyPatch) -> None:
-    """O1 at the wire: a provider nothing answers for (connection refused — no response) is
-    retried to the bound and ends `ProviderDown` with no status."""
+    """A provider nothing answers for (connection refused: no response) is retried to the bound
+    and ends `ProviderDown` with no status."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k-1243")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", P.closed_port_url())
-    built = P.providers().build_for_effort(P.ANTHROPIC_NAME, None, retry=P.instant_policy())
+    built = providers.build_for_effort(P.ANTHROPIC_NAME, None, retry=P.instant_policy())
     caught = _raised(lambda: _wire_run(built.model))
     down = _down(caught)
     assert down.status is None
@@ -696,14 +698,13 @@ def test_p1_the_shared_builder_retries_a_refused_connection(monkeypatch: pytest.
 
 
 def test_p1_the_shared_builder_does_not_retry_a_rejection(monkeypatch: pytest.MonkeyPatch) -> None:
-    """O2 at the wire: a 400 from the provider is one wire attempt, propagated as the model's
-    own HTTP error (part 2 owns it)."""
+    """A 400 from the provider is one wire attempt, propagated as the model's own HTTP error."""
     from pydantic_ai.exceptions import ModelHTTPError
 
     with P.FakeProvider([P.wire_error(400)]) as fake:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k-1243")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", fake.url)
-        built = P.providers().build_for_effort(P.ANTHROPIC_NAME, None, retry=P.instant_policy())
+        built = providers.build_for_effort(P.ANTHROPIC_NAME, None, retry=P.instant_policy())
         with pytest.raises(ModelHTTPError) as caught:
             _wire_run(built.model)
     assert caught.value.status_code == 400
@@ -720,7 +721,7 @@ def test_p1_the_default_builder_path_carries_the_retrier(monkeypatch: pytest.Mon
     with P.FakeProvider([P.wire_error(503)]) as fake:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k-1243")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", fake.url)
-        built = P.providers().build_for_effort(P.ANTHROPIC_NAME, None)
+        built = providers.build_for_effort(P.ANTHROPIC_NAME, None)
 
         async def scenario() -> Any:
             task = asyncio.ensure_future(built.model.request(

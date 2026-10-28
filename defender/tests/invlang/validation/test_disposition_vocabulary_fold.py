@@ -43,12 +43,10 @@ def test_the_slot_order_is_stable():
     )
 
 
-# invlang now enforces it
+# the validator enforces it
 
 @pytest.mark.parametrize("disposition", sorted(DISPOSITION_ENUM))
 def test_every_keyword_clears_the_vocabulary_check(disposition):
-    """Every keyword is a KNOWN disposition — none of them draws the "not a known disposition" error
-    that `spicy` draws below."""
     errors = validate_companion(_companion(disposition), None)
     assert not any("is not a known disposition" in e for e in errors)
 
@@ -57,20 +55,17 @@ def test_every_keyword_clears_the_vocabulary_check(disposition):
     "disposition", sorted(DISPOSITION_ENUM - set(_PRICED) - {HOST_ONLY_DISPOSITION}),
 )
 def test_an_ungated_keyword_draws_no_error_at_all(disposition):
-    """The `== []` half the test above used to carry, kept for every keyword that is NOT priced."""
+    """Priced keywords owe their price (below); every other keyword validates clean."""
     assert validate_companion(_companion(disposition), None) == []
 
 
 @pytest.mark.parametrize("disposition", sorted(_PRICED))
 def test_a_bare_conclude_cannot_reach_a_priced_keyword(disposition):
-    """The counterpart: neither priced keyword is reachable from a `:T conclude` alone."""
     errors = validate_companion(_companion(disposition), None)
     assert any(f"{disposition} blocked" in e for e in errors), errors
 
 
 def test_an_out_of_enum_disposition_is_an_error_not_a_skipped_gate():
-    """Before the fold this was accepted, and its only consequence was that the benign
-    structural checks silently did not run."""
     errors = validate_companion(_companion("spicy"), None)
     assert any("disposition" in e for e in errors)
 
@@ -102,7 +97,7 @@ def _unresolved_companion(disposition: str) -> str:
 
 
 def test_the_benign_gate_cannot_be_switched_off_with_an_invisible_character():
-    """The live bug this fold closes, pinned on the gate's OUTPUT rather than on the compare."""
+    """Pinned on the gate's OUTPUT, not on the string compare."""
     clean = validate_companion(_unresolved_companion("benign"), None)
     laced = validate_companion(_unresolved_companion(f"benign{ZWSP}"), None)
     assert any(_BENIGN_BLOCKED in e for e in clean)
@@ -113,16 +108,15 @@ def test_the_benign_gate_cannot_be_switched_off_with_an_invisible_character():
 # the write gates stay exact
 
 def test_the_report_write_gate_still_refuses_what_the_reader_understands():
-    """The one place the normalizer must NOT be used. On write there is still an author to ask, so
-    the gate denies with retry text the model can act on."""
+    """The one place the normalizer must NOT be used: on write there is still an author to ask,
+    so the gate denies."""
     laced = f"---\ndisposition: benign{ZWSP}\n---\nbody\n"
     assert validate_report(laced) is not None
     assert normalized_disposition(f"benign{ZWSP}") is None
 
 
 def test_the_investigation_write_gate_denies_an_out_of_enum_disposition():
-    """The same refusal reaching the model through the artifact-level entry point the
-    permission gate actually calls, not just the validator underneath it."""
+    """Through the artifact-level entry point the permission gate calls, not just the validator."""
     reason = validate_artifact("investigation.md", _companion("spicy"), None)
     assert reason is not None
     assert "disposition" in reason

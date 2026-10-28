@@ -97,16 +97,9 @@ def test_bare_fromisoformat_is_flagged(tmp_path):
         "import json\ndef f(t) -> list[dict]:\n    return json.loads(t)\n",
         "import json\ndef f(t) -> 'CaseRecord':\n    return json.loads(t)\n",
         "import json\ndef f(t) -> dict | None:\n    return json.loads(t)\n",
-    ],
-)
-def test_every_spelling_of_the_construction_is_one_case(tmp_path, src):
-    assert _checks(_scan_src(tmp_path, src)) == {"unnarrowed-parse"}
-
-
-def test_taint_survives_a_deref_chain(tmp_path):
-    """`.get()` off raw output is still raw: the receiver is `Any`, so the result is. A gate
-    that treated the dot as a boundary would let one deref launder the whole chain."""
-    assert _checks(_scan_src(tmp_path, (
+        "import json\nasync def f(t) -> dict:\n    return json.loads(t)\n",
+        # `.get()` off raw output is still raw (the receiver is `Any`): one deref must not
+        # launder the whole chain.
         "import yaml\n"
         "def catalog_entry(t) -> dict:\n"
         "    catalog = yaml.safe_load(t) or {}\n"
@@ -114,16 +107,11 @@ def test_taint_survives_a_deref_chain(tmp_path):
         "    for entry in entries:\n"
         "        if entry.get('id') == 'x':\n"
         "            return entry\n"
-        "    raise KeyError('x')\n"
-    ))) == {"unnarrowed-parse"}
-
-
-def test_an_async_seam_is_flagged(tmp_path):
-    assert _checks(_scan_src(tmp_path, (
-        "import json\n"
-        "async def f(t) -> dict:\n"
-        "    return json.loads(t)\n"
-    ))) == {"unnarrowed-parse"}
+        "    raise KeyError('x')\n",
+    ],
+)
+def test_every_spelling_of_the_construction_is_one_case(tmp_path, src):
+    assert _checks(_scan_src(tmp_path, src)) == {"unnarrowed-parse"}
 
 
 def test_two_same_named_siblings_get_distinct_fingerprints(tmp_path):
@@ -276,8 +264,8 @@ def test_a_marker_buried_in_the_body_does_not_suppress(tmp_path):
 
 
 def test_the_real_run_scans_the_oracle_golden_tooling_under_evaluations():
-    """#1268 moved the oracle-golden tooling from defender/evals/ to evaluations/. A
-    defender-only scope kept its baselined seams in the file and out of the gate."""
+    """The oracle-golden tooling lives under `evaluations/` (#1268): a defender-only scope
+    would leave its baselined seams out of the gate."""
     covered = _GATE.REPO_ROOT / "evaluations" / "oracle_golden" / "judge.py"
     assert any(covered.is_relative_to(scope) for scope in _GATE.SCOPES)
 

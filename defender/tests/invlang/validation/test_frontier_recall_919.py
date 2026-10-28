@@ -64,13 +64,6 @@ v-003|compute|ip-only/??/??|10.42.7.183|knowledge=partial
 ```
 """
 
-CANDIDATE_SET_BLOCK = """
-```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-007|compute|ip-only/{internal, dmz}/known-corp|10.42.7.9|knowledge=partial
-```
-"""
-
 AUTHZ_DECL_BLOCK = """
 ```invlang
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
@@ -143,9 +136,8 @@ CASE_SIGNATURE = "v2-falco-suspicious-network-tool"
 
 
 def authz_row(verdict: str) -> str:
-    """One `:R authz` block resolving `ac1` with `verdict`, in the header order SKILL.md
-    declares. `resolved_by` is `l-001`, the lead `PROLOGUE` already declares, so the row files
-    onto a real lead rather than adding an undeclared-lead fault to the fixture."""
+    """One `:R authz` block resolving `ac1` with `verdict`, filed by `PROLOGUE`'s lead `l-001`
+    so it adds no undeclared-lead fault."""
     return (
         "\n```invlang\n"
         ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|reasoning]\n"
@@ -155,28 +147,23 @@ def authz_row(verdict: str) -> str:
     )
 
 
-#: Every fixture document, by the name the failure message should name.
+#: The fixture documents, by name.
 _FIXTURE_DOCS = {
     "open class": PROLOGUE + OPEN_CLASS_BLOCK,
     "closed class": PROLOGUE + OPEN_CLASS_BLOCK + attr_block(CLOSE_CLASS_ROW),
     "open loginuid": PROLOGUE + OPEN_LOGINUID_BLOCK,
     "open ident": PROLOGUE + OPEN_IDENT_BLOCK,
     "open triple": PROLOGUE + OPEN_TRIPLE_BLOCK,
-    "candidate set": PROLOGUE + CANDIDATE_SET_BLOCK,
     "authz declared": PROLOGUE + AUTHZ_DECL_BLOCK,
     "authz authorized": PROLOGUE + AUTHZ_DECL_BLOCK + authz_row("authorized"),
     "authz unauthorized": PROLOGUE + AUTHZ_DECL_BLOCK + authz_row("unauthorized"),
     "proposed contract": PROLOGUE + PROPOSED_CONTRACT_BLOCK,
-    "half written": PROLOGUE + HALF_WRITTEN_BLOCK,
 }
 
 
-# the frontier, read through the functions this spec mints
+# reading the frontier
 
 def _frontier(text: str):
-    """`frontier_from_text(text)` — imported INSIDE the body, never at module scope, so this
-    file still COLLECTS on a tree where `skills/invlang/frontier.py` does not exist. Red is
-    the expected state of a spec; an uncollectable file is not."""
     from defender.skills.invlang.frontier import frontier_from_text
 
     return frontier_from_text(text)
@@ -204,16 +191,15 @@ def _lessons_frontier():
 
 # corpora
 
-# `_write_lesson` and `_main_deps` live in `_lessons_corpus` so a second suite can use them
+# `_write_lesson` and `_run_copy_main_deps` live in `_lessons_corpus` so a second suite can use them
 # without importing this COLLECTED module (which would load it twice in one session).
 from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson  # noqa: E402
 from defender.tests.support.learning.retrieval._lessons_corpus import _run_copy_main_deps  # noqa: E402
 
 
 def _corpus(parent: Path, name: str = "lessons") -> Path:
-    """A corpus directory. `name` is a parameter for exactly one test — the relocation seam
-    refuses a directory whose LEAF NAME is not `lessons`, and that refusal needs a
-    correctly-populated corpus under the wrong name to be about the name."""
+    """A corpus directory. `name` exists for the relocation test: the seam refuses a LEAF NAME
+    other than `lessons`, and that refusal needs a well-formed corpus under the wrong name."""
     d = parent / name
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -229,9 +215,6 @@ def _exit_code(main, argv: list[str]) -> int:
         return int(main(argv))
     except SystemExit as e:
         return int(e.code or 0)
-
-
-# the fixtures themselves
 
 
 # case 1 — an open slot is in the frontier until a refinement closes it
@@ -264,7 +247,7 @@ def test_an_open_class_slot_matches_until_a_refinement_closes_it(tmp_path):
 # case 2 — the motivating miss, retrieved without the alert signature
 
 def test_the_loginuid_lesson_is_retrieved_though_its_signature_does_not_match(tmp_path):
-    """CLAIM: retrieval is signature-BLIND — the frontier is the whole key."""
+    """Retrieval is signature-BLIND — the frontier is the whole key."""
     corpus = _corpus(tmp_path)
     wanted = _write_lesson(
         corpus, "loginuid-open-is-not-docker-exec",
@@ -279,8 +262,7 @@ def test_the_loginuid_lesson_is_retrieved_though_its_signature_does_not_match(tm
     assert _names(hits) == ["loginuid-open-is-not-docker-exec"]
     hit = hits[0]
     assert hit.path == wanted
-    # The `description` reaches the model through the rendered frontmatter, which is the only
-    # surface that carries it — `Hit` no longer keeps a second, unrendered copy.
+    # The `description` reaches the model only through the rendered frontmatter.
     assert "loginuid-open-is-not-docker-exec description" in _lessons_frontier().render(hits)
     assert hit.frontmatter["source_signature"] == ["v2-cross-tier-ssh-pivot"], (
         "the retrieved lesson's signature is not the disjoint one the fixture wrote"
@@ -302,8 +284,7 @@ def test_the_loginuid_lesson_is_retrieved_though_its_signature_does_not_match(tm
 # case 3 — `ident` is in the frontier and still not in the benign gate
 
 def test_an_unresolved_ident_is_in_the_frontier_but_not_in_the_benign_gate(tmp_path):
-    """CLAIM: `identifier` is an `OpenSlot` (`slot="ident"`), and `_check_benign_open_slots` is
-    UNCHANGED by that."""
+    """An open `ident` is an `OpenSlot` (`slot="ident"`), yet does not block a benign close."""
     from defender.skills.invlang.validate import _check_benign_open_slots
 
     doc = _FIXTURE_DOCS["open ident"]
@@ -315,7 +296,7 @@ def test_an_unresolved_ident_is_in_the_frontier_but_not_in_the_benign_gate(tmp_p
         "the frontier work leaked into the benign disposition gate"
     )
     assert validate_investigation(doc + CONCLUDE_BENIGN, None) is None, (
-        "an unresolved ident newly blocks a benign close — #836 N3 says it must not"
+        "an unresolved ident blocks a benign close"
     )
     # ...and the control that the gate still WORKS: an open class on the same document blocks.
     blocked = PROLOGUE + OPEN_CLASS_BLOCK + CONCLUDE_BENIGN
@@ -344,7 +325,7 @@ def test_a_contract_is_open_until_a_row_authorizes_it(tmp_path):
 
 
 def test_an_unobserved_contract_carries_no_edge_facts(tmp_path):
-    """CLAIM: `edge_ref` is `proposed` when the contract attaches to no observed edge, and then
+    """`edge_ref` is `proposed` when the contract attaches to no observed edge, and then
     `rel` and `auth_kind` are None rather than invented."""
     assert _contract_tuples(_FIXTURE_DOCS["proposed contract"]) == [
         ("ac2", "h-002", "approved-source-list", "proposed", None, None)
@@ -352,7 +333,7 @@ def test_an_unobserved_contract_carries_no_edge_facts(tmp_path):
 
 
 def test_an_edge_selector_matches_only_when_every_field_it_declares_is_equal(tmp_path):
-    """CLAIM: an edge selector is a conjunction over the fields it DECLARES — an omitted field
+    """An edge selector is a conjunction over the fields it DECLARES — an omitted field
     constrains nothing, a declared one must be equal."""
     corpus = _corpus(tmp_path)
     _write_lesson(corpus, "edge-both", edges=("rel: attempted_auth, anchor_kind: iam-policy",))
@@ -383,7 +364,7 @@ def _ranking_corpus(tmp_path: Path) -> Path:
 
 
 def test_specificity_outranks_generality_and_top_k_bounds_the_list(tmp_path):
-    """CLAIM: score is the count of BOUND components — type, each non-`*` class slot, and the slot
+    """Score is the count of BOUND components — type, each non-`*` class slot, and the slot
     name — highest first, and `top_k` (default 3) is the cut."""
     corpus = _ranking_corpus(tmp_path)
     match_lessons = _lessons_frontier().match_lessons
@@ -412,12 +393,9 @@ def test_specificity_outranks_generality_and_top_k_bounds_the_list(tmp_path):
 # case 6 — the recall rides on the append that moved it
 
 def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(tmp_path):
-    """CLAIM: `_tool_append_block` derives the recall over the pre- and post-append document and
-    appends the rendered section ONLY when the two differ.
-
-    #1108 P4 (O2, O-TEXT): the recalled lesson is the RUN COPY's, shown by its model-view path
-    `/agent/lessons/<name>.md`; a lesson left in the checkout's `lessons/` (a decoy matching the
-    same open slot) is never recalled."""
+    """`_tool_append_block` derives the recall over the pre- and post-append document and
+    appends the rendered section ONLY when the two differ. The recalled lesson is the RUN
+    COPY's, named by its model-view path; a checkout `lessons/` decoy is never recalled (#1108)."""
     from defender.investigation.tools import _tool_append_block
 
     deps, run, agent, dfn = _run_copy_main_deps(tmp_path)
@@ -435,10 +413,10 @@ def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(
         "the append that opened `class=??` did not carry the lesson it unlocked"
     )
     assert "/agent/lessons/process-class-open.md" in second, (
-        "the pushed lesson is not named by the run copy's model-view path (O-TEXT)"
+        "the pushed lesson is not named by the run copy's model-view path"
     )
     assert "checkout-decoy-class-open" not in second, (
-        "the recall read the checkout's lessons corpus, not the run copy's (O2)"
+        "the recall read the checkout's lessons corpus, not the run copy's"
     )
 
     third = _tool_append_block(deps, PROSE_BLOCK)
@@ -455,7 +433,7 @@ def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(
 # case 7 — a half-written block is inert, not fatal
 
 def test_a_malformed_block_yields_an_empty_frontier_rather_than_raising(tmp_path):
-    """CLAIM: `frontier_from_text` never raises — a document it cannot read has an empty frontier."""
+    """`frontier_from_text` never raises — a document it cannot read has an empty frontier."""
     for label, doc, intact in (
         ("unterminated fence", PROLOGUE + HALF_WRITTEN_BLOCK, PROLOGUE),
         ("short row", TRUNCATED_ROW_DOC, ""),
@@ -471,7 +449,7 @@ def test_a_malformed_block_yields_an_empty_frontier_rather_than_raising(tmp_path
 
 
 def test_an_append_landing_a_half_written_block_still_leads_with_its_byte_count(tmp_path):
-    """CLAIM: the recall never turns a write that LANDED into a failed tool call."""
+    """The recall never turns a write that LANDED into a failed tool call."""
     from defender.investigation.tools import _tool_append_block
 
     deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
@@ -488,8 +466,7 @@ def test_an_append_landing_a_half_written_block_still_leads_with_its_byte_count(
 # case 8 — `--corpus` is a relocation seam, not a corpus selector
 
 def test_the_relocated_corpus_must_still_be_named_lessons(tmp_path, capsys):
-    """CLAIM: `--corpus` accepts a RELOCATED `lessons` directory and refuses anything else, exiting
-    2."""
+    """`--corpus` accepts a RELOCATED `lessons` directory and refuses anything else, exiting 2."""
     main = _lessons_frontier().main
     investigation = tmp_path / "investigation.md"
     investigation.write_text(_FIXTURE_DOCS["open class"], encoding="utf-8")
@@ -521,8 +498,7 @@ def test_an_open_case_slot_matches_a_concrete_selector_and_a_settled_one_does_no
 
     hits = _names(match_lessons(_frontier(_FIXTURE_DOCS["open triple"]), corpus))
     assert hits == ["hits-through-the-open-slot"], (
-        "`ip-only/internal` can only reach `ip-only/??/??` through the open slot 1, and "
-        "`bastion` must still be refused by the concrete slot 0"
+        "`ip-only/internal` must match only through open slot 1, `bastion` not at concrete slot 0"
     )
 
     # ...and against a wholly open cell, a fully concrete selector matches too — the same
@@ -534,7 +510,6 @@ def test_an_open_case_slot_matches_a_concrete_selector_and_a_settled_one_does_no
 
 
 def test_ties_break_by_lesson_name_rather_than_by_filename(tmp_path):
-    """CLAIM: equal scores order by the lesson's `name`."""
     corpus = _corpus(tmp_path)
     sel = ("type: compute, slot: class",)
     _write_lesson(corpus, "aaa-first", nodes=sel, filename="99-last.md")
@@ -552,7 +527,6 @@ def test_ties_break_by_lesson_name_rather_than_by_filename(tmp_path):
 
 
 def test_a_lesson_scores_its_best_selector_not_the_sum_of_them(tmp_path):
-    """CLAIM: a lesson's score is its most specific MATCHING selector, not an accumulation."""
     corpus = _corpus(tmp_path)
     _write_lesson(corpus, "two-loose", nodes=(
         "type: compute, slot: class", "type: compute, slot: ident",
@@ -568,7 +542,7 @@ def test_a_lesson_scores_its_best_selector_not_the_sum_of_them(tmp_path):
 
 
 def test_an_edge_selector_can_key_on_the_observational_authority(tmp_path):
-    """CLAIM: `auth_kind` constrains an edge selector like the other two fields."""
+    """`auth_kind` constrains an edge selector like the other two fields."""
     corpus = _corpus(tmp_path)
     _write_lesson(corpus, "right-authority",
                   edges=("auth_kind: siem-event, anchor_kind: iam-policy",))
@@ -587,7 +561,7 @@ def test_an_edge_selector_can_key_on_the_observational_authority(tmp_path):
 
 
 def test_matched_names_the_frontier_item_rather_than_the_selector(tmp_path):
-    """CLAIM: `Hit.matched` identifies WHICH open thing hit — the vertex and its value."""
+    """`Hit.matched` identifies WHICH open thing hit — the vertex and its value."""
     corpus = _corpus(tmp_path)
     _write_lesson(corpus, "loginuid", nodes=("type: process, slot: attrs.loginuid",))
 
@@ -598,7 +572,6 @@ def test_matched_names_the_frontier_item_rather_than_the_selector(tmp_path):
 
 
 def test_the_recall_is_omitted_when_the_corpus_is_missing_or_malformed(tmp_path):
-    """CLAIM: the recall never turns a landed write into a failed tool call."""
     from defender.investigation.tools import _tool_append_block
 
     deps, _run, agent, dfn = _run_copy_main_deps(tmp_path)
@@ -621,7 +594,6 @@ def test_the_recall_is_omitted_when_the_corpus_is_missing_or_malformed(tmp_path)
 
 
 def test_render_of_nothing_is_empty_and_the_cli_honours_top_k(tmp_path):
-    """CLAIM: the two surfaces the contract pins but nothing exercised."""
     lf = _lessons_frontier()
     assert lf.render([]) == "", "render([]) is not empty — the injection gate keys on this"
 
@@ -646,7 +618,7 @@ def test_render_of_nothing_is_empty_and_the_cli_honours_top_k(tmp_path):
 
 
 def test_the_tool_pushes_only_the_lessons_that_matched(tmp_path):
-    """CLAIM: `_tool_append_block` is wired to `match_lessons`, not to a directory listing."""
+    """`_tool_append_block` is wired to `match_lessons`, not to a directory listing."""
     from defender.investigation.tools import _tool_append_block
 
     deps, _run, agent, _dfn = _run_copy_main_deps(tmp_path)
@@ -667,7 +639,6 @@ def test_the_tool_pushes_only_the_lessons_that_matched(tmp_path):
 
 
 def test_the_cli_retrieves_against_the_investigation_it_is_handed(tmp_path):
-    """CLAIM: `main` derives the frontier from `--investigation`."""
     lf = _lessons_frontier()
     corpus = _corpus(tmp_path)
     _write_lesson(corpus, "aaa-decoy-matches-nothing",
@@ -695,7 +666,7 @@ def test_the_cli_retrieves_against_the_investigation_it_is_handed(tmp_path):
 
 
 def test_a_row_discharges_only_the_contract_it_names(tmp_path):
-    """CLAIM: discharge joins on `fulfills_contract`."""
+    """Discharge joins on `fulfills_contract`."""
     doc = (
         PROLOGUE + AUTHZ_DECL_BLOCK + SECOND_CONTRACT_BLOCK + authz_row("authorized")
     )
@@ -706,7 +677,7 @@ def test_a_row_discharges_only_the_contract_it_names(tmp_path):
 
 
 def test_a_refinement_closes_an_ident_or_an_attribute_too(tmp_path):
-    """CLAIM: the `:R attr_updates` fold honours all three legal keys."""
+    """The `:R attr_updates` fold honours all three legal keys."""
     closed_attr = (
         PROLOGUE + OPEN_LOGINUID_BLOCK + attr_block("l-001|v-004|attrs.loginuid|1000")
     )
@@ -721,7 +692,7 @@ def test_a_refinement_closes_an_ident_or_an_attribute_too(tmp_path):
 
 
 def test_a_contract_on_a_refuted_hypothesis_is_not_on_the_frontier(tmp_path):
-    """CLAIM: only LIVE hypotheses carry outstanding contracts."""
+    """Only LIVE hypotheses carry outstanding contracts."""
     refuted = PROLOGUE + AUTHZ_DECL_BLOCK + REFUTE_H001_BLOCK
     assert _frontier(PROLOGUE + AUTHZ_DECL_BLOCK).contracts, "positive control"
     assert _frontier(refuted).contracts == (), (
@@ -729,10 +700,10 @@ def test_a_contract_on_a_refuted_hypothesis_is_not_on_the_frontier(tmp_path):
     )
 
 
-# review follow-ups (#930): the two ways the shipped mechanism missed its own case
+# review follow-ups (#930)
 
 def test_a_class_slot_matched_only_through_the_inversion_pins_nothing(tmp_path):
-    """CLAIM: specificity scores the MATCH, not the selector — a class component that landed on an
+    """Specificity scores the MATCH, not the selector — a class component that landed on an
     open case slot discriminated nothing and earns nothing."""
     corpus = _corpus(tmp_path)
     _write_lesson(corpus, "aaa-wholly-open-class",
@@ -752,8 +723,7 @@ v-008|process|??|nc[pid=4242]|loginuid=??
         "`nginx` matched a `??` — it pinned nothing and must not outscore the attribute"
     )
     assert hits["zzz-names-the-open-attribute"] == 3, (
-        "naming an `attrs.<name>` slot is a claim about what the document HOLDS, where "
-        "`class` and `ident` are cells every vertex carries — `ATTR_SLOT_WEIGHT` (#935)"
+        "an `attrs.<name>` slot match is not weighted by `ATTR_SLOT_WEIGHT`"
     )
     assert hits["aaa-wholly-open-class"] < hits["zzz-names-the-open-attribute"], (
         "a class literal the document never mentions outranked the exact open slot"
@@ -765,7 +735,7 @@ v-008|process|??|nc[pid=4242]|loginuid=??
 
 
 def test_the_frontier_and_the_benign_gate_agree_on_a_shared_contract_id(tmp_path):
-    """CLAIM: `_open_contracts` calls `validate.outstanding_authz_contracts` rather than restating
+    """`_open_contracts` calls `validate.outstanding_authz_contracts` rather than restating
     "discharged", so the two cannot disagree."""
     from defender.skills.invlang.validate import _check_benign_authz
 
@@ -794,7 +764,7 @@ ac1|e-001|approved-source-list|"source host is on the approved list"|escalate|es
 
 
 def test_fix_row_carries_the_recall_because_it_moves_the_frontier_too(tmp_path):
-    """CLAIM: the repair verb pushes lessons on the same terms `append_block` does."""
+    """The repair verb pushes lessons on the same terms `append_block` does."""
     from defender.investigation.tools import _tool_append_block, _tool_fix_row
 
     deps, run, agent, _dfn = _run_copy_main_deps(tmp_path)
@@ -835,12 +805,12 @@ def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
     assert f"matched {hits[0].matched}" in rendered, (
         f"the block dropped its account of WHY the lesson was pushed:\n{rendered}"
     )
-    # The first hit row (#1206 frames the hits, so it follows the frame's opening line; the write
-    # return's own text comes before the block, so the row is found by its `matched` account).
+    # The first hit row, found by its `matched` account: the write's own text and the frame's
+    # opening line (#1206) come before it.
     first = next(ln for ln in rendered.splitlines()
                  if ln.startswith("- ") and " — matched " in ln)
     quoted = first.removeprefix("- ").split(" — matched ")[0]
-    # #1108 P4 (O2, O-TEXT): the lesson lives in the run copy, the model's `/agent` tree.
+    # The lesson lives in the run copy, the model's `/agent` tree (#1108).
     assert quoted == f"{MODEL_AGENT}/lessons/readable-from-the-block.md", (
         f"the block quotes {quoted!r}, not the lesson's model path under {MODEL_AGENT}")
     body = _tool_read_file(deps, quoted)  # ModelRetry here IS the failure
@@ -848,8 +818,8 @@ def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
 
 
 def test_a_pushed_lesson_is_recorded_the_way_a_read_one_is(tmp_path):
-    """CLAIM: the recall lane writes `lessons_loaded.jsonl`, like `_gated_read` does — #1108 P4
-    O5: for a lesson pushed from the RUN COPY's `lessons/` too."""
+    """The recall lane writes `lessons_loaded.jsonl`, as `_gated_read` does, for a lesson
+    pushed from the run copy too (#1108)."""
     import json
 
     from defender.investigation.tools import _tool_append_block
@@ -872,8 +842,8 @@ def test_a_pushed_lesson_is_recorded_the_way_a_read_one_is(tmp_path):
     )
 
 
-#: A `process` whose class and attributes are all SETTLED. Nothing here is open, so the whole
-#: document is invisible to `frontier_nodes` and visible only to `observed_nodes`.
+#: An `identity` whose class, ident and attributes are all SETTLED. Nothing here is open, so
+#: the whole document is invisible to `frontier_nodes` and visible only to `observed_nodes`.
 SETTLED_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -883,7 +853,7 @@ v-008|identity|user/anonymous|root|uid=0;loginuid=-1
 
 
 def test_a_settled_value_is_a_held_fact_and_not_an_open_slot(tmp_path):
-    """CLAIM: the two node halves are complements — a cell is open XOR held, never both."""
+    """The two node halves are complements — a cell is open XOR held, never both."""
     doc = PROLOGUE + SETTLED_BLOCK
     f = _frontier(doc)
     assert f.slots == (), "a fully settled vertex put something on the OPEN half"
@@ -909,7 +879,7 @@ def test_a_settled_value_is_a_held_fact_and_not_an_open_slot(tmp_path):
 
 
 def test_observed_nodes_retrieves_on_a_value_the_document_settled(tmp_path):
-    """CLAIM: `observed_nodes` fires on a concrete value, and `frontier_nodes` does not."""
+    """`observed_nodes` fires on a concrete value, and `frontier_nodes` does not."""
     corpus = _corpus(tmp_path)
     _write_lesson(corpus, "licenses-a-known-loginuid",
                   observed=("type: identity, slot: attrs.loginuid",))

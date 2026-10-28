@@ -3,8 +3,8 @@ overlaps the publish root, or when a container already holds the box's name.
 
 Every lane that reaches `box.start_box` is covered: the run lane, a caller-composed request, and the
 oracle and (in tenancy/tenant_1108_delivery/test_box.py) the tenant draft drain, each through its
-real request builder. The refusal is `box.BoxStartConflict`, a `BoxFault` subtype (name chosen
-by this contract). The docker daemon is faked through the real `docker=` seam."""
+real request builder. The refusal is `box.BoxStartConflict`, a `BoxFault` subtype. The docker
+daemon is faked through the real `docker=` seam."""
 from __future__ import annotations
 
 import os
@@ -241,7 +241,7 @@ def test_o3_outside_dev_there_is_no_publish_root_and_nothing_is_checked(tmp_path
 
 
 def _stage_at(path: Path) -> dict[str, Path]:
-    """A run copy's stage at `path`: `agent/` and the startup token beside it (#1108 P4, U9)."""
+    """A run copy's stage at `path`: `agent/` and the startup token beside it."""
     (path / "agent").mkdir(parents=True, exist_ok=True)
     token = path / ".startup-token"
     token.write_text("run-1279-token\n", encoding="utf-8")
@@ -260,7 +260,7 @@ def _request_in_a_worktree(tmp_path: Path, wt: Path, *, data: Path | None = None
 @pytest.mark.parametrize("lane_kind", ["run", "request"])
 def test_a8_a_box_is_judged_against_this_processes_root_not_its_code_mounts_checkout(
         tmp_path, monkeypatch, lane_kind):
-    """A8: a box whose code mount is a worktree is judged against the root the starting process
+    """A box whose code mount is a worktree is judged against the root the starting process
     publishes into (here the override), not against the folder its code mount's main checkout
     would give. A mount in that checkout's `run-visualizations/` starts; one in the process's root
     is refused naming both, and nothing is created or removed."""
@@ -302,7 +302,7 @@ def _request_without_a_code_mount(req: X.RequestLane) -> box_mod.BoxRequest:
 
 
 def test_a8_a_request_with_no_code_mount_is_still_judged(tmp_path, monkeypatch):
-    """A8: the root does not come from a mount, so a request with no code mount is judged too."""
+    """The root does not come from a mount, so a request with no code mount is judged too."""
     req = X.request_lane(tmp_path)
     X.dev_root(monkeypatch, req.data / "pub")
     rec = RecordingDocker()
@@ -315,7 +315,7 @@ def test_a8_a_request_with_no_code_mount_is_still_judged(tmp_path, monkeypatch):
 @pytest.mark.parametrize("lane_kind", ["run", "request"])
 def test_a9_in_dev_an_unset_root_starts_the_box_and_warns_naming_the_setting(
         tmp_path, monkeypatch, caplog, lane_kind, opt_out):
-    """A9/A11: in `dev` with no publish folder set there is nowhere to publish, not a conflict.
+    """In `dev` with no publish folder set there is nowhere to publish, not a conflict.
     The box starts, plain and with the opt-out, and a warning names the box and the setting, so a
     skipped check never passes as a clear one. Control: outside `dev` it starts with no such
     warning."""
@@ -390,8 +390,8 @@ def test_a2_an_overlap_is_refused_even_when_the_daemon_is_unreachable(tmp_path, 
 @pytest.mark.parametrize("lane_kind", ["run", "request"])
 def test_a2_the_opt_out_never_degrades_an_existing_same_name_container(
         tmp_path, monkeypatch, lane_kind, state):
-    """O6 + A2: whatever the container's state, with the opt-out on, the start refuses, removes
-    nothing and creates nothing."""
+    """Whatever the container's state, with the opt-out on, the start refuses, removes nothing
+    and creates nothing."""
     monkeypatch.delenv(X.DEPLOYMENT_ENV, raising=False)
     X.allow_unsandboxed(monkeypatch)
     rec = RecordingDocker(status=state)
@@ -439,7 +439,7 @@ def _daemon_down(argv, **_kw):
 @pytest.mark.parametrize("lane_kind", ["run", "request"])
 def test_a2_a_daemon_that_answers_errors_to_inspect_and_version_degrades_and_is_not_the_refusal(
         tmp_path, monkeypatch, lane_kind):
-    """A2: a daemon that cannot say what a name holds and cannot answer for itself is a plain
+    """A daemon that cannot say what a name holds and cannot answer for itself is a plain
     BoxFault (not the same-name subtype); the opt-out degrades it; nothing is created or removed."""
     X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
     calls: list[list[str]] = []
@@ -469,9 +469,8 @@ def test_a2_a_daemon_that_answers_errors_to_inspect_and_version_degrades_and_is_
 @pytest.mark.parametrize("lane_kind", ["run", "request"])
 def test_a2_a_name_conflict_raised_by_docker_run_itself_stays_a_degradable_create_fault(
         tmp_path, monkeypatch, lane_kind):
-    """A2: inspect found nothing (the name looked free), then `docker run` itself reports the
-    name taken (a race). That stays a create fault as today: not the refusal subtype, and the
-    opt-out degrades it."""
+    """Inspect found the name free, then `docker run` itself reports it taken (a race): that
+    stays a degradable create fault, not the refusal subtype."""
     from defender.tests.e2e._box665 import DockerFault
 
     def rec() -> RecordingDocker:
@@ -624,7 +623,7 @@ def test_o3_the_oracle_start_carries_the_refusal_as_the_cause_of_its_own(tmp_pat
 
 def test_o3_the_estate_oracle_start_turns_the_refusal_into_its_own_failure_keeping_its_text(
         tmp_path, monkeypatch):
-    """A2 tail: `estate.oracle.start_box` re-wraps `_oracle.BoxStartRefused` as
+    """`estate.oracle.start_box` re-wraps `_oracle.BoxStartRefused` as
     `OracleSandboxError`; the BoxStartConflict, with its text, stays in the chain and in the
     message the operator reads."""
     from defender.learning.branch.estate import oracle as estate_oracle
@@ -658,7 +657,7 @@ def test_o6_the_oracle_request_name_refuses_a_finished_container(tmp_path, oracl
 
 def test_o6_the_oracle_entry_refuses_a_held_same_name_container_and_leaves_it(
         tmp_path, monkeypatch):
-    """O6: `start_oracle_box`, through its own docker closure, refuses when the daemon reports a
+    """`start_oracle_box`, through its own docker closure, refuses when the daemon reports a
     container under the oracle's minted name, with the conflict in the cause chain; it removes and
     creates nothing. Control: a daemon holding nothing starts the same oracle."""
     from defender.box import _oracle
@@ -689,7 +688,6 @@ def test_o6_the_oracle_entry_refuses_a_held_same_name_container_and_leaves_it(
 
 
 def test_o6_every_oracle_box_name_is_fresh(tmp_path, oracle_tree):
-    """O6: two oracle requests carry distinct, `defender-oracle-` prefixed names."""
     from defender.box import _oracle
 
     runner, scratch = oracle_tree

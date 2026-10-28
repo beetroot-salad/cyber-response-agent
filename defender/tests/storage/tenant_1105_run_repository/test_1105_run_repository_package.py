@@ -15,16 +15,16 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._import_blocker import run_blocked
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
-#: The layout's 10 public IMPORTED names, which the door does not serve (D1.3, R4-42).
+#: The layout's 10 public IMPORTED names, which the door does not serve.
 LAYOUT_IMPORTED = ("ALIAS_READ_REFUSAL", "Path", "PurePosixPath", "annotations", "dataclasses",
                    "errno", "is_plain_entry", "re", "refuse_bad_case_id", "stat")
-#: The private layout helpers `records/_episode_paths.py` imports from the submodule (R4-27).
+#: The private layout helpers `records/_episode_paths.py` imports from the submodule.
 PRIVATE_HELPERS = ("_check_component", "_check_index", "_confine")
 
 
 def _child_env() -> dict[str, str]:
-    """The child's environment: this worktree first on PYTHONPATH (RG-09-a), then whatever
-    the parent already carries."""
+    """The child's environment: this worktree first on PYTHONPATH, then whatever the parent
+    already carries."""
     inherited = os.environ.get("PYTHONPATH", "")
     return {**os.environ,
             "PYTHONPATH": os.pathsep.join(p for p in (str(H.WORKTREE), inherited) if p)}
@@ -70,7 +70,7 @@ def test_1105_run_refused_is_a_plain_exception_distinct_from_tenant_refused():
 
     assert isinstance(RunRefused, type), f"the door's RunRefused is not an Exception class: {RunRefused!r}"
     assert issubclass(RunRefused, Exception), f"the door's RunRefused is not an Exception class: {RunRefused!r}"
-    assert not issubclass(RunRefused, ValueError), "RunRefused must not be a ValueError (OP-5)"
+    assert not issubclass(RunRefused, ValueError), "RunRefused must not be a ValueError"
     assert not issubclass(RunRefused, TenantRefused), "RunRefused must not be a TenantRefused"
     assert not issubclass(TenantRefused, RunRefused), "TenantRefused must not be a RunRefused"
 
@@ -103,7 +103,7 @@ def test_1105_the_doors_all_its_type_checking_names_and_its_getattr_names_are_on
     assert len(declared_names) == len(set(declared_names)), "a TYPE_CHECKING name is duplicated"
     assert set(declared_names) == set(all_names), (
         f"TYPE_CHECKING declares {sorted(set(declared_names) ^ set(all_names))} differently "
-        "from __all__ (mypy would type an undeclared door name as Any, R4-30)")
+        "from __all__")
     # `annotations` is left out: the door's own `from __future__ import annotations` binds it.
     probes = set(all_names) | set(declared_names) | set(LAYOUT_IMPORTED) | set(PRIVATE_HELPERS)
     probes = (probes | {"NotAName", "Tenant", "hold"}) - {"annotations"}
@@ -134,23 +134,22 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
     assert proc.returncode == 0, f"the layout names do not import without pydantic: {_out(proc)}"
     seen = json.loads(proc.stdout.decode("utf-8"))
     assert seen["layout"], f"the layout submodule did not load: {seen}"
-    assert not seen["handle"], f"a layout name loaded more than the layout (R4-6): {seen}"
-    assert not seen["tenant"], f"a layout name loaded more than the layout (R4-6): {seen}"
-    assert not seen["pydantic"], f"a layout name loaded more than the layout (R4-6): {seen}"
+    assert not seen["handle"], f"a layout name loaded more than the layout: {seen}"
+    assert not seen["tenant"], f"a layout name loaded more than the layout: {seen}"
+    assert not seen["pydantic"], f"a layout name loaded more than the layout: {seen}"
     assert seen["alert"] == str(RUN_LAYOUT.alert) == "alert_input/alert.json", (
         f"the child's RUN_LAYOUT is not the door's: {seen}")
     assert seen["paths"] == RunPaths.__name__ == "RunPaths", f"the child's RunPaths: {seen}"
-    # #1187 declared change 1: `RunId` admits only canonical lowercase uuid4 text.
     rid = fixture_uuid("package-pydantic-free")
     proc = _child("from defender.records import RunId, RunRefused\n"
                   f"print(RunId.parse({rid!r}), RunRefused.__name__)\n", block=("pydantic*",))
-    assert proc.returncode == 0, f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
-    assert _out(proc).split()[:2] == [rid, "RunRefused"], f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
+    assert proc.returncode == 0, f"RunId and RunRefused do not import pydantic-free: {_out(proc)}"
+    assert _out(proc).split()[:2] == [rid, "RunRefused"], f"RunId and RunRefused do not import pydantic-free: {_out(proc)}"
     proc = _child("import defender.records as rr\n"
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    # F18(b): the door's count as the flipped `__all__` test above pins it (#1187 R6; +1 for #1279's `sidecar_names`).
+    # 71: the size of the door's `__all__`.
     assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
@@ -215,8 +214,6 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
 def test_1105_a_handles_address_is_frozen_after_init(tmp_path):
     from defender.records import Run
 
-    # #1187: a uuid run id (declared change 1) in a container with no record (R1); the
-    # record-reading `Run.for_tenant` goes (R1), `Run.under` is its replacement.
     runs = tmp_path / H.T_ID / "runs"
     rid = fixture_uuid("package-frozen")
     run_dir = H.make_run(runs, rid)

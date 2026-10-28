@@ -23,7 +23,7 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.filesystem._umask import umask
-from defender.tests.learning.branch.test_947_capture_prime import append_call, call_row, source_run
+from defender.tests.storage import test_1133_rev3 as R
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._state1135 import env_state
 
@@ -35,9 +35,8 @@ WORLD_C = T.fixture_world_id("c")
 @pytest.fixture
 def roots(tmp_path, monkeypatch):
     """The configured roots inside `tmp_path` (environment steering, the resolvers' own seam):
-    the runs base, the episodes root and the learning state root the judge's queue lands in."""
+    the runs base and the learning state root the judge's queue lands in."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -50,18 +49,11 @@ def bare_episode(tmp_path: Path) -> tuple[Path, Path]:
     return ep, host
 
 
-def _source_with_one_call(tmp_path: Path) -> Path:
-    run_dir = source_run(tmp_path)
-    append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}),
-                json.dumps({"owner": "estate", "role": "canary"}))
-    return run_dir
-
-
 def test_o4_3_prime_base_refuses_a_linked_served_folder_and_writes_nothing_where_it_points(
         tmp_path):
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
-    run_dir = _source_with_one_call(tmp_path)
+    run_dir = R._one_call_source(tmp_path)
     ep, host = bare_episode(tmp_path)
     elsewhere = host / "served-elsewhere"
     elsewhere.mkdir()
@@ -88,30 +80,6 @@ def test_o4_3_prime_base_refuses_a_linked_served_folder_and_writes_nothing_where
         with pytest.raises(ledger.LedgerError, match="already holds a primed base"):
             capture.prime_base(run_dir, episode)
     assert base.read_bytes() == original
-
-
-@pytest.mark.parametrize("kind", ["plain", "symlink", "dangling", "hardlink", "fifo",
-                                  "directory"])
-def test_o4_8_3_anything_at_the_base_is_the_one_already_primed_refusal(tmp_path, kind):
-    capture = T.mod("learning.branch.capture")
-    ledger = T.mod("learning.branch.ledger")
-    run_dir = _source_with_one_call(tmp_path)
-    ep, host = bare_episode(tmp_path)
-    base = ep / "served" / "base.jsonl"
-    fifo = None
-    if kind == "plain":
-        base.parent.mkdir(parents=True)
-        base.write_bytes(b'{"an": "earlier prime"}\n')
-    else:
-        fifo = S.plant_leaf(base, kind, host=host).fifo
-    before = S.census(tmp_path)
-
-    with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: capture.prime_base(run_dir, episode), fifo=fifo)
-
-    assert isinstance(raised, ledger.LedgerError), f"a {kind} at the base: {raised!r}"
-    assert "already holds a primed base" in str(raised), raised
-    assert S.census(tmp_path) == before, f"priming over a {kind} changed the tree"
 
 
 def _ledger_episode(tmp_path: Path) -> tuple[Path, Path]:
@@ -182,7 +150,7 @@ def test_o4_4_a_linked_served_folder_refuses_the_world_ledgers_declare(tmp_path)
     pytest.param("e1133.b\n", id="newline"),
     pytest.param("e1133.b\x00", id="nul"),
     pytest.param("e1133." + "b" * 250, id="longer-than-a-file-name"),
-    # Rev 3's patch: the WHOLE token must be case-stable, not only the text after its last dot.
+    # The WHOLE token must be case-stable, not only the text after its last dot.
     pytest.param("Control", id="dotless-not-case-stable"),
     pytest.param("E1133.b", id="head-not-case-stable"),
 ])
@@ -223,17 +191,9 @@ class Primed:
 
 
 def _prime_setup(tmp_path: Path) -> tuple[Any, Path, Any]:
-    """`(cli, the source run dir, T's runs repository)` — the O4.5 claim guards' STATED
-    DESTINATION (review-3 F30(a) / F31(f), review-4 F37). #1187 declared change 3: the
-    launcher's entry is `cli.prepare_episode(runs, source, *, prime=) -> EpisodeRuns`
-    (interface sheet): it claims a fresh UUID under `<T>/episodes/` with `runs.create_episode()`,
-    copies the source's input in, primes once under the claim, and returns the view held —
-    closing it, and re-raising the same exception, on any error after the claim. The guards
-    whose scene a launch can produce go through it (the claim's mode and single link, its
-    release, the primer handed the view's own held episode, a refused release never masking
-    the primer's error, the launcher's close on that error); the guards over a claim planted
-    BEFORE priming — a state a launch, which always claims a fresh episode, cannot reach — drive
-    the claim body `cli._prime_once` over `runs.create_episode()`'s held episode."""
+    """`(cli, the source run dir, T's runs repository)`. Guards a launch can reach go through
+    `cli.prepare_episode(runs, source, prime=)`; a claim planted BEFORE priming is unreachable
+    by a launch (it always claims a fresh episode), so those guards drive `cli._prime_once`."""
     cli = T.mod("learning.branch.cli")
     _base, src = location_path(T.runs_base)(tmp_path)
     return cli, src, T.current_tenant().runs_repository()
@@ -263,12 +223,10 @@ def _source(src: Path) -> Any:
 
 def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released(
         tmp_path, roots):
-    """`prepare_episode(runs, source, prime=)` (`_prime_setup`: #1187 declared change 3,
-    review-4 F37) claims a fresh UUID episode under `<T>/episodes/` and hands back its view
-    HELD; its priming claims with `priming_lock.create("")` — a plain, single-linked regular
-    file of mode 0644 while the primer runs — hands the primer the source run and THE SAME held
-    `Episode` the returned view holds, and releases the claim; the view holds the episode dir
-    until its `with` ends (the positive control for the close-on-error tests below)."""
+    """The launch claims a fresh UUID episode under `<T>/episodes/` and returns its view held.
+    The claim is a plain, single-linked 0644 file while the primer runs; the primer gets the
+    source run and the view's own held `Episode`; the claim is then released. Positive control
+    for the close-on-error tests below."""
     import uuid
 
     cli, src, runs = _prime_setup(tmp_path)
@@ -276,10 +234,10 @@ def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released
     with umask(0o022), cli.prepare_episode(runs, _source(src), prime=prime) as view:
         episode = view.episode
         ep = Path(episode.dir)
-        assert isinstance(episode, S.Episode()), f"the view holds {episode!r}"
+        assert isinstance(episode, S.Episode), f"the view holds {episode!r}"
         assert ep.name == view.episode_id
         assert str(uuid.UUID(view.episode_id)) == view.episode_id, (
-            f"the launcher claimed {view.episode_id!r}, not a fresh UUID (declared change 3)")
+            f"the launcher claimed {view.episode_id!r}, not a fresh UUID")
         assert ep.parent == Path(location_path(T.current_tenant().episodes)), (
             f"the launcher claimed {ep}, not an episode under <T>/episodes/")
         assert prime.seen["episode"] is episode, "the primer was handed another episode"
@@ -297,11 +255,7 @@ def test_o4_5_an_occupied_or_aliased_claim_is_the_same_ledger_error_and_primes_n
         tmp_path, roots, kind):
     """An occupied claim (a plain file: another launcher) and an alias at the claim are the one
     `LedgerError` naming another launcher; the primer never runs and the claim is left exactly
-    as it was. Driven through the claim body `_prime_once` (a contract seam, interface sheet,
-    review-4 F37) on the walk's held episode (`_prime_setup`), the claim planted in it BEFORE
-    priming: a launch never adopts an existing directory (#1187 declared change 3:
-    `create_episode()` mints a fresh UUID), so `prepare_episode` cannot reach this scene, and
-    only the claim stands between two primers of one episode."""
+    as it was. Driven through `cli._prime_once` (see `_prime_setup`)."""
     cli, src, runs = _prime_setup(tmp_path)
     host = tmp_path / "host"
     host.mkdir()
@@ -320,10 +274,9 @@ def test_o4_5_an_occupied_or_aliased_claim_is_the_same_ledger_error_and_primes_n
         # The episode lives under the data root, outside `tmp_path`: both trees are counted.
         before = (S.census(ep), S.census(tmp_path))
         with pytest.raises(T.mod("learning.branch.ledger").LedgerError,
-                           match="another launcher is priming") as refused:
+                           match="another launcher is priming"):
             cli._prime_once(view.episode, view.episode_id, src, never)
         assert (S.census(ep), S.census(tmp_path)) == before
-    assert refused.value is not None
     assert S.open_fds_on(ep) == [], "the refused claim left a descriptor open on the episode dir"
 
 
@@ -373,13 +326,10 @@ def _swap_claim(kind: str, claim: Path, host: Path) -> Any:
                                   "served-link"])
 def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_exception(
         tmp_path, roots, caplog, kind):
-    """The claim's `delete()` in the priming step's `finally` suppresses EVERY refusal it can
-    raise: the primer swaps the claim for a plant and fails; the refusal is logged, the
-    primer's own exception propagates out of `prepare_episode` (the same object, unwrapped),
-    the plant is left as planted, and the launcher closes the episode it claimed as the
-    exception leaves it (review-4 F37: the launcher's close-on-error, not a `with` of the
-    test's; the held-view control is
-    `test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released`)."""
+    """The claim's `delete()` in the priming `finally` suppresses EVERY refusal it can raise:
+    the primer swaps the claim for a plant and fails; the refusal is logged, the primer's own
+    exception propagates unwrapped, the plant is left as planted, and the launcher itself (not
+    a `with` of the test's) closes the episode it claimed."""
     cli, src, runs = _prime_setup(tmp_path)
     host = tmp_path / "host"
     host.mkdir()
@@ -402,14 +352,9 @@ def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_excepti
 
 
 def test_o4_5_the_launcher_closes_the_episode_it_claimed_when_its_primer_fails(tmp_path, roots):
-    """The launcher's close-on-error (`cli.py:229-232` at base; review-4 F37): when the primer
-    raises, `prepare_episode` closes the view it claimed — no descriptor of this process is left
-    on the episode dir — releases the priming claim, and the primer's OWN exception propagates,
-    the same object, not wrapped or replaced.
-
-    Positive control on the same observation channel: with a primer that succeeds, the view it
-    hands back holds the episode dir (`open_fds_on` sees it) until the caller's `with` closes it.
-    A launcher that leaves the claim open on the error is seen by the same check."""
+    """When the primer raises, `prepare_episode` closes the view it claimed (no descriptor left
+    on the episode dir), releases the claim, and re-raises the primer's own exception object.
+    Control on the same observation: a succeeding primer's view holds the dir until closed."""
     cli, src, runs = _prime_setup(tmp_path)
 
     ok = Primed()
@@ -438,8 +383,8 @@ def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
         tmp_path, roots, caplog):
     """The primer swaps the claim for a symlink to a host file and succeeds: the release in
     `finally` refuses the link (marked) and leaves it for the reap scan; the refusal is logged
-    and suppressed, so `prepare_episode` still completes and hands back the episode it claimed
-    (`_prime_setup`). The link's target is untouched."""
+    and suppressed, so `prepare_episode` still completes and hands back the episode it claimed.
+    The link's target is untouched."""
     cli, src, runs = _prime_setup(tmp_path)
     target = tmp_path / "host-claim-target"
     target.write_bytes(S.HOST_BYTES)
@@ -473,8 +418,8 @@ class ScriptedJudge:
 
 
 def _draw0_asks() -> list[str]:
-    """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply (N22,
-    `judge._REPLY_ATTEMPTS` asks per draw)."""
+    """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply
+    (`judge._REPLY_ATTEMPTS` asks per draw)."""
     attempts = J.mod("learning.judge")._REPLY_ATTEMPTS
     return [f"judge:{WORLD_B}:0", *(f"judge:{WORLD_B}:0:{a}" for a in range(1, attempts))]
 
@@ -539,7 +484,7 @@ def test_o4_6_a_plain_stale_draw_at_a_malformed_index_is_still_removed(tmp_path,
 
 def _run_draws(episode: Any, judge: ScriptedJudge) -> Any:
     """`judge._run_world_draws(episode, "b", ...)`: the draw loop, handed the pass's Episode.
-    Returns its `(completed, documents, malformed, last refusal's reason)` (#1234)."""
+    Returns its `(completed, documents, malformed, last refusal's reason)`."""
     return J.mod("learning.judge")._run_world_draws(
         episode, "b", world_id=WORLD_B, judge=judge, draws=2, model="judge-model", effort="low",
         prompt="the framed prompt")
@@ -694,13 +639,10 @@ def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreat
 @pytest.mark.parametrize("kind", ["missing", "missing-parent"])
 def test_o4_8_2_render_episode_refuses_a_missing_episode_dir_and_does_not_recreate_it(
         tmp_path, kind):
-    """`render_episode(runs, episode_id)` keeps raising `JudgeRefused` for a missing episode
-    (its door, `runs.episode`, converts the open's `FileNotFoundError`), and creates nothing —
-    neither the episode nor a missing episodes base. Control: an existing episode's page is
-    written inside it. (#1105 PR 2, declared change 4: the door takes the tenant's repository
-    and an id under the configured episodes base, no longer a folder.) #1187 (Layout A, O9):
-    the episodes base is the tenant's own `<T>/episodes/` — absent (`missing-parent`) or
-    present without the episode (`missing`) — and nothing is configured."""
+    """`render_episode(runs, episode_id)` raises `JudgeRefused` for a missing episode (its door,
+    `runs.episode`, converts the open's `FileNotFoundError`) and creates nothing, whether
+    `<T>/episodes/` is absent (`missing-parent`) or present (`missing`). Control: an existing
+    episode's page is written inside it."""
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
     page = T.mod("presentation.visualize_episode")
@@ -739,18 +681,15 @@ def _no_preflight(*_a: Any, **_kw: Any) -> int:
 
 
 def _sibling_argv(episode_id: str) -> list[str]:
-    """The sibling's door (#1105 PR 2, declared change 6): `--tenant T --episode <id> --world
-    b`, the episode opened by id among T's episodes (#1187 O9: `<T>/episodes/`, no configured
-    base)."""
+    """The sibling's door: `--tenant T --episode <id> --world b`, the episode opened by id
+    under `<T>/episodes/`."""
     return ["--tenant", T.SOURCE_TENANT, "--episode", episode_id, "--world", "b"]
 
 
 def _sibling_episode(tmp_path: Path, src: Path) -> Path:
-    """The episode a sibling opens by id, its manifest naming `src`. #1187 (R1, R2, O9,
-    declared changes 5 and 6): at the source tenant's `<T>/episodes/<uuid>` (`T.episode`'s
-    default), with no container record and no episodes variable; the launcher's RUNS step
-    (`T.episode_view`) has made `runs/` and the arm roster the sibling reads world b's arm id
-    from (O4b)."""
+    """The episode a sibling opens by id (`<T>/episodes/<uuid>`), its manifest naming `src`.
+    `T.episode_view` makes `runs/` and the arm roster the sibling reads world b's arm id from,
+    as the launcher's RUNS step does."""
     from defender.records._episode_handle import Episode
 
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
@@ -762,7 +701,7 @@ def _sibling_episode(tmp_path: Path, src: Path) -> Path:
 @pytest.mark.parametrize("spelling", ["path", "case", "separator"])
 def test_the_sibling_door_refuses_an_episode_id_outside_the_id_grammar(
         tmp_path, monkeypatch, spelling):
-    run = RunWithPublish(T.mod("run"))  # #1108 P4 (OD14, O11): plus the in-process publish
+    run = RunWithPublish(T.mod("run"))  # plus the in-process publish
     _base, src = location_path(T.runs_base)(tmp_path)
     ep = _sibling_episode(tmp_path, src)
     bad = {"path": str(ep / LAYOUT.family), "case": ep.name.upper(),
@@ -792,7 +731,7 @@ def test_the_sibling_door_refuses_an_episode_id_outside_the_id_grammar(
 
 def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(tmp_path,
                                                                               monkeypatch):
-    run = RunWithPublish(T.mod("run"))  # #1108 P4 (OD14, O11): plus the in-process publish
+    run = RunWithPublish(T.mod("run"))  # plus the in-process publish
     _base, src = location_path(T.runs_base)(tmp_path)
     ep = _sibling_episode(tmp_path, src)
     seen: dict[str, Any] = {}

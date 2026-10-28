@@ -17,7 +17,7 @@ MARK = "injected"
 
 @pytest.fixture
 def injected(tmp_path) -> Path:
-    """The injected tenant's settings folder: `<tmp root>/playground/knowledge/settings`, every value
+    """The injected tenant's settings folder: `<tmp root>/<T>/knowledge/settings`, every value
     carrying `MARK`, the mapping's reporter distinct from the checkout's."""
     root = tmp_path / "injected-root"
     S.plant(
@@ -32,7 +32,7 @@ def injected(tmp_path) -> Path:
 
 def _record(settings: Path):
     """The run record of the accepted tenant whose `settings/` is `settings`
-    (`<root>/<id>/knowledge/settings`, #1107/#1120), through the real `accept_tenant`."""
+    (`<root>/<id>/knowledge/settings`), through the real `accept_tenant`."""
     knowledge = settings.parent
     return T.run_tenant(T.accept(knowledge.parent.parent, knowledge.parent.name))
 
@@ -63,7 +63,7 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
         transport.load_config(_ctx(settings, tmp_path), "cmdb", "CMDB")
     assert "the tenant's settings/systems/cmdb/config.env" in str(caught.value)
     assert str(settings) not in str(caught.value)
-    # Control: the checkout's playground does carry a cmdb config, so the refusal above is
+    # Control: the checkout's fixture does carry a cmdb config, so the refusal above is
     # the absence of a fallback, not the absence of a file anywhere.
     assert (T.FIXTURE_SETTINGS / "systems" / "cmdb" / "config.env").is_file()
 
@@ -84,12 +84,12 @@ def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
 
 def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
         injected, tmp_path):
-    """The `--update-ticket` lane (O2 names the ticket writer): the REAL writer, over a
-    recording request seam, is handed the run's record — and both the store it
+    """The `--update-ticket` lane: the real writer, over a recording request seam, is handed
+    the run's record — and both the store it
     addresses (`case-history/config.env`) and the payload it renders (`mapping.yaml`) are the
     injected tenant's."""
     writer = T.mod("investigation.ticket_writer")
-    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    # A run folder's name is its canonical UUID run id.
     run_dir = tmp_path / fixture_uuid("run-1106")
     run_dir.mkdir()
     plant_alert(run_dir, {"rule": {"id": "r-1", "description": "d"},

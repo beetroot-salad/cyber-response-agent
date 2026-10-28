@@ -1,24 +1,14 @@
-"""#1108 P4 flow 7, O-PIN (branch side) and O-B for the branch CLI's live capture.
+"""#1108 P4 flow 7, branch replay: every sibling `run.py` is pinned (`--knowledge-commit <sha>`) to
+the source stamp's knowledge commit, materialised first if missing, so preflight's knowledge
+anchor holds across publishes; the questioner reads its corpus from that export; and the branch
+CLI's live capture stamps from an export, never the clone's HEAD (O-B).
 
-Design: "Branch replay: source stamp's knowledge commit → materialise → every sibling `run.py`
-pinned to it; the questioner corpus is read from that export, not `PATHS`." O-PIN: "Branch
-siblings are pinned to the source run's stamp, so preflight's knowledge anchor holds regardless
-of publishes. The branch CLI (git-capable) materialises a missing export for that commit
-first." O-B: the branch CLI's live capture (`learning/branch/cli.py:513`) stamps from an
-export, never the clone's HEAD.
-
-Entry surface: the REAL launcher, `learning.branch.cli.main(argv, spawn=, questioner=,
-preflight=, judge=, roster=, oracle=, verifier=, live_tree=)`, over the P4 fixture tenant
-published for real (`_support.published_tenant`) carrying the #1224 estate's grants (so the
-launcher's served systems and the source run's captured calls agree). Siblings are observed on
-the existing `spawn=` seam (`FakeSpawn` records each `run.py` argv); the questioner on the
-existing `questioner=` seam (it records every prompt). `lessons_dir=` is NOT passed: the corpus
-the questioner sees is the launcher's own choice. The pin is spelled `--knowledge-commit <sha>`
-(two tokens, the design's `run.py --knowledge-commit <sha>`).
-
-Every scene: the source ran at knowledge commit `K1`; afterwards a merge was published, so
-`current` and the clone's HEAD are `K2`; the clone's working tree was then edited; and
-`exports/K1/` was deleted (exports are derived, P-2) — so the launcher must materialise it.
+Entry: the real launcher `learning.branch.cli.main` over the fixture tenant published with the
+#1224 estate's grants (so served systems and the source's captured calls agree). Siblings are
+observed on `spawn=` (`FakeSpawn` records each argv), the questioner on `questioner=`;
+`lessons_dir=` is not passed, so the corpus is the launcher's own choice. Every scene: the source
+ran at `K1`; a later merge was published (`current` and the clone's HEAD are `K2`); the clone's
+working tree was then edited; and `exports/K1/` was deleted, so the launcher must materialise it.
 """
 from __future__ import annotations
 
@@ -135,7 +125,7 @@ def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     try:
         rc = S.mod("cli.learning.branch").main(
             ["--tenant", scene.t.tenant_id, scene.src.name, str(T.BRANCH_MESSAGE_ID),
-             *T.retired_continuation_argv(), *argv_extra],
+             *argv_extra],
             spawn=spawn, questioner=questioner, **seams)
     except SystemExit as stop:
         rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
@@ -157,9 +147,8 @@ def _assert_siblings_pinned(launch: Launch, commit: str) -> None:
 
 
 def test_flow7_siblings_are_pinned_to_the_source_knowledge_commit_materialised_first(scene):
-    """O-PIN / flow 7: every sibling `run.py` carries `--knowledge-commit <K1>` (the SOURCE's
-    knowledge commit, not `current`'s K2); `exports/K1/` — deleted — is materialised first;
-    `current` is not moved."""
+    """Every sibling carries the source's `K1`, not `current`'s `K2`; the deleted `exports/K1/`
+    is materialised first, and `current` does not move."""
     t = scene.t
     _stamp_source(scene, knowledge={"commit": scene.k1})
     launch = _launch(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
@@ -172,9 +161,8 @@ def test_flow7_siblings_are_pinned_to_the_source_knowledge_commit_materialised_f
 
 
 def test_flow7_the_questioner_reads_its_corpus_from_the_pinned_export(scene):
-    """Flow 7: "the questioner corpus is read from that export, not `PATHS`" — call 1 of the
-    question-writer is shown the K1 export's questioner lesson, never `current`'s (K2), the
-    clone working tree's, or a product-tree corpus (`lessons_dir=` is not passed)."""
+    """Call 1 of the question-writer is shown the `K1` export's questioner lesson, never
+    `current`'s or the clone working tree's."""
     _stamp_source(scene, knowledge={"commit": scene.k1})
     launch = _launch(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
 
@@ -187,15 +175,10 @@ def test_flow7_the_questioner_reads_its_corpus_from_the_pinned_export(scene):
 
 
 def test_o_b_the_live_capture_stamps_the_pinned_export_so_the_anchor_survives_a_publish(scene):
-    """O-B (branch CLI live capture) + O-PIN: with NO `live_tree` seam, the launcher's own live
-    capture is judged against the source; its knowledge half is the export the family is pinned
-    to (K1), not the clone's HEAD (K2, published after the source ran) — so the knowledge
-    anchor holds regardless of publishes and the launch proceeds, pinned to K1.
-
-    The code half is the real checkout's (the source stamp names `REPO_ROOT`'s HEAD, scope
-    `defender`); `--allow-dirty` is passed ONLY when that checkout is dirty, so on a clean
-    checkout (CI) an unproven live knowledge revision (e.g. `unversioned` from capturing an
-    export folder as if it were a clone) is a refusal, not a waiver."""
+    """With no `live_tree` seam, the launcher's own live capture is judged against the source:
+    its knowledge half is the pinned export (`K1`), not the clone's HEAD (`K2`), so the launch
+    proceeds pinned. `--allow-dirty` is passed only when the real checkout is dirty, so on a
+    clean checkout (CI) an unproven live knowledge revision is a refusal, not a waiver."""
     from defender.records import _provenance
     from defender._git import REPO_ROOT
 
@@ -212,9 +195,8 @@ def test_o_b_the_live_capture_stamps_the_pinned_export_so_the_anchor_survives_a_
 
 
 def test_flow7_a_source_knowledge_commit_absent_from_the_clone_refuses_before_spending(scene):
-    """Flow 7: a source whose knowledge commit the clone does not hold cannot be materialised,
-    so the launch is refused naming the commit — before the question-writer is paid for and
-    before any sibling starts. (The positive control is the pinned launch above.)"""
+    """A knowledge commit the clone does not hold cannot be materialised: refused naming it,
+    before the question-writer is paid for or any sibling starts. Control: the pinned launch."""
     _stamp_source(scene, knowledge={"commit": ABSENT_COMMIT})
     launch = _launch(scene, live_tree=T.source_capture(knowledge={"commit": ABSENT_COMMIT}))
 
@@ -233,11 +215,9 @@ def test_flow7_a_source_knowledge_commit_absent_from_the_clone_refuses_before_sp
 ], ids=["unversioned", "unavailable"])
 def test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allow_dirty(
         scene, knowledge, cause, argv_extra):
-    """OD9 (flow 7, fail closed): a source whose knowledge stamp is `unversioned` or
-    `unavailable` names no commit to materialise and pin siblings to, so the launch is refused
-    naming why — and `--allow-dirty` does not waive it (there is nothing to pin, not merely
-    nothing proven). Nothing is spawned and the questioner is not paid for. Positive control on
-    the same channels: the pinned launch above (a versioned source launches pinned)."""
+    """An `unversioned` or `unavailable` source stamp names no commit to pin siblings to:
+    refused naming why, and `--allow-dirty` does not waive it (there is nothing to pin, not
+    merely nothing proven). Control: the pinned launch above."""
     _stamp_source(scene, knowledge=knowledge)
     launch = _launch(scene, argv_extra=argv_extra, live_tree=T.source_capture(knowledge=knowledge))
 

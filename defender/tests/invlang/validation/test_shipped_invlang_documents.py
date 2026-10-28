@@ -37,8 +37,8 @@ def _example_a_fences() -> str:
     start = text.index("### Example A — FIM checksum change")
     end = text.index("### More worked examples", start)
     fences = _FENCE_RE.findall(text[start:end])
-    # A renamed header must fail LOUDLY. Silently finding zero fences is the shape of a guard
-    # that stopped guarding, which is the failure this whole module exists to end.
+    # A renamed header must fail LOUDLY: silently finding zero fences is a guard that stopped
+    # guarding.
     assert len(fences) >= 3, "Example A's invlang fences moved — re-anchor this walk"
     return "\n".join(fences)
 
@@ -61,6 +61,6 @@ def _invlang_grammar_fences() -> str:
 
 
 def test_the_invlang_grammar_reference_parses_clean() -> None:
-    """The densest prompt surface in the system, and until now the one no test read."""
+    """The densest prompt surface in the system."""
     _body, warnings = parse_dense_companion(_invlang_grammar_fences())
     assert [w.format() for w in warnings] == []

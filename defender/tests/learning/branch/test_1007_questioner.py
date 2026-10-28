@@ -1,4 +1,4 @@
-"""#1007 — M8: the questioner reads its own corpus back at call 1."""
+"""#1007: the questioner reads its own lessons corpus back at call 1."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -42,19 +42,6 @@ def three_replies():
     ]
 
 
-def test_a_matching_questioner_lesson_reaches_call_1(tmp_path):
-    """A lesson naming a system this episode serves reaches call 1's prompt."""
-    paths = W.loop_paths(tmp_path)
-    lesson = W.questioner_lesson(paths, "match", body="A-MATCHING-LESSON-BODY",
-                                 systems=[W.SYSTEM])
-    agent = W.FakeAgent(*three_replies())
-
-    author(tmp_path, paths, invoke=agent, lessons=[lesson])
-
-    assert "A-MATCHING-LESSON-BODY" in agent.prompts[0], (
-        "the matching questioner lesson did not reach call 1")
-
-
 def test_every_lesson_body_reaches_call_1_framed_and_count_capped(tmp_path):
     """Every lesson body arrives inside the untrusted frame, and the SET of them is count-capped."""
     paths = W.loop_paths(tmp_path)
@@ -75,7 +62,8 @@ def test_every_lesson_body_reaches_call_1_framed_and_count_capped(tmp_path):
 
 
 def test_a_lesson_matching_neither_pattern_nor_system_is_absent(tmp_path):
-    """A lesson naming no system this episode serves does not reach call 1."""
+    """A lesson naming no system this episode serves does not reach call 1; one naming a served
+    system does."""
     paths = W.loop_paths(tmp_path)
     matching = W.questioner_lesson(paths, "yes", body="MATCHING-BODY", systems=[W.SYSTEM])
     other = W.questioner_lesson(paths, "no", body="UNRELATED-BODY", systems=["cmdb"])
@@ -109,8 +97,7 @@ def test_a_lesson_body_carrying_the_frame_delimiter_cannot_close_the_frame(tmp_p
 
 
 def test_a_lesson_frontmatter_value_cannot_forge_the_key_the_selector_reads(tmp_path):
-    """A model-chosen value written into a lesson's own STRUCTURE cannot forge the key the selector
-    keys on."""
+    """A second `systems` key written into a lesson's frontmatter cannot steer the selector."""
     paths = W.loop_paths(tmp_path)
     clean = W.questioner_lesson(paths, "clean", body="CLEAN-LESSON-BODY", systems=[W.SYSTEM])
     forged = W.questioner_lesson_raw(
@@ -128,19 +115,15 @@ def test_a_lesson_frontmatter_value_cannot_forge_the_key_the_selector_reads(tmp_
         "the control failed — no lesson reached call 1 at all, so the absence below is a fact "
         "about a section that never rendered rather than about the forgery")
     assert "FORGED-LESSON-BODY" not in prompt, (
-        "a lesson whose frontmatter declares `systems` twice was selected on the SECOND one — "
-        "a model-chosen value became the document's own structure and steered the selector")
+        "a lesson whose frontmatter declares `systems` twice was selected on the second one")
 
 
 def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
     """A questioner lesson never reaches the DEFENDER agent's prompt.
 
-    #1108 P4 (O1, O2): both corpora sit side by side under one agent root (`<agent>/lessons`,
-    `<agent>/lessons-questioner`), and the defender's lessons tools read `$DEFENDER_AGENT_DIR/
-    lessons` only (the engine's root is pinned by `test_1080_lessons_engine`). So the agent root
-    here holds a questioner lesson keyed on the run's own signature beside a defender lesson
-    keyed the same way, and the section the defender actually gets is built through the
-    production env seam with that root, so the shim really runs."""
+    Both corpora sit side by side under one agent root (`lessons/`, `lessons-questioner/`); the
+    root here holds a questioner lesson and a defender lesson keyed on the same signature, and the
+    section is built through the production env seam with that root, so the shim really runs."""
     from types import SimpleNamespace
 
     orient = W.mod("investigation.orient")

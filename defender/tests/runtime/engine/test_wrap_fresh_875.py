@@ -61,10 +61,8 @@ class _Output:
 
 
 def _main_deps(tmp_path: Path):
-    """MAIN's real deps, bound the way the driver binds them — and WITHOUT a `salt=` kwarg,
-which is the parameter this change deletes. Today `_for_run` mints a uuid4 for it; after
-the change there is no field to mint. They carry the run's one `RunState` (#1235 round 2),
-as the driver hands them: the dispatch's breaker screen reads it."""
+    """MAIN's real deps, bound as the driver binds them (deps carry no salt) and carrying the run's
+    `RunState`, which the dispatch's breaker screen reads."""
     from dataclasses import replace
 
     from defender.investigation.run_state import RunState
@@ -75,12 +73,12 @@ as the driver hands them: the dispatch's breaker screen reads it."""
 
 
 
-def _drive(tmp_path: Path, lead_id: str = "l-001"):
+def _drive(tmp_path: Path):
     run_dir, deps = _main_deps(tmp_path)
     agent = _InjectedGather()
     out = asyncio.run(tools_gather._run_gather(
         deps, lambda agent_id, system, request_limit: agent, 40,
-        tools_gather.GatherRequest(lead_id, "elastic", "who logged in", ("accepted vs failed",)),
+        tools_gather.GatherRequest("l-001", "elastic", "who logged in", ("accepted vs failed",)),
         T1106.fixture_grants().gather, catalog=None,
     ))
     assert agent.calls == 1, "the gather agent never ran — the observation below is vacuous"

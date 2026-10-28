@@ -1,8 +1,5 @@
-"""#1108 P4 round 6 — the publish launcher's and child's report handling (each case was a
-wrong-but-green production variant): the report is the child's LAST line, it is one line, the
-summary of a failed child is bounded, the child runs from the repository root, a spawn fault of
-any kind is a failed child, a stopped child exits non-zero, a reported stale reason is required,
-and the child's own network bound sits well inside the launcher's budget."""
+"""#1108 P4: the publish launcher's and child's report handling, each case a wrong-but-green
+production variant."""
 from __future__ import annotations
 
 import inspect

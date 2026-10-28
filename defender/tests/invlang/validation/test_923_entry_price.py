@@ -1,4 +1,4 @@
-"""#923 — the ENTRY PRICE on `inconclusive` (O1, M1, M4), and its hardenings."""
+"""#923 — the ENTRY PRICE on `inconclusive`, at the close and the write gate, and its hardenings."""
 from __future__ import annotations
 
 import pytest
@@ -33,13 +33,13 @@ from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-
 )
 
 
-def _refusal(tmp_path, companion: str, disposition: str = GAP_MEMBER, **kw) -> str:
+def _refusal(tmp_path, companion: str, **kw) -> str:
     """Drive the real close and return the refusal text, failing loudly if it committed."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run_dir = main_deps(tmp_path, companion)
     with pytest.raises(ModelRetry) as e:
-        close(deps, disposition, **kw)
+        close(deps, GAP_MEMBER, **kw)
     assert not (run_dir / "report.md").exists(), "a refused close still committed a report"
     return str(e.value)
 
@@ -83,13 +83,10 @@ def test_an_inconclusive_close_naming_a_receipt_commits(tmp_path):
     rows = frontmatter.get("ceiling_test")
     rows = [rows] if isinstance(rows, dict) else list(rows or [])
     assert {"state": "query-failed", "ref": "l-002"} in rows, (
-        f"the receipt the model wrote did not reach the committed frontmatter as structure "
-        f"({rows!r}) — the gap claim is the half an analyst reads, and a price collected "
-        f"without carrying the receipt forward produces no coverage finding at all"
+        f"the model's receipt did not reach the committed frontmatter as structure ({rows!r})"
     )
     assert "note" not in rows[0], (
-        "the free-text note rode into the FRONTMATTER — it gates nothing and belongs in the "
-        "body, never in a field a size bound could strand a run over"
+        "the free-text note rode into the frontmatter instead of the body"
     )
     body = (run_dir / "report.md").read_text(encoding="utf-8").split("---\n", 2)[-1]
     assert "EDR execve logs for web-1" in body, (
@@ -147,8 +144,7 @@ def test_a_bare_host_row_does_not_pay_where_a_receipt_does(tmp_path):
     assert "ceiling_test" in refusal
     write_gate = validate_companion(host_only, None)
     assert any(f"{GAP_MEMBER} blocked" in e for e in write_gate), (
-        "a bare free-text row paid at the write gate — that is the RETIRED predicate's own "
-        "shape, which #923 §7 round 4 deletes rather than keeps alongside a receipt check"
+        "a bare free-text row paid at the write gate"
     )
 
     for name, row, why in (
@@ -240,8 +236,7 @@ def test_a_lead_resolved_purely_from_absent_data_still_anchors_a_receipt(tmp_pat
     )
     negative_write_gate = validate_companion(with_data, None)
     assert any(f"{GAP_MEMBER} blocked" in e for e in negative_write_gate), (
-        "a lead that retrieved an observation AND carries a resolution still anchored a "
-        "receipt — retrieved data must disqualify it regardless of what conclusion was drawn"
+        "a lead that retrieved an observation and carries a resolution still anchored a receipt"
     )
     assert any("actually retrieved something" in e for e in negative_write_gate), (
         negative_write_gate
@@ -295,8 +290,7 @@ def test_a_confusable_spelling_of_the_empty_marker_does_not_pay(tmp_path):
 
         at_the_write_gate = validate_companion(paid(row), None)
         assert any(f"{GAP_MEMBER} blocked" in e for e in at_the_write_gate), (
-            f"{row!r} pays at the write gate and not at the close — the document that reaches "
-            f"every downstream reader carries a receipt naming nothing"
+            f"{row!r} pays at the write gate and not at the close"
         )
         assert any("ceiling_test" in e for e in at_the_write_gate), repr(row)
 

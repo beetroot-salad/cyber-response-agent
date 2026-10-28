@@ -51,7 +51,7 @@ def _as_text(value: Any) -> str:
 
 
 class _Call(threading.Thread):
-    """One investigator call on its own thread (the query tool's worker thread, GD-33)."""
+    """One investigator call on its own thread (the query tool's worker thread)."""
 
     def __init__(self, fn: Callable[[], Any], barrier: threading.Barrier | None = None) -> None:
         super().__init__(daemon=True)
@@ -111,7 +111,7 @@ def _spans(*models: S.ScriptedModel) -> list[tuple[float, float, str]]:
 
 
 def _assert_never_overlap(*models: S.ScriptedModel) -> None:
-    """S11: within one world no oracle or verifier request is open while another is."""
+    """Within one world no oracle or verifier request is open while another is."""
     spans = _spans(*models)
     for (_s0, f0, n0), (s1, _f1, n1) in zip(spans, spans[1:], strict=False):
         assert s1 >= f0 - 1e-3, (
@@ -223,12 +223,12 @@ def _mark(lead: str) -> str:
 
 def _drive(tmp_path: Path, *, verbs: Any, tenant: Any, leads: dict[str, list[Any]],
            limits: dict | None = None, run_id: str = "run-1224",
-           run_dir: Path | None = None, system: str = "idp") -> tuple[Path, _Router, dict]:
+           system: str = "idp") -> tuple[Path, _Router, dict]:
     """One investigation through the real driver: MAIN dispatches every lead in `leads` in ONE
     turn (parallel gather leads), each lead runs its own scripted turns. Returns the run dir,
     the router (what each lead was shown) and the run's summary."""
     H = S.replay_harness()
-    run_dir = run_dir if run_dir is not None else H.materialize(tmp_path / run_id, H.GOLDEN_AB3)  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
+    run_dir = H.materialize(tmp_path / run_id, H.GOLDEN_AB3)
     marks = {lead: _mark(lead) for lead in leads}
     main = H.ReplayFn([
         H.Turn(tool_calls=[("gather", {"lead_id": lead, "system": system, "goal": marks[lead],
@@ -271,13 +271,13 @@ def _own_rows(run_dir: Path) -> list[dict]:
 
 def _budget(summary: dict) -> dict:
     """The run's budget counters, read off the run's one `RunState`, which the driver hands back
-    as `summary["run_state"]` (#1235: no file in the run dir holds them)."""
+    as `summary["run_state"]` (no file in the run dir holds them)."""
     return summary["run_state"].budget_snapshot()
 
 
 def _slow_adapter(est: S.Estate, system: str, seconds: float) -> None:
     """Make the planted adapter for `system` slow: a REAL adapter module whose answer takes
-    `seconds` (real-system latency, the investigator's own on a real run — GD-10)."""
+    `seconds` (real-system latency, the investigator's own on a real run)."""
     path = est.adapters / f"{system.replace('-', '_')}_adapter.py"
     head = "def _answer(ctx: VerbContext, name: str, params: dict):\n"
     src = path.read_text(encoding="utf-8")
@@ -659,8 +659,7 @@ def test_conc_18_lead_ended_mid_serve(tmp_path, monkeypatch):
         "l-001's call never entered the live read, or l-002's query reached the tenant")
     assert oracle.started, "the worker never reached the oracle turn after its lead ended"
     assert oracle.started[0] > run["marks"]["killing_turn"], (
-        "the oracle turn began before l-002's killing query: the lead was not ended while its "
-        "call was inside serve_one's live read, so the scenario is moot")
+        "the oracle turn began before l-002's killing query, so the lead was not ended mid-read")
     assert oracle.submissions() == 1
     assert not oracle.overrun
     assert [r for r in _own_rows(run["run_dir"]) if r["lead_id"] == "l-001"] == [], (
@@ -782,7 +781,7 @@ def test_1224_forged_store_has_one_writer_and_commits_rows_with_the_verified_ans
     assert oracle.submissions() == 2
 
     # The project's JSONL reader skips a line that is not a row: a torn trailing record reads
-    # as not written, which is exactly the reading O-08 asks of every reader.
+    # as not written, as every reader must read it.
     complete = S.read_jsonl(store / "forged.jsonl")
     ids = [r["forged_id"] for r in complete]
     assert "fg-1" not in ids, "the failed attempt's forged row was committed"
@@ -823,7 +822,7 @@ class _SnapshotSpawn(S.FakeSpawn):
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **kw: Any) -> int:
         label = T._world_of(argv)
-        ep = S.episode_of(list(argv))  # #1187: the episode the launcher minted, from the argv
+        ep = S.episode_of(list(argv))  # the episode the launcher minted, from the argv
         if label is not None and ep is not None:
             snap = _snapshot(S.oracle_dir(ep, label))
             if snap:

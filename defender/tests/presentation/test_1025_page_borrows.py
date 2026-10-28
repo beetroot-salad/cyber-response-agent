@@ -1,5 +1,5 @@
-"""#1025 (PR #1042 review) — the page BORROWS what the judge owns rather than copying it, and READS
-what the pass decided rather than deciding again."""
+"""#1025 — the page BORROWS what the judge owns rather than copying it, and READS what the pass
+decided (the `judge.yaml.dispositions` ledger) rather than deciding again."""
 from __future__ import annotations
 
 import json
@@ -11,7 +11,6 @@ import pytest
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -21,19 +20,9 @@ NOT_ROOT = pytest.mark.skipif(
 S = E.SAMPLE
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def visualize_episode():
-    return E.page_module()
-
-
-def render(ep) -> E.Page:
-    return E.render(ep, module=visualize_episode())
+_tmp_roots = E.tmp_roots
+visualize_episode = E.page_module
+render = E.render
 
 
 def _restoring(paths: list[Path], mode: int):
@@ -54,8 +43,7 @@ def _restoring(paths: list[Path], mode: int):
 @NOT_ROOT
 def test_1025_a_permission_denied_trace_or_tool_trace_is_that_slots_refusal_never_the_pages_crash(
         tmp_path):
-    """A mode-000 `wire_logs/<stem>.jsonl` and a mode-000 `runs/<ep>-<label>/tool_trace.jsonl` each
-    land in their own slot ."""
+    """A mode-000 trace and a mode-000 `tool_trace.jsonl` each refuse their own slot; the page is still written."""
     ep = E.sample_episode(tmp_path)
     trace = ep.dir / "wire_logs" / f"{E.trace_stem('questioner')}.jsonl"
     tool_trace = ep.run(E.CONTROL) / "tool_trace.jsonl"
@@ -75,8 +63,8 @@ def test_1025_a_permission_denied_trace_or_tool_trace_is_that_slots_refusal_neve
 
 @NOT_ROOT
 def test_1025_a_world_directory_with_no_search_permission_is_that_worlds_refusal(tmp_path):
-    """`worlds/<label>/` chmod 000: the world's archive block reads its refusal and every other
-    section renders. Before: the archive loader asked `Path.exists()` of `report.md`."""
+    """`worlds/<label>/` chmod 000: that world's archive block reads its refusal and every other
+    section renders."""
     ep = E.sample_episode(tmp_path)
     with _restoring([ep.world(E.GRADED_WORLD)], 0):
         page = render(ep)
@@ -90,8 +78,8 @@ def test_1025_a_world_directory_with_no_search_permission_is_that_worlds_refusal
 
 @NOT_ROOT
 def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp_path):
-    """`read_archived_report` on a mode-000 `report.md` says it could not be read and carries the
-    errno."""
+    """A mode-000 `report.md` reads "could not be read" with the errno; a symlinked one gets the alias
+    refusal exactly once."""
     family = E.mod("learning.judge.family")
     ep = E.sample_episode(tmp_path)
     bound = E.mod("_io").bind(ep.dir)
@@ -113,8 +101,7 @@ def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp
 
 
 def test_1025_the_ledgers_malformed_row_count_is_the_judges_own(tmp_path):
-    """A parseable ledger row whose `source` is outside the ledger's vocabulary is malformed to
-    `read_world_facts` (p7."""
+    """A ledger row with an unknown `source` is malformed to `read_world_facts`; the page shows that count."""
     ep = E.sample_episode(tmp_path)
     ledger = ep.dir / "served" / f"{T.fixture_world_id(E.GRADED_WORLD)}.jsonl"
     bogus = J.ledger_row(source="passthrough", world_label=E.GRADED_WORLD)
@@ -130,8 +117,7 @@ def test_1025_the_ledgers_malformed_row_count_is_the_judges_own(tmp_path):
 
 
 def test_1025_read_world_facts_refuses_an_absent_ledger_on_every_path(tmp_path):
-    """p7: "only an ABSENT ledger refuses (JudgeRefused)". The guard is the reader's own, so the
-    bare `render.render(..., facts=None)` path — which has no."""
+    """The absent-ledger refusal is `read_world_facts`' own, so no caller can skip it; the page says "absent"."""
     family = E.mod("learning.judge.family")
     ep = E.sample_episode(tmp_path)
     (ep.dir / "served" / f"{T.fixture_world_id(E.GRADED_WORLD)}.jsonl").unlink()
@@ -179,13 +165,8 @@ def test_1025_a_response_row_with_an_empty_model_string_is_unpriced(tmp_path):
     assert "partial — 2 of 3 calls priced" in questioner, questioner
 
 
-def _ledger_of(doc: dict) -> dict[str, tuple[str, str | None]]:
-    return {e["finding_id"]: (e["lane"], e["reason"]) for e in doc["dispositions"]}
-
-
 def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
-    """`judge.yaml` carries `dispositions` as `grade_episode` wrote it and `read_grade` hands it
-    back unchanged."""
+    """`read_grade` hands the ledger back unchanged; no key reads as `None` (not `[]`); a malformed entry is refused."""
     judge = E.mod("learning.judge")
     enqueue = E.mod("learning.judge.enqueue")
     ep = E.sample_episode(tmp_path)
@@ -216,7 +197,7 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
 
 
 def test_1025_the_page_shows_the_ledger_and_never_re_decides_a_lane(tmp_path):
-    """The page's disposition for a finding is the ledger's entry, full stop ."""
+    """The page shows the ledger's lane even where re-running the lane rule over the rows would differ."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["enqueued_rows"] = 4
@@ -239,8 +220,7 @@ def test_1025_the_page_shows_the_ledger_and_never_re_decides_a_lane(tmp_path):
 
 
 def test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_filed(tmp_path):
-    """The #1042 review's case: `judge.yaml` names one judged world on TWO rows — the first
-    gradable, the second ungradable — and its ledger files that world's findings."""
+    """A record naming one world on two rows (gradable, then ungradable) shows the lanes the ledger filed."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"].append(E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign",

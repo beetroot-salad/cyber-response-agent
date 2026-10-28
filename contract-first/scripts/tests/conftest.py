@@ -19,21 +19,14 @@ import pytest
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 
 
-def run_script(
-    script: str,
-    *argv: str,
-    cwd: Path,
-    env_extra: dict[str, str] | None = None,
-    timeout: int = 120,
-) -> subprocess.CompletedProcess[str]:
+def run_script(script: str, *argv: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     """Drive a real script via subprocess. `$PYTHONPATH` carries the scripts dir so its
-    shared helpers import; `env_extra` overrides process env for the child."""
+    shared helpers import."""
     env = dict(os.environ)
     env["PYTHONPATH"] = str(SCRIPTS_DIR) + os.pathsep + env.get("PYTHONPATH", "")
-    env.update(env_extra or {})
     return subprocess.run(
         [sys.executable, str(SCRIPTS_DIR / script), *argv],
-        cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout,
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=120,
     )
 
 
@@ -57,11 +50,6 @@ class Repo:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(textwrap.dedent(text).lstrip("\n"))
         return p
-
-    def commit(self, msg: str = "c") -> str:
-        self._git("add", "-A")
-        self._git("commit", "-q", "-m", msg)
-        return self._git("rev-parse", "HEAD").strip()
 
 
 @pytest.fixture

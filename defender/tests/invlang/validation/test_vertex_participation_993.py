@@ -1,5 +1,10 @@
-"""#993: a lead that declares a `:V` vertex no `:E` row ever names gets one diagnostic. An edge in the same or another lead's block, or a hypothesis attached to the vertex, clears it; attr_updates, undeclared-target and self edges do not; the opening prologue and rows the baseline already carries are exempt."""
+"""#993: a lead that declares a `:V` vertex no `:E` row ever names gets one diagnostic. An edge
+in the same or another lead's block, or a hypothesis attached to the vertex, clears it;
+attr_updates, undeclared-target and self edges do not; the opening prologue and rows the
+baseline already carries are exempt."""
 from __future__ import annotations
+
+import pytest
 
 from defender.skills.invlang.validate import validate_companion
 
@@ -20,7 +25,6 @@ _ORPHAN_VERTEX = "v-010|process|psql|psql[pid=??]|user=postgres"
 _SECOND_ORPHAN_VERTEX = "v-011|process|postgres|postgres[pid=??]|user=postgres"
 
 #: A `:H` row attached to the orphan — the "found it, can only guess how it connects" record.
-#: Header copied from `tests/invlang/validation/test_frontier_recall_919.py`.
 _HYPOTHESIS_ON_ORPHAN = (
     "h-010|?psql-spawned-by-the-webapp|v-010|spawned|process|unclassified-process||null|active"
 )
@@ -86,18 +90,14 @@ def test_orphan_vertex_is_refused_with_exactly_one_diagnostic():
     assert "v-010" in errors[0]
 
 
-def test_edge_in_same_lead_naming_it_as_source_clears_it():
+@pytest.mark.parametrize("edge", [
+    "e-001|spawned|v-010|v-001||siem-event:siem|",
+    "e-001|spawned|v-001|v-010||siem-event:siem|",
+    "e-001|spawned|v-010|??||siem-event:siem|",
+], ids=["as-source", "as-target", "to-an-open-endpoint"])
+def test_an_edge_in_the_same_lead_naming_it_clears_it(edge):
     doc = _OPENING + _fence(
-        _obs_vertices("l-001", _ORPHAN_VERTEX),
-        _obs_edges("l-001", "e-001|spawned|v-010|v-001||siem-event:siem|"),
-    )
-    assert validate_companion(doc, None) == []
-
-
-def test_edge_in_same_lead_naming_it_as_target_clears_it():
-    doc = _OPENING + _fence(
-        _obs_vertices("l-001", _ORPHAN_VERTEX),
-        _obs_edges("l-001", "e-001|spawned|v-001|v-010||siem-event:siem|"),
+        _obs_vertices("l-001", _ORPHAN_VERTEX), _obs_edges("l-001", edge),
     )
     assert validate_companion(doc, None) == []
 
@@ -173,32 +173,17 @@ def test_a_hypothesis_attached_elsewhere_does_not_clear_it():
     assert "v-010" in errors[0]
 
 
-def test_an_edge_to_an_undeclared_id_does_not_clear_it():
+@pytest.mark.parametrize("edge", [
+    "e-001|spawned|v-010|v-999||siem-event:siem|",
+    "e-001|spawned|v-010|v-010||siem-event:siem|",
+], ids=["to-an-undeclared-id", "self-edge"])
+def test_an_edge_to_no_other_declared_vertex_does_not_clear_it(edge):
     doc = _OPENING + _fence(
-        _obs_vertices("l-001", _ORPHAN_VERTEX),
-        _obs_edges("l-001", "e-001|spawned|v-010|v-999||siem-event:siem|"),
+        _obs_vertices("l-001", _ORPHAN_VERTEX), _obs_edges("l-001", edge),
     )
     errors = validate_companion(doc, None)
     assert len(errors) == 1, errors
     assert "v-010" in errors[0]
-
-
-def test_a_self_edge_does_not_clear_it():
-    doc = _OPENING + _fence(
-        _obs_vertices("l-001", _ORPHAN_VERTEX),
-        _obs_edges("l-001", "e-001|spawned|v-010|v-010||siem-event:siem|"),
-    )
-    errors = validate_companion(doc, None)
-    assert len(errors) == 1, errors
-    assert "v-010" in errors[0]
-
-
-def test_an_edge_to_an_open_endpoint_clears_it():
-    doc = _OPENING + _fence(
-        _obs_vertices("l-001", _ORPHAN_VERTEX),
-        _obs_edges("l-001", "e-001|spawned|v-010|??||siem-event:siem|"),
-    )
-    assert validate_companion(doc, None) == []
 
 
 def test_a_prologue_block_written_after_a_lead_reported_is_not_exempt():

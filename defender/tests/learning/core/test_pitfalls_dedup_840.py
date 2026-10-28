@@ -56,9 +56,9 @@ def _row(pid: str, *, digest: str = UNNEST, system: str = "elastic",
 
 
 def _shim(pid: str, *, digest: str = UNNEST, system: str = "", **extra) -> dict:
-    """A queued REDUCER row: the reserved sentinel in `query_id`. `system` is a parameter and
-    defaults to the post-M5′ `""`, because the population that separates the lane's spellings
-    is the row queued BEFORE M5′ deployed, which carries the system it was attributed to."""
+    """A queued REDUCER row: the reserved sentinel in `query_id`. `system` defaults to `""`;
+    it is a parameter because older reducer rows carry the system they were attributed to, and
+    those are the rows that separate the lane's spellings."""
     return _row(pid, digest=digest, system=system,
                 query_id=BASH_SHIM_QUERY_ID, **extra)
 
@@ -79,7 +79,7 @@ def _records(paths: LoopPaths) -> list[dict]:
 def test_one_looping_leads_eight_turns_become_one_record_carrying_its_count(paths):
     executed = [_lead(sql=f"SELECT unnest(data, {i})", query_index=i) for i in range(8)]
     collected = collect_general_failures(executed, Path("reviewer-measure-0807-b"), catalog=[])
-    assert len(collected) == 8, "the collector is per-row and #823 N3 keeps it that way"
+    assert len(collected) == 8, "the collector no longer returns one record per row"
 
     persist.append_pitfalls(collected, state=_state1135.state_for_paths(paths))
     assert len(_pending(paths)) == 8, "the rows are the evidence and all eight are kept"
@@ -113,7 +113,8 @@ def test_the_same_digest_from_two_systems_stays_two_records(paths):
 
 
 def test_the_reducer_owns_its_lesson_whatever_attributed_it(paths):
-    """#870's half of the same key, and the two directions it moves."""
+    """The reducer owns its key: attributed to a system or not, reducer rows merge with each
+    other and never with a system row."""
     persist.append_pitfalls(
         [_shim("r:l-001:0", system="elastic"), _shim("r:l-002:0"),
          _row("r:l-003:0")],
@@ -151,7 +152,8 @@ def test_a_later_run_repeating_the_mistake_bumps_the_count(paths):
 
 
 def test_a_merged_record_keeps_the_exemplars_queue_bookkeeping(paths):
-    """The merge copies the exemplar row whole, so whatever the drain has stamped on it is"""
+    """The merge copies the exemplar row whole, so what the drain stamped on it (a retire's
+    `attempts` bump) survives, and the retried row is merged, not dropped."""
     persist.append_pitfalls([_row("r:l-001:0"), _row("r2:l-001:0")], state=_state1135.state_for_paths(paths))
     drain.retire(_state1135.state_for_paths(paths), channel=PITFALLS, batch_ids=["r:l-001:0", "r2:l-001:0"],
                  reason="the curator exited nonzero", max_attempts=5)
@@ -197,14 +199,14 @@ def test_a_row_whose_digest_carries_no_diagnosis_keys_to_itself(paths):
         )
 
 
-# O3's repair — the threshold now counts distinct mistakes, so clearing it means the channel
-# learned that many things.
+# The threshold counts distinct mistakes, so clearing it means the channel learned that many
+# things.
 
 
 def _run_pitfalls(paths: LoopPaths, invoke: object) -> int:
-    """`run_pitfalls` over a batch draft of the tenant (#1108 P4, O7, OD12 class ii: the lane
-    commits only into a batch; ASSUMED SEAM S-H `run_pitfalls(..., batch=)`), its learning
-    state the scene's own and `paths.repo_root` the product checkout holding the adapters."""
+    """`run_pitfalls(..., batch=)` over a batch draft of the tenant (the lane commits only into
+    a batch), its learning state the scene's own and `paths.repo_root` the product checkout
+    holding the adapters."""
     state_dir = Path(location_path(paths.state_dir))
     lane = C.draft_lane(state_dir.parent, lanes=C.LEAD_LANES, product=paths.repo_root,
                         state_dir=state_dir)
@@ -221,7 +223,7 @@ def _invoke_spy(calls: list) -> object:
 
 
 def test_a_single_lesson_repeated_does_not_clear_the_threshold(paths, monkeypatch):
-    """#840's headline, ON THE SYSTEM LANE."""
+    """On the system lane, eight rows of one mistake are one record: under threshold 3."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     persist.append_pitfalls([_row(f"r:l-003:{i}") for i in range(8)], state=_state1135.state_for_paths(paths))
     calls: list = []
@@ -233,7 +235,8 @@ def test_a_single_lesson_repeated_does_not_clear_the_threshold(paths, monkeypatc
 
 
 def test_an_attributed_reducer_lesson_repeated_does_clear_it(paths, monkeypatch):
-    """The same eight rows, differing only in `query_id`, DO open the lane — and they carry an"""
+    """The same eight rows as attributed REDUCER rows DO open the lane: one record whose
+    `occurrences` alone clears the threshold, handed off on the reducer surface."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     persist.append_pitfalls(
         [_shim(f"r:l-003:{i}", system="elastic") for i in range(8)], state=_state1135.state_for_paths(paths))
@@ -241,12 +244,11 @@ def test_an_attributed_reducer_lesson_repeated_does_clear_it(paths, monkeypatch)
     records = _records(paths)
     assert len(records) == 1, "attribution still splits one reducer mistake"
     assert records[0]["occurrences"] == 8
-    assert len(records) < 3, "the count alone clears it, so the disjunct is not what fired"
 
     assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True, "the drain never wakes for it"
     calls: list = []
     assert _run_pitfalls(paths, _invoke_spy(calls)) == 0
-    assert calls, "the tick gate refused the incident FK-3 exists to reach"
+    assert calls, "the tick gate refused the attributed reducer record"
     assert [e["surface"] for e in calls[0]] == ["reducer"]
 
 
@@ -278,7 +280,8 @@ def test_the_handoff_carries_the_count_and_leads_with_it():
 
 
 def test_every_duplicate_row_behind_a_curated_record_rotates(paths, monkeypatch):
-    """The orphan hazard the collapse creates: the curator sees one record, but the batch is"""
+    """The orphan hazard the collapse creates: the curator sees one record, but every duplicate
+    row behind it must rotate into the consumed ledger."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls(
         [_row(f"r:l-003:{i}", query_id="elastic.esql") for i in range(4)], state=_state1135.state_for_paths(paths),

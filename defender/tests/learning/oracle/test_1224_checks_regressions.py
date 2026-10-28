@@ -31,7 +31,7 @@ def _count(group, *, base: int, added: int = 0, removed: int = 0) -> dict:
             "served": base + added - removed}
 
 
-# --- D: a "*" count is no bucket ------------------------------------------------------------
+# --- a "*" count is no bucket ---------------------------------------------------------------
 
 
 def test_a_star_count_does_not_launder_an_unclaimed_added_row():
@@ -62,7 +62,7 @@ def test_control_a_new_bucket_row_carrying_its_group_is_claimed():
     assert _check(base, served, {"counts": [_count("db-1", base=0, added=1)]}) == []
 
 
-# --- C: coverage is per group ---------------------------------------------------------------
+# --- count coverage is per group ---------------------------------------------------------
 
 
 def test_an_unrelated_group_count_does_not_cover_an_unserved_forged_row():

@@ -99,8 +99,8 @@ def _observe_knobs(tmp: Path, monkeypatch, capsys) -> dict[str, Any]:
     return _scrub(out, {str(tmp): "<TMP>"})
 
 
-#: s038's knobs the 2026-10-04 scope cut keeps (the moved modules'); the renderer's mirror
-#: override (`mirror_override` in the golden) stays in `presentation/`, parked with #1105.
+#: s038's knobs of the moved modules; the golden's `mirror_override` (the renderer's, which
+#: stays in `presentation/`, #1105) is not checked here.
 S038_KEPT = ("payload_passthrough_cap", "sql_box_marker", "venv_box_marker")
 
 
@@ -109,7 +109,7 @@ def test_moved_module_reads_its_environment_knob_at_a_different_point(
     observed = _observe_knobs(tmp_path, monkeypatch, capsys)
     expected = {k: _golden("s038")[k] for k in S038_KEPT}
     assert observed == expected, (
-        "s038: the moved code's behaviour differs from the base's golden\n"
+        "the moved code's behaviour differs from its golden\n"
         f"observed: {json.dumps(observed, ensure_ascii=False, indent=1)[:4000]}\n"
         f"golden:   {json.dumps(expected, ensure_ascii=False, indent=1)[:4000]}")
 

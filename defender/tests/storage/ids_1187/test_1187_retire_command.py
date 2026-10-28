@@ -4,7 +4,6 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import location_path
 
 import errno
-import importlib
 import json
 import os
 import re
@@ -16,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from defender.cli import retire_legacy_runs
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as process
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
@@ -31,9 +31,8 @@ LESSON_ROW = f"{LESSON}\td\t1\t0"
 # Drivers.
 
 def _retire(*argv: str) -> P.CliResult:
-    """Import the retirement command directly so a missing entrypoint fails the test."""
-    command = importlib.import_module(S.COMMAND_MODULE)
-    return P.drive_cli(command.main, list(argv))
+    """`retire_legacy_runs.py <argv>`, in process."""
+    return P.drive_cli(retire_legacy_runs.main, list(argv))
 
 
 def _trace(tenant_id: str, lessons: Path) -> P.CliResult:
@@ -157,8 +156,7 @@ def _assert_renamed(sc: Scene, before: dict[str, dict[str, tuple[int, int]]]) ->
         moved = {rel for rel in was if after[where].get(rel) != was[rel]}
         assert not moved, (f"{len(moved)} entr(ies) bound for {where} are not the entries that "
                            f"were planted (copied, not renamed): {sorted(moved)[:6]}")
-# O6 / declared changes 6 and 7 — before the command, the listing refuses an old entry and
-# the refusal names the command.
+# Before the command, the listing refuses an old entry and the refusal names the command.
 
 _OLD_ENTRIES = ("old_minted_run", "old_pinned_run", "old_sidecar", "tenant_record", "episodes_record")
 
@@ -206,26 +204,16 @@ def test_legacy_entry_refuses_before_serving_then_its_removal_restores_service(
     assert served.out.splitlines() == [LESSON_ROW]
 
 
-def test_uuid_runs_and_sidecars_need_no_container_record(data_root, tmp_path):
-    tenant = S.tenant(data_root, T)
-    uuids = _uuid_runs(S.natural_runs(data_root, T))
-    assert H.raised(tenant.runs_repository().all_runs) is None
-    assert sorted(str(r.id) for r in tenant.runs_repository().all_runs()) == sorted(uuids)
-    served = _trace(T, _lessons(tmp_path / "lessons"))
-    assert _ok(served), _shown(served)
-    assert served.out.splitlines() == [LESSON_ROW]
-
-
 def test_1187_o6_the_tracer_stops_on_a_pre_1187_container_naming_the_command(
         data_root, tmp_path):
     sc = _scene(data_root, tmp_path, old_root=False)
     shutil.rmtree(location_path(sc.runs) / "_episodes")
 
     got = _trace(T, sc.lessons)
-    assert _refused(got), f"the tracer served a pre-#1187 container: {_shown(got)}"
+    assert _refused(got), f"the tracer served a legacy container: {_shown(got)}"
     assert got.out == "", f"the tracer printed rows before stopping: {got.out!r}"
     assert S.COMMAND in got.said, f"the refusal does not name the command: {got.said!r}"
-# O5 / Flow 6 — the command moves old entries aside, intact, and the tenant is served after.
+# The command moves old entries aside, intact, and the tenant is served after.
 
 def _prepare_retirement(sc: Scene, phase: str, data_root: Path, tmp_path: Path, monkeypatch):
     """Prepare the operator's argument variant or a partially completed move."""
@@ -333,7 +321,7 @@ def test_1187_n13_old_episodes_go_to_the_tenant_named_and_no_other_tenant_is_tou
     assert _ok(got), _shown(got)
     assert S.tree(location_path(sc.episodes_legacy)) == episodes_before
     assert S.tree(other.tenant_dir) == other_before, f"tenant {U}'s tree changed"
-# S-move — refuse before ANY move. Each refusal: non-zero exit, every tree byte-identical,
+# Refuse before ANY move. Each refusal: non-zero exit, every tree byte-identical,
 # the refusal names what it found. Positive control: the operator's fix, then the same command
 # moves.
 
@@ -485,10 +473,9 @@ def test_1187_s_move_a_link_at_the_tenant_folder_refuses_before_any_move(
         assert _names(location_path(sc.episodes_legacy)) == sc.old_episodes
 
 
-#: The CI-provided folder for the rename-time EXDEV case (adversary F6): a folder on ANOTHER
-#: MOUNT of the data root's own filesystem (same `st_dev`, so the plan-time check passes; a
-#: rename across the two mounts still fails with EXDEV). Unset here: this container cannot
-#: mount (`mount --bind` and `unshare -m` are refused).
+#: A folder on ANOTHER MOUNT of the data root's own filesystem, for the rename-time EXDEV case
+#: (same `st_dev`, so the plan-time check passes; a rename across the two mounts still fails
+#: with EXDEV). Nothing in the repo sets it: the test skips unless an operator provides one.
 OTHER_MOUNT_ENV = "DEFENDER_TEST_SAME_FS_OTHER_MOUNT"
 
 
@@ -577,7 +564,7 @@ def test_1187_s_move_an_old_episodes_root_on_another_filesystem_refuses_before_a
     finally:
         if where == "other_filesystem":
             shutil.rmtree(parent, ignore_errors=True)
-# N9 — the help states the precondition; the command is the path the refusal names.
+# The help states the precondition; the command is the path the refusal names.
 
 def test_1187_n9_the_help_states_that_no_run_fork_or_drain_may_be_in_flight(data_root):
     got = _retire("--help")

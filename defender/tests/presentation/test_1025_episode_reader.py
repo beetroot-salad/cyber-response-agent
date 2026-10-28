@@ -1,4 +1,4 @@
-"""#1025 O8 (prep 2) — one episode reader and one home for each file name."""
+"""#1025 — one episode reader, and one home for each file name and each derived accessor."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -15,21 +15,12 @@ from defender._io import bind
 from defender.records import RunPaths
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.core import _state1135
+from defender.tests.support.presentation import _episode_1025 as E
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    """Every configured root inside `tmp_path`, so a pass this file drives lands in this test's
-    own tree — never the checkout's runs base or its real `learning/_pending/`."""
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def _judge():
-    return J.mod("learning.judge")
+_tmp_roots = E.tmp_roots
 
 
 def _family():
@@ -38,7 +29,7 @@ def _family():
 
 def _world(ep: Path, label: str):
     """The reader `lead_chain` takes: the episode's bound primitive, bound one directory down
-    at `worlds/<label>` by derivation (#1049 D-V2) — never a path it could format."""
+    at `worlds/<label>` by derivation — never a path it could format."""
     return J.mod("_io").bind(ep).under(f"worlds/{T.fixture_world_id(label)}")
 
 
@@ -48,10 +39,6 @@ def _render():
 
 def _io():
     return J.mod("_io")
-
-
-def _archive():
-    return J.mod("learning.branch.archive")
 
 
 def _refused():
@@ -68,8 +55,8 @@ def _grade(ep: Path, tmp_path: Path):
 
 def _write_issued(world_dir: Path, rows: list[dict]) -> Path:
     """The world's queries table, written the one way this file writes it: one JSON object per
-    line at the writer's own path (`RunPaths.executed_queries`), so the four scenarios that
-    need a table spell neither the name nor the JSONL join."""
+    line at the writer's own path (`RunPaths.executed_queries`), so the scenarios that need a
+    table spell neither the name nor the JSONL join."""
     table = RunPaths(world_dir).executed_queries
     table.write_text(
         "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
@@ -77,7 +64,7 @@ def _write_issued(world_dir: Path, rows: list[dict]) -> Path:
 
 
 def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_path):
-    """The per-lead chain the judge is SHOWN is the chain `family.lead_chain` computes ."""
+    """The per-lead chain the judge is SHOWN equals `family.lead_chain` over the same world, lead for lead."""
     family = _family()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     world_dir = ep / "worlds" / T.world_id(ep, "b")
@@ -108,8 +95,7 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
 
 
 def test_leads_by_id_is_the_canonical_surface_indexed_once(tmp_path):
-    """`leads_by_id(world_dir)` is `lead_repository.joined` over the archived world, keyed by lead
-    id ."""
+    """`leads_by_id` is `lead_repository.joined` keyed by lead id: the judge keeps no table parser of its own."""
     family = _family()
     ep = J.accepted_episode(tmp_path)
     world_dir = ep / "worlds" / T.world_id(ep, "b")
@@ -148,7 +134,7 @@ def test_leads_by_id_is_the_canonical_surface_indexed_once(tmp_path):
 
 
 def test_lead_chain_joins_goal_params_payload_summary_rows_and_resolutions_per_lead(tmp_path):
-    """`lead_chain(world, lead_id, resolutions_by_lead, *, leads=...)` ."""
+    """Each link of the chain is the archived world's own value, never the raw rows; absence stays `None`."""
     family = _family()
     ep = J.accepted_episode(tmp_path)
     world_dir = ep / "worlds" / T.world_id(ep, "b")
@@ -226,7 +212,7 @@ def test_json_mapping_answers_a_mapping_and_none_for_everything_else(tmp_path):
 
 def test_json_mapping_refuses_a_planted_link_and_reads_the_same_bytes_as_a_regular_file(
         tmp_path):
-    """`json_mapping` is ONE home for the link policy as well as the tolerance policy."""
+    """`json_mapping` owns the link policy too: a link at the file or at `worlds/<X>` reads as nothing."""
     family, render = _family(), _render()
     outside = tmp_path / "planted.json"
     outside.write_text(json.dumps({"commit": "a" * 40, "dirty": False}), encoding="utf-8")
@@ -349,7 +335,7 @@ def test_read_grade_refuses_a_planted_link_a_non_mapping_and_a_torn_record(tmp_p
 
 def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
     """An episode the pass declined to grade leaves a `not_graded` stamp, and the reader hands it
-    back as one ."""
+    back as one."""
     read_grade = J.read_grade_at
     skipped = J.accepted_episode(tmp_path, outcome="refused")
     graded = J.accepted_episode(tmp_path / "graded")
@@ -379,8 +365,7 @@ def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
 ])
 def test_a_record_of_the_wrong_shape_is_refused_not_defaulted_and_not_re_graded(
         tmp_path, damage):
-    """The record is validated against `EpisodeGrade`'s own schema, strictly, and one that fails is
-    `JudgeRefused` ."""
+    """The record is validated strictly against `EpisodeGrade`'s schema; a failing one is `JudgeRefused`."""
     read_grade, refused = J.read_grade_at, _refused()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     sound = {"worlds": [{"world": "b", "bucket": None}], "validity": "usable"}

@@ -23,7 +23,7 @@ class _StartBoxReached(Exception):
 
 
 class StartBoxRecorder:
-    """The lifecycle's `start_box` seam:"""
+    """The lifecycle's `start_box` seam: records each call, then stops or returns the unboxed executor."""
 
     def __init__(self, *, stop: bool) -> None:
         self.stop = stop
@@ -39,7 +39,7 @@ class StartBoxRecorder:
 
 
 class TicketWriterRecorder:
-    """`main`'s `ticket_writer` seam (a module-shaped object):"""
+    """`main`'s `ticket_writer` seam (a module-shaped object), recording each call and its tenant."""
 
     def __init__(self) -> None:
         self.opened: list[tuple[tuple, dict]] = []
@@ -61,7 +61,8 @@ class TicketWriterRecorder:
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
-    """An alert, a data root outside the checkout (`DEFENDER_DATA_ROOT`, where each scenario plants its tenants'..."""
+    """An alert, a data root outside the checkout (`DEFENDER_DATA_ROOT`), and helpers that choose or
+    publish the tenant a scenario runs as."""
     alert_dir = tmp_path / "alerts" / "a-1106"
     alert_dir.mkdir(parents=True)
     alert = alert_dir / "alert.json"
@@ -89,9 +90,8 @@ def world(tmp_path, monkeypatch):
     published: dict[str, Any] = {}
 
     def publish_tenant(tenant_id: str, files: dict[str, str | None]) -> Any:
-        """#1108 P4: the tenant set up and published for real (S0's one helper) with `files`
-        (repo-relative, `None` deletes) over the committed fixture, so the run has an export
-        and its own refusal is the one that fires (not "no `current`")."""
+        """The tenant published for real with `files` (repo-relative, `None` deletes) over the
+        committed fixture, so the run has an export and its own refusal fires (not "no `current`")."""
         from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
         published[tenant_id] = stack.enter_context(published_tenant(
@@ -130,8 +130,8 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
     text = ""
     try:
         own = world["published"].get(world["chosen"]["tenant"])
-        # #1108 P4: a published tenant's launch reports its export fresh (O11 `publish=`); a
-        # tenant refused at acceptance never reaches the publish.
+        # A published tenant's launch reports its export fresh; a tenant refused at acceptance
+        # never reaches the publish.
         seams = ({} if own is None
                  else {"publish": lambda *a, own=own, **k: f"fresh {own.commit}"})
         rc = _run().main(argv, lifecycle=_lifecycle(start), visualize=lambda p, **kw: None,
@@ -159,9 +159,8 @@ def test_a_run_for_a_tenant_with_no_folder_refuses_before_the_box_naming_it(worl
     assert _names(text, world["root"] / fixture_uuid("tenant:ghost")), text
 
 
-#: #1108 P4: the file an operator edits is the tenant repo's `settings/...` (the run reads its
-#: copy of an export of it), so a refusal names it repo-relative; the clone, export or copy
-#: spelling of the same path all contain it.
+#: An operator edits the tenant repo's `settings/...`, so a refusal names it repo-relative; the
+#: clone, export and run-copy spellings of the path all contain it.
 def _settings_named(text: str, rel: str) -> bool:
     return f"settings/{rel}" in text
 
@@ -177,8 +176,7 @@ def _published_without(world: dict, tenant_id: str, rel: str) -> Any:
 
 
 def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base(world, capsys):
-    """O4's second named case (#1108 P4: over a published tenant, so "no `current`" cannot
-    mask it):"""
+    """Over a published tenant, so "no `current`" cannot mask the missing mapping."""
     _published_without(world, T.PLAYGROUND_ID, "systems/case-history/mapping.yaml")
     base = world["runs_base"](T.PLAYGROUND_ID)
     text, _ = _refusal(world, capsys)
@@ -194,7 +192,6 @@ def test_a_tenant_missing_another_required_file_refuses_before_the_box(world, ca
 
 
 def test_a_tenant_copied_from_the_template_refuses_at_start_naming_its_table(world, capsys):
-    """C9:"""
     world["publish_tenant"](fixture_uuid("tenant:newco"),
                             {"settings/verb-grants.yaml": T.TABLE_BLANK})
     text, _ = _refusal(world, capsys)
@@ -212,7 +209,6 @@ dispositions:
 
 
 def test_a_tenant_whose_gather_grant_is_health_checks_alone_refuses_at_start(world, capsys):
-    """The template refusal's sibling:"""
     from defender.tests.tenancy.tenant_1108_p4._support import export_dir
 
     t = world["publish_tenant"](fixture_uuid("tenant:probe"),
@@ -226,7 +222,6 @@ def test_a_tenant_whose_gather_grant_is_health_checks_alone_refuses_at_start(wor
 
 
 def test_a_lead_zero_template_the_catalog_lacks_refuses_before_the_box(world, capsys):
-    """M5 runs the lead-zero agreement check at start:"""
     world["publish_tenant"](fixture_uuid("tenant:drift"),
                             {"settings/lead-zero.yaml": T.lead_zero_text("elastic.no-such-template")})
     text, _ = _refusal(world, capsys)
@@ -247,7 +242,7 @@ dispositions:
 
 def test_a_lead_zero_template_on_another_pair_than_the_table_grants_refuses_before_the_box(
         world, capsys):
-    """M5's agreement half, not only its existence half:"""
+    """The template exists but binds a pair the table does not grant the lead (it grants `query`)."""
     from defender.tests.tenancy.tenant_1108_p4._support import export_dir
 
     t = world["publish_tenant"](fixture_uuid("tenant:drift"),
@@ -261,7 +256,7 @@ def test_a_lead_zero_template_on_another_pair_than_the_table_grants_refuses_befo
 
 
 class _RegistryRecorder:
-    """`_drive_investigation`'s `registry_cls` seam:"""
+    """`_drive_investigation`'s `registry_cls` seam, recording each construction's arguments."""
 
     built: list[tuple[tuple, dict]] = []
 
@@ -279,13 +274,9 @@ def _grant_of(call: tuple[tuple, dict]) -> Any:
 
 
 def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tenant(world, capsys):
-    """Rewritten for #1108 P4 (O-A/O-B/O2): each tenant is published for real (S0's helper) and
-    every run reads its own RUN COPY (`<T>/run-knowledge/<run_id>/`) — the box is handed that
-    copy's `agent/`, the driver and ticket writer that copy's `settings/` — never the tenant's
-    clone, the other tenant, or the checkout's committed copy. (P2/#1106 pinned the clone's
-    `agent/` as the box's `tenant_agent`, the retired `agent` mount.)"""
-    import contextlib
-
+    """Each run reads its own RUN COPY (`<T>/run-knowledge/<run_id>/`): the box gets its `agent/`,
+    the driver and ticket writer its `settings/`; never the clone, the other tenant, or the
+    checkout's committed copy."""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
     from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
@@ -321,8 +312,7 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             copy_root = B.run_copies(own) / Path(driven[0]["run"].run_dir).name
             own_settings = copy_root / "settings"
 
-            # O1/O-A/U9 — the box: this tenant's run copy's stage/agent, no settings, no clone, nothing
-            # of the other tenant.
+            # The box: this run copy's stage/agent; no settings, no clone, nothing of the other tenant.
             assert len(start.calls) == 1, start.calls
             assert T.reaches(start.calls, copy_root / "stage" / "agent"), start.calls
             assert not T.exposes(start.calls, own_settings), start.calls
@@ -330,13 +320,12 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             assert not T.reaches(start.calls, root / other)
             assert not T.exposes(start.calls, root / other), start.calls
 
-            # O3 — the registry: exactly this tenant's gather pairs.
+            # The registry: exactly this tenant's gather pairs.
             assert len(_RegistryRecorder.built) == 1, _RegistryRecorder.built
             grant = _grant_of(_RegistryRecorder.built[0])
             assert {(s, v) for s, v, _ in grant.entries} == set(expected[tenant_id]), tenant_id
 
-            # O2/O-B — the driver and the ticket writer are handed this run copy's settings, and
-            # neither the clone's, the other tenant's, nor the checkout's committed copy.
+            # The driver and the ticket writer: this run copy's settings, and no other.
             for seam, payload in (("driver", driven[0]), ("ticket open", writer.opened),
                                   ("ticket record", writer.recorded)):
                 assert payload, seam

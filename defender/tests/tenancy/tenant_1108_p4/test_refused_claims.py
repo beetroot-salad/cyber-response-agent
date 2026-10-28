@@ -1,33 +1,17 @@
-"""#1108 P4 slice S-D — U10 (human decision D2, `.spec-flow/record.md` "Human decisions
-(2026-10-23)"): a claim the commit-maker refuses, at drain level.
+"""#1108 P4 U10: a claim the commit-maker refuses, at drain level.
 
-U10: the refused claim's draft is reset, the refusal counts ONE attempt on that claim's row, the
-row stays queued and is retried on later ticks until #952's attempt ceiling quarantines it; the
-other claims of the same batch proceed (commit and deliver).
+The refused claim's draft is reset, the refusal counts one attempt on its row, and the row stays
+queued and is retried until #952's attempt ceiling quarantines it; the batch's other claims
+commit and deliver. A claim is one curator's work in the lessons lane (`author`, then
+`questioner_curator`, in one batch) or one queued run in the lead lane. A ChangeSet carries only
+plain regular files under `agent/`, so a symlink or FIFO the model left in the draft refuses it.
 
-What a claim is here: the lessons lane serves two curators into one batch (`author`, then
-`questioner_curator`), each one claim (one ChangeSet, one commit-maker commit); the lead lane
-serves each queued run as one claim. The refusal is the commit-maker's: a ChangeSet over the
-draft carries only plain regular files under `agent/` (P3), so a symlink or a FIFO the claim's
-model left in the draft refuses that claim.
-
-How each half is observed:
-  - "draft reset": the NEXT claim of the same batch (the sibling) looks at the draft when its
-    model runs. Positive control: with no plant, the sibling sees the first claim's committed
-    edit there (the observation reads the right folder).
-  - attempts / queued / quarantine: the lane's own queue state. Lessons lane: the pending row's
-    `attempts`, its graveyard entry (`LEARNING_AUTHOR_MAX_ATTEMPTS`). Lead lane: the queued
-    record `author-queue/<case>.json`'s `attempts`, never left in `inflight/`, quarantined in
-    `failed/` (`LEAD_AUTHOR_MAX_RETRIES`).
-  - "proceeds": the sibling's edit is the batch branch's only change and has its PR.
-
-Between ticks a human merges the sibling's PR (`merge_on_remote`), so the lane's writer lease
-(OD8: our open PR on the lane's prefix holds the lane) does not hold the retry tick.
-
-ASSUMED SEAMS: those of `_drain_support` (OD16: the trigger and steps receive the tick's
-`batch=`; `draft_root_of(batch)` is where the lanes' files live). The lessons lane's
-`hold_committed` keeps the committed sibling's row pending until its lesson reaches `main`
-(#922/#952), so its re-serving is not asserted; only that it is never committed twice.
+"Reset" is observed by the batch's next claim (the sibling) looking at the draft when its model
+runs; each control shows it does see a committed edit there. Attempts and quarantine are the
+lane's own queue state. Between ticks a human merges the sibling's PR, so the lane's writer lease
+(our open PR holds the lane) does not hold the retry tick. The lessons lane's `hold_committed`
+keeps the committed sibling's row pending until its lesson reaches `main`, so its re-serving is
+not asserted, only that it is never committed twice.
 """
 from __future__ import annotations
 
@@ -87,9 +71,8 @@ def _plant(kind: str, where: Path, outside: Path) -> None:
         os.mkfifo(where)
 
 
-#: Where a lead claim's plant goes, under the batch's draft root: a link or FIFO inside the
-#: skills lane; an out-of-lane plain file beside the lane, under `agent/` (OD18: an out-of-lane
-#: path is a commit-maker refusal, as a link or a FIFO is).
+#: Where a lead claim's plant goes under the draft root: a link or FIFO inside the skills lane,
+#: or a plain file outside the lane under `agent/` (also a commit-maker refusal).
 _LEAD_PLANT_AT = {"link": f"{LEAD_DRAFT_LANES[0]}/gather/{PLANTED_NAME}",
                   "fifo": f"{LEAD_DRAFT_LANES[0]}/gather/{PLANTED_NAME}",
                   "out-of-lane": f"agent/{PLANTED_NAME}"}
@@ -159,9 +142,8 @@ def lessons_lane(monkeypatch):
 
 def test_u10_control_an_unrefused_lessons_batch_commits_both_claims(
         p4_tenant, tmp_path, lessons_lane, caplog):
-    """Positive control for the cases below, on the same scene with no plant: both claims commit
-    into the one batch branch (one PR), the sibling sees the author's committed lesson in the
-    draft when its model runs, and the author's row carries no attempt."""
+    """Positive control, same scene with no plant: both claims commit on one branch with one PR,
+    and the sibling sees the author's committed lesson in the draft."""
     t = p4_tenant
     bind_forge(t)
     s = _LessonsScene(t, tmp_path, plant=False)
@@ -175,19 +157,17 @@ def test_u10_control_an_unrefused_lessons_batch_commits_both_claims(
     assert sorted(touched(t.remote, main, tip)) == sorted([LESSON_REL, SIBLING_REL])
     assert [c["head"] for c in t.forge.creates] == [branch]
     row = s.bad_row()
-    assert row is not None, "the committed row is held until its lesson reaches main (#952)"
+    assert row is not None, "the committed row is held until its lesson reaches main"
     assert int(row.get("attempts") or 0) == 0, row
     assert draft_entries(t) == []
 
 
 def test_u10_a_refused_lessons_claim_is_reset_counted_and_left_queued_while_its_sibling_delivers(
         p4_tenant, tmp_path, lessons_lane, caplog):
-    """U10, lessons lane: the author curator's model leaves a symlink beside its lesson, so the
-    commit-maker refuses the author claim. Its draft changes are reset before the sibling runs
-    (the sibling sees neither the lesson nor the link), nothing of it reaches the branch, the
-    refusal counts one attempt on `f-bad`, which stays queued and out of the graveyard; the
-    questioner claim of the same batch commits and is delivered (branch + PR). The tick itself
-    completes (rc 0): a refused claim is the claim's outcome, not the tick's."""
+    """The author's model leaves a symlink beside its lesson, so its claim is refused: reset
+    before the sibling runs, absent from the branch, one attempt counted with the row still
+    queued; the questioner claim delivers. The tick completes (rc 0): a refused claim is the
+    claim's outcome, not the tick's."""
     t = p4_tenant
     bind_forge(t)
     s = _LessonsScene(t, tmp_path, plant=True)
@@ -211,10 +191,9 @@ def test_u10_a_refused_lessons_claim_is_reset_counted_and_left_queued_while_its_
 
 def test_u10_a_refused_lessons_row_is_retried_next_tick_and_quarantined_at_the_ceiling(
         p4_tenant, tmp_path, lessons_lane, caplog):
-    """U10 + #952, lessons lane, ceiling 2 (`LEARNING_AUTHOR_MAX_ATTEMPTS`): after the sibling's
-    PR is merged, the next tick serves `f-bad` again (attempt 2), is refused again and, at the
-    ceiling, retires it to the graveyard (out of the queue); a third tick never serves it. The
-    sibling's lesson is committed once only: no later branch touches it."""
+    """Ceiling 2: after the sibling's PR merges, the next tick retries `f-bad`, is refused again
+    and retires it to the graveyard; a third tick never serves it, and no later branch
+    re-commits the sibling's lesson."""
     t = p4_tenant
     bind_forge(t)
     s = _LessonsScene(t, tmp_path, plant=True)
@@ -245,10 +224,9 @@ def test_u10_a_refused_lessons_row_is_retried_next_tick_and_quarantined_at_the_c
 
 
 class _Planting:
-    """The lead drain's `run_lead_author` seam: `_drain_support.LeadStep` (the REAL lead author),
-    with, for the runs named in `plants`, a planted entry under the batch's draft skills lane
-    placed first (inside the claim's window), and, for the sibling, a record of what the draft
-    holds of the earlier claim when its turn comes."""
+    """The lead drain's `run_lead_author` seam: `LeadStep`, with a planted entry placed first
+    (inside the claim's window) for the runs named in `plants`, and, for the sibling, a record
+    of what the draft holds of the earlier claim when its turn comes."""
 
     def __init__(self, step: LeadStep, *, plants: dict, outside: Path, sibling: str) -> None:
         self.step, self.plants, self.outside, self.sibling = step, plants, outside, sibling
@@ -276,10 +254,9 @@ class _LeadScene:
         self.paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
         self.bad = queued_run(t, self.paths, "p4-refused-a").name
         self.good = queued_run(t, self.paths, "p4-refused-b").name
-        # `a` runs an uncatalogued query, so the REAL draft synthesis mints a `_draft/` entry
-        # inside `a`'s claim: a refused `a` must take that draft down with it. `b` runs the
-        # catalogued template's own query, so its claim mints no draft and the branch carries
-        # exactly the template (test_writers' o7 cases pin the minted draft on a delivered claim).
+        # `a` runs an uncatalogued query, so the real draft synthesis mints a `_draft/` entry
+        # inside `a`'s claim, which a refused `a` must take down with it. `b` runs the catalogued
+        # template's own query and mints no draft, so the branch carries exactly the template.
         self.inner = LeadStep(
             executed={self.bad: [executed_lead("cmdb.owner-by-tag")],
                       self.good: [executed_lead("cmdb.host-owner", lead_id="l-002")]},
@@ -310,9 +287,9 @@ def lead_lane(monkeypatch):
 
 def test_u10_control_an_unrefused_lead_batch_commits_both_claims(
         p4_tenant, tmp_path, lead_lane, caplog):
-    """Positive control for the lead cases below, same scene, no plant: both runs' edits land
-    on the one `lead-author/` branch (one PR), the sibling sees the first claim's committed edit
-    in the draft, and both rows leave the queue (neither queued, in flight nor failed)."""
+    """Positive control, same scene with no plant: both runs' edits land on one `lead-author/`
+    branch with one PR, the sibling sees the first claim's committed edit, and both rows leave
+    the queue."""
     t = p4_tenant
     bind_forge(t)
     s = _LeadScene(t, tmp_path, plant=None)
@@ -340,11 +317,9 @@ def test_u10_control_an_unrefused_lead_batch_commits_both_claims(
 @pytest.mark.parametrize("plant", ["link", "fifo", "out-of-lane"])
 def test_u10_a_refused_lead_claim_is_reset_counted_and_left_queued_while_its_sibling_delivers(
         p4_tenant, tmp_path, lead_lane, caplog, plant):
-    """U10, lead lane: run `a`'s claim leaves a planted link / FIFO in the draft's skills lane,
-    or a plain file outside that lane (OD18), so the commit-maker refuses it. Its draft changes are reset before `b` runs (`b` sees
-    neither `a`'s edit nor the plant), nothing of `a` reaches the branch, `a`'s record is back
-    at the top of the queue carrying one attempt (not in flight, not failed); `b`'s claim
-    commits and is delivered, and `b`'s row leaves the queue."""
+    """Run `a`'s claim leaves a link or FIFO in the skills lane, or a plain file outside it, so
+    it is refused: reset before `b` runs, absent from the branch, and back in the queue with one
+    attempt; `b`'s claim delivers and leaves the queue."""
     t = p4_tenant
     bind_forge(t)
     s = _LeadScene(t, tmp_path, plant=plant)
@@ -372,10 +347,8 @@ def test_u10_a_refused_lead_claim_is_reset_counted_and_left_queued_while_its_sib
 
 def test_u10_a_refused_lead_row_is_retried_next_tick_and_quarantined_at_the_ceiling(
         p4_tenant, tmp_path, lead_lane, caplog):
-    """U10 + #952, lead lane, ceiling 2 (`LEAD_AUTHOR_MAX_RETRIES`): after `b`'s PR is merged,
-    the next tick serves `a` again (attempt 2) and not `b`; refused again at the ceiling, `a` is
-    quarantined in `failed/` (out of the queue and of `inflight/`); a third tick serves
-    nothing. No later branch is opened for either run."""
+    """Ceiling 2: after `b`'s PR merges, the next tick retries only `a`, which, refused again, is
+    quarantined in `failed/`; a third tick serves nothing and opens no branch."""
     t = p4_tenant
     bind_forge(t)
     s = _LeadScene(t, tmp_path, plant="link")
@@ -406,9 +379,8 @@ def test_u10_a_refused_lead_row_is_retried_next_tick_and_quarantined_at_the_ceil
 
 
 class _PlantingPitfalls:
-    """The lead drain's `run_pitfalls` seam: `_drain_support.PitfallsStep` (the REAL pitfalls
-    curation), with, when `plant`, a link placed in the batch's draft skills lane first (inside
-    the pitfalls claim's window), so the commit-maker refuses the claim."""
+    """The lead drain's `run_pitfalls` seam: `PitfallsStep`, with, when `plant`, a link placed in
+    the draft's skills lane first so the commit-maker refuses the claim."""
 
     def __init__(self, step: PitfallsStep, *, plant: bool, outside: Path) -> None:
         self.step, self.plant, self.outside = step, plant, outside
@@ -459,9 +431,8 @@ def pitfalls_lane(monkeypatch):
 
 def test_u10_control_an_unrefused_pitfalls_claim_delivers_and_leaves_the_queue(
         p4_tenant, tmp_path, pitfalls_lane, caplog):
-    """Positive control for the pitfalls case below, same scene, no plant: the curated bullet
-    lands on the tenant add-on page on one `lead-author/` branch with its PR, and the pitfall
-    row is neither queued with an attempt nor dead-lettered."""
+    """Positive control, same scene with no plant: the curated bullet lands on the tenant add-on
+    page on one `lead-author/` branch with its PR, and the row carries no attempt."""
     t = p4_tenant
     bind_forge(t)
     s = _PitfallsScene(t, tmp_path, plant=False)
@@ -483,12 +454,10 @@ def test_u10_control_an_unrefused_pitfalls_claim_delivers_and_leaves_the_queue(
 
 def test_u10_a_refused_pitfalls_claim_is_dead_lettered_as_refused_not_propagated(
         p4_tenant, tmp_path, pitfalls_lane, caplog):
-    """U10/OD19, the lead drain's pitfalls step: its claim leaves a link in the draft's skills
-    lane, so the commit-maker refuses it. The refusal is the claim's outcome, not the tick's: the
-    tick completes (rc 0), nothing reaches the tenant origin or its forge, and the refusal counts
-    one attempt on the pitfall row, which stays queued; at the ceiling
-    (`LEARNING_AUTHOR_MAX_ATTEMPTS`, 2) the next refused tick dead-letters it, its graveyard
-    entry naming the refusal. A refusal propagated out of the step would end the tick instead."""
+    """The pitfalls claim leaves a link in the skills lane and is refused as the claim's outcome,
+    not the tick's: rc 0, nothing reaches the origin or forge, one attempt is counted with the
+    row queued, and at the ceiling (2) the next refusal dead-letters it, naming the refusal. A
+    refusal propagated out of the step would end the tick instead."""
     t = p4_tenant
     bind_forge(t)
     s = _PitfallsScene(t, tmp_path, plant=True)

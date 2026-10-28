@@ -1,5 +1,5 @@
-"""#872 — O7/M6's seam, the gate's reach, and provenance
-(`d19`, `d20`, `d21`, `d22`, `d23`, `d35`, `d40`, `d44`, `d59`, `d74`, `d75`)."""
+"""#872 — the gate's seam, its reach (whole runs, the query path, a re-executed `run.py`
+child), and provenance: owned tools are not gated, foreign ones are."""
 from __future__ import annotations
 
 import json
@@ -47,9 +47,9 @@ def _desalt(text: str) -> str:
     return re.sub(r"run-[0-9a-f]{16}-", "run-<salt>-", text)
 
 
-def _gather_turn(lead: str = "l-001") -> Turn:
+def _gather_turn() -> Turn:
     return Turn(tool_calls=[("gather", {
-        "lead_id": lead, "system": "elastic", "goal": "measure this lead",
+        "lead_id": "l-001", "system": "elastic", "goal": "measure this lead",
         "what_to_summarize": ["auth events"],
     })])
 
@@ -94,8 +94,8 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
         "no executed-queries row was written, so the query path did not run"
     )
     def _comparable(text: str, run_dir: Path) -> str:
-        # ...and the run dir normalized with it, for the same reason: the two arms are two
-        # RUNS, so `query` echoes each one's own `gather_raw` path back in its tool text.
+        # Salt and run dir both differ between the two runs (`query` echoes its `gather_raw`
+        # path back in its tool text).
         return _desalt(text).replace(str(run_dir), "<run-dir>")
 
     assert _comparable(live_gather.dispatched.text("query"), live_dir) == _comparable(
@@ -112,19 +112,19 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
 
 
 def test_an_owned_agent_tool_result_is_untouched_while_a_foreign_one_is_gated() -> None:
-    """An owned `@agent.tool` result and a foreign toolset's tool OF THE SAME NAME are driven
-    in ONE run, and only the foreign one is gated."""
+    """An unlabelled (hence foreign) toolset is gated; an owned-labelled one of the same name
+    and an owned `@agent.tool` in the same run are not."""
     value = _payload()
 
     # THE SAME-NAME DISCRIMINATOR, at the finest grain the library allows.
     foreign = agent_run(toolset=foreign_toolset(value, name="fetch_rows"))
     owned = agent_run(toolset=owned_toolset(value, name="fetch_rows"))
     assert framed_content(foreign.dispatched.text("fetch_rows")) == toons.dumps(value), (
-        "the foreign `fetch_rows` was not gated"
+        "the unlabelled `fetch_rows` was not gated: an unlabelled toolset defaulted to owned"
     )
+    assert owned.encoder.dumps_calls == 0, "an owned-labelled toolset reached the encoder"
     assert owned.dispatched.text("fetch_rows") == wire_text(value), (
-        "the OWNED `fetch_rows` — same name, same payload — was gated too, so the verdict is a "
-        "function of the tool's name and a same-named foreign tool would walk through a name list"
+        "the owned `fetch_rows` was gated too, so the verdict depends on the tool's name"
     )
 
     # THE ONE-RUN ARM, at the two names one agent can carry.
@@ -143,23 +143,7 @@ def test_an_owned_agent_tool_result_is_untouched_while_a_foreign_one_is_gated() 
         "the foreign result was not gated"
     )
     assert owned_text == wire_text(value), (
-        "an owned tool's model-visible text was changed by the gate — exactly what O2 forbids"
-    )
-
-
-def test_an_unlabelled_toolset_is_treated_as_foreign_and_only_the_composition_root_marks_owned() -> None:
-    """An UNLABELLED toolset is treated as foreign — gated and framed — and a toolset carrying
-    defender's owned label is not."""
-    value = _payload()
-    unlabelled = agent_run(toolset=foreign_toolset(value, name="fetch_rows"))
-    assert framed_content(unlabelled.dispatched.text()) == toons.dumps(value), (
-        "an unlabelled toolset defaulted to owned — the unsafe direction"
-    )
-
-    labelled = agent_run(toolset=owned_toolset(value, name="fetch_rows"))
-    assert labelled.encoder.dumps_calls == 0, "an owned-labelled toolset reached the encoder"
-    assert labelled.dispatched.text() == wire_text(value), (
-        "an owned-labelled result was gated or framed"
+        "the gate changed an owned tool's model-visible text"
     )
 
 

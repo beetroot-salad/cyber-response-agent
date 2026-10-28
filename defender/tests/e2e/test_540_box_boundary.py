@@ -42,7 +42,7 @@ EXEC_TIMEOUT = 60.0
 
 _NO_DAEMON = not daemon_reachable()
 _DOOD = (not _NO_DAEMON) and is_dood()
-# What `_box` will actually ask for: `start_box` resolves the F1 lever when no spec is passed.
+# The runtime `start_box` resolves from the lever when `_box` passes no spec.
 _LEVERED_RUNTIME = BoxSpec.from_env(os.environ).runtime
 
 
@@ -90,8 +90,8 @@ def run_dir(runs_base: Path) -> Path:
 
 @pytest.fixture
 def sibling_run(run_dir: Path) -> Path:
-    """A SECOND real run dir beside the first, carrying a real secret-shaped
-    artifact. O6's write set is 'exactly one directory' — this is the other one."""
+    """A second real run dir beside the first, carrying a secret-shaped artifact: the box's
+    write set is exactly one directory, and this is not it."""
     other = run_dir.parent / "20260718T101501Z-otherrun"
     (other / "gather_raw").mkdir(parents=True)
     (other / "gather_raw" / "l-001.lead.json").write_text(
@@ -116,16 +116,14 @@ def box(run_dir: Path):
 
 
 def _run(box, command: str, *, cwd: Path) -> BoxResult:
-    """Drive the REAL entry point: the real `bash_exec.parse` decomposition —
-    the same object the gate validates — handed to the box executor (M8)."""
+    """Drive the real entry point: the `bash_exec.parse` decomposition the gate validates,
+    handed to the box executor."""
     return box.run_parsed(parse(command), command=command, cwd=cwd, timeout=EXEC_TIMEOUT)
 
 
 def _write_probe(run_dir: Path, name: str, source: str) -> Path:
-    """Plant a probe script on the rw bind and return its model-visible path.
-
-    The bytes are written HERE, by the
-    test, through the real filesystem — the fault (or the capability) is real."""
+    """Plant a probe script on the rw bind, through the real filesystem, and return its
+    model-visible path."""
     script = run_dir / f"_probe_{name}.py"
     script.write_text(source, encoding="utf-8")
     return Path("/runs/current") / script.name
@@ -134,7 +132,7 @@ def _write_probe(run_dir: Path, name: str, source: str) -> Path:
 def _probe(box, run_dir: Path, name: str, source: str, *args: str) -> dict:
     """Run a probe in the box and decode its one JSON line. The probe CATCHES its
     own OSError and reports `type(e).__name__` + `e.errno`, so the assertion is on
-    the errno and the exact class — never on an exception subclass (C56)."""
+    the errno and the exact class — never on an exception subclass."""
     script = _write_probe(run_dir, name, source)
     argv = " ".join([f"python3 {script}", *args])
     res = _run(box, argv, cwd=Path("/runs/current"))
@@ -370,8 +368,7 @@ def test_the_bind_source_is_translated_for_the_daemons_namespace(box, run_dir):
 
 @requires_box
 def test_run_dir_and_defender_dir_are_readable_in_box(box, run_dir):
-    """Both binds ARE readable from inside the box: bytes the host wrote into `run_dir` and a
-    real file under `defender_dir` both read back byte-exact."""
+    """Host-written bytes in `run_dir` and a real `defender_dir` file both read back byte-exact."""
     host_bytes = b"RUN-DIR-SENTINEL-\xe2\x9c\x93\n"
     (run_dir / "sentinel.txt").write_bytes(host_bytes)
     skill = DEFENDER / "SKILL.md"
@@ -387,9 +384,8 @@ def test_run_dir_and_defender_dir_are_readable_in_box(box, run_dir):
 def test_write_under_defender_dir_fails_erofs_by_errno(box, run_dir):
     """A write to any path under `defender_dir` fails EROFS: the ro bind is the enforcement, so a
     hijacked agent cannot poison its own corpus, skills, or lessons."""
-    # #1108 P4 (O1): the product tree's `lessons/` is gone, and a write under a folder that does
-    # not exist fails ENOENT before the ro bind is ever met — so the poisoned file goes into a
-    # skills folder the product tree still ships, where only the ro bind can refuse it.
+    # The poisoned file goes into a folder the product tree ships: under a missing folder the
+    # write would fail ENOENT before the ro bind is ever met.
     poisoned = DEFENDER / "skills" / "gather" / "poisoned.md"
     assert poisoned.parent.is_dir(), f"{poisoned.parent} is gone; the EROFS probe would meet ENOENT"
     targets = [
@@ -522,8 +518,8 @@ def test_dns_resolution_fails_from_inside_the_box(box, run_dir):
 
 @requires_box
 def test_the_same_egress_attempt_succeeds_outside_the_box(tmp_path):
-    """THE control for the whole network family: the exact same probe source, aimed at the exact
-    same address, connects and round-trips its bytes when run OUTSIDE the box."""
+    """The control for the network family: the same probe, aimed at the same address,
+    connects and round-trips its bytes outside the box."""
     script = tmp_path / "tcp_probe.py"
     script.write_text(_TCP_CONNECT, encoding="utf-8")
 
@@ -554,8 +550,8 @@ def test_egress_failure_is_a_bare_oserror_asserted_by_errno(box, run_dir):
 
 @requires_box
 def test_no_unix_socket_is_mounted_into_the_box(box, run_dir):
-    """No socket is mounted inward: a full walk of the box's filesystem finds no unix socket
-    anywhere outside the kernel pseudo-filesystems."""
+    """A full walk of the box's filesystem (kernel pseudo-filesystems excepted) finds no unix
+    socket."""
     res = _probe(box, run_dir, "socksweep", _SOCKET_SWEEP)
 
     assert res["sockets"] == [], f"a unix socket is reachable inside the box: {res}"
@@ -572,7 +568,6 @@ def test_loopback_between_two_boxed_processes_is_permitted(box, run_dir):
 
 @requires_box
 def test_no_host_secret_is_present_in_the_box_env(run_dir, monkeypatch):
-    """No host secret crosses into the box."""
     planted = {
         "ANTHROPIC_API_KEY": "sk-ant-boxspec-must-not-cross",
         "FIREWORKS_API_KEY": "fw-boxspec-must-not-cross",
@@ -656,8 +651,7 @@ def test_boundary_holds_with_decide_bash_approving_everything(box, run_dir, sibl
     assert egress["connected"] is False
     assert accepted == []
 
-    # #1108 P4 (O1): the product tree holds no `lessons/` — the read-only probe targets the
-    # checkout's own root, which every box mounts and P4 keeps.
+    # The read-only probe targets the checkout's root, which every box mounts.
     poison = _probe(box, run_dir, "o4erofs", _WRITE_PATH,
                     "/defender/o4.md")
     assert poison["errno"] == errno_mod.EROFS, poison
@@ -698,7 +692,7 @@ def test_boundary_holds_under_both_runc_and_runsc(run_dir, sibling_run, tmp_path
     with _box(run_dir, spec=BoxSpec.from_env({BoxSpec.ENV_VAR: runtime})) as b:
         absent = _probe(b, run_dir, f"floor-abs-{runtime}", _READ_PATH, str(outside))
         erofs = _probe(b, run_dir, f"floor-ro-{runtime}", _WRITE_PATH,
-                       "/defender/floor.md")  # #1108 P4 (O1): no `lessons/` in the product
+                       "/defender/floor.md")  # the checkout root: every box mounts it
         sibling = _probe(b, run_dir, f"floor-sib-{runtime}", _READ_PATH,
                          str(sibling_run / "gather_raw" / "l-001.lead.json"))
         with _echo_listener() as (host, port, accepted):

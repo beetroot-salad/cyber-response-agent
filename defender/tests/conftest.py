@@ -1,34 +1,20 @@
-"""Shared fixtures for defender learning-loop tests.
-
-Each test gets an isolated tmp git repo with the ``defender/learning/`` source
-files copied in. The fixture builds one ``LoopPaths(repo_root=tmp)`` and an
-``AuthorConfig`` from it (``ctx.paths`` / ``ctx.cfg``); tests thread those into
-``author.run_batch(paths=…, cfg=…)`` and inject a fake curator via
-``dataclasses.replace(cfg, invoke_agent=fake)`` — no module-global setattr, no
-``importlib.reload``.
-"""
+"""Suite-wide hooks and autouse fixtures for `defender/tests/`, plus learning-loop helpers
+(`helpers.write_finding`, the #773 scene builders)."""
 from __future__ import annotations
 
 import ctypes
 import os
 import shutil
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 
-#: What `-n auto` means off CI when nothing else says. xdist's own answer is "one worker per
-#: core", which is right for a runner that owns the box and wrong on a developer machine that
-#: several sessions share: each worker sits at hundreds of MB once the runtime-loop replay
-#: files have run through it, and a few concurrent `-n auto` runs at one-worker-per-core
-#: exhaust the machine. The devcontainer already declares `PYTEST_XDIST_AUTO_NUM_WORKERS` for
-#: this, and that variable still wins wherever it is set — this hook is the fallback for the
-#: shells it does not reach (a container that predates the compose change, a shell that never
-#: sourced the profile). Only `auto` is redefined: `-n logical` and `-n N` are untouched, a run
-#: without `-n` stays in-process, and CI keeps xdist's per-core count since the runner owns
-#: its cores. `optionalhook` so a run with xdist unloaded (`-p no:xdist`) does not trip
+#: What `-n auto` means off CI. xdist's one worker per core suits a runner that owns its box,
+#: not a developer machine several sessions share (each worker grows to hundreds of MB). A set
+#: `PYTEST_XDIST_AUTO_NUM_WORKERS` (the devcontainer declares it) still wins; `-n logical`,
+#: `-n N` and CI are untouched. `optionalhook` so a run with `-p no:xdist` does not trip
 #: pluggy's unknown-hook check.
 _LOCAL_AUTO_WORKERS = 4
 
@@ -61,10 +47,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     items[:] = kept
 
 
-REAL_REPO = Path(__file__).resolve().parents[2]
-LEARNING_SRC = REAL_REPO / "defender" / "learning"
-
-
 @pytest.fixture(scope="session")
 def checkout_roster():
     """The real checkout's adapters roster, read ONCE per session — the value a production
@@ -77,13 +59,11 @@ def checkout_roster():
 
 @pytest.fixture(autouse=True)
 def _held_capabilities(checkout_roster):
-    """Every test starts with the `nothing-to-try` gate HOLDING the real checkout's roster,
-    the way a production process does at its start (`_adapters_at_run_start` →
-    `hold_capabilities`), and ends with it released, so a test that drove the gate to another
-    tree cannot leak that tree to the next test in the worker. A test that must observe the
-    unheld state calls `release_capabilities()` itself; the gate never reads for itself, so
-    without this a document with a `nothing-to-try` receipt would raise `CapabilitiesNotRead`
-    out of every validator call in the suite."""
+    """Every test starts with the `nothing-to-try` gate holding the real checkout's roster, as a
+    production process does at start, and ends with it released, so a test that pointed the gate
+    at another tree cannot leak it to the next. The gate never reads for itself: without this, a
+    `nothing-to-try` receipt would raise `CapabilitiesNotRead` from every validator call. A test
+    of the unheld state calls `release_capabilities()` itself."""
     from defender.skills.invlang.validate import hold_capabilities, release_capabilities
 
     hold_capabilities(checkout_roster)
@@ -93,48 +73,40 @@ def _held_capabilities(checkout_roster):
         release_capabilities()
 
 
-#: The run-page mirror's location override (#1084 D4). Spelled here rather than imported from
-#: `defender.configuration.publish_root`, so this conftest never imports the resolver;
-#: `test_1084_mirror` spells the same name and drives the resolver through it.
+#: The run-page mirror's location override (#1084), spelled here so this conftest never imports
+#: the resolver (`defender.configuration.publish_root`).
 RUN_VISUALIZATIONS_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 
 
 @pytest.fixture(autouse=True)
 def run_visualizations_dir(tmp_path_factory, monkeypatch) -> Path:
     """Every test's run-page mirror lands in a per-test tmp dir, never in a real checkout's
-    `run-visualizations/` (#1084 O3, M4). This is the PREVENTION. For a test that removes
-    it, there is no publish root at all (dev names its folder; none is assumed), so no
-    copy lands anywhere — but since #1110 a refused copy is a logged WARNING, not a failed render,
-    so that refusal surfaces as a warning in the test's log, never as a failing test."""
+    `run-visualizations/`. A test that removes the variable has no publish root at all, so no
+    copy lands anywhere; the refused copy is a logged warning, not a failed render."""
     mirror = tmp_path_factory.mktemp("run-visualizations")
     monkeypatch.setenv(RUN_VISUALIZATIONS_ENV, str(mirror))
     return mirror
 
 
-#: The deployment type (#1110 M4): `dev` turns the run page's local copy on; unset means
-#: `production`. Spelled here for the same reason as the override above — this conftest never
-#: imports `_env`.
+#: The deployment type: `dev` turns the run page's local copy on; unset means `production`.
+#: Spelled here so this conftest never imports `_env`.
 DEPLOYMENT_ENV = "DEFENDER_DEPLOYMENT"
 
 
 @pytest.fixture(autouse=True)
 def deployment_unset(monkeypatch) -> None:
-    """Every test starts `production` (#1110 M5): the variable is removed whether or not the
-    shell that launched pytest inherited the devcontainer's `DEFENDER_DEPLOYMENT: dev`. CI does
-    not use compose and the devcontainer does, so without this the copy-side behaviour of the
-    suite would depend on which of the two ran it. A test about the dev copy declares it with
-    its own `monkeypatch.setenv(DEPLOYMENT_ENV, "dev")`, which wins (same function-scoped
-    instance, later)."""
+    """Every test starts `production`, even when the launching shell inherited the
+    devcontainer's `DEFENDER_DEPLOYMENT: dev` (CI has none), so the suite's copy behaviour does
+    not depend on where it runs. A dev-copy test sets `dev` with its own `monkeypatch.setenv`,
+    which wins (same function-scoped instance, later)."""
     monkeypatch.delenv(DEPLOYMENT_ENV, raising=False)
 
 
 @pytest.fixture(autouse=True, scope="session")
 def session_data_root(tmp_path_factory) -> Iterator[Path]:
-    """The data root for whatever runs BEFORE a test's own (`data_root` below): module- and
-    class-scoped fixtures are set up ahead of every function-scoped one, so without this they
-    would see the variable the launching shell exported — in the devcontainer, the host's real
-    data root — and set a tenant up inside it. A session tmp directory per xdist worker,
-    replacing any inherited value; each test then gets its own over it."""
+    """The data root for module- and class-scoped fixtures, which are set up before a test's own
+    `data_root`: without it they would see the launching shell's value (in the devcontainer, the
+    host's real data root) and set a tenant up there. One session tmp dir per xdist worker."""
     from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
     root = tmp_path_factory.mktemp("session-data-root")
@@ -157,11 +129,10 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
 
 @pytest.fixture(autouse=True)
 def data_root(tmp_path_factory, monkeypatch, request) -> Iterator[Path]:
-    """Every test's `DEFENDER_DATA_ROOT` is its own fresh tmp directory (#1078 D9, §7 J57(b)).
-    Emptied once the test passes, as `tmp_path` is removed (`tmp_path_retention_policy`); a
-    failed test's is kept to inspect. The directory itself stays: removed, its number would go
-    to the next test, which then meets whatever support code left beside it under the same name
-    (`data-rootN-p4-forge`: run 40508746837's failed pushes)."""
+    """Every test's `DEFENDER_DATA_ROOT` is its own fresh tmp directory (#1078). Emptied once the
+    test passes, as `tmp_path` is removed; a failed test's is kept to inspect. The directory
+    itself stays: removed, its number would go to the next test, which would then meet whatever
+    support code left beside it under the same name (e.g. `data-rootN-p4-forge`)."""
     from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
     root = tmp_path_factory.mktemp("data-root")
@@ -215,71 +186,6 @@ def _return_freed_arenas():
     _malloc_trim()
 
 
-
-@pytest.fixture
-def tmp_repo(tmp_path: Path):
-    """Build an isolated git repo with the learning module mounted in.
-
-    Returns a namespace with ``root`` (tmp repo path), ``author``
-    (the imported author module rebound to tmp paths), and ``run_git``
-    (helper to run git inside the tmp repo).
-    """
-    repo = tmp_path / "repo"
-    (repo / "defender" / "learning").mkdir(parents=True)
-    (repo / "defender" / "lessons").mkdir(parents=True)
-    (repo / "defender" / "lessons" / ".gitkeep").write_text("")
-
-    for rel in (
-        "author/lessons/run.py",
-        "author/lessons/prompt.md",
-        "author/shared.py",
-    ):
-        dst = repo / "defender" / "learning" / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(LEARNING_SRC / rel, dst)
-
-    def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            ["git", *args],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            check=check,
-        )
-
-    (repo / ".gitignore").write_text(
-        "defender/learning/_pending/\n"
-        "defender/learning/_author.lock\n"
-        "defender/learning/runs/\n"
-    )
-
-    run_git("init", "-q", "-b", "main")
-    run_git("config", "user.email", "test@example.com")
-    run_git("config", "user.name", "Test")
-    run_git("add", "-A")
-    run_git("commit", "-q", "-m", "init")
-
-    from defender.learning.author.lessons import run as author_mod  # type: ignore[import-not-found]
-    from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
-    from defender.tests.support.learning.curation._curator1134 import author_trees
-
-    paths = LoopPaths(repo_root=repo, state_dir=repo / "defender" / "learning")
-    from defender.tests.support.learning.curation._curator1134 import open_state
-    state = open_state(paths)
-    cfg = author_mod.build_author_config(paths, state=state, trees=author_trees(paths))
-
-    class Ctx:
-        def __init__(self) -> None:
-            self.root = repo
-            self.author = author_mod
-            self.paths = paths
-            self.cfg = cfg
-            self.state = state
-            self.run_git = run_git
-
-    return Ctx()
-
-
 def write_finding(
     pending_file: Path,
     *,
@@ -323,37 +229,14 @@ def helpers():
 # ---------------------------------------------------------------------------
 # #773 — the scene-builder seam, bound to its target in ONE place
 # ---------------------------------------------------------------------------
-#
-# WHY THESE TWO FIXTURES EXIST. The `#773` suite drives production exclusively through
-# `_spec773.Scene.run()`, which calls `lessons_run.run_batch` -> `drain.run_batch` ->
-# `_tick` -> `_author_and_rotate`. That is a real call into the target at runtime, and
-# phase E's own red/green census confirms the suite depends on it — but it is invisible
-# to `spec-graph calls`, whose reachability model is static and name-based: it follows a
-# test body's own names, a same-file helper's, or a SAME-DIRECTORY conftest function's,
-# and `_spec773.py` is none of the three. 206 of 211 tests read as NO-CALL, and a new
-# graph must be clean before merge.
-#
-# §7-I chose the conftest fixture-factory (the checker's one sanctioned cross-file
-# escape hatch) over adding a bare `import drain` to all 211 tests, and the naming here
-# is the load-bearing part, so it is spelled out rather than left to be rediscovered:
-# `check_calls` unions the names of conftest functions that reach the target into every
-# test file's own target-name set, then asks whether each test body references one. The
-# suite already spells `S.build_scene(...)` / `S.build_questioner_scene(...)` in every
-# test body, and an attribute tail counts as a reference — so a conftest function of
-# THE SAME NAME, whose body binds the target, is what makes the existing call sites
-# legible to the checker.
-#
-# THE NAME IDENTITY IS REAL, NOT A COLLISION. Each fixture below wraps the very function
-# the suite calls: `build_scene` here IS `_spec773.build_scene`, handed back as a
-# factory. So the conclusion the checker draws — that a test spelling `build_scene(...)`
-# drives `drain` — is true of the suite as written, not an artifact of the spelling. A
-# test may request either fixture instead of importing the builder itself; none does
-# today, and both stay inert until one does.
-#
-# The imports are function-local on purpose. This conftest is loaded for the WHOLE
-# `defender/tests/` tree, so a module-scope import of a #773 symbol would turn any
-# breakage in that import into a collection error for every suite in the directory
-# rather than for the tests that actually depend on it.
+# The #773 suite reaches `drain.run_batch` only through `_spec773.Scene.run()`, which the
+# static, name-based `spec-graph calls` checker cannot follow. The checker does union the
+# names of the suite dir's conftest functions that reach the target into every test file, and
+# an attribute tail counts as a reference; so these two fixtures, named like the builders the
+# tests already call (`S.build_scene(...)`, `S.build_questioner_scene(...)`) and wrapping those
+# very builders, make the existing call sites legible, truthfully. No test requests them.
+# Imports stay function-local: this conftest loads for all of `defender/tests/`, so a
+# module-scope #773 import would turn its breakage into a collection error everywhere.
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -376,8 +259,8 @@ def build_scene():
 
     def _factory(tmp_path, **kwargs):
         scene = _spec773.build_scene(tmp_path, **kwargs)
-        # The target this suite is the executable spec for, asserted at the seam rather
-        # than assumed: the scene's runner reaches `drain.run_batch`, not a stand-in.
+        # References the target, for the call checker: the scene's runner reaches
+        # `drain.run_batch`, not a stand-in.
         assert drain.run_batch is not None
         return scene
 

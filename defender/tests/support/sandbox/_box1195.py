@@ -1,4 +1,4 @@
-"""Shared fakes for the #1195 rows (both drain lanes), design amendment 3. NOT a test module."""
+"""Shared fakes for the #1195 box-lifecycle tests (both drain lanes)."""
 from __future__ import annotations
 
 import contextlib
@@ -16,7 +16,6 @@ import pytest
 
 from defender import box as box_mod
 from defender.box import (
-    AliasBanNotInForce,
     BoxExecutor,
     BoxFault,
     BoxRequest,
@@ -33,8 +32,8 @@ DEFENDER = Path(__file__).resolve().parents[3]
 #: from these under `<wt>/defender`.
 IMAGE_INPUTS = ("box.Dockerfile", "uv.lock", "pyproject.toml")
 
-#: The build pointer the retired worktree batch start appended to a `BoxFault` (#1195; that unwind
-#: went with the worktree drains, #1108 P4): a mid-batch box fault must never carry it.
+#: The cut-commit pointer the retired worktree batch start appended to a `BoxFault`; a mid-batch
+#: box fault must never carry it.
 POINTER = "origin/main @ "
 
 #: A batch box's docker calls from its post-create stop on (`FakeDaemon.calls_from_the_first_stop`)
@@ -43,14 +42,6 @@ POINTER = "origin/main @ "
 #: removal. Nothing between the post-create stop and the run's check: no call outside a run.
 REFUSED_FIRST_RUN = ["stop", "status", "status", "start", "status", "stop", "status", "rm"]
 
-#: What makes the real `start_box` fail at batch start (the `FakeDaemon` knob), and how main
-#: surfaces it: a `BoxFault` with the cut commit appended (`pointed`), or a link ban as
-#: `AliasBanNotInForce`, unpointed.
-BATCH_START_FAULTS = [
-    pytest.param("refuse_create", BoxFault, True, id="create"),
-    pytest.param("refuse_sentinel", BoxFault, True, id="sentinel"),
-    pytest.param("allow_an_alias", AliasBanNotInForce, False, id="link-ban"),
-]
 
 def spawn_timeout() -> subprocess.TimeoutExpired:
     """A spawn's own CLI timing out: a `SubprocessError`."""
@@ -103,7 +94,7 @@ def assert_the_stop_fault_won(got: BaseException | None, raised: BaseException,
 
 
 # ---------------------------------------------------------------------------------------
-# The design's new names, reached at call time
+# Box names, imported at call time
 # ---------------------------------------------------------------------------------------
 
 
@@ -157,12 +148,6 @@ def chain(exc: BaseException | None) -> list[BaseException]:
         out.append(exc)
         exc = exc.__cause__ or exc.__context__
     return out
-
-
-def carries(got: BaseException | None, fault: BaseException) -> bool:
-    """`got` is `fault`, or a `BoxFault` raised from it (main's batch-start unwind re-raises a
-    `BoxFault` with the cut commit appended, chained to the original)."""
-    return got is fault or (isinstance(got, BoxFault) and got.__cause__ is fault)
 
 
 def caught(fn: Callable[[], object]) -> BaseException | None:
@@ -530,27 +515,6 @@ class Journal(list):
                 assert running == [], f"{kind!r} ran beside a running box {running}: {kinds}"
 
 
-class ScanWatch:
-    """A `scrub=` seam over a `FakeDaemon`: for each tree it is asked to walk it records which
-    containers the daemon still holds at that moment (`held`), marks the daemon's log `scan`,
-    and appends `scrub:<tree>` to `events` when given."""
-
-    def __init__(self, daemon: FakeDaemon, events: list | None = None) -> None:
-        self.daemon, self.events = daemon, events
-        self.held: list[list[str]] = []
-
-    def __call__(self, tree: Path, *_a: Any, **_kw: Any) -> None:
-        self.held.append(self.daemon.names())
-        self.daemon.mark("scan")
-        if self.events is not None:
-            self.events.append(f"scrub:{tree}")
-
-    def assert_scanned_once_the_box_was_gone(self) -> None:
-        """The tree was scanned, and only after the batch-end removal: no container was left."""
-        assert self.held, "the tree was never scanned"
-        assert all(h == [] for h in self.held), f"a tree was scanned beside a box: {self.held}"
-
-
 class HeldStart:
     """A `start_box=` that registers the request's container, running, with `daemon` (as a
     real create leaves it) and hands back a sandboxed executor naming it and carrying `daemon`
@@ -591,7 +555,7 @@ def plant_image_inputs(repo: Path) -> None:
     """Copy this checkout's image inputs under `<repo>/defender`, so a real `start_box` over a
     drain request on `repo` resolves an image name rather than faulting on a missing input.
     The product's committed code check file comes too: the drain's read-only worktree is a
-    `code` mount, read back at `<repo>/defender/<box.CODE_CHECK_FILE>` (#1108 D7 amended)."""
+    `code` mount, read back at `<repo>/defender/<box.CODE_CHECK_FILE>`."""
     (repo / "defender").mkdir(parents=True, exist_ok=True)
     for name in (*IMAGE_INPUTS, box_mod.CODE_CHECK_FILE):
         shutil.copyfile(DEFENDER / name, repo / "defender" / name)
@@ -599,5 +563,5 @@ def plant_image_inputs(repo: Path) -> None:
 
 def clear_opt_out(monkeypatch: Any) -> None:
     """`DEFENDER_ALLOW_UNSANDBOXED` unset: a start fault must surface, never degrade to a host
-    executor (N12)."""
+    executor."""
     monkeypatch.delenv(box_mod._ALLOW_UNSANDBOXED, raising=False)

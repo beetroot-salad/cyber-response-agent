@@ -113,29 +113,6 @@ def test_direct_tool_task_cancellation_cannot_discard_a_fatal_worker(main_fails)
         worker.owner.stop()
 
 
-def test_external_cancellation_also_stops_and_drains_owned_worker():
-    worker = _Worker()
-    run = _Run(door=None, deadline=10, box=worker.owner)
-
-    async def work():
-        return await run.box_work(worker.work)
-
-    async def cancel():
-        attempt = asyncio.create_task(_within_deadline(run, work))
-        assert await anyio.to_thread.run_sync(worker.started.wait, 5)
-        attempt.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await attempt
-        assert worker.finished.is_set()
-        assert not run.has_box_work
-
-    try:
-        anyio.run(cancel)
-    finally:
-        worker.shutdown.set()
-        worker.owner.stop()
-
-
 def test_failed_stop_proof_is_fatal_after_the_worker_settles():
     worker = _Worker(stop_fails=True)
     run = _Run(door=None, deadline=0.1, box=worker.owner)
@@ -257,6 +234,7 @@ def test_external_reads_cannot_starve_owned_execution_or_its_shutdown():
         worker.owner.stop()
 
 
+# The all-False cell is the clean control: caller cancellation alone stops and drains the worker.
 @pytest.mark.parametrize("worker_fails", [False, True])
 @pytest.mark.parametrize("stop_fails", [False, True])
 def test_caller_cancellation_preserves_all_settlement_failures(worker_fails, stop_fails):

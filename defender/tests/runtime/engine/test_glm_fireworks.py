@@ -41,9 +41,10 @@ _CACHE = {
 }
 
 
-def _role_settings(provider, role, name="kimi-k3"):
-    """The live role→settings path after `settings(role)` was retired (#493):"""
-    return provider.settings_for_effort(provider.effort_for_role(name, role))
+def _role_settings(provider, role):
+    """A role's settings: its default effort for `kimi-k3` (a model with no effort floor), mapped
+    to settings."""
+    return provider.settings_for_effort(provider.effort_for_role("kimi-k3", role))
 
 
 def test_role_model_defaults(monkeypatch):
@@ -111,8 +112,7 @@ def test_build_pairs_model_with_settings(monkeypatch):
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     built = providers.build_for_effort("glm-5.3", providers.effort_for_role("glm-5.3", AgentRole.MAIN))
     assert isinstance(built, BuiltModel)
-    # #1243 P1: the shared builder hands every caller its model WRAPPED in the provider retrier
-    # (a wrapper model); the provider's own model is the one it wraps.
+    # The shared builder hands every caller the provider's model wrapped in the provider retrier.
     assert isinstance(getattr(built.model, "wrapped", None), OpenAIChatModel), (
         f"build_for_effort handed out {built.model!r}, not the retrier over the Fireworks model")
     assert built.settings == {"extra_body": {"reasoning_effort": "low"}}
@@ -293,10 +293,11 @@ def test_every_shipped_default_model_owns_its_pricing_row(model):
     assert _own_row_key(model) in pricing.PRICING
 
 
-# --- #1023 ask 3: reasoning effort is a MODEL capability, not a provider preference ------
+# --- reasoning effort is a MODEL capability, not a provider preference ----------------
 
 def test_gather_effort_is_floored_for_a_thinking_only_model():
-    """`gather_effort="none"` is the PROVIDER saying "gather wants the cheapest thinking on offer"."""
+    """Gather's `none` effort is a provider preference; thinking-only GLM 5.3 answers `none` with an
+    HTTP 400, so the preference is floored to `low`, the cheapest it serves."""
     assert providers.effort_for_role("glm-5.3", AgentRole.GATHER) == "low"
     assert providers.effort_for_role("glm-5p3", AgentRole.GATHER) == "low"
     assert providers.effort_for_role(f"fireworks:{_GLM_ID}", AgentRole.GATHER) == "low"
@@ -325,7 +326,7 @@ def test_decommissioned_aliases_are_refused_at_routing(name):
     "gpt-4o",               # the old catch-all answered Sonnet's rate for this
 ])
 def test_a_model_no_row_claims_is_refused_not_absorbed(model):
-    """Every silent fallback this table had cost a real run its real number."""
+    """A model no pricing row claims is refused rather than billed at a neighbour's rate."""
     with pytest.raises(UnknownModel):
         pricing.model_key(model)
 

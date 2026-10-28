@@ -1,4 +1,4 @@
-"""#869 M4/U1 — draft synthesis screens membership (site 3, the HOST-side writer)."""
+"""#869: draft synthesis screens system membership (site 3, the host-side writer)."""
 from __future__ import annotations
 
 import dataclasses
@@ -80,8 +80,8 @@ def test_synthesize_drafts_still_mints_for_a_declared_system(tmp_path):
 def test_discover_system_drafts_hands_out_no_undeclared_directory(
     tmp_path, monkeypatch, capsys,
 ):
-    """#869 M4 site 4: discovery over the batch draft hands out no undeclared directory, says so
-    in the log, and the lane hands the agent only the declared draft (#1108 P4: draft lane)."""
+    """Site 4: discovery over the batch draft skips an undeclared directory and logs it, and the
+    lane hands the agent only the declared draft."""
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
     product = tmp_path / "product"
     write_adapter(product, "elastic")
@@ -98,8 +98,7 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
     skills = lane.skills_dir
     paths = lane.paths
     spawn = LeadAuthorSpawn()
-    # ASSUMED SEAM (S-H): `batch=`; the deps' declared set is the product's adapters joined with
-    # the draft's committed markers (gap: r3 does not spell the marker half over a draft).
+    # The deps' declared set: the product's adapters joined with the draft's committed markers.
     deps = dataclasses.replace(
         lead_author.build_lead_author_deps(
             paths, state=C.open_state(paths), trees=C.draft_trees(lane), batch=lane.batch),
@@ -115,8 +114,7 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
     assert [p.name for p in found] == ["lift-me.md"]
 
     assert log_lines_naming(loop_log(capsys), repr("gather")), (
-        "the undeclared directory was skipped with no trace at all — a refusal with zero "
-        "trace is what O3 forbids, and this is the fourth composition site FK-4 added"
+        "the undeclared directory was skipped with no trace in the log"
     )
     # The control on the same address: declare it, and the same walk says nothing.
     capsys.readouterr()

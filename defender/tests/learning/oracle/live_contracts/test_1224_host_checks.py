@@ -47,13 +47,12 @@ DEPT_FACT = S.fact("f1", "alice moved to the finance department and logged on to
 C_FACT = S.fact("f2", "bob reset carol's password from 10.0.0.9", ("bob", "carol", "10.0.0.9"))
 
 
-def _doc(*b_facts: dict, source_run_dir: str | None = None) -> dict:
+def _doc(*b_facts: dict) -> dict:
     """A v2 family whose world b carries `b_facts` (default: the one default fact f1)."""
     worlds = [S.control_world("a"),
               S.world_v2("b", facts=list(b_facts) if b_facts else None),
               S.world_v2("c", facts=[C_FACT])]
-    kw: dict[str, Any] = {} if source_run_dir is None else {"source_run_dir": source_run_dir}
-    return S.family_v2(worlds=worlds, **kw)
+    return S.family_v2(worlds=worlds)
 
 
 @dataclass
@@ -74,8 +73,8 @@ class _Scene:
         if self.source_run_dir is None:
             return S.world_registry(self.ep, label, self.est, oracle=o, verifier=verifier,
                                     box=box, **knobs)
-        # The registry receives the opened source Run; the
-        # manifest's recorded `source_run_dir` is never read. Otherwise `world_registry`'s.
+        # The registry receives the opened source Run (the manifest's recorded
+        # `source_run_dir` is never read); otherwise as `world_registry` builds it.
         rt = self.est.run_tenant()
         world, ledger = S.load_world(self.ep, label), S.world_ledger(self.ep, label)
         return S.sym(S.REGISTRY, "WorldRegistry")(
@@ -205,16 +204,15 @@ def _assert_handed(v: S.ScriptedModel, k: int, *, framed: dict[str, str] | None 
                    never: tuple[str, ...] = (SCRATCH,)) -> None:
     """The verifier's k-th request (one per pass here: each pass answers with a lone
     `verdict`) carried each `framed` token (input name -> token) inside an untrusted frame and
-    nowhere outside one (M26: the call, the answers, the facts and the frozen rows are none of
-    them host-authored), and none of `never` ANYWHERE in its context, history included."""
+    nowhere outside one (the call, answers, facts and frozen rows are none of them
+    host-authored), and none of `never` ANYWHERE in its context, history included."""
     assert len(v.seen) > k, f"the verifier was asked {len(v.seen)} time(s), never pass #{k + 1}"
     for what, token in (framed or {}).items():
         S.assert_wrapped_untrusted(v.seen[k], token, f"verifier pass #{k + 1}, {what}")
     shown = v.seen[k] + "\n" + S.all_parts_text(v.messages[k])
     for token in never:
         assert token not in shown, (
-            f"verifier pass #{k + 1} was handed {token!r}: the oracle's own transcript, or an "
-            "earlier pass's verdict (each pass is cold, M17=A)")
+            f"verifier pass #{k + 1} was handed {token!r}, though each pass is cold")
 
 
 def _assert_scratched(o: S.ScriptedModel) -> None:
@@ -226,8 +224,8 @@ def _assert_scratched(o: S.ScriptedModel) -> None:
 
 
 def _control(tmp_path: Path, **scene_kw: Any) -> _Scene:
-    """An independent scene — its own estate, episode and world stores — for the F-01
-    control: the refused submission replayed under a PASSING verifier."""
+    """An independent scene — its own estate, episode and world stores — for a control: the
+    refused submission replayed under a PASSING verifier."""
     return _scene(tmp_path / "control", **scene_kw)
 
 
@@ -494,7 +492,7 @@ def test_1224_forged_row_with_missing_extra_or_mistyped_column_fails_check_2(tmp
     for k in (1, 2, 3):
         _assert_verdict(o, k, "check 2")
     # No real edr example exists anywhere in this world: forged from the oracle's knowledge and
-    # served on the first attempt (D2), never refused for want of an exemplar.
+    # served on the first attempt, never refused for want of an exemplar.
     assert sc.call(reg, "edr", "query", **DB1) == {"events": [edr_row]}
     _spent(o)
     ledger = sc.ledger()
@@ -562,6 +560,7 @@ def test_1224_forged_id_occurring_in_any_real_answer_fails_check_3(tmp_path):
     reg = sc.registry(o, v, retry_cap=6)
 
     assert sc.call(reg, "idp", "query", **ALICE) == {"rows": [SID_ROW, _sid_row("e-9f01")]}
+    assert sc.est.calls("siem-x", "lookup"), "the verifier's query ran (control)"
     assert sc.call(reg, "idp", "query", **DB1) == {"rows": [_sid_row("e-9f02")]}
     _spent(o)
     for k, source in enumerate(("base recording", "live base answer", None,
@@ -662,7 +661,7 @@ def test_input_oracle_forges_for_a_fact_the_call_does_not_cover_or_that_does_not
                                  "the world's fact": F1_STATEMENT})
     _assert_handed(v, 1, never=(SCRATCH, reason))
     _assert_scratched(o)
-    assert sc.rows("forged") == [], "no row of a failed attempt is frozen (M15=B)"
+    assert sc.rows("forged") == [], "a failed attempt's row was frozen"
     assert [_payload(r) for r in sc.ledger()] == [bob_base], sc.ledger()
 
     # Control: the verifier-refused (third) submission, alone, under a passing verifier.
@@ -676,7 +675,7 @@ def test_input_oracle_forges_for_a_fact_the_call_does_not_cover_or_that_does_not
 
 
 def test_input_two_forged_rows_get_one_forged_id(tmp_path):
-    """s_p070 — two different rows under one forged_id in a call, or a frozen forged_id reused for another fact's row, are refused; forged_id names one frozen row of one fact."""
+    """One forged_id names one frozen row of one fact; a second row or fact under it is refused."""
     carol_fact = S.fact("f3", "carol ran a credential dumper on web-1 at 15:40Z",
                         ("carol", "web-1"))
     carol = S.query_params("user:carol")
@@ -858,7 +857,7 @@ def test_input_real_id_appears_in_family_data_after_the_forged_id_was_frozen(tmp
     assert o.submissions() == 3, "no attempt failed on the frozen row's id"
     assert sc.rows("forged") == frozen, "the frozen row is not rewritten or dropped"
     assert all("dave" not in r["payload_text"] for r in sc.ledger()), (
-        "the exploration's row reached the sibling's ledger (O9)")
+        "the exploration's row reached the sibling's ledger")
 
     # The collision, recorded for the judge: grade THIS episode and read world b's prompt.
     _judged_in_place(sc.ep)
@@ -868,37 +867,11 @@ def test_input_real_id_appears_in_family_data_after_the_forged_id_was_frozen(tmp
                         if a.startswith(f"judge:{T.fixture_world_id('b')}:"))
     assert world_b, f"world b was never graded (agent ids: {judge.agent_ids})"
     assert S.ORACLE_DECISION in world_b, (
-        "world b's ledger rows (two `oracle` rows) reached the judge (positive control, PCO-08)")
+        "positive control: world b's `oracle` rows never reached the judge")
     assert "e-9f01" in world_b or "fg-1" in world_b, (
-        "M12=A: world b's judge prompt names neither the frozen row's colliding id e-9f01 nor "
-        "its forged_id fg-1: the collision was not recorded for the judge")
+        "world b's judge prompt names neither the colliding id e-9f01 nor its forged_id fg-1")
     assert "dave" in world_b, (
-        "M12=A: the collision of the frozen row's id e-9f01 with this world's real row (dave's, "
-        "read by the oracle's exploration) was not recorded for the judge: world b's judge "
-        "prompt does not carry the colliding real row")
-
-
-def test_1224_id_occurs_only_in_a_verifier_query_result_or_the_source_alert(tmp_path):
-    src = _plant_alert(tmp_path)
-    siem = {"entity": "alice", "risk": "low", "record_id": "r-0042"}
-    sc = _scene(tmp_path, doc=_doc(), source_run_dir=src,
-                live=[("idp", "query", ALICE, BASE), ("idp", "query", DB1, {"rows": []}),
-                      ("siem-x", "lookup", SIEM_ALICE, siem)])
-    o = S.oracle(*_honest(),
-                 *_honest("fg-v", row=_forged(event_id="r-0042"), base_rows=()),
-                 *_honest("fg-a", row=_forged(event_id="a-31337"), base_rows=()),
-                 *_honest("fg-2", row=_forged(event_id="e-9f02"), base_rows=()))
-    v = S.verifier(S.run_query("siem-x", "lookup", SIEM_ALICE), S.verdict(True),
-                   then=S.verdict(True))
-    reg = sc.registry(o, v, retry_cap=4)
-
-    assert sc.call(reg, "idp", "query", **ALICE) == SERVED
-    assert [c for c in sc.est.calls("siem-x", "lookup")], "the verifier's query ran (control)"
-    assert sc.call(reg, "idp", "query", **DB1) == {"rows": [_forged(event_id="e-9f02")]}
-    _spent(o)
-    _assert_verdict(o, 2, "check 3")
-    _assert_verdict(o, 3, "check 3")
-    assert [r.get("attempts") for r in sc.ledger()] == [1, 3], sc.ledger()
+        "world b's judge prompt does not carry the colliding real row (dave's)")
 
 
 def test_1224_forged_row_must_reuse_a_real_entitys_identifier(tmp_path):
@@ -940,7 +913,7 @@ def test_input_served_answer_differs_only_in_row_order_or_spacing(tmp_path):
 
 
 def test_p040_served_answer_changes_a_value_to_a_textually_equal_value_of_another_type(tmp_path):
-    """s_p111 — a value served as the same text but another JSON type, with no claimed change, is an unclaimed difference refused at check 1."""
+    """Equal text of another JSON type, unclaimed, is a difference check 1 refuses."""
     base = {"rows": [{**BASE_ROW, "port": 22}]}
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, base)])
     o = S.oracle(S.submit({"rows": [{**BASE_ROW, "port": "22"}]}, S.EMPTY_CLAIM),

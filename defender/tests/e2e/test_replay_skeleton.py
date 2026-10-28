@@ -66,15 +66,15 @@ def test_replay_golden_v2sshd(tmp_path):
 
 
 def test_replay_full_run_ab3(tmp_path, monkeypatch):
-    """Increment (a): replay a FULL real gather run (ab3-B, 10 turns) — bash,
-    read_file, write_file AND gather dispatch — through the real driver loop."""
+    """Replay a full real gather run (ab3-B, 10 turns: bash, read_file, write_file and gather
+    dispatch) through the real driver loop."""
     run_id = "replay-ab3"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
     turns = load_turns_from_trace(
         GOLDEN_AB3 / "tool_trace.jsonl",
         old_run_dir=AB3_ORIG_RUN_DIR, new_run_dir=model_path(run_dir, run_dir=run_dir),
-        as_appends=True,   # the golden predates #810; MAIN's writer is append_block now
+        as_appends=True,   # MAIN's writer is append_block (#810); the golden predates it
     )
     replay = ReplayFn(turns)
 
@@ -82,13 +82,14 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
                                stamp_terminator=None, *, catalog=None):
         return f"[replayed gather summary: lead={request.lead_id} system={request.system}]"
 
+    # Boundary fake: the golden's gather subagent is not replayed, so `_run_gather` answers each
+    # dispatch with a placeholder summary and only MAIN's loop runs for real.
     monkeypatch.setattr(  # lint-monkeypatch: ok — boundary fake (see comment above)
         runtime_tools, "_run_gather", _fake_run_gather,
     )
 
-    # #1108 P4 (A8): the golden carries the agent content it reads; the run is a tenant whose
-    # agent half is that tree, published for real, so its recorded `cat /agent/lessons/X.md`
-    # reads are answered by the golden's own lessons, observed below in what MAIN was handed.
+    # The run is a tenant whose agent half is the golden's own tree, so its recorded
+    # `cat /agent/lessons/X.md` reads are answered by the golden's lessons (checked below).
     drive(run_dir, run_id=run_id, main=replay, agent=GOLDEN_AB3 / "agent")
 
     assert replay.calls == len(turns), \
@@ -132,8 +133,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     # provider, this is where the evidence would land.
     wire_log = RunPaths(run_dir).wire_log
     assert wire_log.is_file(), (
-        "the wire log is not where this belt is looking — a missing file reads as zero live "
-        "records, so the assertion below would pass without measuring anything"
+        "the wire log is missing, so the check below would measure nothing"
     )
     live = [
         r for r in read_jsonl_rows(wire_log)
@@ -167,8 +167,8 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
     report = (run_dir / "report.md").read_text()
     m = re.search(r"^disposition:\s*(\w+)", report, re.M)
     assert m is not None
-    # #923: the gate's overrule commits `unresolved` — the host's own verdict — not
-    # `inconclusive`, which is now reserved for the model's own close.
+    # The gate's overrule commits `unresolved`, the host's own verdict; `inconclusive` is
+    # reserved for the model's own close (#923).
     assert m.group(1) == "unresolved", (
         "the drafted `malicious` reached disk past a review that found a gap"
     )
@@ -222,7 +222,7 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
     drive(run_dir, run_id=run_id, main=replay)
 
     assert (run_dir / "investigation.md").read_text() == "+ probe\n"
-    # #1235 F2: the run -> case link is also a host sidecar beside the run dir.
+    # The run -> case link is a host sidecar beside the run dir too (#1235).
     from defender.records import RunPaths
     host_sidecars = {sidecar_path(run_dir).name, RunPaths(run_dir).session_pointer().name,
                      RunPaths(run_dir).scrub_verdict().name}
@@ -232,8 +232,8 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
 
 
 def test_role_flip_data_access_is_role_dependent():
-    """The crown-jewel contrast, asserted directly: data-source access is ROLE-DEPENDENT —
-    gather may reach a system, main may not."""
+    """Data-source access is role-dependent: gather reaches a system through `query`, main
+    cannot, and neither does from bash."""
     cmd = "defender-elastic query foo"
     run, dfn = Path("/run"), Path("/dfn")
     assert not permission.decide_bash(

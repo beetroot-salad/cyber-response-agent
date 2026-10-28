@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
-import datetime as _dt
 import json
 import os
 import shutil
@@ -17,40 +16,23 @@ from defender.records._tenant_id import TenantId
 
 WORKTREE = Path(__file__).resolve().parents[4]
 DEFENDER = WORKTREE / "defender"
-#: The package this spec pins (D1.1), by path.
+#: The package this spec pins, by path.
 PACKAGE = DEFENDER / "records"
-#: The committed fixture tenant (#1120 H2): the knowledge every test tenant is set up from.
+#: The committed fixture tenant: the knowledge every test tenant is set up from.
 FIXTURE = WORKTREE / "knowledge" / "tenant-fixture"
 
-#: The two tenants a test may need. `create_tenant` admits ONE tenant per data root (F36), so
-#: the second one's row is planted by hand, in the row's own shape — `accept_tenant` accepts it.
+#: The two tenants a test may need. `create_tenant` admits ONE tenant per data root, so the
+#: second one's row is planted by hand, in the row's own shape.
 T_ID = fixture_uuid("tenant:acme")
 U_ID = fixture_uuid("tenant:beta")
 
-#: The five host-only sidecar suffixes (D2.1, R4-35; #1235 F2 added the run -> case pointer,
-#: moved out of the run folder, and retired #1224's oracle-held record, whose credit is now the
-#: run's in-memory state; the accounting-failures suffix stays reserved after #1235 retired its
-#: record, since the run-id bound is derived from it), spelled HERE rather than imported from
-#: the layout: the suite pins the design's list, so a layout that drops one is caught.
+#: Host-only sidecar suffixes, spelled HERE rather than imported from the layout so a layout
+#: that drops one is caught (`.accounting_failures.json` has no writer but stays reserved).
 SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
                     ".ticket-write.json", ".session-pointer.json")
 #: The staged-name tail a sidecar write creates first (`_io.staged_leaf`: `.staged-` plus 16
-#: lowercase hex digits, R41-23) — the shape MF-21 (DV-5) adds to the sidecar clause.
+#: lowercase hex digits).
 STAGED_TAIL = ".staged-0123456789abcdef"
-#: The bound on a run id's bytes (D12.3; owner, OP-4/OP-8).
-RUN_ID_BOUND = 206
-#: The episode record's size cap (D3.4; owner, OP-4).
-RECORD_CAP = 65536
-#: A fixed clock for `RunId.mint(label, clock=...)` — the shape `mint_run_id`'s takes.
-FIXED_NOW = _dt.datetime(2026, 10, 4, 12, 0, 0, tzinfo=_dt.UTC)
-
-
-def fixed_clock() -> _dt.datetime:
-    return FIXED_NOW
-
-
-#: What `RunId.mint` prefixes under `fixed_clock`: `<%Y%m%dT%H%M%SZ>-`, case-folded (17 chars).
-MINT_PREFIX = f"{FIXED_NOW.strftime('%Y%m%dT%H%M%SZ')}-".casefold()
 
 
 # ==========================================================================================
@@ -58,8 +40,7 @@ MINT_PREFIX = f"{FIXED_NOW.strftime('%Y%m%dT%H%M%SZ')}-".casefold()
 # ==========================================================================================
 
 def raised(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> BaseException | None:
-    """What `fn(*args, **kwargs)` raised — a `SystemExit` included — or `None` when it
-    returned. Never asserts: the test that calls it does."""
+    """What `fn(*args, **kwargs)` raised (a `SystemExit` included), or `None` when it returned."""
     try:
         fn(*args, **kwargs)
     except KeyboardInterrupt:
@@ -86,9 +67,8 @@ def message(err: BaseException | None) -> str:
 
 
 def has_raw_control(text: str) -> bool:
-    """Whether `text` carries a raw character a repr-style quote of a name never leaves raw
-    (design NF-8): any character `str.isprintable` rejects, so a newline, a tab, an ESC, NUL,
-    DEL, a C1 control and U+2028 / U+2029 alike (91 BF-09)."""
+    """Whether `text` carries a character a repr-style quote never leaves raw: anything
+    `str.isprintable` rejects (newline, tab, ESC, NUL, DEL, C1 controls, U+2028 / U+2029)."""
     return any(not ch.isprintable() for ch in text)
 
 
@@ -99,10 +79,9 @@ def has_raw_control(text: str) -> bool:
 def tenant(root: Path, tenant_id: str = T_ID) -> Any:
     """`tenant_id` set up under the data root `root` and accepted by the REAL `accept_tenant`.
 
-    The committed fixture's knowledge is copied to `<root>/<id>/knowledge` with its
-    `agent/.tenant-id`, and the row is written in `create_tenant`'s own shape. The first tenant
-    of a root goes through the real `create_tenant`; any further one is planted by hand, since
-    `create_tenant` admits one tenant per root (F36). Nothing under `<id>/runs` is made."""
+    The committed fixture's knowledge is copied to `<root>/<id>/knowledge`. The first tenant of
+    a root goes through the real `create_tenant`; any further one's row is planted by hand (see
+    `T_ID`). Nothing under `<id>/runs` is made."""
     from defender.tenancy import _tenant
 
     root = Path(root)
@@ -123,8 +102,8 @@ def tenant(root: Path, tenant_id: str = T_ID) -> Any:
 
 
 def tenant_record_text(tenant_id: str) -> str:
-    """`_tenant.json` naming `tenant_id`, in the retired `ensure_runs_base_record`'s own shape —
-    a pre-#1187 container record (R1: a fault now, an old entry the listing refuses)."""
+    """A legacy runs-folder `_tenant.json` naming `tenant_id` (pre-#1187 shape): an old entry
+    the listing now refuses."""
     return json.dumps({"tenant_id": tenant_id, "base_world_id": "0" * 32,
                        "created_at": "2026-10-04T00:00:00+00:00"},
                       indent=2, sort_keys=True) + "\n"
@@ -144,9 +123,8 @@ def plant_tenant_record(runs: Path, tenant_id: str, *, raw: str | bytes | None =
 
 
 def runs_folder(t: Any) -> Path:
-    """`t.runs` as run setup leaves it: a real folder. #1187 (R1): it holds run folders and their
-    sidecars only — no `_tenant.json` (a test planting one plants the OLD entry it now is,
-    `plant_tenant_record`)."""
+    """`t.runs` as run setup leaves it: a real folder for run folders and their sidecars only
+    (a `_tenant.json` there is a legacy entry; see `plant_tenant_record`)."""
     Path(location_path(t.runs)).mkdir(parents=True, exist_ok=True)
     return Path(location_path(t.runs))
 
@@ -160,9 +138,21 @@ def make_run(runs: Path, run_id: str, *, alert: str = '{"alert": "seed"}\n') -> 
     return run_dir
 
 
+def tenant_with_runs(tmp_path: Path, *run_ids: str) -> tuple[Path, Any]:
+    """`(data root, tenant)`: `T_ID` set up under `<tmp_path>/data`, its runs folder as run setup
+    leaves it and a real run folder per id."""
+    root = Path(tmp_path) / "data"
+    root.mkdir(parents=True, exist_ok=True)
+    t = tenant(root, T_ID)
+    runs_folder(t)
+    for rid in run_ids:
+        make_run(location_path(t.runs), rid)
+    return root, t
+
+
 def plant_sidecars(runs: Path, run_id: str, *, staged: bool = True) -> list[Path]:
-    """The four known sidecar files `<runs>/<run_id><suffix>` beside the run (regular files),
-    plus the staged one a sidecar write creates first (`<id>.run-end.json.staged-<16 hex>`)."""
+    """A regular file `<runs>/<run_id><suffix>` per `SIDECAR_SUFFIXES`, plus the staged one a
+    sidecar write creates first (`<id>.run-end.json.staged-<16 hex>`)."""
     made = []
     for suffix in SIDECAR_SUFFIXES:
         p = Path(runs) / f"{run_id}{suffix}"
@@ -177,7 +167,7 @@ def plant_sidecars(runs: Path, run_id: str, *, staged: bool = True) -> list[Path
 
 def record_doc(episode_id: str, tenant_id: str, source_run_id: str,
                runs: Mapping[str, str]) -> dict[str, Any]:
-    """An episode record's content (D3.2): exactly the four fields, run ids as text."""
+    """An episode record's content: exactly the four fields, run ids as text."""
     return {"episode_id": episode_id, "tenant_id": tenant_id,
             "source_run_id": source_run_id, "runs": dict(runs)}
 
@@ -189,30 +179,19 @@ def record_text(episode_id: str, tenant_id: str, source_run_id: str,
 
 
 def plant_record(runs: Path, episode_id: str, tenant_id: str, source_run_id: str,
-                 arms: Mapping[str, str], *, raw: str | bytes | None = None,
-                 name: str | None = None) -> Path:
-    """`<runs>/_episodes/<name or episode_id>.json`, written by hand (a host-written record):
-    `record_text(...)`, or `raw` verbatim. Makes `_episodes/`."""
+                 arms: Mapping[str, str]) -> Path:
+    """`<runs>/_episodes/<episode_id>.json` holding `record_text(...)`, written by hand (a
+    host-written record). Makes `_episodes/`."""
     folder = Path(runs) / "_episodes"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{name if name is not None else episode_id}.json"
-    body = record_text(episode_id, tenant_id, source_run_id, arms) if raw is None else raw
-    if isinstance(body, bytes):
-        path.write_bytes(body)
-    else:
-        path.write_text(body, encoding="utf-8")
+    path = folder / f"{episode_id}.json"
+    path.write_text(record_text(episode_id, tenant_id, source_run_id, arms), encoding="utf-8")
     return path
 
 
 def truncated(text: str) -> str:
-    """A good record cut short — the torn write P2's representative names."""
+    """A good record cut short: a torn write."""
     return text[: len(text) // 2]
-
-
-def deep_json(depth: int = 200_000) -> str:
-    """A JSON document nested `depth` levels deep (F42, R4-17: `read_tenant` raises
-    `RecursionError` on it today)."""
-    return "[" * depth + "]" * depth
 
 
 def alert_file(folder: Path, name: str = "alert.json") -> Path:
@@ -259,7 +238,7 @@ def tree_state(root: Path) -> dict[str, tuple[str, bytes | str | None]]:
 
 def open_fd_count() -> int:
     """How many descriptors this process holds open (`/proc/self/fd`). The listing's own
-    descriptor is counted every time, so two counts compare like for like (R41-13's probe)."""
+    descriptor is counted every time, so two counts compare like for like."""
     return len(os.listdir("/proc/self/fd"))
 
 
@@ -267,8 +246,8 @@ class RecordingIO:
     """The repository's injected `io=` seam, observed: delegates every attribute to the real
     `defender._io` and records each call to one of its functions as `(name, args, kwargs)`.
 
-    It injects NOTHING — no fault, no altered answer (the owner's test shape). Classes and
-    constants pass through unwrapped, so `isinstance` against `_io`'s types still holds."""
+    It injects nothing: no fault, no altered answer. Classes and constants pass through
+    unwrapped, so `isinstance` against `_io`'s types still holds."""
 
     def __init__(self) -> None:
         from defender import _io

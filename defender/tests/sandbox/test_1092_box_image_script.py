@@ -1,4 +1,4 @@
-"""The image-name hash module and the stdlib-only build script (box_image.py)."""
+"""The image-name hash module and the stdlib-only build script (image_cli.py)."""
 from __future__ import annotations
 
 import json
@@ -95,8 +95,7 @@ def test_box_image_tag_prints_the_name_derived_from_the_scripts_own_tree_and_not
         assert out.stdout == expected + "\n", (cwd, out.stdout)
         assert out.stderr == "", (cwd, out.stderr)
     assert expected != image_tag(DEFENDER), "the planted tree must name a different image"
-    # `export` included: #1097 round 1's exported-list verb is gone with the list (the design
-    # amendment) — the contract is exactly `tag` | `build` again.
+    # `export` included: the verbs are exactly `tag` | `build`.
     for argv in ((), ("frobnicate",), ("export",), ("tag", "extra")):
         out = _run_script(script, *argv, cwd=tmp_path)
         assert out.returncode == 2, (argv, out.returncode, out.stderr)
@@ -128,7 +127,7 @@ def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_t
     assert len(recorded_docker_calls(log)) == 1, "the build was retried"
 
 
-# ---- #1095 round 2: no docker to run ---------------------------------------------------------------
+# ---- no docker to run ---------------------------------------------------------------------------
 def test_box_image_build_without_docker_on_path_prints_one_line_and_exits_1(tmp_path):
     _, script = _planted_script(tmp_path)
     empty = tmp_path / "empty-bin"
@@ -140,7 +139,7 @@ def test_box_image_build_without_docker_on_path_prints_one_line_and_exits_1(tmp_
     assert "Traceback" not in out.stderr, out.stderr
 
 
-# ---- MF1's script side (CLI #18) ----------------------------------------------------------------
+# ---- an unreadable input, script side ----------------------------------------------------------
 @pytest.mark.parametrize("verb", ["tag", "build"])
 def test_box_image_reports_a_tree_whose_input_it_cannot_read_and_exits_1(tmp_path, verb):
     root, script = _planted_script(tmp_path)
@@ -156,19 +155,3 @@ def test_box_image_reports_a_tree_whose_input_it_cannot_read_and_exits_1(tmp_pat
     assert "uv.lock" in out.stderr, out.stderr
     assert HASH_INPUTS[0] not in out.stderr.split("cannot read", 1)[1], out.stderr
     assert recorded_docker_calls(log) == []
-
-
-_ALPHA_BETA_LINK = b'{ name = "beta", extra = ["speed"] }'
-_ALPHA_LINKS = (
-    b'dependencies = [\n    ' + _ALPHA_BETA_LINK + b',\n'
-    b'    { name = "winonly", marker = "sys_platform == \'win32\'" },\n]\n'
-)
-_UNUSABLE_LOCKS: dict[str, tuple[bytes, bytes]] = {
-    # case -> (the bytes replaced — b"" appends — , what replaces them)
-    "not TOML": (b"", b"[[package]\n"),
-    "a link with no name": (_ALPHA_BETA_LINK, b'{ extra = ["speed"] }'),
-    "dependencies a string": (_ALPHA_LINKS, b'dependencies = "beta"\n'),
-    "a value nested past the encoder": (b"", b"\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n"),
-    "a nameless entry nested past repr": (b"", b"\n[[package]]\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n"),
-    "an integer past the digit limit": (b"", b'\n[[package]]\nname = "zz"\nversion = "1.0.0"\nx = ' + b"1" * 5000 + b"\n"),
-}

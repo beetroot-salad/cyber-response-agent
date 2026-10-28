@@ -1,4 +1,4 @@
-"""D7's behavioural half: rename every record, and the tree still works (#1077)."""
+"""Rename every record through its owner module, and the tree still works (#1077)."""
 from __future__ import annotations
 
 import ast
@@ -10,14 +10,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = REPO_ROOT / "defender"
-#: By path under `defender/`: #1105 moved the run-layout owner into the runs repository (D1.1).
+#: The modules that own record names, by path under `defender/`.
 OWNER_MODULES = ("records/_layout.py", "records/_episode_paths.py", "tenancy/_tenant.py")
 
 #: The token every renamed record gains. Arbitrary — what matters is that no module anywhere
 #: could have guessed it.
 _TOKEN = "zq7"
 
-#: Values that are NOT record names and are left alone: generic suffixes and extensions shared
+#: Constants that are NOT record names and are left alone: shared suffixes, extensions, patterns.
 _SKIP_NAMES = frozenset({
     "ALIAS_READ_REFUSAL", "CASE_STABLE_REQUIRED", "LEAD_ID_BODY", "GATHER_RAW_SHAPE",
     "GATE_METADATA_KEY", "PAYLOAD_SUFFIX", "SESSION_DB_SUFFIX",

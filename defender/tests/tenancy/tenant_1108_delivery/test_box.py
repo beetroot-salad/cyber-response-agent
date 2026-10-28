@@ -27,13 +27,12 @@ _PINNED = box.BoxSpec(runtime="runc", rootfs="defender-box:test1108")
 
 
 def _check_file() -> str:
-    # Lazy: the contract must collect before the amended box package exists.
     return box.CODE_CHECK_FILE
 
 
 def _check_bytes() -> str:
     """Fresh bytes per test, so no constant (the product file's included) can stand in for
-    the host's own read of the check file (adversary A09)."""
+    the host's own read of the check file."""
     return f"made-up check {secrets.token_hex(8)}\n"
 
 
@@ -119,7 +118,7 @@ def _request(name: str, workdir: Path, *mounts, **extra) -> box.BoxRequest:
                           spec=_PINNED, **extra)
 
 
-#: The request lane's two entries (adversary A24): the public `start_box`, and the request
+#: The request lane's two entries: the public `start_box`, and the request
 #: lane `_oracle.start_oracle_box` reaches without it. Every kind rule must hold on both.
 _ENTRIES = {
     "start_box": lambda request, docker: box.start_box(request, docker=docker),
@@ -135,8 +134,8 @@ def start(request, monkeypatch):
 
 
 def test_code_check_file_is_one_box_constant_committed_in_the_product_tree():
-    """D7 amendment 2: the box package owns the check file's name; the product commits the
-    file. Its bytes carry no information, but an empty read-back would prove nothing."""
+    """The box package owns the check file's name; the product commits the file. Its bytes
+    carry no information, but an empty read-back would prove nothing."""
     assert box.CODE_CHECK_FILE == "MOUNT_CHECK"
     check = DEFENDER / box.CODE_CHECK_FILE
     assert stat.S_ISREG(check.lstat().st_mode), f"{check} must be a regular file, not a link"
@@ -159,7 +158,7 @@ def test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes(
         (DEFENDER, Path("/defender"), False, "code"), (draft, Path("/draft"), False, "staged"),
         (draft / "agent/lessons", Path("/draft/agent/lessons"), True, None)}
     assert request.env["DEFENDER_AGENT_DIR"] == "/draft/agent"
-    # Amendment A / U9: `draft` is the draft's `stage/`; the owner record beside it is in no
+    # `draft` is the draft's `stage/`; the owner record beside it is in no
     # mount (control: it exists, and the containment check sees the stage itself mounted).
     owner = draft.parent / "owner"
     assert draft.name == "stage"
@@ -193,7 +192,7 @@ _DRAFT_ROOTS = {
 @pytest.mark.parametrize("where", sorted(_DRAFT_ROOTS))
 def test_1279_o3_the_tenant_draft_box_refuses_a_mount_overlapping_the_publish_root(
         repo, tmp_path, monkeypatch, where):
-    """O3 through `Batch.box_request`, started by the delivery (which requires a sandbox, even with
+    """Through `Batch.box_request`, started by the delivery (which requires a sandbox, even with
     the opt-out on): the refusal is the non-degradable subtype and leaves nothing under drafts/."""
     from defender.tests.support.sandbox import _box1279 as X
     from defender.tests.support.sandbox._box1195 import FakeDaemon
@@ -281,10 +280,10 @@ _START_FAULTS = ["daemon-unavailable", "image-missing", "code-check-missing", "c
 
 @pytest.mark.parametrize("fault", _START_FAULTS)
 def test_a_drain_start_fault_raises_and_leaves_nothing_under_the_drafts(repo, tmp_path, monkeypatch, fault):
-    """C3 / R5 / O-D: the tenant drain's start requires a sandbox."""
+    """The tenant drain's start requires a sandbox: even with the opt-out on, a fault raises."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     d, batch = _batch(repo, "no-box")
-    drafts = batch.draft_root.parent.parent  # amendment A / U9: <T>/drafts/<id>/stage
+    drafts = batch.draft_root.parent.parent  # <T>/drafts/<id>/stage
     request = replace(batch.box_request(), spec=_PINNED)
     if fault == "code-check-missing":
         from defender._model_view import ModelView
@@ -303,10 +302,10 @@ def test_a_drain_start_fault_raises_and_leaves_nothing_under_the_drafts(repo, tm
 
 
 def test_a_drain_box_started_and_stopped_leaves_the_drafts_as_they_were(repo, tmp_path):
-    """C3 / R5: box start and teardown leave nothing under `<T>/drafts/`."""
+    """Box start and teardown leave nothing under `<T>/drafts/`."""
     from defender.tests.support.sandbox._box1195 import FakeDaemon
     d, batch = _batch(repo, "started")
-    drafts = batch.draft_root.parent.parent  # amendment A / U9: <T>/drafts/<id>/stage
+    drafts = batch.draft_root.parent.parent  # <T>/drafts/<id>/stage
     before = _snapshot(drafts)
     daemon = FakeDaemon(tmp_path)
     executor = d.start_box(replace(batch.box_request(), spec=_PINNED), docker=daemon)
@@ -317,7 +316,6 @@ def test_a_drain_box_started_and_stopped_leaves_the_drafts_as_they_were(repo, tm
 
 
 def test_a_request_that_requires_a_sandbox_never_falls_back_and_writes_no_marker(tmp_path, monkeypatch):
-    """A request that requires a sandbox never falls back and writes no marker."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     tree = tmp_path / "tree"
     lane = tree / "lane"
@@ -338,7 +336,7 @@ def test_a_request_that_requires_a_sandbox_never_falls_back_and_writes_no_marker
 
 
 def test_the_oracle_start_requires_a_sandbox_and_leaves_no_stray_marker(tmp_path, monkeypatch):
-    """C3: the #1224 oracle starts through `box.start_box` with `require_sandbox=True`."""
+    """The #1224 oracle starts through `box.start_box` with `require_sandbox=True`."""
     from defender.box import _oracle
     from defender.tests.support.sandbox._box1195 import FakeDaemon
 
@@ -369,7 +367,6 @@ _PROBE_CASES = [
 
 @pytest.mark.parametrize(("kind", "fault"), _PROBE_CASES)
 def test_readonly_probe_reads_existing_file_and_never_plants(tmp_path, start, kind, fault):
-    """Readonly probe reads existing file and never plants."""
     folder, marker, expected = {
         "code": ("product-tree", _check_file(), _check_bytes()),
         "data": ("evidence-store", "result.json", f'{{"made-up": "{secrets.token_hex(8)}"}}\n'),
@@ -403,8 +400,8 @@ def test_readonly_probe_reads_existing_file_and_never_plants(tmp_path, start, ki
 
 @pytest.mark.parametrize("present", ["check-file-only", "skill-md-only"])
 def test_code_probe_reads_the_check_file_and_no_longer_needs_skill_md(tmp_path, start, present):
-    """D7 amendments 2 and 6: the legacy `<workdir>/defender` code dir passes on the check file
-    alone, and SKILL.md without it refuses. Reads are the fake daemon's own host reads."""
+    """The legacy `<workdir>/defender` code dir passes on the check file alone, and SKILL.md
+    without it refuses. Reads are the fake daemon's own host reads."""
     root = tmp_path / "checkout"
     code = root / "defender"
     code.mkdir(parents=True)
@@ -463,8 +460,7 @@ _NOT_KINDS = ["defender", "tenant", "", "product", "checkout", "repo", "source",
 
 @pytest.mark.parametrize("kind", _NOT_KINDS)
 def test_a_word_that_is_not_a_kind_is_refused_not_mapped(tmp_path, start, kind):
-    """D7 amendment 1, failing closed. Refusal may come at construction or at startup, never
-    as a started box."""
+    """Fails closed: refusal may come at construction or at startup, never as a started box."""
     wt = tmp_path / "wt"
     source = wt / "defender"
     source.mkdir(parents=True)
@@ -488,7 +484,6 @@ def test_a_word_that_is_not_a_kind_is_refused_not_mapped(tmp_path, start, kind):
 ])
 def test_startup_applies_the_declared_kind_never_the_folder_name(
         tmp_path, start, case, folder, kind, starts):
-    """D7 amendments 1-2: the rule comes from the declared kind."""
     wt = tmp_path / "wt"
     source = wt / folder
     extra = {}
@@ -526,7 +521,7 @@ def test_startup_applies_the_declared_kind_never_the_folder_name(
     boundary.assert_never_written()
 
 
-#: Folder names a code mount may carry: the run layout's, the corpora's, the lanes' (A08).
+#: Folder names a code mount may carry: the run layout's, the corpora's, the lanes'.
 _FOLDER_WORDS = ["data", "gather_raw", "lessons", "lessons-questioner", "runs", "evidence",
                  "agent", "knowledge", "skills", "settings", "scratch", "runner", "wt", "tmp",
                  "defender"]
@@ -534,8 +529,8 @@ _FOLDER_WORDS = ["data", "gather_raw", "lessons", "lessons-questioner", "runs", 
 
 @pytest.mark.parametrize("folder", _FOLDER_WORDS)
 def test_a_code_mount_needs_its_check_file_whatever_its_folder_is_called(tmp_path, start, folder):
-    """D7 amendments 1-2: no folder name exempts a `code` mount from its check (A08). Without
-    the check file it refuses; with it, the same request starts reading it (control)."""
+    """No folder name exempts a `code` mount from its check: without the check file it
+    refuses; with it, the same request starts, reading it (control)."""
     source = tmp_path / "srv" / folder
     source.mkdir(parents=True)
     shutil.copyfile(DEFENDER / "SKILL.md", source / "SKILL.md")
@@ -575,7 +570,6 @@ _CODE_DIR_LAYOUTS = {
 
 @pytest.mark.parametrize("layout", sorted(_CODE_DIR_LAYOUTS))
 def test_code_dir_is_the_request_code_root_and_lies_inside_the_code_mount(tmp_path, start, layout):
-    """Code dir is the request code root and lies inside the code mount."""
     planted, empty, code_root, workdir, read = _CODE_DIR_LAYOUTS[layout]
     mount, lane = tmp_path / "checkout", tmp_path / "lane"
     mount.mkdir()
@@ -664,7 +658,6 @@ def test_writable_mount_keeps_its_planted_sentinel_read_back(tmp_path, start, fa
 
 def test_oracle_production_start_reads_the_runner_check_and_refuses_a_wrong_mapping(
         tmp_path, monkeypatch):
-    """Oracle production start reads the runner check and refuses a wrong mapping."""
     from defender.box import _oracle
     from defender.tests.support.sandbox._box1195 import FakeDaemon
 
@@ -697,7 +690,6 @@ def test_oracle_production_start_reads_the_runner_check_and_refuses_a_wrong_mapp
 
 def test_oracle_runner_is_a_code_mount_holding_only_runner_files_and_starts_sandboxed(
         tmp_path, start):
-    """Oracle runner is a code mount holding only runner files and starts sandboxed."""
     from defender.box import _oracle
     from defender.tests.support.sandbox._spec1092 import STOCK_ROOTFS
     from defender.tests.tenancy.tenant_1108_p2._support import MountedReadDocker, tree_bytes
@@ -748,7 +740,6 @@ _TOKEN_FAULTS = {"another-copy": (0, "a token another copy holds\n"), "unreadabl
 @pytest.mark.parametrize("fault", [None, *sorted(_TOKEN_FAULTS)])
 def test_a_staged_copy_starts_only_on_the_token_the_host_planted_for_this_start(
         tmp_path, start, fault):
-    """A staged copy starts only on the token the host planted for this start."""
     root = _copy(tmp_path / "copy")
     boundary = _Boundary(tmp_path, [root / "agent"], root=root,
                          root_reply=None if fault is None else _TOKEN_FAULTS[fault])
@@ -869,7 +860,7 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
     reads = []
     agent_before = files_under(root / "agent")
     status_before = git(repo[0].knowledge, "status", "--porcelain")
-    drafts_before = _snapshot(root.parent.parent)  # amendment A / U9: root is <T>/drafts/<id>/stage
+    drafts_before = _snapshot(root.parent.parent)  # root is <T>/drafts/<id>/stage
 
     def boundary(argv, **kwargs):
         argv = [str(a) for a in argv]
@@ -907,8 +898,8 @@ def _with_code_at(request, source: Path):
 
 @pytest.mark.parametrize("contents", ["no-files", "unrelated-file", "skill-md-only"])
 def test_drain_start_requires_the_code_check_file(repo, tmp_path, contents):
-    """D7/O3: generic empty-data handling cannot bypass the required code probe, and SKILL.md
-    is not it (D7 amendment 6)."""
+    """Generic empty-data handling cannot bypass the required code probe, and SKILL.md is not
+    it."""
     from defender.tests.support.sandbox._box1195 import FakeDaemon
     d, batch = _batch(repo, "required-probe")
     source = tmp_path / "arbitrary-code-location"
@@ -926,8 +917,8 @@ def test_drain_start_requires_the_code_check_file(repo, tmp_path, contents):
 
 
 def test_drain_start_accepts_a_code_folder_holding_only_the_check_file(repo, tmp_path):
-    """D7 amendment 6, positive arm: the tenant drain's code mount needs a check file and
-    nothing else, at an arbitrary code root. Its bytes are fresh, never the product's (A09)."""
+    """Positive arm: the tenant drain's code mount needs the check file and nothing else, at an
+    arbitrary code root; its bytes are fresh, never the product's."""
     from defender.tests.support.sandbox._box1195 import FakeDaemon
     d, batch = _batch(repo, "check-only")
     source = tmp_path / "arbitrary-code-location"

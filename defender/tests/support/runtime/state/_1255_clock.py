@@ -104,11 +104,10 @@ def script(clock: FakeClock, *steps: Step) -> Clocked:
     return Clocked(clock, steps)
 
 
-#: #1108 P4 (O1, O4): the lessons corpus is the TENANT's (`agent/lessons/`, read from the run's
-#: copy of its export), never the checkout's — the checkout holds none. These scenarios need
-#: three lessons a run reads, so the clock drivers plant three made-up ones into the run
-#: tenant's knowledge folder before the launch (`plant_lessons`); the launch-time publish takes
-#: them into the export the run copies.
+#: The lessons corpus is the tenant's (`agent/lessons/`, read from the run's copy of its
+#: export); the checkout holds none. These scenarios need three lessons, so the clock drivers
+#: plant made-up ones into the tenant's knowledge folder before the launch (`plant_lessons`),
+#: and the launch-time publish takes them into the export the run copies.
 LESSONS: tuple[str, ...] = ("clock-lesson-a", "clock-lesson-b", "clock-lesson-c")
 
 
@@ -150,8 +149,8 @@ def _argv_tenant(argv: Iterable[str]) -> str | None:
 
 
 def read_lesson(name: str) -> Callable[[str], H.Turn]:
-    """Read a lesson by the path the run's model view gives the agent tree (#1108 P4: the run
-    copy's `agent/` at the model root `MODEL_AGENT`; the lessons are the tenant's)."""
+    """Read a lesson by the path the run's model view gives the agent tree (the run copy's
+    `agent/` at `MODEL_AGENT`)."""
     from defender.tests.support.runtime.state._1255_view import MODEL_AGENT
 
     def turn(_text: str) -> H.Turn:
@@ -245,8 +244,8 @@ def drive_clocked(  # noqa: PLR0913 — one keyword per seam a clock scenario va
         review_stages: Any = None) -> dict:
     """Drive a natural replay with an injected clock and the standard harness defaults. With
     no `tenant` the replay runs as the fixture tenant, into whose folder `LESSONS` are planted
-    first (#1108 P4: the harness publishes the folder as it is); a named tenant (whose agent
-    half the harness reads as it stands) gets them in that agent half."""
+    first (the harness publishes the folder as it stands); a named tenant gets them in its agent
+    half, which the harness reads as it stands."""
     if tenant is None:
         from defender.tests.support.tenancy import _tenants1106
 
@@ -302,7 +301,7 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
         investigate: Callable[..., dict] | None = None, oracle: Any = None,
         verifier: Any = None, registry_cls: type | None = None,
         out: Launched | None = None) -> Launched:
-    """`run.main(argv)` through the dossier's fixed composition."""
+    """`run.main(argv)` with the scripted models and the injected clock in its seams."""
     import defender.run as run_mod
 
     launched = out if out is not None else Launched()  # lint-default: ok — a fresh record per call unless the caller holds one
@@ -323,8 +322,7 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
     if tenant_id is not None:
         plant_lessons(tenant_id)
     try:
-        # #1108 P4 (OD14, O11): the in-process launch-time publish (publishes the tenant for
-        # real when run.main launches it).
+        # The launch-time publish, in-process: it publishes the tenant for real.
         launched.exit = run_mod.main(
             argv, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
             visualize=lambda *_a, **_k: None, enqueue=lambda *_a, **_k: False,
@@ -450,7 +448,7 @@ def record_source(tmp_path: Path, *, limits: dict | None = None) -> tuple[str, P
     """A source run recorded through `run.main` (natural, unboxed), its clock source at `SOURCE_START`."""
     from defender.tests.support.learning.branch import _triplet_947 as T
 
-    base, seed = location_path(T.runs_base)(tmp_path)
+    base, seed = T.runs_base(tmp_path)
     tenant_id = T.current_tenant().id
     clock = FakeClock(SOURCE_START)
     main = script(clock, (0, append_first_fence()), (5, gather_turn("l-001", "elastic")),

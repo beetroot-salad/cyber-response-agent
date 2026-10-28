@@ -23,27 +23,15 @@ def clean_box_env(monkeypatch):
     monkeypatch.setenv('DEFENDER_AGENT_DIR', '/wrong/inherited/agent')
 
 
-# #1108 P4 (O-A) retired P2's in-box `.tenant-id` check and the `agent` mount kind: identity is
-# checked once, at publish, and the box mounts the run copy's `agent/` plus a staged token. The
-# P2 cases that pinned the retired check moved:
-#   - test_matching_identity_is_read_only_and_precedes_message_zero  -> tenant_1108_p4/
-#     test_run_copy.py::test_o_a_the_run_box_mounts_its_copys_agent_and_token_only_and_reads_the_token_back
-#     (the `.tenant-id` ending partitions are the publish's, P3 `parse_tenant_id_bytes`);
-#   - test_wrong_or_malformed_box_identity_refuses_before_message_zero -> tenant_1108_p4/
-#     test_run_copy.py::test_o_a_a_box_bound_to_another_copy_refuses_before_message_zero
-#     (a merged wrong `.tenant-id` -> test_publish_child.py, stale:operator);
-#   - test_orient_host_shims_receive_the_run_tenants_agent_path -> tenant_1108_p4/
-#     test_run_isolation_e2e.py::test_o2_the_opening_messages_orientation_shows_the_copys_lessons.
-# The unsandboxed opt-out case is rewritten below onto the run copy.
+# Tenant identity is checked at publish, not in the box: the run box mounts the run copy's
+# `agent/` and a staged token (pinned in tenant_1108_p4/test_run_copy.py).
 
 
 def test_explicit_unsandboxed_lane_hands_its_programs_the_run_copy_not_an_inherited_path(
         tmp_path, data_root, monkeypatch):
-    """O3 opt-out, re-rooted by #1108 P4 (O-A/O2): under the explicit unsandboxed opt-out the
-    bash lane's `DEFENDER_AGENT_DIR` is neither the inherited shell value nor the tenant's
-    clone, and the files it names are the run copy's (the clone's working tree holds a
-    different, unpublished lesson). No identity file is re-read (identity is checked at
-    publish)."""
+    """Under the explicit unsandboxed opt-out, the bash lane's `DEFENDER_AGENT_DIR` is neither
+    the inherited shell value nor the tenant's clone, and the files it names are the run copy's
+    (the clone's working tree holds a different, unpublished lesson)."""
     import functools
 
     from defender.execution.bash_exec import parse
@@ -84,7 +72,7 @@ def test_explicit_unsandboxed_lane_hands_its_programs_the_run_copy_not_an_inheri
 
 
 def test_box_request_and_oracle_lanes_do_not_require_a_run_tenant(tmp_path):
-    """P2 scope: neither existing non-run lane gains an agent mount or identity requirement."""
+    """Neither non-run lane (a drain box, the oracle) gains an agent mount or identity check."""
     import shutil
 
     from defender.box._oracle import _make_runner, oracle_box_request
@@ -121,8 +109,8 @@ def test_box_request_and_oracle_lanes_do_not_require_a_run_tenant(tmp_path):
 
 
 def test_daemon_path_translation_preserves_the_run_process_agent_target(tmp_path):
-    """D2: translate only the bind source under DooD; the target is the model view's `/agent`
-    (#1255 P1 — it used to keep Tenant.agent's spelling)."""
+    """Under DooD only the bind source is translated; the target stays the model view's `/agent`
+    (#1255)."""
     defender_dir = plant_tree(tmp_path / 'tree', copy_code=False)
     run_dir = make_run_dir(tmp_path / 'runs')
     agent = tmp_path / 'tenants' / fixture_uuid("tenant:acme") / 'knowledge' / 'agent'

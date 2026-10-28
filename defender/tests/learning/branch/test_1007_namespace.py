@@ -1,4 +1,4 @@
-"""#1007 — F-R5: an episode has ONE namespace, and the operator door that defeated it."""
+"""#1007: an episode has ONE namespace, and no operator-named token can defeat it."""
 from __future__ import annotations
 
 import inspect
@@ -23,14 +23,13 @@ _BASE = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon", "hos
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both CONFIGURED roots, and the learning state the judge appends to, inside `tmp_path`."""
+    """The runs-base variable points inside `tmp_path`, so a stray read never reaches the
+    developer's or CI's real runs folder."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    T.isolate_learning_state(tmp_path, monkeypatch)
 
 
 def launch(tmp_path: Path, *, argv_extra=()):
-    """One episode through the REAL launcher over `_spec1224`'s fixture tenant (#1224)."""
+    """One episode through the REAL launcher over `_spec1224`'s fixture tenant."""
     run = S.launch(
         tmp_path, S.estate(tmp_path),
         calls=[S.Call("idp", "query", S.query_params("user:alice"), _BASE),
@@ -38,15 +37,6 @@ def launch(tmp_path: Path, *, argv_extra=()):
         argv_extra=argv_extra, oracle=S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)),
         verifier=S.passing_verifier())
     return run.rc, run.spawn, run.ep
-
-
-def written_bytes(root: Path) -> str:
-    """Every byte the launcher wrote under the episodes root, as one string — the manifest,
-    pre-flight's records, the ledgers and the provenance record all sit here, so one sweep
-    covers every file surface the operator's string could have reached."""
-    return "\n".join(
-        p.read_text(encoding="utf-8", errors="replace")
-        for p in sorted(root.rglob("*")) if p.is_file())
 
 
 def test_an_episode_is_read_under_one_namespace(tmp_path):
@@ -75,12 +65,11 @@ def test_an_episode_is_read_under_one_namespace(tmp_path):
     assert not hasattr(fam, "episode_token_for")
     params = inspect.signature(cli.preflight_episode).parameters
     assert "episode_token" not in params, "the operator-named token is still a parameter"
-    retired = {"continuation_prompt": "go"} if "continuation_prompt" in params else {}
     with pytest.raises(TypeError, match="episode_token"):
         cli.preflight_episode(
             source=fixture_run(ep), branch_message_id=W.BRANCH_MESSAGE_ID,
             preflight=W.no_preflight, model=None, allow_dirty=False,
-            live_tree=T.source_capture(), episode_token=OPERATOR_NAMED, **retired)
+            live_tree=T.source_capture(), episode_token=OPERATOR_NAMED)
 
 
 @pytest.mark.parametrize("length", [220, 1000])

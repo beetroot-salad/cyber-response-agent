@@ -1,4 +1,4 @@
-"""#1077 — O6's read gate and O7's box posture: what the name move must not weaken."""
+"""The read gate and the box posture that the #1077 record-name move must not weaken."""
 from __future__ import annotations
 
 import shutil
@@ -36,7 +36,7 @@ def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
     from defender.investigation.agent_definition import RunScope, compile_policy_for
     from defender._agent_role import AgentRole
     from defender.tests.support.tenancy import _tenants1106
-    # #1106 M4: gather binds with a RUN's grant (its definition carries none), as the driver does.
+    # gather binds with a RUN's grant (its definition carries none), as the driver does.
     defs = {role: (_tenants1106.fixture_gather_def() if role is AgentRole.GATHER else defn)
             for role, defn in AGENTS.items()}
     # A role that requires a per-spawn corpus (`requires_corpus`) refuses the default scope by
@@ -94,8 +94,8 @@ def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
     gather = policies["GATHER"]
     assert permission.decide_read(
         well_shaped, run_dir=run_dir, defender_dir=worktree, policy=gather).allow, (
-        "positive control: the gather-raw deny is BY SHAPE — a well-shaped payload is admitted "
-        "for the role that must `cat` it (O8), so the shape arm above is not a blanket refusal")
+        "positive control: a well-shaped payload is refused to gather, so the deny is blanket, "
+        "not by shape")
 
 
 def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
@@ -106,18 +106,18 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
     argv = _create_argv("defender-run-1077", run_dir, DEFENDER, BoxSpec(), (), lane=_run_lane_mounts(run_dir, DEFENDER, None)).argv
     joined = " ".join(argv)
     assert argv[argv.index("--network") + 1] == "none", (
-        "N7: the box's network stays `none`; a future store's client is the driver process")
+        "the box's network is not `none`")
     assert "--read-only" in argv
 
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
     writable = [m for m in mounts if "readonly" not in m]
     assert len(writable) == 1, f"the box has more than one read-write bind: {writable}"
-    # #1255 (design rev 4, P1) flipped the TARGETS to the model view: the run folder is bound at
-    # `/runs/current`, the checkout at `/defender`; the SOURCES still name this host's trees.
-    assert f"source={run_dir}," in writable[0], ("N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
-        "wire protocol with the model, and the run dir stays its one rw bind (at /runs/current)")
-    assert "target=/runs/current" in writable[0], ("N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
-        "wire protocol with the model, and the run dir stays its one rw bind (at /runs/current)")
+    # The TARGETS are the model view (the run folder at `/runs/current`, the checkout at
+    # `/defender`); the SOURCES name this host's trees.
+    assert f"source={run_dir}," in writable[0], (
+        f"the box's one rw bind is not the run dir: {writable[0]}")
+    assert "target=/runs/current" in writable[0], (
+        f"the run dir is not bound at /runs/current: {writable[0]}")
     readonly = [m for m in mounts if "readonly" in m]
     assert any(f"source={DEFENDER}," in m and "target=/defender," in m for m in readonly)
     assert any(f"source={run_dir / 'alert_input'}," in m
@@ -137,7 +137,7 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
             "the tenant record beside it unreachable from inside a box (demand d49)")
         assert source != run_dir.parent, bound_the_base
         assert target != run_dir.parent, bound_the_base
-        assert target != Path("/runs"), bound_the_base  # the model view's runs base (#1255)
+        assert target != Path("/runs"), bound_the_base  # the model view's runs base
     assert "--cap-add" not in joined
     assert "--privileged" not in joined
 
@@ -156,6 +156,5 @@ def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
         "print('OK')\n",
         block=("pydantic", "pydantic_ai", "pydantic_core"), cwd=PATHS.repo_root)
     assert done.returncode == 0, (
-        f"claim C4: `RunPaths` uses `@model` (pydantic) today while `_io.py` uses a stdlib "
-        f"dataclass, so D1's conversion is a real constraint, not a formality:\n{done.stderr!r}")
+        f"the box closure's owner import needs pydantic:\n{done.stderr!r}")
     assert b"OK" in done.stdout

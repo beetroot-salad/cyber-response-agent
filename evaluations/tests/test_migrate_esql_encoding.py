@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import shutil
@@ -81,7 +80,7 @@ def real_control_record() -> dict:
 
     `attack_contribution.payload` never reaches a judge prompt — `load_lead_inputs` builds
     `baseline` from `controls` only — but it is `esql_payload` output living in `hidden/`,
-    so O2/O5 hold it to the same encoding and the migration must reach it.
+    so it is held to the same encoding and the migration must reach it.
     """
     query = 'FROM logs-*\n| WHERE host.ip == "172.18.0.11"\n| STATS BY host.name'
     return {
@@ -157,11 +156,6 @@ def _revert_document(doc: Any) -> int:
 def _dict_row_payloads(doc: Any) -> list[dict]:
     return [p for p in _esql_payloads_anywhere(doc)
             if p["values"] and isinstance(p["values"][0], dict)]
-
-
-def _hash_tree(root: Path) -> dict[str, str]:
-    return {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in sorted(root.rglob("*")) if path.is_file()}
 
 
 def _write(path: Path, doc: Any, form: str = "compact") -> Path:
@@ -360,17 +354,11 @@ PLANTED = (
 
 @pytest.fixture(scope="module")
 def migrated_tree(tmp_path_factory):
-    """A copy of the real `oracle_golden/` tree, three payload files hand-reverted to the
-    pre-#842 dict-row form, then migrated twice through `migrate_tree`.
+    """A copy of the real `cases/` tree, three payload files hand-reverted to the pre-#842
+    dict-row form, then migrated through `migrate_tree`; with how many payloads were planted."""
+    root = tmp_path_factory.mktemp("golden")
+    shutil.copytree(GOLDEN_DIR / "cases", root / "cases")
 
-    Copied rather than driven over the checkout for the obvious reason, and copied WHOLE
-    rather than just `cases/` so `audits/` and `held_out_ledger.yaml` are in the blast
-    radius O4 measures.
-    """
-    root = tmp_path_factory.mktemp("golden") / "oracle_golden"
-    shutil.copytree(GOLDEN_DIR, root)
-
-    planted_docs = {}
     planted_payloads = 0
     for rel in PLANTED:
         path = root / rel
@@ -380,22 +368,13 @@ def migrated_tree(tmp_path_factory):
                     if render(doc) == raw)
         planted_payloads += _revert_document(doc)
         path.write_text(SERIALIZATIONS[form](doc), encoding="utf-8")
-        planted_docs[rel] = doc
 
-    before = _hash_tree(root)
-    first = MIGRATE.migrate_tree(root / "cases")
-    after_first = _hash_tree(root)
-    second = MIGRATE.migrate_tree(root / "cases")
-    after_second = _hash_tree(root)
-
-    return {
-        "root": root, "before": before, "after_first": after_first,
-        "after_second": after_second, "first": first, "second": second,
-        "planted": planted_docs, "planted_payloads": planted_payloads,
-    }
+    MIGRATE.migrate_tree(root / "cases")
+    return {"root": root, "planted_payloads": planted_payloads}
 
 
 def test_no_dict_row_esql_payload_survives_anywhere_under_hidden(migrated_tree):
+    assert migrated_tree["planted_payloads"] >= len(PLANTED), "the fixture planted no dict rows"
     root = migrated_tree["root"]
     offenders, seen = [], 0
     for path in sorted((root / "cases").glob("*/hidden/**/*.json")):

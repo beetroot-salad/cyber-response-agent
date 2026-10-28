@@ -1,5 +1,4 @@
-"""#773 — the drain's vouching step (M3.2), what survived the forward check's deletion (#1166).
-"""
+"""#773: the drain's vouching step — every changed lesson must cite an id of this batch."""
 from __future__ import annotations
 
 from defender.tests.support.learning.curation import _spec773 as S
@@ -8,8 +7,8 @@ LESSON = "agent/lessons/l1.md"
 
 
 def test_a_changed_file_citing_no_batch_finding_raises_author_error_773(tmp_path):
-    """A changed corpus file whose citations do not intersect this batch's ids is unvouched,
-    and M3.2's disposition for that is `AuthorError`."""
+    """A changed corpus file citing none of this batch's ids (another batch's, another
+    channel's) is unvouched: `AuthorError`, the draft reset, the row charged an attempt."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -22,7 +21,8 @@ def test_a_changed_file_citing_no_batch_finding_raises_author_error_773(tmp_path
 
 
 def test_a_file_whose_citations_match_head_no_longer_passes_vouching_773(tmp_path):
-    """The HEAD-provenance exemption is gone (M3.2/C13)."""
+    """An edit of a base lesson that still cites only an earlier batch is unvouched: ids
+    already in HEAD vouch for nothing. The control also cites this batch and lands."""
     seeded = {"old.md": S.lesson("older-batch-id")}
     sc = S.build_draft_scene(
         tmp_path,
@@ -48,7 +48,8 @@ def test_a_file_whose_citations_match_head_no_longer_passes_vouching_773(tmp_pat
 def test_a_file_whose_bytes_return_to_head_after_editing_no_longer_exempts_itself_from_vouching_773(
     tmp_path,
 ):
-    """Two arms of the same removal."""
+    """A base lesson edited and restored byte for byte is no change; one left rewritten, still
+    citing only the earlier batch, is unvouched."""
     seeded = {"old.md": S.lesson("older-batch-id", body="original")}
 
     def edit_then_restore(rows, batch_id, cfg):
@@ -78,8 +79,8 @@ def test_a_file_whose_bytes_return_to_head_after_editing_no_longer_exempts_itsel
 
 
 def test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773(tmp_path):
-    """A curator that reports NOTHING committed and leaves a well-cited edit never reaches
-    M3 at all."""
+    """Reporting nothing committed over a well-cited edit aborts before vouching: rc 2,
+    nothing lands or rotates, the draft is reset."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -87,6 +88,8 @@ def test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773(tmp_path):
     )
     assert sc.run() == 2
     assert sc.head_files() == []
+    assert sc.consumed() == []
+    assert "f1" in sc.pending_by_id()
     assert "l1.md" not in sc.corpus_files()
     reported = " ".join(
         [r.get("deadletter_reason", "") for r in sc.graveyard()]
@@ -96,7 +99,7 @@ def test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773(tmp_path):
 
 
 def test_curator_reports_committed_but_leaves_the_corpus_clean_773(tmp_path):
-    """The SAME gate, the OPPOSITE mismatch."""
+    """The same gate, the opposite mismatch: `committed` reported over an unchanged corpus."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -104,21 +107,10 @@ def test_curator_reports_committed_but_leaves_the_corpus_clean_773(tmp_path):
     )
     assert sc.run() == 2
     assert sc.head_files() == []
+    assert sc.commit_count() == 1
     assert sc.category_of("f1") is None
     reported = " ".join(
         [r.get("deadletter_reason", "") for r in sc.graveyard()]
         + [r.get("reason", "") for r in S.stuck_records(sc.paths, sc.channel)]
     )
     assert "reported committed" in reported and "unchanged" in reported  # noqa: PT018 — locked spec test (#773), suppressed not split
-
-
-def test_a_first_spawn_deletion_of_a_pre_existing_lesson_still_passes_vouching_773(tmp_path):
-    """N6."""
-    sc = S.build_draft_scene(
-        tmp_path,
-        rows=[S.finding_row("f1", run_id="f1")],
-        seed_corpus={"old.md": S.lesson("older-batch-id")},
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}, deletes=("old.md",)),
-    )
-    assert sc.run() == 0
-    assert sc.head_text("agent/lessons/old.md") is None

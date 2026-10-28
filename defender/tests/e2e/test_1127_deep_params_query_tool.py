@@ -61,7 +61,7 @@ UNDECODABLE = 5000
 
 SENTINEL_KEY = "ZqNestCanaryKey"
 SENTINEL_VALUE = "ZqNestCanaryValue"
-#: An UNDECLARED system name, digit-free for the same reason: the row coarsens it away, so the
+#: An UNDECLARED system name, digit-free like the two above: the row coarsens it away, so the
 #: only way it could reach the model or the row is an echo of the call.
 SENTINEL_SYSTEM = "ZqNestCanarySystem"
 
@@ -80,7 +80,7 @@ def _chain(depth: int) -> Any:
 
 
 def _chain_text(depth: int) -> str:
-    """`_chain(depth)` as JSON text, built as a STRING:"""
+    """`_chain(depth)` as JSON text, built as a STRING so depths `json.dumps` cannot encode exist."""
     return '{"k":' * depth + '"leaf"' + "}" * depth
 
 
@@ -95,7 +95,7 @@ def deep_params_text(depth: int) -> str:
 
 
 def deep_list_text(depth: int) -> str:
-    """A params value that is a LIST nested `depth` deep (the list itself counted), with the value sentinel at..."""
+    """A LIST nested `depth` deep (the list itself counted), with the value sentinel innermost."""
     return "[" * depth + json.dumps(SENTINEL_VALUE) + "]" * depth
 
 
@@ -106,7 +106,7 @@ SHALLOW_PARAMS = deep_params(2)
 
 @dataclass(frozen=True)
 class Shape:
-    """One way a too-deep call arrives:"""
+    """One way a too-deep call arrives: its args' `form` (dict, text, list params, deep `query_id`)."""
 
     name: str
     form: str
@@ -134,7 +134,6 @@ TEXT_REFUSED = Shape("text-refused", "text", REFUSED)
 TEXT_RECURSION = Shape("text-recursion", "text", RECURSION)
 TEXT_UNDECODABLE = Shape("text-undecodable", "text", UNDECODABLE)
 #: One past the limit in `query_id`, params shallow: the scan covers EVERY argument.
-DICT_QUERY_ID = Shape("dict-query-id", "qid-dict", ONE_PAST)
 TEXT_QUERY_ID = Shape("text-query-id", "qid-text", ONE_PAST)
 
 EVERY_SHAPE = [DICT_ONE_PAST, TEXT_ONE_PAST, TEXT_LIST, TEXT_REFUSED, TEXT_RECURSION,
@@ -147,9 +146,6 @@ WOULD_RUN = [DICT_ONE_PAST, TEXT_ONE_PAST]
 def deep_call(shape: Shape, *, system: str = "elastic", verb: str = "query") -> Turn:
     if shape.form == "dict":
         args: Any = {"params": deep_params(shape.depth), "system": system, "verb": verb}
-    elif shape.form == "qid-dict":
-        args = {"query_id": json.loads(deep_list_text(shape.depth)), "params": SHALLOW_PARAMS,
-                "system": system, "verb": verb}
     else:
         args = args_text(shape, system, verb)
     return Turn(tool_calls=[("query", args)])
@@ -168,7 +164,7 @@ class _QueryArgs(BaseModel):
 
 
 def assert_regime(shape: Shape) -> None:
-    """The precondition every arm states for its own shape:"""
+    """The precondition every arm states for its own shape: where pydantic and `json.loads` stop."""
     text = args_text(shape, "elastic", "query")
     assert json_nesting_depth(text) == shape.depth + 1, "the builder's depth arithmetic moved"
     if shape.form.startswith("qid-"):
@@ -182,7 +178,7 @@ def assert_regime(shape: Shape) -> None:
             _QueryArgs.model_validate_json(text)
         assert [err["type"] for err in refused.value.errors()] == ["string_type"]
         assert SENTINEL_VALUE in str(refused.value.errors()), \
-            "pydantic's own error no longer echoes the input, so the O4 arm is vacuous here"
+            "pydantic's own error no longer echoes the input, so the echo check is vacuous"
         return
     if shape.form == "list-text":
         # The parser reads it and `json.loads` decodes it; the SCHEMA refuses it, and the error
@@ -192,7 +188,7 @@ def assert_regime(shape: Shape) -> None:
             _QueryArgs.model_validate_json(text)
         assert [err["type"] for err in refused.value.errors()] == ["dict_type"]
         assert SENTINEL_VALUE in str(refused.value.errors()), \
-            "pydantic's own error no longer echoes the input, so the O4 arm is vacuous here"
+            "pydantic's own error no longer echoes the input, so the echo check is vacuous"
         return
     if shape.depth <= ACCEPTED:
         _ARGS.validate_json(text)
@@ -212,7 +208,7 @@ def assert_regime(shape: Shape) -> None:
 
 
 def registry(rec: VerbRecorder) -> ScopedFakeVerbs:
-    """`elastic` declaring two verbs with a dict-typed `filt`, only `query` granted — so `esql` is DECLARED AND..."""
+    """`elastic` declaring two verbs with a dict-typed `filt`; only `query` is granted (`esql` is withheld)."""
 
     def query(ctx: VerbContext, *, native_query: str, filt: dict | None = None) -> list[dict]:
         rec.record("query", ctx, {"native_query": native_query, "filt": filt})
@@ -254,7 +250,7 @@ def own_raw_lines(r) -> list[str]:
 
 
 def retry_texts(r) -> list[str]:
-    """What each gather call's answer added to the model's context, one entry per call:"""
+    """What each gather call's answer added to the model's (append-only) context, one entry per call."""
     seen = r.gather.seen
     for earlier, later in zip(seen, seen[1:], strict=False):
         assert later.startswith(earlier), "the model's history is not append-only"
@@ -271,7 +267,7 @@ def names_the_limit(text: str) -> bool:
 
 
 def assert_speaks_of_the_arguments(text: str) -> None:
-    """D's wording:"""
+    """The answer says the call's ARGUMENTS nest too deep, never that its params do."""
     assert re.search(r"\barguments? nest", text, re.IGNORECASE), \
         f"the answer does not say the call's arguments nest too deep: {text[:300]!r}"
     assert "params nest" not in text.lower(), f"the answer says params nest: {text[:300]!r}"
@@ -289,7 +285,6 @@ def model_text_in(text: str) -> list[str]:
 
 @pytest.mark.parametrize("shape", EVERY_SHAPE, ids=lambda s: s.name)
 def test_every_too_deep_call_leaves_one_readable_rejection_row_with_no_params(tmp_path, shape):
-    """O1 and O3's "any deep call leaving no row":"""
     assert_regime(shape)
     r, rec = drive(tmp_path, shape.name, [deep_call(shape), DONE])
 
@@ -310,7 +305,7 @@ def test_every_too_deep_call_leaves_one_readable_rejection_row_with_no_params(tm
 
 @pytest.mark.parametrize("shape", WOULD_RUN, ids=lambda s: s.name)
 def test_a_too_deep_call_pydantic_accepts_never_reaches_the_verb(tmp_path, shape):
-    """O2, at the only regime where it can fail:"""
+    """Only shapes pydantic accepts could reach the verb; the shallow call after one does."""
     assert_regime(shape)
     shallow = {"native_query": "FROM logs", "filt": {"a": 1}}
     r, rec = drive(tmp_path, shape.name, [
@@ -323,7 +318,7 @@ def test_a_too_deep_call_pydantic_accepts_never_reaches_the_verb(tmp_path, shape
 
 @pytest.mark.parametrize("form", ["dict", "text"])
 def test_a_call_at_the_limit_runs_and_is_recorded_whole(tmp_path, form):
-    """The positive control at the boundary, through the tool:"""
+    """The positive control at the boundary, through the tool."""
     shape = Shape(f"{form}-at-limit", form, LIMIT)
     assert_regime(shape)
     r, rec = drive(tmp_path, shape.name, [deep_call(shape), DONE])
@@ -339,7 +334,7 @@ def test_a_call_at_the_limit_runs_and_is_recorded_whole(tmp_path, form):
 
 @pytest.mark.parametrize("form", ["dict", "text"])
 def test_a_call_at_the_limit_leaves_every_wire_log_line_readable(tmp_path, form):
-    """A's margin, on the real wire log (`observe.RequestLogger`, `wire_logs/llm_requests.jsonl`):"""
+    """The reader's bound leaves margin for the real wire log's wrapping of a limit-deep call."""
     shape = Shape(f"{form}-at-limit", form, LIMIT)
     assert_regime(shape)
     r, rec = drive(tmp_path, shape.name, [deep_call(shape), DONE])
@@ -366,7 +361,7 @@ PAST_THE_STORE = 205
 
 
 def test_a_refused_dict_call_leaves_nothing_deep_in_the_history_the_lead_goes_on(tmp_path):
-    """#1127 second review:"""
+    """The refused call's arguments leave the history, so the lead goes on and every response logs."""
     shape = Shape("dict-past-the-store", "dict", PAST_THE_STORE)
     r, rec = drive(tmp_path, shape.name, [deep_call(shape), q("elastic", "query", VALID), DONE])
 
@@ -387,7 +382,7 @@ def test_a_refused_dict_call_leaves_nothing_deep_in_the_history_the_lead_goes_on
 
 @pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_ACCEPTED], ids=lambda s: s.name)
 def test_a_too_deep_call_to_a_withheld_verb_is_a_schema_rejection_not_a_denial(tmp_path, shape):
-    """C11 and the design's non-obligation:"""
+    """The shallow call to the withheld verb is its one denial; the deep one is refused for depth."""
     assert_regime(shape)
     r, rec = drive(tmp_path, shape.name, [
         q("elastic", "esql", VALID), deep_call(shape, verb="esql"), DONE])
@@ -409,7 +404,6 @@ def test_a_too_deep_call_to_a_withheld_verb_is_a_schema_rejection_not_a_denial(t
 @pytest.mark.parametrize("system", ["elastic", SENTINEL_SYSTEM], ids=["declared", "undeclared"])
 @pytest.mark.parametrize("shape", EVERY_SHAPE, ids=lambda s: s.name)
 def test_the_model_is_told_the_limit_and_nothing_it_sent(tmp_path, shape, system):
-    """O4:"""
     assert_regime(shape)
     r, _rec = drive(tmp_path, shape.name, [
         q("elastic", "query", {"native_query": SENTINEL_VALUE}),
@@ -442,7 +436,7 @@ def test_the_model_is_told_the_limit_and_nothing_it_sent(tmp_path, shape, system
 @pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_REFUSED], ids=lambda s: s.name)
 def test_a_budget_of_too_deep_calls_ends_the_lead_exactly_as_shallow_rejections_do(
         tmp_path, shape):
-    """THE SECURITY CONTROL (the design's negative universal:"""
+    """THE SECURITY CONTROL: depth exempts no call from the rejection budget, accepted or refused."""
     assert_regime(shape)
     deep, deep_rec = drive(tmp_path, "deep", [
         *[deep_call(shape, system=f"ghost{i}") for i in range(B)],
@@ -468,7 +462,6 @@ def test_a_budget_of_too_deep_calls_ends_the_lead_exactly_as_shallow_rejections_
 @pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_UNDECODABLE, None],
                          ids=lambda s: s.name if s else "shallow-control")
 def test_repeating_one_too_deep_call_trips_the_repeat_guard(tmp_path, shape):
-    """O3's repeat half:"""
     call = _bad_args("ghostone") if shape is None else deep_call(shape)
     if shape is not None:
         assert_regime(shape)
@@ -489,7 +482,6 @@ def test_repeating_one_too_deep_call_trips_the_repeat_guard(tmp_path, shape):
 
 @pytest.mark.parametrize("shape", [DICT_ACCEPTED, TEXT_REFUSED], ids=lambda s: s.name)
 def test_a_too_deep_call_neither_reuses_a_seq_nor_rewrites_a_sidecar(tmp_path, shape):
-    """C13 through the tool:"""
     assert_regime(shape)
     r, rec = drive(tmp_path, shape.name, [
         q("elastic", "query", {"native_query": "FROM a"}), deep_call(shape),

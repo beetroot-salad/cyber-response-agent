@@ -23,7 +23,7 @@ from defender.systems.verbs import read_roster
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 ADAPTERS = PATHS.adapters_dir
-#: The committed tenant's settings folder, where the shipped table lives since #1106.
+#: The committed tenant's settings folder, where the shipped table lives.
 SETTINGS = T1106.FIXTURE_SETTINGS
 
 HOLDER = "lead-zero-correlation"
@@ -77,8 +77,8 @@ def test_a_withholding_from_every_holder_is_honoured_by_the_correlation_registry
                                grant_home=str(withheld_table))
     decision = _NarrowedRegistry(inner, correlation_grant(withheld)).decide("alpha", "lookup")
     assert decision.outcome == "DENIED", decision
-    # #1106 M4: the RUN's resolved table, not a repo-relative constant — and not the other
-    # table this test also built.
+    # The refusal names the RUN's resolved table: not a repo-relative constant, and not the other
+    # table this test built.
     assert str(granted_table) not in (decision.refusal or ""), decision.refusal
     assert str(withheld_table) in (decision.refusal or ""), (
         f"the refusal must name the table the withholding was written in:\n{decision.refusal}"
@@ -87,8 +87,8 @@ def test_a_withholding_from_every_holder_is_honoured_by_the_correlation_registry
 
 
 def test_a_denied_verb_names_the_table_for_gather_too():
-    """M6 is not holder-specific: every registry over a table-projected grant tells a DENIED
-    caller where the withholding is authored. Pinned on gather's own withheld pair."""
+    """Naming the authoring table is not holder-specific: a DENIED gather call is told it too, on
+    gather's own withheld pair."""
     table = dispositions_path(SETTINGS)
     rows = load_dispositions(table)
     decision = ModuleVerbRegistry(

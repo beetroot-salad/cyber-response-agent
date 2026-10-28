@@ -1,11 +1,9 @@
-"""#1108 P4 round 6 — run-copy and run-start cases the earlier rounds left unpinned (each was a
-wrong-but-green production variant): a second launch on a live-owned run id, a dead owner's copy
-at the run id, the owner record written first, per-copy tokens, the host knowledge-source record
-written before the box and a failed write stopping the run, and the dev issuer config's
-location.
+"""#1108 P4 run-copy and run-start edge cases, each a wrong-but-green production variant: a copy
+already at the run id (live or dead owner), the owner record written first, per-copy tokens, the
+host knowledge-source record, and the dev issuer config's location.
 
-Real `run.main` / real `copy_for_run`; no monkeypatching. The oracles are the planted
-copies' bytes and the processes that really exist.
+Real `run.main` and `copy_for_run`; the oracles are the planted copies' bytes and processes that
+really exist.
 """
 from __future__ import annotations
 
@@ -21,15 +19,16 @@ from typing import Any
 import pytest
 
 from defender.tenancy import run_knowledge
-from defender.tests.e2e._box665 import RecordingDocker
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._drain_support import process_start, write_owner
+from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+    _dead_process,
+    process_start,
+    write_owner,
+)
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
 from defender.tests.tenancy.tenant_1108_p4.test_run_copy import (
-    _boxed_lifecycle,
-    _dead_process,
-    _Investigation,
+    _mount_sources,
     boxed_only,  # noqa: F401, F811 — fixture
 )
 
@@ -62,7 +61,7 @@ def _live_child():
     return proc
 
 
-# --- D01: a second launch never steals a live-owned copy --------------------------------------
+# --- a second copy never steals a live-owned one ----------------------------------------------
 
 def test_r6_a_second_copy_for_a_run_id_whose_owner_lives_is_refused_and_leaves_the_first(tenant):
     child = _live_child()
@@ -79,12 +78,11 @@ def test_r6_a_second_copy_for_a_run_id_whose_owner_lives_is_refused_and_leaves_t
         child.wait()
 
 
-# #1279: no launch names a run id (the system mints it) and a run is never resumed, so a launch
-# cannot meet a live or a dead copy at its id; `copy_for_run`'s own refusal and replacement are
-# pinned directly above and below.
+# No launch names a run id (the system mints it, #1279) and a run is never resumed, so
+# `copy_for_run`'s refusal and replacement are pinned directly, above and below.
 
 
-# --- D04: a dead owner's copy at the run id is replaced ---------------------------------------
+# --- a dead owner's copy at the run id is replaced --------------------------------------------
 
 def test_r6_a_dead_owners_copy_at_the_run_id_is_replaced_by_a_fresh_one(tenant):
     run_id = str(uuid.uuid4())
@@ -99,14 +97,13 @@ def test_r6_a_dead_owners_copy_at_the_run_id_is_replaced_by_a_fresh_one(tenant):
     assert [p.name for p in B.run_copies(tenant).iterdir()] == [run_id]
 
 
-# --- D02 / inputs-01: the owner record is written first ---------------------------------------
+# --- the owner record is written first --------------------------------------------------------
 
 def test_r6_a_copy_build_cut_off_mid_write_leaves_a_temporary_that_already_names_its_owner(
         tmp_path, data_root):
-    """A builder killed by the kernel in the middle of writing (here: its first file larger than
-    its file-size limit, SIGXFSZ) leaves the dot-named temporary. That folder must already name
-    the builder: an ownerless temporary counts dead and a concurrent publish would sweep a copy
-    that is still being built."""
+    """A builder killed mid-write (SIGXFSZ: its first file exceeds its file-size limit) leaves the
+    dot-named temporary, which must already name the builder: an ownerless temporary counts
+    dead, and a concurrent publish would sweep a copy still being built."""
     big = "x" * 200_000
     with B.run_tenant(tmp_path, data_root, files={"agent/lessons/r6-big.md": big}) as t:
         run_id = str(uuid.uuid4())
@@ -132,7 +129,7 @@ def test_r6_a_copy_build_cut_off_mid_write_leaves_a_temporary_that_already_names
         assert json.loads(owner.read_text(encoding="utf-8"))["pid"] == proc.pid
 
 
-# --- surfaces-14: each run copy's token is its own --------------------------------------------
+# --- each run copy's token is its own ---------------------------------------------------------
 
 def test_r6_every_run_copy_stages_its_own_unpredictable_token(tenant):
     tokens = []
@@ -144,7 +141,7 @@ def test_r6_every_run_copy_stages_its_own_unpredictable_token(tenant):
     assert all(len(t) >= 32 for t in tokens), tokens
 
 
-# --- H09 / H06: the host knowledge-source record is written before the box --------------------
+# --- the host knowledge-source record is written before the box -------------------------------
 
 def test_r6_the_host_knowledge_source_record_exists_when_the_lifecycle_starts(tenant, tmp_path):
     out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
@@ -174,7 +171,7 @@ def test_r6_a_run_that_cannot_write_its_host_knowledge_record_does_not_start(ten
     assert "knowledge record" in out.refusal, out.text()
 
 
-# --- surfaces-04: the production dev-issuer-config constant lies under no box mount source ----
+# --- the dev issuer config a binding names lies under no box mount source ---------------------
 
 def test_r6_the_dev_issuer_config_location_lies_under_no_box_mount_source(tenant, tmp_path,
                                                                         boxed_only):  # noqa: F811 — fixture
@@ -182,12 +179,6 @@ def test_r6_the_dev_issuer_config_location_lies_under_no_box_mount_source(tenant
     <tenant>/issuer.json`), named by the tenant's binding, is under no box mount source."""
     DEV_ISSUER_CONFIG = WORKTREE / "playground-issuer" / "client" / tenant.tenant_id / "issuer.json"
     bind_forge(tenant, issuer_config=DEV_ISSUER_CONFIG)
-    docker, investigation = RecordingDocker(), _Investigation()
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
-                   lifecycle=_boxed_lifecycle(docker, investigation))
-    assert out.reached, out.text()
-    assert investigation.calls == 1, out.text()
-    sources = [Path(m["source"]) for m in docker.mounts()]
-    assert T.exposes(sources, T.DEFENDER), "control: the product tree is mounted"
+    sources = _mount_sources(tenant, tmp_path)
     assert not T.exposes(sources, DEV_ISSUER_CONFIG), (
         f"a box mount exposes the issuer client config {DEV_ISSUER_CONFIG}")

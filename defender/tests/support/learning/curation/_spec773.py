@@ -1,28 +1,21 @@
-"""Scene substrate for the lessons drain's tick: a real git repo, a real queue file, and the
-curator fake that enters through the config's own injection seam.
+"""Scene substrate for the lessons drain's tick (#773): a real git repo or batch draft, a real
+queue file, and the curator fake, which enters through the config's own injection seam.
 
-Built for #773's drain-owned forward check. #1166 deleted that check, its repair spawn and its
-gap ledger, and with them the verifier, repair and key-source fakes this file carried; what
-remains drives the commit, deferral, single-truth and adversarial-input behaviour the drain
-still has.
-
-Project idioms this file obeys, because CI ratchets them: fakes enter through
-`dataclasses.replace(cfg, ...)` and constructor arguments, never `monkeypatch.setattr`;
-each fake injects faults only and never classifies or decides policy.
+Fakes enter through `dataclasses.replace(cfg, ...)` and constructor arguments, never
+`monkeypatch.setattr` (a CI ratchet), and only inject faults: they never classify or decide
+policy.
 """
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
 
 import dataclasses
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 
 from defender.tests.support.learning.curation._drain719 import (  # noqa: F401 — re-exported substrate
-    Background,
     Holder,
     channel_of,
     consumed,
@@ -30,23 +23,20 @@ from defender.tests.support.learning.curation._drain719 import (  # noqa: F401 �
     git,
     graveyard,
     make_paths,
-    make_repo,
     pending,
     pending_by_id,
-    read_rows,
     seed,
     stuck_records,
 )
 
 from defender.learning.author import drain
-from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.core.config import LoopPaths
 from defender.learning.core.state import QUESTIONER_FINDINGS, Channel, LearningState
 from defender.tests.support.learning.curation._curator1134 import author_trees
 
 
-#: §7 FK-17: a deferral that reaches the ceiling is greppable apart from a fault exit.
+#: The graveyard reason that tells a deferral reaching the ceiling apart from a fault exit.
 DEFERRED_CEILING_REASON = "deferred_ceiling"
 
 
@@ -55,26 +45,19 @@ DEFERRED_CEILING_REASON = "deferred_ceiling"
 # ---------------------------------------------------------------------------
 
 
-def lesson(*finding_ids: str, body: str = "the lesson body", **frontmatter: Any) -> str:
-    """One corpus `*.md` citing `finding_ids` under the channel's own provenance key.
-
-    `source_finding_ids` is the key `provenance_field("finding_id")` derives and the key
-    both the pre-author idempotency gate and M3.2's vouching read (C13/G13), so a file
-    written with it is one a later tick recognises."""
+def lesson(*finding_ids: str, body: str = "the lesson body") -> str:
+    """One corpus `*.md` citing `finding_ids` under `source_finding_ids`, the key
+    `provenance_field("finding_id")` derives and both the idempotency gate and vouching read."""
     lines = ["---", "source_finding_ids:"]
     lines += [f"- {fid}" for fid in finding_ids]
-    for key, val in frontmatter.items():
-        lines.append(f"{key}: {json.dumps(val)}")
     lines += ["---", "", body, ""]
     return "\n".join(lines)
 
 
 def malformed_lesson(body: str = "no frontmatter here at all\n") -> str:
-    """Bytes whose frontmatter block cannot be parsed, written by the test itself.
-
-    Real input through the real primitive: `_cited_ids` runs `split_frontmatter` over these
-    bytes on every run, so the taxonomy assumption ("malformed cites nothing") is re-probed
-    rather than pinned once."""
+    """Bytes whose frontmatter block cannot be parsed: real input to the real parser
+    (`_cited_ids_in` runs `split_frontmatter` on it), so "malformed cites nothing" is re-probed
+    on every run."""
     return "---\nsource_finding_ids: [unterminated\nbody without a closing fence\n" + body
 
 
@@ -94,8 +77,8 @@ class Scene:
     corpus: Path
     rows: list[dict]
     curator: FakeCurator
-    #: The channel module's own `run_batch`; the lessons channel's unless a sibling scene
-    #: replaces it. Named so `Scene.run` always drives a production front door.
+    #: The channel module's own `run_batch` (the lessons channel's unless a sibling scene sets
+    #: it), so `Scene.run` always drives a production front door.
     runner: Callable[..., int] | None = None
     #: HEAD as the scene was built, so `head_files()` can answer "what this tick committed".
     base_sha: str = ""
@@ -103,13 +86,13 @@ class Scene:
     # -- observations -------------------------------------------------------
 
     def run(self, **kw: Any) -> int:
-        """Drive the REAL entry point. `lessons_run.run_batch` -> `drain.run_batch` ->
-        `_tick` -> `_author_and_rotate`: the whole tick, not a re-implementation of it."""
+        """Drive the real entry point (`run_batch` -> `drain.run_batch` -> `_tick` -> ...):
+        the whole tick, not a re-implementation of it."""
         runner = self.runner if self.runner is not None else lessons_run.run_batch
         return runner(cfg=self.cfg, **kw)
 
     def head_files(self) -> list[str]:
-        """The paths THIS TICK committed — asked of git, never of the drain's own record."""
+        """The paths this tick committed, asked of git, never of the drain's own record."""
         if self.head_sha() == self.base_sha:
             return []
         out = git(self.repo, "diff", "--no-renames", "--name-only", self.base_sha, "HEAD").stdout
@@ -136,9 +119,8 @@ class Scene:
         )
 
     def report_lines(self) -> list[str]:
-        """The channel's own disposition report — `held_report` on the lessons channel,
-        `skip_report` on the questioner's. One accessor, because both are written by the
-        same `shared.write_disposition_report` and both are what "reported" means."""
+        """The channel's disposition report: `held_report` on the lessons channel,
+        `skip_report` on the questioner's, both written by `shared.write_disposition_report`."""
         path = location_path(self.paths.state_root) / self.cfg.channel.report
         return path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
 
@@ -172,11 +154,8 @@ def build_scene(  # noqa: PLR0913 — one tick's whole world, threaded rather th
     channel_name: str = "findings",
     **cfg_overrides: Any,
 ) -> Scene:
-    """A lessons-channel tick, wired through the config's own injection seams.
-
-    The curator spawn, which the tick would otherwise reach over the network, enters through a
-    `dataclasses.replace` on the real config builder's output. Nothing is patched onto a
-    module."""
+    """A lessons-channel tick: the curator spawn enters by `dataclasses.replace` on the real
+    config builder's output, so nothing is patched onto a module."""
     paths = make_paths(tmp_path, state_dir=state_dir)
     repo = paths.repo_root
     corpus = paths.lessons_dir
@@ -208,12 +187,9 @@ def build_scene(  # noqa: PLR0913 — one tick's whole world, threaded rather th
 
 
 def world_row(fid: str, **extra: Any) -> dict:
-    """One QUESTIONER-channel row: a finding about the WORLD, not about the defender.
-
-    That channel carries no `run_id` and no defender disposition, so its gate is
-    idempotency-only (#1007 N1) and O7 obliges this delta to leave its behaviour alone. It names
-    the systems its lesson is selected by (#1224 O12): the questioner curator drains a world row
-    naming none without authoring (`consumed_no_systems`)."""
+    """One questioner-channel row: a finding about the world, not the defender. It carries no
+    `run_id` or disposition, so its gate is idempotency-only (#1007), and it names the systems
+    its lesson is selected by: a row naming none drains unauthored (`consumed_no_systems`)."""
     return {
         "schema_version": 1,
         "finding_id": fid,
@@ -233,7 +209,7 @@ def build_questioner_scene(
     seed_corpus: dict[str, str] | None = None,
     **cfg_overrides: Any,
 ) -> Scene:
-    """The SIBLING channel's tick, the questioner curator's, on the same drain body."""
+    """The sibling channel's tick, the questioner curator's, on the same drain body."""
     from defender.learning.author.questioner import run as questioner_run
 
     paths = make_paths(tmp_path)
@@ -270,20 +246,14 @@ def build_questioner_scene(
 
 
 # ---------------------------------------------------------------------------
-# #1108 P4 (O7): the same tick over a git-free draft
+# The same tick over a batch's git-free draft
 # ---------------------------------------------------------------------------
-
-#: The repo-relative spelling of a lesson after P4 (OD6).
-DRAFT_LESSONS = "agent/lessons"
-DRAFT_QUESTIONER = "agent/lessons-questioner"
-
 
 @dataclass
 class DraftScene(Scene):
-    """`Scene` over a P3 batch: `corpus` is the draft's lane, `repo` the tenant clone, and every
-    head observation reads the batch branch (what the commit-maker made), never a checkout.
-    `head_files()` names `agent/...` paths; `commit_count()` counts the branch tip's history
-    (the export commit is the only commit before the tick)."""
+    """`Scene` over a batch: `corpus` is the draft's lane, `repo` the tenant clone, and every
+    head observation reads the batch branch, never a checkout. `head_files()` names `agent/...`
+    paths; `commit_count()` counts the tip's history (only the export commit precedes the tick)."""
 
     lane: Any = None
 
@@ -318,19 +288,17 @@ class DraftScene(Scene):
 def _draft_scene(  # noqa: PLR0913 — one draft tick's whole world, threaded rather than global
         tmp_path: Path, *, corpus_name: str, rows: list[dict], channel: Channel,
                  curator: FakeCurator | None, seed_corpus: dict[str, str] | None,
-                 state_dir: Path | None, build: Callable[..., Any], runner: Callable[..., int],
+                 build: Callable[..., Any], runner: Callable[..., int],
                  cfg_overrides: dict[str, Any],
                  agent_files: dict[str, str] | None = None) -> DraftScene:
     from defender.tests.support.learning.curation import _curator1134 as C
 
     files = {**(agent_files or {}),
              **{f"{corpus_name}/{rel}": text for rel, text in (seed_corpus or {}).items()}}
-    lane = C.draft_lane(tmp_path, files=files, state_dir=state_dir)
+    lane = C.draft_lane(tmp_path, files=files)
     seed(lane.paths, channel, rows)
-    # The draft builders' one funnel resolves the fake here; a fresh one per scene (it is
-    # mutated below), so it cannot be a signature default.
+    # A fresh fake per scene (it records its calls), so it cannot be a signature default.
     fake = curator if curator is not None else FakeCurator()
-    fake.outside_root = lane.root
     base = build(lane, state=LearningState.open(lane.paths))
     wiring: dict[str, Any] = {"invoke_agent": fake}
     wiring.update(cfg_overrides)
@@ -343,21 +311,21 @@ def _draft_scene(  # noqa: PLR0913 — one draft tick's whole world, threaded ra
 
 
 def build_draft_scene(tmp_path: Path, *, rows: list[dict] | None = None,
-                      state_dir: Path | None = None, curator: FakeCurator | None = None,
-                      seed_corpus: dict[str, str] | None = None, channel_name: str = "findings",
+                      curator: FakeCurator | None = None,
+                      seed_corpus: dict[str, str] | None = None,
                       agent_files: dict[str, str] | None = None,
                       **cfg_overrides: Any) -> DraftScene:
-    """`build_scene` after P4: the lessons tick over a draft lane (`_curator1134.draft_lane`),
-    `seed_corpus` published in the export commit, the config built with the assumed `batch=`
-    seam (`_curator1134.draft_author_cfg`). `agent_files` (agent-relative, e.g.
-    `"notes/x.md"`) are published in the export too: content outside the lane's corpus."""
+    """`build_scene` over a draft lane (`_curator1134.draft_lane`): `seed_corpus` is published
+    in the export commit and the config built with `batch=` (`_curator1134.draft_author_cfg`).
+    `agent_files` (agent-relative, e.g. `"notes/x.md"`) are published too: content outside the
+    lane's corpus."""
     from defender.tests.support.learning.curation import _curator1134 as C
 
     return _draft_scene(
         tmp_path, corpus_name="lessons",
         rows=list(rows if rows is not None else [finding_row("f1", run_id="f1")]),
-        channel=channel_of(channel_name), curator=curator, seed_corpus=seed_corpus,
-        state_dir=state_dir, build=C.draft_author_cfg, runner=lessons_run.run_batch,
+        channel=channel_of("findings"), curator=curator, seed_corpus=seed_corpus,
+        build=C.draft_author_cfg, runner=lessons_run.run_batch,
         cfg_overrides=cfg_overrides, agent_files=agent_files)
 
 
@@ -366,8 +334,8 @@ def build_questioner_draft_scene(tmp_path: Path, *, rows: list[dict] | None = No
                                  seed_corpus: dict[str, str] | None = None,
                                  agent_files: dict[str, str] | None = None,
                                  **cfg_overrides: Any) -> DraftScene:
-    """`build_questioner_scene` after P4, over a draft lane (`draft_questioner_cfg`);
-    `agent_files` as `build_draft_scene`'s."""
+    """`build_questioner_scene` over a draft lane (`draft_questioner_cfg`); `agent_files` as in
+    `build_draft_scene`."""
     from defender.learning.author.questioner import run as questioner_run
     from defender.tests.support.learning.curation import _curator1134 as C
 
@@ -375,7 +343,7 @@ def build_questioner_draft_scene(tmp_path: Path, *, rows: list[dict] | None = No
         tmp_path, corpus_name="lessons-questioner",
         rows=list(rows if rows is not None else [world_row("w1")]),
         channel=QUESTIONER_FINDINGS, curator=curator, seed_corpus=seed_corpus,
-        state_dir=None, build=C.draft_questioner_cfg, runner=questioner_run.run_batch,
+        build=C.draft_questioner_cfg, runner=questioner_run.run_batch,
         cfg_overrides=cfg_overrides, agent_files=agent_files)
 
 
@@ -386,17 +354,12 @@ def build_questioner_draft_scene(tmp_path: Path, *, rows: list[dict] | None = No
 
 @dataclass
 class FakeCurator:
-    """The first curator spawn (`cfg.invoke_agent`).
-
-    A fault-spec, not a policy: `writes` is what the agent leaves in the worktree,
-    `committed`/`consumed_skip` are what it SELF-REPORTS, and the two are deliberately
-    independent so a test can drive any report/tree disagreement O5 names. `raises` is the
-    declarative fault slot; every use cites the ledger claim that observed its class on the
-    real dependency (GL2 for the `RETIRE_SET` members)."""
+    """The curator spawn (`cfg.invoke_agent`) as a fault spec, not a policy: `writes` is what it
+    leaves in the tree and `committed`/`consumed_skip` what it self-reports, deliberately
+    independent so a test can drive any report/tree disagreement. `raises` is the fault slot."""
 
     writes: dict[str, str] = field(default_factory=dict)
     deletes: tuple[str, ...] = ()
-    outside: dict[str, str] = field(default_factory=dict)
     committed: list[str] | None = None
     consumed_skip: list[dict] | None = None
     commit_message: str = "author findings batch"
@@ -405,9 +368,6 @@ class FakeCurator:
     raises: BaseException | None = None
     also: Callable[..., None] | None = None
     calls: list[dict] = field(default_factory=list)
-    #: Where `outside` writes land: the repo root by default; a draft scene sets the draft's
-    #: root, so `outside` names `agent/<not a lane>/...` (#1108 P4).
-    outside_root: Path | None = None
 
     def __call__(self, rows: list[dict], batch_id: str, cfg: Any) -> dict:
         self.calls.append({"rows": list(rows), "batch_id": batch_id, "cfg": cfg})
@@ -421,11 +381,6 @@ class FakeCurator:
             target = cfg.corpus_dir / rel
             if target.is_file():
                 target.unlink()
-        for rel, text in self.outside.items():
-            root = self.outside_root if self.outside_root is not None else cfg.repo_root
-            target = root / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text, encoding="utf-8")
         if self.also is not None:
             self.also(rows, batch_id, cfg)
         if self.result is not None:
@@ -441,63 +396,35 @@ class FakeCurator:
 
 
 # ---------------------------------------------------------------------------
-# fault content, each citing the claim that observed it
+# fault content
 # ---------------------------------------------------------------------------
 
 
 def author_error(msg: str = "injected") -> BaseException:
-    """GL2: `AuthorError` is a `RETIRE_SET` member, declared once at `drain.py:73`."""
+    """`AuthorError`: a `RETIRE_SET` member."""
     return drain.AuthorError(msg)
 
 
 def git_error(msg: str = "injected") -> BaseException:
-    """GL2: `GitError` is a `RETIRE_SET` member."""
+    """`GitError`: a `RETIRE_SET` member."""
     from defender._git import GitError
 
     return GitError(["status"], 128, msg)
 
 
-def model_retry(msg: str = "injected") -> BaseException:
-    """GL2: `ModelRetry` is a `RETIRE_SET` member."""
-    from pydantic_ai.exceptions import ModelRetry
-
-    return ModelRetry(msg)
-
-
-def stage_abort(msg: str = "injected") -> BaseException:
-    """GL2: `StageAbort` is an explicit `RETIRE_SET` EXCLUSION (§7 E waives the cell)."""
-    from defender.learning.core.config import StageAbort
-
-    return StageAbort(msg)
-
-
-def fatal_config(msg: str = "injected") -> BaseException:
-    """GL2 / F8: `FatalConfigError` is a `ValueError` and a `RETIRE_SET` exclusion, which is
-    why the per-pair handler must re-raise it BEFORE its broad `except Exception`."""
-    from defender.learning.core.config import FatalConfigError
-
-    return FatalConfigError(msg)
-
-
 __all__ = [
-    "Background",
     "DEFERRED_CEILING_REASON",
     "FakeCurator",
     "Holder",
     "Scene",
     "author_error",
-    "author_shared",
     "build_scene",
     "drain",
-    "fatal_config",
     "finding_row",
     "git",
     "git_error",
     "lesson",
     "lessons_run",
     "malformed_lesson",
-    "model_retry",
-    "read_rows",
     "seed",
-    "stage_abort",
 ]

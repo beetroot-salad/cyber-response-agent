@@ -31,16 +31,14 @@ def test_env_int_raises_named_fatal_on_non_numeric(monkeypatch, bad):
 
 @pytest.mark.parametrize("tok", ["", "0", "off", "false", "no", "NO"])
 def test_env_bool_false_tokens(monkeypatch, tok):
-    """The empty string counts as false, so `NAME=` and an unset NAME behave alike —
-    preserving the prior hand-rolled `os.environ.get(NAME, "")` behavior."""
+    """The empty string counts as false, so `NAME=` and an unset NAME behave alike."""
     monkeypatch.setenv(_NAME, tok)
     assert env_bool(_NAME, True) is False
 
 
 @pytest.mark.parametrize("bad", ["maybe", "2", "disabled"])
 def test_env_bool_raises_on_unrecognized_token(monkeypatch, bad):
-    """The fail-loud upgrade: an unrecognized value is an operator typo we surface,
-    not silently coerce to False (the old behavior)."""
+    """An unrecognized value is an operator typo, surfaced, not silently coerced to False."""
     monkeypatch.setenv(_NAME, bad)
     with pytest.raises(FatalConfigError, match=rf"{_NAME} must be a boolean"):
         env_bool(_NAME, False)
@@ -131,7 +129,6 @@ def test_parse_iso_utc_accepts_the_trailing_z():
 
 
 def test_parse_iso_utc_reads_a_naive_value_as_utc_rather_than_rejecting_it():
-    """The judge's recency screen rested on this."""
     naive = _clock.parse_iso_utc("2026-01-01T12:00:00")
     assert naive is not None
     assert naive.tzinfo is not None

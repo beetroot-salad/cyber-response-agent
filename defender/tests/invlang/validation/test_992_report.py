@@ -1,4 +1,5 @@
-"""#992 — what the committed report carries (O4, M4, the vocabularies, the caps, and the ticket egress)."""
+"""#992 — what the committed report carries for a reviewed `inconclusive`: the ceiling receipts,
+their caps, and the ticket egress."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -52,7 +53,8 @@ _ONE_TURN = "extra_turns"
 
 
 def _override_arms() -> list[tuple[str, object, dict]]:
-    """Every arm on which an `inconclusive` is OVERRIDDEN to `unresolved` after review — the same four arms that..."""
+    """The four arms on which review OVERRIDES an `inconclusive` to `unresolved`, as
+    `(name, stages, close kwargs)`; a repeat and a spent pool need a challenged attempt first."""
     return [
         ("null-ask", recording(gap(None)), {}),
         ("repeat", recording(gap("l-004")), {"after": [recording(gap("l-004"))]}),
@@ -69,7 +71,9 @@ def _drive(deps, name: str, stages, kw: dict):
 
 
 def test_reviewed_inconclusive_carries_receipts(tmp_path):
-    """An `inconclusive` that STANDS after review — the held ceiling, the one arm that stands — carries into..."""
+    """An `inconclusive` that STANDS after review commits its priced receipts (the frontmatter
+    block, one body note line each); one the review overrides commits `unresolved` with
+    neither, and the receipts stay in investigation.md."""
     golden = ceiling_companion()
     deps, run_dir = deps_over(tmp_path / "holds", golden)
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
@@ -125,7 +129,8 @@ def test_reviewed_inconclusive_carries_receipts(tmp_path):
 
 
 def test_confident_and_forced_commits_carry_no_ceiling_test(tmp_path):
-    """A reviewed confident close and a gate-forced `unresolved` commit no `ceiling_test:` block and no receipt..."""
+    """Receipts follow the committed verdict, not the conclude block: neither commit carries
+    them, though the composer still sees them in the companion."""
     golden = ceiling_companion()
 
     confident = recording(holds())
@@ -173,7 +178,8 @@ def _near_cap_rows() -> tuple[str, ...]:
 
 
 def test_reviewed_inconclusive_report_frontmatter_stays_under_its_cap_with_the_longest_cause(tmp_path):
-    """A reviewed `inconclusive` that stands — under the seventh cause, the longest sentence in REPORT_CAUSES —..."""
+    """A block at `_MAX_CEILING_FRONTMATTER_BYTES` under the longest cause commits inside the
+    frontmatter cap, and the arithmetic holds for every cause beside the longest `failure_kind`."""
     rows = _near_cap_rows()
     at_cap = _spec923.paid(*rows)
     block = priced_block(at_cap)
@@ -207,7 +213,9 @@ def test_reviewed_inconclusive_report_frontmatter_stays_under_its_cap_with_the_l
 
 
 def test_reviewed_inconclusive_ceiling_note_overflow_is_refused(tmp_path):
-    """The accumulated rendered `ceiling_test` note lines are BOUNDED at the entry-price gate — collected at BOTH..."""
+    """Rendered `ceiling_test` notes are BOUNDED at the entry-price gate, at the write gate and
+    the close alike: an over-bound note is refused before any stage and never reaches the
+    commit's whole-file cap. The ladder finds whatever bound the code declares."""
     first_refusal_at: int | None = None
     largest_committing: int | None = None
     for size in NOTE_LADDER:
@@ -280,7 +288,8 @@ def test_reviewed_inconclusive_ceiling_note_overflow_is_refused(tmp_path):
 
 
 def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_path, monkeypatch):
-    """Driving a reviewed, ceiling-held `inconclusive` close through to the ticket bridge, the outbound comment's..."""
+    """The ticket comment for a ceiling-held `inconclusive` carries the seventh cause verbatim; a
+    machinery-failed one renders as the `unresolved` it committed, never as the ceiling claim."""
     from defender.tests.support.runtime.engine._spec767 import use_mapping
 
     mapping = case_ticket.load_case_mapping(use_mapping(monkeypatch, tmp_path / "dfn"))

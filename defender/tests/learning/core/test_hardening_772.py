@@ -1,9 +1,8 @@
 """The lead author's PERMISSION gate must not admit agent system prompts (gather/SKILL.md, invlang/SKILL.md) as writable skills paths. Probes go through the real `decide_write` / `decide_bash` with a positive control per refusal.
 
-#1108 P4 (O7, OD6): the lane writes a batch draft's `agent/skills/`; the product prompts stay in the
-product tree. ASSUMED SEAM (S-H): the lead author's write lanes compile under
-`RunScope(tenant_agent=<draft agent/>)` (`bind(LEAD_AUTHOR_DEF, run, defender_dir=<product>,
-scope=...)`), its systems the product's adapters (plus the draft's markers)."""
+The lane writes a batch draft's `agent/skills/` (its write lanes compile under
+`RunScope(tenant_agent=<draft agent/>)`, its systems the product's adapters plus the draft's
+markers); the product prompts stay in the product tree."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,7 +26,7 @@ from defender.investigation import permission  # noqa: E402
 from defender.investigation.agent_definition import RunScope, bind  # noqa: E402
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
 
-#: The draft's repo-relative skills spelling after P4 (OD6).
+#: The draft's repo-relative skills spelling.
 SKILLS_REL = "agent/skills/"
 
 
@@ -197,11 +196,8 @@ def test_the_lanes_read_the_tree_that_was_bound_not_a_sibling_of_it(tmp_path: Pa
     assert not admits("ghost/SKILL.md")        # the sibling's does not
 
 
-# 3. The frame-injection channel. #1108 P4 OD12(i): `test_the_porcelain_reader_does_not_quote_so_
-# the_commit_gate_never_saw_this` pinned how `git status --porcelain` spells a spaced name in the
-# worktree. A claim is now the draft read by name off the filesystem (`ChangeSet`), never
-# porcelain: P3 tenant_1108_delivery/test_change_set_fuzz.py::test_derivation_keeps_its_invariant_on_random_box_output;
-# the write-gate half stays above (`gather/queries/elastic/a b.md` is not writable).
+# 3. The frame-injection channel: the write-gate half is above (`gather/queries/elastic/a b.md`
+# is not writable); the claim side is pinned in `tenant_1108_delivery/test_change_set_fuzz.py`.
 
 
 # 4. The two gates stop disagreeing in the direction that discards a batch.
@@ -233,17 +229,6 @@ _EVERY_SHAPE = (
 )
 
 
-def _commit_scopes_admit_lead_author(repo_root: Path, path: str) -> bool:
-    """The LEAD AUTHOR's path rule alone — the union helper above answers for either role, and
-    the point here is the one path where the two roles disagree."""
-    try:
-        lead_author._skills_path_rule(repo_root, "M", path, systems=frozenset(_SYSTEMS),
-                                      tree_for=lane_tree_for(repo_root))
-    except LeadAuthorError:
-        return False
-    return True
-
-
 def _commit_scopes_admit(repo_root: Path, path: str) -> bool:
     """Does EITHER role's real commit-gate path rule accept `path` as a modification?"""
     for rule in (
@@ -263,7 +248,8 @@ def _commit_scopes_admit(repo_root: Path, path: str) -> bool:
 
 
 def test_nothing_the_write_gate_admits_is_refused_at_the_drain(tmp_path: Path):
-    """The anti-drift invariant, and the second half of what #772 asked for."""
+    """The anti-drift invariant: every path the write gate admits, one of the two roles'
+    commit-gate path rules accepts."""
     admits, repo_root = _gate(tmp_path)
     admitted = [f"{SKILLS_REL}{rel}" for rel in _EVERY_SHAPE if admits(rel)]
     # A gate that admitted nothing would satisfy the implication vacuously.
@@ -292,14 +278,16 @@ def test_the_write_gate_refuses_the_protected_surfaces_first(tmp_path: Path):
 # 5. The `rm` lane, which had the same recoverable-vs-discard problem.
 
 def test_rm_can_no_longer_name_an_agent_prompt(tmp_path: Path):
-    """`rm defender/skills/gather/SKILL.md` used to MATCH the grant — the old pattern was `(?:/{seg})+`, unbounded in depth and indifferent to the filename — and was refused only by the commit-gate delete-prohibition, i.e."""
+    """The `rm` grant names only the two draft lanes: an agent prompt, a system doc or an
+    established template is refused here, not left to the commit gate (which discards the
+    batch)."""
     defender_dir, agent = _tree(tmp_path)
     run = tmp_path / "run"
     run.mkdir()
     pol = _bind(run, defender_dir, agent).policy
 
     def bash(cmd: str) -> bool:
-        # The drain box's cwd is the draft's `agent/` (P3 `Batch.box_request`).
+        # The drain box's cwd is the draft's `agent/`.
         return permission.decide_bash(
             cmd, policy=pol, run_dir=run, cwd_anchor=agent,
         ).allow

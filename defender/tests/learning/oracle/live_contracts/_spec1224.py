@@ -1,4 +1,4 @@
-"""Shared machinery for #1224's spec — "branching through a live oracle". NO test functions;
+"""Shared machinery for #1224's tests (branching through a live oracle). No test functions;
 underscore-prefixed so pytest never collects it."""
 from __future__ import annotations
 
@@ -38,25 +38,22 @@ def mod(dotted: str):
 
 
 def sym(dotted: str, name: str):
-    """One attribute off a lazily-imported module — `AttributeError` is a real red."""
+    """One attribute off a lazily-imported module."""
     return getattr(mod(dotted), name)
 
 
 #: The modules this suite drives, spelled once.
-ORACLE = "learning.branch.estate.oracle"          # NEW (coined)
-LIMITER = "learning.branch.estate.limiter"        # NEW (coined)
+ORACLE = "learning.branch.estate.oracle"
+LIMITER = "learning.branch.estate.limiter"
 REGISTRY = "learning.branch.estate.registry"
 LEDGER = "learning.branch.ledger"
 FAMILY = "records._family"
 CLI = "learning.branch.cli"
 EPISODE = "learning.branch.episode"
-STEPS = "learning.branch.steps"
 QUESTIONER = "learning.branch.questioner"
 JUDGE = "learning.judge"
 JUDGE_RUN = "learning.judge.run"
-JUDGE_RENDER = "learning.judge.render"
 JUDGE_ENQUEUE = "learning.judge.enqueue"
-VOCAB = "_vocab"
 RUN = "run"
 QUERY_TOOL = "investigation.query_tool"
 VERBS = "systems.verbs"
@@ -65,16 +62,11 @@ VISUALIZE = "presentation.visualize_episode"
 SERIALIZE = "learning.frontend.serialize"
 LESSONS_RUN = "learning.author.lessons.run"
 
-#: Every spelling this suite coins (see the module docstring). Renamed here, and only here.
+#: Every production spelling the suite depends on: a rename changes it here, and only here.
 COINED = {
-    "module.oracle": f"defender.{ORACLE}",
-    "module.limiter": f"defender.{LIMITER}",
     "exc.unservable": "OracleUnservable",
     "exc.sandbox": "OracleSandboxError",
-    "fn.start_box": "start_box",
     "fn.settings": "oracle_settings",
-    "fn.check": "check_submission",
-    "cls.limiter": "RateLimiter",
     "tool.run_query": "run_query",
     "tool.forge": "forge",
     "tool.record_fact": "record_fact",
@@ -85,29 +77,17 @@ COINED = {
     "record.outcome": "outcome.yaml",
     "record.world_dir": "world_records",
     "record.oracle_dir": "oracle",
-    "record.forged": "forged.jsonl",
-    "record.facts": "facts.jsonl",
-    "record.answers": "answers.jsonl",
-    "record.oracle_ledger": "ledger.jsonl",
-    "record.world_base": "base.jsonl",
     "record.samples": "samples.yaml",
     "decision.oracle": "oracle",
     "decision.real_error": "real-error",
-    "role.oracle": "oracle",
-    "role.oracle_check": "oracle_check",
-    "step.preflight": "PREFLIGHT",
     "knob.model": "ORACLE_MODEL",
     "knob.check_model": "ORACLE_CHECK_MODEL",
     "knob.retry_cap": "ORACLE_RETRY_CAP",
     "knob.rate": "ORACLE_RATE",
     "knob.budget": "ORACLE_BUDGET",
-    "knob.turn_deadline": "ORACLE_TURN_DEADLINE",
     "knob.effort": "ORACLE_EFFORT",
-    "knob.check_effort": "ORACLE_CHECK_EFFORT",
     "fn.preflight": "preflight_replay",
     "fn.samples": "system_samples",
-    "kw.served_systems": "served_systems",
-    "kw.samples": "samples",
     "reason.unservable": "oracle unservable",
     "reason.did_not_finish": "did not finish",
     "reason.budget": "budget",
@@ -129,10 +109,6 @@ RETIRED_OUTCOME = "incomplete"
 REASON_UNSERVABLE = COINED["reason.unservable"]
 REASON_DID_NOT_FINISH = COINED["reason.did_not_finish"]
 REASON_BUDGET = COINED["reason.budget"]
-BUCKETS = ("lead-set", "lead-quality", "analyze-discipline", "decision-discipline",
-           "observability", "none")
-OLD_MANIFEST_KEYS = ("overlay", "discriminator.holding_system", "discriminator.envelope",
-                     "captured_patterns", "configured_patterns")
 PREDATES = "predates the oracle"
 
 KNOB_MODEL = COINED["knob.model"]
@@ -140,9 +116,7 @@ KNOB_CHECK_MODEL = COINED["knob.check_model"]
 KNOB_RETRY_CAP = COINED["knob.retry_cap"]
 KNOB_RATE = COINED["knob.rate"]
 KNOB_BUDGET = COINED["knob.budget"]
-KNOB_TURN_DEADLINE = COINED["knob.turn_deadline"]
 KNOB_EFFORT = COINED["knob.effort"]
-KNOB_CHECK_EFFORT = COINED["knob.check_effort"]
 UNSANDBOXED_ENV = "DEFENDER_ALLOW_UNSANDBOXED"
 
 
@@ -161,8 +135,8 @@ def judge_refused_cls() -> type[BaseException]:
 # Re-exported from the #947 / #921 machinery, unchanged.
 EPISODE_ID = T.EPISODE_ID
 SOURCE_RUN_ID = T.SOURCE_RUN_ID
-#: The run id a direct (unbranched) investigation fixture runs under (#1187: a uuid4 — `RunId`
-#: admits canonical lowercase UUID text only).
+#: The run id a direct (unbranched) investigation fixture runs under: a uuid4, since `RunId`
+#: admits canonical lowercase UUID text only.
 RUN_ID = "9c2e4b1a-7d3f-4e5a-8b6c-1d2e3f4a5b6c"
 AS_OF = T.AS_OF
 AS_OF_DT = datetime(2026, 7, 28, 16, 18, 45, tzinfo=UTC)
@@ -175,9 +149,7 @@ FakeJudge = J.FakeJudge
 
 
 def no_preflight(*_args: Any, **_kw: Any) -> int:
-    """The role-model preflight, neutralised (`_triplet_947.no_preflight`'s reasoning), taking
-    any arguments: M25 adds a keyword (`branching=`) the one-argument #947 spelling would
-    refuse with a TypeError."""
+    """The role-model preflight, neutralised, accepting any arguments."""
     return 0
 
 fixture_world_id = T.fixture_world_id
@@ -205,12 +177,11 @@ def judge_called_for(judge: FakeJudge, world_id: str) -> bool:
 archived_judge_world = J.archived_judge_world
 
 
-#: The model name GPR-01's probe saw on the provider error (Anthropic arm).
+#: The model name a real (Anthropic) provider error carries.
 OUTAGE_MODEL = "claude-sonnet-4-5"
 
-#: A model `defender.configuration._pricing` prices (R-08): every model double is named after it, so an oracle
-#: request accrues positive spend whatever unit the implementer picks (USD from pricing, request
-#: count, tokens). D1 dropped the unpriced-model fallback from the spec; no test may lean on it.
+#: A model `defender.configuration._pricing` prices: every model double is named after it, so an
+#: oracle request accrues positive spend (an unpriced model is refused before any request).
 PRICED_MODEL = "claude-sonnet-4-6"
 
 
@@ -219,19 +190,17 @@ def double_model_name(role: str) -> str:
     the part after the last `/` (it strips a registry path), so the double is priced, and the
     `fake-<role>` head still marks its traffic in any log a test reads."""
     return f"fake-{role}/{PRICED_MODEL}"
-#: HTTP statuses GPR-01 observed: a provider outage (5xx) and a rate limit (429).
+#: The HTTP status of a provider outage (5xx).
 OUTAGE = 503
-RATE_LIMITED = 429
 
 
 def provider_outage(status: int | None = OUTAGE, *,
                     model_name: str = OUTAGE_MODEL) -> Exception:
-    """What the oracle's / verifier's model client raises once its own bounded transient
-    retries give up — GPR-01 (executed against a local stub server, Anthropic and Fireworks
-    alike): `ModelHTTPError(status_code, model_name, body)` for a 5xx outage or a 429 it could
-    not absorb, `ModelAPIError(model_name, "Connection error.")` when no connection is made
-    (`status=None`). The SDK's retries sit below the model layer, so a model double raises
-    this once per request. Returns a FRESH instance each call; the caller raises it."""
+    """What the oracle's / verifier's model client raises once its own transient retries give
+    up (observed against a stub server, Anthropic and Fireworks alike): `ModelHTTPError` for a
+    5xx or a 429 it could not absorb, `ModelAPIError(model_name, "Connection error.")` when no
+    connection is made (`status=None`). The SDK retries below the model layer, so a double raises
+    this once per request. Returns a fresh instance each call; the caller raises it."""
     from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 
     if status is None:
@@ -242,10 +211,10 @@ def provider_outage(status: int | None = OUTAGE, *,
 
 
 # --------------------------------------------------------------------------------------
-# The fixture tenant (O1): systems that are not the lab's, served by stub adapters on disk.
+# The fixture tenant: systems that are not the lab's, served by stub adapters on disk.
 # --------------------------------------------------------------------------------------
 
-#: The fixture tenant's systems — O1's own example, none of them a lab system.
+#: The fixture tenant's systems, none of them a lab system.
 SYSTEMS = ("edr", "idp", "siem-x")
 LAB_SYSTEMS = ("change-mgmt", "cmdb", "elastic", "host-state", "identity", "tacit-knowledge",
                "threat-intel", "ticket")
@@ -254,7 +223,7 @@ FIXTURE_TENANT = fixture_uuid("tenant:acme")
 #: One stub adapter module, planted per system. It reads its answers from the estate's JSON
 #: file AT CALL TIME (so a scenario may change an answer mid-test) and appends every call it
 #: receives — with `ctx.as_of` — to the estate's call log. Faults are the REAL `AdapterFault`
-#: subclasses (GA-40 / GD-36), so the query tool classifies them as it does on a real run.
+#: subclasses, so the query tool classifies them as it does on a real run.
 _ADAPTER = '''\
 """Stub adapter for the #1224 fixture tenant: system {system!r}. Planted by _spec1224."""
 from __future__ import annotations
@@ -324,7 +293,7 @@ WRITE_VERB = "isolate"
 
 
 def canonical(params: Mapping[str, Any]) -> str:
-    """Canonical JSON of a params map (N08: the cache key's spelling)."""
+    """Canonical JSON of a params map (the cache key's spelling)."""
     return json.dumps(params, sort_keys=True, separators=(",", ":"))
 
 
@@ -343,8 +312,7 @@ class Estate:
     stub adapter per system, its answers table and its call log.
 
     `withheld` names `(system, verb)` pairs the tenant's grant table gives no role (with a
-    reason) — `isolate` is always withheld, so the write verb exists and is never granted (O6's
-    "no branching path reaches a write door" has a door to not reach).
+    reason). `isolate` is always withheld, so a write verb exists that no branching path may reach.
     """
 
     root: Path
@@ -394,7 +362,7 @@ class Estate:
 
     def fail(self, system: str, verb: str, params: Mapping[str, Any] | None, *,
              fault: str = "UpstreamFault", detail: str = "upstream said no") -> None:
-        """The real system errors on this call — a REAL `AdapterFault` subclass (GA-40)."""
+        """The real system errors on this call — a REAL `AdapterFault` subclass."""
         assert fault in ("UpstreamFault", "TransportFault", "ConfigFault", "AdapterFault"), fault
         key = f"{system}|{verb}|" + ("*" if params is None else canonical(params))
         self._put(key, {"fault": fault, "detail": detail})
@@ -428,14 +396,12 @@ class Estate:
         """Set the tenant up under the data root (`DEFENDER_DATA_ROOT` by default) and return
         it accepted (`Tenant`).
 
-        #1108 P4 (OD5, O11): the tenant is a REAL published tenant — a git clone holding the
-        P4 fixture's `agent/` and this estate's settings (grant table), exported for real by
-        S0's one helper (`tenant_1108_p4._support.published_tenant`) — so a branch launch has a
-        knowledge commit to materialise and pin (flow 7). Publishing costs ~0.4 s, so each
-        `(tenant id, grant table)` is published once per process (`_published_template`) and
-        its tenant folder (row, clone, exports) copied in; nothing in it names its root.
-        `configs` (`{system: config.env text}`) is written into the published settings, as
-        `T6.place_tenant(configs=)` writes it."""
+        It is a real published tenant (a git clone of the P4 fixture's `agent/` plus this
+        estate's settings, via `tenant_1108_p4._support.published_tenant`), so a branch launch
+        has a knowledge commit to materialise and pin. Publishing costs ~0.4 s, so each
+        `(tenant id, grant table, configs)` is published once per process
+        (`_published_template`) and its tenant folder copied in; nothing in it names its root.
+        `configs` (`{system: config.env text}`) is written into the published settings."""
         root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
         if not (root / tenant_id / "tenant.json").is_file():
             import shutil
@@ -448,22 +414,22 @@ class Estate:
                    tenant_id: str = FIXTURE_TENANT) -> Any:
         return T6.run_tenant(self.place(data_root, tenant_id))
 
-    def grant(self, data_root: Path | None = None, tenant_id: str = FIXTURE_TENANT) -> Any:
+    def grant(self) -> Any:
         """The tenant's gather `VerbGrant` — the grant every branching query goes through."""
-        return self.run_tenant(data_root, tenant_id).grants.gather
+        return self.run_tenant().grants.gather
 
     def served_systems(self) -> list[str]:
-        """M20's served set: a system with at least one non-health-check read verb granted."""
+        """The served set: a system with at least one non-health-check read verb granted."""
         return sorted(s for s in self.systems
                       if any((s, v) not in self.withheld for v in ("query", "lookup")))
 
-    def ctx(self, run_dir: Path, *, tenant: Any = None, **kw: Any) -> Any:
+    def ctx(self, run_dir: Path, **kw: Any) -> Any:
         """A `VerbContext` for the investigator's side of a call."""
         run_dir = Path(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
         return sym(VERBS, "VerbContext")(
-            defender_dir=self.defender_dir, run_dir=run_dir, env={},
-            tenant=tenant if tenant is not None else self.run_tenant(), **kw)
+            defender_dir=self.defender_dir, run_dir=run_dir, env={}, tenant=self.run_tenant(),
+            **kw)
 
 
 def estate(tmp_path: Path, **kw: Any) -> Estate:
@@ -471,7 +437,7 @@ def estate(tmp_path: Path, **kw: Any) -> Estate:
 
 
 # --------------------------------------------------------------------------------------
-# #1108 P4 (OD5): the estate's tenant is published for real, and the stamps name its commit.
+# The estate's tenant is published for real, and the stamps name its commit.
 # --------------------------------------------------------------------------------------
 
 _TEMPLATES: dict[tuple[Any, ...], Path] = {}
@@ -479,10 +445,10 @@ _TEMPLATE_HOME: list[Any] = []
 
 
 def _published_template(tenant_id: str, table: str, configs: dict[str, str] | None = None) -> Path:
-    """`<process scratch>/<n>/root/<tenant_id>`: the tenant `tenant_id` with grant table
-    `table`, set up and published ONCE per process through S0's `published_tenant` (the P4
-    fixture's `agent/`, the estate's settings in place of the fixture's), its origin server
-    closed after — a published tenant needs no network to be read or materialised."""
+    """`<process scratch>/<n>/root/<tenant_id>`: the tenant with grant table `table`, published
+    once per process through `published_tenant` (the P4 fixture's `agent/`, the estate's settings
+    in place of the fixture's). Its origin server is closed after: a published tenant needs no
+    network to be read or materialised."""
     configs = dict(configs or {})
     key = (tenant_id, table, tuple(sorted(configs.items())))
     if key in _TEMPLATES:
@@ -532,19 +498,19 @@ def knowledge_commit(tenant_id: str = FIXTURE_TENANT, data_root: Path | None = N
 @dataclass(frozen=True)
 class Move:
     """One model request's answer: a tool call (`tool`, `args`) or, with `tool=None`, a
-    text-only reply (`text`) — a turn that ends without a valid submission (M03=A)."""
+    text-only reply (`text`) — a turn that ends without a valid submission."""
 
     tool: str | None
     args: dict = field(default_factory=dict)
     text: str = ""
     #: A provider failure instead of an answer: a zero-argument factory of the exception the
-    #: request raises (`raising(...)`; GPR-01). Called per request, so each raise is fresh.
+    #: request raises (`raising(...)`). Called per request, so each raise is fresh.
     raises: Callable[[], BaseException] | None = None
 
 
 def raising(status: int | None = OUTAGE) -> Move:
-    """A model request that fails as the provider client fails once its retries give up
-    (GPR-01): `provider_outage(status)`, built fresh for each request this move answers."""
+    """A model request that fails as the provider client fails once its retries give up:
+    `provider_outage(status)`, built fresh for each request this move answers."""
     return Move(None, raises=lambda: provider_outage(status))
 
 
@@ -585,7 +551,7 @@ def text_only(text: str = "I could not decide what to serve.") -> Move:
 def claim(*, added: Iterable[Mapping] = (), removed: Iterable[Mapping] = (),
           changed: Iterable[Mapping] = (), counts: Iterable[Mapping] = (),
           entity_refs: Iterable[Mapping] = ()) -> dict:
-    """A claim document (coined schema; see the module docstring)."""
+    """A claim document, as `check` and `submit` take it."""
     return {"added": [dict(a) for a in added], "removed": [dict(r) for r in removed],
             "changed": [dict(c) for c in changed], "counts": [dict(c) for c in counts],
             "entity_refs": [dict(e) for e in entity_refs]}
@@ -638,11 +604,9 @@ def _messages_text(messages: Any) -> str:
 
 def _usage_without_utf8(messages: list[Any], response: Any) -> None:
     """Give `response` a usage estimate when its tool-call args cannot be encoded as UTF-8
-    JSON (a lone surrogate, s_p084). `FunctionModel` estimates usage itself by UTF-8-encoding
-    the args and raises on such a value before the host ever sees the response — a limit of
-    the double, not of a provider (a real provider reports usage and hands the args over). The
-    estimate is the one `FunctionModel` would make over the JSON-escaped form; any response
-    whose args do encode is left untouched (FunctionModel estimates it as before)."""
+    JSON (a lone surrogate). `FunctionModel` would raise on such args before the host sees the
+    response — a limit of the double, not of a provider — so this makes `FunctionModel`'s
+    estimate over the JSON-escaped form. A response whose args encode is left untouched."""
     import pydantic_core
     from pydantic_ai.messages import ModelResponse, ToolCallPart
     from pydantic_ai.models.function import _estimate_usage
@@ -708,7 +672,7 @@ class ScriptedModel:
             self.tools.append(tuple(sorted(t.name for t in offered)))
             if self.fault.raise_after is not None and self.answered >= self.fault.raise_after:
                 self.finished.append(time.monotonic())
-                raise provider_outage()  # GPR-01
+                raise provider_outage()
             if self.moves:
                 move = self.moves.pop(0)
             elif self.then is not None:
@@ -721,7 +685,7 @@ class ScriptedModel:
             time.sleep(self.fault.delay)
         self.finished.append(time.monotonic())
         if move.raises is not None:
-            raise move.raises()  # GPR-01
+            raise move.raises()
         if move.tool is None:
             return ModelResponse(parts=[TextPart(content=move.text)])
         response = ModelResponse(parts=[ToolCallPart(tool_name=move.tool, args=dict(move.args))])
@@ -749,6 +713,49 @@ class ScriptedModel:
         return out
 
 
+class Routed:
+    """A model double that hands each request to the scripted double whose MARKER the
+    request's inbound text carries (a world's fact statement, or a call's params). It injects
+    nothing of its own: an unmatched request goes to `default`, else (or when doubly matched) it
+    is answered text-only and recorded in `unrouted`, which the scenario asserts empty.
+    `last_wins` (call routing only, never world routing) hands a request carrying several
+    markers to the one occurring LAST in its inbound text: the current call's turn, after
+    earlier calls' turns."""
+
+    __name__ = "Routed"
+
+    def __init__(self, routes: Mapping[str, Any], *, default: Any = None,
+                 name: str = "routed", last_wins: bool = False) -> None:
+        self.routes = dict(routes)
+        self.default = default
+        self.name = name
+        self.last_wins = last_wins
+        self.unrouted: list[str] = []
+        self._lock = threading.Lock()
+        self._model: Any = None
+
+    @property
+    def model(self) -> Any:
+        if self._model is None:
+            from pydantic_ai.models.function import FunctionModel
+            self._model = FunctionModel(self, model_name=double_model_name(self.name))
+        return self._model
+
+    def __call__(self, messages: list[Any], info: Any) -> Any:
+        text = _messages_text(messages) + "\n" + (getattr(info, "instructions", None) or "")
+        hits = [double for marker, double in self.routes.items() if marker in text]
+        if len(hits) > 1 and self.last_wins:
+            hits = [self.routes[max(self.routes, key=text.rfind)]]
+        if len(hits) == 1:
+            return hits[0](messages, info)
+        if not hits and self.default is not None:
+            return self.default(messages, info)
+        with self._lock:
+            self.unrouted.append(text)
+        from pydantic_ai.messages import ModelResponse, TextPart
+        return ModelResponse(parts=[TextPart(content="(no scripted double for this request)")])
+
+
 def oracle(*moves: Move, then: Move | None = None, fault: Fault = CLEAN) -> ScriptedModel:
     return ScriptedModel(*moves, then=then, fault=fault, name="oracle")
 
@@ -769,7 +776,7 @@ def failing_verifier(reason: str = "fact f1's logon is missing from the served a
 
 def verdict_names(text: str, what: str) -> bool:
     """Whether a failure verdict the host appended names `what` — `"check 1"`.. `"check 5"`
-    or `"verifier"` (coined spelling, case-insensitive)."""
+    or `"verifier"` (case-insensitive)."""
     return what.lower() in text.lower()
 
 
@@ -813,7 +820,7 @@ def host_tail(messages: list[Any]) -> str:
 
 
 # --------------------------------------------------------------------------------------
-# The oracle's box (M18): sandboxed and recording, or the real unsandboxed executor.
+# The oracle's box: sandboxed and recording.
 # --------------------------------------------------------------------------------------
 
 
@@ -827,15 +834,14 @@ class BoxLog:
         return [decode(f) for f in self.frames]
 
 
-def sandboxed_box(log: BoxLog | None = None, *, out: bytes = b"", rc: int = 0,
+def sandboxed_box(*, out: bytes = b"", rc: int = 0,
                   kill_after: int | None = None) -> tuple[Callable[[], Any], BoxLog]:
-    """A box FACTORY whose executors are sandboxed (`_DockerTransport`, GD-16) and record each
-    frame. `kill_after=n` makes the n+1-th frame on one box fail as a dead container does
-    (`BoxFault`), so N11's "a killed box is a tool error and a fresh box is started" is
-    observable as `log.starts`."""
+    """A box FACTORY whose executors are sandboxed (`_DockerTransport`) and record each frame.
+    `kill_after=n` makes the n+1-th frame on one box fail as a dead container does (`BoxFault`),
+    so a fresh box started after a kill shows in `log.starts`."""
     spec_mod = mod("box._spec")
     codec = mod("execution.box_codec")
-    log = log if log is not None else BoxLog()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
+    log = BoxLog()
 
     @dataclass(frozen=True)
     class _Recording(spec_mod._DockerTransport):
@@ -856,19 +862,6 @@ def sandboxed_box(log: BoxLog | None = None, *, out: bytes = b"", rc: int = 0,
                                sink=log, served=[])
         return spec_mod.BoxExecutor(spec=spec_mod.BoxSpec(), transport=transport,
                                     name=transport.name)
-
-    return factory, log
-
-
-def unsandboxed_box() -> tuple[Callable[[], Any], BoxLog]:
-    """A box factory handing out the REAL default executor: `BoxExecutor()`, `sandboxed`
-    False (GD-16). It records the factory starts; it has no frames to record, because its
-    transport is the real `_unattached` one, which raises `BoxFault` on any frame."""
-    log = BoxLog()
-
-    def factory() -> Any:
-        log.starts += 1
-        return sym("box._spec", "BoxExecutor")()
 
     return factory, log
 
@@ -897,7 +890,7 @@ def world_v2(label: str, *, facts: list[dict] | None = None, role: str = "B",
 
 
 def control_world(label: str = "a", **over: Any) -> dict:
-    """M07=A's control world: an EXPLICIT `facts: []`."""
+    """A control world: an EXPLICIT `facts: []`."""
     return world_v2(label, facts=[], role="A", axis=None,
                     disposition_declared=over.pop("disposition_declared", "benign"), **over)
 
@@ -914,7 +907,6 @@ def family_v2(*, worlds: list[dict] | None = None,
         "branch_message_id": T.BRANCH_MESSAGE_ID,
         "fences_at": 4,
         "as_of": as_of,
-        "continuation_prompt": "Continue from here.",
         "base_story": "the captured story",
         "served_systems": list(served_systems),
         "discriminator": {"predicate": predicate},
@@ -925,19 +917,12 @@ def family_v2(*, worlds: list[dict] | None = None,
                                                 ("bob", "carol", "10.0.0.9"))]),
         ],
     }
-    # #1255 (D1, P4) COMPAT: the fields `T.RETIRED_FAMILY_FIELDS` names are written only while
-    # `Family` still declares them (`_triplet_947.family_doc`'s rule), so the strict loader's
-    # unknown-key refusal does not turn every test here into one failure about a retired key.
-    declared = T._declared_family_fields()  # noqa: SLF001 — the sibling builder's own filter
-    for retired in T.RETIRED_FAMILY_FIELDS:
-        if retired not in declared:
-            doc.pop(retired, None)
     doc.update(over)
     return doc
 
 
-def old_manifest(key: str, *, value: Any = None) -> dict:
-    """A v2 document carrying ONE pre-oracle key (O15). `key` is one of `OLD_MANIFEST_KEYS`."""
+def old_manifest(key: str) -> dict:
+    """A v2 document carrying ONE pre-oracle key, `key` (one of `defaults` below)."""
     doc = family_v2()
     defaults = {
         "overlay": {"patches": {"identity": {"web-1": {"owner": "platform"}}}},
@@ -947,7 +932,7 @@ def old_manifest(key: str, *, value: Any = None) -> dict:
         "captured_patterns": ["logs-*"],
         "configured_patterns": ["logs-*"],
     }
-    v = defaults[key] if value is None else value
+    v = defaults[key]
     if key == "overlay":
         doc["worlds"][1]["overlay"] = v
     elif key.startswith("discriminator."):
@@ -967,21 +952,12 @@ def episode_v2(tmp_path: Path, *, doc: dict | None = None, root: Path | None = N
     return ep
 
 
-def write_manifest(ep: Path, doc: dict) -> Path:
-    return T.write_family(ep, doc)
-
-
-def captured(system: str, verb: str, params: Mapping[str, Any], payload: Any, *,
-             key: str | None = None) -> dict:
+def captured(system: str, verb: str, params: Mapping[str, Any], payload: Any) -> dict:
     """One captured row of the family's base recording (the source run's own call)."""
     return {"system": system, "verb": verb,
-            "correlation_key": key or f"{system}|{verb}|{canonical(params)}",
+            "correlation_key": f"{system}|{verb}|{canonical(params)}",
             "params": dict(params), "payload_text": json.dumps(payload, sort_keys=True),
             "source": "captured", "world_id": None}
-
-
-def base_recording(ep: Path, rows: list[dict]) -> Path:
-    return T.base_capture(ep, rows)
 
 
 def outcome_record(ep: Path, outcome: str = "accepted", *, reason: str = "",
@@ -989,7 +965,7 @@ def outcome_record(ep: Path, outcome: str = "accepted", *, reason: str = "",
                    drift: Iterable[Mapping] = (), family_stamp: bool = True) -> Path:
     """Write pre-flight's outcome record by hand (for readers' scenarios). An `accepted`
     record also gets `verify_family`'s family stamp (`J.comparable_family_stamp`) unless
-    `family_stamp=False`: PR #1232 round 7 grades and compares only a stamped family."""
+    `family_stamp=False`: only a stamped family is graded and compared."""
     path = Path(ep) / OUTCOME_NAME
     path.write_text(_yaml.safe_dump({
         "outcome": outcome, "reason": reason,
@@ -1070,8 +1046,8 @@ def write_ledger(ep: Path, label: str, rows: list[dict]) -> Path:
 
 def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
     """World `label`'s query table (`worlds/<X>/executed_queries.jsonl`) holding one row per
-    served-ledger row, joined to it by the host-written call id (#1234 A12: one investigator
-    call is one table row and the ledger rows that answered it). Each row's id is the one
+    served-ledger row, joined to it by the host-written call id (one investigator call is one
+    table row and the ledger rows that answered it). Each row's id is the one
     `J.write_ledger` stamps (`<token>/<i>`, or the ledger row's own `call_id`); a ledger row
     whose `call_id` is `None` gets no table row. Calls are filed under lead `l-001`, in ledger
     order; a decision other than `passthrough`/`oracle` is a non-zero exit. The payload sidecar
@@ -1111,7 +1087,7 @@ def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
 def ledger_row(source: str, *, system: str = "idp", verb: str = "query",
                params: Mapping[str, Any] | None = None, payload: Any = None,
                label: str = "b", **extra: Any) -> dict:
-    """One world-ledger row in today's row shape plus the coined oracle fields."""
+    """One world-ledger row; `extra` adds the oracle's fields."""
     row = {"system": system, "verb": verb, "params": dict(params or query_params()),
            "payload_text": json.dumps(payload if payload is not None else {"rows": []},
                                       sort_keys=True),
@@ -1143,10 +1119,10 @@ def strings_in(value: Any) -> list[str]:
 def judged_episode(tmp_path: Path, *, doc: dict | None = None,
                    labels: tuple[str, ...] = WORLDS, outcome: str | None = "accepted",
                    ledgers: dict[str, list[dict]] | None = None,
-                   root: Path | None = None, samples: bool = True,
-                   episode_id: str = EPISODE_ID, **world_kw: Any) -> Path:
+                   root: Path | None = None, episode_id: str = EPISODE_ID,
+                   **world_kw: Any) -> Path:
     """A fully archived v2 episode — the judge's and the page's whole input: v2 manifest, a
-    base recording, every world archived under `worlds/<X>/` (the #921 archive builder), the
+    base recording, every world archived under `worlds/<X>/` (`J.archived_judge_world`), the
     world ledgers with the query-table rows they answered (`write_call_table`), each planted
     world's oracle store directory, and pre-flight's outcome record (`outcome=None` writes
     none)."""
@@ -1164,13 +1140,12 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
         write_ledger(ep, label, ledger)
         write_call_table(ep, label, ledger)
         if label in planted:
-            # #1234 A3: a planted world's built layer (`oracle/<X>/`) is part of what it is
-            # judged on — no directory is a malformed world; an empty one is an empty store.
+            # A planted world's built layer (`oracle/<X>/`) is part of what it is judged on:
+            # no directory is a malformed world; an empty one is an empty store.
             oracle_dir(ep, label).mkdir(parents=True, exist_ok=True)
-    if samples:
-        # O16: every served system has a samples section (one example per system here).
-        samples_record(ep, {system: {"verbs": {"query": [json.dumps({"rows": []})]}}
-                            for system in manifest.get("served_systems") or []})
+    # Every served system has a samples section (one example per system here).
+    samples_record(ep, {system: {"verbs": {"query": [json.dumps({"rows": []})]}}
+                        for system in manifest.get("served_systems") or []})
     if outcome is not None:
         outcome_record(ep, outcome)
     if labels:
@@ -1184,13 +1159,11 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
 
 
 def load_world(ep: Path, label: str) -> Any:
-    """The sibling's `ResumeWorld` for `label`, through the REAL loader, as the sibling builds it
-    after its roster check (#1187): the manifest loaded with the episode's own folder name as the
-    expected id (R5, `expected_episode_id=`), and the world handed the episode's ARM ROSTER
-    (`arm_ids=`, `{label: RunId}`) — its own run id and the redaction set's arm ids come from
-    the roster, never composed (O4, S-red). A hand-built episode with no roster yet takes the
-    fixture's explicit RUNS step here (`_triplet_947.plant_roster`: `runs/`, then a roster
-    naming every manifest world); the roster reader itself never writes one (review-3 F33)."""
+    """The sibling's `ResumeWorld` for `label`, through the REAL loader as the sibling builds it:
+    the manifest loaded with the episode's folder name as `expected_episode_id=`, and the world
+    handed the episode's arm roster (`arm_ids=`), from which its run id and the redaction set's
+    arm ids come. A hand-built episode with no roster gets one here
+    (`_triplet_947.plant_roster`); the roster reader itself never writes one."""
     from defender.records import RunId
 
     fam = mod(FAMILY)
@@ -1259,7 +1232,7 @@ def world_registry(ep: Path, label: str, est: Estate, *, oracle: ScriptedModel |
                    verifier: ScriptedModel | None = None, box: Callable[[], Any] | None = None,
                    tenant: Any = None, world: Any = None, **knobs: Any) -> Any:
     """`WorldRegistry` for world `label` of episode `ep`, over the fixture estate's roster and
-    gather grant, with the doubles injected through the coined seams. `knobs` are the coined
+    gather grant, with the doubles injected through its seams. `knobs` are the oracle
     keywords (`retry_cap=`, `turn_deadline=`, `budget=`, `rate=`, `restart_after=`,
     `limiter=`), settled by `registry_seams`, and `as_of=` (the branch point by default)."""
     rt = tenant if tenant is not None else est.run_tenant()
@@ -1294,15 +1267,15 @@ def plain_registry(est: Estate) -> Any:
 
 
 def run_state(run_dir: Path, run_id: str = RUN_ID) -> Any:
-    """A fresh run's `RunState` (#1235 round 2) — what a direct registry call's context carries
-    when the scenario needs the investigator's clock to pause and resume (a context with no run
-    state pauses none). Imported lazily: the module is new in round 2."""
+    """A fresh run's `RunState` — what a direct registry call's context carries when the
+    scenario needs the investigator's clock to pause and resume (a context with no run state
+    pauses none)."""
     return sym("investigation.run_state", "RunState")(Path(run_dir), run_id)
 
 
 def tap_run_states(registry: Any) -> list[Any]:
     """Every `RunState` the investigator's calls through `registry` carried
-    (`VerbContext.run_state`, #1235 round 2), in call order.
+    (`VerbContext.run_state`), in call order.
 
     For a driven run that ends by RAISING (an escaped `OracleUnservable`), `drive()` returns
     nothing, so its `["run_state"]` is out of reach; the verb context is the production carry
@@ -1359,32 +1332,30 @@ def lead_rows(run_dir: Path) -> list[dict]:
 
 
 def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
-                 run_id: str = RUN_ID, limits: Any = None, tenant: Any = None,
-                 **kw: Any) -> tuple[Path, Any]:
+                 run_id: str = RUN_ID, tenant: Any = None, **kw: Any) -> tuple[Path, Any]:
     """A whole investigation through the replay harness (the `test_1106_query_lane` shape):
     the main loop dispatches ONE gather lead on `system`, whose scripted turns are
     `gather_turns` (`query_turn(...)`s then `DONE`), with the registry injected as `verbs=`.
     Returns `(run dir, the gather ReplayFn)` — `gather.seen` is what the investigator saw."""
     run_dir, gather, _summary = _drive_one_gather(
         tmp_path, verbs=verbs, gather_turns=gather_turns, system=system, run_id=run_id,
-        limits=limits, tenant=tenant, **kw)
+        tenant=tenant, **kw)
     return run_dir, gather
 
 
 def drive_gather_run(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
-                     run_id: str = RUN_ID, limits: Any = None, tenant: Any = None,
-                     **kw: Any) -> tuple[Path, Any, Any]:
-    """`drive_gather`, also handing back the run's one `RunState` (#1235: `drive()` injects it
-    and returns it as `["run_state"]`) — where a scenario reads the run's budget or breaker,
-    which no file in the run dir holds."""
+                     run_id: str = RUN_ID, tenant: Any = None, **kw: Any) -> tuple[Path, Any, Any]:
+    """`drive_gather`, also handing back the run's one `RunState` (`drive()`'s
+    `["run_state"]`) — where a scenario reads the run's budget or breaker, which no file in the
+    run dir holds."""
     run_dir, gather, summary = _drive_one_gather(
         tmp_path, verbs=verbs, gather_turns=gather_turns, system=system, run_id=run_id,
-        limits=limits, tenant=tenant, **kw)
+        tenant=tenant, **kw)
     return run_dir, gather, summary["run_state"]
 
 
 def _drive_one_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str,
-                      run_id: str, limits: Any, tenant: Any, **kw: Any) -> tuple[Path, Any, dict]:
+                      run_id: str, tenant: Any, **kw: Any) -> tuple[Path, Any, dict]:
     H = replay_harness()
     run_dir = H.materialize(tmp_path / run_id, H.GOLDEN_AB3, run_id=run_id)
     main = H.ReplayFn([
@@ -1395,7 +1366,7 @@ def _drive_one_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], sy
     ])
     gather = H.ReplayFn(gather_turns)
     summary = H.drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs,
-                      limits=limits, tenant=tenant, **kw)
+                      tenant=tenant, **kw)
     return run_dir, gather, summary
 
 
@@ -1422,45 +1393,18 @@ def source_text(rel: str) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
-def shipped_python(*, exclude_tests: bool = True) -> list[Path]:
-    out = []
-    for p in DEFENDER.rglob("*.py"):
-        rel = p.relative_to(DEFENDER).as_posix()
-        if exclude_tests and (rel.startswith("tests/") or rel.startswith("evals/")):
-            continue
-        if "/.venv/" in f"/{rel}" or "__pycache__" in rel:
-            continue
-        out.append(p)
-    return sorted(out)
 
 
-def grep_shipped(needle: str, *, suffixes: tuple[str, ...] = (".py",)) -> list[str]:
-    """`rel:line` for every shipped (non-test) file line containing `needle`."""
-    hits = []
-    for p in DEFENDER.rglob("*"):
-        if not p.is_file() or p.suffix not in suffixes:
-            continue
-        rel = p.relative_to(DEFENDER).as_posix()
-        if rel.startswith(("tests/", "evals/", ".venv/")) or "__pycache__" in rel:
-            continue
-        try:
-            text = p.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        for i, line in enumerate(text.splitlines(), 1):
-            if needle in line:
-                hits.append(f"{rel}:{i}")
-    return hits
 
 
 # --------------------------------------------------------------------------------------
-# The launcher (M8): a source run on the fixture tenant, and one launch through `cli.main`.
+# The launcher: a source run on the fixture tenant, and one launch through `cli.main`.
 # --------------------------------------------------------------------------------------
 
 BRANCH_MESSAGE_ID = T.BRANCH_MESSAGE_ID
 
 
-#: The lead a post-branch captured call is landed under (R-01). `l-001` (`LEAD`) carries the
+#: The lead a post-branch captured call is landed under. `l-001` (`LEAD`) carries the
 #: pre-branch calls: no `gather` dispatch accounts for it, so `_frontier.leads_at` always keeps
 #: it (inherited). `l-002`'s `gather` call/return pair lands in MAIN's session AFTER the branch
 #: message, so `leads_at` drops it: its calls are not in the sibling's inherited transcript.
@@ -1471,8 +1415,8 @@ POST_BRANCH_LEAD = "l-002"
 class Call:
     """One call the SOURCE run made (and so one call pre-flight replays). `post_branch=True`
     lands it under `POST_BRANCH_LEAD`, a lead dispatched after the branch point, so it is not
-    part of the inherited prefix; the default is a pre-branch call (M01=A: fixed, served
-    unchanged; a world whose facts would change one fails pre-flight)."""
+    part of the inherited prefix; the default is a pre-branch call (served unchanged; a world
+    whose facts would change one fails pre-flight)."""
 
     system: str
     verb: str
@@ -1482,7 +1426,7 @@ class Call:
 
 
 def post_branch_call(q: str = "user:alice host:db-1", payload: Any = None) -> Call:
-    """One idp call the source run made AFTER the branch point (R-01): a call a world may
+    """One idp call the source run made AFTER the branch point: a call a world may
     change, because no sibling inherits its real answer. Its params carry `q` as a marker
     distinct from every default (pre-branch) call."""
     rows = payload if payload is not None else {"rows": [
@@ -1538,7 +1482,7 @@ def source_run(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = No
 
 def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
     """Append `lead`'s `gather` call/return pair to the source run's MAIN session, after the
-    branch message `T.runs_base` already seeded (R-01). `_frontier.leads_at` dates a lead by
+    branch message `T.runs_base` already seeded. `_frontier.leads_at` dates a lead by
     that pair's return: past `BRANCH_MESSAGE_ID`, so the lead is not inherited. Only scenarios
     with a post-branch call get the pair; every other launch keeps `runs_base`'s session as is."""
     from defender.records import session_store as ss
@@ -1591,23 +1535,23 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
         seams["verifier"] = verifier.model
     cli = mod("cli.learning.branch")
     message = ""
-    # #1187 (O9): the episode lands under the launching tenant's own `<T>/episodes/`, no
-    # configured root; the launcher mints its id, so it is found as the ONE new folder there.
+    # The episode lands under the launching tenant's own `<T>/episodes/`; the launcher mints
+    # its id, so it is found as the ONE new folder there.
     tenant_id = src.parent.parent.name
     root = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
     before = {p.name for p in root.iterdir()} if root.is_dir() else set()
     try:
-        # #1105 PR 2 (declared change 1): the tenant and the source run by id — the source sits
-        # at `<data root>/<tenant>/runs/<run id>`.
+        # The tenant and the source run by id: the source sits at
+        # `<data root>/<tenant>/runs/<run id>`.
         rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(BRANCH_MESSAGE_ID),
-                       *T.retired_continuation_argv(), *argv_extra], spawn=spawn, **seams)
+                       *argv_extra], spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code
         else:
             rc, message = 2, str(stop.code)
     # The episode this launch created: the ONE new folder under the tenant's episodes folder
-    # (N17: a launch never reuses one). A launch refused before it claimed an episode leaves
+    # (a launch never reuses one). A launch refused before it claimed an episode leaves
     # none, and `ep` is then a name under that folder that nothing made (its records read as
     # absent).
     fresh = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in before) \
@@ -1631,14 +1575,14 @@ NO_EPISODE = "no-episode-was-made"
 
 
 def tenant_episodes(tenant_id: str = FIXTURE_TENANT) -> Path:
-    """`<data root>/<tenant_id>/episodes` — where #1187 (Layout A, O9) puts every episode a
-    launch over that tenant makes."""
+    """`<data root>/<tenant_id>/episodes` — where every episode a launch over that tenant
+    makes lands."""
     return Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
 
 
 def new_episode(root: Path, before: set[str]) -> Path:
-    """The ONE folder under `root` whose name is not in `before` (a launch's own episode — the
-    launcher mints its id, N17: it never reuses one), else `root / NO_EPISODE`."""
+    """The ONE folder under `root` whose name is not in `before` (a launch's own episode: the
+    launcher mints a fresh id), else `root / NO_EPISODE`."""
     fresh = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in before) \
         if root.is_dir() else []
     return fresh[0] if len(fresh) == 1 else root / NO_EPISODE
@@ -1646,7 +1590,7 @@ def new_episode(root: Path, before: set[str]) -> Path:
 
 def episode_of(argv: list[str]) -> Path | None:
     """The episode folder a sibling started with `argv` runs in: `<data root>/<T>/episodes/<ep>`
-    from its own `--tenant` and `--episode` (#1187), or None when either is missing."""
+    from its own `--tenant` and `--episode`, or None when either is missing."""
     flags = {argv[i]: argv[i + 1] for i in range(len(argv) - 1)
              if argv[i] in ("--tenant", "--episode")}
     if "--tenant" not in flags or "--episode" not in flags:

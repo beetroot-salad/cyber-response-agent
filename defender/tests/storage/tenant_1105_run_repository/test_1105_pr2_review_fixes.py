@@ -33,25 +33,14 @@ def _rid(text: str):
     return RunId.parse(text)
 
 
-#: A natural run's id in the drain scenes (#1187, declared change 1: a run id is a canonical
-#: UUID — a row naming an old `r1` is off grammar and quarantined before the tick's own refusal
-#: or the drain's rehydration is reached).
+#: A natural run's id in the drain scenes: a UUID, since a row naming anything else is
+#: quarantined before rehydration is reached.
 RID_R1 = fixture_uuid("pr2-rf-r1")
 
 
-def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
-    """A tenant under the configured data root, its natural runs folder as run setup leaves it
-    (#1187 R1: no `_tenant.json`) and a real run folder per id."""
-    t = H.tenant(location_path(P.data_root)(), tenant_id)
-    H.runs_folder(t)
-    for rid in run_ids:
-        H.make_run(location_path(t.runs), rid)
-    return t
-
-
 def _uuid_tenant(*run_ids: str, tenant_id: str = H.T_ID):
-    """#1187's natural container (declared changes 1 and 6): a tenant under the configured data
-    root, its `<T>/runs` a real folder with NO `_tenant.json`, and a run folder per (UUID) id."""
+    """A tenant under the configured data root, its `<T>/runs` a real folder (no `_tenant.json`)
+    and a run folder per id."""
     t = H.tenant(location_path(P.data_root)(), tenant_id)
     Path(location_path(t.runs)).mkdir(parents=True, exist_ok=True)
     for rid in run_ids:
@@ -60,9 +49,8 @@ def _uuid_tenant(*run_ids: str, tenant_id: str = H.T_ID):
 
 
 def _post_runs_episode(tenant_id: str, labels: tuple[str, ...]) -> tuple[Path, str, dict]:
-    """#1187's episode after RUNS: `<T>/episodes/<uuid>/` with its arm roster naming `labels`
-    and a real arm folder at each roster id (no record anywhere). Returns
-    `(folder, episode id, roster)`."""
+    """An episode after RUNS: `<T>/episodes/<uuid>/` with its arm roster naming `labels` and a
+    real arm folder at each roster id. Returns `(folder, episode id, roster)`."""
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     episode_id = S.new_id()
@@ -72,12 +60,9 @@ def _post_runs_episode(tenant_id: str, labels: tuple[str, ...]) -> tuple[Path, s
 
 
 def test_a_natural_open_refuses_only_with_run_refused_and_absent_only_when_gone(tmp_path):
-    """`runs.open` over a container that cannot be read — a link at `<T>/runs` — refuses with
-    `RunUnreachable`, a `RunRefused`, raised from the container's `TenantRefused`. An absent
-    container is `RunAbsent`: the run is gone with it. `resolve` answers the same family; an
-    address naming another tenant stays `TenantRefused` (a caller's bug). Positive control: the
-    same open over the good container hands out the run. RED before the fix: the container
-    faults are a bare `TenantRefused`, which an `except RunRefused` misses."""
+    """A link at `<T>/runs` makes `open` and `resolve` refuse with a `RunRefused` (a bare
+    `TenantRefused` would slip past `except RunRefused`); an absent container is `RunAbsent`; an
+    address naming another tenant stays `TenantRefused` (a caller's bug)."""
     import uuid
 
     from defender.records import RunAbsent, RunAddress, RunRefused
@@ -110,15 +95,9 @@ def test_a_natural_open_refuses_only_with_run_refused_and_absent_only_when_gone(
 
 
 def test_a_an_arm_whose_container_goes_bad_after_the_view_opened_is_run_refused(tmp_path):
-    """An episode view's `open` answers the same family: a container removed outright after
-    the view opened is `RunAbsent`. Positive control: the arm opens before the fault.
-
-    #1187 declared changes 2, 6 and 15 (R1, R2): the record halves (a `_tenant.json` removed or
-    corrupted after the view opened) are retired — no arm container holds a record. The episode
-    is `<T>/episodes/<uuid>/` and the arm is at its roster id. (A link at the arm container is
-    pinned by
-    `ids_1187/test_1187_layout_isolation.py::test_a_link_at_an_arm_container_is_refused_and_the_real_folder_opens`.)
-    (Name kept.)"""
+    """An arm container removed after the episode view opened makes the view's `open` answer
+    `RunAbsent`. (A linked arm container: `test_1187_layout_isolation.py`'s
+    `test_linked_repository_levels_refuse_and_restore[arms]`.)"""
     from defender.records import RunAbsent
 
     t = _uuid_tenant()
@@ -152,11 +131,9 @@ def test_a_verify_opens_every_finished_arm_or_hands_back_its_refusal(tmp_path):
 
 
 class _ContainerLinkingSibling(P.J.FakeSibling):
-    """`J.FakeSibling`, then — once EVERY started sibling has returned — the episode's arm
-    container `<ep>/runs` moved outside the episode and a link left at its name: a container
-    fault that appears between RUNS and VERIFY (#1187: the record it used to be is retired; a
-    link is the fault left, S-iso). Counted under a lock, so the move happens after the last
-    sibling finished writing, never under one still running."""
+    """`J.FakeSibling`, then, once EVERY started sibling has returned, the arm container
+    `<ep>/runs` moved outside the episode and a link left at its name: a container fault
+    between RUNS and VERIFY. Counted under a lock, so the move never runs under a live sibling."""
 
     def __init__(self, *, outside: Path, siblings: int) -> None:
         super().__init__()
@@ -190,8 +167,8 @@ def _world_reasons(episode_dir: Path) -> dict[str, str]:
 
 
 def _steps(episode_dir: Path) -> list[str]:
-    """The launcher's stage timing record's steps (`learning.branch.timing`, #1025 O7): a step
-    is on it once its boundary was crossed, the judge's included when the grade failed."""
+    """The launcher's stage timing record's steps: a step is on it once its boundary was
+    crossed, the judge's included when the grade failed."""
     from defender import _io
     from defender.learning.branch import timing
 
@@ -201,14 +178,10 @@ def _steps(episode_dir: Path) -> list[str]:
 
 def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
         tmp_path, monkeypatch):
-    """Driven through the launcher (`learning/branch/cli.main`): the siblings ran, then their
-    container `<ep>/runs` was swapped for a link to a real folder holding every finished arm.
-    VERIFY opens each arm through the episode view, which never follows the link: every world
-    is recorded `not archived` (its arm refused — `RunRefused`, or the container's
-    `TenantRefused`, which VERIFY must hold too), the launch returns a status rather than
-    raising, and the judge step is still reached (its row is on the stage timing record).
-    Nothing is archived from the link's target. Positive control: a clean launch under fresh
-    roots archives the worlds, records none `not archived` and grades."""
+    """Through the launcher: after the siblings ran, `<ep>/runs` became a link to a folder
+    holding every finished arm. VERIFY never follows it: every world is `not archived` (its
+    `RunRefused`, or the container's `TenantRefused`, caught too), the launch returns a status
+    and the judge step is still reached. Control: a clean launch archives and grades."""
     est, src = P.launch_source(tmp_path)
     outside = tmp_path / "outside-the-episode"
     outside.mkdir()
@@ -252,9 +225,9 @@ def _queued(paths: Any, case_id: str) -> dict | None:
 def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt(
         tmp_path, monkeypatch):
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "2")
-    r1, linked, nope = (str(uuid.uuid4()) for _ in range(3))
+    r1, linked, nope, only_in_u = (str(uuid.uuid4()) for _ in range(4))
     t = _uuid_tenant(r1)
-    u = _uuid_tenant(r1, tenant_id=H.U_ID)
+    u = _uuid_tenant(r1, only_in_u, tenant_id=H.U_ID)
     os.symlink(Path(location_path(t.runs)) / r1, Path(location_path(t.runs)) / linked)
     paths = P.loop_paths(tmp_path)
     transient = {
@@ -264,7 +237,12 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     }
     for case_id, body in transient.items():
         P.queue_row(paths, case_id, body)
-    P.queue_row(paths, "gone", {"case_id": "gone", "tenant_id": H.T_ID, "run_id": nope})
+    gone = {
+        "gone": {"case_id": "gone", "tenant_id": H.T_ID, "run_id": nope},
+        "crossed": {"case_id": "crossed", "tenant_id": H.T_ID, "run_id": only_in_u},
+    }
+    for case_id, body in gone.items():
+        P.queue_row(paths, case_id, body)
     P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.T_ID, "run_id": r1})
     moved = tmp_path / "u-runs-elsewhere"
     Path(location_path(u.runs)).rename(moved)
@@ -273,9 +251,10 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     lane = P.Lane()
     P.drain(paths, lane)
     assert lane.run_dirs == [Path(location_path(t.runs)) / r1], f"served {lane.run_dirs}"
-    gone = P.dead_letter(paths, "gone")
-    assert gone is not None
-    assert gone.get("failed") == "artifact-missing", gone
+    for case_id in gone:
+        letter = P.dead_letter(paths, case_id)
+        assert letter is not None, f"{case_id}: {letter!r}"
+        assert letter.get("failed") == "artifact-missing", f"{case_id}: {letter!r}"
     for case_id in transient:
         assert P.dead_letter(paths, case_id) is None, (
             f"{case_id} was dead-lettered at once: {P.dead_letter(paths, case_id)!r}")
@@ -303,8 +282,8 @@ class _Box:
 
 @pytest.fixture
 def published(tmp_path, data_root):
-    """The fixture tenant published for real, its forge bound: #1108 P4's lead-author drain
-    batches into the tenant repo (flow 4), so its ticks run tenant-selected over it."""
+    """The fixture tenant published for real, its forge bound: the lead-author drain batches
+    into the tenant repo, so its ticks run tenant-selected over it."""
     from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 
     with published_tenant(tmp_path / "forge", root=data_root) as t:
@@ -321,8 +300,8 @@ def _tenant_paths(t: Any, tmp_path: Path) -> Any:
 
 
 def _tick(t: Any, paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> int:
-    """One REAL `lead_author_drain` tick over the tenant path (assumed seams, #1108 P4: the
-    tenant forge fake's client and an issuer-fake identity; `branch=`/`scrub=` are gone)."""
+    """One REAL `lead_author_drain` tick over the tenant path, with the tenant forge fake's
+    client and an issuer-fake identity."""
     from defender.learning.core import drains
 
     def run_pitfalls(_wt_paths: Any, _state: Any, **_kw: Any) -> int:
@@ -336,8 +315,8 @@ def _tick(t: Any, paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> i
 
 
 def test_c_a_pitfalls_only_tick_needs_no_data_root(published, tmp_path, monkeypatch):
-    """#1105 PR 2 C-a (tenant path, #1108 P4): a tick with only pitfalls work reads no ambient
-    data root: with `DEFENDER_DATA_ROOT` unset it still starts its box and reaches pitfalls."""
+    """With `DEFENDER_DATA_ROOT` unset, a tick with only pitfalls work still starts its box and
+    reaches pitfalls."""
     from defender.learning.core import persist
     from defender.tests.support.learning.core._state1135 import state_for_paths
 
@@ -358,11 +337,8 @@ def test_c_a_pitfalls_only_tick_needs_no_data_root(published, tmp_path, monkeypa
 
 def test_c_a_tenant_tick_serves_its_rows_from_its_own_root_without_the_env(
         published, tmp_path, monkeypatch):
-    """#1105 PR 2 C-a (tenant path, #1108 P4): every drain is tenant-selected (`--tenant T`), so
-    a queued row's run is rehydrated under the SELECTED tenant's own data root, never the
-    ambient `DEFENDER_DATA_ROOT`: with it unset, the row is served. (The scratch-path refusal
-    this case pinned before P4 — rows and no configured data root — cannot arise: a P4 drain
-    has no scratch paths.)"""
+    """A drain is tenant-selected, so a queued row's run is rehydrated under that tenant's own
+    data root: with `DEFENDER_DATA_ROOT` unset, the row is still served."""
     t = published
     H.make_run(H.runs_folder(t.tenant), RID_R1)
     paths = _tenant_paths(t, tmp_path)

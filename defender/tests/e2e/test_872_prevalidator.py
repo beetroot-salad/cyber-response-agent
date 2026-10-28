@@ -1,4 +1,4 @@
-"""#872 — M7 pre-validator: hostile payloads (bad keys, cycles, depth/node-budget bombs, NUL) are refused before the encoder runs (observed by a spy encoder call count); real-encoder cases run in a child interpreter."""
+"""#872 — the pre-validator: hostile payloads (bad keys, cycles, depth/node-budget bombs, NUL) are refused before the encoder runs (observed by a spy encoder call count); real-encoder cases run in a child interpreter."""
 from __future__ import annotations
 
 import collections
@@ -35,9 +35,9 @@ def _sealed() -> SpyEncoder:
     return SpyEncoder(EncoderFault(dumps_returns="<the encoder must not have been called>"))
 
 
-def _refused_and_unchanged(label: str, value, *, encoder: SpyEncoder | None = None) -> SpyEncoder:
+def _refused_and_unchanged(label: str, value) -> SpyEncoder:
     """Drive a refusal and assert BOTH observables — the count AND what the model got."""
-    spy = encoder if encoder is not None else _sealed()
+    spy = _sealed()
     gated = agent_run(toolset=foreign_toolset(value), encoder=spy)
     assert spy.dumps_calls == 0, f"{label} reached the encoder"
     assert spy.loads_calls == 0, f"{label} was decoded"
@@ -86,8 +86,7 @@ def _nest(depth: int) -> dict:
 
 
 def test_a_non_str_or_non_utf8_mapping_key_is_refused_and_the_encoder_is_never_called() -> None:
-    """A mapping key that is not a `str`, and a `str` key that is not UTF-8 encodable, are
-    refused before the encoder is called — in EVERY structural position."""
+    """Refused in every structural position; a `str` subclass key is still admitted."""
     class StrKey(str):
         pass
 
@@ -115,9 +114,8 @@ def test_a_non_str_or_non_utf8_mapping_key_is_refused_and_the_encoder_is_never_c
             assert framed_content(out.dispatched.text()) == baseline
         else:
             assert out.error is not None, (
-                f"{label}: the un-gated run cannot serialize this payload "
-                f"({type(baseline_error).__name__}), so a gated run that DELIVERS it is the "
-                "gate doing better than the baseline, which d47 forbids"
+                f"{label}: the gated run delivered a payload the un-gated run cannot serialize "
+                f"({type(baseline_error).__name__})"
             )
 
     admitted = {"rows": [{StrKey("a"): i, "b": f"pad-{i}"} for i in range(40)]}
@@ -128,8 +126,6 @@ def test_a_non_str_or_non_utf8_mapping_key_is_refused_and_the_encoder_is_never_c
 
 
 def test_a_container_reachable_from_itself_is_refused_and_the_encoder_is_never_called() -> None:
-    """A container reachable from itself is refused before the encoder, in every dict/list
-    placement the hazard is reachable through."""
     placements = {}
     a: dict = {"self": None}
     a["self"] = a
@@ -164,8 +160,7 @@ def test_a_container_reachable_from_itself_is_refused_and_the_encoder_is_never_c
 
 
 def test_the_validators_container_set_equals_the_encoders() -> None:
-    """The walk recurses into exactly `dict` and `list`, SUBCLASSES INCLUDED, and enters nothing
-    else — the totality argument, made executable."""
+    """The walk enters exactly `dict` and `list` (subclasses included), as the encoder does."""
     Point = collections.namedtuple("Point", "k")
     hazard = {1: "not a str key"}
 
@@ -178,7 +173,7 @@ def test_the_validators_container_set_equals_the_encoders() -> None:
     }
     for label, value in not_entered.items():
         assert isinstance(toons.dumps(value), str), (
-            f"the encoder now ENTERS a {label}; M7's traversal set has moved under this demand"
+            f"the encoder now enters a {label}"
         )
         out = agent_run(toolset=foreign_toolset(value))
         assert out.encoder.dumps_calls == 1, (
@@ -199,8 +194,6 @@ def test_the_validators_container_set_equals_the_encoders() -> None:
 
 
 def test_a_payload_one_level_over_the_configured_depth_cap_is_refused_and_one_under_it_is_admitted() -> None:
-    """One level over the configured depth cap is refused before the encoder; one level under it
-    is admitted."""
     for cap in (8, 16):
         env = {MAX_DEPTH_ENV: str(cap)}
         over = _nest(cap + 1)
@@ -217,8 +210,7 @@ def test_a_payload_one_level_over_the_configured_depth_cap_is_refused_and_one_un
 
 
 def test_a_shallow_acyclic_payload_whose_node_count_exceeds_the_budget_is_refused() -> None:
-    """A shallow, acyclic payload whose node count exceeds the configured budget is refused
-    before the encoder, and the WALK'S OWN COST is bounded by the same budget."""
+    """The walk's own cost is bounded by the same budget, so it ends early on an expansion bomb."""
     gated_child = f'''
 import json
 from defender.tests.e2e import _toon872 as T
@@ -244,8 +236,7 @@ T.agent_run(toolset=T.foreign_toolset(value), capabilities=True)
 '''
     gated_bomb = run_isolated(gated_child, timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
     assert not gated_bomb.timed_out, (
-        "the walk did not terminate on the expansion bomb — a validator with no node budget "
-        "visits 2**16 nodes before it decides anything, and 2**28 at the k=28 arm"
+        "the walk did not terminate on the expansion bomb"
     )
     first = [ln for ln in gated_bomb.stdout.splitlines() if ln.startswith("{")]
     assert first, f"the k=16 probe never reported: {gated_bomb.stderr[-800:]}"
@@ -264,8 +255,7 @@ T.agent_run(toolset=T.foreign_toolset(value), capabilities=True)
     plain_bomb = run_isolated(plain_child, timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
     assert not plain_bomb.timed_out, "the un-gated arm hung, so the comparison below is unsound"
     assert (gated_bomb.returncode == 0) == (plain_bomb.returncode == 0), (
-        "the gate changed whether a 2**28-node payload takes the process down; it is "
-        "undeliverable either way, and the gate may not be worse OR better than the baseline"
+        "the gate changed whether a 2**28-node payload takes the process down"
     )
 
 
@@ -287,8 +277,8 @@ def test_a_payload_under_the_budget_in_containers_and_over_it_in_values_is_refus
         spy = _sealed()
         out = agent_run(toolset=foreign_toolset(over), encoder=spy, env=env)
         assert spy.dumps_calls == 0, (
-            f"a payload holding 63 containers and {32 * over_width} scalar values reached the "
-            f"encoder at a budget of {budget} — the budget is counting containers, not values"
+            f"63 containers and {32 * over_width} values reached the encoder at budget {budget}: "
+            f"the budget counts containers, not values"
         )
         assert framed_content(out.dispatched.text()) == wire_text(over), (
             "the over-budget payload was refused, but the model did not get the tool's own "
@@ -304,8 +294,6 @@ def test_a_payload_under_the_budget_in_containers_and_over_it_in_values_is_refus
 
 
 def test_one_leaf_object_referenced_three_times_encodes_round_trips_and_substitutes() -> None:
-    """One leaf dict referenced three times in a row list encodes, round-trips and SUBSTITUTES —
-    it is not refused."""
     leaf = {"x": 1, "y": 2}
     value = {"values": [leaf, leaf, leaf]}
     assert toons.loads(toons.dumps(value)) == value, (
@@ -319,8 +307,6 @@ def test_one_leaf_object_referenced_three_times_encodes_round_trips_and_substitu
 
 
 def test_the_guard_refuses_no_committed_fixture_and_changes_no_verdict() -> None:
-    """Across both arms of all 40 committed fixtures the guard refuses NOTHING, and the gate's
-    verdict with the guard installed is identical to the un-guarded bar's on 40 of 40."""
     fixtures = corpus()
     assert len(fixtures) == 40, "the vendored corpus is no longer the 40 committed fixtures"
     bar = 85
@@ -336,8 +322,6 @@ def test_the_guard_refuses_no_committed_fixture_and_changes_no_verdict() -> None
 
 
 def test_every_input_class_kills_or_survives_the_run_identically_with_and_without_the_gate() -> None:
-    """For every input class in the probed battery the PROCESS outcome — survives or dies, and
-    how — is identical with the gate installed and with it absent."""
     battery = {
         "brace in key, row position": 'value = {"rows": [{"}": i, "z": i} for i in range(20)]}',
         "benign dict rows": 'value = {"rows": [{"a": i, "b": "pad-%d" % i} for i in range(40)]}',
@@ -401,8 +385,7 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
     assert brace in p_res, "a `}`-in-key payload stopped delivering without the gate"
 
     assert ("panicked at" in gated_out.stderr) == ("panicked at" in plain_out.stderr), (
-        "a Rust panic line became gate-attributable — it is ambient to this harness today, so "
-        "an asymmetry here is a real change in what the gate does to the process"
+        "a Rust panic line appears in one arm only"
     )
     # The gate ALWAYS frames, so raw stdout differs by construction (and by run id). What must
     # match is the framed CONTENT against the un-gated text — the bytes the model reads.
@@ -415,13 +398,11 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
 
 
 def test_a_payload_carrying_a_raw_nul_is_refused_and_the_encoder_is_never_called() -> None:
-    """A payload carrying a raw NUL in any string is refused before the encoder, and the model-
-    visible text is byte-identical to the un-gated run's."""
+    """The refusal leaves the model-visible text byte-identical to the un-gated run's."""
     nul = chr(0)
     value = {"rows": [{"a": "x" + nul + "y", "b": i} for i in range(20)]}
     assert nul in toons.dumps(value), (
-        "the encoder no longer emits the NUL raw and unquoted, so the model-visible "
-        "divergence this refusal exists for has changed shape"
+        "the encoder no longer emits the NUL raw and unquoted"
     )
     assert delivered_percent(value) <= 85, (
         "the NUL payload no longer clears the shipped bar, so it would pass through anyway "

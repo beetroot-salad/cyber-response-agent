@@ -1,4 +1,11 @@
-"""One way to ask "does this import cleanly without that package installed?"."""
+"""One way to ask "does this import cleanly without that package installed?".
+
+The finder implements `find_spec` only: from Python 3.12 a `find_module`-only finder is
+silently skipped, so a test built on one passes having blocked nothing. `block=` names what
+must NOT be importable; `allow_only=` names the only things that may be (stdlib aside), so a
+dependency added later fails. Matching is on the top-level package name; a trailing `*` makes
+it a prefix (`pydantic*` also covers `pydantic_core`).
+"""
 from __future__ import annotations
 
 import subprocess
@@ -8,8 +15,7 @@ from pathlib import Path
 
 __all__ = ["blocker_source", "run_blocked"]
 
-#: Every caller had its own (120 or 180) and none had a reason; a blocked import either fails
-#: in milliseconds or the child is wedged.
+#: Generous: a blocked import either fails in milliseconds or the child is wedged.
 _TIMEOUT_S = 180
 
 

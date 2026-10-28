@@ -1,6 +1,8 @@
 """Closed-vocabulary checks on class-tuple slots and their attrs siblings, plus repair-route hints."""
 from __future__ import annotations
 
+import pytest
+
 from defender.skills.invlang.validate import diagnose, validate_companion
 
 
@@ -28,67 +30,42 @@ def _refine_doc(vertex_row: str, refine_row: str) -> str:
     )
 
 
-def test_compute_role_slot_off_vocab_is_refused():
-    doc = _vertex_doc("v-001|compute|container/internal/novel|db-1|")
-    errors = validate_companion(doc, None)
-    assert errors, "compute.role=container (a COMPUTE_KIND value) must be refused"
-    assert any("compute.role" in e or "enum compute.role" in e for e in errors), errors
+#: One off-vocabulary vertex row per closed slot: a class-tuple position or a closed `attrs` key.
+_OFF_VOCAB_ROWS = [
+    ("v-001|compute|container/internal/novel|db-1|", "compute.role"),
+    ("v-001|compute|web-server/nowhere-land/known-corp|web-1|", "compute.zone"),
+    ("v-001|compute|web-server/internal/imaginary|web-1|", "compute.provenance"),
+    ("v-001|identity|imaginary-kind/known-corp|dev.dana|", "identity.kind"),
+    ("v-001|application|imaginary-vendor/corp-tenant|acme|", "application.vendor"),
+    ("v-001|session|imaginary-class|session@db-1|", "session.class"),
+    ("v-001|compute|unclassified-compute/??/??|1df4bcd65ee4|kind=imaginary", "compute.kind"),
+    ("v-001|socket|listening|sock-1|protocol=imaginary", "socket.protocol"),
+]
+
+
+@pytest.mark.parametrize(
+    ("row", "slot"), _OFF_VOCAB_ROWS, ids=[slot for _row, slot in _OFF_VOCAB_ROWS]
+)
+def test_closed_slot_off_vocab_is_refused(row, slot):
+    errors = validate_companion(_vertex_doc(row), None)
+    assert any(slot in e for e in errors), errors
 
 
 def test_compute_role_slot_off_vocab_names_the_slot_it_actually_belongs_to():
-    """The error message itself carries the fix, not a doc the author had to have pre-read: `container` is a..."""
+    """`container` is a `compute.kind` value, not a `compute.role` one."""
     doc = _vertex_doc("v-001|compute|container/internal/novel|db-1|")
     errors = validate_companion(doc, None)
     assert any("compute.kind" in e for e in errors), errors
 
 
-def test_compute_zone_slot_off_vocab_is_refused():
-    doc = _vertex_doc("v-001|compute|web-server/nowhere-land/known-corp|web-1|")
-    errors = validate_companion(doc, None)
-    assert any("compute.zone" in e for e in errors), errors
-
-
-def test_compute_provenance_slot_off_vocab_is_refused():
-    doc = _vertex_doc("v-001|compute|web-server/internal/imaginary|web-1|")
-    errors = validate_companion(doc, None)
-    assert any("compute.provenance" in e for e in errors), errors
-
-
-def test_identity_kind_slot_off_vocab_is_refused():
-    doc = _vertex_doc("v-001|identity|imaginary-kind/known-corp|dev.dana|")
-    errors = validate_companion(doc, None)
-    assert any("identity.kind" in e for e in errors), errors
-
-
-def test_application_vendor_slot_off_vocab_is_refused():
-    doc = _vertex_doc("v-001|application|imaginary-vendor/corp-tenant|acme|")
-    errors = validate_companion(doc, None)
-    assert any("application.vendor" in e for e in errors), errors
-
-
-def test_candidate_set_slot_passes():
-    doc = _vertex_doc(
-        "v-001|compute|{web-server,database-server}/internal/known-corp|db-1|"
-    )
-    assert validate_companion(doc, None) == []
-
-
-def test_unclassified_catchall_passes():
-    doc = _vertex_doc("v-001|compute|unclassified-compute/??/??|1df4bcd65ee4|")
-    assert validate_companion(doc, None) == []
-
-
-def test_ambiguous_catchall_passes():
-    doc = _vertex_doc(
-        "v-001|compute|ambiguous-web-server-or-database-server/internal/known-corp|db-1|"
-    )
-    assert validate_companion(doc, None) == []
-
-
-def test_compute_kind_attr_off_vocab_is_refused():
-    doc = _vertex_doc("v-001|compute|unclassified-compute/??/??|1df4bcd65ee4|kind=imaginary")
-    errors = validate_companion(doc, None)
-    assert any("compute.kind" in e for e in errors), errors
+@pytest.mark.parametrize("row", [
+    "v-001|compute|{web-server,database-server}/internal/known-corp|db-1|",
+    "v-001|compute|unclassified-compute/??/??|1df4bcd65ee4|",
+    "v-001|compute|ambiguous-web-server-or-database-server/internal/known-corp|db-1|",
+], ids=["candidate-set", "unclassified-catchall", "ambiguous-catchall"])
+def test_escape_hatch_class_passes(row):
+    """A candidate set and the two documented catch-alls pass unchecked."""
+    assert validate_companion(_vertex_doc(row), None) == []
 
 
 def test_compute_kind_attr_container_is_the_right_home_for_it():
@@ -97,43 +74,24 @@ def test_compute_kind_attr_container_is_the_right_home_for_it():
     assert validate_companion(doc, None) == []
 
 
-def test_session_class_off_vocab_is_refused():
-    doc = _vertex_doc("v-001|session|imaginary-class|session@db-1|")
-    errors = validate_companion(doc, None)
-    assert any("session.class" in e for e in errors), errors
-
-
-def test_socket_protocol_attr_off_vocab_is_refused():
-    doc = _vertex_doc("v-001|socket|listening|sock-1|protocol=imaginary")
-    errors = validate_companion(doc, None)
-    assert any("socket.protocol" in e for e in errors), errors
-
-
 def test_process_class_stays_freeform():
     doc = _vertex_doc("v-001|process|some-random-binary|some-random-binary[pid=1]|")
     assert validate_companion(doc, None) == []
 
 
-def test_attr_updates_class_refinement_off_vocab_is_refused():
-    doc = _refine_doc(
-        "v-001|compute|??/??/??|1df4bcd65ee4|",
-        "l-001|v-001|class|container/internal/novel",
-    )
-    errors = validate_companion(doc, None)
-    assert any("compute.role" in e for e in errors), errors
-
-
-def test_attr_updates_attrs_kind_refinement_off_vocab_is_refused():
-    doc = _refine_doc(
-        "v-001|compute|unclassified-compute/??/??|1df4bcd65ee4|",
-        "l-001|v-001|attrs.kind|imaginary",
-    )
-    errors = validate_companion(doc, None)
-    assert any("compute.kind" in e for e in errors), errors
+@pytest.mark.parametrize(("vertex_row", "refine_row", "slot"), [
+    ("v-001|compute|??/??/??|1df4bcd65ee4|",
+     "l-001|v-001|class|container/internal/novel", "compute.role"),
+    ("v-001|compute|unclassified-compute/??/??|1df4bcd65ee4|",
+     "l-001|v-001|attrs.kind|imaginary", "compute.kind"),
+], ids=["class", "attrs.kind"])
+def test_attr_updates_refinement_off_vocab_is_refused(vertex_row, refine_row, slot):
+    errors = validate_companion(_refine_doc(vertex_row, refine_row), None)
+    assert any(slot in e for e in errors), errors
 
 
 def test_986_e2e_realistic_investigation_flags_the_reported_defect():
-    """Reproduces the real run's loop-2 write verbatim (minus unrelated blocks):..."""
+    """The real run's loop-2 write, verbatim minus unrelated blocks."""
     doc = _companion(
         ":V prologue.vertices [id|type|class|ident|attrs?]",
         "v-001|compute|??/??/known-corp|soc-playground|knowledge=partial",
@@ -155,7 +113,8 @@ def test_986_e2e_realistic_investigation_flags_the_reported_defect():
 
 
 def test_a_class_grammar_position_is_not_an_attrs_vocabulary():
-    """`compute.role` closes the FIRST SLASH-SLOT of a `compute` class cell, not an `attrs.role`. SKILL.md..."""
+    """`compute.role` closes the FIRST SLASH-SLOT of a `compute` class cell, not an `attrs.role`:
+    SKILL.md registers no `attrs.role` or `attrs.zone`, so `role=primary` is a free attribute."""
     for attrs in ("role=primary", "zone=us-east-1a", "provenance=vendor-supplied"):
         doc = _vertex_doc(f"v-001|compute|web-server/internal/known-corp|db-1|{attrs}")
         assert validate_companion(doc, None) == [], attrs
@@ -167,7 +126,8 @@ def test_a_class_grammar_position_is_not_an_attrs_vocabulary():
 
 
 def test_a_quoted_value_is_judged_as_the_value_it_quotes():
-    """A quote PROTECTS a delimiter in this format and is kept by `_split_cells`, so the same value arrives bare..."""
+    """`_split_cells` keeps quotes, so one value can arrive bare from a `:V` attrs cell and
+    quoted from a `:R attr_updates` cell; the vocabulary must answer the same for both."""
     assert validate_companion(
         _vertex_doc('v-001|compute|web-server/internal/known-corp|db-1|kind="container"'),
         None,
@@ -189,7 +149,9 @@ def test_a_quoted_value_is_judged_as_the_value_it_quotes():
 
 
 def test_a_vertex_re_declared_under_a_second_type_has_no_grammar_to_dispatch_on():
-    """`_walkers.vertex_types` is FIRST-DECLARATION-WINS while `effective_vertex_state` folds a LATER row's class..."""
+    """`_walkers.vertex_types` is FIRST-DECLARATION-WINS while `effective_vertex_state` folds a
+    LATER row's class over an open one, so the folded walk must not judge `interactive` by the
+    `compute` grammar. Each `:V` row is still judged by its own `type` cell."""
     doc = _companion(
         ":V prologue.vertices [id|type|class|ident|attrs?]",
         "v-001|compute|??/??/??|x|",
@@ -204,7 +166,8 @@ def test_a_vertex_re_declared_under_a_second_type_has_no_grammar_to_dispatch_on(
 
 
 def test_the_cross_slot_hint_names_a_slot_on_this_vertexs_own_type():
-    """The hint is for the category confusion #986 is about — two axes of ONE type. Taking the first hit in..."""
+    """The hint names another axis of ONE type, never the first `SLOTS` hit: an `application`
+    vertex is not pointed at `compute.role`."""
     errors = validate_companion(
         _vertex_doc("v-001|application|unknown/corp-tenant|acme|"), None
     )
@@ -213,7 +176,8 @@ def test_the_cross_slot_hint_names_a_slot_on_this_vertexs_own_type():
 
 
 def test_the_offered_class_repair_is_withheld_when_this_check_would_refuse_it():
-    """The illegal-key repair rewrites the KEY and keeps the author's VALUE, so on a `compute` vertex the `class`..."""
+    """The illegal-key repair keeps the author's VALUE, so on a `compute` vertex the `class`
+    route would offer `class|svc.config-mgmt`, which this check refuses: every offer must land."""
     doc = _companion(
         ":V prologue.vertices [id|type|class|ident|attrs?]",
         "v-001|compute|web-server/internal/known-corp|host|",
@@ -242,7 +206,8 @@ def test_the_offered_class_repair_is_withheld_when_this_check_would_refuse_it():
 
 
 def test_every_offered_repair_route_lands_clean_not_only_the_class_one():
-    """The `attrs.<name>` route keeps the author's VALUE exactly as the `class` route does, and `attr_slot_key`..."""
+    """The `attrs.<name>` route keeps the VALUE too, and `compute.kind` is closed, so
+    `kind|imaginary` has no route that lands: all are withheld, and the message says so for each."""
     doc = _companion(
         ":V prologue.vertices [id|type|class|ident|attrs?]",
         "v-001|compute|web-server/internal/known-corp|host|",
@@ -273,7 +238,8 @@ def test_every_offered_repair_route_lands_clean_not_only_the_class_one():
 
 
 def test_a_withheld_route_is_explained_only_where_it_was_a_candidate():
-    """A quoted LEGAL key has exactly one route — the key the author quoted. A `class` refusal printed beside..."""
+    """A quoted LEGAL key has exactly one route, the key unquoted, so no withheld-route
+    explanation is printed beside it."""
     doc = _companion(
         ":V prologue.vertices [id|type|class|ident|attrs?]",
         "v-001|compute|web-server/internal/known-corp|host|",
@@ -294,7 +260,8 @@ def test_a_withheld_route_is_explained_only_where_it_was_a_candidate():
 
 
 def test_a_later_declaration_the_fold_discards_is_still_checked():
-    """`_seed_vertex_state` upgrades a held class only from BLANK or OPEN, so a concrete cell written over a..."""
+    """`_seed_vertex_state` upgrades a held class only from BLANK or OPEN, so the fold drops a
+    concrete cell written over a concrete one; the row is still on disk and must be checked."""
     doc = _companion(
         ":V prologue.vertices [id|type|class|ident|attrs?]",
         "v-001|compute|web-server/internal/known-corp|host|",
@@ -314,7 +281,8 @@ def test_a_later_declaration_the_fold_discards_is_still_checked():
 
 
 def test_the_cross_slot_hint_never_names_a_catalog_no_vertex_cell_is_drawn_from():
-    """`vocab.SLOTS` also registers `types`, `relations`, `disposition`, the `impact.*` grading keys and..."""
+    """`vocab.SLOTS` also registers non-vertex catalogs (`relations`, `types`, `impact.*`, ...):
+    `created` is a relation, but the hint must not send a `storage` author there."""
     errors = validate_companion(_vertex_doc("v-001|storage|created|s-1|"), None)
     assert any("storage.kind" in e for e in errors), errors
     assert not any("relations" in e for e in errors), errors
@@ -326,7 +294,8 @@ def test_the_cross_slot_hint_never_names_a_catalog_no_vertex_cell_is_drawn_from(
 
 
 def test_a_re_declaration_does_not_smuggle_a_refinement_past_the_check():
-    """A `:R attr_updates` refinement is the write this check exists for, and skipping every re-declared id..."""
+    """A vertex declared both `compute` and `session` still has its `class` refinement checked:
+    a value wrong under every declared type is refused."""
     doc = _companion(
         ":V prologue.vertices [id|type|class|ident|attrs?]",
         "v-001|compute|??/??/??|x|",
@@ -350,7 +319,8 @@ def test_a_re_declaration_does_not_smuggle_a_refinement_past_the_check():
 
 
 def test_an_attrs_name_one_declared_type_leaves_free_is_not_refused():
-    """The `attrs` half of the same rule. `attrs.kind` is closed on `compute` and free on `session` (SKILL.md..."""
+    """The `attrs` half of the same rule: `attrs.kind` is closed on `compute` but free on
+    `session`, so a vertex declared as both may carry `kind=imaginary`."""
     doc = _companion(
         ":V prologue.vertices [id|type|class|ident|attrs?]",
         "v-001|compute|??/??/??|x|",
@@ -368,7 +338,8 @@ def test_an_attrs_name_one_declared_type_leaves_free_is_not_refused():
 
 
 def test_a_non_vertex_type_never_reaches_a_grading_vocabulary():
-    """`vocab.SLOTS` also registers `impact.*`, `conclude.*` and `attr-pred.target` — the grading vocabularies of..."""
+    """A row whose `type` is not a vertex type draws that refusal only, never a second one from
+    a grading vocabulary (`impact.*`, `conclude.*`) that `vocab.SLOTS` also registers."""
     errors = validate_companion(
         _vertex_doc("v-001|impact|x|y|dimension=bogus"), None
     )

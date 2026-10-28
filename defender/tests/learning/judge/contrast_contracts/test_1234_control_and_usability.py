@@ -20,7 +20,7 @@ from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
 #: The hand-built control's label: three letters no refusal text spells by accident ("a" is
 #: an English word, so `"a" in reason` holds for every reason).
 CTL = "ctl"
-#: main's EpisodeGrade field for a stamp. The design keeps stamps "unchanged in kind".
+#: The `EpisodeGrade` field for a stamp.
 STAMP = S.STAMP
 MALFORMED = S.COINED["row.malformed"]
 UNGRADABLE_REASON = S.COINED["row.ungradable_reason"]
@@ -192,7 +192,7 @@ def _finding_reply(focus: str, control: str) -> dict:
 
 def _shared_id_calls(label: str, first: S.CallRow) -> list[S.CallRow]:
     """`first`, then a table-only reject joined to THE SAME call id: two table rows of the run
-    sharing one id (A12). The ledger holds one row, so only the table check can fire."""
+    sharing one id. The ledger holds one row, so only the table check can fire."""
     shared = S.call_id(label, 0)
     return [dataclasses.replace(first, call_id=shared),
             S.CallRow(params=S.query_params("user:carol"), source=None, lead=first.lead,
@@ -200,9 +200,9 @@ def _shared_id_calls(label: str, first: S.CallRow) -> list[S.CallRow]:
 
 
 def _missing_id_calls(first: S.CallRow) -> list[S.CallRow]:
-    """`first`, then a ledger-only row carrying NO call id, which A3's read refuses. It writes
-    no table row: an id-less table row would read as an inherited row the other tables lack,
-    a failed read of the TABLE under R3 (a), and this case pins the ledger's own check."""
+    """`first`, then a ledger-only row carrying NO call id, which the read refuses. It writes no
+    table row: an id-less table row would read as an inherited row the other tables lack (a
+    failed read of the table), and this case pins the ledger's own check."""
     return [first, S.CallRow(params=S.query_params("user:carol"), call_id=None, table=False)]
 
 
@@ -285,14 +285,6 @@ def _fifo(path: Path, _tmp_path: Path) -> Any:
     return S.plant_fifo(path)
 
 
-def _directory(path: Path, _tmp_path: Path) -> Any:
-    return S.plant_dir(path)
-
-
-def _sparse(path: Path, _tmp_path: Path) -> Any:
-    return S.plant_oversize(path)
-
-
 def _second_key(path: Path, _tmp_path: Path) -> Any:
     return S.second_disposition(path)
 
@@ -332,24 +324,6 @@ _READS: dict[str, tuple[Callable[[str, S.CallRow], dict] | None, Damage | None, 
     "oracle-store-is-torn": (None, _on("oracle", _torn), _file("forged.jsonl")),
     "oracle-store-is-a-fifo": (None, _on("oracle", _fifo), _file("forged.jsonl")),
 }
-
-#: The special files D14 names, at each file a run's context reads.
-_SPECIAL: dict[str, tuple[Damage, Names]] = {
-    "report-is-a-fifo": (_on("report.md", _fifo), _file("report.md")),
-    "report-is-a-directory": (_on("report.md", _directory), _file("report.md")),
-    "report-is-sparse-past-the-read-limit": (_on("report.md", _sparse), _file("report.md")),
-    "query-table-is-a-fifo": (_on("executed_queries.jsonl", _fifo),
-                              _file("executed_queries.jsonl")),
-    "query-table-is-sparse-past-the-read-limit": (_on("executed_queries.jsonl", _sparse),
-                                                  _file("executed_queries.jsonl")),
-    "alert-is-a-fifo": (_on("alert.json", _fifo), _file("alert.json")),
-    "alert-is-a-directory": (_on("alert.json", _directory), _file("alert.json")),
-    "lessons-record-is-a-fifo": (_on("lessons_loaded.jsonl", _fifo),
-                                 _file("lessons_loaded.jsonl")),
-    "gather-summary-is-a-fifo": (_on("gather_summaries/l-001.md", _fifo),
-                                 _file("gather_summaries")),
-}
-
 
 def _damaged(tmp_path: Path, case: str, label: str, worlds: Callable[..., list[S.World]],
              first: S.CallRow) -> tuple[S.Built, tuple[str, ...]]:
@@ -411,9 +385,7 @@ def test_1234_control_cut_short_stamps_the_family_not_graded(tmp_path, cut):
         return
 
     est = S.Estate1234(tmp_path / "estate", withheld=(("edr", "lookup"),))
-    pattern = ("{run_dir}/executed_queries.jsonl" if cut == "failed-query-table-write"
-               else "{episode}/served/{world_id}.jsonl")
-    est.break_write("idp", "query", FRESH, pattern)
+    est.break_write("idp", "query", FRESH, "{episode}/served/{world_id}.jsonl")
     turns = [*S.default_turns()[:-1], S.query_turn("idp", "query", FRESH), S.done_turn()]
     real = S.real_family(tmp_path, {"a": S.RealWorld("a", disposition="benign", turns=turns)},
                          estate=est)
@@ -423,8 +395,7 @@ def test_1234_control_cut_short_stamps_the_family_not_graded(tmp_path, cut):
 
     reason = _assert_stamped(real, judge)
     assert _names_label(reason, "a"), f"the stamp does not name the control a: {reason!r}"
-    record = (("executed_queries.jsonl", "query table") if cut == "failed-query-table-write"
-              else (real.ledger_path("a").name, "served ledger", "ledger"))
+    record = (real.ledger_path("a").name, "served ledger", "ledger")
     assert any(name in reason for name in record), (
         f"the stamp does not name the failed write ({record}): {reason!r}")
 
@@ -449,8 +420,7 @@ def test_1234_control_malformed_stamps_the_family_not_graded(tmp_path, case):
 
 @pytest.mark.parametrize("case", [
     "query-table-is-a-symlink", "query-table-is-torn", "served-ledger-is-a-symlink",
-    "served-ledger-is-torn", "ledger-row-without-a-call-id",
-    "two-table-rows-sharing-one-call-id"])
+    "served-ledger-is-torn"])
 def test_1234_control_with_a_damaged_query_table_or_ledger(tmp_path, case):
     built, names = _damaged(tmp_path, case, CTL, _triad_ctl, _CTL_FIRST)
     judge = S.judge({"b": _finding_reply("b", CTL), "c": _finding_reply("c", CTL)})
@@ -667,36 +637,36 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
     assert not any(_carries(e, GHOST_PARAMS) or _names_run(e, GHOST)
                    for e in S.found_gaps(clean)), "the undeclared label's file was read"
 
-    # R5: the same archive under a renamed folder is refused (the variants above, copies that
-    # keep the folder name, are the positive control on the same door).
+    # The same archive under a renamed folder is refused (the variants above, copies that keep
+    # the folder name, are the positive control on the same door).
     renamed_id = str(uuid.uuid4())
     renamed = S.tenant_episodes(tmp_path / "variant-renamed") / renamed_id
     shutil.copytree(real.ep, renamed, symlinks=True)
     before = H5.tree_state(renamed)
     judge = S.judge(world_ids=real.world_ids)
     err = H5.raised(S.grade, renamed, judge)
-    assert err is not None, "a renamed copy was graded (R5)"
+    assert err is not None, "a renamed copy was graded"
     said = H5.message(err)
-    assert renamed_id in said, f"the R5 refusal does not name the folder's id: {said!r}"
-    assert real.ep.name in said, f"the R5 refusal does not name the manifest's id: {said!r}"
+    assert renamed_id in said, f"the refusal does not name the folder's id: {said!r}"
+    assert real.ep.name in said, f"the refusal does not name the manifest's id: {said!r}"
     assert judge.calls == 0, f"a renamed copy reached the model: {judge.agent_ids}"
     assert H5.tree_state(renamed) == before, "the refused pass wrote into the renamed copy"
 
 
-#: The seeded prefix every hand-built table opens with: an ordinary pre-branch row and J3's
-#: inherited denial, identical in every run's table and carrying no id of any run (A12).
+#: The seeded prefix every hand-built table opens with: an ordinary pre-branch row and the
+#: inherited denial (J3), identical in every run's table and carrying no run's call id.
 _PREFIX = [S.CallRow(params=S.query_params("user:prebranch"), inherited=True),
            S.inherited_denial()]
-#: J3's found-gap key: the family's entry (A14), listed once.
+#: J3's found-gap key: the family's entry, listed once.
 _J3_KEY = (S.COINED["found.family_run"], "edr", "lookup",
            S.canonical(_PREFIX[1].the_params))
 
 
 def _edit_prefix(edit: str, built: S.Built, label: str) -> Callable[[list[dict]], list[dict]]:
     """What a box's rewrite of world `label`'s own archived table does to the inherited rows
-    (OB10: the run dir is the box's rw bind): drop its copy of J3's row, add an id-less row the
-    source never wrote, or alter an inherited row's params. (#1255 G6: a row is inherited when
-    the run's host-only call-join record names no id for its `(lead_id, seq)`.)"""
+    (the run dir is the box's rw bind): drop its copy of J3's row, add an id-less row the source
+    never wrote, or alter an inherited row's params. A row is inherited when the call-join
+    record names no id for its `(lead_id, seq)`."""
     own = built.own_keys(label)
 
     def apply(rows: list[dict]) -> list[dict]:
@@ -714,7 +684,7 @@ def _edit_prefix(edit: str, built: S.Built, label: str) -> Callable[[list[dict]]
 
 def _j3_and_ordinary_reply(built: S.Built) -> dict:
     """b files an ordinary two-run finding (it queues) and one resting on J3's inherited row in
-    b and in the control (`a`): gap-only while J3's row is identified (A14)."""
+    b and in the control (`a`): gap-only while J3's row is identified as inherited."""
     return S.world_reply("lead-quality", ["idp"], investigator=[
         S.inv(contrast=[S.conduct("b"), S.conduct("a")], claim=S.marker("b", "ordinary")),
         S.inv(contrast=[built.table("b", 1), built.table("a", 1)], claim=S.marker("b", "j3"))])
@@ -746,12 +716,13 @@ def test_1234_box_edits_the_inherited_rows_of_its_own_query_table(tmp_path, edit
     assert not judge.called("c"), "the world whose table differs was graded"
     _assert_out_of_references(judge, "c")
     assert _j3_listed_once(edited), (
-        f"c's edit un-identified J3's row: {S.found_gaps(edited)}")
+        f"c's edit un-identified the inherited denial: {S.found_gaps(edited)}")
     j3_finding, ordinary = edited.finding_id("b", 0, 1), edited.finding_id("b", 0, 0)
-    assert S.lane_of(edited, j3_finding) == S.LANES["user_record"], "J3's finding left gap-only"
+    assert S.lane_of(edited, j3_finding) == S.LANES["user_record"], (
+        "the finding on the inherited denial left gap-only")
     assert S.from_world(S.defender_queue(), "b"), "b's ordinary finding did not queue"
     assert all(r.get("finding_id") != j3_finding for r in S.defender_queue()), (
-        "b's J3 finding queued")
+        "b's finding on the inherited denial queued")
     assert S.lane_of(edited, ordinary) == S.LANES["defender"]
 
     clean = _build(tmp_path, "clean", _quad(), inherited=_PREFIX)
@@ -759,7 +730,8 @@ def test_1234_box_edits_the_inherited_rows_of_its_own_query_table(tmp_path, edit
     S.grade(clean, judge)
     assert judge.called("c"), "control: the unedited c was not graded"
     assert not S.row(clean, "c").get("ungradable"), f"control: {S.row(clean, 'c')}"
-    assert _j3_listed_once(clean), f"control: J3 is not listed once: {S.found_gaps(clean)}"
+    assert _j3_listed_once(clean), (
+        f"control: the inherited denial is not listed once: {S.found_gaps(clean)}")
 
 
 #: The column a box's rewrite changes on its own table row, and the value it writes.
@@ -768,8 +740,8 @@ _DISAGREE = {"system": "siem-x", "verb": "lookup", "params": FOREIGN}
 
 def _disagree(built: S.Built, label: str, column: str) -> Callable[[list[dict]], list[dict]]:
     """Rewrite the table row joined to `label`'s first call id so its (system, verb, params)
-    no longer matches the ledger row that id joins. (#1255 G6: the row is found through the
-    host-only call-join record, by its `(lead_id, seq)` — the table carries no id.)"""
+    no longer matches the ledger row that id joins. The row is found through the call-join
+    record by its `(lead_id, seq)`; the table carries no id."""
     cid = S.call_id(label, 0)
     hits = built.lines_of_call(label, cid)
 

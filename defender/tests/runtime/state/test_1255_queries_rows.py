@@ -43,8 +43,8 @@ def _assert_only_listed_files(run_dir: Path, where: str) -> None:
 def _assert_no_call_id(rows: list[dict], where: str) -> None:
     carrying = [r for r in rows if W.CALL_ID in r]
     assert not carrying, (
-        f"{where}: {len(carrying)} query row(s) carry `{W.CALL_ID}` — the model reads this "
-        f"table, and the id is host bookkeeping it never uses (G4/G5): {carrying[:2]}")
+        f"{where}: {len(carrying)} query row(s) in the model's table carry `{W.CALL_ID}`: "
+        f"{carrying[:2]}")
     shaped = [tuple(r) for r in rows if tuple(r) != W.ROW_COLUMNS]
     assert not shaped, (
         f"{where}: query rows whose columns are not the writer's fourteen (a column carrying "

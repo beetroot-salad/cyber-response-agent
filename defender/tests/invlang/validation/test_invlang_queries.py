@@ -190,7 +190,8 @@ def test_lead_branch_effects_pattern_filter_excludes_unrelated_hypotheses():
 
 
 def test_lead_branch_effects_frontier_scopes_n_and_empty_rate():
-    """Codex P2: when `hypothesis_patterns` is supplied, `n` and `empty_rate` must reflect frontier-specific support only."""
+    """With `hypothesis_patterns`, `n` and `empty_rate` count only the occurrences that touched
+    the frontier."""
     corpus = [
         _case(
             f"hit-{i}",
@@ -220,7 +221,8 @@ def test_lead_branch_effects_frontier_scopes_n_and_empty_rate():
 
 
 def test_lead_branch_effects_surfaces_tested_hypothesis_without_resolutions():
-    """Codex P2: a lead with `tests_hypotheses` for a frontier hypothesis but no `resolutions[]` (e.g."""
+    """A lead testing a frontier hypothesis with no `resolutions[]` (an empty or failed gather)
+    still appears, with all-zero buckets: its empty_rate is the signal."""
     corpus = [
         _case(
             f"case-{i}",
@@ -255,10 +257,8 @@ def test_lead_branch_effects_min_support_drops_low_n_rows():
 def _shape_case(
     case_id: str,
     *,
-    signature_id: str = "5710",
     vertices: list[dict] | None = None,
     hypotheses: list[dict] | None = None,
-    disposition: str = "benign",
     resolutions: list[dict] | None = None,
 ) -> Companion:
     leads = (
@@ -269,26 +269,25 @@ def _shape_case(
         "prologue": {"vertices": vertices or [], "edges": []},
         "hypothesize": {"hypotheses": hypotheses or []},
         "findings": leads,
-        "conclude": {"disposition": disposition},
+        "conclude": {"disposition": "benign"},
     }
     return Companion(
         case_id=case_id,
         source_path=Path(f"/tmp/fake/{case_id}/investigation.md"),
         body=body,
-        signature_id=signature_id,
+        signature_id="5710",
     )
 
 
 def _hyp(h_id: str, name: str, *, attached_to: str = "v-001",
          parent_type: str = "compute",
-         parent_class: str = "bastion/internal/known-corp",
          rel: str = "attempted_auth", weight: str | None = None) -> dict:
     return {
         "id": h_id, "name": name,
         "anchor": attached_to,
         "proposed_edge": {
             "relation": rel,
-            "parent_vertex": {"type": parent_type, "classification": parent_class},
+            "parent_vertex": {"type": parent_type, "classification": "bastion/internal/known-corp"},
         },
         "weight": weight,
         "status": "active",
@@ -391,6 +390,7 @@ def test_hypothesis_shape_uses_final_weight_from_resolutions():
 
 
 def test_hypothesis_shape_match_filters_via_anchor_field():
+    """Pins the canonical `anchor` key with a hand-built hypothesis, bypassing `_hyp`."""
     h = {
         "id": "h-001", "name": "?config-changed",
         "anchor": "v-001",
@@ -413,7 +413,8 @@ def test_hypothesis_shape_match_filters_via_anchor_field():
 
 
 def test_hypothesis_vocabulary_counts_hypotheses_the_run_raised_mid_investigation():
-    """`cli`'s vocabulary command counts BOTH declaration sites — the prologue's opening hypotheses and the ones a lead raised as it went."""
+    """`cli`'s vocabulary command counts BOTH declaration sites: the opening hypotheses and
+    the ones a lead raised as it went."""
     from defender.skills.invlang.cli import _hypothesis_vocabulary
 
     corpus = [

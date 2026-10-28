@@ -1,4 +1,4 @@
-"""Plant a run's alert and its record the way `materialize_run` leaves them (#1222 A1).
+"""Plant a run's alert and its record the way `materialize_run` leaves them (#1222).
 
 Shared by the hand-built run folders of the older suites: since the front door settles an alert
 once, a folder with an `alert.json` and no record is not a run. Underscore-prefixed so pytest
@@ -39,8 +39,8 @@ def plant_alert(run_dir: Path, alert: bytes | Mapping[str, Any] | None = None, *
 
 def plant_source_copy(episode_dir: Path, alert: bytes, *,
                       mapping: Mapping[str, str] = COMMITTED_MAPPING) -> None:
-    """The copies a launch puts in an episode (#1222 A1): the source run's alert and its
-    record, which the judge reads in place of the world's `alert.json`."""
+    """The copies a launch puts in an episode: the source run's alert and its record, which the
+    judge reads in place of the world's `alert.json`."""
     from defender.records._episode_paths import EpisodePaths
 
     paths = EpisodePaths(Path(episode_dir))

@@ -52,8 +52,8 @@ def _case(runs: Path, case_id: str, *, summary: str = "plain summary",
 
 
 def test_an_undecodable_investigation_is_skipped_not_raised(tmp_path):
-    """demand (#589) — `load_corpus` must warn-SKIP a file it cannot decode, exactly as it skips one
-    it cannot parse."""
+    """`load_corpus` warn-SKIPs a file it cannot decode, exactly as it skips one it cannot parse
+    (#589)."""
     runs = tmp_path / "runs"
     _case(runs, "good")
     _case(runs, "corrupt", investigation=b"```invlang\nprologue:\n  summary: \xff\xfe truncated\n")
@@ -68,9 +68,9 @@ def test_an_undecodable_investigation_is_skipped_not_raised(tmp_path):
     assert reason.startswith("read error:")
 
 
-def test_an_undecodable_alert_json_degrades_the_signature_it_does_not_sink_the_case(tmp_path):
-    """demand (#589) — the same escape lives a second time in the same file, in
-    `_read_signature_id`, and the issue does not mention it."""
+def test_a_case_whose_alert_names_no_signature_loads_with_no_signature_id(tmp_path):
+    """The signature comes from the alert's record, so an alert naming none leaves the case's
+    `signature_id` None and the case still loads."""
     runs = tmp_path / "runs"
     _case(runs, "badalert", alert={"alert_id": "no-signature-here"})
 
@@ -88,8 +88,7 @@ def _c_locale_python(script: str) -> subprocess.CompletedProcess:
 
 
 def test_the_read_pin_keeps_a_valid_utf8_case_under_a_c_locale(tmp_path):
-    """demand (#589, the latent half) — a *valid* UTF-8 companion must load where the ambient
-    encoding is ascii."""
+    """A *valid* UTF-8 companion loads where the ambient encoding is ASCII."""
     runs = tmp_path / "runs"
     _case(runs, "emdash", summary="auth-log leads expose logins — not post-auth behavior")
     _case(runs, "ascii")
@@ -110,8 +109,8 @@ def test_the_read_pin_keeps_a_valid_utf8_case_under_a_c_locale(tmp_path):
 
 
 def test_the_real_invlang_shim_prints_corpus_text_under_a_c_locale(tmp_path):
-    """demand (#589 / the #586 finding, one skill over) — end-to-end through the REAL `defender-
-    invlang` shim, the command the defender runs at PLAN."""
+    """End to end through the REAL `defender-invlang` shim, the command the defender runs at
+    PLAN."""
     runs = tmp_path / "runs"
     _case(runs, "emdash", summary="auth-log leads expose logins — not post-auth behavior")
 
@@ -151,8 +150,8 @@ def _curator_deps(tmp_path: Path):
 
 
 def test_a_lesson_the_runtime_wrote_survives_the_walk_that_reads_it_back(tmp_path):
-    """demand (#588) — the read pin and the WRITE pin are ONE contract, and only a round trip under
-    a hostile locale catches the gap between them."""
+    """The read pin and the WRITE pin are ONE contract: only a round trip under a hostile locale
+    catches a gap between them (#588)."""
     proc = _c_locale_python(
         f"import sys; sys.path.insert(0, {str(WORKSPACE_ROOT)!r})\n"
         "import locale\n"
@@ -224,7 +223,8 @@ def test_use_utf8_stdio_moves_the_encoding_and_leaves_the_error_handler_alone():
 
 
 def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
-    """The gather ingestion boundary, re-pointed at the TRANSPORT (#611)."""
+    """At the gather ingestion boundary, the TRANSPORT replaces a vendor's undecodable byte
+    (#611)."""
     from defender.integrations import _stub_transport as transport
     from defender.systems.verbs import VerbContext
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S

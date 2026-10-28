@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
-import importlib
 import os
 import textwrap
 from pathlib import Path
@@ -30,31 +29,13 @@ TENANT = D9_TENANT_ID
 
 def _case_module() -> Any:
     """The case-mapping module: the one module under `defender/tenancy/` defining
-    `load_case_mapping` (the base module under `SPEC1080_AT_BASE`)."""
+    `load_case_mapping`."""
     return S.moved_module("load_case_mapping", home=S.TENANCY)
 
 
 def _moved(name: str) -> Any:
     """A case-mapping name from its home under `defender/tenancy/`."""
     return S.moved(name, home=S.TENANCY)
-
-
-def _writer_home() -> str:
-    """The write-back module's path, wherever it lives: `record_case_ticket`'s one home outside
-    `defender/scripts/` once #1165 has moved it (the locator's one-home rule decides), else its
-    one definition under `scripts/` — `investigation/ticket_writer.py`, which #1190 leaves in
-    place. Decided by the definitions, never by catching the locator's failure (that would also
-    swallow a duplicate home)."""
-    defs = S.definitions("record_case_ticket")
-    if any(not S.under(d, "defender/scripts") for d in defs):
-        return S.home_of("record_case_ticket")
-    assert len(defs) == 1, f"`record_case_ticket` has {len(defs)} definitions: {list(defs)}"
-    return defs[0]
-
-
-def _writer() -> Any:
-    """The write-back module, imported by its dotted name."""
-    return importlib.import_module(S.dotted(_writer_home()))
 
 
 MAPPING = textwrap.dedent("""\
@@ -76,29 +57,17 @@ MAPPING = textwrap.dedent("""\
 
 MAPPING_REFUSED = MAPPING.replace("  status: open\n", '  status: "{signature}"\n')
 
-def report_text(disposition: str = "benign",
-                cause: str = "the disposition was recorded without a challenge review",
-                body: str = "Disposition recorded by the close gate. outcome=stands.") -> str:
-    """`report.md` as the close gate writes it (YAML frontmatter; `_triplet_947.report_text`'s
-    shape). `cause` is spelled verbatim into the frontmatter, so a caller quotes it if needed."""
-    return (f"---\ndisposition: {disposition}\noutcome: stands\ncause: {cause}\n---\n{body}\n")
 
-
-def _tenant(mapping: str | bytes | None = MAPPING) -> tuple[Path, Path]:
+def _tenant() -> tuple[Path, Path]:
     """The D9 tenant set up under THIS test's data root (`DEFENDER_DATA_ROOT`), its knowledge
-    replaced by a complete #1107 tenant (`_spec1107.plant`), its mapping file `mapping` when
-    given. Returns (data root, knowledge folder)."""
+    replaced by a complete #1107 tenant (`_spec1107.plant`) with `MAPPING` as its mapping file.
+    Returns (data root, knowledge folder)."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 
     ensure_d9_tenant()
     root = current_data_root()
     folder = T7.plant(root, marker=MARKER)
-    if mapping is not None:
-        path = T7.mapping_path(folder)
-        if isinstance(mapping, bytes):
-            path.write_bytes(mapping)
-        else:
-            path.write_text(mapping, encoding="utf-8")
+    T7.mapping_path(folder).write_text(MAPPING, encoding="utf-8")
     return root, folder
 
 
@@ -132,8 +101,7 @@ def _records_at_run_start() -> tuple[Any, Any]:
 
 
 def _view_at_run_start(good: Any, bad: Any, tmp: Path) -> dict[str, Any]:
-    """The record's mapping, as held. (The release predicate the ticket writer built from it was
-    observed here too, until #1221's amendment removed it; nothing reads a released status.)"""
+    """The record's mapping, as held."""
     return _norm({
         "record_good": _held(good.ticket_mapping),
         "record_bad": _held(bad.ticket_mapping),
@@ -199,7 +167,7 @@ def _put_state(path: Path, state: str, outside: Path) -> None:
         os.mkfifo(path)
 
 
-def _observe_mapping_file(state: str, tmp: Path, mp: Any) -> dict[str, Any]:
+def _observe_mapping_file(state: str, tmp: Path) -> dict[str, Any]:
     load = _moved("load_case_mapping")
     root, folder = _tenant()
     _put_state(T7.mapping_path(folder), state, tmp / "outside")
@@ -213,7 +181,7 @@ def _observe_mapping_file(state: str, tmp: Path, mp: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize("state", list(FILE_STATES))
 def test_case_mapping_file_in_each_state(state, tmp_path):
-    assert _observe_mapping_file(state, tmp_path, None) == _golden("s187")[state]
+    assert _observe_mapping_file(state, tmp_path) == _golden("s187")[state]
 
 
 #: YAML documents of the wrong shape (each a complete file).
@@ -246,7 +214,7 @@ YAML_SHAPES: dict[str, str] = {
 }
 
 
-def _observe_yaml_shape(shape: str, tmp: Path, mp: Any) -> dict[str, Any]:
+def _observe_yaml_shape(shape: str, tmp: Path) -> dict[str, Any]:
     load = _moved("load_case_mapping")
     settings = tmp / "settings"
     path = settings / "systems" / "case-history" / "mapping.yaml"
@@ -257,4 +225,4 @@ def _observe_yaml_shape(shape: str, tmp: Path, mp: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize("shape", list(YAML_SHAPES))
 def test_case_mapping_yaml_of_the_wrong_shape(shape, tmp_path):
-    assert _observe_yaml_shape(shape, tmp_path, None) == _golden("s188")[shape]
+    assert _observe_yaml_shape(shape, tmp_path) == _golden("s188")[shape]

@@ -21,7 +21,7 @@ from defender.tests.e2e._replay_harness import GOLDEN_AB3, materialize
 
 
 def _start(run_dir: Path, run_id: str):
-    """A run's state as `run_investigation` starts it (#1235 round 2: one `RunState` per run; imported here..."""
+    """A run's state as `run_investigation` starts it: one `RunState` per run."""
     from defender.investigation.run_state import RunState
 
     return RunState(run_dir, run_id)
@@ -39,16 +39,16 @@ def _tight(**over) -> dict:
 
 
 def _fresh_view(tmp_path: Path) -> dict:
-    """A fresh run's budget as the enforcing checks read it (`enforcement_state`) — whatever
-    origin the run keeps, named by the production builder rather than by this test (#1255: the
-    origin is the run clock's, no longer a pair of fields a test can backdate)."""
+    """A fresh run's budget as the enforcing checks read it (`enforcement_state`), its origin set
+    by the production builder rather than by this test."""
     from defender.hooks.budget_enforcer import enforcement_state
 
     return enforcement_state(_start(tmp_path, "fresh"))
 
 
 def _reads_as_healthy(state: dict, limits: dict) -> bool:
-    """Whether the enforcing read would ADMIT the call — no trip on any limb. The fail-open shape D2/D9 guard..."""
+    """Whether the enforcing read would admit the call (no limb trips): the fail-open answer a
+    hostile state must never get."""
     return not any("Budget exceeded" in m for m in check_budgets(state, limits))
 
 
@@ -110,10 +110,11 @@ def test_an_origin_less_state_fails_closed_rather_than_reading_as_healthy(tmp_pa
 
 
 def test_a_counter_failing_validation_trips_rather_than_returning_no_messages(tmp_path):
-    """A counter that fails type or range validation TRIPS: a negative or boolean tool_calls does not silently..."""
+    """A counter failing type or range validation trips: a negative or boolean count must not
+    suppress the message, and a string, list or `None` must not raise a `TypeError` that the
+    driver's guard would swallow."""
     limits = _tight(max_tool_calls=200, max_subagent_spawns=40)
-    # #1255: the healthy base is a fresh run's own enforcement view, not a state built around a
-    # `started_monotonic` field — only the counter under test is hostile.
+    # The healthy base is a fresh run's own enforcement view; only the counter under test is hostile.
     view = _fresh_view(tmp_path)
     for bad in (-5, True, False, "9", "not-a-number", [1], {"a": 1}, None, 3.5):
         state = {**view, "run_id": "r", "tool_calls": bad, "subagent_spawns": 0}
@@ -134,7 +135,8 @@ def test_a_counter_failing_validation_trips_rather_than_returning_no_messages(tm
 
 
 def test_an_injected_cap_of_zero_trips_immediately_rather_than_disabling(tmp_path):
-    """An injected cap of 0 trips immediately rather than reading as 'disabled': a state well past every cap does..."""
+    """A cap of 0 trips immediately instead of reading as "disabled" (a cap ≤ 0 gets no ratio
+    warning); otherwise a harness injecting 0 would drive no enforcement and still pass."""
     zeroed = {"max_tool_calls": 0, "max_subagent_spawns": 0,
               "wall_clock_timeout": 0, "grace_seconds": 0}
     view = _fresh_view(tmp_path)
@@ -157,7 +159,8 @@ def test_an_injected_cap_of_zero_trips_immediately_rather_than_disabling(tmp_pat
 
 
 def test_no_trip_state_no_reset(tmp_path):
-    """The run's own writer persists no trip flag and never resets or decrements a counter: across every..."""
+    """Counting persists no trip flag and never resets or decrements: both counters only grow, so
+    concurrent gathers that see one trip cannot race a reset."""
     run = _start(tmp_path, "run-1")
     seen: list[tuple[int, int]] = []
     trip_keys = ("tripped", "trip", "budget_tripped", "stopped", "kill")
@@ -175,7 +178,8 @@ def test_no_trip_state_no_reset(tmp_path):
 
 
 def test_connectivity_failures_spend_the_budget_pool(tmp_path):
-    """Accounting is unconditional on call OUTCOME: a call that fails on connectivity still executed, so it still..."""
+    """A call that fails on connectivity still executed, so it spends the pool (`account_call` takes
+    no outcome); the positive control for the commit-time refusal below."""
     run = _start(tmp_path, "run-1")
     limits = _tight(max_tool_calls=100)
     for _ in range(4):
@@ -185,7 +189,8 @@ def test_connectivity_failures_spend_the_budget_pool(tmp_path):
 
 
 def test_a_call_that_finished_after_its_pool_tripped_does_not_land_its_effect(tmp_path):
-    """A call that executed after its pool tripped does not land its effect: the increment path re-checks the..."""
+    """200 core calls racing a pool one short of its cap commit exactly one: the increment re-checks
+    the cap at commit time, since pydantic-ai runs a turn's tool calls concurrently, unbounded."""
     run = _start(tmp_path, "run-1")
     limits = _tight(max_tool_calls=5)
     for _ in range(4):
@@ -209,7 +214,8 @@ def test_a_call_that_finished_after_its_pool_tripped_does_not_land_its_effect(tm
 def test_concurrent_increments_to_the_run_budget_are_neither_lost_nor_duplicated_under_contention(
     tmp_path,
 ):
-    """Every increment committed by many concurrently-executing calls across MAIN and its GATHER siblings..."""
+    """Threads counting on the one in-memory budget lose and duplicate nothing: the
+    read-check-increment holds its lock."""
     run = _start(tmp_path, "run-1")
     n_workers, per_worker = 12, 40
 
@@ -226,14 +232,14 @@ def test_concurrent_increments_to_the_run_budget_are_neither_lost_nor_duplicated
 
 
 def test_a_second_run_state_for_the_folder_starts_a_fresh_budget(tmp_path):
-    """A run's state is the run's start (#1235 round 2): a second `RunState(...)` for the SAME folder is a fresh..."""
+    """A second `RunState` for the same folder starts a fresh budget (zero counters, a later origin,
+    its own run id) and leaves the first run's counts alone."""
     first_run = _start(tmp_path, "run-1")
     first = first_run.budget_snapshot()
     assert first["run_id"] == "run-1"
     assert (first["tool_calls"], first["subagent_spawns"]) == (0, 0)
     assert first["created_at"], "the run's state minted no origin"
-    # (#1255: the origin is a reading of the run clock, an aware UTC instant — this assertion
-    # stood in the retired `test_budget_origin_is_a_wall_clock_the_elapsed_check_honours`.)
+    # The origin is a reading of the run clock: an aware UTC instant.
     assert datetime.fromisoformat(first["created_at"]).tzinfo is not None, \
         "the origin is not an absolute (tz-aware) wall time"
     assert first["started_at"], "the run's state minted no origin"
@@ -253,7 +259,8 @@ def test_a_second_run_state_for_the_folder_starts_a_fresh_budget(tmp_path):
 
 
 def test_the_budget_writes_no_file_into_the_run_folder_or_its_container(tmp_path):
-    """#1235 D3: the budget is the run process's memory. A whole run's worth of accounting — the open, counted..."""
+    """The budget lives in the run process's memory: a whole run's accounting (both tiers, up to and
+    past the cap) leaves no file anywhere under the runs base."""
     runs_base = tmp_path / "runs"
     run_dir = runs_base / "run-1235"
     run_dir.mkdir(parents=True)
@@ -276,7 +283,8 @@ def test_the_budget_writes_no_file_into_the_run_folder_or_its_container(tmp_path
 
 
 def test_a_budget_file_in_the_run_folder_moves_no_count(tmp_path):
-    """#1235 D3, at the library: a `budget.json` sitting in a run folder — planted, or left from an older run —..."""
+    """A `budget.json` in the run folder is never read: a run starts at zero beside one, and a
+    planted zero does not re-open a capped pool."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "budget.json").write_text(

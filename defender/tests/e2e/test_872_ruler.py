@@ -1,4 +1,4 @@
-"""#872 — the ruler and the bar (`d1`, `d3`, `d24`, `d25`, `d45`, `d58`)."""
+"""#872 — the ruler and the bar: delivered UTF-8 bytes, measured with the wire serializer."""
 from __future__ import annotations
 
 import json
@@ -36,24 +36,12 @@ def _pick(bar: int, *, clearing: bool):
     raise AssertionError(f"no committed fixture is {'under' if clearing else 'over'} bar {bar}")
 
 
-def test_foreign_dict_row_clearing_the_bar_reaches_the_model_as_toon() -> None:
-    for bar in (85, 90):
-        label, value = _pick(bar, clearing=True)
-        out = agent_run(toolset=foreign_toolset(value), env={MAX_PERCENT_ENV: str(bar)})
-        view = framed_content(out.dispatched.text())
-        assert view == toons.dumps(value), f"{label} did not reach the model as TOON at bar {bar}"
-        assert toons.loads(view) == value
-
-
 def test_a_fixture_whose_verdict_differs_between_rulers_takes_the_wire_rulers_verdict() -> None:
-    """At the bar the gate is configured with, a fixture whose verdict differs between
-    `json.dumps` and the wire serializer takes the WIRE ruler's verdict."""
     overhead = frame_overhead()
 
     def _verdict(value, denominator: int, bar: int) -> bool:
-        """The gate's own comparison against a candidate baseline — delivered bytes on both
-        sides (`d3`), so the only thing that varies between the two rulers below is WHICH
-        serializer supplies the JSON side."""
+        """The gate's comparison, delivered bytes on both sides, so only the serializer of the
+        JSON side varies between the two rulers."""
         return 100 * (toon_bytes(value) + overhead) <= bar * (denominator + overhead)
 
     for bar in (85, 90):
@@ -74,7 +62,6 @@ def test_a_fixture_whose_verdict_differs_between_rulers_takes_the_wire_rulers_ve
 
 
 def test_a_cjk_payload_is_measured_in_bytes_not_characters() -> None:
-    """Both sides of the comparison are measured in UTF-8 BYTES, not characters."""
     bar = 85
     overhead = frame_overhead()
 
@@ -105,17 +92,17 @@ def test_a_cjk_payload_is_measured_in_bytes_not_characters() -> None:
 
 
 def test_a_payload_just_under_the_configured_bar_substitutes_and_one_just_over_it_passes_through() -> None:
-    """At a configured bar, a payload just under it substitutes and one just over it passes
-    through — at MORE THAN ONE configured bar, and asserting NO CONSTANT."""
+    """Checked at two configured bars and on both sides of one fixture's ratio, so no constant
+    is asserted; a substituted view decodes back to the payload."""
     for bar in (85, 90):
         env = {MAX_PERCENT_ENV: str(bar)}
         under_label, under = _pick(bar, clearing=True)
         over_label, over = _pick(bar, clearing=False)
 
         subbed = agent_run(toolset=foreign_toolset(under), env=env)
-        assert framed_content(subbed.dispatched.text()) == toons.dumps(under), (
-            f"{under_label} did not substitute at bar {bar}"
-        )
+        view = framed_content(subbed.dispatched.text())
+        assert view == toons.dumps(under), f"{under_label} did not substitute at bar {bar}"
+        assert toons.loads(view) == under
 
         passed = agent_run(toolset=foreign_toolset(over), env=env)
         assert framed_content(passed.dispatched.text()) == wire_text(over), (

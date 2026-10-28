@@ -1,5 +1,5 @@
 """#773: the curator partitions a batch into committed and consumed-skip only; the questioner
-channel keeps vouching without a verdict step."""
+channel vouches as the lessons channel does."""
 from __future__ import annotations
 
 
@@ -10,7 +10,8 @@ QLESSON = "agent/lessons-questioner/w1.md"
 
 
 def test_the_curator_partitions_the_batch_into_committed_and_consumed_skip_only_773(tmp_path):
-    """`FINDINGS_BUCKETS` declares exactly `committed` and `consumed_skip`;"""
+    """`FINDINGS_BUCKETS` declares exactly `committed` and `consumed_skip`, and a tick sorts
+    its rows into those two."""
     from defender.learning.author.lessons import run as lessons_run
 
     assert [b.name for b in lessons_run.FINDINGS_BUCKETS] == ["committed", "consumed_skip"]
@@ -45,7 +46,7 @@ def test_author_result_carries_an_unrecognized_bucket_key_773(tmp_path):
 
 
 def test_author_result_consumed_skip_bucket_is_missing_773(tmp_path):
-    """A MISSING bucket key is an empty list, not a violation."""
+    """A missing bucket key is an empty list, not a violation."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -59,30 +60,9 @@ def test_author_result_consumed_skip_bucket_is_missing_773(tmp_path):
     assert sc.category_of("f1") == "consumed_committed"
 
 
-def test_a_citation_of_an_earlier_batch_finding_is_not_verified_773(tmp_path):
-    """N1."""
-    sc = S.build_draft_scene(
-        tmp_path,
-        rows=[S.finding_row("now", run_id="now")],
-        seed_corpus={"old.md": S.lesson("earlier-batch-id")},
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("now", "earlier-batch-id")}),
-    )
-    assert sc.run() == 0
-
-
-def test_a_questioner_tick_runs_vouching_and_no_verdict_step_773(tmp_path):
-    """The questioner channel vouches every changed corpus file."""
-    sc = S.build_questioner_draft_scene(
-        tmp_path,
-        rows=[S.world_row("w1")],
-        curator=S.FakeCurator(writes={"w1.md": S.lesson("w1")}),
-    )
-    assert sc.run() == 0
-    assert sc.head_files() == [QLESSON]
-
-
 def test_the_questioner_channel_still_refuses_an_unvouched_file_773(tmp_path):
-    """The questioner channel still refuses an unvouched file."""
+    """An unvouched file fails the questioner tick as it does the lessons tick (`AuthorError`,
+    the draft reset); the control lands."""
     sc = S.build_questioner_draft_scene(
         tmp_path,
         rows=[S.world_row("w1")],
@@ -91,6 +71,7 @@ def test_the_questioner_channel_still_refuses_an_unvouched_file_773(tmp_path):
     )
     assert sc.run() == 2
     assert sc.head_files() == []
+    assert sc.corpus_files() == []
 
     control = S.build_questioner_draft_scene(
         tmp_path / "control",
@@ -99,18 +80,6 @@ def test_the_questioner_channel_still_refuses_an_unvouched_file_773(tmp_path):
     )
     assert control.run() == 0
     assert control.head_files() == [QLESSON]
-
-
-def test_a_questioner_tick_with_a_changed_file_citing_no_batch_finding_773(tmp_path):
-    """Unvouched → `AuthorError`, the SAME disposition as on the lessons channel."""
-    sc = S.build_questioner_draft_scene(
-        tmp_path,
-        rows=[S.world_row("w1")],
-        curator=S.FakeCurator(writes={"orphan.md": S.lesson("someone-else")},
-                              committed=["w1"]),
-    )
-    assert sc.run() == 2
-    assert sc.corpus_files() == []
 
 
 def test_a_questioner_tick_whose_curator_committed_nothing_773(tmp_path):
@@ -125,10 +94,9 @@ def test_a_questioner_tick_whose_curator_committed_nothing_773(tmp_path):
     assert sc.category_of("w1") == "consumed_skip"
 
 
-def test_the_questioner_tick_skips_only_the_verdict_stage_not_the_surrounding_ordering_773(
-    tmp_path,
-):
-    """`forward_check=None` skips M3.3-4 and M4 ONLY."""
+def test_the_questioner_channel_does_not_consume_a_committed_row_no_file_cites_773(tmp_path):
+    """On the questioner channel too, a row claimed committed that no file cites is not
+    consumed, while the cited one lands."""
     sc = S.build_questioner_draft_scene(
         tmp_path,
         rows=[S.world_row("w1"), S.world_row("w2")],

@@ -68,12 +68,12 @@ LOOP2 = _block(_LH, "l-001|1|raw-auth|v-001|h-001|elastic|w",
                "l-005|2|cmdb-ip|v-006|h-002|cmdb|w")
 
 
-def _req(tag: str = "u", n: int = 600) -> dict:
-    return {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": (tag + " ") * n}]}
+def _req() -> dict:
+    return {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "u " * 600}]}
 
 
-def _resp(tag: str = "a", n: int = 600) -> dict:
-    return {"kind": "response", "parts": [{"part_kind": "text", "content": (tag + " ") * n}]}
+def _resp() -> dict:
+    return {"kind": "response", "parts": [{"part_kind": "text", "content": "a " * 600}]}
 
 
 def _history(n: int = 5) -> list:

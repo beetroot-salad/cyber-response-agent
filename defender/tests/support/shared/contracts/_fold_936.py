@@ -1,10 +1,7 @@
-"""#936's fixture documents, lesson selectors and record reader, shared by the two test
-modules that pin the issue: `test_936_fold_lessons_push.py` (the e2e half — drives the real
-driver, needs the runtime extra, marked `e2e`) and `test_936_lessons_loaded_rows.py` (the
-unit half — the record's columns, `render`'s lead, `trace_lesson`'s vocabulary, the SKILL.md
-prose; no driver, runs everywhere). A private helper rather than one importing the other,
-because importing a collected test module loads it twice in one session (`_lessons_corpus`
-explains).
+"""#936's fixture documents, lesson selectors and record reader, shared by
+`test_936_fold_lessons_push.py` (e2e, drives the real driver) and
+`test_936_lessons_loaded_rows.py` (unit). A helper rather than one importing the other:
+importing a collected test module loads it twice in one session.
 """
 from __future__ import annotations
 
@@ -22,7 +19,7 @@ from defender.tests.support.storage._session_store_705 import CLOSED_LOOP_INVLAN
 CLOSED_LOOP = CLOSED_LOOP_INVLANG
 
 #: A `process` vertex whose class is the bare open marker — the slot `CLASS_LESSON` keys on.
-#: Appended AFTER the loop-2 lead, so it lies past the record cut (see the module docstring).
+#: Appended AFTER the loop-2 lead, so it lies past the record cut.
 OPEN_CLASS_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -40,8 +37,8 @@ v-007|process|nc|nc[pid=4243]|loginuid=??;image=/usr/bin/nc
 """
 
 #: A fenced block that moves NOTHING on the frontier: a lead row opens no slot and no
-#: contract. Fenced on purpose — prose never reaches the frontier-equality limb of the gate,
-#: a fence does, so this is the non-moving write C19 is actually about.
+#: contract. Fenced on purpose: prose never reaches the frontier-equality limb of the gate, a
+#: fence does, so this is a genuinely non-moving write.
 LEAD_ONLY_BLOCK = """
 ```invlang
 :L findings [id|loop|name|target|tests|system|window]
@@ -83,9 +80,9 @@ LOGINUID_SELECTOR = ("type: process, slot: attrs.loginuid",)
 IDENT_SELECTOR = ("type: identity, slot: ident",)
 
 #: The write-return header, verbatim from `lessons_frontier.render`'s default lead — the one
-#: the fold row must NOT carry (O3).
+#: the fold row must NOT carry.
 WRITE_RETURN_HEADER = "pushed because this write moved it"
-#: A substring of the fold lead (design M4). Chosen so it is ABSENT from the record head
+#: A substring of the fold lead. Chosen so it is ABSENT from the record head
 #: (`RESUME_RESTART_SHAPED` already says "no longer in the history"); the first test checks
 #: that discrimination rather than assuming it.
 FOLD_HEADER = "as it stands"

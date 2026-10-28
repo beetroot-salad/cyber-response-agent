@@ -67,7 +67,7 @@ def _episode(root: Path, tenant_id: str, *, roster=False, arms: bool = False) ->
 def _texts(mapping) -> dict[str, str]:
     """A `{label: RunId}` answer as `{label: text}`."""
     return {label: str(run_id) for label, run_id in mapping.items()}
-# Writing the roster: `view.start_runs(world_uuids)` (R2; G25).
+# Writing the roster: `view.start_runs(world_uuids)`.
 
 def test_start_runs_makes_runs_then_writes_one_fresh_arm_uuid_per_world(data_root):
     t = S.tenant(data_root, A_ID)
@@ -210,7 +210,7 @@ def test_a_second_start_runs_refuses_and_leaves_the_roster_byte_identical(data_r
 #: (Python starts with it ignored, which would turn the kill into an `EFBIG` the writer could
 #: clean up after) and `RLIMIT_FSIZE` set only after every import and the view's own open, so
 #: nothing but `start_runs`' own writes meets the limit. A real SIGKILL-class death mid-write,
-#: through the real primitive (adversary F8).
+#: through the real primitive.
 _START_RUNS_CHILD = """
 import errno, os, resource, signal, sys
 from pathlib import Path
@@ -330,7 +330,7 @@ def test_a_link_or_a_file_at_runs_refuses_before_any_roster_is_written(
         view.start_runs(list(WORLD_IDS))
     assert sorted(S.read_roster(ep)) == sorted(WORLD_IDS)
     assert _real_dir(ep / "runs")
-# Reading the roster: `arm_id`, `arm_ids`, and `create` held to it (R2; O4).
+# Reading the roster: `arm_id`, `arm_ids`, and `create` held to it.
 
 def test_the_arm_ids_are_the_rosters_and_an_unknown_label_is_absent(data_root):
     from defender.records import RunAbsent
@@ -390,7 +390,7 @@ ROSTER_FAULTS = ("torn", "not-an-object", "duplicate-ids", "non-uuid-id", "upper
 #: A label no roster, and no caller, may make a refusal print raw: a line break, an ANSI escape,
 #: a C1 control (U+009B, the 8-bit CSI), a line separator, and 20,000 more characters.
 HOSTILE_LABEL = "a\n\x1b[2Jforged row\x9b\u2028" + "x" * 20000 + "HOSTILE-TAIL"
-#: Labels a caller can hand over that no UTF-8 encoder takes (deck #677 replay, adversary F12):
+#: Labels a caller can hand over that no UTF-8 encoder takes:
 #: what `run.py --world $'\xff'` carries after argv's surrogateescape decode, and a lone high
 #: surrogate inside a label. A refusal that MEASURES its label with `.encode("utf-8")` raises
 #: `UnicodeEncodeError` instead of refusing.
@@ -478,7 +478,7 @@ ROSTER_TEXTS = {
     "int-id": lambda good, text: _ids_json(list({**good, T.fixture_world_id("a"): 5}.items())),
     "list-id": lambda good, text: _ids_json(list({**good, T.fixture_world_id("a"): [good[T.fixture_world_id("a")]]}.items())),
     # `a`'s entry under the key `"\ud800"` (a JSON escape, so the file itself is plain ASCII):
-    # decoded, a lone surrogate no UTF-8 encoder takes (adversary F12) — off the label rule and
+    # decoded, a lone surrogate no UTF-8 encoder takes — off the label rule and
     # off the manifest's worlds; what this pins is that the reader refuses rather than raising
     # while it measures or quotes the label.
     "lone-surrogate-label": lambda good, text: _ids_json(
@@ -629,7 +629,7 @@ def test_the_sibling_form_of_the_view_refuses_unless_the_roster_names_the_label(
         assert watch.reads() > 0, (
             "control: the channel saw no read of the manifest where `arm_id` checks the roster "
             "against the manifest's worlds")
-# The sibling gate through the real `run.py` (O4b; G5/G19; O8; O3).
+# The sibling gate through the real `run.py`.
 
 class _Scene:
     """Create an accepted tenant, branchable source run, and post-questioner episode."""
@@ -828,7 +828,7 @@ def test_natural_and_arm_stamps_carry_no_world_lineage(
     scene.start_runs_by_hand()
     ok = _run_control(scene, "arm-provenance")
     arm_stamp = json.loads((ok.run_dir / "provenance.json").read_text(encoding="utf-8"))
-    # #1255 keeps natural and arm provenance alike; #1187 R1b removes the container's lineage.
+    # Natural and arm provenance are alike: neither carries world lineage.
     assert arm_stamp.get("world_id") is None, arm_stamp
     for stamp in (natural_stamp, arm_stamp):
         assert stamp.get("parent_run_id") is None, stamp
@@ -836,7 +836,7 @@ def test_natural_and_arm_stamps_carry_no_world_lineage(
 
 
 def test_1279_o5_an_arm_announces_its_rosters_id_first_on_stdout(tmp_path, data_root):
-    """O5: an arm's `run_id=` line carries the id its roster published, before the box."""
+    """An arm's `run_id=` line carries the id its roster published, before the box."""
     scene = _Scene(tmp_path, data_root, B_ID)
     scene.start_runs_by_hand()
     rec = P.SiblingRecorder()
@@ -853,8 +853,7 @@ def test_1279_o5_an_arm_announces_its_rosters_id_first_on_stdout(tmp_path, data_
 
 
 def _assert_one_line_exit(refusal: BaseException | None) -> None:
-    """A `sys.exit(str)` refusal: one stderr line, no traceback (as test_1105_run_setup's
-    `_one_line_exit`, which the odd-occupant refusals asserted before they moved here)."""
+    """A `sys.exit(str)` refusal: one stderr line, no traceback."""
     assert isinstance(refusal, SystemExit), refusal
     assert isinstance(refusal.code, str), refusal
     assert len(refusal.code.splitlines()) == 1, f"the refusal is not one line: {refusal.code!r}"
@@ -880,7 +879,7 @@ def _occupy(kind: str, existing: Path, outside: Path) -> None:
                                   "link-to-a-dir"])
 def test_1279_o8_setup_refuses_an_existing_run_dir_at_the_arms_id_and_resumes_nothing(
         tmp_path, data_root, kind):
-    """O8: anything already at the roster's arm id is refused, not resumed or followed."""
+    """Anything already at the roster's arm id is refused, not resumed or followed."""
     scene = _Scene(tmp_path, data_root, B_ID)
     scene.start_runs_by_hand()
     existing = scene.ep / "runs" / scene.roster[WORLD_ID]
@@ -912,7 +911,7 @@ ALL_SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_fai
 
 
 def test_1279_o8_the_sidecar_tests_cover_every_reserved_suffix():
-    """O8: the suffixes the sidecar tests run over are exactly the layout's reserved ones."""
+    """The suffixes the sidecar tests run over are exactly the layout's reserved ones."""
     from defender.records._layout import _SIDECAR_SUFFIXES
 
     assert sorted(ALL_SIDECAR_SUFFIXES) == sorted(_SIDECAR_SUFFIXES), (
@@ -922,7 +921,7 @@ def test_1279_o8_the_sidecar_tests_cover_every_reserved_suffix():
 @pytest.mark.parametrize("suffix", ALL_SIDECAR_SUFFIXES)
 def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
         tmp_path, data_root, suffix):
-    """O8: a sidecar beside the arm's id (a prior run's trace) is refused; nothing is cleared."""
+    """A sidecar beside the arm's id (a prior run's trace) is refused; nothing is cleared."""
     scene = _Scene(tmp_path, data_root, B_ID)
     scene.start_runs_by_hand()
     arm = scene.roster[WORLD_ID]
@@ -956,7 +955,7 @@ def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
 @pytest.mark.parametrize("kind", ["directory", "dangling-link", "link-to-file", "link-to-dir"])
 def test_1279_o8_setup_refuses_any_entry_at_an_arms_sidecar_name_links_and_dirs_included(
         tmp_path, data_root, kind, suffix):
-    """O8: a link (dangling or not) or a dir at the arm's sidecar name is refused, as a file is."""
+    """A link (dangling or not) or a dir at the arm's sidecar name is refused, as a file is."""
     from defender.tests.support.storage import _setup_faults_1279 as F
 
     scene = _Scene(tmp_path, data_root, B_ID)

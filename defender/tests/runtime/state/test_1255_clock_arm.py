@@ -11,6 +11,7 @@ import pytest
 
 from defender import _clock
 from defender._io import read_jsonl_rows
+from defender.learning.branch.estate.oracle import BASE_HANDLE
 from defender.tests.support.runtime.state import _1255_clock as C
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
@@ -25,7 +26,6 @@ R = C.BRANCH_READING
 @pytest.fixture(autouse=True)
 def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate configured roots and enable the real unboxed executor."""
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     T.isolate_learning_state(tmp_path, monkeypatch)
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
 
@@ -47,8 +47,7 @@ def _launched(out: C.Launched) -> None:
     assert out.exit == 0, f"the arm did not run: exit={out.exit} refusal={out.refusal} summary={out.summary}"
     assert out.summary is not None, f"the arm did not run: exit={out.exit} refusal={out.refusal} summary={out.summary}"
     assert out.summary.get("truncated_by") != "store", (
-        "the arm ended at store setup — today `branch.validate` refuses a branch point at a "
-        f"response whose calls are unanswered (D1 flips it): {out.summary}")
+        f"the arm ended at store setup: {out.summary}")
 
 
 def test_a1_an_arms_visible_times_start_at_the_sources_reading_at_the_branch_point(tmp_path):
@@ -140,8 +139,7 @@ def _new_host_state_question(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     time.sleep(1.1)
     monkeypatch.setenv("PATH", f"{fake_docker(tmp_path)}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("DOCKER_CALL_LOG", str(tmp_path / DOCKER_LOG))
-    base_handle = S.sym("learning.branch.estate.oracle", "BASE_HANDLE")
-    oracle = S.oracle(then=S.submit(base_handle, S.EMPTY_CLAIM))
+    oracle = S.oracle(then=S.submit(BASE_HANDLE, S.EMPTY_CLAIM))
     arm_clock = C.FakeClock(C.ARM_START)
     gather = C.script(arm_clock, (10, C.query("host-state", "proc-tree", {"host": "web-1"})),
                       (0, _summary("Summary: captured the process tree.")))
@@ -162,7 +160,7 @@ def test_a4_an_arms_host_state_capture_is_stamped_with_its_run_clock(tmp_path, m
     assert rows[0].get("exit_code") == 0, f"the arm's host-state question was not served to its lead: {rows}"
     assert rows[0].get("payload_path"), f"the arm's host-state question was not served to its lead: {rows}"
     assert oracle.submissions() == 1, (
-        f"the control world's new question took {oracle.submissions()} oracle turns (D3: one)")
+        f"the control world's new question took {oracle.submissions()} oracle turns, not one")
     payload = json.loads((out.run_dir / rows[0]["payload_path"]).read_text(encoding="utf-8"))
     assert payload.get("captured_at") == _clock.z_seconds(C.at(R, 30)), (
         "the arm's host-state capture is not stamped with its run clock's reading at the call "
@@ -173,7 +171,7 @@ def test_a5_the_oracle_is_handed_the_snapshots_run_clock_reading_as_the_fork_tim
         tmp_path, monkeypatch):
     out, oracle, source = _new_host_state_question(tmp_path, monkeypatch)
 
-    assert oracle.requests >= 1, "the control world's oracle was never consulted (D3)"
+    assert oracle.requests >= 1, "the control world's oracle was never consulted"
     shown = oracle.all_seen()
     assert C.mentions(shown, R), (
         f"the oracle was not handed the snapshot's run-clock reading {R} as the fork time")

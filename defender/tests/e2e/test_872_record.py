@@ -1,5 +1,5 @@
-"""#872 — attributability, the run record, and the readers of the part this change moves
-(`d15b`, `d27`, `d28`, `d29`, `d30`, `d38`, `d39`, `d41`, `d63`, `d65`, `d66`)."""
+"""#872 — attributability: the wire log, run record and store keep both encodings, and no
+TOON text reaches a run-dir sink or reader input."""
 from __future__ import annotations
 
 import json
@@ -14,6 +14,7 @@ toons = pytest.importorskip("toons")  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender.tests.support.storage._session_store_705 import sql, store_factory  # noqa: E402
+from defender.investigation.toon_gate import GATE_METADATA_KEY  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     ReplayFn,
@@ -23,7 +24,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     materialize,
 )
 from defender.tests.e2e._toon872 import (  # noqa: E402
-    gate_metadata_key,
     RUN_ID,
     PartRecorder,
     corpus,
@@ -43,10 +43,9 @@ def _payload() -> dict:
 
 
 def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = None,
-                      gather: bool = False, summaries: list | None = None):
-    """One driven run in which a foreign result IS substituted — the shared setup for every
-    demand in this module, and the positive control each of the negatives needs. `summaries`
-    receives what `drive()` returned, whose `run_state` is the run's own state (#1235)."""
+                      gather: bool = False):
+    """One driven run in which a foreign result is substituted: this module's shared setup and
+    its negatives' positive control."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
     calls = [Turn(tool_calls=[("fetch_rows", {})]) for _ in range(turns)]
     if gather:
@@ -62,17 +61,13 @@ def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = N
         seams["verbs"] = elastic_ok(rec)
     if stores is not None:
         seams["store_factory"] = store_factory(tmp_path / "store", sink=stores)
-    summary = drive(run_dir, run_id=RUN_ID, main=main, **seams)
-    if summaries is not None:
-        summaries.append(summary)
+    drive(run_dir, run_id=RUN_ID, main=main, **seams)
     return run_dir, main
 
 
 def test_both_encodings_are_recoverable_from_the_wire_log_joined_by_agent_seq_and_tool_call_id(
     tmp_path: Path,
 ) -> None:
-    """After a run in which a substitution occurred, BOTH encodings and their join key are
-    recoverable from the wire log."""
     value = _payload()
     run_dir, _ = _substituting_run(tmp_path)
     records = read_jsonl_rows(RunPaths(run_dir).wire_log) if hasattr(
@@ -88,9 +83,9 @@ def test_both_encodings_are_recoverable_from_the_wire_log_joined_by_agent_seq_an
             )
         for part in _tool_return_parts(rec):
             meta = part.get("metadata") or {}
-            if gate_metadata_key() in meta:
+            if GATE_METADATA_KEY in meta:
                 found.append((rec.get("agent_id"), rec.get("seq"), part.get("tool_call_id"),
-                              part.get("content"), meta[gate_metadata_key()]))
+                              part.get("content"), meta[GATE_METADATA_KEY]))
 
     assert found, "no substituted call is recoverable from the wire log"
     agent_id, seq, tool_call_id, view, original = found[-1]
@@ -142,16 +137,14 @@ def test_a_run_records_what_the_gate_examined_substituted_and_saved(tmp_path: Pa
 def test_a_substituted_return_survives_the_history_the_run_rebuilds_before_sending(
     tmp_path: Path,
 ) -> None:
-    """A substituted return is still the substituted view in the messages the model is
-    DISPATCHED on a later turn — after the send history has been rebuilt from the store."""
+    """The view survives the send history's rebuild from the store, as dispatched on a later turn."""
     value = _payload()
     _, main = _substituting_run(tmp_path, turns=3)
     assert len(main.requests) >= 3, "the run did not survive to a rebuilt request"
 
     views = main.dispatched.texts("fetch_rows")
     assert len(views) >= 2, (
-        "the final dispatched history carries fewer foreign returns than the run made, so the "
-        "rebuild dropped one and this assertion would be about the survivors only"
+        "the final dispatched history carries fewer foreign returns than the run made"
     )
     for i, view in enumerate(views):
         assert framed_content(view) == toons.dumps(value), (
@@ -174,8 +167,7 @@ def test_a_substituted_calls_metadata_survives_persist_and_hydrate_through_the_s
     assert payloads, "the store holds no message payloads"
     carriers = [p for p in payloads if _is_json(p) and _carries_view(json.loads(p), view)]
     assert carriers, (
-        "no persisted message payload carries the substituted TOON view at all, so nothing "
-        "here distinguishes this run from one in which the gate never fired"
+        "no persisted message payload carries the substituted TOON view"
     )
     assert any(
         _carries_original(json.loads(p), value) for p in carriers
@@ -191,8 +183,8 @@ def _is_json(text: object) -> bool:
 
 
 def _strings(obj: object):
-    """Every string anywhere in a decoded payload — the store's own nesting is not this
-    suite's to pin, so the walk is shape-blind rather than keyed on a path."""
+    """Every string anywhere in a decoded payload (shape-blind: the store's nesting is not
+    pinned here)."""
     if isinstance(obj, str):
         yield obj
     elif isinstance(obj, dict):
@@ -215,8 +207,6 @@ def _carries_original(payload: object, value: dict) -> bool:
 
 
 def test_no_toon_text_is_written_to_any_run_dir_sink_or_reducer_input(tmp_path: Path) -> None:
-    """No TOON text is written into ANY run-dir sink: not the gather capture, not the queries
-    table, not the run dir at large, and not the reducer's input."""
     value = _payload()
     view = toons.dumps(value)
     run_dir, main = _substituting_run(tmp_path, turns=2, gather=True)
@@ -244,8 +234,6 @@ def test_no_toon_text_is_written_to_any_run_dir_sink_or_reducer_input(tmp_path: 
 def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_by_the_gates_decision(
     tmp_path: Path,
 ) -> None:
-    """A queries row written before the wrapper sees the return is byte-identical whether the
-    gate substitutes in that run or not."""
     gated_dir, main = _substituting_run(tmp_path / "gated", turns=2, gather=True)
     assert _every_view(main, toons.dumps(_payload())), (
         "the gated run did not substitute, so the two runs are the same run"
@@ -271,8 +259,7 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
     assert idle_rows, "the idle run wrote no queries row"
     lanes = {r.get("lead_id") for r in gated_rows}
     assert "l-001" in lanes, (
-        f"the dispatched lead put no row in the table ({sorted(lanes)}), so the differential "
-        "below is at the table's altitude and not per-writer"
+        f"the dispatched lead put no row in the table: {sorted(lanes)}"
     )
     assert gated_rows == idle_rows, (
         "an executed-queries row differs between a run where the gate substituted and one "
@@ -283,8 +270,6 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
 def test_the_rendered_runtime_page_shows_the_original_json_of_a_substituted_call(
     tmp_path: Path,
 ) -> None:
-    """The offline reader's rendered page shows the original JSON of a substituted call, beside
-    the view — it does not merely survive the new field."""
     import defender.presentation.visualize_data  # noqa: F401 — enter the cycle at the
     # other end first: importing `visualize_messages` (and therefore `visualize_run`, which
     # imports it) as the module head raises ImportError on this pre-existing cycle.

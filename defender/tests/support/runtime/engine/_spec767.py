@@ -1,4 +1,4 @@
-"""Shared machinery for the #767 spec suite — NO test scripts."""
+"""Shared builders, a fake ticket store and drivers for the #767 case-ticket writer suite."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -15,37 +15,30 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 
 # --------------------------------------------------------------------------------------
-# The vendor spellings this lane introduces. Every one of them lives in the MAPPING (O5) —
-# these constants are the TEST's copy, used to build a mapping and to read the wire back,
-# never a claim about what the writer may hardcode (that is
-# o5_no_vendor_literals_in_code's own demand).
+# Vendor spellings. They live in the mapping; these are the test's copy, used to build a
+# mapping and to read the wire back, not a claim about what the writer may hardcode.
 # --------------------------------------------------------------------------------------
 
-#: The lifecycle state a person moves a reviewed case to — the store's own `closed` (c8: the
-#: stub enforces `status ∈ {open, in_progress, closed}` as a Literal, rejecting anything else
-#: with 422). A STORE word, not a mapping one: since #1221's amendment no code reads it and the
-#: mapping names it nowhere (a legacy `released:` section is ignored). Used here as the closed
-#: case a writer still comments on, and as the hostile value an alert might carry.
+#: The store's own `closed` status (its stub accepts only `open`/`in_progress`/`closed`). A
+#: store word, not a mapping one: no code reads it. Used as the closed case a writer still
+#: comments on, and as a hostile value an alert might carry.
 CLOSED_STATUS = "closed"
 
-#: The `released:` section an un-migrated tenant's mapping still carries (#767's release
-#: status). The loader accepts it and nothing reads it (#1221, amended); the SHIPPED mapping no
-#: longer has one (`released=None`).
+#: The legacy `released:` section an un-migrated tenant's mapping may carry: the loader accepts
+#: it and nothing reads it; the shipped mapping has none (`released=None`).
 LEGACY_RELEASED: dict[str, Any] = {"status": CLOSED_STATUS}
 #: The state the bridge opens a case in (`open.status`).
 OPEN_STATUS = "open"
 
-#: The agent identity `mapping.yaml` already spells at `open.reporter` and `close.author`
-#: (c15/r6). D1's new `comment.author` carries it forward.
+#: The agent identity the mapping spells at `open.reporter` and `comment.author`.
 AGENT_AUTHOR = "defender"
 
-#: §7 R2 (FK01, = 20-demands F4, MATERIAL): ONE bound, 4096 UTF-8 **bytes** on the rendered
-#: comment body. `_TICKET_REASON_MAX` (472 characters, r2/c10) retires with `CaseRecord.reason`.
-#: The cut rounds DOWN to the last whole character and the `…` sits INSIDE the bound.
+#: One bound: 4096 UTF-8 bytes on the rendered comment body. The cut rounds down to the last
+#: whole character and the `…` sits inside the bound.
 WIRE_BOUND_BYTES = 4096
 ELLIPSIS = "…"
 
-#: D3's empty-narrative marker.
+#: The empty-narrative marker.
 NO_NOTES = "(no notes)"
 
 COMMENTS_SUFFIX = "/comments"
@@ -65,27 +58,15 @@ ALERT = {
     "timestamp": "2026-05-07T07:15:01.561+0000",
 }
 
-#: D3's rendered comment body. The em-dash separator is the MAPPING's, not a code literal.
+#: The rendered comment body. The em-dash separator is the mapping's, not a code literal.
 COMMENT_BODY_TEMPLATE = "{disposition} — {cause}\n\n{narrative}"
 
-#: The mapping's home BELOW a tenant's settings folder (#1106: `<tenants root>/<id>/settings/`).
+#: The mapping's path below a tenant's settings folder.
 MAPPING_RELPATH = "systems/case-history/mapping.yaml"
 CONFIG_RELPATH = "systems/case-history/config.env"
 
 #: The tenant `use_mapping` plants under the test's root.
 TENANT_ID = fixture_uuid("tenant:t767")
-
-
-def require(obj: Any, name: str, why: str) -> Any:
-    """The named attribute, or a failure that names the DEMAND rather than surfacing as an
-    `AttributeError` inside a scenario about something else.
-
-    Deliberately not a module-level import: every one of these symbols is coined by this
-    spec, and a module-level import of one would turn the whole suite into a collection
-    error instead of a per-demand red."""
-    got = getattr(obj, name, None)
-    assert got is not None, f"{getattr(obj, '__name__', obj)}.{name} does not exist — {why}"
-    return got
 
 
 # --------------------------------------------------------------------------------------
@@ -104,12 +85,10 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
     close_section: dict[str, Any] | None = None,
     extra_open: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The post-#767 mapping as a dict. Every knob is a member some demand exercises:
-    `with_comment` is FAM-1's missing section, `open_status` the literal-status rule the loader
-    keeps (a template, an empty or non-string status), `released` the legacy section an
-    un-migrated tenant carries (`None` omits it, the shipped shape since #1221's amendment; any
-    other value is written as-is and must be ignored), `close_section` is FK27's stale lane and
-    `extra_open` is an operator-added open field."""
+    """The mapping as a dict. `with_comment=False` drops the comment section; `open_status`
+    feeds the loader's literal-status rule; `released` is the legacy section (`None` omits it,
+    as shipped; any other value is written as-is and must be ignored); `close_section` is a
+    stale close lane; `extra_open` an operator-added open field."""
     doc: dict[str, Any] = {
         "open": {
             "key": "{case_id}",
@@ -136,14 +115,8 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
     return doc
 
 
-def tenant_of(root: Path) -> Path:
-    """The data root `plant_tenant` sets `TENANT_ID` up under (#1120)."""
-    return Path(root)
-
-
 def settings_of(root: Path) -> Path:
-    """The settings folder `write_mapping` plants under `root` — the settings half of the
-    tenant's knowledge folder (#1120: `<root>/<T>/knowledge/settings`)."""
+    """The settings folder `write_mapping` plants under `root` (`<root>/<T>/knowledge/settings`)."""
     return Path(root) / TENANT_ID / "knowledge" / "settings"
 
 
@@ -161,18 +134,15 @@ def write_mapping(root: Path, doc: dict[str, Any] | str) -> Path:
     return path
 
 
-#: The settings folder THIS test planted its mapping into, recorded through `monkeypatch`
-#: (`setitem`, undone after every test) so the helpers below hand the same tenant to every
-#: call. The test's own bookkeeping — nothing in production reads this dict.
+#: The settings folder this test planted its mapping into, recorded via `monkeypatch.setitem`
+#: (undone after each test) so the helpers below hand every call the same tenant.
 _PLANTED: dict[str, Path] = {}
 
 
 def use_mapping(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None) -> Path:
-    """Plant a mapping of this test's choosing and return its SETTINGS FOLDER.
-
-    #1107: the record the writer is handed is resolved from this folder at the
-    moment of the call (`current_record`), so a test that plants a second mapping is handing the
-    next call a record built from it — and a record taken before keeps the first."""
+    """Plant a mapping of this test's choosing and return its settings folder. The writer's
+    record is resolved from it at call time (`current_record`), so a second planted mapping
+    reaches the next call, while a record taken before keeps the first."""
     write_mapping(root, mapping_doc() if doc is None else doc)
     monkeypatch.setitem(_PLANTED, "settings", settings_of(root))
     return settings_of(root)
@@ -184,11 +154,8 @@ def current_settings() -> Path:
     return _PLANTED.get("settings", T1106.FIXTURE_SETTINGS)
 
 
-#: `config` distinguishes THREE states across `current_record`/`record`/`open_ticket`: omitted
-#: (the planted tenant carries the fixture's own `CONFIG`), explicitly `None` (a run with no
-#: case-history config at all — the tenant has no `config.env` for it), or an explicit dict.
-#: Python gives both the first two the same spelling if the default is `None` itself, so the
-#: default is this sentinel instead — never `None`.
+#: Sentinel default for `config` (`current_record`/`record`/`open_ticket`), which has three
+#: states: omitted (the fixture's `CONFIG`), explicit `None` (no `config.env`), or a dict.
 _CONFIG_UNSET = object()
 
 
@@ -205,10 +172,7 @@ def _write_case_history_config(settings: Path, config: dict[str, str] | None) ->
 
 def current_record(*, config: dict[str, str] | None | object = _CONFIG_UNSET) -> Any:
     """The run record of the tenant the running test planted (else the committed fixture
-    tenant, set up under the test's data root), resolved NOW through the real resolver.
-
-    `config` states the planted tenant's case-history store: omitted, the fixture's `CONFIG`;
-    `None`, no `config.env` at all (a run with no case-history config); a dict, those keys."""
+    tenant), resolved now through the real resolver, with `config` as `_CONFIG_UNSET` says."""
     if "settings" not in _PLANTED:
         return T1106.fixture_run_tenant()
     settings = current_settings()
@@ -223,16 +187,11 @@ def current_mapping() -> Any:
 
 
 def shipped_comment_author() -> str:
-    """The agent identity as the SHIPPED mapping spells it (`comment.author`).
-
-    Read off the real file rather than taken from this module's constants, because the
-    scenarios that do not plant their own mapping — anything driving the whole run — resolve
-    the shipped mapping, and reading it here is what makes those tests a statement about the
-    file an operator edits (O5) rather than about a literal. (It once returned the shipped
-    `released.status` too; #1221's amendment removed that section from the shipped mapping.)"""
+    """The agent identity as the shipped mapping spells it (`comment.author`), read off the real
+    file so whole-run scenarios assert about the file an operator edits, not a literal."""
     comment_section = shipped_mapping_doc().get("comment") or {}
     assert isinstance(comment_section.get("author"), str), (
-        "the shipped mapping has no `comment: {author}` section (D1)"
+        "the shipped mapping has no `comment: {author}` section"
     )
     return comment_section["author"]
 
@@ -280,18 +239,15 @@ def write_report(
     return path
 
 
-#: The default run's id: #1187 (declared change 1) — a run id is a canonical UUID, so the run a
-#: test opens (`record` / `open` reach `_spec1077.fixture_run`) is named by one.
+#: The default run's id (a run id is a canonical UUID).
 RUN_ID = fixture_uuid("767-sshd")
 
 
 def make_run(tmp_path: Path, name: str = RUN_ID, *, alert: Any = None,
              **report_kw: Any) -> Path:
     """A run dir carrying the two files the writer reads: `report.md` and `alert.json`. `name`
-    is a LABEL for the run, or its id: a canonical UUID is the folder's name as it is, any
-    other text names the folder `fixture_uuid(name)` — so a test reading the run's id back
-    reads `run_dir.name` (or spells `fixture_uuid(<label>)`), never the label."""
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    is a canonical UUID (used as is) or a label (the folder is `fixture_uuid(name)`), so read
+    the run's id back from `run_dir.name`, never the label."""
     run_dir = tmp_path / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     run_dir.mkdir(parents=True, exist_ok=True)
     write_report(run_dir, **report_kw)
@@ -299,14 +255,13 @@ def make_run(tmp_path: Path, name: str = RUN_ID, *, alert: Any = None,
     return run_dir
 
 
-#: The paths this suite's alerts carry their three facts at (the record's derivation, #1222).
+#: The paths this suite's alerts carry their three facts at.
 ALERT_MAPPING = {"signature": "rule.id", "event_time": "timestamp", "summary": "rule.description"}
 
 
 def facts_of(alert: dict[str, Any]) -> AlertFacts:
-    """The facts the front door records for `alert` under `ALERT_MAPPING` — what the mapper is
-    handed in place of the alert (#1222). The values pass as they are: whether a value is a
-    signature is the front door's rule, and these tests watch what the mapper does with one."""
+    """The facts the front door records for `alert` under `ALERT_MAPPING` (what the mapper is
+    handed instead of the alert), passed through unvalidated."""
     rule = alert.get("rule") if isinstance(alert.get("rule"), dict) else {}
     return AlertFacts(signature=rule.get("id") or None, event_time=alert.get("timestamp") or None,
                       summary=rule.get("description") or None)
@@ -324,8 +279,8 @@ _TICKET_UNSET = object()
 
 @dataclass(frozen=True)
 class OutboundCall:
-    """One request the writer handed the transport — the CAPTURED INBOUND PAYLOAD every
-    `kind: shape` demand here asserts against, never the fake's canned reply."""
+    """One request the writer handed the transport: what shape assertions check, never the
+    fake's canned reply."""
 
     method: str
     path: str
@@ -378,9 +333,7 @@ class FakeStore:
     # ---- what the fake recorded ---------------------------------------------------------
 
     def writes(self) -> list[OutboundCall]:
-        """Every call that could change the estate — the census the write-side demands
-        count. A `GET` is not one; that the writer makes none at all (#1221, amended) is
-        asserted on `calls`."""
+        """Every call that could change the estate (any non-`GET`)."""
         return [c for c in self.calls if c.method != "GET"]
 
     def paths(self, suffix: str | None = None) -> list[str]:
@@ -407,35 +360,28 @@ class FakeStore:
         return payloads[0]
 
     def wire_body(self) -> str:
-        """The comment body exactly as it crossed the wire, the agent tag line included (#1221).
-        What a byte bound on the WHOLE body is asserted against."""
+        """The comment body as it crossed the wire, agent tag line included (what the byte bound
+        covers)."""
         body = self.only_comment().get("body")
         assert isinstance(body, str), "the comment payload carries no string `body`"
         return body
 
     def comment_body(self) -> str:
-        """The rendered comment BELOW the agent tag line — what every pre-#1221 assertion about
-        the body's shape is about."""
-        from defender.tenancy import case_ticket
+        """The rendered comment below the agent tag line."""
+        from defender.tenancy.case_ticket import AGENT_TAG_PREFIX
 
-        prefix = require(
-            case_ticket, "AGENT_TAG_PREFIX",
-            "#1221 M1: every comment the host posts opens with the agent tag line",
-        )
         wire = self.wire_body()
         tag_line, newline, rest = wire.partition("\n")
         assert newline, f"the posted comment is one line, with no comment below a tag: {wire!r}"
-        assert tag_line.startswith(prefix), (
-            f"the posted comment does not open with the agent tag line ({prefix!r}): "
+        assert tag_line.startswith(AGENT_TAG_PREFIX), (
+            f"the posted comment does not open with the agent tag line ({AGENT_TAG_PREFIX!r}): "
             f"{wire[:160]!r}"
         )
         return rest
 
 
-
-
 def writer_deps(store: FakeStore):
-    """Bind the fake into the writer's real injection seam (g16)."""
+    """Bind the fake into the writer's real injection seam."""
     from defender.investigation import ticket_writer
 
     return ticket_writer.TicketWriterDeps(request=store)
@@ -451,28 +397,23 @@ def _handed(run_dir: Path, config: dict[str, str] | None | object) -> dict[str, 
 
 def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
            **kw: Any) -> Any:
-    """Drive D2's writer over one run dir, through the real seam."""
+    """Drive the writer (`record_case_ticket`) over one run dir, through the real seam."""
     from defender.investigation import ticket_writer
 
-    fn = require(
-        ticket_writer, "record_case_ticket",
-        "D2 renames `close_case_ticket` to `record_case_ticket`: one POST "
-        "/tickets/{key}/comments, no transition",
-    )
-    return fn(_run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config), **kw)
+    return ticket_writer.record_case_ticket(
+        _run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config), **kw)
 
 
-def open_ticket(
-    run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
-) -> Any:
+def open_ticket(run_dir: Path, store: FakeStore) -> Any:
     from defender.investigation import ticket_writer
 
-    return ticket_writer.open_case_ticket(_run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config))
+    return ticket_writer.open_case_ticket(
+        _run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, _CONFIG_UNSET))
 
 
 def receipt_path(run_dir: Path) -> Path:
-    """The receipt's location: a sidecar beside the run dir, keyed by the run's name (#1107
-    moved it out of the box-writable run dir; it was `run_dir/ticket_write.json`)."""
+    """The receipt's location: a sidecar beside (not inside) the box-writable run dir, keyed by
+    the run's name."""
     return run_dir.parent / f"{run_dir.name}.ticket-write.json"
 
 
@@ -487,63 +428,30 @@ def receipt(run_dir: Path) -> dict[str, Any]:
 # --------------------------------------------------------------------------------------
 
 
-def comment(body: str = "a prior run's notes", *, author: str | None = AGENT_AUTHOR,
-            created: str = "2026-09-16T12:00:00Z", drop_author: bool = False) -> dict[str, Any]:
-    out: dict[str, Any] = {"body": body, "created": created}
-    if not drop_author:
-        out["author"] = author
-    return out
+def comment(body: str) -> dict[str, Any]:
+    return {"body": body, "created": "2026-09-16T12:00:00Z", "author": AGENT_AUTHOR}
 
 
-def ticket(key: str, *, labels: Any = (), comments: Any = (), summary: str = "a prior case",  # noqa: PLR0913 — one keyword per FIELD a demand drives, drop_* included
-           status: Any = OPEN_STATUS, resolution: str | None = None,
-           drop_labels: bool = False, drop_comments: bool = False,
-           drop_status: bool = False) -> dict[str, Any]:
-    out: dict[str, Any] = {
+def ticket(key: str, *, labels: Any = (), comments: Any = (),
+           status: Any = OPEN_STATUS) -> dict[str, Any]:
+    return {
         "key": key,
-        "summary": summary,
+        "summary": "a prior case",
         "description": "",
-        "resolution": resolution,
+        "resolution": None,
         "reporter": AGENT_AUTHOR,
+        "status": status,
+        "labels": list(labels),
+        "comments": list(comments),
     }
-    if not drop_status:
-        out["status"] = status
-    if not drop_labels:
-        out["labels"] = labels if labels is None or isinstance(labels, str) else list(labels)
-    if not drop_comments:
-        out["comments"] = (
-            comments if comments is None or isinstance(comments, str) else list(comments)
-        )
-    return out
 
 
 def listing(*tickets: dict[str, Any], source: str = "ticket-store") -> dict[str, Any]:
     return {"total": len(tickets), "tickets": list(tickets), "source": source}
 
 
-SELF_KEY = "20260917t000000z-the-current-case"
-OTHER_KEY = "20260101T000000Z-a-prior-case"
-
-
-def served_tickets(payload: Any) -> list[dict[str, Any]]:
-    assert isinstance(payload, dict), (
-        f"the reply is not a ticket listing envelope: {payload!r}"
-    )
-    assert isinstance(payload.get("tickets"), list), (
-        f"the listing envelope carries no ticket list: {payload!r}"
-    )
-    return payload["tickets"]
-
-
-def served_comments(t: dict[str, Any]) -> list[Any]:
-    """The comment list a served record carries — the test's own reading of the wire, never
-    the predicate under test. A record with no list serves no comments."""
-    comments = t.get("comments")
-    return list(comments) if isinstance(comments, list) else []
-
-
-def rendered(payload: Any, tmp_path: Path, *, ceiling: int | None = None) -> str:
-    """What gather's payload view hands the model for this payload (c7, executed)."""
+def rendered(payload: Any, tmp_path: Path) -> str:
+    """What gather's payload view hands the model for this payload."""
     from defender.investigation.payload_view import render
 
-    return render(json.dumps(payload), None, tmp_path, ceiling=ceiling)
+    return render(json.dumps(payload), None, tmp_path)

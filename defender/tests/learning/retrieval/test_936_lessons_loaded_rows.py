@@ -1,4 +1,5 @@
-"""#936, the unit half — every `lessons_loaded.jsonl` row says `kind` and `role`, `render` takes a lead, `trace_lesson` reads the closed evidence..."""
+"""#936, the unit half: every `lessons_loaded.jsonl` row says `kind` and `role`, `render` takes a
+lead, and `trace_lesson` reads the evidence class through the record's one reader."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
@@ -25,42 +26,29 @@ from defender.tests.support.shared.contracts._fold_936 import (
     WRITE_RETURN_HEADER,
     _rows,
 )
-from defender.tests.support.learning.retrieval._lessons_corpus import _run_copy_main_deps, _write_lesson
+from defender.tests.support.learning.retrieval._lessons_corpus import (
+    _run_copy_main_deps,
+    _tenant_runs,
+    _write_lesson,
+)
 from defender.tests.support.storage._alert_plant import plant_alert
-from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105  # #1105 PR 2 (J8, declared change 10)
+from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-DEFENDER = Path(__file__).resolve().parents[3]
-
-#: The tenant whose runs the tracer walks — #1105 PR 2 (J8, declared change 10).
+#: The tenant whose runs the tracer walks.
 TID = H1105.T_ID
 
 
-def _tenant_runs() -> Path:
-    """The tenant's natural runs folder `<data root>/<T>/runs` — #1105 PR 2 (J8, declared
-    change 10): the tracer takes a required `--tenant` and walks that tenant's runs
-    (`--runs-dir` is gone). #1187 R1 (declared change 6): the folder carries no `_tenant.json`;
-    the tenant's own folder holding it is the owner. The data root is conftest's autouse
-    per-test one; the tenant is set up here, on request, so tests that never trace keep a
-    tenant-free root."""
-    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
-
-    root = current_data_root()
-    H1105.tenant(root, TID)
-    runs = root / TID / "runs"
-    runs.mkdir(exist_ok=True)
-    return runs
-
-
-# O5 / O8 — `kind` and `role` on every row
+# `kind` and `role` on every row
 
 def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
-    """O5: a lesson opened through the real `_gated_read` (MAIN's `read_file`) leaves a row with `kind == "read"` and the reader's role"""
+    """A lesson opened through the real `read_file` leaves a `kind == "read"` row naming the
+    reader's role."""
     from defender.investigation.agent_definition import RunScope, bind
     from defender.tests.support.tenancy import _tenants1106
     from defender.investigation.tools import _tool_read_file
 
-    # #1108 P4 (O2, O5): the corpus is the run copy's `agent/lessons`, the root both roles serve.
+    # The corpus is the run copy's `agent/lessons`, the root both roles serve.
     main, run, agent, dfn = _run_copy_main_deps(tmp_path)
     corpus = agent / "lessons"
     corpus.mkdir()
@@ -82,13 +70,13 @@ def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
 
 
 def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
-    """O5: the row's `role` is the deps' `AgentRole` value for EVERY role, not "gather or else main"."""
+    """The row's `role` is the deps' `AgentRole` value for every role, not "gather or else main"."""
     from defender.investigation.tools.lesson_read import _tool_lesson_read
     from defender._agent_role import AgentRole
     from defender.tests.support.learning.curation._curator_scene import curator_deps, curator_scene
 
     scene = curator_scene(tmp_path)
-    # #1108 P4 (OD6): the curator works over a batch draft's agent root, `<draft>/agent/lessons`.
+    # The curator works over a batch draft's agent root, `<draft>/agent/lessons`.
     corpus = scene.repo / "agent" / "lessons"
     corpus.mkdir(parents=True)
     (corpus / "curated-936.md").write_text(
@@ -125,7 +113,8 @@ def test_a_push_row_names_the_push_and_the_main_role(tmp_path):
 def test_the_write_that_advances_the_fold_boundary_pushes_nothing_under_compaction(
     tmp_path, monkeypatch,
 ):
-    """Under compaction the render that prepares MAIN's next request folds through the loop a write just closed, and that write's return is off the send..."""
+    """Under compaction the render preparing main's next request folds through the loop a write
+    just closed, so that write's return never reaches main: it pushes and records nothing."""
     from defender.investigation import compaction
     from defender.investigation.tools import _tool_append_block
 
@@ -163,10 +152,10 @@ def test_the_write_that_advances_the_fold_boundary_pushes_nothing_under_compacti
     assert Counter(r["lesson_name"] for r in on_rows) == {CLASS_LESSON: 1}, on_rows
 
 
-# M4 — a header per push
+# A header per push
 
 def test_render_takes_a_lead_and_the_default_is_the_write_return_header(tmp_path):
-    """M4: `render(hits)` still leads with the write-return sentence (the CLI and #919's pins are untouched)"""
+    """The default lead stays the write-return sentence, which the CLI and #919's tests rely on."""
     from defender.investigation.lessons_engine.lessons_frontier import match_lessons, render
     from defender.skills.invlang.frontier import frontier_from_text
 
@@ -187,7 +176,7 @@ def test_render_takes_a_lead_and_the_default_is_the_write_return_header(tmp_path
     assert render([], lead="### Lessons — custom lead 936") == ""
 
 
-# O7 / O8 / O9 — `trace_lesson` reads the difference
+# `trace_lesson` reads the difference
 
 def _tl():
     return load_trace_lesson("trace_lesson_936")
@@ -201,9 +190,8 @@ def _mk_lesson(lessons: Path, stem: str, *, created_at: str | None = None) -> Pa
     return p
 
 
-#: `fixture_uuid(label) -> label` for every run `_mk_run` made: the tracer's case column is
-#: the run's id, which #1187 (declared change 1) makes a canonical UUID; the tests name runs by
-#: label and read the column back through this EXACT map (an id not in it stays as printed).
+#: `fixture_uuid(label) -> label` for every run `_mk_run` made: the tracer's case column is the
+#: run's UUID, read back to its label through this map (an id not in it stays as printed).
 _LABEL_OF: dict[str, str] = {}
 
 
@@ -232,7 +220,7 @@ def _named(tmp_path: Path, capsys, lesson: str = "L") -> dict[str, list[str]]:
     `{case_id: cells}`."""
     tl = _tl()
     rc = tl.main([lesson, "--lessons-dir", str(tmp_path / "lessons"),
-                  "--tenant", TID])  # #1105 PR 2 (J8, declared change 10)
+                  "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     lines = cap.out.splitlines()
@@ -241,9 +229,10 @@ def _named(tmp_path: Path, capsys, lesson: str = "L") -> dict[str, list[str]]:
 
 
 def test_trace_names_the_evidence_class_behind_each_case(tmp_path, capsys):
-    """O7 / O8: the per-case line gains a fourth column, `evidence`, that says what "in context" rests on — a MAIN `read`, a runtime `push`, a read by..."""
+    """The fourth column, `evidence`, says what "in context" rests on: a main `read`, a `push`,
+    another role's read (`indirect`), or a legacy row (`unknown`)."""
     _mk_lesson(tmp_path / "lessons", "L")
-    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
+    runs = _tenant_runs()
     _mk_run(runs, "case-read", [_row("L", kind="read", role="main")])
     _mk_run(runs, "case-push", [_row("L", kind="push", role="main")])
     _mk_run(runs, "case-gather", [_row("L", kind="read", role="gather")])
@@ -261,7 +250,7 @@ def test_trace_names_the_evidence_class_behind_each_case(tmp_path, capsys):
 
 def test_evidence_precedence_is_read_over_push_over_indirect_over_unknown(tmp_path, capsys):
     _mk_lesson(tmp_path / "lessons", "L", created_at="2026-06-04")
-    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
+    runs = _tenant_runs()
     legacy, gather = _row("L"), _row("L", kind="read", role="gather")
     push, main_read = _row("L", kind="push", role="main"), _row("L", kind="read", role="main")
     _mk_run(runs, "all-four", [legacy, gather, push, main_read])
@@ -281,7 +270,7 @@ def test_evidence_precedence_is_read_over_push_over_indirect_over_unknown(tmp_pa
 def test_the_index_counts_cases_with_a_main_read_in_a_fourth_column(tmp_path, capsys):
     _mk_lesson(tmp_path / "lessons", "L", created_at="2026-06-04")
     _mk_lesson(tmp_path / "lessons", "M", created_at="2026-06-04")
-    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
+    runs = _tenant_runs()
     _mk_run(runs, "case-read", [_row("L", kind="read", role="main"), _row("M", kind="push", role="main")])
     _mk_run(runs, "case-push", [_row("L", kind="push", role="main"), _row("M", kind="read", role="gather")])
     _mk_run(runs, "case-legacy", [_row("L"), _row("M")])
@@ -291,7 +280,7 @@ def test_the_index_counts_cases_with_a_main_read_in_a_fourth_column(tmp_path, ca
         _row("L", kind="push", role="main"), _row("M", kind="push", role="main")])
 
     tl = _tl()
-    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])  # #1105 PR 2 (J8, declared change 10)
+    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     assert sorted(cap.out.splitlines()) == ["L\td\t4\t1", "M\td\t4\t0"], (
@@ -299,9 +288,10 @@ def test_the_index_counts_cases_with_a_main_read_in_a_fourth_column(tmp_path, ca
 
 
 def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp_path, capsys):
-    """O9: `lessons_loaded.jsonl` is a #1047 forgery universal, so a `kind` or `role` carrying a tab, a newline, or a word outside the vocabulary must..."""
+    """`lessons_loaded.jsonl` is forgeable (#1047), so a `kind` or `role` carrying a tab, a newline
+    or an unknown word never reaches the TSV."""
     _mk_lesson(tmp_path / "lessons", "L")
-    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
+    runs = _tenant_runs()
     _mk_run(runs, "clean", [_row("L", kind="read", role="main")])
     _mk_run(runs, "tab-kind", [_row("L", kind="read\tFORGED", role="main")])
     _mk_run(runs, "newline-kind", [_row("L", kind="push\nforged\trow", role="main")])
@@ -315,7 +305,7 @@ def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp
     _mk_run(runs, "list-role", [_row("L", kind="read", role=["main"])])
 
     tl = _tl()
-    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])  # #1105 PR 2 (J8, declared change 10)
+    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     lines = cap.out.splitlines()
@@ -334,10 +324,11 @@ def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp
     assert set(c[3] for c in cells.values()) <= EVIDENCE_VOCABULARY
 
 
-# the record's ONE reader — `hooks.record_lesson_load.exposures`
+# the record's one reader, `hooks.record_lesson_load.exposures`
 
 def test_the_record_has_one_reader_and_both_consumers_ask_it():
-    """The judge's lessons view and the trace CLI both read `lessons_loaded.jsonl` through `exposures` (and its classifier `row_evidence`) rather than..."""
+    """The judge's lessons view and the trace CLI both read `lessons_loaded.jsonl` through
+    `exposures` (and its `row_evidence`), not a classifier of their own."""
     import defender.hooks.record_lesson_load as reader
     from defender.learning.judge import render as judge
 
@@ -362,7 +353,7 @@ def test_a_push_to_another_role_is_indirect_and_a_push_without_a_role_is_unknown
 
 
 def test_exposure_time_is_the_earliest_row_of_the_strongest_class():
-    """`evidence_at` and `evidence` describe ONE event"""
+    """`evidence_at` and `evidence` describe one event."""
     from defender.hooks.record_lesson_load import exposures
 
     rows = [

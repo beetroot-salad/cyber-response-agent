@@ -39,7 +39,6 @@ from defender.tests.support.storage._store_owner import owned_store
 # the handle, the connection, the schema version
 
 def test_store_connection_is_strict_fk_wal_with_a_busy_timeout(tmp_path):
-    """A freshly opened store reports STRICT tables, foreign_keys on, journal_mode wal,"""
     store = make_store(tmp_path)
     conn = store.connection
 
@@ -54,14 +53,13 @@ def test_store_connection_is_strict_fk_wal_with_a_busy_timeout(tmp_path):
     for name, text in ddl.items():
         assert "STRICT" in text.upper(), f"table {name} is not STRICT: {text}"
 
-    # what STRICT really does buy, re-probed live rather than inherited (PR1)
+    # what STRICT really buys, probed live: a bytes `seq` is refused
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO message (session_id, agent_id, synthesized, seq, kind) "
                      "VALUES (?, ?, ?, ?, ?)", ("s", "main", 0, b"5", "request"))
 
 
 def test_the_store_refuses_a_wrong_typed_coordinate_at_its_own_boundary(tmp_path):
-    """A coordinate value of the wrong Python type — a bool, a numeric string or an"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -106,7 +104,6 @@ def test_a_store_is_open_exactly_for_its_with_block(tmp_path):
 
 
 def test_reader_refuses_an_unknown_user_version(tmp_path):
-    """A store whose `PRAGMA user_version` the reader does not know is refused with an"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -117,8 +114,7 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
     assert known == ss.SCHEMA_VERSION, (
         "the writer must stamp the schema version it claims to write")
     assert ss.SCHEMA_VERSION != 0, (
-        "0 is the un-set sentinel (is:PO1) — a fresh, never-stamped file must not read "
-        "as a valid version")
+        "0 is the never-stamped sentinel, not a valid version")
     assert ss.hydrate(store, session_id, role="analysis"), "positive control: known version reads"
     store.connection.close()
 
@@ -132,13 +128,9 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
             pass
 
 
-# append-only: the negative and its positive control
-
-
 # payloads — round-trip, coercion, unknown fields, the encoding
 
 def test_ingested_payload_round_trips_verbatim(tmp_path):
-    """Every ingested row's stored payload re-validates into a ModelMessage that"""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     originals = part_kind_zoo()
@@ -157,7 +149,6 @@ def test_ingested_payload_round_trips_verbatim(tmp_path):
 
 
 def test_payload_sha_digests_the_stored_payload_text_at_write_time(tmp_path):
-    """`message_payload.payload_sha` is the digest of the payload TEXT as stored, taken"""
     import hashlib
 
     store = make_store(tmp_path)
@@ -179,7 +170,8 @@ def test_payload_sha_digests_the_stored_payload_text_at_write_time(tmp_path):
 # lineage: the path walk, ordering, cycles
 
 def test_path_exactness_nine_row_fixture(tmp_path):
-    """Over the nine-row fixture `fork-a`'s tip walks to exactly 1,5,6,8,9 and `main`'s"""
+    """Over the nine-row fixture `fork_a` walks exactly 1,5,6,8,9 and `main` 1,5,6,7: the folded
+    rows 2-4 lie on no path, unless the frontier is re-parented onto row 4."""
     ss = store_mod()
     store = make_store(tmp_path)
     fx = nine_row_fixture(store)
@@ -209,7 +201,7 @@ def test_path_exactness_nine_row_fixture(tmp_path):
 
 
 def test_order_comes_from_the_parent_chain_not_from_seq(tmp_path):
-    """A fork that restarts `seq` at 0 still reads back in true send order, because order is the parent chain and nothing records membership separately (O9)."""
+    """A fork restarting `seq` at 0 reads back in send order: only the parent chain orders."""
     ss = store_mod()
     store = make_store(tmp_path)
     main = store.new_session(agent_id="main")
@@ -276,7 +268,6 @@ def test_a_fork_is_a_branch_with_no_prefix_copy_and_no_id_remap(tmp_path):
 
 
 def test_config_row_is_content_addressed_over_the_reproducibility_set(tmp_path):
-    """Two runs with identical models, corpus git_sha, prompt digests and library"""
     ss = store_mod()
     store = make_store(tmp_path)
     base = {"models": {"main": "m1"}, "corpus": {"git_sha": "abc"},
@@ -303,7 +294,6 @@ def test_config_row_is_content_addressed_over_the_reproducibility_set(tmp_path):
 # retention, absences, the session row's bookkeeping
 
 def test_payload_lives_in_its_own_table_and_retention_drops_only_bodies(tmp_path):
-    """`DELETE FROM message_payload` for one session drops the bodies while leaving that"""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [
@@ -315,7 +305,7 @@ def test_payload_lives_in_its_own_table_and_retention_drops_only_bodies(tmp_path
     message_cols = {row[1] for row in sql(store, "PRAGMA table_info(message)")}
     for absent in ("payload", "model_name", "usage", "provider", "finish_reason"):
         assert absent not in message_cols, (
-            f"{absent} must live only in message_payload (O33/X9); found on message")
+            f"{absent} must live only in message_payload; found on message")
 
     before_boundary = sql(store, "SELECT lead_id FROM gather_boundary")
     before_path = sql(store, "SELECT id, parent_id, seq, kind FROM message ORDER BY id")
@@ -330,12 +320,10 @@ def test_payload_lives_in_its_own_table_and_retention_drops_only_bodies(tmp_path
     after_boundary = sql(store, "SELECT lead_id FROM gather_boundary")
     assert before_boundary != [], "the fixture recorded no boundary row to lose"
     assert after_boundary == [], (
-        "the boundary view derives from the payload — retention taking it with the "
-        "bodies is the fact X9 pins, not a bug the test hides")
+        f"the gather boundary survived its payload's removal: {after_boundary}")
 
 
 def test_raw_gather_payloads_are_not_stored_in_the_message_payload_table(tmp_path):
-    """A run whose gather leg wrote a large raw payload to `gather_raw/` stores only the"""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     raw_marker = "RAW-ELASTIC-HIT-" + ("x" * 4096)
@@ -403,7 +391,7 @@ def test_a_session_ends_on_an_incomplete_pair_only_when_truncated_by_is_set(tmp_
 
 
 def test_an_append_is_one_commit_per_render_boundary(tmp_path):
-    """One append is one transaction: the `message` row and its `message_payload` row"""
+    """A second connection never observes a `message` row without its `message_payload` row."""
     base = runs_base(tmp_path)
     store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id="main")
@@ -429,7 +417,6 @@ def test_an_append_is_one_commit_per_render_boundary(tmp_path):
 
 
 def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(tmp_path):
-    """Two gather legs appending concurrently against one store, each under its own"""
     ss = store_mod()
     base = runs_base(tmp_path)
     owner = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
@@ -467,7 +454,6 @@ def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(
 
 
 def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp_path):
-    """One writer racing ITSELF — the same `session_id` and the same `agent_id`, appending"""
     ss = store_mod()
     base = runs_base(tmp_path)
     owner = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
@@ -519,7 +505,7 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
     pytest.param(__import__("fractions").Fraction(1, 2), id="Fraction"),
 ])
 def test_duration_ms_is_refused_at_the_boundary_unless_a_finite_real_number(tmp_path, bad):
-    """`duration_ms` is bound straight into the INSERT and never meets the payload's"""
+    """`duration_ms` is bound straight into the INSERT, skipping the payload's scan."""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -528,7 +514,6 @@ def test_duration_ms_is_refused_at_the_boundary_unless_a_finite_real_number(tmp_
     with pytest.raises(ss.PayloadNotRepresentable):
         store.append(session_id, [message], agent_id="main", duration_ms=bad)
     assert sql(store, "SELECT COUNT(*) FROM message")[0][0] == 0
-    # The accepted shapes: `None`, a real `int`, a finite `float`.
     store.append(session_id, [message], agent_id="main", duration_ms=None)
     store.append(session_id, [message], agent_id="main", duration_ms=3)
     store.append(session_id, [message], agent_id="main", duration_ms=12.5)

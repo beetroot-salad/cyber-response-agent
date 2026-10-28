@@ -1,4 +1,5 @@
-"""The `:L findings` `tests` column stops losing tokens between two regexes (#932 follow-up)."""
+"""The `:L findings` `tests` column: every token resolves to one id namespace or is reported,
+never skipped by both readers (#932)."""
 
 from __future__ import annotations
 
@@ -70,8 +71,6 @@ def test_a_qualified_token_resolves_against_its_own_hypothesis_only() -> None:
 
 
 def test_a_malformed_hypothesis_id_stops_passing_as_some_other_kind() -> None:
-    """The residue the old shape gate accepted by name. `h_888` matches no namespace, so both
-    readers skipped it and the document validated clean."""
     for bad in ("h_888", "H-888", "garbage", "h-001.zz"):
         errors = _errors(bad)
         assert len(errors) == 1, f"{bad} must be reported"

@@ -1,10 +1,10 @@
-"""#992 — the readers of the change: the investigator's prompt, the close tool's registered description, and the run page's reviewed/unreviewed split (O2, M1's O2 half, d22 under §7 FK-8/FK-14)."""
+"""#992 — the run page's reviewed/unreviewed split over two populations: a reviewed `inconclusive`
+dir driven through the real close, and a pre-#992 one written by hand (no `reviewed` field, no
+traces). Every reader keyed on the split must agree within each population."""
 from __future__ import annotations
 
-import re
 import shutil
 from pathlib import Path
-from typing import Any
 
 from defender.investigation.challenge_gate import REVIEW_ROLES
 from defender.investigation.close_tool import (
@@ -22,7 +22,6 @@ from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-
 )
 from defender.tests.support.runtime.engine._spec992 import (
     CEILING_EXAMINED,
-    DEFENDER,
     CONFIDENT,
     GAP,
     bounds,
@@ -40,40 +39,11 @@ from defender.tests.support.runtime.engine._spec992 import (
     trace_files,
 )
 
-SKILL_MD = DEFENDER / "SKILL.md"
-
-#: The bypass sentences the investigator reads today (SKILL.md:521-522, :553) and the tool
-#: docstring's (close_tool.py:778-779), each of which becomes false after M1.
-BYPASS_PHRASES = (
-    "Commits immediately, no review",
-    "anything but `inconclusive`",
-    "A confident disposition passes a live challenge gate",
-)
-
-
-def _bullet(skill: str, member: str) -> str:
-    """One member's own paragraph in SKILL.md §REPORT's roster, whitespace-folded."""
-    m = re.search(rf"- `{member}` — (?P<body>.*?)(?=\n- `|\n\n)", skill, re.DOTALL)
-    assert m, f"SKILL.md no longer carries a `{member}` roster entry"
-    return " ".join(m.group("body").split())
-
-
-class _ToolRecorder:
-    """The `agent` argument `register_close_tool` decorates onto — records the function it registers, so the..."""
-
-    def __init__(self) -> None:
-        self.registered: list[Any] = []
-
-    def tool(self, **_kw):
-        def decorate(fn):
-            self.registered.append(fn)
-            return fn
-
-        return decorate
-
 
 def test_visualizer_renders_a_reviewed_inconclusive(tmp_path):
-    """A run dir whose record is `verdict: stands` / `reviewed_disposition: inconclusive` with the seventh cause..."""
+    """A reviewed `inconclusive` renders as a reviewed attempt with its role traces, while a
+    pre-#992 dir and a forced `unresolved` read 'not reviewed': `_was_reviewed` reads the
+    record's own `reviewed` field."""
     reviewed = reviewed_inconclusive_dir(tmp_path)
     assert frontmatter(reviewed)["cause"] == CEILING_EXAMINED
     assert record(reviewed, 1)["reviewed_disposition"] == GAP
@@ -93,7 +63,7 @@ def test_visualizer_renders_a_reviewed_inconclusive(tmp_path):
     historical = pre_change_inconclusive_dir(tmp_path)
     assert frontmatter(historical)["cause"] == CAUSE_NOT_REVIEWED
     html, n = render_review_gate(historical, parsed_report(historical))
-    assert n == 0, "a pre-#992 inconclusive dir counts as reviewed"
+    assert n == 0, "an unreviewed inconclusive dir (no `reviewed` field) counts as reviewed"
     assert "not reviewed" in html
     assert "rv-stands" not in html
     assert "not reviewed" in _gate_badge_html(parsed_report(historical))
@@ -105,7 +75,8 @@ def test_visualizer_renders_a_reviewed_inconclusive(tmp_path):
 
 
 def test_headline_badge_for_a_ceiling_held_versus_an_unaffordable_gap(tmp_path):
-    """A ceiling-held `inconclusive` (the seventh cause) renders the `gate: stands` headline badge; an..."""
+    """A ceiling-held `inconclusive` gets the `gate: stands` badge; an unaffordable gap (either
+    override cause) gets the same `forced-inconclusive` badge as a confident override."""
     held = reviewed_inconclusive_dir(tmp_path, name="held")
     deps, cannot = deps_over(tmp_path / "cannot", ceiling_companion())
     assert close_with(deps, GAP, recording(gap(None))).outcome == "forced-inconclusive"
@@ -130,7 +101,9 @@ def test_headline_badge_for_a_ceiling_held_versus_an_unaffordable_gap(tmp_path):
 
 
 def _split_answers(run_dir: Path) -> dict:
-    """Every run-page reader keyed on the reviewed/unreviewed split, as one answer each: the § Review gate count,..."""
+    """Every run-page reader keyed on the reviewed/unreviewed split, one answer each: the
+    § Review gate count and section guard, the per-attempt badge and bypass note, the role
+    cards and the headline badge."""
     report = parsed_report(run_dir)
     html, n = render_review_gate(run_dir, report)
     badge = _gate_badge_html(report)
@@ -146,7 +119,9 @@ def _split_answers(run_dir: Path) -> dict:
 
 
 def test_every_reader_of_the_reviewed_split_agrees_on_both_populations(tmp_path):
-    """R8's join census for FK-8 — every consumer of `_was_reviewed`'s answer (the § Review gate's reviewed list..."""
+    """Every reader of `_was_reviewed`'s answer agrees within each population, though both share
+    a `reviewed_disposition`; a reviewed record whose trace files are gone still counts as
+    reviewed (only its role cards go)."""
     reviewed_dir = reviewed_inconclusive_dir(tmp_path)
     historical_dir = pre_change_inconclusive_dir(tmp_path)
     reviewed = _split_answers(reviewed_dir)

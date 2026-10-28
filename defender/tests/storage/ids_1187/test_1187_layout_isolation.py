@@ -32,7 +32,7 @@ def _rid(text: str):
 
 
 def _refusals():
-    """The repository's two refusal classes (S-iso: a link refuses with either, naming the level)."""
+    """The repository's two refusal classes (a link refuses with either, naming the level)."""
     from defender.records._tenant_id import TenantRefused
     from defender.records import RunRefused
 
@@ -89,7 +89,7 @@ def _real_dir(path: Path) -> bool:
 def _records_under(folder: Path) -> list[str]:
     """Every `_tenant.json` under `folder`, links not followed."""
     return sorted(str(p) for p in Path(folder).rglob("_tenant.json"))
-# The natural container: no record written, read or required (R1; O10; flow 1).
+# The natural container: no record written, read or required.
 
 def test_create_makes_the_runs_folder_and_writes_no_tenant_record(data_root):
     t = S.tenant(data_root, A_ID)
@@ -195,8 +195,8 @@ def test_an_arm_id_is_absent_from_the_natural_container_and_opens_through_its_ep
     assert Path(runs.open(_rid(a["run_id"])).run_dir) == runs_dir / a["run_id"]
     with runs.episode(a["episode_id"]) as view:
         assert Path(view.open(_rid(arm)).run_dir) == a["episode"] / "runs" / arm
-# O8 / S-iso: a link at every level below <T> refuses — with the link aimed at ANOTHER
-# tenant's real folder holding real entries — and the real folder opens.
+# A link at every level below <T> refuses — with the link aimed at ANOTHER tenant's real
+# folder holding real entries — and the real folder opens.
 
 def _held_arm(view, arm, operation="open"):
     if operation != "arms":
@@ -379,8 +379,8 @@ def test_a_tenant_folder_swapped_for_a_link_after_acceptance_refuses_every_repos
     assert isinstance(absent, RunAbsent), f"A's open(<B's run id>) gave {absent!r}"
     assert S.raised(runs.episode, b["episode_id"]) is not None, "A's episode(<B's ep>) opened"
     assert S.tree(b_dir) == b_before, "A's calls through its real folder changed B's tree"
-# A level swapped AFTER the check (adversary F10: every link test above plants its link before
-# the call, so a walk that `lstat`s each level and then opens it by path passes them all).
+# A level swapped AFTER the check: every link test above plants its link before the call,
+# which a walk that `lstat`s each level and then opens it by path would pass.
 
 def _decoy_episode(a: dict, root: Path, stranger: str) -> Path:
     """Copy tenant A's episode outside its tenant tree as a cross-tenant decoy."""
@@ -531,7 +531,7 @@ def test_the_path_open_recorder_sees_a_path_walk_and_not_a_handle_walk(tmp_path)
     with S.PathOpens() as audit, _io.hold(tenant_dir, follow=False):
         pass
     assert audit.below(tenant_dir) == [], "opening <T> itself was reported as below <T>"
-# Episodes: claimed under <T>/episodes by one exclusive create; no environment (O9, dc 3, 5).
+# Episodes: claimed under <T>/episodes by one exclusive create; no environment.
 
 @pytest.mark.parametrize("variable", ["unset", "bogus", "existing-elsewhere"])
 def test_create_episode_claims_a_uuid_folder_under_the_tenant_and_reads_no_environment(
@@ -698,7 +698,7 @@ def test_the_episodes_variable_changes_nothing_and_no_episodes_root_refusal_fire
         got = {label: str(arm) for label, arm in (view.arm_ids() or {}).items()}
     assert got == a["roster"], f"the view read another roster: {got}"
     assert S.tree(decoy) == decoy_before, "the decoy episodes folder was touched"
-# O8: A's repository, asked for B's episode by id, reads nothing of B's (the page's and the
+# A's repository, asked for B's episode by id, reads nothing of B's (the page's and the
 # judge's doors are `runs.episode` and `runs.episode_files`).
 
 def test_another_tenants_episode_is_absent_to_this_tenants_repository(data_root):
@@ -728,7 +728,7 @@ def test_another_tenants_episode_is_absent_to_this_tenants_repository(data_root)
     with runs_a.episode(a["episode_id"]) as view:
         assert Path(view.open(_rid(a["roster"][T.fixture_world_id("a")])).run_dir) == (
             a["episode"] / "runs" / a["roster"][T.fixture_world_id("a")])
-# R6 / declared change 13: no `_episodes` claim is read by `create`.
+# No `_episodes` claim is read by `create`.
 
 def test_create_is_not_refused_by_an_episodes_claim_and_the_listing_refuses(data_root):
     from defender.records import RunRefused
@@ -748,7 +748,7 @@ def test_create_is_not_refused_by_an_episodes_claim_and_the_listing_refuses(data
         "the listing accepted a container holding _episodes")
 # The roster name belongs to the layout owner and appears in the kinds registry.
 
-#: The kinds registry the design's docs step edits (`defender/docs/run-records-kinds.tsv`).
+#: The kinds registry (`defender/docs/run-records-kinds.tsv`).
 KINDS_TSV = DEFENDER / "docs" / "run-records-kinds.tsv"
 
 
@@ -784,4 +784,4 @@ def test_the_kinds_table_has_the_roster_row_and_drops_the_record_rows():
     assert rows["arm_roster"]["table"] == "4", rows["arm_roster"]
     assert rows["episode_runs"]["path"] == "runs/<uuid>/", rows["episode_runs"]
     gone = sorted({"tenant", "episode_runs_record"} & set(rows))
-    assert gone == [], f"rows #1187 retires are still in the table: {gone}"
+    assert gone == [], f"retired rows are still in the table: {gone}"

@@ -54,10 +54,9 @@ _NOT_MIRRORED = frozenset({
 
 
 def _planted_defender(root: Path, *, corpus: bool = True) -> tuple[Path, Path]:
-    """A defender tree the run reads (the #1003 `defender_dir` seam) and the agent tree its
-    tenant publishes (`drive(agent=)`, #1108 P4 A8). Returns `(tree, agent)`; the run's corpus is
-    `agent / "lessons"` (O2: a run reads its run copy's lessons, never the product tree's), the
-    fixture tenant's agent content without its own lessons. The product tree has no `lessons/`."""
+    """A defender tree the run reads (`defender_dir`) and the agent tree its tenant publishes
+    (`drive(agent=)`): the fixture tenant's agent content minus its lessons. Returns
+    `(tree, agent)`; the run's corpus is `agent / "lessons"`, never the product tree's."""
     from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
     tree = root / "repo" / "defender"
@@ -132,20 +131,18 @@ def _expected_hits(doc: str, corpus: Path) -> list[str]:
 
 
 def _model_path(lesson: Path) -> str:
-    """The block's hit line for a lesson of the run's corpus: the lesson named through the
-    model view's fixed agent path (#1255, design rev 4 P1 outbound — "the lessons block in the
-    fold frontier row (today an absolute realpath)"; #1108 P4: the corpus is the run copy's
-    `agent/lessons`), never the host realpath. The line's own `- ` lead is part of the match: the
-    planted tree is `<tmp>/golden-936/agent`, so a bare `/agent/lessons/…` is a substring of the
-    host realpath too."""
+    """The block's hit line for a lesson, named through the model view's fixed agent path, never
+    the host realpath. The `- ` lead is part of the match: the planted tree is
+    `<tmp>/golden-936/agent`, so a bare `/agent/lessons/…` is a substring of the host realpath too."""
     return f"- {MODEL_AGENT}/lessons/{lesson.name} — matched"
 
 
-# O1 / O2 / O3 — the fold row carries the block
+# The fold row carries the block
 
 
 def test_the_fold_row_carries_the_block_the_whole_document_matched(tmp_path, monkeypatch):
-    """O1 / O3 / M1 / M2: the synthesized frontier row is `record + "\\n\\n" + block`, where the block names the lesson the FULL document matched at mint —..."""
+    """The frontier row is `record + "\\n\\n" + block`, the block naming the lesson the full
+    document matched at mint by its model-view path."""
     from defender.investigation import compaction
 
     tree = _planted_defender(tmp_path)
@@ -181,7 +178,8 @@ def test_the_fold_row_carries_the_block_the_whole_document_matched(tmp_path, mon
 def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
     tmp_path, monkeypatch,
 ):
-    """M1 / M4: with TWO slots open at mint against a corpus of three lessons (two match), the frontier row's block is byte-for-byte..."""
+    """With two slots open at mint over three lessons (two match), the row's block is byte for byte
+    the shared derivation, `render(match_lessons(...), lead=FOLD_LEAD)`."""
     from defender.investigation.lessons_engine.lessons_frontier import FOLD_LEAD, match_lessons, render
     from defender.skills.invlang.frontier import frontier_from_text
 
@@ -212,7 +210,6 @@ def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
 
 
 def test_a_second_boundary_re_derives_its_own_block_and_records_again(tmp_path, monkeypatch):
-    """N3 / key flow 4 / O1 for every fold after the first"""
     from defender.investigation import compaction
 
     tree = _planted_defender(tmp_path)
@@ -234,7 +231,7 @@ def test_a_second_boundary_re_derives_its_own_block_and_records_again(tmp_path, 
     assert [seq for _id, seq, _t in rows] == [1, 2], rows
     (_r1, _s1, first), (_r2, _s2, second) = rows
     assert _model_path(class_lesson) in first
-    assert _model_path(loginuid_lesson) not in first, "loop 2 had not opened loginuid yet"
+    assert _model_path(loginuid_lesson) not in first, "boundary 1's block names the loginuid lesson before loop 2 opened it"
     assert _model_path(loginuid_lesson) in second, (
         "boundary 2 re-used boundary 1's block — the lesson loop 2 opened never reached MAIN")
     assert second.count(FOLD_HEADER) == 1
@@ -256,7 +253,7 @@ def test_a_second_boundary_re_derives_its_own_block_and_records_again(tmp_path, 
 
 
 def test_a_fold_that_matches_no_lesson_mints_the_row_and_records_nothing(tmp_path, monkeypatch):
-    """O6 negative control, paired with the test above"""
+    """Negative control for the fold block."""
     tree = _planted_defender(tmp_path)
     corpus = tree[1] / "lessons"
     _write_lesson(corpus, "ident-open-936", nodes=IDENT_SELECTOR)
@@ -271,10 +268,11 @@ def test_a_fold_that_matches_no_lesson_mints_the_row_and_records_nothing(tmp_pat
     assert _rows(rd) == []
 
 
-# O4 — fail-open at the fold
+# Fail-open at the fold
 
 def test_a_missing_corpus_fails_open_at_the_fold_and_says_so(tmp_path, monkeypatch, capsys):
-    """O4 / M1: with no `lessons/` under the tree the run reads, the fold still mints its row and the run completes"""
+    """With no `lessons/` under the tree the run reads, the fold still mints its row and the run
+    completes."""
     tree = _planted_defender(tmp_path, corpus=False)
     assert not (tree[1] / "lessons").exists()
     rd, _replay, store, result = _fold_run(
@@ -287,18 +285,18 @@ def test_a_missing_corpus_fails_open_at_the_fold_and_says_so(tmp_path, monkeypat
     assert _rows(rd) == []
     err = capsys.readouterr().err
     assert "no lessons corpus" in err, f"the fold disabled its lessons lane silently:\n{err[-2000:]}"
-    # The corpus it looked for is the run's tenant agent root's (#1108 P4, O2), not the tree's.
+    # The corpus it looked for is the run's tenant agent root's, not the tree's.
     assert re.search(r"no lessons corpus at \S*/agent/lessons\b", err), (
         "the stderr line does not name the corpus it looked for")
-    # M2: composed ONLY at mint. Three renders on this boundary, one corpus lookup — a fold
-    # that derived on every render and gated only the rows would print this line per render.
+    # Composed only at mint: three renders on this boundary, one corpus lookup (a fold deriving
+    # on every render would print this line per render).
     assert _replay.calls == 3
     assert err.count("no lessons corpus") == 1, (
         f"the fold looked for the corpus {err.count('no lessons corpus')} times on one boundary")
 
 
 def test_a_malformed_lesson_beside_a_good_one_does_not_stop_the_mint(tmp_path, monkeypatch):
-    """O4: a corpus-CONTENT fault — a lesson whose selector list is a scalar — at mint."""
+    """A corpus-content fault at mint: a lesson whose selector list is a scalar."""
     tree = _planted_defender(tmp_path)
     corpus = tree[1] / "lessons"
     good = _write_lesson(corpus, CLASS_LESSON, nodes=CLASS_SELECTOR)
@@ -313,12 +311,11 @@ def test_a_malformed_lesson_beside_a_good_one_does_not_stop_the_mint(tmp_path, m
     assert [(r["lesson_name"], r["kind"]) for r in _rows(rd)] == [(CLASS_LESSON, "push")]
 
 
-# O1 (second half) / O2 / C19 — the write-return lane after the fold
+# The write-return lane after the fold
 
 def test_the_write_return_lane_keeps_pushing_after_the_fold_only_when_the_top_three_move(
     tmp_path, monkeypatch,
 ):
-    """O1 / O2 / C19, at the intersection of the two lanes."""
     tree = _planted_defender(tmp_path)
     corpus = tree[1] / "lessons"
     class_lesson = _write_lesson(corpus, CLASS_LESSON, nodes=CLASS_SELECTOR)
@@ -354,10 +351,11 @@ def test_the_write_return_lane_keeps_pushing_after_the_fold_only_when_the_top_th
         f"rows should be: fold(class) + write(class, loginuid); got {rows}")
 
 
-# M3 — a mint that fails records nothing
+# A failed mint
 
 def test_a_mint_that_fails_records_nothing(tmp_path, monkeypatch):
-    """M3 / O6: the store's file is really corrupted right before the SECOND append — which, under compaction on a closing document, is the frontier mint..."""
+    """The store's file is corrupted right before the second append, which under compaction on a
+    closing document is the frontier mint."""
     tree = _planted_defender(tmp_path)
     corpus = tree[1] / "lessons"
     _write_lesson(corpus, CLASS_LESSON, nodes=CLASS_SELECTOR)

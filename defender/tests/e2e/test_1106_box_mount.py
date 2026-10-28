@@ -16,7 +16,7 @@ BRAVO = fixture_uuid("tenant:bravo")
 
 @pytest.fixture(autouse=True)
 def _boxed_only(monkeypatch):
-    """Neither the unsandboxed opt-out nor a runtime override may turn a box fault into the host executor — that..."""
+    """Neither the unsandboxed opt-out nor a runtime override may turn a box fault into host execution."""
     from defender import box as box_mod
 
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
@@ -25,8 +25,7 @@ def _boxed_only(monkeypatch):
 
 @pytest.fixture
 def two_tenants(tmp_path, data_root):
-    """#1108 P4: both tenants published for real under one data root (S0's helper), so each
-    run reads its own run copy."""
+    """Both tenants published for real under one data root, so each run reads its own run copy."""
     from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
     with published_tenant(tmp_path / "forge", root=data_root, tenant_id=ACME,
@@ -41,11 +40,9 @@ def two_tenants(tmp_path, data_root):
 @pytest.mark.parametrize(("own", "other"), [(ACME, BRAVO), (BRAVO, ACME)])
 def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
         tmp_path, two_tenants, own, other):
-    """Re-spelled for #1108 P4 (O-A; OD12 class ii — #1106's obligation, new seams): a run's box,
-    started by `run.main` through production's `start_box` over the recording Docker double,
-    shows the model view's `/agent` bound read-only from THIS run's copy of its own tenant's
-    export (not the clone: the retired `agent` mount), and no mount exposes the copy's
-    `settings/`, the tenant's clone, or anything of the other tenant."""
+    """A box started by `run.main` through production's `start_box` (recording Docker double) binds
+    `/agent` read-only from THIS run's copy of its own tenant's export; no mount exposes the
+    copy's `settings/`, the tenant's clone, or anything of the other tenant."""
     from defender._model_view import MODEL_AGENT
     from defender.tests.e2e._box665 import RecordingDocker
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
@@ -77,8 +74,7 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
 
 
 def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path):
-    """DooD translates the source while the target is the model view's `/agent` (#1255 P1; it
-    used to remain this run process's agent path)."""
+    """DooD translates the source; the target stays the model view's `/agent`."""
     from defender import box as box_mod
 
     defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
@@ -91,7 +87,6 @@ def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path
 
 
 def test_an_agent_source_on_no_shared_mount_refuses_the_box_naming_it():
-    """The negative on the same builder:"""
     from defender import box as box_mod
     from defender.execution.box_codec import BoxFault
 

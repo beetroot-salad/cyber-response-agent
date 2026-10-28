@@ -22,36 +22,31 @@ from defender.tests.support.storage._session_store_705 import (
 
 DEFENDER = Path(__file__).resolve().parents[4]
 
-#: The document every legality fixture branches over — read off the tree rather than authored
-#: inline, for `test_920_branch_seam`'s reason: an invlang document whose frontier is non-empty
-#: needs vertices carrying live `??` cells, which is not a string one improvises.
+#: The document every legality fixture branches over. Read off the tree, not authored inline: a
+#: non-empty frontier needs vertices carrying live `??` cells.
 GOLDEN_INVESTIGATION = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd" / "investigation.md"
 
-#: The case input every real run dir holds: `materialize_run` copies it in before anything
-#: else happens, so a source run without one is not a shape a branch is ever taken from — and
-#: the sibling investigates the SAME alert, which is why it crosses over verbatim.
+#: The case input every real run dir holds (`materialize_run` copies it in first). The sibling
+#: investigates the same alert, so it crosses over verbatim.
 ALERT_DOC = (
     '{"rule": "Adding ssh keys to authorized_keys", "host": "canary-1", '
     '"timestamp": "2026-05-25T15:16:00Z"}\n'
 )
 
-#: One captured query — the evidence `validate` refuses a branch without. `payload_status: ok`
-#: and a real `query_id`, so it is a CAPTURE rather than a `∅.`-prefixed sentinel.
+#: One captured query, the evidence `validate` refuses a branch without: `payload_status: ok`
+#: and a real `query_id`, not a `∅.`-prefixed sentinel.
 CAPTURED_QUERY_ROW = (
     '{"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "esql", '
     '"query_id": "elastic.sshd-failed-by-srcip", "params": {}, '
     '"payload_status": "ok"}\n'
 )
 
-#: The moment a DRAFT spec carries while its real one is being derived. Aware UTC, so building
-#: the draft never trips the shape check that `as_of` is one — the draft exists only to be
-#: handed to `branch_point_time`, which reads the run and the message id and nothing else.
+#: Placeholder `as_of` for the draft spec handed to `branch_point_time` (which reads only the run
+#: and the message id); aware UTC so the draft passes the shape check.
 DRAFT_MOMENT = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
 
-#: "Derive T0 from the store", as a value `as_of` can never legitimately hold. NOT `None`:
-#: `None` is one of the shapes `validate` has to refuse, and a helper that read it as "derive"
-#: would hand the arm testing that refusal a perfectly good spec — the arm then passes on an
-#: implementation that accepts `None`, which is the one direction a spec check must not fail in.
+#: "Derive T0 from the store". Not `None`: `validate` must refuse `as_of=None`, and reading
+#: `None` as "derive" would hand the test of that refusal a valid spec.
 DERIVE = object()
 
 
@@ -60,33 +55,11 @@ def branch_mod():
     return importlib.import_module("defender.investigation.branch")
 
 
-#: The field #1255 (D1, P4) removes from `BranchSpec`: an arm is told nothing on arrival.
-RETIRED_PROMPT_FIELD = "continuation_prompt"
-
-
-def declares_retired_prompt() -> bool:
-    """Does this tree's `BranchSpec` still declare `continuation_prompt` (pre-#1255 code)?
-
-    Read off the class rather than assumed, so the spec builder below stays usable on both
-    sides of #1255: before it, a spec without the field is refused at construction and every
-    branch test would go red on that one construction error instead of reaching its own
-    assertion; after it, passing the field would be refused instead. Whether the field is GONE
-    is a demand of its own (`test_920_branch_seam::test_branch_spec_carries_no_continuation_
-    prompt`), never answered here. Delete this, and the `prompt` parameter below, once #1255
-    has landed."""
-    return RETIRED_PROMPT_FIELD in {f.name for f in dataclasses.fields(branch_mod().BranchSpec)}
-
-
-def spec_at(store: Any, run_dir: Path, message_id: int, *,
-            prompt: str = "continue", as_of: Any = DERIVE):
+def spec_at(store: Any, run_dir: Path, message_id: int, *, as_of: Any = DERIVE):
     """The `BranchSpec` this branch point admits, T0 included."""
     branch = branch_mod()
-    coordinates: dict[str, Any] = {
-        "source_run_dir": Path(run_dir), "branch_message_id": message_id, "as_of": DRAFT_MOMENT,
-    }
-    if declares_retired_prompt():
-        coordinates[RETIRED_PROMPT_FIELD] = prompt
-    draft = branch.BranchSpec(**coordinates)
+    draft = branch.BranchSpec(source_run_dir=Path(run_dir), branch_message_id=message_id,
+                              as_of=DRAFT_MOMENT)
     moment = (  # lint-default: ok — a sentinel-defaulted override, not an optional re-coalesced in the body  # noqa: E501
         branch.branch_point_time(store, Path(run_dir), message_id, source_run=_run_handle_1165(Path(run_dir)))
         if as_of is DERIVE else as_of)
@@ -97,8 +70,8 @@ def legal_source(
     tmp_path: Path, *, investigation: str | None, queries: str | None = CAPTURED_QUERY_ROW,
     case_id: str = "case-source", name: str = "run-source-001",
 ):
-    """A finished run a branch WAS legally taken from before #1255 — store rows written
-    directly, no driver."""
+    """A finished source run planted straight into the store (no driver) with no fork snapshot:
+    the pre-#1255 shape an arm must refuse."""
     return _hand_planted_source(tmp_path, investigation=investigation, queries=queries,
                                 case_id=case_id, name=name)
 
@@ -107,8 +80,8 @@ def planted_source(
     tmp_path: Path, *, investigation: str | None, queries: str | None = CAPTURED_QUERY_ROW,
     case_id: str = "case-source", name: str = "run-source-001",
 ):
-    """A hand-planted source an arm is meant to be ADMITTED from — `legal_source`'s exact shape
-    (same rows, same `path_ids` indexes, same files), but NOT the N4 fixture."""
+    """`legal_source`'s exact shape (same rows, `path_ids` and files) plus fork snapshots, so an
+    arm is admitted from it."""
     from defender.tests.support.runtime.state._fork_snapshot_plant import plant_fork_snapshots
 
     planted = _hand_planted_source(tmp_path, investigation=investigation, queries=queries,
@@ -120,11 +93,8 @@ def planted_source(
 
 def _hand_planted_source(tmp_path: Path, *, investigation: str | None, queries: str | None,
                          case_id: str, name: str):
-    """The one body `legal_source` and `planted_source` share (see each for what it is).
-
-    It plants NO fork snapshot, and it never may: a snapshot planted here would land on
-    `legal_source` too and dissolve N4. Snapshot planting belongs on `planted_source`'s own
-    layer (the implementer's fixture-only helper, applied to what this returns), never here."""
+    """The body `legal_source` and `planted_source` share. It must plant no fork snapshot: one
+    here would land on `legal_source` too and void the no-snapshot refusal test."""
     ss = store_mod()
     store = make_store(tmp_path, case_id=case_id)
     from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
@@ -141,9 +111,8 @@ def _hand_planted_source(tmp_path: Path, *, investigation: str | None, queries: 
                                                  tool_call_id="ab1")], agent_id="main")
     store.append(session_id, [tool_return_request("append_block", "ok", tool_call_id="ab1")],
                  agent_id="main")
-    # A trailing pathless, always-granted call AFTER the document landed: the D1 branch point
-    # (#1255) of this source, whose prefix holds the document. Behaviour-neutral before #1255:
-    # it appends no fence and its return closes the pair.
+    # A trailing pathless, always-granted call after the document landed: this source's branch
+    # point (#1255 D1), whose prefix holds the document.
     store.append(session_id, [tool_call_response("bash", {"command": "echo held"},
                                                  tool_call_id="b1")], agent_id="main")
     store.append(session_id, [tool_return_request("bash", "held", tool_call_id="b1")],
@@ -157,6 +126,5 @@ def _hand_planted_source(tmp_path: Path, *, investigation: str | None, queries: 
     return store, run_dir, session_id, path_ids
 
 
-#: `legal_source`'s path index of its trailing `bash` CALL — the D1 branch point taken after the
-#: document landed (see `legal_source`).
+#: Path index of the planted source's trailing `bash` call, its branch point.
 LEGACY_BRANCH_CALL = 5

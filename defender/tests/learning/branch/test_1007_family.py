@@ -1,4 +1,4 @@
-"""#1007 — M5: the family-level call, and the identity it must not collide with."""
+"""#1007: the family-level judge call, and the identity it must not collide with."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,8 +25,7 @@ def family_rows(queue) -> list[dict]:
 
 
 def test_the_family_call_is_shown_every_world(tmp_path, monkeypatch):
-    """The family prompt carries EVERY world — stories, facts and pre-flight's record — withholding
-    none."""
+    """The family prompt carries EVERY world's story and facts, and pre-flight's record."""
     built = family_episode(tmp_path, monkeypatch, outcome_reason="PREFLIGHT-REASON-MARKER")
     judge = S.judge()
 
@@ -57,20 +56,25 @@ def test_the_family_reply_may_not_name_a_world(tmp_path, monkeypatch):
 
 
 def test_the_family_reply_admits_a_family_level_finding(tmp_path, monkeypatch):
-    """The positive control: a family-level finding with no world stands and reaches the queue."""
+    """The positive control: a family-level finding with no world stands and reaches the queue
+    with a null `world` and the episode as its `source_run_dir`."""
     built = family_episode(tmp_path, monkeypatch)
     judge = S.judge({S.FAMILY: S.family_reply(world=[family_finding("unreachable")])})
 
     S.grade(built, judge)
 
-    rows = [r for r in family_rows(S.questioner_queue()) if r["type"] == "unreachable"]
+    family = family_rows(S.questioner_queue())
+    rows = [r for r in family if r["type"] == "unreachable"]
     assert rows, "the family finding reached no queue row"
-    assert rows[0]["world"] is None, f"a family finding is stamped world={rows[0]['world']!r}"
     assert rows[0]["subject"] == W.SUBJECT_WORLD
+    for row in family:
+        assert row["world"] is None, f"a family finding is stamped world={row['world']!r}"
+        assert row["source_run_dir"].endswith(built.ep.name), (
+            f"a family finding's source_run_dir is {row['source_run_dir']!r}, not the episode")
 
 
 def test_the_family_agent_id_cannot_collide_with_a_world_label(tmp_path, monkeypatch):
-    """`family` becomes a RESERVED world label, so the family call's agent id and trace name cannot
+    """`family` is a RESERVED world label, so the family call's agent id and trace name cannot
     collide with a world's."""
     family_mod = W.mod("records._family")
 
@@ -92,7 +96,7 @@ def test_the_family_agent_id_cannot_collide_with_a_world_label(tmp_path, monkeyp
 
 
 def test_grade_episode_itself_refuses_a_world_labeled_family(tmp_path, monkeypatch):
-    """`grade_episode` refuses a world labeled `family` ON ITS OWN ."""
+    """`grade_episode` refuses a world labeled `family` before making any judge call."""
     built = family_episode(tmp_path, monkeypatch, worlds=S.triad(family={}))
     judge = S.judge()
     with pytest.raises(W.refusals(), match="reserved"):
@@ -101,7 +105,6 @@ def test_grade_episode_itself_refuses_a_world_labeled_family(tmp_path, monkeypat
 
 
 def test_the_family_call_emits_no_defender_finding(tmp_path, monkeypatch):
-    """The family call never produces a `subject: defender` finding."""
     built = family_episode(tmp_path, monkeypatch)
     judge = S.judge({S.FAMILY: S.family_reply(**{S.INVESTIGATOR: [S.inv("lead-set")]})})
 
@@ -119,8 +122,7 @@ def test_the_family_call_emits_no_defender_finding(tmp_path, monkeypatch):
 
 
 def test_family_draws_combine_by_union(tmp_path, monkeypatch):
-    """The family call's draws combine by UNION (#1234 A13): every completed draw's design findings
-    reach the questioner, each under its own id."""
+    """Every completed family draw's design findings reach the questioner, each under its own id."""
     built = family_episode(tmp_path, monkeypatch)
     judge = S.judge({(S.FAMILY, n): S.family_reply(world=[family_finding(bucket)])
                      for n, bucket in enumerate(("unreachable", "incoherent", "mislabelled"))})
@@ -186,8 +188,7 @@ def test_a_faulted_family_draw_isolates_and_leaves_the_per_world_rows_intact(
         f"{sorted(clean_rows)} — a family fault changed WHICH worlds were graded")
     assert drifted == {}, (
         f"a faulted family draw changed per-world fields (world -> {{field: (clean, faulted)}}): "
-        f"{drifted} — the family call is an addition to the pass and its failure may not reach "
-        "a per-world row at all")
+        f"{drifted}")
 
 
 def test_the_family_trace_filename_cannot_collide_with_a_worlds_own(tmp_path):

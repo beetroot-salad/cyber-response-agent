@@ -16,7 +16,6 @@ pytest.importorskip("pydantic_ai")
 
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks.record_lead import CLAIMED, claim_lead  # noqa: E402
-from defender.learning.core import persist  # noqa: E402
 from defender.investigation import permission  # noqa: E402
 from defender.investigation.agent_definition import (  # noqa: E402
     compile_policy_for,
@@ -32,7 +31,6 @@ NUMERIC = "l-001"
 def env(tmp_path):
     """A run dir and a defender tree, both real on disk — `decide_read` resolves, so symlink and
     parent comparisons need files that exist."""
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run = tmp_path / fixture_uuid("run")
     (run / "gather_summaries").mkdir(parents=True)
     for name in ("alert.json", "investigation.md", "report.md", "executed_queries.jsonl",
@@ -48,11 +46,8 @@ def _bash(env, cmd, policy):
     return permission.decide_bash(cmd, policy=policy, run_dir=env.run, defender_dir=env.dfn)
 
 
-def _read(env, path, policy, *, run_dir=None):
-    return permission.decide_read(
-        Path(path), run_dir=run_dir if run_dir is not None else env.run,
-        defender_dir=env.dfn, policy=policy,
-    )
+def _read(env, path, policy):
+    return permission.decide_read(Path(path), run_dir=env.run, defender_dir=env.dfn, policy=policy)
 
 
 def _gather(env):
@@ -62,7 +57,9 @@ def _gather(env):
 # F-09 — the payload shape and the lead-id validators are ONE alphabet
 
 def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
-    """The end-to-end path the defect broke: a lettered id is CLAIMED, its payload is PERSISTED"""
+    """A lettered lead id is claimed, its payload persisted, and gather may `cat` and `read_file`
+    that exact path; driven through the real functions, since the defect was one of them writing
+    what another refused."""
     assert claim_lead({
         "run_dir": str(env.run), "lead_id": LETTERED,
         "goal": "who logged in", "what_to_summarize": ["actor"],
@@ -75,12 +72,14 @@ def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
 
     gather = _gather(env)
     assert _bash(env, f"cat {payload}", gather).allow, (
-        "gather is denied the payload its own query tool just wrote for it (#850 F-09)")
+        "gather is denied the payload its own query tool just wrote for it")
     assert _read(env, payload, gather).allow, (
         "read_file and the cat grant share the shape OBJECT — they cannot disagree here")
 
 
 def test_f09_the_widening_stays_shut(env):
+    """Widening the lead-id alphabet did not widen the payload family, and non-ASCII digits
+    (`٣.json`) stay out."""
     gather = _gather(env)
     for bad in (f"gather_raw/{NUMERIC}/evil.sh", "gather_raw/evil.json",
                 f"gather_raw/{NUMERIC}/٣.json", "gather_raw/l-a b/0.json",
@@ -104,20 +103,9 @@ def test_f09_main_is_still_denied_the_payload_either_way(env):
 
 # F-19 — a confined agent's own run dir is not a hole in its confine
 
-def _staged(env, run_dir):
-    """A learning run dir in the state the SECOND pass over a run id starts the actor in: the
-    previous pass's `persist_run` already staged the case into it. Uses the real
-    `_copy_shared_inputs`, so a change to what persist stages shows up here."""
-    persist._copy_shared_inputs(env.run, run_dir)
-    (run_dir / "source_refs.yaml").write_text("normalized_disposition: malicious\n",
-                                              encoding="utf-8")
-    (run_dir / "executed_queries.jsonl").write_text("{}\n", encoding="utf-8")
-    return run_dir
-
-
 def test_f19_main_still_reads_its_own_run_artifacts(env):
-    """The other control: the run's OWN agents write and re-read these files. MAIN declares no
-    confine, so nothing about its access to its own investigation changed."""
+    """MAIN declares no confine, so it still reads its own run's investigation and report on both
+    surfaces."""
     main = compile_policy_for(MAIN_DEF, run_dir=env.run, defender_dir=env.dfn)
     assert main.read_confine == ()
     for name in ("investigation.md", "report.md"):

@@ -1,7 +1,6 @@
-"""#870 M6 — one reducer surface, a handoff that discriminates, and a prompt that knows."""
+"""#870: one reducer surface, a handoff that tells reducer mistakes from a system's, and the gate."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -29,10 +28,6 @@ from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 DECLARED = frozenset({"elastic", "cmdb"})
-FAILURE_KEYS = {"query_id", "goal", "executed_query", "stderr_digest", "occurrences"}
-
-#: `defender/skills/<anything>.md`, as a prompt spells it — template slots included.
-_PROMPT_PATH = re.compile(r"defender/skills/[A-Za-z0-9_{}./-]+\.md")
 
 
 # The routing decision, at the shape seam.
@@ -63,7 +58,7 @@ def test_the_reducer_handoff_names_no_system():
     assert len(reducer_entries) == 1, "no reducer handoff entry was produced"
     reducer = reducer_entries[0]
 
-    assert "system" not in reducer, "F1 settled at FK-9: the key is omitted, not empty"
+    assert "system" not in reducer, "the `system` key is omitted, not empty"
     assert len(reducer["failures"]) == 2, "the entry is vacuous, so the negative is too"
     blob = repr(reducer)
     for name in ("elastic", "cmdb"):
@@ -84,14 +79,10 @@ def test_many_reducer_mistakes_share_one_handoff_entry():
     assert entries[0]["failures"][0]["stderr_digest"] == BINDER
 
 
-# The two readers of one decision: the prompt the model obeys, and the gate that refuses it.
-#
-# #1108 P4 (O1, O7): the reducer surface the lane amends is the tenant's add-on `REDUCER_REL`
-# (`agent/skills/gather/defender-sql.pitfalls.md`, carried decision); the product page
-# `PRODUCT_REDUCER_REL` stays in the product tree and no tenant write touches it. The content rule
-# (FK-2) is driven through the lane's real entry over a batch draft whose base holds the add-on
-# (ASSUMED SEAM `run_pitfalls(..., batch=)`, `_curator1134`): its base-vs-draft inputs are the
-# implementation's, and what is observed is what lands on the batch branch.
+# The gate. The reducer surface the lane amends is the tenant's add-on `REDUCER_REL`; the product
+# page `PRODUCT_REDUCER_REL` stays in the product tree and no tenant write touches it. The content
+# rule is driven through the lane's real entry over a batch draft whose base holds the add-on;
+# what is observed is what lands on the batch branch.
 
 _PRODUCT = _git.REPO_ROOT / PRODUCT_REDUCER_REL
 
@@ -110,10 +101,8 @@ def _lane(tmp_path: Path, base: str) -> C.DraftLane:
 def _curate(lane: C.DraftLane, text: str, monkeypatch) -> int | BaseException:
     """One REAL pitfalls tick at threshold 2 (two distinct reducer mistakes queued), the spawn
     faked as writing `text` over the add-on in the draft. Returns rc, or the refusal raised."""
-    from defender.tests.support.learning.curation._curator1134 import open_state
-
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    state = open_state(lane.paths)
+    state = C.open_state(lane.paths)
     persist.append_pitfalls([shim_row("r:l-003:0"),
                              shim_row("r:l-004:0", digest="exit=1; Parser Error: x")], state=state)
 
@@ -131,8 +120,8 @@ def _curate(lane: C.DraftLane, text: str, monkeypatch) -> int | BaseException:
 
 
 def test_the_add_on_is_the_reducer_surface_and_the_product_page_is_never_a_tenant_write():
-    """The tenant add-on carries FK-2's frontmatter; the product page carries no curated section
-    and the path rule refuses it (O1, O7, #870 M6)."""
+    """The tenant add-on carries the content rule's frontmatter; the product page carries no
+    curated section and the path rule refuses it."""
     fixture = (FIXTURE_AGENT / REDUCER_REL.removeprefix("agent/")).read_text(encoding="utf-8")
     assert fixture.startswith("---\n")
     for key in REDUCER_FRONTMATTER_KEYS:
@@ -174,8 +163,8 @@ _REFUSED = {
 @pytest.mark.parametrize("what", sorted(_REFUSED))
 def test_the_content_rule_refuses_an_add_on_edit_that_is_not_an_appended_pitfall(
         what, tmp_path, monkeypatch):
-    """FK-2 over the add-on: an edit that rewrites the document is refused and nothing lands,
-    and the product page is untouched (#870 M6, O7)."""
+    """An edit that rewrites the document is refused, nothing lands, and the product page is
+    untouched."""
     product_before = _PRODUCT.read_bytes()
     lane = _lane(tmp_path, reducer_surface_text())
     got = _curate(lane, _REFUSED[what], monkeypatch)
@@ -191,8 +180,8 @@ def test_the_content_rule_refuses_an_add_on_edit_that_is_not_an_appended_pitfall
     "`;drop table` — ## not a heading, <img src=x> and a [link](x)",
 ])
 def test_an_appended_pitfall_lands_on_the_add_on_and_nowhere_else(bullet, tmp_path, monkeypatch):
-    """The positive control on the same channel: one bullet under a created `## Common pitfalls`
-    lands exactly the add-on on the batch branch (#870 M6, O7)."""
+    """Positive control on the same channel: one bullet under a created `## Common pitfalls`
+    lands exactly the add-on on the batch branch."""
     product_before = _PRODUCT.read_bytes()
     lane = _lane(tmp_path, reducer_surface_text())
     text = reducer_surface_text(bullets=(bullet,))
@@ -203,8 +192,7 @@ def test_an_appended_pitfall_lands_on_the_add_on_and_nowhere_else(bullet, tmp_pa
 
 
 def test_a_second_curation_extends_the_section_it_finds(tmp_path, monkeypatch):
-    """A base that already carries the section gains a bullet in it, not a second section
-    (#870 M6, O7)."""
+    """A base that already carries the section gains a bullet in it, not a second section."""
     lane = _lane(tmp_path, _GOOD)
     second = reducer_surface_text(
         bullets=("keep the unnest argument a LIST", "quote @timestamp as an identifier"))

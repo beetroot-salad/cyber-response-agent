@@ -1,8 +1,7 @@
-"""#869 M6/U1 — the pitfalls predicate (site 1). The `SKILL.md` probe goes.
+"""#869: the pitfalls predicate (site 1) screens on declared systems, not on a `SKILL.md` probe.
 
-#1108 P4 (O7, OD6): handoff and gate paths are spelled `agent/skills/...`; the composed gate judges
-the batch's `ChangeSet` over a git-free draft. ASSUMED SEAM (S-H): `_verify_pitfalls_state(root, *,
-change_set, systems, reducer_offered, tree_for)` (the `ChangeSet` replaces `baseline_stray`/`git`).
+Handoff and gate paths are spelled `agent/skills/...`; the composed gate (`_verify_pitfalls_state`)
+judges the batch's `ChangeSet` over a git-free draft.
 """
 from __future__ import annotations
 
@@ -30,15 +29,14 @@ def test_pitfalls_handoff_drops_an_undeclared_system(tmp_path):
     assert is_system_name("fakesys")
     assert pitfalls_curator._build_pitfalls_handoffs(rows, systems=DECLARED) == []
 
-    # And over the product tree's own names, where `gather` is the directory this issue is about
-    # (a product skill that stays, O1).
+    # And over the product tree's own names, where `gather` is a product skill, not a system.
     assert (_git.REPO_ROOT / SKILLS_REL / "gather" / "SKILL.md").is_file()
     assert pitfalls_curator._build_pitfalls_handoffs(
         [pitfall_row("r:2", "gather")], systems=frozenset({"elastic", "cmdb"})) == []
 
 
 def test_pitfalls_handoff_keeps_a_declared_system(tmp_path):
-    """#869 M6: a declared system's pitfalls are handed off at the tenant's `agent/` spelling (OD6)."""
+    """A declared system's pitfalls are handed off at the tenant's `agent/` spelling."""
     rows = [pitfall_row("r:0", "elastic"), pitfall_row("r:1", "gather")]
     handoffs = pitfalls_curator._build_pitfalls_handoffs(rows, systems=DECLARED)
     assert [h["system"] for h in handoffs] == ["elastic"]
@@ -65,8 +63,7 @@ def test_system_name_shape_still_refuses_a_traversal(tmp_path):
 
 
 def test_pitfalls_path_rule_refuses_an_undeclared_directory(tmp_path):
-    """#869 M6: an undeclared system's `execution.md` is refused, by the rule and the composed
-    gate over the batch's claim; the batch commits nothing."""
+    """Refused by the rule and by the composed gate over the batch's claim; nothing commits."""
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES,
                         files={"skills/elastic/execution.md": "# execution\n"})
     with pytest.raises(LeadAuthorError):

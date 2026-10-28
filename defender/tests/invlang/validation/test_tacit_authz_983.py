@@ -1,4 +1,6 @@
-"""#983 mechanism A/B write gate: an authz contract resolved by convention must cite its own lead's recorded registry hit (a miss, a telemetry baseline, a stale window cannot ground it); baseline consultations; the `indeterminate` basis (retry vs exhausted, with exhausted paid for in the transcript); and that none of it changes the verdict or escalation."""
+"""#983 write gate (mechanisms A/B/C): an authz contract resolved by convention must cite its own
+lead's recorded registry hit; baseline consultations are context only; `indeterminate` carries a
+basis (`exhausted` paid for in the transcript); none of it changes the verdict or escalation."""
 
 from __future__ import annotations
 
@@ -11,9 +13,8 @@ from defender.tests.support.shared.contracts import _tacit983 as scene
 
 
 def _errors(text: str) -> list[str]:
-    """The validator's ERROR-severity refusals over a whole document — the surface every
-    production caller reads. Bound to the public entry point rather than to a private check,
-    so the tests survive the check being wired in wherever `diagnose` wants it."""
+    """The validator's ERROR-severity refusals over a whole document, through the public entry
+    point every production caller reads rather than a private check."""
     return validate_companion(text, None)
 
 
@@ -41,10 +42,7 @@ def _consultation_doc(row: str) -> str:
     )
 
 
-# ---------------------------------------------------------------- the vocabularies
-
-
-# ---------------------------------------------------------------- demand #0: the row shapes
+# ---------------------------------------------------------------- the row shapes
 
 
 def test_tacit_knowledge_authz_row_shape():
@@ -66,48 +64,40 @@ def test_authz_anchor_id_must_match_its_own_leads_recorded_hit():
     good = scene.benign_document(rows=scene.authorized_rows(baseline=True))
     assert _errors(good) == [], "positive control: the cited entry is the one the lead found"
     assert disposition_entry_price("benign", good).owed == (), (
-        "a receipted registry hit did not pay benign's entry price — O1 stays blocked"
+        "a receipted registry hit did not pay benign's entry price"
     )
 
     fabricated = scene.benign_document(
         rows=scene.authorized_rows(baseline=True, cited_id=scene.FABRICATED_ENTRY_ID))
     errors = _errors(fabricated)
     assert _mentioning(errors, scene.FABRICATED_ENTRY_ID), (
-        "a `:R authz` row cited a registry entry its own lead never came back with, and the "
-        "close was priced as though a human had authored the sanction"
+        "a `:R authz` row cited a registry entry its own lead never came back with"
     )
     assert disposition_entry_price("benign", fabricated).owed, (
-        "the fabricated citation still paid benign's entry price — the check refuses the "
-        "document at the write gate and lets the close through, which is the half of the "
-        "price that the learning loop and the ticket lane actually read"
+        "the fabricated citation still paid benign's entry price"
     )
 
     other_leads = scene.benign_document(
         rows=scene.authorized_rows(baseline=True, hit_by=scene.UNDISPATCHED_LEAD))
     assert _mentioning(_errors(other_leads), scene.ENTRY_ID), (
-        f"the hit was recorded by {scene.UNDISPATCHED_LEAD} and cited by a row resolved by "
-        f"{scene.LEAD} — the check is searching the whole document rather than the row's own "
-        f"lead, so any lead's finding backs any row"
+        f"a hit recorded by {scene.UNDISPATCHED_LEAD} backed a row resolved by {scene.LEAD}"
     )
 
     unrecorded = scene.benign_document(rows=scene.authz_block(scene.authz_row()))
     assert _mentioning(_errors(unrecorded), scene.ENTRY_ID), (
-        "an `authorized` tacit-knowledge row whose lead recorded no lookup at all was "
-        "accepted — the id is unbacked text, which is the whole of the gap O2 names"
+        "an `authorized` tacit-knowledge row whose lead recorded no lookup was accepted"
     )
 
 
 def test_a_missed_lookup_cannot_be_cited_as_a_hit():
     """A lead that recorded a MISS backs no citation: the `:R authz` row citing an entry id
-    beside its own lead's empty-handed lookup is refused (demand `authz_anchor_id_is_receipted`)."""
+    beside its own lead's empty-handed lookup is refused."""
     missed = scene.document(
         rows=scene.consult_block(scene.lookup_miss_row())
         + scene.authz_block(scene.authz_row()),
     )
     assert _mentioning(_errors(missed), scene.ENTRY_ID), (
-        "a lookup that came back empty backed an `authorized` verdict citing an entry id — "
-        "the row was checked for the PRESENCE of a consultation rather than for the id it "
-        "carries"
+        "a lookup that came back empty backed an `authorized` verdict citing an entry id"
     )
 
     honest = scene.document(
@@ -117,14 +107,13 @@ def test_a_missed_lookup_cannot_be_cited_as_a_hit():
         settled=False,
     )
     assert _errors(honest) == [], (
-        "positive control: recording the miss and resolving `indeterminate` is the legal "
-        "shape, and the check may not refuse the document that tells the truth"
+        "recording the miss and resolving `indeterminate` (the legal shape) was refused"
     )
 
 
 def test_a_telemetry_baseline_cannot_ground_an_authz_row():
     """`grounding_kind: telemetry-baseline` is consultation-only: a `:R authz` row carrying it
-    is refused, whatever verdict it claims (demand `no_statistical_self_authorization`, O2)."""
+    is refused, whatever verdict it claims."""
     grounded_on_density = scene.document(
         rows=scene.consult_block(scene.consultation_row())
         + scene.authz_block(scene.authz_row(
@@ -134,9 +123,7 @@ def test_a_telemetry_baseline_cannot_ground_an_authz_row():
     )
     errors = _errors(grounded_on_density)
     assert _mentioning(errors, "telemetry-baseline") or _mentioning(errors, "runtime-evidence"), (
-        "a month of quiet recurrence authorized itself by being written into the `:R authz` "
-        "bucket instead of the `:R consultations` one — the middle design this issue's own "
-        "discussion discarded, reachable by moving one row"
+        "a telemetry baseline written as a `:R authz` row was accepted as authorization"
     )
     assert disposition_entry_price("benign", scene.benign_document(
         rows=scene.consult_block(scene.consultation_row())
@@ -158,8 +145,7 @@ def test_baseline_consultation_row_shape():
     assert row["grounding_kind"] == "telemetry-baseline"
     assert row["effective_window"] == scene.WINDOW_BEFORE_ALERT
     assert "fulfills_contract" not in row, (
-        "a consultation that can name a contract can discharge one — the shape of the row is "
-        "what makes mechanism A context-only, not a convention about how it is used"
+        "a baseline consultation row carries `fulfills_contract`"
     )
 
     bad_kind = _consultation_doc(scene.consultation_row(anchor_kind="not-an-anchor-kind"))
@@ -187,11 +173,7 @@ def test_indeterminate_authz_row_carries_basis():
     assert _mentioning(
         _errors(scene.document(rows=scene.authz_block(junk), settled=False)),
         "basis", "whenever",
-    ), (
-        "an off-vocabulary `basis` was accepted — a misspelling would then be the cheapest way "
-        "to claim `exhausted` without paying for it, exactly as an off-vocabulary weight cell "
-        "used to be the cheapest way to skip every gate that reads the grade"
-    )
+    ), "an off-vocabulary `basis` was accepted"
 
 
 # ---------------------------------------------------------------- mechanism A's guards
@@ -216,9 +198,7 @@ def test_window_must_predate_the_alerted_event():
 
     hit_row = scene.document(rows=scene.authorized_rows())
     assert _mentioning(_errors(hit_row), "effective_window") == [], (
-        "the registry-hit consultation was refused for carrying the ENTRY's validity span, "
-        "which brackets the alert on every unexpired entry — the guard is about a "
-        "`runtime-evidence` baseline and has been applied to every consultation"
+        "the registry-hit consultation was refused for carrying the entry's validity span"
     )
 
 
@@ -240,8 +220,7 @@ def test_a_single_tacit_knowledge_row_is_full_authority():
     doc = scene.benign_document(rows=scene.authorized_rows())
     assert _errors(doc) == []
     assert disposition_entry_price("benign", doc).owed == (), (
-        "one authored registry entry did not carry its own contract — a cap was applied to a "
-        "source the design deliberately left uncapped"
+        "one authored registry entry did not carry its own contract"
     )
     assert outstanding_authz_contracts(parse_dense_companion(doc)[0]) == []
 
@@ -265,18 +244,13 @@ def test_exhausted_must_be_paid_for_in_the_transcript():
     assert _mentioning(
         _errors(scene.document(rows=scene.authz_block(unpaid), settled=False)),
         "exhausted", scene.UNDISPATCHED_LEAD,
-    ), (
-        "`basis=exhausted` was accepted on a lead this run never dispatched — the claim that "
-        "every applicable registry was actually queried was taken on the model's word"
-    )
+    ), "`basis=exhausted` was accepted on a lead this run never dispatched"
 
     wrong_system = scene.document(
         rows=scene.authz_block(paid), settled=False, system="host-state",
     )
     assert _mentioning(_errors(wrong_system), "exhausted"), (
-        "`basis=exhausted` on a `tacit-knowledge` contract was paid for by a lead whose own "
-        "`:L findings` row says it queried host-state — an unrelated attribute update on any "
-        "lead buys the claim, which is the check being satisfied by 'the lead did something'"
+        "`basis=exhausted` on a `tacit-knowledge` contract was paid for by a host-state lead"
     )
     assert _mentioning(
         _errors(wrong_system), _anchor_kind_systems()["tacit-knowledge"],
@@ -302,9 +276,7 @@ def test_exhausted_falls_back_to_the_loose_check_on_an_unmapped_kind():
             grounding="", anchor_id="", resolved_by=scene.LEAD)),
     )
     assert _errors(doc) == [], (
-        f"`basis=exhausted` was refused on a {unmapped!r} contract, which no system mapping "
-        f"covers — the fallback has to stay reachable or O4 is unavailable for every anchor "
-        f"kind outside the mapping"
+        f"`basis=exhausted` was refused on a {unmapped!r} contract that no system mapping covers"
     )
 
     never_dispatched = scene.document(
@@ -351,20 +323,14 @@ def test_exhausted_contract_is_not_looped_back():
         assert _errors(doc) == [], basis
         return [c.contract_id for c in derive_frontier(parse_dense_companion(doc)[0]).contracts]
 
-    assert contracts("retry") == ["ac1"], (
-        "positive control: a contract that simply has not been checked yet stays on the "
-        "frontier, so the run is pushed back to work it"
-    )
+    assert contracts("retry") == ["ac1"], "a `basis=retry` contract left the frontier"
     assert contracts("") == ["ac1"], "an absent basis reads as `retry` on the frontier too"
-    assert contracts("exhausted") == [], (
-        "a registry that structurally cannot ever hold the answer consumed the same retry "
-        "budget as one that simply has not been checked yet — O4's burned loop"
-    )
+    assert contracts("exhausted") == [], "a `basis=exhausted` contract stayed on the frontier"
 
 
 def test_exhausted_drops_only_its_own_contract():
     """With TWO live contracts and `basis=exhausted` on a row fulfilling ONE of them, only that
-    contract leaves the frontier; the other stays on it (demand `exhausted_is_not_redispatched`)."""
+    contract leaves the frontier; the other stays on it."""
     doc = scene.document(
         second_contract=True, settled=False,
         rows=scene.authz_block(
@@ -387,9 +353,7 @@ def test_exhausted_drops_only_its_own_contract():
     )
 
     assert [c.contract_id for c in derive_frontier(companion).contracts] == ["ac2"], (
-        "one `basis=exhausted` row cleared the whole open-contracts frontier rather than its "
-        "own contract — the run stops being pushed at a `change-mgmt` question that was never "
-        "asked, on the strength of a claim about the tacit-knowledge registry"
+        "one `basis=exhausted` row cleared other contracts off the frontier"
     )
 
 

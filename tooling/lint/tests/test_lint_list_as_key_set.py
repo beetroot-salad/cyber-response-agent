@@ -16,12 +16,10 @@ def render(events, phase_order, tags):
 """
 
 
-def _scan(tmp_path: Path, src: str, rel: str = "m.py") -> list[str]:
+def _scan(tmp_path: Path, src: str) -> list[str]:
     tree = tmp_path / "tree"
     tree.mkdir(exist_ok=True)
-    path = tree / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(src, encoding="utf-8")
+    (tree / "m.py").write_text(src, encoding="utf-8")
     return [f.fingerprint for f in _GATE._scan(tree)]
 
 

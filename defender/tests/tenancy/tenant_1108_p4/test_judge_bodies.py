@@ -1,27 +1,18 @@
-"""#1108 P4 O6 — which bytes the judge is shown for a lesson a sibling loaded.
+"""#1108 P4 O6: which bytes the judge is shown for a lesson a sibling loaded. A pre-move run (its
+code commit's tree has `defender/lessons/<name>.md`) reads the product repo at that commit; others
+read `exports/<knowledge commit>/agent/...`, materialised from the clone if missing; `unversioned`,
+`unavailable` or a commit absent from the clone is unreadable, naming why. Nothing reads the
+clone's working tree.
 
-O6: "pre-move runs (the code commit's tree has `defender/lessons/<name>.md`) read the product
-repo at the code commit; others read `exports/<knowledge commit>/agent/...`, materialised from
-the clone if missing. `unversioned`/`unavailable`/a commit absent from the clone → unreadable,
-naming why." P-1: no reader reads the clone's working tree.
+Every scene plants distinct bytes for one lesson name in four places, so a reader using the wrong
+source shows in what the judge model was shown (`FakeJudge.prompts`): (a) a real product repo
+whose commit `pre` holds the lesson and whose child `post` deleted it; (b) the tenant's export at
+the sibling's knowledge commit `K1`; (c) a later published `K2`, `current` and the clone's HEAD;
+(d) the clone's working tree, edited after that publish.
 
-Every scene plants DISTINCT bytes for ONE lesson name in four places, so a reader using the
-wrong source is caught by what the judge model was shown (`FakeJudge.prompts`, the outbound
-channel), never by inspecting the reader:
-  (a) a real git PRODUCT repo: commit `pre` holds `defender/lessons/<name>.md`, commit `post`
-      (its child) deleted it — the code commit a sibling's stamp names;
-  (b) the tenant's export at the knowledge commit `K1` (the sibling's knowledge stamp);
-  (c) a later merged-and-published commit `K2`: `current` and the clone's HEAD;
-  (d) the clone's working tree, edited after that publish (uncommitted).
-
-Entry surface: the judge's one entry point, `learning.judge.grade_episode(runs, episode_id,
-judge=, state=, draws=, git_show=)`, driven through `_judge_921.grade` over an accepted episode
-under the published fixture tenant. The tenant reaches the judge through `runs.tenant` (the
-existing seam: the runs repository is the tenant's). ASSUMED SEAM (reported): the existing
-`git_show(cwd, rev, path)` keyword stays the judge's ONLY reader of the product repository —
-for the body read AND for the pre-move test — so the test points it at a real product repo
-(`ProductRepo`) whenever the judge asks for `REPO_ROOT`; any other `cwd` is served by real git
-there, so a reader that `git show`s the tenant clone gets the clone's own bytes (and is caught).
+Entry: `learning.judge.grade_episode` through `_judge_921.grade`, over an accepted episode under
+the published fixture tenant. The judge's only product-repo reader is its `git_show(cwd, rev,
+path)` seam (body read and pre-move test alike), which `ProductRepo` serves.
 """
 from __future__ import annotations
 
@@ -66,12 +57,10 @@ ABSENT_COMMIT = "0123456789abcdef" * 2 + "01234567"
 
 @dataclass
 class ProductRepo:
-    """A real git product repository and the `git_show` seam pointed at it.
-
-    `pre` holds `defender/lessons/<NAME>.md` (bytes `PRODUCT`); `post` is its child that
-    deleted it — a code commit from after the move. Calls asking for `REPO_ROOT` are served
-    from this repo with real `git show`; any other `cwd` is served by real git at that `cwd`.
-    Every call is recorded as `(cwd, rev, path)`. No policy: it answers what git answers."""
+    """The `git_show` seam over a real product repo: `pre` holds `defender/lessons/<NAME>.md`
+    (bytes `PRODUCT`), its child `post` deleted it. `REPO_ROOT` is served from this repo, any
+    other `cwd` by real git there (so a reader that `git show`s the clone gets the clone's own
+    bytes); every call is recorded as `(cwd, rev, path)`."""
 
     path: Path
     pre: str
@@ -172,9 +161,8 @@ def _only(shown: str, expected: str) -> None:
 
 
 def test_o6_a_pre_move_run_is_judged_on_the_product_tree_at_its_code_commit(scene):
-    """O6 pre-move: the code commit's tree holds `defender/lessons/<name>.md`, so the body is the
-    product repo's at that commit — not the export, `current`, or the clone. (Today's behaviour:
-    a regression guard for P4.)"""
+    """The code commit's tree holds the lesson, so the body is the product repo's at that
+    commit, not the export, `current` or the clone."""
     _stamp(scene, code=scene.product.pre, knowledge={"commit": scene.k1})
     _only(_shown(scene), PRODUCT)
     from defender._git import REPO_ROOT
@@ -185,18 +173,17 @@ def test_o6_a_pre_move_run_is_judged_on_the_product_tree_at_its_code_commit(scen
 
 
 def test_o6_a_post_move_run_is_judged_on_the_export_at_its_knowledge_commit(scene):
-    """O6 post-move: the code commit's tree lacks the lesson, so the body is
-    `exports/<knowledge commit>/agent/lessons/<name>.md` — not the product tree at an older
-    commit, not `current` (a later publish), not the clone's HEAD or working tree (P-1)."""
+    """The code commit's tree lacks the lesson, so the body is the export's at the knowledge
+    commit: not the product tree at an older commit, `current`, or the clone."""
     _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1})
     _only(_shown(scene), EXPORT)
     assert current_commit(scene.t.tenant) == scene.k2, "the judge moved `current`"
 
 
 def test_o6_a_missing_export_is_materialised_from_the_clone_then_read(scene):
-    """O6 + flow 2: the knowledge commit's export is absent (exports are derived, P-2), so the
-    judge materialises `exports/<K1>/` from the clone's objects and reads it; `current` and
-    the clone are untouched, and nothing went to the network."""
+    """Exports are derived, so the judge materialises the missing `exports/<K1>/` from the
+    clone's objects and reads it; `current` and the clone are untouched, and nothing went to
+    the network."""
     t = scene.t
     shutil.rmtree(export_dir(t.tenant, scene.k1))
     head_before = git(t.clone, "rev-parse", "HEAD")
@@ -223,10 +210,8 @@ def test_o6_a_missing_export_is_materialised_from_the_clone_then_read(scene):
 ], ids=["unversioned", "unavailable", "commit-absent-from-clone"])
 def test_o6_a_post_move_run_with_no_readable_knowledge_commit_is_unreadable_naming_why(
         scene, knowledge, cause):
-    """O6: a post-move sibling whose knowledge stamp is `unversioned`, `unavailable`, or a
-    commit the clone does not hold is shown as unreadable, naming why — never some other
-    revision's body (not `current`, not the clone, not the product tree). The positive control
-    on the same channel is the readable post-move case above."""
+    """Never some other revision's body (`current`, the clone, the product tree) and the slot
+    names why. Control: the readable post-move case above."""
     _stamp(scene, code=scene.product.post, knowledge=knowledge)
     shown = _shown(scene)
     leaked = [m for m in MARKERS if m in shown]
@@ -240,11 +225,9 @@ def test_o6_a_post_move_run_with_no_readable_knowledge_commit_is_unreadable_nami
 
 
 def test_o6_a_traversing_lesson_name_is_never_read_out_of_the_export(scene):
-    """O6 under the danger lens (R-I8): `lessons_loaded.jsonl` is box-writable, so a row's
-    `lesson_name` may walk out of `agent/lessons/` (`../../settings/verb-grants`). The export
-    holds a file at exactly that place (`settings/verb-grants.md`); the judge never shows its
-    bytes. The row's slot is still shown, named and marked rather than dropped. Positive
-    control in the same pass: the ordinary lesson beside it renders from the export."""
+    """`lessons_loaded.jsonl` is box-writable, so a row's `lesson_name` may walk out of
+    `agent/lessons/`; the export holds a file exactly there and the judge never shows it. The
+    row's slot is still shown, named, and the ordinary lesson beside it renders (control)."""
     _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1},
            names=(TRAVERSAL_NAME, NAME))
     assert (export_dir(scene.t.tenant, scene.k1) / SETTINGS_BAIT[0]).is_file(), (
@@ -273,12 +256,10 @@ HOSTILE_COMMITS = {
 @pytest.mark.parametrize("shape", sorted(HOSTILE_COMMITS))
 def test_o6_a_hostile_knowledge_commit_is_unreadable_and_reads_nothing_outside_exports(
         scene, tmp_path, shape):
-    """O6 under the danger lens (R-I8): the knowledge stamp is box-writable. A commit that is
-    not a full object id — a parent walk, an option, an absolute path, a short hex — is
-    unreadable: no body from any source is shown (not the clone's working tree a `../knowledge`
-    join reaches, not the absolute path's file), nothing is written outside `exports/` (the
-    option's output file never appears), and no export folder is made for it. The slot stays,
-    named. Positive control: the readable post-move case (`EXPORT` shown)."""
+    """The knowledge stamp is box-writable: a commit that is not a full object id is
+    unreadable, so no body from any source is shown, nothing is written (the option's output
+    never appears) and no export folder is made; the slot stays, named. Control: the readable
+    post-move case."""
     out = tmp_path / "written-by-an-option"
     bait = tmp_path / "absolute-bait"
     (bait / "agent" / "lessons").mkdir(parents=True)

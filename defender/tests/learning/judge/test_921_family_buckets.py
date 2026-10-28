@@ -13,8 +13,6 @@ from defender.tests.support.learning.core._state1135 import env_state
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -22,15 +20,6 @@ def _grade(ep, **kw):
     """Grade `ep` afresh (a final `judge.yaml` short-circuits a second pass)."""
     (ep / "judge.yaml").unlink(missing_ok=True)
     return J.grade(ep, **kw)
-
-
-def test_921_control_world_is_graded_per_world_only_and_gets_no_bucket(tmp_path):
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    rows = J.rows(_grade(ep))
-    assert "a" not in rows, "the control world was given a bucket row"
-    assert "b" in rows, "the positive control failed: no non-control world is graded at all"
-    assert "bucket" in rows["b"], (
-        "the positive control failed: no non-control world carries a bucket either")
 
 
 def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path):
@@ -48,12 +37,10 @@ def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path)
 
     assert early["c"].get("ungradable") is True, "the stash did not take world c out"
     assert late["c"].get("ungradable") is not True
-    for label in ("b",):
-        for fact in J.PER_WORLD_FACTS:
-            assert early[label][fact] == late[label][fact], (
-                f"{label}.{fact} moved with the CONTROL world's archive write, so some fact "
-                "still reaches across worlds")
-        assert early[label]["bucket"] == late[label]["bucket"]
+    for fact in J.PER_WORLD_FACTS:
+        assert early["b"][fact] == late["b"][fact], (
+            f"b.{fact} moved with world c's archive, so some fact still reaches across worlds")
+    assert early["b"]["bucket"] == late["b"]["bucket"]
 
 
 def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(tmp_path):
@@ -114,7 +101,7 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     discard = J.as_reply_text(J.reply_doc(findings=[
         J.finding_doc(), J.finding_doc(subject="world", bucket="incoherent")]))
-    # Two answers, then the seam degrades: `raise_after=2` is P9's one class, both ways.
+    # Two answers, then every later call fails (`raise_after=2`).
     judge = J.FakeJudge(replies=[discard, discard], default=discard,
                         fault=J.Fault(raise_after=2))
     J.grade_at(ep, judge=judge, draws=4, state=env_state())

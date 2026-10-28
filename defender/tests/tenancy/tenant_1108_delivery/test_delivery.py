@@ -74,7 +74,6 @@ def test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_
 
 @pytest.mark.parametrize("how", ["on-top", "amend", "only-raw", "forbidden-path"])
 def test_finish_refuses_a_branch_holding_a_commit_the_commit_maker_did_not_make(repo, how):
-    """Finish refuses a branch holding a commit the commit maker did not make."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("foreign", lanes=LANES)
@@ -92,7 +91,7 @@ def test_finish_refuses_a_branch_holding_a_commit_the_commit_maker_did_not_make(
 
 
 def test_a_foreign_commit_beneath_a_later_commit_maker_commit_is_refused(repo):
-    """O-C: provenance covers every commit the branch would send, not only its tip."""
+    """Provenance covers every commit the branch would send, not only its tip."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("sandwich", lanes=LANES)
@@ -117,8 +116,8 @@ def test_a_foreign_commit_beneath_a_later_commit_maker_commit_is_refused(repo):
 
 @pytest.mark.parametrize("planted", [None, "on-top", "amended"])
 def test_retained_branch_delivery_pushes_only_commit_maker_commits(repo, planted):
-    """O-C on the retained route: finish pushed the branch but PR creation failed; a later drain
-    (a new delivery object) delivers the retained branch, opening the PR."""
+    """The retained route: finish pushed the branch but PR creation failed; a later drain (a new
+    delivery object) delivers the retained branch only while the commit-maker made all of it."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("retained", lanes=LANES)
@@ -146,7 +145,6 @@ def test_retained_branch_delivery_pushes_only_commit_maker_commits(repo, planted
 
 @pytest.mark.parametrize("planted", [None, "on-top"])
 def test_a_later_process_delivers_a_retained_branch_by_the_commit_maker_record(repo, planted):
-    """A later process delivers a retained branch by the commit maker record."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("retained", lanes=LANES)
@@ -171,8 +169,8 @@ def test_a_later_process_delivers_a_retained_branch_by_the_commit_maker_record(r
 
 @pytest.mark.parametrize("where", sorted(_TRANSPORT_FAULTS))
 def test_a_forge_transport_fault_is_a_refusal_and_a_later_deliver_opens_the_pr(repo, where):
-    """Refusal contract (deck #678): the forge unreachable mid-request (a connection error, not
-    an HTTP status) is a `DeliveryRefused`, never an `httpx` exception escaping delivery."""
+    """The forge unreachable mid-request (a connection error, not an HTTP status) is a
+    `DeliveryRefused`, never an `httpx` exception escaping delivery."""
     http = ForgeHTTP()
     matches = _TRANSPORT_FAULTS[where]
 
@@ -205,7 +203,6 @@ def test_a_forge_transport_fault_is_a_refusal_and_a_later_deliver_opens_the_pr(r
 
 @pytest.mark.parametrize("other", sorted(_NOT_OUR_PR))
 def test_finish_and_deliver_answer_only_with_the_pr_for_their_own_head(repo, other):
-    """Finish and deliver answer only with the pr for their own head."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("forked", lanes=LANES)
@@ -221,7 +218,6 @@ def test_finish_and_deliver_answer_only_with_the_pr_for_their_own_head(repo, oth
 
 @pytest.mark.parametrize("row", sorted(_OUR_PR))
 def test_the_batchs_pr_is_known_by_its_head_commit_and_repository_id(repo, row):
-    """The batchs pr is known by its head commit and repository id."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("known", lanes=LANES)
@@ -241,7 +237,6 @@ def test_the_batchs_pr_is_known_by_its_head_commit_and_repository_id(repo, row):
 
 
 def test_finishing_twice_answers_the_one_open_pr(repo):
-    """Finishing twice answers the one open pr."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("twice", lanes=LANES)
@@ -267,7 +262,6 @@ def test_a_batch_with_no_commit_has_nothing_to_deliver(repo):
 @pytest.mark.parametrize("delete_branch", [False, True], ids=["branch-kept", "branch-deleted"])
 @pytest.mark.parametrize("style", MERGE_STYLES)
 def test_a_merged_batch_answers_merged_and_is_never_delivered_again(repo, tmp_path, style, delete_branch):
-    """A merged batch answers merged and is never delivered again."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("merged", lanes=LANES)
@@ -305,7 +299,6 @@ def test_a_closed_batch_answers_closed_and_is_never_delivered_again(repo, delete
 
 
 def test_a_reused_batch_id_is_not_mistaken_for_its_old_pr(repo, tmp_path):
-    """A reused batch id is not mistaken for its old pr."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     clone = repo[0].knowledge
@@ -328,7 +321,6 @@ def test_a_reused_batch_id_is_not_mistaken_for_its_old_pr(repo, tmp_path):
 
 
 def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo, tmp_path):
-    """Only the commit maker makes commits and only the push routes push."""
     http = ForgeHTTP()
     events, phase, active = [], ["control"], [True]
 

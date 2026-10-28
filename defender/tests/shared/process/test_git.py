@@ -46,8 +46,8 @@ def test_git_ok_is_a_predicate(tmp_path):
 
 
 def test_git_status_z_handles_spaced_paths(tmp_path):
-    """The ``-z`` reader keeps a path with spaces intact (the correctness upgrade over the
-    old non-``-z`` ``line[3:]`` parser, which split on whitespace)."""
+    """The ``-z`` reader keeps a path with spaces intact (a whitespace-splitting parser would
+    not)."""
     repo = _repo(tmp_path)
     (repo / "a file with spaces.md").write_text("x\n")
     records = _git.git_status(repo)
@@ -94,16 +94,3 @@ def test_git_status_pathspec_scopes(tmp_path):
 def test_git_head_sha(tmp_path):
     repo = _repo(tmp_path)
     assert len(_git.git_head_sha(repo)) == 40
-
-
-# #1108 P4 OD12(i): the cases for `_git.git_rev_list_count` (the `rev_list_count` half of the
-# case above), `git_commit` (pathspec-scoped with trailers, and the no-op), `git_worktree_add`/
-# `git_worktree_remove` (detached and on a branch), `git_push` (sets upstream) and `git_fetch`
-# (advances the tracking ref) are deleted with those helpers: their only callers were the
-# deleted `AuthorBranch` worktree delivery and the legacy checkout drains. Every corpus commit,
-# push and fetch now goes through P3's delivery, pinned in `tests/tenancy/tenant_1108_delivery/`:
-# `test_changes.py::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`
-# and `::test_the_first_commit_makes_the_branch_and_never_takes_one_over` (the commit-maker's
-# commit and branch), `test_delivery.py::test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_write`
-# (the push), and `test_publish.py::test_publish_writes_the_commits_blobs_and_points_current_at_them`
-# (the fetch the publish exports).

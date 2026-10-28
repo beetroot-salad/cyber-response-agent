@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from defender.tests.support.invlang.validation._invlang_warn_836 import (
@@ -16,6 +14,7 @@ from defender.tests.support.invlang.validation._invlang_warn_836 import (
     flagged_rows,
     main_deps,
     offered_tool_names,
+    registered_tools,
     run_one_response,
     seed_investigation,
 )
@@ -23,8 +22,7 @@ from defender.tests.support.invlang.validation._invlang_warn_836 import (
 #: The `:R attr_updates` block header every fixture below declares — four columns.
 _HEADER = ":R attr_updates [resolved_by|target|key|value]"
 
-#: EXECUTED at c0dca747 — two warn-family diagnostics for ONE row text, because the row is
-#: written twice. This is F-D's collision, and H4 is what keeps O5 literally true under it.
+#: Two warn-family diagnostics for ONE row text, because the row is written twice.
 _DUPLICATE_WARN_DOC = PROLOGUE + attr_block(WARN_ROW, WARN_ROW)
 
 
@@ -39,7 +37,8 @@ def _inv(run):
 
 
 def _pay_inconclusive_price(run) -> None:
-    """#923: `inconclusive` now carries its own entry price (a `ceiling_test` row naming a source or capability), unrelated to anything this module tests — the repair window."""
+    """Pay `inconclusive`'s entry price (#923), which is unrelated to the repair window; call
+    only once the window is already clear, so it never masks what the test drives."""
     path = run / "investigation.md"
     path.write_bytes(
         path.read_bytes()
@@ -47,39 +46,11 @@ def _pay_inconclusive_price(run) -> None:
     )
 
 
-def _registered_tools():
-    """MAIN's registered `Tool` objects, by name — the framework's own view of the roster,
-    which is where the per-tool scheduling opt-in H6 sets actually lives."""
-    import os
-
-    from pydantic_ai.models import override_allow_model_requests
-    from pydantic_ai.models.function import FunctionModel
-
-    from defender.agents import MAIN_DEF
-    from defender.hooks.budget_enforcer import DEFAULT_LIMITS
-    from defender.investigation import driver, observe
-    from defender.providers import BuiltModel
-    from defender.investigation.tools import AgentDeps
-    from defender.tests.e2e._replay_harness import ReplayFn
-
-    logger = observe.RequestLogger(Path(os.devnull))
-    with override_allow_model_requests(False):
-        agent = driver.build_agent_core(
-            MAIN_DEF, deps_type=AgentDeps, instructions="probe", logger=logger,
-            agent_id="probe",
-            make_model=lambda name, effort: BuiltModel(FunctionModel(ReplayFn([])), None),
-            limits=DEFAULT_LIMITS,
-        )
-    return dict(agent._function_toolset.tools)
-
-
-# the seam
-
-
 # the repair itself
 
 def test_fix_row_repairs_a_flagged_row(tmp_path):
-    """THE positive control for every negative in this module:"""
+    """THE positive control for every negative in this module, the shape guard's included: a
+    flagged row named exactly and replaced by a legal one closes the window, the rest untouched."""
     deps, run = main_deps(tmp_path)
     seed_investigation(run, WARN_DOC)
 
@@ -106,7 +77,6 @@ def test_fix_row_matches_a_whole_line_not_a_substring(tmp_path):
 
 
 def test_fix_row_applies_to_every_flagged_occurrence(tmp_path):
-    """H4: when a flagged row's text is not unique, the repair applies to EVERY flagged occurrence."""
     deps, run = main_deps(tmp_path)
     seed_investigation(run, _DUPLICATE_WARN_DOC)
     assert flagged_rows(_inv(run)) == (WARN_ROW, WARN_ROW)
@@ -119,7 +89,8 @@ def test_fix_row_applies_to_every_flagged_occurrence(tmp_path):
 
 
 def test_fix_row_when_one_flagged_row_is_a_prefix_of_another(tmp_path):
-    """Two flagged rows where one's text is a PREFIX of the other:"""
+    """Repairing the shorter of two flagged rows, one a PREFIX of the other, leaves the longer
+    flagged: the multiplicity counts WHOLE LINES, not substrings."""
     short_row = "l-001|v-001|owner|svc"
     long_row = "l-001|v-001|owner|svc2"
 
@@ -138,7 +109,8 @@ def test_fix_row_when_one_flagged_row_is_a_prefix_of_another(tmp_path):
 
 
 def test_fix_row_refuses_a_match_outside_the_flagged_set(tmp_path):
-    """H4's rider, and the half that keeps the multiplicity safe:"""
+    """If the row also stands as a WHOLE LINE the window did not flag (pasted into prose), the
+    repair refuses; a copy merely embedded in a sentence is out of reach and does not."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -170,7 +142,7 @@ def test_fix_row_refuses_a_match_outside_the_flagged_set(tmp_path):
     assert flagged_rows(_inv(run2)) == ()
 
 
-# H3 — the `new_row` shape guard
+# the `new_row` shape guard
 
 @pytest.mark.parametrize(("label", "new_row"), [
     ("embedded newline", "l-001|v-001|class|a\nl-001|v-002|class|b"),
@@ -181,7 +153,8 @@ def test_fix_row_refuses_a_match_outside_the_flagged_set(tmp_path):
     ("too few cells", "l-001|v-001|class"),
 ])
 def test_fix_row_new_row_is_a_single_row_of_the_same_block(tmp_path, label, new_row):
-    """H3's guard, one predicate:"""
+    """One predicate: `new_row` is a SINGLE line, carries no fence delimiter, and parses as a
+    row of the SAME block with that block's cell count."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -193,19 +166,8 @@ def test_fix_row_new_row_is_a_single_row_of_the_same_block(tmp_path, label, new_
     assert _inv(run) == WARN_DOC, f"{label} left residue on disk"
 
 
-def test_fix_row_new_row_shape_guard_admits_an_ordinary_repair(tmp_path):
-    """H3's positive control, on the same address under the complementary condition:"""
-    deps, run = main_deps(tmp_path)
-    seed_investigation(run, WARN_DOC)
-
-    _fix(deps, WARN_ROW, REPAIRED_ROW)
-
-    assert REPAIRED_ROW in _inv(run)
-    assert flagged_rows(_inv(run)) == ()
-
-
 def test_no_verb_mutates_or_removes_a_committed_v_or_e_record(tmp_path):
-    """O3 / SEC1, bound across EVERY write verb main can reach."""
+    """Bound across EVERY write verb MAIN can reach."""
     from pydantic_ai.exceptions import ModelRetry
 
     def _diagnose(text, current=None):
@@ -217,7 +179,7 @@ def test_no_verb_mutates_or_removes_a_committed_v_or_e_record(tmp_path):
     seed_investigation(run, WARN_DOC)
     committed = _inv(run)
 
-    # fix_row cannot insert a record where a flagged :R row was (rt8/rt9/rt11)
+    # fix_row cannot insert a record where a flagged :R row was
     for smuggled in (
         "v-999|compute|bastion/internal/known-corp|evil.corp|kind=physical",
         "e-999|attempted_auth|v-001|v-002|2026-05-05T03:47:12Z|siem-event:siem|outcome=failed",
@@ -226,7 +188,7 @@ def test_no_verb_mutates_or_removes_a_committed_v_or_e_record(tmp_path):
             _fix(deps, WARN_ROW, smuggled)
     assert _inv(run) == committed
 
-    # a committed vertex core cannot be mutated in place (claim b3, executed exactly this way)
+    # a committed vertex core cannot be mutated in place
     mutated = committed.replace(
         "v-002|identity|user/known-corp|jsmith|",
         "v-002|identity|user/known-corp|attacker|",
@@ -245,7 +207,7 @@ def test_no_verb_mutates_or_removes_a_committed_v_or_e_record(tmp_path):
 # `old_row`'s own domain
 
 def test_fix_row_old_row_names_text_never_flagged(tmp_path):
-    """N2: a row the window never flagged is refused as a SCOPE violation, not merely as a match failure."""
+    """A row the window never flagged is refused as a SCOPE violation, not as a match failure."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -260,7 +222,8 @@ def test_fix_row_old_row_names_text_never_flagged(tmp_path):
 
 
 def test_fix_row_old_row_is_empty(tmp_path):
-    """The empty string is `old_row`'s distinguished falsy member and is NOT valid:"""
+    """An empty `old_row` is NOT valid: it is not a flagged row. (An empty `new_row` is the
+    deletion escape; the asymmetry is deliberate.)"""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -287,10 +250,10 @@ def test_fix_row_old_row_matches_no_line(tmp_path):
     assert _inv(run) == WARN_DOC
 
 
-# `new_row`'s falsy member — O5's escape
+# `new_row`'s falsy member — the deletion escape
 
 def test_fix_row_with_empty_new_row_deletes_the_line(tmp_path):
-    """The empty string is `new_row`'s distinguished falsy member and it is VALID:"""
+    """An empty `new_row` is VALID: it deletes the line, the always-available escape."""
     deps, run = main_deps(tmp_path)
     seed_investigation(run, PROLOGUE + attr_block(WARN_ROW, SECOND_WARN_ROW))
 
@@ -302,7 +265,9 @@ def test_fix_row_with_empty_new_row_deletes_the_line(tmp_path):
 
 
 def test_the_repair_window_is_closable_while_the_run_is_still_taking_turns(tmp_path):
-    """O5, RE-SCOPED by H1: the window can always be closed **while the run is still taking turns**."""
+    """Driven over a flagged row whose text is NOT unique: deleting both copies closes the
+    window, and the close commits. Past the budget's tail the run ends instead
+    (`test_repair_verb_under_budget_pressure`)."""
     from defender.investigation import challenge_gate
     from defender.investigation.close_tool import close_investigation
     from defender.tests.support.runtime.permissions import _review_bundle
@@ -339,7 +304,7 @@ def test_fix_row_result_goes_through_decide_write(tmp_path):
 
 
 def test_fix_row_new_row_pushes_document_past_size_bound(tmp_path):
-    """The repair faces the SAME 64 KiB bound every write faces (`INVESTIGATION_FILE_MAX`, claim p8) — a `new_row` that pushes the document over it is refused."""
+    """The repair faces the SAME size bound every write faces (`INVESTIGATION_FILE_MAX`)."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.records._artifact_schema import INVESTIGATION_FILE_MAX
@@ -362,10 +327,10 @@ def test_fix_row_new_row_pushes_document_past_size_bound(tmp_path):
     assert flagged_rows(_inv(run)) == ()
 
 
-# SEC2 / SEC3 — who may call it, and when
+# who may call it, and when
 
 def test_fix_row_is_offered_only_while_the_window_is_open(tmp_path):
-    """`prepare=` hides the verb when nothing is flagged — the ergonomics half of M4."""
+    """`prepare=` hides the verb when nothing is flagged."""
     deps, run = main_deps(tmp_path)
     inv = seed_investigation(run, PROLOGUE + attr_block(REPAIRED_ROW))
 
@@ -377,7 +342,7 @@ def test_fix_row_is_offered_only_while_the_window_is_open(tmp_path):
 
 
 def test_fix_row_called_with_the_window_closed_is_refused_by_the_body(tmp_path):
-    """SEC3: `prepare=` is ergonomics, the BODY is the guard."""
+    """`prepare=` is ergonomics; the BODY is the guard."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -395,7 +360,8 @@ def test_fix_row_called_with_the_window_closed_is_refused_by_the_body(tmp_path):
 
 
 def test_fix_row_refused_once_the_close_committed(tmp_path):
-    """SEC2 / RS15: no write on `investigation.md` after the close commits a recorded disposition — `fix_row` joins the three verbs that already refuse there (claim p10)."""
+    """No write on investigation.md after the close commits: `fix_row` refuses there like the
+    other write verbs."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation import challenge_gate
@@ -424,12 +390,14 @@ def test_fix_row_refused_once_the_close_committed(tmp_path):
     assert _inv(run) == committed
 
 
-# H6 — two write calls in one model response
+# two write calls in one model response
 
 def test_write_verbs_execute_sequentially_within_one_response(tmp_path):
-    """H6: the write verbs execute SEQUENTIALLY within one model response."""
+    from defender.agents import MAIN_DEF
+
     deps, run = main_deps(tmp_path)
-    tools = _registered_tools()
+    # MAIN's registered `Tool` objects: where the per-tool `sequential` flag lives.
+    tools = registered_tools(MAIN_DEF)
 
     assert tools["append_block"].sequential is True
     assert tools["fix_row"].sequential is True
@@ -451,7 +419,8 @@ def test_write_verbs_execute_sequentially_within_one_response(tmp_path):
 
 
 def test_a_repair_and_an_append_in_one_response_both_persist(tmp_path):
-    """H6's own worked case:"""
+    """Run concurrently, one of the two writes is silently lost; both must persist and the
+    window must close."""
     deps, run = main_deps(tmp_path)
     seed_investigation(run, WARN_DOC)
 

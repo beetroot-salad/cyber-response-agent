@@ -1,11 +1,10 @@
-"""#1025 — the records section, the per-record refusal policy, the value-channel escape, the one-reader
-discipline, and the housekeeping the page PR owes."""
+"""#1025 — the records section, the per-record refusal policy, the value-channel escape and the
+one-reader discipline."""
 from __future__ import annotations
 
 import json
 import os
 import time
-from pathlib import Path
 
 import pytest
 
@@ -13,7 +12,6 @@ from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.storage._alert_plant import plant_source_copy
-from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._state1135 import env_state
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -21,40 +19,12 @@ pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 NOT_ROOT = pytest.mark.skipif(
     os.geteuid() == 0, reason="root ignores permission bits — CI runs non-root (defender/CLAUDE.md)")
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-VULTURE_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_vulture_baseline.json"
-PAGE_PATH = "presentation/visualize_episode.py"
-RECORD_NAMES = ("judge.yaml", "outcome.yaml", "samples.yaml", "family.yaml", "timing.json",
-                "provenance.json")
-PACKAGE_READERS = ("read_grade", "draws_on_disk_report", "read_stage_timings", "read_manifest",
-                   "read_outcome", "failed_worlds", "read_samples_record",
-                   "read_world_ledger", "read_investigation_facts",
-                   "leads_by_id", "lead_chain", "json_mapping", "read_family_stamp")
 MARKUP = "<script>alert(1)</script><img src=x onerror=alert(1)>"
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def visualize_episode():
-    """The target module, `defender.presentation.visualize_episode`, imported at call time
-    (it does not exist at the spec's base — one failure per test, never a collection error)."""
-    return E.page_module()
-
-
-def render(ep) -> E.Page:
-    """`visualize_episode().render_episode(runs, <episode id>)` — the real entry point — then
-    the page it wrote, parsed."""
-    return E.render(ep, module=visualize_episode())
-
-
-def cli(argv, capsys):
-    """`visualize_episode().main(argv)` with its stdout / stderr captured."""
-    return E.cli(argv, capsys, module=visualize_episode())
+_tmp_roots = E.tmp_roots
+visualize_episode = E.page_module
+render = E.render
 
 
 def _records(page: E.Page) -> str:
@@ -199,10 +169,8 @@ def test_1025_timing_json_is_present_but_not_the_stageclock_record_shape(tmp_pat
         stages = page.text_of("sec-stages")
         assert "timing record unreadable" in stages, stages
         assert "not on the record" not in stages, stages
-        # Scoped to the TABLE (`stage-timing`), not the whole section: `sec-stages` also holds
-        # every call's own transcript block, and the sample's real judge response durations
-        # legitimately format to "1m00s" there — unrelated to whether `timing.json` itself
-        # parsed. The docstring's own claim is about the table's wall column, not the section.
+        # Scoped to the TABLE (`stage-timing`): the section's transcript blocks legitimately
+        # show "1m00s" call durations, whether or not `timing.json` parsed.
         assert "1m00s" not in page.text_of("stage-timing")
         assert page.text_of("sec-verdict") == intact["sec-verdict"]
         assert page.text_of("sec-worlds") == intact["sec-worlds"]
@@ -234,8 +202,7 @@ def test_1025_a_malformed_record_versus_an_absent_one(tmp_path):
             ("samples.yaml", "absent", "samples record unreadable"),
             ("provenance.json", "absent", "provenance record unreadable"),
             ("outcome.yaml", "no record: outcome.yaml is absent", "does not parse")):
-        # #1187 declared change 10 (R5): a copy keeps the episode's folder name (its
-        # manifest's episode id); only its root differs.
+        # A copy keeps the episode's folder name (its manifest's episode id); only its root differs.
         fresh = E.copy_episode(ep, tmp_path / f"absent-{name}" / ep.dir.name)
         (fresh.dir / name).unlink()
         assert absent in _records(render(fresh)), name

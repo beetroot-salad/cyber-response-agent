@@ -1,10 +1,8 @@
 """Lead-author driver: lead extraction, handoff shape, lock/sentinel paths, and the post-flight skills scope gate.
 
-#1108 P4 (O7, amendments 2-3): the lane works over a git-free draft of a P3 batch, never a product
-worktree. Every gate case drives the REAL tick (`lead_author.run`) with the spawn faked as an edit
-of the draft's `agent/skills/`, and reads what landed from the batch branch (`agent/...`, OD6).
-ASSUMED SEAM (S-H, `_curator1134`): `lead_author.build_lead_author_deps(paths, *, state, trees,
-batch)`. `paths.repo_root` is the product checkout holding the adapters only (#1172).
+Gate cases drive the real tick (`lead_author.run`) over a git-free batch draft (#1108), the spawn
+faked as an edit of the draft's `agent/skills/`, and read what landed from the batch branch.
+`paths.repo_root` is the product checkout, holding only the adapters.
 """
 from __future__ import annotations
 
@@ -29,14 +27,13 @@ from defender.tests.support.learning.core._state1135 import state_over, set_stat
 from defender.tests.support.shared._locations_1210 import location_path
 
 
-#: The seeded catalog, agent-relative (where it sits in the draft) and repo-relative (OD6).
+#: The seeded catalog, agent-relative (where it sits in the draft) and repo-relative.
 _CATALOG = "skills/gather/queries"
 CATALOG_REL = f"agent/{_CATALOG}"
 
 
 def _product(tmp_path: Path, seeded: Path) -> Path:
-    """The product checkout `paths.repo_root` names: the seeded adapters only, committed (adapters
-    stay in the product repo, #1172); no corpus (O1)."""
+    """The product checkout `paths.repo_root` names: the seeded adapters, committed; no corpus."""
     product = tmp_path / "product"
     shutil.copytree(seeded / "defender" / "integrations", product / "defender" / "integrations")
     for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"),
@@ -47,9 +44,8 @@ def _product(tmp_path: Path, seeded: Path) -> Path:
 
 def _lane(tmp_path: Path, files: dict[str, str] | None = None) -> C.DraftLane:
     """The seeded skills tree (`seed_skills_repo`: an established and a draft `wazuh` template,
-    `SCHEMA.md`, `elastic`'s SKILL.md with a pending `_draft/`) as the tenant's `agent/skills`,
-    plus `files` (agent-relative) in the same export commit; then P3's `start_batch` with the
-    lead lane `skills`."""
+    `SCHEMA.md`, `elastic`'s SKILL.md with a pending `_draft/`) plus `files` (agent-relative) as
+    the tenant's `agent/skills`, in one export commit; then a batch with the lead lane `skills`."""
     seeded = seed_skills_repo(tmp_path / "seed")
     agent = tmp_path / "agent-src"
     shutil.copytree(seeded / "defender" / "skills", agent / "skills")
@@ -60,17 +56,15 @@ def _lane(tmp_path: Path, files: dict[str, str] | None = None) -> C.DraftLane:
 
 
 def _deps(lane: C.DraftLane, **overrides):
-    """REAL lead-author deps over the lane's draft (ASSUMED SEAM `batch=`), leaf collaborators
-    overridden by keyword — replaces monkeypatching lead_author's own functions."""
+    """Real lead-author deps over the lane's draft, leaf collaborators overridden by keyword."""
     deps = lead_author.build_lead_author_deps(
         lane.paths, state=open_state(lane.paths), trees=C.draft_trees(lane), batch=lane.batch)
     return replace(deps, **overrides) if overrides else deps
 
 
 def _executed_lead(**kw):
-    """A minimal ``ExecutedLead`` for flow + collection tests. Defaults to an
-    ``ok`` lead (``error_class=None``) so ``collect_general_failures`` is a no-op
-    unless a test opts into a failure via ``error_class=`` / ``query_id=``."""
+    """A minimal ``ExecutedLead``, ``ok`` by default (``error_class=None``), so
+    ``collect_general_failures`` ignores it unless a test passes ``error_class=``."""
     base = dict(
         lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
         query_id="elastic.esql", system="elastic", verb="esql", params={}, raw_command="cli",
@@ -101,11 +95,9 @@ def _write_query(  # noqa: PLR0913 — a queries-row builder mirrors the table's
     payload_status: str = "ok",
     payload_digest: str = "ok digest",
 ) -> None:
-    """Append one queries-table row + (optionally) its by-ref payload.
-
-    ``verb`` is the honest registry verb the row freezes (#620); it defaults to the query_id
-    suffix (the untagged shape) — pass it explicitly to exercise an engine verb or a coined id
-    whose suffix is not the verb."""
+    """Append one queries-table row and, unless ``payload`` is None, its by-ref payload.
+    ``verb`` defaults to the query_id suffix; pass it for an engine verb or a coined id whose
+    suffix is not the verb."""
     raw = run_dir / "gather_raw"
     raw.mkdir(exist_ok=True)
     rel = None
@@ -133,8 +125,7 @@ def _write_query(  # noqa: PLR0913 — a queries-row builder mirrors the table's
 
 @pytest.fixture
 def run_dir() -> Path:
-    # A natural run where run setup leaves one (`<data root>/<T>/runs/<id>`): the lane takes it
-    # as the `Run` its open hands it (`run_of`, #1105 PR 2).
+    # Where run setup leaves a run (`<data root>/<T>/runs/<id>`); tests hand it over as `run_of(rd)`.
     rd = curation_run_dir("test-run-001")
     (rd / "gather_raw").mkdir()
     return rd
@@ -142,12 +133,8 @@ def run_dir() -> Path:
 
 @pytest.fixture
 def catalog(tmp_path: Path) -> Path:
-    """Self-contained query catalog so build_handoff resolves ids without
-    depending on the live, environment-specific on-disk catalog (v2 ships an
-    elastic/host-state/cmdb catalog; main ships wazuh). Returns the catalog dir;
-    tests pass it as ``build_handoff(..., repo_root=catalog.parent,
-    skills=skills_view(catalog.parents[1]), where=catalog.parents[1])``
-    (the read root + the relative-path anchor), so no module-global patch is needed."""
+    """A self-contained query catalog (`<tmp>/skills/gather/queries`), so `build_handoff`
+    resolves ids without the environment's on-disk catalog."""
     cat = tmp_path / "skills" / "gather" / "queries"
     (cat / "elastic").mkdir(parents=True)
     (cat / "host-state").mkdir(parents=True)
@@ -204,17 +191,11 @@ def test_extract_multi_query_skips_missing_payload(run_dir: Path):
     assert leads[0].query_id == "wazuh.auth-events"
 
 
-def test_extract_missing_payload_status_raises(run_dir: Path):
-    """An empty payload_status (no row status) is a loud failure."""
+@pytest.mark.parametrize("status", ["", "weird"], ids=["missing", "unknown"])
+def test_extract_invalid_payload_status_raises(run_dir: Path, status: str):
+    """A missing (empty) or unknown payload_status is a loud failure."""
     _write_lead_meta(run_dir, "l-001", "x")
-    _write_query(run_dir, "l-001", 0, "wazuh.auth-events", payload_status="")
-    with pytest.raises(lead_author.LeadAuthorError, match="payload_status"):
-        lead_author.extract(run_dir)
-
-
-def test_extract_invalid_payload_status_raises(run_dir: Path):
-    _write_lead_meta(run_dir, "l-001", "x")
-    _write_query(run_dir, "l-001", 0, "wazuh.auth-events", payload_status="weird")
+    _write_query(run_dir, "l-001", 0, "wazuh.auth-events", payload_status=status)
     with pytest.raises(lead_author.LeadAuthorError, match="payload_status"):
         lead_author.extract(run_dir)
 
@@ -300,7 +281,7 @@ def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path, tmp_path:
 def test_1186_lead_author_cli_takes_the_runs_tenant_queue_lock(
     run_dir, tmp_path, monkeypatch, held_root,
 ):
-    """O2: the CLI uses its Run's tenant for the queue lock and pitfall writes."""
+    """The CLI uses its Run's tenant for the queue lock and pitfall writes."""
     set_state_dir(monkeypatch, tmp_path / "legacy-state")
     learning = run_dir.parent.parent / "learning"
     _write_lead_meta(run_dir, "l-001", "failed query")
@@ -351,8 +332,8 @@ def test_discover_system_drafts_finds_files_excluding_readme(tmp_path):
 
 def test_build_system_draft_handoffs_emits_triple(tmp_path):
     """The triple names the draft and its system's SKILL.md below the draft's `skills/`, never
-    the product tree's spelling (#1108 P4 O-TEXT; the exact prefix is an open handoff-spelling
-    gap, so only its tail and the absence of `defender/` are pinned)."""
+    the product tree's spelling. The exact prefix is still open, so only its tail and the
+    absence of `defender/` are pinned."""
     skills = tmp_path / "agent" / "skills"
     (skills / "elastic" / "_draft").mkdir(parents=True)
     draft = skills / "elastic" / "_draft" / "falco-na.md"
@@ -367,15 +348,14 @@ def test_build_system_draft_handoffs_emits_triple(tmp_path):
     assert not h["skill_path"].startswith("defender/")
 
 
-#: `tests/_repo.seed_skills_repo`'s adapter-declared systems (#869): the product checkout's
-#: adapters, which `build_lead_author_deps` resolves at its own boundary.
+#: `seed_skills_repo`'s adapter-declared systems, as `build_lead_author_deps` resolves them.
 DECLARED = frozenset({"elastic", "wazuh"})
 
 
 def _tick(lane: C.DraftLane, edit, *, label: str = "lead-run", synthesize=None,
           handoff: str = "wazuh.newthing", **overrides) -> tuple[Path, int]:
-    """One REAL lead-author tick over the draft: the tables bypassed (one dummy lead), the spawn
-    faked as `edit(<the draft's agent/skills>)` (it runs no git), handing over `handoff`."""
+    """One real lead-author tick over the draft: one dummy lead, the spawn faked as
+    `edit(<the draft's agent/skills>)`, handing over `handoff`."""
     run_dir = curation_run_dir(label)
 
     def agent(rd, handoffs, pending, *, box=None):
@@ -419,7 +399,7 @@ def _append(path: Path, text: str) -> None:
 
 def test_verify_skills_state_accepts_in_scope_edits(tmp_path: Path):
     """Fold an established template, promote a draft (write established + rm draft), and
-    lift a system skill (edit SKILL.md + rm draft) — all in-scope; all of them land (#869/#1108 O7)."""
+    lift a system skill (edit SKILL.md + rm draft): all in scope, all land."""
     def edit(sk: Path) -> None:
         (sk / "gather/queries/wazuh/auth-events.md").write_text(
             query_template("wazuh.auth-events", "established") + "\n# folded\n")
@@ -436,9 +416,8 @@ def test_verify_skills_state_accepts_in_scope_edits(tmp_path: Path):
 
 
 def test_verify_skills_state_rejects_stray_outside_skills(tmp_path: Path):
-    """An edit outside the lane's `skills/` is refused by the batch's ChangeSet (an out-of-lane
-    path, OD18: before the lane gate reads it), naming it outside: nothing lands and the draft is
-    back at its base (#1175, U10). How the drain routes it is below."""
+    """An edit outside the lane's `skills/` is refused by the batch's ChangeSet before the lane
+    gate reads it, and the draft is reset to its base (#1175). The next test routes it."""
     from defender.learning.author.version_control import DeliveryRefused
 
     lane = _lane(tmp_path, files={"other/stray.md": "committed\n"})
@@ -457,12 +436,10 @@ def _queue_entry(paths, where: str, name: str) -> dict | None:
 @pytest.mark.parametrize("fault", ["refused-claim", "gate-rejection", "unrelated"])
 def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
         tmp_path: Path, fault: str, monkeypatch):
-    """U10/OD18 (human, 2026-10-23): the lead-author claim loop serving a run whose claim the
-    batch's ChangeSet refuses (a symlink the box left inside `skills/`, at a path the lane gate
-    would admit as a plain file) keeps the request queued with ONE attempt — not dead-lettered,
-    not in flight — nothing lands and the draft is back at its base. Controls keep the lane's
-    existing rule (#952), not U10's: a lane-gate content rejection (a delete-prohibition) and an
-    unrelated spawn fault are dead-lettered at once (`lead-author-error`) (#1175, P4 O7)."""
+    """A claim the batch's ChangeSet refuses (a symlink the box left in `skills/`, at a path the
+    lane gate would admit as a plain file) stays queued with one attempt, neither dead-lettered
+    nor in flight; nothing lands and the draft is reset (#1175). Controls: a lane-gate content
+    rejection and an unrelated spawn fault are dead-lettered at once."""
     from defender.learning.core import drains
     from defender.tests.support.learning.core._state1135 import enqueue_run, state_for_paths
 
@@ -514,6 +491,12 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
     # a non-*.md file under skills/ is a stray — the corpus is *.md
     ("non-md-under-skills",
      lambda sk: (sk / "junk.json").write_text("{}"), "outside"),
+    ("out-of-scope-skills-md",
+     lambda sk: (sk / "elastic" / "notes.md").write_text("x"), "out-of-scope"),
+
+    # `execution.md` declares a system: the lane may never commit one
+    ("execution-md",
+     lambda sk: (sk / "elastic" / "execution.md").write_text("x"), "execution.md"),
 
     # deleting an ESTABLISHED template, and deleting a system's SKILL.md, are both the
     # delete-prohibition: a promote writes, it never removes what another run relies on
@@ -522,10 +505,12 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
     ("skill-md-deletion",
      lambda sk: (sk / "elastic" / "SKILL.md").unlink(), "delete-prohibition"),
 
-    # the `_draft/README.md` is scaffold the lane may not author over
+    # `_draft/README.md` and the catalog's `SCHEMA.md` are scaffold the lane may not author over
     ("draft-readme-mutation",
      lambda sk: _append(sk / "elastic" / "_draft" / "README.md", "\nstomped\n"),
      "protected surface"),
+    ("schema-mutation",
+     lambda sk: _append(sk / "gather/queries/SCHEMA.md", "\nstomped\n"), "protected surface"),
 
     ("half-promote",
      lambda sk: (sk / "gather/queries/wazuh/newthing.md").write_text(
@@ -541,22 +526,9 @@ def test_verify_skills_state_rejects_a_tree_the_write_lane_could_produce(
     _refused(_lane(tmp_path), mutate, match)
 
 
-def test_verify_skills_state_rejects_out_of_scope_skills_md(tmp_path: Path):
-    _refused(_lane(tmp_path), lambda sk: (sk / "elastic" / "notes.md").write_text("x"),
-             "out-of-scope")
-
-
-def test_verify_skills_state_rejects_execution_md(tmp_path: Path):
-    """`execution.md` is the one per-system file the lead-author lane can never get
-    committed (#869 C32/F1) — under NF1 the commit gate IS the marker's integrity."""
-    _refused(_lane(tmp_path), lambda sk: (sk / "elastic" / "execution.md").write_text("x"),
-             "execution.md")
-
-
 def _covered_draft(query_id: str) -> tuple[str, str]:
-    """A `wazuh` draft that accounts for `query_id`, as the mint would write it, for the batch's
-    base (agent-relative path, text). In the base, not merely written: the invariants under test
-    read the draft's PRE-IMAGE from the base commit."""
+    """`(agent-relative path, text)` of a `wazuh` draft covering `query_id`, as the mint writes
+    it, for the batch's base: the invariants under test read the draft's pre-image from there."""
     name = lead_author._draft_basename(query_id)
     return (f"{_CATALOG}/wazuh/_draft/{name}.md",
             query_template(f"wazuh.{name}", "draft", covers=[query_id]))
@@ -581,9 +553,8 @@ def test_a_bare_discard_of_a_covered_draft_is_refused(tmp_path: Path):
 
 
 def _mint(query_id: str):
-    """A `synthesize` that mints a `wazuh` draft this tick into the draft's catalog — what
-    `synthesize_drafts` leaves behind and hands to the author. `covers:` carries BOTH identities
-    the real mint writes: the draft's own derived id and the coined `query_id`."""
+    """A `synthesize` that mints a `wazuh` draft this tick, as `synthesize_drafts` does: `covers:`
+    carries the draft's own derived id and the coined `query_id`."""
     name = lead_author._draft_basename(query_id)
     draft_id = f"wazuh.{name}"
 
@@ -596,8 +567,7 @@ def _mint(query_id: str):
 
 
 def test_a_promote_of_a_draft_minted_this_tick_is_accepted(tmp_path: Path):
-    """The positive control for the rule above — the identity lands, so the delete costs
-    nothing and the batch commits."""
+    """Positive control for the bare-discard rule: the identity lands, so the delete is fine."""
     synthesize, draft = _mint("wazuh.hunt-failed-logins")
 
     def edit(sk: Path) -> None:
@@ -611,8 +581,8 @@ def test_a_promote_of_a_draft_minted_this_tick_is_accepted(tmp_path: Path):
 
 
 def test_a_draft_minted_this_tick_and_left_alone_is_not_a_departure(tmp_path: Path):
-    """SKIP is a legal disposition, and it is the one the prompt names for a draft that fits
-    nowhere — the rule must fire on the `rm`, never on the file still being there."""
+    """SKIP (the prompt's disposition for a draft that fits nowhere) is legal: the rule fires on
+    the `rm`, never on the file still being there."""
     synthesize, draft = _mint("wazuh.hunt-failed-logins")
     assert _landed(_lane(tmp_path), lambda sk: None, synthesize=synthesize) == [f"agent/{draft}"]
 
@@ -682,12 +652,6 @@ def test_an_established_template_may_not_have_its_id_rewritten(tmp_path: Path):
              "rewrote the identity")
 
 
-def test_verify_skills_state_rejects_schema_mutation(tmp_path: Path):
-    _refused(_lane(tmp_path),
-             lambda sk: _append(sk / "gather/queries/SCHEMA.md", "\nstomped\n"),
-             "protected surface")
-
-
 def test_verify_skills_state_rejects_a_promotion_whose_placeholder_is_not_a_param(
     tmp_path: Path,
 ):
@@ -709,8 +673,7 @@ def test_verify_skills_state_accepts_a_malformed_draft(tmp_path: Path):
 
 
 def test_is_catalog_template_excludes_what_is_not_a_template():
-    """Over the repo-relative spelling after P4 (OD6). ASSUMED: the rule keeps its path-string
-    shape, its paths now `agent/...` from the ChangeSet."""
+    """Over the ChangeSet's repo-relative spelling (`agent/...`)."""
     assert lead_author._is_catalog_template(f"{CATALOG_REL}/wazuh/auth.md")
     assert not lead_author._is_catalog_template(f"{CATALOG_REL}/wazuh/README.md")
     assert not lead_author._is_catalog_template(f"{CATALOG_REL}/NOTES.md")
@@ -738,17 +701,10 @@ def test_verify_skills_state_refuses_a_tree_whose_adapters_cannot_be_read(tmp_pa
     assert "refusing to commit" in str(exc.value)
 
 
-# test_verify_skills_state_ignores_baseline_stray: deleted (#1108 P4 OD12 i). It pinned the
-# worktree's pre-existing dirt (`changes_outside` over git status) not being blamed on the agent;
-# a draft is built clean from the export's blobs, so there is no baseline to subtract. Covered by
-# tests/tenancy/tenant_1108_delivery/test_batches.py::test_start_batch_makes_a_git_free_draft_of_the_export_commit_and_no_checkout
-# and test_changes.py::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files.
-
-
 def test_run_loop_commits_agent_edits(tmp_path: Path):
-    """End-to-end: the agent (faked) edits the draft and runs no git; the loop verifies and
-    the commit-maker commits exactly the skills delta on the batch branch with a generated
-    message, and writes done (#1108 P4 O7: closes F-LEAD's lead-author row)."""
+    """End to end: the faked agent edits the draft (no git); the loop verifies, the commit-maker
+    commits exactly the skills delta on the batch branch with a generated message, and done is
+    written."""
     lane = _lane(tmp_path)
 
     def edit(sk: Path) -> None:
@@ -767,17 +723,6 @@ def test_run_loop_commits_agent_edits(tmp_path: Path):
     assert "lead-author" in msg
     assert run_dir.name in msg
     assert (run_dir / "lead_author" / "done").is_file()
-
-
-def test_run_raises_and_skips_commit_on_scope_violation(tmp_path: Path):
-    """A stray edit makes the gate raise (the drain quarantines the marker); nothing lands and
-    no done sentinel is written."""
-    from defender.learning.author.version_control import DeliveryRefused
-
-    lane = _lane(tmp_path, files={"other/stray.md": "committed\n"})
-    _refused(lane, lambda sk: (sk.parent / "other" / "stray.md").write_text("stray"), "outside",
-             errors=DeliveryRefused)
-    assert lane.drift() == []
 
 
 def test_run_returns_rc2_on_nonzero_agent_exit(tmp_path: Path):
@@ -815,16 +760,9 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_path: Path):
     assert (run_dir / "lead_author" / "done").is_file()
 
 
-def test_run_quarantines_half_promote(tmp_path: Path):
-    _refused(_lane(tmp_path),
-             lambda sk: (sk / "gather/queries/wazuh/newthing.md").write_text(
-                 query_template("wazuh.newthing", "established")),
-             "half-promote")
-
-
 def test_run_refuses_a_bare_discard_of_a_draft_it_minted_this_tick(tmp_path: Path):
-    """The REAL mint (no synthesize override): a bare `rm` of the draft it minted is refused and
-    nothing lands (draft synthesis over the draft, F-LEAD)."""
+    """With the real mint (no `synthesize` override), a bare `rm` of the draft it minted is
+    refused and nothing lands."""
     lane = _lane(tmp_path)
     run_dir = curation_run_dir("lead-run")
     (run_dir / "gather_raw").mkdir(parents=True)
@@ -849,7 +787,7 @@ def test_run_refuses_a_bare_discard_of_a_draft_it_minted_this_tick(tmp_path: Pat
 
 def test_prepare_handoffs_at_threshold_surfaces_drafts(run_dir: Path, monkeypatch, tmp_path):
     """At-or-above threshold → drafts surface alongside executed handoffs; each names its
-    system's SKILL.md in the draft, not the product tree (#1108 P4)."""
+    system's SKILL.md in the draft, not the product tree."""
     lane = _lane(tmp_path)
     fake_handoff = [{
         "query_id": "fake.lead", "status": "established",
@@ -892,7 +830,6 @@ def test_prepare_handoffs_drafts_only_no_executed_proceeds(run_dir: Path, monkey
 
 
 def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path, tmp_path: Path):
-    """No executed leads AND no pending drafts → early exit 0, no work."""
     deps = _deps(_lane(tmp_path), discover_system_drafts=lambda: [])
     handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc == 0
@@ -900,28 +837,16 @@ def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path, tmp_path: Path):
     assert pending == []
 
 
-def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
-    """Patch the in-process engine seam the spawn spine calls. ``_spawn_author_agent`` looks up
-    ``run_author_stage`` on the engine module at call time, so patching the module attr is seen. Captures the kwargs the
-    spawn forwards to the engine + returns a canned rc / raises."""
+def _capture_engine(monkeypatch) -> dict:
+    """Patch the engine's ``run_author_stage``, which the spawn looks up at call time, to capture
+    the user prompt it is handed (`cap["user_prompt"]`) and return rc 0."""
     from defender.learning.leads import lead_author_engine
 
     cap: dict = {}
 
     def _fake(**kwargs):
-        cap.update(kwargs)
-        # #713: the spawn now forwards a StageWiring/StageContext pair. Flatten the fields
-        # the cases assert on back onto `cap`, so each case still names one knob.
-        if (w := kwargs.get("wiring")) is not None:
-            cap.update(system_prompt_file=w.prompt_path, model=w.model,
-                       effort=w.effort, trace_name=w.trace_name, label=w.label)
-        if (c := kwargs.get("ctx")) is not None:
-            cap.update(user_prompt=c.user, learning_run_dir=c.learning_run_dir,
-                       repo_root=c.repo_root, request_limit=c.request_limit,
-                       timeout=c.wall_clock_timeout, box=c.box, salt=c.salt)
-        if raise_exc is not None:
-            raise raise_exc
-        return rc
+        cap["user_prompt"] = kwargs["ctx"].user
+        return 0
 
     monkeypatch.setattr(  # lint-monkeypatch: ok — the spawn spine has no DI seam; capture engine kwargs
         lead_author_engine, "run_author_stage", _fake
@@ -931,8 +856,8 @@ def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
 
 def test_invoke_agent_pending_drafts_reach_engine_user_prompt(run_dir: Path, monkeypatch):
     """The pending drafts reach the engine's user prompt, whose `skills_dir:` line names the
-    draft's skills root, not the product tree's (#1108 P4 O-TEXT; its exact spelling is the open
-    handoff-spelling gap, so only the absence of `defender/` is pinned)."""
+    draft's skills root; its exact spelling is still open, so only the absence of `defender/` is
+    pinned."""
     cap = _capture_engine(monkeypatch)
     handoffs = [{"query_id": "wazuh.auth-events", "status": "established",
                  "executed_template_path": f"{CATALOG_REL}/wazuh/auth-events.md",
@@ -1027,8 +952,8 @@ def test_run_collects_general_failure_before_early_return(tmp_path: Path):
 
 
 def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(tmp_path: Path):
-    """The REAL mint writes its draft into the batch's draft and the reloaded catalog resolves
-    it for the handoff (draft synthesis over a draft, #1108 P4 F-LEAD)."""
+    """The real mint writes its draft into the batch's draft, and the reloaded catalog resolves
+    it for the handoff."""
     lane = _lane(tmp_path)
     seen: dict = {}
     deps = _deps(
@@ -1068,9 +993,8 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(tmp_path: Path)
      ["gather catalog for run-123", "\n\nsource-run: run-123\n"], []),
 ], ids=lambda v: v if isinstance(v, str) and len(v) < 40 and "/" not in v else "")
 def test_loop_commit_message_scope_follows_the_changed_paths(case, changed, present, absent):
-    """The subject line names the scope the batch actually touched — catalog, system skills,
-    or both — and never a scope nothing in `changed` supports. Over the repo-relative spelling
-    after P4 (OD6, `agent/...`)."""
+    """The subject line names the scope the batch touched (catalog, system skills, or both),
+    never one nothing in `changed` supports."""
     msg = lead_author._loop_commit_message(Path("run-123"), changed)
     for fragment in present:
         assert fragment in msg

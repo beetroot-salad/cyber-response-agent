@@ -60,9 +60,8 @@ def _result_of(payload: str) -> dict:
 
 
 def _write_rows(tmp_path, rows):
-    """A run that starts holding `rows` — a branch sibling's inherited prefix, handed to the
-    run's state the way seeding hands it (`RunState.inherit_rows`, #1235 round 2). Returns the
-    state: `repeat_note` reads it, never `executed_queries.jsonl`."""
+    """A run state seeded with `rows` (a branch sibling's inherited prefix) as seeding does it;
+    `repeat_note` reads the state, never `executed_queries.jsonl`."""
     from defender.investigation.run_state import RunState
 
     state = RunState(tmp_path, "rq")
@@ -114,7 +113,7 @@ def test_repeat_note_flags_a_changed_request_that_moved_nothing(tmp_path):
 
 
 def test_a_different_payload_of_the_same_length_is_not_a_no_op(tmp_path):
-    """#877 F-9 — THE regression."""
+    """Regression (#877): equal length is not equal content."""
     assert len(_PAYLOAD) == len(_SAME_LENGTH), "the fixture stopped exercising the defect"
     state = _write_rows(tmp_path, [
         _row(0, params={"host": "web-1"}, payload=_PAYLOAD),
@@ -127,8 +126,8 @@ def test_a_different_payload_of_the_same_length_is_not_a_no_op(tmp_path):
 
 
 def test_a_row_with_no_recorded_hash_evidences_no_byte_identity(tmp_path):
-    """A table written before the hash column existed states no content fact, and the note is a
-    statement OF that fact. Silence, not a digest-shaped guess."""
+    """A row without `payload_sha256` states no content fact, so the note stays silent rather than
+    guess from the digest."""
     row = _row(0, params={"q": "a"}, payload=_PAYLOAD)
     del row["payload_sha256"]
     state = _write_rows(tmp_path, [row, _row(1, params={"q": "b"}, payload=_PAYLOAD)])
@@ -177,13 +176,13 @@ def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
     assert [r["seq"] for r in rows] == [0, 1]
     assert rows[0]["payload_path"] is None
     assert rows[1]["payload_path"] == f"gather_raw/{LEAD}/1.json"
-    # #1235 round 3: the state records the row as its line reads — a failed sidecar write is a
-    # row with no payload in both, not a path the state names and the view does not.
+    # The state records the row as its line reads: a failed sidecar write leaves no payload in either.
     assert list(state.lead_rows(LEAD)) == rows
 
 
 def test_the_content_hash_never_folds_two_payloads_together(tmp_path):
-    """`payload_sha256` is the one field whose contract is that different bytes hash"""
+    """`payload_sha256` is the field whose contract is that different bytes (even lone surrogates)
+    hash differently."""
     a, b = "\ud800", "\ud801"
     assert ge.payload_sha256(a) != ge.payload_sha256(b), \
         "two different payloads share one content hash"
@@ -196,31 +195,31 @@ def _live():
     return rq
 
 
-def _bare_run(tmp_path, name: str = "run"):
+def _bare_run(tmp_path):
     """A run folder and a fresh state for it, as `run_investigation` starts one."""
     from defender.records import RunPaths
     from defender.investigation.run_state import RunState
 
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
-    run_dir = tmp_path / fixture_uuid(name)
+    # A run id is a canonical UUID, so the folder is `fixture_uuid(<label>)`.
+    run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     return run_dir, RunState(run_dir, run_dir.name)
 
 
-def _append(rq, state, *, params, payload=_PAYLOAD, lead=LEAD):
+def _append(rq, state, *, params, payload=_PAYLOAD):
     """One executed row through the production writer, its digest derived from `payload`."""
     return rq.append_query_row(
-        state, run=fixture_run(state.run_dir), lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
+        state, run=fixture_run(state.run_dir), lead_id=LEAD, system="elastic", verb="query", query_id="elastic.probe",
         params=params, raw_command="elastic query", payload_text=payload, exit_code=0,
         payload_status="ok", payload_digest=rq.payload_digest(payload, "", 0), system_key="",
     )
 
 
-def _table_rows(run_dir, lead=LEAD):
+def _table_rows(run_dir):
     from defender.records import RunPaths
 
     return [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
-            if r.get("lead_id") == lead]
+            if r.get("lead_id") == LEAD]
 
 
 def _write_table(run_dir, rows):
@@ -233,7 +232,7 @@ def _write_table(run_dir, rows):
 
 
 def test_the_live_readers_answer_from_the_rows_the_host_recorded_not_from_the_file(tmp_path):
-    """A run-folder file cannot move a live decision (#1235 O1, at the reader): overwriting"""
+    """Overwriting or truncating the table moves neither the next seq nor the repeat note."""
     rq = _live()
     run_dir, state = _bare_run(tmp_path)
     assert [_append(rq, state, params={"q": "a"})["seq"] for _ in range(2)] == [0, 1]
@@ -267,7 +266,8 @@ def test_the_live_readers_answer_from_the_rows_the_host_recorded_not_from_the_fi
 
 
 def test_state_rows_are_the_lines_written_not_the_dicts_the_writer_built(tmp_path):
-    """Each row the state holds is `json.loads` of the line `append_query_row` wrote — the same"""
+    """Each row the state holds is `json.loads` of the line `append_query_row` wrote, not an alias of
+    the writer's dict."""
     import json
 
     rq = _live()
@@ -306,7 +306,7 @@ def _unplant(path, kind: str, saved: bytes) -> None:
 
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_a_row_whose_view_write_failed_is_in_the_state_with_its_seq_spent(tmp_path, kind):
-    """R3, round 3 (#1235): the run's state is the record of what the run did, and `executed_queries.jsonl` is the model's view of it."""
+    """The run's state records what the run did; `executed_queries.jsonl` is only the model's view."""
     from defender.knowledge._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
     from defender.records import RunPaths
 

@@ -27,14 +27,12 @@ DAVE = S.query_params("user:dave")
 #: asked BEFORE the failing call, which its call log must show it received.
 ERIN = S.query_params("user:erin")
 REP = S.query_params("user:rep")
-SENT_TWO = {"entity": "sent-two"}
 #: The second withheld verb (a ledger-only denial needs a withheld call after the door closed).
 IDP_LOOKUP = {"entity": "alice"}
 WITHHELD = (("edr", "lookup"), ("idp", "lookup"))
 #: The source run's pre-branch calls on the held lead (`S.source_calls(post=False)`).
 PRE_BRANCH = len(S.source_calls(post=False))
 LEDGER_GLOB = "served/{world_id}.jsonl"
-TABLE_GLOB = "runs/{arm}/executed_queries.jsonl"
 #: `Estate1234.break_write` patterns (filled per call by the adapter).
 BREAK_LEDGER = "{episode}/served/{world_id}.jsonl"
 
@@ -45,16 +43,15 @@ def q(system: str, verb: str, params: Mapping[str, Any]) -> Any:
 
 def reject_turn() -> Any:
     """A call the query tool rejects before any system is reached (an unknown verb): an exit-64
-    table row, no ledger row (JP-02 "TABLE-ONLY rows")."""
+    table row, no ledger row."""
     return q("idp", "no_such_verb", {})
 
 
 class _Between:
-    """One gather-model turn preceded by a host-side action fired when the model ASKS for it —
-    after the previous call's two records were written (ledger before table, JP-01), before this
-    call is made. `make` builds the turn lazily (a reducer turn needs the run's own payload
-    path). The action only injects: a fault planted, or the estate recovering (AP-01a,
-    JP-02 `s_lw_realerror`). It decides nothing."""
+    """One gather-model turn preceded by a host-side action fired when the model asks for it:
+    after the previous call's two records were written (ledger before table), before this call
+    is made. `make` builds the turn lazily (a reducer turn needs the run's own payload path).
+    The action only injects (a fault planted, or the estate recovering); it decides nothing."""
 
     def __init__(self, turn: Any = None, *, before: Callable[[], Any] | None = None,
                  make: Callable[[], Any] | None = None) -> None:
@@ -72,7 +69,7 @@ class _Between:
 
 def _arms(label: str) -> list[tuple[Path, str]]:
     """`(episode folder, arm id)` for `label` in every episode under the tenant's episodes
-    folder that has a roster naming it (#1187: the arm is at the roster's id)."""
+    folder that has a roster naming it (the arm folder is the roster's id)."""
     out = []
     for ep in sorted(S.episodes_root().iterdir()) if S.episodes_root().is_dir() else []:
         arm = S.T.read_roster(ep).get(S.T.world_id(ep, label))
@@ -88,14 +85,14 @@ def _run_dir(label: str) -> Path:
 
 def reducer_make(label: str = "b") -> Callable[[], Any]:
     """A failing terminal reduce (`cat <payload> | defender-sql …`) over the newest payload this
-    run wrote: the real `_record_shim_failure` appends a `∅.bash-shim` row (observed in a
-    sibling by this writer's smoke: exit 69 `EXIT_NO_RUNTIME`, recorded infra; where duckdb is
-    installed, the missing table fails the reduce the same way)."""
+    run wrote, so the real `_record_shim_failure` appends a `∅.bash-shim` row (exit 69
+    `EXIT_NO_RUNTIME` without duckdb; with it, the missing table fails the reduce the same
+    way)."""
     def make() -> Any:
         run_dir = _run_dir(label)
         raw = run_dir / "gather_raw" / "l-001"
         payload = max(raw.glob("*.json"), key=lambda p: int(p.stem))
-        # #1255 P1 (slice B): the gather model names the payload by its model path,
+        # The gather model names the payload by its model path,
         # `/runs/current/gather_raw/l-001/<n>.json`, never the arm's host run folder.
         return S.S24.replay_harness().Turn(tool_calls=[("bash", {
             "command": f"cat {model_path(payload, run_dir=run_dir)} | defender-sql "
@@ -107,34 +104,34 @@ def reducer_turn(label: str = "b") -> _Between:
     return _Between(make=reducer_make(label))
 
 
-def plant_dir_at(glob: str, label: str = "b") -> Callable[[], None]:
-    """The host action: the record at `glob` (this world's) becomes a directory, so the real
+def plant_dir_at(glob: str) -> Callable[[], None]:
+    """The host action: world b's record at `glob` becomes a directory, so the real
     writer's next open of it fails (mode bits cannot do it as root)."""
     def plant() -> None:
-        for ep, arm in _arms(label):
-            for path in ep.glob(glob.format(label=label, arm=arm, world_id=T.world_id(ep, label))):
+        for ep, _arm in _arms("b"):
+            for path in ep.glob(glob.format(world_id=T.world_id(ep, "b"))):
                 S.plant_dir(path)
     return plant
 
 
-def altering(*markers: str, name: str = "oracle-b") -> Any:
+def altering(*markers: str) -> Any:
     """World b's sibling oracle: each call whose request carries one of `markers` is served the
     forged row (claim adds fg-b-1 for f1, as `S.altering_oracle` does on QP); every other call
     passes unchanged."""
     s24 = S.S24
     return S.Routed({m: s24.oracle(s24.submit(S.CHANGED_B, s24.claim(
         added=[s24.added("fg-b-1", "f1")]))) for m in markers},
-        default=S.passing_oracle(), name=name, last_wins=True)
+        default=S.passing_oracle(), name="oracle-b", last_wins=True)
 
 
 def j3(src: Path) -> None:
-    """J3's inherited `∅.denied` row in the source (one pre-branch sentinel)."""
+    """One inherited pre-branch `∅.denied` sentinel in the source."""
     S.capture_sentinel(src)
 
 
 def j3_and_lead_zero(src: Path) -> None:
-    """J3's row plus a lead-zero row (`l-000`, lead zero's own system `elastic`) in the source;
-    the real seed copies both into every sibling (this writer's smoke: `l-000` is held)."""
+    """`j3`'s row plus a lead-zero row (`l-000`, on lead zero's own system `elastic`) in the
+    source; the real seed copies both into every sibling."""
     S.capture_sentinel(src)
     S.capture_sentinel(src, lead="l-000", seq=0, system="elastic", verb="query",
                        query_id="elastic.query", exit_code=0,
@@ -148,8 +145,8 @@ def estate(tmp_path: Path, withheld: Iterable[tuple[str, str]] = (("edr", "looku
 def launch(tmp_path: Path, est: Any = None, *,
            after_source: Callable[[Path], None] | None = j3, calls: Any = None,
            **worlds: Any) -> Any:
-    """`S.real_family` over `est` (default: edr lookup withheld) with per-world scripts and
-    J3's sentinel in the source unless told otherwise (`after_source=None`: none)."""
+    """`S.real_family` over `est` (default: edr lookup withheld) with per-world scripts and the
+    `j3` sentinel in the source unless told otherwise (`after_source=None`: none)."""
     return S.real_family(tmp_path, dict(worlds),
                          estate=est if est is not None else estate(tmp_path),
                          after_source=after_source, calls=calls)
@@ -260,7 +257,7 @@ def test_1234_contrast_row_names_the_first_altered_investigator_call(tmp_path: P
     assert list(_field(b, "contrast.unserved")) == [], "an inherited row stole a post-branch partner"
     assert list(_field(b, "contrast.unmapped")) == []
     assert sorted(_numbers(_field(b, "contrast.blocked"))) == [j3_line, own_denied], (
-        "b's refused ledger row joins its own ∅.denied row; J3's inherited row is listed apart")
+        "b's refused ledger row joins its own ∅.denied row; the inherited sentinel's is listed apart")
 
 
 def test_1234_contrast_row_counts_calls_leads_and_external_refusals(tmp_path: Path) -> None:
@@ -300,7 +297,7 @@ def test_1234_contrast_row_counts_calls_leads_and_external_refusals(tmp_path: Pa
                           "elastic.query": 1, "idp.no_such_verb": 1, "idp.bash": 1}, (
         "every row of the query table is counted by system and verb, the seeded rows included")
     assert Counter(_numbers(_field(b, "contrast.blocked"))) == Counter([j3_line, own_denied, None]), (
-        "blocked: J3's inherited row, b's refused call, and the ledger-only refusal (no number)")
+        "blocked: the inherited sentinel, b's refused call, and the ledger-only refusal (no number)")
     assert sorted(_field(b, "contrast.errored")) == sorted([bob, *rep_failed]), (
         "the outage rows are served with an error")
     assert sorted(_field(b, "contrast.unserved")) == sorted([reject, shim, *trip]), (
@@ -431,14 +428,14 @@ def test_1234_am_blocked_call_with_only_one_record_in_the_rendered_views(tmp_pat
     door = _entry_at(calls, None, "refused")
     assert len(door) == 1, "the ledger-only denial is a blocked call with no table call number"
     assert _get(door[0], S.COINED["entry.blocked"]) is True, "the ledger-only denial is a blocked call with no table call number"
-    assert _blocked_flags(calls, j3_line) == [True], "J3's row, blocked, under its number"
+    assert _blocked_flags(calls, j3_line) == [True], "the inherited sentinel is blocked under its number"
     for line in (seeded_shim, own_shim):
         assert _blocked_flags(calls, line) == [False], (
             "a killed-shim sentinel is an ordinary table call under its number")
     refs = _reference_calls(ctx)
     for run in ("a", "c"):
         assert _blocked_flags(refs[run], j3_line) == [True], (
-            f"J3's row is a blocked call in reference {run}'s call list, same number")
+            f"the inherited sentinel is blocked in reference {run}'s call list, same number")
     for run in "abc":
         assert j3_line in _numbers(_field(_contrast(ctx, run), "contrast.blocked")), run
     b = _contrast(ctx, "b")
@@ -452,8 +449,8 @@ def test_1234_am_blocked_call_with_only_one_record_in_the_rendered_views(tmp_pat
     S.grade(built, S.judge(), draws=1)
     family_key = (S.COINED["found.family_run"], "edr", "lookup", S.canonical(S.DENIED_LOOKUP))
     once = [g for g in S.found_gaps(built) if S.gap_key(g) == family_key]
-    assert len(once) == 1, f"J3's row is listed once in the user record, as the family's: {once}"
-    assert once[0].get(S.COINED["found.count"]) == 1, f"J3's row is listed once in the user record, as the family's: {once}"
+    assert len(once) == 1, f"the inherited sentinel is listed once, as the family's: {once}"
+    assert once[0].get(S.COINED["found.count"]) == 1, f"the inherited sentinel is listed once, as the family's: {once}"
 
 
 def test_1234_world_ledger_read_keeps_every_row_of_a_repeated_triple(tmp_path: Path) -> None:
@@ -523,32 +520,25 @@ def test_1234_outage_rows_and_the_user_record(tmp_path: Path) -> None:
     assert built.finding_id("b", 0, 1) not in queued, "resting on refusals: gap-only"
 
 
-def _cut_short_family(tmp_path: Path, variant: str) -> tuple[Any, str, str]:
-    """One of s_AN01's three failed writes: b's served ledger, b's query table, or the
-    control's served ledger. Returns the family, the run whose write failed and its record."""
+def _cut_short_family(tmp_path: Path, variant: str) -> tuple[Any, str]:
+    """A failed served-ledger write: b's (`ledger`) or the control's. Returns the family and the
+    run whose write failed."""
     est = estate(tmp_path)
     est.answer("idp", "query", CAROL, S.BASE_ANSWER)
+    est.break_write("idp", "query", BOB, BREAK_LEDGER)
     if variant == "ledger":
-        est.break_write("idp", "query", BOB, BREAK_LEDGER)
         turns = [q("edr", "lookup", S.DENIED_LOOKUP), q("idp", "query", BOB),
                  q("idp", "query", CAROL), S.done_turn()]
-        return launch(tmp_path, est, b=S.RealWorld("b", turns=turns)), "b", "ledger"
-    if variant == "table":
-        turns = [q("edr", "lookup", SENT_TWO), q("idp", "query", S.Q1),
-                 _Between(q("edr", "lookup", S.DENIED_LOOKUP), before=plant_dir_at(TABLE_GLOB)),
-                 q("idp", "query", CAROL), S.done_turn()]
-        return launch(tmp_path, est, b=S.RealWorld("b", turns=turns)), "b", "table"
-    est.break_write("idp", "query", BOB, BREAK_LEDGER)
+        return launch(tmp_path, est, b=S.RealWorld("b", turns=turns)), "b"
     turns = [q("idp", "query", S.Q1), q("idp", "query", BOB), q("idp", "query", CAROL),
              S.done_turn()]
-    return (launch(tmp_path, est, a=S.RealWorld("a", turns=turns, disposition="benign")),
-            "a", "ledger")
+    return launch(tmp_path, est, a=S.RealWorld("a", turns=turns, disposition="benign")), "a"
 
 
 @pytest.mark.parametrize("variant", ["ledger", "control"])
 def test_1234_an_world_cut_short_by_a_failed_call_record_write(tmp_path: Path,
                                                              variant: str) -> None:
-    built, run, record = _cut_short_family(tmp_path, variant)
+    built, run = _cut_short_family(tmp_path, variant)
     judge = S.judge()
     S.grade(built, judge, draws=1)
     if variant == "control":
@@ -560,22 +550,15 @@ def test_1234_an_world_cut_short_by_a_failed_call_record_write(tmp_path: Path,
         assert not judge.called("c"), "no world is graded"
         return
     reason = _cut_short_reason(S.row(built, run))
-    assert S.word_re(S.COINED[f"cut.{record}"]).search(reason), f"the failed write is named: {reason}"
+    assert S.word_re(S.COINED["cut.ledger"]).search(reason), f"the failed write is named: {reason}"
     refs = _reference_calls(S.render_context(built, "c"))
     assert "a" in refs, "a cut-short world leaves every reference set"
     assert run not in refs, "a cut-short world leaves every reference set"
     gaps = [g for g in S.found_gaps(built) if g.get(S.COINED["found.run"]) == S.found_run(run)]
-    if variant == "ledger":
-        assert [g for g in gaps if g.get(S.COINED["found.unread"])], (
-            f"b's unreadable ledger is named unread in its census entry: {gaps}")
-        assert not [g for g in gaps if S.gap_key(g)[3] == S.canonical(BOB)], (
-            "the call whose write failed is no found gap")
-        return
-    for params in (SENT_TWO, S.DENIED_LOOKUP):
-        key = (S.found_run(run), "edr", "lookup", S.canonical(params))
-        hit = [g for g in gaps if S.gap_key(g) == key]
-        assert len(hit) == 1, f"{params}: a refused ledger row of the run is a found gap: {gaps}"
-        assert hit[0].get(S.COINED["found.count"]) == 1, f"{params}: a refused ledger row of the run is a found gap: {gaps}"
+    assert [g for g in gaps if g.get(S.COINED["found.unread"])], (
+        f"b's unreadable ledger is named unread in its census entry: {gaps}")
+    assert not [g for g in gaps if S.gap_key(g)[3] == S.canonical(BOB)], (
+        "the call whose write failed is no found gap")
 
 
 def _ledger_fails(est: Any, writer: str) -> Any:
@@ -642,40 +625,7 @@ def test_1234_one_call_carries_one_host_written_id_on_both_records(tmp_path: Pat
     assert own_denied in _numbers(_field(b, "contrast.blocked")), (
         "the refused call's table row is not joined to its `refused` ledger row")
     carrying = [r for w in "abc" for r in built.table_rows(w) if S.CALL_ID in r]
-    assert not carrying, f"#1255 G4: a query-table row carries the call id: {carrying[:2]}"
-
-
-CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
-    "learning/branch/estate/registry.py::WorldRegistry._deliver": {
-        "writes_by": "record", "via": (), "failed_write": "ends the run",
-        "call_id": "this run's", "driven_by": "test_1234_failed_served_ledger_write_ends_the_run"},
-    "learning/branch/estate/registry.py::_record_beside": {
-        "writes_by": "record", "via": ("WorldRegistry.authorize_call", "WorldRegistry._base"),
-        "failed_write": "ends the run", "call_id": "this run's",
-        "driven_by": "test_1234_failed_served_ledger_write_ends_the_run"},
-    "investigation/query_tool.py::QueryCapture._record": {
-        "writes_by": "append_query_row", "via": ("QueryCapture._record_denied",),
-        "failed_write": "ordinary OSError propagates; denied view is best-effort",
-        "call_id": "none on the row (#1255 G4: the host-only join record holds it)",
-        "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
-    "investigation/tools/_bash.py::_record_shim_failure": {
-        "writes_by": "append_query_row", "via": (), "failed_write": "best-effort view",
-        "call_id": "none on the row (#1255 G4)",
-        "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
-    "investigation/record_query.py::append_query_row": {
-        "writes_by": "append", "via": (), "failed_write": "records state, then raises OSError",
-        "call_id": "none on the row (#1255 G4)",
-        "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
-    "investigation/branch/_snapshot.py::ForkSnapshot.restore_files": {
-        "writes_by": "seed", "via": (), "failed_write": "refuses the restore",
-        "call_id": "none of this run's (restored from the source's snapshot)",
-        "driven_by": "test_1234_every_query_table_writer_writes_this_runs_call_id"},
-    # The archive's verbatim copy of the run's finished table into `worlds/<X>/`.
-    "learning/lead_repository.py::stage_tables": {
-        "writes_by": "copy2", "via": (), "failed_write": "raises out of the archive",
-        "call_id": "none (#1255 G4), copied verbatim",
-        "driven_by": "test_1234_one_call_carries_one_host_written_id_on_both_records"},
-}
+    assert not carrying, f"a query-table row carries the call id: {carrying[:2]}"
 
 
 def test_1234_two_leads_calls_at_once_leave_intact_distinct_ledger_and_table_rows(
@@ -703,7 +653,7 @@ def test_1234_two_leads_calls_at_once_leave_intact_distinct_ledger_and_table_row
     assert all(ledger_ids), "five calls, five ids"
     assert len(set(ledger_ids)) == 5, "five calls, five ids"
     assert len(table) == 5, "a table row per call"
-    # #1255 G4/G6: the table carries no id; the exact join is the host's, read by the judge.
+    # The table carries no id; the exact join is the host's, read by the judge.
     rows = built.table_rows("b")
     b = _contrast(S.render_context(built, "b"), "b")
     assert list(_field(b, "contrast.unserved")) == [], (

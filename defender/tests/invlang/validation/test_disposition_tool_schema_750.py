@@ -93,31 +93,34 @@ def _disposition_property(tool_def) -> dict:
     return prop
 
 
-# O1 — the vocabulary is stated to the model structurally, derived from its owner.
+# The vocabulary is stated to the model structurally, derived from its owner.
 
 
 def test_the_registered_tool_advertises_the_owners_vocabulary(tmp_path):
-    """O1. The schema the MODEL is offered carries `DISPOSITION_VALUES`, in the owner's order."""
+    """The schema the MODEL is offered carries `DISPOSITION_VALUES`, in the owner's order."""
     script, _run_dir = _drive_tool(tmp_path)
     prop = _disposition_property(_close_tool_def(script))
 
     assert DISPOSITION_VALUES, "the vocabulary owner is empty; the comparison below is vacuous"
     assert prop.get("enum") == list(DISPOSITION_VALUES), (
-        "the model is not told the disposition vocabulary structurally — the schema's enum is "
-        f"{prop.get('enum')!r}, the owner's members are {list(DISPOSITION_VALUES)!r}. The "
-        f"whole advertised argument schema is {prop!r}"
+        f"the advertised enum is {prop.get('enum')!r}, the owner's members are "
+        f"{list(DISPOSITION_VALUES)!r}; schema: {prop!r}"
     )
 
 
-# NU2 — the hint must not become the gate.
+# No value outside the vocabulary commits, by EITHER entry path.
 
 
-# O2 — no value outside the vocabulary commits, by EITHER entry path.
-
-
-@pytest.mark.parametrize("disposition", NEAR_MISSES)
+@pytest.mark.parametrize("disposition", [
+    *NEAR_MISSES,
+    pytest.param(["benign"], id="list"),
+    pytest.param({"disposition": "benign"}, id="dict"),
+    1,
+    None,
+])
 def test_the_sync_host_entry_refuses_every_near_miss(tmp_path, disposition):
-    """O2, the lane with no tool-argument validation anywhere in front of it."""
+    """The lane with no tool-argument validation in front of it. Non-strings, unhashable ones
+    included, are refused rather than crashing the check."""
     deps, run_dir = _deps(tmp_path)
 
     with pytest.raises(ModelRetry) as excinfo:
@@ -129,20 +132,8 @@ def test_the_sync_host_entry_refuses_every_near_miss(tmp_path, disposition):
     )
 
 
-@pytest.mark.parametrize("disposition", [["benign"], {"disposition": "benign"}, 1, None])
-def test_the_sync_host_entry_denies_a_non_string_rather_than_crashing(tmp_path, disposition):
-    """O2's unhashable arm, and the one near miss the string list above cannot express."""
-    deps, run_dir = _deps(tmp_path)
-
-    with pytest.raises(ModelRetry) as excinfo:
-        close_investigation(deps, disposition, stages=_stages())
-
-    assert "disposition must be exactly one of" in str(excinfo.value)
-    assert not (run_dir / "report.md").exists()
-
-
 def test_the_tool_lane_refuses_a_value_outside_the_vocabulary(tmp_path):
-    """O2, the model-facing lane, driven end to end through the registered tool."""
+    """The model-facing lane, driven end to end through the registered tool."""
     script, run_dir = _drive_tool(tmp_path, disposition="totally-benign")
 
     seen = "\n".join(script.seen)
@@ -155,7 +146,7 @@ def test_the_tool_lane_refuses_a_value_outside_the_vocabulary(tmp_path):
 
 
 def test_a_member_of_the_vocabulary_commits_through_the_tool_lane(tmp_path):
-    """O2's positive control on the MODEL-FACING lane, and it has to be on this lane."""
+    """The positive control for the tool-lane refusal, on that same lane."""
     script, run_dir = _drive_tool(tmp_path, disposition="inconclusive")
 
     seen = "\n".join(script.seen)
@@ -169,11 +160,11 @@ def test_a_member_of_the_vocabulary_commits_through_the_tool_lane(tmp_path):
     )
 
 
-# O3 — the refusal distinguishes an invisible character from a valid value.
+# The refusal distinguishes an invisible character from a valid value.
 
 
 def test_the_refusal_escapes_an_invisible_character_rather_than_echoing_it(tmp_path):
-    """O3 (#722). `beni<U+200B>gn` comes back repr-escaped, on both lanes."""
+    """`beni<U+200B>gn` comes back repr-escaped, on both lanes (#722)."""
     deps, run_dir = _deps(tmp_path)
 
     with pytest.raises(ModelRetry) as excinfo:
@@ -181,8 +172,7 @@ def test_the_refusal_escapes_an_invisible_character_rather_than_echoing_it(tmp_p
     message = str(excinfo.value)
 
     assert repr(LACED) == "'beni\\u200bgn'", (
-        "python's repr no longer escapes U+200B, so the assertions below are about the wrong "
-        "thing — the retry text needs another way to make the character visible"
+        "python's repr no longer escapes U+200B, so the assertions below test the wrong thing"
     )
     assert "'beni\\u200bgn'" in message, (
         f"the refusal does not show the invisible character: {message!r}"

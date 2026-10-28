@@ -1,4 +1,4 @@
-"""#1025 (PR #1042 review, fifth pass) — a fact is decided where it is produced, once."""
+"""#1025 — a fact is decided where it is produced, once, so two surfaces of the page cannot disagree."""
 from __future__ import annotations
 
 import contextlib
@@ -9,7 +9,6 @@ import pytest
 
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -19,19 +18,9 @@ NOT_ROOT = pytest.mark.skipif(
 S = E.SAMPLE
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def visualize_episode():
-    return E.page_module()
-
-
-def render(ep) -> E.Page:
-    return E.render(ep, module=visualize_episode())
+_tmp_roots = E.tmp_roots
+visualize_episode = E.page_module
+render = E.render
 
 
 def _world(page: E.Page, label: str) -> str:
@@ -39,13 +28,8 @@ def _world(page: E.Page, label: str) -> str:
 
 
 def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
-    """Rendered from `re` — a directory named with a substring of `report.md` and `read` — the
-    report slot's refusal still says `report.md` and `could not be read`, whole: no scrub runs
-    over the sentence at all (#1049: the loader's `_sentence` is gone — the reader formats the
-    relative name `worlds/<w>/report.md` at its source and never holds the root, so a short
-    relative spelling of the root has nothing to leak from and nothing to be cut out of a
-    word). Before, the same page read "<episode>port.md could not be <episode>ad" (review of
-    PR #1042). Positive control: the root's spelling is absent from the page."""
+    """Rendered from `re` (a substring of `report.md` and `read`), the refusal still reads whole:
+    the reader formats the relative name and never holds the root, so nothing is scrubbed (#1049)."""
     ep = E.sample_episode(tmp_path)
     copy = E.copy_episode(ep, tmp_path / "re" / ep.dir.name)
     short = copy.dir
@@ -64,7 +48,7 @@ def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
 
 
 def test_1025_the_runs_launcher_line_and_the_runs_row_show_one_wall(tmp_path):
-    """A repeated `runs` step whose FIRST entry is inverted and whose second spans four minutes."""
+    """With a repeated `runs` step (first entry inverted), the row and the launcher line read one span."""
     ep = E.sample_episode(tmp_path)
     steps = [s for s in E.every_step() if s[0] != "runs"]
     steps += [("runs", "2026-09-09T10:20:00Z", "2026-09-09T10:19:00Z"),
@@ -86,8 +70,7 @@ def test_1025_the_runs_launcher_line_and_the_runs_row_show_one_wall(tmp_path):
 
 
 def test_1025_the_stage_table_reads_the_role_costs_the_model_decided(tmp_path):
-    """The verdict tile's total, the header's lower bound and the stage table's per-role rows are
-    one computation."""
+    """The stage table renders the `role_costs` filled at load; the renderer walks no wire log again."""
     module = visualize_episode()
     ep = E.sample_episode(tmp_path)
     loaded = E.load_episode(ep.dir, module=module)
@@ -100,7 +83,7 @@ def test_1025_the_stage_table_reads_the_role_costs_the_model_decided(tmp_path):
 
 
 def test_1025_a_framed_only_judge_trace_naming_no_roster_label_is_listed_as_unattributed(tmp_path):
-    """A launcher-produced episode writes only the framed twin for a judge call."""
+    """A launcher-produced episode writes only the framed twin of a judge call, so the census walks those too."""
     ep = E.sample_episode(tmp_path)
     E.write_framed(ep.dir, "judge:zz_gone:0", prompt="a world removed after a re-grade")
     page = render(ep)
@@ -140,7 +123,7 @@ def test_judge_trace_uuid_scope_is_shared_by_blocks_and_unattributed_list(tmp_pa
 
 
 def test_1025_the_draw_read_totals_count_every_directory_the_world_sections_count(tmp_path):
-    """A world whose draw directory holds one unparsable document."""
+    """A world's unreadable-draw count is the same in its section and in the findings total."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / f"{E.EPISODE_ID}-orphan").mkdir()
     orphan = T.fixture_world_id("orphan")
@@ -178,7 +161,7 @@ def test_1025_a_negative_duration_is_that_slots_own_absence(tmp_path):
 
 
 def test_1025_a_refused_wire_trace_is_named_as_refused(tmp_path):
-    """A link planted at a questioner trace's own name is refused at load and SAID in its block ."""
+    """A link at a trace's name is refused and said ("trace refused"), never read as "no response recorded"."""
     ep = E.sample_episode(tmp_path)
     target = tmp_path / "elsewhere.jsonl"
     target.write_text("{}\n", encoding="utf-8")
@@ -191,8 +174,7 @@ def test_1025_a_refused_wire_trace_is_named_as_refused(tmp_path):
 
 
 def test_1025_record_derived_refusals_take_the_untrusted_escape(tmp_path):
-    """A refusal sentence quotes the record's own bytes (a YAML error echoes the offending line), so
-    it is rendered through `_uv` like every other record field ."""
+    """A refusal sentence quotes the record's own bytes, so it takes the untrusted escape like any field."""
     ep = E.sample_episode(tmp_path)
     hostile = "onerror=alert(1)"
     E.plant_raw(ep.dir / "judge.yaml", f"worlds:\n  - world: b\n   bad: {hostile}\n")
@@ -207,7 +189,7 @@ def test_1025_record_derived_refusals_take_the_untrusted_escape(tmp_path):
 @NOT_ROOT
 def test_1025_an_unreadable_gather_summary_is_the_chains_own_sentence_for_the_judge_and_the_page(
         tmp_path):
-    """`family.lead_chain` reads the gather summary through `read_guarded`."""
+    """`lead_chain` returns (never raises) a sentence for an unreadable gather summary; judge and page share it."""
     family = E.mod("learning.judge.family")
     ep = E.sample_episode(tmp_path)
     world = ep.world(E.GRADED_WORLD)

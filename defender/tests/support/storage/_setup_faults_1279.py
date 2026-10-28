@@ -1,11 +1,10 @@
-"""Faults planted in run setup through the repository's `io=` injection (#1279 R2).
+"""Faults planted in run setup through the repository's `io=` injection (#1279).
 
 Run setup reaches the run dir through `tenant.runs_repository()`, whose `io=` is the guarded
-`defender._io` seam. A test that must obstruct a write *after* the real run-dir creation (an
-id is minted by setup now, so nothing can be planted at a chosen id beforehand) passes a tenant
-whose repository was built with a pass-through io that plants the obstruction once the real
-`guarded_mkdir` has returned. Nothing is patched: the fault is a real directory on the real
-filesystem, and the real writers refuse it.
+`defender._io` seam. Setup mints the id, so nothing can be planted at a chosen id beforehand: a
+test that must obstruct a write *after* the real run-dir creation passes a tenant whose
+repository has a pass-through io that plants the obstruction once the real `guarded_mkdir` has
+returned. Nothing is patched: the fault is a real entry on the real filesystem.
 """
 from __future__ import annotations
 
@@ -45,7 +44,7 @@ class PlantAfterRunDirIo:
 
 class PlantBeforeRunDirIo(PlantAfterRunDirIo):
     """A pass-through over the real `defender._io` that calls `plant(run_dir)` right BEFORE the
-    run dir's exclusive `hold_new` (#1279 rev 5): between any check of the id and the make, so
+    run dir's exclusive `hold_new`: between any check of the id and the make, so
     only an exclusive make refuses what it finds."""
 
     def __getattr__(self, name: str) -> Any:
@@ -60,11 +59,6 @@ class PlantBeforeRunDirIo(PlantAfterRunDirIo):
             return real(parent, child, *args, **kwargs)
 
         return hold_new
-
-
-#: What can sit at a sidecar's (or a run dir's) name besides a plain file; `plant_entry` makes each.
-OBSTRUCTIONS = ("regular-file", "directory", "dangling-link", "link-to-file",
-                "link-to-dir")
 
 
 def plant_entry(kind: str, at: Path, elsewhere: Path) -> None:
@@ -113,9 +107,9 @@ def tenant_with_runs_io(tenant: Any, io: Any) -> Any:
 
 def materialize_through(io: Any) -> Callable[..., Any]:
     """`run.main`'s `materialize` seam: the real `_materialize_run`, over a tenant whose runs
-    repository uses `io`. #1279 rev 6: run.py makes the run's handle before setup, over the real
-    I/O; the handle it passes is rebound here at the same id over `io`, so setup's run-dir make
-    goes through the seam."""
+    repository uses `io`. run.py makes the run's handle before setup, over the real I/O; the
+    handle it passes is rebound here at the same id over `io`, so setup's run-dir make goes
+    through the seam."""
     from defender import run as run_py
     from defender.records import Run
 

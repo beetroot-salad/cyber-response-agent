@@ -1,4 +1,5 @@
-"""#705 store boundary: R1 placement (the store sits beside runs/, not under it; case-id resolver rejects non-conforming ids; unreachable from the box; host readers do not follow a planted symlink) and R2 read authorization (role-scoped projection)."""
+"""The #705 store's boundary: placement (beside the runs base, not under it; case ids validated;
+unreachable from the box; host readers do not follow a planted symlink) and role-scoped reads."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
@@ -36,7 +37,7 @@ REPO_ROOT = DEFENDER.parent
 SECRET = "STORE-BYTES-DEFENDER-GOALS-4242"
 
 
-# R1 — placement, and the pointer file's own domain
+# placement, and the pointer file's own domain
 
 def test_store_path_is_not_under_the_runs_base(tmp_path):
     """The resolved store path is a SIBLING of the runs base, not a descendant of it, for
@@ -44,8 +45,8 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
     ss = store_mod()
     base = runs_base(tmp_path)
 
-    # The run-id-shaped id is spelled the way the host mints run ids since #1077 — casefolded
-    # (`records/_run_id.py`); the store now refuses an id that is not case-stable (#1077, O2).
+    # The run-id-shaped id is casefolded, as the host mints run ids: the store refuses an id
+    # that is not case-stable.
     for case_id in ("case-alpha", "20260718t101500z-boxspec", "runs", "case.with.dots"):
         path = Path(ss.store_path_for(case_id, sessions=SessionPaths(fixture_runs_base(base))))
         assert base.resolve() not in path.resolve().parents, (
@@ -55,7 +56,7 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
         assert path.name.endswith(".db")
 
     store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    # a run id is a canonical UUID: the folder is fixture_uuid(<label>)
     run_dir = base / fixture_uuid("20260718t101500z-alpha")
     run_dir.mkdir(parents=True)
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
@@ -88,14 +89,13 @@ def test_the_resolver_rejects_a_non_conforming_case_id(tmp_path):
             pass
 
     assert ss.CASE_ID_RE.pattern.endswith("\\Z"), (
-        f"anchor with \\Z, not $: {ss.CASE_ID_RE.pattern!r} admits a trailing newline "
-        "(adv:PO7's one hole, reproduced here rather than re-learned)")
+        f"{ss.CASE_ID_RE.pattern!r} admits a trailing newline (anchor with \\Z, not $)")
 
     leaked = [p.name for p in base.parent.rglob("*") if "passwd" in p.name or "\n" in p.name]
     assert leaked == [], f"a rejected case_id composed a path anyway: {leaked}"
 
 
-# R1's corollary — the box, and the host-side leg adv:PO5b opened
+# the box, and the host-side readers
 
 _NO_DAEMON = not daemon_reachable()
 _DOOD = (not _NO_DAEMON) and is_dood()
@@ -191,12 +191,12 @@ def test_host_readers_do_not_dereference_a_symlink_out_of_the_run_dir(tmp_path):
     copied = "".join(p.read_bytes().decode("utf-8", "replace")
                      for p in staged.rglob("*") if p.is_file() and not p.is_symlink())
     assert SECRET not in copied, (
-        "the collector dereferenced a box-authored symlink out of run_dir (adv:PO5b)")
+        "the collector dereferenced a box-authored symlink out of run_dir")
     assert not (staged / "leak.db").is_file() or (staged / "leak.db").is_symlink(), (
         "a symlink out of run_dir must be refused or preserved as a link, never resolved")
 
 
-# R2 — the leak test, its positive control, and the parity
+# role-scoped reads: the leak test, its positive control, and the parity
 
 def _actor_fixture(tmp_path):
     store = make_store(tmp_path)
@@ -277,7 +277,7 @@ def test_two_investigations_of_the_same_case_land_in_one_per_case_database(tmp_p
     base = runs_base(tmp_path)
     sessions = []
     for slug in ("20260718t101500z-one", "20260718t101501z-two"):
-        # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+        # a run id is a canonical UUID: the folder is fixture_uuid(<label>)
         run_dir = base / fixture_uuid(slug)
         run_dir.mkdir(parents=True)
         store = owned_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))

@@ -68,14 +68,15 @@ def _reached(r: _Res) -> bool:
 
 
 def _assert_no_forbidden_pair(r: _Res) -> None:
-    """The universal, over the WHOLE table (lead-0's rows included):"""
+    """No row in the WHOLE table (lead-0's included) is coarsened yet carries elastic's fingerprint."""
     for row in r.rows:
         assert not (row["system"] == "" and row["system_key"] == ELASTIC_KEY), \
             f"a declared name's fingerprint is on a coarsened row: {row!r}"
 
 
 def test_a_declared_systems_rejection_keeps_its_name_after_the_directory_is_removed(tmp_path):
-    """O3/O1 — the registry is built over a real directory, the directory is REMOVED, and the lead sends four..."""
+    """The adapters directory is removed after the first call; the four rejections (schema and grant,
+    declared and ghost) are still recorded as an intact registry's run records them."""
     rejections = [
         _bad_args("elastic", verb="ghostverb"), q("elastic", "otherverb", PARAMS),
         _bad_args("ghostone", verb="ghostverb"), q("ghosttwo", "otherverb", PARAMS),

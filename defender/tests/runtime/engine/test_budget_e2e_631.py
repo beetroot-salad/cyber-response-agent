@@ -1,4 +1,7 @@
-"""#631 — the enforced posture driven END TO END through the real `driver.run_investigation` loop."""
+"""#631 — the enforced posture driven END TO END through the real `driver.run_investigation` loop
+(`_replay_harness`: real loop, tools, gate and budget hooks; only the model, the verb registry and
+the caps are injected). Enforcement short-circuits a stopped tool's call at the execute seam and
+never withdraws the tool: withdrawal turns each re-issue into a framework retry that kills the run."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,12 +30,12 @@ from defender.tests.e2e._replay_harness import (
 pytestmark = pytest.mark.e2e
 
 FLAG = "DEFENDER_BUDGET_ENFORCE"
-SALT = "0011223344556677"
 
 
 @pytest.fixture
 def enforced(monkeypatch):
-    """The enforcing posture, set the only way production sets it: the real environment variable the real..."""
+    """The enforcing posture, set as production sets it: the real environment variable `env_bool`
+    reads."""
     monkeypatch.setenv(FLAG, "true")
 
 
@@ -46,26 +49,20 @@ def caps(**over) -> dict:
 
 
 def budget(summary: dict) -> dict:
-    """The run's budget counters: a snapshot of the run's own `RunState`, which `drive` hands back on the summary..."""
+    """The run's budget counters: a snapshot of the run's own `RunState`, handed back on the summary."""
     return summary["run_state"].budget_snapshot()
 
 
 def own_rows(run_dir: Path) -> list[dict]:
-    """The queries-table rows written by this test's own scripted `gather`/`query` calls — excluding lead-0's..."""
+    """Queries-table rows from this test's own scripted calls, excluding the lead-0 rows
+    (`RESERVED_LEAD_IDS`) that every `drive()` with a `verbs=` registry writes."""
     return [r for r in read_jsonl_rows(run_dir / "executed_queries.jsonl")
             if r["lead_id"] not in RESERVED_LEAD_IDS]
 
 
-def report_text() -> str:
-    return "---\ncase_id: c-1\ndisposition: benign\nconfidence: low\n---\n\nDone.\n"
-
-
 def tail_turns(run_dir: Path, n: int) -> list[Turn]:
-    """`n` TAIL-tier read_file turns — read_file is tail on MAIN, so each EXECUTES and
-    advances tool_calls even after the trip, driving the count limb to
-    N + TAIL_ALLOWANCE deterministically. This is how the kill tests reach exhaustion
-    WITHOUT depending on wall-clock timing (blind reader R25: six e2e tests shared an
-    undeclared machine-speed assumption through `wall_clock_timeout=1`)."""
+    """`n` tail-tier `read_file` turns: each executes and advances `tool_calls` even after the trip,
+    so the kill tests reach exhaustion deterministically rather than through wall-clock timing."""
     return [Turn(tool_calls=[("read_file", {"path": model_path(RunPaths(run_dir).alert, run_dir=run_dir)})])
             for _ in range(n)]
 
@@ -74,15 +71,16 @@ def refusal_stem() -> str:
     """The placeholder-free literal prefix of the refusal message, GUARDED non-empty."""
     stem = BUDGET_REFUSAL_MESSAGE.split("{", 1)[0].strip()
     assert stem, (
-        "BUDGET_REFUSAL_MESSAGE begins with an interpolated field — its literal prefix "
-        "is empty, so every 'a refusal was delivered' check would pass vacuously. "
-        "Author the constant with a literal lead-in (blind reader R5)."
+        "BUDGET_REFUSAL_MESSAGE has no literal prefix, so every refusal check would pass "
+        "vacuously"
     )
     return stem
 
 
 def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
-    """When a cap trips with enforcement on, run_investigation returns its normal summary dict — {output, model,..."""
+    """A trip under enforcement returns the normal summary with trace and request log on disk. The
+    refusal is asserted because `test_flag_off_leaves_run_unenforced` (same script, same caps) uses
+    this as its positive control."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='trip')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
@@ -105,7 +103,8 @@ def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
 
 
 def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
-    """A run ended by the budget kill carries truncated_by: "budget", so the post-run pipeline can see that..."""
+    """A budget-killed run carries `truncated_by: "budget"`, so post-run scoring does not treat it as
+    complete; a clean run carries `None`."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='trunc')
     summary = drive(run_dir, run_id="trunc",
                     main=ReplayFn(tail_turns(run_dir, 15)),
@@ -122,7 +121,7 @@ def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
 
 
 def test_only_the_budget_kill_marks_truncated_by_budget(tmp_path, enforced):
-    """Only the budget kill sets truncated_by: "budget" — the PRE-EXISTING request-limit termination..."""
+    """A request-limit termination stamps its own `truncated_by` value, never `"budget"`."""
     from defender.tests.e2e._replay_harness import NeverEndsModel
 
     run_dir = materialize(tmp_path, GOLDEN, run_id='reqlimit')
@@ -137,7 +136,9 @@ def test_only_the_budget_kill_marks_truncated_by_budget(tmp_path, enforced):
 
 
 def test_budget_kill_writes_partial_trace(tmp_path, enforced):
-    """Tail exhaustion raises the budget kill's own exception type — not RunAborted, whose constructor is..."""
+    """Parallel tail calls make several kills eligible at once, yet exactly one `BudgetKill` reaches
+    the driver's plain `except` and the partial trace is written. If pydantic-ai stopped collapsing
+    its task group's exception group, `drive()` would raise here."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='kill')
     burst = [Turn(tool_calls=[("read_file", {"path": model_path(RunPaths(run_dir).alert, run_dir=run_dir)})] * 15)]
     summary = drive(run_dir, run_id="kill", main=ReplayFn(burst),
@@ -153,7 +154,8 @@ def test_budget_kill_writes_partial_trace(tmp_path, enforced):
 
 
 def test_kill_exception_reaches_uncaught_driver_handling(tmp_path, enforced, capsys):
-    """The tail-exhaustion kill is raised from a seam OUTSIDE after_tool_execute's broad exception guard, so the..."""
+    """The kill is raised outside `after_tool_execute`'s broad `except Exception` guard, so it ends
+    the run instead of being swallowed with a "budget accounting skipped" line."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='guard')
     summary = drive(run_dir, run_id="guard",
                     main=ReplayFn(tail_turns(run_dir, 15)),
@@ -167,7 +169,8 @@ def test_kill_exception_reaches_uncaught_driver_handling(tmp_path, enforced, cap
 
 
 def test_only_one_shutdown_path_writes_the_run_dir_artifacts(tmp_path, enforced):
-    """Exactly one shutdown path writes the run-dir artifacts, whichever kill fires and whether or not both fire:..."""
+    """Exactly one shutdown path writes the run-dir artifacts: one `result` event in the trace, no
+    duplicated request ids in the log."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='shutdown')
     summary = drive(run_dir, run_id="shutdown",
                     main=ReplayFn(tail_turns(run_dir, 15)),
@@ -185,7 +188,9 @@ def test_only_one_shutdown_path_writes_the_run_dir_artifacts(tmp_path, enforced)
 
 
 def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
-    """The budget kill and the circuit-breaker kill are independent — first fires wins, and neither consults the..."""
+    """The budget and breaker kills are independent both ways round: a budget trip leaves the
+    breaker's in-run charge untouched, a breaker abort leaves the budget unmarked. The breaker is
+    charged inside the run (a gather against a dead backend), as the driver owns the run state."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='both')
     dead = FakeVerbs({"elastic": {"esql": _dead_verb()}})
     charge = ReplayFn([Turn(tool_calls=[("query", {
@@ -226,6 +231,17 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
     assert engaged["total_failures"] > 0, "the breaker never engaged, so arm 2 controls nothing"
 
 
+def _recording_esql() -> tuple[VerbRecorder, FakeVerbs]:
+    """An `elastic.esql` verb that records each call and answers one row."""
+    recorder = VerbRecorder()
+
+    def esql(ctx, *, index: str) -> dict:
+        recorder.record("esql", ctx, {"index": index})
+        return {"rows": [1]}
+
+    return recorder, FakeVerbs({"elastic": {"esql": esql}})
+
+
 def _dead_verb():
     def esql(ctx, *, index: str) -> dict:
         raise ConnectionError("the environment is unreachable")
@@ -233,7 +249,9 @@ def _dead_verb():
 
 
 def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
-    """After a cap trips, the budget-stopped tool is STILL OFFERED to the model, and every call to it is refused..."""
+    """After a trip the stopped tool is still offered, and each call is refused at the execute hook
+    without running the handler. Only schema-valid args reach that hook (invalid ones get a
+    framework retry first), so the script binds valid args."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='refuse')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
@@ -254,7 +272,8 @@ def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
 
 
 def test_repeated_reissue_accumulates_no_retries(tmp_path, enforced):
-    """A model that re-issues a budget-stopped tool many more times than MAIN's ten-retry ceiling accumulates NO..."""
+    """Re-issuing a stopped tool 25 times, well past MAIN's ten-retry ceiling, accumulates no retries:
+    the run completes without `UnexpectedModelBehavior`."""
     from pydantic_ai.exceptions import UnexpectedModelBehavior
 
     run_dir = materialize(tmp_path, GOLDEN, run_id='reissue')
@@ -280,7 +299,8 @@ def test_repeated_reissue_accumulates_no_retries(tmp_path, enforced):
 
 
 def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
-    """A call refused at the execute seam leaves tool_calls unchanged in the run's budget AND emits NOTHING on..."""
+    """A refused call neither advances `tool_calls` nor prints: `check_budgets` keeps no "already
+    warned" state, so calling it per refusal would repeat the exceeded line every time."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='silent')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
@@ -301,7 +321,8 @@ def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
 
 
 def test_a_refused_call_writes_an_explicit_refusal_record(tmp_path, enforced):
-    """A call refused at the budget seam writes its OWN explicit refusal record rather than borrowing..."""
+    """A refused call writes its own `budget_refusal` record: the short-circuit preempts
+    `QueryCapture`, so nothing else would record it."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='record')
     drive(run_dir, run_id="record",
           main=ReplayFn([
@@ -319,9 +340,9 @@ def test_a_refused_call_writes_an_explicit_refusal_record(tmp_path, enforced):
 
 
 def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
-    """The hermetic replay suite drives a full run with INJECTED LOW LIMITS until a cap actually trips, and..."""
-    # #774/R1: report.md left MAIN's write allow-list entirely (the close tool is now its
-    # only writer), so the tail-tier artifact this scenario funds is investigation.md.
+    """A full replay with low injected caps observes a refusal and still writes its tail-tier
+    artifact inside the bounded tail."""
+    # The close tool alone writes report.md, so the tail-tier artifact here is investigation.md.
     run_dir = materialize(tmp_path, GOLDEN, run_id='e2e')
     inv = run_dir / "investigation.md"
     inv_text = (GOLDEN / "investigation.md").read_text()
@@ -344,13 +365,13 @@ def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
 
 
 def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
-    """Every trip limb opens the SAME bounded report tail — the count limb, the spawn limb and the clock limb..."""
+    """The count, spawn and clock limbs each open the same bounded report tail: a refusal is observed
+    and the tail-tier write still lands."""
     verbs = FakeVerbs({"elastic": {"esql": lambda ctx, *, index: {"rows": []}}})
     inv_text = (GOLDEN / "investigation.md").read_text()
 
     def one_limb(name: str, limits: dict, script: list[Turn]) -> tuple[str, Path]:
-        # #774/R1: report.md left MAIN's write allow-list — the tail-tier artifact this
-        # scenario funds is investigation.md, whichever limb trips.
+        # The tail-tier artifact is investigation.md (the close tool alone writes report.md).
         rd = materialize(tmp_path / name, GOLDEN, run_id=name)
         rep = rd / "investigation.md"
         replay = ReplayFn([*script,
@@ -386,7 +407,8 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
 
 
 def test_kill_lands_between_two_report_writes(tmp_path, enforced):
-    """The run's tail-tier artifact is written across more than one call and the tail is exhausted partway..."""
+    """The tail-tier artifact is written in two appends and the tail runs out after them: completed
+    writes persist, and the summary and trace still land."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='between')
     inv = run_dir / "investigation.md"
     inv_text = (GOLDEN / "investigation.md").read_text()
@@ -409,7 +431,8 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
 
 
 def test_main_and_gather_share_one_budget(tmp_path, unenforced):
-    """MAIN and every GATHER subagent increment the ONE budget on the run's `RunState`, so the caps bound the..."""
+    """MAIN and every gather subagent spend one budget on the run's `RunState` (no `budget.json`):
+    MAIN's bash, the dispatch and the subagent's query all count."""
     recorder = VerbRecorder()
 
     def esql(ctx, *, index: str) -> dict:
@@ -435,7 +458,7 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
 
     assert not list(run_dir.glob("**/budget.json"))
     state = budget(summary)
-    assert state["subagent_spawns"] == 2, "the pool: the correlation lead (#1222) plus the one lead"
+    assert state["subagent_spawns"] == 2, "the pool: the correlation lead plus the one lead"
     assert state["tool_calls"] >= 3, (
         f"the gather subagent's own query did not spend the shared pool: {state}"
     )
@@ -443,7 +466,8 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
 
 
 def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
-    """Counter increments AND stderr warnings happen on every tool call that ACTUALLY EXECUTES, whether or not..."""
+    """Executed calls are counted and warned about under both postures (refused calls are
+    `test_refused_call_does_not_increment_tool_calls`'s subject)."""
     def script():
         return ReplayFn([*[Turn(tool_calls=[("bash", {"command": f"echo {i}"})])
                            for i in range(3)], Turn(text="done")])
@@ -465,7 +489,8 @@ def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
 
 
 def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, capsys):
-    """With the flag off, a run that crosses every cap observes no refusal and no kill — only the existing stderr..."""
+    """With the flag off, a run crossing every cap sees no refusal and no kill, only the stderr
+    warnings (positive control: `test_budget_trip_returns_summary_and_writes_trace`)."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='off')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
@@ -484,7 +509,8 @@ def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, capsys):
 
 
 def test_refused_gather_and_the_spawn_counter(tmp_path, enforced):
-    """A budget-refused `gather` call never dispatches a subagent, and the refusal still reaches the accounting..."""
+    """A budget-refused `gather` dispatches no subagent, claims no lead id and does not advance
+    `subagent_spawns`."""
     verbs = FakeVerbs({"elastic": {"esql": lambda ctx, *, index: {"rows": []}}})
     run_dir = materialize(tmp_path, GOLDEN, run_id='spawn')
     gather = ReplayFn([Turn(text="summary")])
@@ -516,14 +542,10 @@ def test_refused_gather_and_the_spawn_counter(tmp_path, enforced):
 
 
 def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
-    """A gather dispatched into an already-tripped pool is refused at MAIN's own tool_execute seam — `gather` is..."""
-    recorder = VerbRecorder()
-
-    def esql(ctx, *, index: str) -> dict:
-        recorder.record("esql", ctx, {"index": index})
-        return {"rows": [1]}
-
-    verbs = FakeVerbs({"elastic": {"esql": esql}})
+    """A gather dispatched into a tripped pool is refused at MAIN's seam before any subagent exists.
+    `gather.calls == 0` is the discriminator: the absence checks also hold for a subagent
+    dispatched and then refused."""
+    recorder, verbs = _recording_esql()
     run_dir = materialize(tmp_path, GOLDEN, run_id='stopped')
     limits = caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600)
 
@@ -533,8 +555,8 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
                                     "query_id": "elastic.probe"})]),
         Turn(text="PARTIAL SUMMARY: refused before any result"),
     ])
-    # The pool is spent to its cap INSIDE the run, by MAIN's own executed bash (#1235 round 2:
-    # the driver starts the run's state, so nothing seeded before `drive` can reach it).
+    # The pool is spent inside the run by MAIN's own bash: the driver creates the run's state,
+    # so nothing seeded before `drive` reaches it.
     main = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo spend the pool"})]),
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -557,14 +579,10 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
 
 
 def test_stopped_query_writes_no_row(tmp_path, enforced):
-    """A query stopped by the budget writes NO row into the queries table — `_make_hooks` is prepended ahead of..."""
-    recorder = VerbRecorder()
-
-    def esql(ctx, *, index: str) -> dict:
-        recorder.record("esql", ctx, {"index": index})
-        return {"rows": [1]}
-
-    verbs = FakeVerbs({"elastic": {"esql": esql}})
+    """A query the budget stops writes no queries-table row (the budget hook runs before
+    `QueryCapture`) but leaves a refusal record. The subagent's first query executes and crosses
+    the cap, so the stopped second one really reached the seam."""
+    recorder, verbs = _recording_esql()
     run_dir = materialize(tmp_path, GOLDEN, run_id='phantom')
     gather = ReplayFn([
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
@@ -597,14 +615,9 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
 
 
 def test_executed_query_writes_a_row(tmp_path, unenforced):
-    """A query that actually executes under the same harness DOES write its queries-table row and its by-ref..."""
-    recorder = VerbRecorder()
-
-    def esql(ctx, *, index: str) -> dict:
-        recorder.record("esql", ctx, {"index": index})
-        return {"rows": [1]}
-
-    verbs = FakeVerbs({"elastic": {"esql": esql}})
+    """An executed query writes its queries-table row: the control for
+    `test_stopped_query_writes_no_row`."""
+    recorder, verbs = _recording_esql()
     run_dir = materialize(tmp_path, GOLDEN, run_id='row')
     drive(run_dir, run_id="row",
           main=ReplayFn([
@@ -628,7 +641,8 @@ def test_executed_query_writes_a_row(tmp_path, unenforced):
 
 
 def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
-    """A gather subagent that runs into its own request limit is converted to the measurement-shaped string, so..."""
+    """A gather that hits its request limit reaches MAIN as the "incomplete lead" measurement string;
+    a budget refusal inside gather is a different path that returns the subagent's own summary."""
     verbs = FakeVerbs({"elastic": {"esql": lambda ctx, *, index: {"rows": []}}})
     query_turn = Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                              "params": {"index": "logs"},
@@ -675,7 +689,8 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
 
 
 def test_gather_has_no_per_call_timeout(tmp_path, unenforced):
-    """No per-call wall clock is imposed on a gather dispatch: a lead whose work runs well past any short..."""
+    """No per-call wall clock cuts a gather short: a slow call completes and its row records exit 0
+    (a `wait_for` wrapper would cancel the await, not the thread, and fake a timeout row)."""
     def slow(ctx, *, index: str) -> dict:
         import time
         time.sleep(1.5)

@@ -63,8 +63,8 @@ def test_correlated_verdict_is_expressible_as_owner_plus_citation():
      'l-005|l-005|e-002|ac1|unauthorized|approved-source-list|"x"',
      "itself"),
 
-    # `l-oo4` is a TYPO for l-004 (letter o for zero). Before this rule the unknown id was
-    # taken at face value and quietly invented a lead nobody declared.
+    # `l-oo4` is a TYPO for l-004 (letter o for zero); taken at face value it would invent a
+    # lead nobody declared.
     ("typo-in-resolved-by-invents-a-lead",
      _AUTHZ_HEADER + "\n"
      'l-oo4||e-002|ac1|unauthorized|approved-source-list|"x"',

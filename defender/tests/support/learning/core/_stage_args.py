@@ -1,19 +1,15 @@
-"""Fold a suite's flat per-spawn kwargs into the #713 grouped `run_curator_stage` shape.
+"""Fold a suite's flat per-spawn kwargs into `run_curator_stage`'s grouped `wiring`/`ctx` shape.
 
-The curator suites drive the real entry point and override one knob at a time
-(`model=`, `learning_run_dir=`, `run_author=`). The wiring/context
-grouping is an implementation detail of the CALL, not of what those cases are testing,
-so it is assembled here instead of being respelled at every case.
-
-This is deliberately NOT a `**kwargs` passthrough: it names every field it moves, so a
-field that stops existing fails loudly here rather than being silently absorbed.
+The curator suites override one knob at a time; the grouping is a detail of the call, assembled
+here once. Deliberately NOT a `**kwargs` passthrough: every moved field is named, so a field
+that stops existing fails loudly here.
 """
 from __future__ import annotations
 
 from defender.learning.core.config import StageContext, StageWiring
 
 def as_curator_stage_args(kw: dict) -> dict:
-    """`kw` is consumed. Returns the kwargs `run_curator_stage` now takes."""
+    """`kw` is consumed. Returns the kwargs `run_curator_stage` takes."""
     wiring = StageWiring.for_batch(
         kw.pop("system_prompt_file"), kw.pop("model"), kw.pop("effort"),
         batch_id=kw.pop("batch_id"), label="curator",

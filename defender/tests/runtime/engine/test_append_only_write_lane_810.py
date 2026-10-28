@@ -57,7 +57,8 @@ def _only(diags, predicate):
 # the typed diagnostic
 
 def test_the_bad_key_is_the_documents_only_fault():
-    """Guards the fixture the rest of this file leans on. An earlier draft declared the lead with invented..."""
+    """Guards the fixture: the bad key must be the document's only fault, or `_only`'s filtering
+    would hide a renderer that mangles the diagnostics it was not asked about."""
     messages = [d.message for d in diagnose(_BAD_ATTR_KEY, None)]
 
     assert len(messages) == 1, messages
@@ -78,7 +79,8 @@ def test_attr_update_key_diagnostic_quotes_its_row_and_both_legal_forms():
 
 
 def test_a_document_global_failure_carries_no_locus():
-    """The seven families with no single offending row leave `locus` None and read exactly as they did before...."""
+    """A check with no single offending row leaves `locus` None and `fix` empty: the other half of
+    the oracle, so special-casing `attr_updates` alone would fail."""
     orphan = "```invlang\n:R attr_updates [resolved_by|target|key|value]\nl-404|v-001|class|x\n```\n"
     d = _only(diagnose(orphan, None), lambda d: "undeclared lead" in d.message)
 
@@ -87,7 +89,7 @@ def test_a_document_global_failure_carries_no_locus():
 
 
 def test_parse_warnings_keep_the_structure_format_used_to_destroy():
-    """A parse warning always knew its block, ordinal and raw row; `format()` folded them into prose and the..."""
+    """A parse warning keeps its block, ordinal and raw row as structure beside its unchanged prose."""
     malformed = "```invlang\n:R attr_updates [resolved_by|target|key|value]\nl-001|v-001\n```\n"
     d = _only(diagnose(malformed, None), lambda d: d.message.startswith("parse error:"))
 
@@ -104,7 +106,8 @@ def test_parse_warnings_keep_the_structure_format_used_to_destroy():
     ("byte-bound", "x" * (INVESTIGATION_FILE_MAX + 1), None),
 ])
 def test_every_refusing_branch_states_the_file_is_unchanged(kind, text, current):
-    """EVERY branch, not just the invlang one. The size branch short-circuits before the validator ever runs, so..."""
+    """Every refusing branch says the file is unchanged, including the size branch, which returns
+    before the validator runs."""
     reason = validate_investigation(text, current)
 
     assert reason is not None, f"the {kind} branch did not refuse"
@@ -112,7 +115,8 @@ def test_every_refusing_branch_states_the_file_is_unchanged(kind, text, current)
 
 
 def test_the_refusal_carries_the_row_and_the_correction_to_the_model():
-    """The rendered refusal, which is the `ModelRetry` body verbatim. The row and both legal forms have to reach..."""
+    """The rendered refusal (the `ModelRetry` body) carries the row and both legal forms to the model.
+    A bad refinement key now warns and lands, so the refusal read here is the repair-window gate's."""
     from defender.investigation.tools import flagged_write_refusal
     from defender.skills.invlang.validate import warn_diagnostics
 
@@ -129,7 +133,8 @@ def test_the_refusal_carries_the_row_and_the_correction_to_the_model():
 
 
 def test_a_located_row_is_not_printed_twice():
-    """A parse warning's prose already embeds its row, so the renderer suppresses the locus line there. Cheap to..."""
+    """A parse warning's prose already embeds its row, so the renderer suppresses the locus line
+    rather than print the row twice."""
     malformed = "```invlang\n:R attr_updates [resolved_by|target|key|value]\nl-001|v-001\n```\n"
     reason = validate_investigation(malformed, None)
 
@@ -137,7 +142,8 @@ def test_a_located_row_is_not_printed_twice():
 
 
 def test_a_row_with_escapes_is_still_not_printed_twice():
-    """The sibling of the test above, and the reason it needed one. `ParseWarning.format()` embeds the row as a..."""
+    """The same for a row carrying an escape: `ParseWarning.format()` embeds the row as its `repr()`,
+    which a raw-substring check alone would not find."""
     malformed = ("```invlang\n:R attr_updates [resolved_by|target|key|value]\n"
                  "l-001|v-001|note|C:\\temp|extra\n```\n")
     reason = validate_investigation(malformed, None)
@@ -147,7 +153,8 @@ def test_a_row_with_escapes_is_still_not_printed_twice():
 
 
 def test_an_over_bound_document_says_what_cannot_be_taken_back(tmp_path):
-    """Under append-only, "trim it" is advice the model may be unable to take: it has no editor, so once the..."""
+    """The model cannot trim what is already committed, so an over-bound append's refusal names the
+    committed share and says to close; a create keeps the "trim it" advice."""
     committed = "x" * (INVESTIGATION_FILE_MAX - 100)
     reason = validate_investigation(committed + "y" * 200, committed)
 
@@ -172,7 +179,8 @@ def test_an_accepted_document_still_returns_no_reason():
 # the bounded tail
 
 def test_tail_never_starts_mid_row():
-    """An invlang row is `|`-delimited and a half row reads as truncated data, so the window trims FORWARD to a..."""
+    """The tail trims forward to a line start (a half `|`-row reads as truncated data), so `n` is a
+    ceiling."""
     doc = "l-001|a|b|c\nl-002|d|e|f\nl-003|g|h|i\n"
 
     out = _tail_chars(doc, 20)
@@ -182,7 +190,8 @@ def test_tail_never_starts_mid_row():
 
 
 def test_tail_edges():
-    """`n <= 0` yields nothing; a document shorter than `n` comes back whole; a window with no newline in it..."""
+    """`n <= 0` yields nothing; a document shorter than `n` comes back whole; a window with no
+    newline falls back to a plain cut."""
     assert _tail_chars("abc", 0) == ""
     assert _tail_chars("abc", -1) == ""
     assert _tail_chars("abc", 99) == "abc"
@@ -190,7 +199,8 @@ def test_tail_edges():
 
 
 def test_tail_of_a_real_investigation_is_a_fraction_of_the_whole():
-    """The reason the tail exists. The read cap equals INVESTIGATION_FILE_MAX, so an unfiltered read of..."""
+    """The tail is a small fraction of a real investigation, unlike an unfiltered read, which never
+    truncates (the read cap equals `INVESTIGATION_FILE_MAX`)."""
     doc = "".join(f"l-{i:03d}|goal|cmdb|resolved\n" for i in range(400))
 
     out = _tail_chars(doc, 2000)
@@ -215,7 +225,8 @@ def _main_deps(tmp_path):
 
 
 def test_append_creates_then_grows_the_transcript(tmp_path):
-    """Creation is an append onto nothing, which is why `write_file` was redundant for MAIN rather than merely..."""
+    """The first append creates the transcript and later ones extend it; no call rewrites a
+    committed byte."""
     from defender.investigation.tools import _tool_append_block
 
     deps, run = _main_deps(tmp_path)
@@ -229,7 +240,8 @@ def test_append_creates_then_grows_the_transcript(tmp_path):
 
 
 def test_append_separates_when_the_document_does_not_end_in_a_newline(tmp_path):
-    """A separator is inserted rather than the previous content being tidied — existing bytes are never..."""
+    """A separator is inserted rather than the previous content tidied: rewriting existing bytes
+    would trip the append-only check."""
     from defender.investigation.tools import _tool_append_block
 
     deps, run = _main_deps(tmp_path)
@@ -241,7 +253,7 @@ def test_append_separates_when_the_document_does_not_end_in_a_newline(tmp_path):
 
 
 def test_a_repeating_last_line_is_not_an_obstacle(tmp_path):
-    """The anchor failure this verb exists to delete. `edit_file` needed a unique `old_string`, so appending..."""
+    """A repeating last line does not block an append: `append_block` needs no unique anchor."""
     from defender.investigation.tools import _tool_append_block
 
     deps, run = _main_deps(tmp_path)
@@ -255,7 +267,8 @@ def test_a_repeating_last_line_is_not_an_obstacle(tmp_path):
 
 
 def test_an_empty_append_changes_nothing(tmp_path):
-    """The separator is computed before `text` is looked at, so an empty append used to add a newline the model..."""
+    """An empty append adds nothing, not even a separator newline (the replay harness sends empty
+    chunks when a target has fewer fences than write sites)."""
     from defender.investigation.tools import _tool_append_block
 
     deps, run = _main_deps(tmp_path)
@@ -268,7 +281,8 @@ def test_an_empty_append_changes_nothing(tmp_path):
 
 
 def test_the_reported_count_is_utf8_bytes_not_characters(tmp_path):
-    """The SKILL tells the model this return IS a byte count, and the 65,536 cap it must stay under is measured..."""
+    """The reported count is UTF-8 bytes, the unit of the cap the model budgets against; with
+    invlang's multibyte glyphs `len(str)` would under-report."""
     from defender.investigation.tools import _tool_append_block
 
     deps, _run = _main_deps(tmp_path)
@@ -281,7 +295,7 @@ def test_the_reported_count_is_utf8_bytes_not_characters(tmp_path):
 
 
 def test_a_refused_append_leaves_no_residue(tmp_path):
-    """The property the refusal text is claiming. If a denied append left a partial write, the notice would be a..."""
+    """A refused append leaves no partial write, so the refusal's "unchanged" notice is true."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation.tools import _tool_append_block
@@ -298,7 +312,8 @@ def test_a_refused_append_leaves_no_residue(tmp_path):
 
 
 def test_a_duplicate_append_is_accepted_so_the_refusal_must_be_believed(tmp_path):
-    """The finding that makes the truthful refusal load-bearing rather than cosmetic."""
+    """A re-appended block passes the gate (it compares fence counts), so only a truthful refusal and
+    the tail keep a model that wrongly believes its write failed from doubling a block."""
     from defender.investigation.tools import _tool_append_block, _tail_chars
 
     deps, run = _main_deps(tmp_path)
@@ -314,13 +329,9 @@ def test_a_duplicate_append_is_accepted_so_the_refusal_must_be_believed(tmp_path
     assert _tail_chars(text, len(block)).strip() == block.strip()
 
 
-# the roster has one owner, and the prompt does not carry a second copy
+# The correction follows the block's DECLARED header, not a convention
 
-
-# #825 — the correction follows the block's DECLARED header, not a convention
-
-#: `v-003` is a `process` for the reason `_BAD_ATTR_KEY` records: both corrections have to be
-#: offered for their column order to be observable at all.
+#: `v-003` is a `process`, so both corrections are offered and their column order is observable.
 _TRANSPOSED = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-003|process|bash|bash[pid=4120]|
@@ -337,7 +348,8 @@ l-003|v-003|svc.config-mgmt|owner
 
 
 def test_a_transposed_header_gets_a_correction_in_its_own_column_order():
-    """#825. `resolved_by|target|key|value` is what every real document happens to declare, but..."""
+    """A correction follows the block's declared header, not the usual `key|value` order: only the
+    `key` cell is substituted, so it stays valid for a `[…|value|key]` header."""
     d = _only(diagnose(_TRANSPOSED, None), lambda d: "refinement key" in d.message)
 
     assert d.locus is not None
@@ -351,7 +363,8 @@ def test_a_transposed_header_gets_a_correction_in_its_own_column_order():
 
 
 def test_a_header_without_a_key_column_degrades_instead_of_guessing():
-    """When the header names no `key` column there is no cell to substitute and no row this can honestly point..."""
+    """With no `key` column there is no cell to substitute, so the diagnostic degrades to prose only
+    rather than fabricate a locus or a fix."""
     headerless = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-003|compute|workstation/internal/known-corp|office-ws-1|

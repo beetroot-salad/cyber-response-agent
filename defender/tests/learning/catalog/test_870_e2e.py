@@ -1,7 +1,6 @@
-"""#870 O3 — the round's own oracle, end to end and across the process boundary.
-
-#1108 P4 (O7): the reducer surface the lane teaches is the tenant's pitfalls add-on, written into a
-batch draft and committed by the commit-maker; the run reads it from its copy's agent root."""
+"""#870 end to end, across the process boundary: a failed reducer pipe is taught on the tenant's
+pitfalls add-on, written into a batch draft and committed; the next run reads it from its copy's
+agent root."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -37,7 +36,7 @@ from defender._git import REPO_ROOT  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 DEFENDER = REPO_ROOT / "defender"
-#: The tenant's learned-SQL-pitfalls add-on (carried decision, A1 path), repo-relative (OD6).
+#: The tenant's learned-SQL-pitfalls add-on, repo-relative.
 ADDON_REL = "agent/skills/gather/defender-sql.pitfalls.md"
 ADDON = T1106.FIXTURE_AGENT / "skills" / "gather" / "defender-sql.pitfalls.md"
 
@@ -82,9 +81,8 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
         "a defender-sql mistake reached the queue attributed to a system"
     )
 
-    # #1108 P4 (O7): the curation tick writes a batch draft holding the declared marker and
-    # the tenant's pitfalls add-on (the reducer surface the tenant owns, carried decision);
-    # adapters stay in the product checkout.
+    # The curation tick writes a batch draft holding the declared marker and the tenant's
+    # pitfalls add-on; adapters stay in the product checkout.
     product = tmp_path / "product"
     write_adapter(product, "elastic")
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files={
@@ -98,7 +96,6 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     assert [r["occurrences"] for r in records] == [3]
 
     # the curation tick: the handoff names the surface, and the commit carries it
-    # (ASSUMED SEAM, S-H: `run_pitfalls(..., batch=)`; the spawn's `repo_root` is the draft root)
     spawn = Spawn(_curate_addon("keep the unnest argument a LIST"))
     assert pitfalls_curator.run_pitfalls(
         paths=paths, invoke=spawn, trees=C.draft_trees(lane), batch=lane.batch) == 0
@@ -118,7 +115,7 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     )
 
     # The next run reads it from its copy's agent root: the batch's committed tree, which the
-    # draft holds after the claim (P3 reset re-syncs it to the branch tip).
+    # draft holds after the claim (re-synced to the branch tip).
     agent = lane.agent
     policy = compile_policy_for(T1106.fixture_gather_def(), run_dir=run_dir, defender_dir=DEFENDER,
                                 scope=RunScope(tenant_agent=agent))

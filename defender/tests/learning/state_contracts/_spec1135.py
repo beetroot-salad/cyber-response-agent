@@ -5,105 +5,32 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import location_path
 
 import contextlib
-import errno
 import fcntl
 import json
 import os
 import stat
-import sys
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 from defender.learning.core.config import LoopPaths
+from defender.learning.core.state import LearningState, StateRefused  # noqa: F401 — re-exported: the tests open the handle as `S.LearningState`
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, run_of  # noqa: F401 — the 1135 suite's doors onto the planted run a row names (#1105 PR 2)
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFENDER = REPO_ROOT / "defender"
 
-#: The handle's module, as F1 names it.
-STATE_MODULE = "defender.learning.core.state"
-STATE_MODULE_FILE = DEFENDER / "learning" / "core" / "state.py"
-
-
-class _Missing:
-    """Stands in for a name of the not-yet-written handle module.
-
-    NOT a skip and NOT a soften: every use raises `ModuleNotFoundError`, so each test fails on
-    its own at the point it first needs the handle. The indirection exists only so a missing
-    target does not abort the collection of this whole directory."""
-
-    def __init__(self, name: str, err: BaseException) -> None:
-        self._name, self._err = name, err
-
-    def _raise(self) -> Any:
-        raise ModuleNotFoundError(
-            f"{STATE_MODULE}.{self._name} cannot be imported — this suite is the executable "
-            f"spec for it (spec_graph_1135-learning-state-handle.yaml). Original: {self._err}"
-        )
-
-    def __getattr__(self, item: str) -> Any:
-        return self._raise()
-
-    def __call__(self, *a: Any, **k: Any) -> Any:
-        return self._raise()
-
-
-# NOT YET WRITTEN at d9128afa — the module this suite is the contract for. One `try` per name,
-# so an implementation that exists but spells one name differently fails only where it is used.
-try:
-    from defender.learning.core.state import LearningState  # type: ignore[import-not-found]
-except ImportError as _absent:  # pragma: no cover — the pre-implementation state
-    LearningState = _Missing("LearningState", _absent)  # type: ignore[assignment,misc]
-try:
-    from defender.learning.core.state import StateRefused  # type: ignore[import-not-found]
-except ImportError as _absent:  # pragma: no cover
-    StateRefused = _Missing("StateRefused", _absent)  # type: ignore[assignment,misc]
-try:
-    from defender.learning.core.state import Channel  # type: ignore[import-not-found]
-except ImportError as _absent:  # pragma: no cover
-    Channel = _Missing("Channel", _absent)  # type: ignore[assignment,misc]
-try:
-    from defender.learning.core.state import Claimed  # type: ignore[import-not-found]
-except ImportError as _absent:  # pragma: no cover
-    Claimed = _Missing("Claimed", _absent)  # type: ignore[assignment,misc]
-
-
-#: Every spelling this suite coins (see the module docstring). Renamed here, and only here.
-COINED = (
-    "FINDINGS", "QUESTIONER_FINDINGS", "PITFALLS",
-    "REPO_LOCK", "AUTHOR_DRAIN_LOCK", "LEAD_AUTHOR_DRAIN_LOCK", "LEAD_QUEUE_LOCK",
-    "CURATOR_DRAIN_LOCK", "TRY_ONCE", "BLOCK",
-)
-
-
-def coined(name: str) -> Any:
-    """A module-level value this suite coins on the handle's module (`COINED`)."""
-    assert name in COINED, f"{name} is not one of this suite's coined names"
-    mod = sys.modules.get(STATE_MODULE)
-    if mod is None:
-        raise ModuleNotFoundError(
-            f"{STATE_MODULE} does not exist yet — this suite is the executable spec for it")
-    try:
-        return getattr(mod, name)
-    except AttributeError:
-        raise AssertionError(
-            f"{STATE_MODULE} has no {name} — a name this suite coins (_spec1135.COINED); rename "
-            "it there if the implementation spells it differently") from None
 
 
 def core_fn(name: str) -> Callable[..., Any]:
-    """`move_at` / `open_lock_at` — D2's two module functions beside `Held` in `defender._io`.
-
-    Reached by name so their absence at base is this test's own assertion, not an import error
-    hiding the file."""
+    """`move_at` / `open_lock_at`, beside `Held` in `defender._io`, reached by name so a missing
+    one fails this test's own assertion rather than the file's import."""
     from defender import _io
 
     fn = getattr(_io, name, None)
     assert callable(fn), f"defender._io.{name} does not exist (D2 adds it beside Held)"
     return fn
-
 
 # ---------------------------------------------------------------------------------------------
 # Roots
@@ -111,8 +38,8 @@ def core_fn(name: str) -> Callable[..., Any]:
 
 
 def built_paths(tmp_path: Path, *, repo_root: Path | None = None) -> LoopPaths:
-    """`LoopPaths` over a CREATED state root at `<tmp>/learning-state` (R15: the root must
-    exist; the operator, here the fixture, creates it). Nothing below the root is made."""
+    """`LoopPaths` over a CREATED state root at `<tmp>/learning-state` (the root must exist;
+    the operator, here the fixture, creates it). Nothing below the root is made."""
     root = tmp_path / "learning-state"
     root.mkdir(parents=True, exist_ok=True)
     return LoopPaths(repo_root=repo_root or (tmp_path / "repo"), state_dir=root)
@@ -131,8 +58,7 @@ def outside(tmp_path: Path, name: str = "target.jsonl", text: str = '{"outside":
 # Plants: real non-plain entries made with the real primitive
 # ---------------------------------------------------------------------------------------------
 
-#: The four entry shapes revision 3.1 D names for a record name, and the folder shapes of
-#: R16 / 3.1 D. Each is made on disk by `plant`.
+#: The non-plain entry shapes a record name can be planted as; `plant` makes each on disk.
 SHAPES = ("symlink", "fifo", "folder", "hardlink")
 
 
@@ -234,15 +160,8 @@ def caught(fn: Callable[[], Any]) -> BaseException | None:
     return None
 
 
-def refusal_class() -> type[BaseException] | None:
-    """`StateRefused` when it is a real exception class (it is not at base or under a stub)."""
-    return StateRefused if isinstance(StateRefused, type) and issubclass(
-        StateRefused, BaseException) else None
-
-
 def is_refusal(exc: BaseException | None) -> bool:
-    cls = refusal_class()
-    return cls is not None and isinstance(exc, cls)
+    return isinstance(exc, StateRefused)
 
 
 def rows_of(answer: Any) -> list[dict]:
@@ -267,15 +186,15 @@ def write_jsonl(p: Path, rows: list[dict]) -> None:
 
 def request_body(case_id: str, run_dir: Path, **extra: Any) -> dict:
     """The curation request record body: `{case_id, tenant_id, run_id}`, the address of the
-    natural run at `run_dir` (#1105 PR 2 declared change 8; the row named its `run_dir`
-    before), read off where it lives (`_state1135.curation_row`; plant the run with
-    `_state1135.curation_run_dir`)."""
+    natural run at `run_dir`, read off where it lives (`_state1135.curation_row`; plant the run
+    with `_state1135.curation_run_dir`)."""
     return {**curation_row(case_id, run_dir), **extra}
 
 
 def seed_request(paths: LoopPaths, case_id: str, run_dir: Path, *, inflight: bool = False,
                  **extra: Any) -> Path:
-    """A plain request record at today's name, written by the fixture."""
+    """A plain request record at `author-queue/[inflight/]<case_id>.json`, written by the
+    fixture."""
     run_dir.mkdir(parents=True, exist_ok=True)
     folder = location_path(paths.state_root) / "author-queue" / ("inflight" if inflight else "")
     folder.mkdir(parents=True, exist_ok=True)
@@ -293,7 +212,7 @@ def seed_request(paths: LoopPaths, case_id: str, run_dir: Path, *, inflight: boo
 def held_flock(path: Path) -> Iterator[None]:
     """Hold an exclusive `flock` on `path` through a separate open of the file — another
     holder, as a second process or an appender would be. Two opens of one name exclude each
-    other even in one process (C7). The file is made if absent (`O_CREAT`, as `a+` does)."""
+    other even in one process. The file is made if absent (`O_CREAT`, as `a+` does)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:
@@ -346,8 +265,3 @@ def child_env() -> dict[str, str]:
     inherited = os.environ.get("PYTHONPATH")
     path = os.pathsep.join([str(REPO_ROOT), *([inherited] if inherited else [])])
     return {**os.environ, "PYTHONPATH": path}
-
-
-def errno_name(e: BaseException | None) -> str | None:
-    n = getattr(e, "errno", None)
-    return errno.errorcode.get(n) if isinstance(n, int) else None

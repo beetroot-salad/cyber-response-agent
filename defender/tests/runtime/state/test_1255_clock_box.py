@@ -1,8 +1,6 @@
 """Box clocks follow the run clock; clock mounts stay outside model read scope."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
-
 import contextlib
 import datetime as dt
 import functools
@@ -32,7 +30,6 @@ _PRELOAD_KEY = re.compile(r"PRELOAD|FAKETIME|CLOCK", re.IGNORECASE)
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     T.isolate_learning_state(tmp_path, monkeypatch)
 
 
@@ -61,13 +58,12 @@ class Captured:
 
 
 def _run_copy_stage(mount: dict) -> Path | None:
-    """#1108 P4 (U9, O-A): the run copy's `stage/` — `agent/` plus one token — is the one
-    other read-only content outside the model roots a run's box carries by design (the token is
-    read back at startup; `/agent` resolves into `stage/agent/`). Whether it is bound as one
-    mount or several (`stage/agent/` and the token apart) is the implementer's choice, so a
-    mount belongs to it when its source is `<T>/run-knowledge/<run id>/stage` or anything below
-    it — where the design's data model puts it (the copy is gone once the run ends, so its shape
-    cannot be read afterwards). Returns that `stage/` path, or `None`."""
+    """The run copy's `stage/` (`agent/` plus one token) is the one other read-only content
+    outside the model roots a run's box carries (the token is read back at startup; `/agent`
+    resolves into `stage/agent/`). It may be bound whole or as `stage/agent/` and the token
+    apart, so a mount belongs to it when its source is `<T>/run-knowledge/<run id>/stage` or
+    below — matched by path, since the copy is gone once the run ends. Returns that `stage/`
+    path, or `None`."""
     source = Path(mount["source"])
     for stage in (source, *source.parents):
         if stage.name == "stage" and stage.parent.parent.name == "run-knowledge":
@@ -92,21 +88,21 @@ def _stage_mount_kind(mount: dict, stage: Path) -> str | None:
 def _clock_candidates(docker: RecordingDocker) -> list[dict]:
     """Read-only mounts outside the model roots, the run copy's `stage/` aside; only the clock
     belongs there. The mounts set aside are only the copy's agent and token mounts — each kind
-    at most once, each read-only (U9)."""
+    at most once, each read-only."""
     candidates, kinds = [], []
     for m in docker.mounts():
         stage = _run_copy_stage(m)
         if stage is not None:
-            assert m["readonly"], f"U9: a run copy stage mount is writable: {m}"
+            assert m["readonly"], f"a run copy stage mount is writable: {m}"
             kind = _stage_mount_kind(m, stage)
             assert kind is not None, (
-                f"U9: a mount below the run copy's stage/ is neither its agent half nor its "
+                f"a mount below the run copy's stage/ is neither its agent half nor its "
                 f"token: {m}")
             kinds.append(kind)
         elif m["readonly"] and not V.under_model_root(m["target"]):
             candidates.append(m)
     assert sorted(kinds) == sorted(set(kinds)), (
-        f"U9: the run copy's stage/ is bound more than once as one kind: {kinds}")
+        f"the run copy's stage/ is bound more than once as one kind: {kinds}")
     return candidates
 
 
@@ -129,7 +125,7 @@ def _start(argv: list[str]) -> Captured:
 @pytest.fixture
 def natural(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Captured:
     """A natural run's box start through `run.main`, from the fixture tenant's seed alert."""
-    base, seed = location_path(T.runs_base)(tmp_path)
+    base, seed = T.runs_base(tmp_path)
     tenant_id = T.current_tenant().id
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
@@ -263,7 +259,7 @@ def _assert_clock_file_reads(seen: dict[str, Any], out: C.Launched, reading: dt.
     assert "mounts" in seen, (
         f"the run never reached the probe turn: exit={out.exit} refusal={out.refusal} "
         f"summary={str(out.summary)[:300]}")
-    assert len(seen["mounts"]) == 1, f"no single clock mount to read (K1): {seen['mounts']}"
+    assert len(seen["mounts"]) == 1, f"no single clock mount to read: {seen['mounts']}"
     text = seen.get("text", "")
     assert text.strip(), (
         f"the clock mount's source holds nothing once the run is live and its box has run a "
@@ -284,7 +280,7 @@ def _assert_clock_file_reads(seen: dict[str, Any], out: C.Launched, reading: dt.
 def test_k1_a_natural_runs_clock_file_holds_the_run_clocks_reading(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
-    base, seed = location_path(T.runs_base)(tmp_path)
+    base, seed = T.runs_base(tmp_path)
     tenant_id = T.current_tenant().id
 
     seen, out, _docker = _clock_file_after_a_command(
@@ -316,7 +312,7 @@ def test_k1_a_natural_runs_clock_file_follows_the_run_clock_between_commands(tmp
                                                                             monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
-    base, seed = location_path(T.runs_base)(tmp_path)
+    base, seed = T.runs_base(tmp_path)
     tenant_id = T.current_tenant().id
     clock = C.FakeClock(START)
 
@@ -412,7 +408,7 @@ def _answers_at_the_tool_boundary(defn: Any, agent_id: str, run_dir: Path,
 @pytest.mark.parametrize("role", ["main", "gather"])
 def test_k2_the_gate_refuses_main_and_gather_a_read_of_the_clock_mount(natural, tmp_path, role):
     mounts = natural.clock_mounts()
-    assert len(mounts) == 1, f"no single clock mount to check (K1): {mounts}"
+    assert len(mounts) == 1, f"no single clock mount to check: {mounts}"
     target = mounts[0]["target"].rstrip("/")
     subjects = (target, f"{target}/clock")
     calls = [*(("read_file", {"path": s}) for s in subjects),
@@ -544,7 +540,7 @@ def _box_reads(seen: dict[str, Any], reading: dt.datetime, out: C.Launched) -> N
 @requires_live_box
 def test_k4_live_in_box_time_reads_the_run_clock(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
-    base, seed = location_path(T.runs_base)(tmp_path)
+    base, seed = T.runs_base(tmp_path)
     tenant_id = T.current_tenant().id
     clock = C.FakeClock(START)
     out = C.Launched()

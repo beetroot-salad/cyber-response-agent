@@ -47,12 +47,13 @@ def test_two_stage_pipe(tmp_path):
     ("bash -c 'echo wrapped'", 0, "wrapped\n"),      # `bash` is an ordinary program here
     ("timeout 5 echo hi", 0, "hi\n"),                # ...and so is `timeout`
     ("true && echo yes", 0, "yes\n"),                # && runs the tail on success ...
+    ("false && echo nope", 1, ""),                   # ... and skips it on failure
     ("false || echo fallback", 0, "fallback\n"),     # ... and || runs it on failure
     ("echo a ; echo b", 0, "a\nb\n"),                # `;` runs both, in order
     ("echo a\necho b", 0, "a\nb\n"),                 # a bare NEWLINE separates commands too
 ], ids=lambda v: v if isinstance(v, str) and "\n" not in v else "")
 def test_a_composed_command_runs_and_returns_exactly_bashs_output(cmd, rc, out):
-    """Pipes, quoting, `bash`/`timeout` as ordinary programs, and the `&&`/`||`/`;`/newline separators each..."""
+    """Each form composes as bash composes it; exact stdout makes a dropped stage visible, not plausible."""
     assert _run(cmd)[:2] == (rc, out)
 
 
@@ -62,12 +63,6 @@ def test_pipe_exit_code_is_last_stage(tmp_path):
     rc, out, err = _run(f"cat {f} | grep zzz")
     assert rc == 1
     assert out == ""
-
-
-def test_and_short_circuits_on_failure():
-    rc, out, err = _run("false && echo nope")
-    assert rc == 1
-    assert "nope" not in out
 
 
 def test_cd_then_relative_read(tmp_path):
@@ -196,19 +191,13 @@ def test_incomplete_connector_fails_closed(cmd):
     ("echo a ; ; echo b", "a\nb\n"),      # the leading-`;` carve-out drops NOTHING
     ("echo a 2>&1 | wc -l", "1\n"),       # a stderr redirect is not an empty right side
     ("echo a && ; echo b", "a\nb\n"),
+    ("echo a ;\necho b", "a\nb\n"),      # `;` closes a FINISHED command: not a dangling connector
 ])
 def test_the_dangling_pipe_guard_leaves_real_pipelines_alone(cmd, out):
-    """The positive control for the guard above. Stated separately because the guard is an invariant over..."""
+    """Positive control for the guard above: real pipelines still run (refusal-only tests cannot catch over-refusal)."""
     rc, got, _err = _run(cmd)
     assert rc == 0
     assert got == out
-
-
-def test_trailing_semicolon_still_parses():
-    """`;` closes a FINISHED command, so it is not a dangling connector."""
-    rc, out, _err = _run("echo a ;\necho b")
-    assert rc == 0
-    assert out == "a\nb\n"
 
 
 def test_unexpected_redirect_fails_closed(tmp_path):

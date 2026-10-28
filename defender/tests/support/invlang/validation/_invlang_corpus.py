@@ -10,13 +10,11 @@ DEFENDER = Path(__file__).resolve().parents[4]
 
 @functools.cache
 def corpus_docs() -> list[Path]:
-    """The `fixtures-e2e/` golden runs, the `examples/` the SKILL points at, and the
-    committed run documents under `tests/_golden_invlang/`.
+    """The `examples/` the SKILL points at, the e2e fixture runs and the committed
+    `tests/fixtures/invlang/` documents — every one carrying an ```invlang fence.
 
-    Cached: this is called once per `parametrize` decorator, at COLLECTION time, and each
-    call globs two trees and reads every hit to filter on the fence. The list is a fact
-    about the tree, not about the caller, and every rule that adopts this helper would
-    otherwise add another full pass over the corpus before a single test runs.
+    Cached: each `parametrize` that adopts it calls it at collection time, and each call
+    reads the whole corpus.
     """
     candidates = [
         *sorted((DEFENDER / "examples").glob("*.md")),

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
-
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import asyncio
@@ -11,6 +9,14 @@ from typing import Any
 
 import pytest
 
+from defender import run as run_mod
+from defender.hooks.budget_enforcer import BudgetKill
+from defender.investigation.challenge_gate import REVIEW_ROLES
+from defender.investigation.review_roles import ReviewStages
+from defender.learning.branch import cli
+from defender.learning.branch.outcome import DID_NOT_FINISH
+from defender.records import run_end
+from defender.systems.circuit_breaker import RunAborted
 from defender.tests.support.runtime.permissions import _review_bundle as RB
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
@@ -39,7 +45,7 @@ def test_o3_main_down_ends_the_run_provider_down_with_no_report_and_exit_4(tmp_p
                     store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
     assert main.requests == 2, f"MAIN made {main.requests} requests; the fault is on its 2nd"
     P.assert_ended_provider_down(d)
-    assert location_path(P.sessions)(_store(stores)).get("main") == P.PROVIDER_DOWN, (
+    assert P.sessions(_store(stores)).get("main") == P.PROVIDER_DOWN, (
         "MAIN's session is not stamped provider-down")
 
 
@@ -62,7 +68,7 @@ def test_o3_a_main_lead_down_stamps_its_session_and_ends_the_run(tmp_path: Path)
         store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
     assert d.router.requests(LEAD) == 2, "MAIN's lead never reached its failing request"
     P.assert_ended_provider_down(d)
-    ended = location_path(P.sessions)(_store(stores))
+    ended = P.sessions(_store(stores))
     assert ended.get(P.gather_agent(LEAD)) == P.PROVIDER_DOWN, (
         f"the lead's session reads {ended.get(P.gather_agent(LEAD))!r}, not provider-down")
     assert ended.get("main") == P.PROVIDER_DOWN
@@ -79,7 +85,7 @@ def test_o3_concurrent_leads_down_end_the_run_once(tmp_path: Path) -> None:
         store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
     assert d.router.dispatched(LEAD) or d.router.dispatched("l-002"), "no lead ran"
     P.assert_ended_provider_down(d)
-    ended = location_path(P.sessions)(_store(stores))
+    ended = P.sessions(_store(stores))
     stamped = [lead for lead in (LEAD, "l-002") if ended.get(P.gather_agent(lead)) == P.PROVIDER_DOWN]
     assert stamped, f"neither down lead's session is stamped provider-down: {ended}"
     for lead in (LEAD, "l-002"):
@@ -101,12 +107,12 @@ def test_o3_scenario5_correlation_lead_down_stops_before_main(tmp_path: Path) ->
         f"MAIN was asked for {d.main.requests} turn(s) after the correlation lead met a down "
         "provider: the run went on (dispatch_raised) instead of stopping before MAIN")
     P.assert_ended_provider_down(d)
-    assert location_path(P.sessions)(_store(stores)).get("main") == P.PROVIDER_DOWN
+    assert P.sessions(_store(stores)).get("main") == P.PROVIDER_DOWN
 
 
 def test_o3_correlation_lead_provider_down_is_not_a_lead_ending(tmp_path: Path) -> None:
-    """O3 (amends #1222 A2): a `ProviderDown` raised in l-00c passes the lead's catch-all like
-    `BudgetKill` — the same stop as the real-retrier scenario, from the typed failure alone."""
+    """A `ProviderDown` raised in l-00c passes the lead's catch-all like `BudgetKill`: the
+    real-retrier scenario's stop, from the typed failure alone."""
     d = S.run_alert(tmp_path, leads={L3: [S.text(CORR)]}, lead_faults={L3: _down_at(1)})
     assert d.router.dispatched(L3), "l-00c never ran"
     assert d.main.requests == 0, "MAIN ran after the correlation lead's provider went down"
@@ -132,8 +138,8 @@ def test_o3_a_deadline_cutting_a_backoff_keeps_its_own_ending(tmp_path: Path) ->
     assert main.first_at - began < stall_s, "MAIN started only after the stalled backoff finished"
     assert d.raised is None, d.raised
     assert (d.summary or {}).get("truncated_by") != P.PROVIDER_DOWN, d.summary
-    timed_out = P.sym("records.run_end", "TRUNCATED_BY_TIMED_OUT")
-    assert location_path(P.sessions)(_store(stores)).get(P.gather_agent(L3)) == timed_out, (
+    timed_out = run_end.TRUNCATED_BY_TIMED_OUT
+    assert P.sessions(_store(stores)).get(P.gather_agent(L3)) == timed_out, (
         "the correlation lead cut mid-backoff is not stamped timed out")
 
 
@@ -192,7 +198,7 @@ def _review_run(tmp_path: Path, stages: Any, events: list[str]) -> S.Drive:
 
 
 def _assert_round_marked_incomplete(d: S.Drive) -> None:
-    for role in P.sym("investigation.challenge_gate", "REVIEW_ROLES"):
+    for role in REVIEW_ROLES:
         rows = P.trace_rows(d.folder, role)
         assert any(r.get("incomplete") is True for r in rows), (
             f"the {role} trace is not marked incomplete for the round the provider ended: {rows}")
@@ -207,7 +213,7 @@ def test_o3_d5_a_review_stage_down_ends_the_run_after_its_sibling_settles(tmp_pa
     support = _Lens(exc=P.provider_down_fault("review"), events=events, name="support",
                     raised=failed)
     ablation = _Lens(delay=SIBLING_HOLD_S, events=events, name="ablation", after=failed)
-    stages = P.sym("investigation.review_roles", "ReviewStages")(
+    stages = ReviewStages(
         support=support, ablation=ablation, composer=RB.stage(RB.composer_reply("holds")))
     d = _review_run(tmp_path, stages, events)
     assert support.started >= 1, "the review gate never dispatched the support lens"
@@ -227,12 +233,12 @@ def test_o3_d5_a_review_stage_down_ends_the_run_after_its_sibling_settles(tmp_pa
 
 
 def test_o3_d5_the_composer_down_ends_the_run(tmp_path: Path) -> None:
-    """O3/D5 (R7): with both lenses answering, a down COMPOSER ends the run `provider-down`
-    the same way, and the round's traces are marked incomplete."""
+    """With both lenses answering, a down composer ends the run `provider-down` the same way,
+    and the round's traces are marked incomplete."""
     events: list[str] = []
     composer = _Lens(exc=P.provider_down_fault("review"), events=events, name="composer")
     support, ablation = _Lens(events=events, name="support"), _Lens(events=events, name="ablation")
-    stages = P.sym("investigation.review_roles", "ReviewStages")(
+    stages = ReviewStages(
         support=support, ablation=ablation, composer=composer)
     d = _review_run(tmp_path, stages, events)
     assert support.finished >= 1, "the lenses never answered — the composer was never reached"
@@ -244,7 +250,7 @@ def test_o3_d5_the_composer_down_ends_the_run(tmp_path: Path) -> None:
 def test_o3_d5_a_review_stage_failing_otherwise_still_fails_the_review_closed(tmp_path: Path) -> None:
     stores: list = []
     support = _Lens(exc=lambda: RuntimeError("lens broke"))
-    stages = P.sym("investigation.review_roles", "ReviewStages")(
+    stages = ReviewStages(
         support=support, ablation=_Lens(), composer=RB.stage(RB.composer_reply("holds")))
     main = S.MainScript(S.closing_main_turns("inconclusive"))
     d = S.run_alert(tmp_path, main=main, leads={L3: [S.text(CORR)]}, review_stages=stages,
@@ -260,7 +266,7 @@ def test_o3_d5_a_review_stage_failing_otherwise_still_fails_the_review_closed(tm
     rec = P.sidecar(d.folder)
     assert rec is not None, "no run-end record on an uncut run"
     assert rec["truncated_by"] is None
-    assert location_path(P.sessions)(_store(stores)).get("main") is None
+    assert P.sessions(_store(stores)).get("main") is None
     assert any(r.get("incomplete") is True for r in P.trace_rows(d.folder, "support"))
 
 
@@ -288,31 +294,31 @@ def test_o6_exit_4_is_new_and_a_sibling_exiting_4_did_not_finish(tmp_path: Path,
     from defender.records._episode_handle import Episode
 
     assert P.PROVIDER_DOWN_EXIT not in P.TAKEN_EXITS
-    assert P.sym("run", "UNSERVABLE_EXIT") != P.PROVIDER_DOWN_EXIT
+    assert run_mod.UNSERVABLE_EXIT != P.PROVIDER_DOWN_EXIT
     _base, src, _root = T.configured_layout(tmp_path, monkeypatch)
     spawn = T.FakeSpawn(exits={"b": P.PROVIDER_DOWN_EXIT})
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src.resolve())))
     with Episode.open(ep) as episode:
         T.episode_view(episode)
-        exits = P.mod("learning.branch.cli").start_family(
+        exits = cli.start_family(
             episode, [T.world_id(ep, label) for label in ("a", "b")], spawn=spawn, tenant_id=T.SOURCE_TENANT)
     assert exits.get(T.world_id(ep, "b")) == P.PROVIDER_DOWN_EXIT
     records = {p.stem: p.read_text(encoding="utf-8") for p in ep.rglob("world_records/*.yaml")}
     assert T.world_id(ep, "b") in records, f"no world record for the sibling that exited 4: {sorted(records)}"
-    assert P.sym("learning.branch.outcome", "DID_NOT_FINISH") in records[T.world_id(ep, "b")]
+    assert DID_NOT_FINISH in records[T.world_id(ep, "b")]
     assert T.world_id(ep, "a") not in records, "a sibling that exited 0 was recorded as failed"
 
 
 @pytest.mark.parametrize(("kill", "member"), [
-    (lambda: P.sym("hooks.budget_enforcer", "BudgetKill")("run budget spent"), "TRUNCATED_BY_BUDGET"),
-    (lambda: P.sym("systems.circuit_breaker", "RunAborted")(5, ["cmdb"]), "TRUNCATED_BY_ABORTED"),
+    (lambda: BudgetKill("run budget spent"), "TRUNCATED_BY_BUDGET"),
+    (lambda: RunAborted(5, ["cmdb"]), "TRUNCATED_BY_ABORTED"),
 ], ids=["budget", "aborted"])
 def test_d4_exit_4_is_provider_downs_alone(tmp_path: Path, kill: Any, member: str) -> None:
     main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=kill))
     d = S.run_alert(tmp_path, main=main, leads={L3: [S.text(CORR)]})
     assert main.requests == 1, f"MAIN made {main.requests} requests; the kill is on its first"
     assert d.raised is None, d.raised
-    assert (d.summary or {}).get("truncated_by") == P.sym("records.run_end", member), d.summary
+    assert (d.summary or {}).get("truncated_by") == getattr(run_end, member), d.summary
     assert d.rc == 0, f"a run ended {member} exited {d.rc}; only provider-down exits 4"
 
 
@@ -321,18 +327,16 @@ SIBLING_WORLD = "b"
 
 
 def _sibling_episode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A launched episode a sibling process can run as (`test_1222_judge_and_episode`'s
-    `_source` + `_launch` shape): a finished source run on tenant `acme` (the #947 runs base's
-    branchable run, recorded: its alert and record at the front door's places), the episode primed from
-    it by the REAL launcher door (`cli.prepare_episode`) with its container made, and the
-    family manifest (worlds a, b, c) written. The episodes root is pointed at its parent."""
+    """A launched episode a sibling process can run as: a finished, recorded source run on
+    tenant `acme`, the episode primed from it by the real launcher door (`cli.prepare_episode`),
+    and the family manifest (worlds a, b, c) written. The episodes root is its parent."""
     from defender.records import RunId
 
     planted = S.plant_tenant(SIBLING_TENANT)
-    _base, src = location_path(T.runs_base)(tmp_path, tenant_id=SIBLING_TENANT, recorded=True)
+    _base, src = T.runs_base(tmp_path, tenant_id=SIBLING_TENANT, recorded=True)
     runs = planted.accept().runs_repository()
     source = runs.open(RunId.parse(src.name))
-    with P.mod("learning.branch.cli").prepare_episode(runs, source) as view:
+    with cli.prepare_episode(runs, source) as view:
         ep = Path(view.episode.dir)
         T.write_family(ep, T.family_doc(episode_id=ep.name, source_run_dir=str(src)))
         view.start_runs([T.world_id(ep, label) for label in T.WORLDS])
@@ -353,8 +357,8 @@ def _run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
     from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
     try:
-        # #1108 P4 (OD14, O11): the in-process launch-time publish.
-        d.rc = P.sym("run", "main")(argv, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
+        # The launch-time publish, in-process.
+        d.rc = run_mod.main(argv, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
                                     preflight=lambda *_a, **_k: 0, ticket_writer=S.NoTicket(),
                                     publish=in_process_publish())
     except SystemExit as exit_:
@@ -367,7 +371,7 @@ def _run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
 
 @pytest.mark.parametrize(("fault", "ends", "rc"), [
     (P.provider_down_fault("sibling"), P.PROVIDER_DOWN, P.PROVIDER_DOWN_EXIT),
-    (lambda: P.sym("hooks.budget_enforcer", "BudgetKill")("world budget spent"), "budget", 0),
+    (lambda: BudgetKill("world budget spent"), "budget", 0),
 ], ids=["provider-down", "control-budget"])
 def test_o6_d4_a_sibling_world_ending_provider_down_exits_4(tmp_path: Path,
                                                            monkeypatch: pytest.MonkeyPatch,
@@ -380,4 +384,4 @@ def test_o6_d4_a_sibling_world_ending_provider_down_exits_4(tmp_path: Path,
     assert main.requests == 1, f"the sibling's MAIN made {main.requests} requests"
     assert d.raised is None, f"the sibling crashed instead of ending {ends}: {d.raised!r}"
     assert (d.summary or {}).get("truncated_by") == ends, d.summary
-    assert d.rc == rc, f"a sibling world that ended {ends} exited {d.rc!r}; D4/O6 say {rc}"
+    assert d.rc == rc, f"a sibling world that ended {ends} exited {d.rc!r}, not {rc}"

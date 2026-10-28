@@ -207,7 +207,7 @@ def arm_box_session(request: pytest.FixtureRequest) -> Iterator[dict[str, Any]]:
         assert session["control_on_host"] == CONTROL, "control bytes did not reach the host"
         yield session
     finally:
-        # The box writes through the rw bind as root (C41); residue is gitignored.
+        # The box writes through the rw bind as root; residue is gitignored.
         shutil.rmtree(base, ignore_errors=True)
 
 

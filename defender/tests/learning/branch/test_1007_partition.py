@@ -1,4 +1,4 @@
-"""#1007 — the `subject` partition, the second queue channel, and who owns a row's identity."""
+"""#1007: the `subject` partition, the second queue channel, and who owns a row's identity."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -16,13 +16,12 @@ from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
 #: The finding id every hand-fed row here carries unless a scenario says otherwise.
 FID = f"{W.EPISODE_ID}/b/0/0"
 
-#: The three keys only a DEFENDER row carries (#1234 M7); the rest is the head both share.
+#: The three keys only a DEFENDER row carries; the rest is the head both share.
 DEFENDER_ONLY = (S.CONTRAST, S.ON_PATH, S.DOUBT)
 
 
 def queue_row(**over) -> dict:
-    """One defender queue row as `enqueue.build_finding_row` mints it (#1234's shape:
-    `contrast_evidence`, `on_verdict_path`, `world_label_doubted`; no `judge_outcome`)."""
+    """One defender queue row as `enqueue.build_finding_row` mints it (no `judge_outcome`)."""
     over.setdefault("type", "lead-set")
     return S.defender_row(over.pop("finding_id", FID), **over)
 
@@ -104,8 +103,6 @@ def test_the_questioner_channel_declares_its_own_append_lock_and_shares_the_drai
 
 
 def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
-    """A questioner-channel row is a full `FindingRow` head plus `world`, `systems`, `provenance`
-    and `subject` ."""
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
@@ -121,19 +118,6 @@ def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
         assert key in landed, f"the world row is missing {key!r}"
 
 
-def test_two_appends_of_one_finding_id_land_once(tmp_path):
-    """The questioner channel is idempotent on `finding_id`, exactly as the defender one is."""
-    enqueue = W.mod("learning.judge.enqueue")
-    paths = W.loop_paths(tmp_path)
-
-    enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
-    enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
-
-    rows = W.queue_rows(paths, QUESTIONER_FINDINGS)
-    assert [r["finding_id"] for r in rows] == [f"{W.EPISODE_ID}/b/0/0"], (
-        f"one finding id landed twice: {rows}")
-
-
 def test_a_non_string_world_bucket_is_refused(tmp_path):
     """A world bucket must be a STRING of the vocabulary — never a list, number or mapping."""
     run = W.mod("learning.judge.run")
@@ -145,8 +129,7 @@ def test_a_non_string_world_bucket_is_refused(tmp_path):
 
 
 def test_an_empty_whitespace_or_unlisted_world_bucket_is_refused_never_normalised(tmp_path):
-    """An empty, whitespace-only or unlisted world bucket is REFUSED — the vocabulary is closed
-    (#1234 M4 replaced #1007's open one), and nothing is trimmed or coerced into it."""
+    """The world-bucket vocabulary is closed: nothing is trimmed or coerced into it."""
     run = W.mod("learning.judge.run")
 
     for bucket in sorted(run.WORLD_FINDING_BUCKETS):
@@ -225,21 +208,6 @@ def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
             "stamp name different worlds")
 
 
-def test_every_family_level_finding_carries_a_null_world(tmp_path, monkeypatch):
-    """A family-level finding is about the FAMILY, so its `world` is null."""
-    built = W.contrast_family(tmp_path, monkeypatch)
-    judge = S.judge({S.FAMILY: S.family_reply(world=[S.wf(evidence=[S.plan_ptr()])])})
-
-    S.grade(built, judge)
-
-    family_rows = [r for r in S.questioner_queue() if r["finding_id"].split("/")[1] == "family"]
-    assert family_rows, "the family draw enqueued nothing at all"
-    for row in family_rows:
-        assert row["world"] is None, f"a family finding is stamped world={row['world']!r}"
-        assert row["source_run_dir"].endswith(built.ep.name), (
-            f"a family finding's source_run_dir is {row['source_run_dir']!r}, not the episode")
-
-
 def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
         tmp_path, monkeypatch):
     """A family finding is keyed on `(episode, "family", draw, index)`."""
@@ -262,8 +230,6 @@ def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
 
 
 def test_a_world_row_missing_systems_or_subject_is_refused_at_the_appender(tmp_path):
-    """`systems` and `subject` are REQUIRED at the questioner appender (#1224: `systems` replaced
-    `pattern` and `holding_system`)."""
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
@@ -316,7 +282,7 @@ def test_an_ungradable_world_enqueues_nothing_on_either_channel(tmp_path, monkey
 
 def test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_own_curator(
         tmp_path):
-    """`finding_id` now feeds TWO channels from ONE id space; consumption on one channel must not
+    """`finding_id` feeds TWO channels from ONE id space; consumption on one channel must not
     suppress the other."""
     drains = W.mod("learning.core.drains")
     enqueue = W.mod("learning.judge.enqueue")

@@ -1,12 +1,8 @@
-"""M4 — the one CMDB-stub change, driven through the real FastAPI app.
+"""M4 — the CMDB stub's chaos obligations, driven through the real FastAPI app.
 
-Two obligations ride on it:
-
-  * O6 leak fix — `GET /health` today returns `overlay_count`, which rises the
-    moment a stale-CMDB profile activates. That is an agent-reachable payload
-    that counts the harness's edits, so it goes. No non-harness consumer needs it.
-  * missing-host — the common real-world "silent gap" needs a way to say a host
-    is absent. An overlay sentinel makes `_effective` return None and drops the
+  * O6 — `GET /health` carries no `overlay_count`: it would rise the moment a
+    stale-CMDB profile activates, an agent-reachable count of the harness's edits.
+  * missing-host — an overlay sentinel makes `_effective` return None and drops the
     host from `list_hosts`, with no marker field left visible anywhere.
 
 Nothing here is mocked: it is the committed cmdb/app.py over the committed
@@ -21,7 +17,7 @@ def test_health_no_longer_counts_the_overlay(cmdb_client):
     body = cmdb_client.get("/health").json()
     assert body["status"] == "ok"
     assert body["host_count"] > 0
-    assert "overlay_count" not in body, "the overlay count is an agent-reachable harness tell (O6)"
+    assert "overlay_count" not in body, "the overlay count is an agent-reachable harness tell"
 
 
 def test_health_does_not_grow_a_tell_when_an_overlay_is_set(cmdb_client):

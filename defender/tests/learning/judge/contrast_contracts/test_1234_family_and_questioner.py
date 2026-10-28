@@ -14,14 +14,12 @@ from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
 
 @pytest.fixture(autouse=True)
 def _roomy_payload_cap(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No scenario here is about the default `JUDGE_PAYLOAD_CAP` except the two that set the knob
-    themselves (d07b's second half, s_AM27), which override this inside the test body. With the
-    cap out of reach, a reference trimmed or a world refused for size (A9) never decides a test
-    about routing, commits or call counts."""
+    """A payload cap out of reach, so a trimmed reference or a size refusal never decides a test
+    about routing, commits or call counts; the two cap scenarios set the knob in their bodies."""
     monkeypatch.setenv(S.CAP_KNOB, "10000000")
 
 
-#: The pass tables a reply keeps (main's names; #1234 does not rename them).
+#: The pass tables a reply keeps.
 _PASS_TABLES = ("correlations", "scope_checks", "derivations")
 
 SYSTEMS_KEY = S.RULED["row.systems"]
@@ -94,7 +92,7 @@ def _names_the_cap(row: dict) -> bool:
 
 
 def _names_the_fault(row: dict) -> bool:
-    """The P9 fault `RoutedJudge(fail=...)` raises: `RunUnprocessable` over a transport fault."""
+    """The fault `RoutedJudge(fail=...)` raises: `RunUnprocessable` over a transport fault."""
     text = json.dumps(row, default=str)
     return "RunUnprocessable" in text or "TransportFault" in text
 
@@ -265,8 +263,8 @@ def test_1234_family_findings_requeued_after_a_stopped_pass(tmp_path: Path) -> N
     state_a = S.state_over(tmp_path / "state-stopped")
     queue_file = _questioner_file(state_a)
     S.plant_dir(queue_file)
-    # How the refused append surfaces (a refusal, or the state handle's own StateRefused) is
-    # s_AM17's; this test reads the record the stopped pass left.
+    # The refused append may surface as a refusal or as the state handle's own `StateRefused`;
+    # this test reads the record the stopped pass left.
     with contextlib.suppress(*S.stops()):
         S.grade(stopped, S.judge(family_default=S.family_reply(world=[d0])), draws=1,
                 state=state_a)
@@ -370,8 +368,9 @@ def test_1234_family_call_faults_after_the_worlds_rows_were_queued(tmp_path: Pat
 
 
 def _unusable_world(kind: str) -> dict[str, Any]:
-    """World `zulu` (role D, its own lead) made O5-failed by its own world record (archive kept,
-    a detail that must never be shown), or cut short. `malformed` is planted after the build."""
+    """World `zulu` (role D, its own lead) failed by its own world record (`ORACLE_UNSERVABLE`,
+    archive kept, with a detail that must never be shown), or cut short. `malformed` is planted
+    after the build."""
     spec: dict[str, Any] = {"role": "D", "calls": [S.CallRow(lead=_lead("zulu"))]}
     if kind == "o5-failed":
         spec.update(world_record=S.sym(S.OUTCOME, "ORACLE_UNSERVABLE"),

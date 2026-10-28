@@ -14,8 +14,7 @@ pytestmark = pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000
 
 
 def test_setup_over_an_unreadable_tenant_folder_refuses(tmp_path: Path) -> None:
-    """`<root>/<T>` at mode 000 with no row: setup exits 1 with `[tenant.py]`, naming the data
-    root, and no traceback."""
+    """`<root>/<T>` at mode 000 with no row: setup refuses naming the data root."""
     root = tmp_path / "data"
     H.place_knowledge(root)
     folder = H.tenant_folder(root)
@@ -27,8 +26,6 @@ def test_setup_over_an_unreadable_tenant_folder_refuses(tmp_path: Path) -> None:
 
 
 def test_scaffold_into_an_unreadable_target_refuses(tmp_path: Path) -> None:
-    """An empty target directory at mode 000: scaffold exits non-zero naming it, with no
-    traceback, and the target is still empty."""
     target = S._empty_dir(tmp_path / "acme")
     target.chmod(0)
     try:

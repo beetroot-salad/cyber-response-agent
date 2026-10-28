@@ -1,4 +1,4 @@
-"""#959 - constants shared by the bash-scanner tests: policies, the divergent-blank alphabet, and the lexing-refusal arms.
+"""#959 - shared by the bash-scanner tests: policies, the decision and parse helpers, the divergent-blank alphabet, and the lexing-refusal arms.
 
 Every divergent blank is built from its CODEPOINT, never a literal character, so no editor or copy-paste can normalise it into a plain space.
 """
@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from defender.agents import MAIN_DEF
+from defender.execution import bash_exec
+from defender.investigation import permission
 from defender.investigation.agent_definition import compile_policy_for
 
 RUN = Path("/run")
@@ -19,12 +21,10 @@ MAIN = compile_policy_for(MAIN_DEF, run_dir=RUN, defender_dir=DFN)
 
 @functools.cache
 def _gather_policy() -> Any:
-    """Gather's policy, compiled on first use from the committed playground tenant's grant.
+    """Gather's policy, from the playground tenant's grant (`GATHER_DEF` carries no table grant).
 
-    #1106 M4: `GATHER_DEF` carries no table grant (a grant fixed per process), so gather is
-    compiled from a RUN's grant — and lazily, so importing this module reads no settings file.
-    `GATHER` and `POLICIES` below stay attribute-spelled (`base.GATHER`) through the module
-    `__getattr__`."""
+    Compiled lazily, so importing this module reads no settings file; `GATHER` resolves through
+    the module `__getattr__`."""
     from defender.tests.support.tenancy import _tenants1106
 
     return compile_policy_for(_tenants1106.fixture_gather_def(), run_dir=RUN, defender_dir=DFN)
@@ -33,9 +33,18 @@ def _gather_policy() -> Any:
 def __getattr__(name: str) -> Any:
     if name == "GATHER":
         return _gather_policy()
-    if name == "POLICIES":
-        return {"main": MAIN, "gather": _gather_policy()}
     raise AttributeError(name)
+
+
+def decide_bash(cmd: str, policy=None):
+    """`permission.decide_bash` over `RUN`/`DFN`, under MAIN's policy unless one is given."""
+    return permission.decide_bash(cmd, policy=policy or MAIN, run_dir=RUN, defender_dir=DFN)
+
+
+def parsed_argv(cmd: str) -> list[list[list[str]]]:
+    """`bash_exec.parse(cmd)` as nested argv: pipelines of stages of words."""
+    return [[list(st.argv) for st in pl.stages] for pl in bash_exec.parse(cmd)]
+
 
 DIVERGENT_BLANK_CODEPOINTS = (
     0x000B, 0x000C, 0x000D, 0x001C, 0x001D, 0x001E, 0x001F, 0x0085,
@@ -68,24 +77,20 @@ WRAPPER_LATER_TOKEN_SHAPES = (
 
 LEXING_ARMS = (
     # id                        base command                            trail   lead
-    # bash_exec.py:281 `_scan` returned nothing - and the two causes that reach it part company.
+    # `_scan` returns nothing; the two causes that reach it part company.
     ("quote-never-closes",      "cat " + REPORT + " | grep 'unterminated", False, False),
     ("newline-inside-a-quote",  "cat " + REPORT + " | grep 'a\nb'",       False, False),
     ("trailing-backslash",      "cat " + REPORT + " \\",                   True, False),
-    # bash_exec.py:206 a `|` that banked a stage with nothing complete to its right.
+    # A `|` that banked a stage with nothing complete to its right.
     ("pipe-into-a-bare-redirect", "cat " + REPORT + " | 2> /dev/null",     True, False),
     ("pipe-then-semicolon",     "cat " + REPORT + " | ; wc -l",            False, False),
-    # bash_exec.py:237 a connector with no command to its left.
+    # A connector with no command to its left.
     ("connector-opens-a-line",  "| wc -l",                                 False, True),
-    # bash_exec.py:290 a connector closing a line. The single-separator spelling of this arm is
-    # already swept above (`cat P |{blank}`); what is added here is the ACROSS-LINES spelling,
-    # where the blank lands on a later line and the refusal does not move.
+    # A connector closing a line, spelled across lines: the blank lands on a later line and the
+    # refusal does not move (`cat P |{blank}` is swept separately).
     ("connector-across-lines",  "cat " + REPORT + " |\nwc -l",            False, False),
-    # bash_exec.py:304 an `&&`/`||` whose right side never arrived within its own line.
+    # An `&&`/`||` whose right side never arrives within its own line.
     ("pending-connector",       "cat " + REPORT + " && ;",                 True, False),
-    # An unclosed quote that happens to have a `bash -c` in front of it. It reaches the same arm
-    # as `quote-never-closes` above and always did - the wrapper step never got a say about a
-    # quote that never closes - so it survives #971 unchanged. That is what makes it worth
-    # keeping: the control that says the two arms above went and this one did not.
+    # An unclosed quote behind a `bash -c` reaches the same arm as `quote-never-closes`.
     ("unclosed-quote-inside-c", "bash -c 'cat " + REPORT,                  False, False),
 )

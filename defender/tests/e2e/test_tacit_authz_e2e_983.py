@@ -51,9 +51,8 @@ def _run(tmp_path: Path, doc: str, disposition: str, *, run_id: str):
 
 def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
     """A gather registry whose `tacit-knowledge.lookup` IS the shipped adapter's, repointed at
-    the fixture tree under `root` and at `AS_OF`. #1108 P4 (O1, O4): the registry is the run's
-    agent knowledge, so `root` is handed as the run tenant's agent root (`RunTenant.agent`),
-    not as `defender_dir`."""
+    the fixture tree under `root` and at `AS_OF`. The registry is the run's agent knowledge, so
+    `root` is handed as the run tenant's agent root, not as `defender_dir`."""
     from defender.systems.verbs import VerbContext
     from defender.kit.verbs import declared_params
     from defender.integrations import tacit_knowledge_adapter
@@ -66,8 +65,7 @@ def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
         )
 
     assert declared_params(lookup) == declared_params(tacit_knowledge_adapter.lookup), (
-        "the harness shim's params are not the shipped verb's — the scenario would be "
-        "validating a call shape no lead can actually make"
+        "the harness shim's params are not the shipped verb's"
     )
     return FakeVerbs({SYSTEM: {LOOKUP: lookup}})
 
@@ -150,7 +148,7 @@ def _authz_verdicts(text: str) -> list[str]:
     return [row.get("verdict", "") for row in _authz_rows(text)]
 
 
-# ---------------------------------------------------------------- O1: benign becomes reachable
+# ---------------------------------------------------------------- benign becomes reachable
 
 
 def test_registry_hit_lets_a_container_root_case_close_benign(tmp_path):
@@ -169,8 +167,7 @@ def test_registry_hit_lets_a_container_root_case_close_benign(tmp_path):
 
     matched = _payload(run_dir)["matched"]
     assert matched is not None, (
-        "the real adapter came back with no entry for an actor, host and pattern its own "
-        "fixture entry covers — the rest of this scenario would be asserting over a fiction"
+        "the real adapter found no entry for an actor, host and pattern its own fixture covers"
     )
 
     assert main.calls == 4, (
@@ -182,19 +179,18 @@ def test_registry_hit_lets_a_container_root_case_close_benign(tmp_path):
         "the committed `:R authz` row cites an entry other than the one the lookup returned"
     )
     assert _committed_disposition(run_dir) == "benign", (
-        "a container-root case with an authored registry entry behind it still could not "
-        f"close benign — O1's failure, unchanged:\n{_feedback(main)[-2000:]}"
+        f"a container-root case with an authored registry entry still could not close benign:\n"
+        f"{_feedback(main)[-2000:]}"
     )
 
     assert frontier_from_text(produced).contracts == (), (
-        "the discharged contract is still on the retrieval frontier, so the run would be "
-        "pushed back to re-ask a question an authored registry entry already answered"
+        "the discharged contract is still on the retrieval frontier"
     )
 
 
 def test_a_citation_the_lookup_never_returned_does_not_close_benign(tmp_path):
     """The same run, with the lookup MISSING and the model citing an entry id anyway: the close
-    does not reach `benign` (demand `authz_anchor_id_is_receipted`, O2)."""
+    does not reach `benign`."""
     doc = scene.benign_document(
         rows=scene.consult_block(scene.lookup_miss_row(), scene.consultation_row())
         + scene.authz_block(scene.authz_row(anchor_id=scene.FABRICATED_ENTRY_ID)),
@@ -210,13 +206,11 @@ def test_a_citation_the_lookup_never_returned_does_not_close_benign(tmp_path):
         "lookup has to come back empty"
     )
     assert _committed_disposition(run_dir) != "benign", (
-        "a `:R authz` row citing an entry no lookup ever returned bought a benign close — "
-        "authorization by convention became authorization by assertion"
+        "a `:R authz` row citing an entry no lookup returned bought a benign close"
     )
     feedback = _feedback(main)
     assert scene.FABRICATED_ENTRY_ID in feedback or "ac1" in feedback, (
-        "the run was blocked without telling the model which citation or which contract was "
-        "the problem — nothing here is repairable"
+        "the block did not name the offending citation or contract"
     )
 
 
@@ -229,8 +223,7 @@ def test_runtime_evidence_lands_in_a_benign_report_body(tmp_path):
     report = (run_dir / "report.md").read_text(encoding="utf-8")
     head, _, body = report.partition("---\n")[2].partition("---\n")
     assert "runtime-evidence" in body, (
-        "the baseline consultation did not reach the committed report's body — O3's gap "
-        "(the density the agent already computes never reaching report.md) is unchanged"
+        "the baseline consultation did not reach the committed report's body"
     )
     assert scene.WINDOW_BEFORE_ALERT in body, "the window did not travel with it"
     assert "1500 occurrences over 30d" in body, "the occurrence count did not travel with it"
@@ -239,13 +232,11 @@ def test_runtime_evidence_lands_in_a_benign_report_body(tmp_path):
     )
     assert body.count("tk-baseline-30d") == 1
     assert scene.ENTRY_ID not in body, (
-        "the lead's `tacit-knowledge` lookup record rode out with the baseline — the report's "
-        "recurrence paragraph now carries an authorization citation, which is a different "
-        "claim about a different anchor kind"
+        "the lead's `tacit-knowledge` lookup record rode out with the baseline"
     )
 
 
-# ---------------------------------------------------------------- O2: the three fakes
+# ---------------------------------------------------------------- the three fakes
 
 
 def test_expired_entry_falls_through_to_indeterminate(tmp_path):
@@ -265,12 +256,10 @@ def test_expired_entry_falls_through_to_indeterminate(tmp_path):
     )
 
     assert _payload(run_dir)["matched"] is None, (
-        "an entry past its own `review_by` still answered the lookup — a stale sanction "
-        "authorizes forever, which is the one thing a file entry cannot notice about itself"
+        "an entry past its own `review_by` still answered the lookup"
     )
     assert scene.ENTRY_ID not in json.dumps(_payload(run_dir)), (
-        "the expired entry's id reached the model anyway — a miss that names the entry it "
-        "nearly matched is a citation waiting to be written"
+        "the expired entry's id reached the model anyway"
     )
 
     produced = _investigation(run_dir, main)
@@ -311,14 +300,11 @@ def test_recurrence_alone_never_authorizes(tmp_path):
         "fixture control: no entry in this run's registry covers the alerted actor"
     )
     assert _committed_disposition(run_dir) is None, (
-        "a benign close committed on a baseline consultation promoted into a verdict — the "
-        "middle design this issue's own discussion discarded, reachable by writing the "
-        "density finding into the `:R authz` bucket instead of the `:R consultations` one"
+        "a benign close committed on a baseline consultation promoted into a verdict"
     )
     feedback = _feedback(main)
     assert "telemetry-baseline" in feedback or "runtime-evidence" in feedback, (
-        "the run was blocked without naming the grounding it refused, so a model cannot tell "
-        "'this evidence does not authorize' from 'try again'"
+        "the block did not name the grounding it refused"
     )
 
 
@@ -343,6 +329,5 @@ def test_exhausted_contract_is_not_looped_back_but_still_escalates(tmp_path):
         f"loops back:\n{_feedback(main)[-2000:]}"
     )
     assert frontier_from_text(produced).contracts == (), (
-        "a contract no registry in this deployment can ever answer is still being handed back "
-        "for another retrieval loop — O4's burned loop"
+        "a contract no registry here can answer is still handed back for another retrieval loop"
     )

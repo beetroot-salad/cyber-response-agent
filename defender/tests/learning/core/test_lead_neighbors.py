@@ -32,9 +32,9 @@ def test_tokenize_query_preserves_hyphenated_index_name():
 
 @pytest.fixture(scope="module")
 def catalog():
-    """The fixture tenant's committed catalog. #1108 P4 (O1): a catalog is a tenant's
-    (`<agent root>/skills/gather/queries`); the product checkout holds none, so `load_catalog`
-    takes it explicitly (no product default to skip on)."""
+    """The fixture tenant's committed catalog: a catalog is a tenant's
+    (`<agent root>/skills/gather/queries`) and the product checkout holds none, so
+    `load_catalog` takes it explicitly."""
     from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
     cat = ln.load_catalog(FIXTURE_AGENT / "skills" / "gather" / "queries")

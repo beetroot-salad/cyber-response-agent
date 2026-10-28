@@ -11,8 +11,8 @@ from defender.records._episode_paths import LAYOUT
 from defender.learning.branch import episode as episode_mod
 from defender.learning.branch import outcome as outcome_mod
 
-#: What the pre-#1127 writer produced for a record that shared one block: an `accepted`
-#: outcome, and an alias elsewhere in the document.
+#: An `accepted` outcome with an alias elsewhere in the document, as a writer that shared one
+#: block emits it.
 ALIASED_OUTCOME = (
     "outcome: accepted\nreason: every world calibrated\n"
     "unservable_worlds: []\nnot_replayable: &id001\n- {system: elastic, verb: query}\n"

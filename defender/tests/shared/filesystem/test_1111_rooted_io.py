@@ -16,7 +16,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -34,14 +34,13 @@ from defender.tests.support.shared.contracts._create_lane import assert_single_p
 from defender.tests.support.shared.filesystem._umask import umask
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-#: #1187 declared change 1: a run id is a canonical lowercase uuid4 text.
 RUN_ID = fixture_uuid("rooted-io-1111")
-#: How long one call may take before O3 calls it hung. A right answer takes milliseconds; the
+#: How long one call may take before it counts as hung. A right answer takes milliseconds; the
 #: deadline only bounds a regression, so it fails the test rather than wedging the run.
 DEADLINE = 3.0
 
 
-#: Today's write-once members (`create`; a second write is refused). Not #1111's to change.
+#: The write-once members (`create`: a second write is refused).
 WRITE_ONCE = frozenset({"alert", "alert_record", "provenance", "leads"})
 
 #: What a plant can put AT a record's name.
@@ -73,8 +72,8 @@ PLAIN = "plain record at its own address\n"
 
 @dataclasses.dataclass(frozen=True)
 class Member:
-    """One record, addressed as the design's M2 addresses it: a trust root (`run_dir`,
-    `runs_base`, `session_root` or `world_dir`) and the record's name relative to it."""
+    """One record, addressed by a trust root (`run_dir`, `runs_base`, `session_root` or
+    `world_dir`) and the record's name relative to it."""
 
     group: str
     name: str
@@ -92,7 +91,7 @@ class Member:
 
 
 def trust_roots(runs_base: Path, world_dir: Path) -> dict[str, Path]:
-    """The design's M2 trust-root table, most specific first: an in-run record's root is the
+    """The trust-root table, most specific first: an in-run record's root is the
     run dir, a sidecar's the runs base, the session db's `SessionPaths(runs_base).trust_root`,
     an archived world's member's the world dir."""
     return {
@@ -167,9 +166,7 @@ class Tree:
         return self.root(m) / m.rel
 
     def run(self, io: Any = _io) -> Any:
-        """The handle as application code builds it. #1187 (R1): `Run.for_tenant` and the
-        runs base's `_tenant.json` it read are retired; `Run.under(container, id, tenant_id=)`
-        replaces it, over a container holding no record."""
+        """The handle as application code builds it (`Run.under`)."""
         return H.Run.under(fixture_runs_base(self.runs_base), RUN_ID, tenant_id=S.DEFAULT_TENANT_ID, io=io)
 
     def handle(self, m: Member, *, run: Any = None, io: Any = _io) -> Any:
@@ -232,14 +229,14 @@ def plant_leaf(record: Path, kind: str, *, host: Path, body: bytes = HOST_BYTES)
 
 
 def plant_folder(root: Path, rel: PurePosixPath, folder: PurePosixPath, kind: str, *,
-                 host: Path, body: bytes = HOST_BYTES) -> Planted:
+                 host: Path) -> Planted:
     """Plant `kind` at `folder`, one of `rel`'s holding folders. A link points at a folder
-    holding the rest of the record's name, with `body` in it, so a walk that followed the link
-    would find a real file there."""
+    holding the rest of the record's name, with `HOST_BYTES` in it, so a walk that followed the
+    link would find a real file there."""
     at = root / folder
     at.parent.mkdir(parents=True, exist_ok=True)
     if kind == "folder_file":
-        at.write_bytes(body)
+        at.write_bytes(HOST_BYTES)
         return Planted(kind, at)
     if kind == "folder_fifo":
         os.mkfifo(at)
@@ -247,7 +244,7 @@ def plant_folder(root: Path, rel: PurePosixPath, folder: PurePosixPath, kind: st
     elsewhere = (root if kind == "folder_link_inside" else host) / f"elsewhere-{folder.name}"
     reached = elsewhere / rel.relative_to(folder)
     reached.parent.mkdir(parents=True, exist_ok=True)
-    reached.write_bytes(body)
+    reached.write_bytes(HOST_BYTES)
     at.symlink_to(elsewhere, target_is_directory=True)
     return Planted(kind, at)
 
@@ -280,7 +277,7 @@ def census(top: Path) -> dict[str, tuple]:
 
 def in_time(fn: Callable[[], Any], *, fifo: Path | None = None) -> Any:
     """`fn()`'s value (or its exception, re-raised), failing if it has not returned within
-    `DEADLINE` (O3). A call stuck opening `fifo` is released by opening the FIFO's other end,
+    `DEADLINE`. A call stuck opening `fifo` is released by opening the FIFO's other end,
     so a regression costs one failed test, not a wedged run."""
     outcome: dict[str, Any] = {}
 
@@ -298,8 +295,7 @@ def in_time(fn: Callable[[], Any], *, fifo: Path | None = None) -> Any:
             with contextlib.suppress(OSError):
                 os.close(os.open(fifo, os.O_RDWR | os.O_NONBLOCK))
         worker.join(DEADLINE)
-        pytest.fail(f"the call did not return within {DEADLINE}s over a planted FIFO — O3: a "
-                    "special file at a record's address is refused without blocking")
+        pytest.fail(f"the call did not return within {DEADLINE}s over a planted FIFO")
     if "error" in outcome:
         raise outcome["error"]
     return outcome.get("value")
@@ -315,23 +311,20 @@ def raised_by(fn: Callable[[], Any], *, fifo: Path | None = None) -> BaseExcepti
 
 
 def assert_row(exc: BaseException | None, kind: str, *, where: str) -> None:
-    """`exc` is O6's row for a `kind` plant: its type, its errno, and its alias mark."""
+    """`exc` is the `O6_ROWS` row for a `kind` plant: its type, its errno, and its alias mark."""
     typ, code, marked = O6_ROWS[kind]
     assert exc is not None, f"{where}: the write into a {kind} plant was not refused"
-    want = f"O6's {typ.__name__} {errno.errorcode[code]}"
+    want = f"{typ.__name__} {errno.errorcode[code]}"
     assert isinstance(exc, typ), f"{where}: a {kind} plant raised {exc!r}, not {want}"
     assert getattr(exc, "errno", None) == code, (
         f"{where}: a {kind} plant raised {exc!r}, not {want}")
     assert bool(getattr(exc, "write_guarded_alias", False)) is marked, (
-        f"{where}: a {kind} plant's refusal is {'un' if marked else ''}marked as an alias; "
-        f"O6 says {'marked' if marked else 'unmarked'} (budget_enforcer's kill circuit keys "
-        "on it)")
+        f"{where}: a {kind} plant's refusal is {'un' if marked else ''}marked as an alias")
 
 
 def owner_refusal(h: Any) -> BaseException | None:
     """The owner's own refusal of the address (`_confine` on a composed path resolving outside
-    the run), which fires before any I/O and is unchanged by #1111. `None` if the owner builds
-    the path."""
+    the run), which fires before any I/O. `None` if the owner builds the path."""
     try:
         _ = h.path
     except (OSError, ValueError) as e:
@@ -393,8 +386,9 @@ def seam_calls(rec: S.RecordingIo, mark: int) -> list[tuple[str, dict[str, Any]]
     return [(op, S.bound_arguments(op, a, kw)) for op, a, kw in rec.invocations[mark:]]
 
 
-def _read_cases():
-    for m in READABLE:
+def _plant_cases(members: Iterable[Member]):
+    """Every member with every leaf plant, and with every folder plant at each holding folder."""
+    for m in members:
         for kind in LEAF_PLANTS:
             yield pytest.param(m, kind, None, id=f"{m}-{kind}")
         for folder in m.folders:
@@ -402,7 +396,7 @@ def _read_cases():
                 yield pytest.param(m, kind, folder, id=f"{m}-{kind}@{folder}")
 
 
-@pytest.mark.parametrize(("m", "kind", "folder"), list(_read_cases()))
+@pytest.mark.parametrize(("m", "kind", "folder"), list(_plant_cases(READABLE)))
 def test_o1_o3_a_plant_at_a_records_address_reads_none_and_a_plain_file_there_reads_back(
         tree, m, kind, folder):
     planted = plant(tree, m, kind, folder)
@@ -439,12 +433,12 @@ def _fill_record_sources(tree: Tree) -> None:
         json.dumps({"truncated_by": "budget", "closed_before_cut": False}), encoding="utf-8")
 
 
-#: The `_io` reads `run.record` may make: today's path-based pair, and the rooted read.
+#: The `_io` reads `run.record` may make: the path-based pair and the rooted read.
 _RECORD_READ_OPS = ("rooted_read", "read_guarded", "read_bytes_guarded")
 
 
 def _record_sources(tree: Tree) -> list[Path]:
-    """Every file `run.record` reads, by construction (O4): the address of each read call a
+    """Every file `run.record` reads, by construction: the address of each read call a
     pass-through recorder captured, whichever read seam it went through."""
     rec = S.RecordingIo()
     run = tree.run(io=rec)
@@ -508,16 +502,7 @@ def test_o1_the_schema_gated_writes_pre_read_does_not_read_through_a_plant(tree,
     assert census(tree.tmp) == before
 
 
-def _write_cases():
-    for m in WRITABLE:
-        for kind in LEAF_PLANTS:
-            yield pytest.param(m, kind, None, id=f"{m}-{kind}")
-        for folder in m.folders:
-            for kind in FOLDER_PLANTS:
-                yield pytest.param(m, kind, folder, id=f"{m}-{kind}@{folder}")
-
-
-@pytest.mark.parametrize(("m", "kind", "folder"), list(_write_cases()))
+@pytest.mark.parametrize(("m", "kind", "folder"), list(_plant_cases(WRITABLE)))
 def test_o2_o3_o6_o7_a_write_into_a_plant_is_refused_in_todays_shape_and_changes_nothing(
         tree, m, kind, folder):
     planted = plant(tree, m, kind, folder)
@@ -531,13 +516,13 @@ def test_o2_o3_o6_o7_a_write_into_a_plant_is_refused_in_todays_shape_and_changes
     if owner is not None:
         assert_same_refusal(raised, owner, where=str(m))
     elif folder is None and m.group == "observability" and m.verb == "append":
-        assert raised is None, f"O7: {m}'s refused leaf append raised {raised!r}"
+        assert raised is None, f"{m}'s refused leaf append raised {raised!r}"
         assert run.partial_failures == (f"{m.name}: append failed",), (
-            f"O7: {m}'s refused leaf append was not recorded: {run.partial_failures!r}")
+            f"{m}'s refused leaf append was not recorded: {run.partial_failures!r}")
     else:
         assert_row(raised, kind, where=f"{m}.{m.verb}")
         assert run.partial_failures == (), (
-            f"O7: a refused holding folder is not a partial failure: {run.partial_failures!r}")
+            f"a refused holding folder was recorded as a partial failure: {run.partial_failures!r}")
     assert census(tree.tmp) == before, f"{m}: a refused {m.verb} changed the tree"
 
     planted.remove()
@@ -557,22 +542,6 @@ def test_o7_a_fifo_at_the_tool_trace_is_a_partial_failure_not_a_raise_and_not_a_
     verb_call(tree.handle(m, run=run), m, "plain")()
     assert_landed(tree.path(m), m, "plain")
     assert run.partial_failures == ("tool_trace: append failed",)
-
-
-def test_o7_a_symlinked_wire_logs_folder_raises_and_records_no_partial_failure(tree):
-    m = _member("wire_log")
-    run = tree.run()
-    planted = plant_folder(tree.root(m), m.rel, m.folders[0], "folder_link_outside",
-                           host=tree.host)
-    before = census(tree.host)
-    assert_row(raised_by(verb_call(tree.handle(m, run=run), m, "x")), "folder_link_outside",
-               where="wire_log.append")
-    assert run.partial_failures == ()
-    assert census(tree.host) == before
-
-    planted.remove()
-    verb_call(tree.handle(m, run=run), m, "plain")()
-    assert_landed(tree.path(m), m, "plain")
 
 
 @pytest.mark.parametrize("m", [m for m in WRITABLE if m.verb == "write"], ids=str)
@@ -615,8 +584,8 @@ def test_o6_an_occupied_staged_name_refuses_the_replace_as_a_marked_eexist(tree,
 
     refused = raised_by(lambda: tree.handle(m, io=_OccupiedStageIo()).write(document(m, "x")))
     assert isinstance(refused, OSError), f"{m}: an occupied staged name raised {refused!r}"
-    assert refused.errno == errno.EEXIST, f"{m}: {refused!r} is not O6's EEXIST"
-    assert getattr(refused, "write_guarded_alias", None) is True, "O6: the EEXIST is marked"
+    assert refused.errno == errno.EEXIST, f"{m}: {refused!r} is not EEXIST"
+    assert getattr(refused, "write_guarded_alias", None) is True, f"{m}: the EEXIST is not marked as an alias"
     assert census(tree.tmp) == before
 
     tree.handle(m).write(document(m, "after"))
@@ -667,8 +636,7 @@ def test_o5_a_symlinked_runs_base_or_data_root_keeps_every_record_readable_and_w
 
 @pytest.mark.parametrize("m", ARCHIVED_MEMBERS, ids=str)
 def test_o5_an_archived_world_at_a_symlinked_world_dir_reads_every_member(tree, m):
-    """O5 for `ArchivedWorld`: its root, the world dir, is followed when spelled through a
-    symlink."""
+    """`ArchivedWorld`'s root, the world dir, is followed when spelled through a symlink."""
     alias = tree.tmp / "alias-of-the-world"
     alias.symlink_to(tree.world_dir, target_is_directory=True)
     (tree.world_dir / m.rel).write_text(PLAIN, encoding="utf-8")
@@ -683,9 +651,7 @@ def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m)
     tree = Tree(tmp_path, tmp_path / "data" / "runs", tmp_path / "unused-world", tmp_path)
     assert not tree.root(m).exists()
 
-    # #1105 NH-3 planted the runs base's record here, after the precondition; #1187 (R1)
-    # retired the record, but the runs base is still made here so the cases stay the ones the
-    # docstring names.
+    # Every root but the world dir hangs off the runs base, made here; the write makes the rest.
     if m.root != "world_dir":
         location_path(tree.runs_base).mkdir()
     verb_call(tree.handle(m), m, "created")()
@@ -695,7 +661,7 @@ def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m)
 @pytest.mark.parametrize("m", READABLE, ids=str)
 def test_o5_a_read_under_a_missing_root_is_none_and_creates_nothing(tmp_path, m):
     tree = Tree(tmp_path, tmp_path / "data" / "runs", tmp_path / "worlds" / "gone", tmp_path)
-    if m.root != "world_dir":  # #1105 NH-3's precondition, kept (#1187 R1: no record now)
+    if m.root != "world_dir":  # the runs base exists; the record's own root may not
         location_path(tree.runs_base).mkdir(parents=True)
     before = census(tmp_path)
     assert tree.handle(m).read() is None
@@ -717,9 +683,9 @@ class Scratch:
     root: Path
     host: Path
 
-    def real_folders(self, rel: PurePosixPath = DEEP) -> Path:
-        (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
-        return self.root / rel
+    def real_folders(self) -> Path:
+        (self.root / DEEP).parent.mkdir(parents=True, exist_ok=True)
+        return self.root / DEEP
 
 
 @pytest.fixture
@@ -760,7 +726,7 @@ def test_rooted_read_returns_the_text_or_the_bytes_of_a_plain_file(scratch):
 
 def test_rooted_read_is_absent_for_a_missing_leaf_folder_or_root(scratch):
     """Absence is `(None, reason)`, never a raise: a missing record, a missing holding folder,
-    a missing root (O5)."""
+    a missing root."""
     (scratch.root / "a").mkdir()
     for root, name in ((scratch.root, "a/rec.json"), (scratch.root, "a/b/rec.json"),
                        (scratch.tmp / "no-such-root", "rec.json")):
@@ -798,7 +764,7 @@ def test_rooted_read_refuses_every_plant_without_blocking(scratch, kind, folder,
 
 
 def test_rooted_read_follows_the_roots_own_spelling(scratch):
-    """O5: the root is opened following its spelling (a symlinked root, or a root under a
+    """The root is opened following its spelling (a symlinked root, or a root under a
     symlinked folder). Only what is below it is judged."""
     scratch.real_folders().write_text(PLAIN, encoding="utf-8")
     alias = scratch.tmp / "alias"
@@ -824,8 +790,8 @@ def test_rooted_read_never_reads_a_name_outside_the_grammar(scratch, name):
 # -- rooted_mkdir -----------------------------------------------------------------------
 
 def test_rooted_mkdir_creates_a_missing_root_following_links_then_each_folder(scratch):
-    """M1: a missing root is created following links (`os.makedirs`, as `guarded_mkdir`'s
-    base). Each missing folder is then created relative to its parent. It is idempotent."""
+    """A missing root is created following links (`os.makedirs`, as `guarded_mkdir`'s base).
+    Each missing folder is then created relative to its parent. It is idempotent."""
     link = scratch.tmp / "link"
     link.symlink_to(scratch.host, target_is_directory=True)
     root = link / "new" / "root"
@@ -1019,7 +985,7 @@ def test_rooted_write_refuses_every_plant_in_todays_shape_and_changes_nothing(
 
 @pytest.mark.parametrize("mode", MODES)
 def test_rooted_write_follows_the_roots_own_spelling(scratch, mode):
-    """O5: a symlinked root is followed; the record lands in the folder it points at."""
+    """A symlinked root is followed; the record lands in the folder it points at."""
     scratch.real_folders()
     alias = scratch.tmp / "alias"
     alias.symlink_to(scratch.root, target_is_directory=True)
@@ -1061,8 +1027,7 @@ def plant_device(path: Path, kind: str) -> Planted:
     return Planted(kind, path)
 
 
-#: The seam ops a leaf judge guards: both reads and each write mode. (The lock,
-#: `rooted_locked_for_rewrite`, left with #1235.)
+#: The seam ops a leaf judge guards: both reads and each write mode.
 SEAM_OPS = ("read", "read_bytes", "create", "replace", "append")
 
 
@@ -1077,16 +1042,15 @@ def seam_op(s: Scratch, op: str, **kw: Any) -> Callable[[], Any]:
     raise AssertionError(f"no seam op {op!r}")
 
 
-def assert_seam_refused(op: str, kind: str, fn: Callable[[], Any], *,
-                        fifo: Path | None = None) -> None:
-    """A read answers `(None, reason)`; every write mode raises O6's row for `kind`.
+def assert_seam_refused(op: str, kind: str, fn: Callable[[], Any]) -> None:
+    """A read answers `(None, reason)`; every write mode raises the `O6_ROWS` row for `kind`.
     Promptly, either way."""
     if op.startswith("read"):
-        got = in_time(fn, fifo=fifo)
+        got = in_time(fn)
         assert got[0] is None, f"{op} of a {kind} leaf returned {got[0]!r}"
         assert isinstance(got[1], str), f"{op} of a {kind} leaf gave no reason: {got!r}"
     else:
-        assert_row(raised_by(fn, fifo=fifo), kind, where=f"{op} of a {kind} leaf")
+        assert_row(raised_by(fn), kind, where=f"{op} of a {kind} leaf")
 
 
 def assert_seam_lands(s: Scratch, op: str, **kw: Any) -> None:
@@ -1104,7 +1068,7 @@ def assert_seam_lands(s: Scratch, op: str, **kw: Any) -> None:
     assert target.read_text(encoding="utf-8").endswith(f"{op} landed\n"), f"control: {op}"
 
 
-# -- hole 1: a device at the leaf ----------------------------------------------------------
+# -- A device at the leaf ------------------------------------------------------------------
 
 @pytest.mark.parametrize("op", SEAM_OPS)
 @pytest.mark.parametrize("kind", sorted(DEVICES))
@@ -1129,7 +1093,7 @@ def test_o1_o2_a_device_node_at_any_members_address_is_refused_through_the_handl
         h = tree.handle(m, run=run)
         raised = raised_by(verb_call(h, m, "refused"))
         if m.group == "observability" and m.verb == "append":
-            assert raised is None, f"O7: {m}'s refused leaf append raised {raised!r}"
+            assert raised is None, f"{m}'s refused leaf append raised {raised!r}"
             assert run.partial_failures == (f"{m.name}: append failed",)
         else:
             assert_row(raised, "char_device", where=f"{m}.{m.verb}")
@@ -1193,7 +1157,7 @@ O6_ROWS.update({
 })
 
 
-# -- hole 2: the race window between the leaf's check and its open ------------------------
+# -- The race window between the leaf's check and its open --------------------------------
 
 @pytest.mark.parametrize("op", ["read", "read_bytes", "append"])
 @pytest.mark.parametrize("pose", sorted(p for p in POSES if p != "as_symlink"))
@@ -1307,7 +1271,7 @@ def test_a_write_once_collision_writes_no_body(scratch):
     assert target.read_text(encoding="utf-8") == "first\n"
 
 
-# -- hole 3: create's DEFAULT lane --------------------------------------------------------
+# -- Create's DEFAULT lane ----------------------------------------------------------------
 
 class _RecordsCreate(PassThroughOs):
     """Records every `link`, with whether the record's name already existed at that moment
@@ -1434,8 +1398,7 @@ def test_the_handles_alert_write_leaves_no_alert_or_a_whole_one_when_killed(tmp_
         bad, landed = _alert_leftovers(root, body)
         return [f"kill {kill}: {b}" for b in bad], landed
 
-    # Each kill is its own child in its own run dir, so they run side by side: sixteen start-ups
-    # one after another were the whole cost of this test.
+    # Each kill is its own child in its own run dir, so they run side by side.
     with ThreadPoolExecutor(max_workers=8) as pool:
         outcomes = list(pool.map(one_kill, range(ALERT_KILLS)))
     torn = [line for lines, _ in outcomes for line in lines]

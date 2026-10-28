@@ -17,7 +17,7 @@ from defender.kit.faults import ConfigFault
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
-#: The declaration K1 names.
+#: The settings check every adapter declares.
 CHECK = "check_settings"
 
 
@@ -98,8 +98,7 @@ def _adapter(roster: Any, system: str) -> Any:
 def _declared_check(module: Any, system: str) -> Callable[..., Any]:
     check = getattr(module, CHECK, None)
     assert callable(check), (
-        f"{system}'s adapter declares no `{CHECK}` (K1, O-5: every adapter declares its settings "
-        f"check, a system needing none declares one that never raises) — got {check!r}")
+        f"{system}'s adapter declares no `{CHECK}`: got {check!r}")
     return check
 
 
@@ -160,11 +159,11 @@ def test_o5_every_roster_adapter_declares_a_settings_check(checkout_roster):
     assert len(systems) >= 8, f"precondition: the roster was read: {sorted(systems)}"
     assert systems == set(FAULTS), (
         f"the roster and this contract's fault table disagree — roster only: "
-        f"{sorted(systems - set(FAULTS))}, table only: {sorted(set(FAULTS) - systems)}. A new "
-        "adapter needs its fault families listed here (O-5: its check must raise each).")
+        f"{sorted(systems - set(FAULTS))}, table only: {sorted(set(FAULTS) - systems)} (a new "
+        "adapter needs its fault families listed here)")
     undeclared = [s for s in sorted(systems)
                   if not callable(getattr(_adapter(checkout_roster, s), CHECK, None))]
-    assert undeclared == [], f"adapters that declare no `{CHECK}` (K1, O-5): {undeclared}"
+    assert undeclared == [], f"adapters that declare no `{CHECK}`: {undeclared}"
 
 
 @pytest.mark.parametrize(("system", "family"), _cases())
@@ -195,10 +194,10 @@ def test_o5_settings_that_make_a_verb_raise_make_the_check_raise(
 
     fault = _check_outcome(_declared_check(module, system), record)
     assert isinstance(fault, ConfigFault), (
-        f"O-5: {system}'s verbs raise ConfigFault under {family.label} ({sorted(raising)}), so its "
-        f"settings check must raise ConfigFault over the same record — got {fault!r}")
+        f"{system}'s verbs raise ConfigFault under {family.label} ({sorted(raising)}) but its "
+        f"settings check does not: got {fault!r}")
     assert any(n in str(fault) for n in family.names), (
-        f"K1: {system}'s check must name what is wrong (one of {family.names}): {fault}")
+        f"{system}'s check does not name what is wrong (one of {family.names}): {fault}")
 
 
 @pytest.mark.parametrize("system", sorted(FAULTS))
@@ -218,8 +217,7 @@ def test_o5_complete_settings_pass_every_verb_and_the_check(tmp_path, checkout_r
 
     fault = _check_outcome(_declared_check(module, system), record)
     assert fault is None, (
-        f"K1/O-1: {system} is usable (no verb raises ConfigFault), so its check must return "
-        f"without raising — got {fault!r}")
+        f"{system} is usable (no verb raises ConfigFault) but its check raised {fault!r}")
 
 
 def test_o5_elastic_without_a_kibana_container_stays_usable(tmp_path, checkout_roster):
@@ -302,7 +300,7 @@ _PLANTED: dict[str, dict[str, str]] = {
              "token": ""},
     "identity": {"verb": "get-user", "fn": "get_user", "param": "user", "arg": "dev.dana",
                  "token": "defender_planted_absent_module_1256"},
-    # Declares no check: the reason names the missing declaration, K1's `check_settings`.
+    # Declares no check: the reason names the missing `check_settings` declaration.
     "threat-intel": {"verb": "lookup", "fn": "lookup", "param": "value", "arg": "203.0.113.7",
                      "token": CHECK},
     # Its check raises something that is not a ConfigFault (a crash).
@@ -315,7 +313,7 @@ _PLANTED: dict[str, dict[str, str]] = {
 _BROKEN = ("identity", "threat-intel", "change-mgmt", "host-state")
 _LOG_CONTROL = "log-channel control for #1256 O-5a (names no system)"
 #: What the well-formed planted verb logs at ERROR when it runs: proves a record emitted INSIDE
-#: the run reaches the same capture the K3 assertion reads. Names no system.
+#: the run reaches the same capture the ERROR-record assertions read. Names no system.
 _IN_RUN_LOG_CONTROL = "in-run log-channel control for #1256 O-5a"
 
 
@@ -325,8 +323,8 @@ _OUTSIDE_TENANT = Path("shared-1256", "credentials")
 def _planted_source(system: str, probe: Path, *, outside: Path | None = None,
                     at_import: list[str] | None = None, check: list[str] | None = None) -> str:
     """`system`'s planted adapter (`_PLANTED[system]`'s verb, recording to `probe`), broken the
-    way `_PLANTED` says — or, given `at_import` / `check`, with those module lines instead (the
-    seams O-5a names: what runs at import, and the declared check)."""
+    way `_PLANTED` says — or, given `at_import` / `check`, with those module lines instead (what
+    runs at import, and the declared check)."""
     spec = _PLANTED[system]
     head = [f'"""Planted by #1256\'s contract (O-5a) as the {system} adapter."""',
             "import json", "import logging", "from pathlib import Path"]
@@ -366,7 +364,7 @@ def _planted_source(system: str, probe: Path, *, outside: Path | None = None,
 
 def planted_tree(root: Path, probe: Path, sources: dict[str, str] | None = None, *,
                  outside: Path | None = None) -> Path:
-    """A defender tree whose adapters are the planted ones (K2): every top-level entry of this
+    """A defender tree whose adapters are the planted ones: every top-level entry of this
     checkout symlinked except `integrations/`,
     a real folder holding only the planted files — `sources` (system -> source), else every
     `_PLANTED` system's. `<root>/repo/defender`, as the catalog's repo-relative locators expect.
@@ -484,7 +482,7 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
     for i, system in enumerate(_BROKEN, start=1):
         token = _PLANTED[system]["token"]
         if (probe / f"{system}.ran").exists():
-            violations.append(f"{system}: its broken adapter's verb ran (O-5a: no call to it runs)")
+            violations.append(f"{system}: its broken adapter's verb ran")
         if refused := [r for r in rows if r.get("system") == system]:
             violations.append(f"{system}: a refused call wrote query row(s) {refused}")
         if system in breaker.get("systems", {}):
@@ -496,14 +494,14 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
             if system not in low or token.lower() not in low:
                 violations.append(
                     f"{system}: its {where} reply must name it down and the reason "
-                    f"({token!r}) (O-5a, DP4): {text[-300:]!r}")
-            # DP4: one notion of down, the message naming the ACTUAL cause — a broken adapter is
+                    f"({token!r}): {text[-300:]!r}")
+            # One notion of down, the message naming the ACTUAL cause — a broken adapter is
             # neither a breaker trip nor a system whose settings do not configure it.
             for wrong_cause in ("tripped", "not configured"):
                 if wrong_cause in low:
                     violations.append(
                         f"{system}: its {where} reply says {wrong_cause!r}, not the adapter "
-                        f"fault (DP4): {text[-300:]!r}")
+                        f"fault: {text[-300:]!r}")
             # The reason shown to the agent carries no host path: not the planted tree's, not the
             # data root's (as written or resolved).
             if leaked := [p for p in host_paths if p in text]:
@@ -511,8 +509,7 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
                     f"{system}: its {where} reply shows host path(s) {leaked}: {text[-300:]!r}")
         if not [r for r in at_start if r.levelno >= logging.ERROR and system in r.getMessage()]:
             violations.append(
-                f"{system}: no ERROR-or-above record naming it before the agent's first turn "
-                f"(O-5a, K3)")
+                f"{system}: no ERROR-or-above record naming it before the agent's first turn")
         if system not in _PATH_BEARING:
             continue
         # The start surfaces: each shows the reason beside the system (non-vacuity of the sweep
@@ -521,19 +518,18 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
             carrying = _token_lines(text, token)
             if not [ln for ln in carrying if system in ln]:
                 violations.append(
-                    f"{system}: {where} has no line naming it with its reason ({token!r}) "
-                    f"(flow step 4: the statuses feed it)")
+                    f"{system}: {where} has no line naming it with its reason ({token!r})")
             for ln in carrying:
                 if leaked := [p for p in host_paths if p in ln]:
                     violations.append(f"{system}: {where} shows host path(s) {leaked}: {ln!r}")
     if breaker.get("total_failures", 0) != 0:
         violations.append(f"failures were charged to the run-wide breaker: {breaker}")
-    assert violations == [], "O-5a — a broken granted adapter is down from the start:\n  " + (
+    assert violations == [], "a broken granted adapter is not down from the start:\n  " + (
         "\n  ".join(violations) + "\n  records at the first turn: "
         + repr([(r.levelname, r.getMessage()[:160]) for r in at_start]))
 
 
-# --- O-5a at both seams, whatever the adapter raises (#678: a catch-all discharged at one seam) --
+# --- O-5a at both seams (import, check), whatever the adapter raises (#678) ---------------------
 
 _ANY_BREAK: tuple[tuple[str, str, list[str], list[str] | None, str], ...] = (
     ("import", "NameError", ["planted_undefined_name_1256  # noqa: F821"], None,
@@ -596,15 +592,15 @@ def test_o5a_any_exception_at_import_or_from_the_check_is_adapter_broken(
             summary = drive(run_dir, run_id="t1256x", main=main, gather=gather,
                             defender_dir=tree, tenant=S.tenant_folder_of(root))
         except Exception as raised:  # noqa: BLE001 — the run must not raise; shown whole
-            pytest.fail(f"{seam} {label}: the run raised instead of taking identity down "
-                        f"(O-5a): {type(raised).__name__}: {raised}")
+            pytest.fail(f"{seam} {label}: the run raised instead of taking identity down: "
+                        f"{type(raised).__name__}: {raised}")
     rows = list(read_jsonl_rows(run_dir / "executed_queries.jsonl"))
     breaker = summary["run_state"].breaker_snapshot()
 
     assert (probe / "cmdb.ran").is_file(), "control: the well-formed cmdb verb ran"
     assert main.calls == 3, f"control: MAIN played its whole script ({main.calls} of 3)"
     assert not (probe / "identity.ran").exists(), (
-        f"{seam} {label}: the broken identity adapter's verb ran (O-5a)")
+        f"{seam} {label}: the broken identity adapter's verb ran")
     identity_rows = [r for r in rows if r.get("system") == "identity"]
     assert identity_rows == [], (
         f"{seam} {label}: a refused identity call wrote a row: {identity_rows}")
@@ -621,8 +617,8 @@ def test_o5a_any_exception_at_import_or_from_the_check_is_adapter_broken(
             f"{text[-300:]!r}")
         for wrong_cause in ("tripped", "not configured"):
             assert wrong_cause not in low, (
-                f"{seam} {label}: identity's {where} refusal says {wrong_cause!r} (DP4): "
+                f"{seam} {label}: identity's {where} refusal says {wrong_cause!r}: "
                 f"{text[-300:]!r}")
     assert [r for r in at_start if r.levelno >= logging.ERROR and "identity" in r.getMessage()], (
         f"{seam} {label}: no ERROR-or-above record naming identity before the agent's first "
-        f"turn (O-5a, K3): {[(r.levelname, r.getMessage()[:160]) for r in at_start]}")
+        f"turn: {[(r.levelname, r.getMessage()[:160]) for r in at_start]}")

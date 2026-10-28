@@ -13,8 +13,6 @@ from defender.tests.support.learning.core._state1135 import env_state
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -34,7 +32,7 @@ def _grade(tmp_path, ep, judge, **kw):
 
 
 def _lanes(ep) -> dict[str, str]:
-    """World b's draw-0 ledger, `{finding index: lane}` (A13: one entry per filed finding)."""
+    """World b's draw-0 ledger, `{finding index: lane}` (one entry per filed finding)."""
     return {e["finding_id"].rsplit("/", 1)[1]: e["lane"]
             for e in J.judge_record(ep)["dispositions"] if "/b/0/" in e["finding_id"]}
 
@@ -142,8 +140,7 @@ def test_921_no_two_judge_calls_of_one_family_share_a_trace_name(tmp_path):
     ep = _episode(tmp_path)
     judge = _grade(tmp_path, ep, J.scripted_judge(), draws=3)
 
-    # #1007 M5 added a THIRD caller (the family-level draw, `judge:family:<n>`) to the fan-out
-    # beside the two per-world ones — 3 callers x 3 draws = 9, not 6.
+    # Two world callers plus the family call (`judge:family:<n>`), times 3 draws.
     assert len(judge.agent_ids) == 9
     assert len(set(judge.agent_ids)) == 9, f"colliding agent ids: {judge.agent_ids}"
     assert set(judge.agent_ids) == {f"judge:{label if label == 'family' else T.world_id(ep, label)}:{n}" for label in ("b", "c", "family")
@@ -215,17 +212,12 @@ def test_921_reply_is_validated_into_JudgeReply_before_anything_reads_it(tmp_pat
     record = J.judge_record(ep)
     rows = J.world_rows(record)
     assert rows["b"]["completed_draws"] == 0, "an invalid reply counted as a completed draw"
-    # #1224 (N22): a refused reply is asked again, up to three asks per draw, and every
-    # refused ask is counted — one draw, three malformed replies.
+    # A refused reply is asked again, up to three asks per draw, and every refused ask counts.
     assert rows["b"]["malformed_replies"] == 3, (
-        "the malformed reply was skipped without a count; a silent skip and a counted skip are "
-        "the same pass and different evidence")
+        "the malformed reply was skipped without a count")
     assert record["enqueued_rows"] == 0, "a finding was enqueued off a reply that never parsed"
     assert J.wire_logs(ep), "the unparseable reply's own bytes were not kept anywhere"
-    assert (ep / "judge.yaml").is_file(), (
-        "the pass left no family record at all; a model that replies unparseably is exactly "
-        "the case an operator needs a record OF, and its absence is indistinguishable from an "
-        "episode nothing ever graded")
+    assert (ep / "judge.yaml").is_file(), "an unparseable reply left no family record"
 
 
 def test_921_a_reply_whose_top_level_is_not_a_mapping_fails_before_anything_reads_it(tmp_path):
@@ -235,7 +227,7 @@ def test_921_a_reply_whose_top_level_is_not_a_mapping_fails_before_anything_read
     for text in (yaml.safe_dump(["gradable"]), "just a sentence\n", "null\n"):
         with pytest.raises(J.refusals()):
             run_mod.validate_reply(text)
-    # Positive control (#1234: `episode_outcome` is retired, A17 — the bucket is the world's).
+    # Positive control: the reply carries the world's bucket.
     assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).bucket == "lead-set"
 
 
@@ -279,7 +271,7 @@ def test_921_judge_call_is_zero_grant_and_deny_all(tmp_path):
     ep = _episode(tmp_path)
     judge = _grade(tmp_path, ep, J.scripted_judge(), draws=1)
 
-    # #1007 M5 adds a THIRD call (the family-level draw) beside the two per-world ones.
+    # Two world calls plus the family call.
     assert judge.calls == 3, "the positive control failed: the model was never reached"
     assert J.draw_files(ep, "b"), "no reply came back"
     for kw in judge.kwargs:
@@ -313,8 +305,8 @@ def test_921_draw_count_is_a_knob_and_the_family_record_reports_the_spread(tmp_p
                                                                           monkeypatch):
     monkeypatch.setenv(J.DRAWS_KNOB, "3")
     ep = _episode(tmp_path)
-    # #1224: the bucket is the model's own per draw (`bucket` on the reply), and the row
-    # reports every draw's answer on `draws`, naming a row bucket only where all draws agree.
+    # Each draw's reply names its own bucket; the row reports every draw's on `draws` and
+    # names a row bucket only where all draws agree.
     varied = [J.as_reply_text(J.reply_doc(bucket=bucket,
                                           findings=[J.finding_doc(bucket=bucket)]))
               for bucket in ("lead-set", "lead-quality", "lead-set")]
@@ -337,17 +329,9 @@ def test_921_draw_count_is_a_knob_and_the_family_record_reports_the_spread(tmp_p
     (ep / "judge.yaml").unlink()
     monkeypatch.setenv(J.DRAWS_KNOB, "2")
     _grade(tmp_path, ep, J.FakeJudge(default=varied[0], family_default=family))
-    assert len(J.draw_files(ep, "b")) == 3, "P4 says a retry clobbers rather than cleans up"
+    assert len(J.draw_files(ep, "b")) == 3, "a retry cleaned up the wider attempt's stale draw file"
     assert J.judge_record(ep)["draws"] == {"configured": 2, "completed": 2}, (
         "the record does not distinguish this pass's draws from the files on disk")
-
-
-def _prompt(ep, label: str = "b") -> str:
-    """World `label`'s prompt, built by the real assembler over the real render (#1234:
-    `_build_prompt(ctx, manifest)` returns the prompt and its layout)."""
-    run_mod = J.mod("learning.judge.run")
-    manifest = J.read_manifest_at(ep)
-    return run_mod._build_prompt(J.render_at(ep, label), manifest)[0]
 
 
 def test_921_a_prose_evidence_value_is_refused_rather_than_silently_empty(tmp_path):
@@ -359,7 +343,7 @@ def test_921_a_prose_evidence_value_is_refused_rather_than_silently_empty(tmp_pa
     assert "evidence" in str(refusal.value)
 
 
-def test_921_a_degenerate_outcome_still_discards_the_findings(tmp_path):
+def test_921_the_not_measured_buckets_are_unreachable_and_incoherent(tmp_path):
     run_mod = J.mod("learning.judge.run")
     assert set(run_mod.NOT_MEASURED_BUCKETS) == {"unreachable", "incoherent"}
     assert "mislabelled" not in run_mod.NOT_MEASURED_BUCKETS

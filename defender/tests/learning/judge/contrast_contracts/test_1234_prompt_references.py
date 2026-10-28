@@ -22,7 +22,7 @@ def _payload_cap_lifted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(S.CAP_KNOB, str(_UNCAPPED))
 
 
-#: The words A2/M2 require on the aligned lead view and the fact surfaces (`S.COINED`).
+#: The words the aligned lead view and the fact surfaces must carry (`S.COINED`).
 HEURISTIC = S.COINED["label.heuristic"]
 BASELINE = S.COINED["label.baseline"]
 
@@ -30,14 +30,14 @@ CTL, WB, WC = "ctl", "wb", "wc"
 LABELS = (CTL, WB, WC)
 _UNCAPPED = 10_000_000
 
-#: M3's sections, each found by its COINED host-text title (`S.COINED["title.<section>"]`),
-#: outside every untrusted frame (A10).
+#: The prompt's sections, each found by its host-text title (`S.COINED["title.<section>"]`),
+#: outside every untrusted frame.
 SECTIONS = ("header", "contrast", "surfaces", "aligned", "references", "focus", "noise")
 
 #: A pre-flight drift entry (the noise context is pre-flight's record alone, drift overlay).
 DRIFT_MARK = "MARK-preflight-drift"
 #: The episode id of a second, separately graded family in one test (finding ids carry it).
-SECOND_EPISODE_ID = fixture_uuid("fresh-case-n60")  # a UUID, as every episode id after #1187
+SECOND_EPISODE_ID = fixture_uuid("fresh-case-n60")  # a UUID, like every episode id
 
 
 def _title(section: str) -> str:
@@ -54,15 +54,15 @@ def _call(lead: str, system: str = "idp", verb: str = "query", params: dict | No
 
 
 def _altered(lead: str, q: str, *, system: str = "idp", fact_id: str = "f-wb",
-             forged_id: str = "fg-wb-1", **kw: Any) -> S.CallRow:
+             **kw: Any) -> S.CallRow:
     """World wb's altered answer (an `oracle` ledger row with its claim and verifier verdict)."""
-    return S.oracle_call(q, system=system, fact_id=fact_id, forged_id=forged_id, lead=lead, **kw)
+    return S.oracle_call(q, system=system, fact_id=fact_id, forged_id="fg-wb-1", lead=lead, **kw)
 
 
-def _forged(forged_id: str, fact_id: str, system: str, *, label: str = WB) -> dict:
+def _forged(forged_id: str, fact_id: str, system: str) -> dict:
     return {"forged_id": forged_id, "fact_id": fact_id, "system": system,
             "row": {"user": "alice", "event_id": f"e-{forged_id}",
-                    "note": S.marker(label, "forged-" + fact_id)}}
+                    "note": S.marker(WB, "forged-" + fact_id)}}
 
 
 def _triad(**over: dict[str, Any]) -> list[S.World]:
@@ -129,15 +129,14 @@ def _host_hits(text: str, pattern: re.Pattern[str], lo: int = 0, hi: int | None 
 
 def _sections(prompt: str) -> dict[str, tuple[int, int]]:
     """Each section's span: from its COINED title in host text to the next title (or the end).
-    The task-and-taxonomy region is everything before the first title (`_task`)."""
+    The task-and-taxonomy region is everything before the first title."""
     starts: dict[str, int] = {}
     for section in SECTIONS:
         token = _title(section)
         hits = _host_hits(prompt, re.compile(re.escape(token)))
-        assert hits, (f"no host-text title {token!r} opens the {section} section (A10: titles sit "
-                      f"outside the untrusted frames; COINED title.{section})")
-        assert len(hits) == 1, (f"the {section} section's title {token!r} occurs {len(hits)} times "
-                                "in host text; rename it in COINED so it marks its section once")
+        assert hits, f"no host-text title {token!r} opens the {section} section"
+        assert len(hits) == 1, (
+            f"the {section} section's title {token!r} occurs {len(hits)} times in host text")
         starts[section] = hits[0]
     order = sorted(starts, key=starts.__getitem__)
     return {s: (starts[s], starts[order[i + 1]] if i + 1 < len(order) else len(prompt))
@@ -147,10 +146,6 @@ def _sections(prompt: str) -> dict[str, tuple[int, int]]:
 def _section(prompt: str, section: str) -> str:
     lo, hi = _sections(prompt)[section]
     return prompt[lo:hi]
-
-
-def _task(prompt: str) -> str:
-    return prompt[:min(lo for lo, _hi in _sections(prompt).values())]
 
 
 def _blocks(prompt: str, span: tuple[int, int], labels: Iterable[str]) -> dict[str, str]:
@@ -167,8 +162,8 @@ def _blocks(prompt: str, span: tuple[int, int], labels: Iterable[str]) -> dict[s
     return out
 
 
-def _reference_blocks(prompt: str, focus: str, labels: Iterable[str] = LABELS) -> dict[str, str]:
-    return _blocks(prompt, _sections(prompt)["references"], [x for x in labels if x != focus])
+def _reference_blocks(prompt: str, focus: str) -> dict[str, str]:
+    return _blocks(prompt, _sections(prompt)["references"], [x for x in LABELS if x != focus])
 
 
 _SCALARS = (str, bytes, int, float, bool, type(None), Path)
@@ -331,7 +326,7 @@ def test_1234_world_prompt_carries_control_and_every_gradable_sibling_as_referen
     judge = _graded(built)
     assert judge.called(WB)
     prompt = judge.prompt_for(WB)
-    assert S.marker(CTL, "report") in prompt, "the control's report reaches no prompt (C1)"
+    assert S.marker(CTL, "report") in prompt, "the control's report reaches no prompt"
     blocks = _reference_blocks(prompt, WB)
     for label, lead in ((CTL, "l-305"), (WC, "l-406")):
         block = blocks[label]
@@ -353,7 +348,6 @@ _UNGRADABLE = {
 
 @pytest.mark.parametrize("kind", sorted(_UNGRADABLE))
 def test_1234_ungradable_planted_world_is_in_no_reference_set(tmp_path: Path, kind: str) -> None:
-    # rejected: grading on a thinned, flagged or partial run set (X5)
     fields, reason_word = _UNGRADABLE[kind]
     wx = {"role": "D", "calls": [_call("l-777", params=_q(f"user:alice {S.marker('wx', 'call')}"))],
           **fields}

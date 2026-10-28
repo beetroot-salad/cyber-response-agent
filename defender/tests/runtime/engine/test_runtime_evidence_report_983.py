@@ -42,7 +42,8 @@ def _body(report: str) -> str:
 
 
 def test_runtime_evidence_receipt_carries_the_rows_parsed_fields():
-    """A receipt is a TYPED record of one `:R consultations` row — the owning lead, the anchor"""
+    """A receipt is a frozen, typed record of one `:R consultations` row: lead, anchor, result,
+    reasoning, and the window both verbatim and parsed, so the guard and the report read one value."""
     (receipt,) = _receipts(BENIGN_DOC)
 
     assert dataclasses.is_dataclass(receipt)
@@ -69,9 +70,7 @@ def test_runtime_evidence_receipt_carries_the_rows_parsed_fields():
     )
     assert receipt.window_start == _utc("2026-04-04T00:00:00Z")
     assert receipt.window_end == _utc("2026-05-04T00:00:00Z"), (
-        "the window's END is not parsed — it is the endpoint mechanism A's guard compares "
-        "against the alerted event, and a receipt that never parsed it cannot have been "
-        "produced by a check that did"
+        "the window's end is not parsed, though the guard compares it against the alerted event"
     )
 
 
@@ -100,7 +99,8 @@ def test_runtime_evidence_rows_project_off_the_consultation_bucket():
 
 
 def test_runtime_evidence_consultation_lands_in_report_body():
-    """A close projects every qualifying `:R consultations` row into `report.md`'s BODY — one"""
+    """A close renders one body line per qualifying `:R consultations` row, never into the capped
+    frontmatter (the whole-close half is `e2e/test_tacit_authz_e2e_983.py`)."""
     receipts = _receipts(BENIGN_DOC)
     assert len(receipts) == 1, "fixture control: the document carries one qualifying consultation"
     (receipt,) = receipts
@@ -159,15 +159,14 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
     wire = json.dumps(payload, sort_keys=True)
     for crossed in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):
         assert crossed in wire, (
-            f"{crossed!r} did not reach the outbound comment — #767 D3 carries the whole "
-            f"report body into it now, deliberately, gated by D4's approval screen on the "
-            f"read side rather than by anything withheld on the write side"
+            f"{crossed!r} did not reach the outbound comment, which carries the whole report body"
         )
 
 
 
 def test_the_projection_and_the_render_read_one_set():
-    """Whatever `conclude_runtime_evidence_rows` hands back is what `render_report` writes —"""
+    """What `conclude_runtime_evidence_rows` hands back is what `render_report` writes: two rows
+    differing in every cell expose a collapsed, duplicated or canned render."""
     doc = scene.document(
         rows=scene.consult_block(
             scene.consultation_row(),

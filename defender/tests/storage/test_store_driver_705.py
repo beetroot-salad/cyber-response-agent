@@ -75,7 +75,7 @@ def _read_alert_turns(run_dir: Path, n: int) -> list[Turn]:
             for _ in range(n)]
 
 
-# the fifth seam, and the identity the run mints
+# the store-factory seam, and the identity the run mints
 
 def test_run_investigation_takes_a_store_factory_seam(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN, run_id='seam')
@@ -124,7 +124,7 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(
     assert Path(resolved) == Path(body["store_path"]) == Path(result["store_path"])
 
 
-# the capability, its seam, and the flag that no longer gates it
+# the capability and its seam
 
 def test_capability_attaches_at_the_existing_extra_capabilities_seam(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='seam-attach')
@@ -144,8 +144,7 @@ def test_capability_attaches_at_the_existing_extra_capabilities_seam(tmp_path):
     agents = {row[0] for row in sql(store, "SELECT DISTINCT agent_id FROM message")}
     assert "main" in agents, agents
     assert any(a != "main" for a in agents), (
-        f"the gather leg's rows must be recorded too (O21 denies gather the RENDER, not "
-        f"the record); agent_ids were {agents}")
+        f"the gather leg's rows were not recorded; agent_ids were {agents}")
 
 
 # whose history is store-rendered
@@ -202,7 +201,7 @@ def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tm
         f"a non-empty set of real requests, including the ones past the first")
     for i, seen in enumerate(gather.seen):
         assert MAIN_ONLY_MARKER not in seen, (
-            f"gather request {i} was handed main's history; O21 pins that it must not be")
+            f"gather request {i} was handed main's history")
 
     # every other out-edge of the gather leg the content could reach
     rows = sql(store, "SELECT p.payload FROM message m JOIN message_payload p "
@@ -273,7 +272,7 @@ def test_a_swallowed_store_error_never_sends_an_unrecorded_list(tmp_path):
 
     source = Path(driver.__file__).read_text()
     assert "compaction skipped" not in source, (
-        "the catch-all that returns the input unchanged is what M5 deletes")
+        "the driver still has the catch-all that returns the input unchanged")
 
     log = RunPaths(run_dir).wire_log
     requests_logged = sum(1 for line in log.read_text().splitlines()
@@ -435,7 +434,7 @@ def request_limit_run(tmp_path_factory):
     return rd, opened[0]
 
 
-# the run-end flush — R11's true `finally`
+# the run-end flush: a true `finally`
 
 def test_run_end_flush_captures_the_terminal_response_on_every_exit(
         tmp_path, monkeypatch, request_limit_run):

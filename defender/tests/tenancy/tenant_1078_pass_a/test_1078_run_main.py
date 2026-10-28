@@ -1,4 +1,4 @@
-"""run.py main front door: tenant required and checked before anything is spent, sibling tenant from the episode record, data-root faults, refusal confinement."""
+"""`run.py main`'s front door: the tenant is required and checked before anything is spent (a sibling's too, whatever its source's stamp says), data-root faults, refusal confinement."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 
 
@@ -38,20 +37,16 @@ def _accepted(argv: list[str], rec: H.Recorder) -> dict[str, Any]:
     return rec.materialize_calls[0]
 
 
-def _sibling(tmp_path: Path, root: Path, tenant_id: str = H.VALID_ID, *, monkeypatch: Any = None,
-             row: bool = True) -> tuple[Path, Path]:
-    """A source run at T's tenant location plus an episode manifest naming it, at
-    `<root>/<T>/episodes/<uuid>` as RUNS leaves it (#1187 Layout A, R2: `runs/` and the arm
-    roster; no container record, R1). Returns (source run dir, manifest). `tmp_path` and
-    `monkeypatch` are unused: no episodes base is configured (O9)."""
-    del tmp_path, monkeypatch
-    _base, src = H.tenant_source(root, tenant_id, row=row)
+def _sibling(root: Path, tenant_id: str) -> tuple[Path, Path]:
+    """A source run at T's tenant location (stamped T) plus an episode manifest naming it, at
+    `<root>/<T>/episodes/<uuid>` as RUNS leaves it. Returns (source run dir, manifest)."""
+    _base, src = H.tenant_source(root, tenant_id)
     manifest = H.family_for(src)
     return src, manifest
 
 
 def _stamp_tenant(run_dir: Path, tenant_id: str) -> None:
-    """Rewrite the run's provenance stamp to carry `tenant_id` — the box-writable file (C7)."""
+    """Rewrite the run's provenance stamp to carry `tenant_id` — the box-writable file."""
     stamp = run_dir / "provenance.json"
     doc = json.loads(stamp.read_text(encoding="utf-8"))
     doc["tenant_id"] = tenant_id
@@ -59,7 +54,7 @@ def _stamp_tenant(run_dir: Path, tenant_id: str) -> None:
 
 
 def test_1279_o5_run_py_takes_no_run_id(tmp_path, data_root, capsys):
-    """O5: `--run-id` is not an option of `run.py`; the refusal names it and nothing is spent."""
+    """`--run-id` is not an option of `run.py`; the refusal names it and nothing is spent."""
     alert = H.plant_alert(tmp_path / "in")
     H.make_tenant(data_root, H.VALID_ID)
     before = H.census(data_root)
@@ -70,7 +65,7 @@ def test_1279_o5_run_py_takes_no_run_id(tmp_path, data_root, capsys):
 
 
 def test_1279_o5_the_run_id_is_announced_as_the_first_stdout_line(tmp_path, data_root, capsys):
-    """O5: right after setup, `run_id=<id of the run setup built>` is the first stdout line."""
+    """Right after setup, `run_id=<id of the run setup built>` is the first stdout line."""
     alert = H.plant_alert(tmp_path / "in")
     H.make_tenant(data_root, H.VALID_ID)
     rec = H.Recorder(tmp_path / fixture_uuid("announced-run"))
@@ -114,16 +109,8 @@ def test_o2_existing_tenant_runs(tmp_path, data_root):
     assert rec.order.index("preflight") < rec.order.index("materialize")
 
 
-def test_o5_sibling_tenant_from_record(tmp_path, data_root, monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
-    _stamp_tenant(src, fixture_uuid("tenant:acme"))
-    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
-                    H.Recorder(tmp_path / "sib"))
-    assert got["tenant"].id == fixture_uuid("tenant:acme")
-
-
-def test_o5_forged_stamp_ignored(tmp_path, data_root, monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+def test_o5_forged_stamp_ignored(tmp_path, data_root):
+    src, manifest = _sibling(data_root, fixture_uuid("tenant:acme"))
     H.plant_row(data_root, fixture_uuid("tenant:victim"))
     _stamp_tenant(src, fixture_uuid("tenant:victim"))
     got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
@@ -132,8 +119,8 @@ def test_o5_forged_stamp_ignored(tmp_path, data_root, monkeypatch):
     _refused(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:victim")), H.Recorder(tmp_path / "sib2"))
 
 
-def test_o5_disagreeing_tenant_refused(tmp_path, data_root, monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+def test_o5_disagreeing_tenant_refused(tmp_path, data_root):
+    src, manifest = _sibling(data_root, fixture_uuid("tenant:acme"))
     H.plant_row(data_root, fixture_uuid("tenant:victim"))
     said = _refused(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:victim")),
                     H.Recorder(tmp_path / "sib"))
@@ -144,8 +131,8 @@ def test_o5_disagreeing_tenant_refused(tmp_path, data_root, monkeypatch):
     assert got["tenant"].id == fixture_uuid("tenant:acme")
 
 
-def test_o5_resume_without_tenant_refused(tmp_path, data_root, monkeypatch, capsys):
-    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme-corp"), monkeypatch=monkeypatch)
+def test_o5_resume_without_tenant_refused(tmp_path, data_root, capsys):
+    src, manifest = _sibling(data_root, fixture_uuid("tenant:acme-corp"))
     recorded = fixture_uuid("tenant:acme-corp")
     said = _refused(H.sibling_argv(manifest), H.Recorder(tmp_path / "sib"), capsys)
     assert "--tenant" in said, f"the refusal does not name the missing --tenant: {said!r}"
@@ -154,10 +141,9 @@ def test_o5_resume_without_tenant_refused(tmp_path, data_root, monkeypatch, caps
     assert got["tenant"].id == recorded
 
 
-def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, data_root,
-                                                                      monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
-    # #1105 PR 2: the launcher accepts the request's tenant (`tenant_of_run_dir` is gone, F-13).
+def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, data_root):
+    src, manifest = _sibling(data_root, fixture_uuid("tenant:acme"))
+    # The launcher accepts the request's tenant.
     assert H.require_tenant(fixture_data_root(data_root), fixture_uuid("tenant:acme")).tenant_id == fixture_uuid("tenant:acme"), (
         "the launcher's own acceptance must pass first")
     location_path(H.row_path)(data_root, fixture_uuid("tenant:acme")).write_text("{torn", encoding="utf-8")
@@ -169,29 +155,24 @@ def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, 
     assert manifest.is_file(), "the prepared episode dir is not the sibling's to remove"
 
 
-def test_s7_j42_resume_episode_resolves_through_its_tenant(tmp_path, data_root, monkeypatch):
-    _src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+def test_s7_j42_resume_episode_resolves_through_its_tenant(tmp_path, data_root):
+    _src, manifest = _sibling(data_root, fixture_uuid("tenant:acme"))
     episode = manifest.parent.resolve()
     expected_runs = location_path(H.S.EpisodePaths(episode).runs)
-    link = tmp_path / "episodes-link"
-    link.symlink_to(manifest.parent.parent, target_is_directory=True)
-    monkeypatch.chdir(tmp_path)
-    for n, base in enumerate((Path("episodes"), link)):
-        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(base))
-        # #1187 opens by id through the tenant; the external-root spelling is a decoy.
-        got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
-                        H.Recorder(tmp_path / "sib" / str(n)))
-        world = got["world"]
-        assert Path(world.episode_dir).is_absolute(), f"{base}: {world.episode_dir}"
-        assert Path(world.episode_dir) == episode, (
-            f"{base}: the episode was not resolved through its tenant ({world.episode_dir})")
-        assert location_path(H.S.EpisodePaths(world.episode_dir).runs) == expected_runs
+    # The episode opens by id through the tenant.
+    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
+                    H.Recorder(tmp_path / "sib"))
+    world = got["world"]
+    assert Path(world.episode_dir).is_absolute(), world.episode_dir
+    assert Path(world.episode_dir) == episode, (
+        f"the episode was not resolved through its tenant ({world.episode_dir})")
+    assert location_path(H.S.EpisodePaths(world.episode_dir).runs) == expected_runs
 
 
 def test_setup_shell_and_run_shell_resolve_different_data_roots(tmp_path, monkeypatch):
     setup_root, run_root = tmp_path / "setup-root", tmp_path / "run-root"
     run_root.mkdir()
-    H.place_knowledge(setup_root, fixture_uuid("tenant:acme"))  # #1120 DC2: the operator's clone, before setup
+    H.place_knowledge(setup_root, fixture_uuid("tenant:acme"))  # the operator's clone, before setup
     done = H.run_setup(setup_root, fixture_uuid("tenant:acme"))
     H.assert_setup_ran(done)
     assert done.returncode == 0, H.setup_output(done)
@@ -242,23 +223,23 @@ def test_shell_that_never_received_the_compose_variable(tmp_path, monkeypatch):
 def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     old, new = tmp_path / "old-root", tmp_path / "new-root"
     H.set_data_root(monkeypatch, old)
-    src, manifest = _sibling(tmp_path, old, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+    src, manifest = _sibling(old, fixture_uuid("tenant:acme"))
     (H.runs_dir(old, fixture_uuid("tenant:acme")) / CASE_X).mkdir()
     old_census = H.census(old)
     H.set_data_root(monkeypatch, new)
 
     alert = H.plant_alert(tmp_path / "in")
-    # #1279 (O5): `run.py` takes no run id; the old root still holds run X, and the new root has none.
+    # The old root still holds run X; the new root has no such tenant yet.
     argv = [str(alert), "--tenant", fixture_uuid("tenant:acme")]
     _refused(argv, H.Recorder(tmp_path / "run"))
 
-    H.place_knowledge(new, fixture_uuid("tenant:acme"))  # #1120 DC2: the operator's clone, before setup
+    H.place_knowledge(new, fixture_uuid("tenant:acme"))  # the operator's clone, before setup
     proc = H.run_setup(new, fixture_uuid("tenant:acme"))
     H.assert_setup_ran(proc)
     assert proc.returncode == 0, H.setup_output(proc)
     assert location_path(H.row_path)(new, fixture_uuid("tenant:acme")).is_file()
 
-    # #1187 Layout A refuses at the absent episode under the NEW root before any source read.
+    # The episode, absent under the NEW root, is refused before any source read.
     with pytest.raises(FileNotFoundError) as opened:
         H.accept(new, fixture_uuid("tenant:acme")).runs_repository().episode(manifest.parent.name)
     location = opened.value
@@ -297,7 +278,7 @@ def test_o3_grammar_refusal_parity(tmp_path, data_root, bad):
 
 
 def _confined(text: str, value: str, *, surface: str) -> None:
-    """R-g_r6 (§7, human): the refused value is rendered ESCAPED (repr-style) — its escaped
+    """The refused value is rendered ESCAPED (repr-style) — its escaped
     form appears, its raw control content does not, and no line of the message begins with
     text the value smuggled in."""
     escaped = repr(value)[1:-1]

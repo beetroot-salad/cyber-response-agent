@@ -31,7 +31,7 @@ def test_counts_tool_calls_and_spawns(tmp_path):
 
 
 def test_only_gather_counts_as_a_spawn(tmp_path):
-    """"Task"/"Agent" were the retired claude -p dispatch names. No tool by either name is registered now, so..."""
+    """Only `gather` is a spawn; `Task`/`Agent` (retired dispatch names, no longer registered) are not."""
     state = _state(tmp_path)
     for name in ("Task", "Agent", "bash", "read_file"):
         _bump(state, name)
@@ -65,7 +65,7 @@ def test_no_warning_below_threshold(tmp_path):
 
 
 def test_check_budgets_survives_a_budget_missing_started_at(tmp_path):
-    """The wall-clock arm swallows a malformed/absent timestamp rather than raising into the caller — the..."""
+    """A budget with no origin does not raise out of `check_budgets`: the tool-call arm still reports."""
     warnings = check_budgets({"tool_calls": 9}, {**DEFAULT_LIMITS, "max_tool_calls": 9})
     assert any("tool_calls at 9/9" in w for w in warnings)
 

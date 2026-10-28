@@ -51,17 +51,15 @@ def family_text(facts_yaml: str) -> str:
 
 
 def load(path: Path):
-    """`load_family` over the episode whose manifest is at `path` (`<episode>/family.yaml`).
-    #1187 (R5, declared change 10): the loader is told the episode's id — its folder's name —
-    and refuses a manifest naming another (`expected_episode_id=`, required)."""
+    """`load_family` over the episode whose manifest is at `path`, told the episode's id (its
+    folder's name), which the loader requires."""
     with Episode.open(path.parent) as episode:
         return load_family(episode.view(), expected_episode_id=path.parent.name)
 
 
 def write_manifest(tmp_path: Path, text: str) -> Path:
-    """The manifest `text` as an episode's `family.yaml`, the episode folder named by the id
-    the shared fixture's document carries (`T.EPISODE_ID`), so the #1187 R5 id check passes
-    and only the envelope under test can refuse."""
+    """The manifest `text` as an episode's `family.yaml`, the folder named `T.EPISODE_ID` (the
+    document's id), so the id check passes and only the envelope under test can refuse."""
     path = tmp_path / T.EPISODE_ID / "family.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -89,8 +87,8 @@ def _has_alias(text: str) -> bool:
 
 
 def assert_refused_at_load(err: Exception | None, what: str) -> None:
-    """C's refusal: a `FamilyError` whose cause is the loader's `YAMLError` — refused by the
-    YAML loader, not later by a walk of an already-built value."""
+    """A `FamilyError` whose cause is the loader's `YAMLError`: refused by the YAML loader, not
+    later by a walk of an already-built value."""
     assert err is not None, f"{what} loaded — nothing refused it"
     assert isinstance(err, FamilyError), \
         f"{what} was refused with {type(err).__name__}, not FamilyError: {str(err)[:200]}"
@@ -110,7 +108,7 @@ def test_a_manifest_too_deep_for_the_yaml_parser_is_still_a_family_error(tmp_pat
         f"refused with {type(err).__name__}, not FamilyError: {str(err)[:200]}"
 
 
-# ── C: the loader refuses aliases ──────────────────────────────────────────────────────────
+# ── the loader refuses aliases ─────────────────────────────────────────────────────────────
 
 
 _ALIASED = {
@@ -245,9 +243,8 @@ def test_an_alias_bomb_manifest_is_refused_fast_without_being_expanded(tmp_path,
 
 
 def _scalar_across_top_level_fields() -> str:
-    """`source_run_id` anchored, `base_story` its alias. (#1255 P4, D1: this was
-    `continuation_prompt` anchored; that field is retired, and the refusal is the YAML loader's,
-    which does not care which two top-level scalars the anchor links.)"""
+    """`source_run_id` anchored, `base_story` its alias (the loader's refusal does not care
+    which two top-level scalars the anchor links)."""
     doc = T.family_doc()
     anchored = doc["source_run_id"]
     doc["source_run_id"], doc["base_story"] = "__ANCHORED__", "__STORY__"
@@ -335,7 +332,7 @@ def test_write_family_writes_a_shared_object_longhand_and_it_loads_back(tmp_path
     assert load(path) == parse_family(doc)
 
 
-# ── C at the questioner: an aliased reply is malformed YAML ────────────────────────────────
+# ── at the questioner: an aliased reply is malformed YAML ───────────────────────────────────
 
 
 def _questioner():

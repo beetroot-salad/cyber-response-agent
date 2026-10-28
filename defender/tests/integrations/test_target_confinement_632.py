@@ -1,8 +1,6 @@
-"""#632 part 4, target fidelity: a verb cannot be aimed outside the system it is declared under. Host-state refuses hosts outside its inventory; elastic refuses indices outside the configured patterns; every outbound request is confined to a declared (path, method) read endpoint, observed through the transport capture seam. NOT covered: `elastic.esql` selects its target inside the FROM clause, which the verb-level check does not reach."""
+"""#632 target fidelity: a verb cannot be aimed outside the system it is declared under. Host-state refuses hosts outside its inventory; elastic refuses indices outside the configured patterns; every outbound request is confined to a declared (path, method) read endpoint, observed through the transport capture seam. Not covered: `elastic.esql` selects its target inside the FROM clause, which the verb-level check does not reach."""
 from __future__ import annotations
 
-import inspect
-import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -59,10 +57,9 @@ REAL_STUB_ENDPOINTS = tuple(
 
 
 def _tree(root: Path, *, url: str = "http://127.0.0.1:1") -> Any:
-    """The run's tenant record (#1107), resolved from a real tenant folder under `root` that
-    carries only the elastic system's config — enough for the real adapter to resolve its index
-    and its transport, and unreachable on purpose so an ordering test can tell a confinement
-    refusal from a transport failure. Returns the record the ctx is handed as `tenant`."""
+    """The run's tenant record, resolved from a real tenant folder under `root` carrying only the
+    elastic and host-state config. The transport is unreachable on purpose: a `ConfinementFault`
+    (not a `TransportFault`) shows confinement refused before any transport was attempted."""
     S.plant(root, configs={"elastic": (
         f"ELASTICSEARCH_URL={url}\n"
         f"KIBANA_URL={url}\n"
@@ -81,18 +78,6 @@ def _tree(root: Path, *, url: str = "http://127.0.0.1:1") -> Any:
 def _ctx(tmp_path: Path) -> VerbContext:
     return VerbContext(defender_dir=tmp_path / "tree", tenant=_tree(tmp_path / "tree"),
                        run_dir=tmp_path / "run", env={})
-
-
-def _kibana_status_path() -> str:
-    """The second endpoint `elastic.health-check` reaches, recovered from the ADAPTER's own
-    source rather than restated here."""
-    src = inspect.getsource(elastic_adapter.health_check)
-    found = re.findall(r'KIBANA_URL"\]\.rstrip\("/"\)\s*\+\s*"([^"]+)"', src)
-    assert len(found) == 1, (
-        f"the elastic health-check verb no longer builds exactly one Kibana-host URL "
-        f"({found}) — the read allowlist's fourth entry is derived from that call site"
-    )
-    return found[0]
 
 
 def test_host_state_refuses_a_host_outside_its_inventory(tmp_path: Path):
@@ -118,8 +103,8 @@ def test_a_case_variant_of_an_inventory_host_is_refused_not_normalized(near_miss
 
 
 def test_a_host_state_verb_confines_the_program_and_the_container_target_together():
-    """A host-state verb's confinement rule checks the PAIR: the program against a
-    per-system allowlist, AND the container target against the declared inventory (§7 R4)."""
+    """The rule checks the pair: the program against a per-system allowlist and the container
+    target against the declared inventory."""
     assert set(HOST_STATE_PROGRAMS) >= {"ps", "cat", "getent", "sha256sum", "dpkg-query"}
 
     confine_host_state_call("cat", "web-1")
@@ -132,16 +117,10 @@ def test_a_host_state_verb_confines_the_program_and_the_container_target_togethe
         confine_host_state_call("curl", "web-1")          # in-inventory target, ungated program
 
 
-def test_an_elastic_read_refuses_an_index_outside_the_configured_patterns(tmp_path: Path):
-    with pytest.raises(ConfinementFault):
-        confine_index(".security-7", CONFIGURED_PATTERNS)
-
-    ctx = _ctx(tmp_path)
-    with pytest.raises(ConfinementFault):
-        elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index=".security-7")
-
-
-@pytest.mark.parametrize("widening", ["logs-*,security-audit-*,.security-7", "*", "-logs-*"])
+@pytest.mark.parametrize("widening", [
+    ".security-7",  # an index outside the configured patterns altogether
+    "logs-*,security-audit-*,.security-7", "*", "-logs-*",
+])
 def test_an_index_expression_whose_reach_widens_refuses_the_whole_call(
     tmp_path: Path, widening: str,
 ):
@@ -169,15 +148,6 @@ def test_an_inventory_host_and_a_configured_index_still_run(tmp_path: Path, insi
         elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index=inside)
     with pytest.raises(TransportFault):
         host_state_adapter.VERBS["proc-tree"](ctx, host="web-1")
-
-
-def test_target_confinement_refuses_before_any_transport_is_attempted(tmp_path: Path):
-    ctx = _ctx(tmp_path)
-
-    with pytest.raises(ConfinementFault):
-        elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index="*")
-    with pytest.raises(ConfinementFault):
-        host_state_adapter.VERBS["passwd"](ctx, host="elasticsearch")
 
 
 def test_the_transport_capture_seam_records_every_resolved_request(tmp_path: Path):
@@ -244,8 +214,7 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
 
     assert TICKET_WRITER_SYSTEM not in READ_ENDPOINT_ALLOWLIST, (
         f"the read allowlist declares read endpoints for {TICKET_WRITER_SYSTEM}, the ticket "
-        f"WRITER's system identity — three of the four write refusals below then pass for a "
-        f"reason this test no longer controls"
+        f"writer's system, so the write refusals below pass for another reason"
     )
 
     for system, endpoint, method in WRITE_ENDPOINTS:
@@ -261,9 +230,8 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
 
 
 def _stub_tree(root: Path, system: str, prefix: str, *, bastion: str) -> Any:
-    """The run's tenant record (#1107), resolved from a real tenant folder under `root`
-    carrying one stub system's config.env — the shape the record's `systems` entry is read
-    from, not a monkeypatch of it. `bastion` names a docker context this host has never heard"""
+    """The run's tenant record from a real tenant folder under `root` carrying one stub system's
+    config.env (no monkeypatch). `bastion` names a docker context this host does not know."""
     S.plant(root, configs={system: (
         f"{prefix}_URL_BASE=http://stub-{system}\n"
         f"{prefix}_BASTION_HOST=stub-bastion\n"
@@ -305,8 +273,7 @@ def test_a_non_elastic_stub_adapter_is_confined_through_the_real_shared_transpor
 def test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry():
     assert isinstance(READ_ENDPOINT_ALLOWLIST, ReadEndpointAllowlist), (
         "the shipped read-endpoint allowlist is not a constructed allowlist, so nothing in "
-        "production refuses a method-less entry — the constructor is not on the path the "
-        "shipped table takes, which is the only path an author's mistake travels"
+        "production refuses a method-less entry"
     )
     assert isinstance(READ_ENDPOINT_ALLOWLIST, Mapping), (
         "the allowlist type is not a Mapping — the endpoint rule's own test reads this table "
@@ -317,7 +284,7 @@ def test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry():
         ("/tickets",),         # a one-element entry: no method at all
         ("/tickets", ""),      # a present-but-empty method token
         ("/tickets", None),    # the shape a half-migrated entry takes
-        "/tickets",            # a bare path string, the pre-F1 entry shape
+        "/tickets",            # a bare path string
     ):
         with pytest.raises(AllowlistError):
             ReadEndpointAllowlist({"ticket": (methodless,)})
@@ -346,8 +313,6 @@ def test_the_two_post_with_body_reads_still_pass_the_endpoint_check():
 
 
 def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_query_string():
-    """The endpoint check binds on the RESOLVED request target, compared on a NORMALIZED
-    path with the query string EXCLUDED (§7 R6)."""
     assert normalize_endpoint("http://es:9200/logs-*/_search?pretty=true&x=1") == "/logs-*/_search"
     assert normalize_endpoint("http://es:9200//logs-*//_search/") == "/logs-*/_search"
 

@@ -170,7 +170,7 @@ def test_a_write_over_a_hard_link_is_a_retry_and_the_host_file_is_unchanged(tool
 
 def test_read_file_refuses_a_symlink_at_the_name(tmp_path):
     """`run/link.txt -> run/notes.txt`: the gate resolves the link to a run-dir file and admits
-    it, so only the read can refuse following it. The file under its own name reads as today."""
+    it, so only the read can refuse following it. The file under its own name still reads."""
     deps, run = _main(tmp_path)
     (run / "notes.txt").write_text("plain notes\n", encoding="utf-8")
     os.symlink(run / "notes.txt", run / "link.txt")
@@ -289,8 +289,8 @@ def test_read_file_refuses_a_dotdot_component(tmp_path):
 
 
 def test_write_file_refuses_a_dotdot_component(tmp_path):
-    """A `..` that stays inside the corpus: today the write lands. It must be refused and land
-    nothing; without the `..` the same lesson lands as today."""
+    """A `..` that stays inside the corpus is still refused and lands nothing; without the `..`
+    the same lesson lands."""
     deps, corpus = _curator(tmp_path)
 
     _refused(lambda: _tool_write_file(deps, "defender/lessons/../lessons/new.md", "NEW\n"))
@@ -411,7 +411,7 @@ def test_the_write_gate_does_not_take_its_baseline_through_a_hard_link(tmp_path)
         )
 
     inv.write_text(baseline, encoding="utf-8")
-    assert decide().allow, "the plain-file control: an extending append is allowed today"
+    assert decide().allow, "the plain-file control: an extending append is allowed"
 
     inv.unlink()
     host = tmp_path / "outside" / "inv.md"
@@ -422,7 +422,7 @@ def test_the_write_gate_does_not_take_its_baseline_through_a_hard_link(tmp_path)
 
 
 # ---------------------------------------------------------------------------------------------
-# the static guard: the touched sites call no path seam
+# more aliases: a folder link above the name, a linked lesson, a FIFO baseline
 
 
 def test_a_folder_link_two_levels_above_the_name_is_refused_for_reads(tmp_path):
@@ -474,7 +474,7 @@ def test_the_write_gate_over_a_fifo_at_investigation_md_denies_without_blocking(
 
 
 # ---------------------------------------------------------------------------------------------
-# review round (#1208): a plain folder is "file not found", and no refusal names a host path
+# no refusal names a host path (#1208)
 
 
 @pytest.mark.parametrize("tool", ["read_file", "write_file"])
@@ -493,7 +493,3 @@ def test_a_refusal_names_no_host_path(tool, tmp_path):
         root = corpus
     assert str(tmp_path) not in message, message
     assert str(root.resolve()) not in message, message
-
-
-# ---------------------------------------------------------------------------------------------
-# second review round (#1208): a confine is never a trust root; `//`; the refusal kind

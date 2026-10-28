@@ -29,7 +29,7 @@ UNGRADABLE = S.COINED["row.ungradable_reason"]
 OUTCOME_CTX = S.outcome_ptr("not_replayable")
 #: A shown samples section: the default family gives every served system one of real answers.
 SAMPLES_CTX = S.samples_ptr("idp")
-#: The plan's family-level part (the manifest's `discriminator`), which names no run (A15).
+#: The plan's family-level part (the manifest's `discriminator`), which names no run.
 PLAN_FAMILY = S.plan_ptr(None)
 #: A row the family's shared capture holds, so `served/base.jsonl#0` names a real line.
 BASE_ROWS = [{"system": "idp", "verb": "query", "params": {"q": "user:alice"},
@@ -48,9 +48,8 @@ def _inv(contrast: Iterable[str], *, label: str = "b", tag: str = "inv") -> dict
     return S.inv(contrast=list(contrast), claim=_claim(label, tag))
 
 
-def _wf(evidence: Iterable[str], *, bucket: str = "mislabelled", label: str = "b",
-        tag: str = "wf", systems: Sequence[str] = ("idp",)) -> dict:
-    return S.wf(bucket, evidence=list(evidence), systems=systems, claim=_claim(label, tag))
+def _wf(evidence: Iterable[str], *, label: str = "b", tag: str = "wf") -> dict:
+    return S.wf("mislabelled", evidence=list(evidence), systems=("idp",), claim=_claim(label, tag))
 
 
 def _reply(*, investigator: Sequence[dict] = (), world: Sequence[dict] = (),
@@ -141,7 +140,7 @@ def _refusal_calls(**more: dict[str, Any]) -> list[Any]:
 
 
 def _failed_d() -> dict[str, Any]:
-    """`d` as an O5-failed world: its world record on disk and no archive."""
+    """`d` as a failed world (`DID_NOT_FINISH`): its world record on disk and no archive."""
     return _d_spec(archived=False, world_record=S.sym(S.OUTCOME, "DID_NOT_FINISH"))
 
 
@@ -151,8 +150,10 @@ HALF, RIDE = "half", "ride"
 
 
 def _probe(built: Any, pointer: str, filed: str) -> dict[str, Any]:
-    """Grade with b's reply filing `pointer` three ways, and read back what the resolver
-    decided:"""
+    """Grade with b's reply filing `pointer` in an investigator finding (`filed` as the reference
+    half, or riding beside a resolving pair) and alone in a world finding, beside a resolving
+    sibling finding; read back each finding's lane, the probe's citations, and which outputs
+    each claim reached."""
     probe = ([S.conduct("b"), pointer] if filed == HALF
              else [S.conduct("b"), S.conduct("a"), pointer])
     reply = _reply(investigator=[_inv(probe, tag="probe"),
@@ -169,8 +170,8 @@ def _probe(built: Any, pointer: str, filed: str) -> dict[str, Any]:
 
 def _probe_expected(pointer: str, filed: str, *, resolves: bool) -> dict[str, Any]:
     """What `_probe` must read back for a pointer into reference run c (or d) that does or does
-    not resolve (A1, A13, A15). The lone world finding is dropped either way (unresolved, or
-    naming only another run), so its claim reaches no output."""
+    not resolve. The lone world finding is dropped either way (unresolved, or naming only
+    another run), so its claim reaches no output."""
     queued = ["defender queue"]
     if filed == HALF:
         return {"probe": DEFENDER if resolves else NO_PAIR, "sibling": DEFENDER,
@@ -186,9 +187,8 @@ def _probe_expected(pointer: str, filed: str, *, resolves: bool) -> dict[str, An
 
 
 def _boundary(built: Any, where: str) -> tuple[Path, str, str]:
-    """One R3 boundary of reference run c: (the file on disk, the pointer naming it, how the
-    pointer is filed). g06/g07 use the conduct file, oracle store, served ledger and query
-    table (the manifest is its own branch); g08 adds c's report."""
+    """One read boundary of reference run c: (the file on disk, the pointer naming it, how the
+    pointer is filed). The manifest is its own branch (`_manifest_case`)."""
     if where == "conduct":
         return built.world_dir("c") / "investigation.md", S.conduct("c", "investigation.md"), HALF
     if where == "report":
@@ -246,7 +246,7 @@ def _c_row_names(built: Any, path: Path) -> bool:
     return bool(said) and path.name in str(row_c.get("ungradable_reason", ""))
 
 
-def _manifest_case(built: Any, *, damaged: bool) -> dict[str, Any]:
+def _manifest_case(built: Any) -> dict[str, Any]:
     """The manifest boundary over an already-built (and possibly damaged) family: b's reply
     cites the plan at b's own entry (design). Read back whether the pass refused naming the
     manifest, whether it asked the model, the finding's lane and questioner row."""
@@ -350,10 +350,12 @@ def test_1234_evidence_resolves_into_reference_runs_manifest_and_oracle_store(
             S.lane_of(built, built.finding_id("b", 0, 2))) == (QUESTIONER, USER_RECORD)
 
 
-#: d05g's cases — each has a plain twin in the same position.
+#: The no-follow cases. Undamaged twins run once per distinct pointer (`_NO_FOLLOW_TWINS`: the
+#: summary pointer and world d's); the conduct and table pointers' twins are the read-cell tests'.
 _NO_FOLLOW = ("leaf_symlink_inside_episode", "table_symlink", "under_linked_directory",
               "hard_linked_file", "absolute_path", "traversal_out_of_the_episode",
               "failed_world", "cut_short_world", "malformed_world", "outside_the_classes")
+_NO_FOLLOW_TWINS = ("leaf_symlink_inside_episode", "failed_world")
 
 
 _SUMMARY = "gather_summaries/l-001.md"
@@ -361,7 +363,7 @@ _INVESTIGATION = "investigation.md"
 
 
 def _no_follow_case(tmp_path: Path, case: str, *, damaged: bool) -> tuple[Any, str]:
-    """Build the family for one d05g case and return it with the pointer under test."""
+    """Build the family for one no-follow case and return it with the pointer under test."""
     if case.endswith("_world"):
         over = {"failed_world": {"world_record": S.sym(S.OUTCOME, "DID_NOT_FINISH")},
                 "cut_short_world": {"run_end": {"truncated_by": "budget",
@@ -395,8 +397,9 @@ def _no_follow_case(tmp_path: Path, case: str, *, damaged: bool) -> tuple[Any, s
     return built, damaged_pointer if damaged else plain_pointer
 
 
-@pytest.mark.parametrize("damaged", [True, False], ids=["damaged", "plain-twin"])
-@pytest.mark.parametrize("case", _NO_FOLLOW)
+@pytest.mark.parametrize(("case", "damaged"), [
+    *[pytest.param(case, True, id=f"{case}-damaged") for case in _NO_FOLLOW],
+    *[pytest.param(case, False, id=f"{case}-plain-twin") for case in _NO_FOLLOW_TWINS]])
 def test_1234_evidence_never_resolves_through_a_link_or_outside_the_reference_set(
         tmp_path: Path, case: str, damaged: bool) -> None:
     built, pointer = _no_follow_case(tmp_path, case, damaged=damaged)
@@ -590,8 +593,8 @@ def test_1234_pointer_into_an_excluded_worlds_oracle_store(tmp_path: Path, d_sta
         OTHER_RUN if plain else UNRESOLVED, OTHER_RUN)
 
 
-#: D30's hostile pointers: empty, whitespace, only a fragment, absolute, home-relative, a URL, a
-#: glob, an embedded newline, an embedded NUL, and one far longer than any path.
+#: Hostile pointers: empty, whitespace, only a fragment, absolute, home-relative, a URL, a glob,
+#: an embedded newline, an embedded NUL, and one far longer than any path.
 _HOSTILE = ["", "   ", "#worlds/b", "/etc/passwd", f"~/worlds/{T.fixture_world_id('b')}/report.md",
             f"https://example.com/worlds/{T.fixture_world_id('b')}/report.md", "worlds/*/report.md",
             f"worlds/{T.fixture_world_id('b')}/report.md\nworlds/{T.fixture_world_id('a')}/report.md", f"worlds/{T.fixture_world_id('b')}/report.md\x00",
@@ -613,8 +616,8 @@ def test_1234_pointer_with_hostile_syntax(tmp_path: Path) -> None:
     S.validate(reply)
 
 
-@pytest.mark.parametrize("link", ["to_a_byte_copy_of_itself", "to_a_reference_runs_report",
-                                  "plain_twin"])
+# The undamaged manifest twin is the oversize test's `manifest-plain-twin` row.
+@pytest.mark.parametrize("link", ["to_a_byte_copy_of_itself", "to_a_reference_runs_report"])
 def test_1234_manifest_replaced_by_a_link_and_cited_as_design(tmp_path: Path, link: str) -> None:
     built = S.family(tmp_path)
     manifest = built.ep / "family.yaml"
@@ -622,8 +625,7 @@ def test_1234_manifest_replaced_by_a_link_and_cited_as_design(tmp_path: Path, li
         S.plant_symlink(manifest, S.scratch_copy(tmp_path, manifest, "manifest-copy.yaml"))
     elif link == "to_a_reference_runs_report":
         S.plant_symlink(manifest, f"worlds/{T.fixture_world_id('c')}/report.md")
-    damaged = link != "plain_twin"
-    assert _manifest_case(built, damaged=damaged) == _manifest_expected(damaged=damaged)
+    assert _manifest_case(built) == _manifest_expected(damaged=True)
 
 
 _FIVE = ("manifest", "conduct", "oracle", "served", "table")
@@ -637,23 +639,22 @@ def test_1234_an_oversize_file_is_refused_by_name_on_every_read_cell(tmp_path: P
         built = S.family(tmp_path)
         if damaged:
             S.plant_oversize(built.ep / "family.yaml")
-        assert _manifest_case(built, damaged=damaged) == _manifest_expected(damaged=damaged)
+        assert _manifest_case(built) == _manifest_expected(damaged=damaged)
         return
     seen, expected, built, path = _cell(tmp_path, where, "oversize" if damaged else None)
     assert (seen, _c_row_names(built, path)) == (expected, damaged)
 
 
-@pytest.mark.parametrize("kind", ["fifo", "dir", "device", None],
-                         ids=["fifo", "directory", "device-node", "plain-twin"])
+# Each cell's undamaged twin is the oversize test's (the same `_cell` / `_manifest_case`).
+@pytest.mark.parametrize("kind", ["fifo", "dir", "device"],
+                         ids=["fifo", "directory", "device-node"])
 @pytest.mark.parametrize("where", _FIVE)
 def test_1234_pointer_naming_a_fifo_or_directory_does_not_resolve_and_does_not_hang(
-        tmp_path: Path, where: str, kind: str | None) -> None:
+        tmp_path: Path, where: str, kind: str) -> None:
     if where == "manifest":
         built = S.family(tmp_path)
-        if kind is not None:
-            _damage(tmp_path, built.ep / "family.yaml", kind)
-        damaged = kind is not None
-        assert _manifest_case(built, damaged=damaged) == _manifest_expected(damaged=damaged)
+        _damage(tmp_path, built.ep / "family.yaml", kind)
+        assert _manifest_case(built) == _manifest_expected(damaged=True)
         return
     seen, expected, _built, _path = _cell(tmp_path, where, kind)
     assert seen == expected
@@ -662,8 +663,10 @@ def test_1234_pointer_naming_a_fifo_or_directory_does_not_resolve_and_does_not_h
 _MALFORMED_CELLS = {"table": "torn", "oracle": "torn", "report": "second_disposition"}
 
 
-@pytest.mark.parametrize("damaged", [True, False], ids=["malformed", "plain-twin"])
-@pytest.mark.parametrize("where", sorted(_MALFORMED_CELLS))
+@pytest.mark.parametrize(("where", "damaged"), [
+    *[pytest.param(where, True, id=f"{where}-malformed") for where in sorted(_MALFORMED_CELLS)],
+    # The table and oracle cells' undamaged twins are the oversize test's.
+    pytest.param("report", False, id="report-plain-twin")])
 def test_1234_pointer_into_a_file_the_reader_refuses_as_malformed_does_not_resolve(
         tmp_path: Path, where: str, damaged: bool) -> None:
     seen, expected, built, path = _cell(tmp_path, where,
@@ -671,14 +674,14 @@ def test_1234_pointer_into_a_file_the_reader_refuses_as_malformed_does_not_resol
     assert (seen, _c_row_names(built, path)) == (expected, damaged)
 
 
+#: The undamaged oracle and served twins are the oversize test's.
 _LINK_CELLS = [("oracle", "symlink"), ("oracle", "linked_dir"), ("oracle", "hardlink"),
-               ("oracle", None), ("served", "symlink"), ("served", "hardlink"),
-               ("served", None)]
+               ("served", "symlink"), ("served", "hardlink")]
 
 
 @pytest.mark.parametrize(("where", "kind"), _LINK_CELLS,
-                         ids=[f"{w}-{k or 'plain-twin'}" for w, k in _LINK_CELLS])
+                         ids=[f"{w}-{k}" for w, k in _LINK_CELLS])
 def test_1234_pointer_through_a_link_is_unresolved_in_the_oracle_store_and_served_ledger_classes(
-        tmp_path: Path, where: str, kind: str | None) -> None:
+        tmp_path: Path, where: str, kind: str) -> None:
     seen, expected, _built, _path = _cell(tmp_path, where, kind)
     assert seen == expected

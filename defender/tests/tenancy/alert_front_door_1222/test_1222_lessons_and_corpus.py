@@ -34,9 +34,9 @@ _SOURCE_SIGNATURE_LINE = re.compile(r"^source_signature:\s*\[(.*)\]\s*$", re.M)
 
 
 def _background_corpus() -> Path:
-    """Background lessons a lookup must NOT match: the committed fixture tenant's made-up runtime
-    corpus (`knowledge/tenant-fixture/agent/lessons/`, #1108 P4 decision 4). Never the lab's
-    corpus, and never the product tree (O1: it holds none)."""
+    """Background lessons a lookup must NOT match: the committed fixture tenant's made-up corpus
+    (`knowledge/tenant-fixture/agent/lessons/`), never the lab's or the product tree's (which
+    holds none)."""
     corpus = Path(S.mod("tests.tenancy.tenant_1108_p4._support").FIXTURE_AGENT) / "lessons"
     assert corpus.is_dir(), f"the fixture corpus {corpus} is missing"
     assert any(corpus.glob("*.md")), f"the fixture corpus {corpus} is empty"
@@ -128,14 +128,14 @@ def _tag_frame(section: str) -> str:
     raise AssertionError("the Lessons section carries no framed tags listing:\n" + section)
 
 
-def _tag_counts(section: str, dimension: str = "source_signature") -> dict[str, int]:
-    """One dimension's block of the framed tags listing: value -> count."""
+def _tag_counts(section: str) -> dict[str, int]:
+    """The `source_signature` block of the framed tags listing: value -> count."""
     body = _tag_frame(section)
     counts: dict[str, int] = {}
     inside = False
     for line in body.splitlines():
         if not line.startswith((" ", "\t")):
-            inside = line.strip() == f"{dimension}:"
+            inside = line.strip() == "source_signature:"
             continue
         if inside and line.strip():
             value, _, count = line.strip().rpartition(" ")
@@ -147,9 +147,6 @@ def _same_text(section: str | None, d: S.Drive) -> str | None:
     if section is None:
         return None
     return S.normalize(section, run_dir=d.run_dir, run_id=d.run_dir.name if d.run_dir else None)
-
-
-# MAIN running the lessons lookup its instructions teach
 
 
 # Past runs
@@ -165,38 +162,15 @@ def _investigation(tag: str) -> str:
     return doc.replace(_GOLDEN_HYPOTHESIS, f"?{tag}-probe")
 
 
-def _with_record(runs_base: Path, run_id: str, *, alert: Mapping[str, Any] | bytes,
-                 facts: Mapping[str, str | None] | None = None,
-                 record: Mapping[str, Any] | None = None, digest: str | None = None) -> bool:
-    """Give an already-planted folder its record (`S.plant_run`). False when the coined record
-    accessor is absent (base): the folder then stays recordless, and the caller asserts the
-    record was planted only after its behavioural observation."""
-    try:
-        S.plant_run(runs_base, run_id, alert=alert,
-                    record=dict(record) if record is not None else True,
-                    digest=digest, facts=facts)
-    except AssertionError:
-        return False
-    return True
-
-
-def _past_run(runs_base: Path, run_id: str, *, tag: str, rule_id: str = "R-PAST",  # noqa: PLR0913 — one past run's every part
+def _past_run(runs_base: Path, run_id: str, *, tag: str, rule_id: str = "R-PAST",
               alert: Mapping[str, Any] | bytes | None = None,
-              signature: str | None = None, recorded: bool = True,
-              digest: str | None = None, report: str | None = None) -> bool:
-    """A finished past run: its alert, an investigation whose hypothesis carries `tag`, an
-    optional report, then (when `recorded`) its record with `signature`. Returns whether the
-    record landed (always True for a recordless folder)."""
-    doc = alert if alert is not None else S.generic_alert(rule_id=rule_id)
-    files = {"investigation.md": _investigation(tag)}
-    if report is not None:
-        files["report.md"] = report
-    S.plant_run(runs_base, run_id, alert=doc, record=False, files=files)
-    if not recorded:
-        return True
-    return _with_record(runs_base, run_id, alert=doc,
-                        facts={"signature": signature} if signature is not None else {},
-                        digest=digest)
+              signature: str | None = None) -> None:
+    """A past run: its alert, an investigation whose hypothesis carries `tag`, and its record
+    (holding `signature` when given)."""
+    S.plant_run(runs_base, run_id,
+                alert=alert if alert is not None else S.generic_alert(rule_id=rule_id),
+                facts={"signature": signature} if signature is not None else {},
+                files={"investigation.md": _investigation(tag)})
 
 
 # The lesson author, through the real judge enqueue and the real drain
@@ -221,44 +195,36 @@ class _Curator:
         for name, text in self.lessons.items():
             (Path(cfg.corpus_dir) / f"{name}.md").write_text(text, encoding="utf-8")
         ids = [r["finding_id"] for r in rows]
-        return {"committed": ids, "consumed_skip": [], "held_forward_bad": [],
+        return {"committed": ids, "consumed_skip": [],
                 "commit_message": "front-door fixture lessons"}
 
     def rows(self) -> list[dict]:
         return [r for batch in self.handed for r in batch]
 
 
-def _judged(tmp_path: Path, *, signature: str | None, world_rule: str | None = None,
-            sub: str = "judged") -> tuple[list[dict], bool]:
+def _judged(tmp_path: Path, *, signature: str | None,
+            world_rule: str | None = None) -> list[dict]:
     """Grade an accepted episode whose record copy holds `signature` (None: no signature) and
     return the finding rows the REAL enqueue appended. `world_rule` rewrites every world copy's
-    `alert.json` to that id first — what a box that rewrote its alert leaves (PR-17)."""
-    ep = J.accepted_episode(tmp_path / sub)
+    `alert.json` to that id first — what a box that rewrote its alert leaves."""
+    ep = J.accepted_episode(tmp_path / "judged")
     if world_rule is not None:
         for alert in (ep / "worlds").glob("*/alert.json"):
             alert.write_text(json.dumps({"alert_id": world_rule, "rule": {"id": world_rule}}),
                              encoding="utf-8")
-    try:
-        S.plant_episode_copy(ep, facts={"signature": signature} if signature else {})
-        copied = True
-    except AssertionError:
-        copied = False
-    runs_base = tmp_path / sub / "runs-base"
+    S.plant_episode_copy(ep, facts={"signature": signature} if signature else {})
+    runs_base = tmp_path / "judged" / "runs-base"
     runs_base.mkdir(parents=True, exist_ok=True)
     J.grade(ep, runs_base=runs_base)
-    return J.enqueued_rows(J.judge_record(ep)), copied
+    return J.enqueued_rows(J.judge_record(ep))
 
 
-def _drain(tmp_path: Path, curator: _Curator, *, extra_rows: Iterable[dict] = (),
-           corpus: Mapping[str, str] | None = None) -> Any:
+def _drain(tmp_path: Path, curator: _Curator, *, extra_rows: Iterable[dict] = ()) -> Any:
     """One REAL drain tick (`drain.run_batch`) over the learning state the judge appended to,
-    the curator at `invoke_agent=`, over a real batch of the fixture tenant (#1108 P4 O7, OD12
-    class ii: a curator commits only into a tenant batch's draft — `_curator1134.draft_lane` /
-    `draft_author_cfg`); `corpus` lessons are published in the tenant's agent half first (lessons
-    a fold lands in). Returns the draft lane, whose batch branch holds what the tick committed."""
-    lane = C.draft_lane(
-        tmp_path, files={f"lessons/{name}.md": text for name, text in (corpus or {}).items()},
-        state_dir=tmp_path / "learning-state")
+    the curator at `invoke_agent=`, over a real batch of the fixture tenant (a curator commits
+    only into a tenant batch's draft). Returns the draft lane, whose batch branch holds what the
+    tick committed."""
+    lane = C.draft_lane(tmp_path, files={}, state_dir=tmp_path / "learning-state")
     paths = lane.paths
     extra = list(extra_rows)
     if extra:
@@ -290,18 +256,16 @@ def _keys_handed(curator: _Curator) -> dict[str, Any]:
 
 
 def _signatures_handed(curator: _Curator) -> dict[str, Any]:
-    """Each handed row's recorded signature as the row carries it in its own field (B2); None
-    when the row carries none there (an unsigned run's row, a row queued before the change)."""
+    """Each handed row's recorded signature as the row carries it in its own field; None when
+    the row carries none there (an unsigned run's row, a row queued before the field existed)."""
     return {r["finding_id"]: r.get(S.QUEUE_SIGNATURE_FIELD) for r in curator.rows()}
 
 
-def _queued_row(finding_id: str, key: str, *, pre_change: bool = False, **over: Any) -> dict:
+def _queued_row(finding_id: str, key: str) -> dict:
     """A defender finding row in the shape the judge appends (a family finding that survived).
-    `key` is its `alert_rule_key`: after the change the recorded signature verbatim, `unkeyed`
-    when there is none (C27); before it, the old `rule-<id>` form (the eval's `rule-5710`). A
-    post-change row with a signature also carries it in `S.QUEUE_SIGNATURE_FIELD` (B2, coined); a
-    `pre_change` row and an unkeyed one carry no such field — rows queued before the change lack
-    it."""
+    `key` is its `alert_rule_key`: the recorded signature verbatim, or `unkeyed` when there is
+    none. A row with a signature also carries it in `S.QUEUE_SIGNATURE_FIELD`; an unkeyed row
+    carries no such field."""
     row = {
         "schema_version": 1, "finding_id": finding_id, "run_id": finding_id.split("/")[0],
         "alert_rule_key": key, "direction": "family", "subject": "defender", "type": "lead-set",
@@ -312,15 +276,14 @@ def _queued_row(finding_id: str, key: str, *, pre_change: bool = False, **over: 
         "citations": ["investigation.md#l-001"],
         "source_run_dir": f"episodes/{finding_id.split('/')[0]}/worlds/b",
     }
-    if not pre_change and key != S.UNKEYED:
+    if key != S.UNKEYED:
         row[S.QUEUE_SIGNATURE_FIELD] = key
-    row.update(over)
     return row
 
 
 def _author_lesson(name: str, entries: Sequence[str] | None, finding_ids: Iterable[str]) -> str:
     """The lesson file the curator is told to write: the shipped frontmatter shape, entries
-    unquoted (C42), no `source_signature` key at all when `entries` is None (C28)."""
+    unquoted, no `source_signature` key at all when `entries` is None."""
     text = S.lesson_text(name, source_signature=entries)
     ids = list(finding_ids)
     return text.replace(f"  - front-door/{name}/0", "\n".join(f"  - {i}" for i in ids) or "  []")
@@ -330,13 +293,13 @@ def _author_lesson(name: str, entries: Sequence[str] | None, finding_ids: Iterab
 _UUID_MAPPING = {"signature": "rule.uuid", "event_time": "detected_at", "summary": "rule.description"}
 
 
-def _lesson_alert(sig: str, **rule: Any) -> dict[str, Any]:
+def _lesson_alert(sig: str) -> dict[str, Any]:
     """A generic alert whose `rule.id` is `sig` (the default mapping's signature path)."""
     return S.generic_alert(rule_id=sig, rule={"id": sig, "name": "front door",
-                                              "description": "front door lesson lookup", **rule})
+                                              "description": "front door lesson lookup"})
 
 
-# o8 / r6 / r7 / r8 — the gate's lesson demands
+# o8 / o2 / r6 / r7 — lesson lookups
 
 def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
     alert = S.fixture_alert("v2-sshd-success-after-failures")
@@ -362,12 +325,10 @@ def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
 
 
 def test_o2_tenant_lesson_is_discovered_and_read_by_main_at_its_agent_path(tmp_path):
-    """#1108 P4 O2 (and O1): a lesson in the TENANT's corpus — where a curator's merged PR puts
-    it (O7; the authoring half is the drain suites') — is listed by orientation and read by
-    MAIN, typed and bash alike, at `/agent/lessons/<name>.md`: the model's spelling of the run
-    copy's `agent/` (#1255 model view; the box mounts the run copy's `agent/` there). The
-    product checkout the run uses holds no corpus (O1), so `/defender/lessons/...` names
-    nothing — the control on the same tool channel."""
+    """A lesson in the tenant's corpus is listed by orientation and read by MAIN, typed and bash
+    alike, at `/agent/lessons/<name>.md` (the box mounts the run copy's `agent/` there). The
+    product checkout holds no corpus, so `/defender/lessons/...` names nothing: the control on
+    the same tool channel."""
     sig, name = "R-FEEDBACK", "fd-feedback"
     marker = "CURATOR-FEEDBACK-BODY-1222"
     planted = S.plant_tenant()
@@ -395,7 +356,8 @@ def test_o2_tenant_lesson_is_discovered_and_read_by_main_at_its_agent_path(tmp_p
 
 _GOOD_ENTRY = "R-good-1"
 #: Entries outside the allow-list a model or a hand could write into `source_signature`: a line
-#: break, an ANSI escape, heading text, a key-looking value, YAML-significant punctuation, 129
+#: break, an ANSI escape, heading text, a key-looking value, YAML-significant punctuation, and
+#: 129 characters (one past the bound).
 _HOSTILE_ENTRIES = {
     "fd-r6-newline": '"evil\\nsource_signature: [forged]"',
     "fd-r6-ansi": '"\\e[31mred\\e[0m"',
@@ -456,8 +418,8 @@ def test_r6_a_hostile_source_signature_entry_is_inert_in_every_lesson_listing(tm
         assert ch not in section, f"a raw control character {ch!r} reached MAIN's lessons section"
 
 
-#: Unquoted entries YAML 1.1 retypes (PA-21): 000123 -> 83, yes -> True, a date, 0x1F -> 31,
-#: null -> None. Every one is inside C43's allow-list.
+#: Unquoted entries YAML 1.1 retypes: 000123 -> 83, yes -> True, a date, 0x1F -> 31,
+#: null -> None. Every one is a valid signature.
 _RETYPED = ["000123", "yes", "2026-05-01", "0x1F", "null"]
 
 
@@ -504,13 +466,12 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
             f"iter_lessons skipped the {spelling} lesson")
 
     runs = location_path(S.plant_tenant().accept().runs)
-    # #1187 (R1): the natural container holds run folders only — no `_tenant.json` is written.
+    # The runs folder holds run folders only: no `_tenant.json` is written there.
     runs.mkdir(parents=True, exist_ok=True)
     alert = S.generic_alert(rule_id="R-R7-TRACE")
-    traced_run = fixture_uuid("1222-r7-traced")  # #1187 declared change 1: a run id is a uuid
-    S.plant_run(runs, traced_run, alert=alert, record=False,
+    traced_run = fixture_uuid("1222-r7-traced")  # a run id is a uuid
+    S.plant_run(runs, traced_run, alert=alert, facts={"signature": "R-R7-TRACE"},
                 files={"lessons_loaded.jsonl": _loaded_row(name)})
-    recorded = _with_record(runs, traced_run, alert=alert, facts={"signature": "R-R7-TRACE"})
     main = S.sym("cli.learning.trace_lesson", "main")
     traced: dict[str, list[str]] = {}
     for spelling, corpus in corpora.items():
@@ -529,7 +490,6 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
     assert _tag_counts(section) == dict.fromkeys(_RETYPED, 1), (
         f"defender-lessons --tags does not list the entries as written: {_tag_counts(section)}")
     assert _listed(section) == [name], f"orientation's lookup of {_RETYPED[0]!r}: {_listed(section)}"
-    assert recorded, "the traced run's record could not be planted (S.COINED accessors)"
 
 
 
@@ -571,10 +531,8 @@ def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys,
     sig = "M-777"
     only_current = tmp_path / "only-current"
     current = S.generic_alert(rule_id="R-1", rule={"id": "R-1", "uuid": sig})
-    S.plant_run(only_current, "current-run", alert=current, record=False,
+    S.plant_run(only_current, "current-run", alert=current, facts={"signature": sig},
                 files={"investigation.md": "# investigation in progress\n"})
-    current_recorded = _with_record(only_current, "current-run", alert=current,
-                                    facts={"signature": sig})
     monkeypatch.delenv("DEFENDER_BOX", raising=False)
     _rc, on_host = _vocab_cli(capsys, only_current, sig)
     monkeypatch.setenv("DEFENDER_BOX", "1")
@@ -592,7 +550,8 @@ def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys,
         "p3": dict(signature=sig.lower(), rule_id="R-3"),
         "p4": dict(signature=sig + "0", rule_id="R-4"),
     }
-    recorded = [_past_run(location_path(planted.runs), f"past-{tag}", tag=tag, **spec) for tag, spec in past.items()]
+    for tag, spec in past.items():
+        _past_run(location_path(planted.runs), f"past-{tag}", tag=tag, **spec)
     _rc, over_runs = _vocab_cli(capsys, location_path(planted.runs), sig)
     assert _probes(over_runs) == {"p1"}, (
         f"the corpus lookup of {sig!r} over the runs folder counted "
@@ -610,12 +569,10 @@ def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys,
         f"MAIN's in-box corpus lookup did not run and answer for {sig!r}: {kind}\n{listing}")
     assert _probes(listing) == set(), (
         f"MAIN's in-box corpus lookup of {sig!r} counted past runs {sorted(_probes(listing))} — "
-        f"the box's /runs holds only this run (#1255 P1):\n{listing}")
+        f"the box's /runs holds only this run:\n{listing}")
     assert "past-p" not in listing, (
         f"MAIN's in-box corpus lookup of {sig!r} names a past run — the box's /runs holds only "
-        f"this run (#1255 P1):\n{listing}")
-    assert all(recorded), "records could not be planted (S.COINED accessors)"
-    assert current_recorded, "the current run's record could not be planted (S.COINED accessors)"
+        f"this run:\n{listing}")
 
 
 def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
@@ -632,29 +589,23 @@ def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
         "the unavailable vocabulary reads exactly as a corpus with no past runs")
 
     mapped = S.plant_tenant(fixture_uuid("tenant:acme-c"), alert_mapping=_UUID_MAPPING)
-    recorded = _past_run(location_path(mapped.runs), "past-pc", tag="pc", signature="SIG-P065",
-                         alert=S.generic_alert(rule_id="R-9", rule={"id": "R-9", "uuid": "U-9",
-                                                                     "description": "past"}))
+    _past_run(location_path(mapped.runs), "past-pc", tag="pc", signature="SIG-P065",
+              alert=S.generic_alert(rule_id="R-9", rule={"id": "R-9", "uuid": "U-9",
+                                                          "description": "past"}))
     d = S.run_alert(tmp_path, alert=S.generic_alert(rule_id="R-other", rule={"id": "R-other", "uuid": "SIG-P065",
                                                                               "description": "now"}),
                     tenant=mapped, orient_shim=S.RecordingShim())
     section = _vocab_section(d) or ""
     assert _probes(section) == {"pc"}, (
         f"the corpus did not attribute the past run by its recorded signature:\n{section}")
-    assert recorded, "the past run's record could not be planted (S.COINED accessors)"
 
 
 
-def _raw_record(run_dir: Path, data: bytes) -> bool:
-    """Write `data` verbatim where the run's record goes (an unreadable record, p143). False
-    when the coined record accessor is absent (base)."""
-    try:
-        target = S.record_file(run_dir)
-    except AssertionError:
-        return False
+def _raw_record(run_dir: Path, data: bytes) -> None:
+    """Write `data` verbatim where the run's record goes (an unreadable record)."""
+    target = S.record_file(run_dir)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
-    return True
 
 
 def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
@@ -673,8 +624,9 @@ def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
         S.plant_run(runs, name, alert=raw, record=False,
                     files={"investigation.md": _investigation(name.removeprefix("p143-")),
                            "report.md": _report("benign")})
-    planted = [_raw_record(runs / name, data) for name, data in unreadable.items()]
-    planted.append(_with_record(runs, served, alert=raw, facts={"signature": sig}))
+    for name, data in unreadable.items():
+        _raw_record(runs / name, data)
+    S.plant_run(runs, served, alert=raw, facts={"signature": sig})
 
     companions, report = S.sym("skills.invlang.corpus", "load_corpus")(runs)
     skipped = _skipped_runs(report, runs)
@@ -688,11 +640,7 @@ def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
             f"record: {skipped[name]!r}")
 
     ep = J.accepted_episode(tmp_path / "judged")
-    try:
-        S.plant_episode_copy(ep, alert=raw, facts={"signature": sig})
-        copied = True
-    except AssertionError:
-        copied = False
+    S.plant_episode_copy(ep, alert=raw, facts={"signature": sig})
     judge = J.scripted_judge()
     J.grade(ep, runs_base=runs, judge=judge)
     lines = [ln for prompt in judge.prompts for ln in prompt.splitlines()]
@@ -700,11 +648,9 @@ def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
     def naming(name: str) -> list[str]:
         return sorted({ln.replace(name, "<run>") for ln in lines if name in ln})
 
-    # J3 retired the sibling union: neither served priors nor skip notes reach the judge.
+    # Neither served priors nor skip notes reach the judge (the sibling union is retired).
     for name in (*unreadable, none, served):
         assert not naming(name), f"a prior run entered the judge prompt: {name!r}"
-    assert all(planted), "the records could not be planted (S.COINED accessors)"
-    assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
 def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
@@ -713,8 +659,8 @@ def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
     for name, entries in {"fd-p080-r": ["R"], "fd-p080-second": ["Q", "R"],
                           "fd-p080-longer": ["R-1001"], "fd-p080-lower": ["r"]}.items():
         S.plant_lesson(name, source_signature=entries)
-    recorded = [_past_run(location_path(planted.runs), f"past-{tag}", tag=tag, rule_id=sig, signature=sig)
-                for tag, sig in (("pr", "R"), ("plonger", "R-1001"), ("plower", "r"))]
+    for tag, sig in (("pr", "R"), ("plonger", "R-1001"), ("plower", "r")):
+        _past_run(location_path(planted.runs), f"past-{tag}", tag=tag, rule_id=sig, signature=sig)
 
     one = S.run_alert(tmp_path, alert=_lesson_alert("R"), tenant=planted,
                       orient_shim=S.RecordingShim())
@@ -727,7 +673,6 @@ def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
     assert _listed(_lessons_section(blank)) == [], (
         f"a blank value was looked up as a signature: {_listed(_lessons_section(blank))}")
     assert _probes(_vocab_section(blank) or "") == set(), _vocab_section(blank)
-    assert all(recorded), "the past runs' records could not be planted (S.COINED accessors)"
 
 
 
@@ -776,7 +721,7 @@ def _later_hits(tmp_path: Path, planted: S.Planted, sig: str) -> list[str]:
 
 def _adopt(planted: S.Planted, lane: Any, *names: str) -> dict[str, Any]:
     """Put the lessons the drain committed on its batch branch into `planted`'s own corpus, as
-    written (as a merged PR on the tenant repo delivers them, #1108 P4 O7/O2); return them."""
+    written (as a merged PR on the tenant repo delivers them); return them."""
     committed = _committed(lane)
     for name in names:
         assert name in committed, f"the drain did not commit {name!r}: {sorted(committed)}"
@@ -791,7 +736,7 @@ _LESSON_KEYS = {"name", "description", "telemetry_source", "attack_phase", "sour
 
 def test_p072_curator_batch_mixes_findings_of_two_signatures(tmp_path):
     sig_a, sig_b, world = "SIG-P072-A", "SIG-P072-B", "R-P072-WORLD"
-    rows_a, copied = _judged(tmp_path, signature=sig_a, world_rule=world)
+    rows_a = _judged(tmp_path, signature=sig_a, world_rule=world)
     assert rows_a, "the judge enqueued no finding"
     row_b = _queued_row("p072-other/1", sig_b)
     curator = _Curator({"fd-p072-a": _author_lesson("fd-p072-a", [sig_a], _ids(rows_a)),
@@ -814,13 +759,12 @@ def test_p072_curator_batch_mixes_findings_of_two_signatures(tmp_path):
     assert committed["fd-p072-b"].lines("source_signature") == [sig_b]
     assert _later_hits(tmp_path, planted, sig_a) == ["fd-p072-a"]
     assert _later_hits(tmp_path, planted, sig_b) == ["fd-p072-b"]
-    assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
 
 @pytest.mark.parametrize("sig", ["Rule:Brute/Force@v2", "unkeyed"])
 def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path, sig):
-    rows, copied = _judged(tmp_path, signature=sig, world_rule="R-P074-WORLD")
+    rows = _judged(tmp_path, signature=sig, world_rule="R-P074-WORLD")
     assert rows, "the judge enqueued no finding"
     curator = _Curator({"fd-p074": _author_lesson("fd-p074", [sig], _ids(rows))})
     lane = _drain(tmp_path, curator)
@@ -831,13 +775,12 @@ def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path, sig):
     committed = _adopt(planted, lane, "fd-p074")
     assert committed["fd-p074"].lines("source_signature") == [sig]
     assert _later_hits(tmp_path, planted, sig) == ["fd-p074"]
-    assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
 
 def test_p077_signature_carries_frontmatter_significant_charac(tmp_path):
     colon, mixed = "R-P077:", "k8s_x:pod/exec@ns=prod+v1.2-x"
-    rows, copied = _judged(tmp_path, signature=colon, world_rule="R-P077-WORLD")
+    rows = _judged(tmp_path, signature=colon, world_rule="R-P077-WORLD")
     assert rows, "the judge enqueued no finding"
     other = _queued_row("p077-other/1", mixed)
     curator = _Curator({"fd-p077-colon": _author_lesson("fd-p077-colon", [colon], _ids(rows)),
@@ -854,4 +797,3 @@ def test_p077_signature_carries_frontmatter_significant_charac(tmp_path):
         assert set(committed[name].fm) == _LESSON_KEYS, sorted(committed[name].fm)
     assert _later_hits(tmp_path, planted, colon) == ["fd-p077-colon"]
     assert _later_hits(tmp_path, planted, mixed) == ["fd-p077-mixed"]
-    assert copied, "the episode's record copy could not be planted (S.COINED accessors)"

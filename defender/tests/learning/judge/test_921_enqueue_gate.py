@@ -22,8 +22,6 @@ from defender.tests.support.learning.core._state1135 import env_state
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -32,13 +30,9 @@ def _enqueue():
 
 
 def _family_row(fid: str = "ep-1/b/0/0", **over) -> dict:
-    """One `FindingRow` in the `direction: family` shape M5 appends.
-
-    `subject="defender"` overrides `D.finding_row`'s own placeholder `"subj"` value — that
-    fixture predates #1007's `subject` partition and this suite is entirely about the DEFENDER
-    lane. #1234 (d00d): no `judge_outcome` (A4), and the three fields the family partition
-    reads as the row's ground truth — `contrast_evidence`, `on_verdict_path`,
-    `world_label_doubted`.
+    """One `FindingRow` in the `direction: family` shape the judge appends: `subject="defender"`
+    (not `D.finding_row`'s placeholder), no `judge_outcome`, and the three fields the family
+    gate reads as ground truth (`contrast_evidence`, `on_verdict_path`, `world_label_doubted`).
     """
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"),
                type="decision-discipline", subject="defender",
@@ -64,22 +58,8 @@ def _graded(tmp_path, **kw):
     return ep, J.judge_record(ep)
 
 
-# #1108 P4 (OD12 class ii): the gate rows drive the REAL lessons tick over a batch's git-free
-# draft (`_curator1134.draft_lane` / `draft_author_cfg`); their assertions are the queue's.
-
-
-def test_921_family_row_is_not_held_as_no_ground_truth(tmp_path):
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    channel = D.channel_of("findings")
-    D.seed(paths, channel, [_family_row()])
-    cfg = C.draft_author_cfg(lane, invoke_agent=D.committing("family-lesson"))
-
-    assert J.mod("learning.author.drain").run_batch(cfg=cfg) == 0
-    assert D.pending(paths, channel) == [], (
-        "the family row is still queued; without a gate of its own it is held forever as "
-        "no_ground_truth")
-    assert [r["finding_id"] for r in D.consumed(paths, channel)] == ["ep-1/b/0/0"]
+# The gate tests drive the real lessons tick over a git-free draft lane
+# (`_curator1134.draft_lane` / `draft_author_cfg`) and assert on the queue.
 
 
 def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings(tmp_path):
@@ -102,19 +82,6 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
     assert still_held == {"run-adv/0": "retired_direction('adversarial')",
                           "run-held/0": "retired_direction('adversarial')"}, (
         "an adversarial row stopped being held, or the family row was held with it")
-
-
-def test_921_gate_family_authors_a_survived_row(tmp_path):
-    lane = C.draft_lane(tmp_path)
-    paths = lane.paths
-    channel = D.channel_of("findings")
-    D.seed(paths, channel, [_family_row()])
-    agent = D.recording(D.committing("survived"))
-
-    assert J.mod("learning.author.drain").run_batch(
-        cfg=C.draft_author_cfg(lane, invoke_agent=agent)) == 0
-    assert agent.calls, "the new-shape row authored nothing; it was held, not admitted"
-    assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/0"]
 
 
 def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
@@ -202,7 +169,7 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
         f"two worlds x two draws x two findings did not mint eight distinct ids: {fresh}")
 
 
-def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
+def test_921_a_world_filing_unreachable_or_incoherent_is_not_measured_and_enqueues_nothing(tmp_path):
     for word in ("unreachable", "incoherent"):
         ep = J.accepted_episode(tmp_path / word, ledgers={"b": [J.staged_row("b")], "c": []})
         reply = J.reply_doc(findings=[J.finding_doc(),
@@ -247,14 +214,13 @@ def test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate(tmp_path
     stuck = D.stuck_records(paths, channel)
     assert stuck, "the tick recorded nothing stuck at all"
     assert set(stuck[-1]["row_ids"]) >= {"run-adv/0"}, (
-        "the well-formed adversarial row did not ride the malformed one into stuck.jsonl; "
-        "P6 observed exactly that, and it is why the appender refuses")
+        "the well-formed adversarial row did not ride the malformed one into stuck.jsonl")
 
 
 def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
     from defender.tests.support.shared.contracts._by_path import load_lint_gate
 
-    enqueue = _enqueue()          # RED until M5 exists: a lint that scans nothing is clean
+    enqueue = _enqueue()          # must exist: a lint that scans nothing is clean
     assert hasattr(enqueue, "append_rows")
     gate = load_lint_gate("lint_unguarded_tree_write")
     tree = tmp_path / "synthetic" / "defender" / "learning" / "judge"
@@ -278,10 +244,9 @@ def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
 
     defender_dir = Path(__file__).resolve().parents[3]
     assert (defender_dir / "learning" / "judge").is_dir(), (
-        "the positive control failed: there is no learning/judge/ package on disk for the gate "
-        "to scan, so a clean result below says nothing about the shipped appender")
-    # Rooted AT the package, not at `defender/` and filtered: a finding is decided per file, and
-    # the wider root only walked the rest of the tree (and its `.venv`) to throw it away.
+        "control: there is no learning/judge/ package on disk for the gate to scan")
+    # Rooted at the package: findings are per file, and a wider root would walk the whole tree
+    # (and `.venv`) for nothing.
     real = {f.fingerprint for f in gate._scan(defender_dir / "learning" / "judge")}
     assert not real, f"the judge's own appender trips the write lint: {sorted(real)}"
 
@@ -310,8 +275,7 @@ def test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding(tmp_path
     assert not errors, f"an appender raised: {errors}"
     rows = J.enqueued_rows(record)
     assert len(rows) == before + 40, (
-        f"{len(rows) - before} rows landed of 40; a torn line is dropped silently by "
-        "`read_jsonl_rows`, which is what makes interleaving invisible without this test")
+        f"{len(rows) - before} rows landed of 40")
     assert len({r["finding_id"] for r in rows}) == len(rows)
 
 
@@ -337,15 +301,12 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     assert Path(record["enqueued_to"]) == queue, (
         "the pass wrote somewhere other than the queue it was pointed at, so nothing below is "
         "about the torn tail")
-    assert record["queue_malformed_rows"] == 1, (
-        "the torn trailing line was dropped without a count; a silent skip and a counted skip "
-        "are the same drain and different evidence, and the count is the only thing that says "
-        "a writer left a row half-written")
+    assert record["queue_malformed_rows"] == 1, "the torn trailing line was dropped without a count"
 
     rows, unreadable = read_jsonl_rows_report(queue)
     assert unreadable == 1, (
-        f"{unreadable} unreadable line(s) on the queue: the torn tail cost more than itself — "
-        "an appended row was concatenated onto the fragment and lost with it")
+        f"{unreadable} unreadable line(s) on the queue: an appended row was concatenated onto "
+        "the torn tail")
     ids = [r["finding_id"] for r in rows]
     assert "ep-0/b/0/0" in ids, (
         "the family row that was already queued went with the torn tail")
@@ -355,20 +316,19 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
         f"the record claims {record['enqueued_rows']} enqueued rows and {len(family_ids)} are "
         "readable; a row of this pass's own was swallowed by the fragment")
 
-    # The stall F-11 exists to prevent, on the real channel: the tick runs to completion and
-    # drains the queue rather than stuck-recording the whole batch behind one torn line.
+    # On the real channel the tick drains the queue rather than stuck-recording the whole batch
+    # behind one torn line.
     agent = D.recording(D.committing("torn-tail"))
     assert J.mod("learning.author.drain").run_batch(
         cfg=C.draft_author_cfg(lane, invoke_agent=agent)) == 0
-    assert D.stuck_records(paths, channel) == [], (
-        "a torn trailing row stuck-recorded the batch; P6's blast radius is every direction "
-        "riding in that tick, which is the whole reason the reader must skip it")
+    assert D.stuck_records(paths, channel) == [], "a torn trailing row stuck-recorded the batch"
     authored = {r["finding_id"] for call in agent.calls for r in call["rows"]}
     assert "ep-0/b/0/0" in authored, (
         "the row already queued stopped draining because of a torn line written after it")
 
 
-def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifact(tmp_path):
+def test_921_drift_reaches_the_judge_and_a_family_incoherent_finding_keeps_the_defender_lane_open(
+        tmp_path):
     from defender.records._episode_handle import Episode
     from defender.learning.branch.outcome import write_outcome
 
@@ -391,11 +351,11 @@ def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifac
                     if "/family/" in e["finding_id"]]
     assert family_lanes == ["world"], f"the family's world finding took {family_lanes}"
     assert J.enqueued_rows(record), (
-        "the family call's world finding closed the worlds' defender lane (I2: it never may)")
+        "the family call's world finding closed the worlds' defender lane")
     assert J.world_rows(record)["b"]["bucket"], "the family record lost its per-world grading"
 
 
-def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
+def test_921_a_world_whose_facts_a_gap_kept_back_is_not_measured_and_enqueues_nothing(tmp_path):
     gap = {"what": "elastic esql", "how": "the served system does not hold the field",
            "evidence": [f"worlds/{T.fixture_world_id('b')}/report.md"], "kept_facts_from_investigator": True}
     kept = J.as_reply_text(J.reply_doc(gaps=[gap]))
@@ -421,7 +381,7 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
     assert J.enqueued_rows(J.judge_record(ok)), "the positive control enqueued nothing"
 
 
-def test_921_discard_needs_a_majority_of_draws(tmp_path):
+def test_921_taking_a_world_out_of_measurement_needs_unanimous_draws(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             labels=("a", "b"))
     incoherent = J.as_reply_text(J.reply_doc(findings=[

@@ -1,9 +1,9 @@
-"""Watches, seams and the unprivileged child runner for `test_1134_shared_readers.py`. It
-defines no tests."""
+"""Watches, seams and the unprivileged child runner for `test_1134_shared_readers.py`."""
 from __future__ import annotations
 
 import contextlib
 import ctypes
+import errno
 import json
 import logging
 import os
@@ -16,8 +16,8 @@ from typing import Any
 from defender.tests.support.learning.curation._tree_listing_1134 import NOBODY, RealOs, _drop_privileges, fd_path
 from defender.tests.support.learning.curation._tree_listing_1134 import spelled as _spelled
 
-__all__ = ["NOBODY", "REFUSAL_ROUTES", "SWAP_PLANTS", "RefusesFolder", "RefusesFolders",
-           "SpellingRecorder",
+__all__ = ["NOBODY", "REFUSAL_ROUTES", "SWAP_PLANTS", "UNCOMMON_ERRNOS", "RefusesFolder",
+           "RefusesFolders", "SpellingRecorder",
            "SwapsFolderBetweenListings", "VanishesOnOpen", "audit_readers", "child", "fd_path",
            "kernel_watch", "project_record", "run_readers"]
 
@@ -138,6 +138,9 @@ class SpellingRecorder(RealOs):
 #: (or a root's open by its spelling), the reopen of `.` off its handle for reading, and
 #: `scandir` of the reopened descriptor.
 REFUSAL_ROUTES = ("step", "reopen", "scandir")
+#: Errnos outside the ones the other rows use: whatever the listing says is the reason, so a
+#: reader special-casing the common ones is caught.
+UNCOMMON_ERRNOS = (errno.ENOMEM, errno.EMFILE, errno.ESTALE, errno.ENOTCONN)
 
 
 class RefusesFolder(RealOs):

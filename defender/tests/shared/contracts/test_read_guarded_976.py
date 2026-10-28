@@ -107,8 +107,7 @@ def test_a_missing_file_is_a_reason_not_an_exception(tmp_path):
 
 
 def test_undecodable_bytes_are_a_reason_not_an_exception(tmp_path):
-    """`UnicodeDecodeError` is not an `OSError`, which is why `TEXT_READ_ERRORS` names both —
-    the exact family mistake this change's review found three times elsewhere."""
+    """`UnicodeDecodeError` is not an `OSError`, which is why `TEXT_READ_ERRORS` names both."""
     bad = tmp_path / "bad.txt"
     bad.write_bytes(b"\xff\xfe not utf-8 \xff")
     text, err = _io.read_guarded(bad)

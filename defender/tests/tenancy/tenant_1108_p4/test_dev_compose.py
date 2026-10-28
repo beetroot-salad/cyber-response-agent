@@ -1,16 +1,11 @@
-"""#1108 P4 S-F — the dev compose file and `.gitignore` carry the configuration that makes
-O12 (issuer unsealed without a human), O13 (Forgejo data on a bind mount) and U4/P-4
-(issuer state on disk under the repo, deployment facts never in the environment) possible.
+"""#1108 P4: the dev compose file and `.gitignore` carry the configuration that lets the issuer
+unseal without a human (O12), keeps Forgejo's data on a bind mount (O13), and keeps issuer state
+on disk under the repo with deployment facts never in the environment (U4/P-4).
 
-Structural and CI-safe: these parse `.devcontainer/docker-compose.yml` and ask git which paths
-`.gitignore` ignores. They pin configuration only. Whether OpenBao actually unseals after a
-restart, whether Forgejo's data actually survives `docker compose down -v`, and whether Forgejo
-accepts the issuer (P4-C14/C15) are live behaviours: `test_live_dev_issuer.py` owns them.
-
-What is deliberately NOT pinned here (the design leaves it to the implementer; reported):
-where OpenBao's own config (file storage, static seal, TLS listener) lives, the issuer's port,
-how Forgejo comes to trust the dev CA (mounted bundle vs environment), and the name of the
-issuer client config file under `playground-issuer/client/`.
+CI-safe configuration checks: they parse `.devcontainer/docker-compose.yml` and ask git what
+`.gitignore` ignores; the behaviour is `test_live_dev_issuer.py`'s. Deliberately not pinned (left
+to the implementation): where OpenBao's own config lives, the issuer's port, how Forgejo trusts
+the dev CA, and the client config file's name.
 """
 from __future__ import annotations
 
@@ -47,7 +42,7 @@ def _services() -> dict:
 
 def _bao() -> dict:
     services = _services()
-    assert "openbao" in services, "no `openbao` service in the dev compose file (U1)"
+    assert "openbao" in services, "no `openbao` service in the dev compose file"
     return services["openbao"]
 
 
@@ -110,13 +105,12 @@ def _ignored(paths: list[str]) -> set[str]:
 
 
 # ---------------------------------------------------------------------------------------------
-# The issuer service (U1, U4; design "Dev issuer and Forgejo")
+# The issuer service
 # ---------------------------------------------------------------------------------------------
 
 def test_compose_has_an_openbao_service_pinned_at_2_4_or_later_O12():
-    """O12/U1: the dev compose file runs OpenBao as service `openbao`, its image pinned to an
-    exact `major.minor.patch` of at least 2.4 at the team baseline (no `latest`, no floating
-    tag). Positive control on the same reader: Forgejo's pin reads as a version."""
+    """The image is pinned to an exact `major.minor.patch` at the team baseline (no `latest`, no
+    floating tag). Control: Forgejo's pin reads as a version."""
     assert _version(_services()["forgejo"]["image"]) is not None, "control: the reader parses a pin"
     image = _bao().get("image", "")
     assert "openbao" in _default(image).rsplit(":", 1)[0], f"openbao runs image {image!r}"
@@ -126,7 +120,7 @@ def test_compose_has_an_openbao_service_pinned_at_2_4_or_later_O12():
 
 
 def test_openbao_publishes_no_host_port_O12():
-    """Design: the issuer has no host port; it is reachable only on the compose network.
+    """The issuer is reachable only on the compose network.
     Positive control on the same field: Forgejo does publish its loopback UI port."""
     assert _services()["forgejo"].get("ports"), "control: forgejo's `ports` is read"
     bao = _bao()
@@ -135,10 +129,9 @@ def test_openbao_publishes_no_host_port_O12():
 
 
 def test_openbao_state_and_seal_key_live_on_disk_under_playground_issuer_U4():
-    """U4: OpenBao's storage, static seal key and CA are on disk under
-    `<repo>/playground-issuer/` (compose `../playground-issuer`), not in a docker volume: so a
-    `down -v` cannot destroy them and the operator can see and back them up. At least one bind
-    mount has its source there, and openbao uses no named or anonymous volume."""
+    """OpenBao's storage, seal key and CA are bound from `<repo>/playground-issuer/`, with no
+    named or anonymous volume, so `down -v` cannot destroy them and the operator can back them
+    up."""
     mounts = _mounts(_bao())
     binds = [_host_path(src) for kind, src, _ in mounts if kind == "bind"]
     assert any(_under(path, ISSUER_STATE) for path in binds), (
@@ -148,11 +141,9 @@ def test_openbao_state_and_seal_key_live_on_disk_under_playground_issuer_U4():
 
 
 def test_openbao_is_not_a_dev_server_and_gets_no_token_by_environment_U4_P4():
-    """The design's issuer is a real server with file storage and a static seal, not `bao server
-    -dev` (in-memory, root token by environment, lost on restart — which would break O12's
-    restart promise). No root/dev token or seal key is handed in through its environment.
-    `command` must be given and start a `server`: the image's default command (inherited from
-    the Vault image) is a dev server, so an absent `command` is dev mode too."""
+    """A real server with file storage and a static seal, not `bao server -dev` (in-memory, root
+    token by environment, lost on restart), and no token or seal key handed in by environment.
+    An absent `command` is dev mode too: the image's default (Vault's) starts a dev server."""
     bao = _bao()
     command = bao.get("command") or []
     command = command.split() if isinstance(command, str) else [str(c) for c in command]
@@ -165,13 +156,12 @@ def test_openbao_is_not_a_dev_server_and_gets_no_token_by_environment_U4_P4():
 
 
 # ---------------------------------------------------------------------------------------------
-# Forgejo (U2, O13; design "Dev issuer and Forgejo")
+# Forgejo
 # ---------------------------------------------------------------------------------------------
 
 def test_forgejo_data_is_bind_mounted_at_playground_knowledge_O13():
-    """O13/U2: Forgejo's `/data` is the host folder `<repo>/playground-knowledge/` (compose
-    `../playground-knowledge`), so `docker compose down -v` and a rebuild cannot delete it.
-    (That it survives is live; this pins the mount that makes it possible.)"""
+    """So `docker compose down -v` and a rebuild cannot delete it (that it survives is the live
+    test's)."""
     mounts = _mounts(_services()["forgejo"])
     data = [(kind, src) for kind, src, dst in mounts if dst.rstrip("/") == "/data"]
     assert len(data) == 1, f"forgejo's /data mounts: {data}"
@@ -181,10 +171,9 @@ def test_forgejo_data_is_bind_mounted_at_playground_knowledge_O13():
 
 
 def test_forgejo_uses_no_named_volume_and_down_v_cannot_reach_the_old_one_O13():
-    """O13: no Forgejo state stays in a docker volume, and the old `forgejo-data` volume is kept
-    until the operator deletes it. `docker compose down -v` removes every named volume the file
-    declares (and does not remove an `external` one), so the old volume is either no longer
-    declared or declared `external: true` (e.g. for a one-time migration)."""
+    """No Forgejo state stays in a docker volume, and `down -v` (which removes every declared
+    named volume that is not `external`) cannot reach the old `forgejo-data` volume: it is
+    undeclared or `external: true`."""
     mounts = _mounts(_services()["forgejo"])
     volumes = [(src, dst) for kind, src, dst in mounts if kind != "bind"]
     assert not volumes, f"forgejo still keeps state in docker volumes {volumes}"
@@ -198,7 +187,7 @@ def test_forgejo_uses_no_named_volume_and_down_v_cannot_reach_the_old_one_O13():
 
 
 def test_forgejo_allows_the_issuer_domain_and_runs_17_or_later_O12():
-    """Design: Forgejo gets `FORGEJO__authorized_integration__ALLOWED_DOMAINS` naming the
+    """Forgejo gets `FORGEJO__authorized_integration__ALLOWED_DOMAINS` naming the
     issuer's compose-network hostname (the `openbao` service's name, `hostname`,
     `container_name` or a network alias), and runs a Forgejo with Authorized Integrations
     (17+) at the team baseline."""
@@ -221,8 +210,8 @@ def test_forgejo_allows_the_issuer_domain_and_runs_17_or_later_O12():
 
 
 def test_git_to_forgejo_stays_on_the_compose_network_http_port_3000():
-    """Design: git to Forgejo stays `http://forgejo:3000` on the compose network in dev — the
-    service keeps its name and listens on 3000 inside the network."""
+    """Git reaches Forgejo at `http://forgejo:3000` on the compose network: the service keeps
+    its name and listens on 3000."""
     forgejo = _services()["forgejo"]
     assert _environment(forgejo).get("FORGEJO__server__HTTP_PORT") == "3000"
 
@@ -236,10 +225,8 @@ _DEPLOYMENT_FACT = re.compile(
 
 
 def test_the_dev_container_environment_names_no_issuer_or_forge_fact_P4_O8():
-    """P-4/O8: issuer URL, CA, AppRole `role_id`/`secret_id` and the forge binding reach delivery
-    processes by file path only, never through an environment variable. The devcontainer
-    service's compose environment names none of them. Positive control: the same reader sees
-    the data root it does carry."""
+    """Issuer and forge facts reach delivery processes by file path only, so the devcontainer's
+    compose environment names none. Control: the reader sees the data root it does carry."""
     env = _environment(_services()["devcontainer"])
     assert "DEFENDER_DATA_ROOT" in env, "control: the devcontainer environment is read"
     leaked = sorted(k for k in env if _DEPLOYMENT_FACT.search(k))
@@ -247,7 +234,7 @@ def test_the_dev_container_environment_names_no_issuer_or_forge_fact_P4_O8():
 
 
 # ---------------------------------------------------------------------------------------------
-# .gitignore (U2, U4)
+# .gitignore
 # ---------------------------------------------------------------------------------------------
 
 # Probe names carry no extension `.gitignore` already ignores (`*.key`, `*.pem`, `*.crt`,
@@ -265,10 +252,8 @@ _ISSUER_PROBES = [
 
 
 def test_playground_knowledge_and_playground_issuer_are_gitignored_U2_U4():
-    """U2/U4: Forgejo's data and the issuer's seal key, storage, recovery keys and client
-    config (`secret_id`) can never be committed: git ignores everything below
-    `playground-knowledge/` and `playground-issuer/`. Positive control on the same matcher: a
-    sibling name and a tracked source file are not ignored."""
+    """Forgejo's data and the issuer's seal key, storage, recovery keys and client config can
+    never be committed. Control: a sibling name and a tracked source file are not ignored."""
     controls = ["playground-knowledgebase/HEAD", "defender/run.py"]
     ignored = _ignored(_KNOWLEDGE_PROBES + _ISSUER_PROBES + controls)
     assert not ignored & set(controls), f"control paths reported ignored: {ignored & set(controls)}"

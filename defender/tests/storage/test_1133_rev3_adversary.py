@@ -1,4 +1,4 @@
-"""#1133 rev 3 adversary regressions: wrong-but-plausible implementations the main rev-3 suite let through."""
+"""Wrong-but-plausible Episode-handle implementations that `test_1133_rev3.py` alone lets through."""
 from __future__ import annotations
 
 import errno
@@ -14,17 +14,13 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage import test_1133_rev3 as R
-from defender.tests.learning.branch.test_947_capture_prime import append_call, call_row, source_run
 
 
 def test_a_linked_served_holding_a_base_elsewhere_is_the_folder_refusal_not_already_primed(tmp_path):
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
-    run_dir = source_run(tmp_path)
-    append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}),
-                json.dumps({"owner": "estate", "role": "canary"}))
-    ep = tmp_path / "episodes" / "ep-1133"
-    ep.mkdir(parents=True)
+    run_dir = R._one_call_source(tmp_path)
+    ep = R.bare_episode(tmp_path)
     elsewhere = tmp_path / "host" / "elsewhere-served"
     elsewhere.mkdir(parents=True)
     (elsewhere / "base.jsonl").write_bytes(b'{"an": "earlier prime elsewhere"}\n')
@@ -37,8 +33,8 @@ def test_a_linked_served_holding_a_base_elsewhere_is_the_folder_refusal_not_alre
 
 
 def test_the_already_primed_check_follows_the_held_root_not_the_path(tmp_path):
-    capture = S.T.mod("learning.branch.capture") if hasattr(S, "T") else R.mod("learning.branch.capture")
-    ledger = R.mod("learning.branch.ledger")
+    capture = T.mod("learning.branch.capture")
+    ledger = T.mod("learning.branch.ledger")
     run_dir = R._one_call_source(tmp_path)
     sidecar, payload = R.fifo_sidecar(run_dir)
     ep = R.bare_episode(tmp_path)
@@ -65,9 +61,8 @@ def test_a_linked_outcome_record_holding_accepted_is_refused_by_both_readers(tmp
     host = tmp_path / "host"
     host.mkdir()
     record = ep / LAYOUT.outcome
-    # Both halves read through the episode's WALKED view (review-3 F32 / review-4 F36: the
-    # readers take the view and no `Path`), opened OUTSIDE `pytest.raises`, so a view that
-    # cannot be opened fails as itself instead of satisfying the refusal below.
+    # The readers take a walked view (never a `Path`), opened OUTSIDE `pytest.raises`, so a
+    # view that cannot be opened fails as itself instead of satisfying the refusal below.
     read = getattr(episode, reader)
     # Control: the plain accepted record passes the gate.
     J.through_view(ep, read)
@@ -95,7 +90,7 @@ def test_a_linked_served_folder_is_no_primed_base_never_followed(tmp_path):
     (ep / "served").symlink_to(outside, target_is_directory=True)
     # A classification here means delta_o followed the linked served/ outside the episode.
     with pytest.raises(ledger.LedgerError, match="no primed base"):
-        J.through_view(ep, episode.delta_o)  # review-3 F32: the walked view, never a path
+        J.through_view(ep, episode.delta_o)
 
 
 def test_an_under_derivation_taken_before_close_is_refused_after_it(tmp_path):

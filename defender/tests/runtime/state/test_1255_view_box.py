@@ -80,8 +80,8 @@ def test_b1_two_host_layouts_render_the_same_create_command(tmp_path):
     a = V.make_layout(tmp_path / "a", V.TENANT_A)
     b = V.make_layout(tmp_path / "b" / "deeper" / "still",
                       V.TENANT_B, checkout=V.mirror_checkout(tmp_path / "b" / "elsewhere" / "src"))
-    # #1279 (A3): each host's setup mints its own run id, so the two commands also agree across
-    # different ids (the name and the sources are masked).
+    # Each host's setup mints its own run id, so the two commands also agree across different
+    # ids (the name and the sources are masked).
     run_id = "20261015t120000z-view-two"
     ca = _created(V.natural_run(a, ALERT, run_id), a)
     cb = _created(V.natural_run(b, ALERT, run_id), b)
@@ -218,9 +218,9 @@ def test_b5_the_unboxed_fallback_never_hands_its_shims_the_real_runs_folder(tmp_
     assert ident.out.decode("utf-8").strip() == layout.tenant.id, ident.out
     staged_tags = _run(box, f"{env['DEFENDER_DIR']}/bin/defender-lessons --tags")
     assert staged_tags.rc == 0, staged_tags
-    # #1108 P4 (O1, O4): the shim reads the lessons of the agent root `DEFENDER_AGENT_DIR`
-    # names (the tenant's), never the checkout's, so the control names the same agent half the
-    # box was handed (the staged view of it is what the box's own call reads).
+    # The shim reads the lessons of the agent root `DEFENDER_AGENT_DIR` names (the tenant's),
+    # never the checkout's, so the control names the agent half the box was handed (whose
+    # staged view the box's own call reads).
     direct = subprocess.run(
         [str(layout.checkout / "bin" / "defender-lessons"), "--tags"], capture_output=True,
         timeout=60, env={**os.environ, "DEFENDER_DIR": str(layout.checkout),

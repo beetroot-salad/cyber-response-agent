@@ -38,7 +38,7 @@ def _blocked(errors: list[str]) -> list[str]:
     return [e for e in errors if "disposition benign blocked" in e]
 
 
-# F-14 — the escaped quote never reaches the quote toggle
+# the escaped quote never reaches the quote toggle
 
 def test_backslash_quote_in_a_middle_cell_does_not_merge_the_rest_of_the_row():
     assert _split_cells(r"a|b\"c|d") == ["a", r"b\"c", "d"]
@@ -47,7 +47,6 @@ def test_backslash_quote_in_a_middle_cell_does_not_merge_the_rest_of_the_row():
 
 
 def test_escaped_delimiter_and_quoted_cells_are_unchanged():
-    """The controls the one-line change had to leave byte-identical."""
     assert _split_cells(r"a|b\|c|d") == ["a", "b|c", "d"]
     row = 'v-002|process|process:bash|bash[pid=42]|flags="EXE_WRITABLE|EXE_LOWER_LAYER"'
     assert _split_cells(row)[4] == 'flags="EXE_WRITABLE|EXE_LOWER_LAYER"'
@@ -56,8 +55,8 @@ def test_escaped_delimiter_and_quoted_cells_are_unchanged():
 
 
 def test_a_laced_ident_cell_no_longer_hides_an_open_attribute_from_the_benign_gate():
-    """The stealth shape the defect bought: `attrs.signing=??` is still ON THE PAGE, and used
-    to be invisible to the gate because the ident cell's `\\"` ate the delimiter before it."""
+    """`attrs.signing=??` is ON THE PAGE: the ident cell's `\\"` must not eat the delimiter
+    before it and hide the open slot from the gate."""
     laced = _benign_doc(
         r'v-001|compute|bastion/internal/known-corp|host\"01|signing=??'
     )
@@ -70,7 +69,8 @@ def test_a_laced_ident_cell_no_longer_hides_an_open_attribute_from_the_benign_ga
 
 
 def test_a_quote_opening_mid_token_is_refused_rather_than_merging_cells():
-    """F-14's residual half, and the one the `\"` fix did NOT close:"""
+    """An EVEN number of plain `"` merges cells with quote parity intact, and the optional
+    `attrs?` column absorbs the shift, so the quote's POSITION is what the row is refused for."""
     merged = _benign_doc(
         'v-001|compute|bastion"/internal/known-corp|bastion"-01.corp|signing=??'
     )
@@ -94,8 +94,8 @@ def test_a_row_short_of_a_required_column_is_refused_not_padded():
 
 
 def test_a_quoted_cell_and_a_quoted_subcell_value_are_still_legal():
-    """The controls the placement rule is bounded by — every quoting shape the corpus uses:
-    a wholly-quoted cell carrying a `|`, and a quoted value inside a `k=v` subcell."""
+    """Controls for the placement rule — every quoting shape the corpus uses: a wholly-quoted
+    cell carrying a `|`, and a quoted value inside a `k=v` subcell."""
     doc = _doc(
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"
         'v-001|process|process:bash|bash[pid=42]|flags="EXE_WRITABLE|EXE_LOWER";user=root',
@@ -112,7 +112,7 @@ def test_a_quoted_cell_and_a_quoted_subcell_value_are_still_legal():
     }
 
 
-# F-15 — every documented spelling of an unresolved slot blocks benign
+# every documented spelling of an unresolved slot blocks benign
 
 def test_per_slot_candidate_set_blocks_benign():
     """SKILL.md §Open questions: "Per-slot enumeration is fine when only one axis is open" —
@@ -156,7 +156,7 @@ def test_a_candidate_set_resolved_by_attr_updates_closes_benign():
     assert validate_companion(doc) == []
 
 
-# F-16 — an `ac*` id binds to exactly one hypothesis
+# an `ac*` id binds to exactly one hypothesis
 
 _TWO_LIVE_HYPS = (
     ":H hypothesize.hypotheses "
@@ -258,7 +258,7 @@ def test_one_hypothesis_repeating_a_contract_id_in_one_block_is_denied():
     assert validate_companion(doc)
 
 
-# F-27 — a hierarchical child declares its own sub-blocks
+# a hierarchical child declares its own sub-blocks
 
 _CHILD_DOC = _doc(
     ":V prologue.vertices [id|type|class|ident|attrs?]\n"
@@ -278,7 +278,8 @@ _CHILD_DOC = _doc(
 
 
 def test_a_hierarchical_child_can_declare_the_predictions_the_validator_demands():
-    """`_HYP_PREFIX_RE` is built from `HYPOTHESIS_ID_RE` now, so the declaring side accepts every id the four reference sites already accepted."""
+    """`_HYP_PREFIX_RE` is built from `HYPOTHESIS_ID_RE`, so the declaring side accepts every
+    id the reference sites accept."""
     companion, warnings = parse_dense_companion(_CHILD_DOC)
     assert warnings == []
     hyp = companion["hypothesize"]["hypotheses"][0]

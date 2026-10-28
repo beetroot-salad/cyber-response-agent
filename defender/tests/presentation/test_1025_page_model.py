@@ -10,26 +10,15 @@ import yaml
 
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 S = E.SAMPLE
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def visualize_episode():
-    return E.page_module()
-
-
-def render(ep) -> E.Page:
-    return E.render(ep, module=visualize_episode())
+_tmp_roots = E.tmp_roots
+visualize_episode = E.page_module
+render = E.render
 
 
 def _heading_of(page: E.Page, row_id: str) -> str:
@@ -60,8 +49,7 @@ def _card_link(card: E.Node) -> tuple[str, str]:
 
 
 def test_1025_a_scalar_worlds_field_in_the_manifest_is_refused_by_the_loader_gate(tmp_path):
-    """`family.yaml` with `worlds: 5` is a manifest the runtime loader refuses (the page reads the
-    manifest through the loader's own gate, `family.read_manifest`), so it is the."""
+    """The loader's gate refuses `worlds: 5`, so `family.yaml` is the one record that refuses the whole page."""
     ep = E.sample_episode(tmp_path)
     manifest = E.sample_manifest()
     manifest["worlds"] = 5
@@ -95,7 +83,7 @@ def test_1025_non_numeric_usage_and_odd_message_shapes_in_a_wire_log_leave_that_
             row["usage"] = {"input_tokens": "abc", "output_tokens": None}
             row["message"] = {"parts": 5}
     E.write_trace(ep.dir, agent_id, rows)
-    # #1234 A6: a transcript shows for a draw the record names
+    # A transcript shows only for a draw the record names
     E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1)))
     page = render(ep)
     block = page.text_of(f"tx-{E.trace_stem(agent_id)}")
@@ -126,8 +114,7 @@ def test_1025_a_scalar_list_field_in_the_outcome_or_the_provenance_record_degrad
 
 
 def test_1025_a_finding_with_no_subject_key_is_the_defenders_as_the_enqueue_read_it(tmp_path):
-    """A draw finding that carries no `subject` at all (the pre-#1007 shape the live archive holds)
-    sits in the "defender."""
+    """A finding with no `subject` (the pre-#1007 shape) is the defender's, as the enqueue reads it."""
     ep = E.sample_episode(tmp_path)
     findings = E._world_findings_rows()
     findings[0].pop("subject")
@@ -140,8 +127,7 @@ def test_1025_a_finding_with_no_subject_key_is_the_defenders_as_the_enqueue_read
 
 
 def test_1025_the_card_footer_counts_and_links_the_same_defender_rows(tmp_path):
-    """A graded world whose FIRST finding row is addressed to the world author still has its card
-    footer "4 findings · enqueued" link the group its defender rows sit in ."""
+    """The footer's count and link come from one list of rows, even when the first row is the world author's."""
     ep = E.sample_episode(tmp_path)
     findings = E._world_findings_rows()
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=findings[4:]))
@@ -161,7 +147,7 @@ def test_1025_the_card_footer_counts_and_links_the_same_defender_rows(tmp_path):
 
 
 def test_1025_a_world_not_measured_card_does_not_say_enqueued(tmp_path):
-    """#1234 retired the `discard` family word and its `never_eligible` lane."""
+    """A card whose rows the ledger kept off the queue (`not_measured`) never says "enqueued"."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"][1].update(measured=False, not_measured_reason="a draw files unreachable")
@@ -221,7 +207,7 @@ def _outside_world(tmp_path, ep) -> tuple[Path, str]:
 
 
 def test_1025_a_manifest_label_off_the_directory_grammar_reads_nothing_from_disk(tmp_path):
-    """A manifest world whose label carries `..` names a directory OUTSIDE the episode."""
+    """A label carrying `..` is refused before it is joined into a path; nothing planted outside is read."""
     ep = E.sample_episode(tmp_path)
     _outside, label = _outside_world(tmp_path, ep)
     manifest = E.sample_manifest()

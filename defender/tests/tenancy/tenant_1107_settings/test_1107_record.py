@@ -27,7 +27,7 @@ RECORD_TYPES = ("SystemConfig", "CaseMapping")
 
 
 def _resolve(root: Path, tenant_id: str = TID) -> object:
-    """The REAL acceptance frame over a planted root (C1: the one frame every entry uses)."""
+    """The real acceptance frame over a planted root (the one frame every entry uses)."""
     return run_tenant.resolve_tenant(
         fixture_data_root(Path(root)), tenant_id, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
@@ -64,7 +64,7 @@ def test_d_systems_fault_kept(tmp_path):
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="fk")
     S.config_path(folder, "cmdb").unlink()
-    # RG4n (executed): these bytes raise an uncaught UnicodeDecodeError out of every reader today.
+    # Invalid UTF-8: it must become this system's fault, never an escaping UnicodeDecodeError.
     S.write_config(folder, "identity", S.config_texts("fk")["identity"].encode("utf-8").replace(
         b"identity-fk", b"identity-\xff\xfe"))
 
@@ -78,7 +78,7 @@ def test_d_systems_fault_kept(tmp_path):
     for system, prefix in (("cmdb", "CMDB"), ("identity", "IDENTITY")):
         with pytest.raises(ConfigFault) as raised:
             transport.load_config(ctx, system, prefix)
-        # the contract is the outcome (s008), so the SAME fault's text, not its identity
+        # the contract is the outcome: the same fault's text, not its identity
         assert str(raised.value) == str(rec.systems[system]), (system, str(raised.value))
 
 
@@ -127,17 +127,11 @@ def test_o5_resolve_keeps_system_faults(tmp_path):
     # TenantRefused keeps its tenant-acceptance reasons, each still refusing.
     TenantRefused = S.tenant_refused()
     missing_mapping = S.plant(root, fixture_uuid("tenant:no-mapping"), marker="o5c")
-    S.mapping_path(missing_mapping).unlink()  # REQUIRED_SETTINGS (MF-10 A, human)
+    S.mapping_path(missing_mapping).unlink()  # a REQUIRED_SETTINGS file
     with pytest.raises(TenantRefused) as refused:
         _resolve(root, fixture_uuid("tenant:no-mapping"))
     assert "mapping.yaml" in str(refused.value), str(refused.value)
-    linked = S.plant(root, fixture_uuid("tenant:linked"), marker="o5d")
-    outside = tmp_path / "outside.env"
-    outside.write_text('CMDB_URL_BASE="http://outside:1"\n', encoding="utf-8")
-    S.config_path(linked, "cmdb").unlink()
-    S.config_path(linked, "cmdb").symlink_to(outside)
-    with pytest.raises(TenantRefused):
-        _resolve(root, fixture_uuid("tenant:linked"))
+    # A linked config.env refuses too: test_s60_config_env_fs_confinement.
     with pytest.raises(TenantRefused):
         _resolve(root, fixture_uuid("tenant:absent"))
 
@@ -200,14 +194,14 @@ def test_s7_nf16_unreadable_config_env_kept_as_fault(tmp_path):
 
 def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
     # No arm here forks a transport; the shim first on PATH makes sure a stray one cannot
-    # reach the real docker (CX8).
+    # reach the real docker.
     monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "shim").path_value())
-    # #1120: under this test's data root, the one `run.main` below reads its tenants from.
+    # Under this test's data root, the one `run.main` below reads its tenants from.
     root = current_data_root()
     folder = S.plant(root, marker="nf4")
     S.plant(root, fixture_uuid("tenant:other"), marker="nf4o")
 
-    # resolve_tenant / resolve_run_tenant, twice around an edit (RG5, refuted: no cache).
+    # Resolved twice around an edit: nothing is cached.
     first = _resolve(root)
     S.set_key(folder, "cmdb", "CMDB_URL_BASE", "http://cmdb-edited:1")
     S.mapping_path(folder).write_text(T1106.mapping_text(reporter="done"),
@@ -296,8 +290,7 @@ def test_d1096_record_types_outside_closure():
 
 
 def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
-    """With those variables exported, resolve_tenant's systems carry the tenant file's
-    values."""
+    """With the same keys exported, resolve_tenant's systems carry the tenant file's values."""
     exported = {
         "CMDB_URL_BASE": "http://from-env:1",
         "TICKET_KEY_PATTERN": "ENV-[0-9]+",
@@ -354,7 +347,7 @@ def test_d2_shipped_tenants_complete():
                 needed |= {"ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER"}
             assert needed <= keys, (tenant_settings, name, sorted(needed - keys))
 
-    # #1120: the committed fixture, set up under this test's data root as `playground`.
+    # The committed fixture, set up under this test's data root as `playground`.
     T1106.fixture_tenant(S.PLAYGROUND_ID)
     rec = _resolve(current_data_root(), S.PLAYGROUND_ID)
     ConfigFault = S.config_fault()
@@ -365,7 +358,7 @@ def test_d2_shipped_tenants_complete():
 
 def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys):
     policy_cli = S.mod("cli.policy_cli")
-    # #1120: policy_cli reads its tenants from `DEFENDER_DATA_ROOT` alone.
+    # policy_cli reads its tenants from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
     S.plant(root, fixture_uuid("tenant:healthy"), marker="pol")
     broken = S.plant(root, fixture_uuid("tenant:broken"), marker="pol")
@@ -394,7 +387,7 @@ def test_s60_config_env_fs_confinement(tmp_path):
     outside = tmp_path / "outside.env"
     outside.write_text('CMDB_URL_BASE="http://outside:1"\nCMDB_BASTION_HOST="b"\n'
                        'CMDB_TIMEOUT_SEC="10"\n', encoding="utf-8")
-    # A config.env reached through a symlink outside the folder: the link walk refuses it (CX6).
+    # A config.env reached through a symlink outside the folder: the link walk refuses it.
     linked = S.plant(root, fixture_uuid("tenant:linked"), marker="s60l")
     S.config_path(linked, "cmdb").unlink()
     S.config_path(linked, "cmdb").symlink_to(outside)
@@ -459,7 +452,7 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
         lambda: rec.ticket_mapping.__setitem__("open", {"reporter": "hijacked"}),
         lambda: setattr(rec.ticket_mapping, "open", {"reporter": "hijacked"}),
     ):
-        # raising is one of the two outcomes the demand allows
+        # raising is one of the two allowed outcomes
         with contextlib.suppress(Exception):
             attempt()
 

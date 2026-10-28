@@ -33,10 +33,6 @@ class MountedReadDocker(RecordingDocker):
         return super().__call__(argv, **kw)
 
 
-# `AgentReadDocker` (routed the in-box `.tenant-id` read) retired with that check (#1108 P4,
-# O-A): the run box's bind is proven by the staged token instead (tenant_1108_p4/test_run_copy.py).
-
-
 def start_with(docker):
     def start(*args, **kwargs):
         return box_mod.start_box(*args, spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS),

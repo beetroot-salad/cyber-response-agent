@@ -42,7 +42,7 @@ HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
 def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_path):
-    """O6/D1 — a live run reaching all three `append_query_row` callers (an executed query, a failed reducer shim..."""
+    """One live run reaches all three writers: an executed query, a failed reducer shim, a rejection."""
     run_dir = materialize(tmp_path / "live", GOLDEN_AB3)
     r = _run(tmp_path / "live", run_dir=run_dir, run_id="d1017-writers", turns=[
         q("elastic", "query", PARAMS), _reduce(run_dir),
@@ -57,7 +57,7 @@ def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_pat
 
 
 def test_the_surface_reads_system_key_and_payload_sha256_off_a_real_table(tmp_path):
-    """O1/D2 — over a table a real run wrote, with coarsened rejections (a 64-hex `system_key`) and declared rows..."""
+    """A coarsened ghost rejection carries a 64-hex `system_key`; declared systems' rows an empty one."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1017-surface", verbs=elastic_ok(rec), turns=[
         _bad_args("ghostone", verb="ghostverb"), _bad_args("elastic", verb="ghostverb"),
@@ -87,7 +87,6 @@ def test_the_surface_reads_system_key_and_payload_sha256_off_a_real_table(tmp_pa
 
 
 def test_records_off_the_surface_are_byte_for_byte_what_the_guard_reads_live(tmp_path):
-    """O2/D2 — `[r.record() for r in load_queries(run_dir) if r.lead_id == LEAD]` is EXACTLY what the guard read..."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1017-records", verbs=elastic_ok(rec), turns=[
         _bad_args("ghostone", verb="ghostverb"), q("ghosttwo", "ghostverb", PARAMS),
@@ -105,14 +104,13 @@ def test_records_off_the_surface_are_byte_for_byte_what_the_guard_reads_live(tmp
 
 @pytest.fixture
 def judge_roots(tmp_path, monkeypatch):
-    """The three roots #921's suite points inside `tmp_path` — the runs base, the episodes root and the learning..."""
+    """The runs base and learning-state dir, inside `tmp_path` as the judge suite sets them."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _world_row(seq: int, **overrides) -> dict:
-    """The unit suite's full row (`_row`, lead `l-001`) with a DISTINCTIVE value in every column the judge cannot..."""
+    """The unit suite's row (`_row`, lead `l-001`) with a searchable marker in params, command and digest."""
     marked = {
         "params": {"native_query": f"PARAMS_MARKER_{seq}"},
         "raw_command": f"RAWCMD_MARKER_{seq}",
@@ -122,7 +120,7 @@ def _world_row(seq: int, **overrides) -> dict:
 
 
 def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER"):
-    """An accepted #947 episode whose graded world `b` carries `rows` as its archived `executed_queries.jsonl`..."""
+    """An accepted episode whose graded world `b` archives `rows` as its `executed_queries.jsonl`."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = location_path(J.runs_base)(tmp_path)
     world = ep / "worlds" / J.world_id(ep, "b")
@@ -135,7 +133,7 @@ def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER")
 
 
 def _leads_view(ep: Path, base: Path):
-    """The per-lead chain and the rendered leads view — the address every O3 claim is made at, off the REAL..."""
+    """The per-lead chain and the leads-view section of the judge's real prompt (`run._build_prompt`)."""
     from defender.learning.judge import layout, run
     from defender.tests.learning.judge.contrast_contracts import _spec1234 as S34
 
@@ -149,7 +147,6 @@ def _leads_view(ep: Path, base: Path):
 
 
 def test_the_judges_leads_view_carries_no_column_it_cannot_act_on(tmp_path, judge_roots):
-    """O3/D3 — a world whose rows carry `system_key`, `payload_sha256`, `payload_path`, `raw_command`,..."""
     rows = [
         _world_row(0, system_key=KEY_MARKER),
         _world_row(1, exit_code=7, error_class="ERRCLASS_MARKER", payload_status="error"),
@@ -179,13 +176,14 @@ def test_the_judges_leads_view_carries_no_column_it_cannot_act_on(tmp_path, judg
 
 
 def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots):
-    """D3 — the lstat gate is the SURFACE's (`load_queries_report`), refusing the table's rows and nothing else:"""
+    """The lstat gate is the surface's (`load_queries_report`): a link is malformed, a missing table
+    ungradable, and a regular table with the same rows is read."""
     target_rows = [_world_row(0, params={"native_query": "LINKED_PARAMS"},
                               payload_digest="LINKED_DIGEST")]
     elsewhere = tmp_path / "elsewhere" / "executed_queries.jsonl"
     append_jsonl(elsewhere, target_rows)
 
-    ep, base, world = _judge_world(tmp_path / "linked", [])
+    ep, _base, world = _judge_world(tmp_path / "linked", [])
     table = world / "executed_queries.jsonl"
     table.unlink()
     os.symlink(elsewhere, table)
@@ -202,10 +200,9 @@ def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots
         assert "LINKED_PARAMS" not in prompt, "the judge followed a link at the table's name"
         assert "LINKED_DIGEST" not in prompt
 
-    ep0, base0, world0 = _judge_world(tmp_path / "tableless", [])
+    ep0, _base0, world0 = _judge_world(tmp_path / "tableless", [])
     (world0 / "executed_queries.jsonl").unlink()
-    # #1234 A3 (spec AM15 `missing-query-table`): a missing query table is a missing required
-    # input — the world is ungradable, naming the table, and never reaches the judge.
+    # A missing table is a missing required input: ungradable, named, and never judged.
     judge0 = J.scripted_judge()
     J.grade(ep0, judge=judge0)
     row0 = J.world_rows(J.judge_record(ep0))["b"]
@@ -224,7 +221,7 @@ def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots
 def test_the_judges_chain_is_the_surfaces_own_reading_on_a_row_that_stresses_every_coercion(
     tmp_path, judge_roots,
 ):
-    """D3/N8/O1 — the chain is compared against `lead_repository.joined` ITSELF, not against literals, over rows..."""
+    """Compared against `lead_repository.joined` itself, not literals: non-dict params, int digest, text seq."""
     stressed = _world_row(1, params="not-a-dict", payload_digest=5)
     stressed["seq"] = "1"
     rows = [

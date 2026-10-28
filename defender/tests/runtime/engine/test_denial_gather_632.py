@@ -35,12 +35,12 @@ DENIED_PAIR = ("elastic", "esql")
 DECLARED = ("query", "esql", "alerts", "health-check")
 
 
-def _registry(rec: VerbRecorder, *, granted=(GRANTED_PAIR,), declared=DECLARED,
+def _registry(rec: VerbRecorder, *, granted=(GRANTED_PAIR,),
               systems=("elastic",), raises: BaseException | None = None,
               call_run: str | None = None) -> ScopedFakeVerbs:
-    """One system declaring `declared`, a grant naming only `granted` — so `elastic.esql` is
-DECLARED AND WITHHELD (a denial) while `elastic.nosuch` is undeclared (today's path)."""
-    table = recording_table(rec, {s: declared for s in systems}, raises=raises)
+    """Each system declaring `DECLARED`, a grant naming only `granted` — so `elastic.esql` is
+DECLARED AND WITHHELD (a denial) while `elastic.nosuch` is undeclared (the unknown-verb path)."""
+    table = recording_table(rec, {s: DECLARED for s in systems}, raises=raises)
     return ScopedFakeVerbs(table, grant_of("gather", granted), call_run=call_run)
 
 
@@ -52,7 +52,7 @@ def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path:
     assert rec.calls == [], "the denied verb body ran"
     assert r.gather.calls >= 2, "the refusal did not come back as a result the loop continued past"
     assert r.own_evidence == [], "a denied call wrote an evidence row"
-    assert len(r.own_denied_rows) == 1, "the denial left no `∅.denied` sentinel row (#860)"
+    assert len(r.own_denied_rows) == 1, "the denial left no `∅.denied` sentinel row"
     assert r.breaker.get("total_failures", 0) == 0
     assert "esql" in r.gather_saw
 
@@ -127,7 +127,7 @@ def test_a_denied_verb_is_not_the_unknown_verb_path(tmp_path: Path):
 
 
 def test_an_undeclared_verb_keeps_todays_unknown_verb_treatment(tmp_path: Path):
-    """A verb no adapter declares still gets today's unknown-verb treatment — the queries row, the
+    """A verb no adapter declares gets the unknown-verb treatment: a queries row, the
     `agent-fixable` class and the retry coaching."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_registry(rec), turns=[q("elastic", "nosuch-verb"), DONE],
@@ -284,7 +284,7 @@ def test_a_denied_call_is_refused_before_its_query_id_meets_the_traversal_screen
 
 def test_a_denial_is_decided_before_the_availability_short_circuit(tmp_path: Path):
     """A denial against a system this run has already given up on is still DECIDED and AUDITED: the
-    grant check runs before the availability short-circuit (§7 R3)."""
+    grant check runs before the availability short-circuit."""
     from defender.kit.faults import TransportFault
 
     rec = VerbRecorder()
@@ -305,8 +305,7 @@ def test_a_denial_is_decided_before_the_availability_short_circuit(tmp_path: Pat
 
 
 def test_a_denial_does_not_move_the_circuit_breaker(tmp_path: Path):
-    """A denial contributes nothing to the circuit breaker, matching the closed-ticket tool's
-    existing rule that a business refusal is not an infra fault."""
+    """A denial contributes nothing to the circuit breaker: a policy refusal is not an infra fault."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_registry(rec),
                    turns=[q(*DENIED_PAIR), q(*DENIED_PAIR), q(*DENIED_PAIR), DONE], run_id="d10")
@@ -379,9 +378,7 @@ def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_pa
     assert reg.decide("elastic", "esql").outcome == DENIED
     assert reg.decide("elastic", "query").outcome == GRANTED
     assert reg.decide("cmdb", "list-hosts").outcome == DENIED, (
-        "a verb withheld on a system whose adapter cannot be imported was not denied — the "
-        "decision reached for the module instead of the grant, or swallowed the import error "
-        "and downgraded the denial to unresolvable"
+        "a verb withheld on a system whose adapter cannot be imported was not denied"
     )
 
     # The run starts over the importable file; the lead's call meets it broken.
@@ -447,8 +444,8 @@ def test_a_case_or_whitespace_variant_of_a_granted_name_never_executes(
 
 
 def test_gather_is_denied_ticket_get_ticket(tmp_path: Path):
-    """Gather is denied `ticket.get-ticket`, which only the judge used. A class-shaped grant
-    could not have expressed this — both are reads on a system gather legitimately holds."""
+    """Gather is denied `ticket.get-ticket` while it may read `list-tickets` on the same system,
+    which only a per-verb grant can express."""
     rec = VerbRecorder()
     reg = ScopedFakeVerbs(
         recording_table(rec, {"ticket": ("list-tickets", "get-ticket")}),

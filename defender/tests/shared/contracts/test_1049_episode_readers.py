@@ -23,26 +23,25 @@ NOT_ROOT = R.NOT_ROOT
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
-def _episode(tmp_path: Path, *, labels: tuple[str, ...] = ("b", "c"), **kw) -> Path:
+def _episode(tmp_path: Path) -> Path:
     """An accepted, archived episode under a root spelled with `SECRET`: the control `a`
-    (benign) plus `labels` (malicious), every world archived, every non-control world
+    (benign) plus `b` and `c` (malicious), every world archived, every non-control world
     carrying one served row."""
     root = T.tenant_episodes(tmp_path / R.SECRET)
     return J.accepted_episode(
-        root, root=root, labels=("a", *labels),
-        dispositions={"a": "benign", **{label: "malicious" for label in labels}},
-        ledgers={label: [J.staged_row(label)] for label in labels}, **kw)
+        root, root=root, labels=("a", "b", "c"),
+        dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
+        ledgers={label: [J.staged_row(label)] for label in ("b", "c")})
 
 
 #: The judge double's reply for every draw: a valid world answer that grades nothing.
 _REPLY = J.as_reply_text(J.reply_doc(bucket="none", systems=[]))
 
 
-def _grade(ep: Path, tmp_path: Path):
+def _grade(ep: Path):
     """The real grading pass over `ep` (`grade_episode`), its model seam a `FakeJudge`. A
     record already on disk is removed first, so a scenario that re-plants a fault and grades
     again sees a fresh pass rather than the idempotent re-read of the earlier one."""
@@ -64,7 +63,7 @@ def _root_free(sentence: str, ep: Path) -> None:
         assert spelling not in sentence, (spelling, sentence)
 
 
-# d-08 — screened_yaml_mapping
+# screened_yaml_mapping
 
 
 def test_1049_screened_yaml_mapping_says_the_name_on_all_three_arms_and_none_on_absence(tmp_path):
@@ -97,17 +96,11 @@ def test_1049_screened_yaml_mapping_says_the_name_on_all_three_arms_and_none_on_
     R.write_bytes(ep / "judge.yaml", "verdict_word: caught\n")
     assert family.screened_yaml_mapping(bound, "judge.yaml", what="the family grade") == {
         "verdict_word": "caught"}
-    # the manifest goes through the same reader and is still the one FATAL absence (d-33)
+    # the manifest goes through the same reader and is still the one FATAL absence
     assert family.episode_id_of(J.read_manifest_at(ep)) == T.EPISODE_ID
 
 
-# d-10 — the permissive samples reader survives
-
-
-# d-11 — read_archived_report
-
-
-# d-12 — the world ledger
+# The world ledger
 
 
 def test_1049_the_world_ledger_refusal_names_served_token_label_jsonl(tmp_path):
@@ -156,10 +149,7 @@ def test_1049_the_world_ledger_refusal_names_served_token_label_jsonl(tmp_path):
     _root_free(sentence, ep)
 
 
-# d-13 — _missing_required_input's ledger arm
-
-
-# d-14 — lead_chain
+# lead_chain
 
 
 def test_1049_the_gather_summary_refusal_names_gather_summaries_lead_md_with_no_scrub(tmp_path):
@@ -207,7 +197,7 @@ def test_1049_the_gather_summary_refusal_names_gather_summaries_lead_md_with_no_
     assert not hasattr(family, "_without_path"), "the reader-side scrub is still there"
 
     R.plant_link(summary, ep / "family.yaml")
-    row = _rows(_grade(ep, tmp_path))["b"]
+    row = _rows(_grade(ep))["b"]
     assert row.get("ungradable"), row
     assert row.get("malformed") is True, row
     assert "gather_summaries" in row["ungradable_reason"], row
@@ -215,28 +205,7 @@ def test_1049_the_gather_summary_refusal_names_gather_summaries_lead_md_with_no_
     _root_free(row["ungradable_reason"], ep)
 
 
-# d-15 — _read_archived_text
-
-
-# d-16 — _grade_from_document
-
-
-# d-17 / d-18 / d-19 — the three episode-root parsing readers
-
-
-# d-20 — branch/episode.verdicts (O3, the eval lane)
-
-
-# d-21 — the reader= seam
-
-
-# d-22 — every caller coalesces at the read site
-
-
-# d-28 — judge.yaml rows say relative names
-
-
-# d-37 — labels and lead ids are gated before any read
+# Labels and lead ids are gated before any read
 
 
 def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_echoed_from_a_read(tmp_path):
@@ -247,7 +216,7 @@ def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_ec
     sound = {**manifest, "worlds": list(manifest["worlds"])}
     manifest["worlds"].append({**manifest["worlds"][1], "world_id": "../../elsewhere"})
     T.write_family(ep, manifest)
-    for read in (lambda: J.read_manifest_at(ep), lambda: _grade(ep, tmp_path)):
+    for read in (lambda: J.read_manifest_at(ep), lambda: _grade(ep)):
         with pytest.raises(refused, match="canonical lowercase UUID"):
             read()
     T.write_family(ep, sound)
@@ -270,10 +239,7 @@ def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_ec
         assert chain["summary"].startswith("summary of"), (odd, chain)
 
 
-# D-J2 — the three world-level readers answer the absent STATE; the page renders it
-
-
-# D-J3 — lead_chain with no lstat ahead of the summary read
+# lead_chain with no lstat ahead of the summary read
 
 
 def test_1049_a_symlinked_gather_summary_or_directory_is_the_chains_sentence_and_an_absent_one_is_none(tmp_path):
@@ -320,13 +286,7 @@ def test_1049_a_symlinked_gather_summary_or_directory_is_the_chains_sentence_and
     assert str(tmp_path) not in page.raw
 
 
-# D-J7 — review / samples shape arms per reader
-
-
-# D-V2 — the bind is the only root holder
-
-
-# D-V4 — names_one_file is the component grammar
+# names_one_file is the component grammar
 
 
 def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_construction_on_either_lane(tmp_path):
@@ -343,9 +303,9 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
     (world_dir / "investigation.md").write_text(doc, encoding="utf-8")
     bound = R.bind(ep)
     facts = family.read_investigation_facts(bound, world=T.world_id(ep, "b"))
-    assert nul in facts.resolutions_by_lead, "the fixture's NUL id did not parse (rg12)"
+    assert nul in facts.resolutions_by_lead, "the fixture's NUL id did not parse"
 
-    grade = _grade(ep, tmp_path)
+    grade = _grade(ep)
     row = _rows(grade)["b"]
     assert not row.get("ungradable"), row
     base, _src = location_path(J.runs_base)(tmp_path)
@@ -361,6 +321,3 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
     block = page.text_of(f"leads-{E.GRADED_WORLD}")
     assert "does not name a file inside this world" in block, block
     assert "investigation record unavailable" not in block, block
-
-
-# s-45 — every refusal shape reaches the served-row swallow site as JudgeRefused

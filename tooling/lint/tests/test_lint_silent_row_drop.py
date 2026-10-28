@@ -223,8 +223,8 @@ _COMPANION_FILTER = (
      "        cur.rows.append(stripped)\n"
      "    return blocks\n", {"_tokenize"}),
 
-    # The scoping that took the rule from 61 findings to 8: a read-side filter that drops
-    # nothing is not this gate's business, and only the role anchor tells them apart.
+    # A read-side filter that drops nothing is not this gate's business, and only the role
+    # anchor tells the two apart.
     ("function-in-neither-role-is-left-alone", "queries.py",
      "def summarize(rows) -> list[str]:\n"
      "    out = []\n"

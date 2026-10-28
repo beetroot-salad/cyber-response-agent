@@ -1,19 +1,11 @@
-"""#1108 P4 slice S-B — the launch-time publish child, in-process against P3's fakes (O11), and
-wired into `run.main` through the `publish=` seam.
+"""#1108 P4 launch-time publish child: in-process against P3's fakes, as a real process under the
+launcher's budget, and wired into `run.main` through `publish=`.
 
-The child (assumed entry `version_control.publish_for_run`, see `_s_b_support`) accepts the
-tenant from id + data root, reads the tenant row's forge binding and the issuer config file
-itself, publishes through P3's real delivery path, and reports ONE outcome. Each case plants a
-REAL fault through P3's fakes or real files (issuer 403 / unreachable issuer / unreachable
-forge / a stalled fetch / tenant lock held / dirty clone / unprotected `main` / a merged commit
-whose `.tenant-id` names another tenant) and asserts the outcome CLASS, never which exception
-the child caught (P4-C23: P3 folds them into one `DeliveryRefused`; the child classifies first).
-
-Obligations: O-STALE (classification; misconfiguration refuses), O7b (a merged PR is read, or
-the run is recorded stale; lock-busy is fresh iff `current` already equals `origin/main`),
-O-BUDGET child half (a stalled network phase ends within the child's own timeouts, leaving no
-process, no `index.lock`, no lock held), O9 (misconfiguration refuses the run before any model
-call), O8 child half (the config path lies under no box mount source: `test_run_copy.py`).
+The child (`version_control.publish_for_run`) accepts the tenant from id + data root, reads the
+forge binding and issuer config itself, publishes through P3's real delivery path, and reports
+one outcome line. Each case plants a real fault through P3's fakes or real files and asserts the
+outcome class, never which exception the child caught (P3 folds them into one `DeliveryRefused`;
+the child classifies first).
 """
 from __future__ import annotations
 
@@ -64,24 +56,23 @@ def _unchanged(t) -> None:
 
 def _stale(line: str, kind: str) -> None:
     assert B.outcome_class(line) == f"stale:{kind}", (
-        f"O-STALE: expected stale:{kind}, the child reported {line!r}")
-    assert B.outcome_detail(line), f"O-STALE: a stale outcome names its reason: {line!r}"
+        f"expected stale:{kind}, the child reported {line!r}")
+    assert B.outcome_detail(line), f"a stale outcome names its reason: {line!r}"
 
 
 # --- fresh (positive control for every class below) -------------------------------------------
 
 def test_o7b_a_merge_on_origin_is_published_and_reported_fresh_at_the_merge(tenant, tmp_path):
-    """O7b/O8: after a PR merges on the fake origin, the child logs in ITSELF from the issuer
-    config file (AppRole: the file's role_id/secret_id, nothing injected), fetches with the
-    token the issuer minted, publishes the merge as `current`, and reports `fresh <merge>` —
-    a line carrying none of the login material or the config path."""
+    """The child logs in itself from the config file (nothing injected), fetches with the minted
+    token, publishes the merge as `current` and reports `fresh <merge>`, a line carrying no
+    login material or config path."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import ROLE_ID, SECRET_ID
 
     merged = tenant.merge(B.MERGE_FILES)
     with B.real_login(tenant, tmp_path / "operator") as (vault, config, secrets):
         line = B.run_child(tenant, config, login=vault)
     assert vault.logins() == [{"role_id": ROLE_ID, "secret_id": SECRET_ID}], (
-        "O8: the child did not log in from the config file")
+        "the child did not log in from the config file")
     assert tenant.server.authorized("git-upload-pack"), "the fetch never carried the minted token"
     assert B.leaks(secrets, report_line=line) == []
     assert B.outcome_class(line) == "fresh", line
@@ -94,8 +85,8 @@ def test_o7b_a_merge_on_origin_is_published_and_reported_fresh_at_the_merge(tena
 # --- O7b: tenant lock held by a drain ---------------------------------------------------------
 
 def test_o7b_lock_held_and_origin_ahead_is_stale_transient(tenant, issuer_config):
-    """O7b/O-STALE: a drain holds the tenant lock and origin has a merge `current` lacks: the
-    child does not wait — `stale:transient` (lock busy), `current` unchanged."""
+    """A drain holds the tenant lock and origin has a merge `current` lacks: the child does not
+    wait."""
     tenant.merge(B.MERGE_FILES)
     with _lock(tenant):
         line = B.run_child(tenant, issuer_config)
@@ -104,7 +95,7 @@ def test_o7b_lock_held_and_origin_ahead_is_stale_transient(tenant, issuer_config
 
 
 def test_o7b_lock_held_but_current_already_equals_origin_main_is_fresh(tenant, issuer_config):
-    """O7b: same lock, but `current` already equals the fetched `origin/main`: `fresh`."""
+    """Same lock, but `current` already equals the fetched `origin/main`."""
     assert tenant.origin_main() == tenant.commit
     with _lock(tenant):
         line = B.run_child(tenant, issuer_config)
@@ -145,9 +136,9 @@ def test_o_stale_an_unreachable_forge_is_transient(tenant, issuer_config):
 
 def test_o_budget_a_stalled_fetch_ends_within_the_childs_timeout_and_leaves_nothing_behind(
         tenant, issuer_config):
-    """O-BUDGET (child half): origin answers the fetch slowly for ever (P3 `Trickle`). With a
-    short network timeout the child reports `stale:transient` well inside the 60 s budget,
-    leaves no git process in the clone, no `index.lock`, and the tenant lock free."""
+    """Origin trickles the fetch for ever: with a short network timeout the child reports
+    `stale:transient` well inside the 60 s budget, leaving no git process, no `index.lock`, and
+    the tenant lock free."""
     tenant.merge(B.MERGE_FILES)
     stop = threading.Event()
     tenant.server.on_service = lambda service: (
@@ -160,7 +151,7 @@ def test_o_budget_a_stalled_fetch_ends_within_the_childs_timeout_and_leaves_noth
         elapsed = time.monotonic() - started
         stop.set()
     _stale(line, "transient")
-    assert elapsed < 30, f"O-BUDGET: the stalled publish took {elapsed:.1f}s"
+    assert elapsed < 30, f"the stalled publish took {elapsed:.1f}s"
     clone = B.clone_dir(tenant)
     assert quiet(clone, seconds=5) == [], "a git process outlived the child's publish"
     assert not (clone / ".git" / "index.lock").exists()
@@ -199,8 +190,8 @@ def test_o_stale_the_forge_rejecting_the_minted_token_is_operator(tenant, issuer
 
 
 def test_o_stale_a_diverged_clone_is_operator(tenant, issuer_config):
-    """STALE-DIVERGED: the clone holds an unpushed local commit and origin moved on: the
-    fast-forward cannot happen — `stale:operator`, `current` unchanged."""
+    """The clone holds an unpushed local commit and origin moved on, so the fast-forward cannot
+    happen."""
     from defender.tests.tenancy.tenant_1108_p4._support import git
 
     clone = B.clone_dir(tenant)
@@ -214,7 +205,7 @@ def test_o_stale_a_diverged_clone_is_operator(tenant, issuer_config):
 
 
 def test_o_stale_a_merged_link_is_operator(tenant, issuer_config):
-    """A human merged a symlink under `agent/`: refused on content — `stale:operator`."""
+    """A human merged a symlink under `agent/`: refused on content."""
     from defender.tests.tenancy.tenant_1108_p4._support import index_entry, push_to_remote
 
     push_to_remote(tenant.p3, tenant.scratch,
@@ -248,7 +239,7 @@ def test_o_stale_a_forge_api_timeout_is_transient(tenant, issuer_config):
 
 def test_o7b_lock_held_with_the_clone_at_origin_main_but_current_behind_is_stale(
         tenant, issuer_config):
-    """O7b: the clone's HEAD already equals `origin/main` (fast-forwarded outside a publish) but
+    """The clone's HEAD already equals `origin/main` (fast-forwarded outside a publish) but
     `current` still names the older export, and a drain holds the lock: the run cannot read the
     merge, so the outcome is stale — never fresh."""
     from defender.tests.tenancy.tenant_1108_p4._support import git
@@ -262,7 +253,7 @@ def test_o7b_lock_held_with_the_clone_at_origin_main_but_current_behind_is_stale
     with _lock(tenant):
         line = B.run_child(tenant, issuer_config)
     assert B.outcome_class(line).startswith("stale:"), (
-        f"O7b: `current` is behind origin/main and could not move, yet the child said {line!r}")
+        f"`current` is behind origin/main and could not move, yet the child said {line!r}")
     _unchanged(tenant)
 
 
@@ -317,10 +308,9 @@ def _force_main(t, how: str) -> str:
 @pytest.mark.parametrize("how", ["rewound", "force-pushed"])
 def test_n2_origin_rewritten_to_a_non_descendant_of_current_is_operator_and_current_stays(
         tenant, issuer_config, how):
-    """N2 (pins the fast-forward-only invariant A-MISMATCH rests on): origin's `main` was
-    rewound or force-pushed to a commit that does not descend from `current`. The child reports
-    `stale:operator` and `current` does not move. Control: `test_o7b_a_merge_on_origin_is_
-    published_and_reported_fresh_at_the_merge` (a descendant is published)."""
+    """Origin's `main` rewound or force-pushed off `current`'s line is refused, and `current`
+    does not move: the fast-forward-only invariant test_run_start's A-MISMATCH case rests on.
+    Control: the first test above (a descendant is published)."""
     target = _force_main(tenant, how)
     # Read after the rewrite: the `rewound` setup publishes its merge first, so when the child
     # runs `current` is that merge, and origin's `main` is the merge's parent (a non-descendant).
@@ -328,7 +318,7 @@ def test_n2_origin_rewritten_to_a_non_descendant_of_current_is_operator_and_curr
     line = B.run_child(tenant, issuer_config)
     _stale(line, "operator")
     assert current_commit(tenant.tenant) == before, (
-        f"N2: `current` moved off {before[:12]} to a non-descendant of it ({target[:12]})")
+        f"`current` moved off {before[:12]} to a non-descendant of it ({target[:12]})")
 
 
 # --- misconfiguration: refused, before any network call ---------------------------------------
@@ -340,9 +330,8 @@ def _network_marks(t) -> tuple[int, int, int]:
 @pytest.mark.parametrize("missing", ["issuer-config", "forge-binding"])
 def test_o_stale_misconfiguration_is_refused_before_any_network_call(
         tenant, issuer_config, tmp_path, missing):
-    """O-STALE/O9: no issuer config file, or no forge binding in the tenant row, is decided
-    locally: the child reports `misconfigured <reason>` (S-B's pick: the same report-line channel
-    as the other outcomes) and makes no issuer, forge or git request. Control: `test_o7b_a_merge_on_origin_is_published...` (both present)."""
+    """A missing issuer config or forge binding is decided locally: the child reports
+    `misconfigured <reason>` and makes no issuer, forge or git request."""
     tenant.merge(B.MERGE_FILES)
     config = issuer_config
     if missing == "issuer-config":
@@ -373,12 +362,10 @@ def _child_publish(t, issuer_config, *, login=None, lines: list | None = None):
 
 
 def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp_path, monkeypatch):
-    """O7b end to end, and O8 by value: merge on the fake origin, launch with the REAL child
-    logging in itself from the config file; the run's copy holds the merged lesson, its stamp and
-    `knowledge_source` name the merge commit, kind fresh. None of role_id, secret_id, the issuer
-    client token, the minted forge token or the config path appears in the run process's
-    environment, what it handed the child, the stamp, the run page, the posted comment or the
-    report line. (Control on the env channel: a value planted in the environment is found.)"""
+    """End to end with the real child logging in itself: the run reads and stamps the merge
+    (fresh), and no login material appears in the run's environment, what it handed the child,
+    the stamp, host record, page, comment or report line (control: a value planted in the
+    environment is found)."""
     import os
     from functools import partial
     from types import SimpleNamespace
@@ -407,14 +394,14 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
                        visualize=run_common.visualize)
     assert out.reached, out.text()
     assert store.calls, "control: the run posted its comment"
-    assert vault.logins(), "O8: the child did not log in from the config file"
+    assert vault.logins(), "the child did not log in from the config file"
     page = out.run_dir / "runtime.html"
     assert page.is_file(), "control: the run page was saved"
     assert B.leaks(
         secrets, env=out.seen[0].environ, handed=out.publish_calls, report_line=lines,
         stamp=out.stamp_after, host_record=out.host_after, page=page.read_text(encoding="utf-8") if page.is_file() else "",
         comment=[str(c.body) for c in store.calls],
-    ) == [], "O8: login material left the publish child"
+    ) == [], "login material left the publish child"
     monkeypatch.setenv("S_B_CONTROL_PROBE", secrets[1])
     assert B.leaks(secrets[1:2], env=dict(os.environ)) == [("env", secrets[1])]
     assert out.rc == 0, out.text()
@@ -426,7 +413,6 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
 
 def test_o7b_a_run_launched_while_a_drain_holds_the_lock_runs_stale_on_current(
         tenant, issuer_config, tmp_path):
-    """O7b: with the lock held by a drain, the run is `stale` on the last snapshot."""
     tenant.merge(B.MERGE_FILES)
     with _lock(tenant):
         out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, issuer_config))
@@ -441,26 +427,24 @@ def test_o7b_a_run_launched_while_a_drain_holds_the_lock_runs_stale_on_current(
 @pytest.mark.parametrize("missing", ["issuer-config", "forge-binding"])
 def test_o9_a_misconfigured_tenant_refuses_the_run_before_any_model_call(
         tenant, issuer_config, tmp_path, missing):
-    """O9: missing forge binding or issuer config refuses the run before its lifecycle, though a
-    snapshot exists. Control: the O7b launches above."""
+    """Refused before its lifecycle though a snapshot exists. Control: the O7b launches above."""
     config: Path = issuer_config
     if missing == "issuer-config":
         config = issuer_config.with_name("absent.json")
     else:
         unbind_forge(tenant)
     out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, config))
-    assert not out.reached, f"O9: a misconfigured tenant's run reached its box: {out.text()}"
+    assert not out.reached, f"a misconfigured tenant's run reached its box: {out.text()}"
     assert out.raised is None or not isinstance(out.raised, TypeError), out.text()
     assert out.refusal is not None, out.text()
 
 
-# --- O-BUDGET, parent half (OD11): a REAL child process under a REAL lock ---------------------
+# --- O-BUDGET, parent half: a real child process under a real lock -----------------------------
 #
-# The parent launcher (`publish_launch.launch_publish`, assumed seam) runs the REAL child's process entry
-# (`publish_child_main`) in a subprocess whose fakes are rebuilt inside it (`_s_b_support.
-# CHILD_WRAPPER`). Budgets are small but must exceed the child's interpreter start-up and
-# imports, which the budget counts; the locked phase is slowed through the child's one
-# injectable slow point (`locked_hook`).
+# `publish_launch.launch_publish` runs the real child entry in a subprocess whose fakes are rebuilt
+# inside it (`_s_b_support.CHILD_WRAPPER`). Budgets are small but must exceed the child's
+# interpreter start-up and imports, which the budget counts; the locked phase is slowed through
+# `locked_hook`.
 
 WORKTREE = Path(__file__).resolve().parents[4]
 #: The parent's budget in these tests, and how long the locked phase is held.
@@ -481,21 +465,21 @@ def child_env(monkeypatch):
 def _no_leftovers(t, spec: Path) -> None:
     clone = B.clone_dir(t)
     assert quiet(clone, naming=(str(spec),), seconds=5) == [], (
-        "O-BUDGET: a child (or its git) outlived the launch")
-    assert not (clone / ".git" / "index.lock").exists(), "O-BUDGET: index.lock left behind"
+        "a child (or its git) outlived the launch")
+    assert not (clone / ".git" / "index.lock").exists(), "index.lock left behind"
     with _lock(t):  # the tenant lock is free again
         pass
 
 
 def _child_saw_no_login_material(marks: Path, secrets: tuple[str, ...]) -> None:
-    """O8: what the child process was started with — its argv and its environment — carries no
-    secret value and no issuer-named variable (P-4: file-only, never environment)."""
+    """The child's argv and environment carry no secret value and no issuer-named variable
+    (login material is file-only)."""
     import json
 
     seen = json.loads((marks / "seen.json").read_text(encoding="utf-8"))
     assert B.leaks(secrets, argv=seen["argv"], env=seen["env"]) == []
     assert [k for k in seen["env"] if B.ISSUER_ENV.search(k)] == [], (
-        "O8: the parent handed its publish child an issuer-named environment variable")
+        "the parent handed its publish child an issuer-named environment variable")
     assert seen["env"].get("S_B_ORDINARY") == "s-b-ordinary-value", (
         "control: an ordinary variable reaches the child, so the env channel is read")
 
@@ -512,9 +496,9 @@ def operator_env(monkeypatch):
 
 def test_o_budget_the_parent_stops_waiting_at_the_budget_in_the_network_phase(
         tenant, issuer_config, tmp_path, child_env, operator_env):
-    """O-BUDGET: origin stalls the fetch for ever and the child's own network timeout is far
-    beyond the budget: the parent stops waiting at the budget, ends the child (no process, no
-    `index.lock`, lock free) and reports `stale:transient`; `current` is unchanged."""
+    """Origin stalls the fetch and the child's own network timeout is far beyond the budget: the
+    parent stops at the budget, ends the child leaving nothing behind, and reports
+    `stale:transient`."""
     tenant.merge(B.MERGE_FILES)
     stop = threading.Event()
     tenant.server.on_service = lambda service: (
@@ -532,7 +516,7 @@ def test_o_budget_the_parent_stops_waiting_at_the_budget_in_the_network_phase(
         stop.set()
     assert (marks / "started").exists(), "premise: the child process ran"
     _stale(line, "transient")
-    assert elapsed < BUDGET + SLACK, f"O-BUDGET: the launch waited {elapsed:.1f}s"
+    assert elapsed < BUDGET + SLACK, f"the launch waited {elapsed:.1f}s"
     assert not (marks / "locked").exists(), "premise: the child never reached its locked phase"
     _child_saw_no_login_material(marks, (*operator_env, B.ISSUER_SECRET_ID, B.ISSUER_ROLE_ID))
     _no_leftovers(tenant, spec)
@@ -541,10 +525,8 @@ def test_o_budget_the_parent_stops_waiting_at_the_budget_in_the_network_phase(
 
 def test_o_budget_a_child_holding_the_lock_is_allowed_to_finish(tenant, issuer_config, tmp_path,
                                                                 child_env):
-    """O-BUDGET: the child takes the tenant lock inside the budget and then holds it past the
-    budget (its locked phase is slowed). The parent does not kill it: it waits for the child to
-    finish, reports `fresh <merge>`, `current` is the merge, and nothing is left behind. It
-    never waits past budget + locked phase."""
+    """A child that takes the tenant lock inside the budget and holds it past the budget is not
+    killed: the parent waits (never past budget + locked phase) and reports its `fresh <merge>`."""
     merged = tenant.merge(B.MERGE_FILES)
     command, spec, marks = B.child_command(tenant, tmp_path, issuer_config,
                                            network_timeout=30.0, locked_sleep=LOCKED_SLEEP)
@@ -556,19 +538,19 @@ def test_o_budget_a_child_holding_the_lock_is_allowed_to_finish(tenant, issuer_c
     assert locked_at < BUDGET, (
         f"premise: the child took the lock {locked_at:.1f}s in, after the {BUDGET}s budget")
     assert (marks / "locked-done").exists(), (
-        "O-BUDGET: the parent returned before the lock-holding child finished (killed it?)")
+        "the parent returned before the lock-holding child finished (killed it?)")
     assert B.outcome_class(line) == "fresh", line
     assert B.outcome_detail(line) == merged, line
     assert current_commit(tenant.tenant) == merged
     assert elapsed > BUDGET, "premise: the locked phase outlasted the budget"
-    assert elapsed < BUDGET + LOCKED_SLEEP + SLACK, f"O-BUDGET: the launch waited {elapsed:.1f}s"
+    assert elapsed < BUDGET + LOCKED_SLEEP + SLACK, f"the launch waited {elapsed:.1f}s"
     _no_leftovers(tenant, spec)
 
 
 def test_o_budget_a_run_whose_publish_ran_out_of_budget_proceeds_stale_on_the_last_snapshot(
         tenant, issuer_config, tmp_path, child_env):
-    """O-BUDGET/O-STALE through `run.main`: the launcher bound to `publish=` with a stalled
-    network phase — the run starts within the budget on `current`, recorded stale/transient."""
+    """Through `run.main` with a stalled network phase, the run starts within the budget on
+    `current`, recorded stale/transient."""
     import functools
 
     tenant.merge(B.MERGE_FILES)
@@ -599,24 +581,21 @@ def _child_rc(marks: Path) -> int:
 
 
 def _child_reported(line: object) -> str:
-    """OD20: a reported outcome is the child's own one-line report, passed through."""
+    """A reported outcome is the child's own one-line report, passed through."""
     text = str(line)
-    assert "\n" not in text.strip(), f"OD20: a report spans lines: {text!r}"
-    assert "\r" not in text, f"OD20: a report spans lines: {text!r}"
+    assert "\n" not in text.strip(), f"a report spans lines: {text!r}"
+    assert "\r" not in text, f"a report spans lines: {text!r}"
     assert not B.outcome_detail(text).startswith("publish child failed"), (
-        f"OD20: the parent took a child that reported an outcome for a failed one: {text!r}")
+        f"the parent took a child that reported an outcome for a failed one: {text!r}")
     return text
 
 
 @pytest.mark.parametrize("case", ["dirty-clone", "lock-held", "misconfigured"])
 def test_od20_a_real_child_reporting_an_outcome_exits_zero_and_its_line_is_passed_through(
         tenant, issuer_config, tmp_path, child_env, case):
-    """OD20: the REAL child process (through `CHILD_WRAPPER`) exits 0 for an outcome it reports,
-    and the parent's line is the child's own: a dirty clone → `stale:operator <reason>`; a drain
-    holding the tenant lock with origin ahead → `stale:transient` naming the lock; no forge
-    binding → `misconfigured <reason>`, and through `run.main` that run refuses before message 0
-    although a snapshot exists (O9). None is U11's "publish child failed". `current` is
-    unchanged."""
+    """The real child process exits 0 for an outcome it reports, and the parent passes its line
+    through, never U11's "publish child failed"; through `run.main` a misconfigured run refuses
+    before message 0 although a snapshot exists."""
     tenant.merge(B.MERGE_FILES)
     if case == "dirty-clone":
         (B.clone_dir(tenant) / "agent" / "lessons" / "stray-untracked.md").write_text(
@@ -632,14 +611,14 @@ def test_od20_a_real_child_reporting_an_outcome_exits_zero_and_its_line_is_passe
                           command=command)
     else:
         line = launch(tenant.tenant_id, data_root=tenant.data_root, budget=30.0, command=command)
-    assert _child_rc(marks) == 0, "OD20: a child that reported an outcome exited non-zero"
+    assert _child_rc(marks) == 0, "a child that reported an outcome exited non-zero"
     _child_reported(line)
     if case == "dirty-clone":
         _stale(line, "operator")
     elif case == "lock-held":
         _stale(line, "transient")
         assert "lock" in B.outcome_detail(line).lower(), (
-            f"OD20: the lock-busy report does not name the lock: {line!r}")
+            f"the lock-busy report does not name the lock: {line!r}")
     else:
         assert B.outcome_class(line) == "misconfigured", line
         assert B.outcome_detail(line), f"a misconfiguration names its reason: {line!r}"
@@ -649,8 +628,8 @@ def test_od20_a_real_child_reporting_an_outcome_exits_zero_and_its_line_is_passe
 
         out = B.launch(tenant, tmp_path, publish=functools.partial(launch, budget=30.0,
                                                                    command=command))
-        assert _child_rc(marks) == 0, "OD20: the misconfigured child exited non-zero"
-        assert not out.reached, f"O9: a misconfigured launch reached its box: {out.text()}"
+        assert _child_rc(marks) == 0, "the misconfigured child exited non-zero"
+        assert not out.reached, f"a misconfigured launch reached its box: {out.text()}"
         assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
         assert out.refusal is not None, out.text()
         _unchanged(tenant)
@@ -658,7 +637,7 @@ def test_od20_a_real_child_reporting_an_outcome_exits_zero_and_its_line_is_passe
 
 def test_od20_a_multi_line_forge_error_is_reported_on_one_line_and_the_run_proceeds_on_it(
         tenant, issuer_config, tmp_path, child_env):
-    """OD20: the forge answers with a multi-line error body; the real child reports ONE line
+    """The forge answers with a multi-line error body; the real child reports one line
     (newlines collapsed) and exits 0; through `run.main` the run proceeds stale on `current`
     and its host record's reason is that one-line reason."""
     import functools
@@ -678,7 +657,7 @@ def test_od20_a_multi_line_forge_error_is_reported_on_one_line_and_the_run_proce
     out = B.launch(tenant, tmp_path, publish=publish)
     assert (marks / "forge-error-served").exists(), "premise: the child read the forge's error"
     assert lines, out.text()
-    assert _child_rc(marks) == 0, "OD20: a child that reported an outcome exited non-zero"
+    assert _child_rc(marks) == 0, "a child that reported an outcome exited non-zero"
     line = _child_reported(lines[0])
     assert B.outcome_class(line).startswith("stale:"), line
     assert out.reached, out.text()
@@ -686,23 +665,22 @@ def test_od20_a_multi_line_forge_error_is_reported_on_one_line_and_the_run_proce
     source = B.knowledge_source(out)
     assert (source.get("kind"), source.get("commit")) == ("stale", tenant.commit), source
     reason = str(source.get("reason"))
-    assert "\n" not in reason, f"OD20: the recorded reason spans lines: {reason!r}"
+    assert "\n" not in reason, f"the recorded reason spans lines: {reason!r}"
     assert reason == B.outcome_detail(line), (
-        f"OD20: the recorded reason is not the child's one-line reason: {reason!r} vs {line!r}")
+        f"the recorded reason is not the child's one-line reason: {reason!r} vs {line!r}")
     for later in ("S-B-ERR-2", "S-B-ERR-3"):
         assert later in reason, (
-            f"OD20: the forge error's later lines were truncated, not collapsed: {reason!r}")
+            f"the forge error's later lines were truncated, not collapsed: {reason!r}")
 
 
 def test_o_budget_the_parents_default_budget_is_sixty_seconds():
-    """O-BUDGET: "at most 60 s" is the launcher's default budget."""
     import inspect
 
     assert inspect.signature(B.launcher()).parameters["budget"].default == 60.0
 
 
 class _RecordingSpawn:
-    """`launch_publish`'s spawn seam (assumed: `subprocess.Popen`'s signature): records the argv
+    """`launch_publish`'s spawn seam (`subprocess.Popen`'s signature): records the argv
     and environment the parent would start its child with, then starts a harmless process."""
 
     def __init__(self) -> None:
@@ -722,10 +700,9 @@ class _RecordingSpawn:
 
 def test_o8_the_default_child_command_carries_identifiers_only_and_no_issuer_environment(
         tenant, operator_env):
-    """O8/O11 (parent half, DEFAULT launch — no `command=`): the parent starts the real child
-    with the tenant id and data root, and neither its argv nor its environment carries an
-    issuer-named variable or any planted secret. U11: the harmless stand-in prints no report
-    line, so the parent reports `stale:operator publish child failed: ...` — never fresh."""
+    """With the default command, the parent starts the child with the tenant id and data root,
+    and neither argv nor environment carries an issuer-named variable or a planted secret. The
+    harmless stand-in prints no report line, so the parent reports a failed child."""
     spawn = _RecordingSpawn()
     launch = B.launcher()
     line = launch(tenant.tenant_id, data_root=tenant.data_root, budget=5.0, spawn=spawn)
@@ -740,9 +717,8 @@ def test_o8_the_default_child_command_carries_identifiers_only_and_no_issuer_env
 
 # --- U11: a child with no valid report line ---------------------------------------------------
 #
-# ASSUMED (U11 wording): the parent's line is `stale:operator publish child failed: <summary>`.
-# `command=` replaces the child's argv prefix; the parent appends its own arguments (ignored by
-# these `python -c` children: they land in `sys.argv`).
+# The parent's line is `stale:operator publish child failed: <summary>`. It appends its own
+# arguments to `command=` (these `python -c` children ignore them in `sys.argv`).
 
 #: Children that end without a valid report line. `fresh-then-exit-1` prints a VALID fresh line
 #: and exits non-zero: the exit decides (never fresh).
@@ -766,16 +742,15 @@ def _bad_child(case: str, t, tmp_path: Path) -> list[str]:
 
 def _child_failed(line: object) -> None:
     assert B.outcome_class(line) == "stale:operator", (
-        f"U11: a child with no valid report line must be stale:operator: {line!r}")
+        f"a child with no valid report line must be stale:operator: {line!r}")
     assert B.outcome_detail(str(line)).startswith("publish child failed"), line
 
 
 @pytest.mark.parametrize("case", [*BAD_CHILDREN, "missing-executable"])
 def test_u11_a_child_with_no_valid_report_line_is_stale_operator(tenant, tmp_path, case):
-    """U11: crash, non-zero exit, empty or junk stdout, an unknown prefix, a spawn failure — the
-    parent reports `stale:operator ("publish child failed: <summary>")`, never fresh, and
-    `current` is untouched. Control: `test_o_budget_a_child_holding_the_lock_is_allowed_to_
-    finish` (a real child's valid line is passed through)."""
+    """Crash, non-zero exit, empty or junk stdout, an unknown prefix, a spawn failure: never
+    fresh, and `current` is untouched. Control: `test_o_budget_a_child_holding_the_lock_is_
+    allowed_to_finish` (a valid line passes through)."""
     line = B.launcher()(tenant.tenant_id, data_root=tenant.data_root, budget=BUDGET,
                         command=_bad_child(case, tenant, tmp_path))
     _child_failed(line)
@@ -784,7 +759,7 @@ def test_u11_a_child_with_no_valid_report_line_is_stale_operator(tenant, tmp_pat
 
 @pytest.mark.parametrize("case", ["exit-1", "missing-executable"])
 def test_u11_a_failed_child_with_a_snapshot_runs_stale_operator_on_it(tenant, tmp_path, case):
-    """U11 through `run.main`: with `current`, the run proceeds on the snapshot, its host record
+    """Through `run.main`: with `current`, the run proceeds on the snapshot, its host record
     `stale`/`operator` at `current` with the failure as its reason."""
     import functools
 
@@ -803,22 +778,22 @@ def test_u11_a_failed_child_with_a_snapshot_runs_stale_operator_on_it(tenant, tm
 @pytest.mark.parametrize("case", ["exit-1", "missing-executable"])
 def test_u11_a_failed_child_without_a_snapshot_refuses_before_message_zero(tenant, tmp_path,
                                                                            case):
-    """U11/O-A: no `current`, the child failed — the run refuses before its lifecycle, by a
-    refusal (not a crash). Control: the snapshot case above runs."""
+    """With no `current`, the run refuses before its lifecycle by a refusal, not a crash.
+    Control: the snapshot case above runs."""
     import functools
 
     (export_dir(tenant.tenant, tenant.commit).parent / "current").unlink()
     publish = functools.partial(B.launcher(), budget=BUDGET,
                                 command=_bad_child(case, tenant, tmp_path))
     out = B.launch(tenant, tmp_path, publish=publish)
-    assert not out.reached, "U11: a failed child with no snapshot reached the box"
+    assert not out.reached, "a failed child with no snapshot reached the box"
     assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
     assert out.rc not in (0, None) or out.refusal is not None, out.text()
 
 
 def test_r_s7_a_first_ever_publish_through_the_real_child_is_fresh_and_the_run_proceeds(
         tenant, issuer_config, tmp_path):
-    """R-S7: no export has ever been written (`<T>/exports/` empty, no `current`): the real
+    """No export has ever been written (`<T>/exports/` empty, no `current`): the real
     child publishes the first one, reports fresh, and the run starts on it."""
     import shutil
 

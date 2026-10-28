@@ -42,7 +42,7 @@ REPO_ROOT = DEFENDER.parent
 #: The box's file-size cap: always the host's whole-file read cap, in bytes.
 L = READ_LIMIT
 
-#: Docker's `--ulimit` unit for fsize is bytes (C3: `fsize=1048576` stopped `dd` at exactly
+#: Docker's `--ulimit` unit for fsize is bytes (`fsize=1048576` stopped `dd` at exactly
 #: 1048576 bytes), so this is the value both argvs must carry.
 FSIZE = f"fsize={L}:{L}"
 
@@ -74,7 +74,7 @@ def _ulimits(argv: list[str], resource: str) -> list[str]:
 
 
 def _assert_one_ulimit(argv: list[str], resource: str, want: str, lane: str) -> None:
-    """Exactly one `<resource>` ulimit, equal to `want`, and in OPTION position:"""
+    """Exactly one `<resource>` ulimit, equal to `want`, in OPTION position (before the image)."""
     got = _ulimits(argv, resource)
     assert got == [want], (
         f"{lane}: the create argv carries {resource} ulimit(s) {got}, expected exactly "
@@ -85,15 +85,13 @@ def _assert_one_ulimit(argv: list[str], resource: str, want: str, lane: str) -> 
     at = argv.index(want) - 1    # the `--ulimit` token `_ulimits` read the value after
     assert argv[at] == "--ulimit", f"{lane}: {want!r} is not the value of a `--ulimit` flag"
     assert at < image_at, (
-        f"{lane}: `--ulimit {want}` sits at {at}, not before the image token at {image_at}, "
-        f"so docker would hand it to the container's command instead of applying it"
-    )
+        f"{lane}: `--ulimit {want}` sits at {at}, after the image token at {image_at}")
 
 
 # ---- the two launch paths, driven through the real `start_box` with a recording daemon ------
 
 def _run_dir(base: Path) -> Path:
-    """A run dir whose NAME is unique:"""
+    """A run dir whose NAME is unique: the box is named after it."""
     run = base / f"run-1188-{uuid.uuid4().hex[:8]}"
     run.mkdir(parents=True)
     plant_alert(run, {"id": "a-1188"})
@@ -119,7 +117,7 @@ def _tenant_agent(base: Path) -> Path:
 
 
 def _start_lane(tmp_path: Path, rec: AliasProbeDocker, spec) -> None:
-    """The lane path in #771's `_request` shape:"""
+    """The lane path: a `BoxRequest` in #771's `_request` shape."""
     src = tmp_path / "lane-wt"
     src.mkdir(parents=True, exist_ok=True)
     box_mod.start_box(
@@ -140,7 +138,7 @@ def _stock(spec):
 
 
 def _both_argvs(tmp_path: Path) -> tuple[list[str], list[str]]:
-    """The investigation box's and a lane box's create argvs, each on the env-resolved default spec (what..."""
+    """The investigation box's and a lane box's create argvs, each on the env-resolved default spec."""
     inv = AliasProbeDocker()
     _start_investigation(_run_dir(tmp_path), inv, tenant_agent=_tenant_agent(tmp_path))
     lane = AliasProbeDocker()
@@ -152,7 +150,6 @@ def _both_argvs(tmp_path: Path) -> tuple[list[str], list[str]]:
 def test_the_investigation_box_launches_with_the_read_cap_as_its_file_size_limit(
     with_tenant, tmp_path,
 ):
-    """O1/O2 (M1), investigation lane:"""
     rec = AliasProbeDocker()
     agent = _tenant_agent(tmp_path) if with_tenant else None
     _start_investigation(_run_dir(tmp_path), rec, tenant_agent=agent)
@@ -199,7 +196,7 @@ def _need_runtime(runtime: str) -> None:
 
 @pytest.fixture
 def base(tmp_path: Path) -> Iterator[Path]:
-    """Where every live tree in a test hangs:"""
+    """Where every live tree in a test hangs: under the DooD anchor when there is one."""
     root = (
         tmp_path / "live" if _DOOD_ANCHOR is None
         else _DOOD_ANCHOR / f"t1188-{uuid.uuid4().hex}"
@@ -222,7 +219,7 @@ class _Ran:
 
 @dataclasses.dataclass(frozen=True)
 class _AgentExec:
-    """The investigation box, reached the way the agent's commands reach it:"""
+    """The investigation box, reached the way the agent's commands reach it (`run_parsed`)."""
 
     box: box_mod.BoxExecutor
     tree: Path
@@ -248,7 +245,7 @@ class _AgentExec:
 
 @dataclasses.dataclass(frozen=True)
 class _DockerExec:
-    """A lane box, reached by plain `docker exec` with its cwd on `tree`, as test_1178 drives one (the drain..."""
+    """A lane box, reached by plain `docker exec` with its cwd on `tree`, as test_1178 drives one."""
 
     name: str
     tree: Path
@@ -275,7 +272,7 @@ _Exec = _AgentExec | _DockerExec
 
 @contextlib.contextmanager
 def _investigation_box(base: Path, runtime: str) -> Iterator[_AgentExec]:
-    """A REAL investigation box on a fresh run dir, with a tenant agent half as `run.py` always starts one;"""
+    """A REAL investigation box on a fresh run dir, with a tenant agent half as `run.py` starts one."""
     run_dir = _run_dir(base)
     agent = _tenant_agent(base)
     box = box_mod.start_box(
@@ -294,7 +291,7 @@ def _investigation_box(base: Path, runtime: str) -> Iterator[_AgentExec]:
 def _drain_code(base: Path) -> Path:
     """The product code the drain box mounts as its `code` mount, under `base` (daemon-visible
     under DooD): the files the box image's name is a function of and the code check file, so the
-    request resolves the image this checkout's CI built (#1108 D7 amended)."""
+    request resolves the image this checkout's CI built."""
     code = base / "defender"
     code.mkdir(parents=True)
     for name in (*HASH_INPUTS, box_mod.CODE_CHECK_FILE):
@@ -305,9 +302,8 @@ def _drain_code(base: Path) -> Path:
 
 @contextlib.contextmanager
 def _lane_box(base: Path, runtime: str) -> Iterator[_DockerExec]:
-    """A REAL lane box, requested the way a P4 drain requests one (#1108 P4 re-spelling, OD12
-    class ii): `Batch.box_request()` over a tenant batch's git-free draft (its lanes the only
-    writable mounts), the tenant and the draft under `base`."""
+    """A REAL lane box, requested the way a drain requests one: `Batch.box_request()` over a tenant
+    batch's git-free draft (its lanes the only writable mounts), all under `base`."""
     with build_tenant(base / "tenant") as built:
         http = ForgeHTTP(remote=built[1])
         origin = configured_origin(built[0].knowledge)
@@ -404,7 +400,7 @@ def _probe(x: _Exec, mode: str, target: Path, n: int) -> dict:
 
 
 def _host_size(path: Path) -> int:
-    """The APPARENT size the host sees (lstat, so a link is not followed);"""
+    """The APPARENT size the host sees (lstat, so a link is not followed); 0 when absent."""
     try:
         return os.lstat(path).st_size
     except FileNotFoundError:
@@ -412,7 +408,7 @@ def _host_size(path: Path) -> int:
 
 
 def _assert_rlimit_is_the_cap(x: _Exec) -> None:
-    """O2:"""
+    """RLIMIT_FSIZE inside the box is the cap, soft and hard."""
     seen = _probe(x, "getrlimit", x.tree / "unused", 0)
     assert seen["fsize"] == [L, L], (
         f"RLIMIT_FSIZE inside the box is {seen['fsize']}, expected [{L}, {L}]"
@@ -420,7 +416,7 @@ def _assert_rlimit_is_the_cap(x: _Exec) -> None:
 
 
 def _assert_host_takes_a_sparse_tib(tree: Path) -> None:
-    """The host-side control:"""
+    """The host-side control: the same tree takes a sparse 1 TiB file outside the box."""
     probe = tree / f"host-sparse-{uuid.uuid4().hex[:8]}"
     try:
         with probe.open("wb") as fh:
@@ -431,7 +427,7 @@ def _assert_host_takes_a_sparse_tib(tree: Path) -> None:
 
 
 def _assert_sparse_extension_is_bounded(x: _Exec) -> None:
-    """O1/O2:"""
+    """`truncate` and `ftruncate` cannot size a file past the cap; under it they can."""
     tree = x.tree
     _assert_host_takes_a_sparse_tib(tree)
 
@@ -459,7 +455,7 @@ def _assert_sparse_extension_is_bounded(x: _Exec) -> None:
 
 
 def _assert_host_takes_an_allocation_past_the_cap(tree: Path) -> None:
-    """The host-side control for allocation:"""
+    """The host-side control for allocation: the same tree allocates past the cap outside the box."""
     probe = tree / f"host-alloc-{uuid.uuid4().hex[:8]}"
     fd = os.open(probe, os.O_RDWR | os.O_CREAT, 0o644)
     try:
@@ -471,7 +467,7 @@ def _assert_host_takes_an_allocation_past_the_cap(tree: Path) -> None:
 
 
 def _assert_allocation_is_bounded(x: _Exec) -> None:
-    """O1/O2:"""
+    """`fallocate` and `posix_fallocate` cannot allocate past the cap; under it they can."""
     tree = x.tree
     _assert_host_takes_an_allocation_past_the_cap(tree)
 
@@ -508,7 +504,7 @@ BLOCK = bytes(range(256)) * 256
 
 
 def _assert_holds_the_pattern(path: Path, size: int) -> None:
-    """`path` is exactly `size` bytes of the probe's pattern — read one block at a time, so the check holds no..."""
+    """`path` is exactly `size` bytes of the probe's pattern, read one block at a time."""
     seen = 0
     with path.open("rb") as fh:
         while chunk := fh.read(len(BLOCK)):
@@ -520,7 +516,7 @@ def _assert_holds_the_pattern(path: Path, size: int) -> None:
 
 
 def _assert_real_write_stops_at_the_cap(x: _Exec) -> None:
-    """O1/O2:"""
+    """A streamed write past the cap stops with EFBIG; one under it lands byte for byte."""
     past = x.tree / "write-past"
     over = _probe(x, "write", past, PAST)
     assert over["errno"] == errno.EFBIG, f"a write past the cap was not refused: {over}"
@@ -534,7 +530,7 @@ def _assert_real_write_stops_at_the_cap(x: _Exec) -> None:
 
 
 def _assert_the_box_cannot_lift_it(x: _Exec) -> None:
-    """O3 (M2):"""
+    """Nothing in the box can raise the limit; lowering it (the control) works."""
     seen = _probe(x, "lift", x.tree / "unused", L)
     assert seen["before"] == [L, L], f"the box did not start at the cap: {seen}"
     assert seen["unlimited"] != "ok", "setrlimit(RLIMIT_FSIZE, unlimited) succeeded in the box"
@@ -556,17 +552,8 @@ def _assert_the_box_cannot_make_a_file_past_the_cap(x: _Exec) -> None:
 
 @requires_box_daemon
 @RUNTIMES
-def test_a_live_investigation_box_cannot_make_a_file_past_the_read_cap(runtime, base):
-    """O1/O2/O3, investigation lane, under each runtime:"""
+@pytest.mark.parametrize("box", [_investigation_box, _lane_box], ids=["investigation", "lane"])
+def test_a_live_box_cannot_make_a_file_past_the_read_cap(box, runtime, base):
     _need_runtime(runtime)
-    with _investigation_box(base, runtime) as x:
-        _assert_the_box_cannot_make_a_file_past_the_cap(x)
-
-
-@requires_box_daemon
-@RUNTIMES
-def test_a_live_lane_box_cannot_make_a_file_past_the_read_cap(runtime, base):
-    """O1/O2/O3, lane path, under each runtime:"""
-    _need_runtime(runtime)
-    with _lane_box(base, runtime) as x:
+    with box(base, runtime) as x:
         _assert_the_box_cannot_make_a_file_past_the_cap(x)

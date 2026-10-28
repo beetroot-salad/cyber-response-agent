@@ -1,4 +1,5 @@
-"""#1025 O7 — the episode's stage timing record, written at the source."""
+"""#1025 — the episode's stage timing record (`timing.json`), written at the source. The launch
+helpers here (`_launch`, `_NextEpisode`, `_abort`) are shared with the page tests."""
 from __future__ import annotations
 
 import contextlib
@@ -17,23 +18,14 @@ from defender.records._episode_paths import LAYOUT, EpisodePaths
 from defender._clock import now_iso, parse_iso_utc
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
+from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 #: The five steps, in the order the launcher runs them — the names a reader of the record keys on.
 EXPECTED_STEPS = ["questioner", "preflight", "runs", "verify", "judge"]
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    """Every configured root points inside `tmp_path` — the launcher's, the sibling runs base's
-    and the learning state root the judge's enqueue appends to — so an episode this file drives
-    lands in this test's own tree and never in the checkout's."""
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    # #1187 (O9): the episodes variable is read by nothing; every launch's episode is
-    # `<data root>/<T>/episodes/<uuid>` (`_NextEpisode`). The per-arm settings below are inert.
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+_tmp_roots = E.tmp_roots
 
 
 def _cli():
@@ -45,20 +37,14 @@ def _entry():
     return T.mod("cli.learning.branch")
 
 
-def _tenant_paths():
-    """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
-    return T.current_tenant()
-
-
 def _episodes_now() -> set[Path]:
-    """Every episode under any tenant of this test's data root — `<data root>/<T>/episodes/*`,
-    where #1187 (Layout A, O9) puts every launch's episode."""
+    """Every episode under any tenant of this test's data root (`<data root>/<T>/episodes/*`)."""
     return set(Path(os.environ["DEFENDER_DATA_ROOT"]).glob("*/episodes/*"))
 
 
 class _NextEpisode:
-    """The episode the NEXT launch makes. #1187: the launcher mints the episode's id (a fresh
-    uuid4), so no test can compose its folder in advance; this is the one folder that appears
+    """The episode the NEXT launch makes. The launcher mints the episode's id (a fresh uuid4),
+    so no test can compose its folder in advance; this is the one folder that appears
     under `<data root>/<T>/episodes/` after it was made — resolved when it is asked for (a seam
     called mid-launch asks after the launcher made it)."""
 
@@ -82,7 +68,7 @@ def _steps_mod():
 
 def _read(episode_dir) -> list[dict] | None:
     """`read_stage_timings` over the episode dir's bound reader — the reader takes the bound
-    primitive, never a root it could format (#1049 D-V2), so the bind is made here."""
+    primitive, never a root it could format, so the bind is made here."""
     return _timing().read_stage_timings(T.mod("_io").bind(episode_dir))
 
 
@@ -112,7 +98,7 @@ def _clock(episode_dir):
 
 def _clocked(rows: list[dict], *, before: str, after: str) -> list[tuple[Any, Any]]:
     """Every row's `(started_at, ended_at)` as aware datetimes, each pair inside the real clock's
-    `[before, after]` bracket, in order, and starting no earlier than the previous row ended ."""
+    `[before, after]` bracket, in order, and starting no earlier than the previous row ended."""
     lo, hi = parse_iso_utc(before), parse_iso_utc(after)
     out = []
     previous_end = None
@@ -174,9 +160,8 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
     seams.setdefault("live_tree", T.source_capture())
     seams.setdefault("roster", est.roster())
     before = now_iso()
-    # #1105 PR 2 (declared change 1): the tenant and the source run by id.
-    rc = _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                      *T.retired_continuation_argv()],
+    # The tenant and the source run, by id.
+    rc = _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                      spawn=spawn, judge=judge, oracle=oracle.model, verifier=verifier.model,
                      **seams)
     return Launch(rc, spawn, judge, nxt.dir, before, now_iso())
@@ -200,7 +185,7 @@ def _outcome(episode_dir: Path) -> dict:
 
 def _refusing_seams() -> dict:
     """The seams under which pre-flight REFUSES the family before any sibling starts: no world
-    carries a fact, so there is nothing to calibrate (M05=A `refused`)."""
+    carries a fact, so there is nothing to calibrate."""
     bare = S.family_v2(worlds=[S.control_world("a"), S.world_v2("b", facts=[]),
                                S.world_v2("c", role="C", facts=[])])
     return {"questioner": S.questioner_for(bare)}
@@ -233,7 +218,7 @@ class _WatchingSibling(J.FakeSibling):
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None,
                  **kw: Any) -> int:
-        # #1187: the episode this child runs in, from its own `--tenant` and `--episode`.
+        # The episode this child runs in, from its own `--tenant` and `--episode`.
         self.seen.append(_steps(self.episode_of(list(argv))))
         if self.hold:
             time.sleep(self.hold)
@@ -265,7 +250,7 @@ def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
     timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
-    # The name is the OWNER's now (#1077 D7) — `timing.py` held a re-binding of it.
+    # The name's one owner is `LAYOUT`; `timing.py` must not re-bind it.
     assert str(LAYOUT.timing) == "timing.json"
     assert not hasattr(timing, "TIMING_NAME"), "timing.py still re-binds the name"
     assert list(_steps_mod().STEPS) == EXPECTED_STEPS
@@ -307,15 +292,14 @@ def test_1025_every_write_replaces_the_whole_document_and_never_the_open_file(tm
     with record.open("r", encoding="utf-8") as held_open:
         second = clock.record("preflight", started_at=now_iso(), ended_at=now_iso())
         assert held_open.read() == before_text, (
-            "a handle opened before the write saw the new bytes — the existing file was written "
-            "in place rather than replaced")
+            "a handle opened before the write saw the new bytes: the file was written in place")
     assert os.stat(record).st_ino != before_inode, "the write reused the existing file"
     assert json.loads(record.read_text(encoding="utf-8")) == {"steps": [first, second]}
     assert _read(episode_dir) == [first, second]
 
 
 def test_1025_a_document_that_is_not_the_record_raises_rather_than_reading_as_no_steps(tmp_path):
-    """A file at the record's name that is not the record ."""
+    """Any document at the record's name that is not the record raises a `ValueError` naming it."""
     good = {"step": "questioner", "started_at": "2026-01-01T00:00:00+00:00",
             "ended_at": "2026-01-01T00:00:05+00:00"}
     foreign = [
@@ -366,7 +350,7 @@ def test_1025_an_unknown_step_is_refused_and_nothing_is_written(tmp_path):
 
 
 def test_1025_an_aliased_or_non_plain_record_is_refused_not_written_through(tmp_path):
-    """The record is written through `_io.write_guarded`."""
+    """The record is written through `_io.write_guarded`: a symlink, hard link or directory at its name is refused."""
     outside = tmp_path / "outside.json"
     outside.write_text("untouched\n", encoding="utf-8")
     original_links = os.stat(outside).st_nlink
@@ -463,12 +447,8 @@ def test_1025_a_step_the_disk_refused_once_is_still_on_the_next_document(tmp_pat
 
 
 def test_1025_an_accepted_episode_leaves_every_step_in_launch_order(tmp_path):
-    """A clean accepted episode leaves five rows in `STEPS` order — in the FILE, not merely as
-    the reader returns them — each row's moments inside the real clock's bracket around the
-    launch, `started_at <= ended_at`, and each step starting no earlier than the previous one
-    ended. The rows are on disk from inside a LATER step: the sibling spawned during `runs`
-    already sees `questioner`, `preflight`, and the judge called during `judge` sees the four
-    before it — a record buffered and flushed on the way out shows them nothing."""
+    """Five rows in `STEPS` order in the FILE, inside the launch's clock bracket; each is on disk
+    before the next step runs (the sibling and the judge see their predecessors)."""
     nxt = _NextEpisode()
     sibling = _WatchingSibling()
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
@@ -500,14 +480,9 @@ def test_1025_an_accepted_episode_leaves_every_step_in_launch_order(tmp_path):
 
 
 def test_1025_the_runs_row_spans_the_time_the_siblings_were_actually_running(tmp_path):
-    """`started_at` and `ended_at` are the boundary's own moments, not one stamp taken when the
-    row is written: a sibling held open across a real second boundary stamps the clock while
-    it runs, and the `runs` row has `started_at < stamp <= ended_at` — strictly, so a row whose
-    two moments are one write-time stamp cannot satisfy it.
-
-    The one scenario in this file that spends real wall time (about a second), because it is
-    the only way a whole-second clock can tell the two apart.
-    """
+    """The row holds the boundary's own moments, not one write-time stamp: a sibling held across
+    a real second boundary stamps strictly inside it. The one scenario here that spends real wall
+    time (about a second): a whole-second clock cannot tell the two apart otherwise."""
     sibling = _WatchingSibling(hold=1.1)
     launch = _launch(tmp_path, spawn=sibling)
     assert launch.rc == 0, "the control failed: the accepted episode did not launch cleanly"
@@ -527,20 +502,17 @@ def test_1025_the_runs_row_spans_the_time_the_siblings_were_actually_running(tmp
         "`verify` started before `runs` ended — a `started_at` that is not the step's own")
 
 
-def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_raised(
-        tmp_path, monkeypatch):
+def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_raised(tmp_path):
     """An episode that aborts MID-STEP leaves the rows for the steps that completed and no row for
-    the step that raised ."""
+    the step that raised."""
     cli = _cli()
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-questioner"))
     questioner = _Interrupting(_NextEpisode())
     ep, _before, _after = _abort(tmp_path, cli.LauncherRefused, questioner=questioner)
     assert questioner.calls > 0, "the control failed: the questioner seam was never reached"
     assert questioner.seen == [[]], f"the questioner saw {questioner.seen} before it ran"
     assert _raw_rows(ep) == [], "a step that raised was recorded"
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-preflight"))
     oracle_seam = _Interrupting(_NextEpisode())
     ep, before, after = _abort(tmp_path, cli.LauncherRefused,
                                oracle=S.oracle(then=S.Move(None, raises=oracle_seam)))
@@ -550,7 +522,6 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     assert [row["step"] for row in _raw_rows(ep)] == ["questioner"]
     _clocked(_raw_rows(ep), before=before, after=after)
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-runs"))
     family = _Interrupting(_NextEpisode())
     ep, before, after = _abort(tmp_path, KeyboardInterrupt, spawn=family)
     assert family.calls > 0, "the control failed: the process seam was never reached"
@@ -560,7 +531,6 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
         "the record does not stop at the last step that completed")
     _clocked(_raw_rows(ep), before=before, after=after)
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-verify"))
     outside = tmp_path / "outside-verify"
     outside.mkdir()
     planting = _PlantingSibling(outside=outside)
@@ -572,7 +542,6 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
         "a `verify` that raised was recorded, or a step before it was not")
     _clocked(_raw_rows(ep), before=before, after=after)
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-judge"))
     judge = _Interrupting(_NextEpisode())
     ep, before, after = _abort(tmp_path, KeyboardInterrupt, judge=judge)
     assert judge.calls > 0, "the control failed: the judge seam was never reached"
@@ -584,7 +553,7 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
 
 
 def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path, capsys):
-    """A timing entry the record cannot take ."""
+    """A timing write the record refuses is reported per step and never ends the episode."""
     author = S.questioner_for()
     squatted: list[Path] = []
     nxt = _NextEpisode()

@@ -27,10 +27,10 @@ from defender.tests.support.runtime.permissions._review_bundle import bundle, co
 DEFENDER = Path(__file__).resolve().parents[3]
 GOLDEN = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3" / "investigation.md"
 
-#: The tools that write ONE SHARED ARTIFACT — the roster this file's serialization rule is
+#: The tools that write ONE SHARED ARTIFACT: the roster the serialization rule covers.
 WRITERS = ("append_block", "fix_row", "close_investigation")
 
-#: The writers a role gets from `ToolSet(write=True)` — CORPUS_AUTHOR and LEAD_AUTHOR grant these,
+#: The writers a role gets from `ToolSet(write=True)` (CORPUS_AUTHOR and LEAD_AUTHOR grant these).
 WRITE_ROLE_WRITERS = ("write_file", "edit_file")
 
 #: Two ways a model spells a scalar field as a container. Both are unhashable, which is the
@@ -40,7 +40,7 @@ UNHASHABLE = ([HOLDS], {"finding": HOLDS})
 
 @pytest.fixture(scope="module")
 def main_tools() -> dict:
-    """MAIN's real tool roster, registered once"""
+    """MAIN's real tool roster, registered once."""
     agent = Agent("test", deps_type=AgentDeps)
     register_tools(agent, MAIN_DEF.tools)
     register_close_tool(
@@ -94,8 +94,8 @@ def test_the_write_role_roster_is_actually_registered(write_role_tools):
 
 
 def test_the_writer_roster_is_actually_registered(main_tools):
-    """The control for the test above, whose `n in tools` guard would otherwise let a renamed
-    or unregistered writer pass vacuously."""
+    """The control for `test_every_writer_main_can_call_is_sequential`, whose `n in tools` guard
+    would otherwise let a renamed or unregistered writer pass vacuously."""
     assert set(WRITERS) <= set(main_tools), f"expected {WRITERS} among {sorted(main_tools)}"
 
 

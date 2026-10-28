@@ -18,20 +18,13 @@ TENANT = H.VALID_ID
 R1 = fixture_uuid("1078-env-r1")
 
 
-def _fresh_run(root: Path, tenant_id: str = TENANT) -> Path:
-    'A fresh run of `tenant_id` materialised by the REAL `materialize_run` under the\ndata root this process resolves (the tenant is created first, through `create_tenant`\nover a placed knowledge folder, then accepted there as the entry does). #1279 (A3): the run id is minted by setup.'
-    if not location_path(H.row_path)(root, tenant_id).is_file():
-        H.make_tenant(root, tenant_id)
-    alert = H.plant_alert(root.parent / f"alert-{tenant_id}")
-    tenant = H.accept(H.resolve_data_root(), tenant_id)
+def _fresh_run(root: Path) -> Path:
+    """A fresh run of `TENANT` materialised by the REAL `materialize_run` under the data root this process resolves."""
+    if not location_path(H.row_path)(root, TENANT).is_file():
+        H.make_tenant(root, TENANT)
+    alert = H.plant_alert(root.parent / f"alert-{TENANT}")
+    tenant = H.accept(H.resolve_data_root(), TENANT)
     return H.run_common().materialize_run(alert, tenant=tenant).run_dir
-
-
-
-def _box_env(run_dir: Path) -> dict[str, str]:
-    """The env a run's box is created with, read off the real `docker run` argv builder."""
-    argv = H.mod("box")._create_argv("defender-r1", Path(run_dir), H.DEFENDER, H.mod("box._spec").DEFAULT_SPEC, lane=H.mod("box")._run_lane_mounts(Path(run_dir), H.DEFENDER, None)).argv
-    return dict(argv[i + 1].partition("=")[::2] for i, a in enumerate(argv) if a == "--env")
 
 
 def _corpus_paths(corpus_root: str | Path) -> set[Path]:
@@ -53,7 +46,9 @@ def _shim_loaded(env: dict[str, str]) -> str:
 
 
 def _plant_corpus_layout(root: Path) -> tuple[Path, Path, Path]:
-    "T with a prior finished run in `<root>/T/runs/r1` and an investigation planted under\n`<root>/T/episodes/x/runs/y/`, both REAL corpus documents (the committed golden — a stub\nparses to nothing and every corpus assertion would read 0 == 0). Then a fresh run r2 of T,\nmaterialised for real. Returns (r2's run dir, r1's document, the planted document)."
+    """T's prior run r1 and an investigation under `<root>/T/episodes/x/runs/y/`, both REAL corpus
+    documents (a stub parses to nothing: 0 == 0), then a fresh run r2 of T. Returns (r2, r1's
+    document, the planted one)."""
     H.make_tenant(root, TENANT)
     prior = T.corpus_document(H.runs_dir(root, TENANT) / R1)
     planted = T.corpus_document(root / TENANT / "episodes" / "x" / "runs" / "y")
@@ -63,7 +58,7 @@ def _plant_corpus_layout(root: Path) -> tuple[Path, Path, Path]:
 
 
 def test_o8_corpus_is_own_runs_base(tmp_path, monkeypatch):
-    "Orient's corpus for a fresh run under <root>/T/runs/ includes a prior run's\ninvestigation.md in <root>/T/runs/."
+    """Orient's corpus for a fresh run under `<root>/T/runs/` includes T's prior run there."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     run_dir, prior, _planted = _plant_corpus_layout(root)
@@ -95,7 +90,7 @@ def test_o8_episode_runs_absent(tmp_path, monkeypatch):
 
 
 def test_data_root_value_reaches_host_subprocesses(tmp_path, monkeypatch):
-    'Host subprocesses a run spawns inherit DEFENDER_DATA_ROOT unchanged, alongside the\nderived DEFENDER_RUNS_BASE.'
+    """Host children inherit DEFENDER_DATA_ROOT unchanged, beside the derived DEFENDER_RUNS_BASE."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     run_dir = _fresh_run(root)
@@ -112,8 +107,8 @@ def test_data_root_value_reaches_host_subprocesses(tmp_path, monkeypatch):
 
 
 def test_run_env_export_clobbers_stale_runs_base(tmp_path, monkeypatch):
-    """run_env and infra_env overwrite an inherited DEFENDER_RUNS_BASE with run_dir.parent
-    for every child they build (C9)."""
+    """`run_env` and the box's argv overwrite an inherited DEFENDER_RUNS_BASE for every child
+    they build."""
     stale = tmp_path / "old-defender-runs"
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(stale))
     run_dir = tmp_path / "data" / TENANT / "runs" / "r1"
@@ -124,6 +119,5 @@ def test_run_env_export_clobbers_stale_runs_base(tmp_path, monkeypatch):
         str(run_dir.parent)
     argv = box._create_argv("defender-r1", run_dir, H.DEFENDER, H.mod("box._spec").DEFAULT_SPEC, lane=box._run_lane_mounts(run_dir, H.DEFENDER, None)).argv
     exported = [a for a in argv if a.startswith("DEFENDER_RUNS_BASE=")]
-    # #1255 (design rev 4, P1): the box's value is the model view's constant, which still
-    # overwrites the stale inherited one.
+    # The box's value is the model view's constant, which still overwrites the stale one.
     assert exported == ["DEFENDER_RUNS_BASE=/runs"], exported

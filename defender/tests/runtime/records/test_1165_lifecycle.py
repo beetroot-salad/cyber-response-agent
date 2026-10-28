@@ -1,4 +1,4 @@
-"""O1/O4: verdict records use the handed run on every lifecycle exit."""
+"""Scrub-verdict records use the handed run on every lifecycle exit."""
 from __future__ import annotations
 
 import json
@@ -115,7 +115,7 @@ def test_launch_binds_the_run_verdict_writer_before_startup_can_fail(tmp_path):
 @pytest.mark.parametrize("phase", ["existing", "image", "create", "probe"])
 @pytest.mark.parametrize("fault", [False, True])
 def test_real_box_startup_refusals_use_the_handed_verdict_backend(tmp_path, monkeypatch, phase, fault):
-    """O1/O4: real start_box threads the callback through every startup refusal arm."""
+    """The real `start_box` threads the callback through every startup refusal arm."""
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     io = RecordIO()
     run = run_handle(tmp_path / fixture_uuid("run"), io)

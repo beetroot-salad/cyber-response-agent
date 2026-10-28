@@ -24,7 +24,7 @@ def test_the_real_tree_is_clean():
     assert _GATE.scan(ROOT) == []
 
 
-# --- D6: the migrated modules make no episode I/O but the declared residue ------------------
+# --- the migrated modules make no episode I/O but the declared residue ------------------
 
 def _hits(rel: str, src: str):
     return _GATE.census_of(_view(), rel, ast.parse(src))
@@ -62,7 +62,7 @@ def test_a_call_outside_the_residue_is_a_violation():
     assert str(row) in found[0], found
 
 
-# --- D6: the handle does I/O only through hold / hold_new ---------------------------------------
+# --- the handle does I/O only through hold / hold_new ---------------------------------------
 
 def _handle(src: str):
     io_funcs = _GATE._io_functions(ROOT)
@@ -93,7 +93,7 @@ def test_the_io_surface_is_read_from_the_source_of_the_io_modules():
     assert {"hold", "hold_new", "move_at"} <= _GATE._io_functions(ROOT)
 
 
-# --- O5: parameters that are paths below the episode dir --------------------------------------
+# --- parameters that are paths below the episode dir --------------------------------------
 
 def _params(src: str):
     return _GATE.o5_params("m", ast.parse(src))
@@ -134,7 +134,7 @@ def test_a_path_taking_function_outside_the_allowlist_is_a_violation():
     assert all("takes a path below the episode dir" in f for f in found), found
 
 
-# --- O5: EpisodePaths / base_file / staged_path ----------------------------------------------
+# --- EpisodePaths / base_file / staged_path ----------------------------------------------
 
 def _calls(src: str):
     return _GATE.o5_calls("m", ast.parse(src))
@@ -163,7 +163,7 @@ def test_a_reader_outside_the_list_of_root_readers_is_a_violation():
     assert all("outside a root-binding reader" in f for f in found), found
 
 
-# --- O5: the doors ---------------------------------------------------------------------------
+# --- the doors ---------------------------------------------------------------------------
 
 def _doors(src: str):
     return _GATE.o5_doors("m", ast.parse(src))

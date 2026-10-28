@@ -36,7 +36,8 @@ from defender.tests.learning.core.test_1017_row_schema import (
     _table,
 )
 
-#: The section title `questioner._capture_sections` renders the leads under — spelled here
+#: The section title `questioner._capture_sections` renders the leads under, spelled here
+#: rather than imported.
 SECTION_TITLE = "The joined leads at the branch point"
 
 #: The frame salt the unit tests render `_section` on. `titled_section` frames the body on the
@@ -45,9 +46,8 @@ TEST_SALT = "test1032"
 
 
 def _section(run_dir: Path) -> str:
-    """The questioner's leads section as the launcher assembles it — the launcher's
-    best-effort read seam, the render over its answer, the section renderer. Every marker check
-    in this file is made here, on the bytes a model would be shown."""
+    """The questioner's leads section as the launcher assembles it (read seam, render, section
+    renderer): the marker checks run on the bytes a model would be shown."""
     return titled_section(
         SECTION_TITLE,
         lead_repository.questioner_leads(_joined_leads(run_dir, lead_repository.joined)),
@@ -61,10 +61,9 @@ def _questioner_leads(run_dir: Path) -> list[dict]:
 
 
 def _above_guard_row(seq: int, marker: str, **overrides) -> dict:
-    """An above-guard rejection row as `wrap_tool_validate` leaves it (the S2 fixture's shape:
-    `system` coarsened to `""`, exit 64, `agent-fixable`, a non-empty `system_key`), with an
-    ASCII `params` marker — the witness O3 names, since the `∅` in its `query_id` is escaped to
-    `\u2205` by `json.dumps` and would be a vacuous negative."""
+    """An above-guard rejection row as `wrap_tool_validate` leaves it (`system` coarsened to `""`,
+    exit 64, `agent-fixable`, a non-empty `system_key`), with an ASCII `params` marker: the `∅`
+    in its `query_id` is escaped by `json.dumps`, so it would be a vacuous negative."""
     return _searchable_row(
         seq, query_id=ABOVE_GUARD_QUERY_ID, system="", exit_code=64,
         error_class=AGENT_FIXABLE_ERROR_CLASS, payload_status="error",
@@ -73,18 +72,15 @@ def _above_guard_row(seq: int, marker: str, **overrides) -> dict:
     )
 
 
-# O3 / D1 — no sentinel row reaches the questioner
+# No sentinel row reaches the questioner
 
 
 def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
-    """O3/D1 — one lead with a real row and two sentinel rows (an above-guard rejection, and a
-    `∅.bash-shim` row written through the REAL writer `append_query_row` exactly as the gather
-    bash lane writes it, its model-authored shell text in `params.command`), each row carrying
-    its own ASCII marker: the real row's marker is in the section, neither sentinel's is, and
-    neither sentinel id's ASCII tail is. `questioner_leads` returns that lead with exactly one
-    query. Beside it, a second lead whose ONLY row is a sentinel is kept — with its goal and no
-    queries — the same decision `actor_view` records: the run did open it."""
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    """One lead with a real row and sentinel rows (above-guard, a `∅.bash-shim` row through the
+    REAL `append_query_row`, repeat-trip, an unknown `∅.` id), each with its own ASCII marker:
+    only the real row reaches the section. A second lead whose ONLY row is a sentinel is kept,
+    with its goal and no queries, as `actor_view` decides: the run did open it."""
+    # A run id is a canonical UUID: the folder is fixture_uuid(<label>).
     run_dir = tmp_path / fixture_uuid("run")
     run_dir.mkdir()
     _lead_file(run_dir, "GOAL_MARKER")
@@ -150,13 +146,12 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
         "a lead whose only rows are sentinels was dropped, or shown a query it never ran"
 
 
-# O2 — every joined lead, in joined()'s order, with the fields the questioner needs
+# Every joined lead, in joined()'s order, with the fields the questioner needs
 
 
 def _expected_query(seq: int, params: dict, **overrides) -> dict:
-    """The nine-key query dict O1 enumerates, for a `_searchable_row(seq, params=...)` — the
-    expected value spelled as a literal, so the equality below is against the design and not
-    against the render."""
+    """The nine-key query dict for a `_searchable_row(seq, params=...)`, spelled as a literal so
+    the equality is against the design, not the render."""
     return {
         "seq": seq, "system": "elastic", "verb": "query", "query_id": "elastic.ad-hoc",
         "params": params, "exit_code": 0, "error_class": None, "payload_status": "ok",
@@ -233,14 +228,13 @@ def test_o2_every_joined_lead_reaches_the_questioner_in_joineds_order(tmp_path):
         assert dropped not in text, f"{dropped!r} reached the questioner"
 
 
-# O4a — the read surface absorbs a run dir's content; the shipped path shows what survived
+# The read surface absorbs a run dir's content; the shipped path shows what survived
 
 
 def _nested_bomb(run_dir: Path) -> Path:
-    """A queries table whose one row's `params` is a JSON array nested 200,000 deep — the one
-    content shape on which `joined()` used to RAISE (`RecursionError` out of `json.loads`, which
-    the lead-file reader tolerated and the table's did not), so one planted row ended the judge
-    pass, the crosscheck and the capture's priming for the whole run."""
+    """A queries table whose one row's `params` is a JSON array nested 200,000 deep: `json.loads`
+    raises `RecursionError` on it, and one such row must not end the judge pass, the crosscheck
+    or the capture's priming for the whole run."""
     run_dir.mkdir()
     _lead_file(run_dir, "SURVIVES_THE_BOMB")
     table = RunPaths(run_dir).executed_queries
@@ -296,19 +290,13 @@ def test_o4a_the_surface_absorbs_a_run_dirs_content_and_the_shipped_path_shows_w
     assert capsys.readouterr().err == "", "the read surface's tolerances are no longer silent"
 
 
-# O4b — the launcher's read seam: the arm, and the passthrough
-
-
-# M2 — the launcher hands the questioner the named projection, end to end
+# The launcher hands the questioner the named projection, end to end
 
 
 @pytest.fixture
 def launcher_roots(tmp_path, monkeypatch):
-    """Both configured roots inside `tmp_path`, as `test_947_triplet_launcher` sets them for
-    every launcher scenario: without them `episode_dir_for` answers about the host's real
-    episodes root and the episode is written outside `tmp_path`."""
+    """The runs-base variable pointed inside `tmp_path`, so a stray read stays inside the test."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
 
 
 def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, launcher_roots):
@@ -324,8 +312,7 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     ])
     questioner = S.questioner_for()
     rc = T.mod("cli.learning.branch").main(
-        ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-         *T.retired_continuation_argv()],
+        ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
         spawn=T.FakeSpawn(), questioner=questioner,
         oracle=S.oracle(then=S.submit(answer, S.EMPTY_CLAIM)).model,
         verifier=S.passing_verifier().model, roster=est.roster(),

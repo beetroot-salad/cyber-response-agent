@@ -1,9 +1,8 @@
-"""#869 — the cross-site universal, the second empty-set boundary, and the two unmoved readers.
+"""#869: every path-composition site refuses an undeclared system, and an empty declared set
+refuses the lead-author lane.
 
-#1108 P4 (O7, OD6): the lead lane's tree is a batch's git-free draft (`agent/skills/...`); "nothing
-written" is the batch's `ChangeSet` and branch. ASSUMED SEAMS (S-H): the path rules keep their
-`(xy, path)` shape over `agent/...` spellings; `build_lead_author_deps(paths, *, state, trees,
-batch)` (`_curator1134`'s seam list).
+The lead lane's tree is a batch's git-free draft (`agent/skills/...`); "nothing written" means the
+batch's `ChangeSet` and branch carry nothing.
 """
 from __future__ import annotations
 
@@ -42,8 +41,8 @@ def _skill(system: str) -> str:
 
 
 def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkeypatch):
-    """#869 universal: all four path-composition sites refuse an undeclared system and admit a
-    declared one; the claim carries nothing for the phantom."""
+    """All four sites refuse an undeclared system and admit a declared one; the claim carries
+    nothing for the phantom."""
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files={
         "skills/elastic/SKILL.md": _skill("elastic"),
@@ -107,8 +106,8 @@ def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkey
 
 
 def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatch):
-    """#869: a product checkout declaring no adapter and a draft with no marker refuse the lane
-    before any spawn; the batch commits nothing."""
+    """No adapter in the product checkout and no marker in the draft refuse the lane before any
+    spawn; the batch commits nothing."""
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
     product = tmp_path / "product"
     (product / "defender" / "integrations").mkdir(parents=True)

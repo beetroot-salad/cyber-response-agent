@@ -177,16 +177,12 @@ def test_the_review_s_spend_is_priced_per_lens(tmp_path):
 
 def test_the_review_s_spend_is_priced_per_model(tmp_path):
     """The review runs on its own pinned default, apart from the investigator's, so it is
-    normally a row of its own in the by-model breakdown."""
-    assert review_cost_by_model(tmp_path, _MIXED) == {"kimi-k3": pytest.approx(3 * _ONE_CALL)}
-
-
-def test_the_review_is_priced_at_its_own_model_s_rate(tmp_path):
+    normally a row of its own in the by-model breakdown, priced at that model's rate."""
     same_usage_as_main = usage_cost("claude-sonnet-4-6", _USAGE)
     assert pytest.approx(same_usage_as_main) != _ONE_CALL, (
         "fixture no longer discriminates — pick a review model whose price row differs"
     )
-    assert sum(review_cost_by_lens(tmp_path, _MIXED).values()) == pytest.approx(3 * _ONE_CALL)
+    assert review_cost_by_model(tmp_path, _MIXED) == {"kimi-k3": pytest.approx(3 * _ONE_CALL)}
 
 
 def test_the_three_namespaces_do_not_read_each_other(tmp_path):

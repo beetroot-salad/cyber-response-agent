@@ -184,10 +184,10 @@ def test_status_reads_the_baked_inventory_not_the_working_tree(
 def test_status_raises_on_an_unreachable_backend_rather_than_reporting_drift(
     profiles_dir, rules_dir, ledger_dir, inventory_text
 ):
-    """cmdb down for a moment used to read as 'no live hosts' — eleven
-    `cmdb-host-missing` entries indistinguishable from real drift, and an
-    operator's `revert --all` on that output stamps still-live faults as
-    reverted. A backend that cannot be read is an error, not a finding."""
+    """A cmdb down for a moment must not read as 'no live hosts': eleven
+    `cmdb-host-missing` entries indistinguishable from real drift, on which an
+    operator's `revert --all` stamps still-live faults as reverted. A backend
+    that cannot be read is an error, not a finding."""
     _activate_stale(profiles_dir, rules_dir, ledger_dir, "stale-owner-down")
     cmdb_down = FakeExecSeam(
         cmdb={"GET /hosts": (500, {"error": "connection refused"})},

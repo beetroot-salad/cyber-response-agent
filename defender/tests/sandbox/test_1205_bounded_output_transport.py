@@ -16,8 +16,8 @@ from defender.execution import bash_exec
 _LIMIT = 65536
 
 
-def _capture(script: str, *, frame: bytes = b"", limit: int = _LIMIT, timeout: float = 5):
-    return capture_bounded([sys.executable, "-c", script], frame, limit=limit, timeout=timeout)
+def _capture(script: str, *, frame: bytes = b"", limit: int = _LIMIT):
+    return capture_bounded([sys.executable, "-c", script], frame, limit=limit, timeout=5)
 
 
 @pytest.mark.parametrize(("out", "err"), [(0, 0), (123, 456), (_LIMIT, 0), (0, _LIMIT), (30000, _LIMIT - 30000)])

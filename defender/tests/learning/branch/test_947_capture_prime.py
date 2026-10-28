@@ -1,4 +1,4 @@
-"""#947 Part B — priming the captured base out of the source run's own evidence."""
+"""#947: priming the captured base out of the source run's own evidence."""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -32,7 +32,8 @@ T0 = dt.datetime(2026, 5, 25, 15, 30, 45, tzinfo=dt.UTC)
 
 UNSORTED_PAYLOAD = {"zebra": 1, "alpha": {"n": 2, "m": 3}, "beta": [3, 1]}
 
-#: A cmdb body answering differently from anything a source run captured, so "the capture was
+#: A cmdb body answering differently from anything a source run captured, so a served capture
+#: and a live read are told apart; it logs every call it runs.
 _LIVE_ADAPTER = '''\
 """A verb body that answers `live-estate` and logs that it ran at all."""
 from __future__ import annotations
@@ -70,8 +71,7 @@ LIVE_GRANT = VerbGrant(role="gather", entries=(
 
 
 def capture_mod():
-    """`defender.learning.branch.capture` — #947's new module, imported per test so a missing
-    target is one failure per test rather than one collection error for the file."""
+    """`defender.learning.branch.capture`, imported per test."""
     return importlib.import_module("defender.learning.branch.capture")
 
 
@@ -88,7 +88,7 @@ def call_row(lead: str, seq: int, system: str, verb: str, params: dict, **extra)
 
 
 def append_call(run_dir: Path, row: dict, sidecar: str | None) -> dict:
-    """Land one captured call in a source run"""
+    """Land one captured call (row and sidecar) in a source run."""
     append_jsonl(RunPaths(run_dir).executed_queries, [row])
     if sidecar is not None:
         target = run_dir / str(row["payload_path"])
@@ -111,8 +111,7 @@ def episode(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _prime(run_dir: Path, root: Path):
-    """`prime_base` over an `Episode` opened on the episode root: it takes the handle, not the
-    base path (#1133 rev 2)."""
+    """`prime_base` over an `Episode` opened on the episode root."""
     with Episode.open(root) as ep:
         return capture_mod().prime_base(run_dir, ep)
 
@@ -344,7 +343,8 @@ def test_priming_an_existing_base_is_refused_without_changing_its_first_capture(
 
 @pytest.mark.parametrize("label", ["empty-table", "all-sentinels", "all-failed", "no-table"])
 def test_priming_nothing_is_refused_rather_than_reported(tmp_path, label):
-    """A run that yields no capture at all raises `LedgerError` instead of returning `primed=0`."""
+    """A run that yields no capture at all raises `LedgerError` instead of returning `primed=0`,
+    and leaves no `served/base.jsonl` a sibling could open."""
     run_dir = source_run(tmp_path)
     if label == "all-sentinels":
         append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"},
@@ -359,19 +359,6 @@ def test_priming_nothing_is_refused_rather_than_reported(tmp_path, label):
     with pytest.raises(LedgerError):
         _prime(run_dir, root)
 
-
-def test_a_refused_priming_leaves_no_base_a_sibling_could_open(tmp_path):
-    """After a refusal there is no `served/base.jsonl` — so `Ledger.for_world` still refuses too."""
-    run_dir = source_run(tmp_path)
-    append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"},
-                                  query_id=ABOVE_GUARD_QUERY_ID), json.dumps({"n": 1}))
-    root, base = episode(tmp_path)
-
-    with pytest.raises(LedgerError):
-        _prime(run_dir, root)
-
-    assert not base.is_file(), (
-        "a refused priming left a base file behind — every later sibling opens it, finds "
-        "nothing, and goes live for the whole episode with nothing red anywhere")
+    assert not base.is_file(), "a refused priming left a base file behind"
     with Episode.open(root) as ep, pytest.raises(LedgerError):
         Ledger.for_world(ep, T.fixture_world_id("w1"))

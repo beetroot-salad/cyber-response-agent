@@ -26,10 +26,11 @@ from defender.tests.support.storage._session_store_705 import (  # noqa: E402
 )
 
 
-# #0 — the signal contract
+# the signal contract
 
 def test_head_move_signal_contract(tmp_path):
-    """The head-move surface is exactly this: `append` takes a keyword `reason` drawn from the"""
+    """`HEAD_MOVE_REASONS` is exactly `("fork", "fold")`, and `displaced_tip`, `fold_history` and
+    `branch_point` read the log, answering `None` / `[]` for an empty or unknown session."""
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -54,7 +55,7 @@ def test_head_move_signal_contract(tmp_path):
 
     fork = store.fork(main, at_message_id=f1)
     assert ss.branch_point(store, fork) == f1
-    assert ss.displaced_tip(store, fork) is None, "no fold of its own yet"
+    assert ss.displaced_tip(store, fork) is None, "a new fork reports a displaced tip"
 
     empty = store.new_session(agent_id="main")
     for absent in (empty, "no-such-session-id"):
@@ -66,9 +67,6 @@ def test_head_move_signal_contract(tmp_path):
 # the path reads from head
 
 def test_path_follows_head_not_insertion_order(tmp_path):
-    """The path a reader projects is the parent walk from the session's RECORDED head, not from"""
-    # provenance: B1/B2 (executed) measured both defects; F5/B13 established the off-path
-    # append has a live production shape (a gather leg's row landing in the main session).
     ss = store_mod()
     store = make_store(tmp_path)
     main = store.new_session(agent_id="main")
@@ -95,8 +93,6 @@ def test_path_follows_head_not_insertion_order(tmp_path):
 
 
 def test_path_row_ids_is_empty_when_head_is_null(tmp_path):
-    """A session whose `head_message_id` is SQL NULL reads as an empty path even when the"""
-    # provenance: P116; the write side is `an_append_into_a_rows_but_null_head_session_raises`.
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -121,7 +117,6 @@ def test_path_row_ids_is_empty_when_head_is_null(tmp_path):
 # the fold
 
 def test_fold_moves_head_to_frontier_and_logs_fold(tmp_path):
-    """A fold moves the session's head to the frontier row it mints and leaves exactly ONE"""
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -144,8 +139,6 @@ def test_fold_moves_head_to_frontier_and_logs_fold(tmp_path):
 
 
 def test_fold_reuse_leaves_head_and_the_log_untouched(tmp_path):
-    """A second fold at a boundary that already holds a frontier returns the existing frontier"""
-    # provenance: P97, raised from claim c18 (read) rather than from the doc.
     sel = selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -167,7 +160,7 @@ def test_fold_reuse_leaves_head_and_the_log_untouched(tmp_path):
 
 
 def test_a_degenerate_fold_still_writes_its_log_entry(tmp_path):
-    """Folding a session whose path is a single row — so the frontier's parent already IS the"""
+    """A one-row path's frontier parents onto head itself (a linear move); the fold still logs it."""
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -202,9 +195,7 @@ def test_a_degenerate_fold_still_writes_its_log_entry(tmp_path):
 # the non-linearity rule
 
 def test_a_linear_turn_writes_no_log_entry(tmp_path):
-    """An ordinary turn — the first inserted row parenting onto the session's own current head,"""
-    # provenance: issue obligation 6; P63 (a sibling child appended into the parent session
-    # after a fork is linear against the parent's own head and adds nothing).
+    """A turn is linear when its first row parents onto the session's own current head."""
     sel = selection_mod()
     store = make_store(tmp_path)
 
@@ -240,9 +231,6 @@ def test_a_linear_turn_writes_no_log_entry(tmp_path):
 
 
 def test_an_append_into_a_rows_but_null_head_session_raises(tmp_path):
-    """An append into a session that holds rows but whose `head_message_id` is SQL NULL is"""
-    # provenance: P55, promoted out of consensus — all three answering copies converged on the
-    # old mechanism correctly and none flagged that it contradicts that principle.
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -264,7 +252,6 @@ def test_an_append_into_a_rows_but_null_head_session_raises(tmp_path):
 
 
 def test_an_unexplained_non_linear_append_raises_and_writes_nothing(tmp_path):
-    """An append whose first row parents onto a row that is not the session's current head, with"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -284,7 +271,7 @@ def test_an_unexplained_non_linear_append_raises_and_writes_nothing(tmp_path):
         "control: the identical move with a reason from the closed set is legal")
     assert len(log_rows(store, session_id)) == 1
 
-    # FK-K's shape, driven: the identical call issued twice raises the second time
+    # an at-least-once retry: the identical call issued twice raises the second time
     payload = [text_response("an at-least-once retry")]
     store.append(session_id, payload, agent_id="main", parent_id=explained)
     with pytest.raises(ss.StoreAppendError):
@@ -292,8 +279,6 @@ def test_an_unexplained_non_linear_append_raises_and_writes_nothing(tmp_path):
 
 
 def test_an_ingest_that_fails_partway_leaves_head_on_the_last_committed_message(tmp_path):
-    """When the third message of an ingested turn cannot be stored, messages one and two are"""
-    # provenance: P52 + P53; the fault object cites B8 (executed).
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -313,9 +298,6 @@ def test_an_ingest_that_fails_partway_leaves_head_on_the_last_committed_message(
 
 
 def test_reason_membership_is_validated_before_linearity_classification(tmp_path):
-    """`reason` membership is checked by exact match whenever it is not None, before the move's"""
-    # provenance: FK-C's single unconditional rule, replacing seven doc-silent cases; PR-5
-    # (executed) for the two discriminating values.
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -342,7 +324,6 @@ def test_reason_membership_is_validated_before_linearity_classification(tmp_path
 # who may hand `append` a reason at all
 
 def test_a_reason_on_a_linear_move_is_refused_unless_the_caller_mints_a_frontier(tmp_path):
-    """A member reason handed to a LINEAR move is accepted only from a caller minting a frontier"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -378,7 +359,6 @@ def test_a_reason_on_a_linear_move_is_refused_unless_the_caller_mints_a_frontier
 
 
 def test_a_bare_append_cannot_mint_a_fork_entry(tmp_path):
-    """`append` refuses the fork reason outright, from every caller and on every move shape:"""
     ss = store_mod()
     store = make_store(tmp_path)
     fresh = store.new_session(agent_id="main")
@@ -412,8 +392,7 @@ def test_a_bare_append_cannot_mint_a_fork_entry(tmp_path):
 
 
 def test_a_fold_refuses_to_parent_a_frontier_outside_the_folding_session(tmp_path):
-    """A fold refuses to mint a frontier parented onto a row belonging to another session:"""
-    # provenance: P102; B12 (executed) established the walk crosses session boundaries.
+    """A fork's path root lies in its parent (the walk crosses sessions), appends of its own or not."""
     sel = selection_mod()
     store = make_store(tmp_path)
     parent = store.new_session(agent_id="main")
@@ -450,7 +429,6 @@ def test_a_fold_refuses_to_parent_a_frontier_outside_the_folding_session(tmp_pat
 
 
 def test_a_fold_on_an_empty_path_is_refused(tmp_path):
-    """Folding a session whose path is empty is refused: there is no row for the frontier to parent onto, and a frontier with no parent is not a fold."""
     sel = selection_mod()
     store = make_store(tmp_path)
     empty = store.new_session(agent_id="main")
@@ -472,10 +450,9 @@ def test_a_fold_on_an_empty_path_is_refused(tmp_path):
     assert sql(store, "SELECT parent_id FROM message WHERE id = ?", (frontier,)) == [(r1,)]
 
 
-# the cycle guard (correction R3, binding)
+# the cycle guard
 
 def test_append_still_refuses_a_cyclic_parent_chain_at_write_time(tmp_path):
-    """`append` still refuses a cyclic `parent_id` chain at WRITE time — before anything is"""
     ss = store_mod()
     store = make_store(tmp_path)
     implicit = store.new_session(agent_id="main")
@@ -506,10 +483,9 @@ def test_append_still_refuses_a_cyclic_parent_chain_at_write_time(tmp_path):
     assert log_rows(store, clean) == []
 
 
-# D4 / survival, and the end-to-end walk
+# the end-to-end walk
 
 def test_the_full_lifecycle_walk_new_session_two_folds_and_a_fork(tmp_path):
-    """The seven-point walk, end to end in one store file: (1) a fresh session's head is NULL,"""
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)

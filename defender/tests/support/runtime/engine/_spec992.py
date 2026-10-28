@@ -1,5 +1,4 @@
-"""Shared machinery for the #992 spec suite — NO test scripts (the leading underscore keeps
-pytest from collecting it)."""
+"""Shared companions, a recording review bundle and close drivers for the #992 spec suite."""
 from __future__ import annotations
 
 import asyncio
@@ -17,20 +16,19 @@ from defender.tests.support.runtime.engine import _spec923
 DEFENDER = Path(__file__).resolve().parents[4]
 GOLDEN_V2SSHD = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
 
-#: The keyword this change puts through the review, the confident control beside it, and the
-#: host's own verdict every override arm commits for BOTH of them (one rule — see
-#: test_992_routing's module docstring for why the design's first cut was reversed).
+#: The ceiling keyword the review judges, the confident control beside it, and the host's own
+#: verdict every override arm commits for both.
 GAP = _spec923.GAP_MEMBER
 CONFIDENT = "malicious"
 UNRESOLVED = _spec923.MEMBER
 
-#: §7 FK-10 — the SEVENTH `REPORT_CAUSES` member, verbatim: the ceiling-held arm's own sentence.
+#: The seventh `REPORT_CAUSES` member, verbatim: the ceiling-held arm's own sentence.
 CEILING_EXAMINED = (
     "the challenge review examined the ceiling claim and found nothing further measurable"
 )
 
-#: The six shipped sentences, as LITERALS (close_tool.py:121-138 at 67d29090) so that a member
-#: reworded at its home fails the vocabulary demand rather than being followed by it.
+#: The six original sentences as literals, so a member reworded at its home fails the
+#: vocabulary test instead of being followed by it.
 SHIPPED_CAUSES: tuple[str, ...] = (
     "the disposition was recorded without a challenge review",
     "the challenge review ran and left nothing about the finding unsettled",
@@ -40,19 +38,18 @@ SHIPPED_CAUSES: tuple[str, ...] = (
     "nothing discriminating remains that the investigation was not already asked for",
 )
 
-#: SB-1: the three confident-question phrasings composer.md carries today (lines 1-2, 9, 32)
-#: and must carry NOWHERE after M2 — grep-level, case-insensitive.
+#: Confident-question phrasings the composer's whole prompt for an `inconclusive` close must
+#: not carry (case-insensitive).
 CONFIDENT_QUESTION_PHRASES: tuple[str, ...] = (
     "conclusion follows", "confident disposition", "evidence carries the conclusion",
 )
-#: The design's own words for the confident host sentence M2 moves into the user message
-#: ("today's 'judge whether the conclusion follows'").
+#: The confident host sentence's key phrase, carried in the composer's user message.
 CONFIDENT_QUESTION = "conclusion follows"
-#: The design's own words for the ceiling sentence (M2): the run closed `inconclusive`
-#: claiming a ceiling; name anything MEASURABLE the record neither cited nor tested.
+#: The ceiling sentence's words: the run closed `inconclusive` claiming a ceiling; name anything
+#: measurable the record neither cited nor tested.
 CEILING_QUESTION_MARKERS: tuple[str, ...] = ("inconclusive", "ceiling", "measurable")
-#: §7 FK-6: the id prefixes the ceiling sentence must require the named thing be recorded
-#: under — the same four `citable_refs` admits.
+#: The id prefixes the ceiling sentence requires a named thing be recorded under (the four
+#: `citable_refs` admits).
 RECORD_ID_PREFIXES: tuple[str, ...] = ("v-", "e-", "l-", "h-")
 
 #: One untrusted frame, whatever salt it carries — `_untrusted.wrap`'s exact shape.
@@ -81,13 +78,11 @@ def normalized(prompt: str) -> str:
 # ---------------------------------------------------------------------------------------
 
 _V2SSHD_ARCHETYPE_ROW = "matched_archetype      unattributed-loopback-ssh-retry\n"
-#: The note of the golden's first receipt (`l-004`), verbatim — the analyst-facing free text
-#: the composer now reads.
+#: The note of the golden's first receipt (`l-004`), verbatim: free text the composer reads.
 V2SSHD_NOTE = "auditd/execve not collected on this non-containerized host"
 #: The golden's receipts as `(state, ref)`, in document order — what the price gate prices.
 V2SSHD_RECEIPTS = (("query-empty", "l-004"), ("query-failed", "l-006"))
-#: A rationale row for the variant that carries one (`conclude.ceiling_rationale`, a real
-#: companion scalar — schema.py:350).
+#: A rationale row for the variant that carries one (`conclude.ceiling_rationale`).
 V2SSHD_RATIONALE = (
     "authorized owner, no post-auth harm; the initiator process is the only unmeasured dimension"
 )
@@ -95,10 +90,8 @@ V2SSHD_RATIONALE = (
 
 def ceiling_companion(*, rationale: bool = False, note_prefix: str | None = None) -> str:
     """The shipped inconclusive golden, optionally with a `ceiling_rationale` row and/or a
-    prefix spliced onto the first receipt's note (a note written to steer the reviewer).
-
-    Both variants were executed through `validate_companion` at 67d29090 with zero
-    diagnostics, so a scenario built on them is about the review and not about the price."""
+    prefix spliced onto the first receipt's note (a note written to steer the reviewer). Both
+    variants pass `validate_companion` cleanly, so a scenario is about the review, not the price."""
     text = (GOLDEN_V2SSHD / "investigation.md").read_text(encoding="utf-8")
     assert _V2SSHD_ARCHETYPE_ROW in text, "the golden's conclude block moved; re-anchor"
     if rationale:
@@ -119,12 +112,9 @@ def sparse_companion(*rows: str, disposition: str = GAP) -> str:
 
 
 def non_utf8_companion() -> bytes:
-    """The golden with ONE undecodable byte in its prose, outside every invlang fence.
-
-    Real input through the real primitive: the companion the close's one read
-    (`tools.read_companion`, over `_io.read_plain`) cannot decode. No gate reads a lenient
-    decode of it — the close decides an unreadable companion once, ahead of every gate, as a
-    review that cannot run — so this is a row of d14's machinery-failure arms, not d18's."""
+    """The golden with one undecodable byte in its prose, outside every invlang fence. The
+    close's one read (`tools.read_companion`) cannot decode it and, ahead of every gate, treats
+    it as a review that cannot run."""
     raw = (GOLDEN_V2SSHD / "investigation.md").read_bytes()
     marker = b"Alert `v2-sshd-success-after-failures`"
     assert marker in raw, "the golden's prose moved; re-anchor"
@@ -173,8 +163,7 @@ class RecordingBundle:
 
     `composer` is the composer's reply (a `_review_bundle.composer_reply` line); `lens` every
     lens's reading; `faults` maps a role to its `Fault`; `unbound` names roles left `None` on
-    the `ReviewStages` (FK-2's partial bundle). `calls` is the dispatch order the gate
-    actually took."""
+    the `ReviewStages` (a partial bundle). `calls` is the dispatch order the gate took."""
 
     def __init__(
         self, composer: str | Fault | None = None, *, lens: str = _review_bundle.LENS_READING,
@@ -340,7 +329,7 @@ def receipt_note_lines(body: str) -> list[str]:
 
 def priced_block(companion_text: str) -> str:
     """What the price gate's own parse of `companion_text` renders as the frontmatter receipt
-    block — the bytes M4 must carry onto the reviewed commit."""
+    block: the bytes the reviewed commit must carry."""
     from defender.investigation.review.projector import parse_investigation
     from defender.skills.invlang.validate import ceiling_test_block, conclude_ceiling_test_rows
 
@@ -355,13 +344,12 @@ def citable(companion_text: str) -> frozenset[str]:
 
 
 # ---------------------------------------------------------------------------------------
-# The two run-dir populations the run page's readers must agree on (FK-8 / FK-14).
+# The two run-dir populations the run page's readers must agree on.
 # ---------------------------------------------------------------------------------------
 
 def reviewed_inconclusive_dir(tmp_path: Path, *, name: str = "reviewed") -> Path:
-    """A POST-CHANGE run dir: an `inconclusive` close driven through the REAL close with a
-    `holds` composer — whatever record, traces and report production writes for a reviewed,
-    ceiling-held close is what lands here."""
+    """A reviewed `inconclusive` run dir: the real close driven with a `holds` composer, so it
+    holds whatever production writes for a reviewed, ceiling-held close."""
     deps, run_dir = deps_over(tmp_path / name, ceiling_companion())
     result = close_with(deps, GAP, recording(holds()))
     assert result.outcome == "stands", f"the fixture close did not stand: {result!r}"
@@ -372,15 +360,13 @@ def reviewed_inconclusive_dir(tmp_path: Path, *, name: str = "reviewed") -> Path
     return run_dir
 
 
-def pre_change_inconclusive_dir(tmp_path: Path, *, name: str = "historical") -> Path:
-    """A PRE-#992 `inconclusive` run dir, in the shape the bypass wrote (G17, x1, executed):
-    `review_record.1.json` = `{verdict: stands, reviewed_disposition: inconclusive, detail: "",
-    failure_kind: null}`, `report.md` with `cause: CAUSE_NOT_REVIEWED` and the priced receipts,
-    and NO `wire_logs/` at all — the five Measurement run dirs are this population, and no
-    post-change code can produce it, so it is written by hand from the observed bytes."""
+def pre_change_inconclusive_dir(tmp_path: Path) -> Path:
+    """A pre-#992 `inconclusive` run dir as the old no-review bypass wrote it: an unreviewed
+    `review_record.1.json`, the not-reviewed cause, the priced receipts and no `wire_logs/`.
+    Current code cannot produce one, so it is written by hand."""
     from defender.records import RunPaths
 
-    run_dir = tmp_path / name
+    run_dir = tmp_path / "historical"
     (run_dir / "gather_raw").mkdir(parents=True)
     run_dir.joinpath("investigation.md").write_text(ceiling_companion(), encoding="utf-8")
     run_dir.joinpath("alert.json").write_text(
@@ -411,13 +397,12 @@ def parsed_report(run_dir: Path) -> Any:
 
 
 # ---------------------------------------------------------------------------------------
-# The note-cap ladder (§7 R6).
+# The note-cap ladder.
 # ---------------------------------------------------------------------------------------
 
-#: Note sizes, doubling, from well under any sane bound to past the WHOLE-FILE cap
-#: (`_artifact_schema.REPORT_FILE_MAX` = 8192). The bound itself is the implementer's; the
-#: ladder is how a test observes that the FIRST refusal is the price gate's and never the
-#: commit's, whatever the value.
+#: Note sizes, doubling, from well under any sane bound to past the whole-file cap
+#: (`_artifact_schema.REPORT_FILE_MAX` = 8192), so a test can check that the first refusal is
+#: the price gate's and never the commit's, whatever the bound.
 NOTE_LADDER: tuple[int, ...] = (128, 256, 512, 1024, 2048, 4096, 8192, 9000)
 
 

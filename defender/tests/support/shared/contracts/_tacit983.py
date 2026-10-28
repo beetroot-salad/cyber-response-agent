@@ -6,7 +6,7 @@ from pathlib import Path
 
 #: The alerted event's own timestamp. A `:R consultations` window is judged against this:
 #: a baseline that does not END before the alert began is a pattern that starts with the
-#: incident, which is the incident (design doc, mechanism A's first guard).
+#: incident, which is the incident.
 ALERT_WHEN = "2026-05-05T03:42:11Z"
 
 #: A window that closes the day before the alert — the shape mechanism A's guard admits.
@@ -24,8 +24,7 @@ WINDOW_STARTING_JUST_AFTER_ALERT = "2026-05-05T03:42:12Z/2026-06-04T00:00:00Z"
 
 #: A window that opens six months BEFORE the alert and closes ten weeks after it. Neither
 #: endpoint resembles `ALERT_WHEN` as text, and its start genuinely predates the alert — so
-#: only an END-vs-alert datetime comparison refuses it. This is the window the hardening pass
-#: added: the guard as first written admitted it.
+#: only an END-vs-alert datetime comparison refuses it.
 WINDOW_SPANNING_THE_ALERT = "2026-01-09T11:03:47Z/2026-07-19T22:15:00Z"
 
 #: A window whose end is the alerted instant itself. The alert is inside the baseline it is
@@ -46,11 +45,10 @@ ENTRY_ID = "tk-ca-bundle-build-runner"
 #: anchor-receipt check exists to refuse.
 FABRICATED_ENTRY_ID = "tk-ca-bundle-fleetwide"
 
-#: The registry entry's own validity span (`added_at`/`review_by`). It brackets the alert
-#: rather than preceding it, and deliberately so: a sanction that stopped being valid before
-#: the alert would not cover the alert. It is here to keep mechanism A's window guard HONESTLY
-#: SCOPED — the guard is about a `runtime-evidence` BASELINE, and applying it to every
-#: consultation would refuse the one row that records a legitimate registry hit.
+#: The registry entry's own validity span (`added_at`/`review_by`). It brackets the alert on
+#: purpose (a sanction that expired before the alert would not cover it), which keeps the window
+#: guard scoped to `runtime-evidence` BASELINES: applied to every consultation, it would refuse
+#: the one row that records a legitimate registry hit.
 ENTRY_VALIDITY_WINDOW = "2026-03-01T00:00:00Z/2026-09-01T00:00:00Z"
 
 #: The actor and host the alerted edge names — what a registry entry's `actor_scope` /
@@ -67,7 +65,7 @@ UNDISPATCHED_LEAD = "l-002"
 
 #: The `:R authz` header this suite writes. `grounding`, `anchor_id` and `basis` are all
 #: optional columns the header-driven parser canonicalizes without a parser change; the
-#: documented header in `skills/invlang/SKILL.md` names neither of the first two (fork F5).
+#: documented header in `skills/invlang/SKILL.md` names neither of the first two.
 AUTHZ_HEADER = (
     ":R authz [resolved_by|edge|fulfills|verdict|anchor_kind|grounding|anchor_id|basis|reasoning]"
 )
@@ -115,58 +113,45 @@ def consultation_row(
     )
 
 
-def lookup_hit_row(
-    *,
-    anchor_id: str = ENTRY_ID,
-    resolved_by: str = LEAD,
-    window: str = ENTRY_VALIDITY_WINDOW,
-    result: str = (
-        "hit: entry covers actor uid-0, host build-runner-*.prod, pattern "
-        "rewrite /etc/ssl/certs/ca-bundle.crt"
-    ),
-    reasoning: str = "tacit-knowledge.lookup returned one unexpired scope-matching entry",
-) -> str:
+def lookup_hit_row(*, resolved_by: str = LEAD) -> str:
     """The lead's own record of what `tacit-knowledge.lookup` came back with — a
     `:R consultations` row under the SAME anchor kind the contract is declared under."""
     return consultation_row(
-        anchor_kind="tacit-knowledge", grounding="org-authority", anchor_id=anchor_id,
-        result=result, window=window, reasoning=reasoning, resolved_by=resolved_by,
+        anchor_kind="tacit-knowledge", grounding="org-authority", anchor_id=ENTRY_ID,
+        result=(
+            "hit: entry covers actor uid-0, host build-runner-*.prod, pattern "
+            "rewrite /etc/ssl/certs/ca-bundle.crt"
+        ),
+        window=ENTRY_VALIDITY_WINDOW,
+        reasoning="tacit-knowledge.lookup returned one unexpired scope-matching entry",
+        resolved_by=resolved_by,
     )
 
 
 def lookup_miss_row(
-    *,
-    resolved_by: str = LEAD,
-    result: str = "miss: no unexpired entry covers actor uid-0 on build-runner-07.prod",
-    reasoning: str = "tacit-knowledge.lookup came back with no matching entry",
+    *, result: str = "miss: no unexpired entry covers actor uid-0 on build-runner-07.prod",
 ) -> str:
     """The same lead recording that the lookup came back EMPTY — no `anchor_id`, because a miss
     has no entry to name. The honest half of the pair, and the row a fabricated citation has to
     sit beside in `test_a_missed_lookup_cannot_be_cited_as_a_hit`."""
     return consultation_row(
         anchor_kind="tacit-knowledge", grounding="org-authority", anchor_id="",
-        result=result, window=ENTRY_VALIDITY_WINDOW, reasoning=reasoning,
-        resolved_by=resolved_by,
+        result=result, window=ENTRY_VALIDITY_WINDOW,
+        reasoning="tacit-knowledge.lookup came back with no matching entry",
     )
 
 
-#: The system directory the registry lives under, inside whatever AGENT ROOT is being read
-#: (a tenant's `agent/skills/tacit-knowledge/registry.yaml` — the run copy's in a run, the
-#: committed fixture tenant's `knowledge/tenant-fixture/agent/...` in the replays, #1108 P4;
-#: a `tmp_path` in a scenario's). The product tree holds no registry after P4 (O1). Spelled once because the unit suite writes fixtures with it and the e2e reads
-#: the adapter's answer back out of one.
+#: The system directory the registry lives under, inside whatever AGENT ROOT is read (a
+#: tenant's `agent/skills/tacit-knowledge/registry.yaml`: the run copy's in a run, the fixture
+#: tenant's in the replays, a `tmp_path` in a scenario). The product tree holds no registry.
 REGISTRY_SYSTEM = "tacit-knowledge"
 REGISTRY_RELPATH = ("skills", REGISTRY_SYSTEM, "registry.yaml")
 
 
 def registry_entry(**overrides) -> dict[str, str]:
-    """One well-formed registry entry. Eight fields: the seven the design names plus the `id`
-    the `:R authz` row cites as `anchor_id` (fork F1's provisional eighth — without it a
-    citation names a `pattern` string, and every edit becomes a silent re-identification).
-
-    Lives here rather than in the registry suite because the e2e drives the real adapter
-    against a fixture tree and needs the same entry (`lint-dup`); the ids the two suites move
-    are the ids this module already names."""
+    """One well-formed registry entry: seven fields plus the `id` an `:R authz` row cites as
+    `anchor_id` (without it a citation names a `pattern` string, which any edit silently
+    re-identifies). Shared because the e2e drives the real adapter over the same entry."""
     base = {
         "id": ENTRY_ID,
         "pattern": PATTERN,
@@ -184,9 +169,8 @@ def registry_entry(**overrides) -> dict[str, str]:
 def write_registry(root: Path, *entries: dict) -> Path:
     """A registry file under a throwaway tree, written as YAML BY HAND.
 
-    Hand-written rather than dumped, because the file is a HUMAN-EDITED artifact and the loader
-    has to read what a human commits — a round trip through the same dumper the loader's parser
-    feeds would be an oracle re-deriving itself (`lint-oracle`'s shape)."""
+    Hand-written rather than dumped: the file is HUMAN-EDITED, and a round trip through the
+    loader's own YAML library would be an oracle re-deriving itself."""
     path = root.joinpath(*REGISTRY_RELPATH)
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["entries:"]
@@ -275,10 +259,9 @@ h-001|++
 """
 
 
-#: The close a container-root case reaches TODAY, and the one #983 exists to make avoidable:
-#: nothing settled the legitimacy question, so the contract is deferred and the run escalates.
-#: `ceiling_test` names `l-002`, the lead that came back empty — the receipt `inconclusive`'s
-#: own entry price demands.
+#: The close a container-root case reaches when nothing settles the legitimacy question: the
+#: contract is deferred and the run escalates. `ceiling_test` names `l-002`, the lead that came
+#: back empty, which is the receipt `inconclusive` demands.
 _CONCLUDE_INCONCLUSIVE = """\
 ```invlang
 :T conclude
@@ -331,7 +314,7 @@ def document(
 
 
 def benign_document(*, rows: str, **kwargs) -> str:
-    """The same document concluding `benign` — the close mechanism B has to make reachable."""
+    """The same document concluding `benign`."""
     return document(rows=rows, conclude=_CONCLUDE_BENIGN, **kwargs)
 
 
@@ -353,22 +336,16 @@ def consult_block(*rows: str) -> str:
 
 def authorized_rows(
     *,
-    hit_id: str = ENTRY_ID,
     cited_id: str | None = None,
     hit_by: str = LEAD,
-    resolved_by: str = LEAD,
     baseline: bool = False,
     **authz_kwargs,
 ) -> str:
     """The rows a REAL registry hit writes: the lead's recorded lookup outcome, then the
     `:R authz` row that cites it."""
-    consultations = [lookup_hit_row(anchor_id=hit_id, resolved_by=hit_by)]
+    consultations = [lookup_hit_row(resolved_by=hit_by)]
     if baseline:
         consultations.append(consultation_row())
     return consult_block(*consultations) + authz_block(
-        authz_row(
-            anchor_id=hit_id if cited_id is None else cited_id,
-            resolved_by=resolved_by,
-            **authz_kwargs,
-        )
+        authz_row(anchor_id=ENTRY_ID if cited_id is None else cited_id, **authz_kwargs)
     )

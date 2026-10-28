@@ -1,4 +1,4 @@
-"""#923 — where a disposition can be AUTHORED, and what each surface refuses (O4, O6, M5, M6)."""
+"""#923: where a disposition can be authored, and what each surface refuses."""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -35,10 +35,7 @@ def test_an_unknown_disposition_is_refused_at_the_tool_boundary(tmp_path, value)
     with pytest.raises(ModelRetry) as e:
         close(deps, value)
     text = str(e.value)
-    assert str(list(DISPOSITION_VALUES)) in text, (
-        "the refusal does not render the owner's ordered tuple, so a model correcting itself "
-        "is not shown the vocabulary it is being held to"
-    )
+    assert str(list(DISPOSITION_VALUES)) in text, "the refusal does not list the disposition vocabulary"
     assert not (run_dir / "report.md").exists(), "an unknown verdict committed a report"
 
 
@@ -71,25 +68,21 @@ def test_a_malformed_verdict_is_refused_at_both_write_gates(tmp_path):
         with pytest.raises(ModelRetry) as e:
             close(deps, spelling)
         assert str(list(DISPOSITION_VALUES)) in str(e.value), (
-            f"{spelling!r} was refused without showing the author the vocabulary it is held "
-            f"to — on write there is still an author to ask, and that is the whole reason "
-            f"this gate does not read like the reader"
+            f"{spelling!r} was refused without listing the disposition vocabulary"
         )
         assert not (run_dir / "report.md").exists(), (
-            f"{spelling!r} committed a report — the gate normalized it into the member"
+            f"{spelling!r} committed a report"
         )
 
         reason = validate_artifact("report.md", report(spelling), None)
         assert reason is not None, (
-            f"the `report.md` frontmatter gate accepted {spelling!r} — a document no reader "
-            f"can tell from a clean one is now on disk"
+            f"the `report.md` frontmatter gate accepted {spelling!r}"
         )
         assert "disposition" in reason, reason
 
     # THE CONTROL, at both gates: the clean spelling of the same member is accepted and commits.
     assert validate_artifact("report.md", report("malicious"), None) is None, (
-        "the frontmatter gate refuses an ordinary verdict — the refusals above are then a gate "
-        "that refuses everything"
+        "the frontmatter gate refuses an ordinary verdict"
     )
     deps, run_dir = main_deps(tmp_path / "clean", paid(PAYING_ROW))
     close(deps, "malicious")
@@ -129,8 +122,7 @@ def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
     assert "disposition_declared" in world_message, (
         f"the manifest refusal does not name the field it was typed into: {world_message!r}")
     assert GAP_MEMBER in world_message, (
-        "the refusal offers no member to use instead — the questioner is told no and not what "
-        f"to write: {world_message!r}"
+        f"the refusal offers no member to use instead: {world_message!r}"
     )
     # The control, on the same validator: an ordinary declaration still parses, so the refusal
     # above is the host-only verdict rather than a validator that stopped admitting anything.
@@ -174,11 +166,9 @@ def test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_
     rows = frontmatter.get("ceiling_test")
     rows = [rows] if isinstance(rows, dict) else list(rows or [])
     assert not any(marker in str(v) for row in rows for v in row.values()), (
-        "the marker reached the frontmatter's `ceiling_test` field — that field is `ref`/"
-        "`state`/`cap` alone now, a closed vocabulary plus an id, and must never carry it"
+        "the marker reached the frontmatter's `ceiling_test` field"
     )
     body = (run_dir / "report.md").read_text(encoding="utf-8").split("---\n", 2)[-1]
     assert marker in body, (
-        "the receipt's own note did not land in the report BODY — the negative above is then "
-        "true of a report that carries no model text at all"
+        "the receipt's own note did not land in the report body"
     )

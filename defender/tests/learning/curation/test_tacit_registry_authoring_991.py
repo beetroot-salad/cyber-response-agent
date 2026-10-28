@@ -17,13 +17,11 @@ from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-#: #1108 P4 (O1, O-U5): the registry is tenant knowledge and the product tree ships none. The
-#: registry this repo shipped before P4 (its authoring header and worked example) is kept byte
-#: for byte as a test fixture; the committed fixture tenant carries the tenant-side one.
+#: The registry is tenant knowledge; the product tree ships none. The registry shipped before
+#: #1108 P4 (authoring header and worked example) is kept byte for byte as a fixture; the
+#: committed fixture tenant carries the tenant-side one.
 SHIPPED_REGISTRY = _pre_p4_shipped.TACIT_REGISTRY
 FIXTURE_AGENT = REPO_ROOT / "knowledge" / "tenant-fixture" / "agent"
-CONNECT_ROUTE = REPO_ROOT / "defender" / "skills" / "connect" / "tacit.md"
-CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 
 def _tree(tmp_path: Path, *entries: dict) -> Path:
@@ -60,8 +58,7 @@ def test_the_validator_and_the_verb_read_the_same_walk(tmp_path) -> None:
     with redirect_stderr(io.StringIO()):
         served = tk.load_entries(path)
     assert served == list(read.entries), (
-        "the verb a run dispatches and the walk a human validates against disagree about what "
-        "loads — the validator would certify a file the runtime reads differently"
+        "the loader and the validator's walk disagree about what loads"
     )
 
 
@@ -77,8 +74,7 @@ def test_a_drop_names_the_field_and_the_rule(tmp_path) -> None:
         read = tk.read_registry(tk.registry_path(_tree(tmp_path / must_name, entry)))
         assert len(read.refusals) == 1, f"{must_name}: expected exactly one drop"
         assert must_name in read.refusals[0], (
-            f"the refusal does not name `{must_name}` — a human cannot repair a row from it: "
-            f"{read.refusals[0]!r}"
+            f"the refusal does not name `{must_name}`: {read.refusals[0]!r}"
         )
 
 
@@ -92,8 +88,7 @@ def test_check_fails_on_a_drop_and_says_what_a_drop_costs(tmp_path) -> None:
     for named in ("DROPPED", "blanket scope"):
         assert named in out, f"the check does not say {named!r}: {out}"
     assert "indistinguishable" in out.lower(), (
-        "the check reports a drop without saying what a drop costs — the consequence is the "
-        "whole reason this runs at commit time rather than never"
+        "the check does not say what a drop costs"
     )
 
     clean = _tree(tmp_path / "clean", scene.registry_entry())
@@ -140,8 +135,7 @@ def test_a_precise_short_actor_is_not_reported_as_broad(tmp_path) -> None:
     rc, out = _run("check", "--defender-dir", str(wide))
     assert rc == 0, f"a legal fleet-wide scope was refused rather than noted: {out}"
     assert "broad" in out, (
-        "a scope that clears the minimum and still covers a fleet drew no note at all — the "
-        "loader cannot judge breadth, so nothing else will raise it with the author"
+        "a fleet-wide scope drew no breadth note"
     )
 
 
@@ -166,8 +160,8 @@ def test_show_answers_what_is_in_force_rather_than_what_parses(tmp_path) -> None
 
 
 def test_the_shipped_registry_passes_its_own_gate() -> None:
-    """Each committed registry — the fixture tenant's, and the pre-P4 shipped copy — passes
-    the gate, run on the tree that holds it (`--defender-dir` names that agent half)."""
+    """Each committed registry (the fixture tenant's, and the pre-P4 shipped copy) passes the
+    gate, run on the tree that holds it (`--defender-dir` names that agent half)."""
     for agent in (FIXTURE_AGENT, _pre_p4_shipped.SHIPPED_AGENT):
         assert tk.registry_path(agent).is_file(), f"no registry under {agent}"
         rc, out = _run("check", "--defender-dir", str(agent))

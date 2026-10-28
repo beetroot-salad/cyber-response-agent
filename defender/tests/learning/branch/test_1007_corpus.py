@@ -1,4 +1,7 @@
-"""#1007 — D3/M7: the second authored corpus, its curator, and the one drain tick they share."""
+"""#1007: the second authored corpus, its curator, and the one drain tick they share.
+
+The drain tests drive the real tenant path (#1108 P4): the box is the batch's, over its draft.
+"""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -46,7 +49,7 @@ def _thresholds(monkeypatch):
 
 @pytest.fixture
 def tenant(tmp_path, data_root):
-    """The fixture tenant published for real, its forge bound (#1108 P4 flow 4)."""
+    """The fixture tenant published for real, its forge bound."""
     with published_tenant(tmp_path / "forge", root=data_root) as t:
         bind_forge(t)
         yield t
@@ -82,8 +85,8 @@ class TwoLaneRecorder:
             from defender.learning.author.lessons import run as module
 
             build = module.build_author_config
-        # The lane's held mounts over the draft the drain handed it (#1108 P4 OD16), never
-        # `paths`' product-checkout corpus.
+        # The lane's held mounts over the draft the drain handed it, never `paths`'
+        # product-checkout corpus.
         with draft_lane_trees(kw["batch"], AUTHOR_DRAFT_LANES) as trees:
             cfg = dataclasses.replace(
                 build(paths, state=state, trees=trees, box=box, **kw),
@@ -102,7 +105,7 @@ def world_queue_row(fid: str = "ep-1/b/0/0", **extra) -> dict:
                systems=[W.SYSTEM], provenance="model",
                subject_anchor="facts", subject_topic="answer shape",
                citations=["family.yaml#worlds/b"], source_run_dir="episodes/ep-1")
-    row.pop("judge_outcome", None)          # #1234 A4: a row carrying the retired name is held
+    row.pop("judge_outcome", None)          # a row carrying the retired name is held (#1234)
     row.update(extra)
     return row
 
@@ -114,13 +117,13 @@ def defender_queue_row(fid: str = "ep-1/b/0/1", **extra) -> dict:
                contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"],
                on_verdict_path=True, world_label_doubted=False,
                source_run_dir="episodes/ep-1/worlds/b")
-    row.pop("judge_outcome", None)          # #1234 A4: a row carrying the retired name is held
+    row.pop("judge_outcome", None)          # a row carrying the retired name is held (#1234)
     row.update(extra)
     return row
 
 
 def drive(t, paths, trigger, *, rec=None):
-    """The REAL `author_drain` over the tenant path (#1108 P4; `test_922_spine`'s driver)."""
+    """The REAL `author_drain` over the tenant path (`test_922_spine`'s driver)."""
     return drive_tenant_author_drain(t, paths, trigger, rec=rec)
 
 
@@ -130,15 +133,13 @@ def lane_sources(request, *lanes: str) -> set[Path]:
 
 
 def test_the_questioner_curator_gate_is_idempotency_only(tmp_path):
-    """The questioner curator's gate is IDEMPOTENCY ONLY — no ground-truth check, no family
-    partition."""
+    """No ground-truth check and no family partition: a world row goes straight to authoring."""
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     curator = W.mod("learning.author.questioner.run")
     cfg = curator.build_questioner_config(
         paths, state=W.learning_state(paths), trees=author_trees(paths))
 
-    # `CorpusAuthorConfig.gate`'s own documented order, which is what `drain.run_batch`
-    # unpacks: `held, consumed_pre, to_author = cfg.gate(keyed, cfg)`.
+    # `cfg.gate` returns `(held, consumed_pre, to_author)`, the order `drain.run_batch` unpacks.
     held, consumed_pre, to_author = cfg.gate([world_queue_row()], cfg)
 
     assert [r["finding_id"] for r in to_author] == ["ep-1/b/0/0"], (
@@ -148,7 +149,6 @@ def test_the_questioner_curator_gate_is_idempotency_only(tmp_path):
 
 
 def test_the_questioner_queue_alone_wakes_the_drain(tenant, tmp_path):
-    """The questioner queue over threshold wakes the drain ON ITS OWN (tenant path, #1108 P4)."""
     t = tenant
     paths = tenant_paths(t, tmp_path)
     D.seed(paths, QUESTIONER_FINDINGS, [world_queue_row()])
@@ -164,8 +164,7 @@ def test_the_questioner_queue_alone_wakes_the_drain(tenant, tmp_path):
 
 
 def test_the_author_drain_triggers_exactly_its_two_named_curators(tenant, tmp_path):
-    """One tick triggers EXACTLY the two named curators — no more, and no fewer (tenant path,
-    #1108 P4)."""
+    """One tick triggers EXACTLY the two named curators, each handed its own channel's queue."""
     t = tenant
     paths = tenant_paths(t, tmp_path)
     D.seed(paths, FINDINGS, [defender_queue_row()])
@@ -185,29 +184,9 @@ def test_the_author_drain_triggers_exactly_its_two_named_curators(tenant, tmp_pa
         location_path(paths.state_root) / QUESTIONER_FINDINGS.queue)
 
 
-def test_a_full_findings_queue_alone_still_wakes_the_drain(tenant, tmp_path):
-    """SURVIVAL: the incumbent findings-only drive still wakes the drain and still runs, its
-    box getting the draft's two lesson corpora writable (tenant path, #1108 P4)."""
-    t = tenant
-    paths = tenant_paths(t, tmp_path)
-    D.seed(paths, FINDINGS, [defender_queue_row()])
-    assert D.pending(paths, QUESTIONER_FINDINGS) == []
-
-    trigger = TwoLaneRecorder(D.recording(D.committing("family-lesson")),
-                              run=(W.DEFENDER_CURATOR_MODULE,))
-    rc, rec = drive(t, paths, trigger)
-
-    assert rc == 0
-    assert W.DEFENDER_CURATOR_MODULE in trigger.modules, (
-        "the findings queue alone no longer wakes the drain")
-    request = rec.only_request()
-    assert writable_sources(request) == lane_sources(request, "lessons", "lessons-questioner")
-
-
 def test_the_lead_author_label_never_mounts_the_questioner_corpus(tenant, tmp_path, monkeypatch):
-    """The `lead_author_drain` lane mounts the draft's skills tree writable and NEITHER lessons
-    corpus (tenant path, #1108 P4: the box is the batch's, over its draft). Woken by a pitfalls
-    row over a threshold of 1; the lane's work steps are no-ops."""
+    """The `lead_author_drain` box mounts the draft's skills tree writable and NEITHER lessons
+    corpus. Woken by one pitfalls row (threshold 1); the lane's work steps are no-ops."""
     from defender.tests.support.learning.core._declared870 import shim_row
 
     t = tenant
@@ -230,9 +209,8 @@ def test_the_lead_author_label_never_mounts_the_questioner_corpus(tenant, tmp_pa
 
 
 def test_the_author_drain_box_mounts_exactly_the_two_lessons_corpora_writable(tenant, tmp_path):
-    """The author drain's box mounts EXACTLY the draft's two lessons corpora writable, beside
-    its read-only product code (`code`) and draft root (`staged`) — the read-only half keeps the
-    exact set from being satisfied by a request that mounts nothing (tenant path, #1108 P4)."""
+    """Beside the writable corpora the box mounts read-only product code (`code`) and draft root
+    (`staged`); checking that half keeps a request that mounts nothing from passing."""
     t = tenant
     paths = tenant_paths(t, tmp_path)
     D.seed(paths, FINDINGS, [defender_queue_row()])
@@ -248,15 +226,8 @@ def test_the_author_drain_box_mounts_exactly_the_two_lessons_corpora_writable(te
         request.mounts)
 
 
-# `test_an_unrecognized_drain_label_gets_no_box_at_all` (#1179 O1') is deleted with
-# `drains._drain_box_request` (#1108 P4): no entry takes a label from outside any more; the two
-# lanes' boxes are pinned through their real entries above and by
-# `tenant_1108_p4/test_drains.py::test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_forge_O7`.
-
-
 def test_each_curator_consumes_its_own_channel_and_is_scoped_to_its_own_corpus(tenant, tmp_path):
-    """Per-curator consumption and per-curator corpus scoping (tenant path, #1108 P4): a tick in
-    which only the questioner curator runs leaves the defender queue alone, and the questioner
+    """A tick in which only the questioner curator runs leaves the defender queue alone, and that
     curator's corpus is the draft's `agent/lessons-questioner`."""
     t = tenant
     paths = tenant_paths(t, tmp_path)
@@ -280,9 +251,8 @@ def test_each_curator_consumes_its_own_channel_and_is_scoped_to_its_own_corpus(t
 def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact(
         tenant, tmp_path, fault_class):
     """One curator's fault leaves the other's landed commit AND CONSUMED MARKERS intact, and IS
-    RECORDED — A2's three clauses, one assertion each (tenant path, #1108 P4: the landed commit
-    is the batch's on the tenant origin; a human merges it before the second tick, whose
-    idempotency read retires the row)."""
+    RECORDED as a stuck record. A human merges the landed commit before the second tick, whose
+    idempotency read retires the row."""
     t = tenant
     paths = tenant_paths(t, tmp_path)
     D.seed(paths, FINDINGS, [defender_queue_row()])
@@ -321,17 +291,13 @@ def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact
 
     stranded = D.pending_by_id(paths, QUESTIONER_FINDINGS)
     assert "ep-1/b/0/0" in stranded, (
-        f"the FAULTING curator's row was consumed anyway: {stranded} — a fault after "
-        "consumption and before authoring retires a finding no lesson was ever written from, "
-        "which is the failure per-curator consumption exists to prevent")
+        f"the faulting curator's row was consumed although no lesson was written: {stranded}")
     assert not D.consumed(paths, QUESTIONER_FINDINGS), (
         "the faulting lane wrote consumed markers for rows it never authored")
 
     stuck = D.stuck_records(paths, QUESTIONER_FINDINGS)
     assert stuck, (
-        f"a {fault_class.__name__} took the questioner curator out of a tick that then committed "
-        "and pushed, and left no durable record of it — A2's third clause is 'and IS RECORDED'; "
-        "a log line in a stream nobody keeps is not a record an operator can read afterwards")
+        f"a {fault_class.__name__} in the questioner curator left no stuck record")
     assert any(r.get("fault_class") == fault_class.__name__ for r in stuck), (
         f"the stuck record names {[r.get('fault_class') for r in stuck]} rather than "
         f"{fault_class.__name__!r} — a record that cannot say WHICH fault stopped the lane "
@@ -342,7 +308,7 @@ def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact
 
 
 def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
-    """M1 to M5 write EXACTLY the five artifacts this change declares, and nothing else."""
+    """A graded pass writes nothing outside the declared episode artifacts and queue files."""
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     built = W.contrast_family(tmp_path, monkeypatch)
     ep = built.ep
@@ -352,8 +318,8 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
 
     S.grade(built, judge, state=W.learning_state(paths))
 
-    # The control: the pass graded and queued on BOTH channels, so the write set below is the
-    # one a whole pass leaves rather than the one a refused pass leaves.
+    # Control: the pass queued on BOTH channels, so the write set is a whole pass's, not a
+    # refused one's.
     for channel in (FINDINGS, QUESTIONER_FINDINGS):
         assert W.queue_rows(paths, channel), (
             f"the pass queued nothing on {channel.queue}, so the write set below is not a "

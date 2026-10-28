@@ -58,12 +58,12 @@ from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.e2e
 
-#: M6 — the per-lead chain's key set and each `refused` entry's, as literals.
+#: The per-lead chain's key set and each `refused` entry's, as literals.
 CHAIN_KEYS = frozenset({"goal", "params", "payload", "summary", "resolutions", "refused"})
 SENTINEL_ENTRY_KEYS = frozenset({"kind", "system", "external"})
 DENIED_ENTRY_KEYS = frozenset({"kind", "system", "verb", "external"})
 
-#: The columns the design says a `refused` entry NEVER carries (O4/M4). Key names, checked
+#: The columns a `refused` entry NEVER carries. Key names, checked
 #: against the entries; their VALUES are planted as markers and checked against the text.
 NEVER_RENDERED = (
     "params", "detail", "raw_command", "payload_digest", "payload_sha256", "system_key",
@@ -72,11 +72,9 @@ NEVER_RENDERED = (
 
 @pytest.fixture
 def judge_roots(tmp_path, monkeypatch):
-    """Mirrors `test_1017_query_row_surface.judge_roots` — the three roots #921's suite points
-    inside `tmp_path` (runs base, episodes root, learning state dir), so a render or a judge
-    pass here reads and writes nothing of the checkout's."""
+    """Mirrors `test_1017_query_row_surface.judge_roots`: the runs base and learning state dir
+    point inside `tmp_path`, so nothing here touches the checkout's."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -89,10 +87,9 @@ QUERY_ONLY_LEAD = "l-006"
 
 def _sentinel(seq: int, query_id: str, *, error_class: str = AGENT_FIXABLE_ERROR_CLASS,
               system: str = "elastic", lead_id: str = SENTINEL_LEAD, **overrides) -> dict:
-    """One `∅.` row on `lead_id`, full fourteen columns, with a DISTINCTIVE value in every column
-    O4 says must not reach the judge: `params` and `raw_command` (`_world_row`'s own markers),
-    the writer's `detail` (which lands in `payload_digest` as `exit=N; <detail>`),
-    `payload_sha256`, `system_key`, and a ..."""
+    """One `∅.` row on `lead_id`, all fourteen columns, with a distinctive marker in every column
+    that must not reach the judge: `params` and `raw_command` (`_world_row`'s markers), `verb`,
+    the `detail` inside `payload_digest`, `payload_sha256` and `system_key`."""
     exit_code = 2 if error_class == INFRA_ERROR_CLASS else 64
     return _world_row(
         seq, lead_id=lead_id, query_id=query_id, system=system, verb=f"VERB_MARKER_{seq}",
@@ -117,7 +114,7 @@ def _denied(seq: int, *, lead_id: str = DENIED_LEAD, system: str = "ticket",
 
 
 def _entry(kind: str, system: str, external: bool, verb: str | None = None) -> dict:
-    """One expected `refused` entry, in the design's key order (M4)."""
+    """One expected `refused` entry, in the rendered key order."""
     if verb is None:
         return {"kind": kind, "system": system, "external": external}
     return {"kind": kind, "system": system, "verb": verb, "external": external}
@@ -125,8 +122,8 @@ def _entry(kind: str, system: str, external: bool, verb: str | None = None) -> d
 
 def _line(entries: list[dict]) -> str:
     """The `refused:` value as the section prints it — `[]`, or each entry's `key=value`
-    pairs with lowercase booleans, comma-separated in brackets (M4, the spelling the host
-    rule is keyed on). Spelled HERE as a literal rather than through `family.render_refused`,
+    pairs with lowercase booleans, comma-separated in brackets (the spelling the host rule is
+    keyed on). Spelled HERE as a literal rather than through `family.render_refused`,
     so a renderer that changed the form would fail this file rather than redefine it."""
     if not entries:
         return "[]"
@@ -147,9 +144,10 @@ def _lead_block(text: str, lead_id: str) -> str:
 
 
 def _refusal_world(tmp_path: Path):
-    """The O1 world: graded world `b` whose lead `l-001` (referenced by `investigation.md`, with
-    a gather summary) ran nothing, plus four leads cited by NEITHER `investigation.md` NOR a
-    `gather_summaries/*.md`:"""
+    """Graded world `b`: lead `l-001` (cited, with a summary) ran nothing, plus five leads cited
+    neither by `investigation.md` nor by a gather summary: a denial only, a pre-dispatch sentinel
+    only, an orphan repeat-trip sentinel (no lead file), a lead file with no rows, and an
+    executed query only."""
     rows = [
         _denied(0, lead_id=DENIED_LEAD),
         _sentinel(0, ABOVE_GUARD_QUERY_ID, system="", lead_id=SENTINEL_LEAD),
@@ -161,7 +159,7 @@ def _refusal_world(tmp_path: Path):
     _lead_file(world, "SENTINEL_LEAD_GOAL", lead_id=SENTINEL_LEAD)
     _lead_file(world, "EMPTY_LEAD_GOAL", lead_id=EMPTY_LEAD)
     _lead_file(world, "QUERY_ONLY_GOAL", lead_id=QUERY_ONLY_LEAD)
-    # The shape O1 is stated over: none of the five is cited anywhere the old builder looked.
+    # Precondition: none of the five is cited anywhere.
     investigation = (world / "investigation.md").read_text(encoding="utf-8")
     for lid in (DENIED_LEAD, SENTINEL_LEAD, ORPHAN_LEAD, EMPTY_LEAD, QUERY_ONLY_LEAD):
         assert lid not in investigation, f"the fixture cites {lid} in investigation.md"
@@ -231,15 +229,15 @@ def test_m4b_the_lead_id_set_grows_by_refusals_only(tmp_path, judge_roots):
     assert "QUERY_ONLY_DIGEST" not in text
     assert {DENIED_LEAD, SENTINEL_LEAD, ORPHAN_LEAD} <= set(leads), \
         f"the refusal-only leads are not all on VIEW 1: {sorted(leads)}"
-    # The old sources are still honoured: the referenced/summarised lead is there too.
+    # A cited lead is still on the view.
     assert "l-001" in leads
 
 
 def test_m4_every_sentinel_origin_maps_to_its_kind_and_external_follows_the_row(
     tmp_path, judge_roots,
 ):
-    """M4 — on one lead, one row per sentinel origin, and the `refused` list is EXACTLY, in seq
-    order:"""
+    """One row per sentinel origin on one lead, each mapped to its kind in seq order; `external`
+    follows the row (infra-class and denied rows are external)."""
     rows = [
         _sentinel(0, ABOVE_GUARD_QUERY_ID, error_class=INFRA_ERROR_CLASS, system="elastic"),
         _sentinel(1, ABOVE_GUARD_QUERY_ID, system=""),
@@ -463,7 +461,7 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     ], run_id="d860-src")
     assert [row["query_id"] for row in r.own_rows] == [DENIED_QUERY_ID, "elastic.query"]
 
-    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    # A run folder's name is its canonical UUID run id (#1187).
     sibling = tmp_path / fixture_uuid("sibling")
     sibling.mkdir()
     state = RunState(sibling, "d860-sibling")
@@ -568,7 +566,7 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
         "the archive grew a second stream for what the table already carries"
 
     prompt = _prompt_for_world_b(ep, base)
-    # #1234: `render` returns a `JudgeContext`; world b's per-lead chain is its focus view's.
+    # `render` returns a `JudgeContext`; world b's per-lead chain is its focus view's.
     chain = S34.render_context(ep, "b").focus.leads[LEAD]
     expected = [
         _entry("rejected-before-dispatch", "elastic", False),

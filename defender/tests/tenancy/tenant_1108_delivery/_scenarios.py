@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
 
-import importlib
-
 import json
 
 import os
@@ -152,8 +150,8 @@ _REFUSED_OUTPUT = {
         lane / "deep", lambda e: e.symlink_to(outside, target_is_directory=True)),
     "replace-file-with-fifo": lambda lane, agent, outside, clone: _replace(lane / "seed.md", os.mkfifo),
     "non-utf8-name": lambda lane, agent, outside, clone: _write_bytes_name(lane, b"\xff\xfe.md"),
-    # #1108 P4 owner ruling 2 (2026-10-23): no hard-linked lesson may exist, so a regular file
-    # whose inode has another name (nlink > 1) is refused like any other aliased entry.
+    # No hard-linked lesson may exist: a regular file whose inode has another name (nlink > 1)
+    # is refused like any other aliased entry.
     "hardlink-to-host": lambda lane, agent, outside, clone: os.link(outside / "secret.md", lane / "hard.md"),
     "hardlink-in-lane": lambda lane, agent, outside, clone: os.link(lane / "seed.md", lane / "alias.md"),
     "replace-file-with-hardlink": lambda lane, agent, outside, clone: _replace(
@@ -457,9 +455,3 @@ class _AnswerLost(ForgeHTTP):
 
 _UNUSABLE_REPOSITORY = {"no-id": {"full_name": "tenants/blue"}, "list": [], "str-id": {"id": "11"},
                         "null-id": {"id": None}, "float-id": {"id": 11.0}, "bool-id": {"id": True}}
-
-
-def _forge():
-    return importlib.import_module("defender.learning.author.version_control.forgejo")
-
-

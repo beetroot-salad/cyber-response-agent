@@ -25,13 +25,12 @@ from chaos import ctl
 from chaos.ledger import read_records
 from chaos.seam import SeamError
 
-AUTH = "logs-system.auth@custom"
 SYSLOG = "logs-system.syslog@custom"
 
 
-def _activate(profile_id, profiles_dir, rules_dir, ledger_dir, execer, seed=42):
+def _activate(profile_id, profiles_dir, rules_dir, ledger_dir, execer):
     return ctl.activate(
-        profile_id, seed=seed, execer=execer, profiles_dir=profiles_dir, rules_dir=rules_dir, ledger_dir=ledger_dir
+        profile_id, seed=42, execer=execer, profiles_dir=profiles_dir, rules_dir=rules_dir, ledger_dir=ledger_dir
     )
 
 
@@ -346,8 +345,8 @@ def test_a_malformed_ledger_file_is_reported_and_does_not_block_the_others(
 
 
 def test_revert_cli_refuses_a_ref_combined_with_all():
-    """`revert chaos-abc --all` used to silently ignore the ref and revert
-    everything — including a fault another run was holding open."""
+    """`revert chaos-abc --all` must not silently ignore the ref and revert
+    everything, including a fault another run is holding open."""
     parser = ctl.build_arg_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["revert", "chaos-abc123", "--all"])

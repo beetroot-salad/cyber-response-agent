@@ -36,18 +36,14 @@ from defender.tests.support.invlang.validation._invlang_amendment_954 import (
 FIRST_ROW = "l-001|1|alpha|v-001||cmdb|24h"
 #: The row it must discard, with everything that row declares.
 LATER_ROW = "l-001|2|beta|v-002||edr|48h"
-#: A third row for the same id — F-C's count case.
-THIRD_ROW = "l-001|3|gamma|v-002||edr|72h"
 #: A DIFFERENT lead in the same block. The complementary condition for every negative here.
 OTHER_ROW = "l-002|1|delta|v-002||edr|48h"
 
-#: EXECUTED at base: one bucket, every non-empty field the LATER row's, `warnings == []`.
+#: One lead id listed twice in one block.
 REPEAT_DOC = VERTICES + findings_block(FIRST_ROW, LATER_ROW)
-#: The same document with the later row never written — what O3 says the repeat must read as.
+#: The same document with the later row never written — what the repeat must read as.
 FIRST_ONLY_DOC = VERTICES + findings_block(FIRST_ROW)
-#: ...and with the first row never written, so a test can tell the two readings apart.
-LATER_ONLY_DOC = VERTICES + findings_block(LATER_ROW)
-#: EXECUTED at base: two buckets, no warning. D5's complementary condition.
+#: Two distinct ids: two buckets, no warning.
 TWO_IDS_DOC = VERTICES + findings_block(FIRST_ROW, OTHER_ROW)
 
 
@@ -78,7 +74,9 @@ def _inv(run):
 # F-46 — the repeated lead id
 
 def test_repeated_lead_id_returns_a_first_wins_bucket_and_an_error_diagnostic():
-    """`parse_dense_companion` over a `:L findings` block listing one lead id twice returns ONE ParseWarning per EXTRA row in slot 2 and, in slot 1, exactly one `lead_bucket` for that id holding the FIRST row's values in identity, outcome and query_details alike;"""
+    """One ParseWarning per EXTRA row and one bucket holding the FIRST row's values whole;
+    `diagnose` lifts it to an error that names the id, with an empty locus (safe only at error
+    severity: a locus-less warning is dropped)."""
     warnings = warnings_of(REPEAT_DOC)
     repeats = [w for w in warnings if REPEAT_PHRASE in w.reason]
     assert len(repeats) == 1, f"one warning per extra row, got {[w.reason for w in warnings]}"
@@ -99,22 +97,16 @@ def test_repeated_lead_id_returns_a_first_wins_bucket_and_an_error_diagnostic():
 
     diags = repeat_diagnostics(REPEAT_DOC)
     assert len(diags) == 1
+    assert "'l-001'" in diags[0].message, diags[0].message
     assert diags[0].severity == "error"
     assert diags[0].locus is not None
     assert diags[0].locus.row_text == ""
     assert diags[0].locus.row_index == -1
 
 
-def test_repeated_lead_id_in_one_block_is_named_in_a_parse_diagnostic():
-    """A `:L findings` block listing one lead id twice gains a `parse_warnings` diagnostic that NAMES that id, and `lead_bucket` keeps the id it names (O1, D1)."""
-    diags = repeat_diagnostics(REPEAT_DOC)
-    assert len(diags) == 1
-    assert "'l-001'" in diags[0].message, diags[0].message
-    assert [b["id"] for b in leads(REPEAT_DOC)] == ["l-001"]
-
-
 def test_repeated_lead_id_refuses_the_write_and_commits_nothing(tmp_path):
-    """`append_block` proposing a `:L findings` block that lists one lead id twice is refused through the real write gate — `validate_investigation` over the full proposed text, via `decide_write` — and `investigation_md` is left exactly as it stood (O2, D2)."""
+    """Refused through the real write gate (`validate_investigation` over the full proposed
+    text, via `decide_write`); investigation.md is left exactly as it stood."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -134,7 +126,8 @@ def test_repeated_lead_id_refuses_the_write_and_commits_nothing(tmp_path):
 
 
 def test_relisting_a_lead_overwrites_a_conflicting_non_empty_cell():
-    """A lead re-listed in a SECOND `:L findings` block still merges into its existing `lead_bucket`, the later block winning on a conflicting NON-EMPTY cell, with no diagnostic (O4, D4b)."""
+    """A lead re-listed in a SECOND `:L findings` block merges into its bucket, the later
+    block winning on a conflicting NON-EMPTY cell, with no diagnostic."""
     doc = (
         VERTICES
         + findings_block("l-001|1|alpha|v-001||cmdb|24h|timeout")
@@ -152,7 +145,8 @@ def test_relisting_a_lead_overwrites_a_conflicting_non_empty_cell():
 
 
 def test_a_block_without_a_repeated_id_gains_no_diagnostic():
-    """A `:L findings` block whose ids are all distinct gains NO repeated-id diagnostic on any surface the finding could reach — `parse_warnings`, `diagnose`, or the write gate's refusal text — and both leads project (O5, D5)."""
+    """Distinct ids draw NO repeated-id finding on any surface (`parse_warnings`, `diagnose`,
+    the write gate), and both leads project."""
     from defender.records._artifact_schema import validate_investigation
 
     assert [w.reason for w in warnings_of(TWO_IDS_DOC) if REPEAT_PHRASE in w.reason] == []
@@ -167,7 +161,9 @@ def test_a_block_without_a_repeated_id_gains_no_diagnostic():
 
 
 def test_the_surviving_lead_stays_declared_for_every_reader_that_names_it():
-    """The lead that survives a within-block repeat is still DECLARED at BOTH readers that decide a lead id's declaredness — `check_lead_refs`, which raises "undeclared lead", and the false-positive entry pr"""
+    """The surviving lead stays DECLARED for both readers that decide declaredness:
+    `_check_lead_refs` ("undeclared lead") and the false-positive `entity_check`. Secondary
+    findings the repeat strands are accepted."""
     refined = REPEAT_DOC + attr_block("l-001|v-001|class|file-server/internal/known-corp")
     diags = diagnostics(refined)
     assert [d.message for d in diags if UNDECLARED_LEAD_PHRASE in d.message] == []
@@ -187,8 +183,8 @@ def test_the_surviving_lead_stays_declared_for_every_reader_that_names_it():
     ) + CONCLUDE_FALSE_POSITIVE
     assert any("not a lead" in owed for owed in entry_price("false-positive", undeclared))
 
-    # F-K's own case: first-wins STRANDS the later row's `mode`, so the screen-structure gate
-    # raises a secondary finding against a row the author wrote correctly. That is accepted.
+    # First-wins STRANDS the later row's `mode`, so the screen-structure gate raises a
+    # secondary finding against a row the author wrote correctly. That is accepted.
     stranded = VERTICES + findings_block(
         "l-001|1|alpha|v-001||cmdb|24h|||no_match",
         "l-001|2|beta|v-001||edr|48h||screen|",
@@ -199,7 +195,8 @@ def test_the_surviving_lead_stays_declared_for_every_reader_that_names_it():
 
 
 def test_id_comparison_is_byte_exact_across_quoting_padding_and_case():
-    """"Same lead id" means the same cell BYTES:"""
+    """"Same lead id" means the same cell BYTES: a quoted, padded or case-variant spelling
+    declares a SECOND lead rather than colliding."""
     for spelling in ('"l-001"', '"  l-001  "', "L-001"):
         doc = VERTICES + findings_block(FIRST_ROW, f"{spelling}|2|beta|v-002||edr|48h")
         assert repeat_diagnostics(doc) == [], f"{spelling} is not the same bytes as l-001"
@@ -210,7 +207,8 @@ def test_id_comparison_is_byte_exact_across_quoting_padding_and_case():
 
 
 def test_a_blank_cell_in_an_amending_row_does_not_erase_the_earlier_value():
-    """A blank cell in a row that amends a lead from a SECOND block does not erase the value an earlier block landed — but `name` and `target` are taken UNCONDITIONALLY, so a blank `target` does overwrite with `""` (F-J, D27)."""
+    """A blank cell in an amending row from a SECOND block does not erase an earlier value —
+    but `name` and `target` are taken UNCONDITIONALLY, so a blank `target` overwrites."""
     doc = (
         VERTICES
         + findings_block(
@@ -220,40 +218,40 @@ def test_a_blank_cell_in_an_amending_row_does_not_erase_the_earlier_value():
         + findings_block("l-001||beta|||||||||", header=STRAND_FINDINGS_HEADER)
     )
     lead = leads(doc)[0]
-    # C1's five, every one: blank in the amending row, and every one survives.
+    # The five non-empty-only fields: blank in the amending row, and every one survives.
     assert lead["loop"] == 1, "a blank `loop` cell does not erase the earlier loop"
     assert lead["mode"] == "screen"
     assert lead["trust_root_reached"] == "yes"
     assert lead["screen_result"] == "no_match"
     assert lead["status"] == "open"
-    # ...and the three C1 does not name that behave the same way for a different reason —
-    # `query_details` and `outcome` are merged sub-dicts, so an absent key writes nothing.
+    # ...and `query_details` / `outcome` survive for another reason: they are merged
+    # sub-dicts, so an absent key writes nothing.
     assert lead["query_details"]["system"] == "cmdb"
     assert lead["query_details"]["time_window"] == "24h"
     assert lead["outcome"]["failure_reason"] == "timeout"
     # The two the amending row takes UNCONDITIONALLY.
     assert lead["name"] == "beta"
-    assert lead["target"] == "", "`target` is taken unconditionally — C1 does not cover it"
+    assert lead["target"] == "", "`target` is taken unconditionally"
     assert repeat_diagnostics(doc) == [], "a CROSS-block re-listing is the legal amendment"
 
 
 # F-47 — the repair suggestion
 
-#: The escaped-pipe trigger, RIGHT of the key cell. EXECUTED at base: both candidates split to
-#: FIVE cells under a four-column header, which is the second refusal F-47 describes.
+#: An escaped pipe RIGHT of the key cell: a rejoin that drops the escape splits to five cells.
 ESCAPED_PIPE_ROW = r"l-001|v-001|bogus|curl\|bash"
-#: EXECUTED at base: `_swap_cell` normalises the padding away and the result keeps the declared
-#: width — so a width guard alone cannot see this one.
+#: Padded cells: a rebuild that normalised the padding away would keep the declared width, so
+#: a width guard alone cannot see it.
 PADDED_ROW = "l-001| v-001 |bogus|hello"
-#: An escaped pipe INSIDE the key cell, on a row that still splits to four. EXECUTED at base:
-#: `…|class|hello` splits to 4 and `…|attrs.a|b|hello` to 5 — exactly one candidate fails.
+#: An escaped pipe INSIDE the key cell: `…|class|hello` splits to 4 but `…|attrs.a|b|hello` to
+#: 5, so exactly one candidate fails.
 ASYMMETRIC_ROW = r"l-001|v-001|a\|b|hello"
 ESCAPED_PIPE_LEFT_ROW = r"l-001|bastion\|01|owner|svc.config-mgmt"
 MID_TOKEN_QUOTE_ROW = 'l-001|v-001|"class"|hello'
 
 
 def test_suggestion_splits_back_to_the_declared_column_count():
-    """Every candidate `check_attr_update_keys` writes into `fix` re-splits to exactly the column count `attr_updates_block` declares, for both repair routes `attr_update_keys` offers — `class` and `attrs.<key>` — with the author's escaped pipe intact (O6, D6)."""
+    """Both offered routes (`class`, `attrs.<key>`) re-split to exactly the declared column
+    count, with the author's escaped pipe intact."""
     doc = attr_doc(ESCAPED_PIPE_ROW, prologue=VERTICES_FREEFORM_CLASS)
     d = key_warning(doc)
     assert d.fix, "both candidates survive this row; withholding here loses a working repair"
@@ -265,7 +263,9 @@ def test_suggestion_splits_back_to_the_declared_column_count():
 
 
 def test_withheld_suggestion_is_an_empty_fix_tuple_on_a_still_flagged_row():
-    """When a candidate cannot satisfy O6 the whole suggestion is withheld:"""
+    """When any candidate misses the declared width the whole suggestion is withheld
+    (`fix == ()`), yet the row stays flagged with its locus and the MESSAGE says so, since
+    `render_diagnostic` cannot."""
     from defender.records._artifact_schema import render_diagnostic
 
     doc = attr_doc(ASYMMETRIC_ROW)
@@ -285,7 +285,7 @@ def test_withheld_suggestion_is_an_empty_fix_tuple_on_a_still_flagged_row():
 
 
 def test_suggestion_differs_from_the_authors_row_in_the_key_cell_only():
-    """A candidate is byte-identical to `locus.row_text` in every cell the author wrote, and differs only in the key cell (O8, D8)."""
+    """A candidate is byte-identical to `locus.row_text` in every cell the author wrote."""
     padded = key_warning(attr_doc(PADDED_ROW, prologue=VERTICES_FREEFORM_CLASS))
     assert padded.locus.row_text == PADDED_ROW
     assert padded.fix[0] == "l-001| v-001 |class|hello"
@@ -314,7 +314,8 @@ def test_suggestion_differs_from_the_authors_row_in_the_key_cell_only():
 
 
 def test_quoted_pipe_cells_round_trip_unchanged():
-    """A cell quoting its pipe — the whole-cell form and the `k=v` form the design names — still splits to the declared width and still appears byte-identical in both candidates (O9, D9)."""
+    """A quoted pipe, whole-cell or `k=v` form, keeps the declared width and appears
+    byte-identical in both candidates."""
     for value in ('"curl|bash"', 'cmd="curl|bash"'):
         row = f"l-001|v-001|bogus|{value}"
         d = key_warning(attr_doc(row, prologue=VERTICES_FREEFORM_CLASS))
@@ -325,7 +326,8 @@ def test_quoted_pipe_cells_round_trip_unchanged():
 
 
 def test_the_backslash_pipe_escape_is_still_accepted_by_the_splitter():
-    """`split_cells` still reads `|` as one escaped delimiter inside a cell, and a row carrying one still parses to the declared width with no parse warning (D10)."""
+    """`_split_cells` reads a backslash-escaped `|` as part of the cell, and such a row parses
+    to the declared width with no parse warning."""
     assert cells(r"a|b\|c") == ["a", "b|c"]
 
     doc = attr_doc(ESCAPED_PIPE_ROW)
@@ -334,7 +336,8 @@ def test_the_backslash_pipe_escape_is_still_accepted_by_the_splitter():
 
 
 def test_a_quoted_legal_keyword_is_repaired_by_unquoting_it():
-    """A key cell spelling a quoted legal keyword is still an ILLEGAL key, and the repair offered for it is now the unquoted keyword (#963, superseding the observable #954 pinned here)."""
+    """A quoted legal keyword is still an ILLEGAL key; the repair offered is the unquoted
+    keyword (#963)."""
     doc = attr_doc(MID_TOKEN_QUOTE_ROW, prologue=VERTICES_FREEFORM_CLASS)
     d = key_warning(doc)
     assert "'\"class\"'" in d.message, "the quoted keyword is still an illegal key"
@@ -348,7 +351,8 @@ def test_a_quoted_legal_keyword_is_repaired_by_unquoting_it():
 
 
 def test_an_empty_key_is_not_repaired_into_an_empty_attribute_name():
-    """`attrs.` is legal-SHAPED and names nothing — the `attrs.<name>` test is a prefix check, so it accepts the bare prefix and would land an attribute whose name is the empty string."""
+    """`attrs.` passes the `attrs.<name>` prefix check but names nothing, so it is never
+    offered."""
     d = key_warning(
         attr_doc('l-001|v-001|""|hello', prologue=VERTICES_FREEFORM_CLASS)
     )
@@ -357,7 +361,7 @@ def test_an_empty_key_is_not_repaired_into_an_empty_attribute_name():
 
 
 def test_the_offered_unquoting_repair_actually_pastes(tmp_path):
-    """The repair #963 offers is one `fix_row` accepts and one that clears the flag — the loop the withheld suggestion could not close."""
+    """The unquoting repair (#963) is accepted by `fix_row` and clears the flag."""
     doc = attr_doc(MID_TOKEN_QUOTE_ROW, prologue=VERTICES_FREEFORM_CLASS)
     d = key_warning(doc)
     deps, run = main_deps(tmp_path)
@@ -371,7 +375,8 @@ def test_the_offered_unquoting_repair_actually_pastes(tmp_path):
 
 
 def test_an_invisible_character_the_strip_does_not_remove_reaches_model_context_raw():
-    """A character the tokenizer's strip does not remove survives into `raw_row` / `locus.row_text` byte for byte, and `render_diagnostic` splices that text into `model_context` unchanged (D18)."""
+    """A character the tokenizer's strip keeps survives into `locus.row_text` byte for byte,
+    and `render_diagnostic` splices it into `model_context` unchanged."""
     from defender.records._artifact_schema import render_diagnostic
 
     row = "l-001|v-001|bo​gus|hello"
@@ -386,7 +391,8 @@ def test_an_invisible_character_the_strip_does_not_remove_reaches_model_context_
 def test_a_legal_short_row_is_rebuilt_byte_identically_then_padded_to_the_declared_width(
     tmp_path,
 ):
-    """Under a header marking its trailing column optional, a legal short row's candidates are rebuilt from the author's raw text and then PADDED to the declared width — byte-identical in every cell the author wrote, full width on paste (F-F, D28)."""
+    """Under an optional trailing column, a legal short row's candidates are rebuilt from the
+    author's raw text, then PADDED to the declared width."""
     plain = key_warning(attr_doc("l-001|v-001|bogus", header=OPTIONAL_ATTR_HEADER))
     assert plain.locus.row_text == "l-001|v-001|bogus"
     assert plain.fix == ("l-001|v-001|class|", "l-001|v-001|attrs.bogus|")
@@ -398,8 +404,8 @@ def test_a_legal_short_row_is_rebuilt_byte_identically_then_padded_to_the_declar
     for candidate in padded.fix:
         assert len(cells(candidate)) == 4
 
-    # The paste half, which no demand drove: the width guard passes and the sibling
-    # empty-`value` family then refuses, so the candidate is a template and not a repair.
+    # Pasting it: the width guard passes and the empty-`value` check refuses, so the candidate
+    # is a template, not a repair.
     from pydantic_ai.exceptions import ModelRetry
 
     doc = attr_doc("l-001|v-001|bogus", header=OPTIONAL_ATTR_HEADER)
@@ -417,7 +423,8 @@ def test_a_legal_short_row_is_rebuilt_byte_identically_then_padded_to_the_declar
 
 
 def test_paste_gate_enforces_the_same_declared_width_equality_as_the_offer_gate(tmp_path):
-    """`suggestion_row` meets the same `declared-width-equality` constraint on the paste via that it meets on the offer via:"""
+    """A candidate the offer gate emits passes the paste gate's width check and lands; one that
+    misses the declared width is refused with the count named."""
     from pydantic_ai.exceptions import ModelRetry
 
     doc = attr_doc(ESCAPED_PIPE_ROW, prologue=VERTICES_FREEFORM_CLASS)
@@ -431,8 +438,7 @@ def test_paste_gate_enforces_the_same_declared_width_equality_as_the_offer_gate(
     assert candidate in _inv(run)
     assert _flagged(_inv(run)) == [], "the repair closed the window"
 
-    # The other end of the parity: today's rejoin, which loses the escape, is refused for its
-    # width — the second refusal, named.
+    # The other end: a rejoin that loses the escape is refused for its width.
     deps2, run2 = main_deps(tmp_path / "second")
     seed_investigation(run2, doc)
     with pytest.raises(ModelRetry) as exc:
@@ -446,8 +452,8 @@ def test_paste_gate_enforces_the_same_declared_width_equality_as_the_offer_gate(
         _fix(deps, ESCAPED_PIPE_ROW, candidate)
     assert "Nothing is currently flagged" in str(again.value)
 
-    # The padding round trip (brief F9): the on-disk line carries TRAILING padding, the window
-    # addresses it without, and a candidate carrying only LEADING padding still lands.
+    # The padding round trip: the on-disk line carries TRAILING padding, the window addresses
+    # it without, and a candidate carrying only LEADING padding still lands.
     on_disk = "l-001|v-001|bogus|  hello  "
     padded_doc = attr_doc(on_disk, prologue=VERTICES_FREEFORM_CLASS)
     addressed = key_warning(padded_doc).locus.row_text
@@ -462,7 +468,8 @@ def test_paste_gate_enforces_the_same_declared_width_equality_as_the_offer_gate(
 
 
 def test_the_paste_gate_returns_a_reason_where_the_row_reader_would_raise(tmp_path):
-    """The parser's row reader is WRAPPED, not substituted:"""
+    """The parser's row reader is WRAPPED, not substituted: a row it would raise on comes back
+    as a refusal reason, and a warn-only document still validates."""
     from defender.records._artifact_schema import validate_investigation
     from pydantic_ai.exceptions import ModelRetry
 
@@ -480,7 +487,8 @@ def test_the_paste_gate_returns_a_reason_where_the_row_reader_would_raise(tmp_pa
 
 
 def test_a_withheld_fix_row_keeps_its_locus_and_stays_deletable(tmp_path):
-    """A row whose repairs were all withheld keeps its `locus`, so it stays in the repair window — and `fix_row(old_row, "")` still reaches it (F-M half two, D31)."""
+    """A row whose repairs were all withheld keeps its `locus`, so it stays in the repair
+    window and `fix_row(old_row, "")` still reaches it."""
     from defender.records._artifact_schema import validate_investigation
 
     doc = attr_doc(MID_TOKEN_QUOTE_ROW)
@@ -499,8 +507,6 @@ def test_a_withheld_fix_row_keeps_its_locus_and_stays_deletable(tmp_path):
 PADDING_ATTR_HEADER = "[resolved_by|target|key|value|note?]"
 
 PAD_EATS_DELIMITER_ROW = "l-001|v-001|bogus|c:\\path\\"
-
-BYTES_MOVE_ROW = r"l-001|v-001|a\|a\ |hello"
 
 
 def test_a_rebuilt_row_that_loses_a_delimiter_is_withheld():
@@ -533,20 +539,11 @@ def test_a_candidate_carrying_a_fence_delimiter_is_withheld():
     assert _new_row_shape_reason("l-001|v-001|class|see ```x``` here", 4) is not None
 
 
-# O3's payoff over the class of readers that parse without validating
-
-FOLD_FIRST = "l-001|1|alpha|v-001||cmdb|24h|timeout"
-FOLD_LATER = "l-001|2|beta|v-002||edr|48h"
-FOLD_OTHER = "l-002|2|delta|v-002||edr|48h"
-FOLD_REPEAT_DOC = (
-    VERTICES + findings_block(FOLD_FIRST, FOLD_LATER, FOLD_OTHER) + close_block(1)
-)
-FOLD_FIRST_ONLY_DOC = VERTICES + findings_block(FOLD_FIRST, FOLD_OTHER) + close_block(1)
-FOLD_LATER_ONLY_DOC = VERTICES + findings_block(FOLD_LATER, FOLD_OTHER) + close_block(1)
-
+# readers that parse without validating
 
 def test_a_precedent_case_carrying_the_repeated_id_warning_is_not_loaded_as_clean(tmp_path):
-    """`corpus_load_one` — the ONE fused-bucket reader that keeps its warnings rather than discarding them — reports a stored case carrying a within-block repeat as PARTIAL, and its lead is the first row's (D22)."""
+    """The corpus loader, the one bucket reader that keeps its warnings, reports a stored case
+    carrying a within-block repeat as PARTIAL, and its lead is the first row's."""
     from defender.skills.invlang.corpus import load_corpus
     from defender.tests.support.storage._alert_plant import plant_alert
 
@@ -564,21 +561,13 @@ def test_a_precedent_case_carrying_the_repeated_id_warning_is_not_loaded_as_clea
     assert companions[0].leads[0]["name"] == "alpha"
 
 
-FP_FIRST_ROW = "l-001|1|alpha|v-001||cmdb|24h"
-FP_LATER_ROW = "l-001|2|beta|v-999||edr|48h"
-FP_RESULT = attr_block("l-001|v-001|attrs.owner|svc-deploy")
-
-
-def _fp_doc(*rows):
-    return VERTICES + findings_block(*rows) + FP_RESULT + CONCLUDE_FALSE_POSITIVE
-
-
 SEEDING_BLOCK = attr_block("l-001|v-001|attrs.owner|svc-deploy")
 SEEDED_UPDATES = [{"target": "v-001", "updates": {"attrs.owner": "svc-deploy"}}]
 
 
 def test_a_lead_bucket_an_earlier_refinement_block_seeded_survives_the_fold():
-    """When a `:R attr_updates` row has already opened a lead's bucket, the first-wins fold over a later repeating `:L findings` block MERGES INTO that bucket — the seeded resolution content survives — and the identity it lands is the FIRST row's (D39)."""
+    """When an `:R attr_updates` row already opened the lead's bucket, the first-wins fold
+    MERGES INTO it: the seeded content survives and the identity is the FIRST row's."""
     repeat = VERTICES + SEEDING_BLOCK + findings_block(FIRST_ROW, LATER_ROW)
     first_only = VERTICES + SEEDING_BLOCK + findings_block(FIRST_ROW)
 
@@ -594,8 +583,8 @@ def test_a_lead_bucket_an_earlier_refinement_block_seeded_survives_the_fold():
         "a pre-seeded bucket reads the repeat as the first row alone, whole"
     )
 
-    # The control the premise names: the seeding block alone really does open the bucket, so
-    # the survival assertion above is about the fold and not about an empty dict.
+    # Control: the seeding block alone opens the bucket, so the survival above is about the
+    # fold and not about an empty dict.
     seeded_only = leads(VERTICES + SEEDING_BLOCK)[0]
     assert seeded_only["outcome"]["attribute_updates"] == SEEDED_UPDATES
     assert "name" not in seeded_only, "nothing has declared the lead yet"
@@ -605,7 +594,7 @@ def test_a_lead_bucket_an_earlier_refinement_block_seeded_survives_the_fold():
     assert len(repeat_diagnostics(repeat)) == 1
 
 
-# F-L — the uniform formation gate
+# the uniform formation gate
 
 LEGACY_DOC = VERTICES + findings_block(
     "l-001|1|alpha|v-001||cmdb|24h|timeout",
@@ -619,7 +608,9 @@ NEXT_BLOCK = attr_block("l-001|v-001|class|file-server/internal/known-corp")
 
 
 def test_a_close_block_write_is_refused_exactly_as_an_ordinary_block_append(tmp_path):
-    """A document carrying a within-block repeat is refused when the run appends a `:T close` BLOCK exactly as it is refused when the run appends any other block — the same `validate_investigation` over the """
+    """Appending a `:T close` BLOCK to a document holding a within-block repeat is refused
+    exactly as any other append is; over the repaired document both land. (A block write,
+    not the `close_investigation` verb.)"""
     from pydantic_ai.exceptions import ModelRetry
 
     for label, block in (("close", close_block(1)), ("append", NEXT_BLOCK)):
@@ -639,7 +630,8 @@ def test_a_close_block_write_is_refused_exactly_as_an_ordinary_block_append(tmp_
 
 
 def test_a_legacy_document_holding_a_repeat_is_refused_at_every_write_verb(tmp_path):
-    """A document written BEFORE this ships, already holding a within-block repeat, is refused at every verb that WRITES invlang bytes, with no grandfathering and no suppression condition (F-L, D34)."""
+    """A document already holding a within-block repeat is refused at every verb that WRITES
+    invlang bytes: no grandfathering."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)

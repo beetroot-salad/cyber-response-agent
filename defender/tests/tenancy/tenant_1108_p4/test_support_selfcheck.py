@@ -1,6 +1,5 @@
-"""S0 self-check: the shared machinery produces a REAL export of the committed fixture tenant
-(O11's "one helper that git-inits the fixture tenant and publishes for real"). Validates the
-machinery against P3 as merged; it promises nothing about P4 behaviour."""
+"""Self-check of `_support`: the shared machinery produces a real export of the committed fixture
+tenant through P3. It pins the machinery, nothing about P4 behaviour."""
 from __future__ import annotations
 
 import json
@@ -32,7 +31,7 @@ def _with_id(files, tenant_id):
 
 
 def test_o11_helper_exports_the_committed_fixture_agent_at_the_published_commit(p4_tenant):
-    """O11: the export's `agent/` is the committed fixture's agent content (plus the placed
+    """The export's `agent/` is the committed fixture's agent content (plus the placed
     `.tenant-id`) at the commit origin's `main` holds, and `current` names that commit."""
     t = p4_tenant
     assert t.tenant_id == FIXTURE_TENANT_ID
@@ -85,8 +84,8 @@ def test_second_tenant_is_published_apart_under_the_same_data_root(p4_tenant):
 
 def test_forge_binding_round_trips_through_the_tenant_row(p4_tenant):
     """`bind_forge` writes `forge: {origin, audience, issuer_role, issuer_config}` into `<T>/tenant.json`,
-    keeping the row's own fields, and the tenant is still accepted by the real reader (which
-    today ignores the field); `unbind_forge` removes it again."""
+    keeping the row's own fields, and the tenant is still accepted by the real reader;
+    `unbind_forge` removes it again."""
     t = p4_tenant
     row_path = Path(location_path(t.tenant.row_path))
     before = json.loads(row_path.read_text(encoding="utf-8"))

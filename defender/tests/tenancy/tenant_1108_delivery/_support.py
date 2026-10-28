@@ -1,4 +1,4 @@
-"""Shared machinery for #1108 P3's contract: real tenant repos, the forge's HTTP boundary, a
+"""Shared helpers for the #1108 delivery tests: real tenant repos, the forge's HTTP boundary, a
 real smart-HTTP git remote, and out-of-process probes of the per-tenant lock.
 
 Nothing here implements target policy: fixtures plant trees and record what crosses a
@@ -33,7 +33,7 @@ from ._identity import TOKEN, identity as fixture_identity
 
 _TENANT_BLUE = fixture_uuid('tenant:blue')
 DEFENDER = Path(__file__).resolve().parents[3]
-#: The import root a probe subprocess needs, so it imports THIS tree's `defender`.
+#: The import root a probe subprocess needs, so it imports this tree's `defender`.
 IMPORT_ROOT = DEFENDER.parent
 #: The lanes every batch here declares writable.
 LANES = ("lessons",)
@@ -43,16 +43,15 @@ _IDENTITY = {"GIT_AUTHOR_NAME": "P3", "GIT_AUTHOR_EMAIL": "p3@test.invalid",
 
 
 def target():
-    # Lazy import: the contract must collect before its implementation exists.
+    # Imported at call time, never at collection.
     return importlib.import_module("defender.learning.author.version_control")
 
 
-#: Git's automatic upkeep, off for every git the fixtures run. Git >= 2.47 starts
-#: `maintenance run --auto` detached after a fetch, commit or merge: still taking
-#: `maintenance.lock` once the fixture's git has returned, it races a test that deletes the clone
-#: (CI: `FileNotFoundError` mid-`rmtree`). Never in the code under test's environment
-#: (`os.environ`, `GitConfigHome`, `fresh_process_env`): whether ITS git leaves upkeep behind is
-#: a case of its own (`test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call`).
+#: Git's automatic upkeep, off for every git the fixtures run: git >= 2.47 starts
+#: `maintenance run --auto` detached after a fetch, commit or merge, still holding
+#: `maintenance.lock` after the fixture's git returns, racing a test that deletes the clone
+#: (CI: `FileNotFoundError` mid-`rmtree`). Never set in the code under test's environment:
+#: whether its git leaves upkeep is `test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call`.
 _NO_UPKEEP = (("maintenance.auto", "false"), ("maintenance.autoDetach", "false"),
               ("gc.auto", "0"), ("gc.autoDetach", "false"))
 #: The same, as `git clone -c` writes it into a bare remote's own config: receive-pack runs with
@@ -114,7 +113,7 @@ RENAMED = {"id": 11, "name": "renamed", "full_name": "tenants/renamed", "owner":
 NAMESAKE = {"id": 97, "name": "blue", "full_name": "tenants/blue", "owner": {"login": "tenants"}}
 
 #: The root Forgejo builds `Link` headers from (its `ROOT_URL`): an internal name, not the
-#: address the host was given (review finding #6), so a Link followed leaves our address.
+#: address the host was given, so a Link followed leaves our address.
 LINK_ROOT = "http://forgejo.internal:3000"
 #: The PR store a remote-backed `ForgeHTTP` keeps inside the bare remote (git ignores it), so
 #: a later process's forge double, and the harness's merges, see the same PRs.
@@ -124,7 +123,7 @@ _PULLS = "p3-forge-pulls.json"
 def pr_row(number, head, *, repo=OURS, state="open", sha=None, merged=False):
     """A PR row in Forgejo's schema: the head's branch, commit and repository (id and
     object), the base's repository id. `repo=None` drops the head's repository entirely, as
-    Forgejo does for a deleted fork (D-fork)."""
+    Forgejo does for a deleted fork."""
     head_side = {"ref": head, "sha": sha, "label": f"{(repo or {}).get('owner', {}).get('login', '')}:{head}"}
     if repo is not None:
         head_side.update(repo_id=repo["id"], repo=repo)
@@ -185,7 +184,7 @@ def set_pull_state(remote, branch, *, merged, delete_branch=False):
 
 
 def close_on_remote(repo, branch):
-    """A human closing the batch's PR without merging it: a rejection (D-closed)."""
+    """A human closing the batch's PR without merging it: a rejection."""
     return set_pull_state(repo[1], branch, merged=False)
 
 
@@ -916,7 +915,7 @@ def fresh_process_env(tenant, scratch: Path):
 
 def in_a_later_process(repo, verb, *args, python_prelude=""):
     """`verb(*args)` (`deliver` or `revert`) on a `TenantDelivery` opened for `repo`'s tenant in
-    ANOTHER, freshly started process with its own forge double (backed by the same remote,
+    another, freshly started process with its own forge double (backed by the same remote,
     as the real forge is) and a fresh environment, as a later drain would: nothing of this
     process's objects, memory or environment reaches it. Returns `{"status": ..., "url": ...}`
     (`url` `None` when the result has none) or `{"refused": ...}`, with `"creates"`, the PR
@@ -967,7 +966,7 @@ def _probe_env():
 
 
 def lock_probe(tenant):
-    """Try the tenant's lock from ANOTHER process (a lock's same-process semantics differ by
+    """Try the tenant's lock from another process (a lock's same-process semantics differ by
     primitive) and give it straight back: `{"free": True}` or `{"busy": <refusal>}`."""
     proc = subprocess.run(_lock_argv(tenant, "try"), capture_output=True, text=True,
                           env=_probe_env(), timeout=120, check=False)
@@ -993,7 +992,7 @@ def git_subcommand(argv):
 
 
 class LockAudit:
-    """Probes the tenant lock from another process at chosen moments of THIS process: an
+    """Probes the tenant lock from another process at chosen moments of this process: an
     audit hook passes every event to `pick(event, args)`, and whenever it names a label the
     lock is probed before the audited operation goes ahead (a spawn, an open, a rename).
     `probes` collects `(label, verdict)`; a probe that crashes is recorded, never raised into
@@ -1092,7 +1091,7 @@ def bounded(fn, *, seconds=30.0, fifos=()):
 
 @pytest.fixture
 def rewritten(http_repo, tmp_path):
-    """The clone's `url.<other>.insteadOf` sends origin's git traffic to ANOTHER smart-HTTP
+    """The clone's `url.<other>.insteadOf` sends origin's git traffic to another smart-HTTP
     server (another port), so the one helper, scoped to the parsed forge address, has no
     answer and git reaches its prompt path. Yields that other server."""
     tenant, remote, _credentials, server = http_repo

@@ -30,8 +30,8 @@ from defender.investigation.agent_definition import bind  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests.support.runtime.engine._engine_helpers import replay_once as _replay  # noqa: E402
 
-# Every spelling of "the model said nothing", labelled with which side of isspace()
-# it falls on — the split that made the old guard steerable in two directions.
+# Every spelling of "the model said nothing", labelled with which side of isspace() it falls
+# on — the split an isspace()-based guard gets wrong in both directions.
 CONTENT_LESS = [
     ("truly-empty", ""),
     ("ascii-spaces", "   "),

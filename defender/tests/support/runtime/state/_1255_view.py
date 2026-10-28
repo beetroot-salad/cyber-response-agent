@@ -108,8 +108,8 @@ def make_layout(base: Path, tenant_id: str, *, checkout: Path | None = None) -> 
 
 
 def natural_run(layout: Layout, alert_bytes: bytes, label: str) -> Path:
-    """Materialize a natural run through its tenant's runs repository. #1279 (A3): setup mints
-    the run id; `label` only names the staged alert file."""
+    """Materialize a natural run through its tenant's runs repository; setup mints the run id,
+    and `label` only names the staged alert file."""
     from defender import run_common
 
     staged = location_path(layout.data_root).parent / f"alert-{label}.json"
@@ -286,7 +286,7 @@ class Recorder:
         return "retry", c if isinstance(c, str) else str(c)
 
     def all_text(self) -> str:
-        """Every part of every request flattened — the O3 scanner's input."""
+        """Every part of every request flattened, for the host-layout scan."""
         from defender.tests.e2e._replay_harness import messages_text
 
         return "\n".join(messages_text(r) for r in self.requests)

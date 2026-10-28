@@ -1,5 +1,5 @@
-"""Seams, plants and child-process runners for #1134 v3 step 1's suite
-(`test_1134_tree_listing.py`). It defines no tests."""
+"""Seams, plants and child-process runners for `test_1134_tree_listing.py`, shared by the other
+#1134 listing suites."""
 from __future__ import annotations
 
 import contextlib
@@ -34,7 +34,7 @@ FD_MARGIN = 16
 #: Each route by which listing one folder can be refused: `_step`'s `O_PATH` open of the
 #: folder's own component, the reopen of `.` for reading off that handle, `scandir` of the
 #: reopened descriptor, the listing failing partway through, judging a listed entry's type, and
-#: the `fstat` of the reopened descriptor that judges whether the folder is dead (addendum 3).
+#: the `fstat` of the reopened descriptor that judges whether the folder is dead.
 LISTING_ROUTES = ("step", "reopen", "scandir", "midway", "entry", "fstat")
 
 #: What a planted entry holds, or what a link or hard link reaches.
@@ -304,8 +304,8 @@ class ListingFaults(RealOs):
     fails its `"."` reopen with that errno (EACCES: refused). A folder in `remove` is REALLY
     removed (`shutil.rmtree`, everything in it) at `moment` (`REMOVAL_MOMENTS`) of its own
     listing, and the real call then runs against the removed folder, so what the kernel and
-    CPython answer for a deleted folder is what `entries()` sees (addendum 3, D2: absent, so
-    `list_tree` reports it `gone`). The folder is named off the descriptor BEFORE it is removed
+    CPython answer for a deleted folder is what `entries()` sees (absent, so `list_tree` reports
+    it `gone`). The folder is named off the descriptor BEFORE it is removed
     (once removed, `/proc` spells it with a `" (deleted)"` suffix). `removed` lists the real
     paths removed, in order."""
 
@@ -423,8 +423,8 @@ SWAP_PLANTS = ("file", "fifo", "symlink", "nothing")
 
 
 class SwapsOnStep(RealOs):
-    """#1134 v2 finding #2, for real. The first time the folder `<parent>/<name>` is stepped
-    into (`os_.open(name, ..., dir_fd=<a descriptor naming parent>)`), BEFORE that open is
+    """A real swap: the first time the folder `<parent>/<name>` is stepped into
+    (`os_.open(name, ..., dir_fd=<a descriptor naming parent>)`), BEFORE that open is
     delegated: the folder is renamed out of the tree to `away` (with everything in it), and
     `plant` is put at its name: a plain file, a FIFO, a symlink to the moved folder, or nothing.
     Then the real open runs and meets whatever now stands there. `fired` says it happened."""
@@ -614,16 +614,17 @@ def child() -> None:
     sys.stdout.write(json.dumps(answer))
 
 
-def run_child(request: dict[str, Any], *, deadline: float = CHILD_DEADLINE) -> dict[str, Any]:
-    """Run `child()` in a fresh interpreter over THIS tree's `defender`, under `deadline`
-    (killed when it runs past it), and answer its JSON. A child that failed, timed out or reported its own
-    failure fails the calling row, naming why."""
+def run_child_of(module: str, request: dict[str, Any], *,
+                 deadline: float = CHILD_DEADLINE) -> dict[str, Any]:
+    """Run `module`'s `child()` in a fresh interpreter over THIS tree's `defender`, `request` on its
+    stdin, under `deadline` (killed when it runs past it), and answer its JSON. A child that failed,
+    timed out or reported its own failure fails the calling row, naming why."""
     source = Path(io_module().__file__).resolve().parents[1]
     path = [str(source), *([os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else [])]
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(path), "PYTHONDONTWRITEBYTECODE": "1"}
     try:
         done = subprocess.run(
-            [sys.executable, "-c", "from defender.tests.support.learning.curation._tree_listing_1134 import child; child()"],
+            [sys.executable, "-c", f"from {module} import child; child()"],
             input=json.dumps(request), capture_output=True, text=True, env=env, cwd=source,
             timeout=deadline, check=False)
     except subprocess.TimeoutExpired:
@@ -633,6 +634,11 @@ def run_child(request: dict[str, Any], *, deadline: float = CHILD_DEADLINE) -> d
     answer = json.loads(done.stdout)
     assert "child_failed" not in answer, f"the child interpreter failed: {answer['child_failed']}"
     return answer
+
+
+def run_child(request: dict[str, Any], *, deadline: float = CHILD_DEADLINE) -> dict[str, Any]:
+    """`run_child_of` this module's `child()`."""
+    return run_child_of(__name__, request, deadline=deadline)
 
 
 def run_unprivileged(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -803,7 +809,7 @@ class ParkedWriter:
             self.release()
 
 
-def build_chain(base: Path, depth: int, leaf: str, body: bytes = PLAIN) -> None:
+def build_chain(base: Path, depth: int, leaf: str) -> None:
     """`depth` nested folders `d` under `base`, `leaf` in the deepest, made one level at a time
     off a descriptor (`os.makedirs` recurses once per level, past Python's recursion limit)."""
     fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
@@ -815,7 +821,7 @@ def build_chain(base: Path, depth: int, leaf: str, body: bytes = PLAIN) -> None:
             fd = below
         out = os.open(leaf, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o644, dir_fd=fd)
         try:
-            os.write(out, body)
+            os.write(out, PLAIN)
         finally:
             os.close(out)
     finally:
@@ -874,21 +880,21 @@ def _dir_link(at: Path, base: Path) -> None:
     at.symlink_to(target, target_is_directory=True)
 
 
-def _plant_symlink(at: Path, root: Path, host: Path, body: bytes) -> None:
+def _plant_symlink(at: Path, root: Path, host: Path) -> None:
     target = host / f"link-target-of-{at.name}"
-    target.write_bytes(body)
+    target.write_bytes(HOST_BYTES)
     at.symlink_to(target)
 
 
-def _plant_hardlink(at: Path, root: Path, host: Path, body: bytes) -> None:
+def _plant_hardlink(at: Path, root: Path, host: Path) -> None:
     other = host / f"other-name-of-{at.name}"
-    other.write_bytes(body)
+    other.write_bytes(HOST_BYTES)
     os.link(other, at)
 
 
-def _plant_directory(at: Path, root: Path, host: Path, body: bytes) -> None:
+def _plant_directory(at: Path, root: Path, host: Path) -> None:
     at.mkdir()
-    (at / "keep").write_bytes(body)
+    (at / "keep").write_bytes(HOST_BYTES)
 
 
 def _plant_device(at: Path, kind: str) -> None:
@@ -899,33 +905,30 @@ def _plant_device(at: Path, kind: str) -> None:
         raise NoDeviceNodes(kind) from None
 
 
-#: How each kind `plant_entry` makes is made: `(at, root, host, body)`.
-_PLANTERS: dict[str, Callable[[Path, Path, Path, bytes], None]] = {
-    "plain": lambda at, root, host, body: put_plain(at),
+#: How `plant_entry` makes each kind, `(at, root, host)`: `directory` holds `keep`; a `dir_link_*`
+#: points at a real folder (inside the root, or under `host`) holding `inner.md`.
+_PLANTERS: dict[str, Callable[[Path, Path, Path], None]] = {
+    "plain": lambda at, root, host: put_plain(at),
     "directory": _plant_directory,
-    "empty_directory": lambda at, root, host, body: at.mkdir(),
+    "empty_directory": lambda at, root, host: at.mkdir(),
     "symlink": _plant_symlink,
-    "dangling": lambda at, root, host, body: at.symlink_to(host / f"dangling-target-of-{at.name}"),
-    "dir_link_inside": lambda at, root, host, body: _dir_link(at, root),
-    "dir_link_outside": lambda at, root, host, body: _dir_link(at, host),
+    "dangling": lambda at, root, host: at.symlink_to(host / f"dangling-target-of-{at.name}"),
+    "dir_link_inside": lambda at, root, host: _dir_link(at, root),
+    "dir_link_outside": lambda at, root, host: _dir_link(at, host),
     "hardlink": _plant_hardlink,
-    "fifo": lambda at, root, host, body: os.mkfifo(at),
+    "fifo": lambda at, root, host: os.mkfifo(at),
     # `mknod` makes a socket inode unprivileged; a bound AF_UNIX socket needs a short path.
-    "socket": lambda at, root, host, body: os.mknod(at, stat.S_IFSOCK | 0o600),
-    **{kind: (lambda at, root, host, body, kind=kind: _plant_device(at, kind)) for kind in DEVICES},
+    "socket": lambda at, root, host: os.mknod(at, stat.S_IFSOCK | 0o600),
+    **{kind: (lambda at, root, host, kind=kind: _plant_device(at, kind)) for kind in DEVICES},
 }
-#: Every kind `plant_entry` can put at a name. `directory` holds `keep`; a `dir_link_*` points
-#: at a real folder (inside the root, or under `host`) holding `inner.md`.
-ENTRY_PLANTS = tuple(_PLANTERS)
 
 
-def plant_entry(at: Path, kind: str, *, root: Path, host: Path,
-                body: bytes = HOST_BYTES) -> Planted:
+def plant_entry(at: Path, kind: str, *, root: Path, host: Path) -> Planted:
     """Plant `kind` at `at` (its holding folders made real). A link, hard link or directory
-    reaches `body`, so a read that followed it would return those bytes. A device node where
-    `mknod` is refused raises `NoDeviceNodes`."""
+    reaches `HOST_BYTES`, so a read that followed it would return those bytes. A device node
+    where `mknod` is refused raises `NoDeviceNodes`."""
     at.parent.mkdir(parents=True, exist_ok=True)
-    _PLANTERS[kind](at, root, host, body)
+    _PLANTERS[kind](at, root, host)
     return Planted(kind, at)
 
 
@@ -939,14 +942,14 @@ FOLDER_PLANTS = ("folder_link_inside", "folder_link_outside", "folder_file", "fo
 
 
 def plant_folder(root: Path, rel: PurePosixPath, folder: PurePosixPath, kind: str, *,
-                 host: Path, body: bytes = HOST_BYTES) -> Planted:
+                 host: Path) -> Planted:
     """Plant `kind` at `folder`, one of `rel`'s holding folders (relative to `root`). A
     `folder_link_inside` / `_outside` points at a folder holding the rest of `rel` as a real
-    file with `body` in it, so a walk that followed the link would find it."""
+    file with `HOST_BYTES` in it, so a walk that followed the link would find it."""
     at = root / folder
     at.parent.mkdir(parents=True, exist_ok=True)
     if kind == "folder_file":
-        at.write_bytes(body)
+        at.write_bytes(HOST_BYTES)
     elif kind == "folder_fifo":
         os.mkfifo(at)
     elif kind in ("folder_link_inside", "folder_link_outside"):
@@ -954,7 +957,7 @@ def plant_folder(root: Path, rel: PurePosixPath, folder: PurePosixPath, kind: st
         elsewhere = (root if kind == "folder_link_inside" else host) / stem
         reached = elsewhere / rel.relative_to(folder)
         reached.parent.mkdir(parents=True, exist_ok=True)
-        reached.write_bytes(body)
+        reached.write_bytes(HOST_BYTES)
         at.symlink_to(elsewhere, target_is_directory=True)
     elif kind in BARE_FOLDER_LINKS:
         stem = f"bare-{'-'.join(folder.parts)}"

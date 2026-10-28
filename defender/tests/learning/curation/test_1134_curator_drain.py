@@ -2,21 +2,9 @@
 attributed through a link, never committed but as a plain in-lane lesson, and a faulted claim
 leaves the lane at its base.
 
-#1108 P4 (O7, amendments 2-3, OD12): every scene is a batch's git-free draft
-(`_spec773.build_draft_scene`, config over the draft through the assumed `batch=` seam); what
-landed is read from the batch branch (`agent/...`). The legacy restore leaves box plants in place
-"for the scrub"; drafts are never scrubbed (amendment 3 C3) and a claim reset re-syncs the draft
-from git objects (C2), so a faulted claim's lane is observed back at its base instead.
-
-Deleted as (i), pinning only the worktree mechanism (pointers: tests/tenancy/tenant_1108_delivery/):
-  - sibling-corpus strays restored through the sibling mount; a linked folder, removed mount or
-    non-folder at a holding folder replacing the fault; a failing disk on the fault restore;
-    `_capture_pre_state` through a refusing mount; gitignored names surviving a fault -> one reset
-    over every lane from git objects: test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links,
-    ::test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole (dir-link,
-    replace-dir-with-link, gitignore-nested);
-  - a before-state git cannot read (`GitProbeError`) -> the base is read from git objects
-    (test_changes.py::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files).
+Every scene is a batch's git-free draft (`_spec773.build_draft_scene`); what landed is read from
+the batch branch (`agent/...`). Drafts are never scrubbed: a claim reset re-syncs the draft from
+git objects, so a faulted claim's lane is observed back at its base.
 """
 from __future__ import annotations
 
@@ -48,7 +36,7 @@ from defender.tests.shared.filesystem.test_1111_rooted_io import census, raised_
 #: The name the agent plants at: distinctive, so a log line naming it names this entry.
 PLANTED = "planted-lesson.md"
 SEEDED = "seeded-lesson.md"
-#: The draft lane's repo-relative spelling (OD6).
+#: The draft lane's repo-relative spelling.
 LESSONS = "agent/lessons"
 
 
@@ -88,16 +76,15 @@ def _stuck_classes(sc) -> list[str]:
     return [r.get("fault_class") for r in S.stuck_records(sc.paths, sc.channel)]
 
 
-#: The lane's counted-attempt classes (`drain.RETIRE_SET`'s `AuthorError`) plus P3's claim
-#: refusal: a stuck record of either is the attempt's bookkeeping, never an unhandled crash.
+#: The lane's counted-attempt classes (`drain.RETIRE_SET`'s `AuthorError`) plus the ChangeSet's
+#: claim refusal: a stuck record of either is the attempt's bookkeeping, never an unhandled crash.
 _COUNTED = {"AuthorError", "DeliveryRefused"}
 
 
 def _refused_claim_routed(sc, got, fid: str) -> None:
-    """U10 (human, 2026-10-23): a refused claim returns (no unhandled crash), lands nothing,
-    leaves the draft back at the batch base, and holds its row queued with ONE attempt counted —
-    not consumed, not graveyarded, not stuck as a crash — for a retry until #952's ceiling. A
-    tick whose only claim was refused returns rc 0: routed, not a stage failure (OD19)."""
+    """A refused claim returns rc 0 (routed, not a stage failure), lands nothing, leaves the draft
+    at the batch base, and keeps its row queued with one attempt counted (not consumed,
+    graveyarded or stuck as a crash) for a retry up to the ceiling."""
     assert got == ("rc", 0), got
     assert sc.head_files() == []
     assert sc.draft_drift() == []
@@ -118,9 +105,8 @@ def test_a_link_lesson_citing_the_batch_is_a_refused_claim_and_nothing_lands(
     tmp_path, caplog, channel,
 ):
     """A link the box leaves in its lane, its target citing the batch, is never followed: the
-    ChangeSet refuses the claim before attribution reads it (OD23, amendment 2 O-D), so it is
-    routed as U10/OD19 — rc 0, one attempt, row held, draft at base — logged naming the entry,
-    and nothing lands (#1134, P4 O7)."""
+    ChangeSet refuses the claim before attribution reads it, and the refused claim is routed and
+    logged naming the entry."""
     caplog.set_level(logging.WARNING)
     fid = "f1" if channel == "lessons" else "w1"
     target = _outside(tmp_path, text=lesson_text(fid, mark=OUT_MARK))
@@ -146,7 +132,7 @@ def test_a_link_lesson_citing_the_batch_is_a_refused_claim_and_nothing_lands(
 
 def test_control_the_same_bytes_as_a_plain_lesson_are_attributed_and_committed(tmp_path):
     """Control at the same name: the outside lesson's bytes as a plain draft file cite `f1`, land
-    on the batch branch with those bytes, and `f1` is consumed as committed (#1134, P4 O7)."""
+    on the batch branch with those bytes, and `f1` is consumed as committed."""
     body = lesson_text("f1", mark=OUT_MARK)
     sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: body}))
 
@@ -158,7 +144,7 @@ def test_control_the_same_bytes_as_a_plain_lesson_are_attributed_and_committed(t
 
 def test_control_an_unattributable_plain_lesson_is_gone_from_the_draft_after_the_fault(tmp_path):
     """A plain lesson citing nothing from the batch faults the tick (rc 2), nothing lands, and the
-    claim's reset leaves no trace of it in the draft (#1134 / #773, P4 O7)."""
+    claim's reset leaves no trace of it in the draft."""
     sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: lesson_text("not-this-batch")}))
 
     assert _run(sc) == ("rc", 2)
@@ -171,8 +157,7 @@ def test_a_non_md_alias_in_the_lane_never_lands_and_its_target_is_never_written(
     tmp_path, caplog, kind,
 ):
     """A non-`.md` alias of a host file in the lane never lands and the host file is never
-    written; a symlink refuses the whole claim, so the lesson beside it does not land either
-    (#1134, P4 O7 / amendment 2 ChangeSet)."""
+    written; a symlink refuses the whole claim, so the lesson beside it does not land either."""
     caplog.set_level(logging.WARNING)
     target = _outside(tmp_path, "secret.txt", f"host notes {OUT_MARK}\n")
 
@@ -191,9 +176,9 @@ def test_a_non_md_alias_in_the_lane_never_lands_and_its_target_is_never_written(
 
 
 def test_control_an_unrelated_fault_beside_a_link_is_not_routed_as_a_refused_claim(tmp_path):
-    """Control for U10: the same symlink plant, but the curator raises an unrelated fault (outside
-    `RETIRE_SET`). The lane's existing rule (#773 O5.3 / #952) holds, not U10's: the fault
-    propagates unchanged and sticks, and the row is NOT charged an attempt (P4 O7)."""
+    """Control for the refused-claim routing: the same symlink plant, but the curator raises an
+    unrelated fault (outside `RETIRE_SET`), which propagates unchanged and sticks; the row is not
+    charged an attempt."""
     target = _outside(tmp_path, "secret.txt", f"host notes {OUT_MARK}\n")
     fault = RuntimeError("unrelated, after the plant")
 
@@ -212,7 +197,7 @@ def test_control_an_unrelated_fault_beside_a_link_is_not_routed_as_a_refused_cla
 
 def test_control_a_non_md_plain_stray_never_lands_and_the_tick_commits(tmp_path):
     """Control: a plain non-`.md` stray in the lane never lands and is gone from the draft after
-    the claim; the lesson beside it lands (#1134, P4 O7)."""
+    the claim; the lesson beside it lands."""
     sc = _scene(tmp_path, curator=S.FakeCurator(
         writes={PLANTED: lesson_text("f1"), "notes.txt": "a plain stray\n"}))
 
@@ -257,7 +242,7 @@ def _unwritten(entries: dict[str, tuple]) -> dict[str, tuple]:
 @pytest.mark.parametrize("kind", PLANTS)
 def test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_base_name(tmp_path, kind):
     """A retiring fault over a plant at a base name still retires (rc 2, one attempt); nothing
-    reads or writes through the plant, and the lane is back at its base (#773 O5.3, P4 O7)."""
+    reads or writes through the plant, and the lane is back at its base."""
     target = _outside(tmp_path, text=lesson_text("f0", mark=OUT_MARK))
     sc = _scene(tmp_path, curator=S.FakeCurator(
         also=_plant_over_seeded(kind, target, drain.AuthorError("injected after the plant"))))
@@ -280,7 +265,7 @@ def test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_base_name(tmp_path
 @pytest.mark.parametrize("kind", PLANTS)
 def test_o5_3_a_non_member_fault_propagates_unchanged_over_a_plant(tmp_path, kind):
     """A non-retiring fault over a plant propagates unchanged and sticks, the row unattempted;
-    nothing writes through the plant and the lane is back at its base (#773 O5.3, P4 O7)."""
+    nothing writes through the plant and the lane is back at its base."""
     target = _outside(tmp_path, text=lesson_text("f0", mark=OUT_MARK))
     fault = RuntimeError("injected after the plant")
     sc = _scene(tmp_path, curator=S.FakeCurator(also=_plant_over_seeded(kind, target, fault)))
@@ -300,7 +285,7 @@ def test_o5_3_a_non_member_fault_propagates_unchanged_over_a_plant(tmp_path, kin
 @pytest.mark.parametrize("fault", ["AuthorError", "RuntimeError"])
 def test_o5_3_control_with_nothing_planted_the_base_file_is_back(tmp_path, fault):
     """Control: a plain rewrite of a base lesson before either fault is undone; each fault routes
-    as above (#773 O5.3, P4 O7)."""
+    as above."""
     exc = drain.AuthorError("injected") if fault == "AuthorError" else RuntimeError("injected")
     sc = _scene(tmp_path, curator=S.FakeCurator(also=_plant_over_seeded("none", Path(), exc)))
 
@@ -317,7 +302,7 @@ def test_o5_3_control_with_nothing_planted_the_base_file_is_back(tmp_path, fault
 
 def test_a_fifo_at_a_new_name_is_never_opened_and_the_fault_still_retires(tmp_path):
     """A FIFO the box leaves at a new name is never opened (deadline), the fault retires (rc 2,
-    one attempt) and the lane holds no FIFO after the claim (#773 O5.3, P4 O7)."""
+    one attempt) and the lane holds no FIFO after the claim."""
     holder: dict = {}
 
     def agent(rows, batch_id, cfg):
@@ -336,7 +321,7 @@ def test_a_fifo_at_a_new_name_is_never_opened_and_the_fault_still_retires(tmp_pa
 
 def test_a_nested_lesson_the_agent_rewrote_is_back_at_its_base_after_the_fault(tmp_path):
     """A nested base lesson the agent rewrote is back at its base bytes and a nested new lesson is
-    gone after a retiring fault; nothing lands (#773, P4 O7)."""
+    gone after a retiring fault; nothing lands."""
 
     def agent(rows, batch_id, cfg):
         put(cfg.corpus_dir / "nested" / "deep" / "l1.md", "the agent's edit\n")
@@ -361,10 +346,10 @@ def _journal(sc, log: list, **kw) -> None:
 
 @pytest.mark.parametrize("refused", [True, False], ids=["refused", "control"])
 def test_attribution_reads_the_claims_own_bytes_never_the_corpus_again(tmp_path, refused):
-    """Attribution reads a lesson's citations from the claim's change set — the bytes its commit
-    carries, read once from the draft with no link followed — never through the lane's held
-    corpus a second time (PR #1288 review). So a corpus read that would be refused is never
-    made, and the cited lesson lands either way (#1134, P4 O7)."""
+    """Attribution reads a lesson's citations from the claim's change set (the bytes its commit
+    carries, read once from the draft with no link followed), never through the lane's held
+    corpus a second time. So a corpus read that would be refused is never made, and the cited
+    lesson lands either way."""
     log: list = []
     sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}))
     _journal(sc, log, refuse=(PLANTED,) if refused else ())
@@ -373,16 +358,15 @@ def test_attribution_reads_the_claims_own_bytes_never_the_corpus_again(tmp_path,
 
     assert got == ("rc", 0), got
     assert sc.head_files() == [f"{LESSONS}/{PLANTED}"]
+    assert ("read", PLANTED) not in log, f"the held corpus was read again: {log}"
 
 
 @pytest.mark.parametrize("mode", ["same mode", "made executable"])
 def test_a_hard_link_holding_a_lessons_exact_bytes_is_never_committed(tmp_path, mode):
     """A base lesson the box hard-links to a host file holding its exact bytes (or those bytes
-    made executable) is an aliased entry, which P3's ChangeSet refuses (owner ruling 2026-10-23:
-    no hard-linked lesson should exist; P3's refusal of aliased entries stands): the claim is
-    U10's refused claim — nothing lands, not even the new lesson; f1 counts one attempt and stays
-    queued; the draft is reset to plain base files; the host file is unchanged (#1134, P4 O7;
-    moved from test_1134_curator_git_compare)."""
+    made executable) is an aliased entry the ChangeSet refuses: a refused claim, so nothing lands
+    (not even the new lesson), the draft is reset to plain base files, and the host file is
+    unchanged."""
     holder: dict = {}
 
     def alias_seeded(rows, batch_id, cfg):

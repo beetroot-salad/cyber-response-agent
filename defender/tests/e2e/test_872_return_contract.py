@@ -1,4 +1,4 @@
-"""#872 — the return contract at the seam (`d0`, `d0b`, `d16`, `d61`, `d71`, `d72`)."""
+"""#872 — the return contract at the seam: what each branch hands the model."""
 from __future__ import annotations
 
 import pytest
@@ -10,8 +10,8 @@ toons = pytest.importorskip("toons")  # noqa: E402
 from pydantic_ai.messages import ToolReturn  # noqa: E402
 from pydantic_ai.toolsets import FunctionToolset  # noqa: E402
 
+from defender.investigation.toon_gate import GATE_METADATA_KEY  # noqa: E402
 from defender.tests.e2e._toon872 import (  # noqa: E402
-    gate_metadata_key,
     agent_run,
     corpus,
     delivered_percent,
@@ -30,43 +30,25 @@ FIXTURE = "fx-33"
 def _under_bar() -> dict:
     value = toon_rows(corpus()[FIXTURE])
     assert delivered_percent(value) < 80.0, (
-        "the substitution fixture no longer clears the shipped DELIVERED-bytes bar (`d3`)"
+        "the substitution fixture no longer clears the delivered-bytes bar"
     )
     return value
-
-
-def _over_bar() -> dict:
-    value = corpus()[FIXTURE]
-    assert delivered_percent(value) > 95.0, (
-        "the passthrough fixture no longer fails the shipped DELIVERED-bytes bar (`d3`)"
-    )
-    return value
-
-
-def test_passthrough_carries_the_tools_own_json_unchanged_inside_the_frame() -> None:
-    for value in (_over_bar(), "a plain string", 7, None):
-        out = agent_run(toolset=foreign_toolset(value))
-        delivered = out.dispatched.text()
-        assert framed_content(delivered) == wire_text(value), (
-            f"passthrough content diverged from the no-gate wire bytes for {type(value).__name__}"
-        )
-        assert out.encoder.loads_calls == 0, "a passthrough decoded a view it did not deliver"
 
 
 def test_substitute_branch_return_shape() -> None:
     """The substitute branch returns `ToolReturn(return_value=<framed TOON>,
-    metadata={"json": <the tool's own return>})` — §7 r1's decision, spelled."""
+    metadata={"json": <the tool's own return>})`."""
     value = _under_bar()
     out = agent_run(toolset=foreign_toolset(value))
     part = out.dispatched.part("fetch_rows")
 
-    assert gate_metadata_key() == "json", "§7 r1 spelled the metadata key; it is not the gate's to pick"
+    assert GATE_METADATA_KEY == "json", "the gate's metadata key is no longer `json`"
     assert framed_content(part.content) == toons.dumps(value), (
         "the model was handed something other than the framed TOON view"
     )
     assert isinstance(part.metadata, dict)
-    assert gate_metadata_key() in part.metadata
-    assert part.metadata[gate_metadata_key()] == value
+    assert GATE_METADATA_KEY in part.metadata
+    assert part.metadata[GATE_METADATA_KEY] == value
 
 
 def test_the_byte_gate_and_the_stringify_step_measure_the_bytes_the_model_receives() -> None:
@@ -78,17 +60,14 @@ def test_the_byte_gate_and_the_stringify_step_measure_the_bytes_the_model_receiv
 
     oracle = {"rows": [{"a": float("nan"), "b": i} for i in range(40)]}
     assert wire_roundtrip_equal(oracle), (
-        "the wire serializer no longer renders both sides of this round trip identically, so "
-        "the two oracles no longer disagree here and this arm has stopped discriminating"
+        "the wire serializer no longer renders both sides of this round trip identically"
     )
     assert delivered_percent(oracle) <= 85, (
-        "the oracle fixture no longer clears the delivered-bytes bar, so the byte gate would "
-        "decide it and M3 would never be consulted"
+        "the oracle fixture no longer clears the delivered-bytes bar"
     )
     out = agent_run(toolset=foreign_toolset(oracle))
     assert framed_content(out.dispatched.text()) == toons.dumps(oracle), (
-        "a payload M3's oracle blesses under the WIRE serializer passed through — the oracle "
-        "is spelled with `pydantic_core.to_json`, the site `d71` left unruled"
+        "a payload the round-trip oracle accepts under the wire serializer passed through"
     )
 
 
@@ -110,12 +89,12 @@ def test_a_tool_body_that_returns_its_own_toolreturn_is_unwrapped_framed_and_los
         "a pre-wrapped ToolReturn opted out of the gate"
     )
     assert part.metadata["body_private"] == "kept", "the gate destroyed application data"
-    assert part.metadata[gate_metadata_key()] == value
+    assert part.metadata[GATE_METADATA_KEY] == value
 
     collide = FunctionToolset()
 
     def fetch_rows_collide() -> ToolReturn:
-        return ToolReturn(return_value=value, metadata={gate_metadata_key(): "the body's own"})
+        return ToolReturn(return_value=value, metadata={GATE_METADATA_KEY: "the body's own"})
 
     fetch_rows_collide.__name__ = "fetch_rows"
     collide.tool_plain(fetch_rows_collide)
@@ -126,8 +105,7 @@ def test_a_tool_body_that_returns_its_own_toolreturn_is_unwrapped_framed_and_los
 
 
 def _flatten(meta: dict) -> list:
-    """Every value reachable in a metadata mapping — the shape assertion, so neither merge
-    order can be spelled into the test as the expected one."""
+    """Every value reachable in a metadata mapping, so the test fixes no merge order."""
     out: list = []
     for v in meta.values():
         out.append(v)

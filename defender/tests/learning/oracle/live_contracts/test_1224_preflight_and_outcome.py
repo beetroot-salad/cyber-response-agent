@@ -19,10 +19,6 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.core import _state1135
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
-#: The configured episodes root (no default exists; `cli.episodes_root` refuses an unset one).
-EPISODES_ENV = "DEFENDER_EPISODES_BASE"
-
-
 def _names(root: Path) -> set[str]:
     """The entries of `root` (none when it does not exist yet: the tenant's `episodes/` is made
     by the first launch)."""
@@ -32,10 +28,8 @@ def _names(root: Path) -> set[str]:
 
 @pytest.fixture(autouse=True)
 def episodes_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Every launch here needs a configured episodes root outside the data root and the
-    checkout, and a learning-state root of its own (an accepted launch ends in the judge,
-    which would otherwise write into the checkout)."""
-    monkeypatch.setenv(EPISODES_ENV, str(tmp_path / "episodes-root"))
+    """A learning-state scratch root; returns the tenant's episodes folder, where every launch
+    here lands."""
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     return S.tenant_episodes()
 
@@ -43,7 +37,7 @@ def episodes_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 _ROW = {"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
         "ts": "2026-07-28T15:00:00Z"}
 _BASE = {"rows": [_ROW]}
-#: World b's forged telemetry for fact f1 (same columns as the real row: check 2's union).
+#: World b's forged telemetry for fact f1 (the real row's columns, as check 2 requires).
 _FORGED_B = {"user": "alice", "event_id": "e-1224-f1", "action": "logon", "host": "db-1",
              "ts": "2026-07-28T15:22:00Z"}
 _CHANGED_B = {"rows": [_ROW, _FORGED_B]}
@@ -57,7 +51,7 @@ _DRIFTED = {"rows": [{**_ROW, "event_id": "e-drift-77"}]}
 _Q1 = S.query_params("user:alice")
 _Q2 = S.query_params("host:db-1")
 _L3 = {"entity": "svc-1224"}
-#: The text each call's params put into a request (only verb params reach the oracle, M26).
+#: The text each call's params put into a request (only verb params reach the oracle).
 _MARK = {"idp": "user:alice", "edr": "host:db-1", "siem-x": "svc-1224"}
 
 _FACT_B = S.fact("f1", "alice obtained a TGT and logged on to db-1 at 15:22Z", ("alice", "db-1"))
@@ -72,14 +66,14 @@ _MARK_POST = _QP["q"]
 
 
 def _calls() -> list[S.Call]:
-    """The three PRE-branch calls (lead `S.LEAD`, inherited): fixed under M01=A."""
+    """The three PRE-branch calls (lead `S.LEAD`, inherited), which every world serves unchanged."""
     return [S.Call("idp", "query", _Q1, _BASE), S.Call("edr", "query", _Q2, _BASE),
             S.Call("siem-x", "lookup", _L3, _BASE)]
 
 
 def _calls_post() -> list[S.Call]:
     """`_calls()` plus the post-branch call `_POST`: the source of every scenario in which a
-    world's pre-flight changes an answer (R-01)."""
+    world's pre-flight changes an answer."""
     return [*_calls(), _POST]
 
 
@@ -99,76 +93,34 @@ def _passing(*, fault: S.Fault = S.CLEAN) -> S.ScriptedModel:
 
 
 def _failing(*, fault: S.Fault = S.CLEAN) -> S.ScriptedModel:
-    """An oracle whose every turn ends without a submission (M03=A: a failed attempt)."""
+    """An oracle whose every turn ends without a submission (a failed attempt)."""
     return S.oracle(then=S.text_only("no served answer fits this world"), fault=fault)
 
 
-def _on_post(double: Any, *, name: str, extra: Mapping[str, Any] | None = None) -> _Routed:
-    """One world's pre-flight double under M01=A: `double` answers the requests of the
+def _on_post(double: Any, *, name: str, extra: Mapping[str, Any] | None = None) -> S.Routed:
+    """One world's pre-flight double: `double` answers the requests of the
     post-branch call (routed by `_MARK_POST`; `extra` maps further post-branch call markers to
     their doubles), and every pre-branch call is served unchanged (`_passing()`). No marker is
     a substring of another, and none is carried by a pre-branch call's params."""
-    return _Routed({_MARK_POST: double, **(extra or {})}, default=_passing(), name=name,
+    return S.Routed({_MARK_POST: double, **(extra or {})}, default=_passing(), name=name,
                    last_wins=True)
 
 
-def _forging_b() -> _Routed:
-    """World b's pre-flight (R-01): forge f1's telemetry, record a fact and serve the forged row
-    on the POST-branch call only; every pre-branch call is served unchanged (M01=A)."""
+def _forging_b() -> S.Routed:
+    """World b's pre-flight: forge f1's telemetry, record a fact and serve the forged row on
+    the POST-branch call only; every pre-branch call is served unchanged."""
     return _on_post(S.oracle(
         S.forge("fg-b-1", "f1", "idp", _FORGED_B),
         S.record_fact("alice", "logon_host", "db-1"),
         S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")]))), name="oracle-b")
 
 
-class _Routed:
-    """A model double that hands each request to the scripted double whose MARKER the
-    request's inbound text carries (the world's fact statement, or a call's params). It
-    injects nothing of its own: an unmatched or doubly-matched request is answered text-only
-    and recorded in `unrouted`, which the scenario asserts empty. `last_wins` (call routing
-    only, never world routing) hands a request carrying several markers to the one occurring
-    LAST in its inbound text: the current call's turn, after earlier calls' turns."""
-
-    __name__ = "Routed"
-
-    def __init__(self, routes: Mapping[str, Any], *, default: Any = None,
-                 name: str = "routed", last_wins: bool = False) -> None:
-        self.routes = dict(routes)
-        self.default = default
-        self.name = name
-        self.last_wins = last_wins
-        self.unrouted: list[str] = []
-        self._lock = threading.Lock()
-        self._model: Any = None
-
-    @property
-    def model(self) -> Any:
-        if self._model is None:
-            from pydantic_ai.models.function import FunctionModel
-            self._model = FunctionModel(self, model_name=S.double_model_name(self.name))
-        return self._model
-
-    def __call__(self, messages: list[Any], info: Any) -> Any:
-        text = S._messages_text(messages) + "\n" + (getattr(info, "instructions", None) or "")
-        hits = [double for marker, double in self.routes.items() if marker in text]
-        if len(hits) > 1 and self.last_wins:
-            last = max(self.routes, key=text.rfind)
-            hits = [self.routes[last]]
-        if len(hits) == 1:
-            return hits[0](messages, info)
-        if not hits and self.default is not None:
-            return self.default(messages, info)
-        with self._lock:
-            self.unrouted.append(text)
-        from pydantic_ai.messages import ModelResponse, TextPart
-        return ModelResponse(parts=[TextPart(content="(no scripted double for this request)")])
 
 
 class _Raising:
     """Answers every request by raising what the provider client raises once its own retries
-    give up (GPR-01): `S.provider_outage(status)`, a fresh instance per request, recorded. Not a
-    model of its own: it is always wrapped by a `_Routed`, whose model carries the priced name
-    (R-08)."""
+    give up: `S.provider_outage(status)`, a fresh instance per request, recorded. Not a model of
+    its own: it is always wrapped by a `S.Routed`, whose model carries the priced name."""
 
     __name__ = "Raising"
 
@@ -179,26 +131,26 @@ class _Raising:
 
     def __call__(self, messages: list[Any], info: Any) -> Any:
         self.requests += 1
-        exc = S.provider_outage(self.status)  # GPR-01
+        exc = S.provider_outage(self.status)
         self.raised.append(exc)
         raise exc
 
 
-def _assert_routed(*routers: _Routed) -> None:
+def _assert_routed(*routers: S.Routed) -> None:
     """No request went unrouted, in these routers or any router nested in them (a world's
     `_on_post` double inside `_by_world`)."""
     for r in routers:
         assert not r.unrouted, (
             f"{r.name}: {len(r.unrouted)} request(s) carried no single world/call marker; "
             f"first: {r.unrouted[0][:600]!r}")
-        _assert_routed(*[d for d in (*r.routes.values(), r.default) if isinstance(d, _Routed)])
+        _assert_routed(*[d for d in (*r.routes.values(), r.default) if isinstance(d, S.Routed)])
 
 
-def _by_world(b: Any, c: Any, *, name: str = "oracle", **more: Any) -> _Routed:
+def _by_world(b: Any, c: Any, *, name: str = "oracle", **more: Any) -> S.Routed:
     routes = {_MARK_B: b, _MARK_C: c}
     if "d" in more:
         routes[_MARK_D] = more["d"]
-    return _Routed(routes, name=name)
+    return S.Routed(routes, name=name)
 
 
 def _world_arg(argv: list[str]) -> str | None:
@@ -216,7 +168,7 @@ def _outcome_text(ep: Path) -> str | None:
 class _Spawn(S.FakeSpawn):
     """`FakeSpawn` that also records WHEN each sibling start happened and what the episode
     held at that moment (the outcome record's bytes, plus an optional `probe`), can play a
-    sibling that writes its own world record before exiting (S8: the sibling's writer), and can
+    sibling that writes its own world record before exiting (the sibling's writer), and can
     plant a finished sibling run dir (so verify and the archive have a tree to judge)."""
 
     def __init__(self, *, root: Path, probe: Callable[[], Any] | None = None,
@@ -232,15 +184,14 @@ class _Spawn(S.FakeSpawn):
         self.outcome_at_start: list[str | None] = []
         self.probed: list[Any] = []
         self.eps: list[Path] = []
-        #: A planted arm with no launcher roster to read its id from (review-3 F33): `_main`
-        #: fails the test on any.
+        #: A planted arm with no launcher roster to read its id from: `_main` fails the test
+        #: on any.
         self.faults: list[str] = []
         self._mine = threading.Lock()
 
     def _ep(self, argv: list[str]) -> Path:
         """The episode this child belongs to: the one its `--tenant` and `--episode` name,
-        `<data root>/<T>/episodes/<ep>` (#1105 PR 2: the sibling's command line names its
-        episode by id; #1187: under its tenant, the id the launcher minted)."""
+        `<data root>/<T>/episodes/<ep>`."""
         ep = S.episode_of(list(argv))
         return ep if ep is not None else self.root / S.NO_EPISODE
 
@@ -260,7 +211,7 @@ class _Spawn(S.FakeSpawn):
                            detail=spec.get("detail", ""))
         if self.plant and world:
             # The arm id the LAUNCHER's roster holds, read as `_judge_921.FakeSibling` reads it;
-            # the double never writes or extends a roster (review-3 F33), so a launcher that
+            # the double never writes or extends a roster, so a launcher that
             # wrote none is a fault here, not a roster the double made for it.
             arm_id = S.T.read_roster(ep).get(S.T.world_id(ep, world)) if (ep / S.T.ROSTER_NAME).is_file() else None
             if arm_id is None:
@@ -291,9 +242,9 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
     root = S.tenant_episodes(src.parent.parent.name)
     already = _names(root)
     try:
-        # #1105 PR 2 (declared change 1): the tenant and the source run by id.
-        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
-                       *S.T.retired_continuation_argv()], spawn=spawn, **seams)
+        # The tenant and the source run by id.
+        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID)],
+                      spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code
@@ -312,9 +263,9 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
 def _launch(tmp_path: Path, est: S.Estate, *, calls: Iterable[S.Call] | None = None,
             after_source: Callable[[Path], None] | None = None, **kw: Any) -> S.Launch:
     """`S.launch`, plus `after_source(src)` run between the source run and the launch — inside
-    `S.source_run`, once the source's calls landed and before its session is seeded (#1255: the
-    fork snapshot holds the source's table as it stood at the branch point, so a row appended
-    after it would leave the source unrestorable and the launch refused for that instead)."""
+    `S.source_run`, once the source's calls landed and before its session is seeded (the fork
+    snapshot holds the source's table as it stood at the branch point, so a row appended after
+    it would leave the source unrestorable and the launch refused for that instead)."""
     _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls,
                               after_source=after_source)
     return _main(src, est, **kw)
@@ -323,9 +274,9 @@ def _launch(tmp_path: Path, est: S.Estate, *, calls: Iterable[S.Call] | None = N
 def _capture_row(src: Path, *, system: str, verb: str, params: Mapping[str, Any], seq: int,
                  query_id: str | None = None, exit_code: int = 0,
                  payload: Any = None) -> None:
-    """Append one row to the source run's queries table in the writer's own column set (the
-    fourteen columns in writer order, `_1255_world.ROW_COLUMNS`; #1255 G4: no `call_id` — the
-    source's own call ids are in its host-only call-join record, which no scenario here reads),
+    """Append one row to the source run's queries table in the writer's own column set
+    (`_1255_world.ROW_COLUMNS`, in writer order; no `call_id`: the source's own call ids are in
+    its host-only call-join record, which no scenario here reads),
     its sidecar persisted, `error_class` and `payload_status` from the writer's own rules: a
     sentinel (`query_id` under the reserved prefix — nothing was sent) or a captured failure
     (`exit_code` non-zero). `T.capture_call` writes only successful captures."""
@@ -389,23 +340,16 @@ def _store_text(ep: Path, *, under: str, glob: str = "*.jsonl") -> str:
 def _new_episode(root: Path, before: set[str]) -> Path:
     fresh = sorted(p for p in Path(root).iterdir() if p.is_dir() and p.name not in before)
     assert len(fresh) == 1, (
-        f"a relaunch must get exactly one episode directory of its own (N17); new: {fresh}")
+        f"a relaunch must get exactly one episode directory of its own; new: {fresh}")
     return fresh[0]
 
 
-def _dead_launch(root: Path, *, est: S.Estate, manifest: bool = True, outcome: str | None = None,
-                 forged: Iterable[Mapping[str, Any]] = ()) -> Path:
+def _dead_launch(root: Path, *, est: S.Estate, forged: Iterable[Mapping[str, Any]] = ()) -> Path:
     """The state a killed launcher leaves at the derived episode directory."""
     est.place()
     root.mkdir(parents=True, exist_ok=True)
-    if manifest:
-        ep = S.episode_v2(root.parent, root=root, doc=_family(), base_rows=[
-            S.captured("idp", "query", _Q1, _BASE)])
-    else:
-        ep = root / S.EPISODE_ID
-        (ep / "served").mkdir(parents=True, exist_ok=True)
-    if outcome is not None:
-        S.outcome_record(ep, outcome)
+    ep = S.episode_v2(root.parent, root=root, doc=_family(), base_rows=[
+        S.captured("idp", "query", _Q1, _BASE)])
     rows = list(forged)
     if rows:
         store = S.oracle_dir(ep, "b")
@@ -429,26 +373,19 @@ def _snapshot(ep: Path) -> dict[str, str]:
             for p in sorted(Path(ep).rglob("*")) if p.is_file()}
 
 
-#: A well-formed v2 world-scope judge reply carrying one finding (the coined `bucket` and
-#: `systems` on #921's reply document), and a v2 family-scope reply (`verdict_word`).
+#: A well-formed world-scope judge reply carrying one finding (top-level `bucket` and
+#: `systems`).
 _WORLD_REPLY = S.as_reply_text(J.reply_doc(
     findings=[J.finding_doc(bucket="lead-quality", topic="the lead was never revisited")],
     bucket="lead-quality", systems=["idp"]))
-_FAMILY_REPLY = S.as_reply_text(J.reply_doc(findings=[], verdict_word="survived"))
 
 
-class _LaunchJudge(S.FakeJudge):
+def _launch_judge() -> S.FakeJudge:
     """The launch's judge seam: #921's recording `FakeJudge` answering a world-scope call with
-    `_WORLD_REPLY` and the family-scope call (`judge:family:<n>`) with `_FAMILY_REPLY`, so a
+    `_WORLD_REPLY` and the family-scope call (`judge:family:<n>`) with a family reply, so a
     judge pass that reaches a world records that world's agent id and moves on. Scripted
     content only: it decides nothing."""
-
-    def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
-                 **kw: Any) -> str:
-        self.prompts.append(prompt)
-        self.agent_ids.append(agent_id)
-        self.kwargs.append({"role": role, "agent_id": agent_id, **kw})
-        return _FAMILY_REPLY if str(agent_id).startswith("judge:family") else _WORLD_REPLY
+    return S.FakeJudge(default=_WORLD_REPLY, family_default=S.as_reply_text(J.family_reply()))
 
 
 def _judge_rows(ep: Path) -> dict[str, dict]:
@@ -462,7 +399,7 @@ def _judge_rows(ep: Path) -> dict[str, dict]:
 @pytest.mark.parametrize("failing", [("b", "c"), ("c",), ()], ids=["two", "one", "none"])
 def test_1224_two_preflight_failures_write_unusable_and_start_no_sibling(tmp_path, monkeypatch,
                                                                          failing):
-    """two pre-flight failures write `unusable` naming both worlds and the spawn seam is never called."""
+    """Two failures write `unusable` naming both and start no sibling; with fewer, the servable worlds start."""
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
     doubles = {w: (_failing() if w in failing else _passing()) for w in ("b", "c")}
@@ -513,7 +450,7 @@ def test_1224_preflight_replays_every_original_call_through_each_worlds_oracle_b
 
 
 def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp_path):
-    """pre-flight leaves no cached answer and no ledger row; the sibling's first issue of an original call spends a fresh oracle turn and verifier pass …"""
+    """Pre-flight caches nothing, so each first issue is a fresh, verified turn on the world's own budget."""
     est = S.estate(tmp_path)
     oracle = _by_world(_forging_b(), _passing())
     run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
@@ -521,8 +458,8 @@ def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp
 
     _assert_routed(oracle)
     assert S.oracle_rows(run.ep, "b", "forged"), "positive control: pre-flight wrote b's state"
-    assert S.oracle_rows(run.ep, "b", "answers") == [], "pre-flight caches no served answer (S1)"
-    assert S.ledger_rows(run.ep, "b") == [], "pre-flight writes no world-ledger row (S1)"
+    assert S.oracle_rows(run.ep, "b", "answers") == [], "pre-flight caches no served answer"
+    assert S.ledger_rows(run.ep, "b") == [], "pre-flight writes no world-ledger row"
 
     sib = S.oracle(S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")])),
                    S.submit(_BASE, S.EMPTY_CLAIM))
@@ -532,9 +469,9 @@ def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp
     S.call(reg, "idp", "query", ctx, **_QP)
     S.call(reg, "edr", "query", ctx, **_Q2)
 
-    assert sib.submissions() == 2, "each first issue is a fresh turn (S3)"
+    assert sib.submissions() == 2, "each first issue is a fresh turn"
     assert not sib.overrun
-    assert sv.answered >= 2, "each first issue gets a verifier pass (S3)"
+    assert sv.answered >= 2, "each first issue gets a verifier pass"
     assert len(S.ledger_rows(run.ep, "b")) == 2, "one ledger row per investigator call"
     assert _keys(S.oracle_rows(run.ep, "b", "answers")) == {
         _key("idp", "query", _QP), _key("edr", "query", _Q2)}, "the channel: now cached"
@@ -566,7 +503,7 @@ def test_1224_preflight_records_original_calls_whose_live_base_answer_drifted(tm
 @pytest.mark.parametrize("word", ["accepted", "unusable", "refused"])
 def test_1224_outcome_record_holds_outcome_reason_unservable_worlds_and_drift(
         tmp_path, monkeypatch, episodes_root, word):
-    """pre-flight writes the outcome record once, before any sibling, holding the outcome, reason, unservable worlds, not-replayable calls and drift; later …"""
+    """Written once, before any sibling, with every field; a later failure goes in the world's own record."""
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
     doc, oracle = _family(), _passing()
@@ -638,7 +575,7 @@ def _empty_grant_estate(tmp_path: Path) -> S.Estate:
 
 @pytest.mark.parametrize("reply", ["broken-document", "facts-bare-string"])
 def test_question_writer_model_returns_a_family_that_does_not_parse(tmp_path, reply):
-    """an unparseable question-writer reply stops the launch with a named reason, keeps the episode directory and records `refused`, with no pre-flight …"""
+    """The launch stops with a reason, keeps the episode, records `refused`, and replays and starts nothing."""
     est = S.estate(tmp_path)
     if reply == "broken-document":
         questioner = S.FakeAgent("worlds: [unclosed, {facts: ")
@@ -662,9 +599,9 @@ def test_question_writer_model_returns_a_family_that_does_not_parse(tmp_path, re
     assert run.spawn.launches == []
 
 
-def test_provider_key_for_the_oracle_is_absent_only_where_the_oracle_runs(tmp_path,
-                                                                         episodes_root):
-    """a sibling that exits 2 at start without leaving a record, as one its role preflight refuses for a missing oracle provider key would, is recorded `did …"""
+def test_a_sibling_exiting_2_at_start_with_no_record_is_recorded_did_not_finish(tmp_path,
+                                                                                 episodes_root):
+    """A sibling exiting 2 at start with no record (a missing provider key) is recorded `did not finish`."""
     est = S.estate(tmp_path)
     spawn = _Spawn(root=episodes_root, exits={"b": 2})
     run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(),
@@ -713,7 +650,7 @@ def test_1224_world_dir_holds_both_oracle_state_and_the_archived_run(tmp_path, e
     est = S.estate(tmp_path)
 
     def at_first_start() -> dict:
-        # #1187: the episode the launcher minted, which the first started sibling ran in.
+        # The episode the launcher minted, which the first started sibling ran in.
         return _snapshot(S.oracle_dir(spawn.eps[0], "b"))
 
     spawn = _Spawn(root=episodes_root, probe=at_first_start, plant=True)
@@ -756,7 +693,7 @@ def test_preflight_the_original_run_made_no_calls(tmp_path):
 
 
 def test_1224_original_run_with_no_replayable_call(tmp_path):
-    """a capture holding only a sentinel and a call the grant no longer admits is `refused`, lists the unadmitted call as not replayable, and spends nothing …"""
+    """Only a sentinel and an unadmitted call: `refused`, the call listed not replayable, nothing sent."""
     est = S.estate(tmp_path, withheld=(("idp", "query"),))
 
     def plant_sentinel(src: Path) -> None:
@@ -779,7 +716,8 @@ def test_1224_original_run_with_no_replayable_call(tmp_path):
 
 @pytest.mark.parametrize("live", ["still-errors", "now-answers"])
 def test_preflight_original_call_was_itself_an_error(tmp_path, live):
-    """a captured failure is read live: still erroring, it passes through as `real-error` and is no oracle unservability; now answering, it is calibrated …"""
+    """A captured failure is read live: still erroring, it passes through as `real-error`,
+    never unservable; now answering, it is calibrated and recorded as drift."""
     params = {"entity": "svc-err"}
     est = S.estate(tmp_path)
 
@@ -871,7 +809,7 @@ def test_1224_original_calls_that_never_reached_a_system(tmp_path):
 
 
 def test_preflight_runs_out_of_oracle_budget_midway(tmp_path, monkeypatch):
-    """only the world whose budget runs out fails calibration; the others proceed on their own budgets, the episode is accepted, and nothing is charged to …"""
+    """Only the world whose budget runs out fails; the others start and the episode is accepted."""
     monkeypatch.setenv(S.KNOB_BUDGET, "1e-9")
     est = S.estate(tmp_path)
     oracle = _passing()
@@ -912,7 +850,7 @@ def test_preflight_drift_read_fails_on_the_real_system(tmp_path):
 
 
 def test_input_drift_differs_only_in_volatile_fields(tmp_path):
-    """drift uses check 1's comparator: a timing counter or a row-order change is drift, an identical answer is not, and the record names each call it …"""
+    """Drift uses check 1's comparator: a timing field or row-order change is drift, an identical answer is not."""
     est = S.estate(tmp_path)
     rows = [_ROW, {**_ROW, "event_id": "e-101"}]
     recorded = {"took_ms": 5, "rows": rows}
@@ -939,8 +877,8 @@ def test_input_drift_differs_only_in_volatile_fields(tmp_path):
 def test_preflight_oracle_provider_is_down_for_every_world(tmp_path, status):
     """a provider outage for the whole pre-flight records `unusable` with each world's reason naming the provider failure, and starts no sibling."""
     est = S.estate(tmp_path)
-    down = _Raising(status)  # GPR-01
-    oracle = _Routed({}, default=down)
+    down = _Raising(status)
+    oracle = S.Routed({}, default=down)
     run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
 
     outcome = S.read_outcome(run.ep)
@@ -956,7 +894,7 @@ def test_preflight_oracle_provider_is_down_for_every_world(tmp_path, status):
 
 
 def test_launcher_dies_with_some_worlds_preflighted_and_others_not(tmp_path, episodes_root):
-    """a relaunch after a launcher died mid pre-flight is a new episode that ignores the dead one's stores, writes its own complete outcome before any …"""
+    """A relaunch is a new episode that leaves the dead one's stores alone and records its outcome first."""
     est = S.estate(tmp_path)
     dead = _dead_launch(episodes_root, est=est, forged=[
         {"forged_id": "fg-dead-1", "fact_id": "f1", "system": "idp", "row": _FORGED_B}])
@@ -983,16 +921,15 @@ def test_launcher_dies_with_some_worlds_preflighted_and_others_not(tmp_path, epi
 
 @pytest.mark.parametrize("state", ["absent", "torn"])
 def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
-    """a torn or missing outcome record is never read as accepted: the judge does not grade it, and the episode reader and the page report it rather than …"""
+    """A torn or missing outcome record is never read as accepted: nothing is graded; reader and page report it."""
     ep = S.judged_episode(tmp_path, outcome=None)
     if state == "torn":
         (ep / S.OUTCOME_NAME).write_text(
             'outcome: accepted\nreason: "the launcher was killed mid-wri', encoding="utf-8")
 
     error = S.sym(S.EPISODE, "EpisodeError")
-    # review-3 F32 / review-4 F36: the reader takes the episode's WALKED view and no `Path`;
-    # the view is opened outside `pytest.raises`, so a view that cannot be opened fails as
-    # itself rather than satisfying the refusal.
+    # The reader takes the episode's walked view, opened outside `pytest.raises` so a view
+    # that cannot be opened fails as itself rather than satisfying the refusal.
     with J.walked_view(ep) as view, pytest.raises(error) as refused:
         S.sym(S.EPISODE, "verdicts")(view)
     assert S.OUTCOME_NAME in str(refused.value)
@@ -1004,14 +941,15 @@ def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
         pass
     assert judge.prompts == [], "no record is not an accepted record: nothing is graded"
 
-    page = Path(E.render_episode(ep, module=S.mod(S.VISUALIZE)))  # #1105 PR 2 (declared change 4)
+    page = Path(E.render_episode(ep, module=S.mod(S.VISUALIZE)))
     html = page.read_text(encoding="utf-8").lower()
     assert "outcome" in html
     assert any(w in html for w in ("missing", "unreadable", "no record"))
 
 
 def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
-    """when archiving one world fails after the siblings ran, that world is one the judge cannot see (never graded) while the archived worlds are graded, …"""
+    """A world whose archive fails after the siblings ran is never graded (the archived ones
+    are), its link target is not archived, and the outcome record stays as written."""
     est = S.estate(tmp_path)
     outside = tmp_path / "outside-the-tree.md"
     outside.write_text("MARKER-1224-NOT-THE-REPORT\n", encoding="utf-8")
@@ -1020,14 +958,14 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     def link_cs_report(world: str) -> None:
         if world != "c":
             return
-        tree = spawn.eps[-1] / "runs" / S.T.read_roster(spawn.eps[-1])[S.T.world_id(spawn.eps[-1], world)]  # #1187
+        tree = spawn.eps[-1] / "runs" / S.T.read_roster(spawn.eps[-1])[S.T.world_id(spawn.eps[-1], world)]
         report = tree / "report.md"
         report.unlink()
         report.symlink_to(outside)
         linked.append(report)
 
     spawn = _Spawn(root=episodes_root, plant=True, hook=link_cs_report)
-    judge = _LaunchJudge()
+    judge = _launch_judge()
     run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=spawn,
                   judge=judge)
 
@@ -1044,7 +982,7 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
 
     assert S.judge_called_for(judge, T.world_id(run.ep, "b")), (
         f"positive control: the judge never graded archived world b ({judge.agent_ids})")
-    assert not S.judge_called_for(judge, T.world_id(run.ep, "c")), "the world whose archive failed was graded (S10)"
+    assert not S.judge_called_for(judge, T.world_id(run.ep, "c")), "the world whose archive failed was graded"
     assert not _judge_rows(run.ep).get("c", {}).get("findings"), "world c carries findings"
     archived = _snapshot(run.ep / "worlds") if (run.ep / "worlds").is_dir() else {}
     assert not [n for n, body in archived.items() if "MARKER-1224-NOT-THE-REPORT" in body], (
@@ -1052,7 +990,8 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
 
 
 def test_1224_preflight_world_fails_after_some_calls_verified(tmp_path, monkeypatch):
-    """a world that fails pre-flight after verifying its first call keeps its committed stores for diagnosis, caches no answer, runs no sibling, and its …"""
+    """A world failing pre-flight after verifying a call keeps its forged row for diagnosis,
+    caches no answer, starts no sibling, and its row reaches no other store."""
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
     late = S.post_branch_call(q="user:alice host:db-2", payload=_BASE)
@@ -1081,15 +1020,15 @@ def test_1224_preflight_world_fails_after_some_calls_verified(tmp_path, monkeypa
 
 
 def test_conc_36_second_launch_while_the_first_is_running(tmp_path, episodes_root):
-    """a second launch for the same branch point while the first's siblings run gets its own episode directory, and neither launch touches the other's …"""
+    """The second launch gets its own episode and touches none of the first's records."""
     est = S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls_post())
     second: dict[str, Any] = {}
-    routers: list[_Routed] = []
+    routers: list[S.Routed] = []
 
     def relaunch_once(world: str) -> None:
         if world == "a" and not second:
-            first_ep = spawn.eps[0]  # #1187: the minted episode the first launch's siblings run in
+            first_ep = spawn.eps[0]  # the minted episode the first launch's siblings run in
             second["first_before"] = _records(first_ep)
             before = _names(episodes_root)
             spawn2 = _Spawn(root=episodes_root)
@@ -1118,7 +1057,7 @@ def test_conc_36_second_launch_while_the_first_is_running(tmp_path, episodes_roo
 @pytest.mark.parametrize("failures", [2, 1])
 def test_conc_33_preflight_worlds_finish_out_of_order(tmp_path, monkeypatch, episodes_root,
                                                       failures):
-    """no sibling starts until pre-flight has judged every world; the outcome is recorded once from all results, and siblings start only for servable worlds …"""
+    """No sibling starts before every world is judged; the outcome is written once from all of them."""
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
     ob = _passing()
@@ -1177,7 +1116,7 @@ def test_conc_34_preflight_worlds_forge_for_one_original_call(tmp_path):
 
 
 def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_path):
-    """a sibling re-issuing a call pre-flight served changed spends a fresh oracle turn and verifier pass, reuses the frozen row, records an `oracle` …"""
+    """A fresh, verified turn reuses the frozen row and is recorded `oracle`; the repeat is byte-identical."""
     est = S.estate(tmp_path)
     oracle = _by_world(_forging_b(), _passing())
     run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
@@ -1196,8 +1135,8 @@ def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_pat
     assert sib.submissions() == 1, "one fresh turn, then the stored answer"
     assert not sib.overrun
     assert sv.answered >= 1
-    assert first == again, "a repeat is the sibling's own stored answer, byte for byte (S5)"
-    assert S.oracle_rows(run.ep, "b", "forged") == frozen, "the frozen row is reused (S4)"
+    assert first == again, "a repeat is the sibling's own stored answer, byte for byte"
+    assert S.oracle_rows(run.ep, "b", "forged") == frozen, "the frozen row is reused"
     rows = S.ledger_rows(run.ep, "b")
     assert rows
     assert rows[0]["source"] == S.ORACLE_DECISION
@@ -1205,7 +1144,8 @@ def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_pat
 
 def test_1224_outcome_record_is_written_once_and_each_world_record_has_one_writer(
         tmp_path, episodes_root):
-    """pre-flight writes the outcome record once, before any sibling, never rewritten; each world record holds one reason from one writer; two launches give …"""
+    """The outcome is written once, before any start; a world record comes from the sibling
+    (unservable) or the launcher (did not finish); a relaunch gets an episode of its own."""
     replay = S.sym(S.CLI, "preflight_replay")
     est = S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls())

@@ -1,4 +1,4 @@
-"""Held-out scoring reads the index of opaque run IDs (#1187); there is no launch command (#1279 rev 4, A10)."""
+"""Held-out scoring reads the index of opaque run ids (#1187); there is no launch command."""
 from __future__ import annotations
 
 
@@ -19,10 +19,10 @@ from itertools import takewhile
 
 SLUG = "m05-lsass-access"
 OTHER = "b01-benign-logon"
-#: A tenant id scoring must refuse to take (§7 J50).
+#: A tenant id scoring must refuse to take.
 LAUNCH_TENANT = fixture_uuid("tenant:playground")
 INDEX_NAME = "held-out-index.jsonl"
-#: The failure bucket an absent or recordless indexed run lands in (recheck X2, quoted).
+#: The failure bucket an absent or recordless indexed run lands in.
 NO_RUN_RECORD = "launched, no run record"
 # Inputs on the real filesystem
 
@@ -52,27 +52,13 @@ def _run(runs: Path, run_id: str | None = None, *, says: str | None,
 
 
 def _index(path: Path, *rows: tuple[str, str]) -> Path:
-    """F holding `rows` (`(slug, run_id)`, oldest first) as the contract pins it: JSON Lines."""
+    """The index holding `rows` (`(slug, run_id)`, oldest first) as JSON Lines."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps({"slug": slug, "run_id": run_id}) + "\n"
                             for slug, run_id in rows), encoding="utf-8")
     return path
 
 
-def _rows(text: str | None) -> list[tuple[str, str]]:
-    """F's rows as `(slug, run_id)`, read by the TEST (plain JSON Lines). #1108 P4 OD10: F
-    also records the knowledge commit resolved at its creation, in a shape not designed; a
-    line that carries no `slug` is that record, not a launch row, and is skipped."""
-    if not text:
-        return []
-    out = []
-    for line in text.splitlines():
-        if line.strip():
-            row = json.loads(line)
-            if "slug" not in row:
-                continue
-            out.append((row["slug"], row["run_id"]))
-    return out
 # The CLI, driven through `held_out.main`
 
 @dataclass
@@ -161,7 +147,8 @@ def _assert_refused(res: Outcome, index: Path, what: str) -> None:
 
 @pytest.fixture
 def scoring(tmp_path: Path) -> tuple[Path, Path, Path]:
-    """`(runs dir, index path, ops folder)`: the runs dir scoring is handed, and F in the operator's own folder beside it (outside the runs dir)."""
+    """`(runs dir, index path, ops folder)`: the runs dir scoring is handed, and the index in the
+    operator's own folder beside it (outside the runs dir)."""
     runs = tmp_path / "runs"
     runs.mkdir()
     ops = tmp_path / "ops"
@@ -210,8 +197,8 @@ def test_a_row_naming_an_absent_or_recordless_run_scores_wrong_not_not_run(tmp_p
 
 
 def test_an_index_from_the_old_launcher_scores_past_its_knowledge_pin_line(tmp_path, scoring):
-    """An index the #1108 P4 launcher wrote opens with a `{"knowledge_commit": …}` line; scoring
-    skips that line and scores the rows after it."""
+    """An old launcher's index opens with a `{"knowledge_commit": …}` line; scoring skips it and
+    scores the rows after it."""
     runs, index, _ = scoring
     fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "malicious"})
     run = _run(runs, says="malicious")
@@ -254,7 +241,7 @@ def test_the_folder_name_matcher_is_gone():
     from evaluations import held_out
 
     assert not hasattr(held_out, "_claimed_slug"), "the folder-name matcher is still defined"
-# Scoring: where F may not be, and what scoring never reads (recheck X3, J50)
+# Scoring: where the index may not be, and what scoring never reads
 
 @pytest.mark.parametrize("place", ["runs-root", "run-folder", "linked-index-parent", "linked-runs-root"])
 def test_scoring_refuses_an_index_inside_its_runs_dir(tmp_path, scoring, place):

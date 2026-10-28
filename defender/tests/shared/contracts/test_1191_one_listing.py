@@ -15,8 +15,8 @@ from defender.tests.storage import test_1191_lint_scopes_fail_loud as T
 from defender.tests.support.shared.contracts._by_path import DEFENDER, LINT_DIR, import_lint_lib, load_lint_gate
 from defender.tests.support.shared.contracts._repo import seed_repo
 
-#: Lints the amendment names as non-obligations — not file listings in its sense. Exempt from
-#: the census by their path under `tooling/lint/`; adding one is a deliberate edit.
+#: Lints that list through an external tool by design, exempt from the census by their path
+#: under `tooling/lint/`; adding one is a deliberate edit.
 NON_OBLIGATIONS: dict[str, str] = {
     "lint_stale_refs.py": "lists through `grep` with EXCLUDED_GREP_DIRS (amendment 2)",
     "lint_vulture.py": "an external tool with --exclude (amendment 2)",
@@ -26,7 +26,7 @@ NON_OBLIGATIONS: dict[str, str] = {
 #: `tooling/lint/`, not any module of that name below it).
 LISTING_OWNER = "_astlib.py"
 
-#: The 24 lints amendment 2's census names ("Corrected premise") as listing their own files.
+#: The 24 lints the census found listing their own files.
 CENSUS_24 = tuple(f"lint_{stem}" for stem in (
     "borrowed_vocabulary", "list_as_key_set", "duplicate_helpers", "hand_rolled_frontmatter",
     "raw_yaml", "ci_hygiene", "shared_oracle", "hand_rolled_name_resolution", "unpinned_text_io",
@@ -42,7 +42,7 @@ LATER_LISTERS = ("lint_unbounded_whole_read",)
 #: Every lint the behaviour checks cover.
 LISTERS = CENSUS_24 + LATER_LISTERS
 
-#: The five scoped lints of amendment 1, which already list through `source_files`.
+#: The five scoped lints, which already list through `source_files`.
 SCOPED_5 = (T.TREE_READ, T.RUN_RECORDS, T.TREE_WRITE, T.STAGE_FRAMES, T.ENV_READS)
 
 #: Calls that walk a tree, by their final name wherever they resolve — `os.walk`, `os.fwalk`,
@@ -326,7 +326,7 @@ def test_o8_the_census_sees_a_walk_planted_in_a_copied_lint(tmp_path):
     walk = "\n\ndef _planted_walk_1191(root):\n    return sorted(root.rglob('*.py'))\n"
     target = lint_dir / "lint_stage_prompt_frames.py"
     before = [w for w in _census(lint_dir) if w.startswith(f"{target.name}:")]
-    assert not before, f"precondition: {target.name} walks nothing today: {before}"
+    assert not before, f"precondition: {target.name} already walks: {before}"
     with target.open("a", encoding="utf-8") as fh:
         fh.write(walk)
     T._write(lint_dir / "sub_1191" / "helper_1191.py", walk)
@@ -462,8 +462,7 @@ PLANTS: dict[str, Plant] = {
 
 
 def test_every_census_lint_has_a_plant():
-    """The behaviour below covers ALL of the amendment's 24 lints (and the later listers), not
-    a sample."""
+    """The behaviour tests below cover ALL the listing lints, not a sample."""
     assert sorted(PLANTS) == sorted(LISTERS)
 
 
@@ -539,7 +538,7 @@ UNDECODABLE = {
 
 
 #: The mini repo outside git (the walk), or a git repo where the item is untracked and not
-#: ignored (amendment 3's git path lists it).
+#: ignored (the git path lists it).
 WHERE_LISTED = {"walk": None, "git": IGNORES}
 
 
@@ -576,7 +575,7 @@ def test_o9_each_listing_lint_as_ci_runs_it_is_blind_on_an_unreadable_directory(
               why=f"{stem}: an unreadable directory did not blind the scan")
 
 
-# --- amendment 3: what git would put in the tree ---------------------------------------
+# --- What git would put in the tree ----------------------------------------------------
 
 
 def _quiet_about(result: subprocess.CompletedProcess[str], *markers: str) -> list[str]:
@@ -714,7 +713,7 @@ def test_o18_a_lint_run_makes_one_full_listing_of_its_root(tmp_path, stem):
     assert len(checks) <= 1, f"{stem}: {len(checks)} `git check-ignore` runs: {checks}"
 
 
-# --- amendment 3, the adversary's holes: what IS in the tree, and git failing ----------
+# --- What IS in the tree, and git failing ----------------------------------------------
 
 
 def test_o5_ci_hygiene_never_reads_an_ignored_top_level_json(tmp_path):
@@ -773,8 +772,8 @@ QUOTED_PLANT = 'pkg_1191/q"uo\\te\tab_1191.py'
 @pytest.mark.parametrize("stem", LISTERS)
 def test_o5_each_listing_lint_as_ci_runs_it_reports_a_plant_git_would_quote(tmp_path, stem,
                                                                             case):
-    """O5 restated, all lints as CI runs them, in a git repo: a plant whose name git would
-    C-quote is in the tree, tracked or untracked, so reported (exit 1, named as it is)."""
+    """In a git repo, a plant whose name git would C-quote, tracked or untracked, is reported
+    (exit 1) named as it is."""
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
     T._write(root / QUOTED_PLANT, PLANTS[stem].source())
@@ -832,7 +831,7 @@ def test_o5_run_layout_imports_prunes_nested_venv_and_hidden_dirs_in_a_git_repo(
     assert not shown, f"pruned dirs were scanned on the git path: {shown}\n{T._said(result)}"
 
 
-# --- five lints through their in-process doors -------------------------------------------
+# --- Lints through their in-process doors (the as-CI-runs-it tests above cover the rest) --
 
 
 def _gate_in_process(stem: str) -> Callable[[Path, Path, pytest.CaptureFixture[str]], str]:
@@ -842,13 +841,6 @@ def _gate_in_process(stem: str) -> Callable[[Path, Path, pytest.CaptureFixture[s
         rc = lint.main([], scope=defender_root, baseline_path=repo / "baseline_1191.json")
         captured = capsys.readouterr()
         return f"rc={rc}\n{captured.out}\n{captured.err}"
-    return run
-
-
-def _gate_as_copy(stem: str) -> Callable[[Path, Path, pytest.CaptureFixture[str]], str]:
-    """A lint with no root argument: its mini-repo copy run as CI runs it."""
-    def run(repo: Path, defender_root: Path, capsys: pytest.CaptureFixture[str]) -> str:
-        return T._said(_as_ci_runs_it(repo, stem))
     return run
 
 
@@ -865,8 +857,6 @@ SAMPLES: dict[str, Callable[[Path, Path, pytest.CaptureFixture[str]], str]] = {
     "lint_raw_yaml": _gate_in_process("lint_raw_yaml"),
     "lint_unsafe_jsonl_io": _gate_in_process("lint_unsafe_jsonl_io"),
     "lint_unpinned_text_io": _gate_in_process("lint_unpinned_text_io"),
-    "lint_monkeypatch": _gate_as_copy("lint_monkeypatch"),
-    "lint_raw_git_subprocess": _gate_as_copy("lint_raw_git_subprocess"),
     "lint_run_layout_imports": _layout_scan,
 }
 

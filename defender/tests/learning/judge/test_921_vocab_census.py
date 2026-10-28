@@ -1,4 +1,4 @@
-"""#921 — the outcome vocabulary, the 08-16 fixture, and the corrected write census."""
+"""#921 — the judge's wire log, which holds the framed prompt, is unreadable from a box."""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -15,13 +15,7 @@ from defender.tests.support.learning.core import _state1135
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def _vocab():
-    return J.mod("_vocab")
 
 
 def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(tmp_path):

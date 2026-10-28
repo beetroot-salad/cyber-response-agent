@@ -1,31 +1,12 @@
-"""#1108 P4 slice S-D — A-ID (the drain logs in to OpenBao itself, AppRole), O8's drain half (issuer
-login material only in host-side delivery processes: never in a box, a run's environment or any
-env var; the client config passed by path and lying under no box mount source), and O9's
-"missing issuer config refuses before any model call".
+"""#1108 P4: the drain logs in to OpenBao itself with AppRole (A-ID); issuer login material stays
+in host-side delivery processes, never in a box or an environment variable, and the client config
+lies under no box mount source (O8); a tenant P3's `open` refuses is the stage's refusal (O9).
 
-The login is one symbol (orchestrator decision OD4):
-    defender.learning.author.version_control.issuer_login(tenant, *, issuer_config: Path)
-        -> ForgejoIdentity
-It reads the issuer client config FILE and the tenant row's `forge` binding (`{origin, audience,
-issuer_role}`, written here with S0's `bind_forge`) and logs in.
-
-ASSUMED SEAM (an extension of OD4, reported): `issuer_login(..., transport=None)` — the
-`httpx` transport its OpenBao client sends through (production: none, a real TLS connection
-trusting the config's CA). The drain forwards it as `author_drain(..., issuer_transport=)`.
-
-ASSUMED SHAPE (the design fixes only the folder `<repo>/playground-issuer/client/` and the
-contents "issuer URL, CA cert, AppRole role_id/secret_id"): a JSON file
-    {"issuer": "https://<host>[:port]", "ca_cert": "<path to a PEM>",
-     "role_id": "...", "secret_id": "..."}
-named `issuer.json` here (S-F's gitignore probe spells the same name). `issuer` is OpenBao's
-address; the identity endpoint is `<issuer>/v1/identity/oidc` (OpenBao's own path).
-
-The issuer fake: P3's `VaultHTTP` answers only the identity-token GET and accepts any caller.
-`AppRoleVault` below adds OpenBao's AppRole login as the API documents it (`POST
-/v1/auth/approle/login` with `{role_id, secret_id}` -> `{auth: {client_token}}`; a bad pair is
-`400`) and requires that client token (`X-Vault-Token`) on the identity-token request (else
-`403`). It records every request; it decides nothing about the drain. S0/P3 are asked to adopt
-it next to `VaultHTTP`.
+`version_control.issuer_login(tenant, *, issuer_config, transport=)` reads the issuer client config
+file and the tenant row's `forge` binding, then logs in; `transport` (the drain's
+`issuer_transport=`) is the httpx transport its OpenBao client sends through. `AppRoleVault` adds
+OpenBao's AppRole login to P3's issuer fake: `POST /v1/auth/approle/login` returns a client token
+(`400` on a bad pair) that the identity-token request must carry (else `403`).
 """
 from __future__ import annotations
 
@@ -80,10 +61,9 @@ def _login(t: Any, config: Path, vault: AppRoleVault) -> Any:
 
 
 def test_a_id_issuer_login_logs_in_with_approle_and_mints_the_bound_tenant_token(p4_tenant, tmp_path):
-    """A-ID: the login sends the config file's AppRole `role_id`/`secret_id` to OpenBao's login
-    endpoint, then asks the identity endpoint for the binding's role with the client token it got;
-    the identity it returns is bound to this tenant, the binding's audience and role, and hands
-    back the token the issuer minted."""
+    """The login sends the config's `role_id`/`secret_id` to OpenBao, then asks for the binding's
+    role with the client token it got; the identity is bound to this tenant and the binding's
+    audience and role, and yields the minted token."""
     t = p4_tenant
     binding = bind_forge(t)
     vault = AppRoleVault(t.tenant_id)
@@ -102,9 +82,8 @@ def test_a_id_issuer_login_logs_in_with_approle_and_mints_the_bound_tenant_token
 
 
 def test_a_id_a_refused_approle_login_is_a_refusal_that_never_echoes_the_secret(p4_tenant, tmp_path):
-    """A-ID: a `secret_id` OpenBao refuses is a refusal (an auth error), never a token, and its
-    text carries neither the `secret_id` nor the `role_id`. Positive control: the same login
-    with the right pair succeeds (previous case)."""
+    """A refused `secret_id` is an auth refusal, never a token, and its text carries neither id.
+    Control: the right pair logs in (previous case)."""
     t = p4_tenant
     bind_forge(t)
     vault = AppRoleVault(t.tenant_id)
@@ -122,9 +101,8 @@ def test_a_id_a_refused_approle_login_is_a_refusal_that_never_echoes_the_secret(
 @pytest.mark.parametrize("missing", ["config", "binding"])
 def test_o9_a_missing_issuer_config_or_forge_binding_refuses_the_login_before_any_request(
         p4_tenant, tmp_path, missing):
-    """O9/O-STALE misconfiguration: no issuer client config file, or no forge binding in the
-    tenant row, is decidable locally: the login refuses before any request reaches the issuer,
-    naming what is missing. (Control: the first case logs in over the same fake.)"""
+    """A missing config file or forge binding is decidable locally: the login refuses before any
+    request reaches the issuer, naming what is missing."""
     t = p4_tenant
     vault = AppRoleVault(t.tenant_id)
     config = write_issuer_config(tmp_path / "client")
@@ -149,14 +127,10 @@ def test_o9_a_missing_issuer_config_or_forge_binding_refuses_the_login_before_an
 
 def test_a_id_o8_the_drain_logs_in_from_the_config_path_and_hands_no_login_material_to_the_box(
         p4_tenant, tmp_path, monkeypatch, caplog):
-    """A-ID + O8 (drain half): given only the issuer client config's PATH (no identity), the
-    drain logs in with AppRole itself, and its push and PR reach the tenant origin with the
-    minted token. The login material never leaves the host process: the batch box's request
-    carries no `role_id`, `secret_id`, client token or forge token in its environment, mounts
-    no folder holding the config file, and no environment variable of the drain process holds
-    any of them while the model step runs. Positive controls on the same channels: the box's
-    environment does carry `DEFENDER_AGENT_DIR`; the containment check flags a config under the
-    code mount; the env scan sees a variable set the same way."""
+    """Given only the config's path, the drain logs in with AppRole itself and pushes and opens
+    its PR with the minted token. No login material leaves the host process: none is in the box
+    request's environment or under its mounts, or in the drain's environment while the model
+    step runs. Each check has a positive control on the same channel."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     t = p4_tenant
     bind_forge(t)
@@ -200,7 +174,7 @@ def test_a_id_o8_the_drain_logs_in_from_the_config_path_and_hands_no_login_mater
 
 
 # ---------------------------------------------------------------------------------------------
-# O9: P3 `open()` refusals x both drains (R-L7)
+# O9: P3 `open()` refusals x both drains
 # ---------------------------------------------------------------------------------------------
 
 #: Each refusal P3's `TenantDelivery.open` (or the login before it) makes on a tenant that cannot
@@ -289,15 +263,10 @@ def _tick(drain: str, t: Any, tmp_path: Path, config: Path, vault: AppRoleVault)
 @pytest.mark.parametrize("fault", list(O9_REFUSALS))
 def test_o9_a_tenant_open_refuses_is_the_stages_one_line_refusal_and_runs_nothing(
         p4_tenant, tmp_path, monkeypatch, caplog, drain, fault):
-    """O9 (R-L7), both drains: each refusal P3's open makes — no issuer client config file, no
-    forge binding in the tenant row, an unversioned tenant clone, a non-network origin, an
-    unprotected `main` — is the stage runner's refusal: exit 2 with ONE critical line naming the
-    cause and no traceback; no box starts, the lane's work steps (curator; lead author and
-    pitfalls) are handed nothing, no draft is left under `<T>/drafts/`, no branch reaches the
-    origin, and the queued row stays where it was (the lead lane's at the top of the queue, not
-    in flight). A refusal decidable locally (config, binding) reaches neither the issuer nor the
-    forge. Restores the stage-refusal shape `test_1105_pr2_review_fixes_2`'s deleted no-data-root
-    case pinned. Positive control: the next case, same seams, nothing broken."""
+    """Each refusal P3's open makes is the stage runner's refusal on both drains: exit 2 with one
+    critical line naming the cause and no traceback, no box, nothing handed to the lane's steps,
+    no draft, no branch, and the queued row left in place. A locally decidable refusal (config,
+    binding) reaches neither the issuer nor the forge. Control: the next case."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
@@ -332,9 +301,8 @@ def test_o9_a_tenant_open_refuses_is_the_stages_one_line_refusal_and_runs_nothin
 @pytest.mark.parametrize("drain", ["author", "lead"])
 def test_control_o9_a_deliverable_tenant_logs_in_and_serves_the_row(
         p4_tenant, tmp_path, monkeypatch, caplog, drain):
-    """Positive control for the O9 matrix: the same scene and seams with nothing broken — the
-    drain logs in with AppRole, the work step is handed the row, and (author lane) a `lessons/`
-    branch and its PR reach the tenant forge. The matrix's observers see each channel here."""
+    """Positive control for the O9 matrix, same scene and seams with nothing broken: the drain
+    logs in, its work step is handed the row, and the tick delivers."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
@@ -357,9 +325,8 @@ def test_control_o9_a_deliverable_tenant_logs_in_and_serves_the_row(
 
 
 def test_o8_the_dev_issuer_client_config_lies_under_no_drain_box_mount_source(p4_tenant):
-    """O8: the dev issuer client config folder (`<repo>/playground-issuer/client/`) lies under no
-    mount source of a drain box (P3's real `Batch.box_request()` over this checkout's
-    `defender/`): neither the code mount nor the draft. Positive control: the same check flags a
+    """The dev issuer client config folder lies under no mount source of a drain box (P3's real
+    `Batch.box_request()`), neither the code mount nor the draft. Control: the check flags a
     path under the code mount."""
     t = p4_tenant
     batch = t.open_delivery().start_batch("o8-mounts", lanes=("lessons",))

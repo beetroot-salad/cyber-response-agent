@@ -45,14 +45,14 @@ T0_Z = "2026-05-25T15:30:45Z"
 
 REAL_ADAPTERS = PATHS.adapters_dir
 
-#: #1255 C4: the branch point `recorded_branch` forks at arrives at this reading of its
-#: source's run clock (`_1255_clock.record_source`'s script: 10 s, then 600 s of MAIN work).
+#: The source's run-clock reading at the branch point `recorded_branch` forks at
+#: (`_1255_clock.record_source`'s script: 10 s, then 600 s of MAIN work).
 R = C.BRANCH_READING
 
 
 def _gather_grant() -> VerbGrant:
-    """The committed playground tenant's gather grant (#1106: grants are per run, projected from
-    the run's tenant's table — there is no process-level `GATHER_DEF.verb_grant` any more)."""
+    """The committed playground tenant's gather grant (grants are per run, projected from the
+    run's tenant's table)."""
     return _tenants1106.fixture_grants().gather
 
 #: What the fake `docker` records, under the run dir the test reads.
@@ -184,7 +184,7 @@ CLOCK_WORLD_ID = T.fixture_world_id("w1")
 
 
 def primed_ledger(tmp_path: Path, *, world_id: str = CLOCK_WORLD_ID) -> Ledger:
-    """A ledger over an explicit world UUID, with the primed capture beside it that #947 makes REQUIRED."""
+    """A ledger over an explicit world UUID, beside the (empty) primed capture a ledger requires."""
     served = tmp_path / SERVED_DIRNAME
     served.mkdir(parents=True, exist_ok=True)
     base = served / BASE_FILENAME
@@ -214,8 +214,8 @@ def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
     return VerbContext(
         defender_dir=defender_dir if defender_dir is not None else tmp_path / "defender",
         run_dir=run_dir,
-        # #1107: the run's tenant record — a fixture tenant whose every system names the
-        # docker context `spec-947`, unless a caller hands its own.
+        # A fixture tenant whose every system names the docker context `spec-947`, unless a
+        # caller hands its own.
         tenant=tenant,
         env={
             "PATH": str(fake_docker(tmp_path)),
@@ -264,13 +264,10 @@ def range_filter(body: dict) -> dict | None:
 
 
 def pass_through() -> dict[str, Any]:
-    """`build_registry`'s oracle-side seam (`oracle=`, `verifier=`: models) for a world with no
-    facts. Under #1255 D3 (rev 4) such a world — a control world, like every `World` stub here —
-    answers each call through one oracle turn, so a registry built over production's lazy oracle
-    model would reach a provider. This double serves the base answer UNCHANGED (the oracle's own
-    `BASE_HANDLE` spelling, with an empty claim) and the verifier passes it; by D5 (rev 5) a
-    control-world turn that leaves the base unchanged is still recorded `passthrough`. It
-    decides nothing a test here asserts: what is served stays the real base."""
+    """`build_registry`'s oracle-side seam (`oracle=`, `verifier=`) for a world with no facts.
+    Such a world answers each call through one oracle turn, so production's lazy oracle model
+    would reach a provider. This double serves the base UNCHANGED with an empty claim (still
+    recorded `passthrough`); it decides nothing a test here asserts."""
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
     base = S.sym("learning.branch.estate.oracle", "BASE_HANDLE")
@@ -339,10 +336,9 @@ def test_a_registry_served_host_state_capture_is_never_stamped_with_the_cut_off(
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(payload.get("captured_at"))), (
         f"the served capture carries no `Z` stamp at all, so nothing below is observed: {payload}")
     assert payload["captured_at"] != T0_Z, (
-        "the served capture is stamped with the world's cut-off T0 — a visible time frozen at "
-        "the fork while every other time the model sees advances (#1255)")
+        "the served capture is stamped with the world's cut-off T0, not the run clock")
     assert before <= payload["captured_at"] <= _clock.z_seconds(dt.datetime.now(dt.UTC)), (
-        "a capture served outside any run is not stamped with the wall clock (C4)")
+        "a capture served outside any run is not stamped with the wall clock")
     assert json.loads(served_rows(reg.ledger)[-1]["payload_text"])["captured_at"] == (
         payload["captured_at"]), "the ledger recorded a different moment from the one served"
 
@@ -399,8 +395,8 @@ def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
         ClocklessContext(defender_dir=tmp_path, run_dir=run_dir, env={}), host="canary-1")
 
     assert payload["host"] == "canary-1"
-    # #1224: the live base read is kept in the world's oracle store, never as a ledger row (M16),
-    # so the one row is the call served to the investigator.
+    # The live base read is kept in the world's oracle store, never as a ledger row, so the one
+    # row is the call served to the investigator.
     assert [r["source"] for r in served_rows(reg.ledger)] == [PASSTHROUGH]
 
 
@@ -447,9 +443,9 @@ def test_no_host_state_capture_is_stamped_with_the_cut_off(tmp_path, verb, param
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(payload.get("captured_at"))), (
         f"{verb} carries no `Z` capture stamp: {payload}")
     assert payload["captured_at"] != T0_Z, (
-        f"{verb}'s capture is stamped with the world's cut-off T0 (#1255: the run clock stamps)")
+        f"{verb}'s capture is stamped with the world's cut-off T0, not the run clock")
     assert before <= payload["captured_at"] <= _clock.z_seconds(dt.datetime.now(dt.UTC)), (
-        f"{verb}'s capture outside any run is not stamped with the wall clock (C4)")
+        f"{verb}'s capture outside any run is not stamped with the wall clock")
 
 
 @pytest.mark.parametrize(("verb", "params"), STAMPING_VERBS)
@@ -508,7 +504,8 @@ def test_a_search_that_names_its_own_end_is_never_rewritten(tmp_path, start, end
 
 @pytest.mark.parametrize("verb", ["query", "alerts"])
 def test_a_branched_search_bounds_its_hits_at_the_cluster_and_keeps_its_window(tmp_path, verb):
-    """A branched search carries the clock as a `post_filter`, beside a `query` window left as the caller spelled it (R-10=A) — so the cluster drops..."""
+    """A branched search carries the clock as a `post_filter` beside the caller's own `query`
+    window, so the cluster drops hits past T0 without the window being rewritten."""
     ctx = elastic_ctx(tmp_path, as_of=T0)
 
     getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login",
@@ -522,7 +519,8 @@ def test_a_branched_search_bounds_its_hits_at_the_cluster_and_keeps_its_window(t
 
 
 def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path):
-    """Two searches in a row through one context give the same window, so the fill went into a FRESH local rather than into anything the caller (or the..."""
+    """The window fill goes into a fresh local: a second search through the same context is
+    filled from T0 again, not from anything the first one left behind."""
     ctx = elastic_ctx(tmp_path, as_of=T0)
 
     elastic_adapter.query(ctx, native_query="a")
@@ -579,7 +577,7 @@ def test_the_models_own_time_predicate_is_left_exactly_as_written(tmp_path):
 
 
 def test_the_bound_reaches_the_wire_and_stays_out_of_the_evidence(tmp_path):
-    """The BOUNDED query is what Elasticsearch runs"""
+    """The BOUNDED query is what Elasticsearch runs; the payload records the query as asked."""
     ctx = elastic_ctx(tmp_path, as_of=T0)
     asked = "FROM logs-zeek.ssh-*\n| LIMIT 5"
 
@@ -632,8 +630,7 @@ def test_the_branch_spec_carries_the_moment_it_forks_at(tmp_path):
     names = [f.name for f in dataclasses.fields(branch.BranchSpec)]
     as_of = next(f for f in dataclasses.fields(branch.BranchSpec) if f.name == "as_of")
 
-    # #1255 (D1): the continuation prompt is no coordinate of a branch — its removal is
-    # slice A's demand (`test_920_branch_seam`); this arm keeps the two that remain in place.
+    # The two remaining coordinates keep their place (the continuation prompt is gone, #1255).
     assert names[:2] == ["source_run_dir", "branch_message_id"], (
         f"the two coordinates moved: {names}")
     assert as_of.default is dataclasses.MISSING, "a resume can be spelled without a moment"
@@ -644,11 +641,9 @@ def test_the_branch_spec_carries_the_moment_it_forks_at(tmp_path):
 
 @pytest.fixture
 def recorded_branch(tmp_path, monkeypatch):
-    """A branch point #1255 admits: a source RECORDED through `run.main` (so it carries what a
-    fork needs, N4) and its tool-calling MAIN response (D1), with the source's store held open
-    for the test. `_branch_947.legal_source` writes its turns straight into a store and branches
-    at a tool RETURN — after #1255 it is a pre-change source that every launch refuses, so a
-    positive arm over it would go red for N4's reason instead of this file's.
+    """A branch point #1255 admits: a source RECORDED through `run.main` (so it carries the fork
+    snapshot) and its tool-calling MAIN response, with the source's store held open. Not
+    `_branch_947.legal_source`: that source has no snapshot, so every launch refuses it.
 
     Yields `(store, source run folder, branch message id, opened source run)`."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")

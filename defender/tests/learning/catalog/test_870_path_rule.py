@@ -1,7 +1,6 @@
-"""#870 M7 — one literal allowance in the path rule, and everything it must not relax.
+"""#870: one literal allowance in the path rule, and everything it must not relax.
 
-#1108 P4 (O7, OD6): paths are the batch draft's `agent/skills/...`; the literal is the tenant's
-pitfalls add-on. ASSUMED (S-H): the rules keep their `(xy, path)` shape, `xy` derived from the claim."""
+Paths are the batch draft's `agent/skills/...`; the literal is the tenant's pitfalls add-on."""
 from __future__ import annotations
 
 import unicodedata
@@ -21,9 +20,7 @@ from defender.tests.support.learning.core._declared870 import (
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 DECLARED = frozenset({"elastic", "cmdb"})
-#: #1108 P4 (OD6): repo-relative spellings are `agent/...`. The one reducer literal the pitfalls
-#: lane may write is the tenant's add-on (carried decision, A1 path), not the product page
-#: `_declared870.REDUCER_REL` still names.
+#: The one reducer literal the pitfalls lane may write: the tenant's add-on, spelled `agent/...`.
 REDUCER_REL = "agent/skills/gather/defender-sql.pitfalls.md"
 ELASTIC_MD = "agent/skills/elastic/execution.md"
 
@@ -54,8 +51,7 @@ def test_the_reducer_surface_cannot_be_deleted():
                     pitfalls_curator._pitfalls_path_rule(xy, path, systems=DECLARED)
                 message = str(exc.value)
                 assert "deleted" in message, (
-                    f"{path} at {xy!r} was refused for the wrong reason ({message}) — the "
-                    f"allowance returned early and U4 was not inherited"
+                    f"{path} at {xy!r} was refused for the wrong reason: {message}"
                 )
                 assert "non-execution.md" not in message
             else:

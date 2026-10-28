@@ -9,11 +9,6 @@ from defender.systems import _scaffold_rules
 from defender.knowledge._corpus import iter_query_templates, read_query_template
 
 _DEFENDER = Path(__file__).resolve().parents[2]
-_CATALOG = _DEFENDER / "skills" / "gather" / "queries"
-_ADAPTERS = _DEFENDER / "integrations"
-_ALL_SEVEN = (
-    "elastic", "identity", "cmdb", "ticket", "change-mgmt", "threat-intel", "host-state",
-)
 
 
 @pytest.fixture(scope="module")
@@ -43,7 +38,8 @@ def test_a_well_formed_template_has_no_findings(tmp_path, resolver):
 
 
 def test_a_template_declaring_no_verb_is_undecidable_not_exempt(tmp_path, resolver):
-    """The rule is per-VERB — the engine exemption, the param roster and the body-substitution"""
+    """The rule is per-verb: without one, the engine exemption, param roster and body substitutions
+    cannot be decided."""
     text = _GOOD.replace("verb: get-host\nparams: [host]\n---", "---", 1)
     assert _codes(text, "cmdb", tmp_path, resolver) == ["no-verb"]
 
@@ -95,7 +91,8 @@ def test_a_wrapper_only_param_is_not_bindable_from_a_template(tmp_path, resolver
 
 
 def test_a_wrapper_only_param_cannot_be_smuggled_in_as_a_body_substitution(tmp_path, resolver):
-    """`body_substitutions:` is an UNCHECKED escape from the placeholder rule — it names what"""
+    """`body_substitutions:` is an unchecked escape from the placeholder rule, so a wrapper-only
+    param must not ride it."""
     text = (
         "---\nid: ticket.probe\nstatus: established\nverb: get-ticket\n"
         "params: [key]\nbody_substitutions: [require_closed]\n---\n\n"
@@ -117,7 +114,7 @@ def test_a_params_mapping_is_read_as_a_declaration_not_as_nothing(tmp_path, reso
 
 
 def test_a_yaml_boolean_param_entry_is_read_the_same_in_every_spelling(tmp_path, resolver):
-    """`params: [on]` is a BOOLEAN to YAML, not the name the author typed — and the reader has"""
+    """`params: [on]` is a boolean to YAML, not the name the author typed; every spelling reads as `on`."""
     for spelling in (
         "params: [on]", "params: on", "params:\n  on: a note", "params:\n  - on: a note",
     ):
@@ -174,10 +171,8 @@ def test_a_covers_entry_must_be_an_identity_of_the_system_it_is_filed_under(tmp_
 
 
 def _catalogs() -> list[Path]:
-    """#1108 P4 (O1, O-U5): the catalog is tenant knowledge and the product tree ships none.
-    The catalogs this repo commits are each tenant folder's (`knowledge/<name>/agent/...`), plus
-    the catalog the product shipped before P4, kept byte for byte as a test fixture (it is the
-    corpus that carries a `_draft/` template)."""
+    """The committed catalogs: each tenant folder's (`knowledge/<name>/agent/...`) plus the pre-P4
+    product catalog fixture, the corpus that carries a `_draft/` template."""
     from defender.tests.support.shared._pre_p4_shipped import CATALOG as SHIPPED_CATALOG
 
     tenants = sorted(p for p in (_DEFENDER.parent / "knowledge").glob(
@@ -187,8 +182,7 @@ def _catalogs() -> list[Path]:
 
 
 def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):
-    """The scope half. `validate_scaffold` excluded `_draft/`; this does not, which is the only
-    reason the lead lane's output is inside any check at all."""
+    """Drafts are in scope: this sweep is what puts the lead lane's output under any check."""
     offenders = []
     drafts = 0
     for t in (t for catalog in _catalogs() for t in iter_query_templates(catalog)):
@@ -199,8 +193,7 @@ def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):
         ]
     assert offenders == [], offenders
     assert drafts, (
-        "the corpus carries no `_draft/` template, so this sweep cannot show that drafts are in "
-        "scope — the assertion above would hold identically under the excluded-drafts rule"
+        "the corpus carries no `_draft/` template, so this sweep cannot show drafts are in scope"
     )
 
 
@@ -211,7 +204,8 @@ def test_a_skill_md_whose_frontmatter_names_another_system_is_refused(tmp_path):
 
 
 def test_the_resolver_answers_about_the_tree_it_was_handed(tmp_path):
-    """The property the loop's commit gate stands on: the drain runs it from the main checkout"""
+    """The loop's commit gate stands on this: the drain runs the resolver from the main checkout
+    over another tree."""
     adapters = tmp_path / "integrations"
     adapters.mkdir(parents=True)
     (adapters / "cmdb_adapter.py").write_text(

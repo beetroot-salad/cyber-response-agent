@@ -51,8 +51,7 @@ def test_unfenced_plan_is_refused_against_its_real_baseline() -> None:
 
 
 def test_fenced_plan_is_accepted_and_actually_parses() -> None:
-    """LIVENESS CONTROL. Same rows, one fence, and the hypothesis reaches the companion —
-    which is the point: acceptance alone would also be satisfied by parsing nothing."""
+    """Liveness control: acceptance alone would also hold if nothing parsed."""
     assert _surface_errors(_FENCED_PLAN, _ORIENT_ONLY) == []
     companion, _ = parse_dense_companion(_FENCED_PLAN)
     assert sorted(_walkers.all_hypotheses(companion)) == ["h-001"]
@@ -95,8 +94,7 @@ def test_a_model_cut_off_mid_block_is_not_refused() -> None:
 
 
 def test_the_continuation_that_closes_a_truncated_block_lands() -> None:
-    """LIVENESS CONTROL for the exemption: the append that finishes the block is accepted
-    too, so the exemption buys the shape it claims to and not just silence."""
+    """Liveness control for the exemption: the append that finishes the block is accepted and parses."""
     truncated = f"{_ORIENT_ONLY}\n```invlang\n"
     completed = truncated + _PLAN_ROWS + "```\n"
     assert _surface_errors(completed, truncated) == []
@@ -144,7 +142,7 @@ def test_a_committed_document_validated_whole_is_not_refused_for_its_own_bytes()
 
 
 def test_yaml_fence_still_refused() -> None:
-    """The loud half of the same family, unchanged."""
+    """The loud half of the same rule."""
     errors = _surface_errors("```yaml\nhypothesize:\n  hypotheses: []\n```\n")
     assert len(errors) == 1
     assert "```yaml/```yml" in errors[0]

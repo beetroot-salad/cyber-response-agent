@@ -1,4 +1,4 @@
-"""#791 part 3 — catalog curation gets its own trigger at the investigation boundary.
+"""Catalog curation gets its own trigger at the investigation boundary (#791).
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ HELD_OUT_ALERT = json.dumps({"rule": {"id": "9999"}, "held": "out"}).encode("utf
 
 @pytest.fixture
 def state(tmp_path, monkeypatch):
-    """#1186 O2: run-end uses its tenant's queue, despite an ambient legacy root."""
+    """Run end uses its tenant's queue, despite an ambient legacy state root."""
     set_state_dir(monkeypatch, tmp_path / "legacy-state")
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     tenant = set_up_tenant(current_data_root())
@@ -54,26 +54,26 @@ def state(tmp_path, monkeypatch):
 
 @pytest.fixture
 def published(tmp_path, data_root):
-    """D9's tenant published for real with its forge bound (#1108 P4: the lead-author drain
-    batches into the tenant repo). Requested before `state`, whose `set_up_tenant` then finds
-    the tenant already set up and keeps it."""
+    """The tenant published for real with its forge bound (the lead-author drain batches into
+    the tenant repo). Requested before `state`, whose `set_up_tenant` then finds the tenant
+    already set up and keeps it."""
     with published_tenant(tmp_path / "forge", root=data_root) as t:
         bind_forge(t)
         yield t
 
 
 def _lead_drain(t, paths, **steps) -> int:
-    """The REAL `lead_author_drain` over the tenant path (assumed seams: the tenant forge fake's
-    client, an identity over its issuer fake; `branch=`/`scrub=` are gone)."""
+    """The REAL `lead_author_drain` over the tenant path, with the tenant forge fake's client,
+    an identity over its issuer fake, and no-op box start/stop."""
     return drains.lead_author_drain(
         paths, client=t.forge.client, identity=t.vault.identity(),
         start_box=noop_start_box, stop_box=noop_stop_box, **steps)
 
 
 def _certified_run(*, name="case-791", alert_bytes=None, tenant_id=None) -> Path:
-    """A finished, certified natural run `name`, where run setup leaves one (#1105 PR 2):
-`<data root>/<T>/runs/<name>` under a real tenant (`curation_run_dir`), so the curation row
-it files is an address the drain can rehydrate. Hand it to run end as `run_of(run_dir)`."""
+    """A finished, certified natural run `name` where run setup leaves one,
+    `<data root>/<T>/runs/<name>` under a real tenant (`curation_run_dir`), so the curation row
+    it files is an address the drain can rehydrate. Hand it to run end as `run_of(run_dir)`."""
     planted = curation_run_dir(name, tenant_id=tenant_id)
     run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign",
                            alert_bytes=alert_bytes)
@@ -97,7 +97,7 @@ def _opened(body: dict) -> Path:
 def _held_out_set(tmp_path, alert_bytes: bytes) -> Path:
     """A held-out fixture set with one real member, planted because the shipped corpus holds a
     single README: its digest set is EMPTY, so the content-keyed net refuses nothing and a test
-    that leans on the shipped set asserts nothing at all (PR2b)."""
+    that leans on the shipped set asserts nothing at all."""
     fixtures = tmp_path / "held-out"
     member = fixtures / "m01-planted"
     member.mkdir(parents=True)
@@ -130,8 +130,8 @@ def test_791_the_investigation_tail_takes_its_dependencies_through_a_seam(tmp_pa
 
 
 def test_791_finished_investigation_drives_catalog_curation(published, tmp_path, state):
-    """curation_trigger_at_the_investigation_boundary — a finished investigation asks for
-    catalog curation at its own boundary, and the lane that serves the request RUNS."""
+    """A finished investigation asks for catalog curation at its own boundary, and the lane
+    that serves the request RUNS."""
     run_dir = _certified_run()
     assert run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json") is True
 
@@ -150,8 +150,8 @@ def test_791_finished_investigation_drives_catalog_curation(published, tmp_path,
 
 
 def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state):
-    """curation_marker_shape — the curation request names the CASE it speaks for and carries a
-    resolvable investigation run directory."""
+    """The curation request names the CASE it speaks for and carries a resolvable
+    investigation run directory."""
     run_dir = _certified_run()
     run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json")
 
@@ -160,8 +160,7 @@ def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state)
     body = marker_body(markers[0])
 
     assert body.get("case_id"), f"the curation request names no case: {body}"
-    # #1105 PR 2 declared change 8: the request carries the run's address, where it carried
-    # its folder; "resolvable" is the drain's own rehydration of that address.
+    # The request carries the run's address; "resolvable" is the drain's own rehydration of it.
     assert body.get("tenant_id"), f"the curation request names no tenant: {body}"
     assert body.get("run_id"), f"the curation request names no run: {body}"
     assert _opened(body).is_dir(), "the run the drain would hand the curator is gone"
@@ -169,7 +168,7 @@ def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state)
 
 
 def test_1186_run_end_keeps_identical_cases_in_their_runs_tenant_queues(tmp_path, state, monkeypatch):
-    """O2: run identity selects state; equal case digests cannot coalesce across tenants."""
+    """Run identity selects state: equal case digests cannot coalesce across tenants."""
     first_root = current_data_root()
     other_root = tmp_path / "other-data"
     other = set_up_tenant(other_root, fixture_uuid("tenant:other-1186"))
@@ -192,8 +191,8 @@ def test_1186_run_end_keeps_identical_cases_in_their_runs_tenant_queues(tmp_path
 
 
 def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_path, state):
-    """curation_request_is_keyed_on_the_case — two investigations of ONE case leave exactly one
-    curation request, and it points at the later run."""
+    """Two investigations of ONE case leave exactly one curation request, pointing at the
+    later run."""
     alert = json.dumps({"rule": {"id": "5710"}, "case": "one-and-the-same"}).encode("utf-8")
     first = _certified_run(name="run-a", alert_bytes=alert)
     second = _certified_run(name="run-b", alert_bytes=alert)
@@ -210,8 +209,8 @@ def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_pat
 
 
 def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(published, tmp_path, state):
-    """curation_claim_and_serve_is_atomic — a curation request that arrives while the lane is
-    already curating that case survives."""
+    """A curation request that arrives while the lane is already curating that case survives
+    (claim and serve are atomic)."""
     alert = json.dumps({"rule": {"id": "5710"}, "case": "one-and-the-same"}).encode("utf-8")
     first = _certified_run(name="run-a", alert_bytes=alert)
     second = _certified_run(name="run-b", alert_bytes=alert)
@@ -242,8 +241,6 @@ def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(published, tmp_
 
 
 def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, state):
-    """curation_write_is_isolated — a curation request that cannot be written costs the
-    investigation nothing."""
     run_dir = _certified_run()
     (location_path(state.state_root) / "author-queue").parent.mkdir(parents=True, exist_ok=True)
     (location_path(state.state_root) / "author-queue").write_text("not a directory\n", encoding="utf-8")
@@ -286,8 +283,6 @@ def test_791_curation_refuses_a_held_out_alert_copy_by_content(tmp_path, state):
 
 
 def test_791_no_learn_suppresses_curation_too(tmp_path, state):
-    """curation_honours_no_learn — the operator's `--no-learn` suppresses catalog curation as
-    well as learning."""
     suppressed = SpecTail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "suppressed"), suppressed, "--no-learn") == 0
     assert author_markers(state) == [], "--no-learn left a curation request behind"

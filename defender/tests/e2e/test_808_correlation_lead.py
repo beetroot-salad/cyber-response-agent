@@ -36,7 +36,6 @@ def test_correlation_lead_is_bound_to_the_alerts_index_only(tmp_path):
 
 
 def test_correlation_ceiling_is_eight_and_mains_leads_keep_forty(tmp_path):
-    """The lead is stopped at its eighth request; a lead MAIN dispatches is not held to eight."""
     over = S.CORRELATION_REQUEST_LIMIT + 4
     d = S.run_alert(
         tmp_path, tenant=S.plant_tenant(),

@@ -56,8 +56,7 @@ def _files(root) -> dict[str, bytes]:
 def _launched(arm: S.Driven) -> None:
     refused = S.refused_at_launch(arm)
     assert refused is None, (
-        f"the arm was refused at launch ({refused}) — the source was driven (so it has its fork "
-        "snapshot) and the branch point is a tool-calling MAIN response outside any retry streak")
+        f"the arm was refused at launch: {refused}")
 
 
 def test_the_arm_holds_the_leads_the_branch_point_held_and_no_later_one(tmp_path):
@@ -154,7 +153,7 @@ def test_a_link_wearing_an_artifacts_name_is_refused_rather_than_followed(tmp_pa
     else:
         target.unlink()
     target.symlink_to(secret if name != "queries table" else secret_file)
-    caplog.clear()  # the control's own lines (today: its D1 refusal) are not this arm's
+    caplog.clear()  # the control's own log lines are not this arm's
     caplog.set_level(logging.INFO)
 
     arm = S.drive_arm(tmp_path, spec, S.Recorder([S.done()]), name="linked", run_id="linked-1255")

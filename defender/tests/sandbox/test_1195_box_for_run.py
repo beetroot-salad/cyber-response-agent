@@ -95,7 +95,7 @@ def test_the_handle_is_no_box(tmp_path: Path, monkeypatch):
 ])
 def test_the_opt_out_handle_yields_the_executor_and_asks_no_docker(
         tmp_path: Path, monkeypatch, make: Any):
-    """An unsandboxed executor (the opt-out's host executor, N12): its handle's stop and run ask
+    """An unsandboxed executor (the opt-out's host executor): its handle's stop and run ask
     no docker, and the run yields that executor; so does `box_for_run` of the handle."""
     daemon, _box, _runs = _stopped(tmp_path, monkeypatch)
     executor = make()
@@ -337,7 +337,7 @@ LEFT_AFTER_A_STOP = ["paused", "restarting", "dead"]
 @pytest.mark.parametrize("left", LEFT_AFTER_A_STOP)
 def test_a_stop_that_leaves_the_box_paused_or_restarting_proves_nothing(
         tmp_path: Path, monkeypatch, left: str):
-    """F4: `.stop()` answers 0 and leaves the box `paused` or `restarting`: `BoxFault` naming the
+    """`.stop()` answers 0 and leaves the box `paused` or `restarting`: `BoxFault` naming the
     status, since only `exited` or `dead` prove a stop. Control (`dead`): the stop is proven."""
     daemon, _box, runs = _stopped(tmp_path, monkeypatch)
     daemon.hold(NAME, "running")
@@ -399,7 +399,7 @@ def test_box_for_run_of_a_handle_yields_its_executor_only_inside_the_run(tmp_pat
                  id="executor-shaped-namespace"),
 ])
 def test_box_for_run_refuses_anything_but_a_handle(tmp_path: Path, monkeypatch, make: Any):
-    """O6: `box_for_run` of anything but a `BoxRuns` (or `None`), a raw executor included, is a
+    """`box_for_run` of anything but a `BoxRuns` (or `None`), a raw executor included, is a
     `BoxFault`: the body never runs and no docker is asked. Control: the row above."""
     daemon, _box, _runs = _stopped(tmp_path, monkeypatch)
     ran: list[str] = []

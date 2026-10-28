@@ -10,21 +10,18 @@ import pytest
 
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
-from defender.tests.support.learning.curation._drain719 import drain  # the not-yet-written target, via the suite's own shim
+from defender.learning.author import drain
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core.state import FINDINGS
 from defender.tests.support.learning.core import _state1135
 
 
-# Demand #0 — the return-value contract, after decision 1 flipped its `2` branch
-
-
-# O6 + O8 — one uniform, bounded retirement into one graveyard
+# One bounded retirement into one graveyard
 
 
 def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path):
-    """Decision 2: the count is LIFETIME."""
-    # #1108 P4 (OD12 class ii): the REAL lessons tick over a batch's git-free draft.
+    """The attempt count is lifetime: a clean tick in between does not reset it."""
+    # The real lessons tick over a batch's git-free draft.
     lane = C.draft_lane(tmp_path)
     paths = lane.paths
     ch = h.channel_of("findings")
@@ -37,8 +34,7 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
     assert h.attempts_of(paths, ch, "run-I/0") == 1
 
     def hold_back(rows, batch_id, cfg):
-        # Mentioned in NEITHER bucket (§773 C3): the row stays queued exactly as it was,
-        # with no counter of any kind bumped — the "clean tick that holds it back" shape.
+        # Mentioned in neither bucket: the row stays queued as it was, no counter bumped.
         return {
             "committed": [],
             "consumed_skip": [],
@@ -55,14 +51,11 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
     assert [r["attempts"] for r in h.graveyard(paths, ch)] == [2], "2, not 1 — no reset happened"
 
 
-# Decision 3 — terminality: consumed ledger, graveyard first
-
-
-# The ceiling's own domain — 1, 0 and -1
+# The ceiling
 
 
 def _retires_on_the_first_failure(tmp_path: Path, ceiling: int) -> None:
-    """Shared body for the three ceiling members; each demand's own test drives it."""
+    """One `AuthorError` under `ceiling` retires the row with `attempts` 1."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "b/0")])
@@ -104,10 +97,8 @@ def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path
     assert survivors["a/2"] == outsiders[1]
 
 
-def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
-    tmp_path: Path, monkeypatch
-):
-    """A11: the retire step's OWN write failing is systemic."""
+def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(tmp_path: Path):
+    """The retire step's own write failing is systemic: it propagates, and the queue survives."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -150,8 +141,8 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
 
 
 def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
-    """P38: `attempts` lives on the queue row, so a second, genuinely separate process picks the
-    count up off disk rather than starting over."""
+    """`attempts` lives on the queue row, so a genuinely separate process picks the count up off
+    disk rather than starting over."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])

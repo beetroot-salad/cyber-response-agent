@@ -1,4 +1,4 @@
-"""#1047 O2 — the ticket lane decides per exit class, from a source the box cannot write."""
+"""#1047 — the ticket lane decides per exit class, from a source the box cannot write."""
 from __future__ import annotations
 
 import json
@@ -16,19 +16,17 @@ def test_an_aborted_run_leaves_its_ticket_open_with_the_escalation(tmp_path):
     fake = S.record_ticket(run_dir, truncated_by="aborted", closed_before_cut=False)
 
     assert fake.records == [], (
-        "an aborted run recorded a verdict; the environment was unreachable, so nothing "
-        "about the case was settled and there is nothing to propose to a person")
+        "an aborted run recorded a verdict")
     assert len(fake.notes) == 1, f"the aborted arm made {len(fake.notes)} note calls, not one"
     note = fake.notes[0]
     assert note.method == "POST"
     assert note.key == opened.calls[0].body["key"], (
         f"the note addressed ticket {note.key!r} while the open leg wrote "
-        f"{opened.calls[0].body['key']!r} — two namespaces, so the note lands on no ticket")
+        f"{opened.calls[0].body['key']!r}")
     body = note.text().lower()
     assert "aborted" in body, f"the note does not name the exit class: {note.text()!r}"
     assert "escalate" in body, (
-        f"the note does not carry the escalation ask: {note.text()!r} — leaving the ticket "
-        "open without one is silence, not an escalation")
+        f"the note does not carry the escalation ask: {note.text()!r}")
 
 
 def test_a_request_limit_run_records_unresolved(tmp_path):
@@ -44,19 +42,16 @@ def test_a_request_limit_run_records_unresolved(tmp_path):
 
 
 def test_a_budget_kill_leaves_its_ticket_open_and_makes_no_call(tmp_path):
-    """A run killed by the budget leaves its ticket open and makes no call at all — the missing
-    report IS the escalation, and that stays true once the lane keys on the exit class."""
+    """The missing report is itself the escalation, so the budget arm makes no call."""
     for report in (False, True):
         run_dir = S.closed_run_dir(tmp_path / f"report-{report}", report=report)
         fake = S.record_ticket(run_dir, truncated_by="budget")
         assert fake.calls == [], (
-            f"report={report}: the budget arm made {fake.calls} — it must make no call at all")
+            f"report={report}: the budget arm made calls: {fake.calls}")
         assert S.receipt(run_dir) is None, "the budget arm wrote a receipt for a call it never made"
 
 
 def test_a_run_that_was_not_cut_short_still_records_off_its_report(tmp_path):
-    """A run with no exit class recorded records its ticket from the report — the ordinary
-    completed run is untouched by this change."""
     run_dir = S.closed_run_dir(tmp_path, disposition="malicious")
     fake = S.record_ticket(run_dir, truncated_by=None)
     assert fake.transitions == []
@@ -68,8 +63,7 @@ def test_a_run_that_was_not_cut_short_still_records_off_its_report(tmp_path):
 
 def test_an_exit_class_the_table_does_not_name_takes_the_report_driven_fallback(tmp_path):
     assert "dead-end" in S.vocabulary(), (
-        "the control failed: `dead-end` left the vocabulary, so this no longer tests a real "
-        "member with no arm in the table")
+        "control: `dead-end` is not in the vocabulary")
     run_dir = S.closed_run_dir(tmp_path, disposition="malicious")
     unmapped = S.record_ticket(run_dir, truncated_by="dead-end")
     baseline = S.record_ticket(run_dir, truncated_by=None)
@@ -100,7 +94,7 @@ def test_a_run_with_no_exit_class_and_no_usable_report_records_that_and_proposes
         assert (S.receipt(run_dir) or {}).get("ok") is True
 
 
-# F-A — the exit class and a genuine model verdict, together
+# the exit class and a genuine model verdict, together
 
 
 def test_a_ticket_for_a_run_that_closed_and_was_then_cut_short(tmp_path):
@@ -136,18 +130,16 @@ def test_a_forced_close_set_exit_whose_own_forced_close_failed_leaves_the_ticket
         decided = S.closed_run_dir(tmp_path / f"{exit_class}-decided", report=False)
         both = S.record_ticket(decided, truncated_by=exit_class, closed_before_cut=True)
         assert both.records == [], (
-            f"{exit_class}: a run that had closed but left no report.md still recorded a "
-            "verdict — off what? F-A's deferral has no verdict on disk to defer to here, and "
-            "inventing the payload is what F-K refuses")
+            f"{exit_class}: a run that had closed but left no report.md still recorded a verdict")
         assert len(both.notes) == 1, (
-            f"{exit_class}: `closed_before_cut=True` swallowed F-K's escalation on a run whose "
-            "own forced close failed, leaving the ticket open in silence")
+            f"{exit_class}: `closed_before_cut=True` swallowed the escalation of a failed "
+            "forced close")
         assert exit_class in both.notes[0].text()
 
 
 def test_a_failed_note_call_never_breaks_the_run_and_is_recorded_in_the_receipt(tmp_path):
     """A note call that fails is swallowed — the run never breaks over it — and the outcome is
-    written into `ticket_write.json` either way (fork F-L, auto, §7 round 2)."""
+    written into `ticket_write.json` either way."""
     ok_dir = S.closed_run_dir(tmp_path / "ok", report=False)
     S.record_ticket(ok_dir, truncated_by="aborted")
     ok = S.receipt(ok_dir)
@@ -222,7 +214,7 @@ def test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_
     for exit_class, expect in (("request-limit", "records"), ("aborted", "notes")):
         run_dir = S.closed_run_dir(tmp_path / exit_class, disposition="unresolved",
                                    report=expect == "records")
-        # #1107 moved the receipt beside the run dir; forged at its name there.
+        # The receipt sits beside the run dir; forge it at its name there.
         S.receipt_path(run_dir).write_text(
             json.dumps({"key": run_dir.name, "status": "closed", "ok": True,
                         "url": "http://tickets.test/tickets/forged"}), encoding="utf-8")
@@ -232,7 +224,7 @@ def test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_
             "the real call")
 
 
-# #767 O1 — the host never transitions; the store's `closed` is a person's word
+# the host never transitions; the store's `closed` is a person's word (#767)
 
 
 def test_no_exit_class_transitions_the_ticket(tmp_path):
@@ -248,7 +240,7 @@ def test_no_exit_class_transitions_the_ticket(tmp_path):
                                        closed_before_cut=closed)
                 assert fake.transitions == [], (
                     f"{exit_class}/report={report}/closed_before_cut={closed}: the host "
-                    f"transitioned the ticket — {[c.path for c in fake.transitions]}")
+                    f"transitioned the ticket: {[c.path for c in fake.transitions]}")
                 assert all(c.is_comment for c in fake.writes), (
                     f"{exit_class}: a write that is neither a comment nor a transition: "
                     f"{[c.path for c in fake.writes]}")

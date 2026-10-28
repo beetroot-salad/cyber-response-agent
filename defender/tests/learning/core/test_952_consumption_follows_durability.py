@@ -75,7 +75,7 @@ _SENTINEL_RE = re.compile(r"\Acommit: (?P<sha>\S+)\nat: \S+\ncommit_made: (?P<ma
 
 def _queued_run(case_id: str, name: str, paths: LoopPaths) -> Path:
     """A natural run `name` planted where the drain rehydrates a row (`curation_run_dir`, under
-    the test's data root, #1105 PR 2), with the curation request for `case_id` naming it."""
+    the test's data root), with the curation request for `case_id` naming it."""
     run_dir = _state1135.curation_run_dir(name)
     _state1135.enqueue_case(_state1135.state_for_paths(paths), case_id, run_dir)
     return run_dir
@@ -106,7 +106,8 @@ def _disposition(sha: str | None = SHA) -> PitfallsDisposition:
 
 
 def _serving(served: list[Path], *, done: bool = True, before=None):
-    """A `run_lead_author` fake that simulates a served run"""
+    """A `run_lead_author` fake that simulates a served run, handing `SHA` over unless `done`
+    is false."""
 
     def serve(_paths, _state, run, *, box=None, on_done, **_kw):
         served.append(run.run_dir)
@@ -136,9 +137,8 @@ def _no_curation(*_a, **_kw) -> int:
 
 @pytest.fixture
 def tenant(tmp_path: Path, data_root: Path):
-    """#1108 P4: the lane drains into the fixture tenant's repo, published for real and bound
-    to its forge (`tenant_1108_p4/_support.py`). Its id is D9's, so the runs the curation rows
-    name (`_state1135.curation_run_dir`) are this tenant's."""
+    """The lane drains into the fixture tenant's repo, published for real and bound to its
+    forge. Its id is D9's, so the runs the curation rows name are this tenant's."""
     with published_tenant(tmp_path / "forge", root=data_root) as t:
         bind_forge(t)
         yield t
@@ -150,9 +150,8 @@ def _tenant_paths(t, tmp_path: Path) -> LoopPaths:
 
 
 def _tick(t, paths: LoopPaths, *, run_lead_author, run_pitfalls, box: BoxSpy | None = None) -> int:
-    """One lead-author tick through the P4 drain seams (`client=`/`identity=` over the tenant's
-    forge and issuer fakes, the batch's box via `BoxSpy`): the `branch=`/`scrub=` seams are
-    gone with the product-repo delivery."""
+    """One lead-author tick through the drain's seams: `client=`/`identity=` over the tenant's
+    forge and issuer fakes, the batch's box via `BoxSpy`."""
     spy = box if box is not None else BoxSpy()
     return drains.lead_author_drain(
         paths, run_lead_author=run_lead_author, run_pitfalls=run_pitfalls,
@@ -240,7 +239,7 @@ def _bounded(fn, *, holder, seconds: float = 15.0):
 
 
 def _assert_consumed(paths: LoopPaths, run_dir: Path, *, done: bool = True) -> None:
-    """O3's census, in one place"""
+    """Everything a tick that consumed what it served leaves behind, in one place."""
     assert author_markers(paths) == [], "the served marker is back at the top level"
     assert _inflight(paths) == [], "the served marker is still claimed"
     if done:
@@ -259,7 +258,7 @@ def _assert_consumed(paths: LoopPaths, run_dir: Path, *, done: bool = True) -> N
     assert graveyard_by_id(paths) == {}
 
 
-# --- O3 — a batch whose tree passed the scrub consumes exactly what it served ----------------
+# --- a batch whose tree passed the scrub consumes exactly what it served ---------------------
 
 
 @pytest.mark.parametrize("done", [True, False],
@@ -267,11 +266,10 @@ def _assert_consumed(paths: LoopPaths, run_dir: Path, *, done: bool = True) -> N
 def test_952_o3_a_batch_that_passes_the_scrub_consumes_what_it_served(
     tmp_path: Path, tenant, done: bool,
 ):
-    """O3, the positive control for every O1 negative — over the P4 lane (#1108): the batch is a
-    draft of the tenant's repo; a tick whose serve and curation leave the draft unchanged has
-    nothing to deliver (no `lead-author/` branch, no PR), discards its draft, and consumes
-    exactly what it served. (The batch-with-commits row is P4's: `tenant_1108_p4/test_writers.py`
-    lead-lane rows.)"""
+    """The positive control for the negatives below: a tick whose serve and curation leave the
+    batch draft unchanged delivers nothing (no `lead-author/` branch, no PR), discards its
+    draft, and consumes exactly what it served. (A batch with commits is covered in
+    `tenant_1108_p4/test_writers.py`.)"""
     paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
     _seed_pitfalls(paths)
@@ -297,7 +295,8 @@ def test_952_o3_a_batch_that_passes_the_scrub_consumes_what_it_served(
 def test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfalls_rotation(
     tmp_path: Path, monkeypatch, tenant,
 ):
-    """M1's apply order — sentinels, then unlinks, then the pitfalls rotation, then the decline bumps — observed through a REAL fault at the third step"""
+    """The apply order — sentinels, then unlinks, then the pitfalls rotation, then the decline
+    bumps — observed through a REAL fault at the third step."""
     monkeypatch.setenv("LEARNING_REPO_LOCK_WAIT_SECONDS", "0")
     paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
@@ -350,7 +349,7 @@ def test_952_m1_a_malformed_lock_wait_refuses_the_tick_before_any_work(
     assert author_markers(paths) == ["case-1.json"]
 
 
-# --- O5 / M4 — the curators' switch: consume now, or hand the consumption back ---------------
+# --- the curators' switch: consume now, or hand the consumption back -------------------------
 
 
 def _lead(**kw) -> ExecutedLead:
@@ -377,14 +376,14 @@ def _curator_deps(repo: Path, state: Path, **overrides):
     return replace(deps, **seams)
 
 
-#: The catalog in a batch draft (OD6): the lane commits `agent/...` (#1108 P4).
+#: The catalog in a batch draft: the lane commits `agent/...`.
 _DRAFT_CATALOG = "agent/skills/gather/queries"
 
 
 def _draft_curator_deps(lane, **overrides):
-    """`_curator_deps` over a batch draft (#1108 P4, O7, OD12 class ii): the production
-    lead-author deps over the draft of `seed_skills_repo`'s tree (`product_lane`, ASSUMED SEAM
-    S-H `build_lead_author_deps(..., batch=)`), the two tables bypassed (their own suite)."""
+    """`_curator_deps` over a batch draft: the production lead-author deps
+    (`build_lead_author_deps(..., batch=)`) over the draft of `seed_skills_repo`'s tree, the two
+    tables bypassed (their own suite)."""
     seams = dict(
         extract=lambda _rd: ([], [_lead()]),
         synthesize=lambda executed, skills=None, where=None, catalog=None, systems=None: [],
@@ -410,17 +409,12 @@ def _agent_must_not_run(*_a, **_kw) -> int:
     raise AssertionError("the agent was spawned on a path that resolves no handoff")
 
 
-def _without_at(text: str) -> str:
-    """The sentinel minus its timestamp line, so two renderings of one sha compare."""
-    return "\n".join(ln for ln in text.splitlines() if not ln.startswith("at: "))
-
-
 @pytest.mark.parametrize("deferred", [False, True], ids=["default-writes", "on_done-defers"])
 def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
     tmp_path: Path, deferred: bool,
 ):
-    """O5 + M4, the `_run_locked` write site (after the commit). #1108 P4: over a batch draft;
-    the commit is the batch branch's."""
+    """The `_run_locked` write site, after the commit (over a batch draft, so the commit is the
+    batch branch's)."""
     lane = product_lane(tmp_path, seed_skills_repo(tmp_path / "repo"))
     run_dir = _state1135.curation_run_dir("lead-run")
     deps = _draft_curator_deps(
@@ -448,7 +442,7 @@ def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
         assert _done_sha(run_dir) == sha
         assert _done(run_dir).read_text(encoding="utf-8").endswith("commit_made: True\n")
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file(), \
-        "the pitfalls_collected marker is NOT deferred (O4)"
+        "the pitfalls_collected marker was deferred too"
 
 
 @pytest.mark.parametrize("deferred", [False, True], ids=["default-writes", "on_done-defers"])
@@ -481,7 +475,7 @@ def test_952_m4_the_none_resolved_sentinel_is_written_or_handed_over(
         assert _done(run_dir).read_text(encoding="utf-8").endswith("commit_made: False\n")
 
 
-# --- O5 / M4 — the pitfalls curator hands its partition back, or consumes as today -----------
+# --- the pitfalls curator hands its partition back, or consumes at once ----------------------
 
 
 @pytest.fixture
@@ -498,9 +492,9 @@ def pitfalls_repo(tmp_path: Path, monkeypatch) -> Path:
 
 @pytest.fixture
 def pitfalls_lane(tmp_path: Path, monkeypatch):
-    """`pitfalls_repo` after P4 (O7, OD12 class ii): a batch draft of the tenant carrying the
-    reducer add-on (elastic's marker and skill, `gather`), over a product checkout with the
-    elastic and cmdb adapters; threshold 1."""
+    """`pitfalls_repo` as a batch draft of the tenant carrying the reducer add-on (elastic's
+    marker and skill, `gather`), over a product checkout with the elastic and cmdb adapters;
+    threshold 1."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     product = seed_product(tmp_path, adapters=("elastic", "cmdb"))
     files = seed_agent_files(markers=("elastic",), skills=("elastic",), catalog=(),
@@ -526,8 +520,9 @@ def _three_way_batch(paths: LoopPaths) -> None:
 def test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_consumes_nothing_committed(
     pitfalls_lane, tmp_path: Path,
 ):
-    """O5 + M4 + O4 at the pitfalls curator, over a batch draft (#1108 P4; ASSUMED SEAM S-H
-    `run_pitfalls(..., batch=)`)."""
+    """Deferred mode at the pitfalls curator (`run_pitfalls(..., batch=)` over a batch draft):
+    it commits and hands its committed/held partition to `on_curated`, consuming only the
+    unattributable row at once; applying the handed-back partition consumes the rest."""
     lane = pitfalls_lane
     paths = lane.paths
     _three_way_batch(paths)
@@ -570,7 +565,8 @@ def test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_consumes_noth
 
 
 def test_952_m1_the_deferred_rotation_reaches_the_queue_lock_with_a_deadline(tmp_path: Path):
-    """M1: the drain must pass a deadline into the rotation (`persist.queue_lock`"""
+    """The deferred rotation (`apply`, `rotate_pitfalls`) takes a deadline and times out on a
+    held append lock with the queue untouched; unobstructed, it applies."""
     paths = loop_paths(tmp_path)
     queue_before = _seed_pitfalls(paths)
     disposition = _disposition()
@@ -602,7 +598,8 @@ def test_952_m1_the_deferred_rotation_reaches_the_queue_lock_with_a_deadline(tmp
 def test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_by_hand(
     pitfalls_repo: Path, tmp_path: Path,
 ):
-    """The deadline covers the rotations the curator makes AT ONCE too — the `consumed_unattributable` rotation runs inside the drain's `do_work`, under..."""
+    """The deadline covers the curator's immediate `consumed_unattributable` rotation too:
+    bounded when a lock wait is passed (as under the drain), unbounded by hand."""
     paths = LoopPaths(repo_root=pitfalls_repo, state_dir=tmp_path / "state")
     persist.append_pitfalls([pitfall_row("u:l-001:0", "newsys")], state=_state1135.state_for_paths(paths))
     queue_before = (location_path(paths.state_root) / PITFALLS.queue).read_bytes()
@@ -623,11 +620,13 @@ def test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_
     assert consumed_by_id(paths)["u:l-001:0"]["consumed_category"] == "consumed_unattributable"
 
 
-# --- O5 / M5 — the drain holds the per-author queue lock for the whole tick ------------------
+# --- the drain holds the per-author queue lock for the whole tick ----------------------------
 
 
 def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path, tenant):
-    """O5 + M5. Deferring the sentinel to the drain opens a gap — the remaining serves, the pitfalls curation, box teardown — in which a by-hand run would re-serve; the drain holds the per-author queue lock for its whole tick (over the P4 tenant lane, #1108)."""
+    """Deferring the sentinel to the drain opens a gap (the remaining serves, the pitfalls
+    curation, box teardown) in which a by-hand run would re-serve, so the drain holds the
+    per-author queue lock for its whole tick."""
     paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
     by_hand = _state1135.curation_run_dir("by-hand")
@@ -659,7 +658,8 @@ def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path, 
 
 
 def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: Path, capsys, tenant):
-    """M5's other direction (over the P4 tenant lane, #1108): a tick that finds the queue lock held claims nothing, builds no draft and starts no box."""
+    """The other direction: a tick that finds the queue lock held claims nothing, builds no
+    draft and starts no box."""
     paths = _tenant_paths(tenant, tmp_path)
     _queued_run("case-1", "run-1", paths)
     _queued_run("case-2", "run-2", paths)
@@ -690,7 +690,8 @@ def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: 
 
 
 def test_952_m5_the_drain_enters_the_curator_past_its_own_lock(tmp_path: Path):
-    """M5's wiring: `_invoke_lead_author` — the drain's production `run_lead_author` — enters the curator through `run_under_held_queue_lock`, past the..."""
+    """`_invoke_lead_author`, the drain's production `run_lead_author`, enters the curator past
+    the queue lock the drain holds, while a by-hand run still skips on it."""
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
                      skills=("elastic",), catalog=("elastic",))
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
@@ -714,12 +715,12 @@ def test_952_m5_the_drain_enters_the_curator_past_its_own_lock(tmp_path: Path):
         assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
 
 
-# --- the adversary round: ways the suite above was greened while betraying intent -----------
+# --- loopholes the tests above would let through ---------------------------------------------
 
 
 class _ProbingBox(BoxSpy):
     """`BoxSpy` whose batch-end stop first records what a by-hand run answers at that moment —
-    after the serves and the curation, still inside the tick M5's lock spans."""
+    after the serves and the curation, still inside the tick the queue lock spans."""
 
     def __init__(self, probe) -> None:
         super().__init__()
@@ -732,7 +733,9 @@ class _ProbingBox(BoxSpy):
 
 
 def test_952_c_the_queue_lock_is_held_through_curation_and_finish_batch(tmp_path: Path, tenant):
-    """Kills C. A lock released right after `do_work` greened the M5 test, which only probes from inside the serve. Over the P4 tenant lane (#1108) the lock is probed during the pitfalls curation, at the batch box's stop, and at every forge request the tick makes after its serve (delivery): a by-hand run skips at each."""
+    """A lock released right after `do_work` would pass the serve-time probe above, so the lock
+    is also probed during the pitfalls curation, at the batch box's stop, and at every forge
+    request after the serve: a by-hand run skips at each."""
     paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
     by_hand = _state1135.curation_run_dir("by-hand")
@@ -773,7 +776,9 @@ def test_952_c_the_queue_lock_is_held_through_curation_and_finish_batch(tmp_path
 
 
 def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Path, tenant):
-    """Kills D. Unlinking the claims BEFORE writing the sentinels greened the ordering test, which faults at the rotation and so only ever sees steps 1–2. Over the P4 tenant lane (#1108): nothing is delivered for a batch whose apply did not complete."""
+    """Unlinking the claims BEFORE writing the sentinels would pass the ordering test, which
+    faults at the rotation and only sees steps 1–2. Nothing is delivered for a batch whose
+    apply did not complete."""
     paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
     queue_before = _seed_pitfalls(paths)
@@ -798,13 +803,12 @@ def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Pa
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
 
 
-# --- O8 / O6 — restored over the P4 tenant lane (#1108), with a fault that is neither a scrub
-#     nor a push ------------------------------------------------------------------------------
+# --- retries and quarantine, with a fault that is neither a scrub nor a push ------------------
 
 
 class _StopFaulting(BoxSpy):
-    """The batch box's stop fails (a `BoxFault`, as a box that will not stop raises, #1195): the
-    tick halts after its serves and before the apply, so nothing it served is consumed."""
+    """The batch box's stop fails (a `BoxFault`, as a box that will not stop raises): the tick
+    halts after its serves and before the apply, so nothing it served is consumed."""
 
     def stop(self, box, **kw) -> None:
         super().stop(box, **kw)
@@ -814,7 +818,7 @@ class _StopFaulting(BoxSpy):
 def test_952_o8_every_serve_is_an_attempt_and_the_run_is_quarantined_at_the_ceiling(
     tmp_path: Path, monkeypatch, tenant,
 ):
-    """O8. A run whose batch never reaches the apply (here its box never stops) is reclaimed from `inflight/` one tick after another, and each reclaim is one more attempt on the request: at `LEAD_AUTHOR_MAX_RETRIES` serves the next tick quarantines it at the claim, before the serve seam, rather than serving it forever."""
+    """A run whose batch never reaches the apply (here its box never stops) is reclaimed from `inflight/` one tick after another, and each reclaim is one more attempt on the request: at `LEAD_AUTHOR_MAX_RETRIES` serves the next tick quarantines it at the claim, before the serve seam, rather than serving it forever."""
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
     paths = _tenant_paths(tenant, tmp_path)
     run_dir = _queued_run("case-1", "run-1", paths)
@@ -844,7 +848,7 @@ def test_952_o8_every_serve_is_an_attempt_and_the_run_is_quarantined_at_the_ceil
 def test_952_o6_a_transient_serve_failure_neither_destroys_nor_supersedes_a_fresher_request(
     tmp_path: Path, tenant,
 ):
-    """O6 + M2. The claim frees the top-level slot so a re-ask landing mid-serve has somewhere to go. The serve then fails transiently (the lead-author step's retry signal, not a scrub or a push): the stale claim is not re-queued over the fresher request, which survives with no attempt spent, and the next tick serves it, and the stale run never again."""
+    """The claim frees the top-level slot so a re-ask landing mid-serve has somewhere to go. The serve then fails transiently (the lead-author step's retry signal, not a scrub or a push): the stale claim is not re-queued over the fresher request, which survives with no attempt spent, and the next tick serves it, and the stale run never again."""
     paths = _tenant_paths(tenant, tmp_path)
     first = _queued_run("case-A", "run-1", paths)
     second = _state1135.curation_run_dir("run-2")

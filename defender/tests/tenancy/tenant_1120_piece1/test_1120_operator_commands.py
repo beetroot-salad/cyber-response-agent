@@ -1,4 +1,4 @@
-"""D1/D2: the operator commands and the settings loaders read the DATA ROOT's copy."""
+"""The operator commands and the settings loaders read the data root's copy of a tenant."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -33,7 +33,7 @@ from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 #: The census lint, a repo script outside `defender/` (driven by path).
 CENSUS_LINT = H.REPO_ROOT / "tooling" / "lint" / "lint_verb_disposition_census.py"
 
-#: A table that loads but grants gather no query verb — a table that DIFFERS from the fixture's
+#: A table that loads but grants gather no query verb, unlike the fixture's.
 HEALTH_CHECK_ONLY_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [gather]}\n"
 
 #: A `verb-grants.yaml` that is not YAML (an unclosed flow mapping) — the unloadable table.
@@ -52,7 +52,7 @@ def _ticket_config(settings: Path) -> Path:
 
 
 def _mark_ticket_config(settings: Path, marker_key: str, *, drop_timeout: bool) -> Path:
-    """Give a tenant's ticket `config.env` an inline-secret MARKER line (a key `validate_scaffold`
+    """Give a tenant's ticket `config.env` an inline-secret marker line (a key `validate_scaffold`
     FAILs by name) and, with `drop_timeout`, lose the required `TICKET_TIMEOUT_SEC`."""
     path = _ticket_config(settings)
     lines = [ln for ln in path.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -63,7 +63,7 @@ def _mark_ticket_config(settings: Path, marker_key: str, *, drop_timeout: bool) 
 
 
 def _other_tree(tmp_path: Path, tenant_id: str, marker_key: str) -> Path:
-    """Another checkout's `defender/` whose `knowledge/tenants/<tenant_id>` holds a COMPLETE tenant
+    """Another checkout's `defender/` whose `knowledge/tenants/<tenant_id>` holds a complete tenant
     folder carrying `marker_key` in its ticket config — what a command would find if it derived its
     tenants root from an exported `$DEFENDER_DIR`."""
     other = tmp_path / "other-checkout"
@@ -101,8 +101,8 @@ def _census_lint(repo: Path) -> Any:
 
 def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_checkouts(
         data_root: Path, tmp_path: Path, capsys) -> None:
-    """The lab is retired (human, PR #1157: #1158 folded in); the checkout's knowledge/ holds only the
-    template and the fixture, a complete copy of the lab's settings."""
+    """policy_cli's grant and validate_scaffold's config check come from the data root's copy,
+    never the checkout's knowledge/ or an exported `DEFENDER_DIR`'s tree."""
     tid = fixture_uuid("tenant:playground")
     H.adopted(data_root, tid)
     settings = H.settings_dir(data_root, tid)
@@ -135,8 +135,8 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
 
 def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback(
         data_root: Path, tmp_path: Path) -> None:
-    """validate_scaffold and the census lint catch TenantRefused (not only the removed TenantDirError)
-    and surface its message in their own idiom, never a traceback."""
+    """validate_scaffold and the census lint catch TenantRefused and surface its message in their
+    own idiom, never a traceback."""
     elsewhere = tmp_path / "elsewhere" / "knowledge"
     shutil.copytree(H.FIXTURE, elsewhere)
     H.write_tenant_id_file(elsewhere, H.TID, "id")
@@ -222,22 +222,21 @@ class _SpawnRecorder:
 
 
 def _launcher_source(root: Path) -> Path:
-    """A finished, branchable source run at `<root>/acme/runs/<id>` (pass-A's source-run
-    builder, at a tenant location). #1187 R1 (review-4 F42): no runs-base record — the run's
-    tenant is where it sits."""
+    """A finished, branchable source run at `<root>/<T>/runs/<id>`, with no runs-base record:
+    a run's tenant is where it sits."""
     base = root / H.TID / "runs"
     base.mkdir(parents=True, exist_ok=True)
     return H78.source_run(base)
 
 
 def _launch(source: Path) -> BaseException | int:
-    """The REAL branch launcher over `source`, with no `--tenants-root` (piece 1 removes it), the role
-    preflight neutralised and the spawn recorded."""
+    """The real branch launcher over `source`, the role preflight neutralised and the spawn
+    recorded."""
     spawn = _SpawnRecorder()
     try:
         return branch_entry.main(
             ["--tenant", source.parent.parent.name, source.name,
-             str(T947.BRANCH_MESSAGE_ID), *T947.retired_continuation_argv()],
+             str(T947.BRANCH_MESSAGE_ID)],
             spawn=spawn, preflight=T947.no_preflight)
     except SystemExit as refused:
         return refused
@@ -247,9 +246,8 @@ def _launch(source: Path) -> BaseException | int:
 
 def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_table(
         data_root: Path, tmp_path: Path, capsys) -> None:
-    """A tenant whose settings/verb-grants.yaml does not parse as YAML: tenant.py check acme exits 1
-    naming verb-grants.yaml (M6: a malformed table is a named finding, never a traceback)."""
-    # rejected: an all-withheld table as a finding (M6, human).
+    """An unparseable verb-grants.yaml is a named refusal from check, run.main, the launcher,
+    policy_cli and setup; validate_scaffold, which never loads the table, accepts the tenant."""
     H.adopted(data_root)
     table = H.settings_dir(data_root) / "verb-grants.yaml"
     table.write_text(UNPARSEABLE_TABLE, encoding="utf-8")
@@ -262,8 +260,7 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     rc, exc = H.drive_run(run_py, [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID],
                           rec)
     assert rc is None, f"run.main ran over an unloadable table: rc={rc}"
-    # #1108 P4 (flow 3, U9): the run loads the table from its own copy of the published
-    # export, so the refusal names THAT file — the same table, at
+    # The run loads the table from its own copy of the export, so the refusal names
     # `<T>/run-knowledge/<run id>/settings/verb-grants.yaml`.
     named = re.findall(r"(/\S*/verb-grants\.yaml)", H.exit_text(exc))
     assert [p for p in named
@@ -313,8 +310,8 @@ def _exposes(source: Path, forbidden: Path) -> bool:
 
 def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root_and_never_settings(
         data_root: Path, tmp_path: Path) -> None:
-    """run.py calls start_box with the accepted tenant's agent half, <root>/acme/knowledge/agent (the
-    tenant's knowledge a local git clone here, so its .git exists)."""
+    """run.py hands start_box its run copy's agent half; no bind exposes settings, the clone (a
+    local git clone here, so its .git exists) or tenant learning."""
     H.cloned_tenant(tmp_path, data_root)
     H.plant_row(data_root)
     started: list[tuple[tuple, dict]] = []
@@ -332,7 +329,7 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
     try:
         from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
-        # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+        # Plus the in-process launch-time publish.
         rc = run_py.main([str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"],
                          **with_publish({**rec.seams(), "lifecycle": lifecycle}))
     except SystemExit as refused:
@@ -340,12 +337,12 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
     assert rc == 0
     assert len(started) == 1, started
     agent = Path(started[0][1]["tenant_agent"])
-    # #1108 P4 (U9, O-A): the box is handed the agent half of the run's OWN copy of the export
-    # (`<T>/run-knowledge/<run id>/stage/agent`), under the data root — never the clone's.
+    # The box gets the run copy's agent half (`<T>/run-knowledge/<run id>/stage/agent`), never
+    # the clone's.
     assert H.run_copy_part(agent, data_root) == ("stage", "agent"), (
         f"start_box was handed {agent}, not the run copy's stage/agent under the data root")
 
-    # #1187: the recorder's run folder is `fixture_uuid("run")` — read it off the recorder.
+    # The recorder's run folder is `fixture_uuid("run")`: read it off the recorder.
     argv = box_mod._create_argv("defender-run-spec1120", rec.run_dir_at, H.DEFENDER, box_mod.DEFAULT_SPEC, (), lane=box_mod._run_lane_mounts(rec.run_dir_at, H.DEFENDER, agent)).argv
     mounts = _mount_specs(argv)
     agent_mounts = [m for m in mounts if m.get("target") == MODEL_AGENT]
@@ -390,8 +387,7 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
     box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER, box_mod.DEFAULT_SPEC, mounts, lane=box_mod._run_lane_mounts(run_dir, H.DEFENDER, H.agent_dir(on_mount)))
 
 
-#: #1255 K3's preload/clock env keys — `test_1255_clock_box._PRELOAD_KEY`'s pattern, kept in step
-#: as `test_1092_box_mark_env._CLOCK_KEY` keeps it.
+#: Preload/clock env keys, kept in step with `test_1255_clock_box._PRELOAD_KEY`.
 _CLOCK_KEY = re.compile(r"PRELOAD|FAKETIME|CLOCK", re.IGNORECASE)
 
 
@@ -435,14 +431,14 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     data_root: Path, tmp_path: Path, script: str, args: list[str], identity: list[str],
     run_visualizations_dir: Path,
 ):
-    """O3: neither absent nor malformed tenant identity can select an ambient queue. #1279: nor publish a page."""
+    """A missing, malformed or unknown --tenant is refused before any state access: it selects
+    no ambient queue and publishes no page."""
     poison = tmp_path / "ambient-state"
     poison.mkdir()
     (poison / "operator-sentinel").write_bytes(b"untouched")
     before_state = {p.relative_to(poison): p.read_bytes() for p in poison.rglob("*") if p.is_file()}
-    # The old frontend wrote to its package before discovering state errors; the build now
-    # publishes per tenant (#1279), so a refusal leaves the tree and the publish root alone.
-    # Restore the existing build outputs even when this contract fails against an old build.
+    # A refusal leaves the frontend's build outputs and the publish root alone; restore the
+    # outputs anyway, so a failure here cannot damage the tree.
     frontend = H.REPO_ROOT / "defender/learning/frontend"
     outputs = [frontend / n for n in ("lessons.json", "lessons.html", "queues.json", "queues.html")]
     before_pages = {p: p.read_bytes() if p.exists() else None for p in outputs}
@@ -470,8 +466,8 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
      "another drainer holds the lock", 0),
     ("defender/learning/loop.py", ["--lead-author-drain"], ".lead-author-drain.lock",
      "another drainer holds the lock", 0),
-    # #1108 P4 (O7, OD16): a curator module's own command runs the author lane's tenant batch,
-    # as `loop.py --author-drain --tenant T` does, so it meets the author drain's lock.
+    # A curator module's own command runs the author lane's tenant batch, as
+    # `loop.py --author-drain --tenant T` does, so it meets the author drain's lock.
     ("defender/learning/author/lessons/run.py", [], ".author-drain.lock",
      "another drainer holds the lock", 0),
     ("defender/learning/author/questioner/run.py", [], ".author-drain.lock",
@@ -483,7 +479,8 @@ def test_1186_learning_operator_cli_uses_the_explicit_tenants_lock(
     data_root: Path, tmp_path: Path, script: str, args: list[str], lock_name: str,
     diagnostic: str, status: int,
 ):
-    """O3/O4: valid --tenant reaches its own held lock despite a conflicting old override."""
+    """A valid --tenant meets its own tenant's held lock despite a conflicting retired
+    state-dir override."""
     from defender.tests.support.learning.curation._drain719 import Holder
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 

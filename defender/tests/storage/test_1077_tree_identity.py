@@ -1,4 +1,4 @@
-"""#1077 — O3's tree observer, and the writers that share a run directory."""
+"""The #1077 run-tree observer, and the writers that share a run directory."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
@@ -23,11 +23,9 @@ pytestmark = pytest.mark.e2e
 
 
 def _agent(tmp_path: Path) -> Path:
-    """The tenant agent tree the replay reads (`drive(agent=)`, #1108 P4 A8): the fixture
-    tenant's, plus one lesson the golden's document matches. The baseline was captured when the
-    product tree's corpus answered this golden (so the run pushed a lesson and kept
-    `lessons_loaded.jsonl`); after O1/O2 the run's corpus is its tenant's, so the tenant carries
-    the lesson the golden pushes."""
+    """The tenant agent tree the replay reads (`drive(agent=)`): the fixture tenant's plus one
+    lesson the golden's document matches, so the run pushes a lesson and keeps
+    `lessons_loaded.jsonl`, as the tree baseline expects."""
     import shutil
 
     from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson
@@ -55,12 +53,10 @@ def _replay(tmp_path: Path, run_id: str = "tree-1077") -> Path:
 
 def _baseline_exists() -> None:
     assert S.TREE_BASELINE.is_file(), (
-        "the O3 baseline does not exist. D7 step 1 captures it BEFORE step 3, on `main`, with "
-        "no implementation behind it — the existing goldens are not this observer (claim C8: "
-        "they compare one normalised investigation text and three iterdir() names)")
+        f"the tree baseline {S.TREE_BASELINE} does not exist")
 
 
-# d13 / d14 — the structural check, and the narrow content check beside it
+# the structural check
 
 def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Path):
     _baseline_exists()
@@ -70,22 +66,19 @@ def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Pat
         "\n".join(S.structural_findings(run_dir, doc)))
 
     # The check is over the WHOLE tree: no name is excused, and the machinery offers no lever
-    # to excuse one. Decision 21 removed `O3_EXEMPT` rather than lengthening it.
+    # to excuse one.
     assert not hasattr(S, "O3_EXEMPT"), (
-        "an exemption list came back. Decision 21 removed it: eight files differ between two "
-        "replays of UNCHANGED code, so an exemption list is a widening lever, not a contract")
+        "an exemption list (`O3_EXEMPT`) is back; unstable files get the name-only check")
     assert "exclude" not in S.snapshot.__code__.co_varnames, (
         "`snapshot` grew an `exclude` argument — the structural check admits no exemption, "
         "which is the only thing that makes 'the same set of names' worth asserting")
     names = set(S.snapshot(run_dir))
     for unstable in ("tool_trace.jsonl",):
         assert unstable in names, (
-            f"{unstable} is outside the structural check. Its BYTES are not compared (it "
-            "carries a clock or a per-run uuid); its NAME is, and that is the whole point of "
-            "splitting the two checks rather than exempting the file")
+            f"{unstable} is outside the structural (name) check")
 
 
-# g04 — the writers that share one run directory
+# the writers that share one run directory
 
 def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_path: Path):
     from defender.investigation import record_query
@@ -111,7 +104,6 @@ def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_pa
         claim("challenge_gate", owner.review_trace(role))
     claim("_alias", run_dir / ".alias-probe-deadbeefdeadbeef-symlink")
     claim("box", owner.box_sentinel)
-    # #1235: `budget` and `circuit_breaker` are no longer run records (in-memory state).
     for fixed in ("tool_trace", "executed_queries", "policy_denials", "lessons_loaded",
                   "wire_log", "provenance"):
         claim("Run", getattr(owner, fixed))
@@ -124,7 +116,7 @@ def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_pa
                 assert not a.startswith(f"{b}/"), f"{a} lands inside {b}, another writer's key"
 
 
-# h26 — the sandbox probe fails closed
+# the sandbox probe fails closed
 
 def test_the_alias_ban_probe_fails_closed_on_a_timeout_or_a_malformed_result(tmp_path: Path):
     """The sandbox alias-ban probe fails closed — a timeout or a malformed result refuses,
@@ -138,8 +130,8 @@ def test_the_alias_ban_probe_fails_closed_on_a_timeout_or_a_malformed_result(tmp
             alias._probe_alias_ban(docker, "box-1077", run_dir, "runc")
         assert docker.argv, f"the {mode} arm never reached the probe"
         assert not issubclass(type(excinfo.value), S.mod("box._docker").BoxFault), (
-            "O7 is a security obligation, so the refusal must not be a `BoxFault` the generic "
-            "`except BoxFault: degrade` startup handler can swallow")
+            "the refusal is a `BoxFault`, which the startup's `except BoxFault: degrade` "
+            "swallows")
 
     # Positive control: a clean probe does NOT refuse, so the two faults above are the refusal
     # and not the probe refusing unconditionally.

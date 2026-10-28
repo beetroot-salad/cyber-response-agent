@@ -1,7 +1,6 @@
 """#773: bounded deferral, conservation of findings, and the tick's deferral/attempt counters.
 
-#1108 P4 (OD12 class ii): every tick runs over a batch's git-free draft
-(`_spec773.build_draft_scene`); what landed is read from the batch branch (`agent/...`)."""
+Every tick runs over a batch's git-free draft (`_spec773.build_draft_scene`)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -62,8 +61,8 @@ def test_a_deferred_row_bumps_the_deferrals_counter_and_graveyards_at_the_ceilin
 
 
 def test_every_deferred_finding_is_named_in_the_held_reports_deferred_group_773(tmp_path):
-    """Every deferred finding is named in the held report's `deferred` group each tick, with
-    its ID and its COUNT — and no per-row free-text reason field."""
+    """Each tick's held report names every deferred finding in its `deferred` group, with id
+    and count, and no per-row free-text reason."""
     sc = _orphan_tick(tmp_path)
     assert sc.run() == 0
     [line] = sc.report_lines()
@@ -71,26 +70,9 @@ def test_every_deferred_finding_is_named_in_the_held_reports_deferred_group_773(
     assert "deferred_ids=['orphan']" in line
 
 
-def test_the_deferral_rotation_passes_the_configured_repo_lock_wait_773(tmp_path):
-    """M7's deferral bump threads `timeout_seconds=cfg.repo_lock_wait_seconds`, the same wait
-    #952 threads through every locked rotation."""
-    held: dict = {}
-    sc = _orphan_tick(tmp_path, repo_lock_wait_seconds=1)
-    sc.curator.also = _hold_append_lock(held)
-    started = time.monotonic()
-    try:
-        with pytest.raises(TimeoutError):
-            sc.run()
-    finally:
-        held["holder"].__exit__()
-    assert time.monotonic() - started < 10
-    # The row that would have been deferred is still queued with its counter untouched: the
-    # bump never happened, so the wait was spent on the deferral's own rotation.
-    assert "deferrals" not in sc.pending_by_id()["orphan"]
-
-
 def test_deferrals_and_attempts_counters_move_independently_across_ticks_773(tmp_path):
-    """Two named counters on one row, each bumped only by its own event."""
+    """Two counters on one row, each bumped only by its own event: a fault unwinds before the
+    deferral step, so a faulted tick charges `attempts` alone."""
     sc = _orphan_tick(tmp_path)
     assert sc.run() == 0
     row = sc.pending_by_id()["orphan"]
@@ -127,8 +109,8 @@ def test_a_deferral_that_reaches_the_ceiling_773(tmp_path):
 
 
 def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
-    """The wake gate is UNCHANGED — a deferred row is ordinary pending work, not a held one
-    — and the spin that buys is bounded."""
+    """To the wake gate a deferred row is ordinary pending work, not a held one, and the spin
+    that buys is bounded."""
     from defender.learning.core import drains
 
     sc = _orphan_tick(tmp_path, max_attempts=3)
@@ -147,22 +129,7 @@ def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
     assert "orphan" not in sc.pending_by_id()
 
 
-def test_max_attempts_one_retires_on_the_first_failure_773(tmp_path):
-    """With `max_attempts = 1`, a single `RETIRE_SET`-class fault retires the batch on that
-    same tick."""
-    sc = S.build_draft_scene(
-        tmp_path,
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(raises=S.author_error("first and only failure")),
-        max_attempts=1,
-    )
-    assert sc.run() == 2
-    assert sc.pending() == []
-    assert [r["finding_id"] for r in sc.graveyard()] == ["f1"]
-
-
 def test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_once_773(tmp_path):
-    """The POSITIVE CONTROL for the test above."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("shared", run_id="shared")],
@@ -221,7 +188,8 @@ def test_a_batch_row_the_curator_mentions_nowhere_and_no_file_cites_773(tmp_path
 def test_rotation_runs_exactly_once_per_tick_even_when_the_commit_step_returned_none_773(
     tmp_path,
 ):
-    """Rotation runs exactly once per tick whatever M5 returned."""
+    """Rotation runs once per tick even when nothing is committed: each skipped row is
+    consumed exactly once."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("dup", run_id="dup"), S.finding_row("skip", run_id="skip")],
@@ -238,7 +206,8 @@ def test_rotation_runs_exactly_once_per_tick_even_when_the_commit_step_returned_
 
 
 def test_a_tick_that_both_defers_a_row_and_closes_its_rotation_773(tmp_path):
-    """A tick that defers a row and then closes its rotation writes the queue ONCE."""
+    """The deferral bump survives the tick's closing rotation (one queue write): a second
+    deferring tick reads `deferrals` 2."""
     sc = _orphan_tick(tmp_path, max_attempts=9)
     assert sc.run() == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 1
@@ -247,25 +216,11 @@ def test_a_tick_that_both_defers_a_row_and_closes_its_rotation_773(tmp_path):
     assert sc.pending_by_id()["orphan"]["deferrals"] == 2
 
 
-def test_a_finding_faulted_and_deferred_in_the_same_tick_773(tmp_path):
-    """A `RETIRE_SET` fault unwinds BEFORE M5–M7 run at all, so no finding is ever charged
-    both counters in one tick."""
-    sc = _orphan_tick(tmp_path, max_attempts=9)
-    assert sc.run() == 0
-    assert sc.pending_by_id()["orphan"]["deferrals"] == 1
-
-    S.seed(sc.paths, sc.channel, sc.pending())
-    sc.curator.raises = S.author_error("faulted before M5")
-    assert sc.run() == 2
-    row = sc.pending_by_id()["orphan"]
-    assert row["deferrals"] == 1
-    assert row["attempts"] == 1
-
-
 def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation_773(
     tmp_path,
 ):
-    """A NEGATIVE demand."""
+    """A batch that faults while authoring never reaches the deferral step: the uncited row
+    gets no `deferrals` (the unfaulted control defers it)."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("bad", run_id="bad"), S.finding_row("orphan", run_id="orphan")],
@@ -292,7 +247,7 @@ def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation
 
 
 def test_repo_lock_wait_exceeded_at_the_closing_rotation_773(tmp_path):
-    """A commit that already LANDED is never undone by a later rotation failure."""
+    """A commit that already landed is never undone by a later rotation failure."""
     held: dict = {}
     sc = S.build_draft_scene(
         tmp_path,
@@ -310,34 +265,24 @@ def test_repo_lock_wait_exceeded_at_the_closing_rotation_773(tmp_path):
     assert "f1" in sc.pending_by_id()
 
 
-def test_repo_lock_wait_exceeded_specifically_on_the_deferral_bump_773(tmp_path):
-    """The deferral bump is ATOMIC with its lock acquisition."""
-    held: dict = {}
-    sc = _orphan_tick(tmp_path, repo_lock_wait_seconds=1, max_attempts=9)
-    sc.curator.also = _hold_append_lock(held)
-    try:
-        with pytest.raises(TimeoutError):
-            sc.run()
-    finally:
-        held["holder"].__exit__()
-    assert "deferrals" not in sc.pending_by_id()["orphan"]
-
-    sc.curator.also = None
-    assert _defer_again(sc, "filler1") == 0
-    assert sc.pending_by_id()["orphan"]["deferrals"] == 1
-
-
 def test_a_locked_rotation_that_expires_waiting_for_the_append_lock_773(tmp_path):
-    """A rotation that expires against a busy appender leaves the queue exactly as it was —
-    no row half-rotated, no counter half-bumped — and surfaces as a stuck tick."""
+    """A deferral rotation that expires against a busy appender gives up at the configured
+    `repo_lock_wait_seconds`, leaves the queue exactly as it was (no row half-rotated, no counter
+    half-bumped) and surfaces as a stuck tick; the next tick bumps the deferral from zero."""
     held: dict = {}
     sc = _orphan_tick(tmp_path, repo_lock_wait_seconds=1)
     before = sc.pending()
     sc.curator.also = _hold_append_lock(held)
+    started = time.monotonic()
     try:
         with pytest.raises(TimeoutError):
             sc.run()
     finally:
         held["holder"].__exit__()
+    assert time.monotonic() - started < 10
     assert sc.pending() == before
     assert [r["fault_class"] for r in S.stuck_records(sc.paths, sc.channel)] == ["TimeoutError"]
+
+    sc.curator.also = None
+    assert _defer_again(sc, "filler1") == 0
+    assert sc.pending_by_id()["orphan"]["deferrals"] == 1

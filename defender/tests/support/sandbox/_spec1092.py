@@ -1,5 +1,4 @@
-"""Shared machinery for #1092's executable spec — NOT a test module (the leading underscore
-keeps pytest from collecting it). Imported by the `test_1092_*.py` files."""
+"""Shared helpers for #1092's box-image tests: planted trees, fake daemons and real-box probes."""
 from __future__ import annotations
 
 import contextlib
@@ -11,14 +10,14 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
-
 from defender import box as box_mod
+from defender.box import _image
+from defender.box import image_tag as image_tag
+from defender.box._image import box_closure as box_closure
 from defender.execution.bash_exec import parse
-from defender.execution.box_codec import BoxFault, BoxResult
-from defender.tests.support.shared.contracts._by_path import DEFENDER, WORKTREE as REPO_ROOT
+from defender.execution.box_codec import BoxResult
+from defender.tests.support.shared.contracts._by_path import DEFENDER, WORKTREE as REPO_ROOT  # noqa: F401 — REPO_ROOT re-exported for the test files
 from defender.tests.e2e._box665 import (  # noqa: F401 — re-exported for the test files
-    BoxLifecycleRecorder,
     DockerFault,
     RecordingDocker,
     _cp,
@@ -28,47 +27,38 @@ from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.e2e._spec771 import requires_daemon, requires_real_box  # noqa: F401
 
 #: The three files the image name is a function of, IN THE ORDER the resolver reads them —
-#: the order decides which file a "cannot read" fault names first (MF1 part 1).
+#: the order decides which file a "cannot read" fault names first.
 HASH_INPUTS: tuple[str, ...] = ("box.Dockerfile", "uv.lock", "pyproject.toml")
 
-#: The two new code files and the Dockerfile, where the amendment sites them (N10, F26).
+#: The image module, the build script and the Dockerfile.
 IMAGE_PY = DEFENDER / "box" / "_image.py"
 BOX_IMAGE_PY = DEFENDER / "box" / "image_cli.py"
 DOCKERFILE = DEFENDER / "box.Dockerfile"
-CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-README_RUNTIME = REPO_ROOT / ".devcontainer" / "README.runtime.md"
 
-#: The stock image a FAKE-DOCKER test pins when it needs "an image" (the amendment's "tests
-#: that need a stock image pin one"; real-daemon tests pin `image_tag(DEFENDER)` — #94).
+#: The stock image a FAKE-DOCKER test pins when it needs one; real-daemon tests pin
+#: `image_tag(DEFENDER)`.
 STOCK_ROOTFS = "python:3.11-slim"
 
-#: The name shape MF3 settled: `defender-box:<RECIPE_VERSION>-<12 hex>`.
+#: The image name's shape: `defender-box:<RECIPE_VERSION>-<12 hex>`.
 TAG_RE = re.compile(r"^defender-box:(?P<version>[A-Za-z0-9._]+)-(?P<digest>[0-9a-f]{12})$")
 
-#: The remedy's tail, relative to the tree — what the README documents and the fault names
-#: absolutely (d42/d45).
+#: The remedy's tail, relative to the tree; the fault names it under the tree's absolute path.
 BUILD_COMMAND_TAIL = "defender/box/image_cli.py build"
 
 EXEC_TIMEOUT = 60.0
 
-#: The planted project's lock — WELL-FORMED, uv-shaped TOML (#1097: the name is computed from
-#: the lock's parsed core + `box` closure, so a planted tree must carry a lock the resolver can
-#: walk). Its closure from the root `planted` is alpha, beta, eta, epsilon, winonly, gamma,
-#: delta and BOTH `split` entries (#1097 amendment 2: the walk reads only link NAMES — from the
-#: root its `dependencies` + `optional-dependencies.box`, from every reached entry its
-#: `dependencies` and EVERY list under its `optional-dependencies`); every shape the walk has
-#: to handle is in it once:
-#:   - `split` is resolved to two versions, as uv writes a fork (claim a1): two same-named
-#:     `[[package]]` entries with `resolution-markers`, root links carrying `version`+`marker`;
+#: The planted project's lock: well-formed uv TOML the resolver can walk. The walk reads link
+#: NAMES only (the root's `dependencies` + `box` extra; every reached entry's `dependencies` and
+#: ALL its optional lists), so the closure from `planted` is alpha, beta, eta, epsilon, winonly,
+#: gamma, delta and BOTH `split` entries. Each shape the walk handles appears once:
+#:   - `split` resolved to two versions, as uv writes a fork: two same-named `[[package]]`
+#:     entries with `resolution-markers`, root links carrying `version`+`marker`;
 #:   - `alpha -> winonly` carries a marker no Linux build satisfies (markers are ignored);
-#:   - `alpha -> beta[speed]` and the root's `box -> gamma[fast]` are links with `extra` (which
-#:     the walk ignores); beta's and gamma's optional lists are ALL walked — `speed`/`fast`
-#:     (-> eta, delta) and the `docs`/`slow` nobody asks for (both -> epsilon, the superset);
+#:   - `alpha -> beta[speed]` and the root's `box -> gamma[fast]` carry `extra` (ignored); beta's
+#:     and gamma's optional lists are ALL walked, the unrequested `docs`/`slow` (-> epsilon) too;
 #:   - `eta -> alpha` closes a cycle;
-#:   - devtool (+ devdep) and rtlib are the ROOT's `dev` and `runtime` extras' — from the root
-#:     only `dependencies` + `box` are taken, and nothing here links back to the root, so they
-#:     stay outside the closure (amendment 3: a link that reached the root would walk its every
-#:     optional list, as for any entry).
+#:   - devtool (+ devdep) and rtlib sit only in the root's `dev`/`runtime` extras, and nothing
+#:     links back to the root, so they stay outside the closure.
 PLANTED_LOCK = """\
 version = 1
 revision = 3
@@ -286,40 +276,18 @@ PLANTED_INPUT_BYTES: dict[str, bytes] = {
 }
 
 
-# ---- the resolver, reached lazily -------------------------------------------------------------
-def image_tag(tree: Path) -> str:
-    """`box/_image.py::image_tag(tree)` through the package door. AttributeError at
-    HEAD — the module does not exist — which is the red every naming test fails on."""
-    return box_mod.image_tag(tree)  # type: ignore[attr-defined]
-
-
-def image_module():
-    """`box/_image.py` through the package door — for the constants (`HASH_INPUTS`,
-    `RECIPE_VERSION`) and `ImageInputError` a test pins exactly. The ONE lazy import site of
-    the module in this spec."""
-    from defender.box import _image  # type: ignore[attr-defined]
-
-    return _image
-
-
+# ---- the resolver -----------------------------------------------------------------------------
 def recipe_version() -> str:
-    """`_image.RECIPE_VERSION` — the constant that prefixes the name (MF3)."""
-    return str(image_module().RECIPE_VERSION)
-
-
-def box_closure(lock: dict, root_name: str) -> list[dict]:
-    """`_image.box_closure(lock, root_name)` (#1097 M1″): the lock entries reachable, by link
-    name, from the root's core + `box` links. Reached lazily, so a module that names it still collects while
-    the function does not exist and each test fails on the missing attribute."""
-    return image_module().box_closure(lock, root_name)  # type: ignore[no-any-return]
+    """`_image.RECIPE_VERSION` — the constant that prefixes the name."""
+    return str(_image.RECIPE_VERSION)
 
 
 # ---- trees ------------------------------------------------------------------------------------
 def plant_tree(root: Path, *, missing: tuple[str, ...] = (), copy_code: bool = True) -> Path:
     """`root/defender` holding the three hash inputs (synthetic bytes) — the DEFENDER DIR a box
-    would mount — minus `missing`. With `copy_code`, the real `_image.py` and `box_image.py`
-    are copied in where they exist, so the build script can be run FROM the planted tree and
-    hash the planted tree's own inputs (F-B). Returns the defender dir."""
+    would mount — minus `missing`. With `copy_code`, the real `_image.py` and `image_cli.py`
+    are copied in, so the build script can run FROM the planted tree and hash its own inputs.
+    Returns the defender dir."""
     defender_dir = root / "defender"
     defender_dir.mkdir(parents=True, exist_ok=True)
     for name in HASH_INPUTS:
@@ -345,9 +313,8 @@ def make_run_dir(tmp_path: Path, name: str = "run-1092") -> Path:
 
 # ---- the fake daemon: a missing image, in the daemon's own words --------------------------------
 #: `docker image inspect --format {{.Id}} <absent>` answers rc 1 with the daemon's one line
-#: `Error response from daemon: No such image: <ref>` (CLI 29.6.1 / daemon 29.5.3, the
-#: #1095 review-fix probe). The TEXT is never read by production — the preflight decides by
-#: exit code, which is the whole point (#1095: the create's text differed across CLIs).
+#: `Error response from daemon: No such image: <ref>` (CLI 29.6.1 / daemon 29.5.3). Production
+#: never reads the TEXT: the preflight decides by exit code, as the text differs across CLIs (#1095).
 NO_SUCH_IMAGE_CITE = "#1095 image-inspect probe"
 
 
@@ -356,8 +323,8 @@ def no_such_image_stderr(ref: str) -> str:
 
 
 #: What the CLI says when the daemon is not there — `docker image inspect` and `docker
-#: version` both exit 1 with it (DOCKER_HOST pointed at an absent socket, CLI 29.6.1, the
-#: #1095 round-2 probe). Same rc as a missing image; only the liveness probe tells them apart.
+#: version` both exit 1 with it (CLI 29.6.1). Same rc as a missing image; only the liveness
+#: probe tells them apart.
 DAEMON_DOWN_STDERR = (
     "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is "
     "correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such "
@@ -366,12 +333,10 @@ DAEMON_DOWN_STDERR = (
 
 
 class NoSuchImageDocker(RecordingDocker):
-    """`RecordingDocker` whose preflight `docker image inspect` answers rc 1 with the daemon's
-    missing-image line for THE IMAGE THE START ASKED ABOUT (the last token of the inspect
-    argv — `NO_SUCH_IMAGE_CITE`), recorded in `inspected_images`. The create is left HEALTHY:
-    a start that reaches it did not preflight, and the test's `"run" not in subcommands`
-    catches that. With `daemon_down`, the inspect AND the liveness probe (`docker version`)
-    both fail with `DAEMON_DOWN_STDERR` — the other reading of the same rc."""
+    """`RecordingDocker` whose preflight `docker image inspect` fails with the missing-image line
+    for the image asked about (recorded in `inspected_images`). The create stays HEALTHY, so a
+    start that skipped the preflight shows up as a `run` call. With `daemon_down`, the inspect
+    and the liveness probe (`docker version`) both fail with `DAEMON_DOWN_STDERR`."""
 
     def __init__(self, *, daemon_down: bool = False, **kw):
         super().__init__(**kw)
@@ -423,28 +388,10 @@ def env_pairs(argv: list[str]) -> list[tuple[str, str]]:
     return out
 
 
-def without_the_additions(argv: list[str]) -> list[str]:
-    """The create argv minus JF5's `--pull=never` token and M6's `--env DEFENDER_BOX=1` pair
-    — what must be byte-for-byte today's argv (d48)."""
-    out: list[str] = []
-    skip = False
-    for i, tok in enumerate(argv):
-        if skip:
-            skip = False
-            continue
-        if tok == "--pull=never":
-            continue
-        if tok == "--env" and i + 1 < len(argv) and argv[i + 1] == "DEFENDER_BOX=1":
-            skip = True
-            continue
-        out.append(tok)
-    return out
-
-
 # ---- the build remedy, as the operator would read it --------------------------------------------
 def remedy_command(message: str) -> list[str] | None:
     """The `python3 <tree>/defender/box/image_cli.py build` command a fault message names,
-    split as a shell would (the tree path is `shlex.quote`d — M5-TEXT #42), or None when the
+    split as a shell would (the tree path is `shlex.quote`d), or None when the
     message names no build command. House style may wrap a command in backticks and end the
     sentence with `.` or `)`; neither is part of what an operator pastes."""
     import shlex
@@ -466,7 +413,7 @@ def remedy_command(message: str) -> list[str] | None:
 
 # ---- a real box (the CI `test` job's lanes) ---------------------------------------------------
 def box_run(box, command: str, *, cwd: Path) -> BoxResult:
-    """The REAL entry point: `bash_exec.parse` → `run_parsed` (M8)."""
+    """The REAL entry point: `bash_exec.parse` → `run_parsed`."""
     return box.run_parsed(parse(command), command=command, cwd=cwd, timeout=EXEC_TIMEOUT)
 
 
@@ -484,9 +431,8 @@ def box_probe(box, run_dir: Path, name: str, source: str, *args: str) -> dict:
 
 @contextlib.contextmanager
 def real_box(run_dir: Path):
-    """A box over THIS checkout's defender dir through the real `start_box` — the resolver
-    names `image_tag(DEFENDER)`, the daemon must hold it (O3: a missing image faults, never
-    skips — #84)."""
+    """A box over THIS checkout's defender dir through the real `start_box`; the daemon must
+    hold `image_tag(DEFENDER)` (a missing image faults, never skips)."""
     box = box_mod.start_box(run_dir, DEFENDER)
     try:
         yield box
@@ -573,8 +519,7 @@ class ShimWorld:
 def shim_world(tmp_path: Path) -> ShimWorld:
     """A fake `DEFENDER_DIR` holding an EXECUTABLE `.venv/bin/python3` stub, and a PATH whose
     bare `python3` is another stub. Each stub prints `STUB:<its own path>` and exits 0, so the
-    shim's exec target is observable on stdout — the real shims print nothing about their
-    interpreter (G8), so the stubs are the observer."""
+    shim's exec target is observable on stdout (the real shims print nothing about it)."""
     defender_dir = tmp_path / "fake-tree" / "defender"
     venv_bin = defender_dir / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
@@ -609,9 +554,3 @@ def run_shim(shim: str, world: ShimWorld, *, marked: bool) -> str:
     lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("STUB:")]
     assert len(lines) == 1, (shim, proc.stdout, proc.stderr)
     return lines[0][len("STUB:"):]
-
-
-def raise_boxfault_message(fn, *args, **kwargs) -> str:
-    with pytest.raises(BoxFault) as e:
-        fn(*args, **kwargs)
-    return str(e.value)

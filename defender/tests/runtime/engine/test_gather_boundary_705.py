@@ -18,10 +18,9 @@ from defender.tests.support.storage._session_store_705 import (
 )
 
 
-def _append_gather_call(store, session_id: str, args, *, tool_call_id: str,
-                        tool_name: str = "gather") -> int:
-    """One model-authored tool call, through the real append path."""
-    return store.append(session_id, [tool_call_response(tool_name, args,
+def _append_gather_call(store, session_id: str, args, *, tool_call_id: str) -> int:
+    """One model-authored gather call, through the real append path."""
+    return store.append(session_id, [tool_call_response("gather", args,
                                                         tool_call_id=tool_call_id)],
                         agent_id="main")[0]
 
@@ -117,7 +116,7 @@ def test_over_depth_args_does_not_abort_the_whole_gather_boundary_query(tmp_path
 
     try:
         rows = dict(sql(store, "SELECT message_id, lead_id FROM gather_boundary"))
-    except sqlite3.OperationalError as exc:  # the shipped behaviour adv:PO2 measured
+    except sqlite3.OperationalError as exc:  # the whole-query abort this test guards against
         pytest.fail(f"one crafted args row aborted the whole boundary query: {exc}")
     assert rows[poison] is None
     assert [rows[m] for m in healthy] == [f"l-{i:03d}" for i in range(9)], (
@@ -201,9 +200,7 @@ def test_gather_boundary_drops_the_leads_a_fold_displaced(tmp_path):
         "below cannot tell 'displaced' from 'the view went blank'")
 
     assert leads(session_id) == {"l-root"}, (
-        "the fold displaced one lead-bearing turn and kept the other; the boundary must "
-        "not still serve a lead off a row the conversation can no longer reach, and must "
-        "still serve the one it can")
+        "the boundary served a displaced lead, or dropped the one the fold kept")
     assert gather_row not in {row[0] for row in sql(
         store, "SELECT message_id FROM gather_boundary")}, (
         "and it must be reachable from NO session, not merely filtered out of this "

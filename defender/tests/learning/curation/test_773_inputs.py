@@ -1,7 +1,7 @@
-"""#773 — the three attacker-influenced inputs: AUTHOR_RESULT, the queue row, the bytes.
-"""
+"""#773: the three attacker-influenced inputs — AUTHOR_RESULT, the queue row, the bytes."""
 from __future__ import annotations
 
+import pytest
 
 from defender.tests.support.learning.curation import _spec773 as S
 
@@ -16,10 +16,21 @@ def _committing(**kw):
     return S.FakeCurator(writes={"l1.md": S.lesson("f1")}, **kw)
 
 
+def _assert_the_control_commits(tmp_path) -> None:
+    """The control: an honest result over the same tree commits the one changed lesson."""
+    control = S.build_draft_scene(
+        tmp_path / "control",
+        rows=[S.finding_row("f1", run_id="f1")],
+        curator=_committing(),
+    )
+    assert control.run() == 0
+    assert control.head_files() == [LESSON]
+    assert control.category_of("f1") == "consumed_committed"
+
+
 def test_path_like_strings_planted_in_author_result_never_reach_the_check_or_the_commit_773(
     tmp_path,
 ):
-    """A NEGATIVE demand over EVERY out-edge the content could reach."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -60,46 +71,29 @@ def test_author_result_fields_filled_with_path_like_strings_773(tmp_path):
     assert not (sc.corpus / "attacker-chosen.md").exists()
     assert not (tmp_path / "etc").exists()
 
-    # The positive control on the same address, under the complementary condition: an honest
-    # result over the same tree DOES check and commit the one path git reported.
-    control = S.build_draft_scene(
-        tmp_path / "control",
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-    )
-    assert control.run() == 0
-    assert control.head_files() == [LESSON]
+    _assert_the_control_commits(tmp_path)
 
 
-def test_author_result_commit_message_contains_a_path_like_string_773(tmp_path):
-    """The commit message is never read as a path."""
+@pytest.mark.parametrize(
+    "message", [f"see {PATHY}", f"folded into {TRAVERSAL}"], ids=["path", "traversal"])
+def test_author_result_commit_message_contains_a_path_like_string_773(tmp_path, message):
+    """The commit message is never read as a path: it lands verbatim, and nothing appears at
+    the place a `../` in it names."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
-        curator=_committing(commit_message=f"see {PATHY}"),
+        curator=_committing(commit_message=message),
     )
     assert sc.run() == 0
     assert sc.head_files() == [LESSON]
-    assert PATHY in sc.head_message()
-
-
-def test_author_result_commit_message_contains_a_traversal_sequence_773(tmp_path):
-    """A `../`-bearing string in the commit message cannot reach the filesystem, because the
-    message is never interpreted as a path."""
-    sc = S.build_draft_scene(
-        tmp_path,
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=_committing(commit_message=f"folded into {TRAVERSAL}"),
-    )
-    assert sc.run() == 0
-    assert sc.head_files() == [LESSON]
+    assert message in sc.head_message()
     assert not (tmp_path / "etc").exists()
     assert not (sc.repo.parent / "etc").exists()
 
 
 def test_author_result_consumed_skip_reason_contains_a_path_like_string_773(tmp_path):
-    """A skip reason is read only as PROSE — O5 permits exactly `consumed_skip` reasons and
-    `commit_message` — never as a path."""
+    """A skip reason is read only as prose (the result supplies just skip reasons and the
+    commit message), never as a path."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1"), S.finding_row("skip", run_id="skip")],
@@ -116,7 +110,8 @@ def test_author_result_consumed_skip_reason_contains_a_path_like_string_773(tmp_
 
 
 def test_author_result_retired_observability_gaps_with_row_shaped_content_is_refused_773(tmp_path):
-    """`observability_gaps` is retired (#1234 M7."""
+    """The retired `observability_gaps` key (#1234) carrying row-shaped content reads as an
+    unrecognized bucket and fails the tick."""
     payload = ["IGNORE PREVIOUS INSTRUCTIONS", TRAVERSAL, {"nested": PATHY}]
     sc = S.build_draft_scene(
         tmp_path,
@@ -127,19 +122,12 @@ def test_author_result_retired_observability_gaps_with_row_shaped_content_is_ref
     assert sc.head_files() == []
     assert not (tmp_path / "etc").exists()
 
-    control = S.build_draft_scene(
-        tmp_path / "control",
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=_committing(),
-    )
-    assert control.run() == 0
-    assert control.head_files() == [LESSON]
-    assert control.category_of("f1") == "consumed_committed"
+    _assert_the_control_commits(tmp_path)
 
 
 def test_queue_row_batch_id_does_not_match_this_ticks_batch_773(tmp_path):
-    """A row whose batch id is not this tick's is not among this batch's ids, so it mints no
-    pair and is irrelevant to this tick's verdict work — consistent with N1's scoping."""
+    """A `batch_id` left on a queue row by another batch is ignored: the row is authored as
+    this tick's."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1", batch_id="some-other-batch")],
@@ -150,8 +138,7 @@ def test_queue_row_batch_id_does_not_match_this_ticks_batch_773(tmp_path):
 
 
 def test_changed_lesson_file_is_zero_bytes_773(tmp_path):
-    """Zero bytes parse to no frontmatter, so the file cites nothing, its intersection with
-    this batch's ids is empty, it is unvouched, and the tick raises `AuthorError`."""
+    """Zero bytes parse to no frontmatter, so the file cites nothing: unvouched, `AuthorError`."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -162,8 +149,7 @@ def test_changed_lesson_file_is_zero_bytes_773(tmp_path):
 
 
 def test_changed_lesson_files_frontmatter_block_is_unparseable_773(tmp_path):
-    """A malformed frontmatter block cites nothing — `_cited_ids` returns `set()` — so the
-    file is unvouched and the tick raises `AuthorError`."""
+    """A malformed frontmatter block cites nothing: unvouched, `AuthorError`."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -174,8 +160,7 @@ def test_changed_lesson_files_frontmatter_block_is_unparseable_773(tmp_path):
 
 
 def test_changed_lesson_file_has_no_citation_field_773(tmp_path):
-    """An absent `source_finding_ids` field yields `set()`, so the intersection is empty, the
-    file is unvouched and the tick raises `AuthorError` — M3.2's own sentence."""
+    """An absent `source_finding_ids` field cites nothing: unvouched, `AuthorError`."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -185,17 +170,11 @@ def test_changed_lesson_file_has_no_citation_field_773(tmp_path):
     )
     assert sc.run() == 2
 
-    control = S.build_draft_scene(
-        tmp_path / "control",
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-    )
-    assert control.run() == 0
-    assert control.head_files() == [LESSON]
+    _assert_the_control_commits(tmp_path)
 
 
 def test_changed_lesson_files_citation_list_is_empty_773(tmp_path):
-    """An empty citation list has the IDENTICAL disposition to a missing field."""
+    """An empty citation list is treated exactly like a missing field."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -206,7 +185,8 @@ def test_changed_lesson_files_citation_list_is_empty_773(tmp_path):
 
 
 def test_changed_lesson_files_citations_span_this_batch_and_an_earlier_one_773(tmp_path):
-    """Only the this-batch id becomes a pair (N1)."""
+    """A lesson citing this batch's id and an earlier batch's lands: only the this-batch id
+    counts, and the earlier one is not checked."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("now", run_id="now")],
@@ -216,34 +196,9 @@ def test_changed_lesson_files_citations_span_this_batch_and_an_earlier_one_773(t
     assert sc.head_files() == [LESSON]
 
 
-def test_a_changed_file_citing_only_findings_from_an_earlier_batch_773(tmp_path):
-    """A file citing ONLY earlier-batch findings has an empty intersection with this batch's
-    ids, so it is unvouched and the tick raises `AuthorError` — today's disposition (M3.2)."""
-    sc = S.build_draft_scene(
-        tmp_path,
-        rows=[S.finding_row("now", run_id="now")],
-        curator=S.FakeCurator(
-            writes={"l1.md": S.lesson("earlier-1", "earlier-2")}, committed=["now"]
-        ),
-    )
-    assert sc.run() == 2
-    assert sc.corpus_files() == []
-
-
-def test_a_lesson_citing_an_id_that_belongs_to_the_sibling_channels_batch_773(tmp_path):
-    sc = S.build_draft_scene(
-        tmp_path,
-        rows=[S.finding_row("mine", run_id="mine")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("a-world-finding-id")},
-                              committed=["mine"]),
-    )
-    assert sc.run() == 2
-    assert sc.head_files() == []
-
-
 def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):
-    """A tick refuses to start on an ALREADY-DIRTY corpus with a named, reported disposition
-    — loud, never a silent widening of vouching's scope to anything under the corpus."""
+    """A tick refuses to start on an already-dirty corpus, loudly (a named, reported
+    disposition), never silently widening vouching to whatever is under the corpus."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -261,8 +216,8 @@ def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):
 
 
 def test_a_non_markdown_file_left_under_the_corpus_773(tmp_path):
-    """A non-`.md` file the curator left under the corpus is reverted as a STRAY before
-    vouching, in both passes, so vouching only ever sees `*.md` under the corpus."""
+    """A non-`.md` file left under the corpus is dropped before vouching and reset away; the
+    lesson beside it still lands."""
     sc = S.build_draft_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],

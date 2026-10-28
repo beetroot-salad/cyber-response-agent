@@ -16,17 +16,17 @@ from defender.tests.support.invlang.validation._invlang_warn_836 import (
     warn_window,
 )
 
-# error-severity documents, one per family that must NOT become a warning (N1)
+# error-severity documents, one per family that must NOT become a warning
 
 _PARSE_ERROR = PROLOGUE + attr_block("l-001|v-001|owner|a|b")
 
-#: EXECUTED — one `undeclared lead` diagnostic, from a document-global check with no locus.
+#: One `undeclared lead` diagnostic, from a document-global check with no locus.
 _UNDECLARED_LEAD = (
     "```invlang\n:R attr_updates [resolved_by|target|key|value]\n"
     "l-404|v-001|class|x\n```\n"
 )
 
-#: EXECUTED — one `disposition benign blocked` diagnostic (an unresolved `??` class).
+#: One `disposition benign blocked` diagnostic (an unresolved `??` class).
 _BENIGN_GATED = (
     PROLOGUE.replace("bastion/internal/known-corp|bastion-01.corp", "??/??/??|bastion-01.corp")
     + CONCLUDE_BENIGN
@@ -39,10 +39,10 @@ _ERROR_FAMILY_DOCS = [
 ]
 
 
-def _diagnose(text: str, current: str | None = None) -> list:
+def _diagnose(text: str) -> list:
     from defender.skills.invlang.validate import diagnose
 
-    return diagnose(text, current)
+    return diagnose(text, None)
 
 
 def _rendered_warning(tmp_path: Path, doc: str) -> str:
@@ -53,14 +53,11 @@ def _rendered_warning(tmp_path: Path, doc: str) -> str:
     return _tool_append_block(deps, doc)
 
 
-# demand #0 — the return contract
-
-
-# M1 — the severity field and its partition
+# the severity field and its partition
 
 
 def test_only_attr_update_key_family_warns():
-    """N1's partition, asserted as a partition rather than as one example."""
+    """Asserted as a partition, not as one example."""
     warn = [d for d in _diagnose(WARN_DOC) if d.severity == "warning"]
 
     assert len(warn) == 1
@@ -75,7 +72,8 @@ def test_only_attr_update_key_family_warns():
 
 
 def test_append_block_mixes_warn_and_error_defects(tmp_path):
-    """One `append_block` whose text carries BOTH a warn-family row and an error-family defect is refused IN FULL and writes nothing — M2 narrows only the warn path."""
+    """One `append_block` carrying BOTH a warn-family row and an error-family defect is refused
+    IN FULL and writes nothing."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation.tools import _tool_append_block
@@ -94,10 +92,11 @@ def test_append_block_mixes_warn_and_error_defects(tmp_path):
     assert (run / "investigation.md").read_text(encoding="utf-8") == warn_only
 
 
-# M2 — the write gate, the two entry points, and the two other validators
+# the write gate, the two entry points, and the two other validators
 
 def test_validate_investigation_returns_none_on_warn_only(tmp_path):
-    """The gate ACCEPTS a document whose only defects are warn-severity — with the size bound, the encodability check and the append-only baseline all still applied."""
+    """The gate ACCEPTS a document whose only defects are warn-severity, with the size bound,
+    the encodability check and the append-only baseline all still applied."""
     from defender.records._artifact_schema import (
         INVESTIGATION_FILE_MAX,
         validate_artifact,
@@ -117,7 +116,8 @@ def test_validate_investigation_returns_none_on_warn_only(tmp_path):
 
 
 def test_validate_artifact_still_returns_str_or_none():
-    """`validate_artifact`'s `str | None` contract is UNCHANGED by M2 — the seam the close tool and the permission gate are both written against (claim g4)."""
+    """`validate_artifact` keeps its `str | None` contract: the close tool and the permission
+    gate are both written against it."""
     from defender.records._artifact_schema import validate_artifact
 
     assert validate_artifact("investigation.md", WARN_DOC, None) is None
@@ -129,7 +129,8 @@ def test_validate_artifact_still_returns_str_or_none():
 
 
 def test_validate_companion_drops_warnings():
-    """`validate_companion` returns only the ERROR-severity messages, so its `list[str]` surface reads as "reasons to refuse" for its one production caller (persist.py:207, claim p6) rather than as "everything diagnose found"."""
+    """`validate_companion` returns only the ERROR-severity messages, so its `list[str]` reads
+    as "reasons to refuse" for its production caller (persist), not "everything diagnose found"."""
     from defender.skills.invlang.validate import validate_companion
 
     assert validate_companion(WARN_DOC, None) == []
@@ -159,7 +160,8 @@ def test_the_write_gate_applies_the_validators_warn_severity(tmp_path):
 
 
 def test_persist_reads_document_written_under_different_severity_semantics(tmp_path):
-    """Severity is assigned per check family at diagnose time and is NEVER document content (claims p1/g5), so a document of any age is validated under current semantics and no migration mechanism exists to invent."""
+    """Severity is assigned per check family at diagnose time and is NEVER document content, so
+    a document of any age is validated under current semantics."""
     from defender.skills.invlang.validate import validate_companion
 
     on_disk = tmp_path / "aged.md"
@@ -171,10 +173,7 @@ def test_persist_reads_document_written_under_different_severity_semantics(tmp_p
     assert [d.severity for d in warn_window(from_disk)] == ["warning"]
 
 
-# O2 — the copy gate and the readers downstream of it
-
-
-# A2 — what the rendered warning shows the model
+# what the rendered warning shows the model
 
 @pytest.mark.parametrize(("label", "row"), [
     ("ordinary", WARN_ROW),
@@ -182,7 +181,8 @@ def test_persist_reads_document_written_under_different_severity_semantics(tmp_p
     ("bidi", "l-001|v-001|own\u202eer|svc.config-mgmt"),
 ])
 def test_warning_renders_the_flagged_row_byte_exactly(tmp_path, label, row):
-    """PR-1, settled as FACT rather than offered as a choice:"""
+    """The row the model is shown is byte-identical to the row `fix_row` will require back,
+    invisible characters included (`str.strip()` leaves category Cf alone)."""
     doc = PROLOGUE + attr_block(row)
 
     rendered = _rendered_warning(tmp_path, doc)

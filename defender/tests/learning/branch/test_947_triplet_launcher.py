@@ -1,4 +1,4 @@
-"""#947 — the launcher: what it checks, what it starts, what it refuses (preflight, `Step.RUNS`, `Step.VERIFY`"""
+"""#947: the launcher — what it checks, what it starts, what it refuses."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
@@ -21,10 +21,9 @@ from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both CONFIGURED roots point inside `tmp_path` for every scenario in this file."""
+    """The runs-base variable points inside `tmp_path`, so a stray read never reaches the
+    developer's or CI's real runs folder."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    T.isolate_learning_state(tmp_path, monkeypatch)
 
 
 def _cli():
@@ -47,7 +46,7 @@ def _verify_family(ep_dir, plant=T.arm_run_dir, **kw):
 
 
 def _tenant_paths():
-    """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
+    """The tenant `T.runs_base` (or `d9_tenant`) already created."""
     return T.current_tenant()
 
 
@@ -64,7 +63,7 @@ def _calls() -> list:
 
 
 def _launch(tmp_path, *, spawn=None, argv_extra=(), oracle=None, verifier=None, **seams):
-    """Drive one episode through the real launcher over `_spec1224`'s fixture tenant (#1224)."""
+    """Drive one episode through the real launcher over `_spec1224`'s fixture tenant."""
     run = S.launch(
         tmp_path, S.estate(tmp_path), calls=_calls(), spawn=spawn, argv_extra=argv_extra,
         oracle=oracle if oracle is not None else S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)),
@@ -92,8 +91,7 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
     src = invalid
     agent = T.FakeAgent()
     with pytest.raises(SystemExit):
-        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                     *T.retired_continuation_argv()],
+        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
     assert agent.calls == 0
@@ -113,14 +111,13 @@ def test_world_identities_are_independent_of_episode_and_label(tmp_path):
 
 def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_path):
     """Preflight checks every precondition in ONE block before anything is spent, and EACH of them refuses before the questioner is called"""
-    base, src = location_path(T.runs_base)(tmp_path, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
+    base, src = location_path(T.runs_base)(tmp_path, published=True)  # a branch launch pins a published tenant's commit
 
     def refuses(argv_extra, *, prepare=lambda: None):
         agent = T.FakeAgent()
         prepare()
         with pytest.raises(SystemExit):
-            _entry().main(["--tenant", src.parent.parent.name, src.name, *argv_extra,
-                         *T.retired_continuation_argv()],
+            _entry().main(["--tenant", src.parent.parent.name, src.name, *argv_extra],
                         spawn=T.FakeSpawn(), questioner=agent,
                         preflight=S.no_preflight, live_tree=T.source_capture())
         assert agent.calls == 0, "the questioner was paid for before the preflight refused"
@@ -133,15 +130,14 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
 
 def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_it(tmp_path):
     """The launcher screens the source run's `alert.json` before it reaches the questioner's prompt"""
-    base, src = location_path(T.runs_base)(tmp_path, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
+    base, src = location_path(T.runs_base)(tmp_path, published=True)  # a branch launch pins a published tenant's commit
     secret = tmp_path / "root-private-key"
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
     RunPaths(src).alert.unlink()
     RunPaths(src).alert.symlink_to(secret)
     agent = T.FakeAgent(T.declaration(T.family_doc()), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c")))
     with pytest.raises(T.refusals()) as refusal:
-        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                     *T.retired_continuation_argv()],
+        _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
     assert "alert" in str(refusal.value)
@@ -169,7 +165,7 @@ def test_947_all_siblings_in_one_family_are_launched_from_one_manifest_and_no_pr
     assert len(spawn.launches) >= 2
     for la in spawn.launches:
         assert not any("continuation" in str(arg) for arg in la["argv"]), la["argv"]
-    # #1105 PR 2 (declared change 6): a sibling names its episode by id, `--episode <ep>`.
+    # A sibling names its episode by id, `--episode <ep>`.
     seen = {la["argv"][la["argv"].index("--episode") + 1] for la in spawn.launches}
     assert len(seen) == 1, "the siblings were launched from different manifests"
 
@@ -183,14 +179,15 @@ def test_947_accepted_siblings_are_started_together_as_processes(tmp_path):
     rc, spawn, ep, _message = _launch(tmp_path, spawn=slow)
     assert sorted(spawn.worlds) == ["a", "b", "c"]
     for launch in spawn.launches:
-        # #1105 PR 2 (declared change 6): `run.py --tenant T --episode <ep> --world L`.
+        # `run.py --tenant T --episode <ep> --world L`.
         assert "--episode" in launch["argv"]
         assert any(arg.endswith("run.py") for arg in launch["argv"])
     assert spawn.overlap, "the siblings ran serially; nothing was started together"
 
 
 def test_947_the_launcher_globs_and_passes_its_own_questioner_lessons(tmp_path):
-    """#1007 M8/O7, wired end to end through the REAL launcher, not `author_family` called directly"""
+    """Questioner lessons reach call 1 through the REAL launcher, not `author_family` called
+    directly."""
     import yaml
 
     lessons_dir = tmp_path / "lessons-questioner"
@@ -307,7 +304,7 @@ def test_947_family_stamp_carries_agreed_and_override_as_disjoint_roles(tmp_path
     ep = T.episode(tmp_path)
     _verify_family(ep, source=T.provenance_record())
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
-    # #1204: `waived` names the fault kinds the override waived — none, for a clean family.
+    # `waived` names the fault kinds the override waived: none, for a clean family.
     assert set(stamp) == {"agreed", "allow_dirty", "source", "waived"}
     assert stamp["waived"] == []
     assert "allow_dirty" not in stamp["agreed"]
@@ -394,7 +391,7 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         return T.arm_run_dir(ep, w, **(silent if w == "b" else {}))
 
     for allow_dirty in (False, True):
-        # #1187 declared change 1: an episode id is a canonical lowercase uuid4 text.
+        # An episode id is a canonical lowercase uuid4.
         ep = T.episode(tmp_path,
                        episode_id=fixture_uuid(f"947-launcher-silent-{str(allow_dirty).lower()}"))
         report = _verify_family(ep, silent_dirs, source=T.provenance_record(),
@@ -416,7 +413,7 @@ def test_947_the_dirty_override_is_named_in_the_family_stamp(tmp_path):
     assert stamp["allow_dirty"] is True
 
 
-# §7 FORK-1 — a family that fails verification withholds comparability
+# a family that fails verification withholds comparability
 
 
 def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability(tmp_path):
@@ -449,7 +446,7 @@ def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability
     assert not (ep / "outcome.yaml").exists(), "verification wrote pre-flight's outcome record"
 
 
-# §7 FORK-2 — relaunching after a death
+# relaunching after a death
 
 
 def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
@@ -487,7 +484,7 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
         assert not (episodes / episode_id).is_symlink(), episode_id
 
 
-# the one shared mutable resource D1 newly contends
+# the source store: the one shared mutable resource concurrent siblings contend for
 
 
 def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
@@ -499,7 +496,7 @@ def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
     from defender.records import SessionPaths
 
     base, src = location_path(T.runs_base)(tmp_path)
-    # #1105 fork S(b): the layout owner hands the store its paths.
+    # The layout owner hands the store its paths.
     with store_mod.open_store(case_id="case-947",
                               sessions=SessionPaths(fixture_runs_base(base))) as handle:
         sid = handle.new_session(agent_id="main")

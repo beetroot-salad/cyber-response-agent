@@ -1,4 +1,4 @@
-"""Fixtures for #1108 P4's contract; the machinery lives in `_support.py` (slice S0)."""
+"""Fixtures for #1108 P4; the machinery lives in `_support.py`."""
 from __future__ import annotations
 
 import pytest

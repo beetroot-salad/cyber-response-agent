@@ -15,7 +15,6 @@ import pytest
 from defender import _io
 from defender.records import RunPaths
 
-ITEM1_SYSTEM = "elastic"  # the breaker file's system key; the lead_zero constant went with item 1 (#1222)
 MiB = 1024 * 1024
 NAME = "rec.txt"
 ABSENT_TEXT = os.strerror(errno.ENOENT)
@@ -126,11 +125,11 @@ def read(reader: str, root: Path, name: str = NAME, os_: Any = os) -> tuple[str,
     return fn(root, name, os_, binary)
 
 
-def absent_reason(reader: str, root: Path, name: str = NAME) -> Any:
-    """What `reader` answers for a really missing `name` — the absent answer a read-phase
+def absent_reason(reader: str, root: Path) -> Any:
+    """What `reader` answers for a really missing `NAME` — the absent answer a read-phase
     refusal must not be mistaken for."""
-    assert not (root / name).exists()
-    kind, payload = read(reader, root, name)
+    assert not (root / NAME).exists()
+    kind, payload = read(reader, root, NAME)
     return payload if reader in FOLDS_ABSENCE else kind
 
 
@@ -645,7 +644,7 @@ def test_o1_the_wrappers_take_a_per_caller_limit(tmp_path):
 
 def test_o1_the_wire_log_reader_reads_past_the_default_limit(tmp_path):
     """`visualize_messages.load_messages` reads the wire log (up to 115 MB seen) by streaming it
-    row by row (#1188 D2): an operator tool over a host-written log, never a whole read."""
+    row by row: an operator tool over a host-written log, never a whole read."""
     run_dir = run_dir_at(tmp_path)
     wire = RunPaths(run_dir).wire_log
     wire.parent.mkdir(parents=True, exist_ok=True)
@@ -723,13 +722,13 @@ class ShortWriteOs(FaultOs):
         return os.write(fd, bytes(data[:self._k]))
 
 
-def in_thread(fn: Callable[[], Any], *, deadline: float = 10.0) -> Any:
-    """`fn()` on a thread, or fail when it has not answered by `deadline` seconds."""
+def in_thread(fn: Callable[[], Any]) -> Any:
+    """`fn()` on a thread, or fail when it has not answered within 10 seconds."""
     out: list[Any] = []
     t = threading.Thread(target=lambda: out.append(fn()), daemon=True)
     t.start()
-    t.join(deadline)
-    assert not t.is_alive(), f"no answer within {deadline}s: the call hangs"
+    t.join(10.0)
+    assert not t.is_alive(), "no answer within 10s: the call hangs"
     return out[0]
 
 
@@ -750,7 +749,7 @@ def test_h1_the_read_opener_takes_a_shared_lock(tmp_path):
             os.close(other)
 
 
-# -- H2, H12 (amended by #1188 D1/D2): the cap only lowers; the wire log streams ------------
+# -- H2, H12: the cap only lowers; the wire log streams ---------------------------------------
 
 
 def _rows_around_a_hole(path: Path) -> None:
@@ -921,8 +920,8 @@ _READERS = {
 
 @pytest.mark.parametrize("reader", sorted(_READERS))
 def test_h12_the_cap_has_no_off_switch(tmp_path, reader):
-    """`None` is not a limit any more (#1188 D1), on every reader that takes one: a TypeError,
-    not "no bound", and not swallowed into a soft "unreadable". Control: the default reads."""
+    """`None` is not a limit on any reader that takes one: a TypeError, not "no bound", and not
+    swallowed into a soft "unreadable". Control: the default reads."""
     p = tmp_path / "small.jsonl"
     p.write_text('{"a": 1}\n', encoding="utf-8")
     assert _READERS[reader](p, _io.READ_LIMIT)

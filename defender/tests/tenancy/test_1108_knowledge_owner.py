@@ -1,23 +1,17 @@
-"""The knowledge layout has one owner, rooted at an agent root (#1108 P1 -> P4).
-
-P1 re-rooted the layout on the code checkout (`DefenderPaths(repo_root).knowledge`). P4 moves
-the knowledge out of the product tree: `KnowledgePaths` is built from an agent root alone (a
-run copy, a draft or an export), and `DefenderPaths` carries no knowledge at all. The
-symbol-resolved census of every other reader is `tenant_1108_p4/test_census.py` (O4).
-"""
+"""The knowledge layout has one owner, `KnowledgePaths`, built from an agent root alone (a run
+copy, a draft or an export); `DefenderPaths` carries no knowledge (#1108). The symbol-resolved
+census of every other reader is `tenant_1108_p4/test_census.py`."""
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
-#: Imported by name: the one-argument constructor is the P4 target (expected red before it).
-_knowledge = importlib.import_module("defender.knowledge._knowledge")
+from defender.knowledge import _knowledge
 
 
 def test_an_agent_root_carries_its_own_knowledge(tmp_path: Path) -> None:
-    """O4: `KnowledgePaths(agent_root)` — built from the agent root alone, as the design
-    writes it — places every corpus and skill under that root and nowhere else, so a run
-    copy's paths can never reach another root (another tenant's, or the product tree)."""
+    """`KnowledgePaths(agent_root)` places every corpus and skill under that root and nowhere
+    else, so a run copy's paths can never reach another root (another tenant's, or the product
+    tree)."""
     agent = tmp_path / "run-knowledge" / "r1" / "agent"
     knowledge = _knowledge.KnowledgePaths(agent)
     assert knowledge.lessons_dir == agent / "lessons"
@@ -29,15 +23,15 @@ def test_an_agent_root_carries_its_own_knowledge(tmp_path: Path) -> None:
 
 
 def test_the_corpus_sets_name_only_live_corpora():
-    """O-U5 / O5: the author side touches the runtime corpus and the questioner's; the runtime
-    loads only its own; the retired corpora are in neither set."""
+    """The author side touches the runtime corpus and the questioner's; the runtime loads only
+    its own; the retired corpora are in neither set."""
     assert frozenset({"lessons", "lessons-questioner"}) == _knowledge.LESSON_CORPORA
     assert frozenset({"lessons"}) == _knowledge.RUNTIME_LESSON_CORPORA
 
 
 def test_the_code_checkout_carries_no_knowledge(tmp_path: Path) -> None:
-    """O1 / O4: a checkout's paths (`DefenderPaths`) no longer lead to any knowledge — the
-    accessor P1 re-rooted (`.knowledge`, `.lessons_dir`, ...) is gone, not re-pointed."""
+    """A checkout's paths (`DefenderPaths`) lead to no knowledge: the accessors (`.knowledge`,
+    `.lessons_dir`, ...) are gone, not re-pointed."""
     from defender._paths import DefenderPaths
 
     paths = DefenderPaths(repo_root=tmp_path)

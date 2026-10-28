@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 
-from defender.kit.settings import SystemConfig
 from defender.kit.faults import ConfigFault
 from defender.tests.tenancy.startup_usability.test_1256_adapter_checks import (
     FAULTS,
@@ -16,6 +15,7 @@ from defender.tests.tenancy.startup_usability.test_1256_adapter_checks import (
     _ctx,
     _declared_check,
     _every_verb,
+    _landed,
     _plant,
 )
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
@@ -64,15 +64,6 @@ def _key_cases() -> list[Any]:
             for family in _mutations(key)]
 
 
-def _landed(record: Any, system: str, family: Family) -> bool:
-    entry = record.systems.get(system)
-    if not isinstance(entry, SystemConfig):
-        return False
-    if family.kind == "drop":
-        return family.key not in entry
-    return entry.get(family.key) == family.value
-
-
 def test_o5_the_key_census_covers_every_settings_reading_adapter() -> None:
     texts = S.config_texts(MARKER)
     readers = sorted(s for s, families in FAULTS.items() if families)
@@ -94,7 +85,7 @@ def test_o5_the_check_raises_exactly_where_a_verb_raises(
     assert _landed(record, system, family), (
         f"precondition: the {family.label} mutation reached the record: "
         f"{record.systems.get(system)!r}")
-    # The disk is complete again; the record is not (K1, DP1: the check reads the record).
+    # The disk is complete again; the record is not (the check reads the record).
     S.write_config(folder, system, S.config_texts(MARKER)[system])
 
     shim = S.DockerShim(tmp_path / "shim")
@@ -105,10 +96,10 @@ def test_o5_the_check_raises_exactly_where_a_verb_raises(
             f"premise: the verbs' fault names {family.key}: {raising}")
         fault = _check_outcome(_declared_check(module, system), record)
         assert isinstance(fault, ConfigFault), (
-            f"O-5: {system}'s verbs {sorted(raising)} raise ConfigFault under {family.label}, so "
-            f"its settings check must raise ConfigFault over the same record — got {fault!r}")
+            f"{system}'s verbs {sorted(raising)} raise ConfigFault under {family.label} but its "
+            f"settings check does not: got {fault!r}")
         assert family.key in str(fault), (
-            f"K1: {system}'s check must name what is wrong ({family.key}): {fault}")
+            f"{system}'s check does not name what is wrong ({family.key}): {fault}")
         return
 
     assert "health-check" in outcomes, f"premise: {system} declares health-check: {sorted(outcomes)}"
@@ -117,6 +108,5 @@ def test_o5_the_check_raises_exactly_where_a_verb_raises(
         f"answers — got {outcomes['health-check']!r}")
     fault = _check_outcome(_declared_check(module, system), record)
     assert fault is None, (
-        f"K1: under {family.label} every {system} verb answers without a ConfigFault, so the "
-        f"system is usable and its check must not raise (it would be down at start for a "
-        f"setting no verb needs) — got {fault!r}")
+        f"under {family.label} every {system} verb answers without a ConfigFault, but its "
+        f"check raised {fault!r}")

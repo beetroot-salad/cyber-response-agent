@@ -6,7 +6,6 @@ import os
 import stat
 import subprocess
 import sys
-import threading
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -270,7 +269,7 @@ def _held_matrix():
 
 def _held_control(held: Any, verb: str, path: Path) -> None:
     """The same verb on the same address, nothing planted, then a plain file there. A durable
-    append makes no folder (R4), so its holding folders are made real first."""
+    append makes no folder, so its holding folders are made real first."""
     if verb == "unlink":
         assert held.unlink(REC) is False
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -371,7 +370,7 @@ def test_d1_one_write_is_one_walk_off_the_held_root_that_makes_its_holding_folde
 def test_d1_a_durable_append_fsyncs_the_leaf_then_its_holding_folder(tree, rel):
     root, _host = tree
     leaf = root / rel
-    leaf.parent.mkdir(parents=True, exist_ok=True)  # R4: a durable append makes no folder
+    leaf.parent.mkdir(parents=True, exist_ok=True)  # a durable append makes no folder
     spy = S.OsSpy(watch=leaf)
     with S.hold(root, os_=spy) as held:
         at = len(spy.fsyncs)
@@ -401,7 +400,7 @@ def test_d1_a_durable_append_fsyncs_the_leaf_then_its_holding_folder(tree, rel):
 @pytest.mark.parametrize("rel", ["rec.jsonl", "fa/rec.jsonl"])
 def test_d1_a_failed_holding_folder_sync_fails_the_durable_append(tree, rel):
     root, _host = tree
-    (root / rel).parent.mkdir(parents=True, exist_ok=True)  # R4: a durable append makes no folder
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)  # a durable append makes no folder
     with S.hold(root, os_=DirSyncFails()) as held:
         raised = S.raised_by(lambda: held.write(rel, ROW, mode="append", durable=True))
         assert isinstance(raised, OSError), (
@@ -428,7 +427,7 @@ def test_d1_a_durable_append_after_a_rename_syncs_the_moved_holding_folder(tmp_p
                for s in syncs), f"the moved holding folder {folder} was not fsynced: {syncs}"
 
 
-#: Rev 3 has no `Held.read`: the view's own close race is in `test_1133_rev3.py`.
+#: `Held` has no `read`; the view's own close race is in `test_1133_rev3.py`.
 _LIFETIME_VERBS = (*WRITE_VERBS, "mkdir", "unlink")
 
 
@@ -472,22 +471,7 @@ def test_d1_a_verb_in_flight_when_close_lands_keeps_working_off_its_own_descript
     held = S.hold(root, os_=spy)
     [root_fd] = S.open_fds_on(root)
     state: dict[str, Any] = {}
-
-    def close_mid_verb(_op: str, _args: tuple, _kwargs: dict) -> None:
-        spy.hook = None
-        state["closed_promptly"] = S.run_in_thread(held.close, timeout=1.0)
-        if not state["closed_promptly"]:
-            return
-        state["open_after_close"] = S.open_fds_on(root)
-        if root_fd not in state["open_after_close"]:
-            # The lowest free number is usually the one just freed; `dup2` makes it certain.
-            fd = os.open(decoy, os.O_RDONLY | os.O_DIRECTORY)
-            if fd != root_fd:
-                os.dup2(fd, root_fd, inheritable=False)
-                os.close(fd)
-            state["decoy_on"] = root_fd
-
-    spy.hook = close_mid_verb
+    spy.hook = S.close_mid_op(spy, held, root, root_fd, decoy, state)
     try:
         got = S.held_verb(held, verb, _lifetime_name(verb), _payload(verb, "in-flight"))
 
@@ -519,11 +503,6 @@ def test_d1_a_verb_in_flight_when_close_lands_keeps_working_off_its_own_descript
             os.close(state["decoy_on"])
 
 
-#: How long the dup waits for a close started on another thread: ample for a close that is
-#: not held off by the lock, and the only wait a correct `Held` costs.
-_CLOSE_GRACE = 0.5
-
-
 @pytest.mark.parametrize("verb", _LIFETIME_VERBS)
 def test_d1_a_close_landing_as_a_verb_takes_its_dup_never_redirects_the_verb(tmp_path, verb):
     root, decoy = _lifetime_trees(tmp_path, verb)
@@ -531,21 +510,7 @@ def test_d1_a_close_landing_as_a_verb_takes_its_dup_never_redirects_the_verb(tmp
     spy = S.OsSpy()
     held = S.hold(root, os_=spy)
     state: dict[str, Any] = {}
-
-    def close_at_dup(fd: int) -> None:
-        closer = threading.Thread(target=held.close, daemon=True)
-        closer.start()
-        closer.join(_CLOSE_GRACE)
-        state["closer"] = closer
-        if not closer.is_alive():
-            # The close finished while the verb was about to dup the number it just freed.
-            taken = os.open(decoy, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-            if taken != fd:
-                os.dup2(taken, fd, inheritable=False)
-                os.close(taken)
-            state["decoy_on"] = fd
-
-    spy.before_dup = close_at_dup
+    spy.before_dup = S.close_at_dup(held, decoy, state)
     try:
         got = S.held_verb(held, verb, _lifetime_name(verb), _payload(verb, "in-flight"))
         assert "closer" in state, f"Held.{verb} took no dup through its os_ seam"
@@ -569,7 +534,7 @@ def test_n_h_every_descriptor_a_held_root_opens_is_close_on_exec(tree):
             name = REC if verb != "create" else "fa/fb/created.jsonl"
             S.held_verb(held, verb, name, _payload(verb, "cloexec"))
         held.mkdir("fa/fc")
-        # The view's reads open (and, rev 3, dup) through the same seam.
+        # The view's reads open (and dup) through the same seam.
         held.view().read("fa/fb/created.jsonl")
         held.view().under("fa").entries()
     opened = [o for o in spy.opens if o.fd is not None]
@@ -630,7 +595,7 @@ def test_o6_a_held_root_that_was_removed_refuses_every_write_and_is_never_recrea
         assert not os.path.lexists(root), f"Held.{verb} recreated the removed root"
     root.mkdir()
     if verb == "durable_append":
-        (root / rel).parent.mkdir(parents=True, exist_ok=True)  # R4: it makes no folder
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)  # a durable append makes no folder
     with S.hold(root) as held:
         S.held_verb(held, verb, rel if verb != "mkdir" else "fa")
 
@@ -642,7 +607,7 @@ def test_o6_a_held_root_that_was_renamed_is_written_in_its_new_place(tmp_path, v
     root = tmp_path / "root"
     root.mkdir()
     if verb == "durable_append":
-        (root / "fa").mkdir()  # R4: a durable append makes no folder
+        (root / "fa").mkdir()  # a durable append makes no folder
     moved = tmp_path / "moved"
     with S.hold(root) as held:
         root.rename(moved)

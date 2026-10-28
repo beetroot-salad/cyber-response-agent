@@ -9,12 +9,9 @@ from defender.tests.support.shared.contracts._by_path import WORKTREE
 
 
 def run_box_python_command(command: list[str]) -> subprocess.CompletedProcess[str]:
-    """Keep the supplied script/operands, using the test runtime and this worktree's imports.
-
-    Docker exec inherits the image's Python and mounted package. The local stand-in needs
-    the test interpreter's dependencies and an explicit import root: pytest's sys.path
-    injection is not a subprocess environment variable, and fake product mounts may hold
-    only geography fixtures rather than a runnable package.
+    """Run the command's script/operands under the test interpreter with this worktree on
+    `PYTHONPATH`: pytest's sys.path injection does not reach a subprocess, and fake product
+    mounts may hold only fixtures rather than the runnable package the image would mount.
     """
     return subprocess.run(
         [sys.executable, *command[1:]],

@@ -33,7 +33,7 @@ def _deployment_logs(caplog, level: int) -> list[str]:
 
 
 def test_1110_o6_unset_is_production_and_logs_nothing(caplog):
-    """O6/M4: unset → `production`, silently. Unset is the documented default (a worker that
+    """Unset → `production`, silently. Unset is the documented default (a worker that
     missed the variable must not write copies into itself), not a typo."""
     caplog.set_level(logging.DEBUG)
     assert _deployment() == "production"
@@ -50,7 +50,7 @@ def test_1110_o6_unset_is_production_and_logs_nothing(caplog):
 ])
 def test_1110_o6_a_recognised_value_is_read_stripped_and_lowercased_and_logs_nothing(
         monkeypatch, caplog, raw, expected):
-    """O6/M4: the two values, stripped and lowercased; empty is unset. None of them is an
+    """The two values, stripped and lowercased; empty is unset. None of them is an
     error — the positive control for the typo case below, on the same logger capture."""
     monkeypatch.setenv(_env.DEPLOYMENT_ENV, raw)
     caplog.set_level(logging.DEBUG)
@@ -118,7 +118,7 @@ def test_1110_o1_main_hands_the_render_step_the_tenant_bound_handle_it_materiali
 
 
 class _TenantRecording(SpecTail):
-    """The tail, noting the tenant the render step is handed beside the run (#1279 A4)."""
+    """The tail, noting the tenant the render step is handed beside the run."""
 
     def __init__(self, *a: Any, **kw: Any) -> None:
         super().__init__(*a, **kw)
@@ -130,7 +130,7 @@ class _TenantRecording(SpecTail):
 
 
 def test_1279_a4_main_hands_the_render_step_the_tenant_it_accepted(tmp_path, state):
-    """A4: run.py's accepted `Tenant` rides the visualize seam; nothing downstream accepts it again."""
+    """run.py's accepted `Tenant` rides the visualize seam; nothing downstream accepts it again."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
     from defender.tests.support.tenancy._tenants1106 import accept
 

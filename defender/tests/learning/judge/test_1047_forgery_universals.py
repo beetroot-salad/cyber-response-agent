@@ -1,5 +1,5 @@
-"""#1047 — the security dive's two negative universals, and the positive controls that make them
-mean something."""
+"""#1047 — no box-writable file is an input to the cut-short decision: the negative universals,
+each with a positive control."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -13,8 +13,8 @@ from defender.tests.support.shared.filesystem import _spec1047 as S
 
 
 def _rows_and_word(episode_dir):
-    """One pass over one episode: every row, plus what the family-scope call (which gives the
-    family's word since #1224) was shown of each world."""
+    """One pass over one episode: every row, plus what the family-scope call was shown of each
+    world."""
     return S.graded_with_view(episode_dir)
 
 
@@ -49,8 +49,7 @@ def test_no_file_a_box_can_write_is_an_input_to_was_this_run_cut_short(tmp_path)
 
     honest = S.cut_short_episode(tmp_path / "honest", cut={"b": "request-limit"})
     assert S.graded(honest)["b"].get("cut_short") == "request-limit", (
-        "the control failed: a HOST-written record no longer moves the grade either, so the "
-        "assertions above are not about the forgery")
+        "control: a host-written record does not move the grade either")
 
     control_ticket = S.record_ticket(
         S.closed_run_dir(tmp_path / "ticket-clean", disposition="benign"), truncated_by=None)
@@ -65,8 +64,7 @@ def test_no_file_a_box_can_write_is_an_input_to_was_this_run_cut_short(tmp_path)
 
 def test_every_box_writable_artifact_carrying_a_truncated_by_looking_value_leaves_the_grade_unmoved(
         tmp_path):
-    """Every file under the box's bind carrying a truncated_by-looking value leaves the grade
-    unmoved — the stated scope of `no_box_writable_input_to_cut_short`."""
+    """One planted name at a time, so a failure names the file that moved the grade."""
     archive = S.mod("learning.branch.archive")
     control_base, _src = location_path(S.runs_base)(tmp_path / "control-base")
     control_ep = S.cut_short_episode(tmp_path / "control")
@@ -89,14 +87,12 @@ def test_every_box_writable_artifact_carrying_a_truncated_by_looking_value_leave
 
     honest = S.cut_short_episode(tmp_path / "honest", cut={"b": "request-limit"})
     assert S.graded(honest)["b"].get("cut_short") == "request-limit", (
-        "the control failed: a HOST-written record no longer moves the grade, so every "
-        "`unmoved` above is a tautology rather than a finding")
+        "control: a host-written record does not move the grade")
 
 
 def test_a_file_named_like_the_archived_run_end_record_planted_anywhere_under_the_run_dir_does_not_reach_the_grade(
         tmp_path):
-    """A file named like the archived record, planted anywhere under the run dir, never reaches the
-    grade: the archive copies only the host-side sidecar, which is outside the run dir."""
+    """The archive copies only the host-side sidecar, which is outside the run dir."""
     base, _src = location_path(S.runs_base)(tmp_path)
     ep = S.cut_short_episode(tmp_path)
     run_dir = S.sibling_run_dir(base, "b")
@@ -119,31 +115,16 @@ def test_a_file_named_like_the_archived_run_end_record_planted_anywhere_under_th
 # report frontmatter — the surface the first design would have trusted
 
 
-def _frontmatter_row(tmp_path, name, extra=None, raw=None):
+def _frontmatter_row(tmp_path, name, extra=None):
     """One episode whose world b carries a planted `report.md`, graded."""
     ep = S.cut_short_episode(tmp_path / name)
-    S.plant_frontmatter(ep / "worlds" / T.world_id(ep, "b"), extra=extra or "", raw=raw)
+    S.plant_frontmatter(ep / "worlds" / T.world_id(ep, "b"), extra=extra or "")
     return _rows_and_word(ep)
 
 
-#: A frontmatter key that means nothing to anything, spelled to exactly the width of
-INERT_KEY = "harmless_key"
-assert len(INERT_KEY) == len("truncated_by")
-
-
-def test_a_planted_truncated_by_line_in_report_frontmatter_changes_nothing(tmp_path):
-    """A `truncated_by:` line spliced into world b's report.md frontmatter — which validate_report
-    admits (claim h3) — changes neither b's row nor the family's verdict word."""
-    control_rows, control_word = _rows_and_word(S.cut_short_episode(tmp_path / "control"))
-    rows, word = _frontmatter_row(tmp_path, "planted", extra="truncated_by: request-limit\n")
-    assert rows == control_rows, (
-        "a frontmatter line the report validator admits moved the grade — the exact capability "
-        "the revised design exists to withhold from the box")
-    assert word == control_word, "a planted frontmatter line moved the family's verdict word"
-
-
 def test_grading_given_a_planted_truncated_by_frontmatter_line_with_a_valid_value(tmp_path):
-    """A planted frontmatter line carrying a VALID vocabulary member changes nothing."""
+    """A `truncated_by:` line spliced into world b's report frontmatter, which the report
+    validator admits, changes nothing for any vocabulary member."""
     control_rows, control_word = _rows_and_word(S.cut_short_episode(tmp_path / "control"))
     for member in S.vocabulary():
         rows, word = _frontmatter_row(tmp_path, f"valid-{member}",

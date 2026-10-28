@@ -1,4 +1,4 @@
-"""#807 ask (1) — the executable spec for gather's REPEAT CIRCUIT BREAKER."""
+"""#807 — gather's repeat circuit breaker."""
 from __future__ import annotations
 
 import re
@@ -42,7 +42,7 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
     raising,
 )
 
-# THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
+# The surface under test
 from defender.investigation.record_query import (
     REJECTION_BUDGET,
     REPEAT_ESCAPE,
@@ -64,8 +64,7 @@ SIBLING = "l-002"
 
 CORPUS = DEFENDER / "tests" / "fixtures" / "e2e" / "repeat-corpus-807"
 
-# The idiom `_run_gather`'s three shipped terminal branches already use, and the ONLY
-# vocabulary any prompt in the corpus teaches main (defender/SKILL.md:394 — G19).
+# The idiom `_run_gather`'s terminal branches use, and the only one any prompt teaches main.
 INCOMPLETE_IDIOM = "Treat this lead as incomplete and reason from what was captured."
 
 SUMMARY_TURN = Turn(text="Before the stop I ran what I could; the answers are above.")
@@ -116,8 +115,8 @@ class _Res:
 
     @property
     def breaker(self) -> dict:
-        """The run's infra-breaker state, off the run's own state (#1235: never a file in the
-        run dir; `_BLANK_BREAKER` when nothing failed)."""
+        """The run's infra-breaker state, off the run's own state (never a file in the run dir;
+        `_BLANK_BREAKER` when nothing failed)."""
         return self.state.breaker_snapshot()
 
     @property
@@ -140,9 +139,10 @@ def _run(
     root: Path, *, verbs, turns: list[Turn], run_id: str, system: str = "elastic",
     lead: str = LEAD, planted: list[dict] | None = None, tenant: Any = None,
 ) -> _Res:
-    """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
-    `turns` against the INJECTED verb registry. Everything between the two fakes — dispatch,
-    the query tool, the repeat guard, the capture capability, the infra breaker, the two"""
+    """Drive a real run: main dispatches one gather lead whose nested agent replays `turns`
+    against the injected verb registry; everything between the two fakes (dispatch, the query
+    tool, the repeat guard, capture, the infra breaker) is production code. `planted` rows are
+    seeded into the folder first."""
     run_dir = materialize(root, GOLDEN_AB3, run_id=run_id)
     if planted:
         _seed(run_dir, planted)
@@ -160,15 +160,11 @@ SOURCE_RUN = fixture_uuid("run-source-001")
 
 def _run_inherited(
     root: Path, *, table: bytes, rows: list[dict], verbs, turns: list[Turn], run_id: str,
-    system: str = "elastic", lead: str = LEAD,
 ) -> _Res:
-    """Drive a REAL branch sibling (`drive(..., resume=spec)`) whose source's queries table is
-    `table` — the shape a resumed lead's run starts from. The source is
-    `_branch_947.planted_source` (a store, a case link, the golden document; not the N4
-    fixture — the implementer's fixture-only snapshot planting may snapshot it), which carries no
-    claim for its leads, so the sibling's MAIN can dispatch `lead` again; seeding copies the
-    table's rows for the inherited leads, and each `rows` entry's sidecar, into the sibling and
-    records them on the sibling's state (#1235 round 2) before its first turn."""
+    """Drive a real branch sibling (`drive(..., resume=spec)`) whose source's queries table is
+    `table`. The source (`_branch_947.planted_source`) claims none of its leads, so the sibling's
+    MAIN can dispatch `lead` again; seeding copies the inherited rows and each `rows` sidecar into
+    the sibling and records them on its state before the first turn."""
     from defender.tests.support.learning.branch._branch_947 import (
         GOLDEN_INVESTIGATION, LEGACY_BRANCH_CALL, planted_source, spec_at,
     )
@@ -186,16 +182,15 @@ def _run_inherited(
         root, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None,
         name=SOURCE_RUN)
     assert planted == source, (planted, source)
-    # #1255 (D1): a tool-calling MAIN response after the document landed, not the RETURN the
-    # pre-#1255 shape branched at. The source is hand-planted (`planted_source`, not N4's).
+    # Branch at a tool-calling MAIN response after the document landed (#1255).
     spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
     store.connection.close()
-    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    # Run folders are named by canonical UUID run ids (#1187).
     sibling = root / "defender-runs" / fixture_uuid("run-sibling-807")
     RunPaths(sibling).gather_raw.mkdir(parents=True)
     from defender.tests.support.storage._alert_plant import plant_alert
     plant_alert(sibling, RunPaths(source).alert.read_bytes())
-    main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
+    main = ReplayFn([Turn(tool_calls=[_dispatch(LEAD, "elastic")]),
                      Turn(text="Investigation complete.")])
     gather = ReplayFn(turns)
     summary = drive(sibling, run_id=run_id, main=main, gather=gather, verbs=verbs, resume=spec)
@@ -229,9 +224,9 @@ def _run_two_leads(
 
 @pytest.fixture(scope="module")
 def three_identical_requests(tmp_path_factory, checkout_roster):
-    """ONE driven run of the canonical trip — one lead asking elastic the same query three
-    times, then `DONE` — shared by the demands that only READ it: its run dir and tables, the
-    verb recorder, and the two replay scripts. A demand that seeds, plants or needs a second"""
+    """One driven run of the canonical trip (one lead asking elastic the same query three times,
+    then `DONE`), shared by the tests that only read it; a test that seeds, plants or needs a
+    second run drives its own."""
     from defender.skills.invlang.validate import hold_capabilities, release_capabilities
 
     rec = VerbRecorder()
@@ -256,9 +251,9 @@ def _row(
     lead: str, seq: int, system: str, verb: str, params: dict, *,
     exit_code: int = 0, query_id: str | None = None, digest: str | None = None,
 ) -> dict:
-    """One queries-table row in the frozen key shape, with `error_class`, `payload_digest` and
-    `payload_sha256` computed by the PRODUCTION helpers rather than restated — a seeded fixture
-    that disagrees with `error_class_for_exit`, or one whose recorded hash does not belong to"""
+    """One queries-table row in the frozen key shape, its `error_class`, `payload_digest` and
+    `payload_sha256` computed by the production helpers rather than restated, so a seeded row
+    cannot disagree with what the writer records."""
     payload_text = "" if exit_code != 0 else _SEEDED_PAYLOAD
     return {
         "lead_id": lead,
@@ -282,9 +277,8 @@ def _row(
 
 
 def _seed(run_dir: Path, rows: list[dict]) -> None:
-    """Plant a queries table (and each row's sidecar) in a fresh run folder BEFORE the run
-    starts. No host recorded these rows for the run, and since #1235 round 2 no file is ever
-    read into a run's state: they are on disk and nowhere else."""
+    """Plant a queries table (and each row's sidecar) in a fresh run folder before the run
+    starts. No file is read into a run's state, so these rows exist on disk only."""
     for row in rows:
         rel = row.get("payload_path")
         if not rel:
@@ -300,9 +294,8 @@ def _corpus(run_name: str) -> list[dict]:
 
 
 def _replay(rows: list[dict], *, threshold: int = REPEAT_THRESHOLD) -> list[tuple[str, int]]:
-    """O1's stated oracle, driving the PRODUCTION predicate: accumulate each lead's rows in
-    file order and STOP accumulating for a lead at its first trip, because M3's trip
-    terminates the lead ("must stop at seq 4 rather than 36" — the doc's own words). A replay"""
+    """The replay oracle over the production predicate: accumulate each lead's rows in file
+    order and stop at the lead's first trip, since a trip ends the lead."""
     seen: dict[str, list[dict]] = {}
     stopped: set[str] = set()
     trips: list[tuple[str, int]] = []
@@ -324,11 +317,10 @@ def _replay(rows: list[dict], *, threshold: int = REPEAT_THRESHOLD) -> list[tupl
 
 
 def _replay_rejections(
-    rows: list[dict], *, threshold: int = REPEAT_THRESHOLD, budget: int = REJECTION_BUDGET,
+    rows: list[dict],
 ) -> list[tuple[str, int, str]]:
-    """The same oracle for the COMPANION guard (#826 item 4), differing from `_replay` only in
-    the production predicate it drives — which is the claim under test: the two guards are one
-    counting rule over two disjoint domains, so one replay shape serves both."""
+    """The same oracle for the companion (rejection) guard: the two guards are one counting rule
+    over two disjoint domains, so one replay shape serves both."""
     seen: dict[str, list[dict]] = {}
     stopped: set[str] = set()
     trips: list[tuple[str, int, str]] = []
@@ -342,11 +334,11 @@ def _replay_rejections(
         if guarded:
             if rejection_trip(
                 prior, lead, system=row.get("system"), verb=row.get("verb"),
-                params=row.get("params"), threshold=threshold,
+                params=row.get("params"), threshold=REPEAT_THRESHOLD,
                 system_key=row.get("system_key"),
             ) is not None:
                 kind = "repeat"
-            elif rejection_budget_trip(prior, lead, budget=budget) is not None:
+            elif rejection_budget_trip(prior, lead, budget=REJECTION_BUDGET) is not None:
                 kind = "budget"
         prior.append(row)
         if kind is not None:
@@ -355,15 +347,15 @@ def _replay_rejections(
     return trips
 
 
-def named_verbs(rec: VerbRecorder, *, system: str = "elastic", verb: str = "sshd-auth-window") -> FakeVerbs:
+def named_verbs(rec: VerbRecorder) -> FakeVerbs:
     """The happy-path registry under a DISTINCTIVE (system, verb) pair, so an assertion that
     the dead-end message names the repeated request cannot pass on a generic word."""
 
     def probe(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:
-        rec.record(verb, ctx, {"native_query": native_query, "limit": limit})
+        rec.record("sshd-auth-window", ctx, {"native_query": native_query, "limit": limit})
         return PAYLOAD
 
-    return FakeVerbs({system: {verb: probe}})
+    return FakeVerbs({"elastic": {"sshd-auth-window": probe}})
 
 
 def two_systems(rec: VerbRecorder) -> FakeVerbs:
@@ -404,9 +396,8 @@ def typed_params(rec: VerbRecorder) -> FakeVerbs:
 
 
 def parameterless(rec: VerbRecorder) -> FakeVerbs:
-    """The shape 8 of GATHER_DEF's 28 granted pairs really have (P-e, executed: all seven
-    `health-check` verbs plus `identity.list-roles`) — a verb declaring NO params at all, so
-    `{}` is the only call it can ever receive."""
+    """A verb declaring no params (the shape of every `health-check` verb), so `{}` is the only
+    call it can receive."""
 
     def health_check(ctx: VerbContext) -> dict:
         rec.record("health-check", ctx, {})
@@ -416,9 +407,9 @@ def parameterless(rec: VerbRecorder) -> FakeVerbs:
 
 
 class GrantScopedVerbs(VerbRegistry):
-    """A real registry over a real `VerbGrant` that DECLARES a verb it does not GRANT — the
-    only way to reach `decide`'s DENIED outcome (a withheld real verb) rather than its
-    UNDECLARED one. Dumb data: it injects no fault and makes no admission decision of its"""
+    """A real registry over a real `VerbGrant` that declares a verb it does not grant: the only
+    way to reach `decide`'s DENIED outcome rather than UNDECLARED. Dumb data: it injects no fault
+    and makes no admission decision of its own."""
 
     def __init__(self, table: dict[str, dict], grant: VerbGrant):
         super().__init__(grant)
@@ -487,16 +478,15 @@ def _after_start(relink: Relink, turns: list[Turn]) -> list:
 
 
 def _bad_args(params: dict) -> Turn:
-    """A tool call the pydantic ARG SCHEMA turns back, so the row is written by
-    `wrap_tool_validate` from the RAW pre-validation arguments. `bogus_extra_arg` is P-a's
-    executed `extra_argument` shape: the rejection row it leaves recovers a perfectly normal"""
+    """A tool call the pydantic arg schema turns back (an extra argument), so `wrap_tool_validate`
+    writes its row from the raw arguments: perfectly normal `params`, a genuine call's key."""
     return Turn(tool_calls=[("query", {
         "system": "elastic", "verb": "query", "params": params, "bogus_extra_arg": "x",
     })])
 
 
 def test_repeat_trip_predicate_seam(tmp_path):
-    assert REPEAT_THRESHOLD == 3, "C11's fitted floor did not ship as the module constant"
+    assert REPEAT_THRESHOLD == 3, "REPEAT_THRESHOLD is not the fitted floor of 3"
 
     key = {"system": "elastic", "verb": "query", "params": {"native_query": "FROM logs"}}
     rows = [_row(LEAD, 0, "elastic", "query", {"native_query": "FROM logs"})]
@@ -604,7 +594,7 @@ def test_repeat_trip_sits_after_grant_and_infra_breaker(tmp_path):
     assert [row["query_id"] for row in denied.own_rows] == [_query_rules.DENIED_QUERY_ID] * 3, \
         "a DENIED call wrote an evidence row, or not its sentinel"
     assert len(denied.denials) == 3, "the denial record is the DENIED path's audit artifact"
-    assert denied.gather.calls == 4, "a denied repeat tripped the guard — it is answered above M2"
+    assert denied.gather.calls == 4, "a denied repeat tripped the repeat guard"
     assert INCOMPLETE_IDIOM not in denied.summary()
 
     down_rec = VerbRecorder()
@@ -635,7 +625,7 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path, three_identica
     assert r.own_rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
     assert r.breaker == _BLANK_BREAKER, "the repeat trip recorded infra-breaker state"
     assert not (r.run_dir / "circuit_breaker.json").exists(), \
-        "a breaker file was written into the run dir (#1235: the breaker is in memory only)"
+        "a breaker file was written into the run dir"
     assert circuit_breaker.is_tripped(r.state, "elastic") is False
 
     prior_rec = VerbRecorder()
@@ -820,7 +810,7 @@ def test_repeat_predicate_fails_open_on_a_damaged_table(tmp_path):
     torn = b'{"lead_id": "l-001", "seq": 4, "sys'
     damaged = [
         _row(LEAD, 0, "elastic", "query", {"native_query": "FROM logs"}),
-        {"seq": 1, "system": "elastic", "verb": "query", "params": {}},  # G17's 7-key judge row
+        {"seq": 1, "system": "elastic", "verb": "query", "params": {}},  # a 7-key judge-shaped row
         {**_row(LEAD, 2, "elastic", "query", {}), "params": "not-a-dict"},
         _row(LEAD, 3, "elastic", "query", {"native_query": "FROM logs"}),
     ]
@@ -847,9 +837,7 @@ def test_tripping_call_carries_no_repeat_note(three_identical_requests):
     assert seen.count("[record_query] REPEAT") == 1, \
         "the second occurrence's REPEAT notice is the control; the tripping call must add none"
     assert r.gather.calls == 4, (
-        "the tripping call was answered like an ordinary query and the lead went on (5+), or "
-        "the summary turn #987 gives a stopped lead did not run (3). Neither adds a REPEAT "
-        "annotation, which is what the count above this line is for."
+        "the trip did not end the lead with one summary turn (5+: the lead went on; 3: no summary turn)"
     )
     assert INCOMPLETE_IDIOM not in seen, "the dead end was handed to the GATHER model"
     assert INCOMPLETE_IDIOM in r.summary()
@@ -881,7 +869,7 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
     assert r.gather.calls == 4, "a GatherDeadEnd ended the lead where the infra breaker owns it"
     assert INCOMPLETE_IDIOM not in r.summary()
     assert _replay(rows, threshold=2) == [], \
-        "replay tripped on rows `_grant_check` wrote above M2 — live and replay disagree"
+        "replay tripped on `_grant_check` rows, unlike the live guard"
 
 
 def test_load_error_repeat_is_answered_by_the_breaker_not_the_run_kill(tmp_path):
@@ -956,13 +944,13 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     assert [row["exit_code"] for row in grant_rows] == [64, 64, 64]
     assert [row["verb"] for row in grant_rows] == ["nosuch-verb"] * 3
     assert all(set(row) == ROW_KEYS for row in grant_rows), \
-        "the above-M2 sentinel identity was added as a key of its own"
+        "the grant-check rows gained a key of their own"
     assert grant_rec.calls == [], "an unresolvable verb reached the backend"
     assert _replay(grant_rows) == [], \
-        "M2's oracle trips on a repeat M2 can never refuse — live and replay disagree"
+        "the replay oracle trips on a repeat the live guard never refuses"
     assert unresolvable.gather.calls == 4, (
-        "the third identical rejection did not end the lead — the companion guard is silent "
-        "(5+), or the lead ended but #987's summary turn did not follow (3)"
+        "the third identical rejection did not end the lead with one summary turn "
+        "(5+: the guard is silent; 3: no summary turn)"
     )
     assert INCOMPLETE_IDIOM in unresolvable.summary()
     assert _replay_rejections(grant_rows) == [(LEAD, 2, "repeat")], \
@@ -982,7 +970,7 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
 def test_repeat_key_normalizes_the_live_call_to_its_stored_form(tmp_path):
     live = {"native_query": "FROM logs", "threshold": float("nan")}
     stored = _json_safe_params(dict(live))
-    assert stored != live, "the transform this demand is about did nothing — the fixture is inert"
+    assert stored != live, "the JSON-safe transform left the fixture unchanged"
 
     rows = [_row(LEAD, s, "elastic", "probe", stored) for s in (0, 1)]
     hit = repeat_trip(rows, LEAD, system="elastic", verb="probe", params=live)
@@ -1022,8 +1010,8 @@ def test_screen_refused_repeats_count_toward_the_trip(tmp_path):
     assert r.gather_saw.count("unknown param(s)") == 2, \
         "the screen must still teach on the first two; only the third is a dead end"
     assert r.gather.calls == 4, (
-        "the third refusal was a ModelRetry, not a dead end (5+) — or the dead end fired and "
-        "#987's summary turn did not follow it (3)"
+        "the third refusal did not end the lead with one summary turn "
+        "(5+: a ModelRetry; 3: no summary turn)"
     )
     rows = r.own_rows
     assert len(rows) == 3
@@ -1048,10 +1036,8 @@ def test_concurrent_identical_siblings_still_stop_the_lead(tmp_path):
     ])
     assert len(rec.calls) == 2, "a sibling of the tripping call still reached the backend"
     assert r.gather.calls == 4, (
-        "the concurrent trip did not end the lead (5+), or it ended and the summary turn did "
-        "not follow (3) — which on THIS script needs BOTH siblings answered, each by its own "
-        "execution: the first to trip closes the door, the other is either its own trip or "
-        "`QUERY_NOT_RUN`"
+        "the concurrent trip did not end the lead with one summary turn "
+        "(5+: the lead went on; 3: no summary turn)"
     )
     assert INCOMPLETE_IDIOM in r.summary()
     assert any(row["exit_code"] == 64 for row in r.own_rows), "no trip row was written at all"

@@ -24,8 +24,8 @@ from defender.tests.support.shared.contracts import _tacit983 as scene
 
 DEFENDER = REPO_ROOT / "defender"
 ADAPTERS = DEFENDER / "integrations"
-#: #1108 P4 (O1, O-U5): the registry is tenant knowledge; the committed fixture tenant's agent
-#: half carries the one this repo ships (the product tree carries none).
+#: The registry is tenant knowledge: the committed fixture tenant's agent half carries the one
+#: this repo ships (the product tree carries none).
 FIXTURE_AGENT = REPO_ROOT / "knowledge" / "tenant-fixture" / "agent"
 
 SYSTEM = scene.REGISTRY_SYSTEM
@@ -45,9 +45,8 @@ def registry():
     return tacit_knowledge_adapter
 
 
-#: The entry builder and the fixture writer live in `tests/support/shared/contracts/_tacit983.py`, not here: the e2e
-#: drives the real adapter against a fixture tree and needs the same two (`lint-dup`), and the
-#: entry's id is one of the ids that module already names for the `:R authz` citation.
+#: The entry builder and the fixture writer live in `tests/support/shared/contracts/_tacit983.py`,
+#: shared with the e2e that drives the real adapter against a fixture tree.
 _entry = scene.registry_entry
 _write_registry = scene.write_registry
 
@@ -136,9 +135,7 @@ def test_blanket_scope_entry_is_refused(tmp_path):
     )):
         scoped = _entry(id=f"tk-scoped-{i}", **{field: value})
         assert _ids(_load(tmp_path / f"scoped{i}", scoped)) == [scoped["id"]], (
-            f"a legitimately scoped {field} of {value!r} was refused as blanket — the rule has "
-            f"been tuned past the entries the registry is FOR, and the one anchor kind a "
-            f"container-root case can reach is unwritable"
+            f"a legitimately scoped {field} of {value!r} was refused as blanket"
         )
 
 
@@ -147,7 +144,7 @@ def test_blanket_scope_entry_is_refused(tmp_path):
 
 def test_scope_mismatch_does_not_discharge(tmp_path):
     """An unexpired entry whose `actor_scope` or `host_scope` does not cover the alerted actor
-    and host is not a hit, and the contract stays unresolved (demand `scope_must_match`)."""
+    and host is not a hit, and the contract stays unresolved."""
     entries = _load(tmp_path / "scope", _entry())
 
     assert registry().find_entry(
@@ -175,16 +172,14 @@ def test_expired_entry_is_not_a_hit_at_lookup(tmp_path):
     assert registry().find_entry(
         entries, actor=ACTOR, host=HOST, pattern=PATTERN, now=dt.date(2026, 5, 5),
     ) is None, (
-        "an entry past its own `review_by` still discharged — a stale sanction authorizes "
-        "forever, which is the one thing a file entry cannot be trusted to notice about itself"
+        "an entry past its own `review_by` still discharged"
     )
 
 
 def _ctx(root: Path, tmp_path: Path, *, as_of: dt.datetime) -> VerbContext:
-    """A `VerbContext` pointing at a throwaway tree and a fixed moment. #1108 P4 (O1, O4): the
-    registry is the run's AGENT knowledge (`<agent root>/skills/tacit-knowledge/registry.yaml`,
-    the run copy's), so the throwaway tree is the run tenant's agent root — never
-    `defender_dir`, which stays this checkout (and holds no registry)."""
+    """A `VerbContext` pointing at a throwaway tree and a fixed moment. The registry is the
+    run's agent knowledge (`<agent root>/skills/tacit-knowledge/registry.yaml`), so the
+    throwaway tree is the run tenant's agent root — never `defender_dir`, which holds none."""
     return VerbContext(
         defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, as_of=as_of,
         tenant=_tenants1106.fixture_run_tenant(agent_root=root),
@@ -204,8 +199,7 @@ def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
         "covers — the lookup is not reading the registry it was handed"
     )
     assert hit["matched"]["id"] == "tk-fixture-only", (
-        "the verb answered with something other than the entry in the tree its `VerbContext` "
-        "names — a registry resolved off an import-time path answers for the wrong estate"
+        "the verb answered from a tree other than the one its `VerbContext` names"
     )
     assert set(hit["matched"]) == set(registry().ENTRY_FIELDS), (
         "the matched entry reaching the model is not the loaded entry — the payload a human "
@@ -230,14 +224,13 @@ def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
 
 def test_no_authz_grounding_from_a_past_ai_verdict(tmp_path):
     """Nothing in the tacit-knowledge path derives an `authorized` verdict from resemblance to a
-    past AI-resolved case (demand `no_precedent_by_similarity`, non-obligation 4)."""
+    past AI-resolved case."""
     assert not any(
         term in field
         for field in registry().ENTRY_FIELDS
         for term in ("case", "precedent", "similar")
     ), (
-        "the entry shape grew a field that can cite a past case — the convention-vs-bad-habit "
-        "problem relocated to 'what counts as similar', now carrying a human's signature"
+        "the entry shape grew a field that can cite a past case"
     )
 
     entries = _load(tmp_path / "similar", _entry())
@@ -283,24 +276,22 @@ def test_registry_lookup_is_a_rostered_gather_verb():
 
 def test_the_shipped_registry_file_is_human_authored_and_loads(tmp_path):
     """The committed registry loads clean through its own loader, and its companion `SKILL.md`
-    is the per-system reference every other system of record ships. #1108 P4 (O1, O-U5): both
-    are tenant knowledge — the committed fixture tenant's `agent/skills/tacit-knowledge/`, where
-    the system skills moved — and the product tree holds neither
-    (`tenant_1108_p4/test_layout` owns the product tree)."""
+    is the per-system reference every other system of record ships. Both are tenant knowledge
+    (the fixture tenant's `agent/skills/tacit-knowledge/`); the product tree holds neither."""
     path = registry().registry_path(FIXTURE_AGENT)
     assert path == FIXTURE_AGENT / "skills" / SYSTEM / "registry.yaml"
     assert path.is_file(), "the registry file itself is part of this change"
     assert (FIXTURE_AGENT / "skills" / SYSTEM / "SKILL.md").is_file(), (
         "the fixture tenant's tacit-knowledge registry ships no per-system SKILL.md")
     assert not registry().registry_path(DEFENDER).exists(), (
-        "the product tree still carries a tacit-knowledge registry (#1108 P4: tenant knowledge)")
+        "the product tree still carries a tacit-knowledge registry")
 
     entries = registry().load_entries(path)
     assert all(set(e) == set(registry().ENTRY_FIELDS) for e in entries)
 
 
 def test_no_run_path_writes_the_registry(tmp_path):
-    # #1108 P4 (O4): the registry a run reads is its tenant's (the fixture tenant's here).
+    # The registry a run reads is its tenant's (the fixture tenant's here).
     target = registry().registry_path(FIXTURE_AGENT)
     assert target.is_file(), "a negative reachability claim about a file that does not exist"
 
@@ -341,9 +332,9 @@ _MUTATING_STEMS = (
 
 
 def test_the_adapter_module_exports_nothing_that_writes():
-    """The tacit-knowledge adapter's own PUBLIC SURFACE carries no write-capable function, and
-    its source performs no filesystem mutation (demand `registry_never_agent_written`; the source half
-    is `tooling/lint/lint_isolated_modules.py`)."""
+    """The tacit-knowledge adapter's own public surface carries no write-capable function, and
+    its source performs no filesystem mutation (the source half is
+    `tooling/lint/lint_isolated_modules.py`)."""
 
     mod = registry()
     public = [n for n in dir(mod) if not n.startswith("_")]

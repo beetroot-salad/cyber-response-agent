@@ -38,7 +38,7 @@ MOUNTS: tuple[tuple[Path, Path], ...] = (
 def _request(defender_root: Path, run_dir: Path, *, spec: BoxSpec | None = None,
              name: str = "defender-drain-1092") -> BoxRequest:
     """A request-lane box in the drain's shape: `workdir` is the tree ROOT (the worktree),
-    the defender dir is `workdir / "defender"` (N5), one rw mount for the markers."""
+    the defender dir is `workdir / "defender"`, one rw mount for the markers."""
     kw = {} if spec is None else {"spec": spec}
     return BoxRequest(
         name=name, workdir=defender_root, env={},
@@ -111,7 +111,7 @@ def test_an_explicit_rootfs_is_appended_verbatim_and_reads_no_file(tmp_path):
     assert image_token(rec2.create_argv or []) == STOCK_ROOTFS
 
 
-# ---- d3 (#1097 O1/O2: the recipe and the box closure name the image; nothing else does) ----
+# ---- d3 (the recipe and the box closure name the image; nothing else does) -------------------
 def test_a_recipe_byte_or_a_box_closure_entry_moves_the_tag_and_an_edit_outside_the_closure_does_not(tmp_path):
     defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
     baseline = image_tag(defender_dir)
@@ -163,13 +163,13 @@ def test_two_trees_with_identical_inputs_name_the_same_image_wherever_they_sit(t
     tags = {image_tag(a), image_tag(b), image_tag(copied)}
     assert len(tags) == 1, tags
     assert TAG_RE.match(next(iter(tags))), tags
-    # A closure entry moved in one tree only (a comment would not do: it cannot rename, #1097).
+    # A closure entry moved in one tree only (a lock comment cannot rename).
     (b / "uv.lock").write_bytes(PLANTED_INPUT_BYTES["uv.lock"].replace(
         b'name = "gamma"\nversion = "3.0.0"', b'name = "gamma"\nversion = "3.0.1"'))
     assert image_tag(b) != image_tag(a), "the positive control: a different closure, same name"
 
 
-# ---- d10 (widened by MF1: "missing" → "cannot be read") ----------------------------------------
+# ---- d10 (an input that is missing or cannot be read) ------------------------------------------
 @pytest.mark.parametrize("lane", ["run-dir", "request"])
 @pytest.mark.parametrize(("unreadable", "first_named"), [
     ("all-missing", "box.Dockerfile"),
@@ -237,7 +237,7 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     assert rec.create_argv is None
 
 
-# ---- MF1 part 2: the C46 refusal keeps running first (both lanes) --------------------------------
+# ---- the C46 refusal runs before the resolver (both lanes) ---------------------------------------
 def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes(tmp_path):
     root = tmp_path / "lacking"
     defender_dir = plant_tree(root, missing=HASH_INPUTS, copy_code=False)
@@ -270,7 +270,7 @@ def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes
     assert "box.Dockerfile" in str(e.value)
 
 
-# ---- MF3: the running package's recipe is authoritative; the name carries its version ---------------
+# ---- the running package's recipe is authoritative; the name carries its version ----------------
 def test_the_image_name_carries_the_running_packages_recipe_version_and_never_the_mounted_trees_recipe(tmp_path):
     version = recipe_version()
     assert isinstance(version, str)

@@ -35,9 +35,8 @@ def test_835_the_per_lead_dispatch_comes_last_behind_the_two_fixed_indexes():
     """Section ORDER is the cache prefix (#835). The descriptor index and the template index vary
     only with the dispatched system and the tree; the Dispatch YAML varies with every lead.
 
-    #1108 P4 (O1, O2): the template index is read from the run's agent root — the tenant's
-    catalog, never the checkout's — so the deps carry the fixture tenant's run tenant, whose
-    `agent/skills/gather/queries/elastic/` holds `elastic.correlate-alerts-by-entity`."""
+    The template index is read from the run's agent root (the tenant's catalog), so the deps carry
+    the fixture run tenant, whose elastic catalog holds `elastic.correlate-alerts-by-entity`."""
     deps = _deps(tenant=T1106.fixture_run_tenant())
     cat = "- `elastic`: desc"
     a = tools._gather_prompt(deps, tools.GatherRequest("l-001", "elastic", "g1", ("d",)), cat)
@@ -60,8 +59,8 @@ def test_835_the_per_lead_dispatch_comes_last_behind_the_two_fixed_indexes():
 
 
 def test_a_malformed_system_is_retried_at_the_seam_not_silently_degraded(tmp_path):
-    """#835 made `system` load-bearing twice: it selects the template index's on-target tier, and it
-    is the prompt-cache lane key the composition root hands the provider."""
+    """A malformed `system` is retried before any claim (it selects the template tier and keys the
+    prompt-cache lane); a well-formed one outside the role grant still dispatches."""
     import asyncio
 
     from defender.investigation import tools_gather
@@ -110,8 +109,8 @@ class _StopAfterDispatch:
 
 
 def _with_run_state(deps: tools.AgentDeps) -> tools.AgentDeps:
-    """MAIN's deps carrying the run's one `RunState` (#1235 round 2), as the driver hands them:
-    an admitted dispatch's breaker screen reads it."""
+    """MAIN's deps carrying the run's `RunState`, as the driver hands them: an admitted dispatch's
+    breaker screen reads it."""
     from defender.investigation.run_state import RunState
 
     return replace(deps, run_state=RunState(deps.run_dir, "r-seam"))
@@ -120,15 +119,16 @@ def _with_run_state(deps: tools.AgentDeps) -> tools.AgentDeps:
 def _seam_deps(tmp_path: Path):
     run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
-    # MAIN's deps carry the run tenant, as the driver hands them (#1108 P4: every dispatched
-    # lead reads the run's knowledge).
+    # MAIN's deps carry the run tenant, as the driver hands them: every dispatched lead reads the
+    # run's knowledge.
     deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER),
                                run=_live_run_1165(run_dir), tenant=T1106.fixture_run_tenant())
     return run_dir, _with_run_state(deps)
 
 
 def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_path):
-    """#855 F-12, the reachable half."""
+    """An empty goal is retried before the lead id is claimed, so the corrected re-dispatch of the
+    same id runs and claims it (#855)."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation import tools_gather
@@ -165,8 +165,8 @@ def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_pat
 
 
 def test_the_second_dispatch_of_one_lead_id_is_always_refused(tmp_path):
-    """The gate #855 F-12 defeated, stated as the property it protects: ONE gather session per
-    `lead_id`, whatever happened to the first attempt."""
+    """One gather session per `lead_id`, whatever happened to earlier attempts: retried empty goals
+    claim nothing, and a second real dispatch is refused."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.investigation import tools_gather
@@ -196,7 +196,8 @@ def test_the_second_dispatch_of_one_lead_id_is_always_refused(tmp_path):
 
 
 def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp_path):
-    """#880 F-19's residue, closed at the seam rather than by two literals agreeing."""
+    """The gather factory is handed this dispatch's own request ceiling, not a literal of its own
+    (#880)."""
     from defender.investigation import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
@@ -214,10 +215,8 @@ def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp
         ))
 
     assert handed == [40, 8], (
-        f"the factory was handed {handed} for dispatches ceilinged at [40, 8] — it is reading "
-        "a ceiling of its own rather than this run's, which is the shape of #880 F-19: the "
-        "recorder it builds then withholds the doomed round against a number no dispatch here "
-        "will enforce"
+        f"the factory was handed {handed} for dispatches ceilinged at [40, 8], a ceiling of "
+        "its own rather than this run's"
     )
 
 
@@ -257,15 +256,14 @@ def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path)
         ))
     handed, none = prompts
     assert index.renders, (
-        "the dispatch never rendered the index it was handed (#1256 r4: it is rendered at use, "
-        "against the run's current down map)")
+        "the dispatch never rendered the index it was handed")
     assert sentinel in handed, "the index this dispatch was handed is not in its prompt"
     assert "## Systems of record" in handed
     assert "## Systems of record" not in none, \
         "handed no catalog, the dispatch rendered one anyway — it built its own from the tree"
 
 
-def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
+def test_a_claim_that_could_not_be_written_is_a_run_fault_not_a_dispatch(tmp_path):
 
     from defender.hooks.record_lead import NOT_CLAIMED
     from defender.investigation import tools_gather
@@ -277,7 +275,7 @@ def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(tools_gather, "_claim_lead", lambda dispatch, **kw: NOT_CLAIMED)
-        # #1222 C40: a host-side write fault ends the run through the store exit; no retry.
+        # A host-side claim-write fault ends the run through the store exit; it is not retried.
         with pytest.raises(tools_gather.LeadRecordFault, match="could not be claimed"):
             asyncio.run(tools_gather._run_gather(
                 deps, _never, 40,

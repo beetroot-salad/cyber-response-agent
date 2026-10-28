@@ -1,30 +1,11 @@
-"""Slice S-B's local helpers (run start + launch-time publish child), built on S0's `_support`.
+"""Run-start and launch-time publish helpers for #1108 P4, built on `_support`.
 
-Nothing here implements P4 policy: it launches `run.main` through its seams, records what the
-seams were handed, and spells the outcome vocabulary ONCE so a representation change is one
-edit. Underscore-prefixed: pytest collects no tests from it.
-
-ASSUMED SEAMS (reported; the implementer provides them):
-
-- `run.main(argv, *, publish=...)` (design O11). `publish` is called once per unpinned launch
-  and returns the child's report line (orchestrator decision): `"fresh <commit>"`,
-  `"stale:transient <reason>"`, `"stale:operator <reason>"`. Misconfiguration (no issuer config
-  file, no forge binding) is reported on the same channel as `"misconfigured <reason>"` (this
-  slice's pick: one text channel between the child process and the parent), and the parent
-  refuses the run on it. What the parent passes `publish` is only identifiers (the tenant id and
-  the data root); the tests below never depend on positional vs keyword.
-- `run.py --knowledge-commit <sha>` (O-PIN): starts on `<T>/exports/<sha>/`, skips `publish`.
-- The child's in-process entry (O11 "the child is tested in-process against P3's fake forge"):
-  `defender.learning.author.version_control.publish_for_run(tenant_id, *, data_root,
-  issuer_config: Path, client=None, issuer_transport=None, identity=None,
-  network_timeout=None) -> str` — accepts the tenant itself from id + data root, reads the
-  tenant row's forge binding and the issuer config file itself (misconfiguration decided before
-  any network call, whatever is injected), logs in through `issuer_login(tenant,
-  issuer_config=..., transport=issuer_transport)` (OD4 + S-D's `transport=` seam: the httpx
-  transport its OpenBao client sends through) — or, when `identity=` is injected, uses that
-  identity instead (the in-process stand-in for the login, kept only for cases whose subject is
-  not the login) — opens P3's `TenantDelivery` with `client=` (the forge client) and publishes,
-  and returns the report line.
+Nothing here implements P4 policy: it launches `run.main` through its seams (`publish=` is called
+once per unpinned launch with identifiers only), records what the seams were handed, and spells
+the child's report vocabulary once: `fresh <commit>`, `stale:transient|operator <reason>`, and
+`misconfigured <reason>`, on which the parent refuses the run. The child runs in-process through
+`version_control.publish_for_run`, either really logging in through `issuer_transport=` or
+handed an `identity=` for cases whose subject is not the login.
 """
 from __future__ import annotations
 
@@ -35,7 +16,6 @@ import io
 import json
 import os
 import re
-import shutil
 import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -45,8 +25,7 @@ from typing import Any
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
-#: The lead-zero template the fixture's `settings/lead-zero.yaml` names (S0's fixture `agent/`
-#: carries it; the product catalog has its own copy).
+#: The lead-zero template the fixture's `settings/lead-zero.yaml` names; its `agent/` carries it.
 CORRELATE_PATH = "agent/skills/gather/queries/elastic/correlate-alerts-by-entity.md"
 CORRELATE_ID = "elastic.correlate-alerts-by-entity"
 
@@ -85,10 +64,11 @@ MERGE_FILES = {LESSON: lesson_text(MERGED_MARK), CMDB_ENV: cmdb_env(MERGED_MARK)
 
 
 @contextlib.contextmanager
-def run_tenant(tmp_path: Path, data_root: Path, **kw: Any) -> Iterator[Any]:
-    """S0's `published_tenant` with the revision marks above written over the fixture."""
-    files = {**SEED_FILES, **kw.pop("files", {})}
-    with published_tenant(tmp_path / "forge", root=data_root, files=files, **kw) as t:
+def run_tenant(tmp_path: Path, data_root: Path, *,
+               files: dict[str, Any] | None = None) -> Iterator[Any]:
+    """`published_tenant` with the revision marks above (then `files`) written over the fixture."""
+    with published_tenant(tmp_path / "forge", root=data_root,
+                          files={**SEED_FILES, **(files or {})}) as t:
         yield t
 
 
@@ -129,17 +109,17 @@ def tenant_root(t: Any) -> Path:
 
 
 def run_copies(t: Any) -> Path:
-    """`<T>/run-knowledge/` (design data model)."""
+    """`<T>/run-knowledge/`."""
     return tenant_root(t) / "run-knowledge"
 
 
 def copy_root(t: Any, run_dir: Path) -> Path:
-    """U9: the run copy `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, <token>}}`."""
+    """The run copy `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, <token>}}`."""
     return run_copies(t) / Path(run_dir).name
 
 
 def copy_stage(t: Any, run_dir: Path) -> Path:
-    """U9: the copy's `stage/` — the only part of it the box mounts (agent/ + the token)."""
+    """The copy's `stage/`: the only part of it the box mounts (agent/ + the token)."""
     return copy_root(t, run_dir) / "stage"
 
 
@@ -159,15 +139,14 @@ def export_half(t: Any, commit: str, half: str) -> dict[str, bytes]:
     return tree_bytes(export_dir(t.tenant, commit) / half)
 
 
-# --- issuer config (assumed shape; the design fixes only the folder) --------------------------
+# --- issuer config ----------------------------------------------------------------------------
 
 ISSUER_SECRET_ID = "s-b-secret-id-5f0c1a9e-never-in-a-run"
 ISSUER_ROLE_ID = "s-b-role-id-0d3e"
 
 
 def write_issuer_config(where: Path) -> Path:
-    """An issuer client config FILE under `<where>/playground-issuer/client/` (design O8: dev
-    path). ASSUMED SHAPE (reported): JSON `{issuer, ca_cert, role_id, secret_id}`."""
+    """An issuer client config file under `<where>/playground-issuer/client/` (the dev path)."""
     from defender.tests.tenancy.tenant_1108_delivery._identity import ISSUER
 
     client = Path(where) / "playground-issuer" / "client"
@@ -182,18 +161,18 @@ def write_issuer_config(where: Path) -> Path:
 
 
 def child_entry() -> Callable[..., str]:
-    """The child's in-process entry (assumed seam, see module doc). Imported lazily."""
+    """The child's in-process entry (`publish_for_run`), imported lazily."""
     vc = importlib.import_module("defender.learning.author.version_control")
     return vc.publish_for_run
 
 
-def run_child(t: Any, issuer_config: Path, *, identity: Any = None, client: Any = None,
-              login: Any = None, **kw: Any) -> str:
-    """The real child, in-process, against P3's fakes and the forge client. With `login` (S-D's
-    `AppRoleVault`) the child REALLY logs in from `issuer_config` through `login.transport`;
-    otherwise it is handed `identity` (default: a fresh identity over `t.vault`, so a fault set
-    there is seen)."""
-    seams: dict[str, Any] = {"client": client if client is not None else t.forge.client}
+def run_child(t: Any, issuer_config: Path, *, identity: Any = None, login: Any = None,
+              **kw: Any) -> str:
+    """The real child, in-process, against P3's fakes and the forge client. With `login` (an
+    `AppRoleVault`) the child really logs in from `issuer_config` through `login.transport`;
+    otherwise it is handed `identity` (default: a fresh one over `t.vault`, so a fault set there
+    is seen)."""
+    seams: dict[str, Any] = {"client": t.forge.client}
     if login is not None:
         seams["issuer_transport"] = login.transport
     else:
@@ -204,10 +183,10 @@ def run_child(t: Any, issuer_config: Path, *, identity: Any = None, client: Any 
 
 @contextlib.contextmanager
 def real_login(t: Any, where: Path) -> Iterator[tuple[Any, Path, tuple[str, ...]]]:
-    """S-D's AppRole issuer fake for `t` (its origin then accepts only what that issuer mints),
-    the issuer config file it expects (known `role_id`/`secret_id`) under
-    `<where>/playground-issuer/client/`, and the secret VALUES that must never leave the child:
-    role_id, secret_id, the issuer client token, the minted forge token and the config path."""
+    """The AppRole issuer fake for `t` (its origin then accepts only what that issuer mints), the
+    config file it expects under `<where>/playground-issuer/client/`, and the secret values that
+    must never leave the child: role and secret ids, the issuer client token, the minted forge
+    token and the config path."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import (
         CLIENT_TOKEN,
         ROLE_ID,
@@ -346,15 +325,13 @@ def launch(t: Any, tmp_path: Path, *, publish: Callable[..., Any] | None,
     return out
 
 
-# --- the run's knowledge source (U12/OD17) ----------------------------------------------------
+# --- the run's knowledge source ----------------------------------------------------------------
 #
-# ASSUMED SEAM (shared with slice S-C, `test_stale_visibility.host_record_path`): the HOST-HELD
-# record is `RunPaths(run_dir).knowledge_source()` -> `<runs base>/<run_id>.knowledge-source.json`
-# beside the run dir (like the ticket receipt), JSON `{kind, commit, stale_kind?, reason?}`. Run
-# start (this slice) writes it; page, API and ticket read it. The box-readable provenance stamp
-# MAY carry `knowledge_source` {kind, commit, stale_kind} (informational), never the reason.
+# The host-held record (`RunPaths(run_dir).knowledge_source()`, beside the run dir) is JSON
+# `{kind, commit, stale_kind?, reason?}`: run start writes it; page, API and ticket read it. The
+# box-readable stamp may carry `knowledge_source` {kind, commit, stale_kind}, never the reason.
 
-#: The keys the box-readable stamp's `knowledge_source` may carry (OD17).
+#: The keys the box-readable stamp's `knowledge_source` may carry.
 STAMP_SOURCE_KEYS = frozenset({"kind", "commit", "stale_kind"})
 
 
@@ -372,23 +349,22 @@ def read_host_record(run_dir: Path) -> dict[str, Any] | None:
 
 
 def knowledge_source(out: Launch) -> dict[str, Any]:
-    """The run's knowledge source as every reader reads it: the HOST record (U12). Also checks
-    the record lies outside the run dir (the box's rw bind) and that the stamp's informational
-    copy, when present, carries only kind/commit/stale_kind and agrees with it (OD17)."""
+    """The run's knowledge source as every reader reads it: the host record. Also checks it lies
+    outside the run dir (the box's rw bind) and that the stamp's informational copy, if any,
+    carries only kind/commit/stale_kind and agrees with it."""
     assert out.run_dir is not None, "the run never started"
     path = host_record_path(out.run_dir)
     assert not path.resolve().is_relative_to(out.run_dir.resolve()), (
-        f"U12: the host-held knowledge-source record {path} is inside the box-writable run dir")
+        f"the host-held knowledge-source record {path} is inside the box-writable run dir")
     source = out.host_after
     assert isinstance(source, dict), (
-        f"O-STALE/U12: run start wrote no host-held knowledge-source record at {path}")
+        f"run start wrote no host-held knowledge-source record at {path}")
     view = stamp_source(out.stamp_after)
     if view is not None:
         assert set(view) <= STAMP_SOURCE_KEYS, (
-            f"OD17: the box-readable stamp's knowledge_source carries {sorted(view)}")
+            f"the box-readable stamp's knowledge_source carries {sorted(view)}")
         assert view == {k: source.get(k) for k in view}, (
-            f"OD17: the stamp's informational knowledge_source disagrees with the host record: "
-            f"{view} vs {source}")
+            f"the stamp's knowledge_source disagrees with the host record: {view} vs {source}")
     return source
 
 
@@ -411,7 +387,7 @@ def stamped_commit(stamp: dict[str, Any] | None) -> Any:
     return stamp.get("knowledge")
 
 
-#: Environment keys an issuer/login value could ride in (P-4: never environment).
+#: Environment keys an issuer/login value could ride in (login material is file-only).
 ISSUER_ENV = re.compile(r"BAO|VAULT|OPENBAO|ISSUER|APPROLE|ROLE_ID|SECRET_ID|FORGEJO_TOKEN",
                         re.IGNORECASE)
 
@@ -425,22 +401,10 @@ def flat_values(value: Any) -> list[Any]:
     return [value]
 
 
-def python() -> str:
-    return sys.executable
-
-
-def rmtree(path: Path) -> None:
-    shutil.rmtree(path, ignore_errors=True)
-
-
-
 # --- e2e: run.main over the real driver with replay models ------------------------------------
 
-def drive_main(  # noqa: PLR0913 — the e2e entry: one keyword per seam
-        t: Any, tmp_path: Path, monkeypatch: Any, *, main: Any, gather: Any = None,
-        orient_shim: Any = None, publish: Callable[..., Any] | None = None,
-        signature: str = "r-s-b", during: Callable[[Seen], Any] | None = None,
-        publish_seam: bool = True) -> Launch:
+def drive_main(t: Any, tmp_path: Path, monkeypatch: Any, *, main: Any, gather: Any = None,
+               orient_shim: Any = None, signature: str = "r-s-b") -> Launch:
     """`run.main` end to end: real `materialize`, production's lifecycle with production's
     `start_box` in its unsandboxed opt-out (no daemon, `DEFENDER_ALLOW_UNSANDBOXED=1`, as the
     replay harness reaches it), and the REAL driver over replay models
@@ -461,41 +425,26 @@ def drive_main(  # noqa: PLR0913 — the e2e entry: one keyword per seam
     (alert_dir / "alert.json").write_text(json.dumps({
         "rule": {"id": signature, "description": "slice S-B e2e"},
         "alert_timestamp": "2026-10-20T00:00:00Z"}), encoding="utf-8")
-    if publish is None:
-        commit = t.commit
+    commit = t.commit
 
-        def publish(*_a: Any, **_k: Any) -> str:
-            return fresh(commit)
-    # `publish_seam=False` drives today's `main` (no seam) — machinery checks only.
-    return launch(t, tmp_path, publish=publish if publish_seam else None,
-                  lifecycle=lifecycle, during=during,
-                  alert_dir=alert_dir)
+    def publish(*_a: Any, **_k: Any) -> str:
+        return fresh(commit)
+    return launch(t, tmp_path, publish=publish, lifecycle=lifecycle, alert_dir=alert_dir)
 
 
-# --- O-BUDGET parent half (OD11) --------------------------------------------------------------
+# --- the publish launcher's budget (parent half) -----------------------------------------------
 #
-# ASSUMED SEAMS (reported):
-# - the parent launcher, the callable the CLI binds to `run.main(publish=...)`:
-#   `defender.investigation.publish_launch.launch_publish(tenant_id, *, data_root, budget: float = 60.0,
-#   command: Sequence[str] | None = None) -> str` — spawns the child process (`command`
-#   replaces the default argv prefix of the real child's process entry; the parent appends its
-#   own arguments after it), waits up to `budget` seconds while the child is in its network
-#   phase, never kills a child that holds the tenant lock, and returns the report line
-#   (`stale:transient <reason>` when it stopped waiting).
-# - the real child's process entry: `defender.learning.author.version_control.publish_child_main(
-#   argv, *, issuer_config=None, client=None, identity=None, network_timeout=None,
-#   locked_hook=None) -> int` — `argv` is what the parent appended; the keywords are the
-#   in-process fakes (as `publish_for_run`) and `locked_hook`, the ONE injectable slow point of
-#   the locked phase: called once, while the child holds the tenant lock, before it touches the
-#   clone.
+# `launch_publish(..., command=)` replaces the real child entry's argv prefix (the parent appends
+# its own arguments). In the child, `publish_child_main(..., locked_hook=)` is the one injectable
+# slow point of the locked phase: called once while it holds the tenant lock, before the clone.
 
 def launcher() -> Callable[..., str]:
     return importlib.import_module("defender.investigation.publish_launch").launch_publish
 
 
-#: The child process a budget test spawns: the REAL child process entry, its fakes rebuilt
-#: inside the subprocess (P3's issuer fake has a fixed clock, so it mints the token the test's
-#: `GitHTTP` accepts), forwarding whatever arguments the parent appended.
+#: The child process a budget test spawns: the real child entry, its fakes rebuilt inside the
+#: subprocess (P3's issuer fake has a fixed clock, so it mints the token the test's `GitHTTP`
+#: accepts), forwarding whatever arguments the parent appended.
 CHILD_WRAPPER = '''
 import json, sys, time
 from pathlib import Path
@@ -544,7 +493,7 @@ def child_command(t: Any, tmp_path: Path, issuer_config: Path, *, network_timeou
                   locked_sleep: float, forge_error_body: str | None = None,
                   ) -> tuple[list[str], Path, Path]:
     """`(command, spec path, marks dir)` for a real child process. The child writes its exit
-    status to `<marks>/rc` (OD20: 0 for every outcome it reports). `forge_error_body`: the
+    status to `<marks>/rc` (0 for every outcome it reports). `forge_error_body`: the
     forge answers the branch-protection read 502 with that body (`<marks>/forge-error-served`)."""
     marks = tmp_path / "child-marks"
     marks.mkdir(parents=True, exist_ok=True)

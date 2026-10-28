@@ -1,23 +1,10 @@
-"""Shared machinery for #1108 P4 slice S-D (drains, writers, revert, connect, credentials).
+"""Shared machinery for #1108 P4's drain, writer, revert, connect and credential tests.
 
 Nothing here implements P4 policy: it builds a scratch product checkout, seeds queues, records
-box requests, wraps the real drain entry in the CLI's stage runner, runs the REAL curator modules
+box requests, wraps the real drain entry in the CLI's stage runner, runs the real curator modules
 with only their model spawn replaced, and reads git state back. `AppRoleVault` is P3's issuer
-fake (`VaultHTTP`) plus OpenBao's AppRole login as its API documents it.
-
-ASSUMED SEAMS (the implementer provides them; see each S-D test file's doc):
-  author_drain(paths, *, trigger_author=, client=, identity=, issuer_config=, issuer_transport=,
-               start_box=, stop_box=)
-  OD16: the drain hands its tick's batch (P3's `Batch`) to every lane entry as `batch=`
-  (`trigger_author(..., batch=)`, `run_lead_author(paths, state, run, *, batch, ...)`,
-  `run_pitfalls(paths, state, *, batch, ...)`); `paths` stays the product-rooted `LoopPaths`
-  (`repo_root` = the product checkout, learning state); the lane's corpus is the batch's draft.
-  lead_author_drain(paths, *, run_lead_author=, run_pitfalls=, client=, identity=,
-                    issuer_config=, issuer_transport=, start_box=, stop_box=, git_timeout=)
-  version_control.issuer_login(tenant, *, issuer_config, transport=None)   # OD4 + transport
-ASSUMED SHAPE: the issuer client config is JSON `{"issuer", "ca_cert" (PEM path), "role_id",
-"secret_id"}` (`issuer.json`, one per tenant under `<repo>/playground-issuer/client/<tenant id>/` in
-dev, named by the tenant row's forge binding).
+fake (`VaultHTTP`) plus OpenBao's AppRole login. A drain hands each lane step its tick's `batch=`;
+`paths` stays the product-rooted `LoopPaths`, and the lane's corpus is the batch's draft.
 """
 from __future__ import annotations
 
@@ -26,6 +13,8 @@ import importlib
 import json
 import logging
 import shutil
+import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -62,12 +51,9 @@ def run_stage(stage) -> int:
 
 
 def product_repo(tmp_path: Path, *, adapters: tuple[str, ...] = ()) -> Path:
-    """A scratch product checkout: a real git repo with a `defender/` tree and one commit, used
-    as the drain's `paths.repo_root` (where the legacy drain cut worktrees and committed).
-    `adapters`: systems whose shipped adapter module (this checkout's
-    `defender/integrations/<system>_adapter.py`) the scratch product carries, for the lanes that
-    resolve declared systems and verbs from the product's adapters (adapters stay in the
-    product repo, #1172)."""
+    """A scratch product checkout (a real git repo with a `defender/` tree and one commit) used
+    as the drain's `paths.repo_root`. `adapters` names systems whose shipped adapter module it
+    carries, for lanes that resolve declared systems and verbs from the product (#1172)."""
     from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 
     repo = tmp_path / "product"
@@ -117,7 +103,7 @@ _BUILDERS = {
 }
 
 
-#: The lanes each drain's box mounts writable, relative to the batch's draft root (OD6).
+#: The lanes each drain's box mounts writable, relative to the batch's draft root.
 AUTHOR_DRAFT_LANES = ("agent/lessons", "agent/lessons-questioner")
 LEAD_DRAFT_LANES = ("agent/skills",)
 
@@ -128,8 +114,8 @@ def draft_root_of(batch: Any) -> Path:
 
 
 def draft_lane_trees(batch: Any, lanes: tuple[str, ...]) -> Any:
-    """The held mounts over `batch`'s draft lanes (`DrainTrees.open`, as S-H's `draft_trees`):
-    the fakes' trees come from the batch the drain handed them, never from `paths` (OD16)."""
+    """The held mounts over `batch`'s draft lanes: the fakes' trees come from the batch the
+    drain handed them, never from `paths`."""
     from defender.learning.core.lane_trees import DrainTrees
 
     root = draft_root_of(batch)
@@ -137,14 +123,11 @@ def draft_lane_trees(batch: Any, lanes: tuple[str, ...]) -> Any:
 
 
 class CuratorTrigger:
-    """The drain's `trigger_author` seam: runs the REAL curator module for the module it is asked
-    for, as the default step does (held trees over the batch's draft lanes, the real config
-    builder with `batch=`, the module's `run_batch`), with only the model spawn
-    (`cfg.invoke_agent`) replaced by `curators[module]`. A module with no fake is recorded and
-    not run. Records each call's module, its keywords, the batch and the paths it was handed.
-
-    OD16 ASSUMED SEAM: the drain calls `trigger_author(paths, state, channel, threshold_env,
-    module_name, pending_label, *, batch, box, ...)`; the builders take `batch=` (S-H's spelling)."""
+    """The drain's `trigger_author` seam: runs the real curator module asked for as the default
+    step does (held trees over the batch's draft lanes, the real config builder with `batch=`,
+    the module's `run_batch`), with only the model spawn (`cfg.invoke_agent`) replaced by
+    `curators[module]`. A module with no fake is recorded and not run. Records each call's
+    module, keywords, batch and paths."""
 
     def __init__(self, **curators: Any) -> None:
         self.curators = curators
@@ -234,19 +217,16 @@ def draft_entries(t: Any) -> list[str]:
     return sorted(p.name for p in d.iterdir()) if d.is_dir() else []
 
 
-# Amendment A / U9: a draft is `<T>/drafts/<id>/{owner, stage/{agent/, <token>}}`.
-# ASSUMED SEAM: `batch.draft_root` is the draft's `stage/` (the root the box mounts as `staged`,
-# holding `agent/`), so its parent is the draft folder `<T>/drafts/<id>` holding `owner`.
-# ASSUMED SHAPE: `owner` is JSON `{"pid": <int>, "start": <process start time>}`, the start time
-# being the kernel's (`/proc/<pid>/stat` field 22, clock ticks since boot), compared as text.
+# A draft is `<T>/drafts/<id>/{owner, stage/{agent/, <token>}}`; `batch.draft_root` is its
+# `stage/`. `owner` is JSON `{"pid", "start"}`, `start` being the kernel's process start time
+# (`/proc/<pid>/stat` field 22), compared as text.
 
 
 def draft_folder(batch: Any) -> Path:
-    """The draft folder `<T>/drafts/<id>` of `batch` (its stage's parent). Refuses a batch
-    whose `draft_root` is not a `stage/` (the pre-U9 layout), so no case reads or plants an
-    owner record in `<T>/drafts/` itself."""
+    """The draft folder `<T>/drafts/<id>` of `batch` (its stage's parent). Asserts the stage
+    layout, so no case reads or plants an owner record in `<T>/drafts/` itself."""
     stage = Path(batch.draft_root)
-    assert stage.name == "stage", f"the draft is not in the U9 layout: {stage}"
+    assert stage.name == "stage", f"the draft root is not a `stage/` folder: {stage}"
     return stage.parent
 
 
@@ -261,8 +241,17 @@ def process_start(pid: int) -> str:
     return stat[stat.rindex(")") + 2:].split()[19]
 
 
+def _dead_process() -> tuple[int, str]:
+    """`(pid, start time)` of a process that has exited (it reports its own start time)."""
+    out = subprocess.run(  # noqa: S603 — a test's own short-lived process
+        [sys.executable, "-c", "import os\ns=open('/proc/self/stat').read()\n"
+         "print(os.getpid(), s[s.rindex(')') + 2:].split()[19])"],
+        capture_output=True, text=True, check=True, timeout=60).stdout.split()
+    return int(out[0]), out[1]
+
+
 def write_owner(folder: Path, pid: int, start: Any) -> None:
-    """Write an owner record in the assumed shape (a fixture's planted owner)."""
+    """Plant an owner record in `tenancy._owner`'s shape."""
     (Path(folder) / "owner").write_text(json.dumps({"pid": pid, "start": start}) + "\n",
                                         encoding="utf-8")
 
@@ -283,7 +272,7 @@ def _p4_caught(fn: Callable[[], Any]) -> BaseException | None:
 
     got = caught(fn)
     assert not (isinstance(got, TypeError) and "unexpected keyword" in str(got)), (
-        f"the drain does not take the P4 seams yet: {got}")
+        f"the drain refused the client=/identity= seams: {got}")
     return got
 
 
@@ -293,7 +282,7 @@ LOGIN_PATH = "/v1/auth/approle/login"
 ROLE_ID = "p4-role-id-5a1c"
 SECRET_ID = "p4-secret-id-9e7f3b"
 CLIENT_TOKEN = "hvs.p4-client-token-0d2a"
-#: The dev issuer client config folder the design names (O8): under the repo, outside `defender/`.
+#: The dev issuer client config folder: under the repo, outside `defender/`.
 DEV_CLIENT_DIR = REPO_ROOT / "playground-issuer" / "client"
 
 
@@ -302,8 +291,8 @@ def vc() -> Any:
 
 
 class AppRoleVault(VaultHTTP):
-    """P3's issuer fake plus OpenBao's AppRole login (see the module doc). Tokens are minted at
-    the real clock (`now`), as a production identity checks them against `time.time()`."""
+    """P3's issuer fake plus OpenBao's AppRole login. Tokens are minted at the real clock
+    (`now`), as a production identity checks them against `time.time()`."""
 
     def __init__(self, tenant: str, *, role_id: str = ROLE_ID, secret_id: str = SECRET_ID) -> None:
         super().__init__(tenant, now=int(time.time()))
@@ -338,8 +327,8 @@ class AppRoleVault(VaultHTTP):
 
 
 def write_issuer_config(folder: Path, **overrides: Any) -> Path:
-    """The issuer client config file (assumed shape, module doc) in `folder`, with a real PEM
-    bundle as its CA (certifi's), so building a CA-trusting client from it succeeds."""
+    """The issuer client config file in `folder`, with certifi's real PEM bundle as its CA, so
+    building a CA-trusting client from it succeeds."""
     folder.mkdir(parents=True, exist_ok=True)
     ca = folder / "ca.pem"
     shutil.copyfile(certifi.where(), ca)
@@ -357,22 +346,16 @@ def write_issuer_config(folder: Path, **overrides: Any) -> Path:
 
 
 class LeadStep:
-    """The drain's `run_lead_author` seam: the REAL lead author for one served run
-    (`lead_author.run_under_held_queue_lock`, over held trees on the batch's draft skills lane and
-    the real `build_lead_author_deps(..., batch=)`), with only the run's extraction
-    (`deps.extract`, `deps.build_handoff`, `deps.discover_system_drafts`) and the model spawn
-    (`deps.invoke_agent`) replaced. Draft synthesis (`deps.synthesize`) stays real.
+    """The drain's `run_lead_author` seam: the real lead author for one served run
+    (`run_under_held_queue_lock` over held trees on the batch's draft skills lane, with the real
+    `build_lead_author_deps(..., batch=)`), with only the run's extraction (`deps.extract`,
+    `deps.build_handoff`, `deps.discover_system_drafts`) and the model spawn replaced; draft
+    synthesis stays real.
 
     `executed[run_name]` is the run's extracted leads; `edits[run_name]` maps a path under the
-    draft's skills lane (`<batch.draft_root>/agent/skills`, taken from the batch the drain
-    handed — `paths` stays product-rooted, OD16) to the text the fake model appends there;
-    `rc[run_name]` is what the spawn returns after writing (default 0). A non-zero rc is raised
-    as `LeadAuthorError`, as the default step does. Records each call's batch and paths.
-
-    ASSUMED SEAMS: `run_lead_author(paths, state, run, *, batch, box, on_done, ...)` (OD16);
-    `build_lead_author_deps(paths, *, state, trees, batch)` (S-H);
-    `run_under_held_queue_lock(run, *, paths, state, trees, box, on_done, git_timeout=,
-    deps=None)` — `deps` given are used as built."""
+    batch's draft skills lane (never `paths`, which stays product-rooted) to the text the fake
+    model appends; `rc[run_name]` is the spawn's return (default 0), a non-zero one raised as
+    `LeadAuthorError` as the default step does. Records each call's batch and paths."""
 
     def __init__(self, *, executed: dict, edits: dict, rc: dict | None = None) -> None:
         self.executed, self.edits, self.rc = executed, edits, rc or {}
@@ -412,14 +395,10 @@ class LeadStep:
 
 
 class PitfallsStep:
-    """The drain's `run_pitfalls` seam: the REAL pitfalls curation (`run_pitfalls` over the
-    lane's held trees) with only its model spawn (`invoke=`) replaced by one that appends
-    `bullet` to each handed-off surface (`handoff["path"]`, `agent/skills/...` (OD6), under the
-    draft root of the batch the drain handed — never a draft-rooted `paths`, OD16). Records the
-    handoffs, the `repo_root` the curator handed the spawn, and each call's batch and paths.
-
-    ASSUMED SEAMS: `run_pitfalls(paths, state, *, batch, box, on_curated, ...)` as the drain's
-    step (OD16); `pitfalls_curator.run_pitfalls(*, paths, state, trees, batch, invoke, ...)` (S-H)."""
+    """The drain's `run_pitfalls` seam: the real pitfalls curation over the lane's held trees,
+    with only its model spawn (`invoke=`) replaced by one appending `bullet` to each handed-off
+    surface (`handoff["path"]` under the batch's draft root, never `paths`). Records the
+    handoffs, the `repo_root` handed to the spawn, and each call's batch and paths."""
 
     def __init__(self, bullet: str) -> None:
         self.bullet = bullet
@@ -451,15 +430,14 @@ class PitfallsStep:
                                                  on_curated=on_curated, **kw)
 
 
-def executed_lead(query_id: str, *, system: str = "cmdb", verb: str = "get-host",
-                  lead_id: str = "l-001") -> Any:
+def executed_lead(query_id: str, *, lead_id: str = "l-001") -> Any:
     """One executed lead as the offline extraction yields it (a successful call)."""
     from defender.learning.leads.lead_extraction import ExecutedLead
 
     return ExecutedLead(
         lead_id=lead_id, query_index=0, is_multi_query=False, entry_index=0,
-        query_id=query_id, system=system, verb=verb, params={"host": "h1"},
-        raw_command=f"{verb} host=h1", goal_text="who owns h1", what_to_summarize=("owner",),
+        query_id=query_id, system="cmdb", verb="get-host", params={"host": "h1"},
+        raw_command="get-host host=h1", goal_text="who owns h1", what_to_summarize=("owner",),
         raw_ref=None, payload_status="ok", payload_digest="digest-1", error_class=None)
 
 

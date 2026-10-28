@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from defender.learning.branch.estate.registry import WorldRegistry
 from defender.tests.e2e._replay_harness import ReplayFn
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24
 
@@ -16,7 +17,7 @@ ROW_COLUMNS = (
     "system_key",
 )
 
-#: The column name the design removes from the model's table (G4/G5).
+#: The column name kept out of the model's table.
 CALL_ID = "call_id"
 
 FORK_TIME = S24.T.AS_OF
@@ -153,6 +154,6 @@ def world_registry_with_source(ep: Path, label: str, est: Any, *, source_run: An
     knobs.setdefault("retry_cap", 3)
     seams = S24.registry_seams(world, ledger, oracle_dir=S24.oracle_dir(ep, label),
                                oracle=oracle.model, verifier=verifier.model, box=box, **knobs)
-    return S24.sym(S24.REGISTRY, "WorldRegistry")(
+    return WorldRegistry(
         est.roster(), rt.grants.gather, world=world, ledger=ledger, as_of=S24.AS_OF_DT,
         tenant=rt, grant_home=rt.table_pointer, source_run=source_run, **seams)

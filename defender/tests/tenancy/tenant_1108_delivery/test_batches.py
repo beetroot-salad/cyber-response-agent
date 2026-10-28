@@ -43,8 +43,8 @@ from ._scenarios import (
 )
 
 def test_start_batch_makes_a_git_free_draft_of_the_export_commit_and_no_checkout(repo, tmp_path):
-    """Flow 3, O7b and C2: the batch starts from a fresh publish, so a human merge on the remote
-    reaches the clone, the export and the draft."""
+    """The batch starts from a fresh publish, so a human merge on the remote reaches the clone,
+    the export and the draft."""
     tenant = repo[0]
     clone = tenant.knowledge
     expected = advance_remote(repo, tmp_path)
@@ -60,7 +60,7 @@ def test_start_batch_makes_a_git_free_draft_of_the_export_commit_and_no_checkout
     assert branch_tip(clone, batch.branch) is None, "the batch's branch exists before any commit"
     assert git(clone, "status", "--porcelain") == ""
 
-    # Amendment A / U9: the draft is `<T>/drafts/<id>/{owner, stage/{agent/, <token>}}`; the
+    # The draft is `<T>/drafts/<id>/{owner, stage/{agent/, <token>}}`; the
     # batch's `draft_root` is its `stage/` (the root the box mounts as `staged`), and the owner
     # record sits beside it, never inside what the box sees.
     folder = location_path(tenant.tenant_root) / "drafts" / "fresh"
@@ -83,8 +83,8 @@ def test_start_batch_makes_a_git_free_draft_of_the_export_commit_and_no_checkout
 
 @pytest.mark.parametrize("state", ["dirty", "untracked", "diverged"])
 def test_refresh_refuses_local_state_without_creating_batch(repo, tmp_path, state):
-    """O7b: a clone with local edits or a diverged `main` refuses, naming the state; nothing
-    is fast-forwarded or published, and no branch, draft or temporary entry is made."""
+    """A clone with local edits or a diverged `main` refuses, naming the state; nothing is
+    fast-forwarded or published, and no branch, draft or temporary entry is made."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     advance_remote(repo, tmp_path)
@@ -125,7 +125,6 @@ def test_publishing_after_a_batch_starts_never_changes_its_draft_or_branch(repo,
 
 @pytest.mark.parametrize("left", ["draft", "branch"])
 def test_start_batch_refuses_an_id_whose_draft_or_branch_exists(repo, left):
-    """Start batch refuses an id whose draft or branch exists."""
     tenant = repo[0]
     clone = tenant.knowledge
     d = delivery(repo, ForgeHTTP())
@@ -179,7 +178,7 @@ def test_stale_draft_temporaries_are_swept_and_drafts_are_kept(repo, by):
 
 
 def test_a_draft_build_that_fails_leaves_nothing_and_its_id_can_be_retried(repo, tmp_path):
-    """R3: the draft is built under the lock in `<T>/drafts/.<id>-<rand>` and renamed into place."""
+    """The draft is built under the lock in `<T>/drafts/.<id>-<rand>` and renamed into place."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     export = _publish_big_lesson(repo, tmp_path, d)
@@ -213,10 +212,9 @@ def test_a_killed_draft_build_leaves_only_a_temporary_the_next_publish_or_start_
 
 def test_a_crash_after_the_draft_exists_refuses_its_id_until_a_publish_sweeps_the_dead_owners_draft(
         repo, tmp_path):
-    """Re-spelled for amendment A / U9 + O-SWEEP (was `..._leaves_its_id_refused_for_good`): a
-    crashed build's draft names its (now dead) owner. While it stands, its id is refused; the
-    next publish, under the tenant lock, sweeps it because its owner is dead. A draft this live
-    process owns survives the same publish (positive control)."""
+    """A crashed build's draft names its (now dead) owner: while it stands its id is refused;
+    the next publish, under the tenant lock, sweeps it. A draft this live process owns survives
+    the same publish (positive control)."""
     tenant = repo[0]
     code, out, err = _build_elsewhere(repo, tmp_path, "crashed", "crash")
     assert code == -signal.SIGKILL, f"{code} {out} {err}"

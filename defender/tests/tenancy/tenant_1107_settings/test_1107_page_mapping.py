@@ -46,15 +46,14 @@ TICKET_TABLE = """dispositions:
 
 
 def _accepted() -> Any:
-    """The accepted `Tenant` the post-run step is handed beside the run (#1279 A4); the page's
+    """The accepted `Tenant` the post-run step is handed beside the run (#1279); the page's
     publish copy is off here (production), so only its type matters."""
     return set_up_tenant(current_data_root())
 
 
 def _seeded_run(tmp_path: Path, name: str) -> Path:
     """A run dir the renderer accepts: the alert and a real session store behind its pointer.
-    `name` is a LABEL: #1187 (declared change 1) — the folder, the run's id, is
-    `fixture_uuid(name)`."""
+    `name` is a label: the folder (the run's id) is `fixture_uuid(name)`."""
     run_dir = tmp_path / "runs" / fixture_uuid(name)
     run_dir.mkdir(parents=True, exist_ok=True)
     plant_with_record(run_dir, {"alert_id": "a-1107", "rule": {"id": "r-1107",
@@ -71,13 +70,13 @@ def _write_receipt(run_dir: Path, doc: Any) -> Path:
 
 
 def _failure_receipt(key: str, reason: str) -> dict[str, Any]:
-    # d0: a failure receipt carries status 'error', ok false, url null with no usable config, and
+    # A failure receipt carries status 'error', ok false, url null with no usable config, and
     # a non-empty reason.
     return {"key": key, "status": "error", "url": None, "ok": False, "reason": reason}
 
 
 def _success_receipt(key: str) -> dict[str, Any]:
-    # d0: a success receipt carries reason null.
+    # A success receipt carries reason null.
     return {"key": key, "status": "commented", "url": f"http://case-history-1107/tickets/{key}",
             "ok": True, "reason": None}
 
@@ -104,9 +103,8 @@ class _ReceiptWriter:
 
 
 def _run_world(tmp_path: Path, monkeypatch: Any, name: str) -> tuple[Path, Path, S.DockerShim]:
-    """A data-root row (#1078), a complete #1107 tenant set up under this test's data root (#1120:
-    `run.py` reads its tenants from `DEFENDER_DATA_ROOT` alone), an alert, and the docker shim
-    first on PATH. Returns (data root, alert, shim)."""
+    """A data-root row, a complete tenant under this test's data root (the one `run.py` reads),
+    an alert, and the docker shim first on PATH. Returns (data root, alert, shim)."""
     ensure_d9_tenant()
     root = current_data_root()
     S.plant(root, marker=f"pg{name}")
@@ -197,7 +195,7 @@ def test_s7_nf26_page_reads_receipt_without_following_links(tmp_path):
                                                      "REASON-LINKED-NF26-1107")),
                          encoding="utf-8")
 
-    # Positive control: the SAME bytes as a regular file at the receipt's name render, so the
+    # Positive control: the same bytes as a regular file at the receipt's name render, so the
     # absence below is the link rule's doing and not a page that never shows receipts.
     regular = _seeded_run(tmp_path, "r-nf26-regular")
     _write_receipt(regular, elsewhere.read_text(encoding="utf-8"))
@@ -391,7 +389,7 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
 
     # (b) The record step: a warning and an error receipt, no comment sent.
     case_dir = M.make_run(tmp_path / "runs", "case-err-1107")
-    # CX8: the shim on the child's PATH receives argv + env; it answers a POST as created, in
+    # The shim on the child's PATH receives argv + env; it answers a POST as created, in
     # curl's body + status-line shape.
     shim = S.DockerShim(tmp_path / "docker", S.store_answers_ok(case_dir.name))
     caplog.clear()
@@ -434,7 +432,7 @@ def test_o2_ticket_replies_ignore_the_mapping(tmp_path):
 
 
 def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
-    # #1120: the resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
+    # The resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
     folder = S.plant(root, marker="est", table=TICKET_TABLE)
     probe = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
@@ -451,7 +449,7 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
         T.world_doc("b", facts=note("SOC-1", "closed")),
         T.world_doc("c", facts=note("SOC-2", "done-edited-1107")),
     ]))
-    # #1105 PR 2: the sibling opens its episode by id under the configured episodes base, over
+    # The sibling opens its episode by id under the configured episodes base, over
     # the container the launcher made for its tenant before the first sibling.
 
     with Episode.open(ep) as held:

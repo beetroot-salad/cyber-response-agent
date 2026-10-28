@@ -1,4 +1,7 @@
-"""#995 verb-disposition table: one authored answer for who may call what, total over the systems that exist. Planted-system tests demand the census gate go red; the loader fails loud on a malformed or missing table; role grants are projected from the rows; an ungranted system's refusal differs from a typo's."""
+"""#995 verb-disposition table: one authored answer for who may call what, total over the systems
+that exist. A planted undecided system turns the census gate red; the loader fails loud on a
+malformed or missing table; role grants are projected from the rows; an ungranted system's
+refusal differs from a typo's."""
 from __future__ import annotations
 
 import subprocess
@@ -41,8 +44,8 @@ def _walk(defender_dir: Path, systems: tuple[str, ...]) -> dict[str, frozenset[s
 
 
 def test_a_planted_system_with_no_disposition_turns_the_gate_red():
-    """THE demand. A system declared by both halves the resolver reads, mentioned nowhere in
-    the table, is residue — and residue is a finding naming the pair."""
+    """A walked verb the table is silent about is residue, and residue is a finding naming the
+    exact pair."""
     planted = ("newsystem", "health-check")
     walked = {"newsystem": frozenset({"lookup", "health-check"})}
     # A table that decides one of the planted system's two verbs and is silent about the
@@ -112,7 +115,8 @@ def test_deleting_a_row_from_the_SHIPPED_table_is_caught():
 
 
 def test_a_system_gather_reaches_but_cannot_health_check_warns_on_load():
-    """The invariant the move from code to table made merely UNWRITTEN rather than impossible."""
+    """Withholding `health-check` from a system gather queries is legal, but warns: gather could
+    then never check that the system is up."""
     table = write_table(_tmp(), {
         ("alpha", "lookup"): OK,
         ("alpha", "health-check"): {"roles": [], "reason": "not needed here"},
@@ -171,8 +175,8 @@ def test_a_hostile_system_directory_name_does_not_blind_the_gate():
         capture_output=True, text=True, cwd=REPO_ROOT,
     )
     assert proc.returncode == 0, (
-        "the hostile names declare nothing, so a table total over `alpha` is total — the "
-        f"gate must be clean, not red or crashed\nstdout={proc.stdout}\nstderr={proc.stderr}"
+        f"the gate was not clean over hostile names that declare nothing\n"
+        f"stdout={proc.stdout}\nstderr={proc.stderr}"
     )
     assert "1 system" in proc.stdout, (
         f"the gate covered a system count that is not just `alpha`: {proc.stdout}"
@@ -231,8 +235,7 @@ def test_the_projection_is_exactly_the_rows_that_name_the_role(role: str):
 
 
 def test_the_shipped_definitions_carry_the_projected_grants():
-    # #1106 M4: the grants are per RUN, projected from the run's tenant table — no longer
-    # module constants on `GATHER_DEF` / `lead_zero`. The wiring is `run_grants`.
+    # The grants are per RUN, projected from the run's tenant table by `run_grants` (#1106).
     grants = T1106.run_grants(SETTINGS)
     rows = load_dispositions(dispositions_path(SETTINGS))
     assert set(grants.gather.entries) == set(grant_for("gather", rows).entries)
@@ -400,7 +403,7 @@ def test_the_duplicate_check_agrees_with_an_independent_oracle():
 
 
 def test_an_ungranted_systems_real_verb_keeps_the_unresolvable_label():
-    """The LABEL is not #995's to change, and this pins that it did not."""
+    """The outcome label stays `UNDECLARED`; only the refusal text tells the cases apart."""
     grant = VerbGrant(
         role="gather",
         entries=tuple((s, v, "r") for s, v in GATHER_CENSUS if s != "cmdb"),
@@ -448,15 +451,14 @@ def test_a_typo_on_a_granted_system_is_told_apart_from_a_typo_on_an_ungranted_on
 
 
 def test_a_withheld_verb_on_a_granted_system_is_still_denied():
-    """Unchanged behaviour, pinned so the O2 fix does not reshuffle the existing taxonomy."""
     rows = load_dispositions(dispositions_path(SETTINGS))
     reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows))
     assert reg.decide("cmdb", "list-roles").outcome == "DENIED"
 
 
 def test_an_unknown_system_entirely_is_still_undeclared():
-    """The boundary of the O2 change: a system with no adapter at all must not be reported as
-    'denied', which would tell a caller it exists."""
+    """A system with no adapter at all must not be reported as 'denied', which would tell a
+    caller it exists."""
     rows = load_dispositions(dispositions_path(SETTINGS))
     reg = ModuleVerbRegistry(read_roster(ADAPTERS), grant_for("gather", rows))
     assert reg.decide("nosuchsystem", "anything").outcome == "UNDECLARED"

@@ -1,4 +1,4 @@
-"""Review hardening for the #1067 remainder port (found in review on PR #1075)."""
+"""Boundary claims of the #1067 port: non-`str` YAML keys, `as_int` over bools, a non-mapping environment."""
 from __future__ import annotations
 
 import datetime

@@ -1,4 +1,4 @@
-"""#870 M5′ — the lane opens on the sentinel id, and on nothing else."""
+"""#870: the reducer lane opens on the bash-shim sentinel id, and on nothing else."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,11 +22,11 @@ DECLARED = frozenset({"elastic", "cmdb"})
 
 
 def _collect(*leads):
-    """The real collector over an empty catalog — the seam M5′ edits, driven directly."""
+    """The real collector over an empty catalog, driven directly."""
     return collect_general_failures(list(leads), RUN, catalog=[])
 
 
-# O3 / O3b — the row reaches the queue, normalized, whatever it was attributed to.
+# The row reaches the queue, normalized, whatever it was attributed to.
 
 
 def test_shim_row_enqueues_with_its_system_normalized():
@@ -54,8 +54,7 @@ def test_the_new_lane_admits_only_the_shim_sentinel():
         shim_lead(system="elastic", query_id=REPEAT_TRIP_QUERY_ID, lead_id="l-012"),
     )
     assert [r["system"] for r in attributed] == ["elastic", "elastic"], (
-        "the attributed half of the other two sentinels stops enqueueing — G12 says it "
-        "reaches the queue today and M5′ neither causes nor fixes that"
+        "the other two sentinels' attributed rows no longer reach the queue"
     )
     surfaces = by_surface(
         pitfalls_curator._build_pitfalls_handoffs(attributed, systems=DECLARED)
@@ -81,7 +80,7 @@ def test_no_model_supplied_query_id_reaches_the_reducer_surface():
         assert resolve_query_id("elastic", "esql", spelled) == "elastic.esql", spelled
 
     near_miss = resolve_query_id("elastic", "esql", "elastic.bash-shim")
-    assert near_miss == "elastic.bash-shim", "C15's near miss no longer passes through"
+    assert near_miss == "elastic.bash-shim", "the near-miss query id no longer passes through"
 
     rows = _collect(shim_lead(system="elastic", query_id=near_miss))
     assert rows == [], (
@@ -92,7 +91,7 @@ def test_no_model_supplied_query_id_reaches_the_reducer_surface():
         systems=DECLARED,
     ))
     assert surfaces["reducer"] == []
-    # #1108 P4 (OD6): handoff paths are spelled repo-relative to the tenant repo.
+    # Handoff paths are spelled relative to the tenant repo.
     assert [e["path"] for e in surfaces["system"]] == [
         "agent/skills/elastic/execution.md"
     ]

@@ -41,7 +41,7 @@ class _Order(logging.Handler):
 
 class _Tail(SpecTail):
     """`_spec791`'s tail fake, noting each step into the shared order; `fail` names the one
-    seam that raises, with the fault the ledger observed on the real `run.main` (RG-08-b..d)."""
+    seam that raises, with the fault that seam really raises."""
 
     def __init__(self, paths: Any, order: list[str], *, fail: str | None = None) -> None:
         super().__init__(paths)
@@ -63,7 +63,7 @@ class _Tail(SpecTail):
             raise run_common.VisualizeFailed("spec 1105: the page was not saved (RG-08-d)")
 
     def enqueue(self, run: Any, alert: Any, **kw: Any) -> bool:
-        # `run.main` hands its enqueue seam the run's `Run` (#1105 PR 2), passed on unchanged.
+        # `run.main` hands its enqueue seam the run's `Run`, passed on unchanged.
         self.order.append(ENQUEUE)
         if self.fail == ENQUEUE:
             raise OSError(errno.ENOSPC, "spec 1105: the queue is full (RG-08-c)")
@@ -91,11 +91,10 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
     logger = logging.getLogger(run_common.__name__)
     logger.addHandler(handler)
     try:
-        # The alert's folder names the minted run id's label: one id per arm.
         alert = plant_alert(arm / f"alert-{arm.name}")
         argv = [str(alert), "--tenant", str(tenant.id), "--update-ticket"]
         try:
-            # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+            # Plus the in-process launch-time publish.
             outcome: Any = run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize,
                                        ticket_writer=tail, enqueue=tail.enqueue,
                                        publish=in_process_publish())
@@ -110,26 +109,26 @@ def test_1105_run_end_keeps_todays_order_cross_check_ticket_curation_page(tmp_pa
     order, outcome, queued = _drive(tmp_path / "ok", monkeypatch)
     tail_steps = [s for s in order if s in (CROSS_CHECK, TICKET, ENQUEUE, PAGE)]
     assert tail_steps == [CROSS_CHECK, TICKET, ENQUEUE, PAGE], (
-        f"run end ran {order}, not cross-check -> ticket -> curation -> page (N-h)")
+        f"run end ran {order}, not cross-check -> ticket -> curation -> page")
     assert outcome == 0, f"a completing run exits 0: {outcome!r}"
-    assert queued, "the curation request was queued (RG-08-a)"
+    assert queued, "no curation request was queued"
     assert order.index("lifecycle") < order.index(CROSS_CHECK), "run end follows the lifecycle"
 
     order, outcome, queued = _drive(tmp_path / "ticket-fails", monkeypatch, fail=TICKET)
     assert isinstance(outcome, OSError), (
-        f"a raising ticket record propagates out of run.main today (RG-08-b): {outcome!r}")
+        f"a raising ticket record did not propagate out of run.main: {outcome!r}")
     assert outcome.errno == errno.EIO, f"the ticket store's own fault propagates: {outcome!r}"
     assert ENQUEUE not in order, f"the enqueue ran after a raising ticket record: {order}"
     assert PAGE not in order, f"the page ran after a raising ticket record: {order}"
-    assert queued == [], "no curation request after a raising ticket record (RG-08-b)"
+    assert queued == [], f"a curation request was queued after a raising ticket record: {queued}"
 
     order, outcome, queued = _drive(tmp_path / "enqueue-fails", monkeypatch, fail=ENQUEUE)
     assert isinstance(outcome, OSError), (
-        f"a raising enqueue propagates out of run.main today (RG-08-c): {outcome!r}")
+        f"a raising enqueue did not propagate out of run.main: {outcome!r}")
     assert outcome.errno == errno.ENOSPC, f"the enqueue's own fault propagates: {outcome!r}"
     assert PAGE not in order, f"the page ran after a raising enqueue: {order}"
 
     order, outcome, queued = _drive(tmp_path / "page-fails", monkeypatch, fail=PAGE)
-    assert outcome == 0, f"a page that was not saved still exits 0 (RG-08-d): {outcome!r}"
-    assert queued, "the curation request was queued before the page failed (RG-08-d)"
+    assert outcome == 0, f"a page that was not saved still exits 0: {outcome!r}"
+    assert queued, "no curation request was queued before the page failed"
     assert order[-1] == PAGE, f"the page is still the last step: {order}"

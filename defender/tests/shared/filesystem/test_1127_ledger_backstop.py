@@ -56,12 +56,11 @@ def raw_lines(path: Path) -> list[str]:
     return [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def served(params: dict, *, source: str = PASSTHROUGH, world_id: str | None = WORLD_ID,
-           asked_params: dict | None = None) -> ServedCall:
+def served(params: dict) -> ServedCall:
     return ServedCall(
         system="cmdb", verb="get-host", params=params,
-        payload_text=payload_text({"owner": "estate"}), source=source, world_id=world_id,
-        asked_params=asked_params,
+        payload_text=payload_text({"owner": "estate"}), source=PASSTHROUGH, world_id=WORLD_ID,
+        asked_params=None,
     )
 
 

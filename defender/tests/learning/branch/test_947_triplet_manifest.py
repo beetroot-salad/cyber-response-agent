@@ -1,4 +1,4 @@
-"""#947 — the family manifest is the contract (M2, O1)."""
+"""#947: the family manifest is the contract."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -22,8 +22,7 @@ def _refusal():
 
 
 def _no_preflight(*_args, **_kw) -> int:
-    """`T.no_preflight`'s neutralised role preflight, taking the `branching=` keyword #1224's
-    launcher passes."""
+    """A neutralised role preflight taking whatever arguments the launcher passes."""
     return 0
 
 
@@ -38,7 +37,7 @@ def test_947_world_a_is_the_control_with_no_facts_and_null_axis():
     assert a.facts == ()
 
 
-# what the loader refuses — the strict reading (§7 FORK-5)
+# what the loader refuses — the strict reading
 
 
 def test_947_questioner_output_is_validated_into_family_before_any_reader():
@@ -87,7 +86,7 @@ def test_947_a_model_authored_free_text_field_stays_one_scalar(tmp_path):
     import yaml
 
     payload = "a story\nepisode_id: hijacked\n- not a list item\n"
-    # `write_family` takes the `Episode` and no longer makes the dir (#1133 rev 2).
+    # `write_family` takes the `Episode`; it does not make the dir.
     with Episode.create(tmp_path / T.EPISODE_ID) as episode:
         manifest = _family().write_family(episode, T.family_doc(base_story=payload))
     reread = yaml.safe_load(manifest.read_text(encoding="utf-8"))
@@ -95,7 +94,7 @@ def test_947_a_model_authored_free_text_field_stays_one_scalar(tmp_path):
     assert reread["episode_id"] == T.EPISODE_ID
 
 
-# §7 FORK-5 (auto) — the strict loader, the manifest digest, the sentinel reading
+# the strict loader
 
 
 def test_947_the_family_loader_refuses_an_unknown_top_level_field():
@@ -135,7 +134,7 @@ def test_947_disposition_declared_is_gated_by_the_same_enum_the_report_is():
     assert ok.worlds[1].disposition_declared in vocab.DISPOSITION_ENUM
 
 
-# §7 FORK-4 (auto) — one identity gate, before anything is launched
+# one identity gate, before anything is launched
 
 
 def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tmp_path,
@@ -159,18 +158,13 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
         assert needle in str(bad.value)
 
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    base, src = location_path(T.runs_base)(tmp_path, published=True)  # #1108 P4: a branch launch needs a published tenant (flow 7 pins its commit)
-    for i, (worlds, _needle) in enumerate(bad_families):
-        # One episodes root per arm: four launches sharing one would have the later three meet a
-        # directory an earlier abort left behind rather than the identity gate.
-        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / f"episodes-root-{i}"))
+    base, src = location_path(T.runs_base)(tmp_path, published=True)  # a branch launch pins a published tenant's commit
+    for worlds, _needle in bad_families:
         spawn = T.FakeSpawn()
         questioner = T.FakeAgent(T.declaration(T.family_doc(worlds=worlds)), *[T.declaration(w) for w in worlds[1:]])
         with pytest.raises(T.refusals()) as refused:
             T.mod("cli.learning.branch").main(
-                ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                 *T.retired_continuation_argv()],
+                ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                 spawn=spawn, preflight=_no_preflight,
                 questioner=questioner, live_tree=T.source_capture())
         assert questioner.calls > 0, "the launch was refused before the identity gate ran"
@@ -180,7 +174,8 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
 
 
 def test_947_a_source_run_id_that_cannot_render_is_refused_by_the_gate_that_runs_first():
-    """A source run whose id cannot render to a nameable episode token is refused, and refused EARLIER — by the id gate `episode_dir_for` runs before any..."""
+    """`refuse_bad_episode_id` refuses an id that cannot render to a nameable episode token and
+    admits the fixture's own."""
     fam = _family()
     untokenable = ("FRESH CASE/2026-n59", "_lead-n5", ".hidden-n5", "-n5")
     for episode_id in untokenable:
@@ -190,7 +185,7 @@ def test_947_a_source_run_id_that_cannot_render_is_refused_by_the_gate_that_runs
     assert fam.parse_family(T.family_doc()).episode_id == T.EPISODE_ID
 
 
-# §7 NEW-1 (gate finding) — a fact's entity is bounded data, never document structure
+# a fact's entity is bounded data, never document structure
 
 
 def _entity_family(entity: str) -> dict:

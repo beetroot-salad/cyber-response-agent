@@ -31,8 +31,8 @@ pytestmark = pytest.mark.e2e
 
 
 def _substituting() -> dict:
-    """A foreign dict-row payload comfortably under the shipped bar — the positive control
-    every "and it did not substitute" assertion in this module needs to be non-vacuous."""
+    """A foreign dict-row payload well under the shipped bar: the positive control for every
+    "did not substitute" assertion here."""
     return toon_rows(corpus()["fx-33"])
 
 
@@ -58,18 +58,6 @@ def test_str_scalar_none_and_content_block_returns_never_reach_the_encoder() -> 
     )
 
 
-def test_a_raising_toon_encoder_emits_json() -> None:
-    """When the encoder raises on a payload the pre-validator ADMITTED, the model gets the tool's
-    own JSON inside the frame and the gate raises nothing of its own."""
-    value = _substituting()
-    spy = SpyEncoder(EncoderFault(dumps_raises=PANIC("simulated encoder panic (S5's class)")))
-    out = agent_run(toolset=foreign_toolset(value), encoder=spy)
-
-    assert out.error is None, "an encoder fault escaped the gate"
-    assert spy.dumps_calls == 1
-    assert framed_content(out.dispatched.text()) == wire_text(value)
-
-
 def test_a_pydantic_serialization_error_on_the_baseline_emits_json() -> None:
     """A payload the wire serializer cannot serialize leaves the run exactly as it is without the
     gate: the gate substitutes nothing, decodes nothing and changes no outcome."""
@@ -79,15 +67,13 @@ def test_a_pydantic_serialization_error_on_the_baseline_emits_json() -> None:
 
     value = {"rows": [{"a": Arbitrary(), "b": 1}]}
     assert isinstance(toons.dumps(value), str), (
-        "the encoder now raises on this fixture, so the ordering assertion below is about a "
-        "different arm than the one this demand names"
+        "the encoder now raises on this fixture"
     )
     gated = agent_run(toolset=foreign_toolset(value))
     ungated = agent_run(toolset=foreign_toolset(value), capabilities=False)
 
     assert gated.encoder.dumps_calls == 1, (
-        "the gate never reached the encoder, so both differentials below are satisfied by a "
-        "gate that does nothing — the key flow puts `dumps` before the baseline serialization"
+        "the gate never reached the encoder"
     )
     assert gated.encoder.loads_calls == 0, "the gate decoded a view whose baseline never serialized"
     assert type(gated.error).__name__ == type(ungated.error).__name__, (
@@ -190,13 +176,15 @@ def test_a_payload_whose_toon_form_is_empty_is_not_substituted() -> None:
 
 
 def test_a_baseexception_from_the_encoder_passes_through_and_a_control_flow_exception_is_reraised() -> None:
-    """Two assertions, and the second is the one a naive widening breaks."""
+    """An encoder panic on an admitted payload is tried once and passes through as the tool's own
+    JSON; a control-flow exception is re-raised (the arm a naive widening breaks)."""
     value = _substituting()
     caught = agent_run(
         toolset=foreign_toolset(value),
         encoder=SpyEncoder(EncoderFault(dumps_raises=PANIC("S5's class, captured"))),
     )
-    assert caught.error is None
+    assert caught.error is None, "an encoder fault escaped the gate"
+    assert caught.encoder.dumps_calls == 1
     assert framed_content(caught.dispatched.text()) == wire_text(value)
 
     for exc in (asyncio.CancelledError(), KeyboardInterrupt(), GeneratorExit(),
@@ -215,15 +203,13 @@ def test_a_baseexception_from_the_encoder_passes_through_and_a_control_flow_exce
 
 
 def test_a_view_the_encoder_produced_that_the_decoder_cannot_read_passes_through() -> None:
-    """A view the encoder itself produced that the decoder cannot read is a passthrough, not an
-    escaped fault — the box r2's diagram does not have."""
+    """The decoder's fault on the encoder's own view is a passthrough, not an escaped fault."""
     value = {"rows": [{"}": i, "z": f"pad-{i}"} for i in range(20)]}
     view = toons.dumps(value)
     with pytest.raises(BaseException) as caught:  # noqa: B017, PT011 — the class IS the probe
         toons.loads(view)
     assert not isinstance(caught.value, Exception), (
-        "the decoder's fault is now an Exception subclass; the guard's breadth demand (d55) "
-        "and this arm no longer describe the same encoder"
+        "the decoder's fault is now an Exception subclass"
     )
 
     out = agent_run(toolset=foreign_toolset(value))
@@ -238,8 +224,7 @@ def test_a_nan_or_infinite_float_reaches_the_model_identically_with_and_without_
     for f in (float("nan"), float("inf"), float("-inf")):
         for value in ({"x": f}, {"rows": [{"a": f, "b": i} for i in range(40)]}):
             assert wire_roundtrip_equal(value), (
-                f"M3's oracle no longer blesses {f!r} under the wire serializer, so the arm "
-                "this demand asserts is decided by the fidelity check rather than by the bar"
+                f"the round-trip oracle no longer accepts {f!r} under the wire serializer"
             )
             out = agent_run(toolset=foreign_toolset(value))
             assert out.error is None
@@ -261,6 +246,5 @@ def test_a_nan_or_infinite_float_reaches_the_model_identically_with_and_without_
             )
 
     assert substituted_at_least_once, (
-        "no non-finite payload substituted, so every assertion above is the passthrough arm "
-        "and the oracle correction this demand pins is untested"
+        "no non-finite payload substituted, so only the passthrough arm ran"
     )

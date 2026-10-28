@@ -100,11 +100,8 @@ def drive_run(  # noqa: PLR0913 — the real driver's injection inputs
     run: Run, main: Any, *, gather: Any = None, verbs: Any = None,
               state: RunState | None = None, resume: Any = None,
               source_run: Run | None = None, limits: Any = None, toolset: Any = None) -> dict:
-    """Use the existing replay models at the new driver boundary, with real runtime wiring.
-
-    The shared harness currently passes the retired run_dir/run_id pair. This fixture only
-    adapts that boundary and uses its established tenant, review and model inputs.
-    """
+    """The real `driver.run_investigation` over `run`, with the replay harness's models, tenant
+    and review inputs and real runtime wiring."""
     tree = replay.DEFENDER
     main_model = BuiltModel(FunctionModel(replay._awaiting(main)), None)
     gather_fn = replay._with_default_correlation(gather, main) if resume is None and verbs is not None else gather

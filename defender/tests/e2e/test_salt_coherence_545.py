@@ -1,4 +1,4 @@
-"""#545 e2e canary, INVERTED BY #875 — the run's untrusted frames must NOT share one salt."""
+"""#545 canary, inverted by #875: a run's untrusted frames must not share one salt."""
 from __future__ import annotations
 
 import re
@@ -39,8 +39,7 @@ def test_the_alert_wrap_and_the_tool_wrap_carry_DIFFERENT_salts(tmp_path):
     salts = set(_UNTRUSTED_TAG.findall(transcript))
     assert salts, "no untrusted-wrapped content seen — the alert wrap and/or tool wrap is missing"
     assert len(salts) > 1, (
-        f"every untrusted frame in the run shares one salt {salts} — the #875 F-1 shape is back: "
-        "a party shown one frame holds the delimiter of every other"
+        f"every untrusted frame in the run shares one salt: {salts}"
     )
 
 

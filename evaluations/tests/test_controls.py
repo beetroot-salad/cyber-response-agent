@@ -220,14 +220,9 @@ _ESQL_PAYLOAD_KEYS = ("query", "columns", "row_count", "values")
 
 
 def _esql_payloads_in(doc):
-    """Every ES|QL payload ANYWHERE in a document, found by shape.
-
-    Recursive, and classified on the four keys rather than read off a list of the places
-    payloads are known to sit (the observed root, `controls[i].payload`,
-    `attack_contribution.payload`). The enumerated sweep is precisely the blind spot that
-    produced #1054: it is correct until someone adds a fourth position, and then it is
-    silently correct about nothing. A payload that moves must still be found.
-    """
+    """Every ES|QL payload ANYWHERE in a document, found recursively by its four keys rather
+    than from a list of known positions: an enumerated sweep goes silently blind when a
+    payload moves (#1054)."""
     if isinstance(doc, dict):
         if all(key in doc for key in _ESQL_PAYLOAD_KEYS):
             yield doc
@@ -269,8 +264,8 @@ def test_the_corpus_speaks_the_SAME_esql_encoding_production_does():
         f"swept {CASES_DIR} and found no ES|QL payload at all — this guard would pass "
         f"over an empty tree, which is not the same fact as a uniform one")
     assert offenders == [], (
-        f"{len(offenders)} file(s) under hidden/ still carry pre-#842 dict rows, so a "
-        f"judge prompt built from them mixes two encodings: {offenders[:5]}"
+        f"{len(offenders)} file(s) under hidden/ still carry dict rows, not positional ones: "
+        f"{offenders[:5]}"
         + (f" (+{len(offenders) - 5} more)" if len(offenders) > 5 else ""))
 
 

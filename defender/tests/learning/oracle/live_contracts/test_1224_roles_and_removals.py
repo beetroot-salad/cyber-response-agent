@@ -13,10 +13,10 @@ from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 #: A name no provider routes (the sentinel `test_glm_fireworks` uses for the same purpose).
 UNROUTABLE = "no-such-vendor/no-such-model"
-#: A Fireworks alias the provider tables route (GD-07: the learning roles' own provider).
+#: A Fireworks alias the provider tables route (the learning roles' own provider).
 ROUTABLE = "glm-5.3"
 #: The oracle role's effort knob, on the pattern of `QUESTIONER_EFFORT` / `JUDGE_EFFORT`.
-KNOB_EFFORT = S.KNOB_EFFORT  # coined in _spec1224 (COINED["knob.effort"])
+KNOB_EFFORT = S.KNOB_EFFORT
 
 
 def _role() -> Any:
@@ -100,7 +100,7 @@ def _assert_spent_nothing(launch: Any, est: Any, oracle: Any, verifier: Any) -> 
 
 def test_1224_oracle_and_its_verifier_are_their_own_roles_with_their_own_model_knobs(
         monkeypatch):
-    """ORACLE and ORACLE_CHECK are two new roles apart from VERIFIER, each with a definition, a model knob read at call time whose default routes, and a budget of its own never charged to the investigator."""
+    """ORACLE and ORACLE_CHECK are roles apart from VERIFIER, each with a definition, a model knob read at call time whose default routes, and a budget of its own never charged to the investigator."""
     AgentRole, AGENTS = _role(), _agents()
     assert AgentRole.ORACLE.value == "oracle"
     assert AgentRole.ORACLE_CHECK.value == "oracle_check"

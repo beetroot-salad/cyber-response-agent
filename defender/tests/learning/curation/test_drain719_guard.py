@@ -10,7 +10,7 @@ from pydantic_ai.exceptions import ModelRetry
 
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation import _drain719 as h
-from defender.tests.support.learning.curation._drain719 import drain  # the not-yet-written target, via the suite's own shim
+from defender.learning.author import drain
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core.config import FatalConfigError, StageAbort  # type: ignore[import-not-found]
 from defender.learning.core.state import FINDINGS, PITFALLS, StateRefused  # type: ignore[import-not-found]
@@ -19,14 +19,12 @@ from defender._git import GitError  # type: ignore[import-not-found]
 from defender.tests.support.learning.core import _state1135
 
 
-# Decision 8 — the trigger is an enumerated set, and A12 is reversed
+# Only the enumerated `RETIRE_SET` classes retire
 
 
 def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouched(
     tmp_path: Path,
 ):
-    """A12 REVERSED. The judge's recommendation was that anything not explicitly systemic retires —
-    "the ceiling is total"."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "b/0", attempts=2)]
@@ -52,8 +50,8 @@ def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouc
 def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_signal(
     tmp_path: Path,
 ):
-    """Decision 10 — the "loud" half of decision 8's trade. Reversing A12 was argued as "stuck but
-    recoverable AND LOUD"; the suite pins recoverable, and loud lived only in the rationale."""
+    """A row stuck on a non-retiring fault is loud: each tick writes a stuck record naming the
+    fault class, the rows and a rising tick count; a fault that retires writes none."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")]
@@ -73,20 +71,15 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
 
         latest = records[-1]
         assert latest["fault_class"] == "FileNotFoundError", (
-            "the record does not name the fault class, so an operator cannot tell this failure "
-            "from any other — a generic 'batch failed' line would satisfy a weaker assertion"
+            "the stuck record does not name the fault class"
         )
         assert sorted(latest["row_ids"]) == ["a/0", "a/1"], "the stalled rows are not named"
-        assert latest["consecutive_ticks"] == tick, (
-            "the record carries no rising count, so a row stuck for three ticks is "
-            "indistinguishable from one that failed once"
-        )
+        assert latest["consecutive_ticks"] == tick, "the stuck record's tick count does not rise"
 
-    assert h.pending_by_id(paths, ch).keys() == {"a/0", "a/1"}, "the rows are stuck, as decision 8 wants"
+    assert h.pending_by_id(paths, ch).keys() == {"a/0", "a/1"}, "the stuck rows left the queue"
     assert h.graveyard(paths, ch) == []
     assert not ((location_path(paths.state_root) / FINDINGS.queue).parent / "held_report.log").exists(), (
-        "the signal must exist on a channel that has no held_report — D7 keeps that one "
-        "lessons-local, so it cannot be the stuck-row surface"
+        "the stuck rows were reported through a held_report.log"
     )
 
     member = h.cfg_for(
@@ -98,21 +91,18 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
     before = len(h.stuck_records(paths, ch))
     assert drain.run_batch(cfg=member) == 2
     assert len(h.graveyard(paths, ch)) == 2, "the member fault retired the rows"
-    assert len(h.stuck_records(paths, ch)) == before, (
-        "a fault that RETIRED wrote a stuck-row record — the signal is firing on every failure "
-        "rather than on the non-retiring ones, which makes it noise"
-    )
+    assert len(h.stuck_records(paths, ch)) == before, "a fault that retired its rows wrote a stuck record"
 
 
-def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(tmp_path: Path):
-    """Decision 5 survives decision 8 unchanged in scope and changed in mechanism: the set is the
-    same on all four drained channels, so a channel naming fewer classes fails here."""
+def test_a_retire_set_member_retires_the_row_and_a_non_member_leaves_it_queued(tmp_path: Path):
+    """On every author channel a `RETIRE_SET` member retires the row and a non-member propagates
+    leaving it queued, so a channel naming fewer classes fails here."""
     paths = h.make_paths(tmp_path)
     member_seen, non_member_seen = {}, {}
 
     for name in h.AUTHOR_CHANNELS:
         ch = h.channel_of(name)
-        rid = "run-W/0" if name == "findings" else "w/0"
+        rid = "run-W/0"
 
         h.seed(paths, ch, [h.row_for(name, rid)])
         member = h.cfg_for(
@@ -134,12 +124,13 @@ def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(t
     assert set(non_member_seen.values()) == {True}, non_member_seen
 
 
-# Decision 1's four paths — each is a named member, which is why each still retires
+# A killed box command is a named member, so it retires
 
 
 def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp_path: Path):
-    """Decision 1 path 4, and the second member an `except AuthorError` spelling drops."""
-    # #1108 P4 (OD12 class ii): the REAL lessons tick over a batch's git-free draft.
+    """`ModelRetry` (a killed box command) is a `RETIRE_SET` member: an `except AuthorError`
+    alone would report the batch as a success."""
+    # The real lessons tick over a batch's git-free draft.
     lane = C.draft_lane(tmp_path)
     paths = lane.paths
     ch = h.channel_of("findings")
@@ -152,8 +143,7 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
 
     assert ModelRetry in tuple(drain.RETIRE_SET), "ModelRetry was dropped from the retire set"
     h.seed(paths, ch, [h.row_for("findings", "a/1")])
-    # The control batch above authored a/0 and consumed it, so the ledger is not empty here
-    # and never was: what this asserts is that the KILLED batch adds nothing to it.
+    # The control batch consumed a/0, so assert that the killed batch adds nothing to the ledger.
     consumed_before = len(h.consumed(paths, ch))
     killed = C.draft_author_cfg(lane, max_attempts=2,
         invoke_agent=h.raising(ModelRetry("command timed out after 120s")),
@@ -165,7 +155,7 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
     )
 
 
-# Non-membership carries what placement used to
+# Non-members propagate without touching the row
 
 
 def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path: Path):
@@ -189,8 +179,9 @@ def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path
 
 
 def test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible(tmp_path: Path):
-    """PJ1b, executed: when the whole-batch wall-clock deadline finally fires it lands as a per-item
-    `AuthorError` through the `TimeoutError` -> `RunUnprocessable` -> `AuthorError` chain."""
+    """The batch's wall-clock deadline reaches the drain as an `AuthorError` (`TimeoutError` ->
+    `RunUnprocessable` -> `AuthorError`), so it bumps and can retire; a bare `TimeoutError`
+    is not a member."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -244,6 +235,3 @@ def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
     assert [r.get("attempts") for r in h.pending(paths, PITFALLS)] == [1, 1], (
         "the non-exempt AuthorError did not bump both rows"
     )
-
-
-# Decision 9 — the reconciling tick, which is what this test actually earns

@@ -75,7 +75,7 @@ def test_an_id_carrying_upper_case_is_not(run_id: str) -> None:
 
 
 def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
-    """At the MINT, where every id rule belongs"""
+    """Refused at the mint (`_family.check_identities`), where every id rule belongs."""
     from defender.records import _family
 
     doc = {
@@ -86,8 +86,8 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
                    "entities": ["web-1"]}],
     }
     def family(world: dict) -> dict:
-        # #1255 (D1, P4): `T.family_doc` writes the continuation prompt and the fence count only
-        # while `Family` still declares them, so this stays about the identity gate on both sides.
+        # `T.family_doc` writes only the fields `Family` declares, so this stays about the
+        # identity gate.
         return T.family_doc(
             episode_id="ep1", source_run_dir="/runs/src", source_run_id="src",
             branch_message_id=1, as_of="2026-07-28T16:18:45Z",
@@ -96,8 +96,8 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
 
     with pytest.raises(_family.FamilyError) as caught:
         _family.check_identities(_family.parse_family(family(doc)))
-    # #1224: the case rule is now the world-token alphabet's own (`world_label_fault`), whose
-    # words name the case it admits — and `Alpha` differs from an admitted label only by case.
+    # The case rule is the world-token alphabet's own (`world_label_fault`, #1224); `Alpha`
+    # differs from an admitted label only by case.
     assert "'Alpha' is outside the world-label alphabet (lower-case" in str(caught.value)
     # The control: the same label lower-cased passes the same gate.
     _family.check_identities(_family.parse_family(family({**doc, "label": "alpha"})))

@@ -1,5 +1,4 @@
-"""Error-path + edge-case e2e scripts — the driver's OWN error handling and the
-gate-as-feedback recovery loop."""
+"""The driver's own error handling and the gate-as-feedback recovery loop, end to end."""
 from __future__ import annotations
 
 import re
@@ -34,9 +33,8 @@ pytestmark = pytest.mark.e2e
 
 
 def _own_qlines(run_dir: Path) -> list[str]:
-    """The run's own queries-table lines, EXCLUDING lead-0's (#808) reserved rows —
-    lead-0 resolves against every alert this suite drives (`verbs` is always injected),
-    contributing rows of its own the scripted scenario never anticipated."""
+    """The run's own queries-table lines, without lead-0's reserved rows (#808): lead-0
+    resolves against every alert this suite drives."""
     lines = (run_dir / "executed_queries.jsonl").read_text().splitlines()
     return [q for q in lines if json.loads(q).get("lead_id") not in RESERVED_LEAD_IDS]
 
@@ -52,6 +50,11 @@ def _q(system: str) -> Turn:
     return Turn(tool_calls=[("query", {"system": system, "verb": "probe", "params": {}})])
 
 
+def _gather(lead_id: str) -> Turn:
+    return Turn(tool_calls=[("gather", {"lead_id": lead_id, "system": "elastic",
+                                        "goal": "g", "what_to_summarize": ["x"]})])
+
+
 def test_request_limit_writes_partial_trace(tmp_path):
     run_id = "limit"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
@@ -62,7 +65,7 @@ def test_request_limit_writes_partial_trace(tmp_path):
     from defender.investigation import challenge_gate
 
     raised_limit = challenge_gate.raised_request_limit(challenge_gate.default_bounds())
-    assert model.calls == raised_limit  # #774/RS7: the ceiling is raised by the gate's cap
+    assert model.calls == raised_limit  # the gate's cap raises the ceiling (#774)
     assert result["output"] is None
     assert result["requests"] == raised_limit
     assert (run_dir / "tool_trace.jsonl").is_file()
@@ -128,10 +131,8 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
     main = ReplayFn([
-        Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
-        Turn(tool_calls=[("gather", {"lead_id": "l-002", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
+        _gather("l-001"),
+        _gather("l-002"),
         Turn(text="done"),
     ])
     gather = ReplayFn([
@@ -150,8 +151,7 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     assert len(qlines) == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
     assert (run_dir / "gather_raw" / "l-001.lead.json").is_file()
     assert not (run_dir / "gather_raw" / "l-002.lead.json").exists(), (
-        "the dispatch to the tripped system claimed l-002 before its down gate refused it "
-        "(#1256 r4: the down gate comes before the lead claim)")
+        "the dispatch to the tripped system claimed l-002 before its down gate refused it")
     assert "DOWN for this run" in main.seen[-1]
 
 
@@ -160,14 +160,10 @@ def test_gather_lead_guards_bounce_then_recover(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
     main = ReplayFn([
-        Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
-        Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
-        Turn(tool_calls=[("gather", {"lead_id": "not a lead", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
-        Turn(tool_calls=[("gather", {"lead_id": "l-002", "system": "elastic",
-                                     "goal": "g", "what_to_summarize": ["x"]})]),
+        _gather("l-001"),
+        _gather("l-001"),
+        _gather("not a lead"),
+        _gather("l-002"),
         Turn(text="done"),
     ])
     gather = ReplayFn([Turn(text="summary l-001"), Turn(text="summary l-002")])
@@ -190,7 +186,7 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     deps = bind(MAIN_DEF, run_dir,
                 defender_dir=Path(__file__).resolve().parents[2])
 
-    m_notes = model_path(notes, run_dir=run_dir)   # #1255 P1: the model's spelling
+    m_notes = model_path(notes, run_dir=run_dir)   # the model's spelling
     runtime_tools._tool_write_file(deps, m_notes, "alpha\nbeta\nalpha\n")
 
     reasons = []

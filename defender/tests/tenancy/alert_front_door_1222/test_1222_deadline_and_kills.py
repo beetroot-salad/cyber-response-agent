@@ -31,7 +31,7 @@ SLACK_S = 5.0
 #: mean "something cut it" — and bounded, so a missing deadline costs seconds, not `S.HANG_S`.
 STALL_S = 12.0
 #: The run wall clock a budget-kill scenario sets, and how long the lead's first request takes:
-#: the lead starts inside the clock and makes its first tool call past it (RJ-04 d).
+#: the lead starts inside the clock and makes its first tool call past it.
 KILL_WALL_S = 3
 KILL_DELAY_S = 3.6
 #: Distinct texts the scripted lead writes, so "delivered" and "never delivered" are observable.
@@ -62,8 +62,8 @@ def _run_end() -> Any:
 
 
 def _base_members() -> frozenset[str]:
-    """The six `truncated_by` members at base (records/run_end.py:33-42) — the endings a lead
-    MAIN dispatches keeps; the timed-out member A7 adds is none of these."""
+    """The six `truncated_by` members a lead MAIN dispatches can end with; the timed-out member
+    is none of these."""
     rb = _run_end()
     return frozenset({rb.TRUNCATED_BY_REQUEST_LIMIT, rb.TRUNCATED_BY_RETRY_EXHAUSTED,
                       rb.TRUNCATED_BY_ABORTED, rb.TRUNCATED_BY_BUDGET, rb.TRUNCATED_BY_STORE,
@@ -92,12 +92,11 @@ def _assert_timed_out_member(value: str | None, *, who: str) -> str:
     """`value` is the timed-out member: a `truncated_by` member that reads back as itself, and
     none of the six base endings (its spelling is the implementer's)."""
     assert value is not None, (
-        f"{who}'s session carries no ending: a timed-out lead reads back as one that finished "
-        "(RJ-10: stamped nothing at base)")
+        f"{who}'s session carries no ending: a timed-out lead reads back as one that finished")
     read_back = _run_end().normalized_truncated_by(value)
     assert read_back == value, (
         f"{who}'s session is stamped {value!r}, which normalized_truncated_by reads back as "
-        f"{read_back!r} — not a member of the truncated_by vocabulary (RJ-10, RF-S3)")
+        f"{read_back!r}: not a truncated_by member")
     assert value not in _base_members(), (
         f"{who}'s timed-out session reads back as the base ending {value!r}: 'timed out' is "
         "named as something else")
@@ -105,11 +104,9 @@ def _assert_timed_out_member(value: str | None, *, who: str) -> str:
 
 
 def _assert_lead_ran(d: S.Drive) -> None:
-    """The design's behaviour every test here rides on: `l-00c` was dispatched on this fresh run
-    (A4) — at base the generic alert never dispatches it (c3)."""
+    """The precondition every test here rides on: `l-00c` was dispatched on this fresh run."""
     assert d.router.dispatched(L3), (
-        f"l-00c never ran: the correlation lead is dispatched on every fresh run, before MAIN's "
-        f"opening message is built (A4, D3); gather conversations: {d.router.leads()}")
+        f"l-00c never ran on a fresh run; gather conversations: {d.router.leads()}")
 
 
 def _assert_main_never_asked(d: S.Drive, why: str) -> None:
@@ -134,8 +131,7 @@ def _prose(d: S.Drive) -> str:
 def _assert_summary_delivered(d: S.Drive, text: str) -> None:
     opening = d.opening_message
     assert any(text in body for body in S.framed_bodies(opening)), (
-        "the correlation lead's summary is not inside a frame of MAIN's opening message — MAIN's "
-        "first request did not follow the lead's end (A4)")
+        "the correlation lead's summary is not inside a frame of MAIN's opening message")
     assert text not in S.harness_text(opening), "the summary sits outside its frame"
 
 
@@ -189,8 +185,8 @@ def _alerts_call(i: int = 0) -> S.Turn:
     return S.query("elastic", "alerts", {"native_query": f'host.hostname:"app-7" AND seq:{i}'})
 
 
-def _parallel(system: str, verb: str, n: int, *, start: int = 0) -> S.Turn:
-    """ONE model response carrying `n` concurrent calls with distinct params (PR-14's shape)."""
+def _parallel(system: str, verb: str, n: int) -> S.Turn:
+    """ONE model response carrying `n` concurrent calls with distinct params."""
     def params(i: int) -> dict:
         if (system, verb) == ("elastic", "alerts"):
             return {"native_query": f'host.hostname:"app-7" AND seq:{i}'}
@@ -200,7 +196,7 @@ def _parallel(system: str, verb: str, n: int, *, start: int = 0) -> S.Turn:
 
     return S.Turn(tool_calls=tuple(
         ("query", {"system": system, "verb": verb, "params": params(i)})
-        for i in range(start, start + n)))
+        for i in range(n)))
 
 
 def _kill_limit() -> int:
@@ -216,7 +212,7 @@ class _AgentAppendFault(SS.FaultStore):
     """`FaultStore` whose append fault counts only the appends ONE agent makes (`agent_id`), so
     "the first append MAIN's session makes" is data, not a calibrated count of the lead's
     appends. It injects only: the real file is put into the spec's real state, the real call
-    follows. Local until the shared machinery carries an agent-keyed store fault."""
+    follows."""
 
     def __init__(self, real: Any, fault: SS.StoreFault, *, agent_id: str) -> None:
         super().__init__(real, fault)
@@ -231,7 +227,7 @@ class _AgentAppendFault(SS.FaultStore):
 
 def _main_append_fault_store(tmp: Path, sink: list) -> Callable[..., Any]:
     """`run_investigation(store_factory=...)`: a REAL store whose file is filled to its growth
-    ceiling at MAIN's first append — after the lead produced its output (RJ-01)."""
+    ceiling at MAIN's first append — after the lead produced its output."""
     base = location_path(SS.runs_base)(tmp)
     fault = SS.StoreFault(on="append", after=0, mode="disk-full")
 
@@ -258,12 +254,12 @@ def _tree_without_main_prompt(tmp: Path) -> Path:
     return tree
 
 
-# --- the four kills from other causes (n12), shared with the demands that name one ---------
+# --- the four kills from other causes, shared with the tests that name one ---------------
 
 def _budget_kill_during_lead(tmp: Path, tenant: S.Planted, monkeypatch: pytest.MonkeyPatch, *,
                              stores: list, **kw: Any) -> S.Drive:
     """Budget enforcement on; the run's wall clock (KILL_WALL_S) expires while the lead's first
-    model request is in flight, so its first tool call meets the kill (RJ-04 d)."""
+    model request is in flight, so its first tool call meets the kill."""
     with monkeypatch.context() as m:
         m.setenv(_enforce_flag(), "true")
         return S.run_alert(
@@ -288,22 +284,20 @@ def _assert_budget_kill_during_lead(d: S.Drive, stores: list) -> None:
         "one of the lead's own endings")
 
 
-def _kill_by_mains_failures(tmp: Path, tenant: S.Planted, *, stores: list,
-                            correlation: list[S.Turn] | None = None) -> S.Drive:
+def _kill_by_mains_failures(tmp: Path, tenant: S.Planted, *, stores: list) -> S.Drive:
     """MAIN's own lead (`l-001`, cmdb) fails RUN_FAIL_KILL_LIMIT calls in one response."""
     return S.run_alert(
         tmp, tenant=tenant,
         main=[S.gather("l-001", "cmdb"), S.text(S.DONE)],
-        leads={L3: correlation or [S.text(SUMMARY)],
+        leads={L3: [S.text(SUMMARY)],
                "l-001": [_parallel("cmdb", "get-host", _kill_limit()), S.text("no host")]},
         backend=S.Backend(fault=T.Fault(fail_on=("cmdb.",))),
         store_factory=S.store_factory(tmp, sink=stores), stores=stores)
 
 
-def _store_fault_after_lead_output(tmp: Path, tenant: S.Planted, *,
-                                   stores: list, **kw: Any) -> S.Drive:
+def _store_fault_after_lead_output(tmp: Path, tenant: S.Planted, *, stores: list) -> S.Drive:
     return S.run_alert(tmp, tenant=tenant, leads={L3: [S.text(SUMMARY)]},
-                       store_factory=_main_append_fault_store(tmp, stores), stores=stores, **kw)
+                       store_factory=_main_append_fault_store(tmp, stores), stores=stores)
 
 
 def _assert_store_fault_stopped_the_run(d: S.Drive) -> None:
@@ -316,14 +310,13 @@ def _assert_store_fault_stopped_the_run(d: S.Drive) -> None:
     stopped = escaped or (d.summary or {}).get("truncated_by") == store_member
     assert stopped, (
         f"a store fault after the lead's output did not stop the run: raised {d.raised!r}, "
-        f"summary {d.summary!r} (RJ-01: truncated_by {store_member!r})")
+        f"summary {d.summary!r} (expected truncated_by {store_member!r})")
     assert d.main.requests <= 1, "MAIN went on past a refused store write"
 
 
-def _setup_fault_after_lead(tmp: Path, tenant: S.Planted, *, stores: list,
-                            before: Callable[[Path], None] | None = None) -> S.Drive:
+def _setup_fault_after_lead(tmp: Path, tenant: S.Planted, *, stores: list) -> S.Drive:
     return S.run_alert(tmp, tenant=tenant, leads={L3: [S.text(SUMMARY)]},
-                       defender_dir=_tree_without_main_prompt(tmp), before=before,
+                       defender_dir=_tree_without_main_prompt(tmp),
                        store_factory=S.store_factory(tmp, sink=stores), stores=stores)
 
 
@@ -335,7 +328,7 @@ def _assert_setup_fault_stopped_the_run(d: S.Drive) -> None:
     _assert_stopped_with(d, IsADirectoryError)
 
 
-# The demands
+# Tests
 
 def test_n12_kills_from_other_causes_end_the_run(tmp_path: Path,
                                                  monkeypatch: pytest.MonkeyPatch) -> None:
@@ -354,8 +347,8 @@ def test_n12_kills_from_other_causes_end_the_run(tmp_path: Path,
     _assert_killed(failures, _run_end().TRUNCATED_BY_ABORTED, "RunAborted")
     assert _session_ending(stores, "l-001") == _run_end().TRUNCATED_BY_ABORTED
     assert _session_ending(stores, L3) is None, (
-        "the correlation lead finished with its summary, yet its session reads as ended by "
-        "something — MAIN's kill was laid onto the correlation lead")
+        "the correlation lead finished with its summary, but its session reads as ended by "
+        "MAIN's kill")
 
     stores = []
     store = _store_fault_after_lead_output(tmp_path / "store", tenant,
@@ -373,13 +366,13 @@ def test_a7_one_deadline_bounds_how_late_main_starts(tmp_path: Path) -> None:
     limits = S.with_deadline(DEADLINE_S)
     stall_kinds: dict[str, dict[str, Any]] = {
         # A request that does not come back within any bound near the deadline (hung; a
-        # trickling response the per-read client timeout never cuts, PA-15).
+        # trickling response the per-read client timeout never cuts).
         "hung": {"leads": {L3: [S.text(LATE)]},
                  "lead_faults": {L3: S.LeadFault(delay=STALL_S)}},
         # Requests each well under the deadline whose run is over it (retries, slow-but-steady).
         "retried": {"leads": {L3: [S.list_verbs("elastic")] * 3 + [S.text(LATE)]},
                     "lead_faults": {L3: S.LeadFault(delay=0.6 * DEADLINE_S)}},
-        # A backend call blocking past the deadline on its worker thread (RJ-10 b1).
+        # A backend call blocking past the deadline on its worker thread.
         "slow-call": {"leads": {L3: [_alerts_call(), S.text(LATE)]},
                       "backend": S.Backend(fault=T.Fault(delay=DEADLINE_S + 1.0))},
     }
@@ -393,6 +386,7 @@ def test_a7_one_deadline_bounds_how_late_main_starts(tmp_path: Path) -> None:
     assert _session_ending(stores, L3) is None, "a lead that finished inside the deadline was cut"
 
     prose: dict[str, str] = {}
+    members: dict[str, str] = {}
     for kind, spec in stall_kinds.items():
         stores = []
         clock = _Clock()
@@ -409,9 +403,11 @@ def test_a7_one_deadline_bounds_how_late_main_starts(tmp_path: Path) -> None:
             f"[{kind}] MAIN's opening request came {waited:.1f}s after the run folder existed — "
             f"the {DEADLINE_S}s correlation deadline did not bound the stalled lead")
         _assert_never_delivered(d, LATE)
-        _assert_timed_out_member(_session_ending(stores, L3), who=f"[{kind}] l-00c")
+        members[kind] = _assert_timed_out_member(_session_ending(stores, L3), who=f"[{kind}] l-00c")
         prose[kind] = _prose(d)
 
+    assert len(set(members.values())) == 1, (
+        f"timed-out leads' sessions read back as different members: {members}")
     first = next(iter(prose.values()))
     for kind, text in prose.items():
         assert text == first, (
@@ -419,31 +415,6 @@ def test_a7_one_deadline_bounds_how_late_main_starts(tmp_path: Path) -> None:
             "('timed out') must reach MAIN as the same fixed sentence, whatever stalled")
     assert first != _prose(control), (
         "a timed-out lead and a lead that delivered its summary gave MAIN the same opening prose")
-
-
-def test_a7_a_timed_out_lead_session_reads_back_as_timed_out(tmp_path: Path) -> None:
-    """The lead's session is stamped with its ending, and a timed-out lead's session reads back as
-    timed out — a member of the truncated_by vocabulary — never as no ending."""
-    tenant = S.plant_tenant()
-    stores: list = []
-    d = S.run_alert(tmp_path / "cut", tenant=tenant,
-                    leads={L3: [S.text(LATE)]}, lead_faults={L3: S.LeadFault(delay=STALL_S)},
-                    limits=S.with_deadline(DEADLINE_S),
-                    store_factory=S.store_factory(tmp_path / "cut", sink=stores), stores=stores)
-    _assert_lead_ran(d)
-    member = _assert_timed_out_member(_session_ending(stores, L3), who="l-00c")
-    assert member in S.sym("records.run_end", "TRUNCATED_BY_VALUES")
-
-    # The same member every time the lead times out: the stamp is the ending, not a detail.
-    again: list = []
-    d2 = S.run_alert(tmp_path / "again", tenant=tenant,
-                     leads={L3: [_alerts_call(), S.text(LATE)]},
-                     backend=S.Backend(fault=T.Fault(delay=DEADLINE_S + 1.0)),
-                     limits=S.with_deadline(DEADLINE_S),
-                     store_factory=S.store_factory(tmp_path / "again", sink=again), stores=again)
-    _assert_lead_ran(d2)
-    assert _session_ending(again, L3) == member, (
-        "two timed-out leads' sessions read back as different members")
 
 
 def test_r5_a_correlation_dispatch_without_a_usable_deadline_refuses_to_run(
@@ -502,15 +473,15 @@ def test_r7_a_lead_main_dispatched_is_stamped_and_read_back_as_before(
     # stalls beside it (the positive control), and any extra cap.
     endings: dict[str, dict[str, Any]] = {
         rb.TRUNCATED_BY_REQUEST_LIMIT: {"l001": [S.list_verbs("cmdb")] * 45, **stalled},
-        # PR-19: the provider path's UnexpectedModelBehavior.
+        # The provider path's UnexpectedModelBehavior.
         rb.TRUNCATED_BY_RETRY_EXHAUSTED: {
             "l001": [S.text("unused")],
             "fault": S.LeadFault(raise_on=1, exc=S.unexpected_behavior), **stalled},
-        # PR-14: parallel transport failures reach the run-level kill.
+        # Parallel transport failures reach the run-level kill.
         rb.TRUNCATED_BY_ABORTED: {
             "l001": [_parallel("cmdb", "get-host", 5), S.text("x")],
             "backend": S.Backend(fault=T.Fault(fail_on=("cmdb.",))), **stalled},
-        # RJ-04 d: the run's wall clock expires while l-001's first request is in flight.
+        # The run's wall clock expires while l-001's first request is in flight.
         rb.TRUNCATED_BY_BUDGET: {
             "l001": [S.list_verbs("cmdb"), S.text("x")],
             "fault": S.LeadFault(delay=KILL_DELAY_S), "enforce": True,
@@ -593,12 +564,6 @@ def test_p002_spawn_budget_sized_to_mains_own_leads(tmp_path: Path,
         "the correlation lead's own failures reached the run-level kill")
     assert over.main.requests >= 1, "MAIN never started after the lead's failures"
 
-    # A budget kill while the lead runs stops the run loudly, as a kill from another cause.
-    stores: list = []
-    killed = _budget_kill_during_lead(tmp_path / "kill", tenant, monkeypatch,
-                                      stores=stores)
-    _assert_budget_kill_during_lead(killed, stores)
-
 
 def test_p003_correlation_lead_still_running_at_mains_second_r(tmp_path: Path) -> None:
     tenant = S.plant_tenant()
@@ -668,12 +633,12 @@ def test_p009_l00c_alone_reaches_the_run_kill_count(tmp_path: Path) -> None:
 
 
 def test_p167_model_request_slow_retried_or_just_past_the_time(tmp_path: Path) -> None:
-    """A trickling, retried or just-late response is cut at the deadline and is the named ending
-    'timed out', never a late summary; MAIN waits at most the deadline."""
+    """A retried or just-late response is cut at the deadline as 'timed out', never a late
+    summary; MAIN waits at most the deadline. (A trickling one is
+    `test_a7_one_deadline_bounds_how_late_main_starts`'s hung case.)"""
     tenant = S.plant_tenant()
     late_by = {
-        "trickling": STALL_S,
-        # Three attempts, each under the deadline, together past it (PA-15: per attempt).
+        # Three attempts, each under the deadline, together past it.
         "retried": 3 * 0.8 * DEADLINE_S,
         "just-late": DEADLINE_S + 0.75,
     }

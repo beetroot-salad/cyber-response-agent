@@ -1,5 +1,5 @@
 """#1025 — the page decides each presentation question ONCE, in the model, and every surface reads the
-answer (PR #1042 review, fourth pass)."""
+answer."""
 from __future__ import annotations
 
 
@@ -9,7 +9,6 @@ import pytest
 
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -17,29 +16,16 @@ S = E.SAMPLE
 LOWER_BOUND = f"≈ {S.lower_bound} lower bound on wall: model calls + longest world"
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-
-
-def render(ep) -> E.Page:
-    return E.render(ep, module=E.page_module())
+_tmp_roots = E.tmp_roots
+render = E.render
 
 
 def _inverted_steps() -> list[tuple[str, str, str]]:
     return [(step, ended, started) for step, started, ended in E.every_step()]
 
 
-def _every_step_wall() -> str:
-    """The wall `E.every_step()` spans: one minute per step, two minutes apart, from 10:00."""
-    return f"{2 * (len(E.every_step()) - 1) + 1}m00s"
-
-
 def test_1025_an_all_inverted_timing_record_is_unmeasured_on_every_surface(tmp_path):
-    """Every row inverted: no trusted pair, so there is no wall. The stages header and the verdict
-    tile BOTH fall back to the lower bound (before: the header did, the tile did."""
+    """Every row inverted leaves no wall: the stages header and the verdict tile BOTH fall back to the lower bound."""
     ep = E.sample_episode(tmp_path)
     E.write_timing(ep.dir, _inverted_steps())
     page = render(ep)
@@ -52,7 +38,7 @@ def test_1025_an_all_inverted_timing_record_is_unmeasured_on_every_surface(tmp_p
 
 
 def test_1025_an_episode_whose_every_run_cost_nothing_still_owes_its_total(tmp_path):
-    """Every result event prices its run at $0.0000 and no wire log exists."""
+    """Runs that all cost $0.0000 are still priced: the runs sub-total and the grand total both render."""
     ep = E.sample_episode(tmp_path, traces=False)
     for label in E.WORLDS:
         E.write_tool_trace(ep.run(label), [E.result_event(cost=0.0)])
@@ -93,8 +79,7 @@ def test_1025_a_runs_result_state_reads_the_same_sentence_in_both_sections(tmp_p
 
 
 def test_1025_a_manifest_id_that_names_no_token_reads_no_ledger_outside_the_episode(tmp_path):
-    """`episode_id: ../../x` is an id the token builder refuses. Before, the model fell back to the
-    raw id AS the token and joined it into `served/<token>.<label>.jsonl` — for."""
+    """The manifest reader refuses `episode_id: ../../x`, so no ledger path is ever joined from it."""
     ep = E.sample_episode(tmp_path)
     manifest = E.sample_manifest()
     manifest["episode_id"] = "../../x"
@@ -111,7 +96,7 @@ def test_1025_a_manifest_id_that_names_no_token_reads_no_ledger_outside_the_epis
 
 
 def test_1025_a_runs_directory_wearing_a_worlds_label_is_sectioned_once(tmp_path):
-    """`runs/<label>/` beside `runs/<ep>-<label>/`."""
+    """A stray `runs/<label>/` is no roster line: every id stays unique and the world renders once."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / E.GRADED_WORLD).mkdir()
     page = render(ep)
@@ -126,8 +111,7 @@ def test_1025_a_runs_directory_wearing_a_worlds_label_is_sectioned_once(tmp_path
 
 
 def test_1025_a_dropped_count_covers_only_the_draws_the_findings_walk_opens(tmp_path):
-    """A bare `runs/<ep>-x` world — no manifest entry, no grade row — is a section with no findings:
-    the walk never opens its draws. Its `dropped_findings: 4` was still summed."""
+    """A manifest world with no grade row gets a section but no findings, and its draw's `dropped` is not summed."""
     ep = E.sample_episode(tmp_path, extra_worlds=(T.world_doc("x", role="B", axis="ungraded"),))
     E.run_dir(ep.dir, "x", arm_id=str(uuid.uuid4()))
     E.draw_document(ep.dir, "x", 0, E.draw_doc(
@@ -143,8 +127,7 @@ def test_1025_a_dropped_count_covers_only_the_draws_the_findings_walk_opens(tmp_
 
 
 def test_1025_a_finding_row_refuses_an_unknown_field():
-    """`_Finding(clam=...)` raised nothing and rendered every row with no claim. A typo at any
-    of the construction sites is now a `TypeError` at construction."""
+    """A misspelled `_Finding` field is a `TypeError` at construction, not a row rendered with no claim."""
     module = E.page_module()
     with pytest.raises(TypeError, match="clam"):
         module._Finding(row_id="f-x-0-0", clam="the claim")
@@ -154,7 +137,7 @@ def test_1025_a_finding_row_refuses_an_unknown_field():
 
 
 def test_1025_an_absent_archived_report_is_decided_after_the_guarded_read(tmp_path):
-    """An absent `report.md` reads as the ABSENT STATE (`ReportRead.absent`."""
+    """Absence is decided from the bound walk's own open, never via `read_report` (which follows a planted link)."""
     family = E.mod("learning.judge.family")
     bound = E.mod("_io").bind(tmp_path)
     got = family.read_archived_report(bound, "report.md")

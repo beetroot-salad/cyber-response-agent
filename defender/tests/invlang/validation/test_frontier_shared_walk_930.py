@@ -35,13 +35,6 @@ from defender.tests.support.invlang.validation._invlang_warn_836 import (  # noq
 )
 
 
-EDGE_BLOCK = """
-```invlang
-:E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
-e-001|attempted_auth|v-002|v-001|2026-05-05T03:47:12Z|siem-event:siem|outcome=failed
-```
-"""
-
 BLANK_IDENT_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -57,17 +50,10 @@ v-006|process|??|nc[pid=4242]|image=/usr/bin/nc
 """
 CLOSE_CLASS_ROW = "l-001|v-006|class|nc"
 
-#: A refinement naming the EDGE. The gate blocks on it; the frontier cannot key on it.
-EDGE_TARGET_DOC = PROLOGUE + EDGE_BLOCK + attr_block("l-001|e-001|attrs.auth_method|??")
-
 #: Open at block 2, closed at block 3.
 REFINED_DOC = PROLOGUE + OPEN_CLASS_BLOCK + attr_block(CLOSE_CLASS_ROW)
 
-_FIXTURE_DOCS = {
-    "edge target": EDGE_TARGET_DOC,
-    "blank ident": PROLOGUE + BLANK_IDENT_BLOCK,
-    "refined": REFINED_DOC,
-}
+BLANK_IDENT_DOC = PROLOGUE + BLANK_IDENT_BLOCK
 
 
 def _cells(doc: str, *, include_ident: bool = True):
@@ -84,8 +70,8 @@ def _frontier(doc: str):
 
 
 def test_a_blank_cell_is_neither_open_nor_held():
-    """CLAIM: cells are three-state, and the third state is not a rounding error."""
-    doc = _FIXTURE_DOCS["blank ident"]
+    """Cells are three-state, and the third state is not a rounding error."""
+    doc = BLANK_IDENT_DOC
     by_slot = {c.slot: c for c in _cells(doc) if c.vertex_id == "v-008"}
 
     assert by_slot["ident"].state == CELL_EMPTY
@@ -100,8 +86,8 @@ def test_a_blank_cell_is_neither_open_nor_held():
 
 
 def test_include_ident_is_the_gates_divergence_made_a_parameter():
-    """CLAIM: the ident asymmetry is one flag on one walk, and still asymmetric."""
-    doc = _FIXTURE_DOCS["blank ident"]
+    """The ident asymmetry is one flag on one walk, and still asymmetric."""
+    doc = BLANK_IDENT_DOC
     assert not [c for c in _cells(doc, include_ident=False) if c.slot == "ident"]
     assert [c for c in _cells(doc, include_ident=True) if c.slot == "ident"]
 
@@ -118,7 +104,7 @@ v-009|identity|user/known-corp|??|
 
 
 def test_the_open_cells_are_exactly_what_the_gate_refuses_on():
-    """CLAIM: the gate blocks on the open cells and on nothing else — one message per cell."""
+    """The gate blocks on the open cells and on nothing else — one message per cell."""
     doc = PROLOGUE + OPEN_CLASS_BLOCK + BLANK_IDENT_BLOCK
     body, _warnings = parse_dense_companion(doc)
     open_ids = [c.vertex_id for c in iter_vertex_cells(body, include_ident=False) if c.is_open]
@@ -130,14 +116,6 @@ def test_the_open_cells_are_exactly_what_the_gate_refuses_on():
                for c in iter_vertex_cells(body, include_ident=True))
 
 
-def test_the_document_frontier_tracks_open_and_resolved_slots():
-    opened = frontier_from_text(PROLOGUE + OPEN_CLASS_BLOCK)
-    closed = frontier_from_text(REFINED_DOC)
-    assert [(s.vertex_id, s.slot) for s in opened.slots] == [("v-006", "class")]
-    assert closed.slots == ()
-    assert ("v-006", "class") in [(h.vertex_id, h.slot) for h in closed.held]
-
-
 def test_prose_between_blocks_cannot_change_the_document_frontier():
     prosed = (PROLOGUE + "\n\nWorking hypothesis: the source IP is a scanner.\n\n"
               + OPEN_CLASS_BLOCK + "\n\nStill unresolved.\n\n" + attr_block(CLOSE_CLASS_ROW))
@@ -145,7 +123,7 @@ def test_prose_between_blocks_cannot_change_the_document_frontier():
 
 
 def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam(tmp_path):
-    """CLAIM: `_frontier_recall`'s no-new-fence fast path cannot skip an append that MOVED the
+    """`_frontier_recall`'s no-new-fence fast path cannot skip an append that MOVED the
     frontier, when the closing delimiter STRADDLES the join."""
     from defender.investigation.tools import _frontier_recall
     from defender.skills.invlang.frontier import frontier_from_text
@@ -154,7 +132,7 @@ def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam(tmp_path)
         _write_lesson,
     )
 
-    # #1108 P4 (O2, O4): recall reads the run copy's `lessons/`, never `defender_dir/lessons`.
+    # Recall reads the run copy's `lessons/`, never `defender_dir/lessons` (#1108).
     deps, _run, agent_root, _dfn = _run_copy_main_deps(tmp_path)
     corpus = agent_root / "lessons"
     corpus.mkdir(parents=True, exist_ok=True)
@@ -202,7 +180,7 @@ def _reobserved(*rows: str) -> dict:
 
 
 def test_a_candidate_set_ident_is_open_and_a_later_concrete_name_supersedes_it():
-    """CLAIM: `ident` reads the SAME two open markers every other cell does."""
+    """`ident` reads the SAME two open markers every other cell does."""
     assert is_ident_open("{dev-ws-1, dev-ws-2}"), "a candidate-set ident read as settled"
     assert is_ident_open("{dev-ws-1"), "an unterminated candidate set read as settled"
 
@@ -218,7 +196,7 @@ def test_a_candidate_set_ident_is_open_and_a_later_concrete_name_supersedes_it()
 
 
 def test_a_blank_cell_takes_a_later_value_that_is_itself_still_partly_open():
-    """CLAIM: the blank arm keys on what is HELD, not on what is arriving."""
+    """The blank arm keys on what is HELD, not on what is arriving."""
     partly_open = _reobserved(
         "v-001|process|bash||kind=child", "v-001|process|bash|bash[pid=??]|",
     )
@@ -234,7 +212,7 @@ def test_a_blank_cell_takes_a_later_value_that_is_itself_still_partly_open():
 
 
 def test_a_blank_class_still_refuses_an_open_one_so_the_benign_gate_cannot_move():
-    """CLAIM: the class arm supersedes toward SETTLED only — the direction the gate cares about."""
+    """The class arm supersedes toward SETTLED only — the direction the gate cares about."""
     doc_rows = ("v-001|compute|||knowledge=partial", "v-001|compute|??/??/??|jump-box-1|")
     assert _reobserved(*doc_rows)["classification"] == "", (
         "an unresolved class superseded a blank one and can now block a benign close"

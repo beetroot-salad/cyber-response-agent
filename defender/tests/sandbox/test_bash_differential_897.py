@@ -26,7 +26,7 @@ _FULL_ALPHABET_MAX_LEN = 3
 _CONNECTOR_MAX_LEN = 4
 
 _SEEDED_FAMILIES: tuple[tuple[str, ...], ...] = (
-    (_WORD, "&&", ";", "\n", _WORD),      # the connector crosses the line — #897 review
+    (_WORD, "&&", ";", "\n", _WORD),      # the connector crosses the line
     (_WORD, "||", ";", "\n", _WORD),
     (_WORD, "&&", ";", ";", "\n", _WORD),  # ...and survives more than one bare `;`
     (_WORD, "|", ";", "\n", _WORD),       # the #884 F-28 shape, spelled across a boundary
@@ -81,8 +81,8 @@ def _bash_accepts(commands: list[str]) -> list[bool]:
     )
     verdicts = proc.stdout.decode().split()
     assert len(verdicts) == len(commands), (
-        f"the bash oracle answered {len(verdicts)} of {len(commands)} candidates — "
-        f"a truncated oracle silently shrinks the corpus. stderr: {proc.stderr[:400]!r}"
+        f"the bash oracle answered {len(verdicts)} of {len(commands)} candidates; "
+        f"stderr: {proc.stderr[:400]!r}"
     )
     return [v == "y" for v in verdicts]
 
@@ -103,7 +103,7 @@ def corpus():
 
 
 def test_every_command_bash_rejects_is_refused_by_the_executor(corpus):
-    """The class-level guard the two hand-found instances (#854 F-22, #884 F-28) each needed."""
+    """One direction only: `parse` may refuse what bash accepts, never accept what bash rejects (benign `;` aside)."""
     diverging = [
         combo for combo, ok in corpus
         if not ok and _parse_accepts(_render(combo))
@@ -117,8 +117,7 @@ def test_every_command_bash_rejects_is_refused_by_the_executor(corpus):
     ]
 
     assert not unexplained, (
-        "these commands are bash syntax errors that `bash_exec.parse` accepts, and the "
-        "leading-`;` carve-out does not explain them:\n  "
+        "bash syntax errors that `parse` accepts, not explained by the leading-`;` carve-out:\n  "
         + "\n  ".join(repr(c) for c in sorted(unexplained)[:40])
     )
 
@@ -127,28 +126,24 @@ def test_every_command_bash_rejects_is_refused_by_the_executor(corpus):
         if not _parse_accepts(_render(_without_benign_semicolons(combo)) or "true")
     ]
     assert not load_bearing, (
-        "the benign-`;` exemption FLIPS this module's own verdict on these commands — `parse` "
-        "accepts them but refuses what they strip to, so the `;` is dropping something:\n  "
+        "`parse` accepts these but refuses them with the benign `;` stripped:\n  "
         + "\n  ".join(repr(c) for c in sorted(load_bearing)[:40])
     )
 
 
 def test_the_corpus_actually_exercises_the_grammar(corpus):
-    """The control for the test above, which is a "no findings" assertion and so passes just as happily on an..."""
+    """Control for the no-findings test above: bash and `parse` each reject a large share of the corpus."""
     assert len(corpus) > 1800, "the corpus shrank — the sweep is no longer exhaustive in both tiers"
 
     accepted = sum(1 for _, ok in corpus if ok)
     assert 0 < accepted < len(corpus), "the bash oracle is answering uniformly"
 
     refused = sum(1 for combo, _ in corpus if not _parse_accepts(_render(combo)))
-    assert refused > 1000, (
-        f"only {refused} candidates were refused by parse — the executor's own guards are "
-        "not being reached, so a passing differential says nothing"
-    )
+    assert refused > 1000, f"only {refused} candidates were refused by parse: its guards are not reached"
 
 
 def test_the_semicolon_exemption_does_not_cover_a_dropped_pipe():
-    """The exemption's own guard rail, stated as a test so a future widening of..."""
+    """Adding `|` to the exemption would disarm the sweep: `echo | ; echo` strips to the legal `echo | echo`."""
     assert "|" not in _SEPARATORS_BEFORE_A_BENIGN_SEMICOLON
     assert _without_benign_semicolons((_WORD, "|", ";", _WORD)) == (_WORD, "|", ";", _WORD)
     # and the carve-out it IS meant to cover still strips

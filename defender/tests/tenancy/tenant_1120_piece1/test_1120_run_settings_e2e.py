@@ -1,5 +1,5 @@
-"""O1/D2 end to end: a run reads its tenant's settings from the DATA ROOT, whatever checkout runs the
-code, and the replay harness runs as the fixture tenant (H2)."""
+"""End to end: a run reads its tenant's settings from the data root, whatever checkout runs the
+code, and the replay harness runs as the fixture tenant."""
 from __future__ import annotations
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -17,7 +17,8 @@ from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H  # noqa: E4
 
 pytestmark = pytest.mark.e2e
 
-#: The retired lab's own id: the data-root tenant carries it, so reading a checkout copy would
+#: The retired lab's id, carried by the data-root tenant (the checkout's fixture is the lab's
+#: frozen copy).
 LAB_ID = fixture_uuid("tenant:playground")
 
 #: The one gather pair the data-root table withholds and the checkout's fixture grants.
@@ -88,8 +89,8 @@ def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_r
     assert len(rec.lifecycle_calls) == 1, f"the lifecycle ran {len(rec.lifecycle_calls)} times"
     run_tenant = rec.lifecycle_calls[0]["tenant"]
 
-    # #1108 P4 (flow 3, U9): the run reads its own copy of the tenant's published export
-    # (`<T>/run-knowledge/<run id>/settings`, under the data root), made from the folder above.
+    # The run reads its own copy of the tenant's published export
+    # (`<T>/run-knowledge/<run id>/settings`), made from the folder above.
     assert H.run_copy_part(run_tenant.settings, data_root, LAB_ID) == ("settings",), (
         f"the run read its tenant's settings from {run_tenant.settings}, not its run copy of "
         f"the data root's {settings} — a checkout copy decided the run")
@@ -136,12 +137,10 @@ def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_t
         rec.record("get-host", ctx, {"host": host})
         return {"host": host}
 
-    # #1108 P4 (O1, O-U5): a system's skill descriptor (the dispatch's "Systems of record"
-    # line) is tenant knowledge, read from the run's agent root; the committed fixture tenant
-    # describes only `cmdb`. So the fixture tenant the replay will run as is given a made-up
-    # descriptor for every other system its grant reaches (in its folder under the data root,
-    # which the harness publishes before the drive), and the index below can show whether the
-    # grant that filters it is the fixture's.
+    # A system's skill descriptor (its "Systems of record" line) is tenant knowledge and the
+    # fixture describes only `cmdb`: give the fixture tenant a made-up descriptor for every
+    # other system its grant reaches, so the index below shows whether the fixture's grant
+    # filters it.
     from defender.tests.support.tenancy import _tenants1106
 
     agent = Path(_tenants1106.fixture_tenant().agent)
@@ -171,8 +170,8 @@ def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_t
     assert len(folders) == 1, f"expected one tenant folder under the data root: {folders}"
     folder = folders[0]
     tenant_id = folder.name
-    # #1108 P4 (P-1, O-B): the harness runs the tenant's PUBLISHED export (the one
-    # `exports/current` names), its settings half — not the clone's working tree.
+    # The harness runs the settings half of the tenant's published export (the one
+    # `exports/current` names), not the clone's working tree.
     current = (folder / "exports" / "current").read_text(encoding="utf-8").strip()
     assert handed.resolve() == (folder / "exports" / current / "settings").resolve()
     row = (folder / H.ROW_NAME).read_text(encoding="utf-8")

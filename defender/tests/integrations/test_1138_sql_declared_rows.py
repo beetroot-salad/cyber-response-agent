@@ -56,10 +56,9 @@ def _schema(payload, rows: str = "values", names: str = "columns") -> list[tuple
 
 
 def _refused(proc: subprocess.CompletedProcess, code: int, *mentions: str | tuple[str, ...]) -> None:
-    """Refused LOUDLY: the table's exit code, nothing on stdout, the tool's own message (not a
-    crash — CPython also exits 1 on an uncaught exception), naming the defect. A mention given
-    as a tuple is a set of alternatives: the message names the defect's locus by ONE of them
-    (the PATH as declared, or the flag it was declared with)."""
+    """Refused loudly: the expected exit, empty stdout, and the tool's own message (not a traceback:
+    CPython also exits 1 on one) naming the defect. A tuple mention is a set of alternatives (the
+    path as declared, or its flag)."""
     detail = f"exit {proc.returncode}, stdout {proc.stdout!r}, stderr {proc.stderr!r}"
     assert proc.returncode == code, detail
     assert proc.stdout == "", detail
@@ -87,8 +86,7 @@ def test_o1_a_flagged_esql_payload_is_filtered_by_name_and_compares_numbers_as_n
 
 
 def test_o1_describe_lists_exactly_the_declared_names_in_order():
-    """O1: `DESCRIBE data` lists the declared names, in the names' order — and nothing of the
-    envelope: under the flags `query`, `row_count`, `columns` and `values` are not columns."""
+    """Under the flags the envelope's keys (`query`, `row_count`, `columns`, `values`) are not columns."""
     assert _schema(_ESQL) == [("failed", "BIGINT"), ("source.ip", "VARCHAR")]
     reordered = dict(_ESQL, columns=[{"name": "hits", "type": "ip"}, {"name": "a", "type": "long"}],
                      values=[[r[1], r[0]] for r in _ESQL["values"]])
@@ -224,8 +222,8 @@ def test_o2_a_columns_type_follows_the_design_rule_over_its_own_cells(cells, exp
 
 
 def test_o2_values_come_back_as_the_json_kind_they_were_sent_as():
-    """O2: the typed column hands its value back exactly — a HUGEINT holds 2**64-1 to the unit
-    (a DOUBLE would round it), a BOOLEAN answers `true`, a float column answers a float."""
+    """A HUGEINT holds 2**64-1 to the unit (a DOUBLE would round it), a BOOLEAN answers `true`, a
+    float column a float."""
     payload = {"hdr": ["big", "flag", "ratio"],
                "recs": [[2**64 - 1, True, 1], [2, False, 2.5]]}
     assert _ok(_flag(payload, "SELECT * FROM data ORDER BY ratio", rows="recs", names="hdr")) == [
@@ -237,8 +235,7 @@ def test_o2_values_come_back_as_the_json_kind_they_were_sent_as():
 
 
 def test_o2_a_vendors_declared_type_decides_nothing():
-    """O2: ES|QL's `type` is the vendor's word, not the payload's value. A `long` column whose
-    cells are strings is VARCHAR; a `keyword` column whose cells are numbers is BIGINT."""
+    """The cells decide: a `long` column of strings is VARCHAR, a `keyword` column of numbers BIGINT."""
     lying = esql_payload(_ESQL_QUERY, {
         "columns": [{"name": "code", "type": "long"}, {"name": "n", "type": "keyword"}],
         "values": [["4625", 1], ["4624", 2]],
@@ -425,8 +422,7 @@ _DEFECTS: dict[str, _Defect] = {
     "name-with-a-c1-control": _Defect(
         _FLAGS + (_SQL,), _recs(["a\x85b"], [[1]]), EXIT_QUERY_ERROR, (("hdr", "--names"),),
         _FLAGS + (_SQL,), _recs(["a\u2026b"], [[1]]), 1),
-    # A lone UTF-16 surrogate parses in Python but is no text the engine can name a column with:
-    # a declaration defect (R2), refused — never a traceback out of the load.
+    # A lone surrogate parses in Python but cannot name an engine column: refused, never a traceback.
     "name-with-a-lone-surrogate": _Defect(
         _FLAGS + (_SQL,), _recs(["a\ud800b"], [[1]]), EXIT_QUERY_ERROR, (("hdr", "--names"),),
         _FLAGS + (_SQL,), _recs(["ab"], [[1]]), 1),
@@ -477,8 +473,7 @@ def test_o3_names_that_differ_only_by_non_ascii_case_are_distinct_columns():
 # ======================================= O4: a list column never answers as if it were scalar
 
 
-#: ES|QL returns a multi-valued keyword field as a list in one row and a bare string in the next
-#: (C6: `keyword`/`ip` → list in 28 real columns, 7 of them mixing list and text).
+#: ES|QL returns a multi-valued field as a list in one row and a bare string in the next.
 _MULTI = esql_payload("FROM logs-* | KEEP host.name, host.ip, user.name", {
     "columns": [{"name": "host.name", "type": "keyword"}, {"name": "host.ip", "type": "ip"},
                 {"name": "user.name", "type": "keyword"}],
@@ -562,8 +557,7 @@ def test_o4_a_list_column_of_any_element_type_gets_the_note_and_the_list_clause(
 
 
 def test_o4_a_scalar_cell_in_a_list_column_is_a_one_element_list_and_null_and_empty_survive():
-    """O4: a non-list cell is wrapped as a one-element list, `null` stays NULL, `[]` stays
-    empty — so `unnest` yields one row per address and `len` tells an empty list from a null."""
+    """So `unnest` yields one row per address and `len` tells an empty list from a null."""
     assert _ok(_flag(_MULTI, 'SELECT "host.ip", len("host.ip") AS k FROM data')) == [
         {"host.ip": ["10.0.0.5", "fe80::1"], "k": 2},
         {"host.ip": ["10.0.0.6"], "k": 1},
@@ -636,11 +630,11 @@ def test_o5_the_sandbox_is_locked_before_the_lead_s_query_runs(hostile):
     assert _ok(_flag(payload, _SQL, rows="recs", names="hdr")) == [{"n": 2}]
 
 
-# ================================================ O6: unflagged behaves as today, and says so
+# ======================================== O6: an unflagged run is unchanged, and says so
 
 
-#: The same ES|QL shape in each typing `read_json_auto` gives `values` (C1). A note keyed on
-#: one type spelling (`JSON[][]`) would miss the others.
+#: The same ES|QL shape in each typing `read_json_auto` gives `values`: a note keyed on one
+#: type spelling (`JSON[][]`) would miss the others.
 _TYPINGS = {
     "VARCHAR[][]": {"columns": [{"name": "host.name", "type": "keyword"},
                                 {"name": "user.name", "type": "keyword"}],
@@ -669,8 +663,7 @@ def test_o6_an_unflagged_count_over_positional_rows_names_the_flags(typing):
 
 
 def test_o6_an_unflagged_error_over_positional_rows_names_the_flags_and_no_positions():
-    """O6: every run, the failing ones included — and the positional recipe is gone from the
-    hint: no `Positions:` map, no `->>'$'` form to copy."""
+    """The note rides failing runs too, and the hint teaches no positional recipe."""
     proc = _plain(_ESQL, "SELECT nope FROM data")
     assert_query_error(proc, "a missing column was not an error")
     assert "--rows values --names columns" in proc.stderr, proc.stderr
@@ -740,8 +733,7 @@ def test_o6_the_names_key_is_the_candidate_whose_length_matches_the_rows(payload
     ({"tags": ["a", "b"], "n": 1}, "SELECT n FROM data", [{"n": 1}]),
 ], ids=["hits", "flat", "bare-array", "flat-with-a-list"])
 def test_o6_a_payload_without_positional_rows_gets_no_note(payload, sql, rows):
-    """O6's control: hits, flat and array payloads behave exactly as today, with nothing new on
-    stderr — including a flat object holding a list of SCALARS, which is not a list of lists."""
+    """Hits, flat and array payloads print nothing; a list of scalars is not a list of rows."""
     proc = _plain(payload, sql)
     assert _ok(proc) == rows
     assert proc.stderr.strip() == "", proc.stderr
@@ -760,8 +752,8 @@ def test_m3_a_flagged_query_error_lists_the_declared_columns_with_their_types():
 
 
 def test_m3_a_json_column_compared_as_text_gets_the_unpack_form_and_it_runs():
-    """M3 (O1/O2): a mixed-kind column is JSON, and `= 'text'` on it fails `Malformed JSON` —
-    loudly. The hint names the unpacking form, and that form, written for this column, answers."""
+    """A mixed-kind column is JSON, so `= 'text'` fails loudly; the hint's unpacking form, written
+    for this column, answers."""
     payload = {"hdr": ["host", "n"], "recs": [["web-1", 1], [7, 2], ["web-1", 3]]}
     assert _schema(payload, rows="recs", names="hdr") == [("host", "JSON"), ("n", "BIGINT")]
     proc = _flag(payload, "SELECT count(*) AS n FROM data WHERE host = 'web-1'", rows="recs", names="hdr")
@@ -769,15 +761,6 @@ def test_m3_a_json_column_compared_as_text_gets_the_unpack_form_and_it_runs():
     assert "->>'$'" in proc.stderr or "AS VARCHAR" in proc.stderr, proc.stderr
     assert _ok(_flag(payload, "SELECT count(*) AS n FROM data WHERE (host->>'$') = 'web-1'",
                      rows="recs", names="hdr")) == [{"n": 2}]
-
-
-# ============================ O8: every reduction example is correct for any payload shape
-
-
-# ================================ O9: every lead-facing text teaches the flagged form, and runs
-
-
-# ======================================== O10: the largest source payload loads well in time
 
 
 # ===================== R1: the declare note is decided from the PARSED payload, not duckdb's types
@@ -801,7 +784,6 @@ def test_r1_an_empty_positional_result_gets_the_note_and_its_declaration_answers
 
 
 def test_r1_a_non_empty_list_of_rows_fires_even_with_no_names_beside_it():
-    """R1: rows alone are enough to say "declare them" — the names slot stays generic."""
     proc = _plain({"matrix": [[1, 2], [3, 4]]}, _SQL)
     assert _ok(proc) == [{"n": 1}]
     assert "--rows matrix --names <names-key>" in proc.stderr, proc.stderr
@@ -862,8 +844,7 @@ def test_r2_a_lone_surrogate_in_a_cell_is_an_input_error_not_a_traceback(bad, go
 
 
 def test_r2_a_valid_surrogate_pair_is_not_a_defect():
-    """R2's control: an escaped surrogate PAIR is one ordinary character (😀), and it loads and
-    round-trips — the refusal above is about a LONE surrogate, not about escapes."""
+    """Control: an escaped surrogate pair is one ordinary character and round-trips."""
     text = json.dumps({"hdr": ["user"], "recs": [["\U0001F600"], ["bob"]]})
     assert "\\ud83d\\ude00" in text, "premise: the pair travels escaped"
     assert _ok(run_sql_warm("--rows", "recs", "--names", "hdr", "SELECT user FROM data ORDER BY 1",
@@ -914,8 +895,7 @@ def test_r3_every_flagged_run_over_a_json_column_says_it_holds_json_and_how_to_c
 
 
 def test_r3_the_json_note_names_every_json_column_and_only_those():
-    """R3: two JSON columns (mixed kinds; objects; a list of mixed kinds) are all named; the
-    number column beside them is not. The control is the number column alone: no note at all."""
+    """The BIGINT column beside three JSON ones is not named; alone, it gets no note at all."""
     payload = {"hdr": ["event.code", "detail", "tags", "bytes"],
                "recs": [[412, {"a": 1}, ["x", 5], 1], ["n/a", {"b": 2}, "c", 2]]}
     assert _schema(payload, rows="recs", names="hdr") == [

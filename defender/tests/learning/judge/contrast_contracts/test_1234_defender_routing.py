@@ -12,43 +12,33 @@ LQ = "lead-quality"
 LS = "lead-set"
 MISLABELLED = "mislabelled"
 UNREACHABLE = "unreachable"
-MEASURED = S.COINED["row.measured"]
 CITATIONS = S.RULED["row.citations"]
-
-
-#: The family words and the per-world reply word the change retires (`_vocab.JUDGE_OUTCOME_ENUM`
-#: and `run._REPLY_OUTCOME_ENUM` at 463833df; design C2, C3, C3b), and the names that carried them.
-OUTCOME_WORDS = frozenset({"caught", "corpus-contradiction", "discard", "survived",
-                           "undecidable", "gradable"})
-RETIRED_NAMES = frozenset({*S.RETIRED_RECORD_FIELDS, *S.RETIRED_ENUMS,
-                           "normalized_judge_outcome", "_UNQUEUEABLE_VERDICTS"})
 
 
 def _ids(rows: list[dict]) -> list[str]:
     return [str(r.get("finding_id")) for r in rows]
 
 
-def _defender(label: str, state: Any = None) -> list[str]:
+def _defender(label: str) -> list[str]:
     """Finding ids of world `label`'s rows on the defender channel, in queue order."""
-    return _ids(S.from_world(S.defender_queue(state), label))
+    return _ids(S.from_world(S.defender_queue(), label))
 
 
-def _questioner(label: str, state: Any = None) -> list[str]:
-    return _ids(S.from_world(S.questioner_queue(state), label))
+def _questioner(label: str) -> list[str]:
+    return _ids(S.from_world(S.questioner_queue(), label))
 
 
-def _defender_rows(label: str, state: Any = None) -> dict[str, dict]:
-    return {str(r.get("finding_id")): r for r in S.from_world(S.defender_queue(state), label)}
+def _defender_rows(label: str) -> dict[str, dict]:
+    return {str(r.get("finding_id")): r for r in S.from_world(S.defender_queue(), label)}
 
 
-def _queues_text(state: Any = None) -> str:
+def _queues_text() -> str:
     """Both channels' raw text — every surface a queued finding's content could reach."""
-    return "\n".join(S.queue_bytes(state))
+    return "\n".join(S.queue_bytes())
 
 
 def _user_mentions(where: Any, finding_id: str, claim: str) -> bool:
-    """Does judge.yaml's user section carry this finding (its id or its claim)? Which list it
-    sits in is F2's; that it is there is the demand (`S.in_user_record`)."""
+    """Does judge.yaml's user section carry this finding, by id or claim (`S.in_user_record`)?"""
     return S.in_user_record(where, finding_id, claim)
 
 
@@ -61,7 +51,7 @@ def _calls(label: str, *extra: S.CallRow) -> list[S.CallRow]:
 
 
 def _served(built: S.Built, label: str, call: int) -> str:
-    """A1's served pointer at world `label`'s `call`-th own call's ledger row."""
+    """A served pointer at world `label`'s `call`-th own call's ledger row."""
     return built.served(label, built.served_row(label, call))
 
 
@@ -242,7 +232,7 @@ def test_1234_a_deployment_gap_reaches_neither_queue(tmp_path: Path) -> None:
     for name in ("inv-refused", "inv-j3", "world-refused"):
         assert S.lane_of(built, fid[name]) == S.LANES["user_record"], name
         assert _user_mentions(built, fid[name], m[name]), f"{name} missing from the user record"
-    assert S.named_gaps(built), "the named gap is listed in the user record (A2, A7)"
+    assert S.named_gaps(built), "the named gap is listed in the user record"
 
 
 def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
@@ -256,7 +246,7 @@ def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
     j3 = {label: _first_row(rows, query_id=S.DENIED_QUERY_ID, without_call_id=True)
           for label, rows in tables.items()}
     assert tables["a"][j3["a"]] == tables["b"][j3["b"]] == tables["c"][j3["c"]], (
-        "fixture: J3's row is present identically in every run's table")
+        "fixture: the inherited sentinel is present identically in every run's table")
     reject_b = _first_row(tables["b"], exit_code=S.REJECT_EXIT)
     j3_b, j3_a = built.table("b", j3["b"]), built.table("a", j3["a"])
     m = {k: S.marker("b", k) for k in ("j3-pair", "reject-pair", "j3-world")}
@@ -272,14 +262,13 @@ def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
 
     fid = {name: built.finding_id("b", 0, i) for i, name in enumerate(m)}
     assert _defender("b") == [fid["reject-pair"]], (
-        "the exit-64 reject is ordinary conduct, so its pair queues; neither J3 finding does: "
+        "the exit-64 reject pair queues and neither sentinel finding does; "
         f"defender ids from b: {_defender('b')}")
-    assert _questioner("b") == [], "the J3 world finding is gap-only, not design"
+    assert _questioner("b") == [], "the sentinel's world finding is gap-only, not design"
     for name in ("j3-pair", "j3-world"):
         assert S.lane_of(built, fid[name]) == S.LANES["user_record"], name
         assert _user_mentions(built, fid[name], m[name]), name
-    # #1255 G4/G6 (flipped from "each own denial row carries the id of its `refused` ledger
-    # row"): the table carries no id; the join is the host's, observed where the judge reads it.
+    # The table carries no id; the join is the host's, observed where the judge reads it.
     key = S.COINED["ctx.contrast"]
     for label, rows in tables.items():
         own_denials = [i for i, r in enumerate(rows)
@@ -299,7 +288,7 @@ def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
             assert (line, "refused") in joined, (
                 f"world {label}: the refused call at line {line} is not joined to its ledger row")
     carrying = [r for rows in tables.values() for r in rows if S.CALL_ID in r]
-    assert not carrying, f"#1255 G4: a query-table row carries the call id: {carrying[:2]}"
+    assert not carrying, f"a query-table row carries the call id: {carrying[:2]}"
 
 
 def test_1234_served_system_with_unavailable_samples_refused_at_run_time(

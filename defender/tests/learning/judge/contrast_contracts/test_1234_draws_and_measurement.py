@@ -8,7 +8,7 @@ import pytest
 
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
 
-#: A world row's measurement (d00a), spelled once through the shared vocabulary.
+#: A world row's measurement fields, spelled once through the shared vocabulary.
 MEASURED = S.COINED["row.measured"]
 NOT_MEASURED_REASON = S.COINED["row.not_measured_reason"]
 DISAGREE = S.COINED["row.draws_disagree"]
@@ -18,8 +18,8 @@ BUCKET = S.RULED["reply.bucket"]
 ROW_SYSTEMS = S.RULED["row.systems"]
 
 
-#: Not YAML: refused by any reply validator, so the draw asks again (N22) and, refused on every
-#: ask, completes nothing.
+#: Not YAML: refused by any reply validator, so the draw asks again and, refused on every ask,
+#: completes nothing.
 MALFORMED = "bucket: [unterminated"
 
 LQ = "lead-quality"
@@ -31,18 +31,16 @@ def _inv(label: str, bucket: str = LQ) -> dict:
     return S.inv(bucket, contrast=[S.conduct(label), S.conduct("a")])
 
 
-def _design(label: str, bucket: str = "mislabelled", *,
-            systems: tuple[str, ...] = ("idp",)) -> dict:
+def _design(label: str, bucket: str = "mislabelled") -> dict:
     """A world finding citing the plan at `label`'s entry only: not gap-only, with a resolving
-    plan pointer, so design — it routes to the questioner queue (A1, A15)."""
-    return S.wf(bucket, systems=systems, evidence=[S.plan_ptr(label)])
+    plan pointer, so design — it routes to the questioner queue."""
+    return S.wf(bucket, systems=("idp",), evidence=[S.plan_ptr(label)])
 
 
-def _lq(label: str, *world: dict, systems: list[str] | None = None) -> dict:
+def _lq(label: str, *world: dict) -> dict:
     """A `lead-quality` world reply carrying one resolving investigator finding (index 0) and
     `world` findings after it (indices 1, 2, ...)."""
-    return S.world_reply(LQ, systems if systems is not None else ["idp"],
-                         investigator=[_inv(label)], world=list(world))
+    return S.world_reply(LQ, ["idp"], investigator=[_inv(label)], world=list(world))
 
 
 def _none(label: str) -> dict:
@@ -52,8 +50,8 @@ def _none(label: str) -> dict:
 
 def _gap_reply(built: S.Built, label: str, call: int, *, kept_facts: bool) -> dict:
     """A `lead-quality` reply with one investigator finding (index 0) and one deployment gap
-    (index 1) citing world `label`'s `call`-th own call's served-ledger row — a `refused` row,
-    so the gap names a blocked call (A2, A14) — and F-14's flag. The gap's `what` carries
+    (index 1) citing world `label`'s `call`-th own call's served-ledger row (a `refused` row, so
+    the gap names a blocked call) and its `kept_facts` flag. The gap's `what` carries
     `S.marker(label, "gap")`, so a reason naming the gap is observable."""
     pointer = built.served(label, built.served_row(label, call))
     return S.world_reply(LQ, ["idp"], investigator=[_inv(label)],

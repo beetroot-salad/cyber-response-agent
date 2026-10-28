@@ -29,9 +29,6 @@ pytestmark = pytest.mark.e2e
 GRANTED_PAIR = ("elastic", "query")
 DENIED_PAIR = ("elastic", "esql")
 
-# The judge's grant minus `get-ticket`: the one shape that makes a denial observable at the
-# second model-facing site, whose two tools otherwise hardcode their system and verb.
-
 
 def _gather_registry(rec: VerbRecorder) -> ScopedFakeVerbs:
     return ScopedFakeVerbs(
@@ -71,7 +68,7 @@ def test_the_denial_record_carries_a_timestamp_and_a_seq_and_does_not_swallow_a_
     tmp_path: Path,
 ):
     """The denial record carries a timestamp and a sequence, and a failed write is NOT silently
-    swallowed — it propagates, after the refusal has already taken effect (§7 R2)."""
+    swallowed — it propagates, after the refusal has already taken effect."""
     path = RunPaths(tmp_path).policy_denials
     logger = observe.RequestLogger(path)
     written = logger.log_policy_denial(
@@ -122,7 +119,7 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
 
     assert set(record) == {
         "event_type", "ts", "seq", "role", "system", "verb", "call_id", "params_digest",
-    }, "the record's shape is not the bounded projection §7 R12 names"
+    }, f"the record's keys are not the bounded projection: {sorted(record)}"
     assert record["role"] == "gather", "the record does not say which role was refused"
     assert record["call_id"] == "elastic.ad-hoc", "the record does not identify the call"
     assert (record["system"], record["verb"]) == ("elastic", "esql")
@@ -136,10 +133,7 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
     assert json.loads(control)["params_digest"], \
         "a well-formed call's digest is empty — the projection identifies nothing"
     assert json.loads(control)["params_digest"] != json.loads(other_value)["params_digest"], (
-        "two denials differing only in their parameter VALUES carry the same digest — the "
-        "digest is over the parameter names, so the audit stream cannot tell one probe from "
-        "another and the non-finite guard above is dead code"
-    )
+        "two denials differing only in their parameter values carry the same digest")
     assert json.loads(control)["params_digest"] == json.loads(repeat)["params_digest"], \
         "the same call digests differently twice — the digest is not a function of the call"
 

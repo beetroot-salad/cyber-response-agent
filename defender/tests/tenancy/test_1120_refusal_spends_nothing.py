@@ -15,8 +15,8 @@ def _no_tenant_root(tmp_path: Path) -> Path:
 
 
 def test_the_launcher_refuses_before_its_role_preflight(tmp_path: Path, monkeypatch) -> None:
-    """A source under a data root holding no tenant: the launch is refused, and the role
-    preflight (which sources a billable provider key) was never called."""
+    """A source under a data root holding no tenant is refused before the role preflight
+    runs."""
     root = _no_tenant_root(tmp_path)
     monkeypatch.setenv(H.DATA_ROOT_ENV, str(root))
     calls: list[object] = []
@@ -28,7 +28,7 @@ def test_the_launcher_refuses_before_its_role_preflight(tmp_path: Path, monkeypa
     source = root / H.TID / "runs" / T.SOURCE_RUN_ID
     try:
         got: object = branch_entry.main(
-            [str(source), str(T.BRANCH_MESSAGE_ID), *T.retired_continuation_argv()],
+            [str(source), str(T.BRANCH_MESSAGE_ID)],
             spawn=T.FakeSpawn(), preflight=recording_preflight)
     except SystemExit as refused:
         got = refused

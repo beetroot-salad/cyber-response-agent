@@ -16,7 +16,7 @@ def spelled(text: str):
 # every scalar comes back as the text it was written as
 
 @pytest.mark.parametrize("spelling", [
-    "2026-07-25T07:48:37.065Z",     # probe-006's millisecond instant
+    "2026-07-25T07:48:37.065Z",     # a millisecond instant
     "2026-07-24T07:45:35.000Z",     # `.000` — `isoformat()` would drop it
     "2026-07-25T07:40:00Z",
     "2026-07-25T07:48:37+00:00",
@@ -47,7 +47,8 @@ def test_a_plain_scalar_is_the_exact_string_it_was_written_as(spelling):
 
 
 def test_a_shape_valid_but_calendar_invalid_instant_is_refused_as_safe_load_refuses_it():
-    """PyYAML's timestamp resolver matches on SHAPE and hands the fields to `datetime`, which raises a bare `ValueError` on `2001-02-30`."""
+    """PyYAML's timestamp resolver matches on SHAPE and hands the fields to `datetime`, which
+    raises a bare `ValueError` on `2001-02-30`; both readers turn it into a `YAMLError`."""
     with pytest.raises(yaml.YAMLError, match="could not be constructed"):
         safe_load_typed_and_spelled("a: 2001-02-30")
     with pytest.raises(yaml.YAMLError, match="could not be constructed"):
@@ -71,7 +72,8 @@ def test_an_explicitly_tagged_scalar_is_its_text_too(tagged, literal):
     "a: !!python/object/apply:os.system ['echo pwned']\n",  # a sequence
 ])
 def test_a_python_tag_is_refused_wherever_it_sits_as_safe_load_refuses_it(text):
-    """The typed half is the safe constructor, which has no constructor for a `!!python/…` tag on a scalar OR a collection, so the pair refuses the..."""
+    """The typed half is the safe constructor, which has no constructor for a `!!python/…` tag
+    on a scalar OR a collection, so the pair refuses both, as `safe_load` does."""
     with pytest.raises(yaml.YAMLError):
         safe_load_typed_and_spelled(text)
     with pytest.raises(yaml.YAMLError):
@@ -173,7 +175,8 @@ def test_a_merge_key_merges_as_safe_load_does():
     "_d: &d {events: [{user.name: root}]}\nprojections:\n  - lead_id: l-001\n    <<: *d\n",
 ], ids=["reused", "self-containing", "self-containing-list", "merged-by-alias"])
 def test_an_alias_is_refused_by_both_readings_as_by_safe_load(text):
-    """#1127: no YAML the tree reads may share or contain itself — an alias of a few hundred bytes can stand for billions of values to whatever walks the..."""
+    """No YAML the tree reads may share or contain itself (#1127): an alias of a few hundred
+    bytes can stand for billions of values to whatever walks the result."""
     with pytest.raises(AliasRefused):
         safe_load(text)
     with pytest.raises(AliasRefused):

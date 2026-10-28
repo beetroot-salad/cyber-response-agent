@@ -84,17 +84,8 @@ def test_an_unmatched_attribute_prediction_blocks_a_double_plus_like_a_p_star_wo
 
 _SCREEN_HEADER = ":L findings [id|loop|name|target|mode|tests|system|window|screen_result]\n"
 
-_SCREEN_CLEAN = _PROLOGUE + _SCREEN_HEADER + """\
-l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|no_match
-"""
-
 _SCREEN_ON_A_NON_SCREEN_LEAD = _PROLOGUE + _SCREEN_HEADER + """\
 l-001|1|auth-history|v-001|||elastic|10m|no_match
-"""
-
-_SCREEN_SEQUENCE_EVERY_LEAD_SCORED = _PROLOGUE + _SCREEN_HEADER + """\
-l-001|1|source-screen|v-001|screen||cmdb|n/a|no_match
-l-002|1|cadence-screen|v-001|screen||elastic|24h|no_match
 """
 
 _SCREEN_MATCH_WITH_HYPOTHESES = _PROLOGUE + _ONE_HYPOTHESIS + _SCREEN_HEADER + """\
@@ -131,22 +122,6 @@ _FORK_IDENTICAL = _FORK_DISTINCT.replace(
     'p1|proposed_edge|"failures repeat on a fixed interval"',
     'p1|proposed_edge|"Failures arrive in bursts,   no fixed interval between them"',
 )
-
-#: The same claims on hypotheses hung on DIFFERENT vertices. Not siblings, so not a fork.
-_SAME_CLAIMS_ON_TWO_ANCHORS = _PROLOGUE.replace(
-    "v-001|compute|monitoring-agent/internal/known-corp|172.18.0.15|",
-    "v-001|compute|monitoring-agent/internal/known-corp|172.18.0.15|\n"
-    "v-002|compute|monitoring-agent/internal/known-corp|172.18.0.16|",
-) + _HYP_HEADER + """\
-h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
-h-002|?credential-guessing|v-002|runs_on|process|??/??/??||null|active
-
-:H h-001.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts, no fixed interval between them"
-
-:H h-002.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts, no fixed interval between them"
-"""
 
 
 def test_siblings_declaring_the_same_claims_are_refused() -> None:
@@ -199,12 +174,6 @@ h-002.p1|"the interval histogram lead did not return"
 _SURVIVING_ONE_OF_TWO = _TWO_LIVE_HYPOTHESES + """\
 :T conclude.surviving [hyp_id|final_weight]
 h-001|null
-"""
-
-_SURVIVING_BOTH = _TWO_LIVE_HYPOTHESES + """\
-:T conclude.surviving [hyp_id|final_weight]
-h-001|null
-h-002|null
 """
 
 
@@ -269,7 +238,7 @@ def test_a_defective_attribute_prediction_row_is_refused(
     assert fragment in errors[0]
 
 
-# refutation scope: the third `p*` site, which rule #7's family never reached
+# refutation scope: the third `p*` site
 
 _REFUT_IN_SCOPE = _PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
@@ -302,18 +271,10 @@ p2|proposed_edge|"failures repeat on a fixed interval"
 r1|p2|"the series is cadenced"
 """
 
-#: A refutation on a hypothesis that declared no predictions yet. Lean, legal, and nothing for
-#: the scope rule to resolve against — rule #23 exempts the same shape.
-_REFUT_ON_A_PREDICTIONLESS_HYPOTHESIS = _PROLOGUE + _HYP_HEADER + """\
-h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
-
-:H h-001.refuts [id|refutes|claim]
-r1|p1|"the series is cadenced"
-"""
-
 
 def test_a_refutation_naming_an_undeclared_prediction_is_refused() -> None:
-    """`:H h-NNN.refuts`'s `refutes` column is the third site naming a `p*`/`ap*`, and it resolved against nothing:"""
+    """`:H h-NNN.refuts`'s `refutes` column is the third site naming a `p*`/`ap*`; it resolves
+    against what the hypothesis declared, like the other two."""
     errors = _errors(_REFUT_OUT_OF_SCOPE)
     assert len(errors) == 1
     assert "row 'r1' refutes prediction 'ap9'" in errors[0]
@@ -341,7 +302,9 @@ ac1|e-001|endpoint-policy|"is this auth permitted"|escalate|escalate
 
 
 def test_a_conclude_block_that_records_nothing_is_refused() -> None:
-    """The CLOSURE gates read "is this document closing" off a non-empty `conclude`, and `_project_conclude_scalars` drops an unrecognized key in silence — so a close keyed entirely on keys the projection do"""
+    """The closure gates read "is this document closing" off a non-empty `conclude`, and
+    unrecognized keys are dropped in silence, so a `:T conclude` that lands nothing would stand
+    them all down; it is a refusal of its own."""
     errors = _errors(_PROLOGUE + _ONE_CONTRACT + _LEAD + """\
 :T conclude
 handoff_notes          "sent to tier 2"
@@ -359,7 +322,7 @@ h-001  null → ++   [l-001 p1 severe ⟂ e-001 :: bursty]
 
 
 def test_a_prediction_numbered_outside_the_p_namespace_is_refused() -> None:
-    """Rule #33 armed the id-shape check on `.attr_preds` and left `.preds` unchecked."""
+    """The id-shape check covers `.preds` as rule #33's covers `.attr_preds`."""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 
@@ -389,7 +352,8 @@ h-001|+
 
 
 def test_a_shared_contract_id_is_discharged_only_by_its_own_anchor_kind() -> None:
-    """`_check_authz_contract_ids` permits two declarers of one `ac*` when one is refuted — which is exactly the shape this rule covers and the benign gate does not."""
+    """`_check_authz_contract_ids` permits two declarers of one `ac*` when one is refuted: the
+    shape this rule covers and the benign gate does not."""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-retry|v-001|runs_on|process|??/??/??||null|active
@@ -429,7 +393,6 @@ h-002|+
 
 
 def test_two_screen_phases_in_different_loops_are_two_sequences() -> None:
-    """Two screen phases in different loops, each carrying its own result."""
     assert _errors(_PROLOGUE + """\
 :L findings [id|loop|name|target|mode|screen_result|tests|system|window]
 l-001|1|known-pattern-screen|v-001|screen|no_match||elastic|10m
@@ -471,32 +434,10 @@ def _moved(after: str) -> str:
 
 @pytest.mark.parametrize("after", ["confirmed", "x", "+++", "CONFIRMED"])
 def test_an_off_vocabulary_after_token_settles_no_prediction(after: str) -> None:
-    """The `after` cell is an unvalidated a non-whitespace run and nothing checks it against `WEIGHT_BUCKETS`, so a "moved unless null" test made a misspelling the CHEAPEST row in the language:"""
+    """A misspelled `after` grade is no move: it must not discharge rule #34 where the honest
+    `null` would be refused."""
     errors = _errors(_PROLOGUE + _ONE_PRED + _LEAD + _moved(after) + _CLOSE_UNPRICED)
     assert any("h-001.p1" in e and "declared and then abandoned" in e for e in errors), errors
-
-
-#: A `:R impact` row and the `ip1` it grades, with EVERY cell quoted — legal, and the shape
-#: that drew three simultaneous refusals before the read side learned to unquote.
-_IMPACT_QUOTED = (
-    ":L l-001.impact_preds "
-    "[id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]\n"
-    'ip1|"confidentiality"|"session bytes within the 30d baseline"'
-    "|within|exceeds|indeterminate|exceeds\n\n"
-    ":R impact [resolved_by|pred_ref|dim|observed|verdict|grounding|authority|as_of"
-    "|reasoning]\n"
-    'l-001|"ip1"|"confidentiality"|"180GB"|"exceeds"|"telemetry-baseline"|"partial"'
-    '|"2026-05-05T04:00:00Z"|"3 sigma over a 2 sigma threshold"\n\n'
-)
-
-
-_LONE_CONTRACT = _HYP_HEADER + """\
-h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
-
-:H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]
-ac1|e-001|iam-policy|"may this identity authenticate here"|escalate|escalate
-
-"""
 
 
 def _authz_row(fulfills: str) -> str:
@@ -509,8 +450,8 @@ def _authz_row(fulfills: str) -> str:
 
 
 def test_a_qualified_fulfills_discharges_only_its_own_declarer() -> None:
-    """...and no other hypothesis's `ac1`: the qualified form names its declarer, which is the
-    whole reason it is worth accepting."""
+    """A qualified `fulfills` (`h-001.ac1`) discharges its own declarer's `ac1` and no other
+    hypothesis's: naming the declarer is why the form is accepted."""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?a|v-001|runs_on|process|??/??/??||null|active
 h-002|?b|v-001|runs_on|process|??/??/??||--|refuted
@@ -527,7 +468,8 @@ ac1|e-001|change-mgmt|"was this change approved"|escalate|escalate
 
 
 def test_twin_contracts_under_one_anchor_kind_are_discharged_by_nothing() -> None:
-    """`_authz_contract_error` states it first:"""
+    """A `:R authz` row names only the contract id, so when two hypotheses declare one `ac*`
+    under the SAME anchor kind no row can be attributed to either."""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?a|v-001|runs_on|process|??/??/??||null|active
 h-002|?b|v-001|runs_on|process|??/??/??||--|refuted
@@ -554,7 +496,8 @@ ac1|e-001|iam-policy|"a different question under the same anchor"|escalate|escal
 def test_the_empty_marker_is_not_a_deferral_rationale(
     rationale: str, discharges: bool
 ) -> None:
-    """`none` / `n/a` is the format's own word for "nothing to say", taught two paragraphs from the deferral tables as the empty-TABLE marker."""
+    """`none` / `n/a` is the format's own word for "nothing to say" (the empty-TABLE marker),
+    so it is no rationale."""
     errors = _errors(
         _PROLOGUE + _ONE_PRED + _LEAD + _CLOSE_UNPRICED
         + f":T conclude.deferred_preds [prediction_ref|rationale]\nh-001.p1|{rationale}\n\n"
@@ -563,7 +506,8 @@ def test_the_empty_marker_is_not_a_deferral_rationale(
 
 
 def test_a_second_conclude_block_of_unrecognized_keys_does_not_refuse_the_close() -> None:
-    """`_project_conclude_scalars` refuses to warn on an unrecognized flat key because "the lessons corpus can instruct conclude rows this projection does not carry, and `learning/core/persist.py` dead-letters a run whose investigation.md fails validation"."""
+    """An unrecognized flat key is not refused: the lessons corpus can instruct conclude rows
+    the projection does not carry, and a run failing validation is dead-lettered."""
     assert _errors(
         _PROLOGUE + _ONE_PRED + _LEAD + _CLOSE_UNPRICED
         + ":T conclude\nescalation_target      soc-tier2\n\n"
@@ -572,7 +516,6 @@ def test_a_second_conclude_block_of_unrecognized_keys_does_not_refuse_the_close(
     ) == []
 
 
-_LESSON_CONCLUDE = ":T conclude\nanalyst_note           soc-tier2\n\n"
 _REAL_CONCLUDE = (
     ':T conclude\ndisposition            benign\nsummary                "s"\n\n'
     ":T conclude.surviving [hyp_id|final_weight]\nh-001|null\n\n"
@@ -583,15 +526,9 @@ _DEFER_P1 = (
 )
 
 
-def _screen_row(mode: str, result: str) -> str:
-    return (
-        ":L findings [id|loop|name|target|mode|screen_result|tests|system|window]\n"
-        f"l-001|1|probe|v-001|{mode}|{result}|h-001|elastic|10m\n\n"
-    )
-
-
 def test_a_claim_that_normalizes_to_nothing_is_an_empty_claim() -> None:
-    """`_predicted_observables` drops a claim normalizing to `""` from the fork signature on the stated grounds that "rule #33 already refuses the row" — which was true of a BLANK cell and false of `"."`, `"..."` or `"''"`."""
+    """A claim normalizing to `""` (`"."`, `"..."`, `"''"`) is refused as empty, as a blank cell
+    is; the fork signature drops it on exactly that ground."""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -616,7 +553,8 @@ l-001|1|auth-history|v-001||match|h-001|elastic|10m
 
 
 def test_a_whitespace_only_attribute_is_the_parse_error_rule_33_says_it_is() -> None:
-    """Rule #33 leaves `attribute` to the parser on the stated grounds that `_require` tests truthiness — which held for a bare empty cell and not for a quoted run of spaces, since `_require` saw the cell before anything unquoted it."""
+    """Rule #33 leaves `attribute` to the parser's `_require`, so a quoted run of spaces must
+    reach it unquoted to fail as a blank cell does."""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 
@@ -628,7 +566,8 @@ ap1|proposed_parent|"  "|"unsigned"
 
 
 def test_a_leading_full_stop_does_not_split_a_fork() -> None:
-    """`_normalized_claim` stopped eating a LEADING full stop so `".5σ above baseline"` keeps its decimal point."""
+    """`_normalized_claim` keeps a leading DECIMAL point (`.5σ`), but a leading full stop must
+    still not make two identical claims distinct."""
     def fork(second: str) -> str:
         return _PROLOGUE + _HYP_HEADER + f"""\
 h-001|?a|v-001|runs_on|process|??/??/??||null|active
@@ -648,7 +587,8 @@ p1|proposed_edge|"{second}"
 
 
 def test_an_off_vocabulary_grade_is_refused_rather_than_ignored() -> None:
-    """The `after` cell was an unvalidated a non-whitespace run, and every weight-keyed gate is a membership test — so a misspelled grade skipped the strong-move provenance gate and the `++` coverage gate at once, where the honest `++` is refused for what it leaves open."""
+    """Every weight-keyed gate is a membership test, so a misspelled grade must be refused
+    itself rather than skip them all where the honest `++` is refused."""
     for token in ("confirmed", "+++"):
         errors = _errors(_SIX_PARTIAL.replace("null → ++", f"null → {token}"))
         assert len(errors) == 1, token
@@ -656,7 +596,8 @@ def test_an_off_vocabulary_grade_is_refused_rather_than_ignored() -> None:
 
 
 def test_a_confirmation_resting_on_a_dead_refutation_is_not_forced_to_lie() -> None:
-    """`_check_strong_move_provenance` reads `matched_refutation_ids` as the same half of a strong move's provenance that `matched_prediction_ids` is;"""
+    """A `++` resting on a refutation that failed to materialize (`r1`) covers the prediction
+    it refutes, as `_check_strong_move_provenance` reads it, so the run need not claim a match."""
     assert _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 
@@ -692,7 +633,8 @@ p1|proposed_edge|"failures arrive in bursts"
 
 
 def test_a_prediction_the_annotation_negates_does_not_cover_a_confirmation() -> None:
-    """`matched_prediction_ids` means "this lead TESTED the id" and files `¬p2` beside `p1` (`test_invlang_parser.test_resolution_negated_iff_literal_still_attributes`)."""
+    """`matched_prediction_ids` means "this lead TESTED the id" and files `¬p2` beside `p1`, so
+    a negated id covers nothing."""
     errors = _errors(_PROLOGUE + _ONE_HYPOTHESIS + _LEAD + """\
 :T resolutions
 h-001  null → ++   [l-001 severe ⟂ e-001 :: bursty but the interval was fixed ⟺ p1 ∧ ¬p2]
@@ -728,7 +670,8 @@ _GRADE_WITHIN = (
 
 
 def test_one_impact_predicate_may_not_be_graded_two_ways() -> None:
-    """`_check_impact_closure` asks only whether SOME row names the ref, so a predicate could be graded `exceeds` AND `within` and still read as resolved — letting the close pick which of its own answers to """
+    """A predicate graded `exceeds` AND `within` is refused, or the close could pick which of
+    its own answers to be measured against."""
     errors = _errors(
         _PROLOGUE + _ONE_PRED + _LEAD + _IP1
         + _impact_rows(_GRADE_EXCEEDS, _GRADE_WITHIN)
@@ -760,14 +703,14 @@ _WEDGE_APPEND_P2 = (
 
 
 def test_declaring_one_more_prediction_after_a_double_plus_leaves_a_legal_next_write() -> None:
-    """Rule #6 compared a growing cited set against a growing DECLARED set."""
+    """The DECLARED set can grow after a `++`; the repair is a downgrade, never a dead end."""
     turn_1 = _PROLOGUE + _WEDGE_HYP + _WEDGE_LEAD + _WEDGE_CONFIRM
     assert _errors(turn_1) == []
 
     turn_2 = turn_1 + _WEDGE_APPEND_P2
     assert [e for e in _errors(turn_2) if "leaves p2 unmatched" in e]
 
-    # THE REPAIR, and the whole point: the run says it is no longer claiming full coverage.
+    # The repair: the run stops claiming full coverage.
     turn_3 = turn_2 + ":T resolutions\nh-001  ++ → +   [l-001 p1 severe ⟂ e-001]\n\n"
     assert _errors(turn_3) == []
 
@@ -811,7 +754,7 @@ def test_a_null_move_off_a_double_plus_withdraws_it_and_conclude_still_asks() ->
 def test_exactly_one_rule_owns_the_hypothesis_whichever_way_the_fold_reads_it(
     case: str, rows: str, owner: str,
 ) -> None:
-    """The #6/#34 handoff, pinned against the ordering that broke it."""
+    """The #6/#34 handoff, pinned against both fold orderings."""
     doc = _PROLOGUE + _WEDGE_HYP_TWO_PREDS + _TWO_LEADS + rows + (
         ':T conclude\ndisposition            benign\nsummary                "s"\n\n'
         ":T conclude.surviving [hyp_id|final_weight]\nh-001|++\n\n"

@@ -29,18 +29,16 @@ def sql_env(env: dict[str, str] | None = None) -> dict[str, str]:
 EXIT_OK = 0
 EXIT_QUERY_ERROR = 1
 EXIT_INPUT_ERROR = 2
-#: The tool could not import duckdb. `run_sql_py` makes this a skip ONLY when the package
-#: is absent from the interpreter it spawns (a dev-only checkout); an installed duckdb that
-#: fails to import is a broken environment and stays a failure, so CI — where the `runtime`
-#: extra is synced and these tests block a merge — cannot go green on skips.
+#: The tool could not import duckdb. `run_sql_py` skips on it only when duckdb is absent from the
+#: spawned interpreter; an installed duckdb that fails to import stays a failure, so CI cannot go
+#: green on skips.
 EXIT_NO_RUNTIME = 69
 #: Asked of `sys.executable`, the interpreter `run_sql_py` spawns, so the answer is the
 #: child's; nothing is imported at collection.
 _DUCKDB_INSTALLED = importlib.util.find_spec("duckdb") is not None
 
-#: The tool's own prefix on a duckdb refusal — prose `sql.py` owns, not duckdb's. Exit 1 is
-#: also CPython's code for an uncaught exception, so the exit code alone cannot tell a
-#: refusal from a crash; this can, without pinning duckdb's wording (#1057).
+#: The tool's own prefix on a duckdb refusal: exit 1 is also CPython's crash code, and this tells
+#: the two apart without pinning duckdb's wording (#1057).
 QUERY_ERROR_MARK = "defender-sql: query error:"
 
 

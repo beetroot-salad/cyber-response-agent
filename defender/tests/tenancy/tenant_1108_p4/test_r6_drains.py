@@ -1,5 +1,5 @@
-"""#1108 P4 round 6 — a retained (undelivered) batch whose redelivery fails again: the lane serves
-no new work and the retained record stays (each was a wrong-but-green production variant)."""
+"""#1108 P4 drain edge cases, each a wrong-but-green production variant: a retained batch whose
+redelivery fails again, and a forge outage while a batch starts."""
 from __future__ import annotations
 
 import logging
@@ -48,8 +48,7 @@ def test_r6_a_failing_redelivery_serves_no_new_work_and_keeps_the_retained_recor
     branches = remote_branches(t.remote)
 
     # The forge now loses the pull-request status lookup `deliver` makes (publishing and the lease
-    # listing still work): the retained batch
-    # cannot be delivered.
+    # listing still work), so the retained batch cannot be delivered.
     t.forge.fault = lambda request: (
         httpx.ConnectError("the forge is down", request=request)
         if "/pulls" in request.url.path and request.url.params.get("state") == "all" else None)
@@ -68,10 +67,10 @@ def test_r6_a_failing_redelivery_serves_no_new_work_and_keeps_the_retained_recor
 
 def test_an_outage_while_the_batch_starts_skips_the_tick_and_serves_nothing(
         p4_tenant, tmp_path, thresholds, caplog):  # noqa: F811 — fixture
-    """A forge outage met while the batch starts (here, the writer-lease listing unreachable) is
-    a passing fault, not a configuration one: the tick logs a warning and exits 0 (the next tick
-    retries), and serves nothing — no box, no curator, the row still queued. A refusal that
-    needs a human stays the stage's one-line refusal (O9's matrix, test_drain_credentials.py)."""
+    """A forge outage while the batch starts (the writer-lease listing unreachable) is a passing
+    fault, not a configuration one: the tick warns, exits 0 for the next tick to retry, and
+    serves nothing. A refusal that needs a human stays the stage's one-line refusal
+    (test_drain_credentials.py's O9 matrix)."""
     from defender.learning.core.state import FINDINGS
 
     t = p4_tenant

@@ -1,8 +1,5 @@
-"""#1108 P4 round 6 — the issuer login's wire behaviour (each case was a wrong-but-green
-production variant): the login trusts only the config's CA, never follows a redirect, never
-sends the secret over cleartext, and leaks no secret into logs or error text.
-
-The TLS case is a REAL local TLS server whose certificate the configured CA did not sign."""
+"""#1108 P4: the issuer login's wire behaviour, each case a wrong-but-green production variant.
+The TLS case is a real local TLS server whose certificate the configured CA did not sign."""
 from __future__ import annotations
 
 import datetime
@@ -122,8 +119,6 @@ def test_r6_the_login_never_follows_a_redirect(p4_tenant, tmp_path):
 
 
 def test_r6_an_http_issuer_is_refused_before_any_request(p4_tenant, tmp_path):
-    """EXPECTED RED until production refuses a cleartext issuer address before the login POST
-    (today `read_issuer_config` accepts `http://` and the secret is POSTed first)."""
     bind_forge(p4_tenant)
     config = write_issuer_config(tmp_path / "cfg", issuer="http://openbao:8200")
     seen: list[str] = []

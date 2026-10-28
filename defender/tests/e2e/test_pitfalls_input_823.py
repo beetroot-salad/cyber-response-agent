@@ -1,4 +1,5 @@
-"""#823 — the executable spec for the PITFALLS CURATOR'S INPUT."""
+"""#823 — the pitfalls curator's input: the shim row a failed reducer call writes, the repeat
+trip row, and where each routes."""
 from __future__ import annotations
 
 import json
@@ -37,7 +38,7 @@ from defender.tests.e2e.test_query_tool_611 import (
     raising,
 )
 
-# THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
+# The surface under test
 from defender.investigation.record_query import SHIM_COMMAND_MAX_CHARS
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
 from defender.tests.support.learning.curation._lead_author_1134 import repo_skills, skills_view  # noqa: E402
@@ -51,8 +52,8 @@ pytestmark = pytest.mark.e2e
 SALT = "aabbccddeeff0011"
 LEAD = "l-001"
 
-# The reducer the gather prompt itself tells the subagent to use, and the one the footer at
-# `record_query.py:198-205` hands it verbatim. `bin/` carries exactly one reducer shim.
+# The reducer the gather prompt (and `record_query`'s footer) tells the subagent to use; `bin/`
+# carries exactly one reducer shim.
 SQL = "defender-sql"
 
 UNNEST_STDERR = b"Binder Error: No function matches unnest(JSON) - candidates: unnest(LIST)"
@@ -100,9 +101,8 @@ class _Res:
 
     @property
     def own_rows(self) -> list[dict]:
-        """`.rows` filtered to exclude #808's harness-authored leads (`l-000`/`l-00c`) —
-        the rows produced by THIS test's own dispatched lead, not lead-0's unconditional
-        pre-ORIENT resolution against `GOLDEN_AB3`'s alert."""
+        """`.rows` without #808's harness-authored leads (`l-000`/`l-00c`), which run against
+        every alert."""
         from defender.investigation.lead_zero import RESERVED_LEAD_IDS
         return [r for r in self.rows if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
@@ -115,9 +115,9 @@ class _Res:
         return self.gather.seen[-1]
 
     def leads(self) -> list:
-        """The rows as the OFFLINE loop sees them — through the real join and the real
-        extraction, never a hand-built `ExecutedLead`. `extract_from_joined` drops any row
-        whose payload sidecar is missing (`lead_extraction.py:60`), so this path is also what"""
+        """The rows as the offline loop sees them, through the real join and extraction (never a
+        hand-built `ExecutedLead`); `extract_from_joined` drops a row whose payload sidecar is
+        missing, so a row seen here has one."""
         return lead_extraction.extract_from_joined(lead_repository.joined(self.run_dir))
 
     def own_leads(self) -> list:
@@ -173,17 +173,16 @@ def _run(
     return _Res(run_dir, main, gather, the_box, summary)
 
 
-def _reduce(run_dir: Path, seq: int = 0, lead: str = LEAD, sql: str = "SELECT count(*) FROM data") -> Turn:
+def _reduce(run_dir: Path, seq: int = 0, sql: str = "SELECT count(*) FROM data") -> Turn:
     """The reduce turn the gather prompt teaches, over a payload this run actually wrote."""
-    payload = run_dir / "gather_raw" / lead / f"{seq}.json"
+    payload = run_dir / "gather_raw" / LEAD / f"{seq}.json"
     return Turn(tool_calls=[("bash", {"command": f"cat {model_path(payload, run_dir=run_dir)} | {SQL} '{sql}'"})])
 
 
 @pytest.fixture(scope="module")
 def failing_reducer_run(tmp_path_factory, checkout_roster):
-    """ONE run of the O1 scenario — a query, then the taught reduce over the payload it wrote,
-    which the shim refuses — shared by the demands below that only READ its tables, leads and
-    box. A scenario with another turn sequence or its own box drives its own."""
+    """One run (a query, then the taught reduce over its payload, which the shim refuses), shared
+    by the tests below that only read its tables, leads and box."""
     from defender.skills.invlang.validate import hold_capabilities, release_capabilities
 
     root = tmp_path_factory.mktemp("failing-reducer")
@@ -278,8 +277,7 @@ def test_shim_row_takes_the_system_of_the_payload_it_reduces(failing_reducer_run
     assert r.rows[0]["system"] == "elastic", "the query row's system moved"
     assert r.rows[1]["system"] == "elastic"
     assert record_query.derive_system([SQL, "SELECT 1"]) == "sql", (
-        "derive_system no longer misattributes the reducer — if it were fixed, this test's "
-        "premise changed and the attribution mechanism should be reconsidered"
+        "derive_system no longer misattributes the reducer, so this test's premise has changed"
     )
 
 
@@ -294,7 +292,7 @@ def test_shim_without_a_payload_operand_has_no_system_and_is_skipped(tmp_path):
     assert shim[0]["system"] == ""
     pitfalls = collect_general_failures(r.leads(), r.run_dir, **repo_skills())
     shim_pitfalls = [p for p in pitfalls if p["query_id"] == BASH_SHIM_QUERY_ID]
-    assert len(shim_pitfalls) == 1, "#870 M5′: the unattributed reduce reaches the queue"
+    assert len(shim_pitfalls) == 1, "the unattributed reduce did not reach the queue exactly once"
     assert shim_pitfalls[0]["system"] == "", "a system was invented for it"
 
 
@@ -371,8 +369,8 @@ def test_shim_row_never_causes_a_trip(tmp_path):
     assert all(row["exit_code"] == 1 for row in r.shim_rows), "a shim row carries a guard exit"
 
 
-# Security — the committed corpus is the asset. A shim row's command is model-authored text
-#      that reaches the curator's prompt and can be echoed into `execution.md`.
+# Security: a shim row's command is model-authored text that reaches the curator's prompt and
+# can be echoed into `execution.md`.
 
 
 def test_shim_command_is_capped_in_the_record(tmp_path):
@@ -406,11 +404,7 @@ def test_shim_row_payload_is_not_the_untrusted_stdout(tmp_path):
     assert "pwned" not in json.dumps(shim)
 
 
-# O3 — the channel can complete a revolution.
-
-
-# Non-obligations — examined noes, pinned so a rejected reading cannot re-enter as an
-#      assumption. Each is a `Demand {form: waiver}` in the graph.
+# Non-obligations, pinned so a rejected reading cannot re-enter as an assumption.
 
 
 def test_catalog_template_failures_still_route_to_the_lead_author(tmp_path):

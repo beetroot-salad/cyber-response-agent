@@ -51,7 +51,7 @@ def refused_class():
 
 def strerror(code: int) -> str:
     """The reason the primitive spells for an errno — `os.strerror`, so the assertion holds in
-    whatever locale CI runs (D-J6: locale invariance is not demanded, byte identity is)."""
+    whatever locale CI runs."""
     return os.strerror(code)
 
 
@@ -109,7 +109,7 @@ class RecordingOs:
     """Every call the primitive makes through `bind(..., os_=)`: delegated to the real `os`
     and recorded — `opens` as `(path, flags, dir_fd, fd-or-exception)`, `fstats` and `closes`
     as the fd, `fdopens` as `(fd, file)`, `dups` as `(fd, copy)` (a read walks off a private
-    copy of the root's handle, #1133), and `asked` as every OTHER attribute the walk touched
+    copy of the root's handle), and `asked` as every OTHER attribute the walk touched
     (so a `lstat`/`stat`/`path.exists` reaches the test as a name, not a silent success)."""
 
     def __init__(self) -> None:
@@ -167,21 +167,20 @@ class RecordingOs:
         return all(fd in self.closes or fd in via_fdopen for fd in component_fds)
 
 
-#: The flag set the LEAF is opened with (D-V3, v2-1).
+#: The flag set the LEAF is opened with.
 WALK_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 #: The flag set every INTERMEDIATE step is opened with — an `O_PATH` handle, never read
-#: through, granted on search permission alone (Linux-only, by decision after PR #1061's review:
-#: a `drwx--x--x` component traverses as it did for the path-based reader).
+#: through, granted on search permission alone (Linux-only: a `drwx--x--x` component traverses
+#: as it did for the path-based reader).
 STEP_FLAGS = os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC
 
 
 def surface(bound: Any) -> dict[str, str]:
-    """Every spelling a bound reader's own surface offers a reader body (D-V2, F-3): each
-    non-dunder, non-callable attribute of `dir(bound)` — `_root` and a property included, a
-    single underscore is no privacy — whose value is a `str`, `bytes` or `os.PathLike`, spelled
-    as text, plus `repr(bound)` and `str(bound)` under the keys `repr` and `str`. A bound reader
-    that exposes its root here passes the readers' parameter census and lets any reader format
-    the root; the census is the readers' half, this is the bind's."""
+    """Every spelling a bound reader's own surface offers a reader body: each non-dunder,
+    non-callable attribute of `dir(bound)` (`_root` and properties included: a single
+    underscore is no privacy) whose value is a `str`, `bytes` or `os.PathLike`, as text, plus
+    `repr(bound)` and `str(bound)`. A bound reader exposing its root here would let any reader
+    format the root."""
     out: dict[str, str] = {"repr": repr(bound), "str": str(bound)}
     for name in dir(bound):
         if name.startswith("__") and name.endswith("__"):
@@ -221,8 +220,8 @@ def plant_link(path: Path, target: Path | str) -> Path:
 
 
 def plant_hard_link(path: Path, scratch: Path) -> Path:
-    """A hard link at `path` to a SCRATCH file (never a live record — a hard link makes BOTH
-    names refused, g1/g13/RF-J5)."""
+    """A hard link at `path` to a SCRATCH file (never a live record: a hard link makes BOTH
+    names refused)."""
     write_bytes(scratch, "scratch target\n")
     if path.exists() or path.is_symlink():
         path.unlink()
@@ -239,18 +238,15 @@ def plant_fifo(path: Path) -> Path:
     return path
 
 
-#: The shapes the primitive's per-shape tests walk, keyed by `entry_shape`'s member name, each
-#: with the relative NAME the walk is asked and the planter that makes the entry under a root.
-#: Parent shapes plant the parent; the leaf under it is what the name asks for.
 LONG_COMPONENT = "x" * 256 + ".md"
 
 
-def _closed(path: Path, content: bytes | str = "closed\n") -> Path:
+def _closed(path: Path) -> Path:
     """A mode-000 regular file — re-opened first when it is already there, so a shape planted
-    twice under one root (d-05 walks the table under two spellings) works as non-root."""
+    twice under one root (one test walks the table under two spellings) works as non-root."""
     if path.exists():
         path.chmod(0o644)
-    write_bytes(path, content).chmod(0)
+    write_bytes(path, "closed\n").chmod(0)
     return path
 
 
@@ -300,7 +296,7 @@ def plant_shape(root: Path, shape: str) -> str:
     return _PLANTERS[shape](root)
 
 
-#: The refused shapes any uid observes, with the reason each is refused for (d-02).
+#: The refused shapes any uid observes, with the reason each is refused for.
 REFUSED_SHAPES: dict[str, str] = {
     "symlink": ALIAS,
     "hard_link": ALIAS,
@@ -315,8 +311,8 @@ REFUSED_SHAPES: dict[str, str] = {
     "name_too_long": os.strerror(errno.ENAMETOOLONG),
 }
 
-#: The refused shapes only a non-root uid observes (d-03, g2/v2-1). `search_only_parent` is
-#: NOT one: an `O_PATH` step traverses a search-only directory, so the leaf beneath it reads.
+#: The refused shapes only a non-root uid observes. `search_only_parent` is NOT one: an
+#: `O_PATH` step traverses a search-only directory, so the leaf beneath it reads.
 PERMISSION_SHAPES: tuple[str, ...] = (
     "mode_000_file", "mode_000_parent", "mode_000_parent_absent_leaf")
 
@@ -339,10 +335,3 @@ def restore_tree(root: Path) -> None:
         p = root / name
         with contextlib.suppress(OSError):
             p.chmod(0o755 if p.is_dir() else 0o644)
-
-
-# --------------------------------------------------------------------------------------
-# AST censuses — over the SOURCE of the target, resolved by symbol.
-# --------------------------------------------------------------------------------------
-
-

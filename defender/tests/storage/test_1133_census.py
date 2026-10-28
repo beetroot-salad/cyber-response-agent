@@ -1,16 +1,15 @@
 """The Episode handle's constructors are exactly its two doors.
 
-The source-reading census this file used to hold (episode I/O in the migrated modules, the handle's
-I/O, path-taking parameters, the path makers, the doors) is `tooling/lint/lint_episode_paths.py`.
-What stays here needs the live class, which a lint cannot import."""
+The source-reading checks are `tooling/lint/lint_episode_paths.py`; this one needs the live
+class, which a lint cannot import."""
 from __future__ import annotations
 
-import importlib
 import inspect
+
+from defender.records import _episode_handle as handle_mod
 
 
 def test_o5_the_episodes_only_constructors_are_its_two_doors():
-    handle_mod = importlib.import_module("defender.records._episode_handle")
     episode = handle_mod.Episode
     constructors = {
         n for n in dir(episode) if not n.startswith("_")

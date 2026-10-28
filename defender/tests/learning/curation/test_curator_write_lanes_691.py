@@ -21,8 +21,8 @@ from defender.tests.support.learning.curation._curator_691_harness import (  # n
 )
 
 
-# The both-surfaces pairing lives in the file (not the harness) so the intent — a policy tight on
-# write_file but loose on edit_file is the fail-open — stays visible at each call site.
+# Kept in this file, not the harness, so the intent stays visible at each call site: a policy
+# tight on write_file but loose on edit_file fails open.
 def _denied_on_both_write_surfaces(deps, path: str) -> None:
     with pytest.raises(ModelRetry):
         write_file(deps, path, "body\n")
@@ -39,18 +39,11 @@ def _admitted_in_corpus(wt, deps, corpus_name: str, stem: str = "lesson") -> Non
     assert landed.read_text() == "edited\n"
 
 
-# O2 / S1 / S4 — the write scope roots at the worktree corpus, not run_dir
-
-def test_write_allow_roots_at_the_worktree_corpus_not_run_dir(tmp_path):
-    """The compiled write scope roots at <worktree>/defender/<corpus>, NOT run_dir: an in-corpus .md
-    write LANDS on both write surfaces, a run_dir .md write is DENIED on both."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    _admitted_in_corpus(wt, deps, "lessons")                  # roots at the worktree corpus
-    _denied_on_both_write_surfaces(deps, str(rd / "scratch.md"))  # NOT run-dir-rooted
-
+# The write scope roots at the worktree corpus
 
 def test_the_curator_cannot_write_outside_its_own_corpus(tmp_path):
+    """The write scope roots at ``<worktree>/defender/<corpus>``: a sibling corpus, the run dir
+    and the main checkout are denied on both write surfaces, the corpus itself admitted."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     _denied_on_both_write_surfaces(deps, rel("lessons-questioner", "x.md"))    # a sibling corpus
@@ -61,21 +54,15 @@ def test_the_curator_cannot_write_outside_its_own_corpus(tmp_path):
 
 
 def test_the_curator_cannot_write_a_non_md_path(tmp_path):
-    """A non-.md write UNDER the corpus (.py, .txt, no extension) is DENIED on both surfaces
-    (build_write_allow suffix='.md'); the sibling .md write succeeds (control)."""
+    """A non-`.md` write under the corpus is denied on both surfaces; the sibling `.md` write
+    lands (control)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
-    for bad in ("note.py", "note.txt", "noext"):
+    for bad in (
+        "note.py", "note.txt", "noext",
+        "LESSON.MD",  # the compiled tail is a literal `\.md`, with no case flag
+    ):
         _denied_on_both_write_surfaces(deps, rel("lessons", bad))
-    _admitted_in_corpus(wt, deps, "lessons")
-
-
-def test_a_write_operand_filename_extension_differs_only_in_letter_case_from_md(tmp_path):
-    """`.MD` is refused on both surfaces — the compiled tail is a literal `\\.md` with no case flag
-    (g8's observed pattern); the lowercase `.md` write succeeds (control)."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    _denied_on_both_write_surfaces(deps, rel("lessons", "LESSON.MD"))
     _admitted_in_corpus(wt, deps, "lessons")
 
 
@@ -86,21 +73,22 @@ def test_a_write_operand_path_is_given_relative_with_a_leading_dot_slash(tmp_pat
     assert (corpus(wt, "lessons") / "dot.md").read_text() == "body\n"
 
 
-# MD-1 (RG-1 / D1) — a mis-scoped curator is unbuildable (refuse at bind)
+# A mis-scoped curator is unbuildable (refused at bind)
 
 def test_a_non_shipped_corpus_name_write_is_denied_by_confine_containment(tmp_path):
-    """MD-1 / D1: a curator whose write scope roots OUTSIDE its own read confine is UNBUILDABLE —
-    bind REFUSES a name (e.g."""
+    """A curator whose write scope would root outside its read confine is unbuildable: `bind`
+    refuses a corpus name outside the shipped confine (`skills`)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     with pytest.raises(ValueError, match=r"confine|scope|outside|author|contain"):
-        bind_curator(wt, rd, "skills")                       # skills ∉ the three-corpus confine
+        bind_curator(wt, rd, "skills")                       # skills ∉ the shipped confine
     deps = bind_curator(wt, rd, "lessons")                    # in-confine → buildable (control)
     write_file(deps, rel("lessons", "ok.md"), "body\n")
     assert (corpus(wt, "lessons") / "ok.md").read_text() == "body\n"
 
 
 def test_a_shipped_corpus_write_is_denied_when_its_read_confine_excludes_it(tmp_path):
-    """MD-1 / D1 ISOLATED from MD-6 (the F18 scenario)."""
+    """The containment check alone, apart from shipped-name membership: a shipped corpus is
+    refused when the given confine omits it."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     excludes_lessons = (
         corpus(wt, "lessons-questioner").resolve(),
@@ -113,7 +101,7 @@ def test_a_shipped_corpus_write_is_denied_when_its_read_confine_excludes_it(tmp_
     assert (corpus(wt, "lessons") / "ok.md").read_text() == "body\n"
 
 
-# S3 / MD-3 / MD-4 / MD-5 — the rm lane and the four-lane parity
+# The rm lane, and parity across the lanes
 
 def test_the_rm_lane_is_scoped_to_the_same_corpus_as_the_write_lane(tmp_path):
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
@@ -135,7 +123,7 @@ def test_all_write_lanes_deny_a_symlink_out_of_corpus(tmp_path):
         write_file(deps, escape, "body\n")
     with pytest.raises(ModelRetry):
         edit_file(deps, escape, "", "body\n")
-    assert not bash_decision(deps, f"rm {escape}").allow   # RED today: the rm grant deletes it
+    assert not bash_decision(deps, f"rm {escape}").allow   # rm must not reach through the link
     assert not (corpus(wt, "lessons-questioner") / "secret.md").exists()  # the escape wrote nothing
     # positive control: an in-corpus operand admitted by every lane
     (corpus(wt, "lessons") / "real.md").write_text("body\n", encoding="utf-8")
@@ -153,12 +141,6 @@ def test_the_rm_grant_matches_the_shell_tokenized_argv(tmp_path):
     assert bash_decision(deps, "rm defender/lessons/draft.md").allow          # positive control
 
 
-def test_a_single_operand_in_corpus_rm_is_admitted(tmp_path):
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    assert bash_decision(deps, "rm defender/lessons/draft.md").allow
-
-
 def test_a_single_rm_naming_two_corpora_is_denied(tmp_path):
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
@@ -169,17 +151,17 @@ def test_a_single_rm_naming_two_corpora_is_denied(tmp_path):
     assert bash_decision(deps, "rm defender/lessons/single.md").allow          # positive control
 
 
-# MD-7 / F77 / f7 — the write lane and the read lane admit the same names
+# The write lane and the read lane admit the same names
 
 def test_a_lesson_the_curator_can_write_it_can_read_back(tmp_path):
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     out_of_class = rel("lessons", "my lesson.md")   # a space — outside the read segment class
-    # the read lane (the cat scope's `[\w.@=+-]+` segment class) already refuses the space today;
-    # the write lane MUST refuse it too so the two lanes admit the same names (the correction).
+    # The read lane's segment class (`[\w.@=+-]+`) refuses the space; the write lane must too,
+    # so both lanes admit the same names.
     assert not bash_decision(deps, "cat " + out_of_class).allow
     with pytest.raises(ModelRetry):
-        write_file(deps, out_of_class, "body\n")     # RED today: the write tail admits the space
+        write_file(deps, out_of_class, "body\n")
     write_file(deps, rel("lessons", "good.md"), "hello\n")
     assert bash_decision(deps, "cat " + rel("lessons", "good.md")).allow
     reader = curator_deps(wt, rd, "lessons")

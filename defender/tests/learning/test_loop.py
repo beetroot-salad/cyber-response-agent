@@ -24,15 +24,15 @@ from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
 
 
 def test_reply_document_text_passes_through_plain_yaml():
-    """Shape 1: a bare document comes back stripped and unchanged (#1018 M1 step 5)."""
+    """A bare document comes back stripped and otherwise unchanged."""
     assert loop.reply_document_text("outcome: caught\nconfidence: high\n") == (
         "outcome: caught\nconfidence: high"
     )
 
 
 def test_reply_document_text_unwraps_a_whole_string_yaml_fence():
-    """Shape 2: exactly one fenced block, nothing around it, is the document it holds (#1018
-    M1 step 4 — the one deliberate leniency)."""
+    """Exactly one fenced block, nothing around it, is the document it holds (the parser's one
+    deliberate leniency)."""
     fenced = "```yaml\noutcome: caught\n```\n"
     assert loop.reply_document_text(fenced) == "outcome: caught"
 
@@ -45,16 +45,16 @@ def test_reply_document_text_leaves_a_trailing_close_tag_for_the_loader_to_refus
 
 
 def test_reply_document_text_refuses_a_dangling_close_fence():
-    """#1018 M4 ("no dangling-closer trim"): a lone column-0 ``` after a plain document is "a
-    fence inside the reply" — `MalformedReply`, not a trim. Would fail: the closer is trimmed."""
+    """A lone column-0 ``` after a plain document is a fence inside the reply: `MalformedReply`,
+    not a trim."""
     text = "outcome: caught\nconfidence: high\n```\n"
     with pytest.raises(loop.MalformedReply):
         loop.reply_document_text(text)
 
 
 def test_reply_document_text_strips_thinking_prelude():
-    """Shape 13 / E8: a column-0 `</thinking>` line ends a prelude that has no opening tag —
-    the recorded live shape (#1018 M1 step 2)."""
+    """A column-0 `</thinking>` line ends a prelude that has no opening tag (a shape recorded
+    live)."""
     text = (
         "outcome: caught\n(reasoning trace…)\n</thinking>\n"
         "outcome: survived\nconfidence: high\n"
@@ -67,8 +67,8 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 
 def _noop_start_box(request, **_kw):
-    """A no-op box lifecycle for drain tests predating #665's box wiring — these tests exercise
-    the worktree/branch/queue mechanics, not the (separately spec'd) box lifecycle."""
+    """A no-op box lifecycle: these tests exercise the drain's queue and batch mechanics, not the
+    box lifecycle, which is pinned separately."""
     from types import SimpleNamespace
 
     return SimpleNamespace(name=request.name, sandboxed=False)
@@ -114,18 +114,18 @@ def test_enqueue_for_authoring_writes_marker(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = curation_run_dir("case-a")
     enqueue_run(state_for_paths(paths), run_dir)
-    # #1187: the run's id is a uuid (`curation_run_dir` derives it from the label), and
-    # `enqueue_run` names the request for the run itself.
+    # The run's id is a uuid (`curation_run_dir` derives it from the label), and `enqueue_run`
+    # names the request for the run itself.
     rid = run_dir.name
     spec = json.loads((location_path(paths.state_root) / "author-queue" / f"{rid}.json").read_text())
-    # The row is the run's address (#1105 PR 2 declared change 8), where it named its folder.
+    # The row is the run's address.
     assert spec == {"case_id": rid, "tenant_id": run_dir.parent.parent.name, "run_id": rid}
 
 
 @pytest.fixture
 def tenant(tmp_path, data_root):
-    """The fixture tenant published for real, its forge bound: #1108 P4's drains batch into the
-    tenant repo (flow 4), so every drain case below runs over it."""
+    """The fixture tenant published for real, its forge bound: the drains batch into the tenant
+    repo, so every drain case below runs over it."""
     from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 
     with published_tenant(tmp_path / "forge", root=data_root) as t:
@@ -143,16 +143,16 @@ def _tenant_paths(t, tmp_path: Path):
 
 
 def _seams(t) -> dict:
-    """The drain's delivery and box seams over the tenant (assumed seams, #1108 P4: the
-    tenant forge fake's client, an identity over its issuer fake, a no-op box)."""
+    """The drain's delivery and box seams over the tenant: the tenant forge fake's client, an
+    identity over its issuer fake, a no-op box."""
     return {"client": t.forge.client, "identity": t.vault.identity(),
             "start_box": _noop_start_box, "stop_box": _noop_stop_box}
 
 
-def _seed_curator_findings(paths, n: int = 5) -> None:
+def _seed_curator_findings(paths) -> None:
     (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
     with (location_path(paths.state_root) / FINDINGS.queue).open("w") as fh:
-        for i in range(n):
+        for i in range(5):
             fh.write(json.dumps({"finding_id": f"f{i}"}) + "\n")
 
 
@@ -249,8 +249,8 @@ def test_has_lead_author_work_fires_on_pitfalls_threshold(tmp_path: Path, monkey
     paths, _ = _isolate(tmp_path)
     assert drains._has_lead_author_work(state_for_paths(paths)) is False
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    # Digest-less rows stay two distinct MISTAKES post-#840: an absent diagnosis is not a
-    # shared one, so `pitfall_key` keys each such row to itself rather than folding them.
+    # Digest-less rows stay two distinct mistakes: an absent diagnosis is not a shared one, so
+    # `pitfall_key` keys each such row to itself rather than folding them.
     persist.append_pitfalls(
         [{"pitfall_id": f"r:{i}", "system": "elastic"} for i in range(2)], state=state_for_paths(paths)
     )
@@ -262,8 +262,8 @@ def test_lead_author_drain_marks_artifact_missing(tenant, tmp_path: Path):
     paths = _tenant_paths(t, tmp_path)
     run_dir = curation_run_dir("case-real")
     enqueue_run(state_for_paths(paths), run_dir)
-    # A row naming a run its tenant's repository cannot open (#1105 PR 2): the address is
-    # well-formed, the run folder was never made.
+    # A row naming a run its tenant's repository cannot open: the address is well-formed, the
+    # run folder was never made.
     gone = run_dir.parent / fixture_uuid("case-gone")
     enqueue_run(state_for_paths(paths), gone)
     seen: list[Path] = []

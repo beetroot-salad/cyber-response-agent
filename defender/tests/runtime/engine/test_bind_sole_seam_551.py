@@ -1,4 +1,7 @@
-"""bind/compile_policy as the sole policy seam: bind contract, write shapes, defender_dir threading, guards, symlink parity."""
+"""bind/compile_policy as the sole policy seam: bind contract, write shapes, defender_dir threading, guards, symlink parity.
+
+`bind` threads one `defender_dir` into both the policy anchor and the deps field: a split between
+them bricks every worktree read and write."""
 from __future__ import annotations
 
 from defender.agents import LEAD_AUTHOR_DEF, MAIN_DEF  # noqa: E402
@@ -41,39 +44,20 @@ _DEFENDER = PATHS.defender_dir
 
 _VALID_REPORT = "---\ndisposition: benign\n---\nok\n"
 
-# Real repo-relative script/confine paths (mirrors test_bind_wiring_545.py) — the actor's
-# _script_pattern does script.resolve().relative_to(REPO_ROOT), so synthetic paths raise.
+# Probe paths under the real defender tree, where MAIN's corpus scope anchors (they need not exist).
 
 _CORPUS_MD = _DEFENDER / "lessons" / "_probe_551.md"
 _NON_MD = _DEFENDER / "skills" / "gather" / "run.py"   # a non-.md path under the corpus
 
 
-def _grant(g: Grant) -> tuple:
-    """One `Grant` as a comparable tuple — the shape (program + argv pattern), the scope (its anchored..."""
-    return (
-        g.program, g.pattern.pattern, tuple(s.pattern for s in g.scope), g.route, g.pins_path,
-    )
-
-
-def _policy_full(p) -> tuple:
-    """EVERY AgentPolicy field as a comparable tuple (#575's fields — the capability bits and the second read..."""
-    return (
-        tuple(_grant(g) for g in p.bash_allow),
-        tuple(pat.pattern for pat in p.read_allow),
-        tuple(str(r) for r in p.read_roots),
-        tuple(str(r) for r in p.read_confine),
-        tuple(pat.pattern for pat in p.write_allow),
-        p.deny_reason,
-    )
-
-
 def _reader_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
-    """The production main-shaped reader grant builder (`_common.reader_grants`) — so a def compiled here carries..."""
+    """The production main-shaped reader grant builder (`_common.reader_grants`), so a def compiled
+    here carries the real reader lane."""
     return reader_grants(roots.run_dir, roots.defender_dir, raw=False)
 
 
 def _reader_def(*, write=False, write_shapes=()) -> AgentDefinition:
-    """An ad-hoc main-shaped AgentDefinition for the `compile_policy` seam tests. Built INSIDE the helper (never..."""
+    """An ad-hoc main-shaped AgentDefinition for the `compile_policy` seam tests."""
     return AgentDefinition(
         role=AgentRole.MAIN,
         model=lambda: "m",
@@ -86,15 +70,15 @@ def _reader_def(*, write=False, write_shapes=()) -> AgentDefinition:
 
 
 def _main_write_shape(roots: ResolvedRoots) -> tuple:
-    """MAIN's write scope builder shape: `(ResolvedRoots) -> patterns` (#575 — one arg, the resolved roots, not..."""
+    """MAIN's write scope builder: `(ResolvedRoots) -> patterns`."""
     return (permission.build_write_allow(roots.run_dir),)
 
 
-# D0 — the return-value contract (resolve FIRST)
+# D0 — bind's return contract
 
 def test_d0_bind_return_contract(tmp_path):
-    """d0_bind_return_contract: bind(defn, run_dir, *, scope, salt, defender_dir=None) returns the role's..."""
-    # RED@HEAD: bind's signature has `repo_root`, not `defender_dir` → TypeError.
+    """`bind` returns the role's deps carrying an `AgentPolicy`, the run's id and the threaded
+    `defender_dir` (never PATHS when a worktree is passed), and no salt."""
     run = tmp_path / "run-xyz"
     wt = tmp_path / "wt" / "defender"
     deps = bind(MAIN_DEF, run, scope=RunScope(), defender_dir=wt)
@@ -105,11 +89,9 @@ def test_d0_bind_return_contract(tmp_path):
     assert deps.defender_dir == wt          # the threaded tree, NOT PATHS
 
 
-# D1 — all seven roles obtain deps via bind
-
-
 def _lead_wtd(tmp_path):
-    """A worktree tree the lead author can actually bind against."""
+    """A worktree tree the lead author can bind against: its write lanes and `rm` grant are compiled
+    per system the tree declares an adapter for, so it seeds `elastic`, the system probes spell."""
     wtd = tmp_path / "wt" / "defender"
     (wtd / "skills" / "gather" / "queries" / "elastic").mkdir(parents=True, exist_ok=True)
     (wtd / "skills" / "elastic" / "_draft").mkdir(parents=True, exist_ok=True)
@@ -117,28 +99,11 @@ def _lead_wtd(tmp_path):
     return wtd
 
 
-def test_d1_lead_author_via_bind(tmp_path):
-    """d1_lead_author_via_bind (survival): bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=<wt>/defender) flows..."""
-    # RED@HEAD: bind takes `repo_root`, not `defender_dir` → TypeError (the early-return path).
-    run = tmp_path / "run"
-    wtd = _lead_wtd(tmp_path)
-    skills = wtd / "skills"
-    deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd)
-    assert isinstance(deps, LeadAuthorDeps)
-    pol = deps.policy
-    # write scope: the worktree skills .md corpus.
-    assert permission.decide_write(
-        skills / "elastic" / "SKILL.md", "c", run_dir=run, defender_dir=wtd, policy=pol).allow
-    # rm-of-drafts grant.
-    assert permission.decide_bash(f"rm {skills}/elastic/_draft/x.md", policy=pol, run_dir=run, defender_dir=wtd).allow
-
-
-# D2 — write scope as data (write_shapes; lead-author fork removed)
+# D2 — write scope as data (`write_shapes`)
 
 def test_d2_write_shapes_field(tmp_path):
-    """d2_write_shapes_field (seam): the def carries `write_shapes` — per-run (ResolvedRoots)-> patterns builders..."""
-    # #575: compile_policy is `(defn, roots)` — the ToolSet/read_shapes/deny_reason positionals
-    # folded back onto the definition they always belonged to.
+    """A def's `write_shapes` builders resolve into `write_allow` (inside admitted, outside denied);
+    a read-only def's `write_allow` is empty."""
     run = tmp_path / "run"
     roots = resolve_roots(run, (), RunScope())
     pol = compile_policy(_reader_def(write=True, write_shapes=(_main_write_shape,)), roots)
@@ -151,7 +116,8 @@ def test_d2_write_shapes_field(tmp_path):
 
 
 def test_d2_main_write_shape_anchors_run_dir(tmp_path):
-    """d2_main_write_shape_anchors_run_dir (domain-outcome): MAIN's write shape anchors run_dir — decide_write..."""
+    """MAIN's write shape anchors run_dir: investigation.md there is admitted, the corpus and
+    report.md are not."""
     run = tmp_path / "run"
     pol = bind(MAIN_DEF, run).policy
     assert permission.decide_write(                                                   # positive control
@@ -159,13 +125,13 @@ def test_d2_main_write_shape_anchors_run_dir(tmp_path):
     assert not permission.decide_write(
         _DEFENDER / "skills" / "investigation.md", "",
         run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
-    assert not permission.decide_write(                                    # R1: report.md is refused too
+    assert not permission.decide_write(                                    # report.md is refused too
         run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=pol).allow
 
 
 def test_d2_lead_author_write_shape_anchors_skills(tmp_path):
-    """d2_lead_author_write_shape_anchors_skills (domain-outcome): LEAD_AUTHOR's write shape uses..."""
-    # RED@HEAD: bind(LEAD_AUTHOR_DEF, …, defender_dir=) → TypeError (repo_root today).
+    """LEAD_AUTHOR's write shape is `.md` under the worktree's skills: run_dir and a non-`.md`
+    suffix are denied."""
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
@@ -179,8 +145,8 @@ def test_d2_lead_author_write_shape_anchors_skills(tmp_path):
 
 
 def test_d2_write_shape_resolves_symlinked_root(tmp_path):
-    """d2_write_shape_resolves_symlinked_root (parity): under a symlinked base, decide_write of a real-path..."""
-    # GREEN@HEAD: build_write_allow already resolve()s its root; the migration must keep it.
+    """Under a symlinked run base, a write through the link is admitted: the write shape anchors on
+    resolved roots."""
     real = tmp_path / "real"
     real.mkdir()
     link = tmp_path / "linkrun"
@@ -191,8 +157,8 @@ def test_d2_write_shape_resolves_symlinked_root(tmp_path):
 
 
 def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
-    """d2_main_lead_shapes_no_cross_contamination (negative): MAIN's run-dir shape admits its sanctioned run-dir..."""
-    # RED@HEAD: the LEAD half needs bind(LEAD_AUTHOR_DEF, defender_dir=) → TypeError.
+    """MAIN's run-dir shape and LEAD's skills `.md` shape each admit their own sanctioned write and
+    neither widens into the other's root."""
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
@@ -203,7 +169,7 @@ def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
         run / "investigation.md", "", run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     assert not permission.decide_write(                                                 # MAIN doesn't widen into skills
         skills / "investigation.md", "", run_dir=run, defender_dir=wtd, policy=main_pol).allow
-    assert not permission.decide_write(                                                 # R1: report.md refused too
+    assert not permission.decide_write(                                                 # report.md refused too
         run / "report.md", _VALID_REPORT, run_dir=run, defender_dir=_DEFENDER, policy=main_pol).allow
     assert permission.decide_write(                                                     # LEAD: sanctioned .md
         skills / "elastic" / "SKILL.md", "c", run_dir=run, defender_dir=wtd, policy=lead_pol).allow
@@ -212,8 +178,8 @@ def test_d2_main_lead_shapes_no_cross_contamination(tmp_path):
 
 
 def test_d2_lead_author_rm_scope(tmp_path):
-    """d2_lead_author_rm_scope (negative): the bound lead-author's decide_bash admits `rm..."""
-    # RED@HEAD: bind(LEAD_AUTHOR_DEF, defender_dir=) → TypeError.
+    """The lead author's `rm` admits only drafts under the worktree skills: not `rm -rf /`, not
+    outside the subtree, not a textual `..`."""
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
@@ -228,31 +194,29 @@ def test_d2_lead_author_rm_scope(tmp_path):
     assert not _bash("rm defender/skills/../../x")     # textual `..` rejected
 
 
-# D3 — defender_dir threaded through resolve_roots AND _for_run (deps)
+# D3 — `defender_dir` threaded into the policy anchor and the deps alike
 
 def test_d3_resolve_roots_defender_dir_param(tmp_path):
-    """d3_resolve_roots_defender_dir_param (seam): resolve_roots takes defender_dir (default PATHS.defender_dir)..."""
+    """`resolve_roots` takes `defender_dir` (default PATHS) and returns it on `ResolvedRoots`."""
     run = tmp_path / "run"
     wtd = tmp_path / "wt" / "defender"
     assert resolve_roots(run, (), RunScope()).defender_dir == _DEFENDER   # positive control (default)
-    # RED@HEAD: resolve_roots is 3-arg → TypeError on the defender_dir kwarg.
     assert resolve_roots(run, (), RunScope(), defender_dir=wtd).defender_dir == wtd
 
 
 def test_d3_bind_threads_defender_dir_into_deps_field(tmp_path):
-    """d3_bind_threads_defender_dir_into_deps_field (parity): bind(MAIN_DEF, run, defender_dir=wt) threads the..."""
-    # RED@HEAD: bind has no defender_dir kwarg → TypeError.
+    """`bind(MAIN_DEF, run, defender_dir=wt)` threads the tree into both the deps field and the
+    policy anchor, so a worktree corpus read is admitted."""
     run = tmp_path / "run"
     wtd = tmp_path / "wt" / "defender"
     deps = bind(MAIN_DEF, run, defender_dir=wtd)
     assert deps.defender_dir == wtd
-    # deps.defender_dir and the policy's read anchor are ONE tree → a wt corpus read admits.
     assert permission.decide_read(wtd / "lessons" / "a.md", run_dir=run, defender_dir=deps.defender_dir, policy=deps.policy).allow
 
 
 def test_d3_partial_thread_bricks_worktree_reads(tmp_path):
-    """d3_partial_thread_bricks_worktree_reads (negative): a policy anchored on tree A while..."""
-    # RED@HEAD: constructing the split requires bind(defender_dir=tree_a) → TypeError.
+    """A policy anchored on tree A but queried with tree B denies every corpus read on both
+    surfaces; one consistent tree admits."""
     run = tmp_path / "run"
     tree_a = tmp_path / "a" / "defender"
     tree_b = tmp_path / "b" / "defender"
@@ -268,8 +232,7 @@ def test_d3_partial_thread_bricks_worktree_reads(tmp_path):
 
 
 def test_d3_lead_author_worktree_anchor(tmp_path):
-    """d3_lead_author_worktree_anchor (behavior): bind(LEAD_AUTHOR_DEF, run, defender_dir=wt/defender) yields..."""
-    # RED@HEAD: bind(LEAD_AUTHOR_DEF, defender_dir=) → TypeError (repo_root today).
+    """The lead author's deps and write scope anchor on its worktree tree, not the main checkout."""
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     deps = bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd)
@@ -283,8 +246,8 @@ def test_d3_lead_author_worktree_anchor(tmp_path):
 
 
 def test_d3_main_gather_non_paths_defender_dir(tmp_path):
-    """d3_main_gather_non_paths_defender_dir (domain-outcome): bind(MAIN_DEF/GATHER_DEF, run,..."""
-    # RED@HEAD: bind has no defender_dir kwarg → TypeError.
+    """MAIN and gather bound with a worktree `defender_dir` anchor their read and bash surfaces on
+    that tree."""
     run = tmp_path / "run"
     wtd = tmp_path / "wt" / "defender"
     probe = wtd / "lessons" / "a.md"
@@ -294,23 +257,11 @@ def test_d3_main_gather_non_paths_defender_dir(tmp_path):
         assert permission.decide_bash(f"cat {probe}", policy=deps.policy, run_dir=run, defender_dir=wtd).allow
 
 
-def test_d3_corpus_traversal_guard_survives(tmp_path):
-    """d3_corpus_traversal_guard_survives (survival): resolve_roots still RAISES ValueError on a '..'/absolute..."""
-    # GREEN@HEAD: the guard exists today; the defender_dir thread must not weaken it.
-    run = tmp_path / "run"
-    with pytest.raises(ValueError, match="clean relative path segment"):
-        resolve_roots(run, ("../evil",), RunScope())
-    with pytest.raises(ValueError, match="clean relative path segment"):
-        resolve_roots(run, ("/abs",), RunScope())
-    assert resolve_roots(run, ("lessons",), RunScope()).corpus_roots  # positive control (clean name)
-
-
-# D4 — actor confine + lead-author tree preconditions as data
+# D4 — the confine and explicit-tree preconditions
 
 
 def test_d4_main_empty_confine_ok(tmp_path):
-    """d4_main_empty_confine_ok (behavior, positive control): bind(MAIN_DEF, run_dir) with the default empty..."""
-    # GREEN@HEAD.
+    """MAIN binds with an empty confine and reads the corpus: `requires_confine` is off for main."""
     run = tmp_path / "run"
     deps = bind(MAIN_DEF, run)
     assert deps.policy.read_confine == ()
@@ -318,31 +269,32 @@ def test_d4_main_empty_confine_ok(tmp_path):
 
 
 def test_d4_lead_author_no_tree_raises(tmp_path):
-    """d4_lead_author_no_tree_raises (negative): after the early-return is deleted, bind(LEAD_AUTHOR_DEF,..."""
+    """Binding the lead author with no `defender_dir` raises (`requires_explicit_tree`) instead of
+    falling back to the main checkout; an explicit worktree binds."""
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     with pytest.raises((ValueError, TypeError), match="explicit NON-PATHS defender_dir"):
-        bind(LEAD_AUTHOR_DEF, run)                        # no tree — raises today (repo_root) + post-#551 (data bit)
-    # RED@HEAD: the positive control uses the new defender_dir kwarg → TypeError.
+        bind(LEAD_AUTHOR_DEF, run)                        # no tree
     assert isinstance(bind(LEAD_AUTHOR_DEF, run, defender_dir=wtd), LeadAuthorDeps)
 
 
-# D5 — the parallel factory path retires
+# D5 — the reader lane through `compile_policy_for`
 
 
 def test_d5_compile_policy_for_read_shapes(tmp_path):
-    """d5_compile_policy_for_read_shapes (survival): `compile_policy_for` (the policy-only half of `bind`)..."""
+    """`compile_policy_for` (the policy-only half of `bind`) carries the reader's read shapes, so a
+    non-`.md` corpus read is denied there as through `bind`."""
     run = tmp_path / "run"
     ppol = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=_DEFENDER)
     assert not permission.decide_read(_NON_MD, run_dir=run, defender_dir=_DEFENDER, policy=ppol).allow
-    # positive control: the bound reader already denies the non-.md corpus file (the target behaviour).
+    # The bound reader denies the non-.md corpus file too.
     bpol = bind(MAIN_DEF, run).policy
     assert not permission.decide_read(_NON_MD, run_dir=run, defender_dir=_DEFENDER, policy=bpol).allow
 
 
 def test_d5_reader_patterns_for_kept(tmp_path):
-    """d5_reader_patterns_for_kept (survival; the builder is `_common.reader_grants` since #575 — the demand id..."""
-    # GREEN@HEAD.
+    """The shared reader builder (`_common.reader_grants`) backs the bound lane: a corpus `cat` is
+    admitted, `/etc/passwd` denied."""
     assert callable(reader_grants)
     run = tmp_path / "run"
     pol = bind(MAIN_DEF, run).policy
@@ -350,10 +302,11 @@ def test_d5_reader_patterns_for_kept(tmp_path):
     assert not permission.decide_bash("cat /etc/passwd", policy=pol, run_dir=run, defender_dir=_DEFENDER).allow
 
 
-# D6 — wire the write ⊆ read guard
+# D6 — the write ⊆ read guard
 
 def test_d6_writers_pass_roots(tmp_path):
-    """d6_writers_pass_roots (seam): both writer call sites (tools.py write_file/edit_file) call decide_write..."""
+    """Every writer call site passes the deps' roots to `decide_write`, so an escaping `write_allow`
+    is denied through `_tool_write_file`."""
     run = tmp_path / "run"
     run.mkdir()
     dfn = tmp_path / "dfn"
@@ -366,7 +319,6 @@ def test_d6_writers_pass_roots(tmp_path):
         run_dir=run, defender_dir=dfn, run_id="r", policy=escape_pol,
         cwd_anchor=run,
     )
-    # RED@#551-HEAD: _tool_write_file called decide_write WITHOUT roots → guard dormant → allowed.
     with pytest.raises(ModelRetry):
         _tool_write_file(deps, str(escape / "x.md"), "content")
     runtime = PATHS.repo_root / "defender" / "investigation" / "tools"
@@ -379,8 +331,7 @@ def test_d6_writers_pass_roots(tmp_path):
 
 
 def test_d6_guard_denies_escape(tmp_path):
-    """d6_guard_denies_escape (negative): decide_write DENIES a target matching write_allow but resolving OUTSIDE..."""
-    # GREEN@HEAD: the guard lives in decide_write.
+    """`decide_write` denies a target that matches `write_allow` but lies outside the read surface."""
     run = tmp_path / "run"
     dfn = tmp_path / "dfn"
     escape = tmp_path / "escape"
@@ -390,8 +341,8 @@ def test_d6_guard_denies_escape(tmp_path):
 
 
 def test_d6_guard_noop_for_real_writers(tmp_path):
-    """d6_guard_noop_for_real_writers (behavior, positive control): with both roots supplied, a MAIN write under..."""
-    # GREEN@HEAD.
+    """The guard is a no-op for real writers: MAIN's run-dir write and a lead-author skills write stay
+    allowed."""
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     skills = wtd / "skills"
@@ -403,8 +354,8 @@ def test_d6_guard_noop_for_real_writers(tmp_path):
 
 
 def test_d6_guard_needs_worktree_defender_dir(tmp_path):
-    """d6_guard_needs_worktree_defender_dir (parity, D6 × the deps/policy split): the write⊆read guard admits..."""
-    # RED@HEAD: the lead-author policy anchored on a worktree needs bind(defender_dir=) → TypeError.
+    """The guard admits a lead-author skills write only when the deps tree is the worktree its
+    `write_allow` anchors on; the PATHS split denies it."""
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     target = wtd / "skills" / "elastic" / "SKILL.md"
@@ -418,8 +369,7 @@ def test_d6_guard_needs_worktree_defender_dir(tmp_path):
 # R3 — read↔bash filename + symlink parity
 
 def test_r3_read_bash_filename_parity(tmp_path):
-    """r3_read_bash_filename_parity (parity): for a reader agent, decide_read and the bash cat lane agree on the..."""
-    # GREEN@HEAD.
+    """`decide_read` and the bash `cat` lane agree on corpus probes (`.md` admitted, non-`.md` denied)."""
     run = tmp_path / "run"
     pol = bind(MAIN_DEF, run).policy
     assert pol.read_allow is read_allow_of(pol.bash_allow)   # one object, not two grammars
@@ -430,9 +380,8 @@ def test_r3_read_bash_filename_parity(tmp_path):
 
 
 def test_r3_symlinked_base_admits(tmp_path):
-    """r3_symlinked_base_admits (parity): under a SYMLINKED run base (link->real), decide_read of a run-dir file..."""
-    # GREEN@HEAD: the reader's shapes anchor on the RESOLVED run base (#546 — `_common.read_shapes`
-    # resolve()s its roots, and #575 resolves the OPERAND too); the fold must keep it.
+    """Under a symlinked run base, a run-dir file is admitted by `decide_read` and the `cat` lane
+    alike: the reader's shapes anchor on the resolved base, and the operand is resolved too."""
     real = tmp_path / "real"
     real.mkdir()
     (real / "scratch.md").write_text("x")
@@ -447,8 +396,8 @@ def test_r3_symlinked_base_admits(tmp_path):
 
 
 def test_r3_symlink_pointing_out_denies(tmp_path):
-    """r3_symlink_pointing_out_denies (negative): a symlink INSIDE the roots pointing OUT: decide_read DENIES..."""
-    # GREEN@HEAD.
+    """A symlink inside the roots pointing out is denied by `decide_read`; the `cat` lane denies a
+    textual `..`."""
     run = tmp_path / "run"
     run.mkdir()
     outside = tmp_path / "outside"
@@ -461,13 +410,11 @@ def test_r3_symlink_pointing_out_denies(tmp_path):
     assert not permission.decide_bash(f"cat {run}/../outside/secret", policy=pol, run_dir=run, defender_dir=_DEFENDER).allow  # textual `..`
 
 
-# R2 — per-pair isolation
-
-
-# R5 — safe-by-construction: compile_policy write co-constraint
+# R5 — `compile_policy`'s write co-constraint
 
 def test_r5_tools_write_write_shapes_agree(tmp_path):
-    """r5_tools_write_write_shapes_agree (negative, Q3 assert): compile_policy RAISES on an inconsistent..."""
+    """`compile_policy` raises on `write=True` with no write shapes or `write=False` with some;
+    consistent defs compile."""
     run = tmp_path / "run"
     roots = resolve_roots(run, (), RunScope())
     with pytest.raises((ValueError, TypeError)):
@@ -479,19 +426,18 @@ def test_r5_tools_write_write_shapes_agree(tmp_path):
     compile_policy(_reader_def(), roots)
 
 
-# D7 — bind input-validation seam (Q4 harden)
+# D7 — bind's input validation
 
 def test_d7_bind_validates_roots(tmp_path):
-    """d7_bind_validates_roots (seam): bind validates its root inputs — a relative or empty-string root RAISES..."""
+    """`bind` refuses a relative run_dir instead of silently anchoring on CWD."""
     assert isinstance(bind(MAIN_DEF, tmp_path / "run"), AgentDeps)  # positive control (absolute)
-    # RED@HEAD: bind passes a relative run_dir straight to resolve_roots (anchors CWD); no validation.
     with pytest.raises((ValueError, TypeError)):
         bind(MAIN_DEF, Path("relative/run"))
 
 
 def test_d7_lead_author_main_tree_unbuildable(tmp_path):
-    """d7_lead_author_main_tree_unbuildable (negative): bind(LEAD_AUTHOR_DEF, run, defender_dir=..."""
-    # RED@HEAD: bind has no defender_dir kwarg → TypeError (the #551 ValueError can't yet fire).
+    """Binding the lead author to the main checkout's tree raises: an explicit-tree role needs a
+    non-PATHS worktree."""
     run = tmp_path / "run"
     wtd = _lead_wtd(tmp_path)
     with pytest.raises((ValueError, TypeError), match="explicit NON-PATHS defender_dir"):

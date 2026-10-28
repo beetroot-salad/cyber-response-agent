@@ -1,7 +1,7 @@
 """Shared machinery for #1077's run-handle spec — NO test scripts."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -15,8 +15,6 @@ from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import pytest
-
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender import records as _records_door
 
@@ -26,29 +24,19 @@ sym = T.sym
 REPO_ROOT = Path(__file__).resolve().parents[5]
 DEFENDER = REPO_ROOT / "defender"
 KINDS_TSV = DEFENDER / "docs" / "run-records-kinds.tsv"
-SITES_TSV = DEFENDER / "docs" / "run-records.tsv"
 PAGE = DEFENDER / "docs" / "run-records.md"
-
-NOT_ROOT = pytest.mark.skipif(
-    os.geteuid() == 0, reason="root ignores permission bits — CI runs non-root (defender/CLAUDE.md)")
 
 
 # ======================================================================================
 # The coined module names. ONE place, so a rename is one edit.
 # ======================================================================================
 
-#: The handle module. D6(a)'s exempt owner set is `records/_layout.py`, `records/_episode_paths.py`,
-#: `tenancy/_tenant.py` and "the handle"; the other three are underscore-prefixed private modules
-#: beside `_io.py` and `records/_provenance.py`, so the handle follows the same convention.
 HANDLE_MODULE = "records._handle"
 TENANT_MODULE = "tenancy._tenant"
 EPISODE_MODULE = "records._episode_paths"
-#: The owner modules by their path under `defender/` (#1105 D1.5): every file of the runs
-#: repository package — which absorbed the layout (`_layout.py`, formerly the flat-tier
-#: run-path module) and the handle (`_handle.py`, formerly the flat-tier run-handle module) —
-#: plus the two owners that stay outside it. Since #1080 merged the repository into `records/`,
-#: its files are the door and the submodules the door's `_HOMES` map serves, so a module the door
-#: gains is an owner without a list edit; the record-format modules beside them are not.
+#: The owner modules by path under `defender/`: `records/`'s door and every submodule its `_HOMES`
+#: map serves (a module the door gains is an owner without a list edit; the record-format modules
+#: beside them are not), then the owners outside the door.
 RUN_REPOSITORY_FILES = tuple(sorted(
     f"records/{m}.py" for m in {"__init__", *_records_door._HOMES.values()}))
 OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "records/_episode_paths.py", "records/_episode_handle.py", "tenancy/_tenant.py")
@@ -60,12 +48,12 @@ def handle() -> Any:
 
 
 def tenant() -> Any:
-    """`defender/tenancy/_tenant.py` — the tenant record's owner (D2)."""
+    """`defender/tenancy/_tenant.py` — the tenant record's owner."""
     return mod(TENANT_MODULE)
 
 
 def episode_paths() -> Any:
-    """`defender/records/_episode_paths.py::EpisodePaths` — the episode layout's owner (D1)."""
+    """`defender/records/_episode_paths.py::EpisodePaths` — the episode layout's owner."""
     return mod(EPISODE_MODULE)
 
 
@@ -114,27 +102,21 @@ def branch_cli() -> Any:
 
 
 # ======================================================================================
-# D2's tenant record and D5's grouped surface — the vocabulary the tests assert against.
+# The tenant record and the grouped surface: the vocabulary the tests assert against.
 # ======================================================================================
 
-#: D2's file-backend location — RETIRED by #1187 (R1: no runs container holds a `_tenant.json`;
-#: a listing that meets one refuses, naming the one-time command). Kept as the OLD entry's name
-#: a test plants or censuses. The leading `_` is what kept it out of the run-id space (claim C18,
-#: executed: `is_valid_run_id("_tenant.json")` is False, `"tenant.json"` is True).
+#: The retired runs-folder tenant record: no runs folder holds one now (a listing that meets one
+#: refuses), so this names the OLD entry a test plants or censuses.
 TENANT_RECORD_NAME = "_tenant.json"
 
-#: D2's creation-time bootstrap value. Settled premise s31: it is a bootstrap default, NOT an
-#: enforced constant — the record is the sole authority for the stamped tenant. `"playground"`
-#: since #1106 D4 (the committed tenant a fresh runs base belongs to); it was `"default"`.
+#: The tenant a fresh runs base belongs to (the committed `playground` tenant): a bootstrap
+#: default, NOT an enforced constant.
 DEFAULT_TENANT_ID = fixture_uuid("tenant:playground")
 
-TENANT_FIELDS = ("tenant_id", "base_world_id", "created_at")
-
-#: Decision 1a held the pin: five group-named sub-collections, addressed group-then-kind.
+#: Five group-named sub-collections, addressed group-then-kind.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
 
-#: D5's group table, as member accessor names per group. `run.tables.queries` is the address
-#: form decision 1a pinned.
+#: The group table, as member accessor names per group (`run.tables.queries`).
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
     "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
@@ -145,12 +127,8 @@ GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "session": ("session_db",),
 }
 
-#: Which group each member lives in, derived from D5's own table.
-GROUP_OF: dict[str, str] = {
-    name: group for group, names in GROUP_MEMBERS.items() for name in names}
-
-#: The owner accessor behind each sub-collection member — what `RecordHandle.path` must equal
-#: (demand h03) and which seam the writer method must reach (demand d44).
+#: The owner accessor behind each member: what `RecordHandle.path` must equal and which seam the
+#: writer method must reach.
 MEMBER_ACCESSOR: dict[str, str] = {
     "queries": "executed_queries", "policy_denials": "policy_denials", "leads": "lead_claim",
     "payloads": "payload", "ticket_reads": "ticket_read",
@@ -166,16 +144,10 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "session_db": "session_db",
 }
 
-#: Decision 11's rule — read everywhere, a producer's verb only where the runtime is the
-#: record's producer — stated PER RECORD, not per group (corrected at finalize, PR #1094
-#: review): the group says how a record is read and by whom; what a writer may do to it is a
-#: fact of the record's own shape, and a group-wide verb handed the session db an `append`
-#: that would have written JSONL into SQLite. `append` for a JSONL table or trace, `write` for
-#: a whole document or a write-once fact, `update` for a `flock`ed JSON state (none remains
-#: since #1235 moved the budget and breaker into the run process's memory), `open` for the
-#: session store, `None` for a record nothing in the host writes through the
-#: handle. Mirrors `defender.records._handle.MEMBER_VERB`; that module is the shipped shape, this
-#: is the spec.
+#: Each record's writer verb, PER RECORD rather than per group (a group-wide verb would hand the
+#: session db a JSONL `append`): `append` for a JSONL table or trace, `write` for a whole document
+#: or write-once fact, `open` for the session store, `None` where nothing in the host writes
+#: through the handle. The spec side of `defender.records._handle.MEMBER_VERB`.
 MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
     "ticket_reads": "write",
@@ -188,8 +160,8 @@ MEMBER_VERB: dict[str, str | None] = {
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
     "session_db": "open",
 }
-# #1165 keeps MEMBER_VERB as compatibility metadata. These are the operations a record
-# actually supports; encoded telemetry uses append_text without JSON re-encoding.
+# `MEMBER_VERB` is compatibility metadata; these are the operations each record actually
+# supports (encoded telemetry uses `append_text`, without JSON re-encoding).
 MEMBER_CAPABILITIES: dict[str, frozenset[str]] = {
     name: frozenset({verb}) if verb is not None else frozenset()
     for name, verb in MEMBER_VERB.items()
@@ -206,64 +178,25 @@ MEMBER_CAPABILITIES.update({
     "ticket_write": frozenset({"write", "delete"}),
 })
 VERBS = ("write", "append", "update", "open", "append_text", "start_stream", "create", "seed", "delete", "replace", "ensure_parent")
-READ_OPERATIONS = ("read", "read_result", "read_bytes", "read_rows")
 
-#: The `observability` members that are LOCKED JSON STATES rather than logs: their writer
-#: method reaches `_io.locked_for_rewrite` (a read-modify-write under `flock`), never a blind
-#: replace — which is what "no accessor exposes an in-place rewrite of an existing entry"
-#: means for them (obligation g08, demand d44). EMPTY since #1235: the two it held, `budget`
-#: and `circuit_breaker`, are the run process's in-memory state and no longer run records.
-LOCKED_STATE_MEMBERS: tuple[str, ...] = ()
-
-#: D4's twelve descriptive fields, read-only, through readers that already exist. Decision 1b
-#: moved them off `Run` onto a named `RunRecord` value object reached at `run.record`.
-RUN_RECORD_FIELDS = (
-    "tenant_id", "world_id", "commit", "dirty", "model", "run_id", "alert_ref",
-    "parent_run_id", "fork_turn", "exit_class", "disposition", "review_outcome")
-
-#: The archive's copied set (page §5, D5 / N5), as `ArchivedWorld` accessor names. Claim C17
-#: is REFUTED-AS-STATED and EXTENDED: `gather_summaries`, `lessons_loaded` and `alert` come
-#: from the four `archive.py` constants the design's enumeration omitted (:151, :153, :154).
-#: #1187 R8 (declared change 12): the fourth, the `run_dir` pointer, is retired with its write —
-#: nothing reads it and the arm roster supersedes it — so it is no longer a member.
+#: The archive's copied set, as `ArchivedWorld` accessor names.
 ARCHIVED_WORLD_MEMBERS = (
     "report", "investigation", "provenance", "scrub_verdict", "run_end", "lessons_loaded",
     "alert", "gather_summaries", "executed_queries", "gather_raw")
 
-#: Decision 6 / fork D-F5, reading 1: the gate's composed-PART set is the five DISCRIMINATING
-#: fragments only. The generic suffixes are dropped — `.json` alone matches 1065 non-test
-#: literals (claim R3), which is why D6(a) as spelled was unimplementable.
-DISCRIMINATING_PARTS = (".lead.json", "review_record.", ".trace.jsonl", "_trace.jsonl", "served/")
-
-#: The five composition idioms §7 decision 6 declared "the gate structurally cannot see" —
-#: string concatenation, `%`-formatting, `.format`, `os.path.join`, multi-argument `Path()`.
-#: IT SEES ALL FIVE when they carry the record name as a whole literal: D6(a) keys on the
-#: `ast.Constant`, not on the syntax around it (executed probe, 93-safety-claim-sweep.md
-#: finding A). What it genuinely cannot see is settled premise s34's narrower class — an
-#: assembly in which NO WHOLE PART is ever a literal — whichever idiom does the assembling.
-#: These are the function names h23's fixture plants, one per idiom, in both directions.
-COMPOSITION_FORMS = ("concat", "percent", "formatted", "joined", "multi_arg")
-
-#: Decision 5's carve-out: the three trees `lint_run_records` never enters, each holding live
-#: record-name use today (claims S10 / G1 / G3, brief red flag R3).
-UNSCANNED_TREES = ("defender/skills", "tooling", "experiments")
-
 
 # ======================================================================================
-# The kinds table — O2's walk reads the EXPECTED NAME OFF THE TSV rather than re-spelling it.
-# This map is the other half: which accessor owns each row. Exactly one per row (demand h31).
+# The kinds table: the walk reads each EXPECTED NAME off the TSV; this map says which run or
+# episode accessor owns each row.
 # ======================================================================================
 
 @dataclasses.dataclass(frozen=True)
 class Accessor:
     """One row of the kinds table and the single accessor that owns its name.
 
-    `owner` is "run" (`RunPaths`), "episode" (`EpisodePaths`), "episode_arm" (an arm folder:
-    `EpisodePaths.runs` — the container the layout owns — joined with the arm's id, the id the
-    episode's roster holds, #1187) or "tenant_row" (`_tenant._TenantPaths`); `attr` is the
-    accessor's name on that owner; `args` are the components a composing accessor takes, in
-    call order, as the concrete values this suite drives it with. (#1187 R1/R6 retired the
-    "tenant" and "repository" owners with `_tenant.json` and the `_episodes` record.)
+    `owner` is "run" (`RunPaths`) or "episode" (`EpisodePaths`); `attr` is the accessor's name on
+    that owner; `args` are the components a composing accessor takes, in call order, as the
+    concrete values this suite drives it with.
     """
     kind: str
     owner: str
@@ -282,18 +215,14 @@ LABEL = "overlay_a"
 EPISODE_ID = "1d7e3c5b-2a4f-4b6c-9e8d-7f6a5b4c3d2e"
 LINEAGE_ID = "case-0011223344556677"
 WORLD_ID = fixture_uuid("world:overlay_a")
-#: The fixture run's id (#1187: `RunId` admits canonical lowercase UUID text only) — the name
-#: `make_run_dir` gives a run folder by default, and an arm's folder name in the `episode_runs`
-#: row (an arm is named by the id the episode's roster holds for it, never `<episode>-<label>`).
+#: The fixture run's id (a UUID, all `RunId` admits): the name `make_run_dir` gives a run folder
+#: by default.
 RUN_ID = "5e8f1a2b-3c4d-4e5f-a6b7-c8d9e0f1a2b3"
-ARM_ID = "7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5d"
 
 
 def report_text(body: str) -> str:
-    """A `report.md` that MEETS its schema (`_artifact_schema.validate_report`: a frontmatter
-    fence carrying a `disposition`), for the tests that write one through the handle — the
-    handle holds the two model-authored documents to their schema at the write, so a
-    fence-less sample is refused there exactly as `permission.decide_write` refuses it."""
+    """A `report.md` that MEETS its schema (a frontmatter fence carrying a `disposition`): the
+    handle refuses a fence-less one at the write, as `permission.decide_write` does."""
     return f"---\ndisposition: inconclusive\n---\n{body}"
 STAGE = "questioner"
 
@@ -315,7 +244,7 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("ticket_write", "run", "ticket_write"),
     Accessor("ticket_reads", "run", "ticket_read", (SEQ,), composing=True),
     Accessor("session_pointer", "run", "session_pointer"),
-    # #1255: two host-only JSONL sidecars beside the run folder (`JSONL_SIDECAR_ACCESSORS`).
+    # Two host-only JSONL sidecars beside the run folder (`JSONL_SIDECAR_ACCESSORS`).
     Accessor("call_join", "run", "call_join"),
     Accessor("ticket_comments", "run", "ticket_comments"),
     Accessor("runtime_html", "run", "runtime_html"),
@@ -336,94 +265,44 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("priming_lock", "episode", "priming_lock"),
     Accessor("stage_trace", "episode", "stage_trace", (STAGE,), composing=True),
     Accessor("learning_html", "episode", "learning_html"),
-    # #1187 (O3): an arm's folder is `runs/<arm id>`, the id the episode's roster holds — the
-    # layout owns the container, never an `<episode>-<label>` composition (`sibling_run_dir`
-    # is deleted, design C1).
-    Accessor("episode_runs", "episode_arm", "runs", (ARM_ID,)),
     Accessor("archive_proj", "episode", "world_dir", (WORLD_ID,), composing=True),
-    # #1187 (R2, Sequencing §4): the host-written arm roster, named by `_episode_paths.LAYOUT`.
+    # The host-written arm roster, named by `_episode_paths.LAYOUT`.
     Accessor("arm_roster", "episode", "arm_roster"),
-    # (#1187 R1 and R6 retired the `tenant` row — `_tenant.json` — and the `episode_runs_record`
-    # row — PR 1's `_episodes/<episode_id>.json` — with their records.)
-    Accessor("tenant_row", "tenant_row", "row"),
 )
 
-#: The UPWARD accessors (cluster B, dissolved by decision 10): their root is the runs base, not
-#: the run directory. (#1107 moved the ticket receipt out of the box-writable run dir, making it
-#: the fourth sidecar; #1235 retired the accounting-failures sidecar's accessor — its suffix
-#: stays reserved in the layout — and moved the run -> case pointer out of the run dir into a
-#: sidecar of its own, `<run_id>.session-pointer.json`, F2.) `session_db`'s root is the sessions
-#: directory, a sibling of the runs base (claims C10/C15).
+#: The UPWARD accessors: their root is the runs base, not the run directory (`session_db`'s is
+#: the sessions directory, a sibling of the runs base).
 SIDECAR_ACCESSORS = ("run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer")
-#: #1255 (query ids, P3): two more host-only records beside the run folder, each keyed by the
-#: run id and taking the runs base — the call join (`<run_id>.call-join.jsonl`: a table row's
-#: (lead_id, seq) to its served call id, which left the model-readable table) and the run's ticket
-#: comments (`<run_id>.ticket-comments.jsonl`). UPWARD like the four above, but kept out of
-#: `SIDECAR_ACCESSORS`: those are single JSON documents (`test_1077_tree_identity` parses each
-#: whole) and these are JSONL logs.
+#: Two more host-only records beside the run folder, keyed by run id: the call join and the
+#: ticket comments. UPWARD like the four above, but JSONL logs, so kept out of
+#: `SIDECAR_ACCESSORS` (whose members `test_1077_tree_identity` parses as whole JSON documents).
 JSONL_SIDECAR_ACCESSORS = ("call_join", "ticket_comments")
 UPWARD_ACCESSORS = (*SIDECAR_ACCESSORS, *JSONL_SIDECAR_ACCESSORS, "sessions_dir", "session_db")
 
 
 def upward_root(attr: str, runs_base: Path) -> Path:
-    """The root an UPWARD accessor is confined to: the sidecars sit directly in the runs
-    base; the sessions directory is its SIBLING (`<runs_base>/../sessions`, claims C10/C15),
-    so the session db's root is the runs base's parent — one table, so no test carries its
-    own guess."""
+    """The root an UPWARD accessor is confined to: the runs base for the sidecars, its parent
+    for the sessions directory (`<runs_base>/../sessions`) and the session db."""
     return runs_base.parent if attr in ("sessions_dir", "session_db") else runs_base
 
-#: Every accessor that builds a path from a caller-supplied component, with an ordinary value
-#: and the component index decision 2's one rule must check. g10's census subjects.
+#: Every accessor that builds a path from a caller-supplied component, with an ordinary value.
 COMPOSING = tuple(a for a in ACCESSOR_FOR_KIND if a.composing) + (
     Accessor("served", "episode", "served_world", (WORLD_ID,), composing=True),
-    # #1187 R8: `EpisodePaths.run_dir_pointer(label)` is retired with the archive pointer's write.
     Accessor("gather_raw", "run", "payload_relpath", (LEAD_ID, SEQ), composing=True),
 )
 
-#: Values decision 2's anchored shape check must refuse, at every composing accessor. Each is a
-#: REAL string handed to the REAL accessor; nothing here is a fake's canned fault.
-HOSTILE_COMPONENTS = (
-    "",                       # F017 — collapses onto the parent directory
-    "..",                     # F011/F030 family — the traversal segment
-    "../../etc/passwd",       # F031 — a separator-bearing component
-    "a/b",                    # F026/F031 — a separator inside one component
-    "/etc/passwd",            # F030 — `/`'s discard-the-left-operand behaviour
-    "x" * 4096,               # F018 — oversized
-    "a\nb",                   # F019 — a control character that the OS does NOT reject
-    "a\x00b",                 # F019 — the NUL byte
-)
-
-
-def kinds_rows(path: Path = KINDS_TSV) -> list[dict[str, str]]:
+def kinds_rows() -> list[dict[str, str]]:
     """The kinds table as dicts, read off the file the gate reads."""
-    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = KINDS_TSV.read_text(encoding="utf-8").splitlines()
     header = lines[0].split("\t")
     return [dict(zip(header, line.split("\t"), strict=False)) for line in lines[1:] if line.strip()]
 
 
-def appendix_only() -> frozenset[str]:
-    """`lint_run_records.APPENDIX_ONLY_KINDS`, IMPORTED rather than re-spelled — fork D-F7's
-    resolution is that O2's walk imports the exclusion set (waiver h51)."""
-    from defender.tests.support.shared.contracts._by_path import load_lint_gate
-    return frozenset(load_lint_gate("lint_run_records").APPENDIX_ONLY_KINDS)
-
-
 def resolve(acc: Accessor, *, run_dir: Path, runs_base: Path | None = None,
-            episode_dir: Path | None = None, args: tuple[Any, ...] | None = None,
-            data_root: Path | None = None, tenant_id: str | None = None) -> Path:
-    """Drive ONE accessor and hand back the path it resolved.
-
-    The owner is reached through its own constructor every time — `RunPaths(run_dir)`,
-    `EpisodePaths(episode_dir)` — so a test that walks the kinds table is driving ~43 real
-    accessors, not asserting a structural property of a registry. #1078 D1 adds `tenant_row`,
-    owned by the layout class `_tenant._TenantPaths(data_root, tenant_id).row` (#1120 M4) — a data-root-and-tenant-aware
-    accessor rather than a runs-base one.
-    """
+            episode_dir: Path | None = None, args: tuple[Any, ...] | None = None) -> Path:
+    """Drive ONE accessor and hand back the path it resolved. Each owner is built through its
+    own constructor every time, so walking the kinds table drives every real accessor."""
     values = acc.args if args is None else args
-    if acc.owner == "tenant_row":
-        return tenant()._TenantPaths(fixture_data_root(data_root), tenant_id).row
-    if acc.owner == "episode_arm":
-        return getattr(EpisodePaths(episode_dir), acc.attr) / values[0]
     owner = RunPaths(run_dir) if acc.owner == "run" else EpisodePaths(episode_dir)
     member = getattr(owner, acc.attr)
     if acc.attr in UPWARD_ACCESSORS:
@@ -445,7 +324,7 @@ def member(run: Any, group: str, name: str, *args: Any) -> Any:
     return m(*args) if args else m
 
 
-def member_args(name: str, *, runs_base: Path | None = None) -> tuple[Any, ...]:
+def member_args(name: str) -> tuple[Any, ...]:
     """The components this suite drives one member with, in call order."""
     table: dict[str, tuple[Any, ...]] = {
         "leads": (LEAD_ID,), "payloads": (LEAD_ID, SEQ), "ticket_reads": (SEQ,),
@@ -467,8 +346,8 @@ def fixture_run(directory: Path) -> Any:
     return Run().under(fixture_runs_base(directory.parent), directory.name)
 
 
-def make_runs_base(tmp_path: Path, name: str = "runs") -> Path:
-    base = tmp_path / name
+def make_runs_base(tmp_path: Path) -> Path:
+    base = tmp_path / "runs"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -479,8 +358,8 @@ def make_run_dir(runs_base: Path, run_id: str = RUN_ID) -> Path:
     return d
 
 
-def make_episode_dir(tmp_path: Path, episode_id: str = EPISODE_ID) -> Path:
-    d = tmp_path / "episodes" / episode_id
+def make_episode_dir(tmp_path: Path) -> Path:
+    d = tmp_path / "episodes" / EPISODE_ID
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -493,8 +372,7 @@ def plant_tenant_record(runs_base: Path, body: str | bytes | None = None, *,
     """Write `<runs_base>/_tenant.json` — well-formed, or with a REAL corruption on disk.
 
     `body` writes raw bytes verbatim (the malformed-JSON, empty-file and truncated cases);
-    `drop` removes a required field; `wrong_type` replaces one with a number. Every one of
-    these is the actual byte sequence the reader will meet, not a fake's canned exception.
+    `drop` removes a required field; `wrong_type` replaces one with a number.
     """
     path = runs_base / TENANT_RECORD_NAME
     if body is not None:
@@ -511,16 +389,11 @@ def plant_tenant_record(runs_base: Path, body: str | bytes | None = None, *,
 
 
 def plant_stamp(run_dir: Path, **fields: Any) -> Path:
-    """A `provenance.json` with exactly the keys given — including a MISSING or explicitly-null
-    `tenant_id`/`world_id`, which is what the migration window produces (decision 15(2))."""
+    """A `provenance.json` with exactly the keys given, including a MISSING or explicitly-null
+    `tenant_id`/`world_id`."""
     path = run_dir / "provenance.json"
     path.write_text(json.dumps(fields, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
-
-
-def alert_ref(alert: Path) -> str:
-    """Today's curation key, composed the way `run_common.py:286` composes it."""
-    return f"case-{hashlib.sha256(alert.read_bytes()).hexdigest()[:16]}"
 
 
 def seed_run_tree(run_dir: Path) -> Path:
@@ -531,52 +404,26 @@ def seed_run_tree(run_dir: Path) -> Path:
 
 
 # ======================================================================================
-# O3's tree observer (decision 21's TWO checks), as a helper every arm drives.
+# The tree observer: one run directory's name set against a captured baseline.
 #
-# DECISION 21 REPLACED DECISION 14 IN FULL. An executed probe (two `_replay()` calls against
-# `main`, same run id, diffed) proved "byte-identical, two exemptions" false independently of
-# this issue's code: eight files differ for reasons that predate the refactor — wall-clock
-# timestamps (`budget.json`, `tool_trace.jsonl`), a per-run random security salt embedded in
-# otherwise-meaningful text (`review_record.<turn>.json`, the three
-# `wire_logs/review_*_trace.jsonl`) and random per-run session/case identifiers
-# (`session_store_pointer.json` — then in the run dir, a sidecar beside it since #1235 —,
-# `tool_trace.jsonl`). So the observer is two checks now:
-#
-#   STRUCTURAL (strict, load-bearing) — `snapshot` / `tree_diff`: the run directory produces
-#   the SAME SET OF NAMES, with no file or directory added, removed, renamed or moved. A
-#   directory and a symlink carry their kind and, for a symlink, its link target. NO BYTES AT
-#   ALL, for any entry. This is the check that holds and the check that matters.
-#
-#   CONTENT (narrow) — `content_digests`: bytes are compared for `investigation.md` and
-#   `report.md` ONLY, the two artifacts the model generates from the SAME fixed replay input
-#   and that a human actually reads.
-#
-# THERE IS NO EXEMPTION LIST, and `snapshot` deliberately takes no `exclude` argument: the
-# widening lever decision 14's `O3_EXEMPT` handed an implementer meeting a red test is gone
-# rather than lengthened. Everything outside `O3_CONTENT` simply carries no byte assertion.
-# Decision 18's wire-log writer id needs no carve-out for the same reason: the wire log was
-# never byte-compared under this contract.
+#   `snapshot` / `tree_diff`: the SAME SET OF NAMES, each with its kind (and a symlink's
+#   target); no bytes at all. Files carry timestamps, per-run salts and random ids, so there
+#   is deliberately no exemption list and no `exclude` argument.
+#   `capture_baseline` also records the digests of `investigation.md` and `report.md`
+#   (`content_digests`); no test compares them now.
 # ======================================================================================
 
 @dataclasses.dataclass(frozen=True)
 class Entry:
-    """One tree entry in the STRUCTURAL check — its name, its kind, and nothing it contains.
-
-    `target` is a symlink's link target and is `None` for a regular file and a directory:
-    following the link would compare one file twice, and a file's BYTES are not part of this
-    check at all (decision 21). Bytes live in `content_digests`, over two names.
-    """
+    """One tree entry: its name and kind, nothing it contains. `target` is a symlink's link
+    target and `None` otherwise."""
     rel: str
     kind: str                # "file" | "dir" | "symlink"
     target: str | None       # the link's target for a symlink; None otherwise
 
 
 def snapshot(root: Path) -> dict[str, Entry]:
-    """Decision 21's structural snapshot of one tree: every entry by relative name.
-
-    No `exclude`: the structural check covers the whole run directory and admits no
-    exemption, which is what makes "the same set of names" a claim worth making.
-    """
+    """The structural snapshot of one tree: every entry by relative name, with no exemption."""
     out: dict[str, Entry] = {}
     for p in sorted(root.rglob("*")):
         rel = p.relative_to(root).as_posix()
@@ -603,35 +450,24 @@ def tree_diff(a: dict[str, Entry], b: dict[str, Entry]) -> list[str]:
     return findings
 
 
-#: Decision 21's content check, in full. The investigation write-up and the final report are
-#: the two artifacts the model generates from the SAME fixed replay input and that a human
-#: actually reads; everything else in the tree (budget, tool trace, session pointer, the wire
-#: logs, the review records and traces) gets NO byte assertion — not exempted-with-a-reason,
-#: not normalised, simply not compared, because it was never stable to begin with.
+#: The two documents whose digests `capture_baseline` records.
 O3_CONTENT = ("investigation.md", "report.md")
 
 
-def content_digests(root: Path, names: Iterable[str] = O3_CONTENT) -> dict[str, str | None]:
-    """The sha256 of each content file's bytes, `None` where the run produced no such file.
-
-    `None` is a VALUE the comparison sees, not a skip: a report that stopped being written is
-    a content finding, the same as one whose bytes changed.
-    """
+def content_digests(root: Path) -> dict[str, str | None]:
+    """The sha256 of each `O3_CONTENT` file's bytes, `None` where the run produced no such
+    file."""
     out: dict[str, str | None] = {}
-    for name in names:
+    for name in O3_CONTENT:
         p = root / name
         out[name] = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
     return out
 
 
 def mutation_census(root: Path) -> dict[str, tuple[str, str | None]]:
-    """Every entry AND every regular file's bytes — the before/after census a READ-PURITY
-    test needs (decision 9), never O3's observer.
-
-    Deliberately separate from `snapshot`: this compares ONE tree to ITSELF across ONE
-    operation, where the bytes are stable by construction. That is exactly the comparison
-    decision 21 found does NOT hold between two separate runs, which is why the two live in
-    different helpers and the structural one carries no bytes.
+    """Every entry AND every regular file's bytes: the before/after census a read-purity test
+    needs. Separate from `snapshot`: one tree compared to itself across one operation has
+    stable bytes; two runs do not.
     """
     out: dict[str, tuple[str, str | None]] = {}
     for rel, e in snapshot(root).items():
@@ -643,35 +479,24 @@ def mutation_census(root: Path) -> dict[str, tuple[str, str | None]]:
     return out
 
 
-#: Decision 21 narrowed decision 14 to the structural name set plus the two documents' bytes,
-#: and that narrowing is what retires rule 4's "re-capture on every commit": the byte-level
-#: golden aged into false findings on unrelated commits (timestamps, salts, uuids); a NAME
-#: SET does not, and a commit that changes it has changed the tree — which is the finding.
-#: So the baseline is a GOLDEN like `tests/e2e/test_replay_skeleton.py`'s: re-captured when
-#: the tree is meant to change, and the re-capture reviewed as the diff it is. It records the
-#: commit it was captured on for the reader (a committed file cannot carry the sha of the
-#: commit that contains it, so nothing keys on that field). D7(1) is where it is first
-#: captured: the observer must ship green on `main`, with no implementation behind it, before
-#: step 3.
+#: The baseline is a GOLDEN like `tests/e2e/test_replay_skeleton.py`'s: re-captured with
+#: `capture_baseline` when the tree is meant to change, and the re-capture reviewed as a diff. Its
+#: `commit` field is for the reader only (a committed file cannot carry the sha of the commit
+#: that contains it).
 TREE_BASELINE = Path(__file__).with_name("_tree_baseline_1077.json")
 
 
 def head_commit() -> str:
-    """The commit the comparison runs on, through the repo's OWN git facade.
-
-    `defender._git.git_head_sha`, not a second `rev-parse` of this suite's own: two places
-    deriving one fact from the same argv is the shared-oracle shape
-    (`tooling/lint/lint_shared_oracle.py`), and here the value is a plain identity read the
-    facade already owns.
+    """The commit the capture runs on, through `defender._git.git_head_sha`: a second
+    `rev-parse` here would be the shared-oracle shape `tooling/lint/lint_shared_oracle.py` flags.
     """
     return mod("_git").git_head_sha(REPO_ROOT)
 
 
-def load_baseline(path: Path = TREE_BASELINE) -> dict[str, Any]:
-    """The captured baseline document: `commit` (where it was captured — informational), the
-    structural `entries`, the two `content` digests. Three keys, and the third is two names
-    long — that IS the contract."""
-    return json.loads(path.read_text(encoding="utf-8"))
+def load_baseline() -> dict[str, Any]:
+    """The captured baseline: `commit` (informational), the structural `entries` and the two
+    `content` digests."""
+    return json.loads(TREE_BASELINE.read_text(encoding="utf-8"))
 
 
 def baseline_entries(doc: dict[str, Any]) -> dict[str, Entry]:
@@ -679,7 +504,7 @@ def baseline_entries(doc: dict[str, Any]) -> dict[str, Entry]:
 
 
 def capture_baseline(run_dir: Path, *, path: Path = TREE_BASELINE) -> dict[str, Any]:
-    """Write the O3 baseline for `run_dir`: the whole name set, the two documents' bytes, and
+    """Write the tree baseline for `run_dir`: the whole name set, the two documents' bytes, and
     the commit it was taken on."""
     doc = {
         "commit": head_commit(),
@@ -691,22 +516,8 @@ def capture_baseline(run_dir: Path, *, path: Path = TREE_BASELINE) -> dict[str, 
 
 
 def structural_findings(run_dir: Path, doc: dict[str, Any]) -> list[str]:
-    """The strict half: the run directory's name set against the baseline's, in full."""
+    """The run directory's name set against the baseline's, in full."""
     return tree_diff(baseline_entries(doc), snapshot(run_dir))
-
-
-def content_findings(run_dir: Path, doc: dict[str, Any]) -> list[str]:
-    """The narrow half: the two documents' bytes, and no other file's."""
-    want: dict[str, str | None] = doc["content"]
-    got = content_digests(run_dir, want)
-    return [f"content differs: {name}" for name in sorted(want) if want[name] != got.get(name)]
-
-
-def compare_to_baseline(run_dir: Path, *, path: Path = TREE_BASELINE) -> list[str]:
-    """O3's findings for `run_dir` — structural first, then content. The golden is compared
-    on every commit; a tree that moved is the finding, whichever commit moved it."""
-    doc = load_baseline(path)
-    return structural_findings(run_dir, doc) + content_findings(run_dir, doc)
 
 
 # ======================================================================================
@@ -727,7 +538,7 @@ def bound_arguments(op: str, args: tuple, kwargs: dict) -> dict[str, Any]:
     """One recorded `_io` call's arguments BY NAME, bound against the real function's own
     signature with its defaults applied — so a positional and a keyword spelling of the same
     call read the same, and a seam test asserts on `root` / `name` / `mode` / `text` rather than
-    on argument positions (#1111 O8)."""
+    on argument positions."""
     bound = inspect.signature(getattr(io(), op)).bind(*args, **kwargs)
     bound.apply_defaults()
     return dict(bound.arguments)
@@ -745,19 +556,18 @@ def _recorded_path(op: str, args: tuple, kwargs: dict) -> Path:
         b = bound_arguments(op, args, kwargs)
         return Path(b["root"]) / PurePosixPath(b.get("name", b.get("folder_name")))
     first = args[0] if args else next(iter(kwargs.values()))
-    # An op over an already-open record (`locked_json_update` takes the opener, #1174) is about
-    # no path of its own; the opener's own call carries the record's path.
+    # An op over an already-open record (`locked_json_update` takes the opener) is about no path
+    # of its own; the opener's own call carries the record's path.
     return Path(first) if isinstance(first, (str, os.PathLike)) else Path()
 
 
 class RecordingIo:
     """A pass-through recorder over the real `defender._io`, entering through the owner's
-    `io=` injection seam (never `monkeypatch.setattr` — `tooling/lint/lint_monkeypatch.py`).
+    `io=` injection seam (never `monkeypatch.setattr`).
 
-    It records every operation the owner asks of it, with the path, so a `kind: seam` demand
-    can assert on the CAPTURED INBOUND CALL rather than on a canned return value. `calls` keeps
-    each call's path (a rooted call's trust root joined with its name); `invocations` keeps
-    every argument, which is where a seam test reads a rooted call's name, mode and payload.
+    `calls` keeps each call's path (a rooted call's trust root joined with its name);
+    `invocations` keeps every argument, where a seam test reads a rooted call's name, mode and
+    payload.
     """
 
     def __init__(self, fault: IoFault | None = None) -> None:
@@ -784,7 +594,7 @@ class RecordingIo:
             prior = sum(1 for n, _ in self.calls[:-1] if n == name)
             if name in self.fault.fail_on and self.fault.raise_after <= prior:
                     raise self.fault.error or FileExistsError(
-                        f"{path}: the guarded exclusive create collided (claim C19)")
+                        f"{path}: the guarded exclusive create collided")
             if name in _WRITE_OPS and self.fault.before_write is not None:
                 self.fault.before_write(path)
             return real(*a, **kw)
@@ -805,7 +615,7 @@ class RecordingIo:
 class ProbeFault:
     """`timeout` raises what `box/_docker.py`'s fixed `subprocess.run(..., timeout=120)`
     raises; `malformed` returns the probe's own control-failed shape, which the real probe
-    already treats as "could not be OBSERVED" (claim C3, claim C14). `clean` is the control."""
+    treats as "could not be OBSERVED". `clean` is the control."""
     mode: str = "clean"
 
 
@@ -827,9 +637,8 @@ class ProbeDocker:
 
 
 # ======================================================================================
-# The gate. D6 REWRITES `tooling/lint/lint_run_records.py`, so every call goes through these
-# two helpers: when the implementation names the rewritten entry point differently, TWO
-# helpers change, not the twenty-eight tests that drive them.
+# The gate (`tooling/lint/lint_run_records.py`): every call goes through these two helpers, so
+# renaming its entry point is two edits, not one per test.
 # ======================================================================================
 
 def gate():
@@ -846,12 +655,8 @@ def plant(root: Path, rel: str, text: str) -> Path:
 
 
 def gate_findings(root: Path, rel: str | None = None, text: str | None = None) -> list[Any]:
-    """Run D6's rewritten sweep over `root` and hand back its findings.
-
-    `rel`/`text` plant one source file first. The pinned entry point is
-    `lint_run_records.scan(root)` — the root-taking pure pass D6's rewrite needs so the sweep
-    can be driven over a tmp tree instead of the checkout.
-    """
+    """Run the gate's sweep (`lint_run_records.scan(root)`) over `root` and hand back its
+    findings; `rel`/`text` plant one source file first."""
     if rel is not None:
         plant(root, rel, text or "")
     return list(gate().scan(root))
@@ -863,27 +668,3 @@ def displays(found: Iterable[Any]) -> str:
 
 def reports(found: Iterable[Any], needle: str) -> bool:
     return needle in displays(found)
-
-
-# ======================================================================================
-# Refusals — "the run is refused" as an observable, not as "something raised".
-# ======================================================================================
-
-def refused_run(fn: Callable[[], Any], *, runs_base: Path, run_id: str) -> BaseException:
-    """Drive `fn` and assert the RUN was refused, not degraded.
-
-    Decision 4 makes the tenant record the sole exception to read-as-`None`, and decision 7
-    makes an identity-bearing write fail LOUDLY. "Refused" is three observables together: the
-    call raised, and no run directory was left addressable with a degraded identity — no
-    provenance stamp naming a defaulted tenant. A bare `pytest.raises` would be green on any
-    exception at all, including one from the harness.
-    """
-    with pytest.raises((SystemExit, Exception)) as excinfo:  # noqa: B017,PT011
-        fn()
-    stamp = runs_base / run_id / "provenance.json"
-    if stamp.is_file():
-        body = json.loads(stamp.read_text(encoding="utf-8"))
-        assert body.get("tenant_id") is None, (
-            "the run was DEGRADED, not refused: it stamped "
-            f"tenant_id={body.get('tenant_id')!r} over a tenant record it could not read")
-    return excinfo.value

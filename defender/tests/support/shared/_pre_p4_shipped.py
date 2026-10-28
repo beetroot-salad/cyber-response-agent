@@ -1,5 +1,5 @@
 """#1108 P4: the agent knowledge this repo shipped in its product tree before P4 moved it to
-each tenant (O1, O-U5) — the exact bytes of base `0f62791e`'s `defender/lessons/`,
+each tenant — the exact bytes of base `0f62791e`'s `defender/lessons/`,
 `defender/skills/gather/queries/` and `defender/skills/tacit-knowledge/`, laid out as an agent
 half (`lessons/`, `skills/...`) under `tests/fixtures/pre-p4-shipped/agent/`.
 

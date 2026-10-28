@@ -13,7 +13,7 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 
 def _resolve(root: Path, tenant_id: str = S.PLAYGROUND_ID) -> object:
-    """The REAL acceptance frame over a planted root (C1)."""
+    """The real acceptance frame over a planted root."""
     return run_tenant.resolve_tenant(
         fixture_data_root(Path(root)), tenant_id, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
@@ -40,7 +40,6 @@ def _replacing(text: str, key: str, line: str) -> str:
 
 
 def test_d_one_parser_quote_rule(tmp_path):
-    # rejected: the stub parser's `.strip('"').strip("'")` character-set strip
     configs = S.config_texts("q1")
     configs["cmdb"] = (_replacing(configs["cmdb"], "CMDB_URL_BASE", 'CMDB_URL_BASE="abc\'"')
                        + "CMDB_SINGLE='single-q1'\n"      # one matched single-quote pair

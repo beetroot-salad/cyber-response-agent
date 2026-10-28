@@ -13,7 +13,8 @@ requires_cat = pytest.mark.skipif(_CAT is None, reason="cat binary not available
 
 
 def _real_cat_opens(argv, sentinels):
-    """A lower bound on the files real `cat` opens for `argv` (paths already inlined): run `cat` on empty stdin..."""
+    """A lower bound on the files real `cat` opens for `argv` (paths already inlined): run `cat`
+    on empty stdin and see which planted sentinels reach its output."""
     proc = subprocess.run(
         [_CAT, *argv], capture_output=True, text=True, timeout=10, input="",
     )
@@ -46,7 +47,8 @@ def test_gate_superset_multiple_operands_behind_a_bundle(tmp_path):
 
 @requires_cat
 def test_gate_superset_operand_after_double_dash(tmp_path):
-    """`--` ends options, so a following `-`-prefixed token is an OPERAND cat opens. The gate must list it rather..."""
+    """`--` ends options, so a following `-`-prefixed token is an operand `cat` opens; the gate
+    must list it rather than read it as flags."""
     weird = tmp_path / "-nE"
     weird.write_text('"SENT_W"')
     argv = ["--", str(weird)]
@@ -54,14 +56,6 @@ def test_gate_superset_operand_after_double_dash(tmp_path):
     observed = _real_cat_opens(argv, {str(weird): "SENT_W"})
     assert observed == {str(weird)}
     assert gate >= observed
-
-
-@requires_cat
-def test_gate_reports_nothing_for_stdin_only(tmp_path):
-    """A downstream pipe stage (`… | cat`) and an explicit `-` name no file: nothing to gate, so the stage is..."""
-    assert cat_input_files(["cat"]) == []
-    assert cat_input_files(["cat", "-"]) == []
-    assert _real_cat_opens([], {}) == set()
 
 
 @pytest.mark.parametrize(("argv", "expected"), [
@@ -72,6 +66,7 @@ def test_gate_reports_nothing_for_stdin_only(tmp_path):
     (["cat", "--", "-n"], ["-n"]),
     (["cat", "--", "a", "-b"], ["a", "-b"]),
     (["cat", "a", "-", "b"], ["a", "b"]),
+    # A downstream pipe stage (`… | cat`) and an explicit `-` name no file: nothing to gate.
     (["cat"], []),
     (["cat", "-"], []),
 ])

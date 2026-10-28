@@ -21,9 +21,8 @@ _REAL_LOAD_CONFIG = transport.load_config
 
 @pytest.fixture
 def ctx(tmp_path):
-    """A VerbContext over a throwaway tree carrying the committed playground tenant's record
-    (#1107: the run's tenant, handed in); the transport is stubbed, so its config is never
-    loaded for real (each test stubs `_config` via `load_config`)."""
+    """A VerbContext carrying the playground tenant's record; the autouse stub replaces
+    `load_config`, so no config is read for real."""
     return T1106.verb_context(tmp_path / "defender", tmp_path / "run", {})
 
 
@@ -47,8 +46,7 @@ def test_require_closed_passes_on_closed(monkeypatch, ctx):
 
 
 def test_require_closed_rejects_open(monkeypatch, ctx):
-    # #338/#611: the refusal of a non-closed ticket is a query error — now raised as UpstreamFault
-    # (the capture layer maps it to exit 1), not SystemExit(1). The answer-key guard stands.
+    # A non-closed ticket is a query error: `UpstreamFault`, which the capture layer maps to exit 1.
     monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
                         lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "open"})
     with pytest.raises(UpstreamFault):
@@ -56,7 +54,7 @@ def test_require_closed_rejects_open(monkeypatch, ctx):
 
 
 def test_no_flag_allows_any_status(monkeypatch, ctx):
-    # Without require_closed the adapter is unchanged (open tickets still fetch).
+    # Without require_closed, open tickets still fetch.
     monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
                         lambda c, cfg, p, system=None, params=None: {"key": "c", "status": "open"})
     payload = ticket_adapter.get_ticket(ctx, key="c", require_closed=False)
@@ -139,7 +137,7 @@ def test_run_env_does_not_override_the_declared_grammar(tmp_path, real_config):
     assert ticket_adapter.key_pattern(over) == "SOC-[0-9]+"
 
 
-# the key/filter encoding symmetry (#684 follow-up)
+# the key/filter encoding symmetry
 
 
 @pytest.mark.parametrize(
@@ -159,7 +157,7 @@ def test_run_env_does_not_override_the_declared_grammar(tmp_path, real_config):
          "dotdot", "crlf", "non-ascii"],
 )
 def test_get_ticket_percent_encodes_the_key_into_the_path(monkeypatch, ctx, key, expect_path):
-    """The key is encoded into `/tickets/{key}`, so no key value can RESHAPE the request:"""
+    """The key is percent-encoded into `/tickets/{key}`, so no key can reshape the request."""
     seen = {}
 
     def fake_get_obj(c, cfg, path, system=None, params=None):
@@ -226,7 +224,7 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
     assert query.count("&") == 2, "a filter value injected a query-parameter separator"
 
 
-# the case-opened boundary verb (Fork J / d33)
+# the case-opened boundary verb
 
 
 def test_case_opened_at_yields_a_timestamp_and_never_the_record(monkeypatch, ctx):
@@ -249,8 +247,7 @@ def test_case_opened_at_yields_a_timestamp_and_never_the_record(monkeypatch, ctx
 
 
 def test_case_opened_at_percent_encodes_the_key_like_every_other_reader(monkeypatch, ctx):
-    """#684's encoding fix applies here too — a new reader that interpolated the key raw would
-    reopen the request-reshaping hole on a path the screen depends on."""
+    """A reader interpolating the key raw would reopen the request-reshaping hole (#684)."""
     seen = {}
 
     def fake_get_obj(_ctx, _config, path, **_kw):

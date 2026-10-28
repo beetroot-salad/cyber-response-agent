@@ -22,7 +22,7 @@ TENANT_ID = fixture_uuid("tenant:t976")
 
 
 def _set_up_tenant(tmp_path, monkeypatch):
-    """A fresh, accepted tenant under its own data root — every run names its tenant, and there"""
+    """A fresh, accepted tenant under its own data root (every run names its tenant)."""
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
     return set_up_tenant(data_root, TENANT_ID)
@@ -34,9 +34,7 @@ SEED = f"{_provenance.CODE_SCOPE}/seed.md"
 
 
 def _repo(tmp_path: Path) -> Path:
-    """A throwaway repo with one commit, through `_repo.seed_repo` rather than a fifteenth
-    hand-rolled `git init` — that module exists because the same five lines had drifted across
-    fourteen sites under five different placeholder identities."""
+    """A throwaway repo with one commit, through the shared `_repo.seed_repo`."""
     repo = tmp_path / "repo"
     (repo / _provenance.CODE_SCOPE).mkdir(parents=True)
     (repo / SEED).write_text("seed\n", encoding="utf-8")
@@ -118,7 +116,7 @@ def test_capture_never_raises_when_git_is_not_on_path(tmp_path, monkeypatch):
 
 
 def test_status_failing_after_a_good_sha_keeps_the_sha_and_unknowns_the_dirt(tmp_path):
-    """The sha is worth keeping on its own; what is unknown is whether it describes the bytes"""
+    """The sha is worth keeping on its own; what is unknown is whether it describes the bytes."""
     repo = _repo(tmp_path)
     head = _git.git_head_sha(repo)
     (repo / ".git" / "index").write_bytes(b"\x00 not an index \xff" * 8)
@@ -141,24 +139,6 @@ def test_a_missing_or_junk_stamp_reads_as_no_stamp(tmp_path):
     wrong_type = tmp_path / "wrong.json"
     wrong_type.write_text(json.dumps({"commit": 17, "dirty": False}))
     assert _provenance.read(wrong_type) is None
-
-
-def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
-    from defender import run_common
-
-    tenant = _set_up_tenant(tmp_path, monkeypatch)
-    alert = tmp_path / "alert.json"
-    alert.write_text(json.dumps({"id": "a1"}))
-
-    run_dir = run_common.materialize_run(alert, tenant=tenant).run_dir
-    stamp = RunPaths(run_dir).provenance
-    assert stamp.is_file()
-    rec = _provenance.read(stamp)
-    assert rec is not None
-    # The suite runs inside this repo, so the capture is a real one: a sha, or an explicit
-    # reason there is none. What it must never be is silence.
-    assert rec.commit is not None or rec.unavailable is not None
-
 
 
 @pytest.mark.parametrize("dirty", [True, False, None])
@@ -211,6 +191,8 @@ def test_a_deeply_nested_payload_reads_as_no_stamp(tmp_path):
         {"commit": None, "dirty": True},
         {"commit": "", "dirty": False},
         {"commit": "", "dirty": None},
+        # what a torn write leaves: the parser folds "" to absent, then the class refuses it
+        {"commit": "", "dirty": None, "unavailable": None},
     ],
 )
 def test_a_record_capture_cannot_produce_is_not_a_record(tmp_path, doc):
@@ -221,14 +203,14 @@ def test_a_record_capture_cannot_produce_is_not_a_record(tmp_path, doc):
 
 
 def test_every_field_reaches_the_wire_and_comes_back(tmp_path):
-    """`as_json` spells the wire shape out, which makes it a SECOND census of the class's"""
+    """`as_json` spells the wire shape out: a SECOND census of the class's fields, which must
+    agree with the first."""
     declared = {f.name for f in fields(RunProvenance)}
     on_disk = json.loads(RunProvenance(commit="a" * 40, dirty=False).as_json())
     assert set(on_disk) == declared, (
         f"the wire shape and the record's fields disagree: {declared ^ set(on_disk)}"
     )
-    # #1204: the tenant knowledge revision rides in the same record, so the rich record carries
-    # one — imported HERE, not at module top, so a tree without it fails this arm alone.
+    # The tenant knowledge revision rides in the same record, so the rich record carries one.
     from defender.records._provenance import KnowledgeRevision  # type: ignore[attr-defined]
 
     rich = RunProvenance(
@@ -259,7 +241,8 @@ def test_a_rename_counts_both_paths_the_sha_fails_to_name(tmp_path):
 
 
 def test_one_dirty_path_earning_two_status_records_is_counted_once(tmp_path):
-    """`git status -z` emits one record per (path, reason) and a single path can earn two: `git rm --cached foo` leaves `D foo` AND `??"""
+    """`git status -z` emits one record per (path, reason), and `git rm --cached` earns one path
+    two (`D` and `??`): the path is counted once."""
     repo = _repo(tmp_path)
     _git.git(["rm", "--cached", "-q", SEED], cwd=repo)
 
@@ -269,8 +252,7 @@ def test_one_dirty_path_earning_two_status_records_is_counted_once(tmp_path):
     assert prov.dirty_path_count == 1, "one dirty path was counted once per status record"
 
 
-# The scoped dirt, the build stamp, the non-fatal write, the shared family
-# capture, the archive copy, and the read gate (#976 follow-ups).
+# The scoped dirt, the build stamp, the read gate, the non-fatal write, one capture per run.
 
 
 def test_dirt_is_scoped_to_the_code_the_box_mounts(tmp_path):
@@ -332,11 +314,9 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     runs = location_path(tenant.runs)
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
-    # A real failure, not an authored exception: a DIRECTORY at the stamp's name is one of the
-    # shapes `write_guarded` refuses. #1279 (conflict updated): setup takes no id and never
-    # resumes a dir, so a crashed run's leftover can no longer be planted at a chosen id; the
-    # obstruction is planted by the runs repository's `io=` seam right after the REAL run-dir
-    # creation, and the REAL `materialize_run` is driven through to its stamp.
+    # A real failure, not an authored exception: a DIRECTORY at the stamp's name, a shape
+    # `write_guarded` refuses. Setup mints its own id, so the obstruction is planted through the
+    # runs repository's `io=` seam right after the REAL run-dir creation.
     planted: list[Path] = []
 
     def obstruct(run_dir: Path) -> None:
@@ -364,10 +344,11 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     run_dir = run_common.materialize_run(alert, tenant=tenant).run_dir
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
+    # The suite runs inside this repo, so the capture is a real one: a sha, or an explicit
+    # reason there is none — never silence.
     assert rec.commit is not None or rec.unavailable is not None
-    # "No seam" is a fact about the signature, pinned as one: a `provenance=` keyword is the
-    # hoisted-capture path this change removed, and it is refused rather than accepted and
-    # ignored. Refused BEFORE the run dir exists, so the id is not burned by the attempt.
+    # No `provenance=` seam: a handed-in capture is refused, not accepted and ignored, and
+    # refused BEFORE the run dir exists.
     handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
     before = sorted(p.name for p in runs.iterdir())
     with pytest.raises(TypeError):
@@ -407,15 +388,6 @@ IMPOSSIBLE = {
 
 @pytest.mark.parametrize("why", sorted(IMPOSSIBLE))
 def test_nothing_can_construct_a_record_no_capture_could_produce(why):
-    """THE POINT OF MOVING THESE ONTO THE CLASS."""
     kwargs, refusal = IMPOSSIBLE[why]
     with pytest.raises(ValueError, match=refusal):
         RunProvenance(**kwargs)
-
-
-def test_a_truncated_sha_on_disk_reads_as_no_stamp(tmp_path):
-    """`{"commit": ""}` is what a torn write leaves. It folds to absent in the parser and is
-    then refused by the class for having no reason behind it — one rule, reached two ways."""
-    path = tmp_path / "torn.json"
-    path.write_text(json.dumps({"commit": "", "dirty": None, "unavailable": None}))
-    assert _provenance.read(path) is None

@@ -1,30 +1,13 @@
-"""#1108 P4 slice S-D — O7: every corpus write goes through `TenantDelivery`. One row per writer
-O7 names, each observed where it lands: the tenant repo (a commit-maker branch + PR on the tenant
-forge), never the product repo.
+"""#1108 P4 O7: every corpus write goes through `TenantDelivery`. One row per writer, each observed
+where it lands: a commit-maker branch and PR on the tenant forge, never the product repo, plus its
+rows in the delivery record `<T>/learning/commit-maker.jsonl` (O7-PATH).
 
-Writers and how each row reaches it:
-  - lessons author, questioner author: behavioural, through the real drain
-    (`author_drain`) with the real curator and only its model spawn faked (`_drain_support`'s
-    `CuratorTrigger`); the lesson lands under `agent/lessons/` / `agent/lessons-questioner/`.
-  - curators' corpus repair (the post-spawn restore of unapproved files): behavioural, through
-    `author_drain`; only the approved lesson is committed and recorded, never the repaired file.
-  - lead author, draft synthesis, pitfalls: behavioural, through the real `lead_author_drain`
-    with the real lead author / pitfalls curation and only their model spawn and the run's
-    extraction faked (`_drain_support.LeadStep` / `PitfallsStep`, handed the tick's batch per
-    OD16); they land under `agent/skills/` on a `lead-author/` branch. Row queue state after the
-    commit, and a retained batch delivered once on the next tick, are asserted here too.
-  - every writer row also asserts its delivery-record rows in `<T>/learning/commit-maker.jsonl`
-    (O7-PATH), and a composed case drives drain -> human merge -> `revert_lesson.main`.
-  - the census below backs all of them: no production module references the legacy commit and
-    delivery machinery (`ClaimGit`, `commit_corpus_paths`, ...) any more, so no writer can commit
-    or push but through P3.
-  - revert: test_revert_cli.py. Connect's tenant half: test_connect_propose.py.
-  - the evals harness: drives the author against a draft with the drain tests' fake forge, no
-    issuer, no network (`evaluations/harness.py`, tested from here, never edited).
-
-ASSUMED SEAM (reported): `evaluations/harness.py::run_author(tmp, *, invoke_agent=None)` — the
-author's model spawn, injectable; `materialize(scenario, tmp)` sets up everything the run needs
-(the tenant repo, its draft and fake forge included).
+The two lesson authors and the curators' corpus repair run through the real `author_drain`, the
+lead author, draft synthesis and pitfalls through the real `lead_author_drain`, each with only the
+model spawn (and a run's extraction) faked by `_drain_support`. A composed case drives drain ->
+human merge -> `revert_lesson.main`; a census shows no production module keeps the legacy commit
+and delivery machinery; and `evaluations/harness.py` is tested from here. Revert itself is
+`test_revert_cli.py`, connect's tenant half `test_connect_propose.py`.
 """
 from __future__ import annotations
 
@@ -79,8 +62,8 @@ EVALUATIONS = REPO_ROOT / "evaluations"
 
 
 def _record_rows(t: Any) -> list[dict]:
-    """The commit-maker's delivery record, `<T>/learning/commit-maker.jsonl` (design r3's data
-    model), read as plain JSON lines: P3 writes one row per commit it made, `{commit, batch:
+    """The commit-maker's delivery record, `<T>/learning/commit-maker.jsonl`, read as plain JSON
+    lines: P3 writes one row per commit it made, `{commit, batch:
     {branch, base, start}, lanes, changes: [{path, before, after}]}`. `[]` when absent."""
     record = Path(location_path(t.tenant.learning)) / "commit-maker.jsonl"
     if not record.is_file():
@@ -89,7 +72,7 @@ def _record_rows(t: Any) -> list[dict]:
 
 
 def _assert_recorded(t: Any, before: list[dict], branch: str, tip: str, paths: list[str]) -> None:
-    """O7-PATH: every commit the tick made on `branch` is a new row of the tenant's delivery
+    """Every commit the tick made on `branch` is a new row of the tenant's delivery
     record (rows recorded before the tick are `before`), its tip among them, and the rows name
     exactly `paths` — the same paths the branch carries."""
     rows = _record_rows(t)
@@ -150,9 +133,8 @@ _ROWS = {
 @pytest.mark.parametrize("writer", sorted(_ROWS))
 def test_o7_each_author_lane_writer_lands_in_the_tenant_repo_and_nowhere_in_the_product_repo(
         p4_tenant, tmp_path, monkeypatch, caplog, writer):
-    """O7: the writer's lesson is a commit on a `lessons/` branch of the tenant origin touching
-    only `agent/<its corpus>/<lesson>`, with a PR on the tenant forge; the product checkout the
-    drain runs over is unchanged (positive control in test_drains' flow-4 case)."""
+    """The lesson is one commit on a tenant `lessons/` branch touching only its corpus, with a
+    PR; the product checkout is unchanged (positive control: test_drains' flow-4 case)."""
     from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
@@ -189,10 +171,9 @@ FIXTURE_LESSON = "fixture-owner-before-close.md"
 
 def test_o7_corpus_repair_restores_an_unapproved_edit_from_the_batch_base_and_commits_none_of_it(
         p4_tenant, tmp_path, monkeypatch, caplog):
-    """O7 (corpus repair): the curator's model writes an approved lesson (citing the queued
-    row) and also rewrites a human-written fixture lesson citing nothing from the batch. Only
-    the approved lesson lands, on the tenant branch; the unapproved edit is put back from the
-    batch's base (the fixture bytes stay at the branch tip) and touches no commit."""
+    """The model writes an approved lesson (citing the queued row) and also rewrites a
+    human-written fixture lesson citing nothing from the batch: only the approved lesson is
+    committed, and the fixture keeps its base bytes at the branch tip."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     t = p4_tenant
     bind_forge(t)
@@ -216,8 +197,7 @@ def test_o7_corpus_repair_restores_an_unapproved_edit_from_the_batch_base_and_co
 
 
 # ---------------------------------------------------------------------------------------------
-# The lead-author lane over a draft (F-LEAD): lead author, draft synthesis, pitfalls, per-claim
-# reset
+# The lead-author lane over a draft: lead author, draft synthesis, pitfalls, per-claim reset
 # ---------------------------------------------------------------------------------------------
 
 TEMPLATE = "gather/queries/cmdb/host-owner.md"
@@ -246,11 +226,9 @@ def _commits(remote, base, tip):
 
 def test_o7_flead_the_lead_author_and_draft_synthesis_land_on_a_lead_author_branch_of_the_tenant(
         p4_tenant, tmp_path, lead_lane, caplog):
-    """O7 / F-LEAD: serving one queued run, the REAL lead author mints a catalog draft for the
-    run's uncatalogued query (draft synthesis) and commits it with the model's edit to an
-    existing template, as one commit-maker commit on a `lead-author/` branch of the tenant
-    origin touching only `agent/skills/gather/queries/cmdb/...`, with its PR on the tenant
-    forge; the product checkout is unchanged."""
+    """Serving one queued run, the real lead author mints a catalog draft for its uncatalogued
+    query and commits it with the model's template edit on a tenant `lead-author/` branch with
+    its PR; the product checkout is unchanged."""
     t = p4_tenant
     bind_forge(t)
     paths = _lead_paths(t, tmp_path)
@@ -279,8 +257,8 @@ def test_o7_flead_the_lead_author_and_draft_synthesis_land_on_a_lead_author_bran
     assert "Also check the asset tag." in git(t.remote, "show", f"{tip}:agent/skills/{TEMPLATE}")
     assert [c["head"] for c in t.forge.creates] == [branch]
     _assert_recorded(t, recorded, branch, tip, paths_touched)
-    # R-L2 (#952 on the lead lane): the claim is consumed once its commit is real — the row is
-    # neither queued nor in flight, and the run is recorded done at the commit that carries it.
+    # The claim is consumed once its commit is real (#952): the row is neither queued nor in
+    # flight, and the run is recorded done at that commit.
     assert _queued(paths, "case-p4-lead-one") == (False, False)
     done = run_dir / "lead_author" / "done"
     assert done.is_file(), "the served run was not recorded done"
@@ -290,12 +268,9 @@ def test_o7_flead_the_lead_author_and_draft_synthesis_land_on_a_lead_author_bran
 
 def test_o7_flead_a_lead_batch_whose_pr_failed_after_its_commit_is_delivered_next_tick_once(
         p4_tenant, tmp_path, lead_lane, caplog):
-    """R-L2 (#952 delivery failure on the lead lane): the claim's commit is real and pushed, but
-    the forge refuses the PR. The failure is logged, never silent; the claim is consumed with
-    its commit (it is not served again). The next tick delivers the retained batch: one PR for
-    the SAME branch at the SAME tip — the run is not re-served and nothing is committed twice
-    (the record holds one row for the branch). Positive controls: the step records the serve
-    in tick 1; the failed create reached the forge."""
+    """The claim's commit is pushed but the forge refuses the PR: the failure is logged and the
+    claim is consumed with its commit (#952). The next tick delivers the retained batch as one
+    PR for the same branch and tip, without re-serving the run or committing twice."""
     t = p4_tenant
     bind_forge(t)
     paths = _lead_paths(t, tmp_path)
@@ -337,11 +312,9 @@ def test_o7_flead_a_lead_batch_whose_pr_failed_after_its_commit_is_delivered_nex
 
 def test_o7_flead_a_failed_claim_is_reset_out_of_the_draft_and_never_reaches_a_commit(
         p4_tenant, tmp_path, lead_lane, caplog):
-    """F-LEAD per-claim reset (replacing `ClaimGit`): two runs served in one tick. The first
-    claim's edit is one commit-maker commit; the second claim's model writes and then fails, so
-    its write is reset out of the draft: no commit carries it, the branch holds exactly one
-    commit (the first claim's, touching only its template), and the system skill at the tip is
-    `main`'s."""
+    """Two runs in one tick: the first claim's edit is one commit; the second claim's model
+    writes and then fails, so its write is reset out of the draft and the system skill at the
+    tip is `main`'s."""
     t = p4_tenant
     bind_forge(t)
     paths = _lead_paths(t, tmp_path)
@@ -368,11 +341,8 @@ def test_o7_flead_a_failed_claim_is_reset_out_of_the_draft_and_never_reaches_a_c
 
 def test_o7_flead_pitfalls_curation_lands_on_the_tenant_add_on_page_only(
         p4_tenant, tmp_path, lead_lane, caplog):
-    """O7 / F-LEAD pitfalls (carried decision: the per-tenant add-on): a pitfalls-only tick
-    (no curation request queued) curates the queued reducer mistake into the tenant's
-    `agent/skills/gather/defender-sql.pitfalls.md` — one commit-maker commit on a `lead-author/`
-    branch touching only that page, with its PR on the tenant forge — and never touches the
-    product reducer page."""
+    """A pitfalls-only tick curates the queued reducer mistake into the tenant's add-on page as
+    one commit on a `lead-author/` branch with its PR, and never touches the product checkout."""
     from defender.learning.core.state import PITFALLS
     from defender.tests.support.learning.core._declared870 import shim_row
 
@@ -407,13 +377,10 @@ def test_o7_flead_pitfalls_curation_lands_on_the_tenant_add_on_page_only(
 
 def test_o7_path_a_drained_lesson_a_human_merged_is_reverted_by_the_cli_on_the_tenant(
         p4_tenant, tmp_path, monkeypatch, caplog, capsys):
-    """O7-PATH composed: the drain's commit-maker commit (recorded in `<T>/learning/
-    commit-maker.jsonl`), merged by a human on the tenant origin, is what `revert_lesson.main`
-    reverts: exit 0, one new branch on the tenant origin off the merged `main` deleting
-    `agent/lessons/<lesson>` and nothing else, with its PR on the tenant forge. The revert
-    reads the delivery record the drain left (P3: revert truth is that record), so this is the
-    path a writer row's record entry must serve. Control: before the merge the same revert
-    refuses (the lesson is not on `main`), so the exit 0 is the merge's doing."""
+    """`revert_lesson.main` reverts the drain's recorded commit once a human merged it: one new
+    branch off the merged `main` deleting only the lesson, with its PR. The revert reads the
+    delivery record the drain left, so this is the path a writer's record row must serve.
+    Control: before the merge the same revert refuses."""
     import importlib
 
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
@@ -452,7 +419,7 @@ def test_o7_path_a_drained_lesson_a_human_merged_is_reverted_by_the_cli_on_the_t
 
 
 # ---------------------------------------------------------------------------------------------
-# F-HARDLINK: a draft shares no inode with the export it was made from
+# A draft shares no inode with the export it was made from
 # ---------------------------------------------------------------------------------------------
 
 
@@ -472,11 +439,9 @@ def test_f_hardlink_the_comparison_sees_a_hard_linked_pair_and_not_a_copy(tmp_pa
 
 def test_f_hardlink_a_drafts_files_share_no_inode_with_the_export_while_the_box_runs(
         p4_tenant, tmp_path, monkeypatch, caplog):
-    """F-HARDLINK: while the curator's model step runs (the box's window, the draft mounted
-    writable), no regular file under the batch's draft `agent/` is the same file (device and
-    inode) as the same path under `<T>/exports/<current>/agent/`: a write through the box can
-    never reach the export the next run copies. The comparison covers the fixture's files
-    (at least one pair compared)."""
+    """While the model step runs (the draft mounted writable), no file under the draft's
+    `agent/` is the export's own file (device and inode), so a write through the box never
+    reaches the export the next run copies. At least one pair is compared."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     t = p4_tenant
     bind_forge(t)
@@ -513,7 +478,7 @@ LEGACY_REFERENCES = frozenset({
     "_run_worktree_batch", "finish_batch", "commit_corpus", "commit_corpus_paths",
     "git_commit_paths", "git_worktree_add",
 })
-#: Of those, the classes and the batch whose very definition must be gone (O7: "deleted").
+#: Of those, the classes and the batch whose very definition must be gone.
 LEGACY_DEFINITIONS = frozenset({"AuthorBranch", "GhForge", "ClaimGit", "_run_worktree_batch"})
 
 
@@ -560,11 +525,9 @@ def test_o7_census_scanner_finds_each_kind_of_legacy_spelling():
 
 
 def test_o7_no_production_writer_commits_or_delivers_outside_the_tenant_commit_maker():
-    """O7: `GhForge`, `AuthorBranch`'s product path, the legacy worktree drain and the per-claim
-    worktree commits are gone from production code (`defender/` outside `tests/`, and
-    `evaluations/`): no definition, import or reference remains, so the lead author, draft
-    synthesis, pitfalls, corpus repair and every curator can reach git only through P3's
-    `TenantDelivery` (`Batch.commit`, `finish`, `deliver`, `revert`)."""
+    """No definition, import or reference of the legacy machinery remains in production code
+    (`defender/` outside `tests/`, and `evaluations/`), so every writer reaches git only
+    through P3's `TenantDelivery`."""
     hits = []
     for path in _production_sources():
         try:
@@ -618,13 +581,9 @@ def _repositories(root: Path) -> list[Path]:
 
 
 def test_o7_the_evals_harness_authors_into_a_tenant_draft_with_a_fake_forge_and_no_issuer(tmp_path):
-    """O7 (evals): the harness drives the real lessons author against a draft, its commit landing
-    on a tenant-shaped repo (`agent/lessons/<lesson>`) delivered to a fake forge, with no issuer
-    configured and nothing written under a product-shaped `defender/lessons/` or `.worktrees/`.
-    The model spawn is the only fake (assumed seam `run_author(tmp, *, invoke_agent=)`).
-    EVALS-HARNESS: exactly one PR on the fake forge (assumed: P3's remote-backed `ForgeHTTP`,
-    its rows beside the bare remote), and no issuer configured or contacted (no socket opened by
-    the harness process, no issuer config written, no issuer variable handed to it)."""
+    """The harness drives the real lessons author against a draft (only the model spawn faked):
+    its commit lands on a tenant-shaped repo with exactly one PR on the fake forge, no issuer is
+    configured or contacted, and nothing is written under `defender/lessons/` or `.worktrees/`."""
     scenario = tmp_path / "scenario"
     scenario.mkdir()
     (scenario / "findings.jsonl").write_text(

@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from defender.learning.branch.estate.limiter import RateLimiter
 from defender.tests.support.runtime.state import _1255_clock as C
 from defender.tests.e2e._replay_harness import GOLDEN_AB3, materialize
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
@@ -23,7 +24,6 @@ LIMITS = C.caps(wall_clock_timeout=600, grace_seconds=600, max_tool_calls=50)
 @pytest.fixture(autouse=True)
 def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate configured roots and enable the real unboxed executor."""
-    monkeypatch.setenv(S.T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     monkeypatch.setenv(S.KNOB_RATE, "1e6")
     monkeypatch.setenv(C.FLAG, "true")
@@ -118,8 +118,7 @@ def test_p1_control_the_investigators_own_seconds_count_in_full(tmp_path):
 def test_p2_a_rate_limit_wait_moves_no_visible_time_and_no_elapsed_time(tmp_path):
     clock = C.FakeClock(START)
     waiting = WaitingLimiter(clock, WORLD_SECONDS)
-    limiter = S.sym("learning.branch.estate.limiter", "RateLimiter")(
-        1.0, clock=waiting.now, sleep=waiting.sleep)
+    limiter = RateLimiter(1.0, clock=waiting.now, sleep=waiting.sleep)
     oracle = WorldTakesTime(S.run_query("idp", "query", S.query_params("probe-1")),
                             S.run_query("idp", "query", S.query_params("probe-2")),
                             S.submit(EMPTY, S.EMPTY_CLAIM), clock=clock, seconds=0,
@@ -150,7 +149,7 @@ def test_p3_the_control_worlds_oracle_turn_also_moves_no_visible_time(tmp_path):
     run_dir, main = _drive(tmp_path, clock, reg, est, params=new_question)
 
     assert oracle.submissions() == 1, (
-        f"the control world's new question took {oracle.submissions()} oracle turns (D3: one)")
+        f"the control world's new question took {oracle.submissions()} oracle turns, not one")
     assert C.lesson_reads(run_dir, L1) == [C.at(START, 35)], (
         f"the control world's oracle turn reached the visible time: {C.lesson_rows(run_dir)}")
     assert not _bash_refused(main), "the control world's oracle turn counted against the limit"

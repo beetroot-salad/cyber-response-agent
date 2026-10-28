@@ -1,23 +1,14 @@
 """O2 — an attack run under a fault is one invocation, and the fault never
 outlives the run.
 
-Driven through the real `attacks/runner.py::run_scenario`, with its two outbound
-effects injected as parameter seams (this repo's convention — fakes enter through
-the entry point, never `monkeypatch.setattr`):
+Driven through the real `attacks/runner.py::run_scenario`, its two outbound effects
+injected through its parameter seams (`post_cr(body) -> (rc, payload)`,
+`exec_fn(host, command, user, dry_run) -> (rc, stdout, stderr)`, plus `chaos_ctl`),
+never `monkeypatch.setattr`. The two failure shapes that matter:
 
-    run_scenario(scenario, seed, overrides, dry_run, cr_mode=..., runs_dir=...,
-                 chaos="none", keep_chaos=False, chaos_ctl=None,
-                 post_cr=_post_cr, exec_fn=docker_exec)
-
-`post_cr(body) -> (rc, payload)` and `exec_fn(host, command, user, dry_run) ->
-(rc, stdout, stderr)` keep today's shapes and today's defaults, so the CLI is
-unchanged. The two failure shapes the design calls out by line number:
-
-  * runner.py:238 raises SystemExit when the cr_mode POST fails — activation must
-    not have happened yet, or a CR failure leaks a live fault with no revert;
-  * a step failure (or any exception) after activation must still revert, which
-    today's `run_scenario` cannot do: it has no `finally`, only two explicit
-    meta-writing branches.
+  * the cr_mode POST failing raises SystemExit — activation must not have happened
+    yet, or a CR failure leaks a live fault with no revert;
+  * a step failure (or any exception) after activation must still revert.
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""#922 — D7: the production transcript renderer survives the cut of the direction table."""
+"""#922 — the production transcript renderer survives the cut of the direction table."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
@@ -43,11 +43,9 @@ def driven_run(tmp_path: Path):
 
 
 def tenant_run(run_dir: Path, *, io=_io) -> Run:
-    """The handle `run.py main` holds over a driven run: tenant-bound, built the way
-    `run_common.materialize_run` builds it (#1187 R1: `Run.under(container, id, tenant_id=)`,
-    with no runs-base record — `ensure_runs_base_record` and `Run.for_tenant` are retired). The
-    runs base is the run dir's parent, where the replay harness put it. `io` is the handle's own
-    injection seam (a recorder, in #1110)."""
+    """The tenant-bound handle `run.py main` holds over a driven run, built as
+    `run_common.materialize_run` builds it (`Run.under`, the runs base being the run dir's
+    parent). `io` is the handle's own injection seam."""
     return Run.under(fixture_runs_base(run_dir.parent), run_dir.name, tenant_id=fixture_uuid("tenant:playground"), io=io)
 
 
@@ -68,5 +66,4 @@ def test_the_two_column_wrapper_never_ships_without_the_sidebar_that_fills_it(tm
             "lands in the 240px track the sidebar was supposed to occupy")
 
     assert checked, (
-        "positive control: neither page uses the two-column shell any more, so this guard "
-        "witnesses nothing — retire it or re-point it at whatever replaced the shell")
+        "positive control: neither page uses the two-column shell any more")

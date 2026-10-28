@@ -23,7 +23,6 @@ WITHHELD = "sibling 'b' ran commit cafef00, not the source's deadbee"
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -51,17 +50,16 @@ def _not_graded(ep) -> dict:
     return J.judge_record(ep).get("not_graded") or {}
 
 
-def _withhold(ep, reason: str = WITHHELD) -> None:
+def _withhold(ep) -> None:
     """What `verify_family` leaves when it withholds the stamp: its reason, through the
     production writer."""
     with Episode.open(ep) as episode:
-        T.mod("learning.branch.outcome").write_not_comparable(episode, reason)
+        T.mod("learning.branch.outcome").write_not_comparable(episode, WITHHELD)
 
 
 def _container(ep):
-    """The siblings' container `<ep>/runs`, made with the tenant's record as the launcher makes
-    it before the first sibling (#1105 PR 2: `verify_family` opens each arm by id through the
-    episode's view, so the arms live there)."""
+    """The siblings' container `<ep>/runs`, made as the launcher makes it before the first
+    sibling: `verify_family` opens each arm by id through the episode's view."""
     with Episode.open(ep) as episode:
         T.episode_view(episode)
     return ep / "runs"
@@ -74,7 +72,6 @@ def _stampless(tmp_path):
 
 
 def test_an_accepted_family_with_no_family_stamp_is_stamped_not_comparable(tmp_path):
-    """Seventh round (finding 3)."""
     ep = _stampless(tmp_path)
     _withhold(ep)
     judge = _judge()
@@ -91,8 +88,7 @@ def test_an_accepted_family_with_no_family_stamp_is_stamped_not_comparable(tmp_p
 
 
 def test_a_family_with_the_stamp_is_graded(tmp_path):
-    """Seventh round (finding 3), the control: the same family carrying the family stamp is
-    graded — the model is called and its finding queued."""
+    """The control: the same family carrying the family stamp is graded and its finding queued."""
     ep = _stampless(tmp_path)
     J.comparable_family_stamp(ep)
     judge = _judge()
@@ -179,11 +175,11 @@ def test_the_episode_readers_refuse_a_stampless_family(tmp_path):
 
 
 def test_a_per_world_fault_leaves_the_family_stamp_to_the_verified_siblings(tmp_path):
-    """Seventh round (finding 3), FORK-1 as amended."""
-
+    """Sibling `c`'s faults (no scrub verdict, another commit) exclude it alone: the stamp covers
+    `b`, and only `b` is judged."""
     location_path(T.runs_base)(tmp_path)
-    # #1234 A3: the control is archived too — every world is judged against it, and a family
-    # whose control is not usable is stamped not graded.
+    # The control is archived too: every world is judged against it, and a family whose control
+    # is unusable is stamped not graded.
     ep = S.judged_episode(tmp_path, outcome=None, labels=("a", "b"))
     S.outcome_record(ep, "accepted", family_stamp=False)
     base = _container(ep)

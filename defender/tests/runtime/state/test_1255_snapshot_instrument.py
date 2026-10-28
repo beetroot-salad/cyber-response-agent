@@ -1,16 +1,16 @@
 """Fork lineage stays host-side and model-visible run records stay neutral."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
-
 import dataclasses
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from defender import run as run_mod
 from defender.records import _provenance
 from defender.records import RunPaths
+from defender.records._family import Family, parse_family
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
 
@@ -22,20 +22,17 @@ CONTROL_PAGE = "skills/handbook/content/runtime-loop.md"
 
 
 def test_p4_the_family_manifest_declares_no_continuation_prompt():
-    family = T.sym("records._family", "Family")
-    names = {f.name for f in dataclasses.fields(family)}
+    names = {f.name for f in dataclasses.fields(Family)}
     assert {"source_run_id", "branch_message_id", "as_of"} <= names, names
     assert "continuation_prompt" not in names, (
-        "the family manifest still declares the operator's continuation prompt (P4: the arm "
-        "resumes with no user message)")
+        "the family manifest declares a continuation prompt (an arm resumes with no user message)")
 
 
 def test_p4_a_manifest_without_a_continuation_prompt_loads():
-    parse = T.sym("records._family", "parse_family")
     doc = T.family_doc()
     doc.pop("continuation_prompt", None)
 
-    family = parse(doc)
+    family = parse_family(doc)
 
     assert family.branch_message_id == T.BRANCH_MESSAGE_ID
     assert [w.label for w in family.worlds] == list(T.WORLDS)
@@ -43,9 +40,8 @@ def test_p4_a_manifest_without_a_continuation_prompt_loads():
 
 @pytest.fixture
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both configured roots inside `tmp_path` (as `test_947_triplet_sibling`)."""
+    """The configured runs base inside `tmp_path` (as `test_947_triplet_sibling`)."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
 
 
 class _Lifecycle:
@@ -61,12 +57,12 @@ class _Lifecycle:
 
 def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
     """`run.main --tenant T --episode <id> --world <world>` over the fixture episode, lifecycle recorded."""
-    base, src = location_path(T.runs_base)(tmp_path)
+    base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     T.plant_roster(ep)
     lifecycle = _Lifecycle()
-    # #1108 P4 (OD14, O11): run.main handed the in-process launch-time publish.
-    rc = RunWithPublish(T.mod("run")).main(
+    # run.main handed the in-process launch-time publish.
+    rc = RunWithPublish(run_mod).main(
         ["--tenant", T.SOURCE_TENANT, "--episode", ep.name, "--world", world],
         lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
         preflight=lambda *_a, **_k: 0)

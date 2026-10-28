@@ -8,6 +8,7 @@ import json
 import pytest
 
 from defender.tenancy import case_ticket
+from defender.tenancy.case_ticket import AGENT_TAG_PREFIX, agent_comment_tag as _tag
 from defender.investigation.payload_view import LEAF_MAX_CHARS, PASSTHROUGH_MAX_BYTES_DEFAULT
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.runtime.engine._spec767 import (
@@ -23,15 +24,13 @@ from defender.tests.support.runtime.engine._spec767 import (
     mapping_doc,
     record,
     rendered,
-    require,
     shipped_mapping_doc,
     ticket,
     use_mapping,
 )
 
-#: Two runs' ids, a live run's and a branch run's: #1187 (declared change 1) — a run id is a
-#: canonical UUID, so each is `fixture_uuid(<label>)`, the label keeping the run it stands for
-#: readable (the run folder `make_run` builds is named by the id).
+#: A live run's and a branch run's ids: canonical UUIDs (`fixture_uuid(<label>)`), the label
+#: keeping each readable; `make_run` names the run folder by the id.
 RUN_ID = fixture_uuid("20261008t091500z-5710-sshd-invalid-user")
 BRANCH_RUN_ID = fixture_uuid("20261008t091500z-5710-sshd-invalid-user-n12-world-b-no-cmdb-owner")
 
@@ -39,17 +38,6 @@ NARRATIVE = "The account is a decommissioned service identity; no egress followe
 
 #: Every character a UI may break a line on (the writer's own `_LINE_BREAKS` set, plus `\n`).
 _LINE_BREAKS = ("\n", "\r", " ", " ", "\x85", "\x0b", "\x0c")
-
-
-def _prefix() -> str:
-    return require(case_ticket, "AGENT_TAG_PREFIX",
-                   "#1221 M1: the agent tag's fixed prefix, defined once as a constant")
-
-
-def _tag(run_id: str) -> str:
-    fn = require(case_ticket, "agent_comment_tag",
-                 "#1221 M1: the one line every posted comment opens with, naming the run")
-    return fn(run_id)
 
 
 def _tag_and_rest(body: str) -> tuple[str, str]:
@@ -66,8 +54,9 @@ def _comment_post(store: FakeStore) -> tuple[str, str]:
 
 
 def test_1221_the_tag_is_one_plain_line_naming_the_run():
-    """The tag is one plain-text line."""
-    prefix = _prefix()
+    """The tag is one plain-text line, the prefix then the run id: no line break, unchanged by JSON
+    or HTML escaping (the teaching quotes it), no markdown, and short enough for the leaf clip."""
+    prefix = AGENT_TAG_PREFIX
     assert isinstance(prefix, str), f"the tag prefix is not a string: {prefix!r}"
     assert prefix.strip(), f"the tag prefix is blank: {prefix!r}"
     for brk in _LINE_BREAKS:
@@ -202,7 +191,8 @@ def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
 
 
 def test_1221_the_tag_survives_the_listing_view_clip(tmp_path):
-    """scale_model_view_stays_bounded, and the tag inside it."""
+    """In gather's payload view one maximal comment renders verbatim; two are clipped (their last
+    words gone), yet each comment still opens with its tag line."""
     narrative = " ".join(f"word{i:05d}" for i in range(4000))
     bodies, last_words = {}, {}
     for run_id in (RUN_ID, BRANCH_RUN_ID):

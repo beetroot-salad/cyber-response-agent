@@ -20,9 +20,8 @@ from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
-    """The runs base, the episodes root and the learning state root, all per test."""
+    """The runs base and the learning state root, both per test."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -33,9 +32,8 @@ def _render(ep: Path) -> E.Page:
 
 class _ScopedJudge(J.FakeJudge):
     """The judge double answering a world-scope draw with the world reply (top-level `bucket`
-    and `systems`) and the family-scope draw with the family reply (world findings only; #1234
-    retired the family's `verdict_word`).
-    It scripts content only; the judge decides what the reply means."""
+    and `systems`) and the family-scope draw with the family reply (world findings only, no
+    `verdict_word`). It scripts content only; the judge decides what the reply means."""
 
     def __init__(self, world: dict[str, str], family: str) -> None:
         super().__init__()
@@ -61,13 +59,13 @@ def _family_reply() -> str:
 
 
 def _grade(ep: Path, tmp_path: Path, judge: J.FakeJudge) -> None:
-    """The REAL judge over the episode, driven by `judge` (it writes `judge.yaml`): by id
-    (#1105 PR 2, `_judge_921.grade_at`)."""
+    """The REAL judge over the episode (`J.grade_at`), driven by `judge`; it writes
+    `judge.yaml`."""
     J.grade_at(ep, judge=judge, draws=1, state=_state1135.env_state())
 
 
 def _oracle_row(label: str = "b", *, q: str = "user:alice", payload: object = None) -> dict:
-    """One served `oracle` world-ledger row with the coined oracle fields."""
+    """One served `oracle` world-ledger row with the oracle's fields."""
     return S.ledger_row(S.ORACLE_DECISION, label=label, params=S.query_params(q),
                         payload=payload if payload is not None else {"rows": [{"user": "alice"}]},
                         base_digest=S.digest('{"rows": []}'),
@@ -120,8 +118,8 @@ def test_1224_episode_page_renders_a_v2_episode_from_the_models_output(tmp_path)
                                              payload="UpstreamFault: upstream said no")],
         "c": [S.ledger_row(S.PASSTHROUGH, label="c")]})
     S.outcome_record(ep, "accepted", reason="pre-flight calibrated every world")
-    # #1234: `observability` left the buckets (P-a), and a discipline bucket needs a world that
-    # was shown its facts (A5) — b, whose oracle answered a call; c was served passthrough only.
+    # A discipline bucket needs a world that was shown its facts: b, whose oracle answered a
+    # call; c was served passthrough only.
     _grade(ep, tmp_path, _ScopedJudge({"b": _world_reply("decision-discipline", ["idp"]),
                                        "c": _world_reply("lead-quality", ["edr"])},
                                       _family_reply()))
@@ -223,9 +221,8 @@ def test_1224_episode_page_counts_oracle_rows_without_a_malformed_row_note(tmp_p
     counts = _malformed_counts(torn)
     assert counts, "a torn row raised no malformed-row note (dead channel)"
     assert counts == [1], (
-        f"the page's malformed-row count is {counts}, not exactly 1 for one torn line beside "
-        f"two served `oracle` rows and one `real-error` row — the served rows were counted as "
-        f"malformed (or the oracle-side store's rows were read as the world's)")
+        f"the page's malformed-row count is {counts}, not 1 for the one torn line: served or "
+        "oracle-side rows were counted as malformed")
     assert "TORN-MARKER-1224" not in torn.text, "the page showed a torn partial row"
     assert "ORACLE-SIDE-MARKER" not in torn.text, (
         "an oracle-side store row was shown as the sibling's own ledger")

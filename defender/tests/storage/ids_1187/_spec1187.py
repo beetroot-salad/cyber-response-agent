@@ -17,17 +17,16 @@ tree = H5.tree_state
 #: The arm roster's file name in the episode folder (pinned by the contract; the production
 #: owner is `defender.records._episode_paths.ARM_ROSTER_NAME`).
 ROSTER_NAME = "arms.json"
-#: The manifest's file name (`_episode_paths.FAMILY_NAME` today, unchanged).
+#: The manifest's file name (`_episode_paths.FAMILY_NAME`).
 MANIFEST_NAME = "family.yaml"
 #: The one-time command, as every refusal that sends the operator to it must spell it.
 COMMAND = "defender/cli/retire_legacy_runs.py"
-COMMAND_MODULE = "defender.cli.retire_legacy_runs"
 RUNS_LEGACY = "runs-legacy"
 EPISODES_LEGACY = "episodes-legacy"
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
 
-#: Ids the design names as off the new grammar (O2's observable list), plus near misses.
+#: Ids off the uuid grammar: the old minted and pinned shapes, and near misses of a uuid.
 OLD_MINTED_ID = "20260101t000000z-x"
 OLD_PINNED_ID = "live-lever-up-20260930-sudo"
 SAMPLE_UUID = "af3ba774-355d-4dbc-b8b6-3becc9d3e7a1"
@@ -46,7 +45,7 @@ NON_CANONICAL_IDS = (
     "..",
 )
 
-#: The known sidecar suffixes beside a run folder (`_layout._SIDECAR_SUFFIXES`, via #1105).
+#: The known sidecar suffixes beside a run folder (`_layout._SIDECAR_SUFFIXES`).
 SIDECAR_SUFFIXES = H5.SIDECAR_SUFFIXES
 
 
@@ -100,16 +99,14 @@ def make_run(container: Path, run_id: str | None = None, *,
     return run_dir
 
 
-def manifest_text(episode_id: str, labels: Iterable[str], *,
-                  source_run_id: str | None = None, extra: str = "") -> str:
+def manifest_text(episode_id: str, labels: Iterable[str]) -> str:
     """A complete persisted manifest, including each label's distinct world UUID."""
     from defender import _yaml
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     worlds = [T.world_doc(label, world_id=new_id(), role="A" if index == 0 else None,
                           axis=None, facts=[]) for index, label in enumerate(labels)]
-    src = source_run_id if source_run_id is not None else new_id()
-    return _yaml.safe_dump(T.family_doc(episode_id=episode_id, source_run_id=src, worlds=worlds)) + extra
+    return _yaml.safe_dump(T.family_doc(episode_id=episode_id, source_run_id=new_id(), worlds=worlds))
 
 
 def make_episode(data_root: Path, tenant_id: str, episode_id: str | None = None, *,
@@ -186,11 +183,9 @@ def roster_for_arms(episode_dir: Path, arms: Mapping[str, Path]) -> dict[str, st
 def torn(text: str) -> str:
     """`text` cut mid-way: a roster a crash or a hand edit truncated."""
     return text[: max(1, len(text) // 2)]
+
+
 # Links and old entries
-
-#: The levels below `<T>` that O8 says are opened without following links, by name.
-LINK_LEVELS = ("runs", "episodes", "episode", "arm_container", "run")
-
 
 def replace_with_link(path: Path, target: Path) -> Path:
     """Move the real `path` aside to `target` (if it exists) and leave a symlink at `path` pointing at `target`."""
@@ -225,11 +220,10 @@ def plant_old_natural_entries(data_root: Path, tenant_id: str) -> dict[str, Path
     return out
 
 
-def plant_old_episodes_root(root: Path, names: Iterable[str] = (
-        "fresh-authkeys-20260909-n124", "live-996-old-sshd-1-n233")) -> Path:
-    """Populate the retired shared episodes root with legacy episode folders."""
+def plant_old_episodes_root(root: Path) -> Path:
+    """Populate the retired shared episodes root with two legacy episode folders."""
     root = Path(root)
-    for name in names:
+    for name in ("fresh-authkeys-20260909-n124", "live-996-old-sshd-1-n233"):
         ep = root / name
         (ep / "runs").mkdir(parents=True, exist_ok=True)
         (ep / MANIFEST_NAME).write_text(f"episode_id: {name}\n", encoding="utf-8")

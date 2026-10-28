@@ -1,4 +1,4 @@
-"""Impl-time hardening for #611: a verb's ANNOTATIONS are part of its param contract."""
+"""#611 — a verb's annotations are part of its param contract."""
 from __future__ import annotations
 
 import pytest
@@ -27,9 +27,8 @@ ADAPTERS_DIR = DEFENDER / "integrations"
 
 
 def clamping(rec: VerbRecorder) -> FakeVerbs:
-    """A verb that uses its `int` param the way the REAL one does. `elastic.query` ends in
-    `min(limit, RETURNED_DOC_CAP)` (`elastic_adapter._build_search_body`), and `min("20", 20)` raises
-    `TypeError` — an unmapped fault, which the capture files as exit 2 = infra. The fake carries"""
+    """A verb using its `int` param as the real `elastic.query` does (`min(limit, cap)`): an
+    unchecked `"20"` would raise `TypeError`, which the capture files as exit 2 (infra)."""
 
     def query(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:
         rec.record("query", ctx, {"native_query": native_query, "limit": limit})
@@ -70,8 +69,8 @@ def test_a_mistyped_param_is_a_usage_error_not_an_infra_failure(tmp_path):
 
 
 def test_mistyped_params_cannot_trip_a_healthy_system(tmp_path):
-    """PER_SYSTEM_FAIL_LIMIT is 2, so two mistyped calls were enough to mark a LIVE system down
-    for the rest of the run. The third call — a well-formed one — must still reach the verb."""
+    """`PER_SYSTEM_FAIL_LIMIT` is 2, yet two mistyped calls must not mark a live system down: the
+    well-formed third call still reaches the verb."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=clamping(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs", "limit": "20"}),
@@ -130,8 +129,8 @@ def test_well_typed_params_including_optionals_and_containers_are_admitted(tmp_p
     ("identity", "list-users", {"enabled": "false"}, "enabled"),
 ])
 def test_the_real_registry_rejects_a_mistyped_param(system, verb, params, why):
-    """The shipped adapters, not a fake: each of these signatures has a non-`str` param a model
-    can plausibly BIND and plausibly send as a string, and each was admitted before."""
+    """The shipped adapters, not a fake: each signature has a non-`str` param a model can bind
+    and plausibly send as a string."""
     fn = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL).verbs(system)[verb]
     assert why in model_facing_params(fn), (
         f"{why} is not a param a model may bind on {system}.{verb} — this row cannot reach the "

@@ -90,13 +90,9 @@ def test_1105_run_setup_names_a_run_by_a_bare_uuid_whatever_suffix_the_alert_car
 
 def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
         tmp_path, data_root):
-    """When tenant.runs is a link to an outside folder, run setup refuses before creating or
-    reading anything inside it, and run.py prints the refusal as '[run.py] ...': the outside
-    folder stays empty and no raw OSError escapes. Positive control: an absent tenant.runs is
-    created with the run. The link is P2's one representative state of the runs folder; a
-    dangling link and a non-directory there are not driven here: _io.hold(follow=False) tells
-    those states apart (test_1105_hold_follow_false_refuses_a_link_root_and_tells_the_states_apart).
-    The tenant.runs arm is driven through run.main itself."""
+    """Through `run.main`, a linked `tenant.runs` is refused as '[run.py] ...' before anything
+    is created through it or the lifecycle runs; an absent `tenant.runs` is created with the run.
+    (Dangling links and non-directories: `test_1105_spec_holes.py`.)"""
     from defender.records import RunRefused
 
     alert = H.alert_file(tmp_path / "in")
@@ -128,9 +124,6 @@ def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
 
 def test_1105_run_setups_refusal_of_a_linked_runs_folder_is_one_stderr_line_naming_the_path(
         tmp_path, data_root):
-    """The hold's refusal of a linked runs folder is TenantRefused shown as '[run.py] ...'
-    naming the path. (The odd-occupant refusals at a run's own name moved with the pinned ids:
-    see test_1187_roster_sibling's O8 cases.)"""
     from defender.records import RunRefused
 
     alert = H.alert_file(tmp_path / "in")
@@ -152,7 +145,7 @@ def test_1105_run_setups_refusal_of_a_linked_runs_folder_is_one_stderr_line_nami
 
 def test_1279_o8_make_run_dir_makes_the_run_dir_once_and_refuses_a_second_time(
         tmp_path, data_root):
-    """O8: the run dir is made exclusively through a handle from `create()`; no second make."""
+    """The run dir is made exclusively through a handle from `create()`; no second make."""
     from defender.records import RunPaths
 
     t = H.tenant(data_root, H.T_ID)
@@ -173,7 +166,7 @@ def test_1279_o8_make_run_dir_makes_the_run_dir_once_and_refuses_a_second_time(
                                   "dangling-link"])
 def test_1279_o8_make_run_dir_refuses_anything_at_the_run_dir_without_following_it(
         tmp_path, data_root, kind):
-    """O8: an empty dir, a setup-only dir, a file or a link at the run id is refused as found."""
+    """An empty dir, a setup-only dir, a file or a link at the run id is refused as found."""
     from defender.records import RunPaths
 
     t = H.tenant(data_root, H.T_ID)
@@ -208,7 +201,7 @@ def test_1279_o8_make_run_dir_refuses_anything_at_the_run_dir_without_following_
 @pytest.mark.parametrize("kind", ["directory", "dangling-link", "link-to-file", "link-to-dir"])
 def test_1279_o8_make_run_dir_refuses_what_appears_between_a_check_and_the_make(
         tmp_path, data_root, kind):
-    """O8: an entry planted right before the run dir's own mkdir is refused untouched (exclusive make)."""
+    """An entry planted right before the run dir's own mkdir is refused untouched (exclusive make)."""
     from defender.tests.support.storage import _setup_faults_1279 as F
 
     t = H.tenant(data_root, H.T_ID)
@@ -239,7 +232,7 @@ def _sidecar_suffixes() -> tuple[str, ...]:
 @pytest.mark.parametrize("suffix", _sidecar_suffixes())
 def test_1279_o8_natural_setup_refuses_any_entry_at_its_minted_ids_sidecar_name(
         tmp_path, data_root, monkeypatch, suffix, kind):
-    """O8: in the natural lane too, any entry at the minted id's sidecar name is refused, naming it."""
+    """In the natural lane too, any entry at the minted id's sidecar name is refused, naming it."""
     from defender.records import RunId
     from defender.tests.support.storage import _setup_faults_1279 as F
 
@@ -247,8 +240,6 @@ def test_1279_o8_natural_setup_refuses_any_entry_at_its_minted_ids_sidecar_name(
     alert = H.alert_file(tmp_path / "in")
     runs = Path(location_path(t.runs))
     fixed = str(uuid.uuid4())
-    # No seam fixes the id `create()` mints, and a sidecar can only be planted at a known id: the
-    # one targeted patch of this test.
     monkeypatch.setattr(RunId, "mint", classmethod(lambda cls: cls.parse(fixed)))  # lint-monkeypatch: ok — no seam fixes the id create() mints, and a sidecar can only be planted at a known id
     runs.mkdir(parents=True)
     sidecar = runs / f"{fixed}{suffix}"

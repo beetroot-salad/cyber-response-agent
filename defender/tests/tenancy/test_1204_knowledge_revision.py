@@ -1,10 +1,5 @@
-"""#1204: a run stamp's `knowledge` wire value — what reads back, what folds to `None`.
-
-#1108 P4 retired the reader that took that value from the tenant clone's `.git`
-(`capture_knowledge`): the run process reads nothing of the clone, and a run's knowledge stamp
-is the export it copied (`tests/tenancy/tenant_1108_p4/test_run_start.py::test_o_b_the_stamp_
-is_the_export_copied_never_the_clones_head`). The wire value it wrote stays pinned here.
-"""
+"""#1204: a run stamp's `knowledge` wire value — what reads back, what folds to `None`. Which
+value a run stamps (the export it copied) is `tenant_1108_p4/test_run_start.py`'s."""
 from __future__ import annotations
 
 import json
@@ -73,7 +68,6 @@ def _without_knowledge() -> dict[str, Any]:
 @pytest.mark.parametrize("name", sorted(MALFORMED))
 def test_1204_a_malformed_knowledge_value_folds_to_none_and_keeps_every_other_field(
         tmp_path, name):
-    """O4/D2."""
     doc = {**_without_knowledge(), "knowledge": MALFORMED[name]}
     record = RunProvenance.from_obj(doc)
     assert record is not None, "a bad knowledge value voided the whole stamp"
@@ -103,7 +97,6 @@ def test_1204_each_valid_knowledge_value_reads_back_as_itself(tmp_path, name):
 
 
 def test_1204_a_stamp_that_does_not_say_writes_null_and_an_old_stamp_reads_as_none():
-    """D2."""
     on_disk = json.loads(RunProvenance(commit="a" * 40, dirty=False).as_json())
     assert "knowledge" in on_disk, on_disk
     assert on_disk["knowledge"] is None, on_disk

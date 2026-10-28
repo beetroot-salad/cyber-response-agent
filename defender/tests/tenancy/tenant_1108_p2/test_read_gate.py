@@ -62,7 +62,7 @@ def _drive_as(read_scene, role, turns):
 ])
 def test_own_tenant_corpus_reads_work_and_other_tenant_and_settings_reads_refuse(
         read_scene, tmp_path, role, surface, relative):
-    """O2/D4: same-path corpus bytes reach both roles/surfaces, other roots remain denied."""
+    """Same-path corpus bytes reach both roles and surfaces; other roots remain denied."""
     tenant, _ = read_scene
     mine = _put(tenant.agent, relative, 'OWN-TENANT-P2-CONTENT')
     # This is just a neighboring physical tree; it need not bypass the one-tenant guard.
@@ -72,7 +72,6 @@ def test_own_tenant_corpus_reads_work_and_other_tenant_and_settings_reads_refuse
     checkout = T.DEFENDER / 'skills' / 'gather' / 'SKILL.md'
     checkout_mark = 'The query computes the answer server-side and returns it small and exact.'
     assert checkout_mark in checkout.read_text(encoding='utf-8')
-    assert checkout_mark.strip(), 'checkout control must observe nonempty content'
     model = _drive_as(read_scene, role, [
         _read_turn(surface, _model(mine, tenant=tenant)), _read_turn(surface, other),
         _read_turn(surface, settings), _read_turn(surface, _model(checkout, tenant=tenant))])
@@ -81,7 +80,7 @@ def test_own_tenant_corpus_reads_work_and_other_tenant_and_settings_reads_refuse
     assert 'Blocked' in model.seen[2], 'another tenant root was not explicitly refused'
     assert 'SETTINGS-P2-CONTENT' not in '\n'.join(model.seen)
     assert 'Blocked' in model.seen[3], 'settings half was not explicitly refused'
-    assert checkout_mark in model.seen[4], 'P2 prematurely removed checkout corpus access'
+    assert checkout_mark in model.seen[4], 'a checkout file read did not return its bytes'
 
 
 @pytest.mark.parametrize('role', ['main', 'gather'])
@@ -92,7 +91,7 @@ def test_own_tenant_corpus_reads_work_and_other_tenant_and_settings_reads_refuse
 ])
 def test_tenant_root_preserves_secret_extension_and_corpus_shape_denies(
         read_scene, role, surface, relative):
-    """O2 P2 boundary: adding a read root grants neither arbitrary files nor secrets."""
+    """Adding a read root grants neither arbitrary files nor secrets."""
     tenant, _ = read_scene
     denied = _put(tenant.agent, relative, 'DENIED-TENANT-P2-CONTENT')
     allowed = _put(tenant.agent, 'lessons/control.md', 'CONTROL-TENANT-P2-CONTENT')
@@ -106,7 +105,7 @@ def test_tenant_root_preserves_secret_extension_and_corpus_shape_denies(
 @pytest.mark.parametrize('role', ['main', 'gather'])
 @pytest.mark.parametrize('surface', ['typed', 'bash'])
 def test_raw_payload_permissions_keep_the_existing_role_partition(read_scene, role, surface):
-    """D4: adding tenant knowledge cannot hand MAIN the captured payloads GATHER owns."""
+    """Adding tenant knowledge cannot hand MAIN the captured payloads GATHER owns."""
     tenant, run_dir = read_scene
     raw = _put(run_dir, 'gather_raw/l-abc123/0.json', 'ROLE-PAYLOAD-P2-CONTENT')
     allowed = _put(tenant.agent, 'lessons/control.md', 'ROLE-CONTROL-P2-CONTENT')
@@ -122,7 +121,7 @@ def test_raw_payload_permissions_keep_the_existing_role_partition(read_scene, ro
 
 
 def test_confined_curator_binding_keeps_tenant_knowledge_outside_its_read_scope(read_scene, tmp_path):
-    """D4: the existing confined learning role retains its own corpus, without a global lift."""
+    """The confined learning role keeps its own corpus, without a global lift."""
     from defender.learning.author.curator_engine import CuratorDeps
     from defender import box as box_mod
     from defender.investigation import permission

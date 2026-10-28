@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from defender import _git  # type: ignore[import-not-found]
 from defender.learning.core import cli  # type: ignore[import-not-found]
 from defender.learning.core import drains  # type: ignore[import-not-found]
 from defender.learning.core import faults  # type: ignore[import-not-found]
@@ -142,7 +143,8 @@ def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
 
 
 def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, monkeypatch):
-    """A _LeadAuthorRetry must reach the drain's retry handler via `propagate=`, NOT the"""
+    """A `_LeadAuthorRetry` reaches the drain's retry handler (via `propagate=`), not the
+    dead-letter path: the marker is requeued with `attempts` bumped."""
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-transient")
@@ -170,45 +172,42 @@ def test_drain_pitfalls_swallows_a_plain_curation_error(tmp_path):
     drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _run_pitfalls)
 
 
-def test_run_or_dead_letter_dead_letters_a_plain_exception():
+@pytest.mark.parametrize("exc", [
+    RuntimeError("poison item"),
+    # A per-run *data* failure (the validate.py sites) dead-letters like any other Exception;
+    # only the StageAbort family is special.
+    RunUnprocessable("malformed report.md"),
+], ids=["plain", "run-unprocessable"])
+def test_run_or_dead_letter_dead_letters_a_plain_exception(exc):
     """A per-item failure is dead-lettered: the callback fires with the exception and the
     helper reports failure (no re-raise) so the serial drain keeps going."""
     calls: list[Exception] = []
 
     def _boom():
-        raise RuntimeError("poison item")
+        raise exc
 
     ok = faults.run_or_dead_letter(_boom, calls.append)
     assert ok is False
     assert len(calls) == 1
-    assert isinstance(calls[0], RuntimeError)
+    assert isinstance(calls[0], type(exc))
 
 
-def test_run_or_dead_letter_dead_letters_a_run_unprocessable():
-    """A RunUnprocessable is a per-run *data* failure (the ~30 validate.py sites): it must
-    dead-letter like any other Exception — only the StageAbort family is special."""
+@pytest.mark.parametrize("exc", [
+    StageAbort("systemic fault"),
+    FatalConfigError("non-numeric threshold"),
+    # A broken local-state git op dooms the whole batch: never quarantined per marker.
+    _git.GitError(["status"], 128, "not a git repository"),
+], ids=["stage-abort", "fatal-config", "git-error"])
+def test_run_or_dead_letter_reraises_systemic_faults(exc):
+    """The systemic family is NEVER dead-lettered — it re-raises past the guard so it reaches _run_stage as the contracted exit 2."""
     calls: list[Exception] = []
 
     def _boom():
-        raise RunUnprocessable("malformed report.md")
+        raise exc
 
-    ok = faults.run_or_dead_letter(_boom, calls.append)
-    assert ok is False
-    assert len(calls) == 1
-    assert isinstance(calls[0], RunUnprocessable)
-
-
-def test_run_or_dead_letter_reraises_systemic_faults():
-    """The systemic family is NEVER dead-lettered — it re-raises past the guard so it reaches _run_stage as the contracted exit 2."""
-    for exc in (StageAbort("systemic fault"), FatalConfigError("non-numeric threshold")):
-        calls: list[Exception] = []
-
-        def _boom(exc=exc):
-            raise exc
-
-        with pytest.raises((StageAbort, FatalConfigError)):
-            faults.run_or_dead_letter(_boom, calls.append)
-        assert calls == []
+    with pytest.raises(type(exc)):
+        faults.run_or_dead_letter(_boom, calls.append)
+    assert calls == []
 
 
 def test_run_or_dead_letter_propagates_declared_control_flow():
@@ -254,21 +253,6 @@ def test_run_stage_maps_run_unprocessable_to_exit_two_on_direct_run():
     ) == 2
 
 
-def test_run_or_dead_letter_reraises_giterror_not_quarantine():
-    """A ``GitError`` (a broken local-state git op) dooms the whole batch, so it must
-    re-raise out of the dead-letter guard — never be quarantined as a per-marker failure."""
-    from defender import _git  # type: ignore[import-not-found]
-
-    dead_lettered: list[Exception] = []
-
-    def boom():
-        raise _git.GitError(["status"], 128, "not a git repository")
-
-    with pytest.raises(_git.GitError):
-        faults.run_or_dead_letter(boom, dead_lettered.append)
-    assert dead_lettered == []
-
-
 def test_run_stage_maps_giterror_to_exit_2():
     """At the stage boundary a ``GitError`` becomes the contracted FATAL exit 2."""
     from defender import _git  # type: ignore[import-not-found]
@@ -301,7 +285,7 @@ _UNRECOGNISED_HOLD = _HELD_REASONS[-1]
 
 
 def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
-    """#881/O2: `_pending_queue_counts` counts what a tick could take, not file lines."""
+    """`_pending_queue_counts` counts what a tick could take, not file lines."""
     paths = _paths(tmp_path)
     held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
 
@@ -317,18 +301,13 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
 
     _seed_queue(paths, [_row("legacy/0", held_reason=_UNRECOGNISED_HOLD)])
     assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 0, (
-        f"a row held for {_UNRECOGNISED_HOLD!r} was counted as pending work; the count is "
-        "reading the reason's prose rather than the field, so any hold whose wording it "
-        "does not recognise — a legacy row, a reworded gate — reads as authorable"
+        f"a row held for {_UNRECOGNISED_HOLD!r} was counted as pending work"
     )
 
     for wordless in ("", None):
         _seed_queue(paths, [_row(f"legacy/{i}", held_reason=wordless) for i in range(5)])
         assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS) == (0, 5), (
-            f"five rows stamped held_reason={wordless!r} were counted as pending work; the "
-            "count is testing whether the reason is TRUTHY rather than whether the field is "
-            "there, so a holder that had no wording to give leaves its rows waking the drain "
-            "on every tick — O2's own defect, by the one route no gate in the tree spells"
+            f"five rows stamped held_reason={wordless!r} were counted as pending work"
         )
 
     _seed_queue(paths, ["", _row("h/0"), "   ", ""])
@@ -342,14 +321,14 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
         _row("c/0"),
     ])
     assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 6, (
-        "a line that is not a row is work for the drain's unkeyable retirement and must be "
-        "counted — whether it failed to parse at all, or parsed to a list, a null, a string "
-        "or a number, none of which is a row"
+        "a line that is not a row (unparseable, or a list, null, string or number) was not "
+        "counted as work for the unkeyable retirement"
     )
 
 
 def test_881_a_deferred_row_still_counts_as_work(tmp_path, monkeypatch):
-    """#881/O2, carried into #773's replacement for the retryable forward-check hold."""
+    """A deferred row may land on the next tick, so it still counts as work; a permanent hold
+    does not."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     paths = _paths(tmp_path)
 
@@ -374,7 +353,7 @@ def test_881_a_deferred_row_still_counts_as_work(tmp_path, monkeypatch):
 def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_again(
     tmp_path, monkeypatch
 ):
-    """#881/O2: `_has_curator_work` answers for rows that can be AUTHORED."""
+    """`_has_curator_work` answers for rows that can be AUTHORED."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     paths = _paths(tmp_path)
     held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
@@ -402,7 +381,5 @@ def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_agai
 
     _seed_queue(paths, [_row(f"legacy/{i}", held_reason=_UNRECOGNISED_HOLD) for i in range(5)])
     assert drains._has_curator_work(_state1135.state_for_paths(paths)) is False, (
-        f"the wake gate fired for five rows held for {_UNRECOGNISED_HOLD!r}; it is reading "
-        "the reason's wording rather than the field, so the legacy rows this defect strands "
-        "— held by a writer that no longer exists — pin it open exactly as before"
+        f"the wake gate fired for five rows held for {_UNRECOGNISED_HOLD!r}"
     )

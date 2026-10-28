@@ -58,7 +58,8 @@ def test_a_lead_that_tests_an_undeclared_hypothesis_is_rejected():
 
 
 def test_a_phantom_hierarchical_child_is_reported():
-    """The id shape the language allocates when a lean hypothesis refines into sub-cases:"""
+    """`h-001-777` is the id shape a lean hypothesis refines into (`h-001` -> `h-001-001`), and
+    `tests` is where such children are named, so a phantom one is reported too."""
     errors = _errors(_doc(
         _declaring("h-001") + "\n"
         + _lead("h-001,h-001-777") + "\n"
@@ -114,8 +115,8 @@ def test_final_weights_does_not_mint_a_hypothesis_no_H_row_declares():
 
 
 def test_the_weight_table_is_keyed_by_exactly_what_the_H_rows_declare():
-    """The invariant the two tests above are instances of, and the one the consumers were
-    already written as if it held: both look weights up BY a declared id."""
+    """The invariant behind the test above, which the consumers rely on: they look weights up
+    BY a declared id."""
     companion = _parsed(
         _declaring("h-001", "h-002") + "\n"
         + _lead("h-001,h-002") + "\n"
@@ -126,7 +127,8 @@ def test_the_weight_table_is_keyed_by_exactly_what_the_H_rows_declare():
 
 
 def test_a_conclude_naming_a_hypothesis_nothing_declares_is_rejected():
-    """The fourth site, and the one the parser used to throw away:"""
+    """`:T conclude.surviving` is the fourth reference site: the run's closing claim about what
+    still stands must not name a phantom."""
     errors = _errors(_doc(
         _declaring("h-001") + "\n"
         + _lead("h-001") + "\n"
@@ -140,7 +142,8 @@ def test_a_conclude_naming_a_hypothesis_nothing_declares_is_rejected():
 
 @pytest.mark.parametrize("marker", ["none", "n/a", "None"])
 def test_an_empty_surviving_table_is_not_read_as_a_hypothesis(marker: str):
-    """`none` is how the format writes an EMPTY array, not an id (`defender/docs/dense-investigation-format.md`:"""
+    """`none` is how the format writes an EMPTY array, not an id: a run whose hypotheses were
+    all refuted writes exactly this row."""
     companion = _parsed(
         _declaring("h-001") + "\n"
         + _lead("h-001") + "\n"
@@ -157,7 +160,8 @@ def test_an_empty_surviving_table_is_not_read_as_a_hypothesis(marker: str):
 
 
 def test_the_surviving_key_is_not_advertised_as_a_flat_conclude_row():
-    """`_CONCLUDE_SCALARS` is read off `Conclude.__annotations__`, so a field added to carry a SUB-TABLE joins the flat-key set unless it is subtracted like `termination` is."""
+    """`_CONCLUDE_SCALARS` is read off `Conclude.__annotations__`, so a field carrying a
+    SUB-TABLE joins the flat-key set unless it is subtracted, as `termination` is."""
     from defender.skills.invlang.parser import _CONCLUDE_KEYS_HINT, _CONCLUDE_SCALARS
 
     assert "surviving_hypotheses" not in _CONCLUDE_SCALARS
@@ -177,8 +181,8 @@ def test_the_surviving_key_is_not_advertised_as_a_flat_conclude_row():
 
 
 def test_the_surviving_table_is_projected_rather_than_discarded():
-    """The parser half. Checking the reference needs the rows to reach the companion at
-    all, and `hypothesis` is the key `:T resolutions` records already use for it."""
+    """The parser half: the rows reach the companion, keyed `hypothesis` as `:T resolutions`
+    records are."""
     companion = _parsed(
         _declaring("h-001") + "\n"
         + _lead("h-001") + "\n"
@@ -207,7 +211,8 @@ def test_a_dropped_declaration_defers_for_its_own_ids_only():
 
 
 def test_the_misspelled_declaration_block_defers_for_the_ids_it_dropped():
-    """`:H l-001.new_hypothesis` (singular) is the reachable typo, and it deletes the declarations just as a rejected header does — the parser warns and says so."""
+    """`:H l-001.new_hypothesis` (singular) is the reachable typo: it drops its declarations as
+    a rejected header does, and the parser warns."""
     doc = _doc(
         _declaring("h-001") + "\n"
         + _lead("h-001,h-010") + "\n"
@@ -235,7 +240,8 @@ def test_a_dropped_declaration_does_not_make_the_commitment_rule_double_report()
 
 
 def test_an_unmappable_dropped_declaration_still_stands_the_rule_down():
-    """The honest fallback. A declaration row whose first cell is not id-shaped names no id to defer FOR, so there is no way to tell a reference that block would have satisfied from a genuine phantom — and r"""
+    """A dropped row whose first cell is not id-shaped names no id to defer FOR, so the whole
+    rule stands down rather than report one defect twice."""
     assert _errors(_doc(
         _declaring("h-001") + "\n"
         ":H l-001.new_hypotheses [id|name|attached_to|rel]\n"
@@ -281,7 +287,8 @@ def test_an_undeclared_authorization_contract_in_tests_is_rejected():
 
 
 def test_a_siblings_commitment_is_rejected_even_though_it_exists():
-    """The scoping that makes the rule worth having:"""
+    """`p2` exists, but on h-002, which this lead does not test: commitments resolve only
+    against the tested hypotheses."""
     errors = _commitment_errors(_with_preds("h-001,p2"))
     assert len(errors) == 1
     assert "'p2'" in errors[0]

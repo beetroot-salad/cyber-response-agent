@@ -17,14 +17,9 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
 
 def test_the_repository_reads_and_writes_episode_records_without_the_model_stack(tmp_path):
-    """With `pydantic_ai` unimportable, the repository answers over a tenant's runs folder (the
-    review: its readers raised ModuleNotFoundError on first read).
-
-    #1187 declared change 13 (R6, D-del): PR 1's `_episodes` record and its writer and readers
-    (`record_episode_runs`, `episode_runs`, `sibling_run_ids`) are deleted — there is no record
-    to write or read. The guard kept is the import weight: the repository lists a container
-    holding one UUID run and no `_tenant.json` (declared change 6) in a process without the
-    model stack. (Name kept.)"""
+    """With `pydantic_ai` unimportable, the repository lists a runs folder holding one UUID run
+    and no `_tenant.json`, importing no model stack. (The name is historical: no episode record
+    is left to read or write.)"""
     import uuid
 
     t = H.tenant(tmp_path / "data")
@@ -90,9 +85,6 @@ def test_a_run_refused_escapes_its_own_message():
     assert str(R.RunRefused(str(err))) == str(err), "escaping an escaped message changes it"
 
 
-# -- the second review's findings ---------------------------------------------------------------
-
-
 def test_a_huge_read_bound_allocates_nothing_up_front(tmp_path):
     """`max_bytes` far past any file's size reads the file, never a `MemoryError`: the prefix
     read asks for one chunk at a time, not for its whole budget."""
@@ -102,10 +94,9 @@ def test_a_huge_read_bound_allocates_nothing_up_front(tmp_path):
 
 
 def test_an_absent_runs_folder_refusal_carries_no_stale_error(tmp_path):
-    """An open's `RunAbsent` over an absent runs folder (#1105 PR 2 review: an open answers an
-    absent container as the run gone) is raised outside the hold's `except`, so it carries no
-    `FileNotFoundError` as its context (a traceback that blamed the wrong error). Positive
-    control: once the folder and the run exist, the same open hands the run out."""
+    """An open's `RunAbsent` over an absent runs folder (a container gone reads as the run gone)
+    is raised outside the hold's `except`, so it carries no `FileNotFoundError` context blaming
+    the wrong error. Positive control: once the folder and the run exist, the open succeeds."""
     import uuid
 
     t = H.tenant(tmp_path / "data")
@@ -115,9 +106,6 @@ def test_an_absent_runs_folder_refusal_carries_no_stale_error(tmp_path):
     assert absent.value.__context__ is None, repr(absent.value.__context__)
     H.make_run(location_path(t.runs), run_id)
     assert t.runs_repository().open(R.RunId.parse(run_id)).run_dir == location_path(t.runs) / run_id
-
-
-# -- the third review's findings ----------------------------------------------------------------
 
 
 @pytest.mark.parametrize("name", ["\x00" * 50, "\x01" * 120, "a" * 500, "ab\nc" * 60])
@@ -136,8 +124,8 @@ def _family_doc(episode_id: str, label: str) -> dict:
     world = {"label": label, "world_id": T.fixture_world_id(label),
              "role": "A", "story": "s", "axis": None,
              "disposition_declared": "malicious", "label_basis": "policy-rule", "facts": []}
-    # #1255 (D1, P4): `T.family_doc` writes the continuation prompt and the fence count only while
-    # `Family` still declares them, so this stays about the bound on both sides.
+    # `T.family_doc` drops the fields `Family` no longer declares, so this document stays
+    # loadable and the test stays about the label alone.
     return T.family_doc(episode_id=episode_id, source_run_dir="/runs/src", source_run_id="src",
                         branch_message_id=1, as_of="2026-07-28T16:18:45Z", base_story="b",
                         served_systems=["elastic"], discriminator={"predicate": "p"},
@@ -156,9 +144,7 @@ def test_a_runs_folder_that_cannot_be_opened_is_not_called_a_link(tmp_path):
 
 def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words(tmp_path):
     """Run setup holds its runs folder with the repository's own opener, so one state has one
-    message wherever it is met.
-
-    #1279 (A3): run setup takes no id, so it reaches its runs folder with the id it mints."""
+    message wherever it is met."""
     from defender import run_common
     from defender.records._tenant_id import TenantRefused
     t = H.tenant(tmp_path / "data")
@@ -184,8 +170,8 @@ def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
 
 
 def test_a_long_printable_path_keeps_its_file_name_when_cut():
-    """The xhigh review's case: a knowledge-folder refusal over a deep path must still name the
-    entry to remove, so `shown` cuts the middle and keeps the start and the end."""
+    """A knowledge-folder refusal over a deep path must still name the entry to remove, so
+    `shown` cuts the middle and keeps the start and the end."""
     from defender._shown import shown
     path = "agent/" + "skills/very-long-skill-folder-name/" * 4 + "file.md"
     text = shown(path)
@@ -193,9 +179,6 @@ def test_a_long_printable_path_keeps_its_file_name_when_cut():
     assert text.startswith("agent/skills/"), text
     assert "chars)" in text, text
     assert len(text) < len(path), text
-
-
-# -- the second xhigh review's findings ---------------------------------------------------------
 
 
 def test_a_runs_folder_fault_above_the_folder_is_not_blamed_on_the_folder(tmp_path):

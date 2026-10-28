@@ -1,5 +1,4 @@
-"""Substrate for the #1035 pins (`test_1035_one_roster_read.py`): the generalised
-drop-to-`nobody` instrument, and the surface under test."""
+"""Helpers for `test_1035_one_roster_read.py`: a run-as-`nobody` probe and the surface under test."""
 from __future__ import annotations
 
 import io
@@ -13,13 +12,11 @@ from pathlib import Path
 
 from defender.tests.support.runtime.engine._declared869 import _hand_tree_to_nobody, _NOBODY, _reclaim_tree
 
-# THE SURFACE UNDER TEST — the roster primitive (#1035), re-exported so the suite and its
-# substrate name one symbol.
+# The surface under test, re-exported so the suite and this module name one symbol.
 from defender.systems.verbs import read_roster  # noqa: F401 — re-exported to the suite
 
-#: The child's exit codes. Distinct on purpose: a red run must say WHAT happened in the child,
-#: and "raised something other than the expected class" is this issue's own defect, not a
-#: setup failure.
+#: The child's exit codes, distinct so a red run says what happened: raising the wrong class is
+#: a defect, not a setup failure.
 EXIT_RAISED_EXPECTED = 0
 EXIT_RETURNED = 1
 EXIT_SETUP_FAILED = 2
@@ -35,11 +32,8 @@ _EXIT_NAMES = {
 
 @dataclass(frozen=True)
 class ChildVerdict:
-    """What the `nobody` child saw, shipped back over the pipe.
-
-    `raised` is the raised exception's qualified class name (None when the probe returned);
-    `message` is its `str()`; `returned` is the returned value's `repr()` (None when it
-    raised); `log` is everything the probe wrote to stdout and stderr while it ran."""
+    """What the `nobody` child saw: `raised` (qualified class name) and `message`, or `returned`
+    (a `repr()`), plus `log`, the probe's stdout and stderr."""
 
     code: int
     raised: str | None
@@ -57,13 +51,9 @@ class ChildVerdict:
 
 
 def run_as_nobody(probe: Callable[[], object], *, expected: type[BaseException]) -> ChildVerdict:
-    """Fork, drop the child to `nobody` (when running as root; a non-root uid already meets
-    the mode bits itself), run `probe` there with both streams captured, and return its
-    verdict.
-
-    The exit code classifies the outcome (see the `EXIT_*` constants) and the pipe carries the
-    detail. The pipe is drained BEFORE `waitpid`, so a child with a long log cannot block on a
-    full pipe while the parent waits for it to exit."""
+    """Run `probe` in a forked child dropped to `nobody` (when root; a non-root uid already meets
+    the mode bits) with both streams captured, and return its verdict. The pipe is drained before
+    `waitpid` so a long log cannot block the child on a full pipe."""
     read_end, write_end = os.pipe()
     pid = os.fork()
     if pid == 0:  # pragma: no cover — the child never returns to pytest
@@ -121,23 +111,15 @@ def run_as_nobody(probe: Callable[[], object], *, expected: type[BaseException])
 
 @contextmanager
 def handed_to_nobody(root: Path, target: Path, mode: int) -> Iterator[None]:
-    """Hand `root` (and everything under it) to `nobody`, set `target` to `mode`, and undo
-    both on the way out.
+    """Hand `root`'s tree to `nobody` and set `target` to `mode`, undoing both on the way out.
 
-    Handed over rather than merely opened up, for the same reason `_declared869` does it: a
-    probe that writes state (the pitfalls drain's queue lock) or runs git needs to OWN the
-    tree, and a setup failure is not a refusal. `mode` is the whole point of the parameter —
-    `0o400` is the listable-but-unsearchable arm (#1035's own), `0o000` the cannot-list arm,
-    `0o755` the readable positive control."""
-    # The handover sits INSIDE the `try`, and the reclaim is what the `finally` guarantees:
-    # a `chmod` that fails on the way out (a `target` the probe removed — the drain's
-    # `reset --hard` + `clean` over a handed-over repo does exactly that) must not skip it,
-    # or the subtree stays owned by `nobody` and every later test in this worker that reuses
-    # the parent directory meets foreign-owned files. So the restore is best-effort and the
-    # reclaim runs regardless.
+    Handed over, not just opened up: a probe that writes state (the drain's queue lock) or runs
+    git must own the tree. `mode`: `0o400` listable but unsearchable, `0o000` unlistable,
+    `0o755` the readable control."""
+    # The reclaim runs even when the restoring `chmod` fails (the drain's `reset --hard` + `clean`
+    # can remove `target`); otherwise later tests in this worker meet `nobody`-owned files.
     as_root = os.geteuid() == 0
-    # The mode `target` HAD, restored on the way out — not a fixed `0o755`, which would leave
-    # an adapter FILE handed over as `target` executable afterwards.
+    # Restore the original mode, not a fixed `0o755` that would leave an adapter file executable.
     original = stat.S_IMODE(target.stat().st_mode)
     try:
         if as_root:

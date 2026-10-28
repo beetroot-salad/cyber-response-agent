@@ -76,9 +76,7 @@ def test_the_entrypoint_does_not_load_a_second_copy_of_itself():
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     report = done.stderr.decode("utf-8", "replace").strip().splitlines()[-1]
     assert report == "UNDER_IMPORT_NAME=__main__", (
-        f"{report}: the interpreter holds a SECOND copy of the entrypoint module — the one it "
-        "ran as the main module, and another that `box_codec`'s import built from source, "
-        "paid on every `docker exec`")
+        f"{report}: the interpreter holds a second copy of the entrypoint module")
 
 
 _REPORT_CLOBBER = (
@@ -100,8 +98,7 @@ def test_running_as_main_never_displaces_an_ordinary_import_of_itself():
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     report = done.stderr.decode("utf-8", "replace").strip().splitlines()[-1]
     assert report == "ORDINARY_IMPORT_SURVIVED=True", (
-        f"{report}: running the entrypoint as the main module REPLACED the module object that "
-        "an ordinary import had already put in place")
+        f"{report}: running as the main module replaced the already-imported module object")
 
 
 def test_the_allowlist_and_the_mark_have_one_owner():

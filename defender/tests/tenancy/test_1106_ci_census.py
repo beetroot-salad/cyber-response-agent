@@ -11,30 +11,21 @@ import pytest
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.support.invlang.validation._dispositions995 import planted_tree
 from defender.tests.support.shared.contracts._repo import seed_repo
+from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H1120
 
 GATE = T.REPO_ROOT / "tooling" / "lint" / "lint_verb_disposition_census.py"
 
-_LEAD = "lead-zero-correlation"
-_WHY = "the template grants nothing until an operator decides"
-
 #: The fixture's table: total over the planted census, and grants the correlation lead
 #: alpha.lookup.
-ROWS_ONE: dict[tuple[str, str], dict] = {
-    ("alpha", "health-check"): {"roles": ["gather", _LEAD]},
-    ("alpha", "lookup"): {"roles": ["gather", _LEAD]},
-    ("beta", "health-check"): {"roles": ["gather"]},
-    ("beta", "lookup"): {"roles": ["gather"]},
-}
+ROWS_ONE = H1120.CENSUS_ROWS
 
 #: A table that is total and withholds the lead (legal: the lead is skipped, not the run).
 ROWS_TWO: dict[tuple[str, str], dict] = {
     pair: {"roles": ["gather"]} for pair in ROWS_ONE
 }
 
-#: The template: total, and grants nothing (D1).
-ROWS_TEMPLATE: dict[tuple[str, str], dict] = {
-    pair: {"roles": [], "reason": _WHY} for pair in ROWS_ONE
-}
+#: The template: total, and grants nothing.
+ROWS_TEMPLATE = H1120.CENSUS_TEMPLATE_ROWS
 
 
 def _without(rows: dict[tuple[str, str], dict], pair: tuple[str, str]) -> dict:
@@ -43,15 +34,14 @@ def _without(rows: dict[tuple[str, str], dict], pair: tuple[str, str]) -> dict:
 
 
 def _repo(tmp_path: Path, *, fixture: dict = ROWS_ONE, template: dict = ROWS_TEMPLATE,
-          fixture_lead_zero: str = T.CENSUS_LEAD_ZERO_ID,
-          template_lead_zero: str = T.CENSUS_LEAD_ZERO_ID) -> Path:
+          fixture_lead_zero: str = T.CENSUS_LEAD_ZERO_ID) -> Path:
     """A committed repo declaring alpha and beta, whose two walked knowledge folders
-    (`knowledge/tenant-fixture/`, `knowledge/tenant-template/`, #1120 C26) hold `fixture` and
-    `template`, each with a `lead-zero.yaml` naming the given id."""
+    (`knowledge/tenant-fixture/`, `knowledge/tenant-template/`) hold `fixture` and
+    `template`, each with a `lead-zero.yaml` (the fixture's naming `fixture_lead_zero`)."""
     repo = planted_tree(tmp_path, {"alpha": "lookup", "beta": "lookup"})
     T.plant_census_settings(repo, fixture, template_rows=template)
     for name, lead_zero in (("tenant-fixture", fixture_lead_zero),
-                            ("tenant-template", template_lead_zero)):
+                            ("tenant-template", T.CENSUS_LEAD_ZERO_ID)):
         (repo / "knowledge" / name / "settings" / "lead-zero.yaml").write_text(
             T.lead_zero_text(lead_zero), encoding="utf-8")
     seed_repo(repo, add="-A", message="knowledge folders")
@@ -112,7 +102,7 @@ def test_a_withheld_leads_config_naming_no_catalog_template_still_turns_the_gate
 
 
 def test_a_lead_zero_naming_no_catalog_template_turns_the_gate_red_naming_the_tenant(tmp_path):
-    """M7: the run-start agreement check, run in CI per folder. The fixture grants the lead
+    """The run-start agreement check, run in CI per folder. The fixture grants the lead
     alpha.lookup and names a template the catalog does not hold."""
     rc, out = _gate(_repo(tmp_path, fixture_lead_zero="alpha.no-such-template"))
     assert rc != 0, out

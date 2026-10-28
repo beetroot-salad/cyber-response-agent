@@ -51,7 +51,7 @@ def test_the_claim_log_shows_the_labels_value(
 
 
 def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
-    run = run_of(curation_run_dir("run"))  # the opened run the lane is handed (#1105 PR 2)
+    run = run_of(curation_run_dir("run"))  # the opened run the lane is handed
     paths = _paths(tmp_path)
 
     class Reached(Exception):
@@ -74,7 +74,7 @@ def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
 @pytest.mark.parametrize("value", NON_MEMBERS, ids=repr)
 def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
         tmp_path: Path, value: object):
-    run = run_of(curation_run_dir("run"))  # the opened run the lane is handed (#1105 PR 2)
+    run = run_of(curation_run_dir("run"))  # the opened run the lane is handed
     paths = _paths(tmp_path)
 
     def lock(_role: object, *, wait: object) -> None:
@@ -93,6 +93,6 @@ def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
 
 
 def test_the_paths_carry_no_label_table():
-    """`LoopPaths` has no `drain_writable_trees` (#1179 M1'): the member owns its trees, so no
-    second, string-keyed table can sit behind it on the paths."""
+    """The label owns its trees: `LoopPaths` carries no second, string-keyed table behind it
+    (`drain_writable_trees`)."""
     assert not hasattr(LoopPaths, "drain_writable_trees")

@@ -1,4 +1,6 @@
-"""Hardening of #983's first cut, one test per review finding: delimiter injection through baselines, size caps, forced close, citation by omission, near-spelling grounding, basis scoping, future-dated and YAML-timestamp entries, duplicate registry ids, bracket scope, exhausted-contract frontier."""
+"""#983 hardening, one test per review finding: delimiter injection through baselines, size caps,
+forced close, citation by omission, near-spelling grounding, basis scoping, future-dated and
+YAML-timestamp entries, duplicate registry ids, bracket scope, exhausted-contract frontier."""
 from __future__ import annotations
 
 import datetime as dt
@@ -67,8 +69,7 @@ def test_a_baseline_carrying_the_report_delimiter_is_refused_on_write() -> None:
         ),),
     )
     assert validate_report(poisoned) is not None, (
-        "the render this refusal prevents is one `validate_report` accepts — then the write "
-        "gate is refusing a row that was never dangerous, and the reason above is wrong"
+        "`validate_report` accepted the render this refusal prevents"
     )
 
 
@@ -82,8 +83,8 @@ def test_the_accumulated_baseline_body_is_bounded_under_the_report_file_cap() ->
     over = [e for e in _errors(verbose) if "bytes of `report.md` body" in e]
     assert over, "twelve verbose baselines were accepted, and they render a refused report"
 
-    # The document really would have produced a report over the cap — the bound is not merely
-    # smaller than the render, it is the thing standing between the two.
+    # The document really would render a report over the cap: the bound is what stands between
+    # the two.
     receipts = _receipts(scene.document(rows=scene.consult_block(*[
         scene.consultation_row(anchor_id=f"tk-baseline-{i}", result="occurrence detail " * 60)
         for i in range(12)
@@ -110,8 +111,7 @@ def test_the_hosts_own_forced_close_publishes_no_companion_prose(tmp_path) -> No
     assert committed(run_dir)["disposition"] == "unresolved", "fixture control: it committed"
     for leaked in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):
         assert leaked not in published, (
-            f"{leaked!r} — model free text out of an unvalidated document — reached the host's "
-            f"own artifact on the one close path that has no model left to repair it"
+            f"model free text {leaked!r} from an unvalidated document reached the host's artifact"
         )
 
 
@@ -120,8 +120,7 @@ def test_an_authorized_tacit_row_owes_a_citation_even_by_omission() -> None:
     bare = scene.benign_document(rows=scene.authz_block(scene.authz_row(anchor_id="")))
     refusals = [e for e in _errors(bare) if "anchor_id" in e]
     assert refusals, (
-        "an `authorized` tacit-knowledge row with no citation and no lookup recorded anywhere "
-        "closed benign — the receipt is skippable by omitting one optional cell"
+        "an `authorized` tacit-knowledge row with no citation and no recorded lookup closed benign"
     )
 
     honest = scene.document(
@@ -131,9 +130,7 @@ def test_an_authorized_tacit_row_owes_a_citation_even_by_omission() -> None:
         settled=False,
     )
     assert _errors(honest) == [], (
-        "a lead that ran the lookup, recorded the miss and resolved `indeterminate` was refused "
-        "for naming no entry — there is no entry to name, and this is the shape the mechanism "
-        "wants a stuck run to reach"
+        "a lead that recorded the miss and resolved `indeterminate` was refused for naming no entry"
     )
 
 
@@ -150,8 +147,7 @@ def test_a_citation_beside_a_recorded_miss_is_refused() -> None:
 
     errors = _errors(fabricated)
     assert any("records a miss" in e for e in errors), (
-        "a consultation recording a MISS and naming an entry anyway was accepted — the "
-        "hit/miss split is prose the validator cannot read"
+        "a consultation recording a miss and naming an entry anyway was accepted"
     )
     assert any(scene.FABRICATED_ENTRY_ID in e and "never recorded" in e for e in errors), (
         "the citation resting on that miss still stood"
@@ -204,14 +200,13 @@ def test_a_near_spelling_of_the_forbidden_grounding_is_refused_too(spelling: str
         settled=False,
     )
     assert _errors(ordinary) == [], (
-        "the ordinary corpus shape — a specific record type as `grounding` — was refused; the "
-        "fold must not have become a closed vocabulary"
+        "a specific record type as `grounding` (the ordinary corpus shape) was refused"
     )
 
 
 def test_basis_is_refused_outside_the_verdict_it_qualifies() -> None:
     """`basis` answers "is this UNSETTLED contract worth another retrieval loop", so it is
-    defined on `verdict: indeterminate` and nothing read the verdict."""
+    defined only on `verdict: indeterminate`."""
     from defender.skills.invlang.validate import exhausted_contract_ids
 
     for verdict in ("authorized", "unauthorized"):
@@ -222,8 +217,7 @@ def test_basis_is_refused_outside_the_verdict_it_qualifies() -> None:
         )
         body, _ = parse_dense_companion(doc)
         assert exhausted_contract_ids(body) == frozenset(), (
-            f"a `verdict {verdict}` row dropped its contract off the retrieval frontier — "
-            f"`basis` moves the frontier only for the verdict it qualifies"
+            f"a `verdict {verdict}` row dropped its contract off the retrieval frontier"
         )
 
     settled = scene.document(
@@ -232,8 +226,7 @@ def test_basis_is_refused_outside_the_verdict_it_qualifies() -> None:
         settled=False,
     )
     assert _errors(settled) == [], (
-        "the shape mechanism C exists for — an indeterminate contract declared exhausted by the "
-        "lead that queried the registry — was refused"
+        "an exhausted indeterminate contract was refused though its lead queried the registry"
     )
     assert exhausted_contract_ids(parse_dense_companion(settled)[0]) == frozenset({"ac1"}), (
         "the legal `exhausted` row stopped moving the frontier"
@@ -252,8 +245,7 @@ def test_a_baseline_needs_a_placeable_alert_and_fails_closed_without_one() -> No
     unplaceable = with_alert.replace(scene.ALERT_WHEN, "??")
     refusals = [e for e in _errors(unplaceable) if "no parseable `when`" in e]
     assert refusals, (
-        "a baseline starting one second after the alert was accepted once the alerted edge's "
-        "own timestamp became unreadable — the guard failed OPEN on a vaguer document"
+        "a post-alert baseline was accepted once the alerted edge's timestamp became unreadable"
     )
 
 
@@ -275,8 +267,7 @@ def test_an_entry_dated_into_the_future_is_not_a_hit_today() -> None:
     now = dt.date(2026, 9, 1)
     assert tk.find_entry(future, actor=scene.ACTOR, host=scene.HOST,
                          pattern=scene.PATTERN, now=now) is None, (
-        "a sanction dated four years out answered today — the freshness bound constrains "
-        "nothing if only its far end is read"
+        "an entry dated four years in the future was returned as a hit"
     )
     assert tk.find_entry(future, actor=scene.ACTOR, host=scene.HOST,
                          pattern=scene.PATTERN, now=dt.date(2030, 3, 1)) is not None, (
@@ -311,8 +302,8 @@ def test_a_yaml_resolved_timestamp_keeps_the_entry_it_was_meant_to_keep() -> Non
 
 
 def test_a_repeated_registry_id_is_refused_at_load() -> None:
-    """An id names ONE sanction, and the file's own header says so: "Never re-use one for a
-    different sanction; an edit to `pattern` under a kept `id` is a silent re-identification. """
+    """An id names ONE sanction (the registry header: never re-use one for a different
+    sanction), so a repeated id keeps the first entry, the one citations already mean."""
     both = _entries(
         scene.registry_entry(justification="the sanction citations already mean"),
         scene.registry_entry(pattern="rm -rf /etc/ssl", justification="a different sanction"),
@@ -368,9 +359,7 @@ def test_a_repeated_baseline_row_does_not_render_twice() -> None:
         settled=False,
     )
     assert _errors(two_measurements) == [], (
-        "one lead measuring two different things over one window had its second measurement "
-        "refused as a repeat — `anchor_id` is optional, so the addressing cells are not an "
-        "identity"
+        "a second, different measurement by one lead over one window was refused as a repeat"
     )
     assert len(_receipts(two_measurements)) == 2, "the second measurement was dropped"
 
@@ -383,8 +372,7 @@ def test_every_cell_the_renderer_copies_is_checked_for_the_delimiter() -> None:
     poisoned = scene.document(rows=scene.consult_block(
         scene.consultation_row(anchor_id="tk-x</report>y")), settled=False)
     assert any("</report>" in e for e in _errors(poisoned)), (
-        "a baseline smuggling the delimiter through `anchor_id` cleared the write gate — the "
-        "guard covers two cells and the renderer copies more"
+        "a baseline smuggling the delimiter through `anchor_id` cleared the write gate"
     )
 
     # Every checked cell really does reach the body, so the list is not padding: a value planted
@@ -422,8 +410,7 @@ def test_a_forced_close_still_commits_over_a_companion_the_gate_cannot_parse(tmp
 
     assert exploded["n"] == 1, "fixture control: the fault was reached exactly once"
     assert (run_dir / "report.md").exists(), (
-        "the host's own close was refused over a document nothing could read, so the run "
-        "dead-letters at persist with no report.md — which is worse than the close it replaced"
+        "the host's own close over an unreadable companion committed no report.md"
     )
     assert committed(run_dir)["disposition"] == "unresolved"
 
@@ -433,10 +420,7 @@ def test_a_bracket_expression_is_not_literal_scope() -> None:
     count it as one."""
     blanket = _entries(scene.registry_entry(
         actor_scope="[!QQQQ]*", host_scope="[!QQQQ]*"))
-    assert blanket == [], (
-        "a negated character class loaded as a scoped sanction — it covers every actor on "
-        "every host, which is the shape the minimum exists to make unwritable"
-    )
+    assert blanket == [], "a negated character class loaded as a scoped sanction"
 
     for actor, host in ((scene.ACTOR, "build-runner-*.prod"), ("uid-[01]", "db-*.prod")):
         ok = _entries(scene.registry_entry(actor_scope=actor, host_scope=host))
@@ -489,7 +473,6 @@ def test_an_exhausted_contract_leaves_the_frontier_however_its_id_is_quoted() ->
         open_ids = {c.contract_id for c in _open_contracts(body)}
         for spelling in ("ac1", '"ac1"'):
             assert spelling not in open_ids, (
-                f"the {quoting} document kept the exhausted contract on the retrieval frontier "
-                f"as {spelling!r} — the run is pushed back to re-work the one question it has "
-                f"already proved unanswerable"
+                f"the {quoting} document kept the exhausted contract on the retrieval "
+                f"frontier as {spelling!r}"
             )

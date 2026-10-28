@@ -1,4 +1,4 @@
-"""D1/O3: the entry points take a tenant through `accept_tenant`, once."""
+"""The entry points take a tenant through `accept_tenant`, once."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base, location_path
@@ -33,9 +33,6 @@ from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as P
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 from defender.records._tenant_id import TenantId
 
-#: The launcher's episodes knob (J44; the refusal stays until D12).
-EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
-
 
 def _owner(root: Path, tenant_id: str = H.TID, **kw: Any) -> str:
     """`accept_tenant`'s own refusal on this tree — the text every entry must pass through."""
@@ -43,7 +40,7 @@ def _owner(root: Path, tenant_id: str = H.TID, **kw: Any) -> str:
 
 
 def _never_created_root() -> Path:
-    """A data root inside the RUNNING checkout's box-mounted `defender/` tree that does not
+    """A data root inside the running checkout's box-mounted `defender/` tree that does not
     exist and must never be created: every path given it refuses before reading or writing."""
     return H.DEFENDER / f".spec1120-never-created-{uuid.uuid4().hex}" / "data"
 
@@ -53,9 +50,9 @@ def _assert_never_created(root: Path) -> None:
         f"a refused entry created {root.parent} inside the checkout's defender/ tree")
 
 
-def _owner_in_checkout(checkout: Path, root: Path, tenant_id: str = H.TID) -> str:
-    """`accept_tenant`'s refusal as the tmp CHECKOUT's own code raises it (its O11a is keyed to
-    its own `defender/`), obtained in a child interpreter that imports the copy."""
+def _owner_in_checkout(checkout: Path, root: Path) -> str:
+    """`accept_tenant`'s refusal as the tmp checkout's own code raises it (its defender-tree
+    guard is keyed to its own `defender/`), from a child interpreter that imports the copy."""
     code = (
         "import sys\n"
         "from pathlib import Path\n"
@@ -72,7 +69,7 @@ def _owner_in_checkout(checkout: Path, root: Path, tenant_id: str = H.TID) -> st
         "    raise SystemExit(0)\n"
         "raise SystemExit('ACCEPTED')\n")
     proc = subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
-        [sys.executable, "-c", code, str(checkout), str(root), tenant_id],
+        [sys.executable, "-c", code, str(checkout), str(root), H.TID],
         env=H.tenant_env(root), cwd=str(checkout), capture_output=True, text=True,
         timeout=120, check=False)
     assert proc.returncode == 0, (
@@ -86,34 +83,31 @@ def _copy_script(checkout: Path, module: Any) -> Path:
     return checkout / H.script_of(module).resolve().relative_to(H.REPO_ROOT)
 
 
-def _knowledge_link(base: Path, root: Path, tenant_id: str = H.TID, *, row: bool = True) -> None:
-    """`<root>/<id>/knowledge` a SYMLINK to a complete knowledge folder elsewhere (N13)."""
-    real = H.place_knowledge(base / "elsewhere", tenant_id)
-    if row:
-        H.plant_row(root, tenant_id)
-    H.tenant_folder(root, tenant_id).mkdir(parents=True, exist_ok=True)
-    H.knowledge_dir(root, tenant_id).symlink_to(real, target_is_directory=True)
+def _knowledge_link(base: Path, root: Path) -> None:
+    """`<root>/<id>/knowledge` as a symlink to a complete knowledge folder elsewhere."""
+    real = H.place_knowledge(base / "elsewhere")
+    H.plant_row(root)
+    H.tenant_folder(root).mkdir(parents=True, exist_ok=True)
+    H.knowledge_dir(root).symlink_to(real, target_is_directory=True)
 
 
-def _source_under(root: Path, *, runs_tenant: str = H.TID) -> Path:
-    """A finished, branchable source run at `<root>/<runs_tenant>/runs/<id>`. #1187 R1
-    (review-4 F42): no runs-base record — every caller named the run's own tenant, and the
+def _source_under(root: Path) -> Path:
+    """A finished, branchable source run at `<root>/<T>/runs/<id>`, with no runs-base record: a
     run's tenant is where it sits."""
-    base = H.tenant_folder(root, runs_tenant) / "runs"
+    base = H.tenant_folder(root) / "runs"
     base.mkdir(parents=True, exist_ok=True)
     return P.source_run(base)
 
 
 def _launch(source: Path, spawn: Any, *, tenant_id: str | None = None,
             **seams: Any) -> BaseException | int:
-    """The REAL launcher over one source, the role preflight neutralised (a refusal is never the host's
-    credentials)."""
+    """The real launcher over one source, the role preflight neutralised (so a refusal is never
+    about the host's credentials)."""
     seams.setdefault("preflight", T.no_preflight)
     requested = source.parent.parent.name if tenant_id is None else tenant_id
     try:
         return branch_entry.main(
-            ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID),
-             *T.retired_continuation_argv()],
+            ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID)],
             spawn=spawn, **seams)
     except SystemExit as refused:
         return refused
@@ -134,9 +128,8 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
         f"RunTenant.tenant is not the Tenant accept_tenant returns: {run_tenant.tenant!r} "
         f"!= {expected!r}")
     assert type(run_tenant.tenant) is type(expected)
-    # #1108 P4 (flow 3, U9): the accepted Tenant still names the tenant's own folder, but the
-    # run reads its OWN copy of the published export — its settings half and the grant table
-    # in it — never the clone's working tree (`knowledge/settings`).
+    # The accepted Tenant names the tenant's own folder, but the run reads its own copy of the
+    # published export (settings and grant table), never the clone's working tree.
     assert run_tenant.tenant.settings == H.settings_dir(data_root)
     assert H.run_copy_part(run_tenant.settings, data_root) == ("settings",), (
         f"the run read settings from {run_tenant.settings}, not its own run copy")
@@ -150,10 +143,8 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
 
     # The sibling: the same accepted Tenant, and no turn-0 dispatch.
     src = _source_under(data_root)
-    # #1187 (Layout A): the episode is `<root>/<T>/episodes/<uuid>`, as RUNS leaves it. (The
-    # retired variable, set below to that same folder, is read by nothing after #1187, O9.)
+    # The episode sits at `<root>/<T>/episodes/<uuid>`.
     manifest = P.family_for(src)
-    monkeypatch.setenv(EPISODES_BASE_ENV, str(manifest.parent.parent))
     with Episode.open(manifest.parent) as episode:
         T.episode_view(episode, tenant=expected)  # the container, as its launcher makes it
     sib = H.RunRecorder(tmp_path / "sib")
@@ -166,7 +157,8 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
     assert sibling_tenant.correlation is None, "a --resume sibling dispatches no turn-0 lead"
 
 
-#: The cells each entry point takes (F8 closed by correction 3; M7). `tenant.py setup` has no
+#: The refusal cells each entry point takes: `tenant.py setup` has no `no-row` cell (it writes
+#: the row) and `scaffold` takes only an id.
 ALL_CELLS = ("bad-id", "no-row", "knowledge-link", "mounted-tree")
 CELLS_OF = {
     "run.main": ALL_CELLS,
@@ -202,8 +194,8 @@ def _build_cell(entry: str, cell: str, base: Path, monkeypatch) -> _Cell:  # noq
     if cell == "bad-id":
         H.adopted(root)
         if launcher:
-            # #1105 PR 2: the launcher's id comes from the request (`--tenant`), refused by
-            # the one grammar, TenantId, before the source is read.
+            # The launcher's id comes from `--tenant`, refused by `TenantId`'s grammar before
+            # the source is read.
             src = _source_under(root)
             return _Cell(root, "A", str(H.refusal(_tenant, TenantId, "A")), source=src)
         return _Cell(root, "A", _owner(root, "A"))
@@ -221,8 +213,8 @@ def _build_cell(entry: str, cell: str, base: Path, monkeypatch) -> _Cell:  # noq
         return cell_
     assert cell == "mounted-tree", cell
     if entry == "policy_cli.main":
-        # F9: at entry-point level through policy_cli's own --defender-dir — a tree that
-        # contains the data root, so the settings half sits inside what a box mounts.
+        # Through policy_cli's own --defender-dir: a tree that contains the data root, so the
+        # settings half sits inside what a box mounts.
         tree = base / "tree"
         root = tree / "data"
         H.adopted(root)
@@ -281,8 +273,8 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
                         unset=("DEFENDER_DIR",), **cell.env)
     text = H.output(proc)
     if entry == "validate_scaffold.main":
-        # M7 (human): advisory — the refusal is its WARN, and that tenant's config check is
-        # skipped; its exit status follows the other checks and is not the observable.
+        # Advisory: the refusal is its WARN and the tenant's config check is skipped; its exit
+        # status follows the other checks and is not the observable.
         skipped = "config.env carries no inline secrets" not in text and "config.env:" not in text
         return skipped and "Traceback" not in text, text, not skipped
     return proc.returncode != 0 and "Traceback" not in text, text, False
@@ -313,8 +305,6 @@ def _cell_problems(where: str, entry: str, cell_name: str, cell: _Cell, base: Pa
     return problems
 
 
-# rejected: a second acceptance path (request_tenant's row-only check, resolve_tenant's
-# folder+grants check — C7, K7).
 @pytest.mark.parametrize("entry", list(CELLS_OF))
 def test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses(
         entry: str, tmp_path: Path, monkeypatch, capsys) -> None:
@@ -330,7 +320,6 @@ def test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses
     assert not problems, "\n".join(problems)
 
 
-# rejected: a tenants-root or data-root argument across the process boundary.
 def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
         data_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     H.adopted(data_root)
@@ -343,7 +332,6 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
 
     assert "tenants_root" not in inspect.signature(branch_cli.start_family).parameters
     spawn = T.FakeSpawn()
-    # #1133 (merged into this branch, PR #1157): start_family takes the held Episode.
     with Episode.open(episode) as held:
         branch_cli.start_family(held, [T.world_id(episode, "a")], spawn=spawn, tenant_id=TenantId(H.TID))
     assert len(spawn.launches) == 1, spawn.launches
@@ -355,13 +343,10 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
 
     # The child re-accepts: its tenant lost a required settings file since the launch.
     src = _source_under(data_root)
-    # #1187 (Layout A): the episode is `<root>/<T>/episodes/<uuid>`, as RUNS leaves it. (The
-    # retired variable, set below to that same folder, is read by nothing after #1187, O9.)
     manifest = P.family_for(src)
     (H.settings_dir(data_root) / "verb-grants.yaml").unlink()
     expected = _owner(data_root)
     assert "verb-grants.yaml" in expected, expected
-    monkeypatch.setenv(EPISODES_BASE_ENV, str(manifest.parent.parent))
     rec = H.RunRecorder(tmp_path / "sib")
     rc, exc = H.drive_run(
         run_py, ["--tenant", H.TID, "--episode", manifest.parent.name, "--world", "b"], rec)
@@ -406,14 +391,7 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
     proc = H.run_script(H.script_of(tenant_py), "setup", H.TID, root=relative, cwd=tmp_path)
     H.assert_refused(proc, str(relative))
     assert not (tmp_path / relative).exists()
-    checkout = H.tmp_checkout(tmp_path / "checkout")
-    placed_root = checkout / "defender" / "tenant-data"
-    H.place_knowledge(placed_root)
-    before = H.tree_census(placed_root)
-    proc = H.run_script(_copy_script(checkout, tenant_py), "setup", H.TID, root=placed_root,
-                        cwd=checkout)
-    H.assert_refused(proc, str(placed_root))
-    assert H.census_diff(before, H.tree_census(placed_root)) == []
+    # Setup over a data root inside a checkout's defender/: test_1120_setup.py.
 
     # Positive control: another checkout's defender/ is not the running one.
     other = tmp_path / "other-checkout"
@@ -424,15 +402,13 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
 
 
 # ======================================================================================
-# D1 — runs_base_for takes the accepted Tenant.
+# The accepted Tenant's runs and sessions folders.
 # ======================================================================================
 
 def test_1120_runs_base_for_a_tenant_is_its_runs_folder(
         data_root: Path, monkeypatch) -> None:
-    """runs_base_for, given a Tenant from accept_tenant, is exactly <root>/acme/runs (composed
-    here by hand) — the Tenant's own runs folder — and it resolves no data root: the call
-    runs with DEFENDER_DATA_ROOT unset. Carries pass-A d2_runs_base_for over Tenant
-    (x1078_d2_runs_base_for's uncarried equality)."""
+    """`Tenant.runs` is `<root>/<T>/runs` (composed by hand) and resolves no data root: it is
+    read with DEFENDER_DATA_ROOT unset."""
     H.adopted(data_root)
     tenant = H.accept(_tenant, data_root, H.TID)
     monkeypatch.delenv(H.DATA_ROOT_ENV)
@@ -442,18 +418,15 @@ def test_1120_runs_base_for_a_tenant_is_its_runs_folder(
 
 def test_1120_tenant_sessions_is_the_session_stores_folder_for_a_fresh_run(
         data_root: Path, tmp_path: Path) -> None:
-    """For a fresh run, Tenant.sessions is the session store's folder: run.py materializes
-    the run (the real builder) under the accepted tenant's runs, and the session store the
-    driver opens beside that runs base lives in <root>/acme/sessions (composed here by hand),
-    which is what accept_tenant's Tenant.sessions names. SessionPaths' derivation is left
-    alone (N10)."""
+    """A fresh run materialized by the real builder keeps its session store in
+    `<root>/<T>/sessions` (composed by hand), the folder `Tenant.sessions` names."""
     H.adopted(data_root)
     rec = H.RunRecorder(tmp_path / "unused")
     seams = rec.seams()
     seams.pop("materialize")
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
-    # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+    # Plus the in-process launch-time publish.
     rc = run_py.main([str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID],
                      **with_publish(dict(seams)))
     assert rc == 0
@@ -461,7 +434,7 @@ def test_1120_tenant_sessions_is_the_session_stores_folder_for_a_fresh_run(
     run_dir = Path(rec.lifecycle_calls[0]["run_dir"])
     from defender.records import SessionPaths
 
-    # #1105 fork S(b): the layout owner's `SessionPaths` names the store, not a runs base.
+    # The layout owner's `SessionPaths` names the store, not a runs base.
     store = session_store.store_path_for("spec1120-case", sessions=SessionPaths(fixture_runs_base(run_dir.parent)))
     expected = data_root / H.TID / "sessions"
     assert store.parent == expected
@@ -469,22 +442,15 @@ def test_1120_tenant_sessions_is_the_session_stores_folder_for_a_fresh_run(
 
 
 # ======================================================================================
-# R7 — every unmoved reader of RunTenant takes the accepted Tenant through it.
+# Every reader of RunTenant takes the accepted Tenant through it.
 # ======================================================================================
 
 def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
-    """The readers of RunTenant that piece 1 does not move — the branch launcher, the driver
-    (run_investigation) and its opening prompt (driver._prompts) — read what they need through
-    RunTenant, whose tenant member is now the accepted Tenant (M5's owner table): its settings
-    is the Tenant's settings under the data root, its tenant_id the Tenant's id, its table
-    pointer names that id. Each is handed the RunTenant run.py itself resolved and must agree
-    with the Tenant: the launcher, over a source run under the accepted tenant, runs a whole
-    episode and starts every sibling with that Tenant's id and the parent's data root; the
-    RunTenant's table pointer
-    names the tenant's id (the opening prompt no longer resolves a lead-zero fetch from the
-    Tenant's settings, #1222); run_investigation's reads are the same RunTenant members (driven end to
-    end only by the replay suite)."""
+    """The `RunTenant` run.py resolves carries the accepted Tenant and a table pointer naming
+    its id; the real launcher runs a whole episode and starts every sibling with the accepted
+    id and the parent's data root. (run_investigation reads the same members; only the replay
+    suite drives it end to end.)"""
     H.adopted(data_root)
     tenant = H.accept(_tenant, data_root, H.TID)
     rec = H.RunRecorder(tmp_path / "run")
@@ -494,21 +460,17 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
     run_tenant = rec.lifecycle_calls[0]["tenant"]
     assert run_tenant.tenant == tenant
 
-    # driver._prompts — the opening prompt no longer reads the tenant's settings for a lead-zero
-    # fetch (the ancestor fetch is gone, #1222); its table pointer still names the tenant's id.
+    # driver._prompts: the opening prompt's table pointer names the tenant's id.
     assert run_tenant_mod.table_pointer(tenant.id) == run_tenant.table_pointer
 
-    # branch.cli.main — one whole episode through the real launcher (every seam it is not
-    # about faked): it resolves the source run's tenant once and reads it through RunTenant for
-    # pre-flight's reader and its siblings, each of which is started with the accepted id. The
-    # episode runs over `_spec1224`'s estate tenant (its gather grant admits the source's
-    # calls, so pre-flight accepts the family), placed under a data root of its own.
+    # branch.cli.main: one whole episode through the real launcher (other seams faked), over
+    # `_spec1224`'s estate tenant (its gather grant admits the source's calls, so pre-flight
+    # accepts the family) under a data root of its own.
     branch_root = tmp_path / "branch-data-root"
     branch_root.mkdir()
     monkeypatch.setenv(H.DATA_ROOT_ENV, str(branch_root))
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-    monkeypatch.setenv(EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     est = S1224.estate(tmp_path)
     branch_tenant = est.place()
     response = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon",

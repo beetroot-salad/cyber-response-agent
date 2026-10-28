@@ -18,14 +18,15 @@ def test_is_infra_failure_keys_on_exit_code_only(exit_code, counts):
 
 
 def _state(run_dir):
-    """A run's state (#1235 round 2): the breaker lives on the run's one `RunState`."""
+    """A run's state: the breaker lives on the run's one `RunState`."""
     from defender.investigation.run_state import RunState
 
     return RunState(run_dir, "run-cb")
 
 
 def test_usage_error_does_not_trip_breaker(tmp_path):
-    """Exit 64 is the agent's own usage error: it charges nothing. #1235: the breaker is the run's state, so..."""
+    """Exit 64 is the agent's own usage error: it charges nothing, read off the run state's
+    `breaker_snapshot`."""
     state = _state(tmp_path)
     cb.record_outcome(state, "elastic", 64)
     cb.record_outcome(state, "elastic", 64)
@@ -47,7 +48,8 @@ def test_two_infra_failures_trip_breaker(tmp_path):
 
 
 def test_a_new_runs_state_starts_with_a_blank_breaker(tmp_path):
-    """A run's breaker starts blank (#1235: `RunState(...)` is the run's start): whatever an earlier run over the..."""
+    """A new run's breaker starts blank whatever an earlier run over the same folder tripped, and
+    the earlier run's state stays tripped."""
     earlier = _state(tmp_path)
     cb.record_outcome(earlier, "elastic", 2)
     cb.record_outcome(earlier, "elastic", 2)
@@ -60,7 +62,8 @@ def test_a_new_runs_state_starts_with_a_blank_breaker(tmp_path):
 
 
 def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
-    """#1235 D3: the breaker lives in the run's state, and no file in the run folder moves it. Two real infra..."""
+    """The breaker lives in the run's state and writes nothing; a `circuit_breaker.json` planted in
+    the run folder (blank, tripping `cmdb`, or unreadable) moves no system."""
     run_dir = tmp_path / "runs" / "run-1235"
     run_dir.mkdir(parents=True)
     state = _state(run_dir)
@@ -89,6 +92,8 @@ def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
 
 
 def test_the_breakers_causes_are_reachability_not_configuration(tmp_path):
+    """Configuration is refused at run start, so the breaker's causes, down message and run kill
+    name reachability only; the operator's escalation note still names configuration."""
     from defender.tenancy.case_ticket import ESCALATION_COMMENT_BODY
     from defender.investigation.lead_zero import (
         ENDING_TRIPPED_BREAKER,

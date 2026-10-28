@@ -108,8 +108,8 @@ def _plant(root, rel, text):
 
 
 def test_the_layout_lint_follows_a_layout_name_through_a_relay_module(tmp_path):
-    """A layout name read off a module that re-binds it (`relay.ALERT`) is the door's name: the
-    xhigh review's bypass, where only a read off the door itself was flagged."""
+    """A layout name read off a module that re-binds it (`relay.ALERT`) is the door's name, as
+    a read off the door itself is."""
     root = _package_copy(tmp_path)
     _plant(root, "learning/relay.py", "from defender.records import ALERT, RUN_LAYOUT\n")
     _plant(root, "learning/probe_relay.py",
@@ -128,8 +128,8 @@ def test_the_layout_lint_follows_a_layout_name_through_a_relay_module(tmp_path):
     ("investigation/rel3.py", "from ..records import ALERT\n"),
 ])
 def test_the_layout_lint_resolves_a_relative_import_as_the_absolute_one(tmp_path, rel, text):
-    """The xhigh review's case: a layout name reached through a relative import is the same
-    name its absolute spelling is (the scope tree is built knowing the module's package)."""
+    """A layout name reached through a relative import is the same name its absolute spelling
+    is (the scope tree is built knowing the module's package)."""
     root = _package_copy(tmp_path)
     _plant(root, rel, text)
     shown = [f.display for f in _lint().scan(root, allow_list=[])]

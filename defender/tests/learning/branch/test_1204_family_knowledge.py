@@ -17,10 +17,9 @@ from defender.tests.learning.branch import test_976_family_anchor as A
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both CONFIGURED roots inside `tmp_path`, as every launcher suite sets them."""
+    """The runs-base variable points inside `tmp_path`, so a stray read never reaches the
+    developer's or CI's real runs folder."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    T.isolate_learning_state(tmp_path, monkeypatch)
 
 
 def _cli():
@@ -90,7 +89,7 @@ def _incomplete(report: dict, *phrases: str, waivable: bool) -> str:
 
 def test_1204_a_family_on_the_sources_knowledge_commit_is_accepted_and_stamped_with_it(
         tmp_path):
-    """O2's positive control at the authority tier."""
+    """The positive control for the refusals below."""
     report, stamp = _verify(tmp_path, "same", source=T.provenance_record())
     assert report["comparable"] is True, report["reason"]
     assert stamp is not None
@@ -101,7 +100,7 @@ def test_1204_a_family_on_the_sources_knowledge_commit_is_accepted_and_stamped_w
 
 def test_1204_siblings_on_another_knowledge_commit_are_incomplete_even_with_the_override(
         tmp_path):
-    """O2/A2."""
+    """Anchoring the source on the siblings' commit instead is accepted."""
     on_k2 = {w: {"knowledge": {"commit": K2}} for w in T.WORLDS}
     for allow_dirty in (False, True):
         report, _ = _verify(tmp_path, f"moved-{allow_dirty}".lower(),
@@ -118,7 +117,6 @@ def test_1204_siblings_on_another_knowledge_commit_are_incomplete_even_with_the_
 
 
 def test_1204_siblings_off_the_sources_knowledge_are_each_named_against_the_source(tmp_path):
-    """O2/D4."""
     report, _ = _verify(
         tmp_path, "two-off", source=T.provenance_record(),
         siblings={"b": {"knowledge": {"commit": K2}}, "c": {"knowledge": {"commit": K3}}})
@@ -129,7 +127,8 @@ def test_1204_siblings_off_the_sources_knowledge_are_each_named_against_the_sour
 @pytest.mark.parametrize("shape", sorted(UNPROVABLE))
 def test_1204_siblings_disagreeing_on_knowledge_are_incomplete_even_with_the_override(
         tmp_path, shape):
-    """O2/A2."""
+    """Whatever the source's knowledge, disagreeing siblings are never waivable; agreeing ones
+    pass under `--allow-dirty`."""
     source = T.provenance_record(knowledge=UNPROVABLE[shape])
     for allow_dirty in (True, False):
         report, _ = _verify(
@@ -147,7 +146,6 @@ def test_1204_siblings_disagreeing_on_knowledge_are_incomplete_even_with_the_ove
 
 @pytest.mark.parametrize("shape", sorted(UNPROVABLE))
 def test_1204_a_source_whose_knowledge_is_unprovable_is_waivable(tmp_path, shape):
-    """O2/A2."""
     source = T.provenance_record(knowledge=UNPROVABLE[shape])
     says = UNPROVABLE_SAYS[shape]
     report, _ = _verify(tmp_path, f"src-{shape}", source=source)
@@ -162,7 +160,6 @@ def test_1204_a_source_whose_knowledge_is_unprovable_is_waivable(tmp_path, shape
 
 @pytest.mark.parametrize("shape", sorted(UNPROVABLE))
 def test_1204_a_sibling_whose_knowledge_is_unprovable_is_waivable(tmp_path, shape):
-    """O2/A2, the member side."""
     siblings = {"b": {"knowledge": UNPROVABLE[shape]}}
     says = UNPROVABLE_SAYS[shape]
     report, _ = _verify(tmp_path, f"sib-{shape}", source=T.provenance_record(),
@@ -179,7 +176,6 @@ def test_1204_a_sibling_whose_knowledge_is_unprovable_is_waivable(tmp_path, shap
 
 
 def test_1204_two_unavailable_reasons_are_not_a_knowledge_disagreement(tmp_path):
-    """A2/D4."""
     no_commit = {"a": {"knowledge": UNAVAILABLE_REFTABLE},
                  "b": {"knowledge": UNAVAILABLE_UNBORN}, "c": {"knowledge": "unversioned"}}
     beside_k = {"b": {"knowledge": UNAVAILABLE_UNBORN}, "c": {"knowledge": "unversioned"}}
@@ -202,7 +198,7 @@ def test_1204_a_launch_whose_live_knowledge_matches_the_source_is_accepted(tmp_p
     launch = A._prepare(tmp_path)
     stamp = A._accepted(launch)
     assert launch.live_tree.calls == 1
-    # #1108 P4 (OD5): the launch's tenant is published for real; its commit replaces `K`.
+    # The launch's tenant is published for real; its commit replaces `K`.
     scene = T.scene_knowledge()
     assert scene != K, "fixture bug: the launch tenant was not published"
     assert stamp["source"]["knowledge"] == {"commit": scene}
@@ -212,11 +208,10 @@ def test_1204_a_launch_whose_live_knowledge_matches_the_source_is_accepted(tmp_p
 
 def test_1204_a_live_tenant_clone_on_another_knowledge_commit_is_refused_and_never_waived(
         tmp_path):
-    """O2/A2 at preflight."""
     for argv in ((), ("--allow-dirty",)):
         launch = A._prepare(tmp_path, live_tree=T.source_capture(knowledge={"commit": K2}))
         message = A._refused_before_spending(launch, *argv)
-        # #1108 P4 (OD5): the source names the published tenant's real commit.
+        # The source names the published tenant's real commit.
         A._never_waivable(message, "live tree", "knowledge", K2, T.scene_knowledge())
         assert launch.live_tree.calls == 1
 
@@ -235,12 +230,10 @@ def test_1204_a_live_capture_whose_knowledge_is_unprovable_is_waivable(tmp_path,
     assert stamp["allow_dirty"] is True
 
 
-#: #1108 P4 (OD9, fail closed): a SOURCE stamp that says `unversioned` or `unavailable` names
-#: no knowledge commit for the launch to materialise and pin its siblings to, so it is refused
-#: even under `--allow-dirty` — the waiver this case pinned for those two shapes is a mechanism
-#: P4 removes (OD12 class i). Covered by
-#: `tests/tenancy/tenant_1108_p4/test_branch_replay.py::test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allow_dirty`.
-#: The stamp-predates-#1204 shapes (no key, or null) stay waivable here.
+#: A SOURCE stamp saying `unversioned` or `unavailable` names no knowledge commit to pin the
+#: siblings to, so it is refused even under `--allow-dirty` (pinned in
+#: `tenant_1108_p4/test_branch_replay.py`). Only the pre-#1204 shapes (no key, or null) stay
+#: waivable.
 SOURCE_WAIVABLE: dict[str, Any] = {k: v for k, v in UNPROVABLE.items()
                                    if k not in ("unversioned", "unavailable")}
 
@@ -248,7 +241,7 @@ SOURCE_WAIVABLE: dict[str, Any] = {k: v for k, v in UNPROVABLE.items()
 @pytest.mark.parametrize("shape", sorted(SOURCE_WAIVABLE))
 def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_unless_waived(
         tmp_path, shape):
-    """O2/A2 at preflight, the source side (the shapes OD9 leaves waivable)."""
+    """Only the pre-#1204 shapes (`SOURCE_WAIVABLE`)."""
     launch = A._prepare(tmp_path)
     A._restamp(launch.src, knowledge=SOURCE_WAIVABLE[shape])
     message = A._refused_before_spending(launch)
@@ -264,7 +257,8 @@ def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_unl
 @pytest.mark.parametrize("argv", [(), ("--allow-dirty",)], ids=["plain", "allow-dirty"])
 def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incomplete(
         tmp_path, argv, caplog):
-    """O2 end to end, the authority tier."""
+    """End to end: pre-flight accepts, but the family stamp is withheld, naming the siblings'
+    commit, and the flag cannot waive it."""
     location_path(T.runs_base)(tmp_path)
     launch = A._prepare(tmp_path, spawn=J.FakeSibling(knowledge={"commit": K2}))
     assert launch.run(*argv) == 0, "the exit is about the launch; the outcome is the family's"
@@ -299,7 +293,6 @@ WAIVED: dict[str, tuple[dict, dict[str, dict], bool, list[str]]] = {
 
 @pytest.mark.parametrize("case", sorted(WAIVED))
 def test_1204_the_family_stamp_records_which_fault_kinds_the_override_waived(tmp_path, case):
-    """Review fix (faults carry their kind)."""
     source, siblings, flag, waived = WAIVED[case]
     report, stamp = _verify(tmp_path, f"waived-{case}", source=source,
                                       siblings=siblings, allow_dirty=flag)
@@ -319,7 +312,7 @@ def test_1204_a_launch_that_waives_a_pre_1204_sources_knowledge_records_it_as_kn
     assert stamp["waived"] == (["dirt", "knowledge"] if dirty_source else ["knowledge"])
     assert stamp["source"]["dirty"] is dirty_source
     assert stamp["allow_dirty"] is True
-    # #1108 P4 (OD5): the siblings name the published tenant's real commit.
+    # The siblings name the published tenant's real commit.
     assert stamp["agreed"]["knowledge"] == {"commit": T.scene_knowledge()}
 
 
@@ -335,7 +328,6 @@ NO_COMMIT_FIRST: dict[str, dict[str, dict]] = {
 @pytest.mark.parametrize("shape", sorted(NO_COMMIT_FIRST))
 def test_1204_agreed_knowledge_is_the_commit_the_check_held_not_the_first_siblings(
         tmp_path, shape, reverse):
-    """Review fix (the agreed record)."""
     report, stamp = _verify(
         tmp_path, f"agreed-{shape}-{reverse}".lower(), source=T.provenance_record(),
         siblings=NO_COMMIT_FIRST[shape], allow_dirty=True, reverse=reverse)
@@ -349,7 +341,6 @@ def test_1204_agreed_knowledge_is_the_commit_the_check_held_not_the_first_siblin
 
 @pytest.mark.parametrize("source_shape", ["on-k", "absent"])
 def test_1204_agreed_knowledge_is_null_when_no_sibling_names_a_commit(tmp_path, source_shape):
-    """Review fix (the agreed record), the other half."""
     source = (T.provenance_record() if source_shape == "on-k"
               else T.provenance_record(knowledge=T.NO_KNOWLEDGE_KEY))
     siblings = {"a": {"knowledge": "unversioned"}, "b": {"knowledge": UNAVAILABLE_REFTABLE},
@@ -363,22 +354,15 @@ def test_1204_agreed_knowledge_is_null_when_no_sibling_names_a_commit(tmp_path, 
     assert stamp["waived"] == ["knowledge"]
 
 
-# #1108 P4 (OD12 class i): `test_1204_the_default_live_capture_reads_the_episode_tenants_knowledge_clone`
-# (#1204 D3) pinned the branch CLI's live capture reading the tenant CLONE's checked-out
-# commit — the mechanism P4's O-B retires (the live capture stamps from the pinned export, never
-# the clone's HEAD). Deleted; its successor is
-# `tests/tenancy/tenant_1108_p4/test_branch_replay.py::test_o_b_the_live_capture_stamps_the_pinned_export_so_the_anchor_survives_a_publish`.
-
-
-#: D4's classification, as the design states it.
+#: The design's classification of every stamp field.
 D4 = {
     "commit": "anchored", "scope": "anchored", "knowledge": "anchored",
     "model": "constant",
     "dirty": "dedicated", "tenant_id": "dedicated",
     "dirty_paths": "informational", "dirty_path_count": "informational",
     "unavailable": "informational", "alert_label": "informational",
-    # #1108 P4 (O-STALE): where the run's knowledge came from (fresh/stale/pinned, the commit
-    # copied, why) is recorded and never compared; `knowledge` stays the anchored commit.
+    # Where the run's knowledge came from is recorded, never compared; `knowledge` stays the
+    # anchored commit.
     "knowledge_source": "informational",
     "world_id": "expected_to_differ", "parent_run_id": "expected_to_differ",
     "fork_turn": "expected_to_differ", "started_at": "expected_to_differ",
@@ -397,14 +381,10 @@ def _table() -> dict[str, str]:
 
 
 def test_1204_the_stamp_table_classes_every_record_field_exactly_as_d4_states():
-    """D4's census (and #1108 P4 O-STALE): `STAMP_FIELD_CLASSES` names exactly the fields a
-    `RunProvenance` record carries on the wire, each in one of the five classes, as D4 (plus
-    P4's `knowledge_source: informational`) states. A new stamp field cannot be left out of the
-    fork check, and `knowledge_source` is recorded, never compared.
-
-    OD17: the stamp "may carry" `knowledge_source`, so a bare record's wire keys are the table
-    less that one optional key, and the key reaches the wire (with only `{kind, commit,
-    stale_kind}`, never the reason) when the run hands it to the stamp."""
+    """`STAMP_FIELD_CLASSES` names exactly the fields a `RunProvenance` record carries on the
+    wire, each classed as `D4` states, so a new stamp field cannot be left out of the fork check.
+    `knowledge_source` is optional on the wire and, when carried, holds only `{kind, commit,
+    stale_kind}` (never the reason)."""
 
     table = _table()
     record = _provenance.RunProvenance(commit="0" * 40, dirty=False)
@@ -426,7 +406,7 @@ def test_1204_the_stamp_table_classes_every_record_field_exactly_as_d4_states():
 
 
 def test_1204_each_anchored_and_constant_field_is_compared_through_verify_family(tmp_path):
-    """O3 behavioural arm."""
+    """One sibling differing on any such field refuses the family, and the flag cannot waive it."""
     table = _table()
     compared = sorted(f for f, c in table.items() if c in ("anchored", "constant"))
     assert compared == sorted(DIFFERENT), (
@@ -446,7 +426,6 @@ def test_1204_each_anchored_and_constant_field_is_compared_through_verify_family
 
 
 def test_1204_fields_expected_to_differ_or_informational_are_not_compared(tmp_path):
-    """O3/D4, the other half."""
     ep = T.episode(tmp_path / "lineage")
     T.plant_roster(ep)
     dirs = [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS]

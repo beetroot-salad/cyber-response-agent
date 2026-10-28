@@ -18,9 +18,8 @@ LINT_DIR = WORKTREE / "tooling" / "lint"
 def on_sys_path(*dirs: Path) -> Iterator[None]:
     """``dirs`` on ``sys.path`` for the duration of the block.
 
-    Removes only what this call added, so a directory another caller is relying on
-    survives — the hand-rolled version of this (insert, then ``finally: sys.path.remove``)
-    removes unconditionally and will happily take away an entry it did not put there.
+    Removes only what this call added, so a directory another caller relies on survives (a
+    hand-rolled ``finally: sys.path.remove`` would take it away).
 
     Use this only where the entry must NOT outlive the load. Where a loaded script's own
     imports need the directory at call time as well as at exec time, pass ``sys_path=``
@@ -60,13 +59,10 @@ def load_module(
 
 
 def load_trace_lesson(name: str) -> ModuleType:
-    """``cli/learning/trace_lesson.py`` — one path, five suites, five module objects.
+    """``cli/learning/trace_lesson.py``, loaded fresh as module ``name``.
 
-    ``name`` is required and deliberately not defaulted. The suites that load this CLI
-    want *separate* module objects, because each rebinds or exercises module state the
-    others must not see; ``test_corpus_fold_584`` documents the rejected alternative
-    (rebinding the CLI's corpus-directory constant on a shared module) at length. What they did not want,
-    and had, was three different derivations of where the file is.
+    ``name`` is required, not defaulted: each suite wants its own module object, because each
+    exercises module state the others must not see.
     """
     return load_module(DEFENDER / "cli" / "learning" / "trace_lesson.py", name=name)
 

@@ -1,10 +1,8 @@
-"""#869 M2/O1 — resolve once at the boundary, thread the value inward non-Optional.
+"""#869: a lane resolves its systems once, at the boundary, and threads the value inward.
 
-#1108 P4 (O7, OD12 class ii): each lane runs over a batch draft (`_curator1134.draft_lane`, the
-tenant's `agent/skills`), its adapters in a scratch product checkout (`seed_product`, #1172);
-the lane entries take the batch (ASSUMED SEAMS S-H `run_pitfalls(..., batch=)`,
-`build_lead_author_deps(..., batch=)`). "Mid-tick" adapter landings commit to that product
-checkout; mid-tick markers/skills are written into the draft the box writes."""
+Each lane runs over a batch draft of the tenant's `agent/skills` (`_curator1134.draft_lane`) with
+its adapters in a scratch product checkout (`seed_product`), and takes the batch. Mid-tick adapter
+landings commit to that product checkout; mid-tick markers and skills go into the draft."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -16,8 +14,8 @@ import pytest
 
 from defender import _git
 from defender.learning.core import drains, persist
-from defender.learning.leads import lead_author, pitfalls_curator
-from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorError
+from defender.learning.leads import lead_author
+from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.tests.support.runtime.engine._declared869 import (
     LeadAuthorSpawn,
     Spawn,
@@ -29,51 +27,24 @@ from defender.tests.support.runtime.engine._declared869 import (
     head_sha,
     loop_log,
     pitfall_row,
-    seed_agent_files,
-    seed_product,
     write,
     write_adapter,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._curator1134 import open_state
-from defender.tests.support.learning.curation._lead_author_1134 import draft_lead_deps
+from defender.tests.support.learning.curation._lead_author_1134 import (
+    draft_lead_deps,
+    lead_lane,
+    run_pitfalls,
+)
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, run_of
 
 
-def _lead(query_id: str, *, system: str = "elastic", verb: str = "esql") -> ExecutedLead:
-    return ExecutedLead(
-        lead_id="l-001", query_index=0, is_multi_query=False, entry_index=0,
-        query_id=query_id, system=system, verb=verb, params={"query": "FROM logs"},
-        raw_command="", goal_text="probe the thing", what_to_summarize=(),
-        raw_ref=Path("gather_raw/l-001/0.json"), payload_status="ok",
-        payload_digest="2 bytes", error_class=None,
-    )
-
-
 def _run_dir() -> Path:
-    """A natural run where the drain rehydrates a row (`curation_run_dir`, #1105 PR 2); hand it
-    to the lane as `run_of(_run_dir())`."""
+    """A run folder the drain rehydrates a row from; hand it to the lane as `run_of(_run_dir())`."""
     d = curation_run_dir("run-x")
     (d / "gather_raw").mkdir(exist_ok=True)
     return d
-
-
-def _lane(tmp_path: Path, *, adapters: tuple[str, ...], markers: tuple[str, ...],
-          skills: tuple[str, ...], catalog: tuple[str, ...], name: str = "product",
-          extra: dict[str, str] | None = None):
-    """`seed_tree` after P4: the product checkout (`adapters`) and a batch draft of the tenant
-    (`markers`/`skills`/`catalog`, plus `extra`, agent-relative) over the lead lane."""
-    product = seed_product(tmp_path, adapters=adapters, name=name)
-    files = {**seed_agent_files(markers=markers, skills=skills, catalog=catalog), **(extra or {})}
-    return product, C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=files,
-                                 state_dir=tmp_path / f"state-{name}")
-
-
-def _pitfalls(lane, state, spawn: Spawn) -> int:
-    with C.draft_trees(lane) as trees:
-        return pitfalls_curator.run_pitfalls(paths=lane.paths, state=state, invoke=spawn,
-                                             trees=trees, batch=lane.batch)
 
 
 def _in_base(lane, rel: str) -> bool:
@@ -82,17 +53,15 @@ def _in_base(lane, rel: str) -> bool:
 
 
 def _lead_author_deps(lane, spawn: LeadAuthorSpawn):
-    """The real deps over the draft lane, with only the seams a hermetic drive must own
-    replaced: the spawn and `extract` (the two tables are a different seam with its own suite).
-    `systems` is NOT replaced — the value this lane resolves at its boundary is the thing under
-    test."""
+    """The real deps over the draft lane with only the spawn and `extract` replaced; `systems`
+    stays real, since the value resolved at the boundary is under test."""
     return draft_lead_deps(lane, invoke_agent=spawn, extract=lambda _run_dir: ([], []))
 
 
 def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    product, lane = _lane(tmp_path, adapters=("elastic",), markers=("elastic", "mcpsys"),
-                          skills=("elastic",), catalog=())
+    product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic", "mcpsys"),
+                              skills=("elastic",), catalog=())
     state = open_state(lane.paths)
     persist.append_pitfalls(
         [pitfall_row("r:l-000:0", "elastic"),
@@ -107,7 +76,7 @@ def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, m
 
     spawn = Spawn(edit, root=lane.root)
     capsys.readouterr()
-    assert _pitfalls(lane, state, spawn) == 0
+    assert run_pitfalls(lane, state, spawn) == 0
 
     assert spawn.systems_seen == ["elastic"]
     assert "late" in adapter_declared_systems(product)   # the tree DOES declare it, by the end
@@ -123,8 +92,8 @@ def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, capsy
     """The lane resolves from ITS product checkout (`paths.repo_root`) and ITS tenant draft —
     never from the process's own product repo (`_git.REPO_ROOT`), which declares no `wtonly`."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    _product, lane = _lane(tmp_path, adapters=("wtonly",), markers=("wtonly",), skills=(),
-                           catalog=(), name="worktree")
+    _product, lane = lead_lane(tmp_path, adapters=("wtonly",), markers=("wtonly",), skills=(),
+                               catalog=(), name="worktree")
     assert "wtonly" not in declared_systems(_git.REPO_ROOT)
 
     state = open_state(lane.paths)
@@ -135,7 +104,7 @@ def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, capsy
                   root=lane.root)
     capsys.readouterr()
 
-    assert _pitfalls(lane, state, spawn) == 0
+    assert run_pitfalls(lane, state, spawn) == 0
     assert spawn.systems_seen == ["wtonly"]
     assert spawn.handoffs[0]["path"] == "agent/skills/wtonly/execution.md"
     assert persist.read_pitfalls(state) == []
@@ -146,8 +115,8 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
 
-    product, lane = _lane(tmp_path, adapters=("elastic",), markers=("elastic",),
-                          skills=("elastic",), catalog=("elastic",))
+    product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic",),
+                              skills=("elastic",), catalog=("elastic",))
     state = open_state(lane.paths)
     persist.append_pitfalls(
         [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], state=state,
@@ -160,14 +129,14 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
 
     before = head_sha(product)
     with pytest.raises(LeadAuthorError, match="mcpsys"):
-        _pitfalls(lane, state, Spawn(land_an_adapter_then_plant, root=lane.root))
-    # The tree agrees ON THIS LANE'S OWN VALUE by the end of the tick — the TICK does not.
+        run_pitfalls(lane, state, Spawn(land_an_adapter_then_plant, root=lane.root))
+    # By the end of the tick the tree declares mcpsys; the tick's resolved value still does not.
     assert "mcpsys" in adapter_declared_systems(product)
     assert persist.read_pitfalls(state), "the batch must survive a refused tick"
     assert before != head_sha(product), "the plant's own commit is the mid-tick change"
     assert lane.commits() == [], "the refused tick committed into the batch"
 
-    other_product, lane2 = _lane(
+    other_product, lane2 = lead_lane(
         tmp_path, adapters=("elastic",), markers=("elastic",), skills=("elastic",),
         catalog=("elastic",), name="lane2",
         extra={"skills/elastic/_draft/lift-me.md":
@@ -189,12 +158,10 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
 
 def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys):
     """Lane 1 (lead author) leaves residue in the draft and refuses; lane 2 (pitfalls) then
-    commits into the same batch. The residue never lands: the drain re-syncs the draft per
-    claim (OD15), handed the tick's batch (OD16; ASSUMED SEAM `_drain_lead_author(...,
-    batch=)`, the spelling the drain's steps take)."""
+    commits into the same batch. The residue never lands: the drain re-syncs the draft per claim."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    _product, lane = _lane(tmp_path, adapters=("elastic",), markers=("elastic",),
-                           skills=("elastic",), catalog=("elastic",))
+    _product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic",),
+                               skills=("elastic",), catalog=("elastic",))
     paths = lane.paths
     state = open_state(paths)
     persist.append_pitfalls(
@@ -214,7 +181,7 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
         raise LeadAuthorError("lane 1 refuses this marker")
 
     def lane2(_paths, _state, *, box=None, **_kw):
-        return _pitfalls(lane, _state, Spawn(
+        return run_pitfalls(lane, _state, Spawn(
             lambda root: write(agent_marker_file(root, "elastic"), "# e\n## Common pitfalls\n- x\n"),
             root=lane.root))
 

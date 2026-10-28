@@ -13,17 +13,15 @@ from defender.tests.support.learning.curation._curator_691_harness import (  # n
     write_file,
 )
 
-# Any sane M7/MD-6 refusal names the corpus/name/segment problem; a permissive disjunction pins
-# that the raise is name-related without over-fitting the not-yet-written message wording.
+# A refusal must be about the name; the permissive disjunction avoids over-fitting the wording.
 _NAME_REJECT_TOKENS = (
     "corpus", "segment", "relative", "single", "name", "membership", "shipped", "clean",
 )
 
 
 def _assert_bind_rejects_name(wt, run_dir, name: str) -> None:
-    """The OBSERVABLE reject: binding the curator with `name` raises ValueError at bind, and the
-    message is about the name (not an unrelated crash). RED at HEAD (TypeError from the missing
-    RunScope.corpus_name field surfaces instead — the #0 mechanism that is not built)."""
+    """Binding the curator with `name` raises a ValueError about the name, not an unrelated
+    crash."""
     with pytest.raises(ValueError) as exc:  # noqa: PT011 - message shape asserted below
         bind_curator(wt, run_dir, name)
     msg = str(exc.value)
@@ -33,8 +31,7 @@ def _assert_bind_rejects_name(wt, run_dir, name: str) -> None:
 
 
 def _assert_bind_accepts(wt, run_dir, name: str, expect_corpus_name: str):
-    """The OBSERVABLE accept: binding resolves the spawn's corpus under the worktree tree at
-    <wt>/defender/<expect_corpus_name>. RED at HEAD (bindable=False / RunScope.corpus_name absent)."""
+    """Binding with `name` resolves the spawn's corpus to ``<wt>/defender/<expect_corpus_name>``."""
     deps = bind_curator(wt, run_dir, name)
     assert deps.corpus_dir.resolve() == corpus(wt, expect_corpus_name).resolve()
     return deps
@@ -42,31 +39,25 @@ def _assert_bind_accepts(wt, run_dir, name: str, expect_corpus_name: str):
 
 @pytest.mark.parametrize(("case", "name"), [
     ("corpus_name has a leading dot slash", "./lessons"),
-    # a trailing slash normalises away and the name is still one segment (g14 executed)
+    # a trailing slash normalises away and the name is still one segment
     ("corpus_name has a trailing slash", "lessons/"),
 ], ids=lambda v: v if isinstance(v, str) else "")
 def test_a_corpus_name_that_normalises_to_one_segment_binds_the_same_dir(tmp_path, case, name):
-    """Normalisation is part of the ``corpus_name`` domain, not a separate rule: a spelling
-    that reduces to one segment binds the SAME corpus_dir as the bare name it reduces to."""
+    """Normalisation is part of the ``corpus_name`` domain: a spelling that reduces to one
+    segment binds the same corpus_dir as the bare name."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = _assert_bind_accepts(wt, rd, name, "lessons")
     assert deps.corpus_dir.resolve() == bind_curator(wt, rd, "lessons").corpus_dir.resolve()
 
 
-def test_the_names_that_resolve_to_the_tree_itself(tmp_path):
+def test_the_standing_prohibition_on_a_whole_tree_authoring_scope(tmp_path):
+    """The names that resolve to the tree itself are refused; an accepted corpus lies strictly
+    below the tree, and a write at the tree's top level is refused."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     _assert_bind_rejects_name(wt, rd, "")
     _assert_bind_rejects_name(wt, rd, ".")
     deps = _assert_bind_accepts(wt, rd, "lessons", "lessons")
-    # the accepted corpus is strictly BELOW the tree, never the tree itself
     assert deps.corpus_dir.resolve() != (wt / "defender").resolve()
-
-
-def test_the_standing_prohibition_on_a_whole_tree_authoring_scope(tmp_path):
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    _assert_bind_rejects_name(wt, rd, "")
-    _assert_bind_rejects_name(wt, rd, ".")
-    deps = bind_curator(wt, rd, "lessons")
     write_file(deps, "defender/lessons/lesson.md")  # in-corpus write lands (positive control)
     assert (wt / "defender" / "lessons" / "lesson.md").is_file()
     with pytest.raises(Exception):  # noqa: PT011, B017 - the write surface may raise ModelRetry or ValueError

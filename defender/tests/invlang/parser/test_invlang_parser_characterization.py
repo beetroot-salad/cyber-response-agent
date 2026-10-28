@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -21,10 +20,6 @@ from defender.skills.invlang.parser import (
     parse_dense_companion,
 )
 
-_HERE = Path(__file__).resolve().parents[2]
-_GOLDEN_DIR = _HERE / "fixtures" / "invlang"
-_CORPUS_DIR = _HERE / "fixtures" / "e2e"
-
 
 def _fence(body: str) -> str:
     return "```invlang\n" + body + "\n```\n"
@@ -35,27 +30,6 @@ _HYP_HEADER = (
     "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
     "h-001|?a|v-001|rel|identity|op||null|active"
 )
-
-
-_PRODUCTION_SURFACE = [
-    "parse_dense_companion",
-    "ParseWarning",
-    "INVLANG_FENCE_RE",
-    "scan_fences",
-    "FenceScan",
-]
-_TEST_SURFACE = [
-    "RowError",
-    "_resolution_record",
-    "_split_cells",
-    "_VERTEX_COLS",
-    "_EDGE_COLS",
-    "_HYP_HEADER_COLS",
-    "_HYP_PRED_COLS",
-    "_HYP_ATTR_PRED_COLS",
-    "_HYP_REFUT_COLS",
-    "_HYP_AUTHZ_COLS",
-]
 
 
 def test_split_quoted_cell_form_keeps_empty_and_honors_quotes():
@@ -80,6 +54,9 @@ def test_split_cells_quoted_pipe_and_backslash():
     cells = _split_cells(row)
     assert len(cells) == 5
     assert cells[4] == 'flags="EXE_WRITABLE|EXE_LOWER_LAYER"'
+    assert _split_cells(row + ";user=root") == [
+        "v-002", "process", "process:bash", "bash[pid=42]",
+        'flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root']
     assert _split_cells(r"a|b\|c|d") == ["a", "b|c", "d"]
 
 
@@ -217,8 +194,7 @@ _WARNING_SITES = [
     ids=[c[0] for c in _WARNING_SITES],
 )
 def test_warning_site_block_label_and_reason(label, body, exp_block, exp_reason, exp_row_index):
-    """Each reachable ParseWarning site keeps its exact block label + reason.
-    These strings are the contract the `_warn` consolidation must reproduce."""
+    """Each reachable ParseWarning site keeps its exact block label and reason."""
     _, warnings = parse_dense_companion(_fence(body))
     assert len(warnings) == 1, f"{label}: expected exactly one warning, got {warnings}"
     w = warnings[0]
@@ -337,8 +313,7 @@ def test_a_lead_subblock_does_not_make_later_rows_inherit_its_lead():
 
 
 def test_relisting_a_lead_with_fail_reason_keeps_its_projected_buckets():
-    """A second `:L findings` row for a lead used to replace its whole outcome
-    dict, discarding resolution buckets an earlier `:R` block had projected."""
+    """A second `:L findings` row for a lead keeps the buckets an earlier `:R` block projected."""
     body, warnings = parse_dense_companion(
         _fence(
             _LEAD_HEADER_FAIL + "\n"

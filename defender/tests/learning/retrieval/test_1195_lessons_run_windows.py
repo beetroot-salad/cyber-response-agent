@@ -65,7 +65,7 @@ def _placing(log: list, tree_for: Callable[..., Any],
              before: Callable[[], object] | None = None) -> Callable[..., Any]:
     """The lane's real `tree_for`, logging `("tree_for", path)` for each path asked of it: the
     settle's put-back of a non-`.md` stray, and the commit's placement of every path it stages.
-    `before` runs first on each call (a process's turn, in the O1 rows)."""
+    `before` runs first on each call (a process's turn)."""
 
     def placed(path: Any) -> Any:
         log.append(("tree_for", str(path)))
@@ -125,15 +125,13 @@ def _rows(channel: str, *ids: str) -> list[dict]:
 
 
 def _channel_scene(tmp_path: Path, channel: str, *, rows: list[dict], curator: S.FakeCurator,
-                   seed_corpus: dict[str, str] | None = None,
                    agent_files: dict[str, str] | None = None) -> S.DraftScene:
-    """The channel's tick over a draft lane (#1108 P4, OD12 class ii): its corpus is the
-    batch's draft lane, its commits land on the batch branch."""
+    """The channel's tick over a draft lane: its corpus is the batch's draft lane, its commits
+    land on the batch branch."""
     if channel == "lessons":
-        return S.build_draft_scene(tmp_path, rows=rows, curator=curator,
-                                   seed_corpus=seed_corpus, agent_files=agent_files)
+        return S.build_draft_scene(tmp_path, rows=rows, curator=curator, agent_files=agent_files)
     return S.build_questioner_draft_scene(tmp_path, rows=rows, curator=curator,
-                                          seed_corpus=seed_corpus, agent_files=agent_files)
+                                          agent_files=agent_files)
 
 
 def _rel(sc: S.DraftScene, name: str) -> str:
@@ -204,12 +202,12 @@ class Tick:
 
 def _tick(  # noqa: PLR0913 — one tick's two curators, every seam a row varies
         tmp_path: Path, log: list, *, curator: S.FakeCurator, q_curator: S.FakeCurator,
-        seed_corpus: dict[str, str] | None = None, q_rows: tuple[str, ...] = ("w1",),
-        journal: bool = False, on_place: Callable[[], object] | None = None,
+        q_rows: tuple[str, ...] = ("w1",), journal: bool = False,
+        on_place: Callable[[], object] | None = None,
 ) -> Tick:
     """The lessons curator over `f1` (`curator`) and the questioner curator over `q_rows`
     (`q_curator`), in one worktree."""
-    sc = S.build_draft_scene(tmp_path, curator=curator, seed_corpus=seed_corpus)
+    sc = S.build_draft_scene(tmp_path, curator=curator)
     S.seed(sc.paths, QUESTIONER_FINDINGS, [S.world_row(i) for i in q_rows])
     lessons = _wire(sc.cfg, log, curator=curator, journal=journal, on_place=on_place)
     questioner = _wire(draft_questioner_cfg(sc.lane), log, curator=q_curator, journal=journal)
@@ -221,7 +219,7 @@ def _questioner_rel(t: Tick, name: str) -> str:
 
 
 def _journal_batch(batch: Any, log: list) -> None:
-    """Wrap the batch's change set and commit (P3's `Batch.change_set` / `Batch.commit`) so each
+    """Wrap the batch's change set and commit (`Batch.change_set` / `Batch.commit`) so each
     call logs `("change_set",)` / `("commit",)`: the host's read of the box's output and its
     commit, journalled beside the spawns."""
     change_set, commit = batch.change_set, batch.commit
@@ -239,12 +237,10 @@ def _journal_batch(batch: Any, log: list) -> None:
 
 def _journal_resets(batch: Any, log: list, watched: Path,
                     fault: BaseException | None = None) -> None:
-    """Wrap the batch's claim reset (P3's `Batch.reset`, the P4 undo) so each call logs
-    `("reset", "gone"|"kept")` — whether `watched` is absent from the draft after it. With
-    `fault`, the FIRST reset raises it (an undo fault, injected at the reset seam) after the
-    real reset ran and after logging `("reset", "faulted")` — so what is under test is which
-    fault the drain lets win, not a draft left dirty for the next claim (OD15). Later resets
-    are the real one."""
+    """Wrap the batch's claim reset (`Batch.reset`, the undo) so each call logs
+    `("reset", "gone"|"kept")`: whether `watched` is gone from the draft after it. With `fault`,
+    the first reset runs, logs `("reset", "faulted")` and raises it, so what is under test is
+    which fault the drain lets win, not a draft left dirty for the next claim."""
     real = batch.reset
     pending = [fault] if fault is not None else []
 
@@ -301,10 +297,9 @@ def test_each_spawn_runs_in_its_own_window_and_no_host_step_beside_a_running_box
     segments = _after_each_spawn(log)
     before, after_spawn = segments
     assert "gate" in _kinds(before), _kinds(before)
-    # #1108 P4: the settle is the claim's change set (OD15) and the commit is P3's commit-maker
-    # (O7), both journalled at the batch (`_journal_batch`); a non-`.md` stray is dropped from
-    # the claim and removed by its reset, never placed. Citations are read from the change
-    # set's own bytes (PR #1288 review), so no corpus read follows the spawn.
+    # The settle is the claim's change set and the commit the batch's, both journalled
+    # (`_journal_batch`); a non-`.md` stray is dropped from the claim and removed by its reset,
+    # never placed. Citations come from the change set's bytes, so no corpus read follows the spawn.
     assert ("change_set",) in after_spawn, "the settle after the curator spawn was not seen"
     assert "report" in set(_kinds(after_spawn)), _kinds(after_spawn)
     assert ("commit",) in after_spawn, "the commit was not seen"
@@ -335,19 +330,13 @@ def test_one_tick_runs_one_window_per_spawn_across_both_curators(tmp_path: Path,
     assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
 
 
-#: A committed file outside both corpora: the box's write there once started is a stray only if
-#: the tick took its baseline of strays before the start.
+#: A committed file outside both corpora, so outside the lanes a claim may change.
 STRAY_REL = "agent/notes/stray1195.md"
 STRAY_EDIT = "rewritten by the box\n"
 
 
-# #1108 P4, OD15: a claim's ChangeSet is its draft against the batch base, the draft re-synced
-# per claim, so there is no "pre-run stray tolerated" baseline. The legacy `before-the-run` rows
-# (a stray edited before the run is tolerated and the tick commits) are deleted (OD12 class i);
-# the derivation is pinned by P3's `tenant_1108_delivery/test_changes.py::
-# test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files` and
-# `::test_claims_commit_and_reset_one_after_another_within_one_batch`. A write outside the lanes
-# is a ChangeSet refusal (OD18): the claim is U10's refused claim, not the lane's rc 2 stray.
+# A claim's change set is its draft against the batch base (re-synced per claim), so there is no
+# pre-run stray baseline: a write outside the lanes refuses the claim, not the lane's rc-2 stray.
 # `untouched` is the positive control: the file left as the base holds it, the tick commits.
 @pytest.mark.parametrize("when", ["once-started", "untouched"])
 @pytest.mark.parametrize("channel", CHANNELS)
@@ -358,7 +347,7 @@ def test_a_stray_the_box_writes_outside_the_lanes_once_started_is_a_refused_clai
     fid = "f1"
     curator = S.FakeCurator(writes={"a.md": S.lesson(fid)})
     rows = _rows(channel, fid)
-    # Published in the export, so the draft starts holding it (#1108 P4: no checkout to commit to).
+    # Published in the export, so the draft starts holding it.
     sc = _channel_scene(tmp_path, channel, rows=rows, curator=curator,
                         agent_files={STRAY_REL.removeprefix("agent/"): "committed\n"})
     stray = sc.lane.root / STRAY_REL
@@ -376,7 +365,7 @@ def test_a_stray_the_box_writes_outside_the_lanes_once_started_is_a_refused_clai
         assert sc.head_text(_rel(sc, "a.md")) == S.lesson(fid)
         assert sc.head_text(STRAY_REL) == "committed\n"
         return
-    # U10 (OD18/OD19): rc 0, nothing lands, one attempt, the row held, the draft back at base.
+    # A refused claim: rc 0, nothing lands, one attempt, the row held, the draft back at base.
     assert rc == 0, rc
     assert sc.head_files() == []
     assert sc.pending_by_id()[fid].get("attempts") == 1
@@ -395,8 +384,7 @@ def test_a_failing_spawns_box_is_stopped_before_the_undo_runs(tmp_path: Path, mo
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=boom)
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
     t = _tick(tmp_path, log, curator=curator, q_curator=q_curator, journal=True)
-    # #1108 P4: the undo is the claim's reset (P3's `Batch.reset`, amendment 3 C2), not a
-    # per-file unlink through the corpus mount; it is journalled with the draft it left.
+    # The undo is the claim's reset (`Batch.reset`), journalled with the draft it left.
     _journal_resets(t.sc.lane.batch, log, t.sc.corpus / "a.md")
 
     drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
@@ -505,27 +493,15 @@ def _set_daemon_fault(daemon: X.FakeDaemon, kind: str, nth: int) -> None:
 
 def _box_fault_scene(  # noqa: PLR0913 — one tick, every fault a row varies
         tmp_path: Path, monkeypatch: Any, source: str, *, in_curator: str = "author",
-        seed_corpus: dict[str, str] | None = None, plant: Callable[..., None] | None = None,
-        log: list | None = None, stops_before: int = 0,
 ) -> Faulted:
     """A tick whose lessons curator leaves `a.md` (citing f1) and whose questioner curator leaves
     `q.md` (citing w1), each committing it unless something faults. The curator `in_curator`
-    meets a box fault from `source` (`FIRST_CURATOR_SOURCES`), after running `plant` (the box's
-    own act) in its spawn. `stops_before`: the stops the daemon answers before the first run's
-    (the drain's post-create stop, through `author_drain`, which starts a box of its own: then
-    the daemon holds nothing to begin with, and `runs` is `None`). A `Tripwire` is the `docker`
-    on `PATH` either way."""
-    if stops_before:
-        daemon, runs = X.FakeDaemon(tmp_path), None
-        daemon.tripwire = X.Tripwire(tmp_path).install(monkeypatch)
-    else:
-        daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
-    log = log if log is not None else []
+    meets a box fault from `source` (`FIRST_CURATOR_SOURCES`). A `Tripwire` is the `docker` on
+    `PATH`."""
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     fault: BaseException | None = BoxFault(f"the box failed ({source})") if source == "spawn" else None
 
     def act(rows: Any, batch_id: str, cfg: Any) -> None:
-        if plant is not None:
-            plant(rows, batch_id, cfg)
         if source == "spawn":
             assert fault is not None
             raise fault
@@ -533,10 +509,9 @@ def _box_fault_scene(  # noqa: PLR0913 — one tick, every fault a row varies
     first = in_curator == "author"
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=act if first else None)
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")}, also=None if first else act)
-    t = _tick(tmp_path, log, curator=curator, q_curator=q_curator, seed_corpus=seed_corpus)
+    t = _tick(tmp_path, [], curator=curator, q_curator=q_curator)
     # The faulting run's ordinal: the lessons curator's is 1, the questioner's 2.
-    nth = 1 if first else 2
-    _set_daemon_fault(daemon, source, nth + (stops_before if source.startswith("stop") else 0))
+    _set_daemon_fault(daemon, source, 1 if first else 2)
     return Faulted(t=t, curator=curator, q_curator=q_curator, daemon=daemon, runs=runs,
                    fault=fault)
 
@@ -633,12 +608,9 @@ def test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_secon
     assert t.sc.pending_by_id()["f1"].get("attempts") == (1 if fault is GitError else None)
 
 
-# #1108 P4 (OD12 class ii): the undo is the claim's reset (P3's `Batch.reset`), which removes a
-# box-planted link without following it (amendment 3 C2), so the legacy plant — a holding folder
-# swapped for a link, meeting the per-file write-back as `OSError(ELOOP)` — no longer faults the
-# undo; that it does not is P3's `tenant_1108_delivery/test_changes.py::
-# test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`. The #1195 precedence
-# promise stands over an undo fault injected at the reset seam (a real `OSError`, EIO).
+# The undo is the claim's reset, which removes a box-planted link without following it
+# (`tenant_1108_delivery/test_changes.py::test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`),
+# so a planted link cannot fault it; the precedence rows inject the undo fault at the reset seam.
 def _swap_sub_for_a_link(moved: Path) -> Callable[..., None]:
     """The box swaps the seeded holding folder `sub/` for a link (the tenant-drain row's plant)."""
     def plant(_rows: Any, _batch_id: str, cfg: Any) -> None:
@@ -787,10 +759,9 @@ def _leave_a_writer(process: LeftProcess, writes: str, outside: Path) -> Callabl
 
 
 def _o1_tick(tmp_path: Path, process: LeftProcess, writes: str | None) -> Tick:
-    """#1108 P4: the host reads the box's output once, as the claim's change set (OD15, the one
-    truth every later step is computed from), so the left process gets its turn as each change
-    set is taken — the first host read after the run, where a surviving process could still
-    change what is committed (the legacy turn was the commit's per-path placement)."""
+    """The host reads the box's output once, as the claim's change set, so the left process gets
+    its turn as each change set is taken: the first host read after the run, where a surviving
+    process could still change what is committed."""
     leave = _leave_a_writer(process, writes, tmp_path / "outside") if writes else None
     curator = S.FakeCurator(writes={"a.md": SPAWNED}, also=leave)
     t = _tick(tmp_path, [], curator=curator, q_curator=S.FakeCurator(), q_rows=())
@@ -824,8 +795,8 @@ def test_a_process_left_in_the_box_cannot_change_a_read_lesson(tmp_path: Path, m
 @pytest.mark.parametrize("writes", ["rewrite", "symlink"])
 def test_control_a_process_that_outlived_its_run_would_race_the_commit(
         tmp_path: Path, monkeypatch, writes: str):
-    """The same tick with a process that survives its run: it acts at the commit's placement,
-    after the citation read, and HEAD holds what it wrote (a symlink commits as one). The race the run's stop closes is real against this machinery."""
+    """Control: a process that survives its run acts when the change set is taken, so the race the
+    run's stop closes is real: a rewrite lands, a symlink refuses the claim."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     process = LeftProcess(daemon, outlives_its_run=True)
     t = _o1_tick(tmp_path, process, writes)
@@ -834,8 +805,7 @@ def test_control_a_process_that_outlived_its_run_would_race_the_commit(
 
     assert process.acts == [writes]
     if writes == "symlink":
-        # #1108 P4: a link in the lane is a ChangeSet refusal (OD18/OD23), never committed as
-        # one: the surviving process's act is seen as a refused claim, nothing lands.
+        # A link in the lane is a change-set refusal, never committed: the claim is refused.
         assert t.sc.head_text(_rel(t.sc, "a.md")) is None
         assert t.sc.pending_by_id()["f1"].get("attempts") == 1
     else:
@@ -883,9 +853,8 @@ def test_a_path_the_box_first_writes_as_its_run_stops_is_settled_and_committed(
         assert sc.head_text(_rel(sc, "b.md")) == NEW_LESSON, "the stop-time lesson was missed"
         assert sc.head_text(_rel(sc, "a.md")) == S.lesson("f1")
         return
-    # #1108 P4: a path outside the lanes is a ChangeSet refusal (OD18), so the stray the
-    # stop-time listing sees refuses the claim as U10 (rc 0, OD19): nothing lands, f1 counts one
-    # attempt and stays queued, the draft is reset.
+    # A path outside the lanes is a change-set refusal, so the stray the stop-time listing sees
+    # refuses the claim (rc 0): nothing lands, f1 counts one attempt and stays queued.
     assert rc == 0, rc
     assert sc.head_files() == [], "a commit landed beside a stray the box left as it stopped"
     assert sc.pending_by_id()["f1"].get("attempts") == 1
@@ -924,16 +893,10 @@ def test_a_seam_fault_at_the_runs_stop_halts_the_lessons_drain(tmp_path: Path, m
 
 
 # ---------------------------------------------------------------------------------------------
-# The drain-level rows over the P4 tenant path (#1108 P4 re-spelling, OD12 class ii). The #1195
-# promises stand: the production drain runs one box, stopped between its agent runs; a stop fault
-# under a failing spawn halts the drain with the failure as context; a swallowed stop fault makes
-# the next curator's run refuse; a batch box that never comes up charges no row; the default
-# curator step halts on a run-start / stop / stop-proof fault; a box fault escapes with nothing
-# delivered. The batch is a tenant draft delivered to the tenant forge
-# (`author_drain(..., client=, identity=, start_box=)`); "delivered" is read on the tenant origin
-# (`lessons/` branches) and the forge's PR creates, "nothing delivered" there and on the product
-# checkout's HEAD. The batch scan (`scrub=`), the worktree cleanup event and the worktree
-# cut-commit pointer are gone with the worktree (amendment 3 C3) and are not re-asserted.
+# The drain-level rows, over the tenant path. The batch is a tenant draft delivered to the tenant
+# forge (`author_drain(..., client=, identity=, start_box=)`); "delivered" is read on the tenant
+# origin's `lessons/` branches and the forge's PR creates, "nothing delivered" there and on the
+# product checkout's HEAD.
 # ---------------------------------------------------------------------------------------------
 
 import contextlib  # noqa: E402 — the P4 section's own imports
@@ -962,7 +925,7 @@ _CURATOR_BUILDERS = {
 
 @pytest.fixture
 def tenant_of(tmp_path: Path, data_root: Path):
-    """`make(files=None)`: S0's fixture tenant published for real under this test's data root
+    """`make(files=None)`: the fixture tenant published for real under this test's data root
     (plus `files`, repo-relative), its forge binding written; closed with the test."""
     with contextlib.ExitStack() as stack:
         def make(files: dict[str, str] | None = None) -> Any:
@@ -975,10 +938,10 @@ def tenant_of(tmp_path: Path, data_root: Path):
 
 @dataclasses.dataclass
 class TenantTick:
-    """`Tick` over the P4 tenant path: `t` the published tenant, `product` the scratch product
+    """`Tick` over the tenant path: `t` the published tenant, `product` the scratch product
     checkout the drain runs over, `paths` the tenant's learning paths over it. `trigger` is the
     drain's `trigger_author` seam: it logs `("trigger", module)`, marks the daemon's log, and runs
-    that REAL curator as the default step does, its config built from the lane's held trees over
+    that real curator as the default step does, its config built from the lane's held trees over
     whatever paths the drain hands it (the draft's), with only the spawn wired (`_wire`)."""
 
     t: Any
@@ -1000,7 +963,7 @@ class TenantTick:
             self.daemon.mark(f"trigger:{module_name}")
         module, builder = _CURATOR_BUILDERS[module_name]
         mod = importlib.import_module(module)
-        # The lane's held mounts over the draft of the batch the drain handed down (OD16), as
+        # The lane's held mounts over the draft of the batch the drain handed down, as
         # `_drain_support.CuratorTrigger` holds them — never `paths`' product-checkout corpus.
         with draft_lane_trees(kw["batch"], AUTHOR_DRAFT_LANES) as trees:
             cfg = getattr(mod, builder)(paths, state=state, trees=trees, box=box, **kw)
@@ -1057,7 +1020,7 @@ def _nothing_delivered(tt: TenantTick) -> None:
 
 
 def test_control_nothing_delivered_sees_each_delivery_channel(tmp_path: Path, tenant_of: Any):
-    """R-L6 control for `_nothing_delivered`: on an untouched scene it passes, and it fails on
+    """Control for `_nothing_delivered`: on an untouched scene it passes, and it fails on
     each channel once something is planted there — a file in the product checkout's `defender/`,
     a product branch, a `lessons/` branch on the tenant origin, a PR request on the forge."""
     tt = _tenant_tick(tmp_path, tenant_of, [], curator=S.FakeCurator(writes={}),
@@ -1111,9 +1074,8 @@ def _tenant_lane(tt: TenantTick, daemon: X.FakeDaemon, *,
 @pytest.mark.parametrize("docker", ["carried", "path-default"])
 def test_the_production_drain_runs_one_box_stopped_between_its_agent_runs(
         tmp_path: Path, monkeypatch, tenant_of: Any, docker: str):
-    """#1195 on the P4 drain: one box per batch, stopped after create and between the two
-    curators' runs, each spawn inside its own window, handed the run handle; the batch is then
-    delivered as one `lessons/` PR on the tenant forge holding both curators' lessons."""
+    """One box per batch, stopped after create and between the two curators' runs, each spawn in
+    its own window; the batch is delivered as one `lessons/` PR holding both curators' lessons."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
     X.clear_opt_out(monkeypatch)
@@ -1157,11 +1119,8 @@ def test_the_production_drain_runs_one_box_stopped_between_its_agent_runs(
 @pytest.mark.parametrize("failure", F1_FAILURES)
 def test_a_stop_fault_under_a_failing_spawn_halts_author_drain_with_the_failure_as_context(
         tmp_path: Path, monkeypatch, tenant_of: Any, failure: Any, stop: str, follows: bool):
-    """#1195 F1 on the P4 drain: a stop fault under a failing lessons spawn halts the drain with
-    the spawn's failure as context: f1 not bumped, the findings stuck record names `BoxFault`,
-    the questioner never triggered, nothing delivered. Control (the stop holds): the failure is
-    handled as without a box, the questioner is served, and the batch is delivered without the
-    failed spawn's lesson."""
+    """Control (the stop holds): the failure is handled as without a box, the questioner is
+    served, and the batch is delivered without the failed spawn's lesson."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     daemon = X.FakeDaemon(tmp_path)
     daemon.tripwire = X.Tripwire(tmp_path).install(monkeypatch)
@@ -1207,9 +1166,8 @@ def test_a_stop_fault_under_a_failing_spawn_halts_author_drain_with_the_failure_
 @pytest.mark.parametrize("stop", ["refused", "holds"])
 def test_a_swallowed_stop_fault_makes_the_next_curators_run_refuse(
         tmp_path: Path, monkeypatch, tenant_of: Any, stop: str):
-    """#1195 on the P4 drain: a stop fault a layer above the spawn swallowed leaves the box
-    running, so the questioner's run refuses it (with a best-effort stop) and nothing is
-    delivered; control: the stop holds and the questioner's lesson is delivered."""
+    """A stop fault swallowed above the spawn leaves the box running, so the questioner's run
+    refuses it (with a best-effort stop); control: the stop holds and its lesson is delivered."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     daemon = X.FakeDaemon(tmp_path)
     daemon.tripwire = X.Tripwire(tmp_path).install(monkeypatch)
@@ -1250,8 +1208,7 @@ def test_a_swallowed_stop_fault_makes_the_next_curators_run_refuse(
     assert "stop" in tail[:tail.index("rm")], f"no best-effort stop on the refusal: {tail}"
 
 
-#: A batch box that never comes up: create refused, sentinel refused, the alias ban not in
-#: force (the worktree cut-commit pointer is gone with the worktree).
+#: A batch box that never comes up: create refused, sentinel refused, the alias ban not in force.
 BATCH_START_FAULTS = [
     pytest.param("refuse_create", BoxFault, id="create"),
     pytest.param("refuse_sentinel", BoxFault, id="sentinel"),
@@ -1263,8 +1220,6 @@ BATCH_START_FAULTS = [
 @pytest.mark.parametrize(("knob", "kind"), BATCH_START_FAULTS)
 def test_a_batch_start_fault_charges_no_curator_row_and_writes_no_stuck_record(
         tmp_path: Path, monkeypatch, tenant_of: Any, knob: str, kind: type):
-    """#1195 on the P4 drain: a batch box that never comes up triggers no curator, moves no
-    queue, writes no stuck record and delivers nothing."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
     X.clear_opt_out(monkeypatch)
@@ -1293,7 +1248,7 @@ def test_a_batch_start_fault_charges_no_curator_row_and_writes_no_stuck_record(
 
 def _default_tick(tmp_path: Path, monkeypatch: Any, tenant_of: Any, *, findings: bool
                   ) -> tuple[TenantTick, X.FakeDaemon]:
-    """The lessons drain's DEFAULT world over the tenant: both thresholds at 1, f1 queued
+    """The lessons drain's default world over the tenant: both thresholds at 1, f1 queued
     (`findings`) and w1 on the questioner channel, the image inputs committed in the product
     checkout, the opt-out unset, and the fake daemon (a `Tripwire` is the `docker` on `PATH`)."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
@@ -1307,7 +1262,7 @@ def _default_tick(tmp_path: Path, monkeypatch: Any, tenant_of: Any, *, findings:
 
 
 def _default_drain(tt: TenantTick, daemon: X.FakeDaemon) -> BaseException | None:
-    """`author_drain` with its DEFAULT curator step (no `trigger_author=`), only the forge, the
+    """`author_drain` with its default curator step (no `trigger_author=`), only the forge, the
     identity and the docker the real `start_box` creates the box with injected."""
     return _p4_caught(lambda: drains.author_drain(
         tt.paths, start_box=partial(box_mod.start_box, docker=daemon), **_seams(tt)))
@@ -1316,9 +1271,6 @@ def _default_drain(tt: TenantTick, daemon: X.FakeDaemon) -> BaseException | None
 @pytest.mark.parametrize("queued", ["both", "questioner-only"])
 def test_a_run_start_fault_through_the_default_curator_step_halts_the_drain(
         tmp_path: Path, monkeypatch, tenant_of: Any, queued: str):
-    """#1195 on the P4 drain: a run-start fault in the default curator step halts the drain: one
-    start asked, no docker call outside the run, the faulting curator's stuck record names
-    `BoxFault`, the other curator's queue untouched, f1 not bumped, nothing delivered."""
     tt, daemon = _default_tick(tmp_path, monkeypatch, tenant_of, findings=queued == "both")
     daemon.refuse_start(at=[1])
     q_before = (location_path(tt.paths.state_root) / QUESTIONER_FINDINGS.queue).read_bytes()
@@ -1343,10 +1295,8 @@ def test_a_run_start_fault_through_the_default_curator_step_halts_the_drain(
 @pytest.mark.parametrize("stop", ["refused", "holds"])
 def test_a_stop_fault_under_a_failing_default_spawn_halts_the_drain(
         tmp_path: Path, monkeypatch, tenant_of: Any, stop: str):
-    """#1195 on the P4 drain: the default spawn fails (no model routes) and its run's stop
-    faults: the stop fault wins with the spawn's `FatalConfigError` as context, the daemon is
-    asked nothing after the failed stop but the removal, nothing delivered. Control: the stop
-    holds, the failure is the findings channel's own and both runs come and go."""
+    """The default spawn fails (no model routes) and its run's stop faults: the stop fault wins,
+    with the spawn's `FatalConfigError` as context. Control: the stop holds; both runs come and go."""
     tt, daemon = _default_tick(tmp_path, monkeypatch, tenant_of, findings=True)
     monkeypatch.setenv("LEARNING_AUTHOR_MODEL", "no-such-model-1195")
     if stop == "refused":
@@ -1376,8 +1326,8 @@ def test_a_stop_fault_under_a_failing_default_spawn_halts_the_drain(
 @pytest.mark.parametrize("proof", ["seam-OSError", "seam-TimeoutExpired", "holds"])
 def test_a_seam_fault_at_the_stops_proof_through_the_default_curator_step_halts_the_drain(
         tmp_path: Path, monkeypatch, tenant_of: Any, proof: str):
-    """#1195 on the P4 drain: a seam fault proving the default run's stop halts the drain as a
-    `BoxFault` (the spawn's failure in its chain), nothing delivered; control: the proof holds."""
+    """A seam fault proving the default run's stop is a `BoxFault` with the spawn's failure in its
+    chain; control: the proof holds."""
     tt, daemon = _default_tick(tmp_path, monkeypatch, tenant_of, findings=True)
     monkeypatch.setenv("LEARNING_AUTHOR_MODEL", "no-such-model-1195")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "99")
@@ -1402,9 +1352,8 @@ def test_a_seam_fault_at_the_stops_proof_through_the_default_curator_step_halts_
 
 def test_control_author_drain_delivers_a_batch_with_no_box_fault(
         tmp_path: Path, monkeypatch, tenant_of: Any):
-    """#1195 control on the P4 drain: with no box fault the box starts, is stopped before the
-    first trigger, each spawn runs in its own window, and the batch is delivered with both
-    lessons."""
+    """Control: with no box fault the box is stopped before the first trigger, each spawn runs in
+    its own window, and both lessons are delivered."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     daemon = X.FakeDaemon(tmp_path)
     daemon.tripwire = X.Tripwire(tmp_path).install(monkeypatch)
@@ -1433,10 +1382,7 @@ TENANT_SEEDED_SUB = {"agent/lessons/sub/lesson.md": S.lesson("f0")}
 @pytest.mark.parametrize(("source", "in_curator"), LANE_FAULTS)
 def test_a_box_fault_escapes_author_drain_with_nothing_delivered(
         tmp_path: Path, monkeypatch, tenant_of: Any, source: str, in_curator: str):
-    """#1195 on the P4 drain: a box fault in either curator (its spawn, its run's start or stop,
-    a stop over an undo that faults too) escapes the drain; nothing is delivered. In the first
-    curator the second is never triggered and its queue untouched; in the second, the first
-    curator's work is not delivered either (the batch halted)."""
+    """In the second curator, the first curator's work is not delivered either: the batch halted."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     undo_fault = source == "stop-over-an-undo-fault"
     kind = "stop" if undo_fault else source

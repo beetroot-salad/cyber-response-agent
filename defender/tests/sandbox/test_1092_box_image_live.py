@@ -105,7 +105,7 @@ def test_a_command_inside_the_box_sees_defender_box_1_and_the_env_is_still_exact
     assert "DEFENDER_AGENT_DIR" not in second
 
 
-# ---- d49 (the live suite's own row, re-sited) --------------------------------------------------
+# ---- d49 (the live suite's startup probe) -----------------------------------------------------
 @pytest.mark.live
 @requires_live_box
 def test_the_live_suites_duckdb_startup_probe_exits_zero_in_a_box_from_the_owned_image(tmp_path):

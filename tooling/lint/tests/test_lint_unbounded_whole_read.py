@@ -1,4 +1,4 @@
-"""Spec for the lint_unbounded_whole_read gate (#1188 M4, as amended by design amendment 2)."""
+"""Tests for the lint_unbounded_whole_read gate (#1188)."""
 from __future__ import annotations
 
 import ast

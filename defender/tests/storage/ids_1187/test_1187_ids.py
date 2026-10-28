@@ -20,7 +20,7 @@ from defender.records._tenant_id import TenantId
 DEFENDER = Path(__file__).resolve().parents[3]
 
 NON_CANONICAL = [pytest.param(text, id=repr(text)) for text in S.NON_CANONICAL_IDS]
-# O1 / declared change 2: a minted id is a bare random UUID.
+# a minted id is a bare random UUID
 
 def test_1187_o1_mint_contract():
     import uuid
@@ -37,24 +37,7 @@ def test_1187_o1_mint_contract():
         assert RunId.parse(text) == run_id
 
 
-def test_1187_o1_run_setup_names_a_run_folder_by_a_bare_uuid(tmp_path, data_root):
-    from defender import run_common
-
-    t = S.tenant(data_root)
-    alert = H.alert_file(tmp_path / "in", "ssh-brute-force.json")
-
-    first = run_common.materialize_run(alert, tenant=t)
-    second = run_common.materialize_run(alert, tenant=t)
-
-    runs = Path(location_path(t.runs))
-    assert Path(first.run_dir).parent == runs
-    assert Path(second.run_dir).parent == runs
-    for run in (first, second):
-        name = Path(run.run_dir).name
-        assert S.is_canonical_uuid(name), f"the minted run folder is named {name!r}"
-        assert Path(run.run_dir).is_dir()
-    assert Path(first.run_dir).name != Path(second.run_dir).name
-# O2 / declared change 1: only canonical lowercase UUID text is an id.
+# only canonical lowercase UUID text is an id
 
 def test_1187_o2_canonical_ids_pass_the_rules():
     from defender.records._run_id import episode_id_fault, run_id_fault
@@ -121,11 +104,10 @@ def test_1187_o2_run_name_fault_still_tells_a_sidecar_from_a_run():
     assert staged, "a staged sidecar was admitted as a run name"
 
 
-# O3 / declared change 4: the family gate no longer judges the composed `<episode>-<label>`.
+# a world label follows its own rule; the family gate never judges a composed `<episode>-<label>`
 
-#: A world label that is valid by its own rule (lower-case letters and digits, 200 bytes) but
-#: would make `<36-byte uuid>-<label>` 237 bytes: over the 206-byte bound the gate used to apply
-#: to the composed name. Far below NAME_MAX, so no filesystem rule is the reason it is refused.
+#: A label valid by its own rule (200 bytes) whose composed `<36-byte uuid>-<label>` would be 237
+#: bytes, past a 206-byte composed-name bound, yet far below NAME_MAX.
 LONG_LABEL = "w" * 200
 
 
@@ -190,7 +172,7 @@ def test_1187_o1_the_episode_layout_spells_no_sibling_run_dir():
     for owner in (_episode_paths.EpisodeLayout, _episode_paths.LAYOUT):
         assert not hasattr(owner, "sibling_run_dir"), (
             f"{owner!r} still spells the composed sibling run dir")
-# #1279 O5: no run id on the command line; the minted id is announced first on stdout.
+# no run id on the command line; the minted id is announced first on stdout (#1279)
 
 def _run_py(tenant, alert: Path, run_id: str):
     """Drive run.main with `--run-id <id>` while recording the spend seams."""
@@ -203,7 +185,7 @@ def _run_py(tenant, alert: Path, run_id: str):
 @pytest.mark.parametrize("text", [pytest.param(S.SAMPLE_UUID, id="canonical-uuid")] + [
     pytest.param(t, id=repr(t)) for t in S.NON_CANONICAL_IDS if t.strip() == t and t])
 def test_1279_o5_run_py_rejects_run_id_on_the_command_line(text, tmp_path, data_root):
-    """O5: `--run-id` is no longer an argument, whatever it carries; the run stops before setup."""
+    """`--run-id` is not an argument, whatever it carries; the run stops before setup."""
     t = S.tenant(data_root)
     alert = H.alert_file(tmp_path / "in")
 
@@ -218,7 +200,7 @@ def test_1279_o5_run_py_rejects_run_id_on_the_command_line(text, tmp_path, data_
 
 
 def test_1279_o5_run_py_rejects_the_equals_form_of_run_id(tmp_path, data_root):
-    """O5: `--run-id=<uuid>` is refused as the spaced form is."""
+    """`--run-id=<uuid>` is refused as the spaced form is."""
     t = S.tenant(data_root)
     rec = P.SiblingRecorder()
 
@@ -234,7 +216,7 @@ def test_1279_o5_run_py_rejects_the_equals_form_of_run_id(tmp_path, data_root):
 @pytest.mark.parametrize("update_ticket", [False, True], ids=["plain", "with-ticket"])
 def test_1279_o5_the_minted_id_is_the_first_stdout_line_before_the_ticket_and_box(
         tmp_path, data_root, update_ticket):
-    """O5: `run_id=<uuid>` is stdout's first line, after setup and before ticket and lifecycle."""
+    """`run_id=<uuid>` is stdout's first line, after setup and before ticket and lifecycle."""
     t = S.tenant(data_root)
     alert = H.alert_file(tmp_path / "in")
     rec = P.SiblingRecorder()
@@ -256,10 +238,9 @@ def test_1279_o5_the_minted_id_is_the_first_stdout_line_before_the_ticket_and_bo
 
 
 def test_1279_o5_the_announce_is_flushed_not_left_in_stdouts_block_buffer(tmp_path, data_root):
-    """O5/A6: a launcher reads the child's stdout through a pipe, where stdout is block-buffered.
-    With `sys.stdout` a block-buffered text wrapper over a pipe, `run_id=<uuid>` is already in the
-    pipe when the box is reached, so run.py flushed it (an unflushed print would sit in the wrapper
-    until exit, and the launcher would see no id while the run is alive)."""
+    """A launcher reads the child's stdout through a pipe, where it is block-buffered: the
+    announce must already be in the pipe when the box is reached (an unflushed print would sit
+    in the wrapper until exit, and the launcher would see no id while the run is alive)."""
     import io
     import os
     import select
@@ -295,7 +276,7 @@ def test_1279_o5_the_announce_is_flushed_not_left_in_stdouts_block_buffer(tmp_pa
 
 
 def test_1279_o8_natural_setup_proceeds_beside_other_ids_sidecars(tmp_path, data_root):
-    """O8: setup refuses sidecars at ITS id only; other ids' sidecars (every suffix) in the runs
+    """Setup refuses sidecars at ITS id only; other ids' sidecars (every suffix) in the runs
     base neither refuse it nor are cleared."""
     t = S.tenant(data_root)
     alert = H.alert_file(tmp_path / "in")
@@ -316,7 +297,7 @@ def test_1279_o8_natural_setup_proceeds_beside_other_ids_sidecars(tmp_path, data
 
 
 def test_1279_o5_two_runs_announce_two_minted_ids(tmp_path, data_root):
-    """O5: each run's setup mints its own id; the announced id names the run folder it made."""
+    """Each run's setup mints its own id; the announced id names the run folder it made."""
     t = S.tenant(data_root)
     alert = H.alert_file(tmp_path / "in")
     announced = []
@@ -336,7 +317,7 @@ def test_1279_o5_two_runs_announce_two_minted_ids(tmp_path, data_root):
 @pytest.mark.parametrize("var", ["DEFENDER_RUN_ID", "RUN_ID", "DEFENDER_RUNID", "DEFENDER_PINNED_RUN_ID",
                                  "DEFENDER_RUN_UUID"])
 def test_1279_o5_no_environment_variable_chooses_the_run_id(tmp_path, data_root, monkeypatch, var):
-    """P-B/O5: with a fresh uuid4 in the environment, run.py still announces a minted, different id."""
+    """With a fresh uuid4 in the environment, run.py still announces a minted, different id."""
     t = S.tenant(data_root)
     alert = H.alert_file(tmp_path / "in")
     runs = Path(location_path(t.runs))
@@ -358,7 +339,7 @@ def test_1279_o5_no_environment_variable_chooses_the_run_id(tmp_path, data_root,
 
 
 def test_1279_o5_a_run_refused_before_setup_announces_nothing(tmp_path, data_root):
-    """O5: nothing is on stdout before the announcement, and a refused start has none."""
+    """Nothing is on stdout before the announcement, and a refused start has none."""
     S.tenant(data_root)
     rec = P.SiblingRecorder()
 
@@ -371,7 +352,7 @@ def test_1279_o5_a_run_refused_before_setup_announces_nothing(tmp_path, data_roo
 
 
 def test_1279_a3_setup_and_create_take_no_run_id(tmp_path, data_root):
-    """A3: no id parameter on `materialize_run`, `run.py`'s seam or `create()`; `create()` mints."""
+    """No id parameter on `materialize_run`, `run.py`'s seam or `create()`; `create()` mints."""
     import inspect
 
     from defender import run as run_py
@@ -421,7 +402,7 @@ def test_1279_a3_setup_and_create_take_no_run_id(tmp_path, data_root):
                       TypeError), "materialize_run took an id"
 
 
-# #1279 A3: the run-id census helpers.
+# the run-id census helpers
 
 _astlib = _by_path.import_lint_lib("_astlib")
 _scope = _by_path.import_lint_lib("_episode_scope")
@@ -440,13 +421,13 @@ class Hit:
         return f"{self.rel}:{self.line} {self.kind} {self.what}"
 
 
-# #1279 A3 census: no production call hands a run id to run setup or `RunsRepository.create`;
-# only run.py makes an arm, from the roster's id, and hands its handle to setup (rev 6).
+# The census: no production call hands a run id to run setup or `RunsRepository.create`;
+# only run.py makes an arm, from the roster's id, and hands its handle to setup.
 
-def run_id_handouts(root: Path, *, skip_tests: bool = True) -> list[Hit]:
+def run_id_handouts(root: Path) -> list[Hit]:
     """Production calls that pass an id to setup or `create`, and every arm `create`."""
     root = Path(root)
-    excluded = (".venv", "__pycache__", "node_modules") + (("tests",) if skip_tests else ())
+    excluded = (".venv", "__pycache__", "node_modules", "tests")
     hits: list[Hit] = []
     for rel in _astlib.source_files(root, excluded):
         _text, tree = _astlib.read_and_parse(root / rel, rel)
@@ -496,9 +477,10 @@ def test_1279_a3_census_no_production_call_hands_a_run_id_to_setup_or_create():
     handed = [h for h in hits if h.kind != "arm-create"]
     assert handed == [], f"production hands an id around:\n  {listing}"
     assert [(h.rel, h.kind) for h in hits] == [("run.py", "arm-create")], (
-        f"only run.py makes an arm, from the roster's arm id (#1279 rev 6):\n  {listing}")
+        f"only run.py makes an arm, from the roster's arm id:\n  {listing}")
 
 
+# Each syntax partition has an exact oracle, including import aliases and negative controls.
 RUN_ID_HANDOUTS = [
     ("setup-positional", "run_common.materialize_run(alert, rid, tenant=t)", [("setup-id",)]),
     ("setup-keyword", "run_common.materialize_run(alert, tenant=t, run_id=rid)", [("setup-id",)]),
@@ -548,6 +530,3 @@ def test_1279_a3_census_partitions(tmp_path, name, body, expected):
     (tmp_path / "probe.py").write_text(source, encoding="utf-8")
 
     assert [(h.kind,) for h in run_id_handouts(tmp_path)] == expected, (name, source)
-
-
-# Each syntax partition has an exact oracle, including import aliases and negative controls.

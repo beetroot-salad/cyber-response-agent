@@ -67,5 +67,4 @@ def assert_only_run_records(run_dir: Path, where: str, rows: list[dict]) -> None
     extra = unlisted(rel_paths, rows)
     assert not extra, (
         f"{where}: the run folder (the box's own mount) holds files that are none of a run's "
-        f"records — host bookkeeping such as the query join, and an arm's lineage, belong "
-        f"outside it (P3): {extra}")
+        f"records; host bookkeeping belongs outside it: {extra}")

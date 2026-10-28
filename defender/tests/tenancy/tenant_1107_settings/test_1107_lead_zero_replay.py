@@ -35,7 +35,7 @@ pytestmark = pytest.mark.e2e
 
 
 def _plant(tmp_path: Path, marker: str, **kw: Any) -> tuple[Path, Path, Any]:
-    """A complete #1107 tenant `playground` under its own data root:
+    """A complete tenant (the playground id) under its own data root:
     (root, knowledge folder, accepted Tenant)."""
     root = tmp_path / f"tenants-{marker}"
     folder = S.plant(root, marker=marker, **kw)
@@ -43,9 +43,8 @@ def _plant(tmp_path: Path, marker: str, **kw: Any) -> tuple[Path, Path, Any]:
 
 
 def _plant_at_data_root(marker: str, **kw: Any) -> tuple[Path, Path, Any]:
-    """`_plant`, under THIS test's data root — the one an entry point (`run.main`, a resume)
-    reads its tenants from (#1120: `DEFENDER_DATA_ROOT` alone, no flag). Replaces
-    any knowledge folder already there. Returns (data root, knowledge folder, accepted Tenant)."""
+    """`_plant` under this test's data root, the one an entry point (`run.main`, a resume)
+    reads its tenants from; replaces any knowledge folder already there."""
     root = current_data_root()
     folder = S.plant(root, marker=marker, **kw)
     return root, folder, S.tenant_folder_of(root)
@@ -60,19 +59,15 @@ def _identity_worlds() -> list[dict]:
 
 
 def _resume_argv(manifest: Path) -> list[str]:
-    """The sibling's command line (#1105 PR 2, declared change 6: `--tenant T --episode <id>
-    --world b`); its episode is opened by id under the tenant's `<T>/episodes/`
-    (`_sibling_episode`)."""
+    """The sibling's command line, `--tenant T --episode <id> --world b`; its episode is opened
+    by id under the tenant's `<T>/episodes/` (`_sibling_episode`)."""
     return H.sibling_argv(manifest, "b", "--tenant", S.PLAYGROUND_ID)
 
 
 def _sibling_episode(tmp_path: Path, doc: dict, *, label: str) -> Path:
-    """The episode a sibling opens by id (#1105 PR 2). #1187 (R1, R2, O9, declared changes 5
-    and 6): at `<data root>/<playground>/episodes/<uuid>` — its tenant's, the id
-    `fixture_uuid(label)` (so two scenes in one test are two episodes) — with no container
-    record and no episodes variable; the launcher's RUNS step (`start_runs`, through
-    `T.episode_view`) makes `runs/` and writes the arm roster the sibling reads its arm id from
-    (O4b)."""
+    """The episode a sibling opens by id, at `<data root>/<T>/episodes/<fixture_uuid(label)>`
+    (two scenes in one test are two episodes); the launcher's RUNS step (`T.episode_view`)
+    makes `runs/` and writes the arm roster the sibling reads its arm id from."""
     from defender.records._episode_handle import Episode
 
     root = current_data_root()
@@ -86,27 +81,6 @@ def _sibling_episode(tmp_path: Path, doc: dict, *, label: str) -> Path:
 
 def _jsonl_text(run_dir: Path) -> str:
     return "\n".join(p.read_text(encoding="utf-8") for p in sorted(run_dir.rglob("*.jsonl")))
-
-
-class _QueryAnswers(ReplayFn):
-    """`ReplayFn` that also keeps, per model request, the `query` tool's answers that arrived
-    with it — the tool-return and retry-prompt parts of the request's last message, i.e. the
-    host's answer to the previous turn's call, read off that request rather than diffed from the
-    whole transcript (an answer worded like an earlier one still counts)."""
-
-    __name__ = "_QueryAnswers"
-
-    def __init__(self, turns: list[Turn]) -> None:
-        super().__init__(turns)
-        self.answers: list[str] = []
-
-    def __call__(self, messages: Any, info: Any) -> Any:
-        parts = getattr(messages[-1], "parts", ()) if messages else ()
-        self.answers.append("\n".join(
-            str(p.content) for p in parts
-            if getattr(p, "part_kind", None) in ("tool-return", "retry-prompt")
-            and getattr(p, "tool_name", None) == "query"))
-        return super().__call__(messages, info)
 
 
 # ---- both AgentDeps copies carry the record ------------------------------------------------------
@@ -155,9 +129,6 @@ def test_d_agentdeps_record(tmp_path):
             assert record.systems["elastic"]["ELASTIC_ALERTS_INDEX"] == f"{marker}-alerts-*", (
                 lead, record.systems["elastic"])
             assert record.systems["cmdb"]["CMDB_URL_BASE"] == f"http://cmdb-{marker}:8080", lead
-
-
-# ---- a run whose Elastic part is bad completes ---------------------------------------------------
 
 
 # ---- resumed runs re-resolve at their own start --------------------------------------------------
@@ -210,7 +181,7 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
     ctx = S.verb_context(after, sibling.run_dir_at, {"PATH": ""})
     assert _stub_transport.load_config(ctx, "cmdb", "CMDB")["URL_BASE"] == edited
     assert S.open_reporter(after.ticket_mapping) == "resolved"
-    # N7: nothing copied the resolved values into the run or the episode.
+    # Nothing copied the resolved values into the run or the episode.
     for where in (sibling.run_dir_at, episode):
         assert S.holders(where, edited) == [], (where, S.holders(where, edited))
 
@@ -219,7 +190,6 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
 
 
 def test_d_grants_through_tenant_config(tmp_path):
-    # rejected: a grants= override on the replay helper chain (_tenants1106.run_tenant, fixture_run_tenant, _replay_harness.drive, _lead_zero_808.run, test_1106_query_lane._run): fork F1, resolved by the human toward the design
     _root, _folder, tenant = _plant(tmp_path, "gb1107", table=T1106.TABLE_B)
     projected = T1106.run_grants(tenant.settings)
     resolved = run_tenant.resolve_run_tenant(tenant.settings, defender_dir=S.DEFENDER,
@@ -261,13 +231,10 @@ def test_d_grants_through_tenant_config(tmp_path):
             f"{entry.__module__}.{entry.__qualname__} still takes {S.GRANTS_KW}=")
 
 
-# ---- the three SOC_PLAYGROUND_DOCKER_CONTEXT tests, migrated -------------------------------------
-
-
 # ---- the settings-path redaction keys on the record ----------------------------------------------
 
 def test_d_record_settings_redacted(tmp_path, monkeypatch):
-    # CX8: the shim first on the PATH the run env inherits (no call here should reach docker).
+    # The shim first on the PATH the run env inherits (no call here should reach docker).
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
     root, _folder, tenant = _plant(tmp_path, "red1107")
@@ -279,7 +246,7 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
 
     raised: list[BaseException] = []
 
-    # CX5: an adapter's ConfigFault names the file under the settings folder, worded as
+    # An adapter's ConfigFault names the file under the settings folder, worded as
     # load_config's own "config file not found: <path> — this tenant's settings do not configure
     # this system"; here it names the path both as given and as resolved.
     def get_host(ctx: Any, *, host: str = "web-1") -> dict:

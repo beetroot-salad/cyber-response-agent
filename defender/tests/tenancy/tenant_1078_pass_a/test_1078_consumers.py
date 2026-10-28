@@ -18,36 +18,37 @@ from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 TENANT = H.VALID_ID
 #: The family's branch-point clock pre-flight's context carries.
 _AS_OF = datetime.fromisoformat(T.AS_OF)
+#: The one held-out fixture's slug: its alert's rule id and its launch-index key.
+SLUG = "slug-one"
 
 
 def _held_out():
     return importlib.import_module("evaluations.held_out")
 
 
-def _fixtures(tmp_path: Path, slug: str = "slug-one", disposition: str = "benign") -> Path:
-    """One labeled held-out fixture: `<fixtures>/<slug>/{alert.json, ground_truth.yaml}`."""
-    fx = tmp_path / "fixtures" / slug
+def _fixtures(tmp_path: Path) -> Path:
+    """One labeled held-out fixture (benign): `<fixtures>/<SLUG>/{alert.json, ground_truth.yaml}`."""
+    fx = tmp_path / "fixtures" / SLUG
     fx.mkdir(parents=True)
-    (fx / "alert.json").write_text(json.dumps({"rule": {"id": slug}}), encoding="utf-8")
-    (fx / "ground_truth.yaml").write_text(
-        f"held_out: true\ndisposition: {disposition}\n", encoding="utf-8")
+    (fx / "alert.json").write_text(json.dumps({"rule": {"id": SLUG}}), encoding="utf-8")
+    (fx / "ground_truth.yaml").write_text("held_out: true\ndisposition: benign\n",
+                                          encoding="utf-8")
     return fx.parent
 
 
-def _scored_run(runs: Path, disposition: str, run_id: str, slug: str = "slug-one") -> Path:
+def _scored_run(runs: Path, disposition: str, run_id: str) -> Path:
     run = runs / run_id
     run.mkdir(parents=True, exist_ok=True)
-    plant_alert(run, {"rule": {"id": slug}})
+    plant_alert(run, {"rule": {"id": SLUG}})
     (run / "report.md").write_text(T.report_text(disposition), encoding="utf-8")
     return run
 
 
-
-def _held_out_index(tmp_path: Path, run_id: str, slug: str = "slug-one") -> Path:
+def _held_out_index(tmp_path: Path, run_id: str) -> Path:
     """Write the operator's launch-index input independently of the production writer."""
     index = tmp_path / "ops" / "held-out-index.jsonl"
     index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text(json.dumps({"slug": slug, "run_id": run_id}) + "\n", encoding="utf-8")
+    index.write_text(json.dumps({"slug": SLUG, "run_id": run_id}) + "\n", encoding="utf-8")
     return index
 
 
@@ -67,13 +68,13 @@ SCORED = "# Held-out eval"
 
 def _preflight_context(ep: Path, source: Any, tenant: Any) -> Any:
     """The context pre-flight's host-side reads run in (`cli._preflight_context`), for the
-    opened source `Run` (#1105 PR 2: the env's runs base is the source's own hand-out)."""
+    opened source `Run` (the env's runs base is the source's own)."""
     return H.branch_cli()._preflight_context(ep, source, tenant, _AS_OF)
 
 
 def _tenant_source(root: Path) -> Any:
     """T's finished source run at `<root>/T/runs/<id>`, opened by id through T's repository —
-    what the launcher hands pre-flight (#1105 PR 2)."""
+    what the launcher hands pre-flight."""
     _base, src = H.tenant_source(root, TENANT, row=False)
     return T.open_source(src)
 
@@ -124,7 +125,7 @@ def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
 
 
 def test_s7_j50_held_out_positional_ignores_data_root(tmp_path, monkeypatch, capsys):
-    'held_out <runs_dir> scores the directory it is given under DEFENDER_DATA_ROOT=rel/ (and\nwith it unset): the positional branch never resolves the data root or a tenant.'
+    """`held_out <runs_dir>` scores the given directory with DEFENDER_DATA_ROOT relative or unset: it never resolves the data root or a tenant."""
     monkeypatch.chdir(tmp_path)
     fixtures = _fixtures(tmp_path)
     run_id = str(uuid.uuid4())

@@ -1,7 +1,5 @@
-"""#1108 P4 round 6 — what a failed build or command leaves behind, and a few liveness and
-pinning judgements (each case was a wrong-but-green production variant): no half-built run copy
-or export staging folder survives a failed write, `propose` always discards its draft, a zombie
-is not a live owner, a pinned commit with no export is refused when resolved."""
+"""#1108 P4: what a failed build or command leaves behind, and a few liveness and pinning
+judgements, each case a wrong-but-green production variant."""
 from __future__ import annotations
 
 import os

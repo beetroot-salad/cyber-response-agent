@@ -53,7 +53,7 @@ def test_cases_sharing_one_envelope_count_as_one_unit(tmp_path):
 
 
 def test_two_cases_from_one_snapshot_are_one_environment(tmp_path):
-    """AC 5. case-002 and case-003 really do share snapshot 412421678."""
+    """case-002 and case-003 really do share snapshot 412421678."""
     _write_case(tmp_path, "case-a", split="dev", family="f1", host_pair="a->b",
                 env="snap-1", rows=[_row("l-1", "elastic", "present", faithful=True)])
     _write_case(tmp_path, "case-b", split="dev", family="f2", host_pair="c->d",
@@ -106,7 +106,7 @@ def test_a_perfect_rate_on_too_few_units_still_fails_to_certify(tmp_path):
 
 
 def test_a_cause_needs_instances_across_distinct_units(tmp_path):
-    """M6: five instances inside one unit is one observation repeated, not
+    """Five instances inside one unit is one observation repeated, not
     evidence. mut-001 and neg-001 are not independent of case-001."""
     for i in range(5):
         _write_case(tmp_path, f"same-{i}", split="dev", family="f", host_pair="a->b",

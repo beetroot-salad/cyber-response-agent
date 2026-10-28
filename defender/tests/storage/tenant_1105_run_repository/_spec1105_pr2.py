@@ -7,7 +7,6 @@ import logging
 import io
 import json
 import os
-from collections.abc import Iterable
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,77 +16,65 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
-from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H78
 
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
-EPISODES_BASE_ENV = T.EPISODES_BASE_ENV
 RUNS_BASE_ENV = T.RUNS_BASE_ENV
 
 #: The launch fixture's tenant (`_spec1224.FIXTURE_TENANT`).
 LAUNCH_TENANT = S.FIXTURE_TENANT
-#: The source run's id: `_triplet_947.SOURCE_RUN_ID`, a uuid4 (#1187: `RunId` admits canonical
-#: lowercase UUID text only).
+#: The source run's id (`_triplet_947.SOURCE_RUN_ID`): a uuid4, the only text `RunId` admits.
 SOURCE_RUN_ID = T.SOURCE_RUN_ID
 BRANCH_MESSAGE_ID = T.BRANCH_MESSAGE_ID
-#: The fixture episode id a hand-built sibling scene carries (`_triplet_947.EPISODE_ID`, a uuid4).
-#: A LAUNCH mints its own (`runs.create_episode()`, #1187): a launcher test finds the episode it
-#: made under `<data root>/<T>/episodes/` (`launched_episodes`), never by this id.
+#: The episode id a hand-built sibling scene carries (`_triplet_947.EPISODE_ID`). A launch mints
+#: its own, so a launcher test finds its episode with `launched_episodes`, never by this id.
 EPISODE_ID = T.EPISODE_ID
 #: The sibling fixture's tenant (`_triplet_947.SOURCE_TENANT`).
 SIBLING_TENANT = T.SOURCE_TENANT
 
 
 # ==========================================================================================
-# The edges' argument shapes. TODAY's shape (re-pointed here by PR 2), then the declared one.
+# The edges' argument shapes: each by-path helper delegates to its by-id `new_*` form.
 # ==========================================================================================
 
-def launch_argv(tenant_id: str, source_run_dir: Path,
-                branch_message_id: int = BRANCH_MESSAGE_ID, *extra: str) -> list[str]:
-    """The launcher's command line for `source_run_dir` of `tenant_id`. TODAY: the source as
-    a positional path (`cli.py:1428`), the tenant derived from its runs folder. PR 2 (declared
-    change 1): `new_launch_argv(tenant_id, source_run_dir.name, ...)`."""
-    return new_launch_argv(tenant_id, Path(source_run_dir).name, branch_message_id, *extra)
+def launch_argv(tenant_id: str, source_run_dir: Path) -> list[str]:
+    """The launcher's command line for the run at `source_run_dir`, named by its folder name."""
+    return new_launch_argv(tenant_id, Path(source_run_dir).name)
 
 
-def new_launch_argv(tenant_id: str, source_run_id: str,
-                    branch_message_id: int = BRANCH_MESSAGE_ID, *extra: str) -> list[str]:
-    """Declared change 1: `branch --tenant T <source_run_id> <branch_message_id>`."""
-    return ["--tenant", tenant_id, source_run_id, str(branch_message_id),
-            *T.retired_continuation_argv(), *extra]
+def new_launch_argv(tenant_id: str, source_run_id: str) -> list[str]:
+    """`branch --tenant T <source_run_id> <BRANCH_MESSAGE_ID>`."""
+    return ["--tenant", tenant_id, source_run_id, str(BRANCH_MESSAGE_ID)]
 
 
 def sibling_argv(tenant_id: str, episode_dir: Path, label: str, *extra: str) -> list[str]:
-    """A sibling's `run.py` command line. TODAY: `--resume <episode>/family.yaml --world L
-    --tenant T`. PR 2 (declared change 6): `new_sibling_argv(tenant_id, episode_dir.name, L)`."""
+    """A sibling's `run.py` command line for the episode at `episode_dir`, named by its id."""
     return new_sibling_argv(tenant_id, Path(episode_dir).name, label, *extra)
 
 
 def new_sibling_argv(tenant_id: str, episode_id: str, label: str, *extra: str) -> list[str]:
-    """Declared change 6: `run.py --tenant T --episode <episode_id> --world L`."""
+    """`run.py --tenant T --episode <episode_id> --world L`."""
     return ["--tenant", tenant_id, "--episode", episode_id, "--world", label, *extra]
 
 
 def page_argv(tenant_id: str, episode_dir: Path) -> list[str]:
-    """The episode page CLI's argv (`visualize_episode.main` takes no program name). TODAY:
-    the episode folder's path. PR 2 (declared change 4): `new_page_argv(tenant_id,
-    episode_dir.name)`."""
+    """The episode page CLI's argv for the episode at `episode_dir` (`visualize_episode.main`
+    takes no program name)."""
     return new_page_argv(tenant_id, Path(episode_dir).name)
 
 
 def new_page_argv(tenant_id: str, episode_id: str) -> list[str]:
-    """Declared change 4: `visualize_episode.py --tenant T <episode_id>`."""
+    """`visualize_episode.py --tenant T <episode_id>`."""
     return ["--tenant", tenant_id, episode_id]
 
 
 def run_page_argv(tenant_id: str, run_dir: Path) -> list[str]:
-    """The run page CLI's argv (`visualize_run.main` takes `sys.argv`, program name first).
-    TODAY: the run folder's path. PR 2 (declared change 7): `new_run_page_argv(tenant_id,
-    run_dir.name)` for a natural run."""
+    """The run page CLI's argv for the natural run at `run_dir` (`visualize_run.main` takes
+    `sys.argv`, program name first)."""
     return new_run_page_argv(tenant_id, Path(run_dir).name)
 
 
 def new_run_page_argv(tenant_id: str, run_id: str, *, episode_id: str | None = None) -> list[str]:
-    """Declared change 7: `visualize_run.py --tenant T [--episode ep] <run_id>`."""
+    """`visualize_run.py --tenant T [--episode ep] <run_id>`."""
     episode = ["--episode", episode_id] if episode_id is not None else []
     return ["visualize_run.py", "--tenant", tenant_id, *episode, run_id]
 
@@ -97,9 +84,8 @@ def new_run_page_argv(tenant_id: str, run_id: str, *, episode_id: str | None = N
 # ==========================================================================================
 
 def roots(tmp_path: Path, monkeypatch: Any) -> None:
-    """Every configured root inside `tmp_path`, as `test_1025_stage_timing`'s launches set them:
-    the operator runs base pre-flight exports and the learning state root. #1187 (O9): no
-    episodes base — an episode lives under its tenant (`episodes(tenant_id)`)."""
+    """Every configured root inside `tmp_path`: the operator runs base pre-flight exports and
+    the learning state root. No episodes base: an episode lives under its tenant."""
     monkeypatch.setenv(RUNS_BASE_ENV, str(Path(tmp_path) / "defender-runs"))
     _state1135.set_state_dir(monkeypatch, Path(tmp_path) / "learning-state")
 
@@ -109,15 +95,14 @@ def data_root() -> Path:
 
 
 def episodes(tenant_id: str = LAUNCH_TENANT) -> Path:
-    """`<data root>/<tenant_id>/episodes` — where #1187 puts every episode of that tenant."""
+    """`<data root>/<tenant_id>/episodes`: where every episode of that tenant lives."""
     return data_root() / tenant_id / "episodes"
 
 
-def launched_episodes(tenant_id: str = LAUNCH_TENANT) -> list[Path]:
-    """Every episode folder under `episodes(tenant_id)`, sorted — the census a launcher test takes
-    to find the episode a launch made (it mints the id) or to show it made none. Entries that
-    are not real folders are listed too, so a squatting file is not hidden."""
-    folder = episodes(tenant_id)
+def launched_episodes() -> list[Path]:
+    """Every entry under `episodes()`, sorted: how a launcher test finds the episode a launch made
+    (or shows it made none). Non-folders are listed too, so a squatter is not hidden."""
+    folder = episodes()
     return sorted(folder.iterdir()) if folder.is_dir() else []
 
 
@@ -134,12 +119,11 @@ def source_calls() -> list:
 
 
 def launch_source(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tuple[Any, Path]:
-    """`(estate, source run dir)`: the launch fixture tenant placed under the data root and ONE
-    finished, branchable source run at `<data root>/<T>/runs/<source_run_id>` whose captured
-    calls the live estate answers unchanged — `_spec1224.source_run`, at a run id the test
-    names. The calls land through `runs_base(land_calls=...)`, before the source's session is
-    seeded (#1255: the fork snapshot holds the table as it stood at the branch point, so a table
-    rewritten after `runs_base` returns no longer opens on it and the launch is refused)."""
+    """`(estate, source run dir)`: the launch fixture tenant and ONE finished, branchable source
+    run at `<data root>/<T>/runs/<source_run_id>` whose captured calls the live estate answers
+    unchanged. The calls land through `runs_base(land_calls=...)`, before the source's session is
+    seeded: the fork snapshot holds the table as of the branch point, so a table rewritten later
+    no longer opens and the launch is refused (#1255)."""
     est = S.estate(tmp_path)
     est.place(tenant_id=LAUNCH_TENANT)
 
@@ -155,9 +139,9 @@ def launch_source(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tupl
 
 
 def quiet_judge() -> Any:
-    """The judge double, recording every prompt it is handed: every world call answered
-    `bucket: none` with nothing filed, the family call with no world finding (#1234: a world
-    reply and a family reply are two shapes, and the family word they once shared is retired)."""
+    """The judge double, recording every prompt it is handed: every world call answers
+    `bucket: none` with nothing filed, the family call (a reply of its own shape) with no world
+    finding."""
     return J.FakeJudge(
         default=J.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[])),
         family_default=J.as_reply_text(J.family_reply()))
@@ -195,8 +179,8 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     its verifier passing it (so the family is accepted), the judge recording its prompts."""
     from defender.cli.learning import branch as branch_entry
 
-    # The fake sibling materialises each arm at the id the launched episode's roster holds
-    # (#1187), the episode named by the child's own argv.
+    # The fake sibling materialises each arm at the id the launched episode's roster holds, the
+    # episode named by the child's own argv.
     spawn = spawn if spawn is not None else J.FakeSibling()  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
     judge = judge if judge is not None else quiet_judge()  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
     questioner = seams.pop("questioner", None) or CountingQuestioner()
@@ -226,13 +210,9 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
 
 
 def grade(episode_dir: Path, tenant_id: str) -> Any:
-    """Grade `episode_dir` afresh for `tenant_id` through the judge's one entry point
-    (`learning.judge.grade_episode`). Re-pointed by PR 2 to the declared shape (J3 as settled:
-    the judge reads only the episode it is handed, and the world-label collision probe over
-    `<T>/runs` is removed): `grade_episode(runs, episode_id)`, `runs` the tenant's repository
-    under the configured data root, the episode opened by id under that tenant's
-    `<T>/episodes/` (#1187). A final `judge.yaml` short-circuits a second pass, so it is removed
-    first."""
+    """Grade `episode_dir` afresh for `tenant_id` through `learning.judge.grade_episode(runs,
+    episode_id)`, `runs` being the tenant's repository under the configured data root. A final
+    `judge.yaml` short-circuits a second pass, so it is removed first."""
     from defender.tenancy import _tenant
     from defender.tests.support.learning.core._state1135 import env_state
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1
@@ -245,26 +225,24 @@ def grade(episode_dir: Path, tenant_id: str) -> Any:
         runs, Path(episode_dir).name, judge=J.scripted_judge(), state=env_state())
 
 
-def sibling_scene(tmp_path: Path, *, roster: bool = True,
-                  doc: dict | None = None, episode_id: str = EPISODE_ID) -> tuple[Path, Path]:
+def sibling_scene(tmp_path: Path, *, roster: bool = True) -> tuple[Path, Path]:
     """`(source run dir, episode dir)` for a sibling: the fixture tenant `SIBLING_TENANT` with a
     branchable source run at its natural runs folder (`_triplet_947.runs_base`), and an episode
-    at `<data root>/<SIBLING_TENANT>/episodes/<episode_id>` (#1187 Layout A) holding the
-    launcher's manifest (`T.family_doc`, naming that source) and a primed `served/base.jsonl`,
-    built by the shared `_spec1187.make_episode`."""
+    at `<data root>/<SIBLING_TENANT>/episodes/<EPISODE_ID>` holding the launcher's manifest
+    (naming that source) and a primed `served/base.jsonl`."""
     from defender import _yaml
     from defender.tests.storage.ids_1187 import _spec1187 as R
 
     _base, src = location_path(T.runs_base)(tmp_path, source_run_id=SOURCE_RUN_ID)
-    doc = doc if doc is not None else family_doc(src)  # lint-default: ok — a test builder's fresh per-call manifest
+    doc = family_doc(src)
     labels = [w["label"] for w in doc.get("worlds", [])]
-    ep = R.make_episode(data_root(), SIBLING_TENANT, episode_id, manifest=_yaml.safe_dump(doc),
+    ep = R.make_episode(data_root(), SIBLING_TENANT, EPISODE_ID, manifest=_yaml.safe_dump(doc),
                         labels=labels, roster=False)
     (ep / "served").mkdir(exist_ok=True)
     (ep / "served" / "base.jsonl").write_text("", encoding="utf-8")
     if T.PLANT_RECORDS:
-        # The launch's copies of the source alert and its record (#1222 A1), as `T.episode`
-        # plants them for the suites that run with the front door's records on.
+        # The launch's copies of the source alert and its record, as `T.episode` plants them
+        # for the suites that run with the front door's records on.
         T._plant_source_input(ep, str(src), SOURCE_RUN_ID)
     if roster:
         (ep / "runs").mkdir(exist_ok=True)
@@ -274,7 +252,7 @@ def sibling_scene(tmp_path: Path, *, roster: bool = True,
 
 def family_doc(src: Path, **over: Any) -> dict:
     """The launcher's manifest for the sibling scene (`_triplet_947.family_doc`), naming the
-    source by `source_run_id` (`SOURCE_RUN_ID`) and — today's writer — by `source_run_dir`."""
+    source by `source_run_id`; the legacy `source_run_dir` it also carries loads but is never read."""
     return T.family_doc(**{"source_run_dir": str(src), "source_run_id": SOURCE_RUN_ID, **over})
 
 
@@ -323,7 +301,7 @@ def drive_run_py(argv: list[str], rec: SiblingRecorder, **override: Any) -> tupl
     err = io.StringIO()
     try:
         with redirect_stderr(err):
-            # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+            # Plus the in-process launch-time publish.
             rc = run_py.main(list(argv), **with_publish({**rec.seams(), **override}))
     except SystemExit as refused:
         return None, refused, err.getvalue()
@@ -422,15 +400,6 @@ def run_page_main() -> Any:
     return visualize_run.main
 
 
-def plant_record(runs: Path, tenant_id: str) -> Path:
-    """`<runs>/_tenant.json` naming `tenant_id`, in the retired writer's own shape — a
-    pre-#1187 container record, planted as the OLD ENTRY it now is (R1: nothing writes or
-    accepts one; a listing that meets it refuses, naming the one-time command)."""
-    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
-
-    return H.plant_tenant_record(Path(runs), tenant_id)
-
-
 def second_tenant(root: Path, tenant_id: str) -> Any:
     """A further real tenant under `root` (a hand-made row over the committed fixture's
     knowledge — `create_tenant` admits one per root), accepted by the real `accept_tenant`."""
@@ -485,9 +454,8 @@ def still_queued(paths: Any, case_id: str) -> bool:
 
 @dataclass
 class Lane:
-    """The drain's lead-author lane (`run_lead_author`), recording what it was handed. The
-    run it serves is read as `getattr(handed, "run_dir", handed)`: today a path, after PR 2 the
-    opened `Run` (D-stored) — either way, the folder that run lives in."""
+    """The drain's lead-author lane (`run_lead_author`), recording the opened `Run` it was
+    handed; `run_dirs` gives the folder each lives in."""
 
     handed: list[Any] = field(default_factory=list)
 
@@ -516,11 +484,3 @@ def loop_paths(tmp_path: Path) -> Any:
     from defender.learning.core.config import LoopPaths
 
     return LoopPaths(repo_root=git_repo(Path(tmp_path) / "wt"), state_dir=Path(tmp_path) / "state")
-
-
-def ids(values: Iterable[Any]) -> list[str]:
-    return [str(v) for v in values]
-
-
-
-__all__ = ["H78"]

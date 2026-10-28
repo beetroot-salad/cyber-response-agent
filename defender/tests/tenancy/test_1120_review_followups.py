@@ -1,4 +1,4 @@
-"""validate_scaffold serves against DEFENDER_DIR when set."""
+"""`validate_scaffold` judges settings against an exported `DEFENDER_DIR` tree."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,8 +17,8 @@ def _data_root_inside_another_code_tree(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def test_validate_scaffold_holds_settings_outside_the_tree_it_checks(tmp_path: Path) -> None:
-    """The same layout under `validate_scaffold` (advisory, M7): its config check is skipped
-    with a WARN naming the settings as inside the exported tree."""
+    """`validate_scaffold` (advisory) skips its config check with a WARN naming the settings
+    as inside the exported tree."""
     root, code = _data_root_inside_another_code_tree(tmp_path)
     proc = H.run_script(H.script_of(validate_scaffold), "cmdb", "--tenant", H.TID,
                         root=root, DEFENDER_DIR=str(code))

@@ -18,6 +18,7 @@ from defender.tests.support.invlang.validation._invlang_warn_836 import (  # noq
     attr_block,
 )
 from defender.tests.support.storage._session_store_705 import sql, store_mod  # noqa: E402
+from defender.tests.e2e.test_1255_snapshot_branch_point import _arm_launched  # noqa: E402
 from defender.tests.e2e._replay_harness import Turn  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -26,19 +27,11 @@ CHUNKS = S.chunks(3)
 SCRIPT = (S.append(CHUNKS[0]), S.echo("x"), S.append(CHUNKS[1]), S.done())
 
 
-def _arm_launched(arm: S.Driven) -> None:
-    refused = S.refused_at_launch(arm)
-    assert refused is None, (
-        f"the control arm was refused at launch ({refused}) — a driven source branched at a "
-        "tool-calling MAIN response with an open frontier and a capture")
-
-
 def _refused(source: S.Driven, arm: S.Driven, forked: int) -> None:
     assert not S.launched(arm), "the arm reached its model"
     assert arm.summary.get("exit_reason") == "BranchError", arm.summary
     assert len(S.child_sessions(source.store)) == forked, (
-        "the refusal came after the fork — the source store now carries a child session no run "
-        "will ever drive, and every retry adds another")
+        "the refusal came after the fork: the source store gained a child session")
 
 
 def _gather_call(store) -> int:
@@ -104,9 +97,7 @@ def test_c7_the_capture_is_the_one_the_branch_points_snapshot_holds(tmp_path, ca
                                    "l-001": C7_LEAD})
     captured = {r["lead_id"] for r in read_jsonl_rows(source.paths.executed_queries)}
     assert captured == {"l-001"}, (
-        f"the source's finished table holds {captured}; this test needs exactly the post-`echo x`"
-        " lead's row and no correlation row, or a whole-table reader and a snapshot reader "
-        "agree")
+        f"fixture: the finished table holds {captured}, not only the post-`echo x` lead's row")
     calls = S.tool_calling_responses(source.store)
     x, y = calls[1], calls[3]
     for row, word in ((x, "echo x"), (y, "echo y")):
@@ -173,13 +164,11 @@ def test_c7_the_frontier_is_the_snapshots_not_a_fence_count_cut_of_the_finished_
 
     refused = S.refused_at_launch(arm)
     assert refused is None, (
-        f"the arm at `echo x` was refused at launch ({refused}) — at that branch point `v-001`'s "
-        f"`attrs.owner` was still open; only the finished document's repaired row is closed: "
-        f"{caplog.text[-400:]!r}")
+        f"the arm at `echo x`, where `v-001`'s owner was still open, was refused at launch "
+        f"({refused}): {caplog.text[-400:]!r}")
     answer = _answers(arm.main.requests[1])
     assert answer == natural, (
-        f"the arm's re-run repair was answered {answer!r}, not {natural!r} — the arm did not "
-        "hold the document as it stood at `echo x`")
+        f"the arm's re-run repair was answered {answer!r}, not {natural!r}")
     assert arm.document == source.document
 
     forked = len(S.child_sessions(source.store))
@@ -278,10 +267,8 @@ def test_d4_a_source_folded_before_its_branch_point_is_refused_at_launch(
     folded = S.drive_source(tmp_path / "folded", FOLD_SCRIPT, before=_plant_folding_document)
     point = S.tool_calling_responses(folded.store)[1]  # `echo b`
     tip = session_store.displaced_tip(folded.store, session_store.main_session_id(folded.store))
-    assert tip is not None, (f"the source did not fold at or before its branch point (displaced tip {tip}, branch "
-        f"point {point}) — the refusal below would not be about a fold")
-    assert tip <= point, (f"the source did not fold at or before its branch point (displaced tip {tip}, branch "
-        f"point {point}) — the refusal below would not be about a fold")
+    assert tip is not None, f"fixture: the source never folded (branch point {point})"
+    assert tip <= point, f"fixture: the source folded at {tip}, after its branch point {point}"
     caplog.set_level(logging.INFO)
 
     arm = S.drive_arm(tmp_path / "folded", S.spec_for(folded, point), S.Recorder([S.done()]))

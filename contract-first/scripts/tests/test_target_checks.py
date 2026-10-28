@@ -61,10 +61,8 @@ def test_nullstub_discriminates_and_flags_the_vacuous_pass(make_repo):
 
 def test_a_directory_of_helpers_with_no_tests_is_refused(make_repo):
     """The guard asks whether pytest would COLLECT anything, not whether the directory holds
-    `.py`. A suite of only `conftest.py` and helpers passes a bare-Python test while collecting
-    nothing, and the run then prints its clean line — `0 test(s) that never reach the target`,
-    exit 0 — over a suite with no tests in it. That is the #949 false clean surviving the guard
-    added to stop it."""
+    `.py`: a suite of only `conftest.py` and helpers collects nothing, and its clean line
+    (`0 test(s) that never reach the target`, exit 0) would be a false clean (#949)."""
     r = _suite_repo(make_repo)
     helpers = r.root / "helpers"
     helpers.mkdir()
@@ -78,7 +76,7 @@ def test_a_directory_of_helpers_with_no_tests_is_refused(make_repo):
 
 def test_a_suite_directory_with_no_python_is_refused_even_with_an_explicit_target(make_repo):
     """The backstop, and the reason it cannot be left to the existing no-targets arm: an
-    explicit `--target` seeds the target map, so an empty directory sailed straight past it."""
+    explicit `--target` seeds the target map, so an empty directory would sail straight past it."""
     r = _suite_repo(make_repo)
     (r.root / "empty").mkdir()
     p = run_script("check_calls.py", str(r.root / "empty"), "--target", "appx.summarize", cwd=r.root)

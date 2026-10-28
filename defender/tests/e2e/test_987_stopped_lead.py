@@ -155,9 +155,9 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     root: Path, responses: list[ModelResponse], *, ceiling: int = 6,
     extra=(), session_id: str | None = None, stamps: list | None = None, verbs=None,
 ) -> _Lead:
-    """Drive the REAL `_run_gather` over an agent the PRODUCTION factory built. Only the
-    provider is replaced: `build_gather_agent`'s own `make_model` seam hands back a
-    `FunctionModel`; the tools, capabilities, instructions and retry policy are the shipped"""
+    """Drive the real `_run_gather` over an agent the production factory built. Only the
+    provider is replaced (`build_gather_agent`'s `make_model` seam hands back a `FunctionModel`);
+    the tools, capabilities, instructions and retry policy are the shipped ones."""
     run_dir = materialize(root, GOLDEN_AB3)
     from defender.investigation.run_state import RunState
 
@@ -249,7 +249,7 @@ def test_the_tripping_call_is_answered_with_the_guards_reason_and_the_summary_fo
     assert "repeats the one already issued at seq 0" in str(closing.content)
     assert str(closing.content).endswith(QUERY_DOOR_CLOSED)
     assert INCOMPLETE_IDIOM not in flat(lead.model.last_inbound), \
-        "main's idiom reached the gather model (#807 G19)"
+        "main's idiom reached the gather model"
     assert lead.persisted == lead.out
 
 

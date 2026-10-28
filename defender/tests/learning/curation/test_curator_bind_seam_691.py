@@ -1,4 +1,5 @@
-"""Curator binding seam: bind returns a corpus-scoped CuratorDeps with retained roots and the generic tool-config slot."""
+"""Curator binding seam: `bind` returns a corpus-scoped CuratorDeps (its roots survive a copy),
+and importing the runtime does not import the learning stages."""
 from __future__ import annotations
 
 import os
@@ -23,11 +24,9 @@ from defender.tests.support.learning.curation._curator_691_harness import (  # n
 )
 
 
-# #0 — the binding seam returns a corpus-scoped curator deps
-
 def test_bind_returns_a_corpus_scoped_curator_deps(tmp_path):
-    """Binding the curator BY NAME against its worktree returns a CuratorDeps whose compiled write
-    scope roots at ``<worktree>/defender/<corpus>``, NOT at run_dir — the whole point of #0."""
+    """The curator bound by corpus name writes under ``<worktree>/defender/<corpus>``, not the
+    run dir."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = bind_curator(wt, rd, "lessons")
     write_file(deps, rel("lessons", "m.md"))                       # own corpus → lands
@@ -41,13 +40,7 @@ def test_a_bound_deps_is_copied_with_one_field_replaced(tmp_path):
     deps = bind_curator(wt, rd, "lessons")
     copy = replace(deps, run_id="other-run")
     assert copy.policy == deps.policy
-    assert copy.roots == deps.roots            # provisional M6 field — retained, copied through
-
-
-# M6 / M1 — retained roots + the corpus found by NAME
-
-
-# M4 / M5 — the named tool-config slot: inert-by-default, unpopulated by this role since #773
+    assert copy.roots == deps.roots            # retained, copied through
 
 
 def test_importing_runtime_does_not_import_the_learning_stages():

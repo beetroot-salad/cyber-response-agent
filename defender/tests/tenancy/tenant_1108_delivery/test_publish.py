@@ -110,7 +110,7 @@ def test_publish_writes_the_commits_blobs_and_points_current_at_them(repo, tmp_p
 
 
 def test_a_later_publish_leaves_every_earlier_export_as_it_was(repo, tmp_path):
-    """O-F: advancing the clone never changes files a reader of an earlier export holds; the
+    """Advancing the clone never changes files a reader of an earlier export holds; the
     `current` pointer is replaced by a rename (a new inode), never rewritten in place."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
@@ -179,7 +179,7 @@ def test_current_export_refuses_a_pointer_that_names_no_export(repo, tmp_path, d
         target().current_export(tenant)
 
 
-#: Tree entries that are not regular blobs (K2: git stores and emits links), under each half.
+#: Tree entries that are not regular blobs (git stores and emits links), under each half.
 _NOT_BLOBS = {
     "file-link-in-agent": ("120000", "agent/lessons/link.md", b"/etc/passwd"),
     "dir-link-in-agent": ("120000", "agent/linked", b"../settings"),

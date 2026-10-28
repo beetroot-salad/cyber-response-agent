@@ -39,17 +39,17 @@ from defender.tests.e2e import _replay_harness as H
 MARK = "FRONTDOOR-S08-ALERT-3c9e"
 #: What the box — or a host process, or a bind that failed silently — put where the alert was.
 DECOY = "FRONTDOOR-S08-DECOY-71b0"
-#: A valid ISO time unique to these tests: base's correlation goal carries the alert's
-#: `alert_timestamp` verbatim (`_correlation_contract`), so it is an alert byte a goal can show.
+#: A valid ISO time unique to these tests: a goal that copied the alert's `alert_timestamp`
+#: verbatim would show it.
 UNIQUE_TS = "2026-05-25T15:27:22.424242Z"
-#: The tail of an alert longer than one read (PA-27: 65,536 characters).
+#: The tail of an alert longer than one read (65,536 characters).
 TAIL = "FRONTDOOR-S08-TAIL-0d4a"
-#: A file one directory down that is NOT the input directory (PA-05's refusal case).
+#: A file one directory down, outside the input directory (a read the agent is refused).
 OTHER_DIR_FILE = "notes/secret-notes.json"
 SECRET = "FRONTDOOR-S08-SECRET-a91f"
-#: The env lever that turns a box startup fault into the host executor (PA-07).
+#: The env lever that turns a box startup fault into the host executor.
 ALLOW_UNSANDBOXED = "DEFENDER_ALLOW_UNSANDBOXED"
-#: PA-27 (executed): the note a capped read carries, read_file's and the cat lane's alike.
+#: The note a capped read carries, read_file's and the cat lane's alike.
 TOO_LARGE = "too large to read whole"
 
 
@@ -59,9 +59,8 @@ DECOY_BYTES = S.alert_bytes(S.generic_alert(rule_id="R-DECOY-9", message=DECOY))
 # The replay scenario
 
 def _resolving(system: str, verb: str, params: dict) -> Any:
-    """The backend: an `_id`-predicate fetch answers one document (item 1 resolves at base, so
-    l-00c is dispatched there too); every other call is an empty envelope, built by the real
-    `search_envelope`."""
+    """The backend: an `_id`-predicate fetch answers one document; every other call is an empty
+    envelope, built by the real `search_envelope`."""
     if system == "elastic" and str(params.get("native_query", "")).startswith("_id"):
         return S.envelope([{"_id": "AZ5fuw9rEmDJyXFcPn5t", "@timestamp": "2026-05-25T15:20:00Z",
                             "message": "sshd accepted password"}],
@@ -82,7 +81,7 @@ def _alert(**over: Any) -> dict[str, Any]:
 
 
 #: MAIN's default: one harmless read (the run's provenance stamp, never the alert) and done —
-#: two requests, so at base the late-injected correlation lead is awaited before MAIN's second
+#: two requests, so whatever reaches MAIN after its first request has a later one to land in.
 _MAIN_TWO_REQUESTS = [S.call("read_file", path="provenance.json"), S.text(S.DONE)]
 
 
@@ -121,21 +120,6 @@ def _assert_read_whole_and_framed(ret: str, text: str, what: str) -> None:
     assert MARK not in S.harness_text(ret), f"{what}: alert text sits OUTSIDE the frame"
 
 
-@dataclass(frozen=True)
-class _HostStep(S.Turn):
-    """A scripted model answer that first runs a host-side step — the host replacing a file while
-    the run is live (RG1's "a bind that failed silently", p152's host rename). The model double
-    still decides nothing: `step` changes real bytes on the real filesystem, then the answer
-    is the scripted one."""
-
-    step: Callable[[], None] | None = None
-
-    def response(self) -> Any:
-        if self.step is not None:
-            self.step()
-        return super().response()
-
-
 def _replace_alert(run_dir: Path, data: bytes = DECOY_BYTES) -> None:
     """The host replaces the stored alert by an atomic rename inside its own directory, keeping
     the record — the alert's bytes no longer match the recorded digest."""
@@ -147,12 +131,12 @@ def _replace_alert(run_dir: Path, data: bytes = DECOY_BYTES) -> None:
     os.replace(tmp, alert)
 
 
-def _replace_alert_and_record(run_dir: Path, data: bytes = DECOY_BYTES) -> None:
-    """The host replaces the alert AND rewrites the record's digest to match it: a folder that
-    is self-consistent but no longer holds the alert an episode copied from it."""
+def _replace_alert_and_record(run_dir: Path) -> None:
+    """The host replaces the alert with the decoy AND rewrites the record's digest to match it:
+    a folder that is self-consistent but no longer holds the alert an episode copied from it."""
     doc = S.read_record(run_dir)
-    doc[S.COINED["record.digest"]] = S.sha256_hex(data)
-    _replace_alert(run_dir, data)
+    doc[S.COINED["record.digest"]] = S.sha256_hex(DECOY_BYTES)
+    _replace_alert(run_dir)
     record = S.record_file(run_dir)
     tmp = record.with_name(f".s08-replace-{uuid.uuid4().hex[:8]}")
     tmp.write_bytes(json.dumps(doc).encode("utf-8"))
@@ -174,8 +158,8 @@ def _refusal_text(exc: BaseException | None, refusal: str | None) -> str:
 
 
 def _assert_names_the_run_and_carries_no_byte(text: str, run_dir: Path, what: str) -> None:
-    """RG1's refusal: a fixed reason naming the run, carrying no byte of the alert or the
-    record (the decoy's marker, the recorded digest)."""
+    """The operator-facing refusal: a fixed reason naming the run, carrying no byte of the alert
+    or the record (the decoy's marker, the recorded digest)."""
     assert text, f"{what}: nothing refused"
     assert Path(run_dir).name in text, f"{what}: the refusal does not name the run: {text[:400]!r}"
     assert DECOY not in text, f"{what}: the refusal carries the replaced alert's bytes"
@@ -184,26 +168,9 @@ def _assert_names_the_run_and_carries_no_byte(text: str, run_dir: Path, what: st
         assert digest not in text, f"{what}: the refusal carries the record's bytes (its digest)"
 
 
-def _assert_model_refusal_names_no_run_and_carries_no_byte(text: str, run_dir: Path,
-                                                            what: str) -> None:
-    """RG1's refusal as a MODEL receives it (a tool result): a fixed reason carrying no byte of
-    the alert or the record, and — #1255 design rev 5, C5 ("the alert-digest refusal names no
-    run folder name") — no run folder name either: the run's id is an identity an arm would
-    differ by (O2), and its host folder is host layout (O3). The operator-facing refusals keep
-    naming the run (`_assert_names_the_run_and_carries_no_byte`)."""
-    assert text, f"{what}: nothing refused"
-    assert Path(run_dir).name not in text, (
-        f"{what}: the refusal the model reads names the run folder: {text[:400]!r}")
-    assert DECOY not in text, f"{what}: the refusal carries the replaced alert's bytes"
-    with contextlib.suppress(AssertionError, OSError, ValueError):
-        digest = S.recorded_digest(run_dir)
-        assert digest not in text, f"{what}: the refusal carries the record's bytes (its digest)"
-
-
 def _in_box(host: Path, run_dir: Path) -> str:
-    """A file under the run folder as the box names it: #1255 (design rev 4, P1 Box bullet; rev
-    5, C8) mounts the run folder at the model view's `/runs/current`, so the host path is not a
-    path inside the box. Lexical, through the design's table (`_1255_view.model_path`)."""
+    """A file under the run folder as the box names it: the box mounts the run folder at
+    `/runs/current`, so the host path is not a path inside the box (`_1255_view.model_path`)."""
     return V.model_path(host, run_dir=run_dir)
 
 
@@ -235,8 +202,7 @@ def _main_boxed(tmp_path: Path, planted: S.Planted, alert: bytes, *,  # noqa: PL
         argv.append("--no-learn")
     from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
-    # #1108 P4 (OD14, O11): the in-process launch-time publish (publishes the planted tenant
-    # for real when run.main launches it).
+    # The in-process launch-time publish: publishes the planted tenant for real.
     return S.sym("run", "main")(
         argv, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
         visualize=lambda *_a, **_k: None, ticket_writer=S.NoTicket(),
@@ -244,20 +210,19 @@ def _main_boxed(tmp_path: Path, planted: S.Planted, alert: bytes, *,  # noqa: PL
         publish=in_process_publish())
 
 
-def _scripted_daemon(**kw: Any) -> Any:
+def _scripted_daemon() -> Any:
     """`e2e/_box665.RecordingDocker`: a healthy scripted daemon (create succeeds, the startup
     sentinel reads back) recording every argv, so `start_box`'s REAL argv build runs without a
     live box."""
     from defender.tests.e2e._box665 import RecordingDocker
 
-    return RecordingDocker(**kw)
+    return RecordingDocker()
 
 
 def _readonly_binds_inside(mounts: list[dict]) -> list[dict]:
     """The read-only binds whose target lies inside the box's run folder (the input
-    directory's shape). Since #1255 (design rev 4, P1) the box mounts the run folder at the
-    model view's `/runs/current` whatever run it is, so a bind's TARGET no longer tells one run
-    from another — the callers pin which run's directory it is by the bind's SOURCE."""
+    directory's shape). Every box mounts its run folder at `/runs/current`, so the target cannot
+    tell runs apart: callers check which run's directory it is by the bind's source."""
     return [m for m in mounts if m["readonly"] and m["target"].startswith(V.MODEL_RUN + "/")]
 
 
@@ -278,8 +243,8 @@ def _live_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, hard: bool) -
     half are both bindable. `hard=True` fails where the environment cannot start a box."""
     def unavailable(why: str) -> None:
         if hard:
-            pytest.fail(f"{why} — this cell must run, never skip: CI's `test` job has a daemon "
-                        "and registers runsc (78, RG1)")
+            pytest.fail(f"{why} — this cell must run, never skip (CI's `test` job has a daemon "
+                        "and registers runsc)")
         pytest.skip(why)
 
     if not daemon_reachable():
@@ -289,7 +254,7 @@ def _live_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, hard: bool) -
         anchor = dood_anchor()
         if anchor is None:
             unavailable("docker-outside-of-Docker with no shared mount covering the repo tree, "
-                        "so no bind source resolves (C46)")
+                        "so no bind source resolves")
         else:
             root = anchor / f"t1222-{uuid.uuid4().hex[:12]}"
     root.mkdir(parents=True)
@@ -301,8 +266,8 @@ def _live_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, hard: bool) -
         shutil.rmtree(root, ignore_errors=True)
 
 
-#: One in-box probe per target, every outcome reported as DATA ("ok" or the errno's name), exit
-#: 0 either way. The shapes are RJ-08's executed list (and RD-02's, for the record): open for
+#: One in-box probe per target: every write shape's outcome reported as data ("ok" or the
+#: errno's name), exit 0 either way.
 _FILE_PROBE = r'''
 import ctypes, errno, json, os, subprocess, sys
 t, scratch = sys.argv[1], sys.argv[2]
@@ -364,10 +329,9 @@ _SHA_PROBE = "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').re
 
 
 def _exec(box: Any, *argv: str) -> subprocess.CompletedProcess:
-    """`docker exec -w /runs/current <box> …` through the docker the box was created with — the
-    in-box view, independent of the permission layer (RJ-08). The box's working directory is
-    its run folder's MODEL path (#1255 design rev 5, C8 extended), and every path argument a
-    caller hands in is an in-box path (`_in_box`)."""
+    """`docker exec -w /runs/current <box> …` through the docker the box was created with: the
+    in-box view, independent of the permission layer. Every path argument is an in-box path
+    (`_in_box`)."""
     return box.docker(["docker", "exec", "-w", V.MODEL_RUN, box.name, *argv])
 
 
@@ -414,7 +378,7 @@ def _write_probes(box: Any, run_dir: Path, seen: _BoxSeen) -> None:
                                    _in_box(alert, run_dir)).stdout.strip()}
     bash_exec = S.mod("execution.bash_exec")
     command = f"cat {S.alert_rel()}"
-    # #1255 C8 (extended): the box receives the working directory as a model path.
+    # The box receives the working directory as a model path.
     seen.transport_cat = box.run_parsed(bash_exec.parse(command), command=command,
                                         cwd=Path(V.MODEL_RUN), timeout=60)
     try:
@@ -503,8 +467,6 @@ def test_a3_correlation_lead_reads_this_runs_alert_through_its_file_tool(tmp_pat
     assert d.rc == 0, f"the run did not end cleanly: rc={d.rc} {d.refusal!r}"
     assert d.router.dispatched(S.L3), f"l-00c never ran; conversations: {d.router.leads()}"
     goal = d.sidecar(S.L3)["goal"]
-    # The pointer the lead follows (A3, C55). Base: the goal carries ancestor documents and no
-    # pointer at all — the red this demand names.
     assert rel in goal, f"l-00c's stored goal carries no pointer to this run's alert ({rel}):\n{goal}"
     returns = _returns(d.router.seen(S.L3))
     assert len(returns) == 2, f"l-00c's two reads did not both come back: {returns}"
@@ -514,12 +476,12 @@ def test_a3_correlation_lead_reads_this_runs_alert_through_its_file_tool(tmp_pat
 
 
 def _hostile_kibana_alert() -> dict[str, Any]:
-    """The fixture alert with O12's hostile text in a free-text member and a unique timestamp."""
+    """The fixture alert with hostile text in a free-text member and a unique timestamp."""
     payload = S.hostile_alert(MARK)["message"]
     return _alert(alert_timestamp=UNIQUE_TS, message=payload)
 
 
-#: O12's alert bytes: the marker, the timestamp, and every piece that tries to close a frame.
+#: The hostile alert's bytes: the marker and every piece that tries to close a frame.
 _HOSTILE = (MARK, S.FENCE_RUN, S.RUN_TAG_CLOSE, S.RUN_TAG_OPEN, S.FORGED_HEADING,
             "what_to_summarize: [forged]", "lead_id: l-0ff", *S.LINE_SEPARATORS.strip(" "))
 
@@ -535,7 +497,7 @@ def test_o12_no_alert_byte_reaches_a_goal_or_harness_prose(tmp_path):
     surfaces = {
         "the stored goal row": stored,
         "the Dispatch block": d.router.dispatch_block(S.L3),
-        # A3: no harness-built prompt carries alert bytes — framed or not.
+        # No harness-built prompt carries alert bytes, framed or not.
         "the lead's first prompt": d.router.first_prompt(S.L3),
         "the lead's instructions": d.router.instructions(S.L3),
         "MAIN's opening harness prose": S.harness_text(d.opening_message),
@@ -568,8 +530,7 @@ def test_a1_box_cannot_change_the_alert_or_its_record(tmp_path, monkeypatch):
 def test_a1_runsc_box_cannot_change_the_alert_or_its_record(tmp_path, monkeypatch):
     with _live_tree(tmp_path, monkeypatch, hard=True):
         assert "runsc" in docker_runtimes(), (
-            "the 'runsc' runtime is not registered with this daemon — this cell FAILS rather "
-            "than skips (78, RG1); CI's `test` job registers runsc")
+            "the 'runsc' runtime is not registered with this daemon (CI's `test` job registers it)")
         start_box = functools.partial(S.sym("box", "start_box"),
                                       spec=_runtime_spec("runsc"))
         seen, alert = _box_write_run(tmp_path, start_box=start_box)
@@ -584,16 +545,12 @@ def test_p151_production_runtime_meets_every_write_shape(tmp_path, monkeypatch):
         monkeypatch.delenv("DEFENDER_BOX_RUNTIME", raising=False)
         production = S.sym("box", "BoxSpec").from_env({}).runtime
         assert production in docker_runtimes(), (
-            f"the production runtime {production!r} is not registered with this daemon — this "
-            "cell FAILS rather than skips (PA-08 never ran; RG1)")
+            f"the production runtime {production!r} is not registered with this daemon")
         seen, alert = _box_write_run(tmp_path, start_box=S.sym("box", "start_box"))
         _assert_box_held(seen, alert)
 
 
-# The gather lead's instructions, MAIN's coordinates, the host readers
-
-
-# RG1's second line: every host-side read re-checks the recorded digest
+# Every host-side read re-checks the recorded digest
 
 
 def _finished_run(tmp_path: Path) -> S.Drive:
@@ -681,7 +638,7 @@ def test_p192_alert_larger_than_one_read_returns(tmp_path):
     assert d.raised is None, f"run start refused a large alert: {d.raised!r} {d.refusal!r}"
     assert d.rc == 0, f"run start refused a large alert: rc={d.rc} {d.refusal!r}"
     text = d.input_bytes.decode("utf-8")
-    assert len(text) > 65_536, "the alert is not past one read (PA-27) — nothing to observe"
+    assert len(text) > 65_536, "premise: the alert is not longer than one read"
     assert _framed(d.opening_message, text.strip()), "MAIN no longer gets the whole alert inline"
     assert rel in d.sidecar(S.L3)["goal"], "the lead was not pointed at the alert"
     returns = _returns(d.router.seen(S.L3))
@@ -731,8 +688,7 @@ def _not_a_directory(run_dir: Path) -> None:
 
 
 def _link(run_dir: Path) -> None:
-    """A link at the directory's name, pointing at a directory OUTSIDE the run (PA-10: today the
-    box starts and reads the target through it)."""
+    """A link at the directory's name, pointing at a directory outside the run."""
     from defender.tests.support.storage._alert_plant import unseal_fixture_input
     unseal_fixture_input(run_dir)
     where = S.input_dir(run_dir)
@@ -786,8 +742,8 @@ def test_p153_box_created_while_the_directory_is_missing_or_no(tmp_path, monkeyp
         assert S.input_dir(run_dir).name in str(raised), (
             f"{name}: the refusal does not name the input directory: {raised}")
         created = daemon.create_argv is not None
-        # Writable at the input directory's place in the box (its model path, #1255 P1) or
-        # writable over its host folder under any target.
+        # Writable at the input directory's place in the box (its model path) or writable over
+        # its host folder under any target.
         inside, host = _in_box(S.input_dir(run_dir), run_dir), str(S.input_dir(run_dir))
         writable = [m for m in (daemon.mounts() if created else [])
                     if not m["readonly"] and (m["target"].startswith(inside)
@@ -821,8 +777,8 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     fresh_binds = _readonly_binds_inside(fresh_daemon.mounts())
     assert fresh_binds, "a fresh run's box mounts nothing read-only inside its run folder"
     _assert_mounts_its_own_input_dir(fresh_binds, src, "the fresh run")
-    # The launcher's copy in the episode (A1; launch itself is S11's), then a sibling resumed.
-    # #1187 (O9, declared change 5): the episode lives under its tenant, `<T>/episodes/<uuid>/`.
+    # The launcher's copy in the episode (the launch itself is tested elsewhere), then a sibling
+    # resumed. The episode lives under its tenant, `<T>/episodes/<uuid>/`.
     ep = T.episode(tmp_path, root=planted.root / planted.tenant_id / "episodes",
                    doc=T.family_doc(source_run_dir=str(src), source_run_id=src.name))
     from defender.records._episode_handle import Episode
@@ -835,7 +791,7 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
                                   investigate=_capture_inputs(sib))
     from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
-    # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+    # Plus the in-process launch-time publish.
     rc = S.sym("run", "main")(
         ["--episode", ep.name, "--world", "b", "--tenant", planted.tenant_id],
         lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
@@ -929,7 +885,7 @@ def _state(paths: Mapping[str, Path]) -> dict[str, tuple[int, int, bytes]]:
 
 
 def _held_files(run_dir: Path) -> dict[str, Path]:
-    """The run's alert and, where the run has one, its record (none exists at base)."""
+    """The run's alert and, where the run has one, its record."""
     held = {"alert": S.alert_file(run_dir)}
     with contextlib.suppress(AssertionError):
         held["record"] = S.record_file(run_dir)
@@ -958,9 +914,8 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
     assert src.run_dir is not None
     with S.sym("investigation.branch._spec", "open_source_store")(
             src.run_dir, source_run=_run_handle_1165(src.run_dir)) as store:
-        # #1255 (D1, C7): a branch point is a MAIN response that called tools, and the arm
-        # resumes with no continuation prompt — the source's third one (its `echo`), after the
-        # capture.
+        # A branch point is a MAIN response that called tools: the source's third (its `echo`),
+        # after the capture.
         point = tool_calling_responses(store)[2]
         assert calls_of(message_at(store, point))[0].tool_name == "bash", (
             "the branch point is not the source's `echo` call")
@@ -981,7 +936,7 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
 
 def test_p152_host_replaces_a_file_inside_the_directory_mid_ru(tmp_path, monkeypatch):
     # A sibling: placed at setup, then resumed through the real seeder while its box would be
-    # up. Base's seeder copies the source's alert over the sibling's (PA-09).
+    # up; the seeder must not copy the source's files over the sibling's.
     at_setup, after = _seeded_sibling(tmp_path / "sibling")
     for name in at_setup:
         assert after[name] == at_setup[name], (

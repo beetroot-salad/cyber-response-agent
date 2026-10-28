@@ -1,12 +1,8 @@
-"""#869 M5/RF2/U1/U2 — the lead-author commit gate (site 2).
+"""#869: the lead-author commit gate (site 2).
 
-#1108 P4 (O7, OD6): the lane writes a batch's git-free draft; the gate judges repo-relative
-`agent/skills/...` paths and, composed, the batch's `ChangeSet`. The draft is built for real
-(`_curator1134.draft_lane`, lane `skills`).
-ASSUMED SEAMS (S-H): `_skills_path_rule(root, xy, path, *, systems, tree_for)` keeps its shape with
-`root` the draft root and `xy` derived from the `ChangeSet` (deletion = `D `); the composed gate is
-`_verify_skills_state(root, *, change_set, systems, tree_for)` (the `ChangeSet` replaces
-`baseline_stray`/`git`).
+The lane writes a batch's git-free draft (`_curator1134.draft_lane`). `_skills_path_rule` judges one
+repo-relative `agent/skills/...` path (`xy` is its change kind, `D ` a deletion);
+`_verify_skills_state` composes it over the batch's `ChangeSet`.
 """
 from __future__ import annotations
 
@@ -23,28 +19,20 @@ from defender.learning.leads.path_validation import (
     _is_schema_md,
 )
 from defender.tests.support.learning.curation import _curator1134 as C
+from defender.tests.support.runtime.engine._declared869 import AGENT_NESTED_MARKER_RELS
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
 NON_SYSTEMS = ("advisory", "connect", "gather", "handbook", "invlang", "judge")
 
 DECLARED = frozenset({"elastic", "cmdb"})
 
-#: The repo-relative spellings after P4 (OD6).
-SKILLS_REL = "agent/skills/"
+#: The repo-relative spelling of the catalog.
 CATALOG_REL = "agent/skills/gather/queries/"
-#: #869 F1's two nested `execution.md` addresses (`_declared869.NESTED_MARKER_RELS`), at the
-#: draft's spelling.
-NESTED_MARKER_RELS = (
-    "agent/skills/elastic/_draft/mcpsys/execution.md",
-    "agent/skills/gather/queries/elastic/mcpsys/execution.md",
-)
-
 #: The fixture tenant's committed catalog (made-up content, `knowledge/tenant-fixture/agent/`).
 FIXTURE_CATALOG = FIXTURE_AGENT / "skills" / "gather" / "queries"
-#: The systems the fixture tenant declares: `cmdb` (its one system skill, marker and catalog
-#: folder) and `elastic` (the product adapter its catalog's `elastic/` template is for; the
-#: union of the adapter half and the tenant's markers, #869). Its catalog holds an `elastic/`
-#: template (owner ruling U15 / the run-path fixture), which only a declared `elastic` admits.
+#: The fixture tenant's declared systems: `cmdb` (its system skill, marker and catalog folder)
+#: and `elastic` (the product adapter behind its catalog's `elastic/` template, which only a
+#: declared `elastic` admits).
 FIXTURE_SYSTEMS = frozenset({"cmdb", "elastic"})
 
 
@@ -92,14 +80,14 @@ def _write(lane: C.DraftLane, rel: str, text: str) -> Path:
 
 
 def _composed(lane: C.DraftLane, systems=DECLARED):
-    """The composed gate over the claim the batch derives from its draft (real P3 `ChangeSet`)."""
+    """The composed gate over the claim the batch derives from its draft (a real `ChangeSet`)."""
     return lead_author._verify_skills_state(
         _root(lane), change_set=lane.batch.change_set(), systems=systems,
         tree_for=_tree_for(lane))
 
 
 def test_skills_path_rule_refuses_an_undeclared_system_skill(tmp_path):
-    """#869 M5: an undeclared system's SKILL.md is refused, by the rule and the composed gate."""
+    """Refused by the rule and by the composed gate."""
     lane = _gate_lane(tmp_path)
     phantom = _write(lane, "agent/skills/fakesys2/SKILL.md",
                      "---\nname: defender-fakesys2\n---\n# fakesys2\n")
@@ -117,7 +105,6 @@ def test_skills_path_rule_refuses_an_undeclared_system_skill(tmp_path):
 
 
 def test_skills_path_rule_refuses_an_undeclared_catalog_system(tmp_path):
-    """#869 M5: a catalog template (or draft) under an undeclared system is refused."""
     lane = _gate_lane(tmp_path)
     with pytest.raises(LeadAuthorError):
         lead_author._skills_path_rule(
@@ -134,8 +121,8 @@ def test_skills_path_rule_refuses_an_undeclared_catalog_system(tmp_path):
 
 
 def test_skills_path_rule_still_admits_the_fixture_tenants_catalog(tmp_path):
-    """#869 M5 control: declared catalog paths are admitted, and so is every template of the
-    fixture tenant's committed catalog (O11: fixture content, not the checkout's)."""
+    """Control: declared catalog paths are admitted, as is every template of the fixture
+    tenant's committed catalog."""
     lane = _gate_lane(tmp_path)
     assert "gather" not in DECLARED
     _write(lane, "agent/skills/gather/queries/elastic/_draft/new-verb.md",
@@ -164,11 +151,11 @@ def test_skills_path_rule_still_admits_the_fixture_tenants_catalog(tmp_path):
 
 
 def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):
-    """#869 U1: a non-system `SKILL.md` in the draft is refused unless that name is declared."""
+    """A non-system `SKILL.md` in the draft is refused unless that name is declared."""
     lane = _gate_lane(tmp_path)
     for name in NON_SYSTEMS:
         path = f"agent/skills/{name}/SKILL.md"
-        assert _is_in_scope(path), f"{path} is in scope today, which is why it needs refusing"
+        assert _is_in_scope(path), f"{path} is outside the path rule's scope, so refusing it shows nothing"
         with pytest.raises(LeadAuthorError):
             lead_author._skills_path_rule(_root(lane), "A ", path, systems=DECLARED,
                                           tree_for=_tree_for(lane))
@@ -179,14 +166,14 @@ def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):
     with pytest.raises(LeadAuthorError):
         _composed(lane)
 
-    # The live edge FK-10 leaves open, stated: declare `gather` and the refusal lifts.
+    # The open edge, stated: declare `gather` and the refusal lifts.
     assert lead_author._skills_path_rule(
         _root(lane), "A ", "agent/skills/gather/SKILL.md",
         systems=DECLARED | {"gather"}, tree_for=_tree_for(lane)) is None
 
 
 def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
-    """#869 U2/F1: a system's marker `execution.md`, top-level or nested, never lands."""
+    """A system's marker `execution.md`, top-level or nested, never lands."""
     lane = _gate_lane(tmp_path)
     _write(lane, "agent/skills/elastic/_draft/x.md", "# a draft\n")
     _write(lane, "agent/skills/gather/queries/elastic/x.md", _template("elastic", "x"))
@@ -200,8 +187,8 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
         assert lead_author._skills_path_rule(_root(lane), "A ", admitted, systems=DECLARED,
                                              tree_for=_tree_for(lane)) is None
 
-    # The control for the depth half: the SAME nested directories, one basename over, for the
-    # same declared system — still admitted, id-less so RF2's rule spares them.
+    # Control for the depth half: the same nested directories under another basename are
+    # admitted (id-less, so the id rule spares them).
     for sibling in (
         "agent/skills/elastic/_draft/mcpsys/notes.md",
         "agent/skills/gather/queries/elastic/mcpsys/notes.md",
@@ -211,7 +198,7 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
                                              tree_for=_tree_for(lane)) is None
 
     assert not _is_in_scope("agent/skills/elastic/execution.md")
-    nested_forms = (*NESTED_MARKER_RELS, "agent/skills/gather/queries/elastic/execution.md")
+    nested_forms = (*AGENT_NESTED_MARKER_RELS, "agent/skills/gather/queries/elastic/execution.md")
     for nested in nested_forms:
         assert _is_in_scope(nested), f"{nested} left scope; this composition has moved"
 
@@ -229,7 +216,7 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
     # And through the composed gate on the NESTED form: the file lands in the draft and the
     # claim still commits nothing.
     nested_lane = _gate_lane(tmp_path)
-    nested = _write(nested_lane, NESTED_MARKER_RELS[0], "# mcpsys\n")
+    nested = _write(nested_lane, AGENT_NESTED_MARKER_RELS[0], "# mcpsys\n")
     assert nested.is_file(), "the refusal is the gate's, not the filesystem's"
     with pytest.raises(LeadAuthorError):
         _composed(nested_lane)
@@ -237,8 +224,7 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
 
 
 def test_the_commit_gate_refuses_an_id_that_disagrees_with_its_directory(tmp_path):
-    """#869 RF2: a template whose id disagrees with its directory is refused; the agreeing one
-    is admitted; deletion and the protected surface keep their own refusals."""
+    """The agreeing id is admitted; deletion and the protected surface keep their own refusals."""
     lane = _gate_lane(tmp_path)
     _write(lane, "agent/skills/gather/queries/elastic/x.md", _template("elastic", "x", tid="fakesys.x"))
     with pytest.raises(LeadAuthorError):
@@ -257,9 +243,8 @@ def test_the_commit_gate_refuses_an_id_that_disagrees_with_its_directory(tmp_pat
         lead_author._skills_path_rule(
             _root(lane), "D ", "agent/skills/gather/queries/elastic/x.md", systems=DECLARED,
             tree_for=_tree_for(lane))
-    # … and the protected-surface branch still owns a catalog-root SCHEMA.md, whose frontmatter
-    # has no id (needs-implementation-check: O1 moves the product schema to
-    # `defender/skills/gather/query-schema.md`; a tenant-catalog `SCHEMA.md` stays protected).
+    # … and the protected-surface branch still owns a tenant catalog's root SCHEMA.md, whose
+    # frontmatter has no id.
     _write(lane, "agent/skills/gather/queries/SCHEMA.md", "# template schema\n")
     with pytest.raises(LeadAuthorError, match="protected"):
         lead_author._skills_path_rule(

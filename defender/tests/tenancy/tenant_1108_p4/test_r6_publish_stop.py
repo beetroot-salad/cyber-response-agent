@@ -1,8 +1,5 @@
-"""#1108 P4 round 6 — how the launcher stops a publish child and how the child takes a stop
-(each case was a wrong-but-green production variant): the child is asked to end (SIGTERM) and
-given time to unwind before it is killed; a kill takes its whole process group; a child that
-takes the tenant lock while being stopped is never killed; a child already in its locked phase
-ignores SIGTERM and finishes. Real processes, real signals, the real tenant lock."""
+"""#1108 P4: how the launcher stops a publish child and how the child takes a stop, each case a
+wrong-but-green production variant. Real processes, real signals, the real tenant lock."""
 from __future__ import annotations
 
 import os
@@ -81,10 +78,10 @@ def _alive(pid: int) -> bool:
     return stat[stat.rindex(")") + 2] != "Z"
 
 
-def _outlives(pid: int, within: float = 2.0) -> bool:
-    """Still alive after `within` seconds? A SIGKILL is delivered asynchronously: the launch
-    returns once the group's pipes close, which can be a moment before the grandchild's exit."""
-    deadline = time.monotonic() + within
+def _outlives(pid: int) -> bool:
+    """Still alive after 2 seconds? A SIGKILL is delivered asynchronously: the launch returns
+    once the group's pipes close, which can be a moment before the grandchild's exit."""
+    deadline = time.monotonic() + 2.0
     while _alive(pid):
         if time.monotonic() > deadline:
             return True
@@ -138,12 +135,12 @@ def test_r6_a_child_that_takes_the_lock_after_being_asked_to_stop_is_let_finish(
     line = B.launcher()(tenant.tenant_id, data_root=tenant.data_root, budget=1.5,
                         command=[sys.executable, "-c", code, str(marks)])
     assert (marks / "finished").exists(), "a child holding the tenant lock was killed"
-    # The child's own report is the outcome, however the wait ended (PR #1288 review): it
-    # published, so `current` names its commit, and calling that run stale would be false.
+    # The child's own report is the outcome, however the wait ended: it published, so calling
+    # the run stale would be false.
     assert B.outcome_class(line) == "fresh", line
 
 
-# --- a child in its locked phase ignores SIGTERM and finishes (B02) -----------------------------
+# --- a child in its locked phase ignores SIGTERM and finishes -----------------------------------
 
 def test_r6_a_real_child_in_its_locked_phase_ignores_sigterm_and_finishes(
         tenant, tmp_path, child_env):
@@ -170,7 +167,7 @@ def test_r6_a_real_child_in_its_locked_phase_ignores_sigterm_and_finishes(
     assert current_commit(tenant.tenant) == merged
 
 
-# --- the child's signal state is its own to restore (B04, B05) ----------------------------------
+# --- the child's signal state is its own to restore --------------------------------------------
 
 def test_r6_the_child_entry_restores_the_sigterm_handler_and_clears_its_locked_flag(
         tenant, tmp_path):

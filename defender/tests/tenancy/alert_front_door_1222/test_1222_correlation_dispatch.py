@@ -26,10 +26,9 @@ from defender.tests.e2e import _replay_harness as H
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S7
 from defender.tests.support.storage._store_owner import reread
 
-# Local helpers (work-arounds requested as shared machinery in 82-writer-correlation_dispatch.md)
+# Local helpers
 
-#: A document every elastic search of `_resolving_backend` answers. At base it is what item 1
-#: renders into the ancestor section (and what makes base dispatch `l-00c` at all on a Kibana
+#: A document every elastic search of `_resolving_backend` answers.
 ANCESTOR_DOC_MARK = "ANCESTOR-DOC-S04-9c1e"
 
 
@@ -52,7 +51,7 @@ def _resolving_backend() -> S.Backend:
 class _AtFirstRequest(S.MainScript):
     """MAIN's double, plus what the run held at the moment MAIN's FIRST request arrived: the
     queries table, the backend calls, the leads rows and the gather summaries. `bind` is the
-    `before=` hook that names the run folder (requested as a shared hook, see the frontier)."""
+    `before=` hook that names the run folder."""
 
     def __init__(self, turns: Sequence[S.Turn], backend: S.Backend) -> None:
         super().__init__(list(turns))
@@ -123,9 +122,8 @@ def _assert_nothing_later(d: S.Drive, *needles: str) -> None:
     opening = d.opening_message
     for i, prompts in enumerate(_later_user_prompts(d), start=2):
         assert prompts == [opening], (
-            f"MAIN's request {i} carries {len(prompts)} user prompt(s) — something besides the "
-            "opening message was added to MAIN's session after its first request (A4 retires the "
-            "late correlation entry)")
+            f"MAIN's request {i} carries {len(prompts)} user prompt(s): something besides the "
+            "opening message was added to MAIN's session after its first request")
     for i, seen in enumerate(d.main.seen[1:], start=2):
         rest = "\n".join(t for k, t in seen.parts if t != opening)
         for needle in needles:
@@ -138,8 +136,7 @@ def _assert_summary_in_opening(d: S.Drive, marker: str) -> None:
     opening = d.opening_message
     framed = _framed_with(opening, marker)
     assert len(framed) == 1, (
-        f"MAIN's opening message carries l-00c's summary in {len(framed)} frame(s); exactly one "
-        "framed copy is the contract (A4: the lead finishes before the opening message is built)")
+        f"MAIN's opening message carries l-00c's summary in {len(framed)} frame(s), not one")
     assert marker not in S.harness_text(opening), (
         "l-00c's summary text also reaches MAIN's opening message outside its frame")
     _head, body = S.correlation_section(opening)
@@ -154,15 +151,10 @@ def _run_with_turns(d: S.Drive) -> None:
 
 def _tenant_elastic_configs(tenant_id: str, *, events: str, alerts: str,
                             url: str | None = None) -> dict[str, str]:
-    """The tenant's COMPLETE config files (`T6.config_texts`: access method, docker context and
-    both containers included), its elastic one carrying the index patterns given. `url=""`
-    blanks `ELASTICSEARCH_URL` (a faulted SIEM config: elastic's own settings check fails, so
-    since #1256 elastic is down from run start).
-
-    Until #1256 this omitted `ELASTIC_ES_CONTAINER` so that a call the confinement gate admitted
-    ended in the adapter's own call-time `ConfigFault`. Under #1256 that omission makes elastic
-    down at start and no call reaches the gate, so the real adapter is now stopped short of real
-    docker by `_docker_shim` instead."""
+    """The tenant's complete config files (`T6.config_texts`), its elastic one carrying the index
+    patterns given. `url=""` blanks `ELASTICSEARCH_URL`, so elastic's settings check fails and
+    elastic is down from run start. Any other missing key would also make elastic down at start,
+    so the real adapter is stopped short of real docker by `_docker_shim` instead."""
     texts = T6.config_texts(tenant_id, events_index=events, alerts_index=alerts)
     if url is not None:
         texts["elastic"] = re.sub(r'(?m)^ELASTICSEARCH_URL=.*$', f'ELASTICSEARCH_URL="{url}"',
@@ -217,7 +209,7 @@ def _payloads(store: Any, session_id: str) -> list[str]:
         WHERE m.session_id = ? ORDER BY m.id""", (session_id,))]
 
 
-# correlation_outcome_reaches_main / slim heading / o3 opening prompt
+# The correlation outcome reaches MAIN's opening message
 
 def test_opening_message_holds_one_correlation_section(tmp_path):
     marker = "CORR-SUMMARY-S04-ONE"
@@ -236,29 +228,27 @@ def test_opening_message_holds_one_correlation_section(tmp_path):
     assert marker not in opening, "a lead whose dispatch raised still had text framed for MAIN"
     head, body = S.correlation_section(opening)
     assert not S.outer_frames(body), (
-        "the correlation section of a lead that produced nothing carries a frame — its ending "
-        "is one host sentence outside any frame (A2)")
+        "the correlation section of a lead that produced nothing carries a frame")
     ending = (_section_lines(raised, head, body)
               - _section_lines(told, *S.correlation_section(told.opening_message)))
     assert ending, (
         "the correlation section of a lead whose dispatch raised says nothing the summary run's "
-        "does not — the ending is never named to MAIN (never neither)")
+        "does not: its ending is not named to MAIN")
     assert "request refused by provider" not in opening, (
-        "the provider's error text reached MAIN's opening message (the ending is a fixed sentence)")
+        "the provider's error text reached MAIN's opening message")
     told_lines = _prose_lines(told, told.opening_message)
     assert not (ending & told_lines), (
-        f"the summary run's opening message also carries the ending sentence {ending & told_lines}"
-        " — never both")
+        f"the summary run's opening message also carries the ending sentence {ending & told_lines}")
     _assert_nothing_later(raised, *ending)
 
 
 
-# O1, the timestamp gate, tenants without elastic, O2
+# O1 — tenants without elastic; alerts without a usable timestamp
 
 def test_o1_non_elastic_tenant_gets_correlation_without_kibana_fields(tmp_path):
     marker = "CORR-O1-CMDB-5a"
     alert = S.generic_alert()
-    assert not set(S.KIBANA_KEYS) & set(alert), "the O1 alert must carry no Kibana field"
+    assert not set(S.KIBANA_KEYS) & set(alert), "premise: the alert must carry no Kibana field"
     planted = S.plant_tenant(fixture_uuid("tenant:acme"), table=S.TABLE_NON_ELASTIC, omit_systems=("elastic",))
     d = S.run_alert(tmp_path, alert=alert, tenant=planted,
                     leads={S.L3: [S.query("cmdb", "list-hosts", {}),
@@ -321,15 +311,14 @@ def test_o3_only_l00c_backend_calls_precede_mains_first_request(tmp_path):
     assert main.rows is not None, "MAIN was never asked for a turn"
     before = {r.get("lead_id") for r in main.rows}
     assert before <= {S.L3}, (
-        f"queries rows under {sorted(map(str, before - {S.L3}))} exist before MAIN's first request — only "
-        "l-00c may call a backend before MAIN starts (O3)")
+        f"queries rows under {sorted(map(str, before - {S.L3}))} exist before MAIN's first "
+        "request: only l-00c may call a backend before MAIN starts")
     assert len(main.calls) == len(main.rows), (
         f"{len(main.calls)} backend call(s) but {len(main.rows)} queries row(s) before MAIN's first "
         "request — a call reached the backend that no lead's row accounts for")
     # Controls: the snapshot channel sees l-00c's call, and attributes MAIN's lead's call later.
     assert [c.params.get("native_query") for c in main.calls] == [corr_q], (
-        "l-00c's scripted call is not what reached the backend before MAIN's first request — the "
-        "lead had not finished (A4) or the channel cannot see it")
+        "l-00c's scripted call is not what reached the backend before MAIN's first request")
     assert [r.get("lead_id") for r in d.rows if r not in main.rows] == ["l-001"]
 
 
@@ -382,7 +371,7 @@ def test_p013_mains_first_turn_dispatches_leads_while_correlat(tmp_path):
 
 
 
-# l-000, O4 and the confinement survivals
+# O4, and a SIEM config faulted at run start
 
 
 def test_o4_agent_fetches_constituent_events_through_a_gather_lead(tmp_path):
@@ -438,8 +427,7 @@ dispositions:
 
 def _names_down_as_not_configured(text: str, system: str) -> list[str]:
     """Each line of `text` saying "not configured" (any case) whose own line or the one before
-    it names `system` — how #1256 tells an agent a granted system is down from run start, read
-    loosely on layout (the note may put the system on its own bullet line above the reason)."""
+    it names `system` (the note may put the system on its own bullet line above the reason)."""
     lines = text.lower().splitlines()
     return [ln for i, ln in enumerate(lines) if "not configured" in ln
             and any(system in near for near in lines[max(i - 1, 0):i + 1])]
@@ -457,7 +445,7 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
                        S.text("L1-P134: the SIEM answered.")]}
     main = [S.gather("l-001", "elastic", "measure the host"), S.text(S.DONE)]
     # An alert that names no signal index: the tenant's own SIEM config is the only place an
-    # index could come from (base's item 1 read it here, and named its fault).
+    # index could come from.
     alert = S.fixture_alert()
     alert.pop("signal_index")
     runs: dict[str, S.Drive] = {}
@@ -477,11 +465,11 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
         _run_with_turns(runs[tenant_id])
     faulted, healthy = runs[fixture_uuid("tenant:tfault1222")], runs[fixture_uuid("tenant:tgood1222")]
 
-    # O-3: MAIN's opening names elastic as not configured, with the check's reason (the key).
+    # MAIN's opening names elastic as not configured, with the check's reason (the blank key).
     opening = _opening(faulted, fixture_uuid("tenant:tfault1222"))
     assert _names_down_as_not_configured(opening, "elastic"), (
-        "MAIN's opening message does not name elastic as not configured on a tenant whose "
-        "elastic settings fail its check at run start (#1256 O-3)")
+        "MAIN's opening message does not name elastic as not configured though its settings "
+        "fail the start check")
     assert "ELASTICSEARCH_URL" in opening, (
         "MAIN's opening message names elastic down without the check's reason (the blank key)")
 
@@ -497,8 +485,8 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
     assert faulted.rows_for("l-001") == [], (
         f"the refused elastic lead wrote query rows — its call ran: {faulted.rows_for('l-001')}")
     assert not [r for r in faulted.rows if r.get("system") == "elastic"], faulted.rows
-    # O-2: nothing is charged, per system or run-wide (read as failure counts, not as the
-    # breaker's layout — where a not-configured status is kept is the implementer's).
+    # Nothing is charged, per system or run-wide (read as failure counts, not the breaker's
+    # layout).
     assert faulted.run_state.breaker_failures("elastic") == 0, faulted.breaker
     assert faulted.breaker.get("total_failures", 0) == 0, faulted.breaker
 
@@ -585,8 +573,7 @@ def test_r1_every_harness_slot_of_mains_opening_message_is_bound(tmp_path):
     assert "R-1001" in S.harness_text(parts["vocabulary"]), (
         "the vocabulary section does not name the signature it was looked up by")
     assert d.run_dir is not None
-    # #1255 (design rev 4, P1 Outbound; O3): the workspace map names the run folder by its model
-    # path, and never by its host folder.
+    # The workspace map names the run folder by its model path, never by its host folder.
     workspace = S.harness_text(parts["workspace"])
     assert V.MODEL_RUN in workspace, (
         f"the workspace section does not name this run's folder ({V.MODEL_RUN})")
@@ -630,8 +617,8 @@ def test_r2_the_lead_session_and_mains_sessions_land_as_distinct_rows(tmp_path):
     main_rows = by_agent["main"]
     carrying = [i for i, p in enumerate(main_rows) if marks[S.L3] in p]
     assert carrying == [0], (
-        f"l-00c's summary appears in MAIN's session rows {carrying} — it belongs to MAIN's opening "
-        "message alone, with no injected correlation entry after it")
+        f"l-00c's summary appears in MAIN's session rows {carrying}, not in its opening message "
+        "alone (row 0)")
     for lead, other in (("l-001", "l002"), ("l-002", "l001")):
         text = "\n".join(by_agent[f"gather:{lead}"])
         assert f"r2:{lead.replace('-', '')}" in text, (
@@ -641,10 +628,7 @@ def test_r2_the_lead_session_and_mains_sessions_land_as_distinct_rows(tmp_path):
 
 
 
-# The harness default (C01): p001, p186
-
-
-# p012, p033, p173 — the outcome is in the opening message, whenever the run ends
+# The outcome is in the opening message, whenever the run ends
 
 def test_p012_run_ends_at_mains_first_answer_with_correlation(tmp_path):
     marker = "CORR-P012-31"
@@ -680,24 +664,23 @@ def test_p033_mains_first_request_retried_before_correlation_i(tmp_path):
     _run_with_turns(d)
     assert len(d.main.seen) >= 2, "MAIN made no second request"
     assert d.main.seen[1].of_kind("retry-prompt"), (
-        "MAIN's second request is not a retry — the scenario does not exercise PR-15")
+        "premise: MAIN's second request is not a retry")
     retry = d.main.seen[1]
     assert retry.user_prompts == [d.opening_message], (
         "the retried first request does not resend exactly the opening message — something "
         f"arrived at the retry: {len(retry.user_prompts)} user prompt(s)")
     copies = sum(t.count(marker) for _k, t in retry.parts)
     assert copies == 1, (
-        f"the retried request carries l-00c's summary {copies} time(s); exactly the one in the "
-        "resent opening message is the contract")
+        f"the retried request carries l-00c's summary {copies} time(s), not once")
     _assert_summary_in_opening(d, marker)
 
 
 
-# The resume trio: p034, p037, p040
+# Resumed siblings
 
 def _plant_sibling(source_dir: Path, sibling_dir: Path) -> Path:
-    """A sibling's run folder holding the source run's alert (and its record once it has one) — the
-    case input a resumed run starts from (`_branch_947.ALERT_DOC`'s reasoning)."""
+    """A sibling's run folder holding the source run's alert and record: the case input a
+    resumed run starts from."""
     sibling_dir.mkdir(parents=True)
     for attr in ("alert", S.COINED["runpaths.record"]):
         src = getattr(RunPaths(source_dir), attr, None)
@@ -710,21 +693,16 @@ def _plant_sibling(source_dir: Path, sibling_dir: Path) -> Path:
 
 def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
                          corr: list[S.Turn], capture: tuple[str, str, dict],
-                         sibling_turns: list[S.Turn],
-                         before: Callable[[Path], None] | None = None,
-                         ) -> tuple[S.Drive, S.Drive]:
+                         sibling_turns: list[S.Turn]) -> tuple[S.Drive, S.Drive]:
     """A source run through `run.main` (production's default store), branched at MAIN's `echo`
-    CALL after the document landed and the capturing lead returned, and a sibling resumed
-    there. Before #1255 this branched at the append's tool RETURN, which D1 refuses; the
-    `echo` is a tool-calling MAIN response (D1) that is not the gather turn (an arm re-runs a
-    gather at its branch turn against its own backend), and it sits after `l-009`'s capture so
-    the branch point holds a capture however the capture rule reads the source's table (cut at
-    the snapshot or whole — the design does not say)."""
+    call, and a sibling resumed there. A branch point must be a tool-calling MAIN response that
+    is not the gather turn (an arm re-runs a gather against its own backend); the `echo` follows
+    `l-009`'s capture, so the branch point holds a capture however the source's table is cut."""
     golden = (H.GOLDEN / "investigation.md").read_text(encoding="utf-8")
     system, verb, params = capture
     src = S.run_alert(
         tmp_path / "source", alert=S.fixture_alert(), tenant=planted,
-        backend=_resolving_backend(), before=before,
+        backend=_resolving_backend(),
         main=[S.call("append_block", text=golden),
               S.gather("l-009", system, "capture one fact"), S.call("bash", command="echo held"),
               S.text(S.DONE)],

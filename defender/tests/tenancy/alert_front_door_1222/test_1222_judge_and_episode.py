@@ -13,7 +13,6 @@ import os
 import re
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +34,8 @@ CORPUS = "skills.invlang.corpus"
 INVLANG_CLI = "skills.invlang.cli"
 RUN = "run"
 
-#: The judge prompt's union views, by the title each framed section opens with
-#: (`learning/judge/run.SECTION_TITLES`).
+#: Titles of the retired union views (sibling trials, trial spread): no judge prompt may carry
+#: them.
 SIBLINGS = "VIEW 4 — SIBLING TRIALS"
 SPREAD = "TRIAL SPREAD"
 #: The tenant every launcher scenario plants (`S.plant_tenant`'s default id).
@@ -61,17 +60,15 @@ def _alert(tag: str, **over: Any) -> bytes:
 
 def _episode(tmp_path: Path, name: str, *, raw: bytes | None = None,
              signature: str | None = "", copy: bool = True,
-             record: bool | dict[str, Any] = True, **world_kw: Any) -> tuple[Path, bytes]:
+             record: bool | dict[str, Any] = True) -> tuple[Path, bytes]:
     """An accepted, archived episode (`J.accepted_episode`, world copies = the decoys) at
-    `<data root>/<T>/episodes/<uuid>` (#1187 Layout A: the only place a door reaches it by id),
-    with the launch's copies of `raw` (default `_alert(name)`) and a record carrying `signature`
-    (default `SIG-<name>`; None = no signature recorded). `copy=False` plants nothing: the
-    episode a pre-change launcher left."""
-    ep = J.accepted_episode(tmp_path, **world_kw)
-    # Distinct scenarios share a queue, so their episode identities must differ (#1241): each
-    # its own uuid (#1187 dc3), and the manifest names that id (R5: every manifest reader
-    # refuses a manifest whose `episode_id` is not its folder's name — a mismatch here would be
-    # refused for THAT, and a test about the record would pass on the wrong refusal).
+    `<data root>/<T>/episodes/<uuid>` (where a door reaches it by id), with the launch's copies
+    of `raw` (default `_alert(name)`) and a record carrying `signature` (default `SIG-<name>`;
+    None = no signature recorded). `copy=False` plants no copies."""
+    ep = J.accepted_episode(tmp_path)
+    # Distinct scenarios share a queue, so each episode gets its own uuid (#1241), and the
+    # manifest names that id: every manifest reader refuses a mismatched `episode_id`, and a test
+    # about the record would then pass on the wrong refusal.
     episode_id = fixture_uuid(f"1222-episode-{name}")
     ep = ep.rename(ep.with_name(episode_id))
     doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
@@ -96,12 +93,11 @@ def _set_source_run_id(ep: Path, source_run_id: str) -> None:
     T.write_family(ep, doc)
 
 
-def _trial(base: Path, name: str, raw: bytes, *, report: bool = True,
-           disposition: str = "benign", **kw: Any) -> Path:
-    """A run under `base` holding `raw` and (default) its record — a finished trial of `raw`
-    when `report`; `kw` reaches `S.plant_run` (`record=False`, `digest=`, `facts=`)."""
-    files = {"report.md": T.report_text(disposition)} if report else {}
-    return S.plant_run(base, name, alert=raw, files=files, **kw)
+def _trial(base: Path, name: str, raw: bytes, *, disposition: str = "benign", **kw: Any) -> Path:
+    """A finished trial of `raw` under `base`: the alert, (default) its record and a report;
+    `kw` reaches `S.plant_run` (`record=False`, `facts=`)."""
+    return S.plant_run(base, name, alert=raw,
+                       files={"report.md": T.report_text(disposition)}, **kw)
 
 
 def _grade(ep: Path, base: Path, *, judge: J.FakeJudge | None = None) -> tuple[Any, J.FakeJudge]:
@@ -149,20 +145,20 @@ def _world_prompts(judge: J.FakeJudge) -> list[str]:
     return out
 
 
-def _trials(judge: J.FakeJudge) -> set[str]:
-    """J3: no prior trial or spread enters the judge's prompt."""
+def _assert_no_prior_trials(judge: J.FakeJudge) -> None:
+    """No prior trial or spread enters the judge's prompt (the union views are retired)."""
     prompts = _world_prompts(judge)
-    assert all(SIBLINGS not in p and SPREAD not in p for p in prompts)
-    return set()
+    assert all(SIBLINGS not in p and SPREAD not in p for p in prompts), (
+        "same-alert priors reached the judge prompt")
 
 
 def _lines_naming(text: str, stem: str) -> list[str]:
     return [line for line in text.splitlines() if stem in line]
 
 
-def _assert_named_skip(judge: J.FakeJudge, name: str, *, reason: str | None = "record") -> None:
-    """J3: neither prior trials nor skipped-folder notes enter the judge's view."""
-    assert not _trials(judge)
+def _assert_named_skip(judge: J.FakeJudge, name: str) -> None:
+    """Neither prior trials nor the skipped folder's name enter the judge's view."""
+    _assert_no_prior_trials(judge)
     assert all(name not in prompt for prompt in _world_prompts(judge))
 
 
@@ -189,18 +185,14 @@ def _judge_refusal(ep: Path, base: Path) -> str:
 
 def _assert_names_record(text: str, what: str) -> None:
     assert "record" in text.lower(), f"{what} does not name the missing record: {text!r}"
-    # #1187 (R5): a manifest naming another episode is refused too, and its text may say
-    # "record"; a refusal of the record is never that one.
+    # A manifest naming another episode is refused too, and its text may say "record"; a
+    # refusal of the record is never that one.
     assert "episode_id" not in text, f"{what} is the manifest's id refusal, not the record's: {text!r}"
-
-
-# --- a pass that predates the change ---------------------------------------------------------
 
 
 # --- the launcher ----------------------------------------------------------------------------
 
-def _source(tmp_path: Path, raw: bytes, *, record: bool = True, digest: str | None = None,
-            signature: str | None = None, alert_mapping: Any = S.DEFAULT_MAPPING_GENERIC,
+def _source(tmp_path: Path, raw: bytes, *, record: bool = True, signature: str | None = None, alert_mapping: Any = S.DEFAULT_MAPPING_GENERIC,
             case_mapping: str | None = None) -> tuple[S.Planted, Path, Path]:
     """A finished source run on tenant `TENANT`: `T.runs_base`'s stamped, branchable run (its
     capture, session and runs-base record), its alert replaced by `raw` at the run's alert
@@ -210,17 +202,15 @@ def _source(tmp_path: Path, raw: bytes, *, record: bool = True, digest: str | No
     former = src / "alert.json"
     if former != S.alert_file(src):
         former.unlink()
-    S.plant_run(base, src.name, alert=raw, record=record, digest=digest,
+    S.plant_run(base, src.name, alert=raw, record=record,
                 facts={"signature": signature} if signature is not None else {})
     return planted, base, src
 
 
 def _launch(planted: S.Planted, src: Path) -> Path:
     """`prepare_episode(runs, source)` over `src` (the real primer) in the tenant's runs
-    repository — #1187 declared change 3, review-4 F37: the episode is a fresh UUID
-    `runs.create_episode()` claims, handed back as its held view — then the launcher's RUNS
-    step for the manifest's worlds (#1187 R2: `view.start_runs` makes `runs/` and writes the
-    arm roster — it replaces `create_container`), the view released."""
+    repository, then the launcher's runs step for the manifest's worlds (`view.start_runs`
+    makes `runs/` and writes the arm roster); the view is released."""
     cli = S.mod(CLI)
     with cli.prepare_episode(planted.accept().runs_repository(), Run.at(src)) as view:
         ep = Path(view.episode.dir)
@@ -244,10 +234,8 @@ def _files_under(root: Path) -> dict[str, bytes]:
 
 
 def _episode_files() -> dict[str, bytes]:
-    """Every file in every episode of every tenant: `<data root>/*/episodes/` (#1187 Layout A,
-    where a launch puts its episode and its copies; O9: no configured root). The census a
-    refused launch leaves without the source's bytes — and `test_a1`'s accepted launch does not
-    (its positive control)."""
+    """Every file in every episode of every tenant: `<data root>/*/episodes/`, where a launch
+    puts its episode and its copies."""
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     found: dict[str, bytes] = {}
     for episodes in sorted(root.glob("*/episodes")):
@@ -268,19 +256,15 @@ class _Lifecycle:
         return {"output": "done", "requests": 1, "truncated_by": None}
 
 
-def _resume_sibling(ep: Path, label: str = "b") -> Path:
-    """World `label`'s sibling through the REAL `run.main --resume`; returns its run folder."""
-    life = _Lifecycle()
-    # #1187 (O9): the episode is found under `--tenant`'s own `<T>/episodes/`; no variable.
-    return _resume_sibling_at(ep, label, life)
-
-
-def _resume_sibling_at(ep: Path, label: str, life: _Lifecycle) -> Path:
+def _resume_sibling(ep: Path) -> Path:
+    """World `b`'s sibling through the REAL `run.main --resume`; returns its run folder. The
+    episode is found under `--tenant`'s own `<T>/episodes/`."""
     from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
-    # #1108 P4 (OD14, O11): plus the in-process launch-time publish.
+    life = _Lifecycle()
+    # Plus the in-process launch-time publish.
     rc = S.sym(RUN, "main")(
-        ["--episode", ep.name, "--world", label, "--tenant", TENANT, "--no-learn"],
+        ["--episode", ep.name, "--world", "b", "--tenant", TENANT, "--no-learn"],
         lifecycle=life, visualize=lambda *_a, **_k: None, preflight=lambda *_a, **_k: 0,
         ticket_writer=S.NoTicket(), publish=in_process_publish())
     assert life.run_dir is not None, f"the sibling never reached its run (rc={rc!r})"
@@ -306,7 +290,7 @@ def test_o11_episode_alert_is_the_episodes_copy(tmp_path):
     assert keys == {"SIG-COPY-O11"}, (
         f"the findings key is {keys}: not the copy's recorded signature (a world copy, the "
         "vendor rule.id, the tenant's mapping or the source run folder keyed them)")
-    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
+    _assert_no_prior_trials(judge)
 
 
 def test_o11_episode_without_a_record_is_refused_by_name(tmp_path):
@@ -347,7 +331,7 @@ def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
 
     ep = _launch(planted, src)
     assert raw in _episode_files().values(), (
-        "the census p156/p157 take never saw the accepted launch's copy (#1187: <T>/episodes)")
+        "no episode under <data root>/*/episodes holds the launch's copy of the alert")
     assert S.episode_alert_file(ep).is_file(), "the launch put no copy of the alert in the episode"
     assert S.episode_record_file(ep).is_file(), "the launch put no copy of the record in the episode"
     assert S.episode_alert_file(ep).read_bytes() == raw, "the episode's alert is not the source's"
@@ -398,7 +382,6 @@ def test_a8_a_folder_without_a_record_is_not_a_run(tmp_path, capsys):
     _trial(base, "trial-a8", raw, facts={"signature": "SIG-a8"})
     _grade_, judge = _grade(ep, base)
     _assert_named_skip(judge, src.name)
-    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
 
 
 def test_r6_a_skipped_runs_name_cannot_forge_a_line_in_the_judge_notes_or_the_vocabulary(
@@ -432,17 +415,13 @@ def test_r6_a_skipped_runs_name_cannot_forge_a_line_in_the_judge_notes_or_the_vo
     ep, _raw = _episode(tmp_path, "r6", raw=raw)
     T.corpus_document(_trial(base, "trial-r6", raw, facts={"signature": "SIG-r6"}))
     _grade_, judge = _grade(ep, base)
-    control_ep, _raw = _episode(tmp_path, "r6-control", raw=raw)
-    control_base = tmp_path / "runs-control"
-    _trial(control_base, plain, raw, record=False)
-    _grade_, control = _grade(control_ep, control_base)
 
-    assert not _trials(judge)
+    _assert_no_prior_trials(judge)
     for prompt in _world_prompts(judge):
         assert all(stem not in prompt for stem in [*hostile, plain])
 
 
-# The findings key: the recorded signature, verbatim (C27)
+# The findings key: the recorded signature, verbatim
 
 
 def test_p070_mapping_changed_between_source_run_and_judge(tmp_path):
@@ -486,7 +465,7 @@ def test_p076_rule_key_from_an_enormous_or_path_shaped_signatu(tmp_path):
             assert sig not in str(path), f"the key became part of a path: {path}"
 
 
-# The sibling union: runs under the base whose recorded digest is the copy's
+# Odd runs under the base, and source run ids that name another run
 
 
 def test_p120_source_alert_json_is_not_a_regular_file(tmp_path):
@@ -514,12 +493,11 @@ def test_p120_source_alert_json_is_not_a_regular_file(tmp_path):
     judge = J.scripted_judge()
     box = _bounded(lambda: _grade(ep, base, judge=judge), what="the judge pass")
     assert "raised" not in box, f"the pass failed: {box.get('raised')!r}"
-    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
     for prompt in judge.prompts:
         assert marker not in prompt, "a link target's bytes reached the judge's prompt"
     for name in ("cand-link-record", "cand-fifo-record"):
         _assert_named_skip(judge, name)
-    _assert_named_skip(judge, "cand-link-dir", reason=None)
+    _assert_named_skip(judge, "cand-link-dir")
 
 
 def test_p121_family_record_names_a_hostile_source_run(tmp_path):
@@ -537,7 +515,7 @@ def test_p121_family_record_names_a_hostile_source_run(tmp_path):
         _trial(base, f"trial-{name}", raw)
         _grade_, judge = _grade(ep, base)
         assert set(_keys(_rows()[before:])) == {f"SIG-p121-{name}"}, name
-        assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
+        _assert_no_prior_trials(judge)
         for prompt in judge.prompts:
             assert marker not in prompt, f"{name}: the hostile source run's bytes were read"
 
@@ -551,28 +529,7 @@ def test_p122_source_run_id_in_the_episode_record_names_a_diff(tmp_path):
     _trial(base, "trial-p122", raw)
     _grade_, judge = _grade(ep, base)
     assert set(_keys(_rows())) == {"SIG-p122"}
-    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
-
-
-@dataclass
-class _RewritingJudge(J.FakeJudge):
-    """`J.FakeJudge` whose first call runs `rewrite` — the episode's record changing on disk
-    while the pass runs (after the union is taken, before the findings are keyed)."""
-
-    rewrite: Callable[[], None] | None = None
-
-    def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
-                 **kw: Any) -> str:
-        if self.rewrite is not None:
-            rewrite, self.rewrite = self.rewrite, None
-            rewrite()
-        return super().__call__(prompt, role=role, agent_id=agent_id, **kw)
-
-
-# The episode page
-
-
-# The launcher's copy step (C41, C47)
+    _assert_no_prior_trials(judge)
 
 
 # A sibling resumed after a mapping edit

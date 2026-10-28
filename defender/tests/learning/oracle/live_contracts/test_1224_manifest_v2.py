@@ -38,16 +38,14 @@ def _episode(where: Path, doc: dict | None = None, *, text: str | None = None) -
 
 def _load(ep: Path) -> Any:
     """The runtime loader over the episode's manifest on disk (`load_family` through a view),
-    handed the episode's own folder name as the expected id (#1187 R5: a required keyword, the
-    one the episode handle supplies; review-4 F36)."""
+    handed the episode's own folder name as the required `expected_episode_id`."""
     with _episode_cls().open(Path(ep)) as handle:
         return S.sym(S.FAMILY, "load_family")(handle.view(), expected_episode_id=Path(ep).name)
 
 
 def _no_tenant() -> Any:
     raise AssertionError(
-        "the sibling's loader resolved a tenant for the manifest — the launcher records "
-        "served_systems so no reader after it resolves one (d01e)")
+        "the sibling's loader resolved a tenant; it must read the manifest's served_systems")
 
 
 def _resume(ep: Path, label: str) -> Any:
@@ -64,9 +62,8 @@ def _judge_read(ep: Path) -> dict:
 
 
 def _page(ep: Path, capsys: Any) -> tuple[int, str]:
-    """The episode page as the operator runs it: its exit code and what it printed on stderr
-    (#1105 PR 2, declared change 4: `--tenant T <episode_id>` under the episodes base holding
-    `ep`, `_episode_1025.cli_on`)."""
+    """The episode page as the operator runs it (`_episode_1025.cli_on`): its exit code and
+    what it printed on stderr."""
     capsys.readouterr()
     rc, _out, err = E.cli_on(Path(ep), capsys, module=S.mod(S.VISUALIZE))
     return rc, err
@@ -77,8 +74,8 @@ def _page_file(ep: Path) -> Path:
 
 
 def _grade(ep: Path, judge: Any, where: Path) -> Any:
-    """`grade_episode` over the episode at `ep`, by id (#1105 PR 2, `_judge_921.grade_at`): the
-    judge reads only the episode it is handed (J3), so `where` threads nothing in."""
+    """`grade_episode` over the episode at `ep` (`J.grade_at`): the judge reads only the
+    episode it is handed, so `where` threads nothing in."""
     from defender.tests.support.learning.core._state1135 import env_state
 
     del where
@@ -99,7 +96,7 @@ _PREDICATE = "did the analyst look at idp after the branch"
 
 
 def _doc(*seats: tuple[str, list], **over: Any) -> dict:
-    """A v2 manifest: the control world `a` (an explicit `facts: []`, M07=A), then one seat per
+    """A v2 manifest: the control world `a` (an explicit `facts: []`), then one seat per
     `(label, facts)`, each with its OWN role — two arms sharing a role are refused by the
     launcher's identity gate, which would mask the rule a scenario is about."""
     seats = seats or (("b", [_F1]), ("c", [_F2]))
@@ -107,19 +104,6 @@ def _doc(*seats: tuple[str, list], **over: Any) -> dict:
         S.world_v2(label, facts=list(facts), role=_ROLES[i])
         for i, (label, facts) in enumerate(seats)]
     return S.family_v2(worlds=worlds, **over)
-
-
-def _old_doc(key: str, value: Any) -> dict:
-    """`S.old_manifest(key)` with the old field set to exactly `value` — `None` included, which
-    `S.old_manifest`'s own `value=None` cannot express (it means "the default")."""
-    doc = S.old_manifest(key)
-    if key == "overlay":
-        doc["worlds"][1]["overlay"] = value
-    elif key.startswith("discriminator."):
-        doc["discriminator"][key.split(".", 1)[1]] = value
-    else:
-        doc[key] = value
-    return doc
 
 
 def _text(doc: dict, raw: dict[str, str] | None = None) -> str:
@@ -191,7 +175,7 @@ def _serving(where: Path, doc: dict, label: str, *, oracle: Any = None, verifier
 
 
 def _samples(*, siem_x: list[str] | None = None) -> dict:
-    """A samples record with a section for EVERY served system (O16: a served system with no
+    """A samples record with a section for EVERY served system (a served system with no
     section is itself a failure), `siem-x` carrying `siem_x` as its lookup examples."""
     out: dict[str, Any] = {s: {"unavailable": "no capture"} for s in S.SYSTEMS}
     if siem_x is not None:
@@ -242,54 +226,6 @@ def test_1224_malformed_fact_is_refused_naming_the_field():
         assert "oddfact" in msg, (entity[:24], msg[:400])
         assert "entities" in msg, (entity[:24], msg[:400])
         assert _names(msg, entity), (entity[:24], msg[:400])
-
-
-def _also_unknown(key: str) -> dict:
-    doc = S.old_manifest(key)
-    doc["zzz_unknown_1224"] = "x"
-    doc["worlds"][2]["touches"] = ["idp"]
-    return doc
-
-
-def _five_worlds() -> dict:
-    return _doc(("b", [_F1]), ("c", [_F2]), ("d", [S.fact("f3")]), ("e", [S.fact("f4")]))
-
-
-def _old_in_third_of_five() -> dict:
-    doc = _five_worlds()
-    doc["worlds"][2]["overlay"] = {"patches": {"idp": {"alice": {"mfa": "off"}}}}
-    return doc
-
-
-def _discriminator(value: Any, *, overlay_world: int | None = None) -> dict:
-    doc = _doc(("b", [_F1]), ("c", [_F2]), ("d", [S.fact("f3")])) if overlay_world else _doc()
-    doc["discriminator"] = value
-    if overlay_world:
-        doc["worlds"][overlay_world]["overlay"] = {}
-    return doc
-
-
-def _aliased_text() -> str:
-    base = _text(_doc())
-    aliased = base.replace("served_systems:\n", "served_systems: &systems_1224\n", 1)
-    assert aliased != base
-    return aliased + "configured_patterns: *systems_1224\n"
-
-
-#: Every old-manifest shape, as `(id, builder)`; a builder returns a document or raw YAML text.
-_OLD_MANIFESTS: list[tuple[str, Any]] = [
-    *[(f"field-{k}", lambda k=k: S.old_manifest(k)) for k in S.OLD_MANIFEST_KEYS],
-    *[(f"also-unknown-{k}", lambda k=k: _also_unknown(k)) for k in S.OLD_MANIFEST_KEYS],
-    ("alias", _aliased_text),
-    ("merge-key", lambda: _text(_doc()) + '<<: {captured_patterns: ["logs-*"]}\n'),
-    ("duplicate-key", lambda: _text(_old_doc("discriminator.holding_system", "elastic"))
-     + f"discriminator:\n  predicate: {_PREDICATE}\n"),
-    ("third-of-five", _old_in_third_of_five),
-    ("discriminator-string", lambda: _discriminator("holding_system: elastic")),
-    ("discriminator-list", lambda: _discriminator(
-        [{"predicate": _PREDICATE}, {"holding_system": "elastic"}])),
-    ("discriminator-null", lambda: _discriminator(None, overlay_world=3)),
-]
 
 
 def test_input_fact_entity_is_an_idp_principal(tmp_path):
@@ -586,28 +522,6 @@ def test_input_manifest_has_no_branch_point_clock(tmp_path):
                              box=S.sandboxed_box()[0])
         assert oracle.requests == 0
         assert len(est.calls()) == before
-
-
-def _beside_new(key: str) -> dict:
-    doc = _doc()
-    if key == "overlay":
-        doc["worlds"][1]["overlay"] = {"patches": {"idp": {"alice": {"mfa": "off"}}}}
-    else:
-        doc["configured_patterns"] = ["logs-*"]
-    return doc
-
-
-#: Old fields present as empty or null (b_p023), and beside the new fields (s_p025).
-_OLD_AT_EVERY_READER: list[tuple[str, Any]] = [
-    ("overlay-empty", lambda: _old_doc("overlay", {})),
-    ("overlay-null", lambda: _old_doc("overlay", None)),
-    ("captured-empty", lambda: _old_doc("captured_patterns", [])),
-    ("configured-empty", lambda: _old_doc("configured_patterns", [])),
-    ("envelope-null", lambda: _old_doc("discriminator.envelope", None)),
-    ("holding-null", lambda: _old_doc("discriminator.holding_system", None)),
-    ("overlay-beside-facts", lambda: _beside_new("overlay")),
-    ("configured-beside-served", lambda: _beside_new("configured_patterns")),
-]
 
 
 def test_p067_manifest_alias_bomb_or_pathological_nesting(tmp_path, capsys):

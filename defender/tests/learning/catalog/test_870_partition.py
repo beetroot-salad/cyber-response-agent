@@ -1,12 +1,9 @@
-"""#870 M8 — the partition follows the handoff, and what the tick tells a human.
+"""#870: the partition follows the handoff, and the commit says what it carries.
 
-#1108 P4 (O7, OD6, OD12 class ii): every scene is a git-free draft of a P3 batch over the
-fixture tenant (`_curator1134.draft_lane`), never a product worktree. The reducer surface is the
-tenant add-on `REDUCER_REL` (`agent/skills/gather/defender-sql.pitfalls.md`), the system lane's
-page is `agent/skills/<system>/execution.md`, and what a tick committed is read from the batch
-branch (its tip commit stands where HEAD stood). ASSUMED SEAM (S-H, `_curator1134`):
-`pitfalls_curator.run_pitfalls(*, paths, state, trees, batch, invoke)`; `paths.repo_root` is the
-product checkout holding only the adapters (#1172).
+Every scene is a git-free draft of a batch over the fixture tenant (`_curator1134.draft_lane`). The
+reducer surface is the tenant add-on `REDUCER_REL`, a system's page is
+`agent/skills/<system>/execution.md`, and what a tick committed is read from the batch branch.
+`paths.repo_root` is the product checkout, holding only the adapters.
 """
 from __future__ import annotations
 
@@ -42,13 +39,10 @@ ELASTIC_MD = "agent/skills/elastic/execution.md"
 
 @pytest.fixture
 def scene(tmp_path: Path, monkeypatch) -> C.DraftLane:
-    """A started batch whose draft carries the reducer add-on (in the export commit, so it is
-    the batch base), the declared `elastic` marker and skill and the `gather` non-system skill;
-    the product checkout holds the `elastic` and `cmdb` adapters. Learning state is scratch,
-    outside the draft — a queue file inside the corpus would read to the scope walk as a stray.
-
-    The threshold is set to 1 so these demands are about the PARTITION rather than about the
-    gate; FK-3's gate has its own file.
+    """A started batch whose base carries the reducer add-on, the declared `elastic` marker and
+    skill, and the `gather` non-system skill; the product checkout holds the `elastic` and `cmdb`
+    adapters. Learning state lives outside the draft (a queue file in the corpus reads as a stray).
+    Threshold 1 keeps these tests about the partition, not the gate (`test_870_threshold.py`).
     """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     product = seed_product(tmp_path, adapters=("elastic", "cmdb"))
@@ -64,7 +58,7 @@ def _spawn(lane: C.DraftLane, edit=None) -> Spawn:
 
 
 def _tick(lane: C.DraftLane, spawn: Spawn) -> int:
-    """One REAL pitfalls tick over the draft (ASSUMED SEAM `batch=`)."""
+    """One real pitfalls tick over the draft."""
     return pitfalls_curator.run_pitfalls(
         paths=lane.paths, state=_state1135.state_for_paths(lane.paths),
         trees=C.draft_trees(lane), batch=lane.batch, invoke=spawn)
@@ -78,17 +72,18 @@ def _tip_files(lane: C.DraftLane) -> list[str]:
 
 
 def _shim_batch(paths, n: int = 3) -> list[str]:
-    """N rows behind ONE reducer mistake — the l-003 shape, which is what a real reducer
-    batch looks like. Appended through the production appender, into the real queue file."""
+    """`n` rows behind one reducer mistake (the shape of a real reducer batch), appended through
+    the production appender."""
     rows = [shim_row(f"r:l-003:{i}") for i in range(n)]
     persist.append_pitfalls(rows, state=_state1135.state_for_paths(paths))
     return [r["pitfall_id"] for r in rows]
 
 
-# FK-7 — a handoff is an OFFER; only a confirmed edit is curation.
+# A handoff is an offer; only a confirmed edit is curation.
 
 
 def test_a_taught_reducer_row_is_consumed_not_retired(scene):
+    """A reducer-only batch reaches the curator, and its taught rows are consumed, not retired."""
     lane = scene
     paths = lane.paths
     ids = _shim_batch(paths)
@@ -96,7 +91,8 @@ def test_a_taught_reducer_row_is_consumed_not_retired(scene):
     head_before = lane.tip()
 
     assert _tick(lane, spawn) == 0
-    assert by_surface(spawn.handoffs)["reducer"], "no reducer handoff, so the arm is vacuous"
+    assert [e["surface"] for e in spawn.handoffs] == ["reducer"], (
+        "the reducer-only batch never reached the curator with its one offer")
     assert lane.tip() != head_before, (
         "the curator's edit never reached a commit"
     )
@@ -166,7 +162,7 @@ def test_an_unoffered_reducer_edit_is_refused(scene):
         _tick(lane, overreach)
 
     assert not by_surface(overreach.handoffs)["reducer"], (
-        "the batch offered the reducer surface after all, so the demand is vacuous"
+        "the batch offered the reducer surface after all, so the test is vacuous"
     )
     assert lane.tip() == head_before, (
         "the unoffered reducer edit reached a commit"
@@ -247,21 +243,6 @@ def test_a_faulting_tick_does_not_spend_the_offer_budget(scene, monkeypatch):
     assert set(graveyard_by_id(paths)) == set(ids)
 
 
-def test_a_reducer_only_batch_still_reaches_the_curator(scene):
-    lane = scene
-    paths = lane.paths
-    ids = _shim_batch(paths)
-    spawn = _spawn(lane, curate_reducer_surface())
-
-    assert _tick(lane, spawn) == 0
-    assert spawn.calls, "the curator was never spawned for a batch that had a lesson"
-    assert [e["surface"] for e in spawn.handoffs] == ["reducer"]
-    assert set(consumed_by_id(paths)) == set(ids)
-    assert graveyard_by_id(paths) == {}, (
-        "the reducer-only batch took the `not handoffs` arm and was retired unread"
-    )
-
-
 def test_no_row_leaves_the_queue_without_a_record(scene):
     lane = scene
     paths = lane.paths
@@ -318,8 +299,7 @@ def test_the_commit_carries_exactly_what_the_rule_admitted(scene):
         "the commit carries paths the rule never adjudicated"
     )
 
-    # The correction, executed: a newly-dirty non-`.md` file under the corpus refuses the
-    # whole tick rather than riding it.
+    # A newly-dirty non-`.md` file under the corpus refuses the whole tick rather than riding it.
     persist.append_pitfalls([shim_row("r2:l-009:0", digest="exit=1; a second mistake")],
                             state=_state1135.state_for_paths(paths))
     stray = _spawn(lane, edits(

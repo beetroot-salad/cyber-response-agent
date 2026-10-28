@@ -1,4 +1,4 @@
-"""A review bundle whose four stages answer without a provider — for both test trees."""
+"""A review bundle whose three stages answer without a provider."""
 from __future__ import annotations
 
 import json
@@ -14,11 +14,8 @@ LENS_READING = "l-001 separates h-001 from h-002."
 
 
 def stage(reply: str) -> Any:
-    """One stage: the reply it returns, whatever it is handed.
-
-    It ignores the request rather than asserting on it, so a scenario that wants to inspect
-    what reached a role — the frame, the salt, the projection — binds its own recording stage
-    instead of growing this one a recorder every caller pays for."""
+    """One stage returning `reply`, whatever it is handed. A scenario that inspects what reached
+    a role (the frame, the salt, the projection) binds its own recording stage."""
 
     async def call(_request):
         return reply
@@ -34,11 +31,8 @@ def composer_reply(finding: str = "holds", review: str = "reads sound", ask: Any
 
 
 def bundle(*, composer: str, lens: str = LENS_READING) -> ReviewStages:
-    """All four stages bound. Every lens answers with `lens`; only the composer varies.
-
-    The lens calls are held constant because the routing arms turn on what the COMPOSER
-    found — the host is shown a lens reading only through the composer — so a scenario that
-    varied them would be varying something the outcome does not read."""
+    """All three stages bound: every lens answers `lens` and only the composer varies, since the
+    routing turns on what the composer found (the host sees a lens reading only through it)."""
     return ReviewStages(
         support=stage(lens), ablation=stage(lens),
         composer=stage(composer),

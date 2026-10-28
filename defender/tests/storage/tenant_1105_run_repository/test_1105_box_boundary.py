@@ -23,8 +23,8 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
 pytestmark = pytest.mark.box
 
-#: The runtimes every box test here runs under: the production default first (GR-A5), then the
-#: floor. A superset of `BoxSpec.RUNTIMES`, so a runtime the lever admits is never left out.
+#: The runtimes every box test here runs under: the production default first, then the floor.
+#: A superset of `BoxSpec.RUNTIMES`, so a runtime the lever admits is never left out.
 RUNTIMES = ("runsc", "runc")
 
 #: The two reasons a box parameter may skip for (off CI only).
@@ -37,15 +37,14 @@ RUNTIME_ABSENT = (
     "no box under it can start")
 
 EXEC_TIMEOUT = 60.0
-#: The box's own run: exactly `RUN_ID_BOUND` (206) bytes, so the container name is 219
-#: characters (RG-27-a, RG-27-b). It starts with `r1`, so it sorts after the sibling `r0`.
+#: The box's own run, and a sibling run beside it holding a secret the box must not see.
 RUN_ID = str(uuid.uuid4())
 SIBLING_ID = str(uuid.uuid4())
 SIBLING_SECRET = "SIBLING-RUN-SECRET-1105"
 CONTROL = b"box-control-1105"
 
-#: The writes the box attempts, keyed by what each tries to reach (GR-A1's shape, made
-#: against a real tenant's runs folder). `control` is the one that must land.
+#: The probe's writes that must fail, keyed by what each tries to reach; its `control` write
+#: is the one that must land.
 _ATTEMPTS = ("tenant_record", "episode_record", "sibling_folder", "into_sibling", "dotdot")
 
 _PROBE = r'''
@@ -100,9 +99,8 @@ def _daemon() -> tuple[bool, Path | None, frozenset[str]]:
     daemon registers). Asked once, lazily, so collecting this file runs no docker command.
 
     The anchor is the checkout's gitignored `.defender-runs/` natively too, never pytest's tmp
-    dir: that sits under `/tmp`, and inside the box `/tmp` is the box's own writable tmpfs, so
-    the run folder's parent there is box scratch, not the host's runs folder, and the write
-    attempts would land in it (owner ruling, #1105 PR 1's first CI run)."""
+    dir: inside the box `/tmp` is the box's own tmpfs, so a run folder under it would have box
+    scratch as its parent and the write attempts would land there."""
     if not daemon_reachable():
         return False, None, frozenset()
     anchor = H.WORKTREE / ".defender-runs"
@@ -138,7 +136,7 @@ def _outside_run(state: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in state.items() if not k.startswith(f"{RUN_ID}/")}
 
 
-def _session(root: Path, runtime: str, *, defender_dir: Path = H.DEFENDER) -> dict[str, Any]:
+def _session(root: Path, runtime: str) -> dict[str, Any]:
     t = H.tenant(root, H.T_ID)
     runs = Path(location_path(t.runs))
     run_dir = H.make_run(runs, RUN_ID)
@@ -153,7 +151,7 @@ def _session(root: Path, runtime: str, *, defender_dir: Path = H.DEFENDER) -> di
     from defender.tests.support.tenancy._run_copy_stage import staged_agent
 
     agent, token = staged_agent(Path(t.agent), run_dir.parent.parent / "run-copies")
-    box = start_box(run_dir, defender_dir, spec=BoxSpec(runtime=runtime),
+    box = start_box(run_dir, H.DEFENDER, spec=BoxSpec(runtime=runtime),
                     tenant_agent=agent, tenant_id=t.id, staged_token=token)
     sandboxed, name = box.sandboxed, box.name
     try:
@@ -189,7 +187,7 @@ def box_session(request: pytest.FixtureRequest,
     try:
         yield _session(base / "data", runtime)
     finally:
-        # The box writes through the rw bind as root (C41); residue is gitignored.
+        # The box writes through the rw bind as root; residue is gitignored.
         shutil.rmtree(base, ignore_errors=True)
 
 
@@ -245,5 +243,4 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
     sidecar = f"{RUN_ID}{H.SIDECAR_SUFFIXES[0]}"
     assert (s["runs"] / sidecar).exists(), f"the host's runs folder holds {sidecar}"
     for name in ("_tenant.json", "_episodes"):
-        assert not os.path.lexists(s["runs"] / name), (
-            f"the host's runs folder holds {name}, which #1187 never plants")
+        assert not os.path.lexists(s["runs"] / name), f"the host's runs folder holds {name}"

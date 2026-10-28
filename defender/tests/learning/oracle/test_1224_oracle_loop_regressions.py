@@ -1,5 +1,5 @@
-"""Regressions for the #1224 oracle loop found in PR #1232 review: turn/deadline handling, frozen
-forged rows, accounting and pricing, pre-flight worlds, pre-branch calls, esql forging checks."""
+"""Regressions for the #1224 oracle loop: turn/deadline handling, frozen forged rows,
+accounting and pricing, pre-flight worlds, pre-branch calls, esql forging checks."""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -161,7 +161,6 @@ def test_a_hung_verifier_is_cut_off_by_the_turn_deadline(tmp_path):
 
 
 def test_a_call_after_the_world_went_unservable_reports_the_failing_call(tmp_path):
-    """CI race (test_conc_13)."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "query", BOB, BOB_ROWS)
@@ -256,7 +255,7 @@ def _tool_result(messages: list[Any], tool: str) -> str:
                      if isinstance(p, ToolReturnPart) and p.tool_name == tool)
 
 
-# --- second round ---------------------------------------------------------------------------
+# --- frozen rows, caps, deadlines and pricing -----------------------------------------------
 
 _REAL_ROW = {"user": "alice", "event_id": "e-100", "action": "logon"}
 _FROZEN = {"forged_id": "fg-1", "fact_id": "F", "system": "s",
@@ -379,7 +378,7 @@ def test_an_undelivered_control_world_call_leaves_no_row(tmp_path):
     assert S.ledger_rows(ep, "a") == []
 
 
-# --- fourth round: one row model ------------------------------------------------------------
+# --- one row model: ES|QL answers and nested ids --------------------------------------------
 
 _ESQL_COLUMNS = [{"name": "@timestamp", "type": "date"}, {"name": "user.name", "type": "keyword"},
                  {"name": "event_id", "type": "keyword"}, {"name": "host", "type": "keyword"}]
@@ -394,7 +393,6 @@ def _esql(rows: list[list[Any]]) -> dict:
 
 
 def test_a_forged_row_can_be_added_to_an_esql_answer(tmp_path):
-    """Fourth-round finding 2."""
     est = S.estate(tmp_path)
     base = est.answer("idp", "query", ALICE, _esql(_ESQL_ROWS))
     row = ["2026-03-01T11:00:00Z", "alice", "e-9f01", "db-1"]
@@ -435,7 +433,6 @@ def test_an_esql_side_query_selects_its_rows_not_its_columns():
 
 
 def test_esql_answers_projecting_other_columns_are_separate_tables_for_check_2():
-    """Fourth-round finding 2, check 2."""
     other = {"columns": [{"name": "host", "type": "keyword"}, {"name": "risk", "type": "long"}],
              "values": [["web-1", 3]]}
     base = _esql(_ESQL_ROWS)
@@ -495,7 +492,7 @@ def test_a_frozen_row_s_nested_id_collision_is_recorded():
                                       "process.entity_id": _PROCESS_ID}]
 
 
-# --- fourth round: state belongs to whoever created it; preconditions settle before spending ---
+# --- state belongs to whoever created it; preconditions settle before spending -------------
 
 
 class _BoxLog:
@@ -544,7 +541,6 @@ def _python_box_factory(tmp_path: Path, *, slow_first: float = 0.0) -> tuple[Any
 
 
 def test_the_python_box_is_stopped_when_the_attempt_that_used_it_ends(tmp_path):
-    """Finding 9."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     box, log = _python_box_factory(tmp_path)
@@ -606,7 +602,6 @@ class _GatedLimiter:
 
 
 def test_an_abandoned_attempts_limiter_wait_does_not_touch_the_next_attempts_clock(tmp_path):
-    """Finding 10."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "query", BOB, BOB_ROWS)
@@ -639,7 +634,6 @@ def test_an_abandoned_attempts_limiter_wait_does_not_touch_the_next_attempts_clo
 
 
 def test_an_oracle_turn_holds_the_clock_only_while_it_is_open(tmp_path):
-    """Finding 7."""
     from defender.hooks import budget_enforcer as be
 
     state = S.run_state(tmp_path / "run", "r-1")
@@ -698,7 +692,6 @@ def test_an_unpriced_verifier_is_refused_before_the_oracles_first_request(tmp_pa
 
 
 def test_a_failing_trace_write_still_charges_and_is_not_a_model_failure(tmp_path):
-    """Finding 8."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
@@ -711,7 +704,7 @@ def test_a_failing_trace_write_still_charges_and_is_not_a_model_failure(tmp_path
     assert (o.requests, v.requests) == (1, 1), (o.requests, v.requests)
 
 
-# --- fifth round: the host fills in what it knows, and refuses malformed input at entry ------
+# --- the host fills in what it knows, and refuses malformed input at entry ------------------
 
 _ALICE_ROW = ALICE_ROWS["rows"][0]
 _HONEST = {"user": "alice", "event_id": "e-9f01", "action": "tgt", "host": "db-1",
@@ -731,7 +724,6 @@ def _forge_and_serve(tmp_path: Path, row: Any, *, system: str = "Elastic") -> tu
 
 
 def test_a_forged_row_belongs_to_the_calls_system_not_the_one_the_oracle_typed(tmp_path):
-    """Fifth-round finding 3."""
     with pytest.raises(oracle_mod.OracleUnservable) as refused:
         _forge_and_serve(tmp_path / "a", {"ts": "2026-07-28T15:20:00Z", "totally": "different"})
     assert "check 2" in refused.value.detail, refused.value.detail
@@ -742,7 +734,6 @@ def test_a_forged_row_belongs_to_the_calls_system_not_the_one_the_oracle_typed(t
 
 
 def test_an_esql_value_array_of_the_wrong_length_is_refused_at_forge(tmp_path):
-    """Fifth-round finding 4."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, _esql(_ESQL_ROWS))
     short = ["2026-03-01T11:00:00Z", "alice", "e-9f01"]
@@ -768,7 +759,6 @@ def test_an_esql_value_array_of_the_wrong_length_is_refused_at_forge(tmp_path):
 
 
 def test_a_nested_esql_value_array_that_does_not_zip_fails_check_2():
-    """Fifth-round finding 4, the checks' side."""
     base = {"result": _esql(_ESQL_ROWS)}
 
     def forged(row: list[Any]) -> list[str]:
@@ -796,14 +786,12 @@ def _two_fact_checks(claimed_fact: str, *, frozen: bool) -> list[str]:
 
 @pytest.mark.parametrize("frozen", [False, True], ids=["fresh", "frozen"])
 def test_a_forged_row_is_claimed_under_the_fact_it_was_forged_for(frozen):
-    """Fifth-round finding 7."""
     wrong = _two_fact_checks("f2", frozen=frozen)
     assert any(f.startswith("check 4") and "'f1', not 'f2'" in f for f in wrong), wrong
     assert _two_fact_checks("f1", frozen=frozen) == []
 
 
 def test_a_star_count_does_not_cover_an_edit_to_a_real_rows_field():
-    """Fifth-round finding 2."""
     base = {"total": 1, "hits": [{"user": "alice", "severity": 1, "risk": 1}]}
     forged_row = {"user": "bob", "severity": 1, "risk": 1}
     record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": forged_row}
@@ -848,7 +836,7 @@ def test_a_declared_reference_is_found_by_value_not_by_scanning_every_real_row()
                             store=store, real_data=real) == []
 
 
-# --- fifth round: a turn's outcome is decided in one place, by one rule ---------------------
+# --- a turn's outcome is decided in one place, by one rule ----------------------------------
 
 
 def test_a_result_that_returned_as_the_deadline_fired_is_completed():
@@ -881,7 +869,6 @@ def _serve_colliding(tmp_path: Path, *, answers_unwritable: bool) -> tuple[Any, 
 
 
 def test_an_uncommitted_answer_leaves_no_collision_row(tmp_path):
-    """Fifth-round finding 9, the side effect."""
     est, reg = _serve_colliding(tmp_path / "failed", answers_unwritable=True)
     with pytest.raises(oracle_mod.OracleUnservable):
         S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
@@ -895,7 +882,6 @@ def test_an_uncommitted_answer_leaves_no_collision_row(tmp_path):
 
 def test_a_failure_closing_the_clock_mark_leaves_no_row_for_the_answer_it_withheld(
         tmp_path, monkeypatch):
-    """Fifth-round finding 6."""
     from defender.learning.branch.estate import registry as registry_mod
 
     real_close = registry_mod.oracle_turn_closed
@@ -908,7 +894,7 @@ def test_a_failure_closing_the_clock_mark_leaves_no_row_for_the_answer_it_withhe
         real_close(state)
 
     # The close must fail after its open succeeded; no file fault does that (see the
-    # round-four close test).
+    # oracle-mark close test above).
     monkeypatch.setattr(registry_mod, "oracle_turn_closed", fails_once)  # lint-monkeypatch: ok — only seam for a close that fails after its open
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
@@ -944,7 +930,6 @@ class _LimiterFailsOnce:
 
 
 def test_a_limiter_failing_closed_under_an_oracle_query_is_a_failed_attempt(tmp_path):
-    """Fifth-round finding 10."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "lookup", {"entity": "alice"}, LOOKUP_ALICE)
@@ -1006,7 +991,6 @@ def test_a_trace_append_that_failed_part_way_is_counted_once_on_resume(tmp_path)
 
 
 def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path):
-    """Fifth-round finding 5."""
     from defender.hooks import budget_enforcer as be
 
     def close(gate: threading.Barrier) -> None:
@@ -1047,8 +1031,6 @@ def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path):
 ])
 def test_a_bad_oracle_setting_is_refused_before_the_question_writer(tmp_path, monkeypatch, knob,
                                                                      value, named):
-    """Fifth-round finding 8."""
-    monkeypatch.setenv(S.T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     monkeypatch.setenv(knob, value)
     est = S.estate(tmp_path)
@@ -1062,7 +1044,6 @@ def test_a_bad_oracle_setting_is_refused_before_the_question_writer(tmp_path, mo
 
 
 def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path, monkeypatch):
-    """Sixth-round finding 1."""
     from defender.box import _oracle as box_oracle
     from defender.tests.learning.oracle.live_contracts import test_1224_oracle_context_and_box as B
 
@@ -1096,7 +1077,7 @@ def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path
         shutil.rmtree(runner, ignore_errors=True)
 
 
-# -- sixth round --------------------------------------------------------------------------------
+# --- request size caps and cross-world detail -----------------------------------------------
 
 _SIX_MARK = "EXAMPLE6-HUGE"
 
@@ -1107,7 +1088,6 @@ def _big_rows(user: str, mark: str, n: int = 300) -> dict:
 
 
 def test_oversized_family_example_answers_are_capped(tmp_path):
-    """Sixth-round finding 9."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
@@ -1125,7 +1105,6 @@ def test_oversized_family_example_answers_are_capped(tmp_path):
 
 def test_a_conversation_past_the_size_budget_restarts_and_keeps_the_frozen_rows(tmp_path,
                                                                                monkeypatch):
-    """Sixth-round finding 5."""
     monkeypatch.setattr(
         # lint-monkeypatch: ok — the size budget is a module constant with no seam; a small one
         # keeps the scenario fast (the full-size one is ~400k characters a request).
@@ -1156,7 +1135,6 @@ def test_a_conversation_past_the_size_budget_restarts_and_keeps_the_frozen_rows(
 
 
 def test_a_failed_worlds_detail_never_reaches_another_worlds_judge_prompt(tmp_path):
-    """Sixth-round finding 7."""
     from defender.tests.support.learning.judge import _judge_921 as J
 
     ep = S.judged_episode(tmp_path / "judged", labels=("a", "c"))
@@ -1176,11 +1154,10 @@ def test_a_failed_worlds_detail_never_reaches_another_worlds_judge_prompt(tmp_pa
         assert "FORGEDLEAK" not in prompt, f"{agent}: a failed world's detail reached the prompt"
 
 
-# --- sixth round ---------------------------------------------------------------------------
+# --- billing, the box wire, count cells and pre-flight errors ------------------------------
 
 
 def test_cached_tokens_are_billed_once(tmp_path):
-    """Sixth-round finding 4."""
     from defender.configuration._pricing import usage_cost
 
     est = S.estate(tmp_path)
@@ -1198,7 +1175,6 @@ def test_cached_tokens_are_billed_once(tmp_path):
 
 
 def test_python_code_the_box_wire_cannot_carry_fails_that_call_only(tmp_path):
-    """Sixth-round finding 6."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     box, log = _python_box_factory(tmp_path)
@@ -1214,7 +1190,6 @@ def test_python_code_the_box_wire_cannot_carry_fails_that_call_only(tmp_path):
 
 
 def test_a_star_count_cannot_claim_an_ordinary_field_of_a_document():
-    """Sixth-round finding 12."""
     base = {"user": {"name": "alice", "failed_logins": 3}}
     served = {"user": {"name": "alice", "failed_logins": 10}}
     for group in ("*", "failed_logins"):
@@ -1233,7 +1208,6 @@ def test_a_star_count_cannot_claim_an_ordinary_field_of_a_document():
 
 
 def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
-    """Sixth-round finding 13."""
     from defender.learning.branch import cli
 
     est = S.estate(tmp_path)
@@ -1247,9 +1221,9 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM), S.submit(BOB_ROWS, S.EMPTY_CLAIM),
                  fault=S.Fault(delay=1.5))
 
-    # Review-3 F32 ruling (#1187 S-iso): pre-flight takes the walked view's held episode.
-    # The view is opened OUTSIDE the raises block: its own open failure (an OSError too) must
-    # propagate as itself, not be read against the match below.
+    # Pre-flight takes the walked view's held episode. The view is opened OUTSIDE the raises
+    # block: its own open failure (an OSError too) must propagate as itself, not be read
+    # against the match below.
     with J.walked_view(ep) as view, \
             pytest.raises(OSError, match=re.escape(str(ep / "oracle" / T.world_id(ep, "b")))):
         cli.preflight_replay(view.episode, source=S.T.open_source(src), roster=est.roster(),
@@ -1290,7 +1264,6 @@ def _pb_registry(tmp_path: Path, o: Any, v: Any, *, prebranch: bool, retry_cap: 
 
 
 def test_a_sibling_s_changed_answer_to_a_pre_branch_call_is_refused_and_retried(tmp_path):
-    """Seventh-round finding 5."""
     o = S.oracle(*_pb_change(), S.submit(_PB_BASE, S.EMPTY_CLAIM))
     v = S.passing_verifier()
     reg, ctx = _pb_registry(tmp_path, o, v, prebranch=True)
@@ -1319,8 +1292,8 @@ def test_an_oracle_that_only_changes_a_pre_branch_call_makes_it_unservable(tmp_p
 
 
 def test_a_post_branch_call_can_still_be_changed(tmp_path):
-    """Seventh-round finding 5, the control: a call outside the pre-branch set is served the
-    world's verified change, and its framing does not call it pre-branch."""
+    """The control: a call outside the pre-branch set is served the world's verified change,
+    and its framing does not call it pre-branch."""
     o = S.oracle(*_pb_change())
     v = S.passing_verifier()
     reg, ctx = _pb_registry(tmp_path, o, v, prebranch=False)
@@ -1344,7 +1317,7 @@ def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
     seen: dict = {}
     from defender.records._episode_handle import Episode
     run._drive_investigation(
-        alert_path=src / "alert.json", run=_fixture_run_1165(tmp_path / fixture_uuid("sib")),  # #1187 (declared change 1)
+        alert_path=src / "alert.json", run=_fixture_run_1165(tmp_path / fixture_uuid("sib")),
         defender_dir=est.defender_dir, model_name="m", model_override=None, box=None,
         tenant=est.run_tenant(), world=S.load_world(ep, "b"), episode=Episode.open(ep),
         serving=S.serving(), source=S.T.open_source(src),
@@ -1352,7 +1325,7 @@ def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
     assert seen["verbs"].prebranch == expected
 
 
-# --- seventh round (re-ruled M14/M12) -------------------------------------------------------
+# --- check 2 row shapes and check 3 id columns ---------------------------------------------
 
 _ES_EVENT = {"@timestamp": "2026-03-01T09:00:00Z", "event": {"kind": "event"},
              "host": {"name": "web-1"}, "process": {"name": "bash"}}
@@ -1371,7 +1344,7 @@ def _hits_check(row: dict) -> list[str]:
 
 
 def test_a_forged_row_in_an_answer_mixing_event_and_alert_documents_has_one_real_rows_shape():
-    """Seventh round (re-ruled M14/M12)."""
+    """Check 2 compares a forged row with one real row's column set, never the union of them."""
     event = {"@timestamp": "2026-03-01T09:30:00Z", "event": {"kind": "event"},
              "host": {"name": "db-1"}, "process": {"name": "kinit"}}
     assert _hits_check(event) == []
@@ -1386,8 +1359,8 @@ def test_a_forged_row_in_an_answer_mixing_event_and_alert_documents_has_one_real
 
 
 def test_only_columns_named_as_ids_are_id_columns():
-    """Seventh round (re-ruled M14/M12): any column whose name ended in `id` was id-like, so
-    `valid`, `paid` and `android` were ids; `pid`, `userId` and `host_id` are, those are not."""
+    """A name ending in `id` is not thereby an id column: `pid`, `userId` and `host_id` are;
+    `valid`, `paid` and `android` are not."""
     from defender.learning.branch.estate.checks import id_column
 
     for name in ("id", "pid", "PPID", "userId", "hostID", "host_id", "agent-id", "user.id",

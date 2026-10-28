@@ -172,7 +172,7 @@ def test_the_finding_decides_the_route_and_not_the_presence_of_an_ask(refs):
 
 
 def test_the_citable_set_spans_every_kind_a_review_may_name(refs):
-    """An ask may name an entity or a hypothesis, not only a lead — which is exactly why the
-    retired guard, keyed on executed leads alone, does not generalise."""
+    """An ask may name an entity or a hypothesis, not only a lead, so a guard keyed on executed
+    leads alone would not do."""
     for prefix in ("v-", "e-", "h-", "l-"):
         assert any(r.startswith(prefix) for r in refs), f"no {prefix}* id is citable"

@@ -60,7 +60,7 @@ def _corpus_of(tmp_path: Path, *stems: str) -> Path:
 
 
 def test_d0_byte_shape_two_sections(tmp_path):
-    """demand: d0 — the FULL byte shape, not just the headers."""
+    """The full byte shape, not just the headers."""
     corpus = _corpus_of(tmp_path, "alpha", "beta")
     manifest = _shared.build_corpus_manifest(corpus)
     assert manifest.startswith("## alpha\n")
@@ -100,15 +100,13 @@ def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(t
 
 
 def test_s0_manifest_takes_the_iterators_path_order(tmp_path):
-    """demand: s0 (fork F1, RESOLVED) — with no seed the manifest follows ``iter_lessons``' full-
-    Path order. This OVERTURNS #559's M9, which asserts stem order."""
+    """With no seed the manifest follows ``iter_lessons``' full-path order, not stem order."""
     corpus = _corpus_of(tmp_path, "cover", "cover-prereqs")
     assert _headers(_shared.build_corpus_manifest(corpus)) == ["cover-prereqs", "cover"]
 
 
 def test_s1_seed_none_is_the_default_and_is_the_sorted_order(tmp_path):
-    """demand: s1 — ``seed=None``, and the seed omitted entirely, both yield the deterministic
-    sorted manifest and are byte-identical to each other."""
+    """``seed=None`` and an omitted seed both give the sorted manifest, byte for byte."""
     corpus = _corpus_of(tmp_path, "a-lesson", "b-lesson", "c-lesson")
     bare = _shared.build_corpus_manifest(corpus)
     explicit = _shared.build_corpus_manifest(corpus, seed=None)
@@ -119,7 +117,6 @@ def test_s1_seed_none_is_the_default_and_is_the_sorted_order(tmp_path):
 
 
 def test_s2_same_seed_is_byte_identical_across_processes(tmp_path):
-    """demand: s2 — the same seed yields a byte-identical manifest, and it holds ACROSS PROCESSES."""
     corpus = _corpus_of(tmp_path, *[f"lesson-{i}" for i in range(8)])
     in_process = _shared.build_corpus_manifest(corpus, seed="a1b2c3d4e5f6")
 
@@ -143,8 +140,7 @@ def test_s2_same_seed_is_byte_identical_across_processes(tmp_path):
 
 
 def test_s3_a_seeded_manifest_is_a_permutation_of_the_sorted_one(tmp_path):
-    """demand: s3 — a seeded manifest is a TRUE PERMUTATION of the unseeded one: the multiset of
-    whole sections (header line + its YAML body) is equal, and the set of headers is equal."""
+    """The multiset of whole sections (header line plus YAML body) is equal, not only the headers."""
     corpus = _corpus_of(tmp_path, *[f"lesson-{i}" for i in range(8)])
     sorted_m = _shared.build_corpus_manifest(corpus)
     seeded_m = _shared.build_corpus_manifest(corpus, seed="a1b2c3d4e5f6")
@@ -155,8 +151,7 @@ def test_s3_a_seeded_manifest_is_a_permutation_of_the_sorted_one(tmp_path):
 
 
 def test_s4_the_shuffle_actually_fires(tmp_path):
-    """demand: s4 — a seed that is accepted and then IGNORED is indistinguishable from ``seed=None``
-    on every other assertion in this file."""
+    """A seed accepted and then ignored would pass every other test in this file."""
     corpus = _corpus_of(tmp_path, *[f"lesson-{i}" for i in range(8)])
     sorted_heads = _headers(_shared.build_corpus_manifest(corpus))
     seeded = [_headers(_shared.build_corpus_manifest(corpus, seed=s)) for s in ("b1", "b2", "b3", "b4")]
@@ -165,7 +160,7 @@ def test_s4_the_shuffle_actually_fires(tmp_path):
 
 
 def test_s5_empty_string_seed_is_a_seed_not_a_none(tmp_path):
-    """demand: s5 — ``seed=""`` is FALSY but not ``None``, and it must SHUFFLE."""
+    """``seed=""`` is falsy but not ``None``, so it shuffles."""
     stems = [f"lesson-{i}" for i in range(8)]
     corpus = _corpus_of(tmp_path, *stems)
     expected = list(_headers(_shared.build_corpus_manifest(corpus)))
@@ -190,7 +185,6 @@ def test_s6_build_curator_user_prompt_seeds_the_manifest_from_batch_id(tmp_path)
 
 
 def test_s7_forged_section_defenses_survive_the_shuffle(tmp_path):
-    """demand: s7 (negative) — under a seed, the M8/M8b defenses still hold."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     _findings_lesson(corpus, "genuine-a", description="clean")
@@ -225,8 +219,6 @@ def test_m8c_a_list_valued_injection_payload_cannot_forge_a_section(tmp_path):
 
 
 def test_e1_the_author_config_can_pin_the_manifest_seed(tmp_path):
-    """demand: e1 (seam, fork F2 RESOLVED) — the author config carries an explicit manifest-seed
-    override."""
     from defender.learning.author.lessons.run import build_author_config, build_user_prompt
     from defender.learning.core.config import LoopPaths
 

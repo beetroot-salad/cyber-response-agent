@@ -16,7 +16,7 @@ def _configured_roots_1222(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.fixture(autouse=True)
 def _checkout_corpus_1222(tmp_path: Path, request: pytest.FixtureRequest):
-    """Lesson tests run the real product against an isolated checkout-owned corpus."""
+    """Lesson tests run the real product from an isolated checkout copy (holding no lessons)."""
     if request.module.__name__.rsplit(".", 1)[-1] not in {
             "test_1222_lessons_and_corpus", "test_1222_signature_sinks"}:
         yield

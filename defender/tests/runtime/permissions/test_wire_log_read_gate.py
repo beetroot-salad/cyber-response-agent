@@ -141,7 +141,7 @@ def lenv(tmp_path):
     )
 
 
-#: TWO LEARNING-LANE DEMANDS LEFT WITH #922, recorded because their absence weakens this file.
+#: The learning roles asked about here (two more left with #922, narrowing this file).
 LEARNING_READERS = ("curator",)
 
 
@@ -157,9 +157,7 @@ def test_a_learning_role_cannot_read_a_stage_trace_or_the_staged_payloads(lenv):
     assert not _read(lenv, lenv.traces["questioner_trace.jsonl"], "curator").allow
     assert not _read(lenv, lenv.run / "gather_raw" / "l-001" / "0.json", "curator").allow
     assert lenv.curator.read_allow == (), (
-        "the actor grew a read shape — this test's premise (no shape filter runs for it) is "
-        "the reason its deny has to come from the component rule and not from enumeration"
-    )
+        "the curator grew a read shape, so these denies no longer isolate the component rule")
 
 
 @pytest.mark.parametrize("which", LEARNING_READERS)

@@ -19,9 +19,8 @@ from defender.tests.support.learning.retrieval._lessons_corpus import _write_les
 
 from defender.tests.support.shared._pre_p4_shipped import LESSONS as SHIPPED_LESSONS  # noqa: E402
 
-#: The corpus these cases rank against: the lessons this repo shipped before #1108 P4 moved
-#: lessons to each tenant (O1, O-U5), byte for byte — the retrieval engine is the subject, and
-#: its motivating lesson and the run reproductions below are pinned against that real corpus.
+#: The lessons this repo shipped before #1108 moved them to each tenant, byte for byte: the
+#: motivating lesson and the run reproductions below are pinned against that real corpus.
 CORPUS = SHIPPED_LESSONS
 
 TWO_VERTEX_DOC = """```invlang
@@ -73,7 +72,7 @@ def _match(text: str, *, top_k: int = LF.DEFAULT_TOP_K) -> list:
 
 
 def _prefixes(text: str) -> list:
-    """Build each append-stage document to exercise lesson retrieval over its evolution."""
+    """The frontier after each fence of `text` is appended, starting from the empty document."""
     frontiers = [frontier_from_text("")]
     document = ""
     for body in scan_fences(text).bodies:
@@ -82,10 +81,7 @@ def _prefixes(text: str) -> list:
     return frontiers
 
 
-# the missing table
-
-
-# defect 3 — the class match is monotonic in what the document records
+# the class match is monotonic in what the document records
 
 def test_recording_more_about_a_class_slot_never_loses_a_selector():
     sel = "ip-only/internet/novel"
@@ -96,11 +92,10 @@ def test_recording_more_about_a_class_slot_never_loses_a_selector():
         f"refining a compute class cell lost the selector: {pins}"
     )
     assert pins["ip-only/??"] == pins["ip-only/??/??"], (
-        "a two-slot spelling of a three-slot type scored differently from the padded one — "
-        "the cell is still being taken at its own length"
+        "a two-slot spelling of a three-slot type scored differently from the padded one"
     )
-    # ...and the inversion still costs what it always cost: a pattern that matched NOWHERE by
-    # equality pins nothing, so the wholly-open cases stay at 0 rather than riding the padding.
+    # ...and a pattern that matched NOWHERE by equality pins nothing: the wholly-open cases
+    # stay at 0 rather than riding the padding.
     assert pins["??"] == pins["??/??"] == pins["??/??/??"] == 0
     assert pins["ip-only/??"] == 3
 
@@ -135,7 +130,7 @@ def test_a_cell_declaring_more_slots_than_its_type_is_widened_not_truncated():
     )
 
 
-# defect 1 — the node lane can tell a named attribute from a universal cell
+# the node lane can tell a named attribute from a universal cell
 
 def test_the_filed_reproduction_reaches_the_loginuid_lesson_at_the_real_cut():
     assert diagnose(TWO_VERTEX_DOC, None) == [], "the reproduction is no longer a clean document"
@@ -143,7 +138,7 @@ def test_the_filed_reproduction_reaches_the_loginuid_lesson_at_the_real_cut():
     hits = _match(TWO_VERTEX_DOC)
     top = _names(hits)
     assert LOGINUID_LESSON in top, (
-        f"#919's motivating lesson is still cut from its own reproduction; got {top}"
+        f"the motivating lesson is cut from its own reproduction; got {top}"
     )
 
     by_name = {h.name: h.score for h in _match(TWO_VERTEX_DOC, top_k=99)}
@@ -167,7 +162,7 @@ def test_a_named_attribute_outscores_a_cell_every_vertex_carries():
     ), "`class` and `ident` are both universal cells and must weigh the same"
 
 
-# defect 2 — the edge lane can be heard
+# the edge lane can be heard
 
 def test_the_edge_lane_is_not_floored_below_the_node_lane():
     floor_edge = LF._EdgeSelector(rel="", auth_kind="", anchor_kind="iam-policy")
@@ -196,8 +191,7 @@ def test_the_edge_lane_wins_a_slot_on_score_rather_than_on_its_name(tmp_path):
 
     hits = LF.match_lessons(frontier_from_text(CONTRACT_AND_THREE_CELLS_DOC), corpus)
     assert "zzz-anchor-only" in _names(hits), (
-        "the lesson speaking to the run's one open authorization question lost every slot to "
-        f"three bare node matches that sort earlier; got {_names(hits)}"
+        f"the authorization lesson lost every slot to bare node matches; got {_names(hits)}"
     )
     assert _names(hits)[0] == "zzz-anchor-only", (
         "the edge lesson survived on the alphabet rather than on its score"
@@ -292,11 +286,7 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
         ), f"the loginuid lesson fell out of the block at fence {n}, where the run holds the value"
 
 
-# the gate the spread sits in front of
-
-#: One `compute` vertex with an open class triple and an open ident, and the ordinary append
-#: that declares a second. The pair is the churn shape the gate below exists for — see the test.
-
+# placement, and what a selector's open marker and candidate set mean
 
 def test_a_lesson_tied_across_two_cells_is_placed_on_the_one_nothing_else_covers(tmp_path):
     corpus = tmp_path / "lessons"
@@ -321,8 +311,7 @@ def test_a_lesson_tied_across_two_cells_is_placed_on_the_one_nothing_else_covers
         "other open class unmentioned"
     )
     assert block(tuple(reversed(rows))) == placed, (
-        "reversing the order the vertices are DECLARED in changed where the lessons landed — "
-        "placement is reading the walk order rather than the frontier's content"
+        "reversing the vertex declaration order changed where the lessons landed"
     )
 
 
@@ -362,8 +351,7 @@ def test_a_candidate_set_in_a_selector_is_a_disjunction_and_not_a_wildcard(tmp_p
     assert inside == sorted(inside), f"the in-set refinement path is not monotonic: {inside}"
 
     assert LF._class_pins(sel, "bastion/internet/novel", "compute") is None, (
-        "a lesson scoped to internal-or-dmz matched a bastion vertex — the candidate set is "
-        "being read as a wildcard rather than as the disjunction the author wrote"
+        "a lesson scoped to internal-or-dmz matched a bastion vertex"
     )
     # ...and it still earns nothing where it matches: it names no single value, so there is
     # no equality for it to anchor on, exactly as the open marker has none.

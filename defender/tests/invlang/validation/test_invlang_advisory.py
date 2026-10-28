@@ -32,7 +32,6 @@ def _case(
     hypotheses=None,
     leads=None,
     disposition=None,
-    termination="natural",
 ) -> Companion:
     body = {
         "prologue": {"vertices": [], "edges": []},
@@ -40,7 +39,7 @@ def _case(
         "findings": leads or [],
         "conclude": {
             "disposition": disposition,
-            "termination": {"category": termination},
+            "termination": {"category": "natural"},
         },
     }
     return Companion(
@@ -270,8 +269,6 @@ def test_telemetry_carries_parse_health():
 
 
 def test_empty_frontier_falls_back_to_top_k_leads():
-    """Without a frontier, Class 8 surfaces the most-used leads as a
-    baseline view — useful for ORIENT-only or pre-PREDICT consumers."""
     corpus = [_benign_case(f"case-{i}") for i in range(4)]
 
     out = advisory_recall(

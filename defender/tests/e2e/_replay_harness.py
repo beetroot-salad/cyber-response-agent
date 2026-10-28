@@ -92,12 +92,9 @@ class ReplayFn:
 class ToolRoster(ReplayFn):
     """`ReplayFn` + capture of the model-visible tool roster.
 
-    `AgentInfo.function_tools` — the second argument every `FunctionModel` callable receives
-    — is the tool definitions as the MODEL is offered them, which is the only honest place to
-    read a registration or an advertised schema from: a registry entry, or the annotation
-    re-inspected off the function object, would both pass while the wire carried something
-    else. Lives here rather than in each suite that wants it: three suites had grown the same
-    six-line subclass."""
+    `AgentInfo.function_tools` is the tool definitions as the MODEL is offered them: the only
+    honest place to read a registration or advertised schema (a registry entry or the
+    function's annotation would pass while the wire carried something else)."""
 
     __name__ = "ToolRoster"
 
@@ -131,6 +128,16 @@ class DenyProbe:
         return ModelResponse(parts=[TextPart(content="Acknowledged; stopping.")])
 
 
+def dispatching_main(system: str, summarize: str, *, lead: str = "l-001") -> ReplayFn:
+    """MAIN dispatches one `system` lead to measure, then closes."""
+    return ReplayFn([
+        Turn(tool_calls=[("gather", {
+            "lead_id": lead, "system": system, "goal": "measure this lead",
+            "what_to_summarize": [summarize]})]),
+        Turn(text="Investigation complete."),
+    ])
+
+
 class NeverEndsModel:
     """A model that ALWAYS emits one benign, allowed tool call (read the alert),
     so the loop never reaches a text-only stop turn and instead runs straight
@@ -140,7 +147,7 @@ class NeverEndsModel:
 
     def __init__(self, run_dir: Path):
         self.calls = 0
-        # #1255 P1/C9: the model names the alert by its model path; a host path is refused.
+        # The model names the alert by its model path; a host path is refused (#1255).
         from defender.tests.support.runtime.state._1255_view import model_path
 
         self._alert = model_path(RunPaths(run_dir).alert, run_dir=run_dir)
@@ -163,11 +170,8 @@ class VerbCall:
 
 
 class VerbRecorder:
-    """The observation channel for the injected registry: what each verb was HANDED.
-
-    A fake that only returns a canned value proves nothing about the payload the tool
-    built for it, so every scenario asserts against these records as well as against
-    the row on disk."""
+    """What each verb of the injected registry was HANDED: a canned return proves nothing about
+    the payload the tool built, so scenarios assert on these records as well as the row on disk."""
 
     def __init__(self) -> None:
         self.calls: list[VerbCall] = []
@@ -187,12 +191,9 @@ class VerbRecorder:
 class FakeVerbs(VerbRegistry):
     """An injected verb registry — the drop-in for the production `ModuleVerbRegistry`.
 
-    Dumb data: `{system: {verb: fn}}`. It declares the systems it was built with (a system
-    mapped to an EMPTY dict is a DECLARED system with no verbs — the fail-closed case, and
-    the reason this is a plain table rather than a defaultdict), and hands back the mapping
-    for one. It makes no admission decision beyond a real, everything-it-declares `VerbGrant`
-    built from its own table (#632 — pre-dating the per-role grant, this pre-authorization-era
-    fake grants itself full access rather than making every #611-era scenario author one)."""
+    Dumb data: `{system: {verb: fn}}`. A system mapped to an EMPTY dict is a DECLARED system
+    with no verbs (the fail-closed case, hence a plain table, not a defaultdict). It grants
+    itself a real `VerbGrant` over everything it declares, so scenarios need not author one."""
 
     def __init__(self, table: Mapping[str, Mapping[str, Callable[..., Any]]], *,
                  known_ids: frozenset[str] = frozenset()):
@@ -239,8 +240,8 @@ def _turn_from_record(rec: dict, old_run_dir: str | None, new_run_dir: str | Non
     return Turn(tool_calls=calls, text=text)
 
 
-#: The verbs BOUND to investigation.md, which therefore carry no path to filter on — the name
-#: is the whole predicate. `append_block` has been one since #810 and `fix_row` since #836.
+#: The verbs BOUND to investigation.md, which carry no path to filter on: the name is the whole
+#: predicate.
 _PATHLESS_INVESTIGATION_WRITES = ("append_block", "fix_row")
 
 
@@ -274,11 +275,9 @@ def _retarget_writes_as_appends(turns: list[Turn]) -> list[Turn]:
     if not sites:
         return turns
     last_name, last_args = turns[sites[-1][0]].tool_calls[sites[-1][1]]
-    # The re-split rests on the LAST recorded write being the whole document. An `edit_file`
-    # carries only the replacement FRAGMENT in `new_string`, so reading a target out of one
-    # would silently replay a few lines as if they were the finished artifact — and the
-    # byte-identity assertion downstream would then be comparing the golden against a stub.
-    # Fail loudly on a golden shaped that way instead.
+    # The re-split needs the LAST write to be the whole document: an `edit_file` carries only a
+    # fragment, which would replay a stub as the finished artifact and leave the downstream
+    # byte-identity check comparing the golden against it. Fail loudly instead.
     target = last_args.get("content")
     if last_name != "write_file" or not isinstance(target, str):
         raise AssertionError(
@@ -304,9 +303,8 @@ def load_turns_from_trace(
 
 
 
-#: The run id a replay's folder carries when its scenario names none: a fixed fixture UUID.
-#: #1187 (O2, declared change 1): `RunId` — so `Run.under`, which `drive` builds the run with —
-#: admits canonical lowercase UUID text only, so the folder is never the bare word `run`.
+#: The run id of a replay whose scenario names none: a fixed fixture UUID (`Run.under`, which
+#: `drive` builds the run with, admits only canonical lowercase UUID text).
 REPLAY_RUN_ID = fixture_uuid("replay-run")
 
 
@@ -331,20 +329,14 @@ def plant_alert(run_dir: Path, raw: bytes) -> None:
 
 @functools.cache
 def _harness_provenance() -> _provenance.RunProvenance:
-    """The capture, taken ONCE per test session rather than once per fixture.
-
-    `capture_tree` shells out to `git rev-parse` and to a whole-repo `git status
-    --untracked-files=all`, and this builder runs in ~120 places across the suite. What the
-    parity arm needs is that the harness writes the same FILE production writes; it does not
-    need a fresh interrogation of an unchanging checkout per test, and paying for one turns a
-    hermetic fixture into a per-test subprocess pair."""
+    """The provenance capture, taken ONCE per test session: `capture_tree` shells out to git
+    (rev-parse and a whole-repo status), and parity needs only that the harness writes the same
+    FILE production writes, not a fresh capture of an unchanging checkout per test."""
     return _provenance.capture_tree(run_common.REPO_ROOT)
 
 
-#: Every frame delimiter, whatever salt it carries. Since #875 a run has no single salt to
-#: substitute: `wrap_fresh` mints one per frame, after the content is in hand, so normalizing
-#: has to match the SHAPE rather than a known value. Strictly better for a golden diff — it
-#: also normalizes frames the old single-substitution missed (a stage salt, a nested frame).
+#: Every frame delimiter, whatever its salt: `wrap_fresh` mints a salt per frame, so normalizing
+#: matches the SHAPE rather than a known value.
 _FRAME_TAG_RE = re.compile(r"<(/?)run-[0-9a-f]+-([a-z_-]+)>")
 
 
@@ -361,9 +353,8 @@ def no_orient_shims(argv: list[str], env: dict[str, str]) -> None:
     return None
 
 
-#: What the correlation lead (`l-00c`) says under a replay that does not script it (#1222 C01): a
-#: usable summary from a lead that issued no call (C38), so an incidental replay's lead draws
-#: none of the turns scripted for MAIN's own leads.
+#: What the correlation lead (`l-00c`) answers in a replay that does not script it: a usable
+#: no-call summary, so it draws none of the turns scripted for MAIN's own leads (#1222).
 DEFAULT_CORRELATION_SUMMARY = (
     "Window bound 2026-05-25T13:00:00Z..2026-05-25T17:00:00Z, anchored on the alert's "
     "timestamp field; no call issued, so no counts to report.")
@@ -387,8 +378,8 @@ def _awaiting(fn):
 def _with_default_correlation(gather, main):
     """`gather` (or `main`, when none is given) as the gather model, except that the
     correlation lead's conversation is answered by its own default fake. A `gather` that routes
-    leads itself (`by_lead`, the #1222 `LeadRouter`) or is marked `serves_correlation` (the
-    #808 scenario builder's, whose script is `l-00c`'s) is already that."""
+    leads itself (`by_lead`, e.g. `LeadRouter`) or is marked `serves_correlation` (its script
+    is `l-00c`'s) is returned as is."""
     if gather is not None and (hasattr(gather, "by_lead") or getattr(gather, "serves_correlation", False)):
         return gather
     inner = gather if gather is not None else main
@@ -405,9 +396,9 @@ def _with_default_correlation(gather, main):
 
 def _fake_make_model(main, gather, *, dispatches_correlation: bool, wrap_model: Any = None):
     """The driver's `make_model` seam over the replay doubles: the gather model NAME gets
-    `gather` (the correlation lead drawing its own default fake when the run dispatches it,
-    C01), every other name gets `main`. `wrap_model(kind, model)` (#1243), when given, wraps
-    each scripted model (`kind` "main" or "gather") before it is handed out."""
+    `gather` (the correlation lead drawing its own default fake when the run dispatches it),
+    every other name gets `main`. `wrap_model(kind, model)`, when given, wraps each scripted
+    model (`kind` "main" or "gather") before it is handed out."""
     def wrap(kind: str, model: Any) -> Any:
         return wrap_model(kind, model) if wrap_model is not None else model
 
@@ -437,10 +428,9 @@ def _fake_make_model(main, gather, *, dispatches_correlation: bool, wrap_model: 
 
 def investigate_as_handed(main, gather=None, *, review_stages=None, orient_shim=None):
     """A production `investigate` for `run._drive_investigation(investigate=…)`: the REAL driver
-    run with EXACTLY the keywords production composed for it — the `run`, the `RunTenant`, the
-    roster, the verb registry, the box, and whatever else run.py hands its driver — plus only
-    what no hermetic run can build: the fake models (`main` / `gather`, wired as `drive` wires
-    them), the review bundle (`drive`'s `holds` default) and the ORIENT shims (none)."""
+    run with EXACTLY the keywords run.py composed for it, plus only what no hermetic run can
+    build: the fake models (wired as `drive` wires them), the review bundle (`drive`'s `holds`
+    default) and no ORIENT shims."""
     def investigate(**handed: Any) -> dict:
         make_model = _fake_make_model(
             main, gather,
@@ -458,12 +448,9 @@ def investigate_as_handed(main, gather=None, *, review_stages=None, orient_shim=
 def _refuse_conflicting_store_seams(resume, store_factory) -> None:
     """`resume=` and `store_factory=` name the same thing and cannot both be honoured.
 
-    `driver._resolve_store_factory` lets the resume win, which is right for the driver — the
-    two can disagree about which database holds the branch point — but silent here. Every
-    neighbouring scenario injects `store_factory=` to capture the store handle it later asserts
-    over, so a #920 script written to that shape would get an empty sink and die on `sink[0]`
-    with an `IndexError` naming nothing. A resume already forks INTO the source run's store;
-    that handle is the one to assert over.
+    The driver silently lets the resume win, so a resume script that injected `store_factory=`
+    to capture the store would die later on an empty sink with an `IndexError` naming nothing.
+    A resume forks INTO the source run's store; that handle is the one to assert over.
     """
     if resume is not None and store_factory is not None:
         raise ValueError(
@@ -473,17 +460,13 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
 
 def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
     """The tenant a replay that names none runs as, and the PUBLISHED export the run reads
-    (`<T>/exports/<commit>/`: its `agent/` and its `settings/`, one commit, O-B; #1108 P4,
-    P-1/O11: every reader of tenant knowledge reads an export, made by the one real helper),
-    never the clone's working tree.
+    (`<T>/exports/<commit>/`: its `agent/` and `settings/`), never the clone's working tree.
 
-    Without `agent`: the committed fixture tenant, set up under the current data root (#1120
-    H2) — the test's own, or, for a module-scoped drive that runs before it, the session's
-    (conftest's `session_data_root`). With `agent` (A8: a golden carries the agent content it
-    reads): the fixture's settings with THAT tree as the agent half, under an id of its own
-    (one per golden). Either is published through `tenant_1108_p4._support.publish_once` on each
-    drive (an unchanged folder republishes the same commit), so an edit a test made to the
-    tenant's folder is what the run reads."""
+    Without `agent`: the committed fixture tenant under the current data root (the test's own,
+    or conftest's `session_data_root` for a module-scoped drive). With `agent` (a golden's own
+    agent content): the fixture's settings with THAT tree as the agent half, under an id of its
+    own per golden. Either is republished on each drive (an unchanged folder republishes the same
+    commit), so an edit a test made to the tenant's folder is what the run reads."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
     from defender.tests.tenancy.tenant_1108_p4._support import (
         export_dir,
@@ -527,10 +510,9 @@ def _unsandboxed_allowed() -> Iterator[None]:
 def production_unboxed_box(run_dir: Path, defender_dir: Path, run_tenant: Any) -> Any:
     """The box a hermetic replay runs its bash lane in: production's unboxed mode, reached the
     way `run.py` reaches it (`start_box(run_dir, defender_dir, tenant_agent=…, tenant_id=…)`)
-    with no daemon and the opt-out set for this call alone (#1255 C6). Nothing it writes or logs
-    is hidden: the opt-out's "running UNSANDBOXED" warning and the startup fault's did-not-run
-    scrub marker beside the run folder (`RunPaths.scrub_verdict`) are production's, and land in
-    every replay that takes this default."""
+    with no daemon and the opt-out set for this call alone. Its output is production's: the
+    "running UNSANDBOXED" warning and the did-not-run scrub marker beside the run folder
+    (`RunPaths.scrub_verdict`) land in every replay that takes this default."""
     token = getattr(run_tenant, "stage_token", None)
     agent = Path(run_tenant.agent)
     if token is None:
@@ -559,10 +541,10 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
     plumbing-free.
 
-    `agent` runs the replay as a tenant whose agent half is that tree (a golden's own `agent/`,
-    #1108 P4 A8), published for real (`_default_tenant`); it cannot be combined with `tenant`."""
-    # Legacy replay labels are retained in this helper's call shape. The real run identity
-    # comes from its directory: materialize(run_id=<label>) names it the label's fixture UUID.
+    `agent` runs the replay as a tenant whose agent half is that tree (a golden's own `agent/`),
+    published for real (`_default_tenant`); it cannot be combined with `tenant`."""
+    # `run_id` is a legacy label: the run's identity is its directory, which
+    # materialize(run_id=<label>) names after the label's fixture UUID.
     state = run_state if run_state is not None else RunState(run_dir, run_dir.name)
     summary = driver_summary(
         run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, limits=limits, box=box,
@@ -624,17 +606,12 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         seams["roster"] = roster
     if systems is not None:
         seams["systems"] = systems
-    # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
-    # grant is fixed per process, and no reader finds the settings folder itself). A scenario
-    # names its own tenant when it is about one; every other replay runs as the committed
-    # fixture tenant set up under the test's data root (#1120 H2) — accepted through the real
-    # `accept_tenant`, never a hand-built value.
-    #
-    # The driver takes them as ONE value (`RunTenant`), resolved before it runs, the way
-    # `run.py` resolves it before the box: item 3's dispatch identity is checked here — for a
-    # scenario that will dispatch the lead (an injected registry, no resume), exactly the runs
-    # the driver itself would dispatch it on — so a scenario about a disagreeing lead-zero
-    # config still sees `CorrelationDispatchError` out of `drive()` before anything is spent.
+    # The run's tenant and per-run grants reach the driver as ONE `RunTenant`, resolved before
+    # the box as `run.py` resolves it; a replay naming no tenant runs as the committed fixture
+    # tenant, accepted through the real `accept_tenant`. Lead-zero dispatch identity is checked
+    # here for exactly the runs that dispatch it (an injected registry, no resume), so a
+    # disagreeing lead-zero config raises `CorrelationDispatchError` out of `drive()` before
+    # anything is spent.
     roots: dict[str, Path] = {}
     if tenant is None:
         tenant, export = _default_tenant(agent)

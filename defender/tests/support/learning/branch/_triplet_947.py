@@ -12,7 +12,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,33 +24,27 @@ DEFENDER = Path(__file__).resolve().parents[4]
 
 #: Fixed identity for hand-built scenes; real launches mint and persist their own UUIDs.
 EPISODE_ID = "6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5"
-#: The fixture source run's id (#1187: a uuid4, as `RunId.parse` admits and `RunId.mint()` mints).
-#: The launcher and the sibling open the source by id through the tenant's repository.
+#: The fixture source run's id: a uuid4, the shape `RunId.parse` admits.
 SOURCE_RUN_ID = "3b8d5e2a-1c4f-4a7b-9d6e-2f0c1a3b5d7e"
 BRANCH_MESSAGE_ID = 59
 AS_OF = "2026-07-28T16:18:45Z"
 WORLDS = ("a", "b", "c")
 
-#: The operator runs base a child inherits (`run_common.resolve_runs_base`'s retired knob, J46):
-#: still SET by some scenarios, as a stale configured value, never read to place anything.
+#: A retired runs-base knob: some scenarios still set it as a stale value; nothing reads it to
+#: place a run.
 RUNS_BASE_ENV = "DEFENDER_RUNS_BASE"
-#: The episodes base #1187 retires (O9, declared change 5): NOTHING reads it — an episode lives at
-#: `<data root>/<T>/episodes/<uuid>/`, derived from its tenant. The name stays only so a
-#: scenario can set it as a DECOY and show it changes nothing; no builder here sets or reads it.
+#: A retired episodes-base knob: nothing reads it (an episode lives at
+#: `<data root>/<T>/episodes/<uuid>/`). Scenarios set it only as a decoy.
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
-#: The arm roster's name in an episode folder (#1187 R2; owned by `_episode_paths.LAYOUT`,
-#: `ARM_ROSTER_NAME`): `{label: arm run id}`, one entry per manifest world, host-written at the
-#: start of RUNS. Spelled here (the builders below plant it) as `ids_1187/_spec1187` spells it.
+#: The arm roster in an episode folder (production's `ARM_ROSTER_NAME`): `{world id: arm run id}`,
+#: one entry per manifest world, host-written when RUNS starts.
 ROSTER_NAME = "arms.json"
 
-#: A committed `\`\`\`invlang` companion document — the orientation corpus's own input shape.
-#: `skills/invlang/corpus.load_corpus` only counts a document that PARSES (three required
-#: top-level keys), so a stub would make every corpus assertion read 0 == 0 and pass on the
-#: absence of the thing it measures.
+#: A committed invlang document, not a stub: `load_corpus` counts only a document that parses
+#: (three required top-level keys), so over stubs every corpus assertion would pass as 0 == 0.
 GOLDEN_INVESTIGATION = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd" / "investigation.md"
 
-#: The two configured corpus patterns (G11: 11 distinct patterns across the shipped query
-#: corpus; these two are the configured pair, `knowledge/environment/systems/elastic/config.env`).
+#: The two index patterns the elastic system is configured with (its `config.env`).
 EVENTS_PATTERN = "logs-*"
 ALERTS_PATTERN = ".internal.alerts-security.alerts-default-*"
 CONFIGURED = (EVENTS_PATTERN, ALERTS_PATTERN)
@@ -95,27 +89,20 @@ def declaration(doc: dict) -> dict:
 
 
 # --------------------------------------------------------------------------------------
-# The untrusted wrap, read off the TEXT rather than re-minted.
-#
-# `_untrusted.wrap_fresh` mints a FRESH salt per frame and puts it in both delimiters
-# (`_untrusted.py:50`, `while (salt := secrets.token_hex(8)) in content`), because #875 F-1 is a
-# token that outlives the string it delimits. So a marker built here by calling `wrap_fresh` a
-# SECOND time names a frame the target never emitted: two calls on the same content differ at
-# 2^-64 and neither contains the other, and an assertion comparing them can never hold for ANY
-# implementation. Match the frame SHAPE and read what sits inside it instead.
+# The untrusted wrap, read off the TEXT rather than re-minted: `wrap_fresh` mints a fresh salt
+# per frame, so a second call never reproduces the frame the target emitted. Match the frame
+# shape and read what sits inside it.
 # --------------------------------------------------------------------------------------
 
-#: `<run-{salt}-untrusted>` in either direction — the same shape the replay harness's own
-#: `_FRAME_TAG_RE` and `test_947_triplet_served.py` spell.
+#: `<run-{salt}-untrusted>`, opening or closing (the replay harness's `_FRAME_TAG_RE` shape).
 UNTRUSTED_FRAME = re.compile(r"<(/?)(run-[0-9a-f]+-untrusted)>")
 
 
 def untrusted_frames(text: str) -> list[tuple[int, int, int, int]]:
     """Every CLOSED untrusted frame in `text`, as `(open_start, open_end, close_start, close_end)`.
 
-    An opening tag with no matching close is not a frame: a wrap that opens and never closes
-    leaves everything after it in the model's host-text region, which is the failure the frame
-    exists to prevent.
+    An opening tag with no close is not a frame: it leaves everything after it in the host-text
+    region, the failure the frame exists to prevent.
     """
     spans: list[tuple[int, int, int, int]] = []
     for m in UNTRUSTED_FRAME.finditer(text):
@@ -142,12 +129,8 @@ def outside_untrusted_frames(text: str) -> str:
 
 
 def assert_wrapped_untrusted(text: str, payload: str, what: str) -> None:
-    """`payload` reaches `text` INSIDE an untrusted frame and nowhere outside one.
-
-    Both halves are load-bearing. The first fails an implementation that hands the payload over
-    as bare text; the second fails one that wraps a copy while ALSO rendering the same text in
-    the host region, which is the whole of "no payload text is presented as instruction".
-    """
+    """`payload` reaches `text` INSIDE an untrusted frame and nowhere outside one. The second half
+    fails an implementation that wraps a copy while also rendering the payload bare."""
     frames = untrusted_frames(text)
     assert frames, f"{what}: the prompt carries no untrusted frame at all"
     inside = [text[open_end:close_start] for _s, open_end, close_start, _e in frames]
@@ -164,18 +147,14 @@ def assert_wrapped_untrusted(text: str, payload: str, what: str) -> None:
 
 @dataclass(frozen=True)
 class Fault:
-    """How a dependency misbehaves, as DATA a scenario writes in one line.
-
-    Every field is inert until a fake reads it. The fake decides nothing about what the
-    fault MEANS — that is the production code's job, and the whole point of the test.
-    """
+    """How a dependency misbehaves, as data. Inert until a fake reads it; what the fault MEANS is
+    left to the production code under test."""
 
     #: Substrings of the target name (an index, an alias, a run id) whose call fails.
     fail_on: tuple[str, ...] = ()
     #: Succeed this many calls, then raise. `None` = never.
     raise_after: int | None = None
-    #: A response SHAPE, each spelling citing the claim that observed it. See the module
-    #: docstring: "no-status-line" (PO-C3), "truncated-json", "empty-body".
+    #: A malformed response shape: "no-status-line", "truncated-json" or "empty-body".
     malformed: str | None = None
     #: Seconds a call blocks before answering — for the ordering scenarios only.
     delay: float | None = None
@@ -197,56 +176,6 @@ def _upstream_fault(detail: str) -> Exception:
     return sym("kit.faults", "UpstreamFault")(detail)
 
 
-class FakeTransport:
-    """`transport.docker_exec_curl`'s shape, as a recording fake (X9's executed signature).
-
-    Returns `(returncode, stdout, stderr)` with stdout = body + "\\n" + http_code, which is
-    what `split_status` is built to recover. `malformed="no-status-line"` drops the trailing
-    line — PO-C3's executed fault: `split_status` then returns `("", <whole body>)` and the
-    caller that compares the second element to "200" reads a FAILED create as a success.
-
-    Records `argv`-shaped call state so a test can assert a derived name reached the
-    transport as a DISCRETE argument rather than concatenated into a shell string (S39).
-    """
-
-    def __init__(self, *, fault: Fault = CLEAN, status: str = "200",
-                 body: dict | None = None) -> None:
-        self.fault = fault
-        self.status = status
-        self.body = body if body is not None else {"acknowledged": True}
-        self.calls: list[dict[str, Any]] = []
-
-    def __call__(  # noqa: PLR0913 — mirrors `docker_exec_curl`'s own signature (X9)
-            self, ctx: Any, container: str, url: str, *, method: str = "GET",
-                 headers: dict | None = None, body: dict | None = None,
-                 timeout_sec: int = 10, insecure: bool = False,
-                 auth: str | None = None, system: str | None = None,
-                 secrets: tuple[str, ...] = ()) -> tuple[int, str, str]:
-        self.calls.append({
-            "ctx": ctx, "container": container, "url": url, "method": method,
-            "headers": dict(headers or {}), "body": body, "timeout_sec": timeout_sec,
-            "insecure": insecure, "auth": auth, "system": system, "secrets": secrets,
-        })
-        if self.fault.raise_after is not None and len(self.calls) > self.fault.raise_after:
-            raise _transport_fault(f"docker exec failed: {url}")
-        payload = json.dumps(self.body)
-        if self.fault.malformed == "no-status-line":
-            return 0, payload, ""
-        if self.fault.malformed == "truncated-json":
-            return 0, payload[: len(payload) // 2] + f"\n{self.status}", ""
-        if self.fault.malformed == "empty-body":
-            return 0, "", ""
-        if self.fault.hits(url):
-            return 0, json.dumps({"error": {"reason": f"refused {url}"}}) + "\n400", ""
-        return 0, payload + f"\n{self.status}", ""
-
-    @property
-    def methods(self) -> list[str]:
-        return [c["method"] for c in self.calls]
-
-    @property
-    def urls(self) -> list[str]:
-        return [c["url"] for c in self.calls]
 
 
 # --------------------------------------------------------------------------------------
@@ -256,12 +185,8 @@ class FakeTransport:
 
 class FakeAgent:
     """A recording stand-in for one model-backed call (`invoke=` on the questioner and the
-    comparator).
-
-    It is the second tier of the fault hierarchy and nothing more: an LLM is neither cheap nor
-    deterministic to drive, so the reply is scripted and the PROMPT is captured. Every payload
-    demand in this suite asserts against `agent.prompts` — what the seam was handed — because a
-    fake that only returns answers leaves the outbound channel unpinned.
+    comparator): replies are scripted and prompts captured. Payload tests assert on `prompts`,
+    because a fake that only returns answers leaves the outbound channel unpinned.
     """
 
     def __init__(self, *replies: Any, fault: Fault = CLEAN) -> None:
@@ -289,11 +214,10 @@ class FakeAgent:
 
 
 class FakeSpawn:
-    """The launcher's process seam (`spawn=`) — D1's "a sibling is a `run.py` PROCESS".
+    """The launcher's process seam (`spawn=`; a sibling is a `run.py` process).
 
-    Records the argv and env of every child it was asked to start, and the wall-clock order in
-    which the starts happened, so "started together" is an OBSERVATION rather than an
-    inspection of a config flag. Runs no code: `exits` scripts each child's return code.
+    Records each child's argv and env and whether starts overlapped, so "started together" is
+    observed rather than read off a config flag. Runs no code: `exits` scripts return codes.
     """
 
     def __init__(self, *, exits: dict[str, int] | None = None, fault: Fault = CLEAN) -> None:
@@ -311,13 +235,9 @@ class FakeSpawn:
             if self._live > 1:
                 self.overlap = True
         self.launches.append({"argv": list(argv), "env": dict(env or {}), "kw": dict(kw)})
-        # THE DELAY IS WHAT MAKES `overlap` OBSERVABLE. A child that answers in microseconds of
-        # pure Python is never preempted mid-call — CPython hands the GIL over at a switch
-        # interval measured in milliseconds — so N launchers released together still enter and
-        # leave this frame one at a time, and `overlap` reads False for an implementation that
-        # did start them together. A real `run.py` child blocks for the length of an
-        # investigation; `delay` is the fake's stand-in for that, and it is what the fault spec
-        # has always documented it as ("seconds a call blocks before answering").
+        # The delay is what makes `overlap` observable: a pure-Python call finishes within one
+        # GIL switch interval, so launches started together would still pass through here one at
+        # a time. It stands in for a real `run.py` child blocking for an investigation.
         if self.fault.delay:
             time.sleep(self.fault.delay)
         world = _world_of(argv)
@@ -369,23 +289,8 @@ def base_world() -> dict:
     return world_doc("a", role="A", axis=None, facts=[])
 
 
-#: Manifest fields #1255 retires: the continuation prompt (P4, stated). `family_doc` writes it
-#: only while `Family` still declares it. NOT `fences_at` (recheck review RC-L5): the design
-#: retires fence counting as a CUT RULE (P2) and says nothing of the field, which the judge
-#: reads and `test_947_triplet_manifest` requires — an implementer who drops it from `Family`
-#: must fail that suite loudly, not have this helper quietly stop writing it.
-RETIRED_FAMILY_FIELDS = ("continuation_prompt",)
-
-
-def _declared_family_fields() -> set[str]:
-    import dataclasses
-
-    return {f.name for f in dataclasses.fields(sym("records._family", "Family"))}
-
-
 def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs/source",
-               as_of: str = AS_OF, continuation_prompt: str = "Continue from here.",
-               **over: Any) -> dict:
+               as_of: str = AS_OF, **over: Any) -> dict:
     """A v2 `Family` document: the launcher's derived half, the operator's instrument field and
     the questioner's authored half, one document."""
     doc: dict[str, Any] = {
@@ -395,10 +300,9 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
         "branch_message_id": BRANCH_MESSAGE_ID,
         "fences_at": 4,
         "as_of": as_of,
-        "continuation_prompt": continuation_prompt,
         "base_story": "the captured story",
-        # #1224: the launcher records the systems the tenant's gather grant served (the loader
-        # reads no settings), so the authored document carries them.
+        # The launcher records the systems the tenant's gather grant served (#1224); the loader
+        # reads no settings.
         "served_systems": list(SERVED_SYSTEMS),
         "discriminator": {"predicate": "p"},
         "worlds": worlds if worlds is not None else [
@@ -408,31 +312,8 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
             world_doc("c", role="C", facts=[fact("f2")]),
         ],
     }
-    declared = _declared_family_fields()
-    for retired in RETIRED_FAMILY_FIELDS:
-        if retired not in declared:
-            doc.pop(retired, None)
     doc.update(over)
     return doc
-
-
-def retired_continuation_argv() -> list[str]:
-    """`["--continuation-prompt", "go"]` while the branch CLI still requires the flag, else `[]`.
-
-    #1255 (P4) removes the argument. Asked of the CLI's own parser (a bare request naming no
-    prompt either parses or is refused for the missing flag), so a launcher scenario keeps
-    reaching what it tests on both sides of the change. Whether the flag is GONE is
-    `test_947_branch_cli`'s demand, never answered here. Delete once #1255 has landed."""
-    import contextlib
-    import io
-
-    parse = sym("learning.branch.cli", "parse_branch_args")
-    with contextlib.redirect_stderr(io.StringIO()):
-        try:
-            parse(["--tenant", SOURCE_TENANT, "run-x", "1"])
-        except SystemExit:
-            return ["--continuation-prompt", "go"]
-    return []
 
 
 def write_family(episode_dir: Path, doc: dict | None = None) -> Path:
@@ -444,29 +325,22 @@ def write_family(episode_dir: Path, doc: dict | None = None) -> Path:
     return manifest
 
 
-#: Whether the builders here plant what the front door leaves (#1222): a source run's alert
-#: record, and the episode's copies of them. The older suites are written for runs the front door
-#: made, so `tests/conftest.py` turns it on for them; #1222's own suite plants each of those
-#: itself, including their absence, so it runs with it off.
+#: Whether the builders plant what the front door leaves (#1222): a source run's alert record
+#: and the episode's copies. `tests/conftest.py` turns it on except for #1222's own suite, which
+#: plants (or omits) each record itself.
 PLANT_RECORDS = False
 
 
-#: `tenant episodes folder -> the tmp_path of the first scene placed there by default` — see
-#: `_default_root`. Keyed by the folder, which is per test (each test has its own data root), so
-#: nothing carries between tests.
+#: Tenant episodes folder -> the tmp_path of the first scene placed there (see `_default_root`).
+#: Keyed by the folder, which is per test, so nothing carries between tests.
 _FIRST_SCENE: dict[str, str] = {}
 
 
 def _default_root(tmp_path: Path) -> Path:
-    """Where `episode` puts a scene built with no `root=`: the FIRST scene a test builds — and
-    every later call with the same `tmp_path` (a builder re-entered for one scene names one
-    folder) — under this data root's tenant, `<T>/episodes/`; a scene built for a DIFFERENT
-    `tmp_path` (a test's second scene, `accepted_episode(tmp_path / "linked")`) under a data root
-    of its own, `<tmp_path>/scene-data-root/<T>/episodes/` (`tenant_episodes`). Every scene keeps
-    `EPISODE_ID` and its tokens, as each did when it sat under its own `tmp_path`; Layout A holds
-    one episode per id under a tenant, so without this a second scene would be built INTO the
-    first (a FIFO the first planted then blocks the second's writes). The judge and the page
-    reach either by id through the tenant whose folder holds it (`_judge_921.episode_runs_for`)."""
+    """Where `episode` puts a scene built with no `root=`: the first `tmp_path` a test builds for
+    goes under this data root's tenant; any other `tmp_path` gets a data root of its own
+    (`tenant_episodes`). Layout A holds one episode per id under a tenant, so a second scene at
+    the default `EPISODE_ID` would otherwise be built into the first."""
     home = location_path(current_tenant().episodes)
     first = _FIRST_SCENE.setdefault(str(Path(home).absolute()), str(Path(tmp_path).absolute()))
     if first == str(Path(tmp_path).absolute()):
@@ -482,16 +356,12 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
         root = _default_root(tmp_path)
     ep = Path(root) / episode_id
     (ep / "served").mkdir(parents=True, exist_ok=True)
-    # THE BASE IS PRIMED, EMPTY, because that is the shape `prepare_episode` always leaves and
-    # an episode holding a manifest and no base is a state production never produces. `Ledger`
-    # refuses a missing base as the ordering guarantee that priming ran before any sibling
-    # forked, so a fixture without one makes every world registry unbuildable for a reason the
-    # scenario is not about. `base_capture` overwrites it wherever a scenario has rows.
+    # An empty primed base, as `prepare_episode` always leaves: `Ledger` refuses a missing base
+    # (priming must precede any fork). `base_capture` overwrites it where a scenario has rows.
     base = ep / "served" / "base.jsonl"
     if not base.exists():
         base.write_text("", encoding="utf-8")
-    # #1187 (R5): every manifest reader refuses a manifest whose `episode_id` is not its
-    # folder's name, so the default manifest names THIS episode's id.
+    # Manifest readers refuse an `episode_id` that is not the folder's name.
     write_family(ep, doc if doc is not None else family_doc(episode_id=episode_id))
     if PLANT_RECORDS:
         _plant_source_input(ep, (doc or {}).get("source_run_dir"), (doc or {}).get("source_run_id"))
@@ -534,17 +404,14 @@ def branchable_investigation() -> str:
     return f"# investigation\n\n```invlang\n{bodies[0]}\n```\n"
 
 
-#: The tenant the fixture's SOURCE run was stamped with (#1077 stamps every run's tenant; #1106
-#: M2 seeds each sibling's runs base from it). Set up from the committed fixture under the test's
-#: data root (#1120 H2), so a launch that accepts it finds a complete tenant.
+#: The tenant the fixture's SOURCE run is stamped with (siblings are seeded from it). Set up from
+#: the committed fixture, so a launch that accepts it finds a complete tenant.
 SOURCE_TENANT = fixture_uuid("tenant:playground")
 
 
 def current_tenant() -> Any:
-    """#1078: the ONE tenant O10 permits in this test's `DEFENDER_DATA_ROOT` (whichever
-    `runs_base()`, `d9_tenant` or the like already set up there), as an accepted `Tenant`
-    (#1120 D1) — for callers (`episode_dir`, `prepare_episode`, the runs repository) that need
-    the tenant rather than its runs base alone. Set up from the committed fixture when the root has none yet."""
+    """The one tenant in this test's `DEFENDER_DATA_ROOT` (whichever a builder already set up), as
+    an accepted `Tenant`; set up from the committed fixture when the root has none yet."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
@@ -554,13 +421,9 @@ def current_tenant() -> Any:
 
 
 def tenant_episodes(data_root: Path) -> Path:
-    """`<data_root>/<T>/episodes/` of this suite's tenant (`current_tenant().id`) set up under a
-    data root of a scene's OWN (`_data_root_1078.set_up_tenant`; a second call is the first's
-    tenant). #1187 Layout A allows one episode per id under a tenant and reaches an episode by id
-    only there, so a test that builds several scenes at the default `EPISODE_ID` "each under its
-    own episodes root" gives each its own data root, and the judge and the page reach each through
-    that tenant's repository (`_judge_921.episode_runs_for` reads the data root off the episode's
-    location). Pass the result as `episode(root=...)`."""
+    """`<data_root>/<T>/episodes/` for this suite's tenant, set up under a scene's own data root.
+    Layout A allows one episode per id under a tenant, so a test building several scenes at the
+    default `EPISODE_ID` passes each its own, as `episode(root=...)`."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     return location_path(set_up_tenant(Path(data_root), current_tenant().id).episodes)
@@ -573,10 +436,8 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
               published: bool = False) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
 
-    `published=True` (#1108 P4): the tenant is set up as a real published tenant
-    (`set_up_tenant(published=True)`), so the source's default knowledge stamp
-    (`scene_knowledge`) names a commit its clone holds — what a branch launch materialises and
-    pins (flow 7). For scenes that launch a branch over this source."""
+    `published=True` sets the tenant up as published, so the source's default knowledge stamp
+    (`scene_knowledge`) names a commit its clone holds, as a branch launch over it needs."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
@@ -600,38 +461,29 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     (src / "investigation.md").write_text(branchable_investigation(), encoding="utf-8")
     (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
-    # ONE CAPTURED CALL, because a source that captured nothing is not branchable: every
-    # proposed world agrees with an empty prefix by construction, which is the generated-world
-    # design the redesign rejected, and `branch.validate` refuses it at the launch. A scenario
-    # that wants other rows lands them through `land_calls` (before the session is seeded);
-    # one that lands this same call again writes a duplicate the primer skips, so the primed
-    # key set is unchanged for it.
+    # One captured call: `branch.validate` refuses a source that captured nothing (every world
+    # would agree with an empty prefix). `land_calls` lands other rows instead, before seeding.
     if land_calls is None:
         capture_call(src)
     else:
         land_calls(src)
-    # THE STAMP EVERY ORDINARY RUN DIR CARRIES. `materialize_run` writes one at the single
-    # place a run the box will execute is ever created, so a source run without one is not a run
-    # any production path could have produced — and the containment walks read exactly this file
-    # to tell an ordinary run from an episode's contents.
+    # The stamp `materialize_run` gives every ordinary run dir; containment walks read it to tell
+    # an ordinary run from an episode's contents.
     (src / "provenance.json").write_text(
         json.dumps(provenance_record(tenant_id=tenant_id)), encoding="utf-8")
     seed_source_session(base, src, pre_snapshot=pre_snapshot)
     return base, src
 
 
-#: The case this fixture's source run belongs to. One id, because the run's case POINTER (the
-#: sidecar beside the run dir) and the store the pointer names have to agree — that reconciliation is what
-#: `open_source_store` checks, and it is the whole reason a branch can find its source's session.
+#: The fixture source run's case. The run's case pointer and the store it names must agree
+#: (`open_source_store` checks), which is how a branch finds its source's session.
 SOURCE_CASE_ID = "case-947-fresh"
 
 
 def source_case_id(src: Path) -> str:
-    """The case a fixture source run belongs to: `SOURCE_CASE_ID` for the default source, and a
-    case of its own for any other source id. The store is per case (`<sessions>/<case>.db`), and
-    its row ids are the STORE's, so a second source seeded into the first source's case starts
-    its session past `BRANCH_MESSAGE_ID` and the branch point can never land on its main path —
-    each source run gets its own case, as each real investigation does."""
+    """`SOURCE_CASE_ID` for the default source, a case of its own for any other: row ids are per
+    store (per case), so a second source in the first's case would start past
+    `BRANCH_MESSAGE_ID` and never reach its branch point."""
     if src.name == SOURCE_RUN_ID:
         return SOURCE_CASE_ID
     digest = hashlib.sha256(src.name.encode("utf-8")).hexdigest()[:16]
@@ -639,12 +491,9 @@ def source_case_id(src: Path) -> str:
 
 
 def _source_handle(src: Path) -> Any:
-    """The source run's handle, for writing its case pointer. A canonical-UUID folder (every
-    run after #1187) through `_spec1077.fixture_run`, production's own rule. A source a test
-    plants under an OLD-shaped or hostile id ON PURPOSE (to see the launcher refuse it before
-    anything is spent, #1187 declared change 1) is a folder production can no longer name, so
-    its handle is built at that folder directly — the fixture still seeds the session such a
-    run had, and the refusal under test is the launcher's, not this fixture's."""
+    """The source run's handle, for writing its case pointer: `fixture_run` for a canonical-UUID
+    folder; for an old-shaped or hostile id planted on purpose (so the launcher refuses it), a
+    `Run` built at that folder directly."""
     from defender.records import Run
     from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
@@ -660,33 +509,28 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
     from defender.records import RunPaths, SessionPaths
 
     ss = mod("records.session_store")
-    # #1235: the case pointer is a host-only sidecar beside the run dir, not a file in it.
+    # The case pointer is a host-only sidecar beside the run dir (#1235).
     if RunPaths(src).session_pointer().exists():
         return
-    from defender.tests.support.learning.branch import _branch_947
     from defender.tests.support.storage import _session_store_705 as S
 
     from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
 
     assert isinstance(pre_snapshot, bool), pre_snapshot
 
-    # #1105 fork S(b): the store takes the layout owner's hand-out for the runs base.
+    # The store opens on the layout owner's `SessionPaths` for the runs base.
     case_id = source_case_id(src)
     with ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(base))) as store:
         ss.write_case_pointer(_source_handle(src), case_id=case_id, store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [S.user_request("investigate the alert")], agent_id="main")
-        if not _branch_947.declares_retired_prompt():
-            # #1255 (D1): a branch point is a MAIN response that CALLED tools, so the id must
-            # land on a call, not on its return — one leading row shifts every pair by one.
-            # Keyed on the same switch `_branch_947.spec_at` uses (is this tree past #1255?);
-            # before it, `validate` refuses a call as "unanswered", so the old shape stays.
-            store.append(session_id, [S.text_response("orienting")], agent_id="main")
+        # A branch point is a MAIN response that called tools: one leading row shifts every
+        # pair so `BRANCH_MESSAGE_ID` lands on a call, not its return.
+        store.append(session_id, [S.text_response("orienting")], agent_id="main")
         while BRANCH_MESSAGE_ID not in ss.path_row_ids(store, session_id):
             store.append(session_id, list(S.complete_pair()), agent_id="main")
         if not pre_snapshot and is_fixture_uuid_shape(src.name):
             # Legacy or hostile source ids are refused before the snapshot gate.
-            # #1255 deferred verification 4: the fixture-only planter (see its module).
             from defender.tests.support.runtime.state._fork_snapshot_plant import plant_fork_snapshots
 
             plant_fork_snapshots(store, session_id, src)
@@ -719,24 +563,17 @@ def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
     return row
 
 
-#: The three NON-CLEAN stamp shapes `_provenance.capture_tree` can actually return, spelled once
-#: because §7 round 2 settled that all three refuse absent `--allow-dirty` (FORK-10's answer, F4).
-#: A `dirty: None` record that KEEPS a commit is only producible on the git-status arm, and only
-#: with a reason beside it (`records/_provenance.py:338-345`); the git-could-not-be-asked arm is
-#: `commit: None` (`_from_build_stamp`, `records/_provenance.py:293`). A fixture spelling either without
-#: its reason is a shape no capture produced, which is how the old one read `dirty: None` as
-#: covering "git could not be asked" while asserting over a record with a sha in it.
+#: The reasons `capture_tree` pairs with its non-clean shapes (each refuses without
+#: `--allow-dirty`): a `dirty: None` record that keeps a commit comes only from a failed git
+#: status; git being unavailable means `commit: None`. Either shape without its reason is a
+#: record no capture produces.
 GIT_STATUS_FAILED = "git status: GitError('git status --porcelain=v1 -z', 128)"
 GIT_UNAVAILABLE = "git unavailable: FileNotFoundError('git')"
 
-#: The tenant knowledge commit every default stamp carries (#1204): every run materialised after
-#: #1204 stamps `knowledge` from its tenant's clone, so a source, its siblings and the live
-#: capture that agree on everything else agree on this too — which is what a real family
-#: launched from one tenant clone looks like. A FULL 40-hex lowercase sha, never an abbreviation:
-#: the reader folds any other shape to "the record does not say" (#1204 O4), which would make
-#: every default stamp read as knowledge-absent — a waivable fault — and turn every
-#: accept-without-the-flag scenario red for a reason it is not about. Before #1204 is
-#: implemented `RunProvenance.from_obj` ignores the key, so the default is inert there.
+#: The tenant knowledge commit every default stamp carries (#1204), so a source, its siblings and
+#: the live capture agree on it, as a family launched from one tenant clone does. A FULL 40-hex
+#: lowercase sha: the reader folds any other shape to "the record does not say", a waivable
+#: fault that would turn every accept-without-the-flag scenario red.
 KNOWLEDGE_SHA = "1204" + "d" * 36
 
 #: A second, distinct knowledge commit, for the scenarios about a family across two of them.
@@ -750,10 +587,8 @@ class _OmitKnowledge:
         return "NO_KNOWLEDGE_KEY"
 
 
-#: `provenance_record(knowledge=NO_KNOWLEDGE_KEY)` OMITS the `knowledge` key altogether: the
-#: shape every stamp written before #1204 has. Distinct from `knowledge=None`, which writes JSON
-#: `null` — the shape `as_json` writes for a record that does not say. Both read back as
-#: `knowledge is None`; the two spellings exist so a scenario can name the one it means.
+#: `provenance_record(knowledge=NO_KNOWLEDGE_KEY)` OMITS the `knowledge` key (a pre-#1204
+#: stamp); `knowledge=None` writes JSON `null`. Both read back as `knowledge is None`.
 NO_KNOWLEDGE_KEY: Any = _OmitKnowledge()
 
 #: The default `knowledge=` of `provenance_record` — a sentinel so each call builds a fresh dict.
@@ -761,11 +596,9 @@ _DEFAULT_KNOWLEDGE: Any = object()
 
 
 def scene_knowledge(tenant_id: str | None = None) -> str:
-    """The knowledge commit a DEFAULT stamp names (#1108 P4, OD5): the commit the scene's
-    published tenant's `exports/current` names — `tenant_id`'s, or the data root's one
-    PUBLISHED tenant's — so a source, its siblings and the live capture name a commit its clone
-    really holds (flow 7 materialises and pins it). A scene with no (or several) published
-    tenants and no `tenant_id` keeps the placeholder `KNOWLEDGE_SHA`."""
+    """The knowledge commit a DEFAULT stamp names: what `exports/current` names for `tenant_id`,
+    or for the data root's one published tenant, so stamps name a commit the clone really holds.
+    Otherwise the placeholder `KNOWLEDGE_SHA`."""
     raw = os.environ.get("DEFENDER_DATA_ROOT")
     if not raw:
         return KNOWLEDGE_SHA
@@ -797,40 +630,31 @@ def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = Fa
     if dirty:
         doc["dirty_paths"] = ["defender/investigation/driver/__init__.py"]
         doc["dirty_path_count"] = 1
-    # #1106 M2: the stamp every run materialised since #1077 carries its tenant, and a branched
-    # episode seeds its siblings' tenant record FROM the SOURCE's. `None` (the default, so the
-    # sibling-stamp call sites that spell their own `tenant_id` keep doing so) omits the field.
+    # Every stamp carries its tenant (siblings seed theirs from the source's); `None`, the
+    # default, omits the field.
     if tenant_id is not None:
         doc["tenant_id"] = tenant_id
     return doc
 
 
 def source_stamp(src: Path, **overrides: Any) -> Path:
-    """Rewrite the SOURCE run's `provenance.json` — the anchor #976 reads at preflight.
-
-    `runs_base` stamps the source with `provenance_record()` (commit `deadbee`, clean, scope
-    `repo`); a scenario about the anchor's other shapes rewrites it here with the same builder,
-    so the file on disk is always one `materialize_run` could have written. Absence and
-    aliasing are NOT spelled here: a scenario about a missing or planted stamp unlinks or
-    symlinks the real path itself, because the fault has to be the real one.
+    """Rewrite the SOURCE run's `provenance.json` — the anchor #976 reads at preflight — with the
+    builder `runs_base` uses, so the file is one `materialize_run` could have written. A missing
+    or planted stamp is not spelled here: such scenarios unlink or symlink the real path.
     """
     path = Path(src) / "provenance.json"
-    # The source's tenant rides unless the scenario is ABOUT it (#1106 M2: a legacy stamp with
-    # no tenant — `tenant_id=None` — is the one the launcher refuses, N10).
+    # The source's tenant rides unless the scenario overrides it (`tenant_id=None` is the legacy
+    # stamp the launcher refuses).
     overrides.setdefault("tenant_id", SOURCE_TENANT)
     path.write_text(json.dumps(provenance_record(**overrides)), encoding="utf-8")
     return path
 
 
 class FakeCapture:
-    """The launcher's live-tree seam (`live_tree=` on `cli.main`, #976 M2), scripted and counted.
+    """The launcher's live-tree seam (`live_tree=` on `cli.main`), scripted and counted.
 
-    Production resolves it to `_provenance.capture_tree(REPO_ROOT)`, which asks git about the
-    checkout the launcher is running in — so every end-to-end launcher scenario has to inject
-    one whose answer matches the fixture source's stamp, or the live HEAD of whatever tree the
-    suite runs in is what gets compared and refused. It is a zero-argument callable returning a
-    `RunProvenance`, and it COUNTS: the design says the capture is taken once per launch, and
-    "once" is an observation over `calls`, not a reading of the code.
+    Production asks git about the checkout the launcher runs in, so every end-to-end launcher
+    scenario injects one matching the source's stamp. `calls` counts captures (once per launch).
     """
 
     def __init__(self, record: dict) -> None:
@@ -871,12 +695,10 @@ def isolate_learning_state(tmp_path: Path, monkeypatch: Any) -> Path:
 def source_capture(**overrides: Any) -> FakeCapture:
     """A live-tree capture built from `provenance_record(**overrides)`.
 
-    With no overrides it matches the source `runs_base` stamps (commit `deadbee`, clean, scope
-    `repo`, knowledge `KNOWLEDGE_SHA`), which is what an accepted launch needs;
-    `source_capture(commit="0ther")`, `(dirty=True)`, `(dirty=None, unavailable=GIT_STATUS_FAILED)`
-    and `(commit=None, dirty=None, unavailable=GIT_UNAVAILABLE)` are the four other shapes a real
-    `capture_tree` answers with. `knowledge=` spells the live tenant clone's revision (#1204 D3:
-    production's live capture reads it from the episode tenant's clone).
+    With no overrides it matches the source `runs_base` stamps, as an accepted launch needs. The
+    other shapes a real `capture_tree` answers with: `commit="0ther"`, `dirty=True`,
+    `dirty=None, unavailable=GIT_STATUS_FAILED`, `commit=None, dirty=None,
+    unavailable=GIT_UNAVAILABLE`. `knowledge=` is the live tenant clone's revision.
     """
     return FakeCapture(provenance_record(**overrides))
 
@@ -897,10 +719,9 @@ def report_text(disposition: str, *, extra: str = "", body: str = "") -> str:
 def archived_world(episode_dir: Path, label: str, *, disposition: str = "malicious",
                    scrub_ran: bool = True, commit: str | None = "deadbee",
                    dirty: bool | None = False, unavailable: str | None = None) -> Path:
-    """One `worlds/<X>/` directory carrying every artifact M8's row declares. No
-    `worlds/<X>/run_dir` pointer: #1187 (R8, declared change 12) stops the archive writing it
-    (nothing reads it; the arm roster supersedes it), so a scenario about an OLD archive's
-    leftover pointer plants one itself."""
+    """One archived `worlds/<X>/` directory with every artifact the archive writes. No `run_dir`
+    pointer (the arm roster supersedes it): a scenario about an old archive's leftover pointer
+    plants one itself."""
     w = episode_dir / "worlds" / world_id(episode_dir, label)
     (w / "gather_raw").mkdir(parents=True, exist_ok=True)
     (w / "report.md").write_text(report_text(disposition), encoding="utf-8")
@@ -914,8 +735,7 @@ def archived_world(episode_dir: Path, label: str, *, disposition: str = "malicio
 
 
 def read_roster(episode_dir: Path) -> dict[str, str]:
-    """`<episode_dir>/arms.json` as plain JSON (`{world UUID: arm id}`) — the test reading back what a
-    builder or the launcher wrote; `{}` when there is none."""
+    """`<episode_dir>/arms.json` as plain JSON (`{world UUID: arm id}`); `{}` when there is none."""
     path = Path(episode_dir) / ROSTER_NAME
     if not path.is_file():
         return {}
@@ -923,8 +743,7 @@ def read_roster(episode_dir: Path) -> dict[str, str]:
 
 
 def write_roster(episode_dir: Path, roster: dict[str, str]) -> Path:
-    """`<episode_dir>/arms.json` holding `roster` — the host-written arm roster a launch leaves
-    at the start of RUNS (#1187 R2), planted by hand. Overwrites."""
+    """Plant `roster` as the arm roster a launch writes when RUNS starts. Overwrites."""
     path = Path(episode_dir) / ROSTER_NAME
     path.write_text(json.dumps(dict(roster), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
@@ -937,13 +756,10 @@ def _manifest_world_ids(episode_dir: Path) -> list[str]:
 
 
 def plant_roster(episode_dir: Path) -> dict[str, str]:
-    """The fixture's EXPLICIT RUNS step for a hand-built scene (no launcher ran): makes
-    `<episode_dir>/runs/` and then writes the arm roster once, a fresh uuid4 for EVERY manifest
-    world (#1187 R2: `start_runs` makes `runs/`, then writes a roster naming exactly the
-    manifest's worlds). Returns the roster. Refuses loudly (AssertionError) when a roster is
-    already there (it is written once) or the manifest names no world. A scene that wants a
-    stray arm no roster names plants `runs/<uuid4>` directly; it never extends the roster
-    (review-3 F33)."""
+    """Take the RUNS step for a hand-built scene (no launcher ran), as `start_runs` does: make
+    `runs/`, then write the roster once, a fresh uuid4 per manifest world; return it. Refuses
+    (AssertionError) a second roster or a manifest naming no world. A stray arm no roster names
+    is planted at `runs/<uuid4>` directly, never by extending the roster."""
     import uuid
 
     episode_dir = Path(episode_dir)
@@ -964,10 +780,8 @@ def plant_roster(episode_dir: Path) -> dict[str, str]:
 
 
 def roster_arm_id(episode_dir: Path, world_id: str) -> str:
-    """The arm id the episode's roster holds for `world_id`. READ-ONLY (review-3 F33): it never
-    writes or extends a roster, so a scene whose launcher (or explicit RUNS step,
-    `plant_roster` / `episode_view`) wrote none fails here loudly, and so does a world UUID the
-    roster does not name (a roster names exactly the manifest's worlds, #1187 R2)."""
+    """The arm id the episode's roster holds for `world_id`. READ-ONLY: with no roster, or a
+    world UUID the roster does not name, it fails loudly rather than writing one."""
     episode_dir = Path(episode_dir)
     if not (episode_dir / ROSTER_NAME).is_file():
         raise AssertionError(
@@ -1016,22 +830,14 @@ def _arm_name(base: Path, label: str) -> str:
 
 
 def arm_run_dir(episode_dir: Path, label: str, **kw: Any) -> Path:
-    """A finished arm in the episode's own container, `<episode_dir>/runs/<arm id>` — the arm id
-    the episode's roster holds for `label` (#1187: an arm is opened by its roster id through
-    the episode's view, `family_arms`): `sibling_run_dir` over `<episode_dir>/runs`, every
-    keyword passed through."""
+    """A finished arm at `<episode_dir>/runs/<arm id>`, the id the roster holds for `label`:
+    `sibling_run_dir` over `<episode_dir>/runs`, every keyword passed through."""
     return sibling_run_dir(Path(episode_dir) / "runs", label, **kw)
 
 
 def corpus_document(run_dir: Path) -> Path:
-    """Give `run_dir` a REAL orientation-corpus document, copied from the committed golden run.
-
-    `load_corpus` counts a document only when `parse_dense_companion` finds its three required
-    top-level keys, so a `# investigation` stub is scanned and skipped — and a corpus assertion
-    written over stubs compares 0 against 0 whatever the layout is. Copying the shipped golden
-    keeps the fixture a real input through the real parser (tier 1) rather than a guess at the
-    grammar.
-    """
+    """Give `run_dir` a REAL orientation-corpus document, a copy of `GOLDEN_INVESTIGATION` (see
+    there for why not a stub)."""
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "investigation.md"
     path.write_text(GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), encoding="utf-8")
@@ -1045,10 +851,9 @@ def corpus_document(run_dir: Path) -> Path:
 
 
 def open_source(src: Path) -> Any:
-    """The source `Run` the launcher opens (#1105 PR 2): the run at `src` —
-    `<data root>/<T>/runs/<run id>` — by its id, through tenant T's runs repository, T accepted
-    under that data root. What `preflight_episode(source=)` / `preflight_replay(source=)` take
-    where a test once handed the folder."""
+    """The source `Run` the launcher opens: the run at `src` (`<data root>/<T>/runs/<run id>`),
+    by id through tenant T's runs repository. What `preflight_episode(source=)` and
+    `preflight_replay(source=)` take."""
     from defender.tenancy import _tenant
     from defender.records import RunId
 
@@ -1059,14 +864,10 @@ def open_source(src: Path) -> Any:
 
 
 def episode_view(episode: Any, *, tenant: Any = None) -> Any:
-    """The episode's view (`EpisodeRuns`) in `tenant`'s runs repository (default: this data
-    root's one tenant, `current_tenant()`), adopting the held `episode` — `runs.episode(<id>,
-    held=episode)`. #1187: no container record is judged or planted (R1). An episode with no
-    arm roster yet never reached RUNS, so the fixture takes the launcher's RUNS step for it:
-    `view.start_runs(<every manifest world UUID>)` makes `runs/` and writes the roster (R2).
-    A roster a scene already planted (`arm_run_dir`) is the episode's own and is kept.
-    `start_family` callers reach RUNS this way; `verify_family` callers open their arms through
-    it (`family_arms`)."""
+    """The episode's view (`EpisodeRuns`) in `tenant`'s runs repository (default
+    `current_tenant()`), adopting the held `episode`. An episode with no arm roster yet never
+    reached RUNS, so this takes the launcher's RUNS step (`view.start_runs(<manifest world
+    UUIDs>)`); a roster a scene already planted is kept."""
     owner = current_tenant() if tenant is None else tenant
     view = owner.runs_repository().episode(episode.dir.name, held=episode)
     if view.arm_ids() is None:
@@ -1075,10 +876,9 @@ def episode_view(episode: Any, *, tenant: Any = None) -> Any:
 
 
 def family_arms(episode: Any, labels: Any, *, tenant: Any = None) -> dict[str, Any]:
-    """`verify_family`'s UUID-keyed `arms`, resolving the fixture labels through the manifest
-    before `view.arm_id(world_uuid)`, opened by id through the episode's view (`episode_view`), as
-    the launcher's `_finished_arms` does — the `RunRefused` an open raises (`RunAbsent` for a
-    roster id with no folder: "not started") kept as that world UUID's value."""
+    """`verify_family`'s UUID-keyed `arms`: each label's arm opened by roster id through
+    `episode_view`, as the launcher's `_finished_arms` does. A refused open (`RunAbsent`: not
+    started) is kept as that world UUID's value."""
     from defender.records import RunRefused
 
     view = episode_view(episode, tenant=tenant)
@@ -1110,11 +910,9 @@ def lesson_row(run_dir: Path, name: str = "L1",
 class FakeAdapters:
     """The real adapter bodies' stand-in behind the serving registry (`adapters=`).
 
-    The serving path answers from the primed capture BEFORE calling any adapter (C15) — so "no
-    post-branch query reaches a real adapter unasked" is only observable if something records
-    what the adapter layer was asked for. That is this fake's whole job: it records `(system, verb, params)` per call and
-    answers from a scripted table, so an unrecorded call is a demand failing rather than a
-    silence nobody can see.
+    The serving path answers from the primed capture BEFORE calling any adapter, so an adapter
+    call is only visible if recorded: this records `(system, verb, params)` per call and answers
+    from a scripted table.
     """
 
     def __init__(self, answers: dict[tuple[str, str], Any] | None = None, *,
@@ -1125,19 +923,15 @@ class FakeAdapters:
         self.by_target = dict(by_target or {})
         self.fault = fault
         self.calls: list[tuple[str, str, dict]] = []
-        #: Every world token `for_world` was asked for, in order. The production read side
-        #: hands back a copy whose context DECLARES the world, which is the only thing that
-        #: makes a `wv-<world>-<corpus>` alias admissible at `confine_index`; a fake carries no
-        #: confinement, so it records the request and answers as itself. A test that wants to
-        #: know a staged read went out under its own world's declaration reads this.
+        #: Every world `for_world` was asked for, in order. Production returns a copy whose
+        #: context declares the world (what admits a `wv-<world>-<corpus>` alias at
+        #: `confine_index`); the fake records the request instead, for tests about which world a
+        #: staged read went out under.
         self.world_views: list[str] = []
 
     def for_world(self, world_id: str) -> FakeAdapters:
-        """The per-world view `seams.EpisodeAdapters` provides and the review requires.
-
-        SELF, not a copy: `calls` is what every demand in this suite asserts on, and a copy per
-        world would split one world's staged reads off the list its base reads are on.
-        """
+        """The per-world view `seams.EpisodeAdapters` provides. SELF, not a copy, so every world's
+        reads land on the one `calls` list tests assert on."""
         self.world_views.append(world_id)
         return self
 
@@ -1182,13 +976,9 @@ def captured_row(system: str = "elastic", verb: str = "query", *, key: str = "k1
 
 
 def refusals() -> tuple[type[BaseException], ...]:
-    """Every class a refusal in this design may be — and NEVER bare `Exception`.
-
-    `pytest.raises(Exception)` is the shape that turns a spec suite green on its own absence: a
-    module the design has not built yet raises `ModuleNotFoundError`, which is an `Exception`, so
-    the assertion passes while proving nothing at all. Every refusal assertion in this suite
-    names this tuple instead, and because it is EVALUATED before the `raises` block opens, a
-    missing target fails the test at the call rather than satisfying it.
+    """Every class a refusal in this design may be — and NEVER bare `Exception`, which a
+    `ModuleNotFoundError` satisfies. Evaluated before the `raises` block opens, so a missing
+    target fails the test at the call.
     """
     from defender.learning.branch.estate.registry import EstateError
     from defender.learning.branch.ledger import LedgerError
@@ -1212,7 +1002,7 @@ __all__ = [
     "KNOWLEDGE_SHA", "NO_KNOWLEDGE_KEY", "OTHER_KNOWLEDGE_SHA",
     "branchable_investigation",
     "SOURCE_RUN_ID", "WORLDS",
-    "FakeAdapters", "FakeAgent", "FakeSpawn", "FakeTransport", "SERVED_SYSTEMS",
+    "FakeAdapters", "FakeAgent", "FakeSpawn", "SERVED_SYSTEMS",
     "UNTRUSTED_FRAME", "assert_wrapped_untrusted", "outside_untrusted_frames", "untrusted_frames",
     "Fault", "base_capture", "captured_row",
     "archived_world", "base_world", "capture_call", "configured_layout", "ROSTER_NAME",
@@ -1222,7 +1012,7 @@ __all__ = [
     "episode", "episode_view", "fact", "family_arms", "family_doc", "open_source",
     "provenance_record",
     "FakeCapture", "source_capture", "source_stamp", "isolate_learning_state", "LEARNING_STATE_ENV",
-    "lesson_row", "mod", "refusals", "replace", "runs_base",
+    "lesson_row", "mod", "refusals", "runs_base",
     "arm_run_dir", "sibling_run_dir",
     "sym", "world_doc", "fixture_world_id", "world_id", "declaration", "write_family",
 ]

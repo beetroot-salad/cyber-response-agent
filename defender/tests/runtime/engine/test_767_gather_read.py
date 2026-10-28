@@ -1,4 +1,7 @@
-"""#767 — what a gather lead's capture holds of a ticket reply: the store's answer, whole, through the real query tool."""
+"""#767 — what a gather lead's capture holds of a ticket reply: the store's answer, whole, through the real query tool.
+
+A driven run reads the committed playground tenant's mapping, so the agent identity is read off that
+file (`shipped_comment_author`)."""
 from __future__ import annotations
 
 import copy
@@ -37,7 +40,8 @@ def _comment(author: str, body: str) -> dict[str, Any]:
 
 
 def _seed(author: str, *, closed: bool = True) -> dict[str, Any]:
-    """The e2e seed (the `d6_e2e_seed` clause)."""
+    """One closed case with two agent comments and an analyst's, one open case with an agent's and
+    an analyst's; `closed=False` re-opens the first."""
     closed_ticket = {
         "key": CLOSED_KEY,
         "summary": CORRELATION_SUMMARY,
@@ -88,8 +92,8 @@ def _rows_with_payloads(run) -> list[tuple[dict, Any]]:
 
 
 def test_767_the_capture_carries_the_store_payload(tmp_path: Path):
-    """d_capture_carries_the_screened_payload, after #1221 — COHERENCE, bound at the UNMOVED
-    reader's own edge."""
+    """The capture the offline collectors join on is exactly the store's answer: every comment, an
+    open case's included, is there as it is in the model's turn."""
     seed = _seed(shipped_comment_author())
     run = run_gather(
         tmp_path, verbs=_registry([seed]),
@@ -107,7 +111,8 @@ def test_767_the_capture_carries_the_store_payload(tmp_path: Path):
 
 
 def test_767_an_archived_world_carries_the_capture_whole(tmp_path: Path):
-    """d_archived_world_carries_only_screened_capture, after #1221."""
+    """The surface a branched world archives (`executed_queries.jsonl` and all of `gather_raw/`)
+    holds every comment the store served, an open case's included."""
     run = run_gather(
         tmp_path, verbs=_registry([_seed(shipped_comment_author())]),
         system="ticket", turns=[q("ticket", "list-tickets"), DONE], run_id="s767-archive",
@@ -128,7 +133,8 @@ def test_767_an_archived_world_carries_the_capture_whole(tmp_path: Path):
 
 
 def test_767_a_later_revocation_does_not_touch_an_existing_capture(tmp_path: Path):
-    """d_capture_not_retroactively_scrubbed — NEGATIVE, settled premise 41."""
+    """A case re-opened between two reads in one run changes neither capture: nothing is scrubbed
+    after the fact."""
     author = shipped_comment_author()
     before, reopened = _seed(author), _seed(author, closed=False)
     run = run_gather(

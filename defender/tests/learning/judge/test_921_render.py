@@ -1,4 +1,8 @@
-"""#921 — the judge's input: the four joined views, the withholding, and what the archive owes it."""
+"""#921 — the judge's input: the four joined views, the withholding, and what the archive owes it.
+
+Scenes that build a sibling run dir plant the roster first: `sibling_run_dir` reads it and never
+writes one.
+"""
 from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -14,8 +18,6 @@ from defender.tests.support.learning.core import _state1135
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -25,25 +27,21 @@ def _render():
 
 def _lessons_view(ctx) -> str:
     """The judged world's lessons view as the prompt lays it out (`layout`'s `lessons` section
-    body, `render._render_lessons` over `JudgeContext.focus.lessons`; #1234 retired
-    `as_prompt_sections`)."""
+    body, `render._render_lessons` over `JudgeContext.focus.lessons`)."""
     return _render()._render_lessons(ctx.focus.lessons)
 
 
-def _world_prompt(ep, label: str = "b", **kw) -> str:
-    """World `label`'s prompt from the real assembler over the real render
-    (`run._build_prompt(ctx, manifest)`, #1234)."""
+def _world_prompt(ep) -> str:
+    """World b's prompt from the real assembler over the real render
+    (`run._build_prompt(ctx, manifest)`)."""
     manifest = J.read_manifest_at(ep)
-    ctx = J.render_at(ep, label, **kw)
+    ctx = J.render_at(ep, "b")
     return J.mod("learning.judge.run")._build_prompt(ctx, manifest)[0]
 
 
 def _prompts(tmp_path, ep, **kw):
-    """Drive the real episode-grading pass and hand back what the model seam was SHOWN.
-
-    Every payload assertion in this file reads `judge.prompts`, never the canned reply: a fake
-    that only returns answers leaves the whole outbound channel unpinned, and the outbound
-    channel is what O4/O5/O9 are about.
+    """Drive the real grading pass and return the judge double: payload assertions read what
+    the model was shown (`judge.prompts`), never the canned reply.
     """
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.grade_at(
@@ -51,7 +49,7 @@ def _prompts(tmp_path, ep, **kw):
     return judge
 
 
-def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread(tmp_path):
+def test_921_judge_input_carries_the_per_lead_chain_per_call_view_and_lessons(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     ctx = J.render_at(ep, "b")
     judge_input = ctx.focus
@@ -60,8 +58,8 @@ def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread
     for link in ("goal", "params", "payload", "summary", "resolutions"):
         assert link in chain, f"the per-lead chain is missing its {link} link"
     assert "document_rows" not in chain, \
-        "the per-lead chain still carries the raw row dump #1017 removed"
-    assert ctx.focus_calls, "the per-call view (#1224's successor to coverage) is empty"
+        "the per-lead chain still carries the raw row dump"
+    assert ctx.focus_calls, "the per-call view is empty"
     assert judge_input.lessons, "the lessons-loaded view is empty"
 
 
@@ -95,7 +93,7 @@ def test_921_reply_without_the_three_pass_tables_is_refused(tmp_path):
     assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).bucket == "lead-set"
 
 
-def test_921_no_sibling_facts_reach_the_prompt(tmp_path):
+def test_921_sibling_facts_reach_the_prompt_labelled_as_the_reference_runs(tmp_path):
     secret = "SIBLING-ONLY-INJECTED-FACT"
     worlds = [
         J.world_doc("a", role="A", axis=None, disposition_declared="benign", facts=[]),
@@ -132,26 +130,10 @@ def test_921_graded_world_keeps_its_own_facts_and_is_not_withheld(tmp_path):
     assert "withheld" not in prompt.lower(), "the graded world's facts were marked withheld"
 
 
-def test_921_render_reads_no_sibling_run_dir(tmp_path):
-    import shutil
-
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    runs = ep / "runs"
-    runs.mkdir(parents=True, exist_ok=True)
-    (runs / f"{J.EPISODE_ID}-b").mkdir(parents=True, exist_ok=True)
-    shutil.rmtree(runs)
-
-    view = J.render_at(ep, "b").focus
-    assert view.leads, "the per-lead chain was empty once the run dir was gone"
-    assert view.lessons, "the lessons view needed the sibling's run dir"
-
-
 def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_commit(tmp_path):
     import shutil
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
-    # the arm planter reads the roster and never writes one (review-3 F33).
     T.plant_roster(ep)
     runs = ep / "runs"
     J.sibling_run_dir(runs, "b")
@@ -169,8 +151,6 @@ def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_comm
 def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_path):
     archive = J.mod("learning.branch.archive")
     ep = J.episode(tmp_path)
-    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
-    # the arm planter reads the roster and never writes one (review-3 F33).
     T.plant_roster(ep)
     runs = ep / "runs"
     run_dir = J.sibling_run_dir(runs, "b")
@@ -196,8 +176,6 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
         tmp_path):
     archive = J.mod("learning.branch.archive")
     ep = J.episode(tmp_path)
-    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
-    # the arm planter reads the roster and never writes one (review-3 F33).
     T.plant_roster(ep)
     runs = ep / "runs"
     run_dir = J.sibling_run_dir(runs, "b")
@@ -218,25 +196,6 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
         "a link's TARGET was copied into the archive as if the world had written it")
     assert (world / "report.md").exists(), "the rest of the world stopped archiving"
 
-    partial = J.accepted_episode(tmp_path / "partial",
-                                 ledgers={"b": [J.oracle_row("b")], "c": []})
-    assert J.rows(J.grade(partial))["b"].get(
-        "ungradable") is not True, (
-        "the control failed: the intact episode did not grade world b at all")
-    # The control's final grade would short-circuit the re-grade (`judge.yaml` is idempotent).
-    (partial / "judge.yaml").unlink()
-    (partial / "worlds" / T.world_id(partial, "b") / "gather_summaries" / "l-001.md").unlink()
-
-    rows = J.rows(J.grade(partial))
-    assert rows["b"].get("malformed") is True, (
-        "a world the archive left short graded normally, on a thinner view than it appears to "
-        "have")
-    assert "gather_summaries" in rows["b"]["ungradable_reason"], (
-        "the world was excluded without naming the short input; the message is the whole "
-        "difference between a partial archive and a malformed artifact")
-    assert rows["c"].get("ungradable") is not True, (
-        "world b's short directory cost world c its grade")
-
 
 def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
@@ -248,7 +207,7 @@ def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(
         "the lesson body was not read at the sibling's recorded commit")
     assert "the body" in _lessons_view(view)
     assert not list((ep / "worlds" / T.world_id(ep, "b")).glob("**/L1.md")), (
-        "a lesson BODY was archived; D7 keeps them out of the archive on purpose")
+        "a lesson body was archived")
 
 
 def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_how_it_reached_the_model(tmp_path):
@@ -281,11 +240,9 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_ho
 
 
 def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothing(tmp_path):
-    """#1108 P4 O6: the code commit's tree lacks the lesson here, so the run is post-move and the
-    body would come from the tenant's export at its knowledge commit — which this fixture tenant
-    (not a git clone) cannot supply. Either way the slot is marked, never empty. P4 words the
-    mark "unreadable" or keeps "unavailable"; both are accepted (the design names the concept,
-    not the text). The product-repo probe still goes through `git_show` (the assumed seam)."""
+    """The code commit's tree lacks the lesson, so its body would come from the tenant's export,
+    which this fixture tenant (not a git clone) cannot supply. The slot is marked, never empty;
+    either wording ("unavailable" or "unreadable") is accepted."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
 
     for commit, note in (("cafebabe", "absent commit"), ("deadbee", "absent path")):

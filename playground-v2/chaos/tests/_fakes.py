@@ -1,11 +1,9 @@
 """Injectable fakes for the chaos control plane (issue #401).
 
-The controller never shells out from a test. Every mutation it makes travels
-over an *exec seam* — a duck-typed object passed in as `execer=` (this repo's
-convention: fakes enter through the entry point's parameter seam, never
-`monkeypatch.setattr`). The real seam shells `docker --context soc-playground
-exec`; this one records what it was asked to do so tests can assert on the
-captured command/payload rather than on a canned return value.
+Every mutation the controller makes travels over an *exec seam*, a duck-typed
+object passed in as `execer=`. The real seam shells `docker --context soc-playground
+exec`; this one records what it was asked to do, so tests assert on the captured
+command/payload rather than on a canned return value.
 
 Seam contract (chaos/seam.py — what `chaos/ctl.py` may call, and all it may call):
 
@@ -173,13 +171,13 @@ class FakeChaosCtl:
         return {"ledger_ref": ref, "status": "reverted", "reverted_at": "2026-09-20T00:01:00+00:00"}
 
 
-def write_profile(profiles_dir, profile_id: str, mode: str, params: dict, seed: int = 42) -> str:
+def write_profile(profiles_dir, profile_id: str, mode: str, params: dict) -> str:
     """Write one `chaos/profiles/<id>.yaml` (M2's committed-YAML schema)."""
     body = {
         "id": profile_id,
         "description": f"spec fixture for {mode}",
         "mode": mode,
-        "seed": seed,
+        "seed": 42,
         "params": params,
         "cover": "ordinary environmental decay; documentation only",
     }

@@ -17,7 +17,7 @@ DOCKER_EXEC = "docker-exec"
 def _scaffold(root: Path, *, extra: str = "", transport: str | None = DOCKER_EXEC,
               context: str | None = "ctx-mysys") -> Path:
     """A tenant `settings/` folder holding one scaffolded system's `config.env` (URL base plus the
-    MF-8 access-method lines unless dropped, plus `extra` verbatim). Returns the settings folder."""
+    access-method lines unless dropped, plus `extra` verbatim). Returns the settings folder."""
     settings = Path(root) / "settings"
     cfg = settings / "systems" / SYSTEM / "config.env"
     cfg.parent.mkdir(parents=True, exist_ok=True)
@@ -31,7 +31,7 @@ def _scaffold(root: Path, *, extra: str = "", transport: str | None = DOCKER_EXE
 
 
 def _check(settings: Path) -> list[tuple[str, str]]:
-    """The REAL validator over `settings`, returning its report rows."""
+    """The real validator over `settings`, returning its report rows."""
     report = validate_scaffold.Report()
     validate_scaffold.check_config(report, settings, SYSTEM)
     return list(report.rows)
@@ -43,9 +43,6 @@ def _passes(rows: list[tuple[str, str]]) -> list[str]:
 
 def _naming(messages: list[str], needle: str) -> list[str]:
     return [m for m in messages if needle in m]
-
-
-# ---- O8: the retired _ENV convention -----------------------------------------------------------------
 
 
 # ---- the access method is not the product's to check -----------------------------------------------
@@ -61,6 +58,3 @@ def test_validator_does_not_judge_an_access_method(tmp_path):
         assert not _naming(messages, f"{PREFIX}_DOCKER_CONTEXT"), (
             f"{label}: an access-method row: {rows}")
         assert _passes(rows), f"{label}: the validator reported no PASS: {rows}"
-
-
-# ---- the connect guide --------------------------------------------------------------------------

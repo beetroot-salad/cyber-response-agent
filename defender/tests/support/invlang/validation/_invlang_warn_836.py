@@ -46,6 +46,7 @@ __all__ = [
     "offered_tool_defs",
     "offered_tool_names",
     "recording_stages",
+    "registered_tools",
     "run_one_response",
     "seed_investigation",
     "warn_window",
@@ -54,7 +55,7 @@ __all__ = [
 
 # documents
 
-#: Two declared vertices and one lead. EXECUTED: `diagnose(PROLOGUE, None) == []`.
+#: Two declared vertices and one lead; `diagnose(PROLOGUE, None) == []`.
 PROLOGUE = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical
@@ -65,22 +66,14 @@ l-001|1|cmdb-lookup|v-001||cmdb|n/a
 ```
 """
 
-#: The warn-family row: a refinement key outside `class` / `attrs.*` / (post-M6) `ident`.
+#: The warn-family row: a refinement key outside `class` / `attrs.*` / `ident`.
 WARN_ROW = "l-001|v-001|owner|svc.config-mgmt"
 #: A SECOND, textually distinct warn-family row, on the other declared vertex.
 SECOND_WARN_ROW = "l-001|v-002|dept|finance"
-#: A legal `class` repair of `WARN_ROW` — HAND-WRITTEN, not the validator's own offer, which is
-#: the difference #986 made and the reason this comment is longer than the constant.
-#:
-#: The offer rewrites the KEY and keeps the author's VALUE, and since #986 a `class` cell on a
-#: `compute` vertex is judged against `compute.role` — so `svc.config-mgmt` under `class` is
-#: refused for the value, the `class` route is WITHHELD, and `REPAIRED_ROW_ATTRS` below is the
-#: only alternative the validator now prints (asserted in
-#: `test_gate_refusal_names_the_flagged_rows_and_their_use_alternatives`). The tests here that
-#: feed this row exercise `fix_row`'s own mechanics — the window, the multiplicity rule, the
-#: append-only comparison — on a row that lands; the "the model pastes exactly the bytes it was
-#: handed" property belongs to the offers, and `test_class_vocab_986` is where every offered
-#: route is put back through the validator.
+#: A legal `class` repair of `WARN_ROW`, hand-written: the validator's own `class` offer keeps
+#: the author's value, which `compute.role` refuses (#986), so it withholds that route and
+#: offers only `REPAIRED_ROW_ATTRS`. Tests feeding this row exercise `fix_row`'s mechanics on a
+#: row that lands; `test_class_vocab_986` puts the offered routes back through the validator.
 REPAIRED_ROW = "l-001|v-001|class|file-server/internal/known-corp"
 #: The other legal repair — the `attrs.<name>` spelling. Keeps the VALUE cell verbatim.
 REPAIRED_ROW_ATTRS = "l-001|v-001|attrs.owner|svc.config-mgmt"
@@ -109,24 +102,18 @@ def attr_block(*rows: str) -> str:
     )
 
 
-#: EXECUTED: exactly one diagnostic, the `owner` refinement-key finding, and
-#: `validate_investigation` REFUSES it at c0dca747. M1/M2 are what make it land.
+#: Exactly one diagnostic, the warn-severity `owner` refinement-key finding;
+#: `validate_investigation` accepts it.
 WARN_DOC = PROLOGUE + attr_block(WARN_ROW)
 
-#: EXECUTED: zero diagnostics, and `validate_investigation` accepts it today and after #836.
+#: Zero diagnostics; `validate_investigation` accepts it.
 CLEAN_BLOCK = attr_block(REPAIRED_ROW)
 
 
-# the window, read through the function this spec mints
+# the warn window
 
 def warn_window(text: str) -> tuple[Any, ...]:
-    """`warn_diagnostics(text)` — M3's derived window, imported here so the suite still
-    collects on a tree that does not have it yet.
-
-    The module is `defender.skills.invlang.validate`, the module that already owns
-    `Diagnostic` and `diagnose`: claim g5 censused exactly one consumer of `Diagnostic`
-    outside it, so putting the derivation anywhere else would give the type a second
-    importer for no reason."""
+    """`warn_diagnostics(text)`: the repair window derived from the document's bytes."""
     from defender.skills.invlang.validate import warn_diagnostics
 
     return tuple(warn_diagnostics(text))
@@ -135,26 +122,23 @@ def warn_window(text: str) -> tuple[Any, ...]:
 def flagged_rows(text: str) -> tuple[str, ...]:
     """The flagged set as `fix_row` addresses it: one `Locus.row_text` per warn diagnostic.
 
-    `row_text` — NOT the on-disk line. `_tokenize_fence` (parser.py:90) strips every row
-    before `Locus.row_text` is populated, so the two differ exactly when the on-disk line
-    carries leading or trailing whitespace (claim pr1b, REFUTED byte-equality there)."""
+    `row_text` is the stripped row, not the on-disk line: the two differ when the line
+    carries leading or trailing whitespace."""
     return tuple(d.locus.row_text for d in warn_window(text) if d.locus is not None)
 
 
 # deps and the run dir
 
 def main_deps(tmp_path: Path) -> tuple[Any, Path]:
-    """MAIN deps through the real `bind` seam — real compiled policy, real gate.
-
-    Same shape `test_append_only_write_lane_810.py::_main_deps` uses, so the two suites
-    exercise one construction path rather than two."""
-    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    """MAIN deps through the real `bind` seam — real compiled policy, real gate — built as
+    `test_append_only_write_lane_810.py::_main_deps` builds them."""
+    # A run folder's name is its canonical UUID run id (#1187).
     run = tmp_path / fixture_uuid("run")
     run.mkdir(parents=True)
     dfn = tmp_path / "defender"
     dfn.mkdir(parents=True)
-    # Carrying a run's state, as every MAIN the driver builds does: the enforced budget hooks
-    # raise on deps that carry none (#1235 round 3).
+    # Carries run state, as every MAIN the driver builds does: the enforced budget hooks raise
+    # on deps without it (#1235).
     from defender.records import Run
 
     return replace(bind(MAIN_DEF, run, defender_dir=dfn),
@@ -162,12 +146,8 @@ def main_deps(tmp_path: Path) -> tuple[Any, Path]:
 
 
 def seed_investigation(run_dir: Path, text: str) -> Path:
-    """Put `text` on disk as the run's investigation.md, bypassing the write verbs.
-
-    Deliberately not through `append_block`: several scenarios need a document the write
-    gate would refuse TODAY (a warn-only one) as their STARTING state, and staging it
-    through the verb under test would make the fixture depend on the mechanism it is
-    there to exercise."""
+    """Put `text` on disk as the run's investigation.md, bypassing the write verbs, so a
+    scenario's starting state never depends on the verb under test."""
     p = run_dir / "investigation.md"
     p.write_text(text, encoding="utf-8")
     return p
@@ -178,9 +158,8 @@ def seed_investigation(run_dir: Path, text: str) -> Path:
 class _Recorder:
     """A FunctionModel callable that records the tool definitions the model was SHOWN.
 
-    `prepare=` filters per-request OFFERS, never registration, so "which tools exist on the
-    agent" cannot see it — `AgentInfo.function_tools` is the channel that can, and it is the
-    one probe b6/p7 executed at the pinned floor (pydantic-ai-slim 1.107.0)."""
+    `prepare=` filters per-request offers, not registration, so only
+    `AgentInfo.function_tools` sees its effect."""
 
     __name__ = "Recorder"
 
@@ -201,8 +180,7 @@ class _Recorder:
 def build_main_agent(model_fn: Any, *, review_stages: Any = None) -> Any:
     """MAIN's real agent, built through the real composition root, with a fake model.
 
-    `build_agent` rather than `build_agent_core`: `close_investigation` is registered by the
-    root, not the core, and half the #836 gate lives on the close path."""
+    `build_agent`, not `build_agent_core`: only the root registers `close_investigation`."""
     logger = observe.RequestLogger(Path(os.devnull))
     stages = review_stages if review_stages is not None else _review_bundle.bundle(
         composer=_review_bundle.composer_reply("holds")
@@ -214,6 +192,23 @@ def build_main_agent(model_fn: Any, *, review_stages: Any = None) -> Any:
             review_stages=stages, bounds=challenge_gate.default_bounds(), catalog=None,
             gather_grant=driver.GATHER_DEF.verb_grant,
         )
+
+
+def registered_tools(defn: Any) -> dict[str, Any]:
+    """`defn`'s REGISTERED `Tool` objects by name, read off a real agent core built with a fake
+    model rather than off a hand-kept list."""
+    from defender.hooks.budget_enforcer import DEFAULT_LIMITS
+    from defender.investigation.tools import AgentDeps
+
+    logger = observe.RequestLogger(Path(os.devnull))
+    with override_allow_model_requests(False):
+        agent = driver.build_agent_core(
+            defn, deps_type=defn.deps_cls or AgentDeps, instructions="probe", logger=logger,
+            agent_id="probe",
+            make_model=lambda name, effort: BuiltModel(FunctionModel(ReplayFn([])), None),
+            limits=DEFAULT_LIMITS,
+        )
+    return dict(agent._function_toolset.tools)
 
 
 def offered_tool_defs(deps: Any, *, turns: list[Turn] | None = None) -> list[Any]:
@@ -237,11 +232,8 @@ def run_one_response(deps: Any, calls: list[tuple[str, dict]]) -> Any:
     """Drive MAIN's real agent with a model that emits ONE model response carrying every
     call in `calls`, then stops.
 
-    This is the shape PR-5 executed at the pinned floor: `Turn(tool_calls=[a, b])` becomes a
-    single `ModelResponse` with two `ToolCallPart`s, which at pydantic-ai-slim 1.107.0 run
-    CONCURRENTLY by default (rt1 REFUTED the sequential reading) and lose one of the two
-    writes against the real `write_guarded` primitive (rt2). H6 sets `sequential=True` on the
-    write verbs; this is how a scenario observes it."""
+    pydantic-ai runs one response's tool calls concurrently unless the tool is
+    `sequential=True`, as the write verbs are; this is how a scenario observes that."""
     import asyncio
 
     agent = build_main_agent(ReplayFn([Turn(tool_calls=calls), Turn(text="done")]))
@@ -250,12 +242,8 @@ def run_one_response(deps: Any, calls: list[tuple[str, dict]]) -> Any:
 
 
 class RecordingStages:
-    """A review bundle that COUNTS its stage calls.
-
-    The gate's cost is the thing H5's ordering buys: a close refused for a flagged row must
-    never have spent a lens. A bundle that only answers cannot observe that, so this one
-    records — the `_review_bundle` docstring's own note that a scenario wanting to inspect
-    what reached a role binds its own recording stage."""
+    """A review bundle that COUNTS its stage calls, so a scenario can assert that a close
+    refused for a flagged row never spent a lens."""
 
     def __init__(self, composer: str = "holds") -> None:
         self.calls: list[str] = []

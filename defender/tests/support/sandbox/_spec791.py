@@ -1,5 +1,5 @@
-"""Shared machinery for the #791 spec suite — NO test scripts (the leading underscore
-keeps pytest from collecting it)."""
+"""Shared helpers for the #791 suite: run dirs the learning cycle accepts, and fakes for the
+investigation entrypoint's tail."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
@@ -14,61 +14,9 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DEFENDER = REPO_ROOT / "defender"
-RUN_PY = DEFENDER / "run.py"
-RUN_COMMON_PY = DEFENDER / "run_common.py"
-CLI_PY = DEFENDER / "learning" / "core" / "cli.py"
-SCRUB_PROPERTY_TEST = DEFENDER / "tests" / "e2e" / "test_540_scrub_lifecycle.py"
-VULTURE_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_vulture_baseline.json"
 
-# `OLDER_SPEC_GRAPH` (spec_graph_774.yaml) and `LIVE_STAGE_WORD` ("projection") left with
-# #797: the graph is deleted and the live projection stage is retired, so the two demands
-# that read them — `rekey_live_projection_graph_id` and
-# `live_projection_stage_sheds_the_retired_name` — have no subject left to assert about.
-# `RETIRED_STAGE_WORD` went with them; the offline oracle's own vocabulary lives on in
-# `PROJECTION_WORDS` below, which the judge-prompt demands still read.
-
-RETIRED_PACKAGE = "defender.learning.pipeline.oracle"
-# What the retirement actually orphans. NOT the retired package: `pipeline/oracle/` keeps
-# every symbol live, because the secondary eval still projects (its own measurement, kept
-# deliberately) and the golden replay binds the per-lead seam. The design demand — this
-# change's deliberate dead code is ON RECORD — is about the corpses, wherever they fall.
-# #922 finished two of the original three off: `enqueue_learning` (the learning-queue write the  # lint-stale-ref: ok — naming the departed symbol IS the record this comment exists to keep
-# curation request replaced) and `parse_judge_verdict` (the A/B harness's verdict parser) are  # lint-stale-ref: ok — same
-# DELETED, not merely dead, so there is no baseline entry left to carry a reason. Deletion is the
-# strongest form of what this demand asks for, and a name that resolves to nothing cannot be
-# asserted about — the surviving sibling is what still has to carry its attribution.
-#: Empty since #1135: the one symbol it held (the authoring-queue write the curation request
-#: replaced) lived in `core/markers.py`, which that change deleted outright — a symbol that no
-#: longer exists has no dead-code record to name.
-RETIRED_DEAD_SYMBOLS: tuple[str, ...] = ()
-# The projected-telemetry writer bullet 3 deletes, as the shared-root census spells it. A census row naming a symbol that resolves to nothing reads exactly
-# like a row nobody wrote, and this file seeds the next change's grounding pass.
-RETIRED_TELEMETRY_WRITER = "_write_oracle_telemetry"
-
-# The investigation tail's undrivable dependencies (R22). Everything else in the tail — the
-# table cross-check, the refusal predicate, the curation write, the queue itself — is driven
-# for real, so what these scenarios observe is production, not a double.
+# The investigation tail's undrivable dependencies; everything else in the tail runs for real.
 TAIL_SEAM = ("lifecycle", "visualize", "ticket_writer")
-
-# The leg's own terminal status (R15). `unrecorded` is the value a run dir written BEFORE
-# the field existed reads as — R15's accepted cost, and the third member the gate credits.
-LEG_COMPLETED = "completed"
-LEG_NEVER_SELECTED = "never-selected"
-LEG_STARTED_AND_DIED = "started-and-died"
-LEG_UNRECORDED = "unrecorded"
-
-# Every spelling the retired stage's column reached the judge under. A negative binds every
-# surface the content could reach, so the same vocabulary is asserted against the prompts,
-# the rendered comparison files and the assembled judge turn.
-PROJECTION_WORDS = (
-    "oracle projection",
-    "projected telemetry",
-    "projected_telemetry",
-    "the oracle's projection",
-    "oracle's projected",
-    "projection",
-)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -77,12 +25,10 @@ def worktree_package_guard():
     imported a different checkout's copy of the package than the one holding these tests."""
     import defender.agents as agents_mod
 
-    here = Path(__file__).resolve().parents[4]
     loaded = Path(agents_mod.__file__).resolve()
-    assert here in loaded.parents, (
-        f"ENVIRONMENT: this suite lives under {here} but imported the package from "
-        f"{loaded} — a different checkout's installed copy. Run from a neutral directory "
-        f"with PYTHONPATH={here}; every all-roles claim below is meaningless otherwise."
+    assert REPO_ROOT in loaded.parents, (
+        f"ENVIRONMENT: this suite lives under {REPO_ROOT} but imported the package from "
+        f"{loaded}; run from a neutral directory with PYTHONPATH={REPO_ROOT}"
     )
 
 
@@ -93,10 +39,6 @@ def noop_start_box(request, **_kw):
 
 
 def noop_stop_box(_box, **_kw) -> None:
-    pass
-
-
-def noop_scrub(_path, **_kw) -> None:
     pass
 
 
@@ -151,9 +93,8 @@ def satisfy_entrypoint_keys(monkeypatch, tmp_path: Path) -> None:
     """Give the ENTRYPOINT's startup preflight a key per provider and a runs base under tmp,
     so a scenario about the tail does not fail in the credential step ahead of it.
 
-    Every provider's var is set before the preflight runs, so the key the preflight sources
-    out of the repo's `.env` into `os.environ` is restored at teardown rather than leaking
-    into the rest of the session (setenv, the sanctioned env seam — never setattr)."""
+    Setting every var first means a key the preflight sources from the repo's `.env` is
+    restored at teardown instead of leaking into the rest of the session."""
     from defender import providers
 
     for var in providers.api_key_vars():
@@ -172,18 +113,16 @@ def make_run_dir(
     *,
     name: str = "case-791",
     disposition: str = "inconclusive",
-    leads: tuple[str, ...] = ("l-001",),
-    payload: bool = True,
     alert_bytes: bytes | None = None,
 ) -> Path:
     """A finished investigation run dir the learning cycle accepts: the alert, the report
     whose disposition selects the legs, the invlang work log, and the two append-only
-    tables (one lead sidecar + one executed-query row + its raw payload per lead)."""
+    tables (lead `l-001`'s sidecar, its executed-query row and its raw payload)."""
     run_dir = tmp_path / name
     run_dir.mkdir(parents=True, exist_ok=True)
     plant_alert_in_run(run_dir, alert_bytes if alert_bytes is not None
                        else json.dumps({"rule": {"id": "5710", "key": "spec.rule"}}).encode("utf-8"))
-    populate_run_dir(run_dir, disposition=disposition, leads=leads, payload=payload)
+    populate_run_dir(run_dir, disposition=disposition)
     return run_dir
 
 
@@ -193,18 +132,9 @@ def plant_alert_in_run(run_dir: Path, raw: bytes) -> None:
     plant_in_run(run_dir, raw)
 
 
-def populate_run_dir(
-    run_dir: Path,
-    *,
-    disposition: str = "inconclusive",
-    leads: tuple[str, ...] = ("l-001",),
-    payload: bool = True,
-) -> Path:
-    """The same artifacts, written into a run dir that ALREADY EXISTS.
-
-    The tail scenarios cannot use `make_run_dir`: `main` materializes its own run dir under
-    the runs base and copies the operator's alert into it, and that dir — not one the test
-    chose — is what every tail step reads."""
+def populate_run_dir(run_dir: Path, *, disposition: str = "inconclusive") -> Path:
+    """The same artifacts, written into a run dir that ALREADY EXISTS: in the tail scenarios
+    that is the run dir `main` materializes, not one the test chose."""
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     run_dir.joinpath("report.md").write_text(
         f"---\ndisposition: {disposition}\nconfidence: high\n---\n\nspec791 run\n",
@@ -212,26 +142,18 @@ def populate_run_dir(
     )
     run_dir.joinpath("investigation.md").write_text("+ spec791 investigation\n", encoding="utf-8")
 
-    rows = []
-    for i, lead_id in enumerate(leads):
-        (run_dir / "gather_raw" / lead_id).mkdir(parents=True, exist_ok=True)
-        (run_dir / "gather_raw" / f"{lead_id}.lead.json").write_text(
-            json.dumps({"goal": f"check {lead_id}", "what_to_summarize": ["accepted vs failed"]}),
-            encoding="utf-8",
-        )
-        rows.append(json.dumps({
-            "lead_id": lead_id, "seq": 0, "system": "elastic", "verb": "search",
-            "query_id": "elastic.auth", "params": {"host": f"h{i}"}, "raw_command": "x",
-            "exit_code": 0, "payload_status": "ok", "payload_digest": f"d{i}",
-            "payload_path": f"gather_raw/{lead_id}/0.json",
-        }))
-        if payload:
-            (run_dir / "gather_raw" / lead_id / "0.json").write_text(
-                LEAD_PAYLOAD, encoding="utf-8"
-            )
-    run_dir.joinpath("executed_queries.jsonl").write_text(
-        "".join(r + "\n" for r in rows), encoding="utf-8"
+    (run_dir / "gather_raw" / "l-001").mkdir(parents=True, exist_ok=True)
+    (run_dir / "gather_raw" / "l-001.lead.json").write_text(
+        json.dumps({"goal": "check l-001", "what_to_summarize": ["accepted vs failed"]}),
+        encoding="utf-8",
     )
+    (run_dir / "gather_raw" / "l-001" / "0.json").write_text(LEAD_PAYLOAD, encoding="utf-8")
+    run_dir.joinpath("executed_queries.jsonl").write_text(json.dumps({
+        "lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "search",
+        "query_id": "elastic.auth", "params": {"host": "h0"}, "raw_command": "x",
+        "exit_code": 0, "payload_status": "ok", "payload_digest": "d0",
+        "payload_path": "gather_raw/l-001/0.json",
+    }) + "\n", encoding="utf-8")
     return run_dir
 
 
@@ -252,33 +174,23 @@ class SpecTail:
         self,
         paths,
         *,
-        disposition: str = "benign",
-        leads: tuple[str, ...] = ("l-001",),
         truncated_by: str | None = None,
         closed_before_cut: bool = False,
         certify: bool = True,
     ) -> None:
         self._paths = paths
-        self._disposition = disposition
-        self._leads = leads
         self._truncated_by = truncated_by
         self._closed_before_cut = closed_before_cut
         self._certify = certify
         self.run_dirs: list[Path] = []
         self.steps: list[TailStep] = []
-        #: What `record_case_ticket` was actually called with, in order — #1047's own
-        #: `test_1047_ticket_lane.py` drives the ticket lane's per-class branching directly and
-        #: never through this seam, so this is the one place that can tell whether `run.py`'s
-        #: tail actually THREADS the exit class through rather than calling the old
-        #: no-argument shape: a `record_calls` entry missing `truncated_by` (or holding `None`
-        #: for a tail built with `truncated_by=` set) means the wiring, not the lane, is dead.
+        #: What `record_case_ticket` was called with, in order: the one place that shows whether
+        #: `run.py`'s tail threads the exit class (`truncated_by`) through to the ticket lane.
         self.record_calls: list[dict[str, Any]] = []
         #: Every `Run` handle the render step was handed, in order (#1110).
         self.visualized: list[Any] = []
-        #: The run's record each ticket leg was handed (#1107: the writer no longer finds its
-        #: mapping and store config itself — `run.py` hands it the record, the code tree and the
-        #: run's env). Kept apart from `record_calls` so that list stays the exit-class record it
-        #: was.
+        #: The tenant record each ticket leg was handed by `run.py`; kept apart from
+        #: `record_calls`, which stays the exit-class record.
         self.ticket_tenants: list[Any] = []
 
     # the seam's three dependencies
@@ -287,7 +199,7 @@ class SpecTail:
 
         run_dir = run.run_dir
         self.run_dirs.append(run_dir)
-        populate_run_dir(run_dir, disposition=self._disposition, leads=self._leads)
+        populate_run_dir(run_dir, disposition="benign")
         if self._certify:
             scrub_mod.scrub(run_dir)
         self._note("lifecycle", run_dir)
@@ -295,9 +207,8 @@ class SpecTail:
                 "closed_before_cut": self._closed_before_cut}
 
     def visualize(self, run: Any, *, tenant: Any = None, update_ticket: bool = False) -> None:
-        # #1110: the seam is handed the run's tenant-bound `Run` handle, not a bare path — the
-        # step saves the page through it. Kept whole in `visualized` so a demand can ask what
-        # handle the tail was given; the step itself is noted against the handle's run dir.
+        # The run's tenant-bound `Run` handle (the step saves the page through it), kept whole
+        # so a test can ask which handle the tail gave (#1110).
         self.visualized.append(run)
         self._note("visualize", run.run_dir)
 
@@ -309,12 +220,8 @@ class SpecTail:
     def record_case_ticket(self, run: Any, *, tenant: Any, defender_dir: Path, env: Any,
                            **kw: Any) -> None:
         self.ticket_tenants.append(tenant)
-        # `**kw` absorbs #1047's `truncated_by=`/`closed_before_cut=` kwargs — this fake
-        # stands in for the ticket-system SEAM, not for the ticket lane's own per-class
-        # branching (which `test_1047_ticket_lane.py` drives against the real
-        # `record_case_ticket` directly), so it only needs to accept the call, not interpret
-        # it — but it DOES record what it was called with, in `record_calls`, because whether
-        # the tail passes these through at all is a question only this seam can answer.
+        # `**kw` takes #1047's `truncated_by=`/`closed_before_cut=`: this fakes the ticket SEAM,
+        # not the lane's per-class branching, but records the call to show they are passed on.
         self.record_calls.append(kw)
         self._note("record_case_ticket", run.run_dir)
 
@@ -340,29 +247,18 @@ class SpecTail:
 
 
 def require_tail_seam(main) -> None:
-    """The entrypoint's tail seam, checked before it is used.
-
-    Checked here rather than at each call site so the failure names the DEMAND — the tail has
-    no injection point — instead of surfacing as an unexpected-keyword TypeError inside a
-    scenario about something else."""
+    """The entrypoint's tail seam, checked up front so a missing seam fails by name rather than
+    as an unexpected-keyword `TypeError` inside an unrelated scenario."""
     missing = [p for p in TAIL_SEAM if p not in inspect.signature(main).parameters]
-    assert not missing, (
-        f"the investigation entrypoint takes no {missing}: its tail has no injection seam, so "
-        "every demand about what the tail DOES can only be read off its source — and a test "
-        "that reads source cannot fail when the behaviour changes"
-    )
+    assert not missing, f"the investigation entrypoint takes no {missing}: its tail has no injection seam"
 
 
 def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
     """Drive the REAL entrypoint over one alert with the tail's dependencies injected.
 
-    `main` is passed in rather than imported here so each scenario's own body names the
-    entry point it drives.
-
-    #1078 O1: a fresh run names its tenant, and the tenant must exist (O2). The argv carries
-    `--tenant` with D9's one tenant, created in this test's own data root (the autouse
-    `data_root` fixture) through the real `create_tenant` first — without it `main` refuses the
-    run before anything is spent."""
+    `main` is passed in so each scenario names the entry point it drives. The argv carries
+    `--tenant` with D9's tenant, created first in this test's data root: `main` refuses a run
+    whose tenant does not exist (#1078)."""
     from defender.tests.support.shared.contracts._data_root_1078 import ensure_d9_tenant, current_data_root
     from defender.tenancy._tenant import requested_tenant
 
@@ -371,18 +267,16 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
     location_path(requested_tenant(fixture_data_root(current_data_root()), tenant_id).learning).mkdir(exist_ok=True)
     from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
 
-    # #1108 P4 (OD14, O11): the in-process launch-time publish (publishes the tenant for real
-    # when `main` launches it), unless a scenario's `main` is not run.py's.
+    # The in-process launch-time publish (it publishes the tenant for real), when `main` takes one.
     publish = ({"publish": in_process_publish()}
                if "publish" in inspect.signature(main).parameters else {})
     return main([str(alert), "--tenant", tenant_id, *args], lifecycle=tail.lifecycle,
                 visualize=tail.visualize, ticket_writer=tail, **publish)
 
 
-def plant_alert(tmp_path: Path, *, name: str = "alert.json",
-                alert_bytes: bytes | None = None) -> Path:
+def plant_alert(tmp_path: Path, *, alert_bytes: bytes | None = None) -> Path:
     """The operator's own alert file — the argv the entrypoint is handed."""
-    alert = tmp_path / name
+    alert = tmp_path / "alert.json"
     alert.parent.mkdir(parents=True, exist_ok=True)
     alert.write_bytes(
         alert_bytes if alert_bytes is not None

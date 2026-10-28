@@ -102,20 +102,16 @@ def test_b6_o3_message_zero_lessons_section_shows_no_host_layout(tmp_path, monke
     from defender.investigation import orient
 
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
-    # #1108 P4 (O1, O4): the corpus the signature lookup reads is the run TENANT's
-    # (`agent/lessons/`), never the checkout's; the fixture tenant carries no lesson for this
-    # alert's signature, so the scene plants one there (made up; the default signature of
-    # `_write_lesson` is this alert's rule id).
+    # The signature lookup reads the run TENANT's lessons; the fixture tenant has none for this
+    # alert, so the scene plants one (`_write_lesson`'s default signature is this alert's rule id).
     _write_lesson(layout.agent / "lessons", "view-b6-signature-lesson")
     run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-lessons0")
     main = V.Recorder([Turn(text="done")])
     _drive(layout, run_dir, main, monkeypatch, orient_shim=orient._shim)
 
     m0 = main.first_user_text()
-    assert "## Lessons" in m0, ("control: the signature lookup's hits are not in message 0 — the shims did not run, or "
-        "the corpus no longer holds a lesson for this signature")
-    assert HITS_HEADER in m0, ("control: the signature lookup's hits are not in message 0 — the shims did not run, or "
-        "the corpus no longer holds a lesson for this signature")
+    assert "## Lessons" in m0, "control: message 0 has no lessons section"
+    assert HITS_HEADER in m0, "control: the signature lookup's hits are not in message 0"
     hits = V.scan(m0, V.host_tokens(layout))
     assert not hits, "message 0's lessons section shows host layout:\n" + "\n".join(hits)
 
@@ -160,8 +156,8 @@ def _outside(text: str, evidence: list[str]) -> str:
 
 def test_b4_evidence_naming_this_runs_own_trees_is_shown_byte_for_byte(tmp_path, monkeypatch):
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
-    # #1279 A3: setup mints the run id, so the evidence naming this run's folder is planted into
-    # the alert after the run exists, at the place the view reads the alert from.
+    # Setup mints the run id, so the evidence naming this run's folder is planted into the alert
+    # after the run exists, at the place the view reads the alert from.
     run_dir = V.natural_run(layout, ALERT, "view-evid-own")
     old = f"{location_path(layout.data_root)}/{layout.tenant_id}/runs/20250101t000000z-old/investigation.md"
     own = _own_tree_evidence(layout, run_dir)
@@ -361,6 +357,15 @@ def test_b2_g10_proc_stays_outside_read_scope(tmp_path, monkeypatch):
     assert (kind, RULE_ID in text) == ("return", True), (kind, text[:300])
 
 
+def _dispatching_main(goal: str = "measure this lead") -> V.Recorder:
+    """MAIN dispatches `l-001` on elastic, then closes."""
+    return V.Recorder([
+        Turn(tool_calls=[("gather", {"lead_id": LEAD, "system": "elastic", "goal": goal,
+                                     "what_to_summarize": ["auth events"]})]),
+        Turn(text="done"),
+    ])
+
+
 def _elastic(payload: list[dict]) -> FakeVerbs:
     def query(ctx, *, native_query: str, limit: int = 10) -> list[dict]:
         return payload
@@ -377,12 +382,7 @@ def test_b3_gather_is_dispatched_and_answered_in_the_model_view(tmp_path, monkey
                 "process.command_line": planted[0],
                 **{f"process.parent{i}.command_line": line
                    for i, line in enumerate(planted[1:], start=1)}}]
-    main = V.Recorder([
-        Turn(tool_calls=[("gather", {"lead_id": LEAD, "system": "elastic",
-                                     "goal": "measure this lead",
-                                     "what_to_summarize": ["auth events"]})]),
-        Turn(text="done"),
-    ])
+    main = _dispatching_main()
     gather = V.Recorder([
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "query",
                                     "params": {"native_query": "FROM logs | LIMIT 1"}})]),
@@ -426,9 +426,7 @@ def test_b3_gather_is_dispatched_and_answered_in_the_model_view(tmp_path, monkey
 
 
 def test_b3_the_lessons_block_names_lessons_by_model_path(tmp_path, monkeypatch):
-    # #1108 P4 (O1, O4): the lessons a run's writes are matched against are its TENANT's
-    # (`agent/lessons/`, at the model root `MODEL_AGENT`), never the checkout's — so the
-    # lesson is planted in the tenant's agent half and named back by its `/agent` path. The
+    # Writes are matched against the TENANT's lessons, named back under `MODEL_AGENT`; the
     # checkout is a mirror elsewhere, so a block that leaked either host tree is caught.
     tree = V.mirror_checkout(tmp_path / "co" / "src")
     layout = V.make_layout(tmp_path / "a", V.TENANT_A, checkout=tree)
@@ -498,12 +496,7 @@ def test_b5_unboxed_sql_reduces_a_payload_gathered_mid_run_by_its_model_path(tmp
     run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-sql")
     payload = [{"@timestamp": f"2026-05-25T13:5{i}:00Z", "user.name": "dev.dana"}
                for i in range(SQL_ROWS)]
-    main = V.Recorder([
-        Turn(tool_calls=[("gather", {"lead_id": LEAD, "system": "elastic",
-                                     "goal": "count the auth events",
-                                     "what_to_summarize": ["auth events"]})]),
-        Turn(text="done"),
-    ])
+    main = _dispatching_main("count the auth events")
     gather = V.Recorder([
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "query",
                                     "params": {"native_query": "FROM logs | LIMIT 3"}})]),
@@ -535,12 +528,7 @@ def test_c5_the_bash_overflow_hint_names_the_payload_by_its_model_path(tmp_path,
     payload = [{"@timestamp": "2026-05-25T13:50:00Z", "user.name": "dev.dana",
                 "message": f"auth event {i:04d} " + "x" * 120} for i in range(200)]
     relative = f"{RUN_LAYOUT.gather_raw.name}/{LEAD}/0.json"
-    main = V.Recorder([
-        Turn(tool_calls=[("gather", {"lead_id": LEAD, "system": "elastic",
-                                     "goal": "measure this lead",
-                                     "what_to_summarize": ["auth events"]})]),
-        Turn(text="done"),
-    ])
+    main = _dispatching_main()
     gather = V.Recorder([
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "query",
                                     "params": {"native_query": "FROM logs"}})]),

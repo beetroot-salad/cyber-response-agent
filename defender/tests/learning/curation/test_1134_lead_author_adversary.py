@@ -81,10 +81,9 @@ def _head_mode(repo: Path, rel: str, rev: str = "HEAD") -> str:
 
 
 def _outcome(fn: Any) -> tuple:
-    """`outcome`, plus P3's commit-maker refusal: `("raised", "DeliveryRefused", message)`. A
-    link or hard link the box leaves in its lane is a ChangeSet refusal (OD18/OD23; owner ruling
-    2026-10-23: no hard-linked entry is ever committed), which the direct entry raises and the
-    drain routes as a U10 refused claim (`test_refused_claims.py`)."""
+    """`outcome`, plus the commit-maker's refusal as `("raised", "DeliveryRefused", message)`: a
+    link or hard link the box leaves in its lane is refused by the ChangeSet (no hard-linked entry
+    is ever committed), and the direct entry raises it."""
     from defender.learning.author.version_control import DeliveryRefused
 
     try:
@@ -99,8 +98,8 @@ EDITED_REDUCER = reducer_surface_text(bullets=(OUT_MARK,))
 
 
 def _pitfalls_lane(tmp_path: Path) -> C.DraftLane:
-    """#1108 P4 (O7, OD6, OD12 class ii): a started batch whose draft carries the reducer add-on
-    (`REDUCER_REL`, in the batch base) and the `elastic` marker and skill, the product checkout
+    """A started batch whose draft carries the reducer add-on (`REDUCER_REL`, in the batch base)
+    and the `elastic` marker and skill, the product checkout
     holding the `elastic` and `cmdb` adapters, and three queued reducer rows (a `defender-sql`
     mistake each), so the tick offers the reducer surface to its curator."""
     product = seed_product(tmp_path, adapters=("elastic", "cmdb"))
@@ -117,8 +116,7 @@ def _pitfalls_lane(tmp_path: Path) -> C.DraftLane:
 @pytest.mark.parametrize("left", ["plain", "link", "hardlink"])
 def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
         tmp_path: Path, monkeypatch, left: str):
-    """Over a batch draft (ASSUMED SEAM `run_pitfalls(..., batch=)`); what landed is read from
-    the batch branch, whose tip stands where HEAD stood."""
+    """Over a batch draft; what landed is read from the batch branch."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     lane = _pitfalls_lane(tmp_path)
     target = write(tmp_path / "outside" / "reducer.md", EDITED_REDUCER)
@@ -148,17 +146,17 @@ def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
         assert lane.tip() != head, "the control's edit was not committed"
         assert lane.text_at_tip(REDUCER_REL) == EDITED_REDUCER
         return
-    # #1108 P4 (OD18/OD23, owner ruling 2): the ChangeSet refuses the claim whole, naming the
-    # entry by its repo-relative path; the lane's own gate never reads it.
+    # The ChangeSet refuses the claim whole, naming the entry by its repo-relative path; the
+    # lane's own gate never reads it.
     assert raised(got, "DeliveryRefused", REDUCER_REL), got
     assert OUT_MARK not in got[2], got
     assert lane.tip() == head, "a link or a hard link was committed"
 
 
 def _lead_lane(tmp_path: Path) -> C.DraftLane:
-    """#1108 P4 (O7, OD6, OD12 class ii): `_worktree`'s tree as a started batch's draft (the
-    `elastic` and `wazuh` markers and catalogs, the `elastic` skill, the catalog schema, in the
-    batch base), its `elastic` and `wazuh` adapters in the product checkout."""
+    """`_worktree`'s tree as a started batch's draft (the `elastic` and `wazuh` markers and
+    catalogs, the `elastic` skill, the catalog schema, in the batch base), its `elastic` and
+    `wazuh` adapters in the product checkout."""
     product = seed_product(tmp_path, adapters=("elastic", "wazuh"))
     files = {**seed_agent_files(markers=("elastic", "wazuh"), skills=("elastic",),
                                 catalog=("elastic", "wazuh")),
@@ -172,7 +170,7 @@ def _lead_lane(tmp_path: Path) -> C.DraftLane:
 class Left:
     """What the agent leaves below `skills/`: the name, the bytes, how the gate refuses the
     plain file (`None`: it passes and is committed). A link or a hard link to an outside file
-    holding the same bytes is refused by the ChangeSet before any gate (#1108 P4, OD18/OD23)."""
+    holding the same bytes is refused by the ChangeSet before any gate."""
 
     id: str
     name: str
@@ -196,10 +194,8 @@ LEFTS = [
 @pytest.mark.parametrize("what", LEFTS, ids=lambda w: w.id)
 def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
         tmp_path: Path, what: Left, left: str, caplog):
-    """#1108 P4 (O7, OD6, OD12 class ii): over a batch draft (`_worktree`'s tree as the tenant's
-    `agent/skills`, its adapters in the product checkout), the lane's deps built on the batch
-    (ASSUMED SEAM `build_lead_author_deps(..., batch=)`, `draft_lead_deps`); what landed is read
-    from the batch branch, whose tip stands where HEAD stood."""
+    """Over a batch draft (`_worktree`'s tree as the tenant's `agent/skills`, its adapters in the
+    product checkout); what landed is read from the batch branch."""
     product = seed_product(tmp_path, adapters=("elastic", "wazuh"))
     lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=seed_agent_files(
         markers=("elastic", "wazuh"), skills=("elastic",), catalog=("elastic", "wazuh")))
@@ -239,8 +235,8 @@ def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
         assert raised(got, "LeadAuthorError", what.plain_refusal), got
         assert OUT_MARK in got[2], "the control's file was not read"
         return
-    # #1108 P4 (OD18/OD23, owner ruling 2): a link or hard link in the lane is a ChangeSet
-    # refusal of the whole claim, naming the entry; nothing behind it is read.
+    # A link or hard link in the lane is a ChangeSet refusal of the whole claim, naming the
+    # entry; nothing behind it is read.
     assert raised(got, "DeliveryRefused", rel), got
     assert OUT_MARK not in repr(got) + repr(logged(caplog)), got
 
@@ -324,9 +320,8 @@ def test_the_draft_is_created_through_the_held_mount(tmp_path: Path, full: bool,
 
 def test_two_claims_over_one_paths_each_mint_through_their_own_trees(
         tmp_path: Path, monkeypatch, caplog):
-    """#1108 P4 (O7, OD12 class ii): two claims over one batch draft (ASSUMED SEAM
-    `_invoke_lead_author(..., batch=)`). Each claim's minted draft is observed after its own
-    serve: the draft is re-synced per claim (OD15), so a later claim may not see an earlier's."""
+    """Two claims over one batch draft. Each claim's minted draft is observed after its own
+    serve: the draft is re-synced per claim, so a later claim may not see an earlier one's."""
     caplog.set_level(logging.DEBUG)
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     lane = _lead_lane(tmp_path)
@@ -356,9 +351,7 @@ CONTRADICTING = (f"---\nid: elastic.contradicts\nstatus: draft\ncontradicts_skil
 @pytest.mark.parametrize("left", ["plain", "hardlink"])
 def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
         tmp_path: Path, monkeypatch, left: str):
-    """#1108 P4 (O7, OD6, OD12 class ii): over a batch draft, the deps built on the batch
-    (ASSUMED SEAM `build_lead_author_deps(..., batch=)`); the pending draft is named
-    repo-relative in the tenant repo (`agent/skills/...`)."""
+    """Over a batch draft; the pending draft is named repo-relative (`agent/skills/...`)."""
     monkeypatch.delenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", raising=False)
     lane = _lead_lane(tmp_path)
     paths = lane.paths
@@ -388,8 +381,6 @@ def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
 
 @pytest.mark.parametrize("refused", [False, True], ids=["control", "EIO"])
 def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, refused: bool):
-    """#1108 P4 (O7, OD6, OD12 class ii): over a batch draft, the deps built on the batch
-    (ASSUMED SEAM `build_lead_author_deps(..., batch=)`) under trees holding its skills."""
     lane = _lead_lane(tmp_path)
     paths = lane.paths
     run_dir = _run_dir()
@@ -417,9 +408,8 @@ def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, r
 
 @pytest.fixture
 def scene(tmp_path: Path):
-    """#1108 P4 (O7, OD6, OD12 class ii): the skills tree as a tenant-shaped root
-    (`draft_scene_over`: the mount `<root>/agent/skills`, names `agent/skills/...`, committed as
-    the batch base); the adapters stay in the product checkout."""
+    """The skills tree at a tenant-shaped root (`draft_scene_over`), committed as the batch base;
+    the adapters stay in the product checkout."""
     with draft_scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
         yield s
 

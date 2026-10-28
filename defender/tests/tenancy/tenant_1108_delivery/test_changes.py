@@ -52,8 +52,8 @@ from ._scenarios import (
 )
 
 def test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files(repo, tmp_path):
-    """O-C/O-D: added, changed and deleted regular files in a lane become `AgentChange`s (repo-
-    relative path, exact bytes, `None` for a deletion)."""
+    """Added, changed and deleted regular files in a lane become `AgentChange`s (repo-relative
+    path, exact bytes, `None` for a deletion)."""
     def edit(checkout):
         _write(checkout / "agent/lessons/merged.md", "human-reviewed merge\n")
         _write(checkout / "agent/lessons/tool.md", "#!/bin/sh\n")
@@ -92,9 +92,9 @@ def test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_fil
 
 
 def test_an_existing_lesson_rewritten_lf_to_crlf_with_the_same_text_is_a_change_of_those_bytes(repo):
-    """O-C/O-D (review R-4): the ChangeSet compares raw bytes, so a lane file the box rewrites
-    from LF to CRLF endings, its text otherwise unchanged, is a change carrying the CRLF bytes,
-    and the commit stores exactly those bytes."""
+    """The ChangeSet compares raw bytes, so a lane file the box rewrites from LF to CRLF
+    endings, its text otherwise unchanged, is a change carrying the CRLF bytes, and the commit
+    stores exactly those bytes."""
     batch = delivery(repo, ForgeHTTP()).start_batch("crlfonly", lanes=LANES)
     lane = batch.draft_root / "agent/lessons"
     lesson = sorted(p for p in lane.rglob("*") if p.is_file())[0]
@@ -113,8 +113,8 @@ def test_an_existing_lesson_rewritten_lf_to_crlf_with_the_same_text_is_a_change_
 
 
 def test_a_mode_only_edit_of_an_existing_lesson_is_no_change(repo):
-    """O-C/O-D (review R-4): the commit-maker stores plain files (mode 100644 whatever the box
-    set), so a chmod of an unchanged lane file, its bytes untouched, is no change at all."""
+    """The commit-maker stores plain files (mode 100644 whatever the box set), so a chmod of an
+    unchanged lane file, its bytes untouched, is no change at all."""
     batch = delivery(repo, ForgeHTTP()).start_batch("modeonly", lanes=LANES)
     lane = batch.draft_root / "agent/lessons"
     lesson = sorted(p for p in lane.rglob("*") if p.is_file())[0]
@@ -127,7 +127,7 @@ def test_a_mode_only_edit_of_an_existing_lesson_is_no_change(repo):
 
 @pytest.mark.parametrize("changer", sorted(_BYTE_CHANGERS))
 def test_the_commit_maker_stores_the_boxs_bytes_whatever_mains_attributes_say(repo, tmp_path, changer):
-    """O-C: the commit-maker stores each changed file's bytes exactly as the box wrote them."""
+    """The commit-maker stores each changed file's bytes exactly as the box wrote them."""
     attributes, driver = _BYTE_CHANGERS[changer]
     push_to_remote(repo, tmp_path, lambda c: _write(c / ".gitattributes", attributes))
     clone = repo[0].knowledge
@@ -144,7 +144,6 @@ def test_the_commit_maker_stores_the_boxs_bytes_whatever_mains_attributes_say(re
 @pytest.mark.parametrize("attributes", ["*.md text eol=crlf\n", "*.md text eol=crlf ident\n"],
                          ids=["eol", "eol-and-ident"])
 def test_claim_after_claim_the_box_sees_exactly_the_committed_bytes(repo, tmp_path, attributes):
-    """Claim after claim the box sees exactly the committed bytes."""
     def human(checkout):
         _write(checkout / ".gitattributes", attributes)
         (checkout / "agent/lessons/human.md").write_bytes(b"a human's lesson\n")
@@ -182,7 +181,6 @@ def test_claim_after_claim_the_box_sees_exactly_the_committed_bytes(repo, tmp_pa
 @pytest.mark.parametrize("entry", sorted(_REFUSED_OUTPUT))
 def test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole(
         repo, tmp_path, monkeypatch, entry):
-    """A claim holding anything but in lane regular files is refused whole."""
     if entry in _REFUSED_BASE:
         def base(checkout):
             for rel, text in _REFUSED_BASE[entry].items():
@@ -245,8 +243,8 @@ def test_git_metadata_in_a_lane_never_becomes_a_commit(repo, plant):
 @pytest.mark.parametrize("shape", ["list-of-changes", "tuple-of-changes", "bare-change",
                                    "path-list", "mapping"])
 def test_the_commit_maker_takes_nothing_but_a_change_set(repo, shape):
-    """O-C: the commit-maker's sole input is a `ChangeSet`; anything else, however close in
-    shape, is refused before any branch moves. A real `ChangeSet` commits (control)."""
+    """The commit-maker's sole input is a `ChangeSet`; anything else, however close in shape,
+    is refused before any branch moves. A real `ChangeSet` commits (control)."""
     mod = target()
     clone = repo[0].knowledge
     batch = delivery(repo, ForgeHTTP()).start_batch("only", lanes=LANES)
@@ -264,7 +262,6 @@ def test_the_commit_maker_takes_nothing_but_a_change_set(repo, shape):
 
 
 def test_a_change_set_cannot_change_once_built(repo):
-    """A change set cannot change once built."""
     clone = repo[0].knowledge
     batch = delivery(repo, ForgeHTTP()).start_batch("frozen", lanes=LANES)
     _write(batch.draft_root / "agent/lessons/ok.md", "ok\n")
@@ -303,7 +300,6 @@ def test_a_change_set_cannot_change_once_built(repo):
     ("agent/AGENT.md", None), ("agent/lessons/x.md", "text, not bytes"),
 ])
 def test_no_change_set_commits_outside_the_lanes_or_touches_a_forbidden_name(repo, path, content):
-    """No change set commits outside the lanes or touches a forbidden name."""
     mod = target()
     clone = repo[0].knowledge
     batch = delivery(repo, ForgeHTTP()).start_batch("bounded", lanes=LANES)
@@ -355,7 +351,6 @@ def test_claims_commit_and_reset_one_after_another_within_one_batch(repo):
 
 
 def test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links(repo, tmp_path):
-    """A claim reset resyncs the draft and never follows box links."""
     batch = delivery(repo, ForgeHTTP()).start_batch("reset", lanes=LANES)
     lane = batch.draft_root / "agent/lessons"
     for name in ("a.md", "edited.md", "fifo.md", "deep/b.md"):
@@ -384,7 +379,7 @@ def test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links(repo, tmp_p
 
 
 def test_the_first_commit_makes_the_branch_and_never_takes_one_over(repo):
-    """C2: the commit-maker moves the batch's branch by compare-and-swap, and the first commit
+    """The commit-maker moves the batch's branch by compare-and-swap, and the first commit
     expects no branch at all: it creates it."""
     http = ForgeHTTP()
     d = delivery(repo, http)
@@ -402,8 +397,8 @@ def test_the_first_commit_makes_the_branch_and_never_takes_one_over(repo):
 
 def test_the_commit_maker_takes_no_lock_and_leaves_main_the_index_and_the_checkout_alone(
         repo, tmp_path):
-    """C2 / O-F (narrowed): the commit-maker writes git objects and moves its own branch by
-    compare-and-swap, with no lock (a lock there would fall inside a box window)."""
+    """The commit-maker writes git objects and moves its own branch by compare-and-swap, with
+    no lock (a lock there would fall inside a box window)."""
     tenant = repo[0]
     clone = tenant.knowledge
     batch = delivery(repo, ForgeHTTP()).start_batch("lockless", lanes=LANES)

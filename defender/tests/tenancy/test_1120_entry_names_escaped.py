@@ -16,8 +16,6 @@ def _no_control_characters(text: str) -> None:
 
 
 def test_a_stray_top_level_name_is_shown_escaped(tmp_path: Path) -> None:
-    """A top-level file named with an escape sequence: refused, the message carries no
-    control character, and names the entry by its escaped form."""
     root = tmp_path / "data"
     H.adopted(root)
     (H.knowledge_dir(root) / _FORGED).write_text("", encoding="utf-8")

@@ -1,4 +1,4 @@
-"""#869 M3/O2 at the SINK — what a real granted call actually records."""
+"""#869 at the sink: what a real granted call records."""
 from __future__ import annotations
 
 import pytest

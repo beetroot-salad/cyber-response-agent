@@ -1,4 +1,4 @@
-"""#869 M3/O2/U3 — the queries-table row names the system the call was dispatched to."""
+"""#869: the queries-table row names the system the call was dispatched to."""
 from __future__ import annotations
 
 from defender.learning.leads.draft_synthesis import (
@@ -10,8 +10,7 @@ from defender.investigation.query_tool import resolve_query_id
 
 def test_resolve_query_id_refuses_a_foreign_prefix():
     assert resolve_query_id("elastic", "esql", "fakesys.hunt-creds") == "elastic.esql"
-    # The two shapes that are already refused, so the new rule joins a screen rather than
-    # replacing one: a reserved sentinel prefix and a traversal-bearing id.
+    # The screen's other refusals still hold: a reserved sentinel prefix and a traversal-bearing id.
     assert resolve_query_id("elastic", "esql", "∅.bash-shim") == "elastic.esql"
     assert resolve_query_id("elastic", "esql", "../x") == "elastic.esql"
 

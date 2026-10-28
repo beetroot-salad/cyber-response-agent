@@ -27,10 +27,11 @@ from defender.tests.support.storage._session_store_705 import (
 )
 
 
-# demand #0 — one entry point, three roles, one truncation rule
+# one entry point, three roles, one truncation rule
 
 def test_store_reader_return_shape_is_role_scoped(tmp_path):
-    """One reader entry point takes a role from the closed set {send, analysis, actor}:"""
+    """`send` and `analysis` return messages (`analysis` keeps the orphan terminal response `send`
+    cuts); `actor` returns coordinate rows of exactly four columns."""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, n_complete = mid_pair_session(store)
@@ -43,7 +44,7 @@ def test_store_reader_return_shape_is_role_scoped(tmp_path):
     assert all(isinstance(m, (ModelRequest, ModelResponse)) for m in analysis), analysis
     assert len(send) == n_complete
     assert len(analysis) == n_complete + 1, (
-        "the analysis read must see the orphan terminal response R8 keeps for it")
+        "the analysis read does not see the orphan terminal response")
 
     assert actor, "the actor read returned nothing"
     assert not isinstance(actor[0], (ModelRequest, ModelResponse))
@@ -52,7 +53,6 @@ def test_store_reader_return_shape_is_role_scoped(tmp_path):
 
 
 def test_reader_role_vocabulary_is_closed_and_unknown_roles_are_refused(tmp_path):
-    """Exactly `send`, `analysis` and `actor` are accepted; every other value — an unknown"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, _ = mid_pair_session(store)
@@ -71,7 +71,6 @@ def test_reader_role_vocabulary_is_closed_and_unknown_roles_are_refused(tmp_path
 
 
 def test_a_role_argument_supplied_by_agent_authored_content_is_not_honoured(tmp_path):
-    """A `role` value derived from agent- or tool-authored content does not select a"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, _ = mid_pair_session(store)
@@ -91,30 +90,11 @@ def test_a_role_argument_supplied_by_agent_authored_content_is_not_honoured(tmp_
         "content that names a role must not widen the projection it is read under")
 
 
-def _reachable_by_row_id(module, store, row_id: int) -> list[str]:
-    """Everything the reader hands back when it is DRIVEN with a raw row id."""
-    out: list[str] = []
-    for name in dir(module):
-        if name.startswith("_"):
-            continue
-        fn = getattr(module, name)
-        if not callable(fn):
-            continue
-        for args in ((store, row_id), (row_id,), (store, row_id, "analysis")):
-            try:
-                got = fn(*args)
-            except Exception:  # noqa: BLE001 — a refusal of any shape is the contract
-                continue
-            out.append(repr(got))
-    return out
-
-
-# truncation — the demand and its REQUIRED negative control (R8)
+# truncation, and its negative control
 
 @pytest.mark.parametrize("terminator", ["BudgetKill", "UsageLimitExceeded", "RunAborted"])
 def test_sendable_history_stops_at_the_last_complete_pair_on_every_terminator(
         tmp_path, terminator):
-    """The history the reader returns FOR ROLE=`send` ends on the last complete"""
     ss = store_mod()
     store = make_store(tmp_path, case_id=f"case-{terminator.lower()}")
     session_id, n_complete = mid_pair_session(store)
@@ -135,7 +115,7 @@ def _answered(messages, call: ToolCallPart) -> bool:
 
 
 def test_an_analysis_read_is_not_stopped_at_the_last_complete_pair(tmp_path):
-    """THE NEGATIVE CONTROL for the truncation demand: the same mid-pair session read at"""
+    """The negative control for `send`'s truncation: the same mid-pair session read as `analysis`."""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, n_complete = mid_pair_session(store)
@@ -156,7 +136,7 @@ def test_an_analysis_read_is_not_stopped_at_the_last_complete_pair(tmp_path):
 
 
 def test_the_actor_row_projection_over_a_session_that_ends_mid_pair(tmp_path):
-    """Over a session whose final response has no matching returns, the `actor` read"""
+    """Over a session ending mid-pair, the `actor` read is not truncated and carries no payload."""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, n_complete = mid_pair_session(store)
@@ -179,7 +159,8 @@ def test_the_actor_row_projection_over_a_session_that_ends_mid_pair(tmp_path):
 
 
 def test_run_end_flush_on_a_forked_sessions_own_terminal_turn(tmp_path):
-    """For a fork whose parent chain crosses into another `session_id` partway up, the"""
+    """For a fork whose chain crosses into its parent's session, `send` cuts only the fork's own
+    orphan response: the pair straddling the two sessions is complete."""
     ss = store_mod()
     store = make_store(tmp_path)
     parent = store.new_session(agent_id="main")
@@ -206,7 +187,6 @@ def test_run_end_flush_on_a_forked_sessions_own_terminal_turn(tmp_path):
 # hydrate — the walk, and what separates it from the truncation rule
 
 def test_hydrate_returns_the_root_to_tip_path_in_order(tmp_path):
-    """The reader called with an untruncated role (`analysis`) returns the parent chain"""
     ss = store_mod()
     store = make_store(tmp_path)
     fx = nine_row_fixture(store)
@@ -228,7 +208,6 @@ def test_hydrate_returns_the_root_to_tip_path_in_order(tmp_path):
 
 
 def test_the_synthesized_flag_is_surfaced_to_the_analysis_shape(tmp_path):
-    """A synthesized frontier row's provenance reaches the analysis consumer: the reader"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -245,7 +224,6 @@ def test_the_synthesized_flag_is_surfaced_to_the_analysis_shape(tmp_path):
 # the renderer — inversion, the tail, the fold
 
 def test_ingest_tail_is_exactly_response_then_request_including_across_a_fold(tmp_path):
-    """On every turn of a store-rendered run — the fold turn included — the rows appended"""
     sel = selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -271,7 +249,7 @@ def test_ingest_tail_is_exactly_response_then_request_including_across_a_fold(tm
 
 
 def test_a_composer_is_called_on_the_mint_only_and_its_action_runs_once_the_row_landed(tmp_path):
-    """`text` may be a `selection.Composer` (#936): a callable the mint invokes ON THE APPEND"""
+    """`text` may be a `selection.Composer`: a callable returning `(text, landed)`."""
     sel = selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -300,7 +278,7 @@ def test_a_composer_is_called_on_the_mint_only_and_its_action_runs_once_the_row_
 
 
 def test_folds_are_restart_shaped_with_an_empty_tail(tmp_path):
-    """After a fold the rendered history is the orientation row plus the frontier and"""
+    """After a fold the render is [orientation, frontier]: no live turn survives."""
     sel = selection_mod()
     ss = store_mod()
     store = make_store(tmp_path)
@@ -324,7 +302,7 @@ def test_folds_are_restart_shaped_with_an_empty_tail(tmp_path):
 
 
 def test_compaction_on_a_restored_history_survives_against_selection(tmp_path):
-    """Compaction over a restored history still folds correctly when the fold boundary is"""
+    """Frontier-looking CONTENT is folded away like any turn: the boundary is the frontier row."""
     sel = selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")

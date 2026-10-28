@@ -56,6 +56,6 @@ def test_the_weights_table_still_names_most_test_files():
     table = json.loads(_shard.WEIGHTS.read_text(encoding="utf-8"))
     unweighted = sorted(files - table.keys())
     assert len(unweighted) <= UNWEIGHTED_LIMIT * len(files), (
-        f"{len(unweighted)} of {len(files)} test files have no recorded cost, so the CI shards "
-        "may no longer balance. Refresh the table from a CI run where both shards finished: "
+        f"{len(unweighted)} of {len(files)} test files have no recorded cost; refresh the table "
+        "from a CI run where both shards finished: "
         "python3 defender/tests/_shard_weights_refresh.py <run id>")

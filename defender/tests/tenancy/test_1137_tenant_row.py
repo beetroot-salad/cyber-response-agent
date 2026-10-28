@@ -28,7 +28,7 @@ TID = fixture_uuid("tenant:acme")
 OTHER = fixture_uuid("tenant:beta")
 #: The good row's timestamp.
 GOOD_AT = "2026-09-26T00:00:00+00:00"
-#: The row a linked `<T>` leads to has its own timestamp, so "served" is seen to be THAT row.
+#: The row a linked `<T>` leads to has its own timestamp, so "served" is seen to be that row.
 LINKED_AT = "2026-01-02T03:04:05+00:00"
 #: The second name a hard-linked row has, outside the data root.
 SECOND_NAME = "second-name.json"
@@ -145,7 +145,7 @@ def _outcome(fn: Callable[..., Any], *args: Any, **kw: Any) -> tuple[Any, Except
 
 def _served(fn: Callable[..., Any], *args: Any, **kw: Any) -> Any:
     value, raised = _outcome(fn, *args, **kw)
-    assert raised is None, f"{fn.__name__} refused where today it serves: {raised!r}"
+    assert raised is None, f"{fn.__name__} refused where it should serve: {raised!r}"
     return value
 
 
@@ -153,7 +153,7 @@ def _refused(fn: Callable[..., Any], *args: Any, **kw: Any) -> str:
     """The refusal's message, after checking that the call refused with `TenantRefused` itself:
     no subclass, and no bare `OSError` or `ValueError` escaping."""
     value, raised = _outcome(fn, *args, **kw)
-    assert raised is not None, f"{fn.__name__} served {value!r} where today it refuses"
+    assert raised is not None, f"{fn.__name__} served {value!r} where it should refuse"
     assert type(raised) is owner.TenantRefused, (
         f"{fn.__name__} refused with {type(raised).__name__}, not TenantRefused: {raised}")
     return str(raised)
@@ -188,7 +188,7 @@ def _plant_linked_dir(w: Where) -> None:
 
 
 def _plant_live_link(w: Where) -> None:
-    """The row is a link to a GOOD row outside the root: a reader that followed it would serve."""
+    """The row is a link to a good row outside the root: a reader that followed it would serve."""
     target = w.outside / "target.json"
     target.write_text(GOOD_ROW, encoding="utf-8")
     w.dir.mkdir(parents=True)
@@ -206,7 +206,7 @@ def _plant_fifo(w: Where) -> None:
 
 
 def _plant_hard_link(w: Where) -> None:
-    """A GOOD row with a second name outside the root."""
+    """A good row with a second name outside the root."""
     _put_row(w)
     os.link(w.row, w.outside / SECOND_NAME)
 
@@ -225,9 +225,15 @@ _UNDECODABLE = (b'{\n  "created_at": "2026-09-26T00:00:00+00:00\xff",\n'
 #: A good row followed by whitespace past `READ_LIMIT`.
 _OVERSIZED = GOOD_ROW + " " * _io.READ_LIMIT
 
+#: A good row plus a key a newer writer might add: served, the extra key ignored.
+_NEWER_WRITER_ROW = json.dumps(
+    {"tenant_id": TID, "created_at": GOOD_AT, "added_by_a_newer_writer": "x"},
+    indent=2, sort_keys=True) + "\n"
+
 READ_SHAPES: dict[str, ReadShape] = {
     # Served.
     "good-row": ReadShape(_put_row, None),
+    "newer-writer-key": ReadShape(lambda w: _put_row(w, _NEWER_WRITER_ROW), None),
     "linked-T": ReadShape(_plant_linked_dir, None),
     # Refused at the open: the entry at the row's name is not a plain, single-named file.
     "directory-at-row": ReadShape(lambda w: w.row.mkdir(parents=True),
@@ -241,16 +247,16 @@ READ_SHAPES: dict[str, ReadShape] = {
     "hard-linked-row": ReadShape(_plant_hard_link,
                                  lambda w: (w.outside / SECOND_NAME).unlink(),
                                  _io.ALIAS_READ_REFUSAL),
-    # Refused by the read. The reason's wording is the declared change, so none is pinned.
+    # Refused by the read; the reason's wording is not pinned.
     "absent-row": ReadShape(lambda w: w.dir.mkdir(parents=True), _restore),
     "absent-T": ReadShape(lambda w: w.root.mkdir(parents=True), _restore),
     "file-at-T": ReadShape(_plant_file_at_dir, lambda w: _restore(w, remove=w.dir)),
     "undecodable-row": ReadShape(lambda w: _put_row(w, _UNDECODABLE), _restore),
     # A good row padded past the read limit with whitespace: valid JSON as a whole, and a
-    # prefix read would serve it. The whole-file read's size bound refuses it, as today.
+    # prefix read would serve it. The whole-file read's size bound refuses it.
     "oversized-row": ReadShape(lambda w: _put_row(w, _OVERSIZED), _restore,
                                "larger than the read limit"),
-    # Refused by the parse, which D1 leaves alone.
+    # Refused by the parse.
     "empty-row": ReadShape(lambda w: _put_row(w, ""), _restore, "is not valid JSON"),
     "malformed-json": ReadShape(lambda w: _put_row(w, "{not json"), _restore,
                                 "is not valid JSON"),
@@ -309,8 +315,8 @@ def _unlink_dir_and_move_target_in(w: Where) -> None:
 
 
 def _assert_knowledge_refusal(message: str, w: Where) -> None:
-    """Refused at the knowledge step, not at the row: N2 lets the row read follow a linked
-    `<T>`, and acceptance refuses the link later, naming the knowledge folder."""
+    """Refused at the knowledge step, not at the row: the row read may follow a linked `<T>`,
+    and acceptance refuses the link later, naming the knowledge folder."""
     assert not message.startswith(str(w.row)), f"refused at the row, not later: {message!r}"
     assert str(w.dir / "knowledge") in message, f"the refusal names no knowledge folder: {message!r}"
 
@@ -340,7 +346,7 @@ def test_accept_tenant_reads_the_row_as_it_did(tmp_path, shape):
     READ_SHAPES[shape].plant(w)
     _place_knowledge_if_reachable(w)
     accept = functools.partial(owner.accept_tenant, defender_dir=H.DEFENDER)
-    if shape == "good-row":
+    if shape in ("good-row", "newer-writer-key"):
         tenant = _served(accept, fixture_data_root(w.root), TID)
         assert (tenant.id, tenant.row.tenant_id, tenant.row.created_at) == (TID, TID, GOOD_AT)
         return
@@ -361,8 +367,8 @@ def test_accept_placed_knowledge_reads_a_present_row_as_it_did(tmp_path, shape):
     _place_knowledge_if_reachable(w)
     place = functools.partial(owner.accept_placed_knowledge, defender_dir=H.DEFENDER)
     settings = w.dir / "knowledge" / "settings"
-    if shape in ("good-row", "absent-row"):
-        assert _served(place, fixture_data_root(w.root), TID) == (settings, shape == "good-row")
+    if shape in ("good-row", "newer-writer-key", "absent-row"):
+        assert _served(place, fixture_data_root(w.root), TID) == (settings, shape != "absent-row")
         return
     _refuse_then_repair(place, w, shape, tmp_path)
     assert _served(place, fixture_data_root(w.root), TID) == (settings, True), "the positive control"
@@ -426,7 +432,7 @@ class CreateShape:
     ("row", "dir", or "root", which the foreign-root refusal only names somewhere in the
     message). `words` is the stable phrase the design keeps, or None where only the verdict is
     pinned. `repair` removes the plant, after which the same create succeeds. It is None only
-    for the occupied row, whose plant WAS the positive control."""
+    for the occupied row, whose plant was the positive control."""
 
     plant: Callable[[Where], Any]
     repair: Callable[[Where], None] | None
@@ -479,7 +485,7 @@ CREATE_REFUSED: dict[str, CreateShape] = {
                                      lambda w: w.dir.unlink(), "dir", _io._LINKED_FOLDER),
     "file-at-T": CreateShape(_plant_file_at_dir, lambda w: w.dir.unlink(), "dir",
                              _io._NOT_A_FOLDER),
-    # Not a fresh data root (O10), refused before anything is made.
+    # Not a fresh data root, refused before anything is made.
     "foreign-tenant-folder": CreateShape(lambda w: (w.root / OTHER).mkdir(parents=True),
                                          lambda w: (w.root / OTHER).rmdir(), "root",
                                          _NOT_FRESH),

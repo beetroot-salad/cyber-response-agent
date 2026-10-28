@@ -39,18 +39,12 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     elastic_backend,
     envelope,
 )
+from defender.tests.e2e.test_1255_snapshot_branch_point import _arm_launched  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER, FakeVerbs, Turn  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
 CHUNKS = S.chunks(3)
-
-
-def _arm_launched(arm: S.Driven) -> None:
-    refused = S.refused_at_launch(arm)
-    assert refused is None, (
-        f"the arm was refused at launch ({refused}) — the source was driven (so it has its fork "
-        "snapshot) and the branch point is a tool-calling MAIN response outside any retry streak")
 
 
 SMALL_CEILING = challenge_gate.Bounds(extra_turns=1, base_request_limit=6)
@@ -61,8 +55,7 @@ def test_d2_mains_request_count_enters_the_arm_as_its_starting_usage(tmp_path, k
     source = S.drive_source(tmp_path, (), main=S.Forever(opening=[S.append(CHUNKS[0])]),
                             bounds=SMALL_CEILING)
     assert source.summary.get("truncated_by") == session_store.TRUNCATED_BY_REQUEST_LIMIT, (
-        f"the source was not stopped by its request ceiling ({source.summary}) — the count "
-        "below would not be measured against a limit")
+        f"fixture: the source was not stopped by its request ceiling ({source.summary})")
     natural = source.main.calls
     assert natural > k, f"the source made {natural} requests; it cannot be branched at {k}"
     point = S.tool_calling_responses(source.store)[k - 1]
@@ -73,7 +66,7 @@ def test_d2_mains_request_count_enters_the_arm_as_its_starting_usage(tmp_path, k
     assert arm.summary.get("truncated_by") == session_store.TRUNCATED_BY_REQUEST_LIMIT, arm.summary
     assert arm.main.calls == natural - k, (
         f"the arm made {arm.main.calls} requests before its ceiling; the source, branched at its "
-        f"request {k}, had {natural - k} left — the arm's request count restarted")
+        f"request {k}, had {natural - k} left")
 
 
 CAP = {**DEFAULT_LIMITS, "max_tool_calls": 5, "wall_clock_timeout": 3600, "grace_seconds": 600}
@@ -130,8 +123,7 @@ def test_d2_the_subagent_spawn_count_is_restored(tmp_path, monkeypatch):
 
     _arm_launched(arm)
     assert arm.gather.asked == ["l-002"], (
-        f"the arm's dispatches reached {arm.gather.asked}; the source, making the same calls, "
-        "reached only l-002 after the branch — the arm's spawn count restarted")
+        f"the arm's dispatches reached {arm.gather.asked}; the source's reached only l-002")
     assert _counters(arm.state) == _counters(source.state)
 
 
@@ -277,12 +269,8 @@ DENIED = Turn(tool_calls=[("query", {"system": "identity", "verb": "list-authori
 
 
 def _planted_tree(root: Path) -> Path:
-    """Create a checkout mirror, and plant the scene's lessons for the restored file checks.
-
-    #1108 P4 (O1, O4): the lessons a run matches its writes against are its TENANT's
-    (`agent/lessons/`, from the export the run reads), never the checkout's — so the three
-    lessons go into the fixture tenant's agent half (the replays run as that tenant, and the
-    harness publishes its folder before each drive); the checkout mirror carries none."""
+    """A checkout mirror without lessons, and the scene's three lessons in the fixture tenant's
+    agent half: a run matches its writes against its TENANT's lessons, never the checkout's."""
     tree = root / "repo" / "defender"
     tree.mkdir(parents=True)
     for entry in DEFENDER.iterdir():
@@ -303,7 +291,7 @@ def _lines(path: Path) -> list[bytes]:
 
 
 def _rows(path: Path) -> list[dict]:
-    """A log's rows with their timestamp dropped: the one field a re-made row may differ in (the run clock's restore is slice D's)."""
+    """A log's rows with their timestamp dropped: the one field a re-made row may differ in."""
     return [{k: v for k, v in json.loads(line).items() if k != "ts"} for line in _lines(path)]
 
 
@@ -325,10 +313,8 @@ def test_p2_append_only_and_write_once_files_are_restored_up_to_the_cut(tmp_path
         ours = _rows(getattr(source.paths, name))
         assert ours[:n] == _rows(getattr(prefix.paths, name)), (
             f"the source's {name} does not open on the rows a run stopped at the branch point holds")
-        assert n, (f"the source's {name} holds {len(ours)} row(s), {n} through the cut — it must grow on "
-            "both sides of the branch point, or an exact cut is indistinguishable from a copy")
-        assert len(ours) > n, (f"the source's {name} holds {len(ours)} row(s), {n} through the cut — it must grow on "
-            "both sides of the branch point, or an exact cut is indistinguishable from a copy")
+        assert n, f"fixture: the source's {name} holds no row through the cut"
+        assert len(ours) > n, f"fixture: the source's {name} holds no row past the cut ({n} rows)"
     queries_before = [line for line in _lines(source.paths.executed_queries)
                       if json.loads(line).get("lead_id") != "l-002"]  # everything before the cut
     point = S.tool_calling_responses(source.store)[2]  # `echo x`
@@ -537,9 +523,7 @@ def test_p3_the_fork_snapshot_is_not_kept_in_the_run_folder_or_the_tenant_agent_
     keep = _model_readable_records(source.paths)
     payload = source.paths.payload(S.CORRELATION_LEAD, 0).resolve()
     assert payload.is_file(), "fixture: the source has no correlation-lead payload"
-    assert payload in keep, (
-        "fixture: the correlation lead's payload is not among the records kept — the prune "
-        "would take evidence the arm restores")
+    assert payload in keep, "fixture: the correlation lead's payload is not among the kept records"
     removed = []
     for entry in sorted(source.run_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
         resolved = entry.resolve()

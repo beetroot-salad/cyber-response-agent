@@ -1,4 +1,4 @@
-"""Substrate for the issue-869 executable spec (`docs/archive/spec-graphs/spec_graph_869.yaml`)."""
+"""Fixture repos, spawn fakes and log readers for the #869 declared-systems suites."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
@@ -9,65 +9,28 @@ import subprocess
 from pathlib import Path
 
 from defender import _git
-#: Re-exported so the #869 suites keep importing the shape predicate from the one module that
-#: states this seam's contract, rather than each reaching into `systems.verbs` themselves.
+#: Re-exported: the #869 suites import the shape predicate from here.
 from defender.systems.verbs import is_system_name  # noqa: F401  (re-exported)
 
-# THE SURFACE UNDER TEST — it does not exist on this base (RED by construction)
-try:  # pragma: no cover — the post-implementation branch
-    from defender.learning.leads.declared_systems import (  # type: ignore[import-not-found]
-        adapter_declared_systems,
-        declared_systems,
-    )
-except ImportError as _err:  # pragma: no cover — the pre-implementation state
-    # Rebound out of the `except` name, which Python unbinds at the end of the block — a
-    # closure that read it there would raise NameError and hide the real diagnosis.
-    _missing_target = _err
-
-    def _not_yet_written(symbol: str):
-        """Stand in for one not-yet-written symbol.
-
-        NOT a skip and NOT a soften: calling it raises, so each test fails loudly on its
-        own. The indirection exists only so a missing target does not abort pytest's whole
-        collection and take the rest of the tree's suite down with it."""
-
-        def _raise(*_a, **_k):
-            raise ImportError(
-                f"defender.learning.leads.declared_systems.{symbol} does not exist yet — "
-                f"this suite is the executable spec for it (spec_graph_869.yaml). "
-                f"Original: {_missing_target}"
-            )
-
-        return _raise
-
-    declared_systems = _not_yet_written("declared_systems")  # type: ignore[assignment]
-    adapter_declared_systems = _not_yet_written(  # type: ignore[assignment]
-        "adapter_declared_systems"
-    )
+#: Re-exported: the #869 suites import the resolver under test from here.
+from defender.learning.leads.declared_systems import (  # noqa: F401  (re-exported)
+    adapter_declared_systems,
+    declared_systems,
+)
 
 
-#: The two source directories, spelled here once so a fixture cannot disagree with the
-#: resolver about where it reads.
+#: The source directories, spelled once so a fixture cannot disagree with the resolver about
+#: where it reads.
 ADAPTERS_REL = "defender/integrations/"
 SKILLS_REL = "defender/skills/"
 CATALOG_REL = "defender/skills/gather/queries/"
 
-#: The two NESTED `execution.md` addresses phase F found admitted at the commit gate (F1) —
-#: an `execution.md` whose parent directory name is entirely model-chosen, one under a
-#: system's `_draft/` and one under the catalog. Spelled once here because two demands are
-#: about the same two addresses from opposite ends (the resolver must not read them as
-#: markers; the commit gate must not let them land) and a drift between the two spellings
-#: would leave the composition open with both tests green.
-NESTED_MARKER_RELS = (
-    "defender/skills/elastic/_draft/mcpsys/execution.md",
-    "defender/skills/gather/queries/elastic/mcpsys/execution.md",
-)
-
-#: #1108 P4 (OD6): the same addresses as a tenant repo spells them. After P4 the lane's root is
-#: a batch draft (`<T>/drafts/<id>/`, holding `agent/`); adapters stay in the product checkout
-#: (`ADAPTERS_REL`, #1172). The `defender/` spellings above stay for the suites not yet moved.
+#: The same directories as a tenant repo or batch draft (`<T>/drafts/<id>/`, holding `agent/`)
+#: spells them; adapters stay in the product checkout (`ADAPTERS_REL`).
 AGENT_SKILLS_REL = "agent/skills/"
 AGENT_CATALOG_REL = "agent/skills/gather/queries/"
+#: Two nested `execution.md` addresses whose parent directory name is model-chosen (one under a
+#: system's `_draft/`, one under the catalog): the resolver must not read them as markers.
 AGENT_NESTED_MARKER_RELS = (
     "agent/skills/elastic/_draft/mcpsys/execution.md",
     "agent/skills/gather/queries/elastic/mcpsys/execution.md",
@@ -77,11 +40,9 @@ AGENT_NESTED_MARKER_RELS = (
 #: path above — the obvious implementation's answer, and the one the depth rule refuses.
 NESTED_MARKER_PARENT = "mcpsys"
 
-#: What `defender/learning/`'s mutable state must never look like to `git status`: the
-#: corpus-scope walk raises on ANY change outside `defender/skills/**.md`, so a queue file
-#: inside the fixture repo would be read as a stray rather than as state. Every builder here
-#: puts the state root outside the repo instead, and this is the belt for the paths that
-#: cannot be moved.
+#: Hides the learning lane's mutable state from `git status`: the corpus-scope walk raises on
+#: any change outside `defender/skills/**.md`, so a queue file in the fixture repo would read as
+#: a stray. Builders put the state root outside the repo; this covers paths that cannot move.
 GIT_IGNORE = (
     "defender/learning/_pending/\n"
     "defender/learning/_pending_leads/\n"
@@ -90,13 +51,8 @@ GIT_IGNORE = (
     "state/\n"
 )
 
-#: An adapter module body that is IMPORT-SAFE. The resolver must never import one (C2/G1), so
-#: `RAISING_ADAPTER_BODY` below is the fault that proves it; this is the ordinary case.
+#: An import-safe adapter body.
 ADAPTER_BODY = "VERBS = {}\n"
-
-#: An adapter module whose import RAISES. `declared_systems` must still yield its system name:
-#: the adapter half is a cold glob over filenames, never a load (C2, G1).
-RAISING_ADAPTER_BODY = 'raise RuntimeError("this adapter must never be imported")\n'
 
 
 def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -106,11 +62,8 @@ def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
 
 
 def adapter_file(repo: Path, system: str) -> Path:
-    """Where an adapter for `system` lands.
-
-    The inverse of `verbs._system_of`, which is `name[:-len(SUFFIX)].replace("_", "-")` — so
-    a hyphenated system (`change-mgmt`) is an underscored filename. Spelled here so a fixture
-    for `change-mgmt` cannot silently seed a system called `change_mgmt`."""
+    """Where an adapter for `system` lands: the inverse of `verbs._system_of`, so a hyphenated
+    system (`change-mgmt`) gets an underscored filename."""
     return repo / ADAPTERS_REL / f"{system.replace('-', '_')}_adapter.py"
 
 
@@ -145,47 +98,35 @@ def write_marker(repo: Path, system: str, *, body: str = "# execution\n") -> Pat
     return write(marker_file(repo, system), body)
 
 
-def write_skill_md(repo: Path, system: str, *, name: str | None = None) -> Path:
-    front = f"---\nname: defender-{system if name is None else name}\n---\n"
-    return write(skill_md(repo, system), f"{front}# {system}\n")
+def _skill_md_text(system: str) -> str:
+    return f"---\nname: defender-{system}\n---\n# {system}\n"
 
 
-def write_template(
-    repo: Path, system: str, stem: str, *, tid: str | None = None,
-    status: str = "established", draft: bool = False,
-) -> Path:
-    """One catalog template under `gather/queries/<system>/` (or its `_draft/`).
+def _template_text(system: str, stem: str) -> str:
+    """An established catalog template whose id agrees with its directory."""
+    return f"---\nid: {system}.{stem}\nstatus: established\n---\n\n## Goal\n\nprobe\n\n## Query\n\nx\n"
 
-    `tid` defaults to the directory-agreeing id — the invariant C35 measured 34/34 — so a
-    test that wants a DISAGREEING one has to say so out loud."""
-    parent = repo / CATALOG_REL / system / ("_draft" if draft else "")
-    ident = f"{system}.{stem}" if tid is None else tid
-    return write(
-        parent / f"{stem}.md",
-        f"---\nid: {ident}\nstatus: {status}\n---\n\n## Goal\n\nprobe\n\n## Query\n\nx\n",
-    )
+
+def write_skill_md(repo: Path, system: str) -> Path:
+    return write(skill_md(repo, system), _skill_md_text(system))
+
+
+def write_template(repo: Path, system: str, stem: str) -> Path:
+    """One catalog template under `gather/queries/<system>/`."""
+    return write(repo / CATALOG_REL / system / f"{stem}.md", _template_text(system, stem))
 
 
 def write_agent_marker(root: Path, system: str, *, body: str = "# execution\n") -> Path:
     return write(agent_marker_file(root, system), body)
 
 
-def write_agent_skill_md(root: Path, system: str, *, name: str | None = None) -> Path:
-    front = f"---\nname: defender-{system if name is None else name}\n---\n"
-    return write(agent_skill_md(root, system), f"{front}# {system}\n")
+def write_agent_skill_md(root: Path, system: str) -> Path:
+    return write(agent_skill_md(root, system), _skill_md_text(system))
 
 
-def write_agent_template(
-    root: Path, system: str, stem: str, *, tid: str | None = None,
-    status: str = "established", draft: bool = False,
-) -> Path:
+def write_agent_template(root: Path, system: str, stem: str) -> Path:
     """`write_template` under `agent/skills/gather/queries/<system>/` of `root`."""
-    parent = root / AGENT_CATALOG_REL / system / ("_draft" if draft else "")
-    ident = f"{system}.{stem}" if tid is None else tid
-    return write(
-        parent / f"{stem}.md",
-        f"---\nid: {ident}\nstatus: {status}\n---\n\n## Goal\n\nprobe\n\n## Query\n\nx\n",
-    )
+    return write(root / AGENT_CATALOG_REL / system / f"{stem}.md", _template_text(system, stem))
 
 
 def seed_agent_files(
@@ -216,7 +157,7 @@ def seed_agent_files(
 def seed_product(tmp_path: Path, *, adapters: tuple[str, ...] = ("elastic",),
                  name: str = "product") -> Path:
     """`seed_tree`'s product half: a committed checkout holding only `defender/integrations/`
-    adapters (they stay in the product repo, #1172) — no corpus, no skills."""
+    adapters — no corpus, no skills."""
     repo = tmp_path / name
     init_git(repo)
     (repo / ADAPTERS_REL).mkdir(parents=True, exist_ok=True)
@@ -242,10 +183,8 @@ def commit_all(repo: Path, message: str = "seed") -> str:
 
 
 def commit_paths(repo: Path, *paths: Path, message: str = "mid-tick") -> str:
-    """Commit exactly these paths and nothing else.
-
-    `git add -A` would sweep in whatever else the drive has put in the worktree, which for
-    the ordering demands is the very thing under observation."""
+    """Commit exactly these paths: `git add -A` would sweep in the other worktree changes the
+    ordering tests observe."""
     git(repo, "add", "--", *(str(p.relative_to(repo)) for p in paths))
     git(repo, "commit", "-q", "-m", message)
     return _git.git_head_sha(repo)
@@ -268,17 +207,13 @@ def seed_tree(
     catalog: tuple[str, ...] = ("elastic",),
     non_systems: tuple[str, ...] = (),
     name: str = "repo",
-    commit: bool = True,
 ) -> Path:
     """A committed git repo standing in for a fresh `lead-author/<id>` worktree."""
     repo = tmp_path / name
     init_git(repo)
     write(repo / ".gitignore", GIT_IGNORE)
-    # Always present, even when it declares nothing: in production `branch.start_batch` cuts
-    # an ordinary worktree off origin/main, so the directory is there and the ABSENT state is
-    # a thing a test has to arrange on purpose (D5). A builder that only created it when it
-    # had files in it would make every empty-source fixture an absent-source fixture, and the
-    # two are different demands.
+    # Always present, even empty: a production worktree has it, so an ABSENT directory is
+    # something a test arranges on purpose (empty and absent are different cases).
     (repo / ADAPTERS_REL).mkdir(parents=True, exist_ok=True)
     for system in adapters:
         write_adapter(repo, system)
@@ -289,8 +224,7 @@ def seed_tree(
     for system in catalog:
         write_template(repo, system, "auth-events")
     write(repo / CATALOG_REL / "SCHEMA.md", "# template schema\n")
-    if commit:
-        commit_all(repo, "seed")
+    commit_all(repo, "seed")
     return repo
 
 
@@ -301,11 +235,8 @@ def read_rows(path: Path) -> list[dict]:
 
 
 def pitfall_row(pid: str, system: str, *, digest: str | None = None, **extra) -> dict:
-    """One queued pitfalls row.
-
-    `stderr_digest` is distinct per row by default because #840 collapses rows sharing a
-    digest into ONE record and the curation threshold counts records — a fixture that reused
-    one digest would seed N rows worth one unit of work."""
+    """One queued pitfalls row. `stderr_digest` is distinct per row by default: rows sharing a
+    digest collapse into one record (#840), and the curation threshold counts records."""
     return {
         "schema_version": 1,
         "pitfall_id": pid,
@@ -322,14 +253,10 @@ def pitfall_row(pid: str, system: str, *, digest: str | None = None, **extra) ->
 
 def seed_executed_query(
     run_dir: Path, *, query_id: str, lead_id: str = "l-001", system: str = "elastic",
-    verb: str = "esql", goal: str = "probe the thing",
+    verb: str = "esql",
 ) -> dict:
-    """Append one row to the run's queries table THROUGH THE PRODUCTION WRITER.
-
-    The table is append-only and read by later ticks, so "a row recorded before the writer
-    rule existed" is not a hypothetical shape — it is whatever `append_query_row` wrote at
-    the time. Seeding through that function rather than by hand is what keeps this fixture a
-    real historical row instead of the test's own idea of one."""
+    """Append one row to the run's queries table through the production writer
+    (`append_query_row`), so it is a real historical row, not the test's idea of one."""
     from defender._io import read_jsonl_rows
     from defender.records import Run, RunPaths
     from defender.investigation.run_state import RunState
@@ -339,11 +266,10 @@ def seed_executed_query(
     gather.mkdir(parents=True, exist_ok=True)
     write(
         gather / f"{lead_id}.lead.json",
-        json.dumps({"goal": goal, "what_to_summarize": []}) + "\n",
+        json.dumps({"goal": "probe the thing", "what_to_summarize": []}) + "\n",
     )
-    # Each seeded row is a historical run's write: the writer takes its seq from that run's
-    # state (#1235), which held the table as it stands — a run holds rows it did not write only
-    # as an inherited prefix, so they are handed to it the way seeding hands them (round 2).
+    # The writer takes its seq from the run's state, which must hold the rows already in the
+    # table as an inherited prefix.
     state = RunState(run_dir, "r869-historical")
     state.inherit_rows(read_jsonl_rows(RunPaths(run_dir).executed_queries))
     return append_query_row(
@@ -351,26 +277,23 @@ def seed_executed_query(
         lead_id=lead_id, system=system, verb=verb, query_id=query_id,
         params={"query": "FROM logs"}, raw_command=f"{system} {verb}",
         payload_text="[]", exit_code=0, payload_status="ok", payload_digest="2 bytes",
-        # `system` is the dispatched name on every row this fixture writes, so the row keys as
-        # itself and the #871 fingerprint column is empty — as it is for every below-guard row.
+        # `system` is the dispatched name here, so the row keys as itself and the fingerprint
+        # column is empty.
         system_key="",
     )
 
 
 class Spawn:
-    """The curator/author spawn, faked at the entry point's own `invoke=` / `invoke_agent=`
-    seam. It RECORDS what it was handed and then runs `edit` against the worktree.
-
-    The recording half is what makes the ordering demands observable: `handoffs` is the value
-    the entry point computed BEFORE the spawn, so a lane that re-resolved membership after
-    the agent ran would have to disagree with it. The fake decides nothing — it does not
-    filter, does not classify, and returns whatever `rc` it was built with."""
+    """The curator/author spawn, faked at the entry point's `invoke=` / `invoke_agent=` seam: it
+    records what it was handed, then runs `edit` against the worktree. `handoffs` is what the
+    entry point computed BEFORE the spawn, so a lane that re-resolved membership after the agent
+    ran would disagree with it. It decides nothing and returns `rc`."""
 
     def __init__(self, edit=None, *, rc: int = 0, root: Path | None = None):
         self.edit = edit
         self.rc = rc
-        #: Where `edit` runs when set (#1108 P4: a batch draft's root, which holds `agent/`),
-        #: instead of the `repo_root` (pitfalls) or `run_dir` (lead author) the seam hands in.
+        #: Where `edit` runs when set (a batch draft's root, which holds `agent/`), instead of
+        #: the `repo_root` (pitfalls) or `run_dir` (lead author) the seam hands in.
         self.root = root
         self.calls: list[dict] = []
 
@@ -410,71 +333,28 @@ class LeadAuthorSpawn(Spawn):
 
 
 def loop_log(capsys) -> str:
-    """Everything the loop said on this drive.
-
-    Both streams, joined: the lane's loggers write to stderr and a few of the surfaces
-    these demands bind print to stdout, and which descriptor a line lands on is not what any
-    demand here is about — that a line naming the refusal EXISTS is."""
+    """Everything the loop said on this drive, stderr and stdout joined: which stream a line
+    lands on does not matter, only that it exists."""
     captured = capsys.readouterr()
     return captured.err + captured.out
 
 
 def log_lines_naming(log: str, *needles: object) -> list[str]:
-    """The log lines carrying every one of `needles` at once.
-
-    Per-LINE rather than per-log, because "each refusal is named with the source it came
-    from" (FK-5) is a claim about the pairing: two lines, one naming the name and another
-    naming a directory, satisfy a whole-log substring test while telling an operator
-    nothing about which source produced which name."""
+    """The log lines carrying every one of `needles` at once. Per line, not per log: a refusal
+    must be named together with its source, and two separate lines would pass a whole-log test."""
     wanted = [str(n) for n in needles]
     return [ln for ln in log.splitlines() if all(w in ln for w in wanted)]
 
 
-def unreadable_dir_verdict(root: Path, target: Path) -> bool:
-    """Does `declared_systems(root)` RAISE when `target` is a directory it cannot read?"""
-    from defender.learning.leads.lead_extraction import LeadAuthorError
-
-    def _probe() -> bool:
-        try:
-            declared_systems(root)
-        except LeadAuthorError:
-            return True
-        return False
-
-    if os.geteuid() != 0:
-        mode = target.stat().st_mode
-        target.chmod(0o000)
-        try:
-            return _probe()
-        finally:
-            target.chmod(mode & 0o7777)
-
-    _hand_tree_to_nobody(root)
-    target.chmod(0o000)
-    try:
-        code = _verdict_from_child(_probe)
-    finally:
-        target.chmod(0o755)
-        _reclaim_tree(root)
-    assert code in (0, 1), (
-        f"the unreadable-source probe child failed to set up (exit {code}); it never reached "
-        f"the resolver, so neither answer would be about the resolver"
-    )
-    return code == 0
-
-
-#: `nobody`, the uid P2 dropped to. Named rather than repeated, because the chown and the
-#: setuid have to agree or the child fails setup instead of meeting the fault.
+#: `nobody`. Named once because the chown and the setuid must agree, or the child fails setup
+#: instead of meeting the fault.
 _NOBODY = 65534
 
 
 def _hand_tree_to_nobody(root: Path) -> None:
-    """Open the path down to `root` and hand the tree itself to `nobody`.
-
-    Handed over outright rather than merely opened up, because the child also runs the
-    COMMITTED-tree half of the resolver and git refuses a repository whose directory it does
-    not own ("dubious ownership") — which would make the child fail before it ever reached
-    the source under test, and a setup failure is not a refusal."""
+    """Open the path down to `root` and hand the tree to `nobody` outright: the child also runs
+    the committed-tree half of the resolver, and git refuses a repository it does not own
+    ("dubious ownership"), a setup failure rather than a refusal."""
     for parent in (root, *root.parents):
         if parent == Path(parent.root):
             break
@@ -489,26 +369,3 @@ def _hand_tree_to_nobody(root: Path) -> None:
 def _reclaim_tree(root: Path) -> None:
     for path in (root, *root.rglob("*")):
         os.chown(path, 0, 0)
-
-
-def _verdict_from_child(probe) -> int:
-    """Run `probe` as `nobody` in a forked child; return its exit status.
-
-    0 = the resolver refused, 1 = it returned, 2 = the child never got that far. The child
-    reports through its exit status because an exception raised after `setuid` cannot cross
-    back any other way."""
-    pid = os.fork()
-    if pid == 0:  # pragma: no cover — the child never returns to pytest
-        code = 2
-        try:
-            os.setgroups([])
-            os.setgid(_NOBODY)
-            os.setuid(_NOBODY)
-            code = 0 if probe() else 1
-        except BaseException:  # noqa: BLE001 — the child reports through its exit status
-            code = 2
-        finally:
-            os._exit(code)
-    _, status = os.waitpid(pid, 0)
-    assert os.WIFEXITED(status), f"the unreadable-source probe child did not exit: {status}"
-    return os.WEXITSTATUS(status)
