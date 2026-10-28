@@ -21,6 +21,12 @@ HERE = Path(__file__).resolve().parent
 VERSION_TABLE_SCHEMA = "public"
 
 
+def include_object(object_, _name, type_, _reflected, _compare_to) -> bool:
+    """Autogenerate's filter: feature schemas only. A table in the default schema (`public`, which
+    holds Alembic's own table) is reported with no schema at all, so both spellings are excluded."""
+    return type_ != "table" or object_.schema not in (None, VERSION_TABLE_SCHEMA)
+
+
 class RevisionMismatch(Exception):
     """The database is not at the revision this code expects: `database` is its recorded revision
     (`None` when unmigrated), `head` the code's."""
