@@ -180,10 +180,12 @@ services:
     memswap_limit: 1g
     restart: unless-stopped
 
-  # Keycloak's database (#1306): a `keycloak` database owned by the `defender` role, which is also
-  # the dev cluster's superuser, so the API can `createdb` its own beside it. Compose network only.
+  # The dev databases: `keycloak` (#1306) and `defender`, the application's (#1339), both owned by the
+  # `defender` role, which is also the cluster's superuser. Both are created when the data volume is
+  # first initialised; PostgreSQL 17 cannot open a 16 volume, so moving to it wiped the volume
+  # (`docker compose down -v`, then `up`; Keycloak re-imports its realm). Compose network only.
   postgres:
-    image: postgres:${POSTGRES_VERSION:-16.6}
+    image: postgres:${POSTGRES_VERSION:-17}
     container_name: response-postgres
     environment:
       POSTGRES_USER: defender
@@ -191,6 +193,7 @@ services:
       POSTGRES_DB: keycloak
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./postgres/create-application-database.sql:/docker-entrypoint-initdb.d/10-defender.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U defender -d keycloak"]
       interval: 5s

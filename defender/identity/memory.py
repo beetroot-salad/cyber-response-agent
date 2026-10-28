@@ -10,12 +10,12 @@ import hashlib
 import threading
 import uuid
 from collections.abc import Collection
-from typing import Any
+from typing import Any, TypeVar, overload
 
 from defender.records._tenant_id import TenantId
 
 from .errors import DataRuleViolation
-from .rows import Membership, MembershipStatus, Session, User, UserStatus, normalize_email
+from .models import Membership, MembershipStatus, Session, User, UserStatus, normalize_email
 
 #: How stale `last_seen_at` must be before a request writes it again.
 TOUCH_AFTER = _dt.timedelta(minutes=5)
@@ -25,6 +25,18 @@ _LIVE = ("invited", "active")
 def session_hash(value: str) -> str:
     """The lowercase hex SHA-256 of a session value: the only form in which one is stored."""
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+_Row = TypeVar("_Row", User, Membership, Session)
+
+
+@overload
+def _copy(row: _Row) -> _Row: ...
+@overload
+def _copy(row: None) -> None: ...
+def _copy(row: _Row | None) -> _Row | None:
+    """What a repository hands out: a copy, so the caller's changes never reach what is stored."""
+    return row if row is None else dataclasses.replace(row)
 
 
 def _due(next_try_at: _dt.datetime | None, now: _dt.datetime) -> bool:
@@ -47,7 +59,7 @@ class InMemoryIdentityRepository:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._tenants: dict[str, None] = {}
+        self._tenants: dict[str, _dt.datetime] = {}
         self._users: dict[str, User] = {}
         self._by_email: dict[str, str] = {}
         self._by_account: dict[str, str] = {}
@@ -55,23 +67,26 @@ class InMemoryIdentityRepository:
         self._sessions: dict[str, Session] = {}
 
     # --- tenants -----------------------------------------------------------------------------
-    def register_tenant(self, tenant_id: TenantId) -> None:
-        with self._lock:
-            self._tenants.setdefault(str(TenantId(tenant_id)))
+    async def close(self) -> None:
+        """Nothing is held outside this object."""
 
-    def tenant_exists(self, tenant_id: str) -> bool:
+    async def register_tenant(self, tenant_id: TenantId, *, now: _dt.datetime) -> None:
+        with self._lock:
+            self._tenants.setdefault(str(TenantId(tenant_id)), now)
+
+    async def tenant_exists(self, tenant_id: str) -> bool:
         with self._lock:
             return str(tenant_id) in self._tenants
 
-    def tenants(self) -> list[str]:
+    async def tenants(self) -> list[str]:
         with self._lock:
             return sorted(self._tenants)
 
-    def tenant_has_ever_had_membership(self, tenant_id: str) -> bool:
+    async def tenant_has_ever_had_membership(self, tenant_id: str) -> bool:
         with self._lock:
             return any(m.tenant_id == str(tenant_id) for m in self._memberships.values())
 
-    def tenant_has_active_members(self, tenant_id: str) -> bool:
+    async def tenant_has_active_members(self, tenant_id: str) -> bool:
         with self._lock:
             return any(m.tenant_id == str(tenant_id) and m.status == "active"
                        for m in self._memberships.values())
@@ -101,43 +116,43 @@ class InMemoryIdentityRepository:
             self._by_account[signin_account_id] = user.id
         return user
 
-    def add_user(
+    async def add_user(
         self, email: str, *, created_at: _dt.datetime, status: UserStatus = "invited",
         display_name: str = "", signin_account_id: str | None = None, is_platform_admin: bool = False,
     ) -> User:
         """Seeder."""
         with self._lock:
-            return self._new_user(
+            return _copy(self._new_user(
                 email, created_at=created_at, status=status, display_name=display_name,
-                signin_account_id=signin_account_id, is_platform_admin=is_platform_admin)
+                signin_account_id=signin_account_id, is_platform_admin=is_platform_admin))
 
-    def ensure_user(self, email: str, *, now: _dt.datetime) -> User:
+    async def ensure_user(self, email: str, *, now: _dt.datetime) -> User:
         with self._lock:
             existing = self._by_email.get(normalize_email(email))
-            return self._users[existing] if existing else self._new_user(email, created_at=now)
+            return _copy(self._users[existing] if existing else self._new_user(email, created_at=now))
 
-    def user(self, user_id: str) -> User | None:
+    async def user(self, user_id: str) -> User | None:
         with self._lock:
-            return self._users.get(user_id)
+            return _copy(self._users.get(user_id))
 
-    def user_by_email(self, email: str) -> User | None:
+    async def user_by_email(self, email: str) -> User | None:
         with self._lock:
             found = self._by_email.get(normalize_email(email))
-            return self._users[found] if found else None
+            return _copy(self._users[found]) if found else None
 
-    def user_by_signin_account(self, account_id: str) -> User | None:
+    async def user_by_signin_account(self, account_id: str) -> User | None:
         with self._lock:
             found = self._by_account.get(account_id)
-            return self._users[found] if found else None
+            return _copy(self._users[found]) if found else None
 
-    def platform_admins(self) -> list[User]:
+    async def platform_admins(self) -> list[User]:
         with self._lock:
-            return [u for u in self._users.values() if u.is_platform_admin]
+            return [_copy(u) for u in self._users.values() if u.is_platform_admin]
 
     def _update_user(self, user_id: str, **changes: Any) -> None:
         self._users[user_id] = dataclasses.replace(self._users[user_id], **changes)
 
-    def record_signin_account(self, user_id: str, account_id: str) -> bool:
+    async def record_signin_account(self, user_id: str, account_id: str) -> bool:
         with self._lock:
             user = self._users.get(user_id)
             if user is None or user.signin_account_id is not None or account_id in self._by_account:
@@ -146,7 +161,7 @@ class InMemoryIdentityRepository:
             self._by_account[account_id] = user_id
             return True
 
-    def activate_user(self, user_id: str, *, display_name: str, now: _dt.datetime) -> bool:
+    async def activate_user(self, user_id: str, *, display_name: str, now: _dt.datetime) -> bool:
         with self._lock:
             user = self._users.get(user_id)
             if user is None or user.status != "invited":
@@ -155,12 +170,12 @@ class InMemoryIdentityRepository:
                               updated_at=now)
             return True
 
-    def set_display_name(self, user_id: str, display_name: str, *, now: _dt.datetime) -> None:
+    async def set_display_name(self, user_id: str, display_name: str, *, now: _dt.datetime) -> None:
         with self._lock:
             if user_id in self._users and self._users[user_id].display_name != display_name:
                 self._update_user(user_id, display_name=display_name, updated_at=now)
 
-    def set_platform_admin(self, user_id: str, flag: bool) -> None:
+    async def set_platform_admin(self, user_id: str, flag: bool) -> None:
         with self._lock:
             if user_id in self._users:
                 self._update_user(user_id, is_platform_admin=flag)
@@ -184,7 +199,7 @@ class InMemoryIdentityRepository:
         self._memberships[row.id] = row
         return row
 
-    def add_membership(  # noqa: PLR0913 — the pinned seeder signature
+    async def add_membership(  # noqa: PLR0913 — the pinned seeder signature
         self, user_id: str, tenant_id: str, *, status: MembershipStatus, invited_by: str,
         created_at: _dt.datetime, expires_at: _dt.datetime | None = None,
         accepted_at: _dt.datetime | None = None, ended_at: _dt.datetime | None = None,
@@ -197,12 +212,12 @@ class InMemoryIdentityRepository:
             check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by)
             if status in _LIVE and self._live_row(user_id, tenant_id) is not None:
                 raise DataRuleViolation("the user already has a live membership in this tenant")
-            return self._insert_membership(
+            return _copy(self._insert_membership(
                 user_id=user_id, tenant_id=tenant_id, status=status, invited_by=invited_by,
                 created_at=created_at, expires_at=expires_at, accepted_at=accepted_at,
-                ended_at=ended_at, ended_by=ended_by)
+                ended_at=ended_at, ended_by=ended_by))
 
-    def ensure_invitation(
+    async def ensure_invitation(
         self, user_id: str, tenant_id: str, *, invited_by: str, now: _dt.datetime,
         expires_at: _dt.datetime | None = None,
     ) -> Membership | None:
@@ -211,15 +226,15 @@ class InMemoryIdentityRepository:
             self._refuse_dangling(user_id, tenant_id)
             live = self._live_row(user_id, tenant_id)
             if live is not None:
-                return None if live.status == "active" else live
-            return self._insert_membership(
+                return None if live.status == "active" else _copy(live)
+            return _copy(self._insert_membership(
                 user_id=user_id, tenant_id=tenant_id, status="invited", invited_by=invited_by,
-                created_at=now, expires_at=expires_at, accepted_at=None, ended_at=None, ended_by=None)
+                created_at=now, expires_at=expires_at, accepted_at=None, ended_at=None, ended_by=None))
 
     def _update_membership(self, membership_id: str, **changes: Any) -> None:
         self._memberships[membership_id] = dataclasses.replace(self._memberships[membership_id], **changes)
 
-    def accept_invitation(self, membership_id: str, *, now: _dt.datetime) -> bool:
+    async def accept_invitation(self, membership_id: str, *, now: _dt.datetime) -> bool:
         with self._lock:
             row = self._memberships.get(membership_id)
             if row is None or row.status != "invited" or (row.expires_at is not None and row.expires_at <= now):
@@ -227,7 +242,7 @@ class InMemoryIdentityRepository:
             self._update_membership(membership_id, status="active", accepted_at=now)
             return True
 
-    def end_membership(self, membership_id: str, *, ended_by: str, now: _dt.datetime) -> bool:
+    async def end_membership(self, membership_id: str, *, ended_by: str, now: _dt.datetime) -> bool:
         with self._lock:
             row = self._memberships.get(membership_id)
             if row is None or row.status != "active":
@@ -235,7 +250,7 @@ class InMemoryIdentityRepository:
             self._update_membership(membership_id, status="ended", ended_at=now, ended_by=ended_by)
             return True
 
-    def revoke_invitation(self, membership_id: str) -> bool:
+    async def revoke_invitation(self, membership_id: str) -> bool:
         with self._lock:
             row = self._memberships.get(membership_id)
             if row is None or row.status != "invited":
@@ -243,44 +258,44 @@ class InMemoryIdentityRepository:
             self._update_membership(membership_id, status="revoked")
             return True
 
-    def membership(self, membership_id: str) -> Membership | None:
+    async def membership(self, membership_id: str) -> Membership | None:
         with self._lock:
-            return self._memberships.get(membership_id)
+            return _copy(self._memberships.get(membership_id))
 
-    def memberships_of_user(self, user_id: str) -> list[Membership]:
+    async def memberships_of_user(self, user_id: str) -> list[Membership]:
         with self._lock:
-            return [m for m in self._memberships.values() if m.user_id == user_id]
+            return [_copy(m) for m in self._memberships.values() if m.user_id == user_id]
 
-    def memberships_of_tenant(self, tenant_id: str) -> list[Membership]:
+    async def memberships_of_tenant(self, tenant_id: str) -> list[Membership]:
         with self._lock:
-            return [m for m in self._memberships.values() if m.tenant_id == str(tenant_id)]
+            return [_copy(m) for m in self._memberships.values() if m.tenant_id == str(tenant_id)]
 
-    def people_of_tenant(
+    async def people_of_tenant(
         self, tenant_id: str, status: MembershipStatus,
     ) -> list[tuple[Membership, User]]:
         with self._lock:
-            return [(m, self._users[m.user_id]) for m in self.memberships_of_tenant(tenant_id)
-                    if m.status == status]
+            return [(m, _copy(self._users[m.user_id]))
+                    for m in await self.memberships_of_tenant(tenant_id) if m.status == status]
 
-    def active_membership(self, user_id: str, tenant_id: str) -> Membership | None:
+    async def active_membership(self, user_id: str, tenant_id: str) -> Membership | None:
         with self._lock:
             row = self._live_row(user_id, str(tenant_id))
-            return row if row is not None and row.status == "active" else None
+            return _copy(row) if row is not None and row.status == "active" else None
 
     # --- sends -------------------------------------------------------------------------------
-    def request_set_password(self, user_id: str, *, now: _dt.datetime) -> int:
+    async def request_set_password(self, user_id: str, *, now: _dt.datetime) -> int:
         with self._lock:
             seq = self._users[user_id].set_password_requested_seq + 1
             self._update_user(user_id, set_password_requested_seq=seq, set_password_requested_at=now)
             return seq
 
-    def request_notification(self, membership_id: str, *, now: _dt.datetime) -> int:
+    async def request_notification(self, membership_id: str, *, now: _dt.datetime) -> int:
         with self._lock:
             seq = self._memberships[membership_id].notify_requested_seq + 1
             self._update_membership(membership_id, notify_requested_seq=seq, notify_requested_at=now)
             return seq
 
-    def claim_set_password(
+    async def claim_set_password(
         self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
     ) -> User | None:
         with self._lock:
@@ -290,9 +305,9 @@ class InMemoryIdentityRepository:
             if found is None:
                 return None
             self._update_user(found.id, set_password_next_try_at=hold_until)
-            return self._users[found.id]
+            return _copy(self._users[found.id])
 
-    def claim_notification(
+    async def claim_notification(
         self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
     ) -> Membership | None:
         with self._lock:
@@ -302,19 +317,19 @@ class InMemoryIdentityRepository:
             if found is None:
                 return None
             self._update_membership(found.id, notify_next_try_at=hold_until)
-            return self._memberships[found.id]
+            return _copy(self._memberships[found.id])
 
-    def defer_set_password(self, user_id: str, *, until: _dt.datetime) -> None:
+    async def defer_set_password(self, user_id: str, *, until: _dt.datetime) -> None:
         with self._lock:
             attempts = self._users[user_id].set_password_attempts + 1
             self._update_user(user_id, set_password_attempts=attempts, set_password_next_try_at=until)
 
-    def defer_notification(self, membership_id: str, *, until: _dt.datetime) -> None:
+    async def defer_notification(self, membership_id: str, *, until: _dt.datetime) -> None:
         with self._lock:
             attempts = self._memberships[membership_id].notify_attempts + 1
             self._update_membership(membership_id, notify_attempts=attempts, notify_next_try_at=until)
 
-    def settle_set_password(
+    async def settle_set_password(
         self, user_id: str, read_seq: int, *, sent_at: _dt.datetime | None = None,
         expires_at: _dt.datetime | None = None,
     ) -> bool:
@@ -328,12 +343,12 @@ class InMemoryIdentityRepository:
                 changes["set_password_sent_at"] = sent_at
             self._update_user(user_id, **changes)
             if sent_at is not None and expires_at is not None:
-                for row in self.memberships_of_user(user_id):
-                    if row.status == "invited":
+                for row in list(self._memberships.values()):
+                    if row.user_id == user_id and row.status == "invited":
                         self._update_membership(row.id, expires_at=expires_at)
             return True
 
-    def settle_notification(
+    async def settle_notification(
         self, membership_id: str, read_seq: int, *, sent_at: _dt.datetime | None = None,
         expires_at: _dt.datetime | None = None,
     ) -> bool:
@@ -351,7 +366,7 @@ class InMemoryIdentityRepository:
             return True
 
     # --- sessions ----------------------------------------------------------------------------
-    def add_session(
+    async def add_session(
         self, value: str, user_id: str, *, now: _dt.datetime, expires_at: _dt.datetime,
         used_otp: bool = False,
     ) -> Session:
@@ -361,17 +376,17 @@ class InMemoryIdentityRepository:
             row = Session(token_hash=session_hash(value), user_id=user_id, used_otp=used_otp,
                           created_at=now, last_seen_at=now, expires_at=expires_at)
             self._sessions[row.token_hash] = row
-            return row
+            return _copy(row)
 
-    def session_by_value(self, value: str) -> Session | None:
+    async def session_by_value(self, value: str) -> Session | None:
         with self._lock:
-            return self._sessions.get(session_hash(value))
+            return _copy(self._sessions.get(session_hash(value)))
 
-    def delete_session(self, value: str) -> bool:
+    async def delete_session(self, value: str) -> bool:
         with self._lock:
             return self._sessions.pop(session_hash(value), None) is not None
 
-    def touch_session(self, value: str, *, now: _dt.datetime) -> bool:
+    async def touch_session(self, value: str, *, now: _dt.datetime) -> bool:
         with self._lock:
             key = session_hash(value)
             row = self._sessions.get(key)

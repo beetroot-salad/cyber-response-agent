@@ -13,6 +13,7 @@ localhost:8000/tenants/<id>/alerts` (the values are printed at start). The OpenA
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -46,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="the Origin a state-changing request must carry")
     args = parser.parse_args(argv)
     try:
-        deps = demo_deps(args.tenants, frontend_origin=args.frontend_origin)
+        deps = asyncio.run(demo_deps(args.tenants, frontend_origin=args.frontend_origin))
     except ValueError as e:
         parser.error(str(e))
     _logger.info("stub API on http://%s:%d; demo sessions (cookie __Host-defender_session): %s",

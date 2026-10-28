@@ -7,7 +7,7 @@ import binascii
 import datetime as _dt
 import hashlib
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Generic, Literal, TypeVar
 
 from fastapi import HTTPException
@@ -99,8 +99,8 @@ def _advances(order: Order[T, P], after: P | None, rows: Sequence[T], asked: int
         previous = position
 
 
-def paginate(
-    fetch: Callable[[P | None, int], Sequence[T]],
+async def paginate(
+    fetch: Callable[[P | None, int], Awaitable[Sequence[T]]],
     order: Order[T, P],
     *,
     list_name: str,
@@ -124,7 +124,7 @@ def paginate(
         after = order.load(body)
         if after is None:
             raise _refused("not a position in this list")
-    rows = list(fetch(after, limit + 1))
+    rows = list(await fetch(after, limit + 1))
     _advances(order, after, rows, limit + 1)
     items = rows[:limit]
     next_cursor = None

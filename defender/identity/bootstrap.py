@@ -3,13 +3,14 @@ tenants have which first members. Plain data; the service applies it at start.""
 
 from __future__ import annotations
 
+import datetime as _dt
 from collections.abc import Mapping
 
 from defender._model import model
 from defender.records._tenant_id import TenantId
 
 from .ports import IdentityRepository
-from .rows import Email
+from .models import Email
 
 
 @model(frozen=True)
@@ -18,7 +19,7 @@ class Bootstrap:
     tenants: Mapping[str, tuple[Email, ...]]
 
 
-def register_tenant(repo: IdentityRepository, tenant_id: TenantId) -> None:
+async def register_tenant(repo: IdentityRepository, tenant_id: TenantId, *, now: _dt.datetime) -> None:
     """Register a tenant so memberships can refer to it. The one function #1214's tenant
     creation takes over."""
-    repo.register_tenant(tenant_id)
+    await repo.register_tenant(tenant_id, now=now)

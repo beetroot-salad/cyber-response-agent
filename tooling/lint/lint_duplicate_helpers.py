@@ -63,6 +63,8 @@ ALLOWLIST_NAMES = frozenset(
     {
         "main",  # every script's entry point
         "run",  # generic per-module driver entry
+        "upgrade",  # an Alembic revision's entry points (`upgrade`/`downgrade`), one per revision file
+        "downgrade",
     }
 )
 

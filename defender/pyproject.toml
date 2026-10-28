@@ -96,9 +96,12 @@ api = [
     # The HTTP client `identity/keycloak.py` uses for the token endpoint and admin API; the `dev`
     # extra's `httpx` is not installed in a production `api` sync.
     "httpx",
-    # The Postgres driver for the people and memberships store (#1306); `[binary]` ships libpq,
-    # `[pool]` the connection pool the request and sender threads share.
-    "psycopg[binary,pool]>=3.2",
+    # The Postgres driver for the people and memberships store (#1306); `[binary]` ships libpq.
+    "psycopg[binary]>=3.2",
+    # The async ORM the stores are written against, and the one migration history for every
+    # feature's tables (#1339). The revisions ship with the source tree.
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.13",
 ]
 dev = [
     "pytest>=8.0",

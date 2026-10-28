@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import logging
-import threading
 from collections.abc import AsyncIterator
-from contextlib import AbstractContextManager, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Annotated, NamedTuple
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
@@ -74,7 +73,7 @@ _SENDER_STOP_WAIT = 2.0
 _logger = logging.getLogger(__name__)
 
 
-def _deps(request: Request) -> ApiDeps:
+async def _deps(request: Request) -> ApiDeps:
     deps: ApiDeps = request.app.state.deps
     return deps
 
@@ -97,8 +96,8 @@ class _FrontendOriginOnly:
         await self._app(scope, receive, send)
 
 
-def _authenticated(request: Request, deps: Annotated[ApiDeps, Depends(_deps)]) -> Authenticated:
-    return deps.identity.authenticate(request.cookies.get(SESSION_COOKIE))
+async def _authenticated(request: Request, deps: Annotated[ApiDeps, Depends(_deps)]) -> Authenticated:
+    return await deps.identity.authenticate(request.cookies.get(SESSION_COOKIE))
 
 
 Authed = Annotated[Authenticated, Depends(_authenticated)]
@@ -109,23 +108,23 @@ class _Membered(NamedTuple):
     tenant_id: TenantId
 
 
-def _membered(
+async def _membered(
     tenant_id: Annotated[str, Path(description="The tenant the request acts in.")],
     auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)],
 ) -> _Membered:
     """The tenant is the path's and is checked against the caller's membership on every request;
     a non-member, an unknown tenant and a malformed id are all the same 404 (P-D)."""
-    return _Membered(auth, TenantId(deps.identity.member_of(auth, tenant_id)))
+    return _Membered(auth, TenantId(await deps.identity.member_of(auth, tenant_id)))
 
 
 Membered = Annotated[_Membered, Depends(_membered)]
 
 
-def _principal(member: Membered) -> Principal:
+async def _principal(member: Membered) -> Principal:
     return Principal(tenant_id=member.tenant_id, user_id=member.auth.user.id)
 
 
-def _administrator(auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)]) -> Authenticated:
+async def _administrator(auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)]) -> Authenticated:
     deps.identity.require_administrator(auth)
     return auth
 
@@ -157,7 +156,7 @@ def _filter_moment(moment: _dt.datetime | None) -> str | None:
     return None if moment is None else moment.isoformat()
 
 
-def _transaction(deps: ApiDeps, caller: Principal) -> AbstractContextManager[WriteTransaction]:
+def _transaction(deps: ApiDeps, caller: Principal) -> AbstractAsyncContextManager[WriteTransaction]:
     return deps.writes.transaction(caller.tenant_id, caller.user_id)
 
 
@@ -183,7 +182,7 @@ alerts = APIRouter(prefix="/alerts", tags=["alerts"], responses=_EVERY_ROUTE)
 
 
 @alerts.get("")
-def list_alerts(
+async def list_alerts(
     deps: Deps,
     caller: Caller,
     fired_after: Instant | None = None,
@@ -192,7 +191,7 @@ def list_alerts(
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> Page[AlertSummary]:
-    return paginate(
+    return await paginate(
         lambda after, n: deps.alerts.list_alerts(
             caller.tenant_id, fired_after=fired_after, fired_before=fired_before,
             severity=severity, after=after, limit=n,
@@ -204,8 +203,8 @@ def list_alerts(
 
 
 @alerts.get("/{alert_id}", responses=responses(404))
-def get_alert(deps: Deps, caller: Caller, alert_id: Id) -> Alert:
-    alert = deps.alerts.get_alert(caller.tenant_id, alert_id)
+async def get_alert(deps: Deps, caller: Caller, alert_id: Id) -> Alert:
+    alert = await deps.alerts.get_alert(caller.tenant_id, alert_id)
     if alert is None:
         raise _not_found("alert", alert_id)
     return alert
@@ -215,7 +214,7 @@ investigations = APIRouter(prefix="/investigations", tags=["investigations"], re
 
 
 @investigations.post("", responses={201: {"model": Investigation}, **responses(409)})
-def start_investigation(
+async def start_investigation(
     deps: Deps, caller: Caller, body: InvestigationCreate, request: Request, response: Response
 ) -> Investigation:
     """Start an investigation of an alert. While one of the alert's investigations is live, it
@@ -224,11 +223,11 @@ def start_investigation(
     Repeating a request with its `client_request_id` returns the investigation that request
     started (200). A request answered with an investigation that was already live started
     nothing, so repeating it later is a new request."""
-    with _transaction(deps, caller) as tx:
-        investigation, created = tx.create_investigation(body.alert_id, body.client_request_id)
+    async with _transaction(deps, caller) as tx:
+        investigation, created = await tx.create_investigation(body.alert_id, body.client_request_id)
         _answered_for("alert", body.alert_id, investigation.alert_id)
         if created:
-            tx.audit("investigation.start", investigation.investigation_id,
+            await tx.audit("investigation.start", investigation.investigation_id,
                      detail=f"alert {body.alert_id}")
     if created:
         _created_at(request, response, "get_investigation", caller.tenant_id,
@@ -237,12 +236,12 @@ def start_investigation(
 
 
 @investigations.get("")
-def list_investigations(
+async def list_investigations(
     deps: Deps, caller: Caller, alert_id: Annotated[str | None, Query(pattern=RECORD_ID_PATTERN)] = None,
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> Page[Investigation]:
-    return paginate(
+    return await paginate(
         lambda after, n: deps.investigations.list_investigations(
             caller.tenant_id, alert_id=alert_id, after=after, limit=n),
         _INVESTIGATION_ORDER, list_name="investigations", tenant_id=caller.tenant_id,
@@ -251,28 +250,28 @@ def list_investigations(
 
 
 @investigations.get("/{investigation_id}", responses=responses(404))
-def get_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
-    investigation = deps.investigations.get_investigation(caller.tenant_id, investigation_id)
+async def get_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
+    investigation = await deps.investigations.get_investigation(caller.tenant_id, investigation_id)
     if investigation is None:
         raise _not_found("investigation", investigation_id)
     return investigation
 
 
 @investigations.post("/{investigation_id}/cancel", responses=responses(404, 409))
-def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
-    with _transaction(deps, caller) as tx:
-        investigation = tx.cancel_investigation(investigation_id)
-        tx.audit("investigation.cancel", investigation_id)
+async def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
+    async with _transaction(deps, caller) as tx:
+        investigation = await tx.cancel_investigation(investigation_id)
+        await tx.audit("investigation.cancel", investigation_id)
     return investigation
 
 
 @investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT,
                         responses=responses(404, 409))
-def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> None:
+async def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> None:
     """Hide an investigation from every read. Its records are kept: lessons cite runs."""
-    with _transaction(deps, caller) as tx:
-        tx.delete_investigation(investigation_id)
-        tx.audit("investigation.delete", investigation_id)
+    async with _transaction(deps, caller) as tx:
+        await tx.delete_investigation(investigation_id)
+        await tx.audit("investigation.delete", investigation_id)
 
 
 @investigations.get(
@@ -281,19 +280,19 @@ def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> No
     response_class=RedirectResponse,
     responses=responses(404),
 )
-def read_artifact(deps: Deps, caller: Caller, investigation_id: Id, key: str) -> RedirectResponse:
+async def read_artifact(deps: Deps, caller: Caller, investigation_id: Id, key: str) -> RedirectResponse:
     """Redirect to a short-lived signed link on the blob store's own origin. The bytes never
     pass through the API, and a run page never renders on the app's origin.
 
     `key` may hold `/` (a file inside the run folder's bundle); only keys the investigation's
     own artifact list names are answered."""
-    investigation = get_investigation(deps, caller, investigation_id)
+    investigation = await get_investigation(deps, caller, investigation_id)
     if key not in investigation.artifacts:
         raise _not_found("artifact", key)
-    url = deps.artifact_links.signed_url(caller.tenant_id, investigation_id, key)
+    url = await deps.artifact_links.signed_url(caller.tenant_id, investigation_id, key)
     # Audited once the link exists, and committed before it is handed out.
-    with _transaction(deps, caller) as tx:
-        tx.audit("artifact.read", investigation_id, detail=key)
+    async with _transaction(deps, caller) as tx:
+        await tx.audit("artifact.read", investigation_id, detail=key)
     return RedirectResponse(url, headers={"Cache-Control": "no-store"})
 
 
@@ -301,17 +300,17 @@ learning_jobs = APIRouter(prefix="/learning-jobs", tags=["learning"], responses=
 
 
 @learning_jobs.post("", responses={201: {"model": LearningJob}, **responses(409)})
-def start_learning_job(
+async def start_learning_job(
     deps: Deps, caller: Caller, body: LearningJobCreate, request: Request, response: Response
 ) -> LearningJob:
     """Learn again from an investigation: queue an explicit re-learn. A completed
     investigation is learned from automatically; this adds another, and re-learns are unlimited.
     Repeating a request with its `client_request_id` returns the job that request queued (200)."""
-    with _transaction(deps, caller) as tx:
-        job, created = tx.create_learning_job(body.investigation_id, body.client_request_id)
+    async with _transaction(deps, caller) as tx:
+        job, created = await tx.create_learning_job(body.investigation_id, body.client_request_id)
         _answered_for("investigation", body.investigation_id, job.investigation_id)
         if created:
-            tx.audit("learning_job.start", job.learning_job_id,
+            await tx.audit("learning_job.start", job.learning_job_id,
                      detail=f"investigation {body.investigation_id}")
     if created:
         _created_at(request, response, "get_learning_job", caller.tenant_id, learning_job_id=job.learning_job_id)
@@ -319,13 +318,13 @@ def start_learning_job(
 
 
 @learning_jobs.get("")
-def list_learning_jobs(
+async def list_learning_jobs(
     deps: Deps, caller: Caller,
     investigation_id: Annotated[str | None, Query(pattern=RECORD_ID_PATTERN)] = None,
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> Page[LearningJob]:
-    return paginate(
+    return await paginate(
         lambda after, n: deps.learning_jobs.list_learning_jobs(
             caller.tenant_id, investigation_id=investigation_id, after=after, limit=n),
         _LEARNING_JOB_ORDER, list_name="learning-jobs", tenant_id=caller.tenant_id,
@@ -334,8 +333,8 @@ def list_learning_jobs(
 
 
 @learning_jobs.get("/{learning_job_id}", responses=responses(404))
-def get_learning_job(deps: Deps, caller: Caller, learning_job_id: Id) -> LearningJob:
-    job = deps.learning_jobs.get_learning_job(caller.tenant_id, learning_job_id)
+async def get_learning_job(deps: Deps, caller: Caller, learning_job_id: Id) -> LearningJob:
+    job = await deps.learning_jobs.get_learning_job(caller.tenant_id, learning_job_id)
     if job is None:
         raise _not_found("learning job", learning_job_id)
     return job
@@ -345,10 +344,10 @@ lessons = APIRouter(prefix="/lessons", tags=["learning"], responses=_EVERY_ROUTE
 
 
 @lessons.get("")
-def list_lessons(
+async def list_lessons(
     deps: Deps, caller: Caller, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
 ) -> Page[Lesson]:
-    return paginate(
+    return await paginate(
         lambda after, n: deps.lessons.list_lessons(caller.tenant_id, after=after, limit=n),
         _LESSON_ORDER, list_name="lessons", tenant_id=caller.tenant_id, cursor=cursor,
         limit=limit, filters={},
@@ -358,67 +357,67 @@ def list_lessons(
 systems = APIRouter(prefix="/systems", tags=["systems"], responses=_EVERY_ROUTE)
 
 
-def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) -> System:
+async def _served(deps: ApiDeps, caller: Principal, settings: SystemSettings) -> System:
     """The system as served: its settings plus the secret store's own answer, so the flag can
     never disagree with where credentials were written."""
-    has = deps.secrets.has_credentials(caller.tenant_id, settings.system_id)
+    has = await deps.secrets.has_credentials(caller.tenant_id, settings.system_id)
     # Only the settings' own fields: a store answering a richer record cannot collide with ours.
     return System(**settings.model_dump(include=set(SystemSettings.model_fields)), has_credentials=has)
 
 
 @systems.get("")
-def list_systems(
+async def list_systems(
     deps: Deps, caller: Caller, cursor: Cursor = None, limit: Limit = DEFAULT_PAGE
 ) -> Page[System]:
-    page = paginate(
+    page = await paginate(
         lambda after, n: deps.systems.list_systems(caller.tenant_id, after=after, limit=n),
         _SYSTEM_ORDER, list_name="systems", tenant_id=caller.tenant_id, cursor=cursor,
         limit=limit, filters={},
     )
     # Served after the page is cut, so the secret store is asked only about rows that are sent.
-    return Page(items=[_served(deps, caller, s) for s in page.items], next_cursor=page.next_cursor)
+    return Page(items=[await _served(deps, caller, s) for s in page.items], next_cursor=page.next_cursor)
 
 
-def _settings(deps: ApiDeps, caller: Principal, system_id: str) -> SystemSettings:
-    settings = deps.systems.get_system(caller.tenant_id, system_id)
+async def _settings(deps: ApiDeps, caller: Principal, system_id: str) -> SystemSettings:
+    settings = await deps.systems.get_system(caller.tenant_id, system_id)
     if settings is None:
         raise _not_found("system", system_id)
     return settings
 
 
 @systems.put("/{system_id}", responses={201: {"model": System}})
-def put_system(
+async def put_system(
     deps: Deps, caller: Caller, system_id: Id, body: SystemPut, request: Request, response: Response
 ) -> System:
     """Create or replace a connected system's settings. Credentials are set separately."""
-    with _transaction(deps, caller) as tx:
-        settings, created = tx.put_system(system_id, body)
+    async with _transaction(deps, caller) as tx:
+        settings, created = await tx.put_system(system_id, body)
         _answered_for("system", system_id, settings.system_id)
-        tx.audit("system.update", system_id)
+        await tx.audit("system.update", system_id)
     if created:
         # A PUT creates the resource at its own URL; built by the router, so no query rides along.
         _created_at(request, response, "put_system", caller.tenant_id, system_id=system_id)
-    return _served(deps, caller, settings)
+    return await _served(deps, caller, settings)
 
 
 @systems.put("/{system_id}/credentials", status_code=status.HTTP_204_NO_CONTENT,
              responses=responses(404))
-def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: CredentialsPut) -> None:
+async def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: CredentialsPut) -> None:
     """Replace the system's credentials. Write-only: no endpoint returns them."""
-    _settings(deps, caller, system_id)
+    await _settings(deps, caller, system_id)
     # The secret store is outside the transaction, so the audit event is written first and the
     # secret inside the block: a failed audit write stops the secret write, and only a commit
     # failing after the secret is stored can leave it unaudited.
-    with _transaction(deps, caller) as tx:
-        tx.audit("system.credentials", system_id,
+    async with _transaction(deps, caller) as tx:
+        await tx.audit("system.credentials", system_id,
                  detail="fields: " + ", ".join(sorted(body.credentials)))
-        deps.secrets.put_credentials(caller.tenant_id, system_id, body.credentials)
+        await deps.secrets.put_credentials(caller.tenant_id, system_id, body.credentials)
 
 
 @systems.post("/{system_id}/check", responses=responses(404))
-def check_system(deps: Deps, caller: Caller, system_id: Id) -> SystemCheck:
+async def check_system(deps: Deps, caller: Caller, system_id: Id) -> SystemCheck:
     """Test the connection and a first query."""
-    return deps.checker.check(caller.tenant_id, _served(deps, caller, _settings(deps, caller, system_id)))
+    return await deps.checker.check(caller.tenant_id, await _served(deps, caller, await _settings(deps, caller, system_id)))
 
 
 # --- people, memberships and sign-in (#1306) ---------------------------------------------------
@@ -436,10 +435,10 @@ auth = APIRouter(tags=["auth"])
 
 @auth.get("/auth/login", status_code=status.HTTP_302_FOUND, response_class=RedirectResponse,
           responses=responses(503, 500))
-def login(deps: Deps) -> RedirectResponse:
+async def login(deps: Deps) -> RedirectResponse:
     """Send the person to the sign-in page. The state, nonce and PKCE verifier travel back in a
     short-lived cookie."""
-    start = deps.identity.begin_signin()
+    start = await deps.identity.begin_signin()
     response = RedirectResponse(start.url, status_code=status.HTTP_302_FOUND)
     response.set_cookie(PRELOGIN_COOKIE, start.prelogin, max_age=_PRELOGIN_MAX_AGE, **_cookie_options())  # type: ignore[arg-type]
     return response
@@ -447,11 +446,11 @@ def login(deps: Deps) -> RedirectResponse:
 
 @auth.get("/auth/callback", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse,
           responses=responses(403, 503, 422, 500))
-def callback(request: Request, deps: Deps, code: str = "", state: str = "") -> Response:
+async def callback(request: Request, deps: Deps, code: str = "", state: str = "") -> Response:
     """Finish a sign-in: a session cookie and a redirect to the frontend, or a 403 problem of one
     of four types. The pre-login cookie is cleared whatever the outcome."""
     try:
-        value = deps.identity.complete_signin(
+        value = await deps.identity.complete_signin(
             code=code, state=state, prelogin=request.cookies.get(PRELOGIN_COOKIE))
     except _identity.CallbackRefused as e:
         response: Response = problem(403, str(e), type_=f"urn:defender:problem:{e.reason}")
@@ -466,17 +465,17 @@ def callback(request: Request, deps: Deps, code: str = "", state: str = "") -> R
 
 
 @auth.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, responses=_IDENTITY)
-def logout(request: Request, deps: Deps, caller: Authed) -> Response:
+async def logout(request: Request, deps: Deps, caller: Authed) -> Response:
     """End this session only; other devices stay signed in."""
-    deps.identity.logout(caller, request.cookies.get(SESSION_COOKIE, ""))
+    await deps.identity.logout(caller, request.cookies.get(SESSION_COOKIE, ""))
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(SESSION_COOKIE, **_cookie_options())  # type: ignore[arg-type]
     return response
 
 
 @auth.get("/me", responses=_IDENTITY)
-def read_me(deps: Deps, caller: Authed) -> Me:
-    view = deps.identity.me(caller)
+async def read_me(deps: Deps, caller: Authed) -> Me:
+    view = await deps.identity.me(caller)
     return Me(
         user=MeUser(id=view.user.id, email=view.user.email, display_name=view.user.display_name),
         tenants=[TenantRef(tenant_id=t) for t in view.tenants],
@@ -485,9 +484,9 @@ def read_me(deps: Deps, caller: Authed) -> Me:
 
 
 @auth.post("/invitations/{invitation_id}/accept", responses={**_IDENTITY, **responses(404)})
-def accept_invitation(deps: Deps, caller: Authed, invitation_id: str = Path(max_length=64)) -> TenantRef:
+async def accept_invitation(deps: Deps, caller: Authed, invitation_id: str = Path(max_length=64)) -> TenantRef:
     """Accept an invitation addressed to you, while signed in."""
-    return TenantRef(tenant_id=deps.identity.accept(caller, invitation_id))
+    return TenantRef(tenant_id=await deps.identity.accept(caller, invitation_id))
 
 
 people = APIRouter(tags=["people"], responses=_EVERY_ROUTE)
@@ -498,76 +497,80 @@ def _invitation(view: _identity.InvitationView) -> Invitation:
 
 
 @people.get("/members")
-def list_members(deps: Deps, member: Membered) -> Page[Member]:
-    rows = deps.identity.members(member.tenant_id)
+async def list_members(deps: Deps, member: Membered) -> Page[Member]:
+    rows = await deps.identity.members(member.tenant_id)
     return Page(items=[Member(user_id=m.user_id, email=m.email, display_name=m.display_name) for m in rows],
                 next_cursor=None)
 
 
 @people.delete("/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_member(deps: Deps, member: Membered, user_id: str = Path(max_length=64)) -> None:
+async def remove_member(deps: Deps, member: Membered, user_id: str = Path(max_length=64)) -> None:
     """End a membership: yours, or another member's. Nothing else of that person changes."""
-    deps.identity.remove(member.auth, member.tenant_id, user_id)
+    await deps.identity.remove(member.auth, member.tenant_id, user_id)
 
 
 @people.get("/invitations")
-def list_invitations(deps: Deps, member: Membered) -> Page[Invitation]:
-    return Page(items=[_invitation(v) for v in deps.identity.invitations(member.tenant_id)],
+async def list_invitations(deps: Deps, member: Membered) -> Page[Invitation]:
+    return Page(items=[_invitation(v) for v in await deps.identity.invitations(member.tenant_id)],
                 next_cursor=None)
 
 
 @people.post("/invitations", status_code=status.HTTP_202_ACCEPTED, responses=responses(409))
-def invite(deps: Deps, member: Membered, body: InviteCreate) -> Invitation:
+async def invite(deps: Deps, member: Membered, body: InviteCreate) -> Invitation:
     """Invite a person by email. The answer is the same whoever the email belongs to; the
     email itself goes out afterwards."""
-    return _invitation(deps.identity.invite(member.auth, member.tenant_id, body.email))
+    return _invitation(await deps.identity.invite(member.auth, member.tenant_id, body.email))
 
 
 @people.delete("/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
-def revoke_invitation(deps: Deps, member: Membered, invitation_id: str = Path(max_length=64)) -> None:
-    deps.identity.revoke(member.auth, member.tenant_id, invitation_id)
+async def revoke_invitation(deps: Deps, member: Membered, invitation_id: str = Path(max_length=64)) -> None:
+    await deps.identity.revoke(member.auth, member.tenant_id, invitation_id)
 
 
 admin = APIRouter(prefix="/admin", tags=["admin"], responses={**_IDENTITY, **responses(404)})
 
 
 @admin.get("/tenants")
-def list_all_tenants(deps: Deps, caller: Admin) -> Page[TenantRef]:
-    return Page(items=[TenantRef(tenant_id=t) for t in deps.identity.all_tenants(caller)], next_cursor=None)
+async def list_all_tenants(deps: Deps, caller: Admin) -> Page[TenantRef]:
+    return Page(items=[TenantRef(tenant_id=t) for t in await deps.identity.all_tenants(caller)], next_cursor=None)
 
 
 @admin.post("/tenants/{tenant_id}/invitations", status_code=status.HTTP_202_ACCEPTED,
             responses=responses(409))
-def admin_invite(deps: Deps, caller: Admin, body: InviteCreate,
+async def admin_invite(deps: Deps, caller: Admin, body: InviteCreate,
                  tenant_id: str = Path(max_length=64)) -> Invitation:
     """Invite the first member into a tenant that has no active members."""
-    return _invitation(deps.identity.admin_invite(caller, tenant_id, body.email))
+    return _invitation(await deps.identity.admin_invite(caller, tenant_id, body.email))
 
 
-def _send_loop(identity: IdentityService, stop: threading.Event) -> None:
-    """Run the sender now and then every `send_interval` until told to stop. A failing pass
-    never stops the loop."""
+async def _send_loop(identity: IdentityService) -> None:
+    """Run the sender now and then every `send_interval` until cancelled. A failing pass never
+    stops the loop."""
     while True:
         try:
-            identity.send_pending()
+            await identity.send_pending()
         except Exception:
             _logger.exception("a sender pass failed; the next pass tries again")
-        if stop.wait(identity.send_interval.total_seconds()):
-            return
+        await asyncio.sleep(identity.send_interval.total_seconds())
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Apply the bootstrap before serving, run the sender as a task on this loop, and on shutdown
+    stop the sender before the service closes what it holds."""
     identity: IdentityService = app.state.deps.identity
-    await asyncio.to_thread(identity.start)
-    stop = threading.Event()
-    sender = threading.Thread(target=_send_loop, args=(identity, stop), name="identity-sender", daemon=True)
-    sender.start()
     try:
-        yield
+        await identity.start()
+        sender = asyncio.create_task(_send_loop(identity), name="identity-sender")
+        try:
+            yield
+        finally:
+            sender.cancel()
+            _, running = await asyncio.wait({sender}, timeout=_SENDER_STOP_WAIT)
+            if running:
+                _logger.error("the sender did not stop within %s s of shutdown", _SENDER_STOP_WAIT)
     finally:
-        stop.set()
-        await asyncio.to_thread(sender.join, _SENDER_STOP_WAIT)
+        await identity.close()
 
 
 def create_app(deps: ApiDeps) -> FastAPI:
