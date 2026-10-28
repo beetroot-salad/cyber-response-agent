@@ -19,6 +19,7 @@ pytestmark = [
     pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
 ]
 
+from defender.identity import SignInUnavailable  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
@@ -102,19 +103,24 @@ def test_the_lifespan_sender_runs_on_the_apps_loop_and_stops_before_the_reposito
     assert len(world.signin.every_call) == world.signin.calls_at_close
 
 
-def _leave_during_a_held_send(world: World, *, hold: float = 0.5) -> list[str]:
-    """Run the lifespan; leave it while the start-up pass's first set-password send is held at the
-    provider (accepted there, not yet recorded). Returns the hook's progress: 'held', then 'released'."""
+def _leave_during_a_held_send(world: World, *, fails: bool = False) -> list[str]:
+    """Run the lifespan; ask it to stop while the start-up pass's first set-password send is held at
+    the provider (accepted there, not yet recorded), releasing the hold only after shutdown began.
+    With `fails`, the held call then raises. Returns the hook's progress: 'held', then 'released'."""
     progress: list[str] = []
+    release = threading.Event()
     sender_threads: list[threading.Thread] = []
     started_before = set(threading.enumerate())
 
     async def held_at_the_provider() -> None:
         progress.append("held")
         sender_threads.append(threading.current_thread())
-        await asyncio.sleep(hold)
+        while not release.is_set():
+            await asyncio.sleep(0.01)
         progress.append("released")
         world.repo.calls.append(("send released", asyncio.get_running_loop()))
+        if fails:
+            raise SignInUnavailable("the held send failed")
 
     world.signin.during_send = held_at_the_provider
     with world.lifespan_client():
@@ -122,7 +128,15 @@ def _leave_during_a_held_send(world: World, *, hold: float = 0.5) -> list[str]:
         # S-2: the sender is a task on the harness's loop, not a thread the app started
         assert [t.name for t in sender_threads] == ["world-loop"]
         assert set(threading.enumerate()) - started_before == set()
+        threading.Timer(0.3, release.set).start()  # fires while leaving the block below waits on shutdown
     return progress
+
+
+def _nothing_runs_after_shutdown(world: World) -> None:
+    settled, sent = len(world.repo.names()), len(world.signin.every_call)
+    time.sleep(3 * INTERVAL.total_seconds())
+    assert len(world.repo.names()) == settled
+    assert len(world.signin.every_call) == sent
 
 
 def test_shutdown_during_a_send_lets_it_finish_and_be_recorded_so_it_is_not_sent_again() -> None:
@@ -138,6 +152,7 @@ def test_shutdown_during_a_send_lets_it_finish_and_be_recorded_so_it_is_not_sent
     assert names[-1] == "close", names[-5:]
     assert world.signin.closes == 1
     assert world.signin.calls_at_close == len(world.signin.every_call)
+    _nothing_runs_after_shutdown(world)
     ann = world.call(world.repo.user_by_email, ANN)
     assert ann.set_password_sent_seq == ann.set_password_requested_seq
     assert ann.set_password_sent_at is not None
@@ -146,19 +161,25 @@ def test_shutdown_during_a_send_lets_it_finish_and_be_recorded_so_it_is_not_sent
     assert world.signin.sends_to(ANN) == 1
 
 
-def test_shutdown_during_a_send_claims_nothing_more_and_the_rest_stays_pending() -> None:
-    """After shutdown is asked for, no email is claimed: not the next set-password, not a notification; both stay sendable (O8b)."""
+@pytest.mark.parametrize("outcome", ["sent", "failed"])
+def test_shutdown_during_a_send_claims_nothing_more_and_the_rest_stays_pending(outcome: str) -> None:
+    """After shutdown is asked for, whether the email in flight went out or failed (and was deferred), the sender claims nothing more; the rest stays sendable (O8b, O8d)."""
     world = World(tenants={T1: [ANN, BOB]}, start=False, send_interval=INTERVAL)
     world.repo = RecordingRepository(world.repo)
     world.signin = ClosingSignIn()
     world.build(administrators=(), tenants={T1: [ANN, BOB]})
-    assert _leave_during_a_held_send(world) == ["held", "released"]
+    assert _leave_during_a_held_send(world, fails=outcome == "failed") == ["held", "released"]
     names = world.repo.names()
+    settle = "settle_set_password" if outcome == "sent" else "defer_set_password"
+    assert names.index("send released") < names.index(settle) < names.index("close"), names
     assert names.count("claim_set_password") == 1, names
-    assert "claim_notification" not in names, names
-    assert len(world.signin.set_password_sent) == 1
+    assert "claim_notification" not in names, names  # the notification loop did not start either
+    assert names.count("close") == 1, names[-5:]
+    assert names[-1] == "close", names[-5:]
+    _nothing_runs_after_shutdown(world)
+    assert len(world.signin.send_attempts) == 1
     world.send_pending()  # control: the other person was pending and sendable all along
-    assert (world.signin.sends_to(ANN), world.signin.sends_to(BOB)) == (1, 1)
+    assert len(world.signin.send_attempts) == 2
 
 
 def test_the_bootstrap_finishes_before_the_lifespan_start_up_returns_and_before_any_send() -> None:

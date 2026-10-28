@@ -341,7 +341,7 @@ def test_a_notification_that_fails_does_not_stop_the_next_ones_in_the_same_pass(
     assert sorted(n.to for n in world.mail.sent) == [ANN, BOB]
 
 
-DEADLINE = _dt.timedelta(milliseconds=200)
+DEADLINE = _dt.timedelta(seconds=1)
 
 
 def test_each_email_has_a_thirty_second_deadline_by_default() -> None:
@@ -359,13 +359,15 @@ def test_an_email_that_outlives_its_deadline_is_deferred_and_the_pass_moves_on(k
         world.invite(ann, T1, NINA)
         before = len(world.signin.set_password_sent)
         sent = lambda: len(world.signin.set_password_sent) - before  # noqa: E731
+        attempts = lambda: sorted(  # noqa: E731
+            world.call(world.repo.user_by_email, p).set_password_attempts for p in (NEW, NINA))
     else:
-        world.invite(ann, T1, BOB)
-        world.invite(bob, T2, ANN)
+        rows = [world.invite(ann, T1, BOB).json()["id"], world.invite(bob, T2, ANN).json()["id"]]
         sent = lambda: len(world.mail.sent)  # noqa: E731
+        attempts = lambda: sorted(world.call(world.repo.membership, r).notify_attempts for r in rows)  # noqa: E731
 
     async def hangs() -> None:
-        await asyncio.sleep(10)  # far past the deadline; only the deadline ends it in time
+        await asyncio.sleep(60)  # far past the deadline; only the deadline ends it in time
 
     if kind == "set_password":
         world.signin.during_send = hangs
@@ -373,8 +375,9 @@ def test_an_email_that_outlives_its_deadline_is_deferred_and_the_pass_moves_on(k
         world.mail.during_notice = hangs
     began = time.monotonic()
     world.send_pending()
-    assert time.monotonic() - began < 5
+    assert time.monotonic() - began < 10
     assert sent() == 2  # the hung one reached the provider, and the next one still went out
+    assert attempts() == [0, 1]  # the hung one was deferred like a failed send, the other was not
     world.clock.advance(HOUR + SECOND)
     world.send_pending()
     assert sent() == 3  # the hung one was never recorded, so it is retried (at-least-once)
