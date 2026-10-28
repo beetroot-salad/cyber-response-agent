@@ -188,6 +188,37 @@ def test_the_catalog_comparison_sees_each_kind_of_drift(drift, migrated_database
     assert catalog(migrated_database) != before
 
 
+def _autogenerate_diff(dsn: str) -> list[Any]:
+    """What autogenerate would write for `dsn`, filtered as the Alembic environment filters it."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from sqlalchemy import create_engine
+    from sqlalchemy.engine import make_url
+
+    from defender.migrations import VERSION_TABLE_SCHEMA, include_object
+    from defender.migrations.models import target_metadata
+
+    engine = create_engine(make_url(dsn).set(drivername="postgresql+psycopg"))
+    try:
+        with engine.connect() as conn:
+            context = MigrationContext.configure(conn, opts={
+                "include_schemas": True, "include_object": include_object,
+                "version_table_schema": VERSION_TABLE_SCHEMA, "target_metadata": target_metadata})
+            return compare_metadata(context, target_metadata)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.postgres
+def test_autogenerate_ignores_tables_in_public_and_still_sees_drift_in_a_feature_schema(migrated_database):
+    """A table in `public` (Alembic's own, or anyone's) is never one to drop; a feature table's drift still shows."""
+    execute(migrated_database, "CREATE TABLE public.not_ours (id int)")
+    assert _autogenerate_diff(migrated_database) == []
+
+    execute(migrated_database, "ALTER TABLE identity.users DROP COLUMN display_name")
+    assert [d[0] for d in _autogenerate_diff(migrated_database)] == ["add_column"]
+
+
 @pytest.mark.postgres
 def test_tenants_created_at_is_a_column_the_repository_must_supply(migrated_database):
     """D/P4: `tenants.created_at` exists and has no server default (the caller passes `now`)."""
