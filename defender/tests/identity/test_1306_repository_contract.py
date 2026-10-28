@@ -756,6 +756,8 @@ def _mutate(model: object) -> None:
             changed = value + 1
         elif isinstance(value, dt.datetime):
             changed = value + dt.timedelta(days=1)
+        elif name == "status":  # another status the model accepts; the models refuse any other value
+            changed = "invited" if value == "active" else "active"
         elif isinstance(value, str):
             changed = value + "-mutated"
         else:

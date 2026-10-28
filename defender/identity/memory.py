@@ -8,7 +8,6 @@ import dataclasses
 import datetime as _dt
 import hashlib
 import threading
-import uuid
 from collections.abc import Collection
 from typing import Any, TypeVar, overload
 
@@ -101,15 +100,9 @@ class InMemoryIdentityRepository:
             raise DataRuleViolation(f"the email {email!r} already belongs to a user")
         if signin_account_id is not None and signin_account_id in self._by_account:
             raise DataRuleViolation(f"the sign-in account {signin_account_id!r} is already recorded")
-        user = User(
-            id=str(uuid.uuid4()), email=email, display_name=display_name, status=status,
-            signin_account_id=signin_account_id, is_platform_admin=is_platform_admin,
-            set_password_requested_seq=0, set_password_sent_seq=0,
-            set_password_requested_at=None, set_password_sent_at=None,
-            set_password_attempts=0, set_password_next_try_at=None,
-            created_at=created_at, updated_at=created_at,
-            activated_at=created_at if status == "active" else None,
-        )
+        user = User.new(
+            email, created_at=created_at, status=status, display_name=display_name,
+            signin_account_id=signin_account_id, is_platform_admin=is_platform_admin)
         self._users[user.id] = user
         self._by_email[email] = user.id
         if signin_account_id is not None:
@@ -192,10 +185,7 @@ class InMemoryIdentityRepository:
             raise DataRuleViolation(f"no registered tenant {tenant_id!r}")
 
     def _insert_membership(self, **fields: object) -> Membership:
-        row = Membership(
-            id=str(uuid.uuid4()), notify_requested_seq=0, notify_sent_seq=0,
-            notify_requested_at=None, notified_at=None, notify_attempts=0, notify_next_try_at=None,
-            **fields)  # type: ignore[arg-type]
+        row = Membership(**fields)  # type: ignore[arg-type]
         self._memberships[row.id] = row
         return row
 

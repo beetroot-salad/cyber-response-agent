@@ -11,7 +11,6 @@ every field loaded. The tables come from `defender.migrations`, never from this 
 from __future__ import annotations
 
 import datetime as _dt
-import uuid
 from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from typing import Any
@@ -82,25 +81,12 @@ class PostgresIdentityRepository:
             Membership.tenant_id == str(tenant_id), Membership.status == "active"))) is True
 
     # --- users -------------------------------------------------------------------------------
-    @staticmethod
-    def _new_user(
-        email: str, *, created_at: _dt.datetime, status: UserStatus = "invited", display_name: str = "",
-        signin_account_id: str | None = None, is_platform_admin: bool = False,
-    ) -> User:
-        return User(
-            id=str(uuid.uuid4()), email=normalize_email(email), display_name=display_name, status=status,
-            signin_account_id=signin_account_id, is_platform_admin=is_platform_admin,
-            set_password_requested_seq=0, set_password_sent_seq=0, set_password_requested_at=None,
-            set_password_sent_at=None, set_password_attempts=0, set_password_next_try_at=None,
-            created_at=created_at, updated_at=created_at,
-            activated_at=created_at if status == "active" else None)
-
     async def add_user(
         self, email: str, *, created_at: _dt.datetime, status: UserStatus = "invited",
         display_name: str = "", signin_account_id: str | None = None, is_platform_admin: bool = False,
     ) -> User:
         """Seeder."""
-        user = self._new_user(
+        user = User.new(
             email, created_at=created_at, status=status, display_name=display_name,
             signin_account_id=signin_account_id, is_platform_admin=is_platform_admin)
         async with self._tx() as s:
@@ -109,7 +95,7 @@ class PostgresIdentityRepository:
 
     async def ensure_user(self, email: str, *, now: _dt.datetime) -> User:
         email = normalize_email(email)
-        new = self._new_user(email, created_at=now)
+        new = User.new(email, created_at=now)
         async with self._tx() as s:
             columns = {c.name: getattr(new, c.name) for c in User.__table__.columns}
             inserted = (await s.execute(
@@ -157,18 +143,6 @@ class PostgresIdentityRepository:
             await s.execute(update(User).where(User.id == user_id).values(is_platform_admin=flag))
 
     # --- memberships -------------------------------------------------------------------------
-    @staticmethod
-    def _new_membership(  # noqa: PLR0913 — every column, supplied here
-        user_id: str, tenant_id: str, *, status: MembershipStatus, invited_by: str, created_at: _dt.datetime,
-        expires_at: _dt.datetime | None = None, accepted_at: _dt.datetime | None = None,
-        ended_at: _dt.datetime | None = None, ended_by: str | None = None,
-    ) -> Membership:
-        return Membership(
-            id=str(uuid.uuid4()), user_id=user_id, tenant_id=str(tenant_id), status=status,
-            invited_by=invited_by, created_at=created_at, notify_requested_seq=0, notify_sent_seq=0,
-            notify_requested_at=None, notified_at=None, notify_attempts=0, notify_next_try_at=None,
-            expires_at=expires_at, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by)
-
     async def add_membership(  # noqa: PLR0913 — the pinned seeder signature
         self, user_id: str, tenant_id: str, *, status: MembershipStatus, invited_by: str,
         created_at: _dt.datetime, expires_at: _dt.datetime | None = None,
@@ -177,8 +151,8 @@ class PostgresIdentityRepository:
     ) -> Membership:
         """Seeder."""
         check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by)
-        row = self._new_membership(
-            user_id, tenant_id, status=status, invited_by=invited_by, created_at=created_at,
+        row = Membership(
+            user_id=user_id, tenant_id=str(tenant_id), status=status, invited_by=invited_by, created_at=created_at,
             expires_at=expires_at, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by)
         async with self._tx() as s:
             s.add(row)
@@ -198,8 +172,8 @@ class PostgresIdentityRepository:
                 Membership.status.in_(_LIVE)))).scalars().first()
             if live is not None:
                 return None if live.status == "active" else live
-            row = self._new_membership(
-                user_id, tenant_id, status="invited", invited_by=invited_by, created_at=now,
+            row = Membership(
+                user_id=user_id, tenant_id=tenant_id, status="invited", invited_by=invited_by, created_at=now,
                 expires_at=expires_at)
             s.add(row)
         return row
