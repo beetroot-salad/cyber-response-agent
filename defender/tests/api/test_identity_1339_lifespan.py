@@ -123,12 +123,17 @@ def _leave_during_a_held_send(world: World, *, fails: bool = False) -> list[str]
             raise SignInUnavailable("the held send failed")
 
     world.signin.during_send = held_at_the_provider
+    # Released 3 s after shutdown is asked for: past r3's 2 s, so an API that stops waiting at a
+    # deadline of its own closes before the release. Armed in `finally` so a failing check above
+    # fails the test instead of hanging it.
     with world.lifespan_client():
-        assert wait_until(lambda: "held" in progress), "the start-up pass never reached the send"
-        # S-2: the sender is a task on the harness's loop, not a thread the app started
-        assert [t.name for t in sender_threads] == ["world-loop"]
-        assert set(threading.enumerate()) - started_before == set()
-        threading.Timer(0.3, release.set).start()  # fires while leaving the block below waits on shutdown
+        try:
+            assert wait_until(lambda: "held" in progress), "the start-up pass never reached the send"
+            # S-2: the sender is a task on the harness's loop, not a thread the app started
+            assert [t.name for t in sender_threads] == ["world-loop"]
+            assert set(threading.enumerate()) - started_before == set()
+        finally:
+            threading.Timer(3.0, release.set).start()
     return progress
 
 
@@ -161,16 +166,19 @@ def test_shutdown_during_a_send_lets_it_finish_and_be_recorded_so_it_is_not_sent
     assert world.signin.sends_to(ANN) == 1
 
 
-@pytest.mark.parametrize("outcome", ["sent", "failed"])
+@pytest.mark.parametrize("outcome", ["sent", "failed", "repository_fails"])
 def test_shutdown_during_a_send_claims_nothing_more_and_the_rest_stays_pending(outcome: str) -> None:
-    """After shutdown is asked for, whether the email in flight went out or failed (and was deferred), the sender claims nothing more; the rest stays sendable (O8b, O8d)."""
-    world = World(tenants={T1: [ANN, BOB]}, start=False, send_interval=INTERVAL)
-    world.repo = RecordingRepository(world.repo)
+    """After shutdown is asked for, whether the email in flight went out, failed (deferred), or the repository raised, the sender claims nothing more; the rest stays sendable (O8b, O8d)."""
+    world = World(tenants={T1: [ANN, BOB]}, start=False, send_interval=INTERVAL, failing_writes=True)
+    failing = world.repo
+    if outcome == "repository_fails":  # recording the email fails, and so does deferring it: the pass raises
+        failing.failing |= {"settle_set_password", "defer_set_password"}
+    world.repo = RecordingRepository(failing)
     world.signin = ClosingSignIn()
     world.build(administrators=(), tenants={T1: [ANN, BOB]})
     assert _leave_during_a_held_send(world, fails=outcome == "failed") == ["held", "released"]
     names = world.repo.names()
-    settle = "settle_set_password" if outcome == "sent" else "defer_set_password"
+    settle = "settle_set_password" if outcome != "failed" else "defer_set_password"
     assert names.index("send released") < names.index(settle) < names.index("close"), names
     assert names.count("claim_set_password") == 1, names
     assert "claim_notification" not in names, names  # the notification loop did not start either
@@ -178,8 +186,9 @@ def test_shutdown_during_a_send_claims_nothing_more_and_the_rest_stays_pending(o
     assert names[-1] == "close", names[-5:]
     _nothing_runs_after_shutdown(world)
     assert len(world.signin.send_attempts) == 1
-    world.send_pending()  # control: the other person was pending and sendable all along
-    assert len(world.signin.send_attempts) == 2
+    failing.failing.clear()
+    world.send_pending()  # control: BOB was pending and sendable all along
+    assert world.signin.send_attempts[1:] == [world.signin.account_for(BOB)]
 
 
 def test_the_bootstrap_finishes_before_the_lifespan_start_up_returns_and_before_any_send() -> None:
