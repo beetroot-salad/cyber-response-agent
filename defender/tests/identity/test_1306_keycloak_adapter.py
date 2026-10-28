@@ -93,6 +93,17 @@ class Seen:
         return {k: v[0] for k, v in urllib.parse.parse_qs(self.body.decode()).items()}
 
 
+class _AsyncOnly(httpx.AsyncBaseTransport):
+    """Serves async clients only: a sync `httpx.Client` over it has no `handle_request` to call."""
+
+    def __init__(self, handler: Callable[[httpx.Request], httpx.Response]) -> None:
+        self._handler = handler
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        await request.aread()
+        return self._handler(request)
+
+
 class Keycloak:
     """Keycloak's endpoints as a transport. `id_token` is what the token endpoint hands out."""
 
@@ -119,8 +130,8 @@ class Keycloak:
         self.admin_token_lifetime: int | None = None
 
     # --- the transport ---------------------------------------------------------------------
-    def transport(self) -> httpx.MockTransport:
-        return httpx.MockTransport(self._handle)
+    def transport(self) -> httpx.AsyncBaseTransport:
+        return _AsyncOnly(self._handle)
 
     def _handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0912
         url = request.url

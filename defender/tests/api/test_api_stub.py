@@ -5,6 +5,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import base64
 import datetime as _dt
+import inspect
 import json
 from http import HTTPStatus
 import subprocess
@@ -14,13 +15,14 @@ from pathlib import Path
 from typing import Any
 
 import anyio
-import asyncio
 import pytest
 
 pytest.importorskip("fastapi")
 
+from fastapi.routing import APIRoute  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from defender.api import fakes as fakes_module, ports as ports_module  # noqa: E402
 from defender.api.app import MAX_PAGE, create_app  # noqa: E402
 from defender.api.demo import DEMO_ROLES, demo_deps, demo_sessions  # noqa: E402
 from defender.api.fakes import (  # noqa: E402
@@ -1100,20 +1102,52 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
     assert seen == ["al-3", "al-2", "al-1", "al-0", "al-4"]
 
 
-def test_a_route_awaits_its_port_on_the_apps_loop_not_in_a_worker_thread() -> None:
-    """D11: the port answers inside a running event loop (a worker thread has none), the same loop
-    for every request. A blocking route handed to the thread pool would see no loop."""
-    loops: list[asyncio.AbstractEventLoop] = []
+def _api_routes(routes: Any) -> Any:
+    """Every `APIRoute` under `routes`, looking inside included routers (FastAPI includes them lazily)."""
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route
+        elif hasattr(route, "original_router"):
+            yield from _api_routes(route.original_router.routes)
 
-    def answer(*_: Any, **__: Any) -> list[Any]:
-        loops.append(asyncio.get_running_loop())
-        return [SUMMARY]
 
-    api = Api(list_alerts=answer)
-    assert api.client.get(f"{T}/alerts", headers=AUTH).status_code == 200
-    assert api.client.get(f"{T}/alerts", headers=AUTH).status_code == 200
-    assert len(loops) == 2
-    assert loops[0] is loops[1]
+def _walk_dependants(dependant: Any) -> Any:
+    for sub in dependant.dependencies:
+        yield sub.call
+        yield from _walk_dependants(sub)
+
+
+def test_every_route_and_every_dependency_is_a_coroutine_function() -> None:
+    """D11: a sync endpoint or dependency runs in a worker thread with no event loop; none may."""
+    app = create_app(_deps(Scripted({}))[0])
+    routes = list(_api_routes(app.routes))
+    calls = [r.endpoint for r in routes] + [c for r in routes for c in _walk_dependants(r.dependant)]
+    assert len(routes) > 20
+    assert any(r.path.endswith("/alerts") and r.methods == {"GET"} for r in routes)
+    assert any(c.__name__ == "_administrator" for c in calls)
+    assert [f"{c.__module__}.{c.__qualname__}" for c in calls if not inspect.iscoroutinefunction(c)] == []
+
+
+def test_every_fake_port_method_is_a_coroutine_function_and_a_transaction_an_async_context() -> None:
+    """D11/B: each fake implementing a `defender.api.ports` Protocol answers by `await`."""
+    protocols = [p for p in vars(ports_module).values()
+                 if isinstance(p, type) and getattr(p, "_is_protocol", False) and p.__module__ == ports_module.__name__]
+    fakes = [f for f in vars(fakes_module).values() if isinstance(f, type) and f.__module__ == fakes_module.__name__]
+    implemented = []
+    for protocol in protocols:
+        names = [n for n in vars(protocol) if not n.startswith("_") and callable(vars(protocol)[n])]
+        for fake in fakes:
+            if names and all(hasattr(fake, n) for n in names):
+                implemented.append((fake.__name__, protocol.__name__))
+                sync = [n for n in names if n != "transaction" and not inspect.iscoroutinefunction(getattr(fake, n))]
+                assert sync == [], (fake.__name__, protocol.__name__)
+    assert len(protocols) >= 9
+    assert len(implemented) >= 9
+    assert ("InMemoryStore", "AlertsRepository") in implemented
+    assert ("_InMemoryTransaction", "WriteTransaction") in implemented
+    transaction = InMemoryStore(lambda: NOW).transaction(A, USER)
+    assert hasattr(transaction, "__aenter__")
+    assert hasattr(transaction, "__aexit__")
 
 
 # --- the demo server -----------------------------------------------------------------------

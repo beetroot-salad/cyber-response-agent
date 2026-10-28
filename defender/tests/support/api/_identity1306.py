@@ -5,7 +5,7 @@ mail port and one injected clock — NO test functions. The fakes record calls a
 #1339 (D11): the service, the repository and the two ports are async. `World` keeps the sync
 `TestClient` for requests and runs every service/repository call on ONE event loop, the loop its
 clients' requests run on: `world.call(async_fn, *args)` is the bridge. Hooks are coroutines
-awaited on that loop; a hook that needs HTTP uses `world.async_browser()`, never a `TestClient`."""
+awaited on that loop; a hook that needs HTTP runs the sync client through `asyncio.to_thread`, never on the loop."""
 from __future__ import annotations
 
 import base64
@@ -25,7 +25,6 @@ from urllib.parse import parse_qs, urlsplit
 
 import anyio
 import anyio.from_thread
-import httpx
 from fastapi.testclient import TestClient
 
 from defender.api.app import create_app
@@ -586,13 +585,6 @@ class World:
         self.call(self.service.close)
         self._loop.stop()
 
-    def async_browser(self, *, origin: str | None = FRONTEND_ORIGIN) -> httpx.AsyncClient:
-        """A browser for use INSIDE the loop (a hook): `async with world.async_browser() as b:`.
-        Own cookie jar, same app (it follows `restart`), same loop. Never use a `TestClient` there."""
-        headers = {} if origin is None else {"Origin": origin}
-        return httpx.AsyncClient(transport=httpx.ASGITransport(app=self._asgi), base_url=BASE_URL,
-                                 follow_redirects=False, headers=headers)
-
     def build(self, *, administrators: Sequence[str], tenants: Mapping[str, Sequence[str]]) -> None:
         extra = {} if self.send_interval is None else {"send_interval": self.send_interval}
         self.service = IdentityService(
@@ -652,12 +644,6 @@ class World:
         assert login.status_code == 302, login.text
         return parse_qs(urlsplit(login.headers["location"]).query)["state"][0]
 
-    async def abegin_signin(self, browser: httpx.AsyncClient) -> str:
-        """`begin_signin` for a hook: `browser` is a `world.async_browser()`."""
-        login = await browser.get("/auth/login")
-        assert login.status_code == 302, login.text
-        return parse_qs(urlsplit(login.headers["location"]).query)["state"][0]
-
     def _callback_params(self, email: str, sent_state: str, *, amr: Sequence[str], name: str | None,
                          account_id: str | None, state: str | None,
                          extra: Mapping[str, str] | None) -> dict[str, str]:
@@ -682,30 +668,11 @@ class World:
                                        state=state, extra=extra)
         return browser.get("/auth/callback", params=params)
 
-    async def asign_in_response(self, browser: httpx.AsyncClient, email: str, *,
-                                amr: Sequence[str] = ("pwd",), name: str | None = None,
-                                account_id: str | None = None, state: str | None = None,
-                                begin: bool = True, extra: Mapping[str, str] | None = None) -> Any:
-        """`sign_in_response` for a hook (a `world.async_browser()`)."""
-        sent_state = await self.abegin_signin(browser) if begin else (state or "no-login")
-        params = self._callback_params(email, sent_state, amr=amr, name=name, account_id=account_id,
-                                       state=state, extra=extra)
-        return await browser.get("/auth/callback", params=params)
-
     def sign_in(self, email: str, *, amr: Sequence[str] = ("pwd",), name: str | None = None,
                 browser: TestClient | None = None) -> TestClient:
         """A new browser (or the given one) signed in as `email` (needs an account: the sender has run)."""
         browser = browser or self.client()
         response = self.sign_in_response(browser, email, amr=amr, name=name)
-        assert response.status_code == 303, response.text
-        assert browser.cookies.get(SESSION_COOKIE), "session cookie did not round-trip"
-        return browser
-
-    async def asign_in(self, email: str, *, amr: Sequence[str] = ("pwd",), name: str | None = None) -> httpx.AsyncClient:
-        """`sign_in` for a hook: a new async browser signed in as `email`. The caller closes it
-        (`await browser.aclose()`) or uses it after the hook only if the app is still up."""
-        browser = self.async_browser()
-        response = await self.asign_in_response(browser, email, amr=amr, name=name)
         assert response.status_code == 303, response.text
         assert browser.cookies.get(SESSION_COOKIE), "session cookie did not round-trip"
         return browser

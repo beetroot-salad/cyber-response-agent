@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import inspect
+import threading
 import time
 from typing import Any
 
@@ -107,14 +108,20 @@ def test_shutdown_cancels_a_send_in_flight_promptly_and_closes_once_afterwards()
     world.signin = ClosingSignIn()
     world.build(administrators=(), tenants={T1: [ANN]})
     inside: list[bool] = []
+    sender_threads: list[threading.Thread] = []
+    started_before = set(threading.enumerate())
 
     async def stuck_at_the_provider() -> None:
         inside.append(True)
+        sender_threads.append(threading.current_thread())
         await asyncio.sleep(30)  # only cancellation ends it within the test's bound
 
     world.signin.during_send = stuck_at_the_provider
     with world.lifespan_client():
         assert wait_until(lambda: bool(inside)), "the start-up pass never reached the send"
+        # S-2: the sender is a task on the harness's loop, not a thread the app started
+        assert [t.name for t in sender_threads] == ["world-loop"]
+        assert set(threading.enumerate()) - started_before == set()
         leaving = time.monotonic()
     assert time.monotonic() - leaving < 2
     names = world.repo.names()

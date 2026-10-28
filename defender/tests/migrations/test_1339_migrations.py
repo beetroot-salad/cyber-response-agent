@@ -43,11 +43,14 @@ def dev_command(dsn: str | None, *args: str) -> subprocess.CompletedProcess[str]
 
 
 def catalog(dsn: str) -> dict[str, Any]:
-    """Every column, constraint and index of every non-system schema, Alembic's version table aside."""
+    """Every column (full formatted type), constraint and index of every non-system schema, Alembic's version table aside."""
     columns = execute(dsn, f"""
-        SELECT c.table_schema, c.table_name, c.column_name, c.data_type, c.is_nullable, c.column_default
-        FROM information_schema.columns c JOIN pg_namespace n ON n.nspname = c.table_schema
-        WHERE {_SYSTEM} AND (c.table_schema, c.table_name) <> ('public', 'alembic_version')""")
+        SELECT n.nspname, t.relname, a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull,
+               pg_get_expr(d.adbin, d.adrelid)
+        FROM pg_attribute a JOIN pg_class t ON t.oid = a.attrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+        WHERE a.attnum > 0 AND NOT a.attisdropped AND t.relkind IN ('r', 'p') AND {_SYSTEM}
+          AND (n.nspname, t.relname) <> ('public', 'alembic_version')""")
     constraints = execute(dsn, f"""
         SELECT n.nspname, t.relname, k.conname, k.contype, pg_get_constraintdef(k.oid)
         FROM pg_constraint k JOIN pg_class t ON t.oid = k.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace
@@ -142,7 +145,7 @@ def test_the_migrated_schema_is_the_schema_the_models_declare(migrated_database)
     from sqlalchemy import create_engine
     from sqlalchemy.engine import make_url
 
-    from defender.migrations import target_metadata
+    from defender.migrations.models import target_metadata
 
     with database(migrated=False) as from_models:
         for schema in sorted({t.schema for t in target_metadata.tables.values()}):
@@ -228,7 +231,7 @@ def test_head_and_heads_load_no_features_models():
         from defender.migrations import head, heads
         heads(); head()
         print("identity" if "defender.identity" in sys.modules else "clean")
-        from defender.migrations import target_metadata
+        from defender.migrations.models import target_metadata
         print("identity" if "defender.identity" in sys.modules else "clean")
     """)
     assert probe.returncode == 0, probe.stderr

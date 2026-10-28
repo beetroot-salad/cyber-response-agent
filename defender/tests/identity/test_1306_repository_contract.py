@@ -26,7 +26,7 @@ from defender.tests.support.shared._pglocks1339 import (
     until,
     until_blocked,
 )
-from defender.tests.support.shared._postgres1339 import database
+from defender.tests.support.shared._postgres1339 import database, execute
 
 pytestmark = pytest.mark.anyio
 
@@ -101,6 +101,18 @@ async def test_register_tenant_is_idempotent_and_decides_existence(seeded):
     await seeded.register_tenant(T1, now=NOW + HOUR)
     assert await seeded.tenant_exists(T1) is True
     assert await seeded.tenant_exists(T_UNREGISTERED) is False
+
+
+@pytest.mark.postgres
+async def test_register_tenant_stores_the_given_time_and_keeps_the_first(pg_dsn):
+    """D: `tenants.created_at` is the `now` the caller passed; registering again does not move it."""
+    repo = _postgres(pg_dsn)
+    try:
+        await repo.register_tenant(T1, now=NOW)
+        await repo.register_tenant(T1, now=NOW + HOUR)
+    finally:
+        await repo.close()
+    assert execute(pg_dsn, "SELECT created_at FROM identity.tenants WHERE id = %s", (str(T1),)) == [(NOW,)]
 
 
 async def test_a_membership_in_an_unregistered_tenant_is_refused(seeded):
@@ -887,6 +899,9 @@ async def test_a_claim_skips_a_row_another_claimant_holds_and_does_not_wait(two_
     claimed = await claim(second)
     assert claimed.id == row_id
     assert await claim(first) is None  # held now by the claim itself
+    settled = (await first.settle_set_password(u.id, 1, sent_at=NOW) if kind == "set_password"
+               else await first.settle_notification(row_id, 1, sent_at=NOW, expires_at=NOW + WEEK))
+    assert settled is True
 
 
 @pytest.mark.postgres
@@ -923,3 +938,28 @@ async def test_closing_a_repository_disposes_its_engine(pg_dsn):
     assert await connections(pg_dsn) > 0  # control: the repository does hold connections while open
     await repo.close()
     await until(idle)
+
+
+@pytest.mark.postgres
+async def test_a_returned_datetime_is_utc_whatever_zone_the_database_defaults_to(pg_dsn):
+    """P4: the database's own time zone never shows in what the repository returns (every offset is zero)."""
+    name = execute(pg_dsn, "SELECT current_database()")[0][0]
+    execute(pg_dsn, f'ALTER DATABASE "{name}" SET timezone TO \'Pacific/Chatham\'')
+    repo = _postgres(pg_dsn)
+    try:
+        await repo.register_tenant(T1, now=NOW)
+        ann = await repo.add_user("ann@x.org", created_at=NOW)
+        row = await repo.ensure_invitation(ann.id, T1, invited_by="system", now=NOW)
+        await repo.accept_invitation(row.id, now=NOW)
+        await repo.request_set_password(ann.id, now=NOW)
+        models = _models([
+            await repo.user(ann.id), await repo.membership(row.id),
+            await repo.add_session("tz-sess", ann.id, now=NOW, expires_at=NOW + WEEK),
+            await _claim_user(repo)])
+    finally:
+        await repo.close()
+    # control: the zone is in force for a plain connection, so a naive read would have shown it
+    assert execute(pg_dsn, "SELECT created_at FROM identity.users")[0][0].utcoffset() != dt.timedelta(0)
+    stamps = [v for m in models for v in _values(m).values() if isinstance(v, dt.datetime)]
+    assert len(stamps) >= 6
+    assert [v for v in stamps if v.utcoffset() != dt.timedelta(0)] == []
