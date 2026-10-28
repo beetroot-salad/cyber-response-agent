@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import logging
 import time
 from typing import Any
 
@@ -375,12 +376,14 @@ class _Emails:
             return sorted(w.call(w.repo.user_by_email, p).set_password_attempts for p in (NEW, NINA))
         return sorted(w.call(w.repo.membership, r).notify_attempts for r in self._rows)
 
-    def hold(self, step: str, seconds: float, *, second: bool = False) -> None:
-        """Make the first (or, with `second`, the next) email spend `seconds` at `step`: the provider
-        call, or a repository read the send makes before it."""
+    def hold(self, step: str, seconds: float, *, second: bool = False, every: bool = False) -> None:
+        """Make the first (or, with `second`, the next; with `every`, each) email spend `seconds` at
+        `step`: the provider call, or a repository call the send makes before it."""
         w = self.world
 
         async def held() -> None:
+            if every:
+                arm(held)
             await asyncio.sleep(seconds)
 
         if step == "provider":
@@ -404,14 +407,17 @@ class _Emails:
 @pytest.mark.parametrize("second", [False, True], ids=["first", "second"])
 @pytest.mark.parametrize("step", ["provider", "repository"])
 @pytest.mark.parametrize("kind", ["set_password", "notice"])
-def test_an_email_that_outlives_its_deadline_is_deferred_and_the_pass_moves_on(kind: str, step: str, second: bool) -> None:
-    """Any email of a pass, stuck at any step, is abandoned at the deadline, deferred with backoff like a failed send, and does not hold back the others (O9)."""
+def test_an_email_that_outlives_its_deadline_is_deferred_and_the_pass_moves_on(
+        kind: str, step: str, second: bool, caplog: Any) -> None:
+    """Any email of a pass, stuck at any step, is abandoned at the deadline, logged, deferred with backoff like a failed send, and does not hold back the others (O9)."""
     emails = _Emails(kind)
     world = emails.world
     emails.hold(step, 60, second=second)  # far past the deadline; only the deadline ends it in time
     began = time.monotonic()
-    world.send_pending()
+    with caplog.at_level(logging.ERROR, logger="defender.identity"):
+        world.send_pending()
     assert time.monotonic() - began < 10
+    assert [r for r in caplog.records if r.levelno == logging.ERROR and "stays pending" in r.getMessage()]
     assert emails.attempts() == [0, 1]  # the stuck one was deferred like a failed send, the other was not
     reached = emails.sent()
     assert reached == (2 if step == "provider" else 1)  # a hold at the provider comes after it took the email
@@ -429,9 +435,9 @@ def test_an_email_that_outlives_its_deadline_is_deferred_and_the_pass_moves_on(k
 
 @pytest.mark.parametrize("kind", ["set_password", "notice"])
 def test_an_email_slower_than_usual_but_within_its_deadline_is_sent_and_recorded(kind: str) -> None:
-    """The deadline is the whole configured time, not a fraction of it (O9, control)."""
+    """Each email gets the whole configured time, not a fraction of it nor a share of one per pass (O9, control)."""
     emails = _Emails(kind)
-    emails.hold("provider", 0.6 * DEADLINE.total_seconds())
+    emails.hold("provider", 0.6 * DEADLINE.total_seconds(), every=True)  # together past one deadline
     emails.world.send_pending()
     assert (emails.sent(), emails.attempts()) == (2, [0, 0])
 
@@ -450,9 +456,42 @@ def test_deferring_a_stuck_email_is_not_cut_short_by_its_deadline() -> None:
     assert (emails.sent(), emails.attempts()) == (2, [0, 1])
 
 
+def test_an_email_that_keeps_outliving_its_deadline_backs_off_further_each_time() -> None:
+    """A timed-out email is deferred exactly like a failed send: the wait doubles with each attempt (O9; flow 1 backoff)."""
+    emails = _Emails("set_password")
+    world = emails.world
+    emails.hold("provider", 60)
+    world.send_pending()
+    assert emails.attempts() == [0, 1]
+    emails.hold("provider", 60)
+    world.clock.advance(_dt.timedelta(seconds=31))  # the first retry, 30 s on, times out again
+    world.send_pending()
+    assert (emails.sent(), emails.attempts()) == (3, [0, 2])
+    world.clock.advance(_dt.timedelta(seconds=31))
+    world.send_pending()
+    assert emails.sent() == 3  # now 60 s, not 30 s again
+    world.clock.advance(_dt.timedelta(seconds=30))
+    world.send_pending()
+    assert emails.sent() == 4
+
+
+def test_a_claim_that_outlives_the_deadline_ends_the_pass() -> None:
+    """The deadline covers the claim too: a claim that hangs fails the pass in time rather than stalling it (O9, D14)."""
+    world = World(tenants={T1: [ANN]}, send_deadline=DEADLINE, failing_writes=True)
+
+    async def hangs() -> None:
+        await asyncio.sleep(60)
+
+    world.repo.after["claim_set_password"] = hangs
+    began = time.monotonic()
+    with pytest.raises(TimeoutError):
+        world.send_pending()
+    assert time.monotonic() - began < 10
+
+
 @pytest.mark.parametrize("claim", ["claim_set_password", "claim_notification"])
 def test_a_repository_failure_while_claiming_raises_out_of_the_pass(claim: str) -> None:
-    """The deadline's handling defers emails, never hides a repository failure: a failing claim propagates (flow 1, O9)."""
+    """The deadline's handling defers emails but does not swallow a failing claim: it propagates out of the pass (flow 1, O9)."""
     world = World(tenants={T1: [ANN]}, failing_writes=True)
     world.repo.failing.add(claim)
     with pytest.raises(InjectedFailure):
