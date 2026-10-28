@@ -2,7 +2,7 @@
 
 Every PostgreSQL test gets a database of its own, cloned from its worker's template, which the
 migrations bring to head once per worker. Migrations run only in synchronous fixtures, never on a
-running event loop. A template left by an earlier run is dropped and rebuilt, never reused.
+running event loop. A template is named by worker and process id and built fresh, never reused from an earlier run.
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def _template(server: str) -> str:
     """This worker's template database at head, built once per process."""
     from defender.migrations import upgrade
 
-    name = f"defender_tmpl_{os.environ.get('PYTEST_XDIST_WORKER', 'main')}"
+    name = f"defender_tmpl_{os.environ.get('PYTEST_XDIST_WORKER', 'main')}_{os.getpid()}"
     _drop(server, name)
     upgrade(_create(server, name, template="template0"))
     atexit.register(_drop, server, name)

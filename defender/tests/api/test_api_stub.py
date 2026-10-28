@@ -13,6 +13,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import anyio
+import asyncio
 import pytest
 
 pytest.importorskip("fastapi")
@@ -193,7 +195,7 @@ class Scripted:
         if name.startswith("_"):
             raise AttributeError(name)
 
-        def call(*args: Any, **kwargs: Any) -> Any:
+        async def call(*args: Any, **kwargs: Any) -> Any:
             self.calls.append((name, args, kwargs))
             if name not in self.answers:
                 raise AssertionError(f"unscripted port call: {name}{args}")
@@ -215,11 +217,11 @@ class _ScriptedTransaction:
         self.actor = actor
         self.pending: list[tuple[str, str, str, str, str]] = []
 
-    def __enter__(self) -> _ScriptedTransaction:
+    async def __aenter__(self) -> _ScriptedTransaction:
         self.ports.transactions.append((self.tenant_id, self.actor))
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, *_: object) -> None:
+    async def __aexit__(self, exc_type: type[BaseException] | None, *_: object) -> None:
         if exc_type is None:
             self.ports.audits.extend(self.pending)
 
@@ -228,7 +230,7 @@ class _ScriptedTransaction:
             raise AttributeError(name)
         return getattr(self.ports, name)
 
-    def audit(self, action: str, target: str, detail: str = "") -> None:
+    async def audit(self, action: str, target: str, detail: str = "") -> None:
         failure = self.ports.answers.get("audit")
         if isinstance(failure, BaseException):
             raise failure
@@ -242,28 +244,34 @@ class _Unused:
         raise AssertionError(f"a route test reached the unused port: {name}")
 
 
-def _identity() -> tuple[IdentityService, dict[str, str]]:
+async def _seed_identity() -> tuple[IdentityService, dict[str, str]]:
     """Ann is a member of A, Bob of B and Cy of both, each with a seeded session. Returns the
     service and the seeded user ids by session value."""
     repo = InMemoryIdentityRepository()
-    register_tenant(repo, TenantId(A))
-    register_tenant(repo, TenantId(B))
+    await register_tenant(repo, TenantId(A), now=NOW)
+    await register_tenant(repo, TenantId(B), now=NOW)
     users: dict[str, str] = {}
     for email, tenant, session in (("ann@a.example", A, SESSION_A), ("bob@b.example", B, SESSION_B)):
-        user = repo.add_user(email, created_at=NOW, status="active", display_name=email)
-        repo.add_membership(user.id, TenantId(tenant), status="active", invited_by="system",
+        user = await repo.add_user(email, created_at=NOW, status="active", display_name=email)
+        await repo.add_membership(user.id, TenantId(tenant), status="active", invited_by="system",
                             created_at=NOW, accepted_at=NOW)
-        repo.add_session(session, user.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
+        await repo.add_session(session, user.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
         users[session] = user.id
-    cy = repo.add_user("cy@c.example", created_at=NOW, status="active", display_name="cy")
+    cy = await repo.add_user("cy@c.example", created_at=NOW, status="active", display_name="cy")
     for tenant in (A, B):
-        repo.add_membership(cy.id, TenantId(tenant), status="active", invited_by="system",
+        await repo.add_membership(cy.id, TenantId(tenant), status="active", invited_by="system",
                             created_at=NOW, accepted_at=NOW)
-    repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
+    await repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
     users[SESSION_AB] = cy.id
     service = IdentityService(repo, signin=_Unused(), mail=_Unused(), clock=lambda: NOW,
                               bootstrap=Bootstrap(administrators=(), tenants={}))
     return service, users
+
+
+def _identity() -> tuple[IdentityService, dict[str, str]]:
+    """The seeded identity service, built in a throwaway loop: the in-memory repository holds no
+    loop state, so the app's own loop can use it afterwards."""
+    return anyio.run(_seed_identity)
 
 
 def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
@@ -1092,6 +1100,22 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
     assert seen == ["al-3", "al-2", "al-1", "al-0", "al-4"]
 
 
+def test_a_route_awaits_its_port_on_the_apps_loop_not_in_a_worker_thread() -> None:
+    """D11: the port answers inside a running event loop (a worker thread has none), the same loop
+    for every request. A blocking route handed to the thread pool would see no loop."""
+    loops: list[asyncio.AbstractEventLoop] = []
+
+    def answer(*_: Any, **__: Any) -> list[Any]:
+        loops.append(asyncio.get_running_loop())
+        return [SUMMARY]
+
+    api = Api(list_alerts=answer)
+    assert api.client.get(f"{T}/alerts", headers=AUTH).status_code == 200
+    assert api.client.get(f"{T}/alerts", headers=AUTH).status_code == 200
+    assert len(loops) == 2
+    assert loops[0] is loops[1]
+
+
 # --- the demo server -----------------------------------------------------------------------
 
 
@@ -1102,7 +1126,7 @@ def _session(value: str, origin: str) -> dict[str, str]:
 def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
     """The demo's seeded sessions reach only their own tenant."""
     tenants = (DEMO_ONE, DEMO_TWO)
-    deps = demo_deps(tenants, lambda: NOW)
+    deps = anyio.run(demo_deps, tenants, lambda: NOW)
     client = TestClient(create_app(deps), base_url=BASE)
     sessions = demo_sessions(tenants)
     seen: dict[str, set[str]] = {}
@@ -1132,7 +1156,7 @@ def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
 def test_a_demo_session_outlasts_the_production_idle_limit() -> None:
     """The printed demo sessions keep working through a night unused; only their own lifetime ends them."""
     clock = {"now": NOW}
-    deps = demo_deps((DEMO_ONE,), lambda: clock["now"])
+    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: clock["now"])
     client = TestClient(create_app(deps), base_url=BASE)
     auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
     clock["now"] = NOW + _dt.timedelta(days=3)
@@ -1143,7 +1167,7 @@ def test_a_demo_session_outlasts_the_production_idle_limit() -> None:
 
 def test_the_demo_sign_in_port_refuses_with_a_503_problem() -> None:
     """The demo has no Keycloak; `/auth/login` answers a 503 problem, never a redirect."""
-    client = TestClient(create_app(demo_deps((DEMO_ONE,), lambda: NOW)), base_url=BASE)
+    client = TestClient(create_app(anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)), base_url=BASE)
     response = client.get("/auth/login", follow_redirects=False)
     assert response.status_code == 503
     assert response.headers["Content-Type"] == "application/problem+json"
@@ -1152,7 +1176,7 @@ def test_the_demo_sign_in_port_refuses_with_a_503_problem() -> None:
 
 def test_the_demo_store_keeps_the_audit_events_a_transaction_commits() -> None:
     """The actor is the demo session's user id (read from `/me`)."""
-    deps = demo_deps((DEMO_ONE,), lambda: NOW)
+    deps = anyio.run(demo_deps, (DEMO_ONE,), lambda: NOW)
     client = TestClient(create_app(deps), base_url=BASE)
     auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
     user_id = client.get("/me", headers=auth).json()["user"]["id"]
@@ -1168,7 +1192,7 @@ def test_the_demo_store_keys_records_by_tenant() -> None:
     store = InMemoryStore(lambda: NOW)
     store.add_alert(DEMO_ONE, ALERT)
     store.add_alert(DEMO_TWO, ALERT.model_copy(update={"title": "two's"}))
-    one, two = store.get_alert(DEMO_ONE, "al-1"), store.get_alert(DEMO_TWO, "al-1")
+    one, two = anyio.run(store.get_alert, DEMO_ONE, "al-1"), anyio.run(store.get_alert, DEMO_TWO, "al-1")
     assert one is not None
     assert two is not None
     assert (one.title, two.title) == ("t", "two's")
@@ -1181,4 +1205,4 @@ def test_the_demo_store_keys_records_by_tenant() -> None:
 ])
 def test_the_demo_seed_refuses_a_bad_tenant_list(tenants: tuple[str, ...], reason: str) -> None:
     with pytest.raises(ValueError, match=reason):
-        demo_deps(tenants)
+        anyio.run(demo_deps, tenants)

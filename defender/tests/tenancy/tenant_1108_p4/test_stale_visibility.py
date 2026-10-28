@@ -569,6 +569,7 @@ def _client(*investigations: Any) -> Any:
     import datetime as _dt
 
     pytest.importorskip("fastapi")
+    import anyio
     from fastapi.testclient import TestClient
 
     from defender.api.app import create_app
@@ -584,11 +585,16 @@ def _client(*investigations: Any) -> Any:
         store.add_investigation(_TENANT, inv)
     now = lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC)  # noqa: E731
     repo = InMemoryIdentityRepository()
-    register_tenant(repo, TenantId(_TENANT))
-    ann = repo.add_user("ann@example.invalid", created_at=now(), status="active", display_name="Ann")
-    repo.add_membership(ann.id, TenantId(_TENANT), status="active", invited_by="system",
-                        created_at=now(), accepted_at=now())
-    repo.add_session(_SESSION, ann.id, now=now(), expires_at=now() + _dt.timedelta(days=7))
+
+    async def seed() -> None:
+        # The in-memory repository holds no loop state, so a throwaway loop seeds it.
+        await register_tenant(repo, TenantId(_TENANT), now=now())
+        ann = await repo.add_user("ann@example.invalid", created_at=now(), status="active", display_name="Ann")
+        await repo.add_membership(ann.id, TenantId(_TENANT), status="active", invited_by="system",
+                                  created_at=now(), accepted_at=now())
+        await repo.add_session(_SESSION, ann.id, now=now(), expires_at=now() + _dt.timedelta(days=7))
+
+    anyio.run(seed)
     identity = IdentityService(repo, signin=_NoPort(), mail=_NoPort(), clock=now,
                                bootstrap=Bootstrap(administrators=(), tenants={}))
     deps = ApiDeps(

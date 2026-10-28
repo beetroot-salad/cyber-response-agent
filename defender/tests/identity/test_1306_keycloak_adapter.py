@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import urllib.parse
+from collections.abc import AsyncIterator, Callable
 
 import httpx
 import pytest
@@ -20,6 +21,8 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 # Production names (Pinned interface): a missing module is the expected red.
 from defender.identity import SignInRefused, SignInUnavailable, VerifiedSignIn
 from defender.identity.keycloak import KeycloakSignIn
+
+pytestmark = pytest.mark.anyio
 
 NOW = dt.datetime(2026, 10, 26, 9, 0, tzinfo=dt.UTC)
 BASE = "https://kc.test"
@@ -99,6 +102,7 @@ class Keycloak:
         self.id_token = ""
         self.token_status = 200
         self.seen: list[Seen] = []
+        self.opened: list[KeycloakSignIn] = []
         self.users: dict[str, str] = {}  # username -> id
         self.create_status = 201
         self.email_status = 204
@@ -187,29 +191,37 @@ class Keycloak:
 
 
 @pytest.fixture
-def kc() -> Keycloak:
-    return Keycloak(Signer())
+async def kc() -> AsyncIterator[Keycloak]:
+    """The fake Keycloak; every adapter a test builds on it is closed in the test's loop afterwards."""
+    fake = Keycloak(Signer())
+    try:
+        yield fake
+    finally:
+        for port in fake.opened:
+            await port.close()
 
 
-def adapter(kc: Keycloak, *, now: dt.datetime = NOW) -> KeycloakSignIn:
-    return KeycloakSignIn(
+def adapter(kc: Keycloak, *, now: dt.datetime = NOW, clock: Callable[[], dt.datetime] | None = None) -> KeycloakSignIn:
+    port = KeycloakSignIn(
         issuer=ISSUER, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI,
         admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET,
-        transport=kc.transport(), clock=lambda: now)
+        transport=kc.transport(), clock=clock or (lambda: now))
+    kc.opened.append(port)
+    return port
 
 
-def sign_in(kc: Keycloak, token: str, *, nonce: str = "n1") -> VerifiedSignIn:
+async def sign_in(kc: Keycloak, token: str, *, nonce: str = "n1") -> VerifiedSignIn:
     kc.id_token = token
     port = adapter(kc)
-    port.begin_signin(state="s1", nonce=nonce, code_challenge="chal")
-    return port.finish_signin(code="code-1", code_verifier="verifier-1", nonce=nonce)
+    await port.begin_signin(state="s1", nonce=nonce, code_challenge="chal")
+    return await port.finish_signin(code="code-1", code_verifier="verifier-1", nonce=nonce)
 
 
 # --- begin_signin ----------------------------------------------------------------------------
 
-def test_begin_signin_url_carries_the_pkce_login_prompt_and_the_configured_client(kc):
+async def test_begin_signin_url_carries_the_pkce_login_prompt_and_the_configured_client(kc):
     """The sign-in URL forces the password prompt and PKCE S256 (DC-8, C12)."""
-    url = urllib.parse.urlsplit(adapter(kc).begin_signin(state="st-9", nonce="no-9", code_challenge="ch-9"))
+    url = urllib.parse.urlsplit(await adapter(kc).begin_signin(state="st-9", nonce="no-9", code_challenge="ch-9"))
     query = urllib.parse.parse_qs(url.query)
     assert f"{url.scheme}://{url.netloc}{url.path}" == f"{ISSUER}/protocol/openid-connect/auth"
     assert query["prompt"] == ["login"]
@@ -226,9 +238,9 @@ def test_begin_signin_url_carries_the_pkce_login_prompt_and_the_configured_clien
 
 # --- finish_signin: the positive control and what the token endpoint received --------------
 
-def test_finish_signin_exchanges_the_code_with_its_verifier_and_returns_the_verified_identity(kc):
+async def test_finish_signin_exchanges_the_code_with_its_verifier_and_returns_the_verified_identity(kc):
     """A correctly signed token yields VerifiedSignIn; the code, verifier and redirect_uri are sent (DC-8)."""
-    result = sign_in(kc, kc.signer.sign(claims(amr=["pwd", "otp"])))
+    result = await sign_in(kc, kc.signer.sign(claims(amr=["pwd", "otp"])))
     assert result == VerifiedSignIn(account_id=ACCOUNT, name="Ada Ops", amr=("pwd", "otp"))
     [sent] = [s for s in kc.calls("POST", "/openid-connect/token")
               if s.form().get("grant_type") == "authorization_code"]
@@ -261,12 +273,12 @@ def _holds(obj: object, needle: str) -> bool:
     return False
 
 
-def test_keycloaks_tokens_never_leave_the_adapter(kc):
+async def test_keycloaks_tokens_never_leave_the_adapter(kc):
     """The result carries only account_id, name and amr, and the adapter keeps none of Keycloak's tokens (O6, K7/H5)."""
     kc.id_token = kc.signer.sign(claims())
     port = adapter(kc)
-    port.begin_signin(state="s1", nonce="n1", code_challenge="chal")
-    result = port.finish_signin(code="code-1", code_verifier="verifier-1", nonce="n1")
+    await port.begin_signin(state="s1", nonce="n1", code_challenge="chal")
+    result = await port.finish_signin(code="code-1", code_verifier="verifier-1", nonce="n1")
     assert {f.name for f in dataclasses.fields(result)} == {"account_id", "name", "amr"}
     leaked = repr(result) + json.dumps(dataclasses.asdict(result))
     assert _holds(port, CLIENT_SECRET)  # control: the walk reaches what the adapter holds
@@ -275,19 +287,19 @@ def test_keycloaks_tokens_never_leave_the_adapter(kc):
         assert not _holds(port, secret)
 
 
-def test_a_token_without_amr_reports_no_methods_and_so_no_otp(kc):
+async def test_a_token_without_amr_reports_no_methods_and_so_no_otp(kc):
     """A missing amr is the empty tuple, not an error and not otp (C13)."""
-    assert sign_in(kc, kc.signer.sign(claims(amr=None))).amr == ()
+    assert (await sign_in(kc, kc.signer.sign(claims(amr=None)))).amr == ()
 
 
-def test_a_token_without_a_name_reports_no_name_not_the_username(kc):
+async def test_a_token_without_a_name_reports_no_name_not_the_username(kc):
     """`preferred_username` is the id our own code gave the account, never a display name."""
-    assert sign_in(kc, kc.signer.sign(claims(name=None, preferred_username=USER_ID))).name == ""
+    assert (await sign_in(kc, kc.signer.sign(claims(name=None, preferred_username=USER_ID)))).name == ""
 
 
-def test_an_audience_list_that_contains_the_client_is_accepted(kc):
+async def test_an_audience_list_that_contains_the_client_is_accepted(kc):
     """Positive control for the audience refusal: aud may be a list holding our client id."""
-    assert sign_in(kc, kc.signer.sign(claims(aud=["account", CLIENT_ID]))).account_id == ACCOUNT
+    assert (await sign_in(kc, kc.signer.sign(claims(aud=["account", CLIENT_ID])))).account_id == ACCOUNT
 
 
 # --- finish_signin: refusals (each paired with the control above on the same fixture) -------
@@ -326,37 +338,37 @@ def _unsigned(kc: Keycloak) -> str:
     pytest.param(_unsigned, id="alg-none"),
     pytest.param(lambda kc: kc.signer.sign(claims(sub=None)), id="no-subject"),
 ])
-def test_finish_signin_refuses_a_token_that_fails_verification(kc, make):
+async def test_finish_signin_refuses_a_token_that_fails_verification(kc, make):
     """Signature, key id, issuer, audience, nonce, expiry and algorithm are all checked (DC-8)."""
     kc.id_token = make(kc)
     port = adapter(kc)
-    port.begin_signin(state="s1", nonce="n1", code_challenge="chal")
+    await port.begin_signin(state="s1", nonce="n1", code_challenge="chal")
     with pytest.raises(SignInRefused):
-        port.finish_signin(code="code-1", code_verifier="verifier-1", nonce="n1")
+        await port.finish_signin(code="code-1", code_verifier="verifier-1", nonce="n1")
 
 
-def test_finish_signin_refuses_when_keycloak_rejects_the_code(kc):
+async def test_finish_signin_refuses_when_keycloak_rejects_the_code(kc):
     """A failed code exchange is a refusal, not a crash and not an identity."""
     kc.token_status = 400
     kc.id_token = kc.signer.sign(claims())
     port = adapter(kc)
     with pytest.raises(SignInRefused):
-        port.finish_signin(code="used-code", code_verifier="verifier-1", nonce="n1")
+        await port.finish_signin(code="used-code", code_verifier="verifier-1", nonce="n1")
 
 
-def test_the_nonce_the_caller_passes_is_the_one_checked(kc):
+async def test_the_nonce_the_caller_passes_is_the_one_checked(kc):
     """A token whose nonce matches the token endpoint's note but not the caller's is refused."""
     kc.id_token = kc.signer.sign(claims(nonce="n1"))
     with pytest.raises(SignInRefused):
-        adapter(kc).finish_signin(code="c", code_verifier="v", nonce="n-from-our-cookie")
-    assert adapter(kc).finish_signin(code="c", code_verifier="v", nonce="n1").account_id == ACCOUNT
+        await adapter(kc).finish_signin(code="c", code_verifier="v", nonce="n-from-our-cookie")
+    assert (await adapter(kc).finish_signin(code="c", code_verifier="v", nonce="n1")).account_id == ACCOUNT
 
 
 # --- the admin API ----------------------------------------------------------------------------
 
-def test_create_account_sends_our_user_id_as_username_verified_with_mapped_required_actions(kc):
+async def test_create_account_sends_our_user_id_as_username_verified_with_mapped_required_actions(kc):
     """username = our user id, emailVerified, set_password/set_up_otp -> UPDATE_PASSWORD/CONFIGURE_TOTP (C9)."""
-    account = adapter(kc).create_account(
+    account = await adapter(kc).create_account(
         username=USER_ID, email="ada@example.test", required_actions=frozenset({"set_password", "set_up_otp"}))
     assert account == USER_ID
     [sent] = kc.calls("POST", f"/admin/realms/{REALM}/users")
@@ -377,25 +389,25 @@ def test_create_account_sends_our_user_id_as_username_verified_with_mapped_requi
         assert grant.headers.get("authorization") == basic
 
 
-def test_create_account_with_only_set_password_requires_no_otp_setup(kc):
+async def test_create_account_with_only_set_password_requires_no_otp_setup(kc):
     """A plain invitee is not made to set up a one-time code (r6 flow 1)."""
-    adapter(kc).create_account(username=USER_ID, email="a@example.test", required_actions=frozenset({"set_password"}))
+    await adapter(kc).create_account(username=USER_ID, email="a@example.test", required_actions=frozenset({"set_password"}))
     [sent] = kc.calls("POST", f"/admin/realms/{REALM}/users")
     assert sent.json()["requiredActions"] == ["UPDATE_PASSWORD"]
 
 
-def test_create_account_reads_the_new_id_from_the_location_header(kc):
+async def test_create_account_reads_the_new_id_from_the_location_header(kc):
     """The returned account id is the one Keycloak chose (P-B)."""
     kc.new_id = "kc-chosen-id"
-    assert adapter(kc).create_account(
+    assert await adapter(kc).create_account(
         username=USER_ID, email="a@example.test", required_actions=frozenset({"set_password"})) == "kc-chosen-id"
 
 
-def test_a_conflict_on_create_finds_the_existing_account_by_exact_username(kc):
+async def test_a_conflict_on_create_finds_the_existing_account_by_exact_username(kc):
     """Create-or-find: a retry gets the same account, never a username-prefix lookalike (P-C)."""
     kc.users = {USER_ID + "0": "decoy-id", USER_ID: "existing-id"}
     kc.create_status = 409
-    account = adapter(kc).create_account(
+    account = await adapter(kc).create_account(
         username=USER_ID, email="a@example.test", required_actions=frozenset({"set_password"}))
     assert account == "existing-id"
     [lookup] = kc.calls("GET", f"/admin/realms/{REALM}/users")
@@ -403,16 +415,16 @@ def test_a_conflict_on_create_finds_the_existing_account_by_exact_username(kc):
     assert lookup.query["exact"] == ["true"]
 
 
-def test_a_conflict_with_no_account_of_that_username_is_not_papered_over(kc):
+async def test_a_conflict_with_no_account_of_that_username_is_not_papered_over(kc):
     """A 409 caused by someone else's email must not return a wrong id."""
     kc.create_status = 409
     with pytest.raises(SignInUnavailable):
-        adapter(kc).create_account(username=USER_ID, email="a@example.test", required_actions=frozenset())
+        await adapter(kc).create_account(username=USER_ID, email="a@example.test", required_actions=frozenset())
 
 
-def test_send_set_password_email_asks_for_a_seven_day_action_link_for_that_account(kc):
+async def test_send_set_password_email_asks_for_a_seven_day_action_link_for_that_account(kc):
     """PUT .../execute-actions-email?lifespan=604800 with UPDATE_PASSWORD (C9)."""
-    adapter(kc).send_set_password_email(USER_ID, lifespan=SEVEN_DAYS)
+    await adapter(kc).send_set_password_email(USER_ID, lifespan=SEVEN_DAYS)
     [sent] = kc.calls("PUT", "/execute-actions-email")
     assert sent.path == f"/admin/realms/{REALM}/users/{USER_ID}/execute-actions-email"
     assert sent.query["lifespan"] == ["604800"]
@@ -420,11 +432,11 @@ def test_send_set_password_email_asks_for_a_seven_day_action_link_for_that_accou
     assert sent.headers["authorization"] == f"Bearer {ADMIN_TOKEN}"
 
 
-def test_a_failed_email_send_is_reported_so_the_sender_keeps_it_pending(kc):
+async def test_a_failed_email_send_is_reported_so_the_sender_keeps_it_pending(kc):
     """Keycloak refusing the send raises; success (above) does not (r6 flow 1 retry)."""
     kc.email_status = 500
     with pytest.raises(SignInUnavailable):
-        adapter(kc).send_set_password_email(USER_ID, lifespan=SEVEN_DAYS)
+        await adapter(kc).send_set_password_email(USER_ID, lifespan=SEVEN_DAYS)
 
 
 _TRANSPORT_ERRORS = [
@@ -443,26 +455,26 @@ _ADMIN_CALLS = {
 @pytest.mark.parametrize("where", ["admin-api", "admin-token"])
 @pytest.mark.parametrize("call", sorted(_ADMIN_CALLS))
 @pytest.mark.parametrize("error", _TRANSPORT_ERRORS)
-def test_a_transport_error_on_the_admin_side_surfaces_as_sign_in_unavailable(kc, error, call, where):
+async def test_a_transport_error_on_the_admin_side_surfaces_as_sign_in_unavailable(kc, error, call, where):
     """A refused connection or a timeout raises SignInUnavailable, so the sender keeps the send pending (R-4)."""
     port = adapter(kc)
     setattr(kc, "admin_error" if where == "admin-api" else "token_error", error)
     with pytest.raises(SignInUnavailable):
-        _ADMIN_CALLS[call](port)
+        await _ADMIN_CALLS[call](port)
     kc.admin_error = kc.token_error = None
-    _ADMIN_CALLS[call](adapter(kc))  # control: the same call on the same fake succeeds
+    await _ADMIN_CALLS[call](adapter(kc))  # control: the same call on the same fake succeeds
 
 
 @pytest.mark.parametrize("where", ["admin-api", "admin-token"])
 @pytest.mark.parametrize("call", sorted(_ADMIN_CALLS))
 @pytest.mark.parametrize("status", [403, 500, 503])
-def test_an_http_error_on_the_admin_side_surfaces_as_sign_in_unavailable(kc, status, call, where):
+async def test_an_http_error_on_the_admin_side_surfaces_as_sign_in_unavailable(kc, status, call, where):
     """Keycloak answering an admin call (or the service-account token) with an error is unavailable, never an answer (SignInUnavailable)."""
     setattr(kc, "admin_status" if where == "admin-api" else "admin_token_status", status)
     with pytest.raises(SignInUnavailable):
-        _ADMIN_CALLS[call](adapter(kc))
+        await _ADMIN_CALLS[call](adapter(kc))
     kc.admin_status = kc.admin_token_status = None
-    _ADMIN_CALLS[call](adapter(kc))  # control: the same call on the same fake succeeds
+    await _ADMIN_CALLS[call](adapter(kc))  # control: the same call on the same fake succeeds
 
 
 @pytest.mark.parametrize(("credentials", "expected"), [
@@ -471,26 +483,26 @@ def test_an_http_error_on_the_admin_side_surfaces_as_sign_in_unavailable(kc, sta
     pytest.param([{"type": "password"}, {"type": "webauthn"}], False, id="other-second-factor"),
     pytest.param([], False, id="none"),
 ])
-def test_has_otp_reads_the_accounts_credential_list(kc, credentials, expected):
+async def test_has_otp_reads_the_accounts_credential_list(kc, credentials, expected):
     """has_otp is true exactly when the credential list holds an `otp` credential (C13)."""
     kc.credentials = credentials
-    assert adapter(kc).has_otp(USER_ID) is expected
+    assert await adapter(kc).has_otp(USER_ID) is expected
     [read] = kc.calls("GET", "/credentials")
     assert read.path == f"/admin/realms/{REALM}/users/{USER_ID}/credentials"
 
 
-def test_require_otp_setup_puts_configure_totp_on_that_account(kc):
+async def test_require_otp_setup_puts_configure_totp_on_that_account(kc):
     """The account is made to set up a one-time code at next sign-in (C13)."""
-    adapter(kc).require_otp_setup(USER_ID)
+    await adapter(kc).require_otp_setup(USER_ID)
     [put] = [s for s in kc.admin_writes() if s.method == "PUT"]
     assert put.path == f"/admin/realms/{REALM}/users/{USER_ID}"
     assert "CONFIGURE_TOTP" in put.json()["requiredActions"]
 
 
-def test_reads_change_nothing_at_keycloak(kc):
+async def test_reads_change_nothing_at_keycloak(kc):
     """has_otp and sign-in are read-only on the admin API (control for the write assertions)."""
-    adapter(kc).has_otp(USER_ID)
-    sign_in(kc, kc.signer.sign(claims()))
+    await adapter(kc).has_otp(USER_ID)
+    await sign_in(kc, kc.signer.sign(claims()))
     # Positive control: both calls did reach Keycloak, the credential read on the admin API.
     assert any(s.method == "GET" and s.path.endswith(f"/users/{USER_ID}/credentials") for s in kc.seen)
     assert kc.admin_writes() == []
@@ -501,28 +513,25 @@ def _admin_token_requests(kc: Keycloak) -> int:
                if s.form().get("grant_type") == "client_credentials")
 
 
-def test_the_admin_token_is_reused_until_shortly_before_it_expires(kc):
+async def test_the_admin_token_is_reused_until_shortly_before_it_expires(kc):
     """One client-credentials grant serves admin calls while it has more than 30 s left."""
     kc.admin_token_lifetime = 300
     clock = {"now": NOW}
-    port = KeycloakSignIn(
-        issuer=ISSUER, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI,
-        admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET,
-        transport=kc.transport(), clock=lambda: clock["now"])
-    port.require_otp_setup(USER_ID)  # a read and a write
-    port.has_otp(USER_ID)
+    port = adapter(kc, clock=lambda: clock["now"])
+    await port.require_otp_setup(USER_ID)  # a read and a write
+    await port.has_otp(USER_ID)
     assert _admin_token_requests(kc) == 1
     clock["now"] = NOW + dt.timedelta(seconds=269)
-    port.has_otp(USER_ID)
+    await port.has_otp(USER_ID)
     assert _admin_token_requests(kc) == 1
     clock["now"] = NOW + dt.timedelta(seconds=270)
-    port.has_otp(USER_ID)
+    await port.has_otp(USER_ID)
     assert _admin_token_requests(kc) == 2
 
 
-def test_an_admin_token_with_no_stated_lifetime_is_not_reused(kc):
+async def test_an_admin_token_with_no_stated_lifetime_is_not_reused(kc):
     """Without `expires_in` there is nothing to bound reuse by, so each admin call asks afresh."""
     port = adapter(kc)
-    port.has_otp(USER_ID)
-    port.has_otp(USER_ID)
+    await port.has_otp(USER_ID)
+    await port.has_otp(USER_ID)
     assert _admin_token_requests(kc) == 2

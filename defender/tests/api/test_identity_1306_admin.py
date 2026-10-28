@@ -7,6 +7,12 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+# A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
+pytestmark = [
+    pytest.mark.filterwarnings("error:coroutine .* was never awaited:RuntimeWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
+
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     DAY,
     EMPTY,
@@ -51,11 +57,11 @@ def test_a_refused_administrator_sign_in_does_not_activate_the_account() -> None
     world = lab()
     world.signin.has_otp_answers[world.signin.account_for(OPS)] = True
     assert world.sign_in_response(world.client(), OPS, amr=("pwd",), name="Refused").status_code == 403
-    refused = world.repo.user_by_email(OPS)
+    refused = world.call(world.repo.user_by_email, OPS)
     assert (refused.status, refused.activated_at) == ("invited", None)
     assert refused.display_name != "Refused"
     world.sign_in_admin()
-    assert world.repo.user_by_email(OPS).status == "active"  # control
+    assert world.call(world.repo.user_by_email, OPS).status == "active"  # control
 
 
 def test_an_administrators_invitation_records_the_administrator_as_inviter() -> None:
@@ -66,7 +72,7 @@ def test_an_administrators_invitation_records_the_administrator_as_inviter() -> 
     ops = world.sign_in_admin()
     invited = ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": NEW})
     assert invited.status_code == 202
-    assert world.repo.membership(invited.json()["id"]).invited_by == user_id(ops)
+    assert world.call(world.repo.membership, invited.json()["id"]).invited_by == user_id(ops)
 
 
 def test_an_administrator_session_reads_platform_routes_and_holds_no_tenants() -> None:

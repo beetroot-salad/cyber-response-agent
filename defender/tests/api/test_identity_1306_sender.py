@@ -1,14 +1,20 @@
 """#1306: the sender — the only code that sends — and its re-checks (flow 1, O2, DC-3)."""
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
-import threading
 import time
 from typing import Any
 
 import pytest
 
 pytest.importorskip("fastapi")
+
+# A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
+pytestmark = [
+    pytest.mark.filterwarnings("error:coroutine .* was never awaited:RuntimeWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
 
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
@@ -76,7 +82,10 @@ def test_a_re_invite_arriving_during_a_send_stays_pending(kind: str) -> None:
     """A send does not swallow a request that arrived while it ran (DC-3, flow 1)."""
     world, ann, _ = two_tenants()
     person = NEW if kind == "set_password" else BOB
-    again = lambda: world.invite(ann, T1, person)  # noqa: E731
+
+    async def again() -> None:  # the sync browser, off the loop's thread: the loop stays free to serve it
+        await asyncio.to_thread(world.invite, ann, T1, person)
+
     sent = lambda: world.signin.sends_to(NEW) if kind == "set_password" else len(world.mail.sent)  # noqa: E731
     world.invite(ann, T1, person)
     if kind == "set_password":
@@ -99,11 +108,11 @@ def test_a_second_sender_skips_what_the_first_is_sending_and_a_re_invite_is_not_
     world.invite(ann, T1, person)
     inside: list[Any] = []
 
-    def inside_the_send() -> None:
-        inside.append(world.invite(ann, T1, person).status_code)
+    async def inside_the_send() -> None:
+        inside.append((await asyncio.to_thread(world.invite, ann, T1, person)).status_code)
         now = world.clock()
         claim = world.repo.claim_set_password if kind == "set_password" else world.repo.claim_notification
-        inside.append(claim(now=now, hold_until=now + HOUR))
+        inside.append(await claim(now=now, hold_until=now + HOUR))
 
     if kind == "set_password":
         world.signin.during_send = inside_the_send
@@ -136,7 +145,7 @@ def test_a_revoked_invitation_is_dropped_by_the_sender_but_the_account_is_still_
     assert world.signin.sends_to(NINA) == 1  # positive control, same pass
     assert world.signin.sends_to(NEW) == 0
     assert world.signin.account_for(NEW)  # r6 order: the account precedes the re-check
-    dropped = world.repo.user_by_email(NEW)  # fixed details: a dropped send advances its sent counter
+    dropped = world.call(world.repo.user_by_email, NEW)  # fixed details: a dropped send advances its sent counter
     assert dropped.set_password_sent_seq == dropped.set_password_requested_seq > 0
     assert dropped.set_password_sent_at is None
     world.send_pending()
@@ -273,13 +282,12 @@ def test_an_invite_racing_the_invitees_first_sign_in_still_reaches_them() -> Non
     state = world.begin_signin(browser)
     signed_in: list[Any] = []
 
-    def sign_in() -> None:
-        signed_in.append(world.sign_in_response(browser, NEW, state=state, begin=False))
-
-    def between_the_read_and_the_request() -> None:
-        racer = threading.Thread(target=sign_in)
-        racer.start()
-        racer.join(timeout=2)  # an implementation that holds the user-row lock makes it wait
+    async def between_the_read_and_the_request() -> None:
+        racer = asyncio.ensure_future(asyncio.to_thread(
+            world.sign_in_response, browser, NEW, state=state, begin=False))
+        racer.add_done_callback(lambda done: signed_in.append(done.result()))
+        # an implementation that holds the user-row lock makes it wait
+        await asyncio.wait({racer}, timeout=2)
 
     world.repo.after["ensure_user"] = between_the_read_and_the_request
     assert world.invite(bob, T2, NEW).status_code == 202

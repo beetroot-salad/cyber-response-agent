@@ -5,6 +5,12 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+# A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
+pytestmark = [
+    pytest.mark.filterwarnings("error:coroutine .* was never awaited:RuntimeWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
+
 from defender.api.models import AlertSummary  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ALERT,

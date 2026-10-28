@@ -1,20 +1,31 @@
 """#1306 test world: the API over an in-memory identity repository, a fake sign-in port, a fake
 mail port and one injected clock — NO test functions. The fakes record calls and inject answers
-(failures, a hook that runs inside a send); they never implement policy."""
+(failures, a hook that runs inside a send); they never implement policy.
+
+#1339 (D11): the service, the repository and the two ports are async. `World` keeps the sync
+`TestClient` for requests and runs every service/repository call on ONE event loop, the loop its
+clients' requests run on: `world.call(async_fn, *args)` is the bridge. Hooks are coroutines
+awaited on that loop; a hook that needs HTTP uses `world.async_browser()`, never a `TestClient`."""
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
 import datetime as _dt
 import hashlib
 import itertools
+import inspect
 import logging
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+import weakref
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import anyio
+import anyio.from_thread
+import httpx
 from fastapi.testclient import TestClient
 
 from defender.api.app import create_app
@@ -91,33 +102,37 @@ class FailingRepository:
     `failing` raises `InjectedFailure` instead of running; everything else is delegated.
     `missing_tenants` scripts the answer of `tenant_exists` (False) for a tenant whose row is
     gone or no longer active (#1214's lifecycle); nothing else about the tenant changes.
-    `after` maps a method name to a hook run once right after that method returns (an
-    interleaving point: the hook is the test's own action, e.g. a sign-in; it decides nothing)."""
+    `after` maps a method name to a hook (a coroutine function, no arguments) awaited once right
+    after that method returns (an interleaving point: the hook is the test's own action, e.g. a
+    sign-in; it decides nothing). Every delegated method is a coroutine function and the inner
+    method is awaited strictly: a repository whose method is not async fails loudly."""
 
     def __init__(self, inner: Any) -> None:
         self._inner = inner
         self.failing: set[str] = set()
         self.missing_tenants: set[str] = set()
-        #: method name -> how many calls were refused (the sender thread may be the caller).
+        #: method name -> how many calls were refused (the sender may be the caller).
         self.refusals: dict[str, int] = {}
-        self.after: dict[str, Callable[[], None]] = {}
+        self.after: dict[str, Callable[[], Awaitable[None]]] = {}
 
     def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
         attribute = getattr(self._inner, name)
         if not callable(attribute):
             return attribute
 
-        def call(*args: Any, **kwargs: Any) -> Any:
+        async def call(*args: Any, **kwargs: Any) -> Any:
             # Decided at CALL time, so a caller that kept the bound method still sees later changes.
             if name in self.failing:
                 self.refusals[name] = self.refusals.get(name, 0) + 1
                 raise InjectedFailure(f"{name} failed")
             if name == "tenant_exists" and args and str(args[0]) in self.missing_tenants:
                 return False
-            result = attribute(*args, **kwargs)
+            result = await attribute(*args, **kwargs)
             hook = self.after.pop(name, None)
             if hook is not None:
-                hook()
+                await hook()
             return result
 
         return call
@@ -178,16 +193,23 @@ class FakeSignIn:
         self.fail_sends_to: set[str] = set()
         self.crash_after_create = 0
         #: Runs once inside the next set-password send, after it is recorded.
-        self.during_send: Callable[[], None] | None = None
+        self.during_send: Callable[[], Awaitable[None]] | None = None
         #: email -> the exception (any type) every send to that account raises until removed.
         self.raise_on_send_to: dict[str, Exception] = {}
         #: email -> the exception (any type) every `create_account` for that email raises until removed.
         self.raise_on_create_to: dict[str, Exception] = {}
-        #: The lifespan's sender runs on its own thread; views read snapshots taken under this lock.
+        #: How many times `close` ran (kept out of `every_call`, which records port round trips).
+        self.closes = 0
+        #: Methods run on the app's loop, the test's views on its thread; views read snapshots taken
+        #: under this lock. A thread lock is bound to no loop, and nothing is awaited while held.
         self._lock = threading.RLock()
 
     # --- the port ---------------------------------------------------------------------
-    def create_account(self, username: str, email: str, required_actions: frozenset[str]) -> str:
+    async def close(self) -> None:
+        with self._lock:
+            self.closes += 1
+
+    async def create_account(self, username: str, email: str, required_actions: frozenset[str]) -> str:
         with self._lock:
             self.every_call.append("create_account")
             self.create_calls.append(username)
@@ -201,7 +223,7 @@ class FakeSignIn:
                     raise SignInUnavailable("crash after the account was created")
             return self.accounts[username].account_id
 
-    def send_set_password_email(self, account_id: str, lifespan: _dt.timedelta) -> None:
+    async def send_set_password_email(self, account_id: str, lifespan: _dt.timedelta) -> None:
         with self._lock:
             self.every_call.append("send_set_password_email")
             self.send_attempts.append(account_id)
@@ -216,27 +238,27 @@ class FakeSignIn:
             self.set_password_sent.append((account_id, lifespan))
             hook, self.during_send = self.during_send, None
         if hook:
-            hook()
+            await hook()
 
-    def has_otp(self, account_id: str) -> bool:
+    async def has_otp(self, account_id: str) -> bool:
         with self._lock:
             self.every_call.append("has_otp")
         if self.raise_on_has_otp is not None:
             raise self.raise_on_has_otp
         return self.has_otp_answers.get(account_id, False)
 
-    def require_otp_setup(self, account_id: str) -> None:
+    async def require_otp_setup(self, account_id: str) -> None:
         with self._lock:
             self.every_call.append("require_otp_setup")
         self.otp_required.append(account_id)
 
-    def begin_signin(self, state: str, nonce: str, code_challenge: str) -> str:
+    async def begin_signin(self, state: str, nonce: str, code_challenge: str) -> str:
         with self._lock:
             self.every_call.append("begin_signin")
         self.started.append(SignInStart(state, nonce, code_challenge))
         return f"{SIGNIN_URL}?state={state}"
 
-    def finish_signin(self, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
+    async def finish_signin(self, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
         with self._lock:
             self.every_call.append("finish_signin")
         self.finished.append(SignInFinish(code, code_verifier, nonce))
@@ -293,9 +315,9 @@ class FakeMail:
         #: Every notification to a recipient in this set raises until the test removes it.
         self.fail_notices_to: set[str] = set()
         #: Runs once inside the next notification, after it is recorded.
-        self.during_notice: Callable[[], None] | None = None
+        self.during_notice: Callable[[], Awaitable[None]] | None = None
 
-    def notify_invitation(self, to: str, tenant_id: str, invitation_id: str) -> None:
+    async def notify_invitation(self, to: str, tenant_id: str, invitation_id: str) -> None:
         with self._lock:
             self.attempts.append(to)
             if self.fail_notices:
@@ -306,7 +328,7 @@ class FakeMail:
             self.sent.append(Notice(to, str(tenant_id), str(invitation_id)))
             hook, self.during_notice = self.during_notice, None
         if hook:
-            hook()
+            await hook()
 
 
 def pkce_challenge(verifier: str) -> str:
@@ -459,6 +481,63 @@ class AuditLog:
 
 # --- the world -----------------------------------------------------------------------------------
 
+class _AppLoop:
+    """One event loop on a daemon thread, with a blocking portal into it. Daemon, so a world nobody
+    closed cannot hold the interpreter at exit."""
+
+    def __init__(self) -> None:
+        ready = threading.Event()
+        box: list[anyio.from_thread.BlockingPortal] = []
+
+        async def main() -> None:
+            async with anyio.from_thread.BlockingPortal() as portal:
+                box.append(portal)
+                ready.set()
+                await portal.sleep_until_stopped()
+
+        threading.Thread(target=anyio.run, args=(main,), daemon=True, name="world-loop").start()
+        assert ready.wait(10), "the world's event loop did not start"
+        self.portal = box[0]
+
+    def stop(self) -> None:
+        with contextlib.suppress(Exception):  # already stopped, or the interpreter is exiting
+            self.portal.call(self.portal.stop)
+
+
+class _WorldClient(TestClient):
+    """A `TestClient` whose requests run on the world's loop (no loop per request). Never entered
+    as a context manager, so no lifespan, unless it is a `lifespan_client`."""
+
+    def __init__(self, loop: _AppLoop, app: Any, **kwargs: Any) -> None:
+        super().__init__(app, **kwargs)
+        self.portal = loop.portal
+
+
+class _LifespanClient(_WorldClient):
+    """Entered as a context manager it runs the app's lifespan ON THE WORLD'S LOOP (the stock
+    client would start a second loop of its own)."""
+
+    def __enter__(self) -> _LifespanClient:
+        import math
+
+        from starlette.testclient import StapledObjectStream
+
+        portal = self.portal
+        assert portal is not None
+        with contextlib.ExitStack() as stack:
+            send: Any = anyio.create_memory_object_stream(math.inf)
+            receive: Any = anyio.create_memory_object_stream(math.inf)
+            for channel in (*send, *receive):
+                stack.callback(channel.close)
+            self.stream_send = StapledObjectStream(*send)
+            self.stream_receive = StapledObjectStream(*receive)
+            self.task = portal.start_task_soon(self.lifespan)
+            portal.call(self.wait_startup)
+            stack.callback(lambda: portal.call(self.wait_shutdown))
+            self.exit_stack = stack.pop_all()
+        return self
+
+
 class World:
     """App + identity service over an in-memory repository, fakes, one clock and a bootstrap file.
     `restart` builds a fresh service and app over the same repository and fakes; browsers follow it.
@@ -475,6 +554,8 @@ class World:
         self.repo: Any = InMemoryIdentityRepository()
         if failing_writes:
             self.repo = FailingRepository(self.repo)
+        self._loop = _AppLoop()
+        weakref.finalize(self, self._loop.stop)
         self.signin = FakeSignIn()
         self.signin.fail_sends = failing_sends
         self.mail = FakeMail()
@@ -484,8 +565,33 @@ class World:
         self.send_interval = send_interval
         self.build(administrators=administrators, tenants=tenants or {})
         if start:
-            self.service.start()
+            self.call(self.service.start)
             self.send_pending()
+
+    def call(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+        """Run `fn(*args, **kwargs)` on the app's loop and return what it awaited:
+        `world.call(world.repo.user, uid)`, `world.call(world.service.send_pending)`. The call is
+        made on the loop thread, so a coroutine function sees the same loop as the app. `fn` must
+        return an awaitable: a method that is still synchronous (or a coroutine object passed
+        instead of the function) is refused with TypeError, never run silently."""
+        async def run() -> Any:
+            result = fn(*args, **kwargs)
+            if not inspect.isawaitable(result):
+                raise TypeError(f"world.call: {fn!r} returned {type(result).__name__}, not an awaitable")
+            return await result
+        return self._loop.portal.call(run)
+
+    def close(self) -> None:
+        """Close the service (repository and sign-in port) on the loop, then stop the loop."""
+        self.call(self.service.close)
+        self._loop.stop()
+
+    def async_browser(self, *, origin: str | None = FRONTEND_ORIGIN) -> httpx.AsyncClient:
+        """A browser for use INSIDE the loop (a hook): `async with world.async_browser() as b:`.
+        Own cookie jar, same app (it follows `restart`), same loop. Never use a `TestClient` there."""
+        headers = {} if origin is None else {"Origin": origin}
+        return httpx.AsyncClient(transport=httpx.ASGITransport(app=self._asgi), base_url=BASE_URL,
+                                 follow_redirects=False, headers=headers)
 
     def build(self, *, administrators: Sequence[str], tenants: Mapping[str, Sequence[str]]) -> None:
         extra = {} if self.send_interval is None else {"send_interval": self.send_interval}
@@ -507,15 +613,15 @@ class World:
                 tenants: Mapping[str, Sequence[str]] | None = None) -> None:
         """A process start: bootstrap (may raise `BootstrapRefused`), then the sender's first pass."""
         self.build(administrators=administrators, tenants=tenants or {})
-        self.service.start()
+        self.call(self.service.start)
         self.send_pending()
 
     def send_pending(self) -> None:
         """One run of the sender. It must not raise: a port failure only leaves that send pending."""
-        self.service.send_pending()
+        self.call(self.service.send_pending)
 
     def register(self, tenant: str) -> None:
-        register_tenant(self.repo, TenantId(tenant))
+        self.call(register_tenant, self.repo, TenantId(tenant), now=self.clock())
 
     async def _asgi(self, scope: Any, receive: Any, send: Any) -> None:
         await self.app(scope, receive, send)
@@ -524,8 +630,8 @@ class World:
         """A browser: its own cookie jar and, unless `origin` is None, the Origin header on every
         request. Never entered as a context manager, so no lifespan (no background sender)."""
         headers = {} if origin is None else {"Origin": origin}
-        return TestClient(self._asgi, base_url=BASE_URL, follow_redirects=False, headers=headers,
-                          raise_server_exceptions=raise_errors)
+        return _WorldClient(self._loop, self._asgi, base_url=BASE_URL, follow_redirects=False,
+                            headers=headers, raise_server_exceptions=raise_errors)
 
     def client_with_cookie(self, value: str, *, name: str = SESSION_COOKIE,
                            origin: str | None = FRONTEND_ORIGIN, raise_errors: bool = True) -> TestClient:
@@ -537,14 +643,32 @@ class World:
     def lifespan_client(self) -> TestClient:
         """A browser over the app itself: used as a context manager it runs the app's lifespan (the
         start-up and the periodic sender). Send every request of a lifespan test through it."""
-        return TestClient(self.app, base_url=BASE_URL, follow_redirects=False,
-                          headers={"Origin": FRONTEND_ORIGIN})
+        return _LifespanClient(self._loop, self.app, base_url=BASE_URL, follow_redirects=False,
+                               headers={"Origin": FRONTEND_ORIGIN})
 
     def begin_signin(self, browser: TestClient) -> str:
         """GET /auth/login; the state the person is sent to Keycloak with."""
         login = browser.get("/auth/login")
         assert login.status_code == 302, login.text
         return parse_qs(urlsplit(login.headers["location"]).query)["state"][0]
+
+    async def abegin_signin(self, browser: httpx.AsyncClient) -> str:
+        """`begin_signin` for a hook: `browser` is a `world.async_browser()`."""
+        login = await browser.get("/auth/login")
+        assert login.status_code == 302, login.text
+        return parse_qs(urlsplit(login.headers["location"]).query)["state"][0]
+
+    def _callback_params(self, email: str, sent_state: str, *, amr: Sequence[str], name: str | None,
+                         account_id: str | None, state: str | None,
+                         extra: Mapping[str, str] | None) -> dict[str, str]:
+        code = f"code-{next(self._codes)}"
+        self.signin.answers[code] = VerifiedSignIn(
+            account_id=account_id or self.signin.account_for(email),
+            name=name or email.split("@")[0].title(), amr=tuple(amr))
+        params = {"code": code, "state": sent_state if state is None else state, **(extra or {})}
+        if state == NO_STATE:
+            del params["state"]
+        return params
 
     def sign_in_response(self, browser: TestClient, email: str, *, amr: Sequence[str] = ("pwd",),
                          name: str | None = None, account_id: str | None = None,
@@ -554,20 +678,34 @@ class World:
         overrides the state the callback carries (`""` sends it empty, `NO_STATE` leaves it
         out); `begin=False` skips the login step; `extra` adds query parameters to the callback."""
         sent_state = self.begin_signin(browser) if begin else (state or "no-login")
-        code = f"code-{next(self._codes)}"
-        self.signin.answers[code] = VerifiedSignIn(
-            account_id=account_id or self.signin.account_for(email),
-            name=name or email.split("@")[0].title(), amr=tuple(amr))
-        params = {"code": code, "state": sent_state if state is None else state, **(extra or {})}
-        if state == NO_STATE:
-            del params["state"]
+        params = self._callback_params(email, sent_state, amr=amr, name=name, account_id=account_id,
+                                       state=state, extra=extra)
         return browser.get("/auth/callback", params=params)
+
+    async def asign_in_response(self, browser: httpx.AsyncClient, email: str, *,
+                                amr: Sequence[str] = ("pwd",), name: str | None = None,
+                                account_id: str | None = None, state: str | None = None,
+                                begin: bool = True, extra: Mapping[str, str] | None = None) -> Any:
+        """`sign_in_response` for a hook (a `world.async_browser()`)."""
+        sent_state = await self.abegin_signin(browser) if begin else (state or "no-login")
+        params = self._callback_params(email, sent_state, amr=amr, name=name, account_id=account_id,
+                                       state=state, extra=extra)
+        return await browser.get("/auth/callback", params=params)
 
     def sign_in(self, email: str, *, amr: Sequence[str] = ("pwd",), name: str | None = None,
                 browser: TestClient | None = None) -> TestClient:
         """A new browser (or the given one) signed in as `email` (needs an account: the sender has run)."""
         browser = browser or self.client()
         response = self.sign_in_response(browser, email, amr=amr, name=name)
+        assert response.status_code == 303, response.text
+        assert browser.cookies.get(SESSION_COOKIE), "session cookie did not round-trip"
+        return browser
+
+    async def asign_in(self, email: str, *, amr: Sequence[str] = ("pwd",), name: str | None = None) -> httpx.AsyncClient:
+        """`sign_in` for a hook: a new async browser signed in as `email`. The caller closes it
+        (`await browser.aclose()`) or uses it after the hook only if the app is still up."""
+        browser = self.async_browser()
+        response = await self.asign_in_response(browser, email, amr=amr, name=name)
         assert response.status_code == 303, response.text
         assert browser.cookies.get(SESSION_COOKIE), "session cookie did not round-trip"
         return browser
@@ -588,7 +726,7 @@ class World:
 
 
 def wait_until(condition: Callable[[], bool], *, seconds: float = 5.0) -> bool:
-    """Poll `condition` in real time for at most `seconds` (the lifespan's sender runs on its own thread)."""
+    """Poll `condition` in real time for at most `seconds` (the lifespan's sender runs on the app's loop thread)."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if condition():

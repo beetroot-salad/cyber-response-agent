@@ -12,10 +12,18 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+# A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
+pytestmark = [
+    pytest.mark.filterwarnings("error:coroutine .* was never awaited:RuntimeWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
+
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     NEW,
     T1,
+    FakeSignIn,
+    HOUR,
     World,
     wait_until,
 )
@@ -44,6 +52,19 @@ class RecordingRepository:
         return [name for name, _ in self.calls]
 
 
+class ClosingSignIn(FakeSignIn):
+    """The sign-in fake with a `close` that records itself and how many port calls had happened by then."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.closes = 0
+        self.calls_at_close = -1
+
+    async def close(self) -> None:
+        self.closes += 1
+        self.calls_at_close = len(self.every_call)
+
+
 def test_the_harness_runs_bootstrap_and_a_send_pass_and_the_api_serves_over_them() -> None:
     """World(start=True) awaits start and one sender pass; the person can then sign in through the API (O5)."""
     world = World(tenants={T1: [ANN]})
@@ -59,6 +80,7 @@ def test_the_lifespan_sender_runs_on_the_apps_loop_and_stops_before_the_reposito
     """Start-up pass and later passes run as a task on the app's loop; shutdown is prompt and closes the repository last (O5, S-2)."""
     world = World(tenants={T1: [ANN]}, start=False, send_interval=INTERVAL)
     world.repo = RecordingRepository(world.repo)
+    world.signin = ClosingSignIn()
     world.build(administrators=(), tenants={T1: [ANN]})
     with world.lifespan_client() as browser:
         assert wait_until(lambda: world.signin.sends_to(ANN) == 1)
@@ -70,6 +92,53 @@ def test_the_lifespan_sender_runs_on_the_apps_loop_and_stops_before_the_reposito
     names = world.repo.names()
     assert names.count("close") == 1, names[-5:]
     assert names[-1] == "close", names[-5:]
+    assert world.signin.closes == 1  # the service closes its sign-in port too, once, after the last send
+    assert world.signin.calls_at_close == len(world.signin.every_call)
     settled = len(names)
     time.sleep(3 * INTERVAL.total_seconds())
     assert len(world.repo.names()) == settled  # nothing ran after shutdown
+    assert len(world.signin.every_call) == world.signin.calls_at_close
+
+
+def test_shutdown_cancels_a_send_in_flight_promptly_and_closes_once_afterwards() -> None:
+    """A send stuck at the provider does not hold shutdown past S-2's 2 s; close still runs once, last (O5, S-2)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=INTERVAL)
+    world.repo = RecordingRepository(world.repo)
+    world.signin = ClosingSignIn()
+    world.build(administrators=(), tenants={T1: [ANN]})
+    inside: list[bool] = []
+
+    async def stuck_at_the_provider() -> None:
+        inside.append(True)
+        await asyncio.sleep(30)  # only cancellation ends it within the test's bound
+
+    world.signin.during_send = stuck_at_the_provider
+    with world.lifespan_client():
+        assert wait_until(lambda: bool(inside)), "the start-up pass never reached the send"
+        leaving = time.monotonic()
+    assert time.monotonic() - leaving < 2
+    names = world.repo.names()
+    assert names.count("close") == 1, names[-5:]
+    assert names[-1] == "close", names[-5:]
+    assert world.signin.closes == 1
+    settled = len(names)
+    time.sleep(3 * INTERVAL.total_seconds())
+    assert len(world.repo.names()) == settled  # the cancelled sender did not carry on
+
+
+def test_the_bootstrap_finishes_before_the_lifespan_start_up_returns_and_before_any_send() -> None:
+    """Entering the lifespan awaits the bootstrap: when it returns the file is applied, and no port was called yet (O5, DC-4)."""
+    world = World(tenants={T1: [ANN]}, start=False, send_interval=HOUR, failing_writes=True)
+    finished: list[bool] = []
+    ports_seen: list[list[str]] = []
+
+    async def slow_bootstrap_step() -> None:
+        ports_seen.append(list(world.signin.every_call))
+        await asyncio.sleep(0.3)
+        finished.append(True)
+
+    world.repo.after["register_tenant"] = slow_bootstrap_step
+    with world.lifespan_client():
+        assert finished == [True], "the lifespan started serving while the bootstrap was still running"
+        assert world.call(world.repo.user_by_email, ANN) is not None
+    assert ports_seen == [[]]

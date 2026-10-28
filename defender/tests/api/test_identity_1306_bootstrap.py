@@ -8,7 +8,12 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from fastapi.testclient import TestClient  # noqa: E402
+# A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
+pytestmark = [
+    pytest.mark.filterwarnings("error:coroutine .* was never awaited:RuntimeWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
+
 
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     BOB,
@@ -129,7 +134,7 @@ def test_an_active_person_listed_as_a_new_tenants_first_member_gets_our_notifica
 def test_start_only_marks_sends_pending_and_calls_no_port() -> None:
     """The bootstrap marks sends as pending; only the sender sends (O8, flow 1)."""
     world = World(administrators=[OPS], tenants={LAB: [ME]}, start=False)
-    world.service.start()
+    world.call(world.service.start)
     assert (world.signin.every_call, world.mail.attempts) == ([], [])
     world.send_pending()  # control: both are pending
     assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (1, 1)
@@ -247,7 +252,7 @@ def test_emails_in_the_file_are_compared_lower_cased() -> None:
 def test_the_app_does_not_start_when_the_bootstrap_refuses() -> None:
     """A refused file stops start-up: entering the lifespan raises BootstrapRefused and nothing is sent (O8, DC-4)."""
     world = World(administrators=[ME], tenants={LAB: [ME]}, start=False)
-    with pytest.raises(BootstrapRefused, match=re.escape(ME)), TestClient(world.app):
+    with pytest.raises(BootstrapRefused, match=re.escape(ME)), world.lifespan_client():
         pass
     assert (world.signin.every_call, world.mail.attempts) == ([], [])
 
@@ -256,7 +261,7 @@ def test_entering_the_apps_lifespan_runs_start_and_the_senders_first_pass() -> N
     """The real app starts the bootstrap and sends without anyone calling either (DC-4)."""
     world = World(administrators=[OPS], tenants={LAB: [ME]}, start=False)
     assert world.signin.accounts == {}
-    with TestClient(world.app):
+    with world.lifespan_client():
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline and world.signin.sends_to(ME) + world.signin.sends_to(OPS) < 2:
             time.sleep(0.02)

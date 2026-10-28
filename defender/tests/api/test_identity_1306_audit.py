@@ -12,6 +12,12 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+# A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
+pytestmark = [
+    pytest.mark.filterwarnings("error:coroutine .* was never awaited:RuntimeWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
+
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
@@ -100,8 +106,8 @@ def test_first_sign_in_logs_an_accept_only_for_the_invitations_it_accepted(audit
     world, ann, _ = two_tenants()
     open_row = world.invite(ann, T1, NEW).json()["id"]
     world.send_pending()
-    new_user = world.repo.user_by_email(NEW)
-    world.repo.add_membership(new_user.id, T2, status="invited", invited_by="system",
+    new_user = world.call(world.repo.user_by_email, NEW)
+    world.call(world.repo.add_membership, new_user.id, T2, status="invited", invited_by="system",
                               created_at=world.clock.now - SEVEN_DAYS - DAY, expires_at=world.clock.now - SECOND)
     mark = audit.mark()
     new = world.sign_in(NEW)
@@ -162,7 +168,7 @@ def test_administrator_actions_log_platform_events_and_an_invite_also_logs_the_t
 def test_flag_events_follow_real_flag_changes_only(audit: AuditLog) -> None:
     """A restart with an unchanged file logs nothing; a flag write that fails logs nothing (K11, DC-5)."""
     world = World(administrators=[OPS], tenants={LAB: [ME]}, failing_writes=True)
-    ops_id = world.repo.user_by_email(OPS).id
+    ops_id = world.call(world.repo.user_by_email, OPS).id
     mark = audit.mark()
     world.restart(administrators=[OPS], tenants={LAB: [ME]})
     assert audit.since(mark) == []
@@ -175,7 +181,7 @@ def test_flag_events_follow_real_flag_changes_only(audit: AuditLog) -> None:
     world.repo.failing.clear()  # control: the same changes, written, are logged
     mark = audit.mark()
     world.restart(administrators=[NINA], tenants={LAB: [ME]})
-    nina_id = world.repo.user_by_email(NINA).id
+    nina_id = world.call(world.repo.user_by_email, NINA).id
     flags = [e for e in audit.since(mark) if e.action.startswith("admin.flag.")]
     assert sorted(flags, key=lambda e: e.action) == [
         Event("admin.flag.clear", "system", None, ops_id), Event("admin.flag.set", "system", None, nina_id)]

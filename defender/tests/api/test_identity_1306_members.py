@@ -5,6 +5,12 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+# A forgotten `world.call` leaves a never-awaited coroutine; pytest reports its RuntimeWarning as an unraisable exception, so both are errors.
+pytestmark = [
+    pytest.mark.filterwarnings("error:coroutine .* was never awaited:RuntimeWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
+
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
@@ -151,19 +157,19 @@ def test_a_membership_records_who_invited_it_and_who_ended_it() -> None:
     """`invited_by` is the inviting member (`system` for the bootstrap); `ended_by` is whoever removed it (data model, O4)."""
     world, ann, bob = two_tenants()
     ann_id, bob_id = user_id(ann), user_id(bob)
-    [ann_row] = world.repo.memberships_of_user(ann_id)
+    [ann_row] = world.call(world.repo.memberships_of_user, ann_id)
     assert ann_row.invited_by == "system"
     nina_row = world.invite(ann, T1, NINA).json()["id"]
-    assert world.repo.membership(nina_row).invited_by == ann_id
+    assert world.call(world.repo.membership, nina_row).invited_by == ann_id
     world.send_pending()
     nina = world.sign_in(NINA)
     assert ann.delete(f"/tenants/{T1}/members/{user_id(nina)}").status_code == 204
-    assert world.repo.membership(nina_row).ended_by == ann_id
+    assert world.call(world.repo.membership, nina_row).ended_by == ann_id
     bob_row = _open_invitation(world, ann, T1, bob)
-    assert world.repo.membership(bob_row).invited_by == ann_id
+    assert world.call(world.repo.membership, bob_row).invited_by == ann_id
     assert bob.post(f"/invitations/{bob_row}/accept").status_code == 200
     assert bob.delete(f"/tenants/{T1}/members/{bob_id}").status_code == 204
-    assert world.repo.membership(bob_row).ended_by == bob_id
+    assert world.call(world.repo.membership, bob_row).ended_by == bob_id
 
 
 def test_a_member_can_remove_themselves_and_then_be_invited_again() -> None:
