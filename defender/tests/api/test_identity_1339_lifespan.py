@@ -185,6 +185,8 @@ def test_shutdown_during_a_send_claims_nothing_more_and_the_rest_stays_pending(o
     assert names.count("close") == 1, names[-5:]
     assert names[-1] == "close", names[-5:]
     _nothing_runs_after_shutdown(world)
+    if outcome == "repository_fails":  # the setup took effect: both writes were refused, so the pass raised
+        assert failing.refusals == {"settle_set_password": 1, "defer_set_password": 1}
     assert len(world.signin.send_attempts) == 1
     failing.failing.clear()
     world.send_pending()  # control: BOB was pending and sendable all along
