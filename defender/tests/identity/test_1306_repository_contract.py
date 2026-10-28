@@ -320,6 +320,18 @@ async def test_a_status_without_its_timestamps_is_refused(seeded, kw):
         await seeded.add_membership(u.id, T1, invited_by="system", created_at=NOW, **kw)
 
 
+async def test_a_status_outside_the_model_is_refused_and_nothing_is_stored(seeded):
+    """Data model CHECK: a user's and a membership's status is one of the model's; both stores refuse the rest alike."""
+    with pytest.raises(DataRuleViolation):
+        await seeded.add_user("bogus@example.com", created_at=NOW, status="bogus")
+    assert await seeded.user_by_email("bogus@example.com") is None
+
+    u = await _user(seeded)
+    with pytest.raises(DataRuleViolation):
+        await seeded.add_membership(u.id, T1, status="bogus", invited_by="system", created_at=NOW)
+    assert await seeded.memberships_of_tenant(T1) == []
+
+
 async def test_accept_applies_once_and_stamps_accepted_at(seeded):
     """Flow 2/3: conditional invited -> active; a second accept reports not-applied (O4, K6)."""
     u = await _user(seeded)
