@@ -14,7 +14,7 @@ REPO_ROOT = HERE.parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender.execution._venv import reexec_into_venv  # noqa: E402
+from defender.execution.venv_guard import reexec_into_venv  # noqa: E402
 
 if __name__ == "__main__":
     reexec_into_venv(__file__)
@@ -25,7 +25,7 @@ from defender.presentation.lessons_page import render, render_queues  # noqa: E4
 from defender.presentation.publisher import NoPublishRoot, Publisher  # noqa: E402
 
 if TYPE_CHECKING:
-    from defender.tenancy._tenant import Tenant
+    from defender.tenancy import Tenant
 
 
 def main(tenant: Tenant) -> int:
@@ -34,7 +34,7 @@ def main(tenant: Tenant) -> int:
     `dev` deployment with no publish folder set (A11). The lessons page shows the tenant's
     published knowledge; with nothing published it shows no lesson (and says why), and the queue
     page is built all the same."""
-    from defender.tenancy._exports import DeliveryRefused
+    from defender.tenancy import DeliveryRefused
 
     publisher = Publisher.for_tenant(tenant)
     agent_root = None

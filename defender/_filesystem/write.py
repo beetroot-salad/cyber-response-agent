@@ -202,7 +202,7 @@ def _create_named(path: Path, text: str | bytes) -> None:
 
 
 
-def _mark_alias(exc: OSError, *, is_alias: bool) -> OSError:
+def mark_alias(exc: OSError, *, is_alias: bool) -> OSError:
     exc.write_guarded_alias = is_alias  # type: ignore[attr-defined]
     return exc
 
@@ -245,7 +245,7 @@ def _refuse_unless_plain_stat(st: os.stat_result, where: object) -> None:
         # The planted entry is left in place so the reap scan can still report it. EMLINK for
         # a hard link, ELOOP otherwise; both are plain `OSError`, so the type stays uniform.
         refusal_errno = errno.EMLINK if is_hardlink else errno.ELOOP
-        raise _mark_alias(
+        raise mark_alias(
             NotPlainEntry(refusal_errno, "refusing to write through a non-plain or aliased entry",
                           str(where)),
             is_alias=is_alias,
@@ -261,7 +261,7 @@ def open_nofollow_fd(path: Path, flags: int, *, os_: Any = os) -> int:
     try:
         return os_.open(path, flags | os.O_NOFOLLOW, _FILE_MODE)
     except OSError as e:
-        raise _mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
+        raise mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
 
 
 
@@ -307,7 +307,7 @@ def write_guarded(
             fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                          _FILE_MODE)
         except OSError as e:
-            raise _mark_alias(e, is_alias=e.errno == errno.EEXIST) from None
+            raise mark_alias(e, is_alias=e.errno == errno.EEXIST) from None
         try:
             _write_all(fd, text)
             os.replace(staged, path)

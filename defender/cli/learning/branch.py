@@ -25,8 +25,8 @@ from defender.learning.branch import cli as launcher  # noqa: E402
 
 if TYPE_CHECKING:
     from defender.records import RunsRepository
-    from defender.tenancy._tenant import Tenant
-    from defender.records._provenance import RunProvenance
+    from defender.tenancy import Tenant
+    from defender.records.formats import RunProvenance
 
 
 def _render_episode_page(runs: RunsRepository[Tenant], episode_id: str) -> Path:

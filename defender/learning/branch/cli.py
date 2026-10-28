@@ -50,15 +50,15 @@ _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 #: Renders an episode's page from its runs repository and id; the entry supplies it.
 PageRenderer = Callable[["RunsRepository[Tenant]", str], Path]
 
-from defender.records import _alert_input, _provenance
-from defender.records._locations import DataRoot
-from defender.records._episode_handle import Episode
-from defender.records._knowledge_pin import pin_text
+from defender.records import formats
+from defender.records.formats import DataRoot
+from defender.records.formats import Episode
+from defender.records.formats import pin_text
 from defender._io import (
     NotPlainEntry,
 )
 from defender._paths import PATHS
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.knowledge import KnowledgePaths
 from defender.records import (
     EpisodeRuns,
     Run,
@@ -67,7 +67,7 @@ from defender.records import (
     RunsRepository,
 )
 from defender.systems.run_tenant import RunTenant
-from defender.tenancy._tenant import Tenant
+from defender.tenancy import Tenant
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import seams
 from defender.learning.branch import timing as timing_mod
@@ -75,15 +75,11 @@ from defender.learning.branch.steps import Step
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.ledger import Ledger, LedgerError
-from defender.tenancy import _tenant
+from defender import tenancy
 from defender._git import REPO_ROOT
 from defender.investigation import branch
 from defender.records import session_store
-from defender.records._family import (
-    FamilyError,
-    load_family,
-    runnable_worlds,
-)
+from defender.records.formats import FamilyError, load_family, runnable_worlds
 from defender.systems.verb_grant import GrantError
 
 from defender.learning.branch.questioner_launch import (
@@ -166,9 +162,9 @@ def source_input(source: Run) -> tuple[bytes, str]:
     either file. The ONE read of the source's input a launch makes; what it returns is copied
     into the episode, and everything downstream reads the copy."""
     try:
-        return _alert_input.verified_input(
+        return formats.verified_input(
             source.facts.alert.path, source.facts.alert_record.path, run_name=str(source.id))
-    except _alert_input.AlertReplaced as replaced:
+    except formats.AlertReplaced as replaced:
         raise SourceInputReplaced(f"[branch] {replaced}") from replaced
 
 
@@ -262,7 +258,7 @@ def _episode_tenant(tenant_id: TenantId, data_root: DataRoot) -> RunTenant:
         # as a run refuses one inside its runs base (#1107 MF-13).
         return run_tenant_mod.resolve_tenant(
             data_root, tenant_id, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=False,
-            box_mounted=(_tenant.box_mounted_episodes(data_root, tenant_id),))
+            box_mounted=(tenancy.box_mounted_episodes(data_root, tenant_id),))
     except run_tenant_mod.TenantRefused as refusal:
         raise LauncherRefused(f"[branch] the episode's tenant: {refusal}") from refusal
 
@@ -341,7 +337,7 @@ def _pinned_export(tenant: RunTenant, source: Run) -> Any:
     try:
         if status is None:
             # A source from before host records: its stamp is all there is (#1204's rules).
-            revision = _provenance.KnowledgeRevision.from_wire(
+            revision = formats.KnowledgeRevision.from_wire(
                 (_stamp_of(source) or {}).get("knowledge"))
             if revision is None:
                 return current_export(tenant.tenant)
@@ -379,10 +375,10 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
     knowledge_commit: str | None = None,
 ) -> dict[str, int]:
     """Start the selected world UUIDs together, returning exits keyed by those UUIDs."""
-    from defender.tenancy import _tenant
+    from defender import tenancy
     from defender.learning.core.config import KNOB_RATE
 
-    if tenant_id is None or not _tenant.is_valid_tenant_id(tenant_id):
+    if tenant_id is None or not tenancy.is_valid_tenant_id(tenant_id):
         # A ValueError, not `LauncherRefused`: `_episode_tenant` already resolved the tenant, so
         # this is a caller bug and takes the episode's normal abort path.
         raise ValueError(
@@ -476,7 +472,7 @@ from defender.learning.branch.verification import (
     _write_family_stamp as _write_family_stamp,
     verify_family as verify_family,
 )
-from defender.records._tenant_id import TenantId, TenantRefused
+from defender.records.formats import TenantId, TenantRefused
 
 if _missing := [f for f in _ANCHORED if _HELD[f].off_anchor is None]:
     raise RuntimeError(f"anchored stamp field(s) {_missing} have no refusal text in _HELD_RULES")
@@ -515,7 +511,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     render_page: PageRenderer,
     judge: Any = None,
     lessons_dir: Path | None = None,
-    live_tree: Callable[[], _provenance.RunProvenance] | None = None,
+    live_tree: Callable[[], formats.RunProvenance] | None = None,
     oracle: Any = None,
     verifier: Any = None,
     roster: Any = None,
@@ -536,7 +532,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     argv: list[str], *, spawn: Any, questioner: Any,
     preflight: Callable[..., int], render_page: PageRenderer, judge: Any = None,
     lessons_dir: Path | None = None,
-    live_tree: Callable[[], _provenance.RunProvenance] | None = None,
+    live_tree: Callable[[], formats.RunProvenance] | None = None,
     oracle: Any = None, verifier: Any = None, roster: Any = None,
 ) -> int:
     ns = parse_branch_args(argv)
@@ -545,8 +541,8 @@ def _launch(  # noqa: PLR0913 — see `main`
     # The episode's tenant first, from the request: pre-flight's reader, the served systems,
     # the source run and the siblings all resolve through it.
     try:
-        tenant_id = _tenant.requested_tenant_id(ns.tenant)
-        data_root = _tenant.resolve_data_root()
+        tenant_id = tenancy.requested_tenant_id(ns.tenant)
+        data_root = tenancy.resolve_data_root()
     except TenantRefused as refusal:
         raise LauncherRefused(f"[branch] {refusal}") from refusal
     tenant = _episode_tenant(tenant_id, data_root)
@@ -576,8 +572,8 @@ def _launch(  # noqa: PLR0913 — see `main`
     # knowledge half is the export every sibling is pinned to, as every sibling's stamp will
     # be (#1204 D3, O-B): never the clone's HEAD, which a publish moves.
     live_capture = ((lambda: dataclasses.replace(
-        _provenance.capture_tree(REPO_ROOT),
-        knowledge=_provenance.KnowledgeRevision.at(pinned.commit)))
+        formats.capture_tree(REPO_ROOT),
+        knowledge=formats.KnowledgeRevision.at(pinned.commit)))
                     if live_tree is None else live_tree)
     source_stamp = preflight_episode(
         source=source, branch_message_id=ns.branch_message_id,

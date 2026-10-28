@@ -23,16 +23,18 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Protocol
+from typing import TYPE_CHECKING, ClassVar, Protocol
+
+from defender.lazy_door import lazy_door
 
 from defender._io import read_text_soft, sweep_staged, write_guarded
-from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
+from defender.records.formats import RUN_ID_ALLOWED, is_valid_run_id
 from defender.execution import bash_exec
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,  # noqa: F401 — re-exported: tests read it as `box.BOX_ENV_ALLOWLIST`
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
-    _BOX_MARK_ENV,  # noqa: F401 — re-exported: tests read it as `box._BOX_MARK_ENV`
+    BOX_MARK_ENV,  # noqa: F401 — re-exported: tests read it as `box.BOX_MARK_ENV`
     BoxFault,
     BoxResult,
     RawExec,
@@ -45,6 +47,8 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
     Finding,
     RunTainted,
     scrub,
+    tree_unsandboxed,
+    tree_verified,
     verdict_path,
     write_did_not_run,
 )
@@ -96,7 +100,7 @@ from ._docker import (
     _covering_mount,
     _daemon_source,
     _derived_infra_env,
-    _docker,
+    run_docker,
     _inspect_field,
     _own_container_ids,
     _own_container_mounts,
@@ -191,7 +195,7 @@ __all__ = [
     "_MOUNTINFO_PATH",
     "_NAME_PREFIX",
     "_NO_LABEL",
-    "_BOX_MARK_ENV",
+    "BOX_MARK_ENV",
     "_OCI_SECCOMP_FLAG",
     "_RUNSC_INSTALL_CMD",
     "_alias_ban_fault_message",
@@ -208,7 +212,7 @@ __all__ = [
     "_daemon_source",
     "_derived_infra_env",
     "_did_not_run_for_request",
-    "_docker",
+    "run_docker",
     "_host_fallback_env",
     "_inspect_field",
     "_opt_out_or_raise",
@@ -259,9 +263,29 @@ __all__ = [
     "subprocess",
     "sweep_staged",
     "sys",
+    "tree_unsandboxed",
+    "tree_verified",
     "unboxed_executor",
     "uuid",
     "verdict_path",
     "write_did_not_run",
     "write_guarded",
 ]
+
+
+# The oracle box is served lazily (#1315): importing it eagerly here would load the oracle's
+# stack for every user of the box.
+if TYPE_CHECKING:
+    from defender.box._oracle import (
+        BoxStartRefused as BoxStartRefused,
+        start_oracle_box as start_oracle_box,
+        start_process_oracle_box as start_process_oracle_box,
+        stop_oracle_box as stop_oracle_box,
+    )
+
+#: Each name this door serves lazily, and the submodule that defines it.
+_HOMES: dict[str, str] = {
+    **dict.fromkeys(("BoxStartRefused", "start_oracle_box", "start_process_oracle_box", "stop_oracle_box",), "_oracle"),
+}
+
+__getattr__ = lazy_door(globals(), _HOMES)

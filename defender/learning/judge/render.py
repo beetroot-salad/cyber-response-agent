@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import SkipValidation
 
-from defender.records import _alert_input
+from defender.records import formats
 from defender._io import Bound
-from defender.records._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
+from defender.records.formats import LAYOUT, WORLD_LEAVES, OracleStorePaths
 from defender.hooks.record_lesson_load import (
     EVIDENCE_INDIRECT,
     EVIDENCE_PUSH,
@@ -50,7 +50,7 @@ from defender.learning.judge.calls import (
 )
 from defender.learning.judge.runs import RunSet, read_run_set
 from defender._git import REPO_ROOT
-from defender.records._family import world_id_for, parse_family
+from defender.records.formats import world_id_for, parse_family
 
 #: The frame tag every model-authored body in the judge's prompt is wrapped in — the
 #: questioner's spelling, so one frame regex matches both.
@@ -67,7 +67,7 @@ class RunText:
 
 
 if TYPE_CHECKING:
-    from defender.tenancy._exports import TenantExport
+    from defender.tenancy import TenantExport
 
 
 def _git_show_default(cwd: Path, rev: str, path: str) -> str | None:
@@ -96,7 +96,7 @@ class KnowledgeBodies:
         self._resolve()
         if self._export is None:
             return None, self._why
-        from defender.tenancy._exports import read_export_text
+        from defender.tenancy import read_export_text
 
         text, why = read_export_text(self._export, f"{AGENT_DIR}/{rel}")
         if text is None:
@@ -108,7 +108,7 @@ class KnowledgeBodies:
         if self._resolved:
             return
         self._resolved = True
-        from defender.records._provenance import KnowledgeRevision
+        from defender.records.formats import KnowledgeRevision
 
         revision = KnowledgeRevision.from_wire(self.knowledge)
         if revision is None:
@@ -217,19 +217,19 @@ def _world_entry(doc: dict[str, Any], label: str) -> dict[str, Any]:
     raise JudgeRefused(f"the manifest declares no world {label!r}")
 
 
-def episode_record(bound: Bound) -> _alert_input.AlertRecord | None:
+def episode_record(bound: Bound) -> formats.AlertRecord | None:
     """The record of the alert this episode's worlds all investigate: the copy launch put in the
     episode (A1), or `None` when there is none or it is not one.
 
     Shared by the sibling union and the enqueue's rule key, so both key on the same record."""
     read = bound.read(LAYOUT.source_record)
-    return _alert_input.parse_alert_record(read.text) if read.text else None
+    return formats.parse_alert_record(read.text) if read.text else None
 
 
 def episode_alert(bound: Bound) -> dict[str, Any]:
     """The alert document the episode's copy holds, for display; `{}` when there is none, it is
     not one JSON object, or its bytes are not the record's digest."""
-    return _alert_input.verified_document(
+    return formats.verified_document(
         bound, LAYOUT.source_alert, LAYOUT.source_record) or {}
 
 
@@ -514,7 +514,7 @@ def _lesson_paths_for(lesson_name: Any) -> list[tuple[str, str]]:
     `RUNTIME_LESSON_CORPORA`. Empty for a name that is not a single path segment, which would
     build a path outside the corpus. The product spelling is the judge's pre-move branch, the
     one reader of `CHECKOUT_KNOWLEDGE` (O6)."""
-    from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, RUNTIME_LESSON_CORPORA
+    from defender.knowledge import CHECKOUT_KNOWLEDGE, RUNTIME_LESSON_CORPORA
 
     if (not isinstance(lesson_name, str) or not lesson_name
             or lesson_name != Path(lesson_name).name or lesson_name in (".", "..")):

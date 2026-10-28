@@ -396,7 +396,7 @@ def _lane_env(tmp: Path, lane: str, trace: Path) -> dict[str, str]:
     PATH: the box image's `python3` here, and the host python3 a tree without a venv falls back
     to."""
     if lane == "box":
-        # By its dotted name: the package door binds `_docker` to a function of that name.
+        # By its dotted name: the module that holds `_render_env`.
         docker = importlib.import_module("defender.box._docker")
         env = dict(docker._render_env({}, S.REPO_ROOT))
     else:

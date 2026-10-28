@@ -8,7 +8,7 @@ from defender.records import (
     alert_input_shape,
     gather_summaries_shape,
 )
-from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
+from defender.hooks import NON_ADAPTER_SHIMS
 from defender.investigation.permission.grant import (
     SEG,
     PathShapes,

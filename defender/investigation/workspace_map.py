@@ -4,8 +4,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from defender.knowledge._corpus import iter_query_templates
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.knowledge import iter_query_templates
+from defender.knowledge import KnowledgePaths
 from defender._paths import PATHS, adapters_under
 from defender.records import RUN_LAYOUT
 from defender.systems.system_status import NONE_DOWN

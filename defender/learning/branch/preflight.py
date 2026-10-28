@@ -24,9 +24,9 @@ from pathlib import Path
 from contextlib import AbstractContextManager
 from typing import Any, NamedTuple
 
-from defender.records import _provenance
+from defender.records import formats
 
-from defender.records._episode_handle import Episode
+from defender.records.formats import Episode
 
 
 
@@ -50,11 +50,7 @@ from defender.learning.branch.ledger import Ledger
 
 from defender.investigation import branch
 
-from defender.records import _family
-
-from defender.records._family import (
-    runnable_worlds,
-)
+from defender.records.formats import runnable_worlds
 
 
 
@@ -77,7 +73,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
     *, source: Run, branch_message_id: int,
     preflight: Callable[..., int], model: str | None,
     allow_dirty: bool,
-    live_tree: Callable[[], _provenance.RunProvenance],
+    live_tree: Callable[[], formats.RunProvenance],
     oracle: Any = None, verifier: Any = None,
 ) -> dict:
     """Everything that can refuse before the questioner is paid for, in one block, so an
@@ -115,7 +111,7 @@ def _check_oracle_side(*, oracle: Any, verifier: Any) -> None:
     (`FatalConfigError`) or a role with no pricing row (`OraclePricingError`). The same
     functions pre-flight's `oracle_settings_with` and each world's `Oracle` call, so the rule
     lives once; asked here only to refuse before the questioner is paid for."""
-    from defender.configuration._env import FatalConfigError
+    from defender.configuration import FatalConfigError
     from defender.learning.branch.estate.oracle import OraclePricingError, price_row
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.learning.core.config import oracle_settings_with
@@ -304,7 +300,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     # The reader first, unguarded: a tenant with no gather grant refuses here (`GrantError`),
     # before anything is read or sent (O-16).
     reader = ModuleVerbRegistry(roster, tenant.grants.gather, grant_home=tenant.table_pointer)
-    family = _family.load_family(episode.view(), expected_episode_id=episode.dir.name)
+    family = formats.load_family(episode.view(), expected_episode_id=episode.dir.name)
     originals = _originals(source.run_dir)
     not_replayable: list[dict[str, Any]] = []
     replayable: list[_Original] = []
@@ -344,7 +340,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     settings = oracle_settings_with(**knobs)
     limiter = RateLimiter(settings.rate)
     ctx = _preflight_context(episode.dir, source, tenant, family.as_of)
-    resumed = {w.label: _family.resume_world_from(family, w.label, episode.dir)
+    resumed = {w.label: formats.resume_world_from(family, w.label, episode.dir)
                for w in fact_worlds}
     recording = Ledger.for_world(episode, resumed[fact_worlds[0].label].world_id)
     # The family's base recording, parsed once for every world's registry.
@@ -464,18 +460,18 @@ def _stamp_of(run: Run) -> dict | None:
     Used for both the source and every sibling, so both ends of the comparison share one shape.
     Absent and unreadable both answer `None`: neither is an agreeing stamp.
 
-    Read through `_provenance.read`, which refuses aliases and type-checks fields: the file is
+    Read through `formats.read_provenance`, which refuses aliases and type-checks fields: the file is
     in a box's rw bind, and a forged `"commit": ["x"]` would otherwise crash `verify_family`
     before anything was archived. Returned as the record's wire-shape mapping, which
     `_write_family_stamp` publishes verbatim.
     """
-    record = _provenance.read(run.facts.provenance.path)
+    record = formats.read_provenance(run.facts.provenance.path)
     return None if record is None else _as_stamp(record)
 
 
 
 
-def _as_stamp(record: _provenance.RunProvenance) -> dict:
+def _as_stamp(record: formats.RunProvenance) -> dict:
     """A typed provenance record as the mapping every comparison below asks."""
     # lint-parse: ok — a round-trip of a typed record through its own `as_json`, not untyped
     # input.
@@ -549,7 +545,7 @@ class _HeldRule(NamedTuple):
 def _knowledge_commit(stamp: dict) -> str | None:
     """Knowledge is compared as its commit alone, so two unavailable reasons with different
     text are not a disagreement."""
-    revision = _provenance.KnowledgeRevision.from_wire(stamp.get("knowledge"))
+    revision = formats.KnowledgeRevision.from_wire(stamp.get("knowledge"))
     return None if revision is None else revision.commit
 
 
@@ -685,7 +681,7 @@ def _member_faults(who: str, stamp: dict | None, *, anchor: dict | None) -> list
 
 def _unprovable(field: str, who: str, stamp: dict) -> str:
     """The waivable fault text for a stamp with no value on `field` (today only knowledge)."""
-    revision = _provenance.KnowledgeRevision.from_wire(stamp.get(field))
+    revision = formats.KnowledgeRevision.from_wire(stamp.get(field))
     if revision is None:
         what = f"records no tenant {field} revision (stamped before #1204, or it does not say)"
     elif revision.unavailable is not None:

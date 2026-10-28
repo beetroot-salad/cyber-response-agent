@@ -726,7 +726,7 @@
   "defender/tests/sandbox/test_1096_entrypoint_closure.py": [
    "assert 'hunter2' not in done.stdout.decode('utf-8', 'replace')",
    "assert box.BOX_ENV_ALLOWLIST is box_codec.BOX_ENV_ALLOWLIST",
-   "assert box._BOX_MARK_ENV is box_codec._BOX_MARK_ENV",
+   "assert box.BOX_MARK_ENV is box_codec.BOX_MARK_ENV",
    "assert done.returncode == 0, done.stderr.decode('utf-8', 'replace')",
    "assert done.returncode == 0, done.stderr.decode('utf-8', 'replace')",
    "assert done.returncode == 0, done.stderr.decode('utf-8', 'replace')",
@@ -737,7 +737,7 @@
    "assert result.out == b'hi from the box\\n', result",
    "assert result.rc == 0, result",
    "assert seen['DEFENDER_BOX'] == '1', seen",
-   "assert set(box_codec._BOX_MARK_ENV) <= set(box_codec.BOX_ENV_ALLOWLIST)",
+   "assert set(box_codec.BOX_MARK_ENV) <= set(box_codec.BOX_ENV_ALLOWLIST)",
    "assert set(seen) == {'PATH', 'PYTHONPATH', 'DEFENDER_BOX', 'TZ'}, sorted(seen)"
   ]
  },

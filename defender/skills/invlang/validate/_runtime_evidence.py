@@ -12,7 +12,7 @@ from typing import Any
 from defender import _clock
 
 from defender._model import model
-from defender.records._artifact_schema import REPORT_CLOSE_DELIMITER
+from defender.records.formats import REPORT_CLOSE_DELIMITER
 
 
 

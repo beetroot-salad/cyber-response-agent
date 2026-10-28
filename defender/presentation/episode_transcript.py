@@ -15,7 +15,7 @@ from typing import Any
 
 
 
-from defender.records._run_id import is_valid_run_id
+from defender.records.formats import is_valid_run_id
 
 
 

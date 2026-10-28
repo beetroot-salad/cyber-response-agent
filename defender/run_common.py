@@ -16,20 +16,19 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from defender import _io
-from defender.records import _alert_input
-from defender.records import _provenance
-from defender.tenancy import _tenant  # noqa: E402
+from defender.records import formats
+from defender import tenancy  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
 from defender.records import (  # noqa: E402
     RUN_LAYOUT, Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest, sidecar_names,
 )
-from defender.presentation._page_failed import VisualizeFailed  # noqa: E402
-from defender.records._tenant_id import TenantId, TenantRefused
+from defender.presentation import VisualizeFailed  # noqa: E402
+from defender.records.formats import TenantId, TenantRefused
 
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from defender.records._family import ResumeWorld
+    from defender.records.formats import ResumeWorld
     from defender.tenancy.run_knowledge import KnowledgeSource
 
 _GENERIC_ALERT_STEMS = {"alert"}
@@ -40,7 +39,7 @@ def _alert_label(alert: Path) -> str:
 
 
 def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the knowledge it reads
-    alert: Path, *, tenant: _tenant.Tenant, run: Run | None = None, model: str | None = None,
+    alert: Path, *, tenant: tenancy.Tenant, run: Run | None = None, model: str | None = None,
     world: ResumeWorld | None = None,
     settings: Path | None = None, knowledge: KnowledgeSource | None = None,
 ) -> Run:
@@ -63,7 +62,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
                         "only from its episode's roster")
     started_at = _started_at()
     if settings is None:
-        settings = _tenant.clone_halves(tenant)[1]
+        settings = tenancy.clone_halves(tenant)[1]
     front_door = _admit_input(alert, settings=settings, world=world)
     world_id: str | None = None
     if run is None:
@@ -119,29 +118,29 @@ def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None) -> _
     is its episode's copy of the source run's alert, carried with the record launch copied
     beside it; neither is derived again."""
     try:
-        raw = _alert_input.read_operator_alert(alert)
-        admitted = _alert_input.admit(raw)
-    except _alert_input.AlertRefused as refused:
+        raw = formats.read_operator_alert(alert)
+        admitted = formats.admit(raw)
+    except formats.AlertRefused as refused:
         sys.exit(f"[run.py] {refused}")
     except OSError as e:
         sys.exit(f"[run.py] the alert {alert} could not be read: {e}")
     if world is not None:
-        from defender.records._episode_paths import EpisodePaths
+        from defender.records.formats import EpisodePaths
 
         record_path = EpisodePaths(world.episode_dir).source_record
         text, reason = _io.read_guarded(record_path)
-        parsed = None if text is None else _alert_input.parse_alert_record(text)
+        parsed = None if text is None else formats.parse_alert_record(text)
         if text is None or parsed is None or parsed.digest != admitted.digest:
             sys.exit(f"[run.py] episode {world.episode_dir.name}: its copy of the source alert does not "
                      f"match the record beside it "
                      f"({reason or 'the record is missing, malformed or for another alert'})")
         return _FrontDoor(raw=raw, record=text)
     try:
-        mapping = _alert_input.load_alert_mapping(settings)
-    except _alert_input.AlertMappingFault as fault:
+        mapping = formats.load_alert_mapping(settings)
+    except formats.AlertMappingFault as fault:
         sys.exit(f"[run.py] this run's tenant cannot be used: {fault}")
-    facts = _alert_input.derive_facts(admitted.document, mapping)
-    return _FrontDoor(raw=raw, record=_alert_input.record_text(admitted.digest, facts))
+    facts = formats.derive_facts(admitted.document, mapping)
+    return _FrontDoor(raw=raw, record=formats.record_text(admitted.digest, facts))
 
 
 def _write_input(run: Run, door: _FrontDoor) -> None:
@@ -194,10 +193,10 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
     never a clone's checked-out commit), with the informational `knowledge_source` (OD17)."""
     path = run.facts.provenance.path
     try:
-        record = _provenance.capture_tree(REPO_ROOT)
+        record = formats.capture_tree(REPO_ROOT)
         if knowledge is not None:
             record = _dataclasses.replace(
-                record, knowledge=_provenance.KnowledgeRevision.at(knowledge.commit))
+                record, knowledge=formats.KnowledgeRevision.at(knowledge.commit))
         # Set in the single pre-box write; a later write would land in the box's rw bind.
         if model is not None:
             record = _dataclasses.replace(record, model=model)
@@ -212,7 +211,7 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
                       "nothing downstream can prove which code it ran")
 
 
-def visualize(run: Run, *, tenant: _tenant.Tenant, update_ticket: bool = False) -> None:
+def visualize(run: Run, *, tenant: tenancy.Tenant, update_ticket: bool = False) -> None:
     """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
     (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
     copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
@@ -264,7 +263,7 @@ def held_out_alert_digests(fixtures_dir: Path = HELD_OUT_FIXTURES) -> set[str]:
         return out
     for child in sorted(fixtures_dir.iterdir()):
         try:
-            out.add(_alert_input.digest_of(read_bytes_capped(child / "alert.json")))  # lint-run-records: ok — a held-out fixture folder's own file, not a run's record
+            out.add(formats.digest_of(read_bytes_capped(child / "alert.json")))  # lint-run-records: ok — a held-out fixture folder's own file, not a run's record
         except OSError:
             continue
     return out
@@ -287,7 +286,7 @@ def learning_refusal_gate(
     if truncated_by is not None:
         return f"run was truncated (truncated_by={truncated_by!r}) — a truncated " \
             "investigation must not train the corpus"
-    record = _alert_input.read_record(RunPaths(run_dir).alert_record)
+    record = formats.read_record(RunPaths(run_dir).alert_record)
     if record is None:
         return f"{run_dir} carries no readable record of its alert — a folder without one is " \
             "not a run, and nothing is learned from it"
@@ -295,12 +294,12 @@ def learning_refusal_gate(
     if held_out_input or record.digest in held_out_alert_digests(fixtures_dir):
         return f"{run_dir.name} investigated a held-out eval fixture (or a copy of one) — its " \
             "findings must never feed a corpus it is scored against"
-    import defender.box._scrub as _scrub
+    from defender import box
 
-    if _scrub.tree_unsandboxed(run_dir):
+    if box.tree_unsandboxed(run_dir):
         return f"{run_dir.name} ran without a sandbox, so its input directory was never bound " \
             "read-only — nothing is learned from it"
-    if not _scrub.tree_verified(run_dir):
+    if not box.tree_verified(run_dir):
         # No completed scan verdict: the crash path most likely to hold what a box planted.
         return f"{run_dir} carries no completed reap-scan verdict — an unverified tree " \
             "must not feed the corpus"
@@ -327,7 +326,7 @@ def enqueue_curation(
     if reason is not None:
         _logger.info(f"NOT enqueuing for curation: {reason}")
         return False
-    from defender.configuration._env import FatalConfigError
+    from defender.configuration import FatalConfigError
     from defender.learning.core.config import LoopPaths
     from defender.learning.core.state import LearningState, StateRefused
 
@@ -335,12 +334,12 @@ def enqueue_curation(
     # Reading the alert is inside the guard too: a moved alert must not fail the run. So is the
     # state tree: a refused entry or a missing root costs this request, never the investigation.
     try:
-        record = _alert_input.read_record(RunPaths(run_dir).alert_record)
+        record = formats.read_record(RunPaths(run_dir).alert_record)
         if record is None:
             raise OSError("the run's record vanished")
         case_id = case_ref_of_digest(record.digest)
         with LearningState.open(LoopPaths.for_tenant(
-                _tenant.requested_tenant(_tenant.resolve_data_root(), run.tenant_id))) as state:
+                tenancy.requested_tenant(tenancy.resolve_data_root(), run.tenant_id))) as state:
             state.enqueue_curation(
                 case_id, {"case_id": case_id, "tenant_id": str(address.tenant_id),
                           "run_id": str(address.run_id)})

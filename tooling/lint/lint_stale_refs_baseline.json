@@ -189,6 +189,7 @@
     "tooling/lint/lint_unnarrowed_parse.py:comprehension": "consolidation (test-suite shrink): token shared with a removed test constant/docstring word, not a dangling reference",
     "tooling/lint/lint_vulture_baseline.json:test_1120_runs_base_for_a_tenant_is_its_runs_folder": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import",
     "tooling/lint/lint_vulture_baseline.json:test_drain719_fold": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import",
-    "tooling/lint/lint_vulture_baseline.json:test_the_drains_explicit_list_commit_is_a_new_function_beside_an_unchanged_commit_fn_773": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import"
+    "tooling/lint/lint_vulture_baseline.json:test_the_drains_explicit_list_commit_is_a_new_function_beside_an_unchanged_commit_fn_773": "suite consolidation: identifier or test name removed from a test file; reference is prose/fixture text or a generic word, not a dangling import",
+    ".claude/contract-first-attacks.md:_utf8_len": "historical record, not a reference: the attack log quotes the code as it stood when the exploit was found. #1315 renamed `_utf8_len` to `utf8_len`; rewriting the log would misquote it."
   }
 }

@@ -18,11 +18,11 @@ from defender._io import (
     READ_LIMIT,
 )
 from defender._model import model
-from defender.knowledge._query_rules import (
+from defender.knowledge import (
     ABOVE_GUARD_QUERY_ID,
     DENIED_QUERY_ID,
-    _json_safe_params,
-    _request_key,
+    json_safe_params,
+    query_request_key,
 )
 from defender.records import Run, LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender._text import as_int, as_str, is_content_less
@@ -195,7 +195,7 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     the run folder: #1255 G4/G6) and append the row's line in `QUERY_ROW_COLUMNS` order."""
     # First, so too-deep params are refused before a seq is taken or a sidecar written.
     with state.lock:
-        stored_params = _json_safe_params(dict(params))
+        stored_params = json_safe_params(dict(params))
         if call_id is None:
             call_id = next_call_id(state)
         seq = _next_seq(state, lead_id)
@@ -304,7 +304,7 @@ def repeat_note(  # noqa: PLR0913 — one parameter per row field the comparison
     it must not be told it "returned the same payload"); failures and successes never match
     each other because their digests have different shapes.
     """
-    key = _request_key(system, verb, params)
+    key = query_request_key(system, verb, params)
     identity = _result_identity(payload_digest, payload_sha256)
     repeat_seq: int | None = None
     same_payload: int | None = None
@@ -321,7 +321,7 @@ def repeat_note(  # noqa: PLR0913 — one parameter per row field the comparison
         # A repeat needs both matches on the same row.
         if (
             repeat_seq is None and payload_matches
-            and _request_key(rec.get("system"), rec.get("verb"), rec.get("params")) == key
+            and query_request_key(rec.get("system"), rec.get("verb"), rec.get("params")) == key
         ):
             repeat_seq = prior
         if same_payload is None and payload_matches:
@@ -484,13 +484,13 @@ def _trip(
 
     The cheap `system_key` compare runs before the per-row `json.dumps`, which matters for
     `rejection_trip` where many rows differ by system key."""
-    key_request = _request_key(system, verb, params)
+    key_request = query_request_key(system, verb, params)
     key_system = as_str(system_key)
     matches = [
         r for r in rows
         if isinstance(r, dict) and r.get("lead_id") == lead and in_domain(r)
         and as_str(r.get("system_key")) == key_system
-        and _request_key(r.get("system"), r.get("verb"), r.get("params")) == key_request
+        and query_request_key(r.get("system"), r.get("verb"), r.get("params")) == key_request
     ]
     occurrence = len(matches) + 1
     if occurrence < threshold:

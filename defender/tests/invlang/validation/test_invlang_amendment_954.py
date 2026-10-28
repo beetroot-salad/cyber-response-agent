@@ -326,7 +326,7 @@ def test_quoted_pipe_cells_round_trip_unchanged():
 
 
 def test_the_backslash_pipe_escape_is_still_accepted_by_the_splitter():
-    """`_split_cells` reads a backslash-escaped `|` as part of the cell, and such a row parses
+    """`split_cells` reads a backslash-escaped `|` as part of the cell, and such a row parses
     to the declared width with no parse warning."""
     assert cells(r"a|b\|c") == ["a", "b|c"]
 

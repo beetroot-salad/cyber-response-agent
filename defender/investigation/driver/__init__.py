@@ -32,14 +32,14 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
-from defender.box._output import BoxOutputLimitExceeded
+from defender.box import BoxOutputLimitExceeded
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from defender.investigation.tools._deps import run_of
 from defender._io import write_guarded
 from defender import _git
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.knowledge import KnowledgePaths
 from defender._paths import DefenderPaths, adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
 
@@ -79,7 +79,7 @@ from defender.skills.invlang.validate import hold_capabilities
 from defender.hooks.inject_system_skill_description import SystemIndex, descriptor_index
 
 from defender import _clock
-from defender.configuration._env import env_bool
+from defender.configuration import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender.records import Run, RunPaths
 from defender.systems.run_tenant import RunTenant

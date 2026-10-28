@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._paths import PATHS
-from defender.tenancy._tenants import add_tenant_arguments
+from defender.tenancy import add_tenant_arguments
 from defender.agents import AGENTS
 from defender.investigation import permission
 from defender.investigation.agent_definition import (
@@ -81,14 +81,14 @@ def _definition(role: AgentRole, defender_dir: Path, tenant: str | None) -> Agen
     defn = AGENTS[role]
     if role is not AgentRole.GATHER:
         return defn
-    from defender.tenancy import _tenant
+    from defender import tenancy
     from defender.systems import run_tenant as run_tenant_mod
     from defender.investigation.driver import gather_def_for
 
     try:
-        requested = _tenant.requested_tenant_id(tenant)
+        requested = tenancy.requested_tenant_id(tenant)
         run = run_tenant_mod.resolve_tenant(
-            _tenant.resolve_data_root(), requested, defender_dir=defender_dir,
+            tenancy.resolve_data_root(), requested, defender_dir=defender_dir,
             dispatches_lead_zero=False)
     except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"defender-policy: {refusal}")
@@ -100,10 +100,10 @@ def _read_roots(policy: AgentPolicy, run_dir: Path, defender_dir: Path) -> list[
 
     The resolver may raise on a hostile operand (symlink cycle, embedded NUL); where the gate
     fails closed, this reports the fault rather than a traceback."""
-    from defender.investigation.permission.files import _resolved_read_roots
+    from defender.investigation.permission.files import resolved_read_roots
 
     try:
-        return [str(p) for p in _resolved_read_roots(policy, run_dir, defender_dir)]
+        return [str(p) for p in resolved_read_roots(policy, run_dir, defender_dir)]
     except (OSError, RuntimeError, ValueError) as e:
         return [f"(unresolvable — the gate refuses every read here: {e})"]
 

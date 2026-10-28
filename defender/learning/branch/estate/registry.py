@@ -15,13 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
-from defender.records._episode_paths import LAYOUT
-from defender.records._run_id import uuid_id_fault
+from defender.records.formats import LAYOUT
+from defender.records.formats import uuid_id_fault
 from defender.investigation.branch import source_alert
-from defender.records._family import family_identities
+from defender.records.formats import family_identities
 from defender.records import Run
 from defender._io import read_jsonl_rows, read_text_utf8
-from defender.knowledge._query_rules import ParamsTooDeep, _json_safe_params
+from defender.knowledge import ParamsTooDeep, json_safe_params
 from defender.learning.core.config import OracleSettings
 from defender.hooks.budget_enforcer import oracle_turn_closed, oracle_turn_opened
 from defender.investigation.payload_view import payload_text_of
@@ -627,7 +627,7 @@ def _refuse_unstorable(system: str, verb: str, params: Mapping[str, Any]) -> Non
     refused or FAULT row is ever attempted and then dropped. `served` re-raises `LedgerError`
     untouched, where any other exception would be filed as a FAULT row."""
     try:
-        _json_safe_params(params)
+        json_safe_params(params)
     except ParamsTooDeep as too_deep:
         raise LedgerError(f"{system}.{verb} was not served: {too_deep}") from too_deep
 

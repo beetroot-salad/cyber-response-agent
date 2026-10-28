@@ -12,7 +12,7 @@ from pathlib import Path
 from types import MappingProxyType, ModuleType
 from typing import Any
 
-from defender.configuration._env import env_choice, env_str
+from defender.configuration import env_choice, env_str
 from defender._io import json_safe
 
 #: Emitted on every line, `null` when unbound — one shape per line keeps log queries simple.

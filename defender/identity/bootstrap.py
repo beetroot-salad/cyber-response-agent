@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from defender._model import model
-from defender.records._tenant_id import TenantId
+from defender.records.formats import TenantId
 
 from .ports import IdentityRepository
 from .rows import Email

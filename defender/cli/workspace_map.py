@@ -10,7 +10,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 
 from defender._paths import adapters_under  # noqa: E402
 from defender.investigation.workspace_map import DEFENDER_DIR, workspace_map  # noqa: E402
-from defender.records._tenant_id import TenantRefused
+from defender.records.formats import TenantRefused
 
 def main(argv: list[str]) -> int:
     """`workspace_map.py --tenant T <run_id>` (#1105 declared change 10, J8): the map of T's
@@ -25,7 +25,7 @@ def main(argv: list[str]) -> int:
     ns = p.parse_args(argv[1:])
     # The CLI reads the checkout's roster itself; an unreadable adapters tree is a one-line
     # refusal and exit 2, not a traceback.
-    from defender.tenancy._command_line_run import open_command_line_run
+    from defender.tenancy import open_command_line_run
     from defender.systems.verbs import RegistryError, read_roster
 
     opened = open_command_line_run(ns.tenant, ns.run_id)
@@ -47,9 +47,9 @@ def _stamped_agent_root(raw_tenant: str, run_dir: Path) -> Path | None:
     """The agent half of the export the run read (#1108 P4: its host-held knowledge record's
     commit, `<T>/exports/<commit>/agent`), or `None` when the run names none or the export is
     gone: the map then says it has no tenant knowledge to show."""
-    from defender.records._knowledge_status import read_knowledge_status
+    from defender.records.formats import read_knowledge_status
     from defender.records import RunPaths
-    from defender.tenancy import _tenant
+    from defender import tenancy
 
     paths = RunPaths(run_dir)
     status = read_knowledge_status(paths.knowledge_source(), paths.provenance)
@@ -57,7 +57,7 @@ def _stamped_agent_root(raw_tenant: str, run_dir: Path) -> Path | None:
     if commit is None:
         return None
     try:
-        tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
+        tenant = tenancy.requested_tenant(tenancy.resolve_data_root(), raw_tenant)
     except TenantRefused:
         return None
     agent = tenant.export_folder(commit) / "agent"

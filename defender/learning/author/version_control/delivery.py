@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import httpx
 from defender import _io
-from defender.tenancy._tenant import Tenant, read_forge_binding
+from defender.tenancy import Tenant, read_forge_binding
 from defender import box
-from defender.box._docker import DockerFn, _docker
+from defender.box import DockerFn, run_docker
 
 from .auth import ForgejoIdentity
 from .batch import Batch
@@ -196,7 +196,7 @@ class TenantDelivery:
             )
 
     def start_box(
-        self, request: box.BoxRequest, *, docker: DockerFn = _docker
+        self, request: box.BoxRequest, *, docker: DockerFn = run_docker
     ) -> box.BoxExecutor:
         """The tenant drain's box, through `box.start_box`, the one entry: it requires a
         sandbox, so a start fault raises whatever the operator's opt-out says, never an

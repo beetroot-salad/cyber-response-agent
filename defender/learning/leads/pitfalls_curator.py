@@ -14,8 +14,8 @@ from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.knowledge._corpus import _FENCE_RE
-from defender.knowledge._knowledge import AGENT_REL, REDUCER_PITFALLS
+from defender.knowledge import FENCE_LINE_RE
+from defender.knowledge import AGENT_REL, REDUCER_PITFALLS
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender.learning.author import drain as _author_drain
 from defender.learning.author import shared as _author_shared
@@ -201,7 +201,7 @@ def _outline(lines: list[str]) -> tuple[list[tuple[int, str]], list[str | None]]
     section: str | None = None
     fenced = False
     for i, line in enumerate(lines):
-        if _FENCE_RE.match(line.lstrip()):
+        if FENCE_LINE_RE.match(line.lstrip()):
             fenced = not fenced
         elif fenced:
             pass

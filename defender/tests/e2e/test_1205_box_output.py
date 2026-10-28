@@ -68,7 +68,7 @@ def test_live_box_printing_past_limit_is_refused_and_stopped(tmp_path, runtime):
         command = f"head -c {box.BOX_OUTPUT_LIMIT + 1} /dev/zero"
         with pytest.raises(box.BoxOutputLimitExceeded):
             executor.run_parsed(bash_exec.parse(command), command=command, cwd=cwd, timeout=60)
-        status = box._docker(["docker", "inspect", "-f", "{{.State.Status}}", executor.name])
+        status = box.run_docker(["docker", "inspect", "-f", "{{.State.Status}}", executor.name])
         assert status.stdout.strip() in {"exited", "dead"}
         with pytest.raises(box.BoxOutputLimitExceeded):
             executor.run_parsed([], command="again", cwd=cwd, timeout=5)

@@ -11,7 +11,7 @@ from typing import Annotated, Any
 
 from pydantic import BeforeValidator
 
-from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
+from defender.hooks import NON_ADAPTER_SHIMS
 from defender.investigation import gnu_flags
 
 

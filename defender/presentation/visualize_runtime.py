@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import NamedTuple
 
-from defender.records._report import ReportRead
+from defender.records.formats import ReportRead
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, normalized_disposition
 from defender.records import RUN_LAYOUT
 from defender.learning import lead_repository

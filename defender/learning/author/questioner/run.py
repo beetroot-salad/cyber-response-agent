@@ -41,7 +41,7 @@ from defender.learning.core.config import (
 )
 from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.core.state import QUESTIONER_FINDINGS, LearningState, names_systems
-from defender.knowledge._knowledge import LESSONS_QUESTIONER
+from defender.knowledge import LESSONS_QUESTIONER
 
 
 AuthorError = _shared.AuthorError

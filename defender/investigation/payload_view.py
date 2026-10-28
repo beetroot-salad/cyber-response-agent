@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._clock import parse_iso_utc
-from defender.configuration._env import env_int
+from defender.configuration import env_int
 from defender._model import model
 from defender._text import as_int
 

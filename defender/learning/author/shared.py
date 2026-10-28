@@ -14,8 +14,8 @@ from defender.learning._prompt import stage_user_message, structured_json_body
 from defender._text import is_content_less
 from defender._untrusted import wrap
 from defender._clock import now_iso
-from defender.knowledge._corpus import PROVENANCE_KEYS, iter_lessons
-from defender.knowledge._knowledge import AGENT_REL, KnowledgePaths
+from defender.knowledge import PROVENANCE_KEYS, iter_lessons
+from defender.knowledge import AGENT_REL, KnowledgePaths
 from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.core.state import Channel, LearningState
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Venv-guard fence (#1080): a script that re-executes itself into the venv does so first.
 
-* `execution/_venv.py`, the module that holds the guard, imports only the standard library (it runs
-  before the venv's packages exist).
+* `execution/venv_guard.py`, the module that holds the guard, imports only the standard library (it runs
+  before the venv's packages exist). So does everything importing it runs first: the package door
+  `execution/__init__.py` and the `lazy_door` helper it binds (#1315), which may import each other.
 * Every production file that calls `reexec_into_venv(` calls it at module scope (inside a compound
   statement such as `if __name__ ...` counts) before it imports any other `defender.*` module,
   because an import above the guard would load the wrong interpreter's packages.
@@ -26,9 +27,11 @@ import _astlib
 DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
 EXCLUDED_DIRS = ("tests", ".venv", "__pycache__")
-_VENV = "execution/_venv.py"
-_VENV_MODULE = "defender.execution._venv"
+_VENV = "execution/venv_guard.py"
+_VENV_MODULE = "defender.execution.venv_guard"
 _GUARD = "reexec_into_venv"
+#: What importing the guard executes besides the guard itself, by file and module; each may be absent.
+_BOOTSTRAP = {"execution/__init__.py": "defender.execution", "lazy_door.py": "defender.lazy_door"}
 
 
 def _module_imports(stmt: ast.stmt) -> list[str]:
@@ -40,6 +43,11 @@ def _module_imports(stmt: ast.stmt) -> list[str]:
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             names.append(node.module)
     return names
+
+
+def _type_checking_only(stmt: ast.stmt) -> bool:
+    """`if TYPE_CHECKING:` with no `else`: its imports never run (a door's type mirror)."""
+    return _astlib.type_checking_block(stmt) and not stmt.orelse
 
 
 def _calls_guard(stmt: ast.stmt) -> bool:
@@ -64,6 +72,16 @@ def scan(root: Path) -> list[str]:
             "standard-library-only"
             for stmt in tree.body for m in _module_imports(stmt)
             if m.split(".")[0] not in sys.stdlib_module_names)
+    for rel, module in _BOOTSTRAP.items():
+        if not (root / rel).is_file():
+            continue
+        _text, tree = _astlib.read_and_parse(root / rel, rel)
+        findings.extend(
+            f"{rel}: imports `{m}`; importing the venv guard runs it first, so it must stay "
+            "standard-library-only"
+            for stmt in tree.body if not _type_checking_only(stmt) for m in _module_imports(stmt)
+            if m.split(".")[0] not in sys.stdlib_module_names
+            and m not in (*_BOOTSTRAP.values(), _VENV_MODULE))
     guarded = 0
     for rel in _astlib.source_files(root, EXCLUDED_DIRS):
         if rel == _VENV:

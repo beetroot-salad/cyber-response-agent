@@ -1,7 +1,7 @@
 """The learning-state handle (#1135): the one front door to the learning state tree."""
 from __future__ import annotations
 
-from defender.records._locations import (LearningRoot, DataRoot, _unwrap_learning_root, _unwrap_data_root)
+from defender.records.formats import LearningRoot, DataRoot, unwrap_learning_root, unwrap_data_root
 
 import contextlib
 import errno
@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from defender import _flock
 from defender._clock import now_iso
-from defender.configuration._env import FatalConfigError
+from defender.configuration import FatalConfigError
 from defender._io import (
     ALIAS_READ_REFUSAL,
     Bound,
@@ -36,7 +36,7 @@ from defender._io import (
 from defender.learning.core.config import DrainLabel
 
 if TYPE_CHECKING:
-    from defender.tenancy._tenant import TenantId
+    from defender.tenancy import TenantId
     from defender.records import RunAddress
     from defender.learning.core.config import LoopPaths
 
@@ -179,7 +179,7 @@ def _address_fault(spec: dict) -> str | None:
     """Why a curation row's `tenant_id` / `run_id` cannot be read as a run address — missing,
     not a string, or off its grammar — or `None` when they can. The shape alone: no tenant
     folder is read (#1105 D-stored)."""
-    from defender.records._tenant_id import TenantRefused
+    from defender.records.formats import TenantRefused
     from defender.records import RunAddress, RunRefused
 
     for key in ("tenant_id", "run_id"):
@@ -317,7 +317,7 @@ class LearningState:
         """Hold an existing state root. Tenant roots must be real directories; explicit
         scratch roots retain their resolved-once handle semantics. Nothing is created."""
         location = paths.state_root
-        original = _unwrap_learning_root(location) if isinstance(location, LearningRoot) else location
+        original = unwrap_learning_root(location) if isinstance(location, LearningRoot) else location
         if paths.tenant is not None and original.is_symlink():
             raise FatalConfigError(f"the tenant learning state root {original} must be a real directory, not a symlink")
         root = original.resolve()
@@ -886,10 +886,10 @@ class LearningAdoption:
 
     def __init__(self, destination: LearningRoot, source: Path | None, *, tenant_id: str,
                  data_root: DataRoot, repo_root: Path) -> None:
-        from defender.records._tenant_id import TenantRefused
+        from defender.records.formats import TenantRefused
 
-        destination_path = _unwrap_learning_root(destination)
-        root_path = _unwrap_data_root(data_root)
+        destination_path = unwrap_learning_root(destination)
+        root_path = unwrap_data_root(data_root)
         self.destination = destination_path
         self.source = source
         self.aside = source / f".adopting-to-{tenant_id}" if source is not None else None
@@ -917,7 +917,7 @@ class LearningAdoption:
         self._validate_existing_state()
 
     def _validate_existing_state(self) -> None:
-        from defender.records._tenant_id import TenantRefused
+        from defender.records.formats import TenantRefused
 
         assert self.aside is not None
         source, destination = self.source, self.destination
@@ -951,7 +951,7 @@ class LearningAdoption:
                 self._check_permissions(base)
 
     def _validate_staging(self) -> bool:
-        from defender.records._tenant_id import TenantRefused
+        from defender.records.formats import TenantRefused
 
         assert self.stage is not None
         assert self.aside is not None
@@ -979,7 +979,7 @@ class LearningAdoption:
 
     @staticmethod
     def _token(root: Path) -> str | None:
-        from defender.records._tenant_id import TenantRefused
+        from defender.records.formats import TenantRefused
         path = root / ".adoption"
         if not os.path.lexists(path):
             return None
@@ -996,7 +996,7 @@ class LearningAdoption:
         return [self.source / name for name in self.entries if os.path.lexists(self.source / name)]
 
     def _check_permissions(self, base: Path) -> None:
-        from defender.records._tenant_id import TenantRefused
+        from defender.records.formats import TenantRefused
         if not os.access(base, os.W_OK | os.X_OK):
             raise TenantRefused(f"{base}: learning adoption requires write and search permission")
         for name in self.entries:
@@ -1030,7 +1030,7 @@ class LearningAdoption:
                     shutil.copystat(original, copied, follow_symlinks=False)
 
     def run(self, *, before_move: Callable[[], object] | None = None) -> None:
-        from defender.records._tenant_id import TenantRefused
+        from defender.records.formats import TenantRefused
 
         try:
             with contextlib.ExitStack() as locks:
@@ -1059,7 +1059,7 @@ class LearningAdoption:
             raise TenantRefused(f"learning adoption {self.source} -> {self.destination}: {failed}") from failed
 
     def _lock_existing(self, locks: contextlib.ExitStack) -> None:
-        from defender.records._tenant_id import TenantRefused
+        from defender.records.formats import TenantRefused
         import fcntl
         import stat
 
@@ -1131,7 +1131,7 @@ class LearningAdoption:
         self._refuse_remaining()
 
     def _refuse_remaining(self) -> None:
-        from defender.records._tenant_id import TenantRefused
+        from defender.records.formats import TenantRefused
         remaining = self._remaining()
         if remaining:
             raise TenantRefused(f"learning adoption completed but source records were recreated: "
@@ -1143,7 +1143,7 @@ def provision_learning(
     create_row: bool,
 ) -> None:
     """Execute setup's learning plan, publishing a missing row only after plan validation."""
-    from defender.tenancy._tenant import create_tenant, learning_root_for_setup
+    from defender.tenancy import create_tenant, learning_root_for_setup
 
     adoption = LearningAdoption(learning_root_for_setup(data_root, tenant_id), source,
                                 tenant_id=tenant_id, data_root=data_root, repo_root=repo_root)

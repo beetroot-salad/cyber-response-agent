@@ -13,7 +13,7 @@ import json
 import re
 from defender._model import model
 
-from defender.skills.invlang import _walkers
+from defender.skills import invlang
 from defender.skills.invlang.schema import CompanionBody
 
 __all__ = [
@@ -68,9 +68,9 @@ class Review:
 def citable_refs(companion: CompanionBody) -> frozenset[str]:
     """Every invlang id a review may name — the guard against a hallucinated or foreign id
     flowing back to the investigator as work."""
-    refs = {v["id"] for v in _walkers.all_vertices(companion) if v.get("id")}
-    refs |= {e["id"] for e in _walkers.all_edges(companion) if e.get("id")}
-    refs |= set(_walkers.all_hypotheses(companion))
+    refs = {v["id"] for v in invlang.all_vertices(companion) if v.get("id")}
+    refs |= {e["id"] for e in invlang.all_edges(companion) if e.get("id")}
+    refs |= set(invlang.all_hypotheses(companion))
     refs |= {
         lead["id"] for lead in (companion.get("findings") or [])
         if isinstance(lead, dict) and lead.get("id")

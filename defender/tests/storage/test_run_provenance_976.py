@@ -129,16 +129,16 @@ def test_status_failing_after_a_good_sha_keeps_the_sha_and_unknowns_the_dirt(tmp
 def test_a_missing_or_junk_stamp_reads_as_no_stamp(tmp_path):
     """This file sits in the box's rw bind, so a reader must treat whatever is there as
     arbitrary and answer "no usable record" rather than raise out of an archive walk."""
-    assert _provenance.read(tmp_path / "absent.json") is None
+    assert _provenance.read_provenance(tmp_path / "absent.json") is None
     junk = tmp_path / "junk.json"
     junk.write_text("not json{")
-    assert _provenance.read(junk) is None
+    assert _provenance.read_provenance(junk) is None
     listy = tmp_path / "listy.json"
     listy.write_text(json.dumps(["not", "a", "record"]))
-    assert _provenance.read(listy) is None
+    assert _provenance.read_provenance(listy) is None
     wrong_type = tmp_path / "wrong.json"
     wrong_type.write_text(json.dumps({"commit": 17, "dirty": False}))
-    assert _provenance.read(wrong_type) is None
+    assert _provenance.read_provenance(wrong_type) is None
 
 
 @pytest.mark.parametrize("dirty", [True, False, None])
@@ -147,7 +147,7 @@ def test_the_three_valued_dirt_survives_the_round_trip(tmp_path, dirty):
     reintroduce the exact lie the three-valued field exists to prevent."""
     path = tmp_path / "p.json"
     _provenance.write(path, RunProvenance(commit="a" * 40, dirty=dirty))
-    rec = _provenance.read(path)
+    rec = _provenance.read_provenance(path)
     assert rec is not None, "the round trip lost the record entirely"
     assert rec.dirty is dirty
 
@@ -173,13 +173,13 @@ def test_a_stamp_that_is_a_planted_link_reads_as_no_stamp(tmp_path):
     _provenance.write(real, RunProvenance(commit="b" * 40, dirty=False))
     planted = tmp_path / PROVENANCE
     planted.symlink_to(real)
-    assert _provenance.read(planted) is None
+    assert _provenance.read_provenance(planted) is None
 
 
 def test_a_deeply_nested_payload_reads_as_no_stamp(tmp_path):
     path = tmp_path / PROVENANCE
     path.write_text("[" * 200_000 + "]" * 200_000, encoding="utf-8")
-    assert _provenance.read(path) is None
+    assert _provenance.read_provenance(path) is None
 
 
 @pytest.mark.parametrize(
@@ -199,7 +199,7 @@ def test_a_record_capture_cannot_produce_is_not_a_record(tmp_path, doc):
     """Type-checking each field alone is not enough."""
     path = tmp_path / PROVENANCE
     path.write_text(json.dumps(doc), encoding="utf-8")
-    assert _provenance.read(path) is None
+    assert _provenance.read_provenance(path) is None
 
 
 def test_every_field_reaches_the_wire_and_comes_back(tmp_path):
@@ -219,7 +219,7 @@ def test_every_field_reaches_the_wire_and_comes_back(tmp_path):
     )
     path = tmp_path / PROVENANCE
     _provenance.write(path, rich)
-    assert _provenance.read(path) == rich
+    assert _provenance.read_provenance(path) == rich
     assert json.loads(path.read_text(encoding="utf-8"))["knowledge"] == {"commit": "c" * 40}
 
 
@@ -301,7 +301,7 @@ def test_a_read_refuses_a_hard_link_the_write_would_refuse(tmp_path):
     _provenance.write(real, RunProvenance(commit="a" * 40, dirty=False))
     link = tmp_path / "provenance.json"
     os.link(real, link)
-    assert _provenance.read(link) is None, "a hard-linked stamp was read as this run's own"
+    assert _provenance.read_provenance(link) is None, "a hard-linked stamp was read as this run's own"
     with pytest.raises(OSError, match="aliased entry"):
         _provenance.write(link, RunProvenance(commit="b" * 40, dirty=False))
 
@@ -342,7 +342,7 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
     run_dir = run_common.materialize_run(alert, tenant=tenant).run_dir
-    rec = _provenance.read(RunPaths(run_dir).provenance)
+    rec = _provenance.read_provenance(RunPaths(run_dir).provenance)
     assert rec is not None
     # The suite runs inside this repo, so the capture is a real one: a sha, or an explicit
     # reason there is none — never silence.

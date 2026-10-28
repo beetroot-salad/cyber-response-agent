@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .verb_grant import DENY_ALL, VerbGrant
-from defender.knowledge._knowledge import KnowledgePaths
+from defender.knowledge import KnowledgePaths
 from defender._paths import adapters_under
 
 from defender.kit.verbs import SYSTEM_PATTERN

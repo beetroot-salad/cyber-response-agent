@@ -32,9 +32,7 @@ from typing import Any
 
 
 
-from defender.box._oracle import (
-    stop_oracle_box,
-)
+from defender.box import stop_oracle_box
 
 
 from defender.learning.branch.estate.checks import RealData
@@ -102,7 +100,7 @@ class _AttemptBox:
 
     def cancel(self) -> None:
         """Stop useful execution; retain the box and scratch until the worker settles."""
-        from defender.box._lifecycle import BoxRuns
+        from defender.box import BoxRuns
 
         with self._lock:
             self._ended = True
@@ -206,7 +204,7 @@ class OraclePricingError(RuntimeError):
 def price_row(actor: str, given: Any) -> str:
     """`actor`'s pricing row, from the model's name alone: a `Model`, a `BuiltModel` carrying
     one, or a model built lazily from its knob (whose name needs no provider key)."""
-    from defender.configuration._pricing import UnknownModel, model_key
+    from defender.configuration import UnknownModel, model_key
 
     name = getattr(given, "model_name", None)
     if name is None:

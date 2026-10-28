@@ -159,7 +159,7 @@ def test_the_stamp_reader_preserves_the_record_over_display_fact_changes(
 
     run, _b, _a = _setup(tmp_path, data_root, "ssh-brute-force.json", "in")
     _rewrite_stamp(run, **changes)
-    read = _provenance.read(_stamp_path(run))
+    read = _provenance.read_provenance(_stamp_path(run))
     assert read is not None, changes
     wire = json.loads(read.as_json())
     assert wire["tenant_id"] == H.T_ID, "the rest of the record survived"

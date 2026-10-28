@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from defender._paths import PATHS
-from defender.knowledge._knowledge import AGENT_REL, CATALOG, CATALOG_SCHEMA_NAME, SKILLS
+from defender.knowledge import AGENT_REL, CATALOG, CATALOG_SCHEMA_NAME, SKILLS
 
 REPO_ROOT = PATHS.repo_root
 LEARNING_DIR = PATHS.learning_dir

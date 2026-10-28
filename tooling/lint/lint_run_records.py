@@ -333,8 +333,8 @@ def _scan_location_pass(rel: str, tree: ast.Module, lines: list[str],
                 resolved = reexport_origin(resolved, (root, DEFENDER), relay_cache)
             if resolved and resolved.startswith(_LOCATION_MODULE + "."):
                 member = resolved.removeprefix(_LOCATION_MODULE + ".")
-                if member.startswith("_unwrap_"):
-                    if not allowed(member.removeprefix("_unwrap_"), node):
+                if member.startswith("unwrap_"):
+                    if not allowed(member.removeprefix("unwrap_"), node):
                         report(node, f"owner-only location conversion ({member})")
                 elif member in classes and node not in annotations and not (_is_owner_module(rel) or rel == _LOCATION_FILE):
                     report(node, f"owner-only location constructor ({member})")

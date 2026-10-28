@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender.execution._async import run_sync
-from defender.configuration._pricing import billed_usage
+from defender.execution import run_sync
+from defender.configuration import billed_usage
 from defender._untrusted import wrap, wrap_fresh
 from defender.learning.branch.ledger import request_key
 from defender.learning.core import config
@@ -23,11 +23,7 @@ from defender.learning.core.config import (
 from defender.investigation.agent_definition import AgentDefinition
 from defender._agent_role import AgentRole
 from defender.execution.bash_exec import Pipeline, Stage
-from defender.box._oracle import (
-    BoxStartRefused,
-    start_oracle_box,
-    start_process_oracle_box,
-)
+from defender.box import BoxStartRefused, start_oracle_box, start_process_oracle_box
 from defender.systems.verbs import ServingAbort
 
 from .checks import (
@@ -838,7 +834,7 @@ class Oracle:
 
     def _python(self, args: dict, run: _Run) -> str:
         from defender.execution.box_codec import BoxFault, encode_request
-        from defender.box._output import BoxOutputLimitExceeded
+        from defender.box import BoxOutputLimitExceeded
 
         code = args.get("code")
         if not isinstance(code, str):

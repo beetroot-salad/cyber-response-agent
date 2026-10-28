@@ -19,11 +19,11 @@ from defender._agent_role import AgentRole
 from ..run_state import run_state_of
 
 from defender._untrusted import wrap_fresh
-from defender.configuration._env import FatalConfigError
+from defender.configuration import FatalConfigError
 from defender.kit.faults import USAGE_EXIT_CODE
 from defender.investigation.sql_engine import sql as defender_sql
 from defender.investigation import record_query
-from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID
+from defender.knowledge import BASH_SHIM_QUERY_ID
 from ._deps import run_of, AgentDeps, GatherDeps, _BASH_TIMEOUT_S, _BASH_VERB, _INFRA_EXIT_CODE, _bounded_read, _cap_for, _format_bash_result, _overflow_filter_hint, _read_char_cap
 
 

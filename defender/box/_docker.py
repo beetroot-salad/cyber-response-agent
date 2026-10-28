@@ -15,10 +15,10 @@ from typing import NamedTuple
 import shlex
 
 from defender._io import read_text_soft
-from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
+from defender.records.formats import RUN_ID_ALLOWED, is_valid_run_id
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,
-    _BOX_MARK_ENV,
+    BOX_MARK_ENV,
     REQUEST_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.REQUEST_MAGIC`
     RESPONSE_MAGIC,  # noqa: F401 — re-exported: test_540_exec_seam.py imports it as `box.RESPONSE_MAGIC`
     BoxFault,
@@ -154,11 +154,11 @@ def _render_env(request_env: Mapping[str, str], workdir: Path, *, defender_dir: 
     merged = dict(_LOCALE_ENV)
     merged.update({k: v for k, v in request_env.items() if k in BOX_ENV_ALLOWLIST})
     merged.update(_derived_infra_env(workdir, defender_dir=defender_dir))
-    merged.update(_BOX_MARK_ENV)
+    merged.update(BOX_MARK_ENV)
     return merged
 
 
-def _docker(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
+def run_docker(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv, capture_output=True, text=True, check=False, timeout=120,
         encoding="utf-8",

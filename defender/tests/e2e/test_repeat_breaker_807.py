@@ -17,7 +17,7 @@ from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads import lead_extraction  # noqa: E402
 from defender.systems import circuit_breaker  # noqa: E402
 from defender.investigation.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
-from defender.knowledge._query_rules import _json_safe_params  # noqa: E402
+from defender.knowledge._query_rules import json_safe_params  # noqa: E402
 from defender.systems.verb_grant import VerbGrant  # noqa: E402
 from defender.systems.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry  # noqa: E402
 from defender.kit.faults import TransportFault, UpstreamFault  # noqa: E402
@@ -969,7 +969,7 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
 
 def test_repeat_key_normalizes_the_live_call_to_its_stored_form(tmp_path):
     live = {"native_query": "FROM logs", "threshold": float("nan")}
-    stored = _json_safe_params(dict(live))
+    stored = json_safe_params(dict(live))
     assert stored != live, "the JSON-safe transform left the fixture unchanged"
 
     rows = [_row(LEAD, s, "elastic", "probe", stored) for s in (0, 1)]

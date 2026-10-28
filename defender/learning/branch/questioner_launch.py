@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 
-from defender.records._episode_handle import Episode
+from defender.records.formats import Episode
 
 
 from defender._io import (
@@ -48,11 +48,9 @@ from defender.records import (
 
 from defender.investigation import branch
 
-from defender.records import _family
+from defender.records import formats
 
-from defender.records._family import (
-    Family,
-)
+from defender.records.formats import Family
 
 
 from defender import _yaml
@@ -195,7 +193,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
     systems) overwrite whatever the model returned, so a family cannot name a different
     source, or a different set of served systems, than it was authored from. One identity gate
     runs over the whole manifest before it is written."""
-    from defender.knowledge._corpus import iter_lesson_paths
+    from defender.knowledge import iter_lesson_paths
     from defender.learning.branch import questioner as questioner_mod
     from defender.learning.lead_repository import joined, questioner_leads
 
@@ -234,8 +232,8 @@ def _author(  # noqa: PLR0913 — the step's inputs
         # the judge, lessons and question-writer read them from here (M21).
         "served_systems": list(served),
     })
-    document, family = _family.accept_family(document)
-    _family.write_family(episode, document)
+    document, family = formats.accept_family(document)
+    formats.write_family(episode, document)
     return family
 
 

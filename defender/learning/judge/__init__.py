@@ -19,10 +19,10 @@ from defender.learning.core.state import (  # noqa: E402
 )
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
-from defender.records._episode_handle import Episode  # noqa: E402
+from defender.records.formats import Episode  # noqa: E402
 from defender._io import Bound, NotPlainEntry
 from defender.records import WIRE_LOG_NAMES  # noqa: E402
-from defender.records._episode_paths import LAYOUT  # noqa: E402
+from defender.records.formats import LAYOUT  # noqa: E402
 from defender.learning.branch import outcome as outcome_mod  # noqa: E402
 from defender.learning.judge import calls as calls_mod  # noqa: E402
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
@@ -31,12 +31,12 @@ from defender.learning.judge import render as render_mod  # noqa: E402
 from defender.learning.judge import route as route_mod  # noqa: E402
 from defender.learning.judge import run as run_mod  # noqa: E402
 from defender.learning.judge.runs import RunSet, failed_row, read_run_set  # noqa: E402
-from defender.records._family import ManifestPredatesOracle  # noqa: E402
+from defender.records.formats import ManifestPredatesOracle  # noqa: E402
 from defender import _yaml
 
 if TYPE_CHECKING:
     from defender.records import RunsRepository
-    from defender.tenancy._tenant import Tenant
+    from defender.tenancy import Tenant
 
 _logger = logging.getLogger(__name__)
 
@@ -105,13 +105,13 @@ def _judge_effort() -> str:
 
 
 def _judge_draws() -> int:
-    from defender.configuration._env import env_int
+    from defender.configuration import env_int
 
     return env_int(DRAWS_KNOB, 1)
 
 
 def _judge_cap() -> int:
-    from defender.configuration._env import env_int
+    from defender.configuration import env_int
 
     return env_int(CAP_KNOB, 20000)
 
@@ -338,7 +338,7 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
 def _open_episode(runs: RunsRepository[Tenant], episode_id: str) -> Episode:
     """The pass's one handle, through the judge's door. A missing episode is refused, never
     recreated by the not-graded stamp."""
-    from defender.records._tenant_id import TenantRefused
+    from defender.records.formats import TenantRefused
 
     try:
         return runs.episode_files(episode_id)
@@ -832,8 +832,8 @@ def _pass_knowledge(bound: Bound, world_ids: list[str]) -> object:
     bind. A pin that cannot be read gives none (bodies shown as unreadable). Only an episode
     launched before the pin was recorded falls back to the first graded world's stamp that
     records one, as before."""
-    from defender.records._knowledge_pin import PinUnreadable, read_pin
-    from defender.records._provenance import KnowledgeRevision
+    from defender.records.formats import PinUnreadable, read_pin
+    from defender.records.formats import KnowledgeRevision
 
     try:
         commit = read_pin(bound)

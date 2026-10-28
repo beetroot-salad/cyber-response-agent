@@ -20,7 +20,7 @@ from pydantic import model_validator
 from defender.records import Run, RunPaths
 
 from defender.records import session_store
-from defender.records._seeded import BranchError
+from defender.records.formats import BranchError
 
 
 @model(frozen=True)

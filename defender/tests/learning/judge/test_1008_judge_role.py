@@ -197,7 +197,7 @@ def test_1008_the_judges_compiled_policy_is_empty_on_every_surface(tmp_path):
     assert policy.verb_allow.entries == ()
 
     files = T.mod("investigation.permission.files")
-    resolved = files._resolved_read_roots(policy, tmp_path, T.DEFENDER)
+    resolved = files.resolved_read_roots(policy, tmp_path, T.DEFENDER)
     assert T.DEFENDER.resolve() in resolved, (
         "the judge's resolved read roots no longer include the defender tree")
 

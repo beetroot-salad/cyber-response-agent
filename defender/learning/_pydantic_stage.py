@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import Any, ClassVar, Protocol
 
 from defender._text import is_content_less
-from defender.box._output import BoxOutputLimitExceeded
+from defender.box import BoxOutputLimitExceeded
 from defender._exception_groups import carried
 from defender.learning.core.config import (
     FatalConfigError,

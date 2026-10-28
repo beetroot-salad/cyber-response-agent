@@ -215,11 +215,11 @@ def entry_price(disposition: str, text: str) -> tuple[str, ...]:
 
 
 def cells(row: str) -> list[str]:
-    """`_split_cells(row)` — the SAME splitter the parser reads a row with, never
+    """`split_cells(row)` — the SAME splitter the parser reads a row with, never
     `row.count("|")`, which miscounts quoted and escaped pipes."""
-    from defender.skills.invlang._cells import _split_cells
+    from defender.skills.invlang._cells import split_cells
 
-    return _split_cells(row)
+    return split_cells(row)
 
 
 # deps and the run dir — the write verbs' real seam

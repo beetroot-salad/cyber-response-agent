@@ -1,4 +1,4 @@
-"""Tests for the lint_venv_guard gate: _venv.py stays stdlib-only and every guarded script calls
+"""Tests for the lint_venv_guard gate: venv_guard.py stays stdlib-only and every guarded script calls
 the guard before importing any other defender module."""
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ from _by_path import load_lint_gate
 _GATE = load_lint_gate("lint_venv_guard")
 
 _VENV = "import os, sys\nfrom pathlib import Path\ndef reexec_into_venv(): pass\n"
-_SCRIPT = ("import sys\nfrom defender.execution._venv import reexec_into_venv\n"
+_SCRIPT = ("import sys\nfrom defender.execution.venv_guard import reexec_into_venv\n"
            "reexec_into_venv()\nfrom defender.other import x\n")
 
 
 def _tree(tmp_path: Path, **files: str) -> Path:
     root = tmp_path / "defender"
-    for rel, text in {"execution/_venv.py": _VENV, "tool.py": _SCRIPT,
+    for rel, text in {"execution/venv_guard.py": _VENV, "tool.py": _SCRIPT,
                       **{k.replace("__", "/"): v for k, v in files.items()}}.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -30,15 +30,15 @@ def test_a_clean_tree_has_no_findings(tmp_path):
 
 
 def test_a_guard_inside_the_main_block_counts(tmp_path):
-    src = ("from defender.execution._venv import reexec_into_venv\n"
+    src = ("from defender.execution.venv_guard import reexec_into_venv\n"
            "if __name__ == '__main__':\n    reexec_into_venv()\nfrom defender.other import x\n")
     assert _GATE.scan(_tree(tmp_path, **{"tool.py": src})) == []
 
 
 @pytest.mark.parametrize("src", [
-    "from defender.other import x\nfrom defender.execution._venv import reexec_into_venv\nreexec_into_venv()\n",
-    "import defender.other\nfrom defender.execution._venv import reexec_into_venv\nreexec_into_venv()\n",
-    "try:\n    from defender.other import x\nexcept ImportError:\n    pass\nfrom defender.execution._venv import reexec_into_venv\nreexec_into_venv()\n",
+    "from defender.other import x\nfrom defender.execution.venv_guard import reexec_into_venv\nreexec_into_venv()\n",
+    "import defender.other\nfrom defender.execution.venv_guard import reexec_into_venv\nreexec_into_venv()\n",
+    "try:\n    from defender.other import x\nexcept ImportError:\n    pass\nfrom defender.execution.venv_guard import reexec_into_venv\nreexec_into_venv()\n",
 ])
 def test_a_defender_import_above_the_guard_is_found(tmp_path, src):
     found = _GATE.scan(_tree(tmp_path, **{"tool.py": src}))
@@ -51,8 +51,21 @@ def test_a_guard_only_inside_a_function_is_found(tmp_path):
 
 
 def test_the_venv_module_importing_beyond_the_stdlib_is_found(tmp_path):
-    found = _GATE.scan(_tree(tmp_path, **{"execution___venv.py": "import yaml\n"}))
+    found = _GATE.scan(_tree(tmp_path, **{"execution__venv_guard.py": "import yaml\n"}))
     assert len(found) == 1 and "standard-library-only" in found[0], found
+
+
+def test_the_package_door_and_its_helper_stay_stdlib_only(tmp_path):
+    root = _tree(tmp_path)
+    door = ("from typing import TYPE_CHECKING\nfrom defender.lazy_door import lazy_door\n"
+            "if TYPE_CHECKING:\n    from defender.execution._async import run_sync as run_sync\n")
+    (root / "execution/__init__.py").write_text(door, encoding="utf-8")
+    (root / "lazy_door.py").write_text("import importlib\n", encoding="utf-8")
+    assert _GATE.scan(root) == []
+    (root / "execution/__init__.py").write_text(door + "import yaml\n", encoding="utf-8")
+    (root / "lazy_door.py").write_text("from defender.records import x\n", encoding="utf-8")
+    found = _GATE.scan(root)
+    assert len(found) == 2 and all("standard-library-only" in f for f in found), found
 
 
 def test_a_tree_with_no_guarded_script_is_a_finding(tmp_path):

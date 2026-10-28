@@ -21,7 +21,7 @@ import httpx
 
 from defender import _git
 from defender._text import one_line
-from defender.tenancy._publish_status import (
+from defender.tenancy import (
     FRESH,
     MISCONFIGURED,
     OPERATOR,
@@ -33,7 +33,7 @@ from defender.tenancy._publish_status import (
     record_refusal,
     record_report,
 )
-from defender.tenancy._tenant import Tenant
+from defender.tenancy import Tenant
 
 from .forgejo import ForgeError
 from .model import LockBusy

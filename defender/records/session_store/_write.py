@@ -1,7 +1,7 @@
 """Store connections and append-only writes."""
 from __future__ import annotations
 
-from defender.records._locations import (_unwrap_session_trust_root)
+from defender.records._locations import (unwrap_session_trust_root)
 import contextlib
 import hashlib
 import json
@@ -420,7 +420,7 @@ def open_store(*, case_id: str, sessions: SessionPaths) -> Iterator[StoreHandle]
     # The store's path and the root its directory is made under, from the owner's one
     # hand-out (the one `store_path_for`, which the resume door asks, reads too), asked once.
     path, root = sessions.store(case_id)
-    guarded_mkdir(path.parent, base=_unwrap_session_trust_root(root))
+    guarded_mkdir(path.parent, base=unwrap_session_trust_root(root))
     fresh = not path.exists()
     conn = _bare_connect(path)
     try:

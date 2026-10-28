@@ -36,7 +36,7 @@ from defender.tenancy._publish_status import (
     TRANSIENT,
 )
 from defender.tenancy._tenant import Tenant
-from defender.records._tenant_id import TenantRefused
+from defender.records.formats import TenantRefused
 from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
 
 #: The report line's classes (OD2) are `tenancy._publish_status`'s, shared with the child that

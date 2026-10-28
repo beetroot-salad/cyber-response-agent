@@ -97,7 +97,7 @@ def needs_baseline(name: str) -> bool:
     return name == RUN_LAYOUT.investigation.name
 
 
-def _utf8_len(text: str) -> int:
+def utf8_len(text: str) -> int:
     """Byte length under UTF-8 — `len(str)` would under-count multibyte codepoints."""
     return len(text.encode("utf-8"))
 
@@ -153,14 +153,14 @@ def validate_report(proposed_text: str) -> str | None:
             "report.md frontmatter must carry a top-level `disposition` in "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{sorted(DISPOSITION_ENUM)} (got {disposition!r}) — fix and rewrite."
         )
-    if _utf8_len(raw) > REPORT_FRONTMATTER_MAX:
+    if utf8_len(raw) > REPORT_FRONTMATTER_MAX:
         problems.append(
-            f"report.md frontmatter is {_utf8_len(raw)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            f"report.md frontmatter is {utf8_len(raw)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{REPORT_FRONTMATTER_MAX}-byte limit — trim it and rewrite."
         )
-    if _utf8_len(proposed_text) > REPORT_FILE_MAX:
+    if utf8_len(proposed_text) > REPORT_FILE_MAX:
         problems.append(
-            f"report.md is {_utf8_len(proposed_text)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            f"report.md is {utf8_len(proposed_text)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{REPORT_FILE_MAX}-byte limit — trim it and rewrite."
         )
     if REPORT_CLOSE_DELIMITER in proposed_text:
@@ -228,10 +228,10 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
             f"not loaded. {UNCHANGED_NOTICE} This is a deployment fault, not a fault in your "
             "text — re-sending will not help."
         )
-    if _utf8_len(proposed_text) > INVESTIGATION_FILE_MAX:
+    if utf8_len(proposed_text) > INVESTIGATION_FILE_MAX:
         # The bound covers the whole append-only document, so name the committed share: the
         # model must tell "send less" from "out of room".
-        on_disk = _utf8_len(current) if current is not None else 0
+        on_disk = utf8_len(current) if current is not None else 0
         # With a row flagged the close is refused, so name `fix_row(old, "")`, which shrinks
         # the document.
         if on_disk and current is not None and _warns_quietly(current):
@@ -248,7 +248,7 @@ def validate_investigation(proposed_text: str, current: str | None) -> str | Non
         else:
             remedy = "Trim it and re-send."
         return (
-            f"investigation.md is {_utf8_len(proposed_text)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+            f"investigation.md is {utf8_len(proposed_text)} bytes, over the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             f"{INVESTIGATION_FILE_MAX}-byte limit. {UNCHANGED_NOTICE} {remedy}"
         )
     # Fail closed on an internal validator error. (The adapter roster was read at run start,

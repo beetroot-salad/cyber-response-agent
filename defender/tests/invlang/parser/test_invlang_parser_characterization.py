@@ -12,7 +12,7 @@ from defender.skills.invlang.parser import (
     _parse_auth,
     _row_cells,
     _row_dict,
-    _split_cells,
+    split_cells,
     _split_csv_or_semi,
     _split_quoted,
     _split_subcells,
@@ -51,13 +51,13 @@ def test_split_quoted_backslash_depends_on_unescape_knob():
 
 def test_split_cells_quoted_pipe_and_backslash():
     row = 'v-002|process|process:bash|bash[pid=42]|flags="EXE_WRITABLE|EXE_LOWER_LAYER"'
-    cells = _split_cells(row)
+    cells = split_cells(row)
     assert len(cells) == 5
     assert cells[4] == 'flags="EXE_WRITABLE|EXE_LOWER_LAYER"'
-    assert _split_cells(row + ";user=root") == [
+    assert split_cells(row + ";user=root") == [
         "v-002", "process", "process:bash", "bash[pid=42]",
         'flags="EXE_WRITABLE|EXE_LOWER_LAYER";user=root']
-    assert _split_cells(r"a|b\|c|d") == ["a", "b|c", "d"]
+    assert split_cells(r"a|b\|c|d") == ["a", "b|c", "d"]
 
 
 def test_split_subcells_honors_quoted_semicolon():
