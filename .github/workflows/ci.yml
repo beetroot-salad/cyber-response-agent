@@ -163,7 +163,7 @@ jobs:
       - name: Start PostgreSQL for the identity contract
         run: |
           docker run -d --name defender-postgres --runtime runc -e POSTGRES_PASSWORD=postgres \
-            -p 127.0.0.1:5432:5432 postgres:17
+            -p 127.0.0.1:5432:5432 postgres:17.11
           timeout 60 sh -c 'until docker exec defender-postgres pg_isready -h 127.0.0.1 -q; do sleep 1; done'
 
       - name: Run unit tests

@@ -183,9 +183,10 @@ services:
   # The dev databases: `keycloak` (#1306) and `defender`, the application's (#1339), both owned by the
   # `defender` role, which is also the cluster's superuser. Both are created when the data volume is
   # first initialised; PostgreSQL 17 cannot open a 16 volume, so moving to it wiped the volume
-  # (`docker compose down -v`, then `up`; Keycloak re-imports its realm). Compose network only.
+  # (`docker compose down -v`, then `up`; Keycloak re-imports its realm). Pinned to the minor release CI
+  # runs (`.github/workflows/ci.yml`), so every machine runs the same server. Compose network only.
   postgres:
-    image: postgres:${POSTGRES_VERSION:-17}
+    image: postgres:${POSTGRES_VERSION:-17.11}
     container_name: response-postgres
     environment:
       POSTGRES_USER: defender
