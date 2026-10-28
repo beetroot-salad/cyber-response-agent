@@ -285,12 +285,16 @@ class InMemoryIdentityRepository:
     # --- sends -------------------------------------------------------------------------------
     async def request_set_password(self, user_id: str, *, now: _dt.datetime) -> int:
         with self._lock:
+            if user_id not in self._users:
+                raise DataRuleViolation(f"no user {user_id!r}")
             seq = self._users[user_id].set_password_requested_seq + 1
             self._update_user(user_id, set_password_requested_seq=seq, set_password_requested_at=now)
             return seq
 
     async def request_notification(self, membership_id: str, *, now: _dt.datetime) -> int:
         with self._lock:
+            if membership_id not in self._memberships:
+                raise DataRuleViolation(f"no membership {membership_id!r}")
             seq = self._memberships[membership_id].notify_requested_seq + 1
             self._update_membership(membership_id, notify_requested_seq=seq, notify_requested_at=now)
             return seq
@@ -321,11 +325,15 @@ class InMemoryIdentityRepository:
 
     async def defer_set_password(self, user_id: str, *, until: _dt.datetime) -> None:
         with self._lock:
+            if user_id not in self._users:
+                return
             attempts = self._users[user_id].set_password_attempts + 1
             self._update_user(user_id, set_password_attempts=attempts, set_password_next_try_at=until)
 
     async def defer_notification(self, membership_id: str, *, until: _dt.datetime) -> None:
         with self._lock:
+            if membership_id not in self._memberships:
+                return
             attempts = self._memberships[membership_id].notify_attempts + 1
             self._update_membership(membership_id, notify_attempts=attempts, notify_next_try_at=until)
 
@@ -373,6 +381,8 @@ class InMemoryIdentityRepository:
         with self._lock:
             if user_id not in self._users:
                 raise DataRuleViolation(f"no user {user_id!r}")
+            if session_hash(value) in self._sessions:
+                raise DataRuleViolation("a session with this value already exists")
             row = Session(token_hash=session_hash(value), user_id=user_id, used_otp=used_otp,
                           created_at=now, last_seen_at=now, expires_at=expires_at)
             self._sessions[row.token_hash] = row
