@@ -17,7 +17,7 @@ from types import MappingProxyType
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import knowledge as corpus
+from defender import knowledge
 from defender import systems as scaffold_rules
 from defender._io import ENTRY_DIR, ENTRY_FILE, Bound
 from defender.learning.core.lane_trees import KIND_ABSENT, TreeFor, kind_at, read_at, view_at
@@ -74,17 +74,17 @@ def _membership_segment(path: str) -> str:
 
 def _template_in_tree(
     repo_root: Path, tree_for: TreeFor, path: str,
-) -> tuple[corpus.QueryTemplate | None, str]:
+) -> tuple[knowledge.QueryTemplate | None, str]:
     """`read_query_template` of the working-copy `path`, through the lane's held mount when
     `tree_for` places it in one (#1134), its `path` spelled `repo_root / path` as today; outside
     the lane's mounts, its plain path (the box's read-only area, D3)."""
     full = repo_root / path
     hit = tree_for(full)
     if hit is None:
-        return corpus.read_query_template(full)
+        return knowledge.read_query_template(full)
     held, name = hit
     folder, leaf = posixpath.split(name)
-    return corpus.read_query_template(view_at(held, folder or "."), leaf, where=full.parent)
+    return knowledge.read_query_template(view_at(held, folder or "."), leaf, where=full.parent)
 
 
 def _frontmatter_id(repo_root: Path, path: str, *, tree_for: TreeFor) -> str | None:
@@ -238,7 +238,7 @@ def _skills_rule(
 
 def _template_at_head(
     repo_root: Path, path: str, *, base: Mapping[str, bytes] | None = None,
-) -> corpus.QueryTemplate | None:
+) -> knowledge.QueryTemplate | None:
     """The template `path` was at the batch's base (`base`, `Batch.base`'s blobs), or `None`
     if the base did not carry it or it did not parse. With no base given, a `repo_root` that is
     itself a git checkout answers from its HEAD; any other root has no pre-image.
@@ -248,7 +248,7 @@ def _template_at_head(
     text = committed_text(repo_root, path, base=base)
     if text is None:
         return None
-    template, _reason = corpus.parse_query_template(text, repo_root / path)
+    template, _reason = knowledge.parse_query_template(text, repo_root / path)
     return template
 
 
@@ -271,7 +271,7 @@ def _minted_identities(
     """
     out: dict[Path, tuple[str, ...]] = {}
     for path in created:
-        template = corpus.read_query_template(
+        template = knowledge.read_query_template(
             skills, path.relative_to(where).as_posix(), where=where,
         )[0]
         if template is not None and template.covers:
@@ -303,24 +303,24 @@ def _answered_after_batch(repo_root: Path, *, tree_for: TreeFor) -> set[str]:
     return answered_identities(lead_neighbors.load_catalog(view, where=where))
 
 
-def _catalog_drafts(repo_root: Path, tree_for: TreeFor) -> list[corpus.QueryTemplate]:
+def _catalog_drafts(repo_root: Path, tree_for: TreeFor) -> list[knowledge.QueryTemplate]:
     """Every readable `<system>/_draft/*.md` template in the working copy's catalog, in path
     order; one that does not read or parse is passed over.
 
     Listed and read through the lane's held mount, by the catalog readers' own selection
-    (`corpus.template_names`, the catalog's fixed three-level listing): a link is never
+    (`knowledge.template_names`, the catalog's fixed three-level listing): a link is never
     entered or read, a linked, non-directory or refused `<sys>` or `_draft` folder is skipped and
     warned exactly as they skip it, and one found gone is passed over silently (#1134 O5.5).
     Outside the lane's mounts, the plain path's glob (D3)."""
     view, where = _catalog_in_tree(repo_root, tree_for)
     if view is None:
-        found = [corpus.read_query_template(p)[0] for p in sorted(where.glob("*/_draft/*.md"))]
+        found = [knowledge.read_query_template(p)[0] for p in sorted(where.glob("*/_draft/*.md"))]
     else:
         names = [
-            name for name in corpus.template_names(view, where)
+            name for name in knowledge.template_names(view, where)
             if len(parts := name.split("/")) == 3 and parts[1] == "_draft"
         ]
-        found = [corpus.read_query_template(view, name, where=where)[0] for name in names]
+        found = [knowledge.read_query_template(view, name, where=where)[0] for name in names]
     return [t for t in found if t is not None]
 
 
@@ -426,7 +426,7 @@ def _covers_rule(
 
 
 def _repairs_the_id(
-    before: corpus.QueryTemplate, after: corpus.QueryTemplate,
+    before: knowledge.QueryTemplate, after: knowledge.QueryTemplate,
 ) -> bool:
     """Is this `id:` change the repair of an id that disagreed with its directory?
 
@@ -434,14 +434,14 @@ def _repairs_the_id(
     the id change, and the delete-prohibition refuses moving the file — a deadlock on every
     tick that touches it. Narrow: the id must be wrong before and right after.
     """
-    def _prefix(t: corpus.QueryTemplate) -> str:
+    def _prefix(t: knowledge.QueryTemplate) -> str:
         return t.id.split(".", 1)[0] if "." in t.id else ""
 
     return _prefix(before) != before.system and _prefix(after) == after.system
 
 
 def _refuse_lost_provenance(
-    path: str, before: corpus.QueryTemplate | None, after: corpus.QueryTemplate,
+    path: str, before: knowledge.QueryTemplate | None, after: knowledge.QueryTemplate,
 ) -> None:
     """The monotonicity half of `_covers_rule`, on one established template against its
     pre-image (passed in, since the caller needs it too).

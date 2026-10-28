@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import SkipValidation
 
-from defender.records import formats as alert_input
+from defender.records import formats
 from defender._io import Bound
 from defender.records.formats import LAYOUT, WORLD_LEAVES, OracleStorePaths
 from defender.hooks.record_lesson_load import (
@@ -217,19 +217,19 @@ def _world_entry(doc: dict[str, Any], label: str) -> dict[str, Any]:
     raise JudgeRefused(f"the manifest declares no world {label!r}")
 
 
-def episode_record(bound: Bound) -> alert_input.AlertRecord | None:
+def episode_record(bound: Bound) -> formats.AlertRecord | None:
     """The record of the alert this episode's worlds all investigate: the copy launch put in the
     episode (A1), or `None` when there is none or it is not one.
 
     Shared by the sibling union and the enqueue's rule key, so both key on the same record."""
     read = bound.read(LAYOUT.source_record)
-    return alert_input.parse_alert_record(read.text) if read.text else None
+    return formats.parse_alert_record(read.text) if read.text else None
 
 
 def episode_alert(bound: Bound) -> dict[str, Any]:
     """The alert document the episode's copy holds, for display; `{}` when there is none, it is
     not one JSON object, or its bytes are not the record's digest."""
-    return alert_input.verified_document(
+    return formats.verified_document(
         bound, LAYOUT.source_alert, LAYOUT.source_record) or {}
 
 

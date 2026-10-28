@@ -33,7 +33,7 @@ from defender.records.formats import (
     unwrap_runs_base,
     unwrap_episodes_root,
 )
-from defender.records import formats as alert_input
+from defender.records import formats
 from defender.records import RecordTenant
 from defender.records.formats import TenantId, TenantRefused
 from defender import _io as _real_io
@@ -609,7 +609,7 @@ def _check_knowledge(
     # The two mapping files (#1222 A5): every fault, one fixed reason each, in one refusal. Asked
     # before the link walk, so a link or FIFO at a mapping's name is that mapping's reason (the
     # reader refuses it without opening it), not the walk's first-found refusal alone.
-    mapping_faults = alert_input.settings_reasons(bound.under(SETTINGS_HALF))
+    mapping_faults = formats.settings_reasons(bound.under(SETTINGS_HALF))
     if mapping_faults:
         raise TenantRefused("; ".join(mapping_faults))
     for name in (SETTINGS_HALF, AGENT_HALF):
@@ -633,7 +633,7 @@ def check_run_settings(settings: Path) -> None:
     with _real_io.bind(settings) as bound:
         for rel in REQUIRED_SETTINGS:
             _required_setting(_real_io.stat_entry(bound, rel), settings / rel)
-        mapping_faults = alert_input.settings_reasons(bound)
+        mapping_faults = formats.settings_reasons(bound)
     if mapping_faults:
         raise TenantRefused("; ".join(mapping_faults))
 

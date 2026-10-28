@@ -80,11 +80,17 @@ class _Tree:
         self.files = {_astlib.module_and_package(rel)[0]: rel
                       for rel in _astlib.source_files(root, _EXCLUDED)}
         self.parsed: dict[str, ast.Module] = {}
+        self.bound: dict[str, frozenset[str]] = {}
 
     def tree(self, rel: str) -> ast.Module:
         if rel not in self.parsed:
             self.parsed[rel] = _astlib.read_and_parse(self.root / rel, rel)[1]
         return self.parsed[rel]
+
+    def bindings(self, rel: str) -> frozenset[str]:
+        if rel not in self.bound:
+            self.bound[rel] = _module_bindings(self.tree(rel).body)
+        return self.bound[rel]
 
     def is_module(self, dotted: str) -> bool:
         """A scanned module, or a package holding one."""
@@ -132,7 +138,7 @@ def _imported(node: ast.Import | ast.ImportFrom, package: str) -> Iterator[str]:
 def _type_checking_imports(tree: ast.Module, package: str) -> dict[str, str]:
     mirror: dict[str, str] = {}
     for stmt in tree.body:
-        if isinstance(stmt, ast.If) and ast.unparse(stmt.test) in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}:
+        if _astlib.type_checking_block(stmt):
             for node in stmt.body:
                 if isinstance(node, ast.ImportFrom):
                     source = _astlib.import_source(node, package)
@@ -140,17 +146,24 @@ def _type_checking_imports(tree: ast.Module, package: str) -> dict[str, str]:
     return mirror
 
 
-def _module_bindings(tree: ast.Module) -> frozenset[str]:
+def _module_bindings(body: list[ast.stmt]) -> frozenset[str]:
+    """The names `body`'s statements bind in the module: through `if`/`try`/`with`/loops, never
+    into a function's or class's own body."""
     bound: set[str] = set()
-    for stmt in tree.body:
+    for stmt in body:
         if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             bound.add(stmt.name)
         elif isinstance(stmt, ast.Import | ast.ImportFrom):
             bound.update((a.asname or a.name).split(".")[0] for a in stmt.names)
-        elif isinstance(stmt, ast.If | ast.Try):
-            bound |= _module_bindings(ast.Module(body=[s for s in ast.walk(stmt)
-                                                       if isinstance(s, ast.stmt) and s is not stmt],
-                                                 type_ignores=[]))
+        elif isinstance(stmt, ast.If | ast.Try | ast.TryStar | ast.With | ast.AsyncWith
+                        | ast.For | ast.AsyncFor | ast.While):
+            nested = [*getattr(stmt, "body", []), *getattr(stmt, "orelse", []),
+                      *getattr(stmt, "finalbody", []),
+                      *(s for h in getattr(stmt, "handlers", []) for s in h.body)]
+            bound |= _module_bindings(nested)
+            heads = [getattr(stmt, "target", None), *(i.optional_vars for i in getattr(stmt, "items", []))]
+            bound.update(n.id for h in heads if h is not None for n in ast.walk(h) if isinstance(n, ast.Name))
+            bound.update(h.name for h in getattr(stmt, "handlers", []) if h.name)
         else:
             for node in ast.walk(stmt):
                 if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
@@ -167,7 +180,7 @@ def _doors(tree: _Tree) -> dict[str, _Door]:
             continue
         _m, package = _astlib.module_and_package(rel)
         doors[module] = _Door(module, package, homes,
-                              _type_checking_imports(parsed, package), _module_bindings(parsed))
+                              _type_checking_imports(parsed, package), tree.bindings(rel))
     return doors
 
 
@@ -184,7 +197,7 @@ def _door_faults(door: _Door, tree: _Tree) -> Iterator[str]:
                    f"`{door.mirror[name]}`")
         if home_module not in tree.files:
             yield f"{rel}: `{name}`'s home `{home_module}` is not a module"
-        elif name not in _module_bindings(tree.tree(tree.files[home_module])):
+        elif name not in tree.bindings(tree.files[home_module]):
             yield f"{rel}: `{name}` is not bound at module level in its home `{home_module}`"
 
 

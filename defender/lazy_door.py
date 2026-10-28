@@ -19,8 +19,12 @@ from typing import Any
 
 def lazy_door(namespace: dict[str, Any], homes: Mapping[str, str]) -> Callable[[str], Any]:
     """The PEP 562 `__getattr__` for the door module whose globals are `namespace`: a served
-    name is read off its home submodule and cached in the door; anything else is an
-    AttributeError, as for any module."""
+    name is read off its home submodule on every access; anything else is an AttributeError, as
+    for any module.
+
+    Never cached in the door: a caller that read `home.name` at call time before the door
+    existed still sees what the home holds now, a test's patch on the home included. A cached
+    copy would keep the first value it read, a patched one included, for the process."""
     module = namespace["__name__"]
     package = namespace["__package__"]
 
@@ -28,8 +32,6 @@ def lazy_door(namespace: dict[str, Any], homes: Mapping[str, str]) -> Callable[[
         home = homes.get(name)
         if home is None:
             raise AttributeError(f"module {module!r} has no attribute {name!r}")
-        value = getattr(importlib.import_module(f"{package}.{home}"), name)
-        namespace[name] = value
-        return value
+        return getattr(importlib.import_module(f"{package}.{home}"), name)
 
     return __getattr__

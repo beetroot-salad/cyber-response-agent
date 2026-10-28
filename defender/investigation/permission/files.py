@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
-from defender.records import formats as artifact_schema
+from defender.records import formats
 from defender._io import bind
 from defender.records import (
     RUN_LAYOUT,
@@ -350,13 +350,13 @@ def decide_write(
     # to report.md faces the same validator, and a same-named lesson in a curator corpus is
     # left alone.
     artifact = next(
-        (n for n in artifact_schema.artifact_names() if _is_run_dir_file(rp, run_dir, n)), None
+        (n for n in formats.artifact_names() if _is_run_dir_file(rp, run_dir, n)), None
     )
     if artifact is None:
         # A lone surrogate from a model tool-call arg would otherwise raise
         # `UnicodeEncodeError` out of `write_guarded` instead of returning a refusal. The
         # artifact branch gets the same check inside `validate_artifact`.
-        reason = artifact_schema.encodable_or_reason(proposed_text, named)
+        reason = formats.encodable_or_reason(proposed_text, named)
         return Decision(True) if reason is None else Decision(False, reason)
     # The append-only baseline is read here so the schema module stays filesystem-free. A read
     # fault denies: falling back to `current=None` would let the write replace the document.
@@ -365,7 +365,7 @@ def decide_write(
     # through the rooted core: a hard link, FIFO or folder at the name is a refused read, which
     # denies rather than serving as the baseline.
     current: str | None = None
-    if artifact_schema.needs_baseline(artifact):
+    if formats.needs_baseline(artifact):
         with bind(rp.parent) as run_root:
             got = run_root.read(rp.name)
         if got.reason is not None:
@@ -375,7 +375,7 @@ def decide_write(
                 f"against it (failing closed): {got.reason}.",
             )
         current = got.text
-    return _as_decision(artifact_schema.validate_artifact(artifact, proposed_text, current))
+    return _as_decision(formats.validate_artifact(artifact, proposed_text, current))
 
 
 def _as_decision(reason: str | None) -> Decision:
@@ -392,5 +392,5 @@ def _is_run_dir_file(rp: Path, run_dir: Path, name: str) -> bool:
 
 
 def _decide_report_write(proposed_text: str) -> Decision:
-    """`artifact_schema.validate_report` as a `Decision`; tests drive this directly."""
-    return _as_decision(artifact_schema.validate_report(proposed_text))
+    """`formats.validate_report` as a `Decision`; tests drive this directly."""
+    return _as_decision(formats.validate_report(proposed_text))

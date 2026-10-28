@@ -40,6 +40,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeGuard
 
 try:  # bare-name import, as every gate reaches its siblings
     from _gitscope import git_ignored, git_listed
@@ -325,14 +326,24 @@ def _lazy_doors() -> tuple[tuple[str, str, dict[str, str]], ...]:
     return tuple(sorted(doors, key=lambda d: -len(d[0])))
 
 
+_RELAYS: dict[str, dict[str, str]] = {}  # `reexport_origin`'s cache for this checkout
+
+
 def _home_spelling(origin: str) -> str:
-    """A name a lazy door serves, spelled at its home: `defender.records.formats.EpisodePaths` is
-    `defender.records._episode_paths.EpisodePaths`."""
-    for door, package, homes in _lazy_doors():
-        if origin.startswith(door + "."):
-            name, dot, tail = origin[len(door) + 1:].partition(".")
-            if name in homes:
-                return f"{package}.{homes[name]}.{name}{dot}{tail}"
+    """A name a lazy door serves, spelled where it is defined: `defender.records.formats.
+    EpisodePaths` is `defender.records._episode_paths.EpisodePaths`. A home that only re-imports
+    the name is followed on, through any further door: the tenancy door's `TenantId` is the
+    record format's."""
+    seen: set[str] = set()
+    while origin not in seen:
+        seen.add(origin)
+        for door, package, homes in _lazy_doors():
+            if origin.startswith(door + "."):
+                name, dot, tail = origin[len(door) + 1:].partition(".")
+                if name in homes:
+                    origin = f"{package}.{homes[name]}.{name}{dot}{tail}"
+                    break
+        origin = reexport_origin(origin, (_DEFENDER,), _RELAYS)
     return origin
 
 
@@ -352,11 +363,17 @@ def door_spelling(origin: str) -> str:
     RunPaths`), since the door serves it; a name any other lazy door serves is its home's
     (`defender.records.formats.Episode` is `defender.records._episode_handle.Episode`), since
     the gates' tables name homes; anything else is unchanged."""
-    parts = _home_spelling(origin).split(".")
-    if origin.startswith(_RUN_REPOSITORY + "._") and len(parts) >= 3 \
+    spelled = _home_spelling(origin)
+    parts = spelled.split(".")
+    if spelled.startswith(_RUN_REPOSITORY + "._") and len(parts) >= 3 \
             and parts[2] in door_modules():
         del parts[2]
     return ".".join(parts)
+
+
+def type_checking_block(stmt: ast.stmt) -> TypeGuard[ast.If]:
+    """`if TYPE_CHECKING:` (or `typing.TYPE_CHECKING`): its body runs only for the type checker."""
+    return isinstance(stmt, ast.If) and ast.unparse(stmt.test) in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}
 
 
 def read_source(path: Path, rel: str) -> str:

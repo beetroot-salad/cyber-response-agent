@@ -289,6 +289,8 @@ def test_root_name_walks_through_calls_unlike_origin():
     ("defender.records.formats.Episode", "defender.records._episode_handle.Episode"),
     ("defender.records.formats.EpisodePaths.world", "defender.records._episode_paths.EpisodePaths.world"),
     ("defender.tenancy.Tenant", "defender.tenancy._tenant.Tenant"),
+    # A home that only re-imports the name is followed to where it is defined.
+    ("defender.tenancy.TenantId", "defender.records._tenant_id.TenantId"),
     # The runs repository's names keep the door's spelling, from either side.
     ("defender.records._layout.RunPaths", "defender.records.RunPaths"),
     ("defender.records.RunPaths", "defender.records.RunPaths"),

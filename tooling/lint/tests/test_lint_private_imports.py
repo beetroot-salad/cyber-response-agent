@@ -116,3 +116,14 @@ def test_importing_a_name_the_door_does_not_serve_is_found(tmp_path):
 
 def test_a_file_that_does_not_parse_is_exit_2(tmp_path):
     assert _GATE.main(["--root", str(_tree(tmp_path, **{"cli:main.py": "def (:\n"}))]) == 2
+
+
+def test_a_name_bound_only_inside_a_function_is_not_a_home_binding(tmp_path):
+    home = "if True:\n    def make():\n        class Tenant: pass\n"
+    found = _GATE.scan(_tree(tmp_path, **{"tenancy:_tenant.py": home}))
+    assert any("`Tenant` is not bound" in f for f in found), found
+
+
+def test_a_name_bound_under_if_or_try_is_a_home_binding(tmp_path):
+    home = "try:\n    from x import Tenant\nexcept ImportError:\n    class Tenant: pass\n"
+    assert _GATE.scan(_tree(tmp_path, **{"tenancy:_tenant.py": home})) == []

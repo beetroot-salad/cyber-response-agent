@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from defender import box as box_mod
-from defender.records import formats as alert_input
+from defender.records import formats
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft
 from defender.knowledge import KnowledgePaths
@@ -212,8 +212,8 @@ def orientation(  # noqa: PLR0913 — the orientation's inputs, each a seam or a
         env = {}
     # The alert is read once, checked against the digest the run recorded at its start; the
     # signature is the record's, never derived here (a replaced alert is refused by name).
-    alert_bytes, record = alert_input.verified_alert(
-        Path(alert_path), alert_input.record_beside(Path(alert_path)), run_name=Path(run_dir).name)
+    alert_bytes, record = formats.verified_alert(
+        Path(alert_path), formats.record_beside(Path(alert_path)), run_name=Path(run_dir).name)
     sig = record.signature
 
     sections: list[str] = [

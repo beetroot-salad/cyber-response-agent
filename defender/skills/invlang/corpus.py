@@ -9,7 +9,7 @@ from typing import Annotated
 
 from pydantic import SkipValidation
 
-from defender.records import formats as alert_input
+from defender.records import formats
 from defender._shown import quoted
 from defender._io import read_text_soft
 from defender._model import model
@@ -74,7 +74,7 @@ class LoadReport:
 def _read_signature_id(record_path: Path) -> str | None:
     """The signature the run's record carries (never re-derived from the alert's bytes); `None`
     when there is no record or it names no signature."""
-    record = alert_input.read_record(record_path)
+    record = formats.read_record(record_path)
     return None if record is None else record.facts.signature
 
 
@@ -109,7 +109,7 @@ def _load_one(
     run_dir = path.parent
     record_path = RunPaths(run_dir).alert_record
     # A folder with no readable record is not a run (A8): named and counted, never attributed.
-    if alert_input.read_record(record_path) is None:
+    if formats.read_record(record_path) is None:
         if not os.path.lexists(record_path):
             return None, "no run record (not a run of this version)", warnings
         return None, "run record unreadable (not a record of this version)", warnings

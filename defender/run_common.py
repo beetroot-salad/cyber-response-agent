@@ -294,12 +294,12 @@ def learning_refusal_gate(
     if held_out_input or record.digest in held_out_alert_digests(fixtures_dir):
         return f"{run_dir.name} investigated a held-out eval fixture (or a copy of one) — its " \
             "findings must never feed a corpus it is scored against"
-    from defender import box as scrub
+    from defender import box
 
-    if scrub.tree_unsandboxed(run_dir):
+    if box.tree_unsandboxed(run_dir):
         return f"{run_dir.name} ran without a sandbox, so its input directory was never bound " \
             "read-only — nothing is learned from it"
-    if not scrub.tree_verified(run_dir):
+    if not box.tree_verified(run_dir):
         # No completed scan verdict: the crash path most likely to hold what a box planted.
         return f"{run_dir} carries no completed reap-scan verdict — an unverified tree " \
             "must not feed the corpus"

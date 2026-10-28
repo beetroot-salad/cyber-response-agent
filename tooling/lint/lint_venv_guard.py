@@ -47,8 +47,7 @@ def _module_imports(stmt: ast.stmt) -> list[str]:
 
 def _type_checking_only(stmt: ast.stmt) -> bool:
     """`if TYPE_CHECKING:` with no `else`: its imports never run (a door's type mirror)."""
-    return (isinstance(stmt, ast.If) and not stmt.orelse
-            and ast.unparse(stmt.test) in {"TYPE_CHECKING", "typing.TYPE_CHECKING"})
+    return _astlib.type_checking_block(stmt) and not stmt.orelse
 
 
 def _calls_guard(stmt: ast.stmt) -> bool:
