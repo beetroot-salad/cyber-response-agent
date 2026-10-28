@@ -1,8 +1,9 @@
 """People, memberships and sign-in (#1306): the users, their tenants, invitations and sessions.
 
 Imports nothing from `api`, `runtime` or `learning`. It loads SQLAlchemy (the models are its
-tables), but the sign-in provider's adapter and the PostgreSQL repository are separate modules,
-so importing this package loads neither a web client nor a database driver."""
+tables), so it needs the `api` extra installed, even for the in-memory repository. The sign-in
+provider's adapter and the PostgreSQL repository are separate modules, so importing this package
+loads neither a web client nor a database driver."""
 
 from __future__ import annotations
 
