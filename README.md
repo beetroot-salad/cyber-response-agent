@@ -121,37 +121,32 @@ Live runs additionally need a provider API key (Anthropic by default; Fireworks 
 
 ## Running The Agent
 
-Every run names its tenant, and there is no default (#1078): set `DEFENDER_DATA_ROOT` to a
-directory outside the checkout, clone your tenant's knowledge repo into it, and set the tenant up
-once —
+Every run names its tenant, and there is no default (#1078). A tenant is created through the
+platform API, not by hand (#1214): an administrator posts `POST /admin/tenants` (202, the new
+tenant's URL in `Location`), and `python -m defender.lifecycle serve` (dev: the management service
+and the host actor in one process) creates its repository from the committed template, its bot and
+credentials, and the clone and empty learning state under `$DEFENDER_DATA_ROOT/<id>/`, then marks it
+`active`. Follow it with `GET /admin/tenants/<id>`; a failed step is recorded there and resumed with
+`POST /admin/tenants/<id>/resume`. Every host entry point (`run.py`, the drains, `tenant.py
+check|update|propose`) works only for an `active` tenant, reading the tenant records from
+`DEFENDER_DATABASE_DSN`; see
+[Host process settings](defender/docs/development-operations.md#host-process-settings-1214).
 
 ```bash
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout
-export TENANT_ID=<uuid-committed-in-the-tenant-repo>
-git clone <tenant repo> "$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge"
-python3 defender/cli/tenant.py setup "$TENANT_ID"
+export DEFENDER_DATABASE_DSN=<the tenant database>
+export TENANT_ID=<the id POST /admin/tenants answered>
+python3 defender/cli/tenant.py check "$TENANT_ID"   # the tenant admitted and its folder accepted
 ```
 
-Before setup, clone the tenant's own repo into `<root>/<id>/knowledge` on the host, with a
-credential helper or an ssh agent (never a credential in the URL), and run setup once the clone
-has exited 0: setup adopts the placed folder as it is — it copies nothing and runs no git — checks
-it, and writes the tenant's row last. A new tenant's repo starts from
-`tenant.py scaffold <id> <empty dir>`; choose its UUID first with
-`python3 defender/cli/tenant.py new-id` and save it. Existing named tenants require the
-[explicit UUID migration](defender/docs/development-operations.md#migrating-named-tenants-to-uuids-1187).
+A tenant that predates #1214 (the lab's) is brought over once with
+`python -m defender.lifecycle adopt <id> --issuer-dir <old issuer dir>`; see
+"Upgrade from before #1214" in [`defender/CLAUDE.md`](defender/CLAUDE.md). A data root made before
+#1120 has no `knowledge/` repository; recover it using the old checkout's one-off `tenant.py migrate`
+before upgrading, then follow the
+[named-tenant UUID migration](defender/docs/development-operations.md#migrating-named-tenants-to-uuids-1187).
 
-**A data root made before #1120** has no `knowledge/` repository. Recover its knowledge
-using the old checkout's one-off `tenant.py migrate` command before upgrading, then follow
-the [named-tenant UUID migration](defender/docs/development-operations.md#migrating-named-tenants-to-uuids-1187).
-The current `migrate` subcommand recovers historical knowledge; it does not convert tenant IDs.
-
-Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
-default data root) and no run, fork or drain in flight on any checkout of the host, as the same
-user that runs defender; a destination already occupied makes setup refuse, naming it in the
-message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
-setup run as root — that adoption case only.)
-
-— then investigate one alert end-to-end (runtime loop + post-steps + learning loop):
+Then investigate one alert end-to-end (runtime loop + post-steps + learning loop):
 
 ```bash
 python3 defender/run.py <alert.json> --tenant "$TENANT_ID"

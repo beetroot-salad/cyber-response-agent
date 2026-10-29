@@ -46,6 +46,26 @@ checkout's `run-visualizations/`); unset, nothing is published. By hand, once: d
 `defender/learning/` (`_author.lock`, `.author-drain.lock`, `author-queue/`); delete old flat
 `run-visualizations/<run id>/` folders.
 
+## Upgrade from before #1214
+
+Tenants are rows in PostgreSQL that the lifecycle (`python -m defender.lifecycle serve`) creates, rotates
+and offboards; the on-disk `tenant.json` is retired, and so are `tenant.py setup`, `new-id`,
+`scaffold` and `migrate` (and `setup --learning-state-from`). Every host entry point reads the tenant
+records from `DEFENDER_DATABASE_DSN`, at exactly this code's revision, and works only for an
+`active` tenant. The lab tenant moves once:
+
+1. Forgejo 17 or newer first (the dev image is 17.0.0; back up and follow Forgejo's upgrade notes, see
+   `docs/development-operations.md`), then run migrations: the lab's row is backfilled as a failed
+   create waiting for adoption.
+2. Run `python -m defender.lifecycle adopt <T> --issuer-dir <the old issuer directory>`, with the
+   lifecycle's settings in place and `serve` running. The first call hands the lab's row to the
+   job (it keeps the recorded repository and the existing clone); run it again once the tenant
+   is `active` to delete `tenant.json`, the old `client/<T>/` issuer directory and the old
+   unsalted OpenBao entries.
+3. Learning starts empty: prepare creates `<data root>/<T>/learning/` and nothing is copied. By
+   hand, once: delete the old learning state left under the checkout's `defender/learning/`
+   (queues, markers, locks, deliveries, legacy `runs/` bundles).
+
 ## Upgrade from before #1187
 
 Tenant, run, episode and world ids are opaque UUIDs and episodes live under each tenant's data root. Before upgrading a

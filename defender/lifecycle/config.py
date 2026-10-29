@@ -35,8 +35,9 @@ class LifecycleConfig:
     """The lifecycle's settings (DC-13, F-11).
 
     `issuer_url` is OpenBao's OIDC issuer (https; the integration's `--issuer`, Forgejo fetches its
-    discovery document) and `openbao_url` its address: the deployment's fixed service names by
-    default (`configuration.issuer`), a test's own when it injects them. `integration_command`
+    discovery document) and `openbao_url` its address (https as well: the AppRole secret and the
+    management login never travel in cleartext): the deployment's fixed service names by default
+    (`configuration.issuer`), a test's own when it injects them. `integration_command`
     names where the fixed integration command runs (dev: the Forgejo container `docker exec`
     enters). `template_dir` is the committed template tenant.
     `secrets_dir` holds one folder per tenant with one file per installed secret, outside every
@@ -67,10 +68,10 @@ class LifecycleConfig:
         issuer = urlsplit(self.issuer_url)
         if issuer.scheme != "https" or not issuer.hostname or self.issuer_url.endswith("/"):
             raise ConfigRefused(f"the issuer URL {self.issuer_url!r} must be https, with no trailing slash")
-        for name in ("forge_url", "openbao_url"):
+        for name, schemes in (("forge_url", ("http", "https")), ("openbao_url", ("https",))):
             parsed = urlsplit(getattr(self, name))
-            if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
-                raise ConfigRefused(f"{name} {getattr(self, name)!r} must be an http(s) address with no credentials")
+            if parsed.scheme not in schemes or not parsed.hostname or parsed.username or parsed.password:
+                raise ConfigRefused(f"{name} {getattr(self, name)!r} must be an {'/'.join(schemes)} address with no credentials")
         if not self.forge_admin_token or not self.openbao_login or not self.integration_command:
             raise ConfigRefused("the forge admin token, the OpenBao login and the integration command are required")
         if not (self.poll_interval > 0 and self.lock_keepalive > 0 and self.teardown_wait > 0):
@@ -78,7 +79,9 @@ class LifecycleConfig:
         root = self.data_root
         if not (self.secrets_dir.is_absolute() and root.is_absolute()):
             raise ConfigRefused("the secrets directory and the data root are absolute paths")
-        if self.secrets_dir == root or root in self.secrets_dir.parents:
+        # Judged on resolved paths: a `..` or a link must not smuggle the secrets into a tenant's folder.
+        secrets, tenants_root = self.secrets_dir.resolve(), root.resolve()
+        if secrets == tenants_root or tenants_root in secrets.parents:
             raise ConfigRefused(f"the secrets directory {self.secrets_dir} must lie outside the data root {root}")
 
     @property

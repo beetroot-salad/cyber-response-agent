@@ -1,9 +1,9 @@
 # Development operations
 
 Read only when bootstrapping a development environment, running an investigation, or diagnosing tenant setup.
-These are existing CLI procedures, not the desired user onboarding API. Tenant registration belongs
-in the product API and its register-tenant command; this cleanup does not implement that interface.
-Check the current command's help before using a procedure below.
+Tenants are created, rotated and offboarded through the platform API and the tenant lifecycle
+(#1214); the commands below are the host's side of that. Check the current command's help before
+using a procedure below.
 
 In this devcontainer use `DEFENDER_DATA_ROOT=/workspace/.defender-data` (gitignored), so the
 remote Docker daemon can resolve bind sources. There is no default data root; name the tenant.
@@ -13,34 +13,38 @@ remote Docker daemon can resolve bind sources. There is no default data root; na
 ```bash
 cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'   # bootstrap (entrypoints re-exec into .venv themselves)
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout   # every run names its tenant; there is no default (#1078)
-export TENANT_ID=<uuid-committed-in-the-tenant-repo>  # new tenants: mint with tenant.py new-id before scaffold
-git clone <tenant repo> "$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge"   # the tenant's settings + agent knowledge, on the host
-python3 defender/cli/tenant.py setup "$TENANT_ID"    # once, after the clone exits 0, before the first run
+export DEFENDER_DATABASE_DSN=<the tenant database>   # host processes read the tenant records from it (see below)
+export TENANT_ID=<the id POST /admin/tenants answered>   # an `active` tenant: see "Creating a tenant"
+python3 defender/cli/tenant.py check "$TENANT_ID"    # admitted and its folder accepted; every finding reported
 python3 defender/run.py <alert.json> --tenant "$TENANT_ID"   # one investigation → run dir under $DEFENDER_DATA_ROOT/$TENANT_ID/runs/; --no-learn skips curation enqueue
 python3 defender/cli/learning/branch.py --tenant "$TENANT_ID" <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
 python3 defender/learning/loop.py --tenant "$TENANT_ID" --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
 python3 defender/api/serve.py --tenant <id>           # the stub platform API on 127.0.0.1:8000, seeded for the named tenant(s) (needs the `api` extra: `uv sync --extra dev --extra runtime --extra api`, as CI does — a bare `uv sync --extra api` uninstalls the others); tokens `<id>-analyst`
 ```
 
-Run `tenant.py setup` with `DEFENDER_DATA_ROOT` set after the clone into
-`<root>/<id>/knowledge` has exited successfully. Setup validates that folder and provisions
-`<root>/<id>/learning/` as a real directory. It has no default tenant or learning-state
-source. `DEFENDER_LEARNING_STATE_DIR` no longer selects runtime state.
+### Creating a tenant (#1214)
 
-To move an existing learning-state directory, stop all runs, forks and drains on every
-checkout using it, then name the source explicitly:
+An administrator posts `POST /admin/tenants` (202; `Location` is the tenant's URL). The record is
+`creating` until the lifecycle has done its steps, which `python -m defender.lifecycle serve` runs
+(dev: the management service and the host actor in one process; hosted: one process each): the
+repository `tenants/<id>` from the committed template, a bot with write access to it alone, the
+credentials and the forge integration, the host secret file under the secrets directory, and
+`$DEFENDER_DATA_ROOT/<id>/` with the clone in `knowledge/`, an empty `learning/` and a first
+publish. Then the tenant is `active`. Nothing is cloned or set up by hand, and there is no
+`tenant.json` or other on-disk tenant row.
 
-```bash
-python3 defender/cli/tenant.py setup "$TENANT_ID" --learning-state-from /path/to/old/learning
-```
-
-Setup moves only the known queues, markers, locks, deliveries and legacy `runs/` bundles;
-Python source and unrelated entries stay at the source. It never merges into occupied
-learning state. The source must be disjoint from the data root, except an already-in-place
-source equal to the destination. Re-run the same command to complete an interrupted move.
-Modes and timestamps are preserved; running as root also preserves owners and groups.
-Root-owned legacy state may require migration as root. An unexpected writer that recreates
-source records is reported and those records remain for the operator to reconcile.
+- `GET /admin/tenants/<id>` shows the state, the pending action, the step and the actor, and the
+  failure of a failed step; `POST /admin/tenants/<id>/resume` retries it (a failure at `adopt` is
+  cleared only by `python -m defender.lifecycle adopt`).
+- `POST /admin/tenants/<id>/invitations` invites the first member (an `active` tenant with no
+  members); `POST /admin/tenants/<id>/rotate-forge-credential` replaces the credential generation;
+  `POST /admin/tenants/<id>/offboard` removes the tenant's folder, secrets, credentials and
+  repository (the repository is deleted 30 days later).
+- The lifecycle's settings are the files and variables `defender/lifecycle/config.py` names
+  (the forge admin token and OpenBao management login are read from files, never the environment).
+  OpenBao's address is `https`; the config refuses cleartext.
+- The tenant's knowledge repository lives on the forge. Edit it through its pull requests; humans
+  merge, and `python3 defender/cli/tenant.py update <id>` publishes the merged `main`.
 
 The drains, standalone author commands, frontend, trace and revert commands require
 `--tenant <T>`. Run-associated writers derive the tenant from the accepted run or episode.
@@ -173,11 +177,11 @@ The issuer's JWKS key id must be `fixture`; these signing keys are fixture data 
 ## Migrating named tenants to UUIDs (#1187)
 
 Tenant IDs are canonical lowercase UUIDs. Names such as `acme` are refused by every normal
-admission path; there is no alias or automatic conversion. Choose and save the replacement
-with `python3 defender/cli/tenant.py new-id`. The command only prints a UUID.
+admission path; there is no alias or automatic conversion. The replacement is a new tenant:
+`POST /admin/tenants` mints its UUID (save it).
 
 If a pre-#1120 installation has no knowledge repository, recover it with the old checkout
-before this migration. The current `migrate` command does not accept a legacy name.
+before this migration; `tenant.py migrate` is retired and no longer exists here.
 
 Before upgrading, stop every run, fork and drain, and drain or clear the curation queue using
 the old code. Upgrade every checkout using the data root together. With all writers stopped:
@@ -186,15 +190,15 @@ the old code. Upgrade every checkout using the data root together. With all writ
    Preserve that archive, including its row, runs, episodes, sessions and learning state.
    Do not change tenant IDs inside historical records or reuse their state for the new tenant.
    A sibling archive inside the data root is refused by its single-tenant guard.
-2. Copy the archived `knowledge/` repository to
-   `$DEFENDER_DATA_ROOT/<new-uuid>/knowledge`. Change `agent/.tenant-id` to the chosen UUID
-   followed by one newline, and commit that change in the knowledge repository. Review and
-   update any external credentials or identity claims bound to the old tenant ID.
-3. Run `python3 defender/cli/tenant.py setup <new-uuid>`, then
-   `python3 defender/cli/tenant.py check <new-uuid>`. Setup creates a fresh UUID tenant row;
-   it never imports the archived runtime state. Use the UUID in every CLI, API token and
-   integration configuration thereafter.
+2. Create the new tenant (`POST /admin/tenants`, then wait for it to be `active`; see "Creating a
+   tenant"). Its repository starts from the template: push the archived `knowledge/` history
+   into it by hand as a pull request, keeping `agent/.tenant-id` as the lifecycle wrote it (the
+   new UUID followed by one newline). Review and update any external credentials or identity
+   claims bound to the old tenant ID.
+3. Run `python3 defender/cli/tenant.py update <new-uuid>` once the pull request is merged, then
+   `python3 defender/cli/tenant.py check <new-uuid>`. The new tenant never imports the archived
+   runtime state. Use the UUID in every CLI, API token and integration configuration thereafter.
 
 This is an explicit identity migration. The archive retains the old identity and bytes;
-normal UUID lookups cannot reach it. The older `tenant.py migrate` subcommand recovers
-pre-#1120 knowledge from checkout history and does not convert tenant IDs.
+normal UUID lookups cannot reach it. The retired `tenant.py migrate` subcommand recovered
+pre-#1120 knowledge from checkout history and never converted tenant IDs.

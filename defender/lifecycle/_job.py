@@ -43,6 +43,13 @@ NEXT: Mapping[str, Mapping[str, tuple[str | None, str | None]]] = {
 _FAILURE_LIMIT = 600
 
 
+def _storable(text: str) -> str:
+    """`text` as the database stores it: no NUL (PostgreSQL text refuses it) and no character UTF-8
+    cannot encode (a lone surrogate from an external answer), each replaced by `?`. The failure is
+    always recorded, whatever the external answer carried."""
+    return text.replace("\x00", "?").encode("utf-8", errors="replace").decode("utf-8")
+
+
 def next_step(held: HeldTenant) -> tuple[str | None, str | None]:
     """The step after the held tenant's current one, and its actor."""
     record = held.record
@@ -163,10 +170,12 @@ class Actor:
             await held.fail(text, step=restart[0], actor=restart[1])
         except FenceMissed as missed:
             _logger.warning("tenant %s: the failure of %s was not recorded: %s", held.tenant_id, step, missed)
+        except Exception:  # noqa: BLE001 — recording a failure never ends the pass: the other tenants are still served
+            _logger.exception("tenant %s: the failure of %s could not be recorded", held.tenant_id, step)
 
     def _failure_text(self, step: str, failed: Exception) -> str:
         said = str(failed) if isinstance(failed, StepFailed) else f"{type(failed).__name__}: {failed}"
-        text = f"{step}: {said}".replace("\n", " ").strip()
+        text = _storable(f"{step}: {said}".replace("\n", " ")).strip()
         for secret in sorted({*self._secrets, *self._standing_secrets}, key=len, reverse=True):
             text = text.replace(secret, "<secret>")
         return text if len(text) <= _FAILURE_LIMIT else text[:_FAILURE_LIMIT - 3] + "..."

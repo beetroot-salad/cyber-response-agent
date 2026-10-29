@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Revert a lesson the commit-maker wrote, on the tenant's own repository (#1108 P4 flow 5).
 
-`--tenant T <lesson>`: the tenant admitted from the tenant records (`active`, its forge wiring,
-#1214 Flow 4), its forge credential minted through its live generation, `TenantDelivery.open`,
-then `TenantDelivery.revert` (D-peel) as a PR on the tenant forge. The author drain's lock stays the revert's mutual exclusion with the drain (exit 3)."""
+`--tenant T <lesson>`: under the tenant's host lock (shared, #1214 P3), the tenant admitted from
+the tenant records (`active`, its forge wiring, #1214 Flow 4), its forge credential minted through
+its live generation, `TenantDelivery.open`, then `TenantDelivery.revert` (D-peel) as a PR on the
+tenant forge. The author drain's lock stays the revert's mutual exclusion with the drain (exit 3)."""
 from __future__ import annotations
 
 import logging
@@ -13,8 +14,9 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import tenancy
 from defender.knowledge import AGENT_REL, LESSONS
-from defender.learning.core.cli import command_line_paths
+from defender.learning.core.cli import admitted_directory, command_line_paths
 from defender.learning.core.state import AUTHOR_DRAIN_LOCK, TRY_ONCE, LearningState
 from defender.records.formats import TenantRefused
 
@@ -88,15 +90,25 @@ def main(
     parser.add_argument("--tenant", required=True)
     parser.add_argument("lesson_name")
     args = parser.parse_args(argv)
-    paths = command_line_paths(parser, args.tenant)
-    if not _has_state_root(paths):
-        return revert(args.lesson_name, state=None, tenant=paths.tenant, client=client,
-                      identity=identity, directory=directory, credential_config=credential_config,
-                      issuer_transport=issuer_transport)
-    with LearningState.open(paths) as state:
-        return revert(args.lesson_name, state=state, tenant=paths.tenant, client=client,
-                      identity=identity, directory=directory, credential_config=credential_config,
-                      issuer_transport=issuer_transport)
+    # The tenant's host lock, shared for the whole revert (it mints the tenant's credential and opens a
+    # PR), this process recorded under it first, as every entry point does (#1214 P3, Flow 4: id, data
+    # root, lock, then state): prepare and teardown wait for it, and a teardown finds it to stop it.
+    try:
+        tenancy.requested_tenant_id(args.tenant)
+        held = tenancy.hold_tenant(tenancy.resolve_data_root(), args.tenant)
+    except TenantRefused as refused:
+        parser.error(str(refused))
+    with held:
+        records = admitted_directory(parser, args.tenant, directory)
+        paths = command_line_paths(parser, args.tenant)
+        if not _has_state_root(paths):
+            return revert(args.lesson_name, state=None, tenant=paths.tenant, client=client,
+                          identity=identity, directory=records, credential_config=credential_config,
+                          issuer_transport=issuer_transport)
+        with LearningState.open(paths) as state:
+            return revert(args.lesson_name, state=state, tenant=paths.tenant, client=client,
+                          identity=identity, directory=records, credential_config=credential_config,
+                          issuer_transport=issuer_transport)
 
 
 if __name__ == "__main__":
