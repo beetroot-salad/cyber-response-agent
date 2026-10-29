@@ -548,7 +548,7 @@ async def list_all_tenants(deps: Deps, caller: Admin) -> Page[TenantItem]:
 async def create_tenant(deps: Deps, caller: Admin, request: Request, response: Response) -> TenantItem:
     """Mint a tenant and record it `creating`; the management service does the rest. No members."""
     record = await deps.tenants.request_create(now=deps.identity.now())
-    audit.emit("tenant.create", actor=caller.user.id, tenant_id=None, target=record.id)
+    audit.emit("tenant.create", actor=caller.user.id, tenant_id=record.id, target=record.id)
     response.headers["Location"] = str(request.app.url_path_for("get_tenant", tenant_id=record.id))
     return _tenant_item(record)
 
@@ -565,7 +565,7 @@ async def get_tenant(deps: Deps, caller: Admin, tenant_id: str = Path(max_length
 async def resume_tenant(deps: Deps, caller: Admin, tenant_id: str = Path(max_length=64)) -> TenantItem:
     """Clear the failure of a stopped job so the next pass retries its step."""
     record = await deps.tenants.request_resume(tenant_id)
-    audit.emit("tenant.resume", actor=caller.user.id, tenant_id=None, target=record.id)
+    audit.emit("tenant.resume", actor=caller.user.id, tenant_id=record.id, target=record.id)
     return _tenant_item(record)
 
 
@@ -573,7 +573,7 @@ async def resume_tenant(deps: Deps, caller: Admin, tenant_id: str = Path(max_len
 async def offboard_tenant(deps: Deps, caller: Admin, tenant_id: str = Path(max_length=64)) -> TenantItem:
     """End access at once and queue the teardown, replacing any pending action."""
     record = await deps.tenants.request_offboard(tenant_id, now=deps.identity.now())
-    audit.emit("tenant.offboard", actor=caller.user.id, tenant_id=None, target=record.id)
+    audit.emit("tenant.offboard", actor=caller.user.id, tenant_id=record.id, target=record.id)
     return _tenant_item(record)
 
 
@@ -582,7 +582,7 @@ async def offboard_tenant(deps: Deps, caller: Admin, tenant_id: str = Path(max_l
 async def rotate_tenant_credential(deps: Deps, caller: Admin, tenant_id: str = Path(max_length=64)) -> TenantItem:
     """Queue a new credential generation for an active tenant with nothing pending."""
     record = await deps.tenants.request_rotate(tenant_id)
-    audit.emit("tenant.rotate", actor=caller.user.id, tenant_id=None, target=record.id)
+    audit.emit("tenant.rotate", actor=caller.user.id, tenant_id=record.id, target=record.id)
     return _tenant_item(record)
 
 
