@@ -17,6 +17,7 @@ from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
     as_bot,
     in_order,
     jwts,
+    protection_reads,
     sample,
     split_drive,
 )
@@ -69,14 +70,16 @@ def test_the_job_leaves_an_active_tenant_with_repo_bot_credential_folder_and_no_
     assert world.forge.repos[full]["private"] is True
     assert world.forge.collaborators(full) == {gen.bot_login: "write"}
     assert "main" in world.forge.repos[full]["protections"]
-    protect = [i for i, c in enumerate(world.forge.calls) if c.path.endswith("/branch_protections")]
-    read_back = [i for i, c in enumerate(world.forge.calls)
-                 if c.method == "GET" and c.path.endswith("/branch_protections/main")]
+    protect = [i for i, c in enumerate(world.forge.calls) if c.method == "POST" and c.path.endswith("/branch_protections")]
+    read_back = protection_reads(world, full)
     assert protect and read_back and read_back[-1] > protect[-1], "protection was not read back"
     assert world.forge.integrations[gen.bot_login] == [gen.audience]
     assert world.openbao.oidc_roles[gen.oidc_role]["client_id"] == gen.audience
     assert world.openbao.secret_accessors(gen.approle) == {gen.secret_accessor}
-    assert (world.data_root / tenant).is_dir()
+    folder = world.data_root / tenant
+    assert folder.is_dir() and not folder.is_symlink()
+    assert (folder / "learning").is_dir() and not (folder / "learning").is_symlink()
+    assert list((folder / "learning").iterdir()) == [], "prepare makes an empty real learning root (GAP-Re-4)"
     assert world.publish.calls == [(tenant, world.data_root)]
     assert world.call(world.repo.memberships_of_tenant, tenant) == []
     assert not list(world.data_root.rglob("tenant.json"))

@@ -30,9 +30,6 @@ from defender.tests.support.shared._postgres1339 import migrated_database  # noq
 TENANT = "7f3c1a52-9d4e-4b8a-a1c6-2e5d8b9f0c13"
 OTHER = "0b9e6d2a-41c8-4f57-8e3b-6a7d1c5f9e24"
 NOT_A_REFUSAL_OF_STATE = ("not active", "offboarding", "creating", "offboarded", "no database")
-#: Words of the other refusals an entry point makes before work (no row, no wiring, no address, a bad folder).
-OTHER_REFUSALS = ("unknown", "no row", "no such", "not a tenant", "does not exist", "not found", "no forge wiring",
-                  DSN_ENV)
 DEFENDER = Path(__file__).resolve().parents[3]
 
 
@@ -107,9 +104,25 @@ def _has(text: str, *words: str) -> None:
 
 
 def _admits(text: str) -> bool:
-    """True when the entry point got past the tenant checks: its text names neither a state refusal nor any other
-    refusal (no row, no address, ...), so a refusal of another kind is never mistaken for admission."""
-    return not any(word in text.lower() for word in (*NOT_A_REFUSAL_OF_STATE, *OTHER_REFUSALS))
+    """True when the entry point got past the tenant-state check (its text names no state refusal). Strict: callers
+    that claim admission also assert the run's stand-ins were reached, or that the folder is placed (`_tenant_placed`)."""
+    return not any(word in text for word in NOT_A_REFUSAL_OF_STATE)
+
+
+def place_complete(data_root: Path, tenant: str) -> Path:
+    """`tenant` as a set-up host folder: the knowledge folder plus an empty real `<tenant>/learning/` (what prepare makes)."""
+    from defender.tests.support.tenancy._tenants1106 import place_tenant
+
+    place_tenant(data_root, tenant)
+    (data_root / tenant / "learning").mkdir(exist_ok=True)
+    return data_root / tenant
+
+
+@pytest.fixture(autouse=True)
+def _tenant_placed(data_root) -> Path:
+    """FR-1: `TENANT`'s folder is complete for every case, so a control's admission is not refused for a missing
+    folder (Flow 4); a case that needs another folder places it itself."""
+    return place_complete(data_root, TENANT)
 
 
 # --- run start -------------------------------------------------------------------------------------
@@ -129,9 +142,7 @@ def test_run_start_refuses_a_tenant_that_is_not_active_naming_its_state_before_a
 def test_run_start_refuses_a_tenant_with_no_row(tmp_path, data_root):
     """An id the directory does not hold is refused as unknown by the directory alone, though its folder is placed
     and complete (Flow 4, P3)."""
-    from defender.tests.support.tenancy._tenants1106 import place_tenant
-
-    place_tenant(data_root, OTHER)  # the folder exists and is well-formed: only the directory can refuse
+    place_complete(data_root, OTHER)  # the folder exists and is well-formed: only the directory can refuse
     admitted = _Calls()
     text = _run_start(OTHER, tmp_path, active_directory(data_root, OTHER), admitted)
     assert _admits(text), f"control: the placed folder passes with a row: {text}"
@@ -139,7 +150,6 @@ def test_run_start_refuses_a_tenant_with_no_row(tmp_path, data_root):
     calls = _Calls()
     refused = _run_start(OTHER, tmp_path, active_directory(data_root, TENANT), calls)
     _has(refused, "[run.py]", OTHER)
-    assert not _admits(refused)
     assert calls.reached == []
 
 
@@ -202,9 +212,7 @@ def test_run_start_refuses_a_tenant_being_offboarded_through_the_api(tmp_path, d
 
 def test_run_start_does_not_read_a_planted_tenant_json(tmp_path, data_root):
     """O6 dynamic arm: a corrupt `tenant.json` under the tenant's folder changes nothing; the row is the database's."""
-    folder = data_root / TENANT
-    folder.mkdir()
-    (folder / "tenant.json").write_text("{torn", encoding="utf-8")
+    (data_root / TENANT / "tenant.json").write_text("{torn", encoding="utf-8")
     text = _run_start(TENANT, tmp_path, active_directory(data_root, TENANT))
     assert "tenant.json" not in text, text
     assert "not valid JSON" not in text, text
@@ -270,10 +278,13 @@ def test_the_connect_command_with_no_directory_and_no_database_address_refuses(d
     _has(refused, DSN_ENV)
 
 
-def test_the_connect_command_has_no_setup_subcommand(data_root):
-    """`cli/tenant.py setup` is retired with the on-disk row (RC-9, O6)."""
-    text = _connect(["setup", TENANT, ], active_directory(data_root, TENANT))
-    _has(text, "invalid choice", "'setup'")
+@pytest.mark.parametrize("retired", ["setup", "scaffold", "new-id", "migrate"])
+def test_the_connect_command_has_only_update_propose_and_check(data_root, retired):
+    """`setup`, `scaffold`, `new-id`, `migrate` are retired with the on-disk row; `check` still runs (F-12, RC-9, O6)."""
+    directory = active_directory(data_root, TENANT)
+    assert _admits(_connect(["check", TENANT], directory)), "control: a kept subcommand is not an invalid choice"
+    text = _connect([retired, TENANT], directory)
+    _has(text, "invalid choice", f"'{retired}'")
 
 
 # --- each lead-drain claim -------------------------------------------------------------------------

@@ -54,15 +54,20 @@ def test_the_bash_executor_host_fallback_has_no_database_address(monkeypatch, tm
     assert _carries(env) == []
 
 
-def test_a_box_request_environment_built_from_the_host_never_carries_the_address(monkeypatch, tmp_path):
-    """The environment a box request is built from carries no copy of the address under another name (O12)."""
+def test_a_box_launched_from_the_run_environment_never_carries_the_address(monkeypatch, tmp_path):
+    """The container argv rendered for a request built from `run_env` carries no `--env` with the address (O12)."""
     from defender import box as box_mod
+    from defender.box._lifecycle import _render_argv
+    from defender.box._spec import BoxSpec
 
     monkeypatch.setenv(DSN_ENV, DSN)
     run_dir = tmp_path / "runs" / "o12-box"
     run_dir.mkdir(parents=True)
-    env = box_mod.run_env(tmp_path / "defender", run_dir)
-    assert _carries(env) == []
+    request = box_mod.BoxRequest(name="o12-box", workdir=tmp_path, defender_dir=tmp_path, spec=BoxSpec(rootfs="defender-box:o12"),
+                                 env=box_mod.run_env(tmp_path / "defender", run_dir))
+    argv = _render_argv(request).argv
+    assert "--env" in argv, "control: the launch renders environment variables"
+    assert not [a for a in argv if "o12-planted" in a or DSN_ENV in a]
 
 
 def test_the_publish_child_is_handed_the_address_the_base_lacks(monkeypatch, tmp_path):

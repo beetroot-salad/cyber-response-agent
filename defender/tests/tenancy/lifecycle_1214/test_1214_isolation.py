@@ -10,7 +10,7 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot, jwts  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot, jwts, protection_reads  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
 
 
@@ -131,5 +131,5 @@ def test_the_protection_read_back_is_the_rule_on_main_that_stops_the_bot(world):
     rule = world.forge.repos[f"{ORG}/{tenant}"]["protections"]["main"]
     assert (rule.get("rule_name") or rule.get("branch_name")) == "main"
     assert gen.bot_login not in (rule.get("push_whitelist_usernames") or [])
-    reads = [c for c in world.forge.calls if c.method == "GET" and c.path.endswith(f"/repos/{ORG}/{tenant}/branch_protections/main")]
+    reads = [world.forge.calls[i] for i in protection_reads(world, f"{ORG}/{tenant}")]
     assert reads and reads[-1].headers["authorization"].startswith("token "), "read back as the administrator"

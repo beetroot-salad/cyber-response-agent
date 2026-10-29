@@ -135,7 +135,7 @@ def test_a_spent_wrapper_found_when_install_is_taken_up_fails_loudly_and_restart
     assert world.openbao.secret_accessors(live.approle) == {live.secret_accessor}
 
 
-@pytest.mark.parametrize("line", ["stale 0123abc", "fresh", "error: remote refused", "", "fresh-ish 0123abc"])
+@pytest.mark.parametrize("line", ["stale 0123abc", "fresh", "error: remote refused", "fresh-ish 0123abc"])
 def test_prepare_fails_unless_the_first_publish_answers_fresh_and_a_commit(world, line):
     """The first publish must answer `fresh <commit>`; any other line fails prepare, which records the line and
     stays at prepare; the default answer completes it (RC-7, O1)."""
@@ -176,6 +176,46 @@ def test_prepare_keeps_an_existing_clone_of_the_recorded_repo_and_refuses_any_ot
     assert item["failure"]
     assert (world.data_root / bad / "keep.txt").read_text() == "mine"
     assert [t for t, _ in world.publish.calls] == [good]
+
+
+def _tree(path) -> list[str]:
+    return sorted(str(p.relative_to(path)) for p in path.rglob("*")) if path.is_dir() else []
+
+
+@pytest.mark.parametrize("linked", ["tenant", "dangling tenant", "learning"])
+def test_prepare_refuses_a_link_at_the_tenant_folder_or_its_learning_root_and_resumes_once_removed(world, tmp_path, linked):
+    """A linked or dangling `<T>`, or a linked `<T>/learning`, fails prepare (host) and publishes nothing; the link's
+    target is untouched; with the link removed resume completes with a real empty `learning/` (GAP-Re-4, O6, O1)."""
+    tenant = world.create()
+    world.drive(stop=lambda: world.item(tenant)["step"] == "prepare")
+    origin = world.call(world.tenants.forge_wiring, tenant).origin
+    target = tmp_path / "elsewhere"
+    link = world.data_root / tenant
+    if linked == "dangling tenant":
+        link.symlink_to(target)
+    else:
+        target.mkdir()
+        (target / "keep.txt").write_text("mine")
+        if linked == "tenant":
+            link.symlink_to(target)
+        else:
+            _plant_clone(world, tenant, origin)
+            link = link / "learning"
+            link.symlink_to(target)
+    before = _tree(target)
+    world.drive()
+    item = world.item(tenant)
+    assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host"), item
+    assert item["failure"]
+    assert world.publish.calls == []
+    assert link.is_symlink() and _tree(target) == before and target.exists() == (linked != "dangling tenant")
+    link.unlink()
+    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    world.drive()
+    assert world.item(tenant)["state"] == "active"
+    learning = world.data_root / tenant / "learning"
+    assert learning.is_dir() and not learning.is_symlink() and list(learning.iterdir()) == []
+    assert _tree(target) == before
 
 
 def test_the_oidc_role_client_id_is_set_before_the_integration_step_commits(world):

@@ -43,7 +43,7 @@ def tenant_directory(root: Path, tenant_id: str, **keywords: Any) -> Any:
     """A `TenantDirectory` holding `tenant_id` ACTIVE with its forge wiring (#1214 Flow 4: host entry points
     take the tenant from the directory, not from `tenant.json`). Imported at CALL time -- the production
     names it needs exist only after #1214. `keywords` are `_active1214.active_directory`'s (`origin`, `repo`,
-    `state`, `wiring`); the origin defaults to the tenant clone's own `origin` remote when `<root>/<id>` is a
+    `state`, `wiring`, `generations`: a minting call site seeds a generation, see `_active1214`); the origin defaults to the tenant clone's own `origin` remote when `<root>/<id>` is a
     clone, else `http://forge.test/tenants/<id>.git`."""
     from defender.tests.support.tenancy._active1214 import active_directory
 

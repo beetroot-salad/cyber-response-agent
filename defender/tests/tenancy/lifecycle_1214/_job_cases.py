@@ -34,18 +34,30 @@ def as_bot(world: LifecycleWorld, jwt: str, path: str) -> httpx.Response:
     return world.forge.handle(request)
 
 
+def protection_reads(world: LifecycleWorld, full: str) -> list[int]:
+    """Indexes of the forge calls that read `full`'s branch protection: `GET .../branch_protections/main` or the list
+    read `GET .../branch_protections` (either shows the rule on `main`; DC-11, FR-9)."""
+    base = f"/api/v1/repos/{full}/branch_protections"
+    return [i for i, c in enumerate(world.forge.calls) if c.method == "GET" and c.path in (base, f"{base}/main")]
+
+
 def jwts(world: LifecycleWorld, gen: Any) -> list[str]:
     """Every JWT OpenBao minted for the generation's OIDC role so far."""
     return [jwt for role, jwt in world.openbao.minted if role == gen.oidc_role]
 
 
-def sample(world: LifecycleWorld, tenant: str, *, limit: int = 60) -> list[tuple[str | None, str | None]]:
-    """Drive the job, noting (step, actor) after every pass; consecutive repeats dropped."""
+def sample(world: LifecycleWorld, tenant: str, *, limit: int = 60,
+           at: dict[str, Callable[[], None]] | None = None) -> list[tuple[str | None, str | None]]:
+    """Drive the job, noting (step, actor) after every pass; consecutive repeats dropped. `at[step]` is called once,
+    the first time a pass leaves the job at that step (its work not yet done)."""
     seen: list[tuple[str | None, str | None]] = []
+    pending = dict(at or {})
 
     def note() -> bool:
         item = world.item(tenant)
         point = (item["step"], item["step_actor"])
+        if point[0] in pending:
+            pending.pop(point[0])()
         if not seen or seen[-1] != point:
             seen.append(point)
         return False

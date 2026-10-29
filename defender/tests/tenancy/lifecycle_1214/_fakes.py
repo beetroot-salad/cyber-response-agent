@@ -250,6 +250,8 @@ class FakeForge(_Recorder):
                 rule = body.get("rule_name") or body.get("branch_name")
                 self.repos[f"{owner}/{name}"]["protections"][rule] = body
                 return httpx.Response(201, json=body)
+            case ("GET", ["repos", owner, name, "branch_protections"]):
+                return httpx.Response(200, json=list(self.repos[f"{owner}/{name}"]["protections"].values()))
             case ("GET", ["repos", owner, name, "branch_protections", rule]):
                 found = self.repos[f"{owner}/{name}"]["protections"].get(rule)
                 return httpx.Response(200, json=found) if found else httpx.Response(404)
@@ -390,6 +392,8 @@ class FakeOpenBao(_Recorder):
         self.minted: list[tuple[str, str]] = []  # (oidc role, jwt)
         #: the entity name each `minted` entry was minted for (index-aligned with `minted`).
         self.minted_for: list[str | None] = []
+        #: the audience and `tenant_id` claim at the moment of the mint (index-aligned): a signed JWT keeps its claims.
+        self.minted_claims: list[dict[str, Any]] = []
         #: client token -> its entity (name), or None when the AppRole login resolved no entity alias.
         self.token_entity: dict[str, str | None] = {}
         #: The token the management login holds; CRUD/list/role-id paths need it (the host has none).
@@ -409,11 +413,9 @@ class FakeOpenBao(_Recorder):
         if index is None:
             return None
         role = self.minted[index][0]
-        if role not in self.oidc_roles:
-            return None
-        entity = self.entities.get(self.minted_for[index] or "", {})
-        return {"iss": self.issuer, "role": role, "aud": self.oidc_roles[role].get("client_id"),
-                "tenant_id": (entity.get("metadata") or {}).get("tenant_id")}
+        # A signed JWT is verified by signature: deleting its role (or entity) revokes nothing (r9 FR-8); old JWTs
+        # die with the old bot (its integration), not here.
+        return {"iss": self.issuer, "role": role, **self.minted_claims[index]}
 
     def mint_entity(self, jwt: str) -> str | None:
         """The entity name `jwt` was minted for."""
@@ -509,6 +511,8 @@ class FakeOpenBao(_Recorder):
                 jwt = f"jwt.{role}.{next(self._n)}"
                 self.minted.append((role, jwt))
                 self.minted_for.append(entity)
+                self.minted_claims.append({"aud": self.oidc_roles[role].get("client_id"),
+                                           "tenant_id": (self.entities[entity].get("metadata") or {}).get("tenant_id")})
                 return httpx.Response(200, json={"data": {"token": jwt, "client_id": self.oidc_roles[role].get("client_id")}})
             case ("POST" | "PUT", ["identity", "entity", "name", name]):
                 self.entities[name] = {"id": f"entity-{name}", **body}

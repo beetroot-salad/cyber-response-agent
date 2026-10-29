@@ -8,6 +8,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 DEFENDER = Path(__file__).resolve().parents[3]
 OWNER = "tenancy/_tenant.py"
 ROW, STATUS = "tenant.json", "publish-status.json"
@@ -89,3 +91,26 @@ def test_no_production_module_outside_the_owner_reads_the_row_through_its_names(
                 names = [node.id]
             hits += [f"{_rel(path)}:{node.lineno}:{n}" for n in names if n in ROW_READERS]
     assert hits == []
+
+
+def test_retire_row_removes_a_regular_file_reports_an_absent_one_and_refuses_a_link(tmp_path):
+    """`retire_row(data_root, T)`: True and gone for a regular file; False when absent; a link at the row path is
+    refused and its target survives (GAP-Re-3, O6, O9). The refusal's type is the implementer's."""
+    from defender.tenancy import retire_row
+
+    tenant = "7f3c1a52-9d4e-4b8a-a1c6-2e5d8b9f0c13"
+    folder = tmp_path / tenant
+    folder.mkdir()
+    assert retire_row(tmp_path, tenant) is False  # absent
+    (folder / "tenant.json").write_text("{}", encoding="utf-8")
+    (folder / "keep.txt").write_text("kept", encoding="utf-8")
+    assert retire_row(tmp_path, tenant) is True
+    assert not (folder / "tenant.json").exists()
+    assert (folder / "keep.txt").read_text(encoding="utf-8") == "kept"
+    assert retire_row(tmp_path, tenant) is False  # again: nothing left
+    target = tmp_path / "elsewhere.json"
+    target.write_text("{\"alias\": 1}", encoding="utf-8")
+    (folder / "tenant.json").symlink_to(target)
+    with pytest.raises(Exception):  # noqa: B017, PT011 — a refusal; its type is not pinned
+        retire_row(tmp_path, tenant)
+    assert target.read_text(encoding="utf-8") == "{\"alias\": 1}", "the link's target was written through or removed"

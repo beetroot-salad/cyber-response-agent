@@ -128,6 +128,8 @@ def test_the_job_keeps_the_recorded_wiring_skips_repo_and_template_and_keeps_the
     assert (lab.folder / "keep.txt").read_text(encoding="utf-8") == "the lab's own clone\n"
     assert (lab.folder / "learning").is_dir() and not list((lab.folder / "learning").iterdir())
     assert "main" in world.forge.repos[LAB_REPO]["protections"]
+    [made] = [c for c in world.integration.created if c["user"] == world.live(LAB).bot_login]
+    assert made["repos"] == [LAB_REPO], "the integration names the recorded repo, not one derived from the id (FR-2)"
     assert world.publish.calls == [(LAB, world.data_root)]
 
 
@@ -158,9 +160,10 @@ def test_retiring_the_lab_deletes_the_row_file_the_issuer_directory_and_the_old_
     assert f"tenant-{LAB}" not in bao.entities
     assert live.approle in bao.approles and live.oidc_role in bao.oidc_roles and live.entity in bao.entities
     assert (lab.folder / "keep.txt").is_file()
-    again = world.openbao.calls[:]
-    lab.adopt()  # idempotent: nothing left to retire, nothing fails
-    assert world.item(LAB)["state"] == "active" and len(world.openbao.calls) >= len(again)
+    lab.adopt()  # idempotent: nothing left to retire, nothing fails, the new generation is untouched
+    assert world.item(LAB)["state"] == "active"
+    assert [(g.salt, g.status) for g in world.generations(LAB)] == [(live.salt, "live")]
+    assert live.approle in bao.approles and (lab.folder / "keep.txt").is_file()
 
 
 def test_the_old_secrets_no_longer_log_in(world, lab):

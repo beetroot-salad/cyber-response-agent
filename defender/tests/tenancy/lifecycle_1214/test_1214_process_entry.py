@@ -5,8 +5,8 @@ being gone (DC-6, DC-14, O11, F-11).
 
 GAP-Rc-4 (pinned here): `await defender.lifecycle.serve(service, host, *, config, stop)` is `python -m defender.lifecycle
 serve`'s loop: one `work()` pass of each actor, then `config.poll_interval`, until `stop()` (called once per round) is true.
-NOT asserted, design gaps: teardown removing "per-tenant dev output elsewhere" (no location is stated: GAP-Rc-5), failure
-injection for `teardown` (no seam makes a host removal fail: GAP-Rc-6) and stopping the labelled containers (no docker
+Teardown removes the tenant's dev output `<DEFENDER_RUN_VISUALIZATIONS_DIR>/<T>/` (r9 pin, GAP-Rc-5).
+NOT asserted, design gaps: failure injection for `teardown` (no seam makes a host removal fail: GAP-Rc-6) and stopping the labelled containers (no docker
 seam on the host actor: GAP-Rc-7).
 """
 from __future__ import annotations
@@ -27,6 +27,7 @@ from defender.tests.tenancy.lifecycle_1214._job_cases import openbao_failing  # 
 from defender.tests.tenancy.lifecycle_1214._support import REPO_WINDOW, LifecycleWorld  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214.test_1214_host_entry import (  # noqa: E402
     TENANT,
+    _tenant_placed,  # noqa: F401 — FR-1: the autouse fixture places TENANT complete here too
     _admits,
     _connect,
     _drain_start,
@@ -147,6 +148,20 @@ def test_a_failing_finish_records_its_restart_point_and_resume_completes_it(worl
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
     assert gen.approle not in world.openbao.approles
+
+
+def test_offboarding_removes_the_tenants_dev_output_and_keeps_another_tenants(world, run_visualizations_dir, monkeypatch):
+    """Teardown deletes `<DEFENDER_RUN_VISUALIZATIONS_DIR>/<T>/`; another tenant's directory beside it stays (O4, Flow 2.3)."""
+    monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")  # only a dev deployment has dev output
+    tenant, other = world.active_tenant(), world.active_tenant()
+    for t in (tenant, other):
+        (run_visualizations_dir / t / "runs").mkdir(parents=True)
+        (run_visualizations_dir / t / "runs" / "page.html").write_text("page\n", encoding="utf-8")
+    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    world.drive()
+    assert world.item(tenant)["state"] == "offboarded"
+    assert not (run_visualizations_dir / tenant).exists()
+    assert (run_visualizations_dir / other / "runs" / "page.html").read_text(encoding="utf-8") == "page\n"
 
 
 # --- O4 boxes and DC-6 --------------------------------------------------------------------------------

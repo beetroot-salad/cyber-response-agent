@@ -10,8 +10,8 @@ production code and the production entries are not wrapped: the same function ru
 Entries (argv exactly as the production command line takes it, exit status passed through):
 - `run`     -> `defender.run.main(argv, directory=...)`
 - `drain`   -> `defender.learning.core.cli.main(argv, directory=...)`
-- `connect` -> `defender.cli.tenant.main(argv, directory=...)`   (GAP-L-1: r9 pins `directory=` only for the
-  first two; the connect command is expected to take it the same way, DC-9)
+- `connect` -> `defender.cli.tenant.main(argv, directory=...)`   (pinned by GAP-Rm-2: `cli.tenant.main(argv, *,
+  directory=None)`)
 
 Directory (give one; `--dsn` wins over `--seed` when both are given):
 - `--dsn DSN` (env `DEFENDER_TEST_DSN`): `_active1214.postgres_directory(DSN)`, over rows the test inserted with
@@ -34,6 +34,17 @@ From a test:
                           capture_output=True, text=True)
     # or over PostgreSQL:
     done = subprocess.run(launcher.command("drain", argv, dsn=migrated_database), ...)
+
+Publish child. A launched `run` that spawns the publish child (`launch_publish`) starts it as a separate process,
+which builds ITS directory from `DEFENDER_DATABASE_DSN` -- a `--seed` directory lives only in this process and cannot
+cross. So a test of a run through the publish child uses `--dsn` AND gives the child's environment the address:
+
+    done = subprocess.run(launcher.command("run", argv, dsn=dsn),
+                          env=launcher.environment(_active1214.database_env(dsn)), ...)
+
+`environment(database_env(dsn))` adds the address back after stripping the inherited one, so the launched process and
+its publish child read the same rows. Minting needs a generation too: insert it with
+`insert_active_tenant(dsn, T, generations=[provision_generation(...)])` (see `_active1214`).
 
 Importing this module imports no production code (collection stays clean at base); `main` imports it at run time.
 """

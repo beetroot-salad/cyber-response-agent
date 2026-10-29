@@ -113,7 +113,9 @@ class PublishedTenant:
 
     def directory_with(self, *, origin: str | None = None, repo: str | None = None, **keywords: Any) -> Any:
         """`directory` with another `origin`/`repo` (what `bind_forge(t, origin=...)` bound), or `state=`/
-        `wiring=False` for the refusal sides."""
+        `wiring=False` for the refusal sides, or `generations=[fields]` to seed the live generation a minting call
+        site (drain credential, publish child) needs: `fields = _active1214.provision_generation(openbao, T,
+        secrets_dir)` builds its OpenBao chain and host secret file (GAP-Ma-1, see `_active1214`)."""
         from defender.tests.support.tenancy._active1214 import active_directory
 
         return active_directory(self.data_root, self.tenant_id, origin=self.origin if origin is None else origin,
@@ -283,7 +285,8 @@ def bind_forge(t: PublishedTenant, *, origin: str | None = None, issuer_role: st
 
     #1214: `t.directory` / `t.directory_with(origin=...)` replaces the origin part. WHEN THE ROW GOES
     (code-stage census) this function is deleted: the issuer part (`issuer_role`, `issuer_config`) is derived
-    from the tenant's live generation, so tests of it seed a generation instead (the fail-closed-on-bad-wiring
+    from the tenant's live generation, so tests of it seed a generation instead
+    (`t.directory_with(generations=[provision_generation(...)])`; the fail-closed-on-bad-wiring
     cases become `forge_wiring`/generation cases, see `test_1214_forge_credential`)."""
     if issuer_config is None:
         issuer_config = default_issuer_config(t)

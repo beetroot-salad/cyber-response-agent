@@ -286,24 +286,25 @@ def test_rotation_leaves_the_new_bot_the_only_collaborator_and_only_the_new_secr
     assert (world.data_root / tenant).is_dir()
 
 
-def test_the_live_bot_keeps_write_until_retire_and_rotate_shows_its_steps(world):
-    """When the old bot is destroyed (retire) both bots had write and the old JWT still worked; rotate's steps
-    and actors are as DC-3 lists them (O5, DC-3)."""
+def test_both_bots_have_write_and_the_old_jwt_works_once_install_is_done_and_rotate_shows_its_steps(world):
+    """Where the job first stands at `sweep` (install done, nothing of the old generation touched) both bots have write
+    and the old JWT works; rotate's steps and actors are DC-3's (O5, DC-3, r9 FR-8)."""
     tenant = world.active_tenant()
     old = world.live(tenant)
     full = f"{ORG}/{tenant}"
     old_jwt = jwts(world, old)[-1]
     seen: dict[str, object] = {}
 
-    def at_retire() -> None:
+    def at_sweep() -> None:
         seen["collaborators"] = world.forge.collaborators(full)
         seen["old jwt"] = as_bot(world, old_jwt, f"repos/{full}").status_code
-    world.forge.during[("DELETE", f"/api/v1/admin/users/{old.bot_login}")] = at_retire
     assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
-    in_order(sample(world, tenant), ROTATE_STEPS, hosts=["install", "remove_old_file"])
+    in_order(sample(world, tenant, at={"sweep": at_sweep}), ROTATE_STEPS, hosts=["install", "remove_old_file"])
     new = world.live(tenant)
+    assert seen, "control: the job stood at sweep"
     assert seen["collaborators"] == {old.bot_login: "write", new.bot_login: "write"}
     assert seen["old jwt"] == 200
+    assert as_bot(world, old_jwt, f"repos/{full}").status_code == 401, "control: the old JWT dies with the old bot"
 
 
 def test_rotation_is_refused_unless_the_tenant_is_active_with_nothing_pending(world):
