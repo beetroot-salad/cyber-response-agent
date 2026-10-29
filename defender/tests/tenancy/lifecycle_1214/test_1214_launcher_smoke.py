@@ -5,6 +5,7 @@ Expected red before implementation: the missing `InMemoryTenantRepository` / `di
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -60,11 +61,15 @@ def test_launcher_seeded_active_is_admitted_and_seeded_offboarding_is_refused_na
 
 
 def test_launcher_environment_gives_the_child_the_database_address_only_when_asked(monkeypatch):
-    """`environment()` strips `DEFENDER_DATABASE_DSN`; `environment(database_env(dsn))` is how a publish child gets it."""
+    """`environment()` strips `DEFENDER_DATABASE_DSN`; `environment(database_env(dsn))` is how a publish child gets it.
+    The checkout root is first on the child's `PYTHONPATH`, whatever the caller's (CI sets none)."""
     from defender.tests.support.tenancy._active1214 import database_env
 
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", "postgresql://inherited/x")
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     assert "DEFENDER_DATABASE_DSN" not in launcher.environment()
+    root = str(Path(launcher.__file__).resolve().parents[4])
+    assert launcher.environment()["PYTHONPATH"].split(os.pathsep)[0] == root
     assert launcher.environment(database_env("postgresql://t/y"))["DEFENDER_DATABASE_DSN"] == "postgresql://t/y"
 
 

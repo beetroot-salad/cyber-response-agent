@@ -11,12 +11,14 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.shared.contracts._by_path import import_lint_lib
 from defender.tests.tenancy.tenant_1108_delivery._support import merged_agent_lesson
 from defender.tests.tenancy.tenant_1108_p4._drain_support import critical_text, remote_branches
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
 from defender.tests.tenancy.tenant_1108_p4.test_revert_cli import LESSON, LESSON_PATH, _cli
 
 DEFENDER = Path(__file__).resolve().parents[3]
+_astlib = import_lint_lib("_astlib")
 
 
 def _directory_for(t: Any, state: str | None) -> Any:
@@ -51,18 +53,30 @@ def test_the_by_hand_revert_proceeds_only_for_an_active_tenant(p4_tenant, caplog
     assert after == before and t.forge.creates == []
 
 
-def _functions_calling(tree: ast.AST, name: str) -> set[str]:
+def _functions_calling(tree: ast.Module, name: str, module: str) -> set[str]:
+    """The functions of `module` with a call to `name`: a callee `_astlib` resolves to an origin ending in `.name`
+    (an alias or the attribute form is the same function), or, where the receiver is a value it cannot resolve, a
+    method spelled `name`."""
+    env = _astlib.module_env(tree, module=module)
     found: set[str] = set()
     for fn in ast.walk(tree):
         if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for node in ast.walk(fn):
-                if isinstance(node, ast.Call) and getattr(node.func, "attr", getattr(node.func, "id", None)) == name:
+                if not isinstance(node, ast.Call):
+                    continue
+                origin = _astlib.callee(node, env)
+                if (origin.rpartition(".")[2] == name if origin is not None
+                        else isinstance(node.func, ast.Attribute) and node.func.attr == name):
                     found.add(fn.name)
     return found
 
 
-def _module_tree(rel: str) -> ast.AST:
-    return ast.parse((DEFENDER / rel).read_text(encoding="utf-8"))
+def _module_name(rel: str) -> str:
+    return "defender." + rel.removesuffix(".py").replace("/", ".")
+
+
+def _calling(rel: str, name: str) -> set[str]:
+    return _functions_calling(ast.parse((DEFENDER / rel).read_text(encoding="utf-8")), name, _module_name(rel))
 
 
 def test_the_census_lists_every_credential_caller_and_every_admission_site():
@@ -72,16 +86,16 @@ def test_the_census_lists_every_credential_caller_and_every_admission_site():
                   "learning/author/version_control/publish.py": "forge_credential",
                   "learning/core/drains.py": "opened_delivery", "cli/tenant.py": "opened_delivery"}
     for rel, call in credential.items():
-        assert _functions_calling(_module_tree(rel), call), f"{rel} no longer reaches the credential through {call}"
+        assert _calling(rel, call), f"{rel} no longer reaches the credential through {call}"
     admitting = {"run.py": set(), "learning/core/cli.py": set(), "learning/core/drains.py": {"revert_delivery"},
                  "cli/tenant.py": set()}
     for rel, required in admitting.items():
-        found = _functions_calling(_module_tree(rel), "admit_tenant")
+        found = _calling(rel, "admit_tenant")
         assert found and required <= found, (rel, found)
     others = [p.relative_to(DEFENDER).as_posix() for p in DEFENDER.rglob("*.py")
               if "tests" not in p.relative_to(DEFENDER).parts and ".venv" not in p.parts
               and p.relative_to(DEFENDER).as_posix() not in admitting
-              and _functions_calling(ast.parse(p.read_text(encoding="utf-8")), "admit_tenant")]
+              and _calling(p.relative_to(DEFENDER).as_posix(), "admit_tenant")]
     assert others == [], "a new module admits a tenant: list it in this census"
     # the by-hand revert reaches the delivery only through the admitting `revert_delivery`
-    assert _functions_calling(_module_tree("cli/learning/revert_lesson.py"), "revert_delivery")
+    assert _calling("cli/learning/revert_lesson.py", "revert_delivery")

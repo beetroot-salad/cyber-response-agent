@@ -55,8 +55,11 @@ def _folded(node: ast.AST) -> str | None:
     if isinstance(node, ast.JoinedStr):
         parts = [_folded(v) for v in node.values]
         return None if None in parts else "".join(parts)  # type: ignore[arg-type]
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "join" \
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
             and len(node.args) == 1 and isinstance(node.args[0], (ast.List, ast.Tuple)):
+        # `str.join` on a literal separator: a method of a value, which `_astlib.callee` cannot resolve.
+        if node.func.attr != "join":  # lint-ast-resolve: ok — a str method on a literal receiver; the spelling is the fact
+            return None
         sep = _folded(node.func.value)
         parts = [_folded(e) for e in node.args[0].elts]
         return None if sep is None or None in parts else sep.join(parts)  # type: ignore[arg-type]

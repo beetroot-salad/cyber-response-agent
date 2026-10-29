@@ -66,7 +66,11 @@ def _origin_of(data_root: Path, tenant: str, origin: str | None) -> str:
     if origin is not None:
         return origin
     folder = Path(data_root) / tenant
-    if (folder / ".git").exists():
+    try:
+        cloned = (folder / ".git").exists()
+    except OSError:  # an unreadable folder (mode 000, non-root): the default origin; the entry judges the folder
+        cloned = False
+    if cloned:
         try:
             got = subprocess.run(["git", "-C", str(folder), "remote", "get-url", "origin"],  # noqa: S603, S607
                                  capture_output=True, text=True, check=False)

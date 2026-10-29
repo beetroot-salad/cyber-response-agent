@@ -1,5 +1,5 @@
 """#1214 attack-2 helpers — NO test functions. A host actor whose OpenBao answers a chosen secret accessor at unwrap,
-and a `git` stub on PATH that records what a real git process is handed."""
+a `git` stub on PATH that records what a real git process is handed, and a `docker` stub that records its argv."""
 from __future__ import annotations
 
 import json
@@ -57,3 +57,38 @@ class GitStub:
 
     def sealed_text(self) -> str:
         return self.sealed.read_text(encoding="utf-8") if self.sealed.exists() else ""
+
+
+class DockerStub:
+    """A `docker` executable first on PATH that records each call's arguments (after `docker`), one per line with an
+    end marker after each call, and answers `{}`."""
+
+    END = "--end-of-call--"
+
+    def __init__(self, folder: Path) -> None:
+        self.bin = folder / "bin"
+        self.record = folder / "docker-record.txt"
+        self.bin.mkdir(parents=True)
+        script = self.bin / "docker"
+        script.write_text(
+            "#!/bin/sh\n"
+            f"for a in \"$@\"; do printf '%s\\n' \"$a\"; done >> '{self.record}'\n"
+            f"echo '{self.END}' >> '{self.record}'\n"
+            "echo '{}'\n"
+            "exit 0\n", encoding="utf-8")
+        script.chmod(script.stat().st_mode | stat.S_IXUSR)
+
+    def path(self) -> str:
+        return f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}"
+
+    def calls(self) -> list[list[str]]:
+        """Each call's arguments, in order."""
+        if not self.record.exists():
+            return []
+        calls: list[list[str]] = [[]]
+        for line in self.record.read_text(encoding="utf-8").splitlines():
+            if line == self.END:
+                calls.append([])
+            else:
+                calls[-1].append(line)
+        return calls[:-1]

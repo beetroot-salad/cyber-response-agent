@@ -25,7 +25,8 @@ Directory (give one; `--dsn` wins over `--seed` when both are given):
 With neither `--dsn` nor `--seed` the directory is EMPTY: every tenant is unknown, the fail-closed side.
 
 The subprocess never gets `DEFENDER_DATABASE_DSN` from this module (the production entry would build its
-own directory from it); `environment()` strips it unless `keep_database_env=True`.
+own directory from it); `environment()` strips it unless `keep_database_env=True`. It puts this checkout's root first
+on `PYTHONPATH`, so `-m` finds this module (and this checkout's `defender`) whatever the caller's path or cwd.
 
 From a test:
 
@@ -67,6 +68,8 @@ ENTRIES: dict[str, tuple[str, str]] = {
 }
 SEED_ENV, DSN_ENV, ROOT_ENV = "DEFENDER_TEST_SEED", "DEFENDER_TEST_DSN", "DEFENDER_DATA_ROOT"
 _PRODUCTION_DSN_ENV = "DEFENDER_DATABASE_DSN"
+#: The checkout root holding `defender/` (this file is `defender/tests/support/tenancy/_launcher1214.py`).
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def command(kind: str, argv: Sequence[str], *, dsn: str | None = None, seed: Sequence[str] = (),
@@ -84,9 +87,12 @@ def command(kind: str, argv: Sequence[str], *, dsn: str | None = None, seed: Seq
 
 def environment(extra: Mapping[str, str] | None = None, *, keep_database_env: bool = False) -> dict[str, str]:
     """The current environment for the child, without `DEFENDER_DATABASE_DSN` (so the only directory is the one
-    this launcher builds), plus `extra`. `PYTHONPATH` is kept as the caller has it."""
+    this launcher builds), plus `extra`, with the checkout root put first on `PYTHONPATH` (any path the caller or
+    `extra` gives follows it)."""
     env = {k: v for k, v in os.environ.items() if keep_database_env or k != _PRODUCTION_DSN_ENV}
-    return {**env, **(extra or {})}
+    env = {**env, **(extra or {})}
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(REPO_ROOT), env.get("PYTHONPATH", "")) if p)
+    return env
 
 
 def build_directory(*, dsn: str | None, seeds: Sequence[str], data_root: Path | None) -> Any:

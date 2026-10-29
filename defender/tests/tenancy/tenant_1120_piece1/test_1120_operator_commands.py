@@ -424,10 +424,15 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     data_root: Path, tmp_path: Path, script: str, args: list[str], identity: list[str],
-    run_visualizations_dir: Path,
+    run_visualizations_dir: Path, request: pytest.FixtureRequest,
 ):
     """A missing, malformed or unknown --tenant is refused before any state access: it selects
-    no ambient queue and publishes no page."""
+    no ambient queue and publishes no page. For the unknown id the command has tenant records to
+    read (#1214 Flow 4: an empty migrated database, which knows no tenant), so the refusal is the
+    id's, not a missing database address's."""
+    records: dict[str, str] = {}
+    if identity[-1:] == [H.OTHER]:
+        records = database_env(request.getfixturevalue("migrated_database"))
     poison = tmp_path / "ambient-state"
     poison.mkdir()
     (poison / "operator-sentinel").write_bytes(b"untouched")
@@ -439,10 +444,11 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     before_pages = {p: p.read_bytes() if p.exists() else None for p in outputs}
     try:
         proc = H.run_script(H.REPO_ROOT / script, *args, *identity, root=data_root, DEFENDER_DEPLOYMENT="dev",
-                            DEFENDER_LEARNING_STATE_DIR=str(poison))
+                            DEFENDER_LEARNING_STATE_DIR=str(poison), **records)
         out = H.output(proc)
         assert proc.returncode != 0, f"tenant-free command ran successfully: {out}"
         assert "tenant" in out.lower(), out
+        assert not records or H.OTHER in out, f"the unknown id's refusal does not name it: {out}"
         assert "traceback" not in out.lower(), out
         assert {p.relative_to(poison): p.read_bytes() for p in poison.rglob("*") if p.is_file()} == before_state
         assert {p: p.read_bytes() if p.exists() else None for p in outputs} == before_pages
