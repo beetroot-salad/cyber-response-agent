@@ -22,6 +22,13 @@ from defender.records.formats import TenantRefused
 
 _logger = logging.getLogger(__name__)
 
+
+class _Refusing:
+    """Stands in for the argument parser in the shared admission: its usage error becomes the refusal the revert reports."""
+
+    def error(self, message: str):
+        raise TenantRefused(message)
+
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 
 
@@ -99,7 +106,12 @@ def main(
     except TenantRefused as refused:
         parser.error(str(refused))
     with held:
-        records = admitted_directory(parser, args.tenant, directory)
+        try:
+            records = admitted_directory(_Refusing(), args.tenant, directory)
+        except TenantRefused as refused:
+            # A revert reports a refusal as its other refusals: critical log, exit 2, nothing minted or opened.
+            _logger.critical(f"revert of {args.lesson_name} refused: {refused}")
+            return 2
         paths = command_line_paths(parser, args.tenant)
         if not _has_state_root(paths):
             return revert(args.lesson_name, state=None, tenant=paths.tenant, client=client,

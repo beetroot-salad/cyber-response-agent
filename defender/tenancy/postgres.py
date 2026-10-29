@@ -73,6 +73,12 @@ def _record(row: Any) -> TenantRecord:
     return TenantRecord(**row._mapping)
 
 
+def _cannot_exist(tenant_id: object) -> bool:
+    """A NUL byte cannot be stored in a PostgreSQL text value: such an id names no tenant, and asking the database
+    would raise a data error instead of answering "unknown"."""
+    return "\x00" in str(tenant_id)
+
+
 class PostgresTenantRepository:
     def __init__(self, dsn: str, *, max_connections: int = 10, lock_keepalive: int = LOCK_KEEPALIVE) -> None:
         if lock_keepalive <= 0:
@@ -93,6 +99,8 @@ class PostgresTenantRepository:
             return list(await conn.execute(statement))
 
     async def tenant(self, tenant_id: str) -> TenantRecord | None:
+        if _cannot_exist(tenant_id):
+            return None
         rows = await self._rows(select(_T).where(_T.c.id == str(tenant_id)))
         return _record(rows[0]) if rows else None
 
@@ -100,14 +108,20 @@ class PostgresTenantRepository:
         return [_record(r) for r in await self._rows(select(_T).order_by(_T.c.created_at, _T.c.id))]
 
     async def generations(self, tenant_id: str) -> list[Generation]:
+        if _cannot_exist(tenant_id):
+            return []
         rows = await self._rows(select(_G).where(_G.c.tenant_id == str(tenant_id)).order_by(_G.c.salt))
         return [Generation(**r._mapping) for r in rows]
 
     async def forge_wiring(self, tenant_id: str) -> ForgeWiring | None:
+        if _cannot_exist(tenant_id):
+            return None
         rows = await self._rows(select(_W).where(_W.c.tenant_id == str(tenant_id)))
         return ForgeWiring(**rows[0]._mapping) if rows else None
 
     async def publish_status(self, tenant_id: str) -> dict[str, str] | None:
+        if _cannot_exist(tenant_id):
+            return None
         rows = await self._rows(select(_P).where(_P.c.tenant_id == str(tenant_id)))
         return PublishStatus(**rows[0]._mapping).as_dict() if rows else None
 
@@ -122,6 +136,8 @@ class PostgresTenantRepository:
                        **values: Any) -> TenantRecord:
         """One conditional update; no row is `NotFound` for an absent tenant, else `Conflict`."""
         tenant_id = str(tenant_id)
+        if _cannot_exist(tenant_id):
+            raise NotFound(f"no tenant {tenant_id!r}")
         async with self._engine.begin() as conn:
             done = (await conn.execute(update(_T).where(_T.c.id == tenant_id, precondition)
                                        .values(**values).returning(*_T.c))).first()

@@ -217,7 +217,7 @@ def test_a_secrets_directory_in_or_at_the_data_root_is_refused_and_one_beside_it
 
 def test_a_secrets_directory_that_resolves_into_the_data_root_is_refused(tmp_path, data_root):
     """Containment is judged on resolved paths: a `..` detour or a link into the data root does not escape it (D4, DC-2)."""
-    detour = tmp_path / "other" / ".." / data_root.name
+    detour = data_root.parent / "other" / ".." / data_root.name
     _refused(tmp_path, data_root, secrets_dir=data_root.parent / "other" / ".." / data_root.name / "secrets")
     _refused(tmp_path, data_root, secrets_dir=detour)
     alias = tmp_path / "alias"
