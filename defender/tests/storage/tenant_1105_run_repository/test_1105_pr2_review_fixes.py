@@ -310,7 +310,7 @@ def _tick(t: Any, paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> i
 
     return drains.lead_author_drain(
         paths, run_lead_author=lane, run_pitfalls=run_pitfalls,
-        client=t.forge.client, identity=t.vault.identity(), start_box=box.start,
+        client=t.forge.client, identity=t.vault.identity(), directory=t.directory, start_box=box.start,
         stop_box=lambda *_a, **_k: None)
 
 

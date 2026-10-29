@@ -21,6 +21,7 @@ pytestmark = [
 
 from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
+    ANN,
     BOB,
     EMPTY,
     LAB,
@@ -38,7 +39,6 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     items,
     lab,
     tenants_of,
-    two_tenants,
     user_id,
 )
 
@@ -458,7 +458,8 @@ def test_an_administrator_cannot_invite_into_a_tenant_that_is_not_active(state: 
 
 def test_end_tenant_ends_every_membership_and_revokes_every_invitation_as_system(audit: AuditLog) -> None:
     """`end_tenant(T, now=)`: active members end (ended_by system), invitations revoke; member.remove / invitation.revoke by `system`; other tenants and past rows are untouched (r9 Identity seam)."""
-    world, ann, bob = two_tenants()
+    world = World(administrators=[OPS], tenants={T1: [ANN], T2: [BOB]})
+    ann, bob = world.sign_in(ANN), world.sign_in(BOB)
     nina = world.member(ann, T1, NINA)
     gone = world.member(ann, T1, NEW)
     assert gone.delete(f"/tenants/{T1}/members/{user_id(gone)}").status_code == 204  # a past leaver

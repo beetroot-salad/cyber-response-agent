@@ -10,7 +10,6 @@ for the AppRole login) and `check_tenant` (local state only), whose output is ca
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -36,14 +35,14 @@ def _cli() -> Any:
 
 def _update(p4: Any, capsys, *, identity: Any = None) -> tuple[int, list[str]]:
     capsys.readouterr()
-    rc = _cli().update(p4.tenant_id, client=p4.forge.client,
+    rc = _cli().update(p4.tenant_id, client=p4.forge.client, directory=p4.directory,
                        identity=identity if identity is not None else p4.identity)
     return rc, _said(capsys)
 
 
 def _check(p4: Any, capsys) -> list[str]:
     capsys.readouterr()
-    _cli().check_tenant(p4.tenant_id)
+    _cli().check_tenant(p4.tenant_id, directory=p4.directory)
     return _said(capsys)
 
 
@@ -169,12 +168,6 @@ def test_o_see_check_reports_a_sealed_issuer_refusal(p4_tenant, capsys):
 # `tenant.py update`.
 # ---------------------------------------------------------------------------------------------
 
-def _issuer_config(tmp_path: Path) -> Path:
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-
-    return B.write_issuer_config(tmp_path / "operator")
-
-
 def test_o_see_check_names_an_unprotected_main_met_by_the_launch_time_child(
         p4_tenant, tmp_path, capsys):
     """A launch-time publish (the child's in-process entry) that meets an unprotected `main`
@@ -182,11 +175,10 @@ def test_o_see_check_names_an_unprotected_main_met_by_the_launch_time_child(
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     bind_forge(p4_tenant)
-    config = _issuer_config(tmp_path)
     before = _check(p4_tenant, capsys)
 
     p4_tenant.forge.protection = {"name": "main", "protected": False, "user_can_push": True}
-    line = B.run_child(p4_tenant, config)
+    line = B.run_child(p4_tenant)
     assert B.outcome_class(line) == "stale:operator", line
 
     after = _new(_check(p4_tenant, capsys), before)
@@ -201,14 +193,13 @@ def test_o_see_check_names_a_merged_link_refused_by_the_launch_time_child(
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     bind_forge(p4_tenant)
-    config = _issuer_config(tmp_path)
     before = _check(p4_tenant, capsys)
     assert _trails_by(before, 1) == [], f"positive control: {before}"
 
     push_to_remote(p4_tenant.p3, p4_tenant.scratch,
                    lambda w: index_entry(w, "120000", LINK_PATH, data=b"/etc/passwd"),
                    "a link merged by a human", stage=False)
-    line = B.run_child(p4_tenant, config)
+    line = B.run_child(p4_tenant)
     assert B.outcome_class(line) == "stale:operator", line
     assert current_commit(p4_tenant.tenant) == p4_tenant.commit
 

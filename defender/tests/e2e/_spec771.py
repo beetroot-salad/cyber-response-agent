@@ -1,7 +1,7 @@
 """Shared fakes, the writer census and real-box probes for the #771 alias-ban tests."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
@@ -36,7 +36,6 @@ from collections.abc import Iterator
 DEFENDER = Path(__file__).resolve().parents[2]
 #: `run_tree`'s run folder (run ids are canonical UUIDs, #1187).
 RUN_771 = fixture_uuid("run-771")
-CENSUS_TENANT = fixture_uuid("tenant:census-tenant")
 REPO_ROOT = DEFENDER.parent
 #: The generator that derives the shipped seccomp profile from the vendored platform default.
 SECCOMP_GEN_PATH = REPO_ROOT / "tooling" / "gen_seccomp_profile.py"
@@ -547,14 +546,6 @@ def _invoke_write_guarded(run_dir: Path) -> None:
     write_guarded(run_dir / "report.md", "guarded body\n")
 
 
-def _invoke_tenant_row_writer(run_dir: Path) -> None:
-    """The tenant row's writer, `create_tenant`, under a fresh `tenant-root/` in the run dir:
-    it refuses a data root holding anything else, and `run_dir.parent` holds the run."""
-    from defender.tenancy import _tenant
-
-    _tenant.create_tenant(fixture_data_root(run_dir / "tenant-root"), CENSUS_TENANT)
-
-
 #: Host-side writers into a shared tree while a box is alive, one row per artifact. A floor, not a
 #: closed list: grep-derived censuses have missed writers (e.g. `run_investigation`'s fault-exit
 #: trace write).
@@ -590,10 +581,6 @@ CENSUS: tuple[Writer, ...] = (
            _invoke_sentinel_plant, "box/"),
     Writer("write_guarded", "report.md", "guarded", "unmeasured",
            _invoke_write_guarded, "_io.py"),
-    # Guarded idiom: `Held.write`'s create lane refuses an alias like `write_guarded` (#1137).
-    # This row also keeps `tenancy/_tenant.py` in the census-derived hard-gate set.
-    Writer("tenant_row_writer", f"tenant-root/{CENSUS_TENANT}/tenant.json", "guarded", "unmeasured",
-           _invoke_tenant_row_writer, "tenancy/_tenant.py"),
 )
 
 #: Modules the write lint must hard-gate, derived from the census (plus the drain lane's
@@ -602,6 +589,8 @@ CENSUS_MODULES: frozenset[str] = frozenset(w.module for w in CENSUS)
 DRAIN_MODULES: frozenset[str] = frozenset({"learning/author/drain.py"})
 LINT_HARD_GATED_MODULES: frozenset[str] = CENSUS_MODULES | DRAIN_MODULES | {
     "_filesystem/", "investigation/query_catalog.py", "records/session_store/_pointers.py",
+    # O6: the row writer left the census with `create_tenant`; the owner still holds `retire_row`'s unlink.
+    "tenancy/_tenant.py",
 }
 
 

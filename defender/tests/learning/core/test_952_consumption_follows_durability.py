@@ -155,7 +155,7 @@ def _tick(t, paths: LoopPaths, *, run_lead_author, run_pitfalls, box: BoxSpy | N
     spy = box if box is not None else BoxSpy()
     return drains.lead_author_drain(
         paths, run_lead_author=run_lead_author, run_pitfalls=run_pitfalls,
-        client=t.forge.client, identity=t.vault.identity(), start_box=spy.start,
+        client=t.forge.client, identity=t.vault.identity(), directory=t.directory, start_box=spy.start,
         stop_box=spy.stop,
     )
 

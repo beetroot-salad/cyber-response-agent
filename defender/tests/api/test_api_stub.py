@@ -136,6 +136,11 @@ IDENTITY_ROUTES = {
     ("POST", "/invitations/{invitation_id}/accept"),
     ("GET", "/admin/tenants"),
     ("POST", "/admin/tenants/{tenant_id}/invitations"),
+    ("POST", "/admin/tenants"),
+    ("GET", "/admin/tenants/{tenant_id}"),
+    ("POST", "/admin/tenants/{tenant_id}/resume"),
+    ("POST", "/admin/tenants/{tenant_id}/offboard"),
+    ("POST", "/admin/tenants/{tenant_id}/rotate-forge-credential"),
 }
 PUBLIC_ROUTES = EXISTING_ROUTES | IDENTITY_ROUTES
 

@@ -416,7 +416,7 @@ def current_tenant() -> Any:
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     existing = sorted(p.name for p in root.iterdir()
-                      if (p / "tenant.json").is_file()) if root.is_dir() else []
+                      if (p / "knowledge").is_dir()) if root.is_dir() else []
     return set_up_tenant(root, existing[0] if existing else SOURCE_TENANT)
 
 
@@ -443,7 +443,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     if tenant_id is None:
         existing = sorted(p.name for p in root.iterdir()
-                          if (p / "tenant.json").is_file()) if root.is_dir() else []
+                          if (p / "knowledge").is_dir()) if root.is_dir() else []
         tenant_id = existing[0] if existing else SOURCE_TENANT
     tenant = set_up_tenant(root, tenant_id, published=published)
     location_path(tenant.learning).mkdir(exist_ok=True)  # setup provisions the real launcher queue root

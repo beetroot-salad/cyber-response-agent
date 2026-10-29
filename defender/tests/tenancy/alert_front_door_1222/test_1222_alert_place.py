@@ -204,7 +204,7 @@ def _main_boxed(tmp_path: Path, planted: S.Planted, alert: bytes, *,  # noqa: PL
 
     # The in-process launch-time publish: publishes the planted tenant for real.
     return S.sym("run", "main")(
-        argv, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
+        argv, directory=planted.directory, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
         visualize=lambda *_a, **_k: None, ticket_writer=S.NoTicket(),
         enqueue=enqueue if enqueue is not None else (lambda *_a, **_k: False),
         publish=in_process_publish())
@@ -794,7 +794,7 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     # Plus the in-process launch-time publish.
     rc = S.sym("run", "main")(
         ["--episode", ep.name, "--world", "b", "--tenant", planted.tenant_id],
-        lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
+        directory=planted.directory, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
         ticket_writer=S.NoTicket(), publish=in_process_publish())
     assert rc == 0, f"the sibling run failed (rc={rc})"
     assert "run_dir" in sib, "the sibling never started its box"

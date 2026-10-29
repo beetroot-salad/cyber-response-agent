@@ -4,6 +4,7 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
 
 import contextlib
 import functools
@@ -78,12 +79,9 @@ def world(tmp_path, monkeypatch):
     def runs_base(tenant_id: str) -> Path:
         tenant = T.mod("tenancy._tenant")
         layout = tenant._TenantPaths(fixture_data_root(root), tenant_id)
-        if not layout.row.exists():
-            # The row alone (no knowledge folder): a tenant set up in name only.
+        if not layout.tenant_root.exists():
+            # No knowledge folder: a tenant active in the directory in name only (O6: no row on disk).
             layout.tenant_root.mkdir(parents=True, exist_ok=True)
-            layout.row.write_text(json.dumps(
-                {"tenant_id": tenant_id, "created_at": "2026-09-28T00:00:00+00:00"}) + "\n",
-                encoding="utf-8")
         chosen["tenant"] = tenant_id
         return location_path(layout.runs)
 
@@ -134,7 +132,10 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
         # never reaches the publish.
         seams = ({} if own is None
                  else {"publish": lambda *a, own=own, **k: f"fresh {own.commit}"})
-        rc = _run().main(argv, lifecycle=_lifecycle(start), visualize=lambda p, **kw: None,
+        # #1214 Flow 4: the tenant is active in the directory whether or not its folder is placed.
+        directory = (own.directory if own is not None
+                     else tenant_directory(world["root"], world["chosen"]["tenant"]))
+        rc = _run().main(argv, directory=directory, lifecycle=_lifecycle(start), visualize=lambda p, **kw: None,
                          preflight=lambda m: 0, **seams)
     except _StartBoxReached:
         pytest.fail(f"start_box was reached for a tenant that must be refused: {start.calls}")
@@ -302,8 +303,9 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
                 run._drive_investigation, registry_cls=_RegistryRecorder,
                 investigate=lambda driven=driven, **kw: (
                     driven.append(kw) or {"output": "done", "requests": 0}))
+            argv = [str(world["alert"]), "--tenant", tenant_id, "--no-learn", "--update-ticket"]
             rc = run.main(
-                [str(world["alert"]), "--tenant", tenant_id, "--no-learn", "--update-ticket"],
+                argv, directory=own.directory,
                 lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p, **kw: None,
                 preflight=lambda m: 0, ticket_writer=writer,
                 publish=lambda *a, own=own, **k: B.fresh(own.commit))

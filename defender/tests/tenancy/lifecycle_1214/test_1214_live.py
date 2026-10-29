@@ -67,13 +67,14 @@ def _live() -> Live:
 
 
 def _forgejo_major(live: Live) -> int:
-    version = httpx.get(f"{live.forge_url}/api/v1/version", timeout=30).json()["version"]
+    version = httpx.get(f"{live.forge_url}/api/v1/version", timeout=30,
+                         headers={"Authorization": f"token {live.forge_token}"}).json()["version"]
     return int(version.split(".")[0])
 
 
 def _integration_runner(container: str) -> Any:
     def run(arguments: Any) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(["docker", "exec", container, "forgejo", "admin", "user",  # noqa: S603, S607
+        return subprocess.run(["docker", "exec", "-u", "git", container, "forgejo", "admin", "user",  # noqa: S603, S607
                                "create-authorized-integration", *map(str, arguments)],
                               capture_output=True, text=True, timeout=120, check=False)
     return run

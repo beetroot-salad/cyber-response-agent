@@ -1055,7 +1055,7 @@ QUESTIONER_REL = "agent/lessons-questioner/q.md"
 
 
 def _seams(tt: TenantTick) -> dict[str, Any]:
-    return {"client": tt.t.forge.client, "identity": tt.t.vault.identity()}
+    return {"client": tt.t.forge.client, "identity": tt.t.vault.identity(), "directory": tt.t.directory}
 
 
 def _tenant_lane(tt: TenantTick, daemon: X.FakeDaemon, *,

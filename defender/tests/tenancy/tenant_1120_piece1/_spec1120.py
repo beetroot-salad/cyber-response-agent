@@ -185,10 +185,9 @@ def write_tenant_id_file(knowledge: Path, tenant_id: str, content: str | bytes |
 
 
 def adopted(root: Path, tenant_id: str = TID, **kw: Any) -> Path:
-    """A finished tenant built by hand — a placed `knowledge/` plus a valid row — so a test
-    about acceptance does not depend on `setup`. Returns the tenant folder."""
+    """A finished tenant folder built by hand: a placed `knowledge/` (O6: the tenant record is not on disk).
+    Returns the tenant folder."""
     place_knowledge(root, tenant_id, **kw)
-    plant_row(root, tenant_id)
     return tenant_folder(root, tenant_id)
 
 
@@ -361,10 +360,30 @@ def script_of(module: Any) -> Path:
     return Path(module.__file__).resolve()
 
 
-def tenant_py(module: Any, *args: str, root: Path | str | None, **kw: Any,
-              ) -> subprocess.CompletedProcess:
-    """`python3 defender/cli/tenant.py <args>` — `module` is the imported `tenant.py`."""
-    return run_script(script_of(module), *args, root=root, **kw)
+def placed_tenants(root: Path | str | None) -> list[str]:
+    """The tenants whose `<root>/<T>/knowledge` is a folder: what a launched command's directory holds active."""
+    if root is None or not Path(root).is_dir():
+        return []
+    return sorted(p.name for p in Path(root).iterdir() if (p / "knowledge").is_dir())
+
+
+def tenant_py(module: Any, *args: str, root: Path | str | None, seed: list[str] | None = None,
+              script: bool = False, **kw: Any) -> subprocess.CompletedProcess:
+    """`tenant.py <args>` as the operator's command line, through the test-side launcher (#1214 Flow 4: the entry
+    admits a tenant only from a directory, and a subprocess has no database). The launcher's directory holds
+    each tenant folder under `root` active (`seed` overrides: items `T[:STATE[:ORIGIN]]`). `script=True` runs the
+    script file itself, which has no directory and refuses by design: for tests whose subject is the shim."""
+    if script:
+        return run_script(script_of(module), *args, root=root, **kw)
+    from defender.tests.support.tenancy import _launcher1214 as launcher
+
+    unset = kw.pop("unset", ())
+    cwd = kw.pop("cwd", None)
+    env = launcher.environment(tenant_env(root, unset=unset, **kw))
+    seeds = placed_tenants(root) if seed is None else seed
+    command = launcher.command("connect", list(args), seed=seeds, data_root=Path(root) if root is not None else None)
+    return subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
+        command, env=env, cwd=str(cwd or REPO_ROOT), capture_output=True, text=True, timeout=180, check=False)
 
 
 def output(proc: subprocess.CompletedProcess) -> str:
@@ -490,15 +509,24 @@ def plant_alert(where: Path) -> Path:
     return alert
 
 
-def drive_run(run_module: Any, argv: list[str], rec: RunRecorder,
+def directory_for(argv: list[str], root: Path | str | None = None, **keywords: Any) -> Any:
+    """`_launch_publish_p4.directory_for_argv`: the directory a run's `--tenant` is admitted from (#1214 Flow 4)."""
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
+    return directory_for_argv(argv, root, **keywords)
+
+
+def drive_run(run_module: Any, argv: list[str], rec: RunRecorder, *, directory: Any = None,
               ) -> tuple[int | None, BaseException | None]:
-    """The REAL `run.main(argv)` (`run_module` is the imported `defender/run.py`) with every
-    seam recorded: `(exit status, None)`, or `(None, the SystemExit it refused with)`."""
+    """The REAL `run.main(argv, directory=)` (`run_module` is the imported `defender/run.py`) with every
+    seam recorded: `(exit status, None)`, or `(None, the SystemExit it refused with)`. `directory`
+    defaults to `directory_for(argv)`."""
     try:
         # Plus the in-process launch-time publish.
         from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
-        return run_module.main(list(argv), **with_publish(dict(rec.seams()))), None
+        return run_module.main(list(argv), directory=directory if directory is not None else directory_for(argv),
+                               **with_publish(dict(rec.seams()))), None
     except SystemExit as refused:
         return None, refused
 

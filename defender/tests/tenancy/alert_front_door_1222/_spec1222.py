@@ -503,12 +503,19 @@ TENANT_CATALOG: dict[str, str] = T6.TENANT_CATALOG
 
 @dataclass(frozen=True)
 class Planted:
-    """One set-up tenant under a data root: `knowledge/{settings,agent}` placed, its row written,
+    """One set-up tenant under a data root: `knowledge/{settings,agent}` placed (no row: O6),
     its alert mapping and source-free case mapping in place."""
 
     root: Path
     tenant_id: str
     knowledge: Path
+
+    @property
+    def directory(self) -> Any:
+        """A `TenantDirectory` holding this tenant active with its forge wiring (#1214 Flow 4)."""
+        from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
+
+        return tenant_directory(self.root, self.tenant_id)
 
     @property
     def settings(self) -> Path:
@@ -1638,12 +1645,12 @@ def publish_planted(tmp_path: Path, planted: Planted) -> tuple[Any, str | None]:
     """Publish the planted tenant's folder as it is now, for real (`publish_once`), so the run
     has an export to read. Returns `(PublishedTenant, None)`; `(None, refusal)` when acceptance
     or the publish refuses the folder (a tenant broken on purpose); `(None, None)` when the
-    tenant was never placed (no row)."""
+    tenant was never placed (no knowledge folder)."""
     from defender.learning.author.version_control import DeliveryRefused, LockBusy
     from defender.records._tenant_id import TenantRefused
     from defender.tests.tenancy.tenant_1108_p4._support import publish_once
 
-    if not (Path(planted.root) / planted.tenant_id / "tenant.json").is_file():
+    if not (Path(planted.root) / planted.tenant_id / "knowledge").is_dir():
         return None, None
     try:
         return publish_once(Path(tmp_path) / "p4-forge", root=planted.root,
@@ -1763,6 +1770,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     if materialize is not None:
         seams["materialize"] = materialize  # run.main's setup seam (faults planted in setup)
     seams["publish"] = publish_double(d.published)
+    seams["directory"] = planted.directory
     try:
         d.rc = run_main(
             argv, lifecycle=lifecycle_fn, preflight=lambda *_a, **_k: 0,

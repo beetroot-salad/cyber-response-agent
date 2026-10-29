@@ -2,7 +2,6 @@
 tenant through P3. It pins the machinery, nothing about P4 behaviour."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -11,11 +10,9 @@ from defender.tests.support.tenancy import _tenants1106 as tenants
 
 from ._support import (
     FIXTURE_TENANT_ID,
-    ISSUER_AUDIENCE,
     OTHER_LESSON,
     agent_blobs,
     bind_forge,
-    default_issuer_config,
     current_commit,
     export_dir,
     files_under,
@@ -82,22 +79,23 @@ def test_second_tenant_is_published_apart_under_the_same_data_root(p4_tenant):
     assert rel not in files_under(export_dir(first.tenant, first.commit) / "agent")
 
 
-def test_forge_binding_round_trips_through_the_tenant_row(p4_tenant):
-    """`bind_forge` writes `forge: {origin, audience, issuer_role, issuer_config}` into `<T>/tenant.json`,
-    keeping the row's own fields, and the tenant is still accepted by the real reader;
-    `unbind_forge` removes it again."""
+def test_forge_binding_is_recorded_in_the_directory_and_writes_nothing_to_the_folder(p4_tenant):
+    """`bind_forge` records the origin and a live generation on `t.directory` (O6: no row on disk, the folder is
+    untouched); `unbind_forge` leaves the tenant active with no forge wiring."""
     t = p4_tenant
-    row_path = Path(location_path(t.tenant.row_path))
-    before = json.loads(row_path.read_text(encoding="utf-8"))
-    assert "forge" not in before
-    binding = bind_forge(t)
-    assert binding == {"origin": t.origin, "audience": ISSUER_AUDIENCE,
-                       "issuer_role": f"tenant-{t.tenant_id}",
-                       "issuer_config": str(default_issuer_config(t))}
-    assert json.loads(row_path.read_text(encoding="utf-8")) == {**before, "forge": binding}
-    assert str(tenants.accept(t.data_root, t.tenant_id).id) == t.tenant_id
+    before = files_under(Path(location_path(t.tenant.tenant_root)))
+    other = "http://forge.test/other.git"
+    bound = bind_forge(t, origin=other)
+    assert bound["origin"] == other
+    assert len(bound["generations"]) == 1
+    assert files_under(Path(location_path(t.tenant.tenant_root))) == before
+    assert not (Path(location_path(t.tenant.tenant_root)) / "tenant.json").exists()
+    assert t.directory.state(t.tenant_id) == "active"
+    assert t.directory.forge_wiring(t.tenant_id).origin == other
+    assert t.directory_with(origin=t.origin).forge_wiring(t.tenant_id).origin == t.origin  # keywords win
     unbind_forge(t)
-    assert json.loads(row_path.read_text(encoding="utf-8")) == before
+    assert t.directory.state(t.tenant_id) == "active"
+    assert t.directory.forge_wiring(t.tenant_id) is None
 
 
 def test_publish_placed_exports_a_hand_planted_tenant_and_republishes_its_edits(tmp_path, data_root):

@@ -1,7 +1,7 @@
 """The entry points take a tenant through `accept_tenant`, once."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base, location_path
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
 
 from defender.records import session_store
 from defender.systems import run_tenant as run_tenant_mod
@@ -157,19 +157,18 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
     assert sibling_tenant.correlation is None, "a --resume sibling dispatches no turn-0 lead"
 
 
-#: The refusal cells each entry point takes: `tenant.py setup` has no `no-row` cell (it writes
-#: the row) and `scaffold` takes only an id.
-ALL_CELLS = ("bad-id", "no-row", "knowledge-link", "mounted-tree")
+#: The refusal cells each entry point takes. O6: there is no row, so no `no-row` cell; `tenant.py
+#: setup` and `scaffold` are retired (F-12); `tenant.check` runs through the launcher (no database
+#: in a subprocess), which cannot stand in a copied checkout, so it has no `mounted-tree` cell.
+ALL_CELLS = ("bad-id", "knowledge-link", "mounted-tree")
 CELLS_OF = {
     "run.main": ALL_CELLS,
     "branch.cli.main": ALL_CELLS,
-    "tenant.setup": ("bad-id", "knowledge-link", "mounted-tree"),
-    "tenant.check": ALL_CELLS,
-    "tenant.scaffold": ("bad-id",),
+    "tenant.check": ("bad-id", "knowledge-link"),
     "policy_cli.main": ALL_CELLS,
     "validate_scaffold.main": ALL_CELLS,
 }
-PROCESS_ENTRIES = {"tenant.setup", "tenant.check", "tenant.scaffold", "validate_scaffold.main"}
+PROCESS_ENTRIES = {"tenant.check", "validate_scaffold.main"}
 
 
 @dataclass
@@ -199,12 +198,6 @@ def _build_cell(entry: str, cell: str, base: Path, monkeypatch) -> _Cell:  # noq
             src = _source_under(root)
             return _Cell(root, "A", str(H.refusal(_tenant, TenantId, "A")), source=src)
         return _Cell(root, "A", _owner(root, "A"))
-    if cell == "no-row":
-        H.place_knowledge(root)
-        cell_ = _Cell(root, H.TID, _owner(root))
-        if launcher:
-            cell_.source = _source_under(root)
-        return cell_
     if cell == "knowledge-link":
         _knowledge_link(base, root)
         cell_ = _Cell(root, H.TID, _owner(root))
@@ -260,13 +253,14 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
         return rc != 0, cap.err + cap.out, True
     # The process entries.
     module, args = {
-        "tenant.setup": (tenant_py, ["setup", cell.tenant_id]),
         "tenant.check": (tenant_py, ["check", cell.tenant_id]),
-        "tenant.scaffold": (tenant_py, ["scaffold", cell.tenant_id, str(base / "scaffold-target")]),
         "validate_scaffold.main": (validate_scaffold, ["cmdb", "--tenant", cell.tenant_id]),
     }[entry]
-    if entry == "tenant.scaffold":
-        (base / "scaffold-target").mkdir()
+    if entry == "tenant.check":
+        # The launcher's directory holds the asked-for tenant active, so the refusal is accept_tenant's own.
+        proc = H.tenant_py(module, *args, root=cell.root, seed=[cell.tenant_id], unset=("DEFENDER_DIR",), **cell.env)
+        text = H.output(proc)
+        return proc.returncode != 0 and "Traceback" not in text, text, False
     script = (_copy_script(cell.checkout, module) if cell.checkout is not None
               else H.script_of(module))
     proc = H.run_script(script, *args, root=cell.root, cwd=cell.checkout,
@@ -300,8 +294,6 @@ def _cell_problems(where: str, entry: str, cell_name: str, cell: _Cell, base: Pa
             problems.append(f"{where}: created {cell.root.parent} in the checkout")
     elif diff := H.census_diff(before, H.tree_census(cell.root)):
         problems.append(f"{where}: wrote into the data root {diff}")
-    if entry == "tenant.scaffold" and any((base / "scaffold-target").iterdir()):
-        problems.append(f"{where}: wrote into the scaffold target")
     return problems
 
 
@@ -358,13 +350,10 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
 def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data_root_before_reading(
         tmp_path: Path, monkeypatch, capsys) -> None:
     monkeypatch.chdir(tmp_path)  # a relative root, if anything followed it, lands in tmp
-    tid = TenantId(H.TID)
     relative = Path("relative-spec1120") / "data"
     inside = _never_created_root()
     for root in (relative, inside):
         owners = {
-            "create_tenant": lambda r=root: _tenant.create_tenant(fixture_data_root(r), tid),
-            "require_tenant": lambda r=root: _tenant.require_tenant(fixture_data_root(r), tid),
             "accept_tenant": lambda r=root: H.accept(_tenant, r, H.TID),
         }
         for name, call in owners.items():
@@ -388,10 +377,9 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
             f"the launcher did not refuse {root} before reading the source's record: {text!r}")
     _assert_never_created(inside)
 
-    proc = H.run_script(H.script_of(tenant_py), "setup", H.TID, root=relative, cwd=tmp_path)
+    proc = H.tenant_py(tenant_py, "check", H.TID, root=relative, seed=[H.TID], cwd=tmp_path)
     H.assert_refused(proc, str(relative))
     assert not (tmp_path / relative).exists()
-    # Setup over a data root inside a checkout's defender/: test_1120_setup.py.
 
     # Positive control: another checkout's defender/ is not the running one.
     other = tmp_path / "other-checkout"
@@ -427,8 +415,8 @@ def test_1120_tenant_sessions_is_the_session_stores_folder_for_a_fresh_run(
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
     # Plus the in-process launch-time publish.
-    rc = run_py.main([str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID],
-                     **with_publish(dict(seams)))
+    argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID]
+    rc = run_py.main(argv, **with_publish(dict(seams), argv))
     assert rc == 0
     assert len(rec.lifecycle_calls) == 1
     run_dir = Path(rec.lifecycle_calls[0]["run_dir"])

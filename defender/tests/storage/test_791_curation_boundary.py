@@ -66,7 +66,7 @@ def _lead_drain(t, paths, **steps) -> int:
     """The REAL `lead_author_drain` over the tenant path, with the tenant forge fake's client,
     an identity over its issuer fake, and no-op box start/stop."""
     return drains.lead_author_drain(
-        paths, client=t.forge.client, identity=t.vault.identity(),
+        paths, client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
         start_box=noop_start_box, stop_box=noop_stop_box, **steps)
 
 

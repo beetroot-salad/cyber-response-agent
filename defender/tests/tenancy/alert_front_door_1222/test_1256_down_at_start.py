@@ -16,7 +16,6 @@ import pytest
 from defender._paths import adapters_under
 from defender.systems.verbs import read_roster
 from defender.cli import policy_cli
-from defender.cli import tenant as tenant_py
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
@@ -784,9 +783,9 @@ def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one_through_r
 
 # --- O-8 x D4: a run-start refusal only — setup adopts the same tenant ----------------------------
 
-def test_o8_d4_setup_adopts_an_all_down_tenant_whose_runs_are_refused(
+def test_o8_d4_acceptance_adopts_an_all_down_tenant_whose_runs_are_refused(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Tenant management judges structure, not usability: `tenant.py setup` adopts an all-down tenant and `defender-policy show gather` answers over it, while a run of it is refused at start — so the refusal does not live in the tenant resolution they share (`run_tenant_for` / `resolve_tenant`)."""
+    """Tenant acceptance judges structure, not usability: it adopts an all-down tenant and `defender-policy show gather` answers over it, while a run of it is refused at start — so the refusal does not live in the tenant resolution they share (`run_tenant_for` / `resolve_tenant`). (`setup` retired, F-12.)"""
     tenant_id = fixture_uuid("tenant:acme-d4")
     # The operator's folder, authored outside the data root: complete but for one key per
     # granted system.
@@ -797,10 +796,8 @@ def test_o8_d4_setup_adopts_an_all_down_tenant_whose_runs_are_refused(
     root = current_data_root()
     H20.place_knowledge(root, tenant_id, source=authored.knowledge)
 
-    proc = H20.setup(tenant_py, root, tenant_id)
-    H20.assert_clean(proc)
-    assert location_path(H20.row_path)(root, tenant_id).is_file(), (
-        f"setup exited 0 but wrote no row for {tenant_id}:\n{H20.output(proc)}")
+    tenant = S.Planted(root=root, tenant_id=tenant_id, knowledge=H20.knowledge_dir(root, tenant_id))
+    tenant.accept()  # acceptance adopts the folder: it judges structure, so no refusal here
 
     # The operator's policy audit over the adopted tenant (`defender-policy show gather`).
     policy_run = tmp_path / "policy-run"
@@ -815,7 +812,6 @@ def test_o8_d4_setup_adopts_an_all_down_tenant_whose_runs_are_refused(
     assert rc == 0, f"defender-policy show gather exited {rc!r} over an all-down tenant:\n{shown}"
     assert shown.startswith("agent: gather"), f"defender-policy showed no gather policy:\n{shown}"
 
-    tenant = S.Planted(root=root, tenant_id=tenant_id, knowledge=H20.knowledge_dir(root, tenant_id))
     before = _runs_entries(tenant)
     d = S.run_alert(tmp_path / "run", alert=_alert(), tenant=tenant, **_down_lead())
     text = _refusal_text(d, tenant)

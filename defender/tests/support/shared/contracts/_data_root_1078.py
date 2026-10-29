@@ -85,13 +85,9 @@ class KnowledgeFolder(type(Path())):  # type: ignore[misc]
 
 
 def ensure_d9_tenant(tenant_id: str = D9_TENANT_ID) -> str:
-    """Set `tenant_id` up in the current test's data root (`set_up_tenant`), unless its row is
-    already there. Returns the id (a `D9Tenant`, a `str`), ready to hand to `--tenant`; a call site migrated
-    to #1214 also passes `directory=<that id>.directory`.
-
-    WHEN THE ROW GOES (code-stage census): this stops calling `create_tenant`/`accept_tenant` (via
-    `set_up_tenant`); the knowledge folder stays and the tenant exists only in `.directory`. Call sites keep
-    this call and add `directory=`; nothing else about them changes."""
+    """Set `tenant_id` up in the current test's data root (`set_up_tenant`). Returns the id (a `D9Tenant`, a
+    `str`), ready to hand to `--tenant`; a host entry call also passes `directory=<that id>.directory`
+    (O6: the folder is on disk, the tenant only in `.directory`)."""
     set_up_tenant(current_data_root(), tenant_id)
     return D9Tenant(tenant_id)
 
@@ -124,10 +120,9 @@ def _published_copy(tenant_id: str) -> Path:
 
 def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID, *, published: bool = False) -> Any:
     """`tenant_id` set up under the data root `root` the way an operator does and accepted: the
-    committed fixture tenant copied to `<root>/<id>/knowledge` with its `agent/.tenant-id`, then
-    the row minted by the REAL `create_tenant`. Each step is skipped when already done, so a
-    second call is the first one's tenant. Returns the `Tenant` the real `accept_tenant` hands
-    back.
+    committed fixture tenant copied to `<root>/<id>/knowledge` with its `agent/.tenant-id`
+    (O6: no row is written; the tenant exists in `.directory`). Each step is skipped when already
+    done. Returns the `Tenant` the real `accept_tenant` hands back.
 
     `published=True` (opt-in for branch-launch scenes): the same content as a REAL published
     tenant (clone, export, `exports/current`), so a source stamped through
@@ -135,9 +130,7 @@ def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID, *, published: bool 
     pinned. Asking for it over a tenant already set up unpublished is a fixture bug, refused.
 
     `.directory` on the returned `Tenant` (#1214): a `LazyDirectory` over `tenant_directory(root, id)`, the
-    tenant active with its forge wiring; a migrated call site passes `directory=t.directory`. WHEN THE ROW
-    GOES (code-stage census): the `create_tenant` line and the `accept_tenant` return go; this returns an
-    object carrying the tenant's paths and `.directory` instead, built from the same arguments."""
+    tenant active with its forge wiring; a migrated call site passes `directory=t.directory`."""
     owner = _tenant_owner()
     root = Path(location_path(root))
     if published:
@@ -151,8 +144,6 @@ def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID, *, published: bool 
     if not knowledge.exists():
         shutil.copytree(FIXTURE, knowledge, symlinks=True)
         (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
-    if not (root / tenant_id / "tenant.json").is_file():
-        owner.create_tenant(fixture_data_root(root), tenant_id)
     accepted = owner.accept_tenant(fixture_data_root(root), tenant_id, defender_dir=DEFENDER)
     # a frozen dataclass without slots still takes an instance attribute; eq and hash use the fields only
     with contextlib.suppress(AttributeError, TypeError):

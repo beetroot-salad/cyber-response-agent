@@ -63,9 +63,28 @@ def in_process_publish() -> Callable[..., str]:
     return publish
 
 
-def with_publish(seams: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
-    """`seams` with the in-process publish added, unless the caller already passes its own."""
+def directory_for_argv(argv: Any, root: Path | str | None = None, **keywords: Any) -> Any:
+    """The `TenantDirectory` a run's `--tenant T` is admitted from (#1214 Flow 4): `T` active with its forge wiring
+    when `<root>/<T>/knowledge` is placed, else an empty directory (every tenant unknown: the refusal side).
+    `root` defaults to this test's data root; `keywords` are `active_directory`'s (`state=`, `wiring=`, ...)."""
+    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
+
+    words = [str(a) for a in argv or ()]
+    root = Path(root) if root is not None else current_data_root()
+    tenant = words[words.index("--tenant") + 1] if "--tenant" in words[:-1] else None
+    if tenant is not None and (root / tenant / "knowledge").is_dir():
+        return tenant_directory(root, tenant, **keywords)
+    twin = InMemoryTenantRepository()
+    return TenantDirectory(lambda: twin)
+
+
+def with_publish(seams: MutableMapping[str, Any], argv: Any = None) -> MutableMapping[str, Any]:
+    """`seams` with the in-process publish added, unless the caller already passes its own; given the run's `argv`,
+    also `directory=` (`directory_for_argv`) unless the caller passes one."""
     seams.setdefault(PUBLISH_SEAM, in_process_publish())
+    if argv is not None:
+        seams.setdefault("directory", directory_for_argv(argv))
     return seams
 
 
@@ -81,4 +100,4 @@ class RunWithPublish:
         return getattr(self._module, name)
 
     def main(self, argv: Any = None, **seams: Any) -> Any:
-        return self._module.main(argv, **with_publish(seams))
+        return self._module.main(argv, **with_publish(seams, argv))

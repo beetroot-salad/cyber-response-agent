@@ -1316,7 +1316,8 @@ def _held_lead_drain(s: TenantLeadScene, monkeypatch: Any
     daemon.refuse_start(at=[1])
     start = X.HeldStart(daemon)
     got = _p4_caught(lambda: drains.lead_author_drain(
-        s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), start_box=start))
+        s.paths, client=s.t.forge.client, identity=s.t.vault.identity(), directory=s.t.directory,
+        start_box=start))
     [request] = start.requests
     X.no_path_docker(daemon)
     return got, daemon.calls_from_the_first_stop(request.name)
@@ -1407,7 +1408,7 @@ def _production_lead_drain(s: TenantLeadScene, daemon: X.FakeDaemon,
         seams["start_box"] = partial(box_mod.start_box, docker=daemon)
     got = _p4_caught(lambda: drains.lead_author_drain(
         s.paths, run_lead_author=lanes.run_lead, run_pitfalls=lanes.run_pitfalls,
-        client=s.t.forge.client, identity=s.t.vault.identity(), **seams))
+        client=s.t.forge.client, identity=s.t.vault.identity(), directory=s.t.directory, **seams))
     return got, lanes
 
 
