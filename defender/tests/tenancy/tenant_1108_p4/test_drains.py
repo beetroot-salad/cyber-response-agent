@@ -68,6 +68,7 @@ from defender.tests.tenancy.tenant_1108_p4._support import (
     bind_forge,
     current_commit,
     git,
+    unbind_forge,
 )
 
 
@@ -165,6 +166,7 @@ def test_o9_a_tenant_with_no_forge_binding_refuses_the_drain_before_any_model_ca
     before touching the issuer, the forge, a draft, a box or the curator. Positive control: once
     bound, the same tick reaches them."""
     t = p4_tenant
+    unbind_forge(t)  # the fixture's directory wires every tenant; this case is the unwired one
     paths, trigger, box = _author_tick(t, product_repo(tmp_path))
     # The fixture's own publish already asked the issuer and the forge; only the drain counts.
     t.vault.calls.clear()

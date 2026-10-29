@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS, TRY_ONCE
@@ -469,7 +470,7 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
         lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps, box=box, on_done=on_done)
 
     drains._drain_lead_author_markers(lane.paths, state, serve,
-                                      accept_tenant=drains._tenant_acceptor(None), directory=None)
+                                      accept_tenant=drains._tenant_acceptor(None), directory=directory_for_root())
 
     name = run_dir.name
     assert lane.landed() == []

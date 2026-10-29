@@ -4,6 +4,7 @@ The mixed pitfalls tick runs over a batch draft (`_curator1134.draft_lane`) with
 product checkout; what landed is read from the batch branch (`agent/...`)."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared._locations_1210 import location_path
 
 import json
@@ -112,7 +113,7 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
     capsys.readouterr()
     for _tick in range(5):
         drains._drain_lead_author_markers(paths, state, refusing_lane,
-                                          accept_tenant=drains._tenant_acceptor(paths.tenant), directory=None)
+                                          accept_tenant=drains._tenant_acceptor(paths.tenant), directory=directory_for_root())
 
     assert len(calls) == 1, f"the refusal was retried: {len(calls)} invocations"
     assert not (location_path(paths.state_root) / "author-queue" / "case-1.json").exists()
