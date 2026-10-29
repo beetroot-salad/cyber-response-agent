@@ -30,6 +30,9 @@ from defender.tests.support.shared._postgres1339 import migrated_database  # noq
 TENANT = "7f3c1a52-9d4e-4b8a-a1c6-2e5d8b9f0c13"
 OTHER = "0b9e6d2a-41c8-4f57-8e3b-6a7d1c5f9e24"
 NOT_A_REFUSAL_OF_STATE = ("not active", "offboarding", "creating", "offboarded", "no database")
+#: Refusals that are not about state; an admission control must show none of them either (FRR-1).
+OTHER_REFUSALS = ("unknown", "no row", "no such", "not a tenant", "does not exist", "not found", "no forge wiring",
+                  "invalid choice", "defender_database_dsn")
 DEFENDER = Path(__file__).resolve().parents[3]
 
 
@@ -106,7 +109,7 @@ def _has(text: str, *words: str) -> None:
 def _admits(text: str) -> bool:
     """True when the entry point got past the tenant-state check (its text names no state refusal). Strict: callers
     that claim admission also assert the run's stand-ins were reached, or that the folder is placed (`_tenant_placed`)."""
-    return not any(word in text for word in NOT_A_REFUSAL_OF_STATE)
+    return not any(word in text.lower() for word in (*NOT_A_REFUSAL_OF_STATE, *OTHER_REFUSALS))
 
 
 def place_complete(data_root: Path, tenant: str) -> Path:

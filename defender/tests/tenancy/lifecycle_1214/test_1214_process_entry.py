@@ -150,9 +150,14 @@ def test_a_failing_finish_records_its_restart_point_and_resume_completes_it(worl
     assert gen.approle not in world.openbao.approles
 
 
-def test_offboarding_removes_the_tenants_dev_output_and_keeps_another_tenants(world, run_visualizations_dir, monkeypatch):
+@pytest.fixture
+def dev_deployment(monkeypatch) -> None:
+    """A dev deployment, set before the world (and its config) is built: only dev has dev output (FRR-3)."""
+    monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
+
+
+def test_offboarding_removes_the_tenants_dev_output_and_keeps_another_tenants(dev_deployment, world, run_visualizations_dir):
     """Teardown deletes `<DEFENDER_RUN_VISUALIZATIONS_DIR>/<T>/`; another tenant's directory beside it stays (O4, Flow 2.3)."""
-    monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")  # only a dev deployment has dev output
     tenant, other = world.active_tenant(), world.active_tenant()
     for t in (tenant, other):
         (run_visualizations_dir / t / "runs").mkdir(parents=True)
