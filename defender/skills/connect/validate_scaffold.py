@@ -312,7 +312,8 @@ def main() -> None:
     try:
         requested = tenancy.requested_tenant_id(args.tenant)
         settings_dir = tenancy.accept_tenant(
-            tenancy.resolve_data_root(), requested, defender_dir=defender).settings
+            tenancy.resolve_data_root(), requested, defender_dir=defender,
+            parse_tables=False).settings
     except TenantRefused as refusal:
         report.add(WARN, f"config.env not checked — the tenant's settings folder could not be "
                          f"resolved: {refusal}")

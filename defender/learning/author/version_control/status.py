@@ -38,6 +38,7 @@ from defender.tenancy import (
 if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
 
+from .auth import CredentialMisconfigured
 from .forgejo import ForgeError
 from .model import LockBusy
 
@@ -76,6 +77,12 @@ def classify(error: BaseException) -> tuple[str, str]:
     return _fault_kind(error), one_line(reason)
 
 
+def is_misconfigured(error: BaseException) -> bool:
+    """Whether `error` stems from a credential the host cannot even log in with (its host secret
+    file missing, unreadable or malformed): the `misconfigured` outcome, not a `stale` one."""
+    return any(isinstance(fault, CredentialMisconfigured) for fault in _chain(error))
+
+
 def _fault_kind(error: BaseException) -> str:
     if isinstance(error, LockBusy):
         return TRANSIENT
@@ -112,6 +119,6 @@ def recording(directory: TenantDirectory | None, tenant_id: object, *, by: str) 
 
 __all__ = [
     "FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT",
-    "classify", "read_status", "record_published", "record_refused", "record_report",
+    "classify", "is_misconfigured", "read_status", "record_published", "record_refused", "record_report",
     "recording",
 ]

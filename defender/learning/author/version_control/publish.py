@@ -47,6 +47,7 @@ from .status import (
     STALE_OPERATOR,
     STALE_TRANSIENT,
     classify,
+    is_misconfigured,
     record_report,
 )
 
@@ -172,6 +173,8 @@ def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outc
     except LockBusy as busy:
         return _lock_busy(tenant, repository, busy)
     except DeliveryRefused as refused:
+        if is_misconfigured(refused):
+            return report(MISCONFIGURED, str(refused))
         kind, reason = classify(refused)
         return report(STALE_OPERATOR if kind == OPERATOR else STALE_TRANSIENT, reason)
     return report(FRESH, export.commit)

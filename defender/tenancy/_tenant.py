@@ -382,7 +382,7 @@ def requested_tenant_id(raw: object) -> TenantId:
 
 def accept_tenant(
     data_root: DataRoot, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot] = (),
-    clone_tree: bool = True,
+    clone_tree: bool = True, parse_tables: bool = True,
 ) -> Tenant:
     """`raw_id` under `data_root`, checked whole — the ONE acceptance of a tenant, and the
     only constructor of `Tenant`. Refused with `TenantRefused` naming the refused value, at the
@@ -393,11 +393,15 @@ def accept_tenant(
     copy's settings are held to `check_run_settings`. The folder rules still judge the clone
     whenever it has a working tree, so a tenant whose folder is faulted is refused at run start
     with the tenant check's own reason (#1222 A5), snapshot or none; only a clone whose working
-    tree is gone altogether (both halves absent, its git objects kept: R-I5) is not asked."""
+    tree is gone altogether (both halves absent, its git objects kept: R-I5) is not asked.
+
+    `parse_tables=False` leaves the two reviewed tables (`SETTINGS_TABLES`) unparsed: for the one
+    consumer that only locates the settings folder and never loads a table (`validate_scaffold`,
+    #1120); every consumer that loads or admits the tenant keeps the default."""
     tenant_id = TenantId(raw_id)
     paths = _TenantPaths(data_root, tenant_id)
     _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted,
-                      clone_tree=clone_tree)
+                      clone_tree=clone_tree, parse_tables=parse_tables)
     return Tenant(id=tenant_id, data_root=data_root, _token=_ACCEPTED)
 
 
@@ -439,7 +443,7 @@ def requested_tenant(data_root: DataRoot, raw: object) -> Tenant:
 
 def _accept_knowledge(
     paths: _TenantPaths, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot],
-    clone_tree: bool = True,
+    clone_tree: bool = True, parse_tables: bool = True,
 ) -> None:
     """Steps 3-7 of `accept_tenant` over an id and root its layout class already guarded.
     The knowledge folder is neither followed nor resolved: the walk opens `<T>` and
@@ -452,7 +456,7 @@ def _accept_knowledge(
         _knowledge_is_real(paths, _real_io.stat_entry(bound, knowledge_name))
         if clone_tree or _has_working_tree(bound, knowledge_name):
             _check_knowledge(bound.under(knowledge_name), paths.knowledge,
-                             tenant_id=paths.tenant_id)
+                             tenant_id=paths.tenant_id, parse_tables=parse_tables)
     root_real = _resolve_or_refuse(root)
     settings_real = root_real / paths.settings.relative_to(root)
     halves_real = (settings_real, root_real / paths.agent.relative_to(root))
@@ -516,10 +520,11 @@ def check_knowledge_folder(folder: Path, *, tenant_id: TenantId | None) -> None:
 
 
 def _check_knowledge(
-    bound: _real_io.Bound, folder: Path, *, tenant_id: TenantId | None,
+    bound: _real_io.Bound, folder: Path, *, tenant_id: TenantId | None, parse_tables: bool = True,
 ) -> None:
     """`check_knowledge_folder`'s rules over `bound`, the knowledge folder's no-follow reader;
-    `folder` is its path, used only to name what is refused."""
+    `folder` is its path, used only to name what is refused. `parse_tables=False` skips the
+    `SETTINGS_TABLES` parse (see `accept_tenant`)."""
     top = bound.entries()
     if top.entries is None:
         raise TenantRefused(f"{folder} could not be listed: "
@@ -545,7 +550,7 @@ def _check_knowledge(
     for name in (SETTINGS_HALF, AGENT_HALF):
         _refuse_links_and_special_files(bound, folder, name)
     # After the link walk: each table is read no-follow, but a link at its name is the walk's.
-    for rel, (what, known) in SETTINGS_TABLES.items():
+    for rel, (what, known) in (SETTINGS_TABLES if parse_tables else {}).items():
         _table_parses(bound.read(f"{SETTINGS_HALF}/{rel}"), folder / SETTINGS_HALF / rel,
                       what=what, known=known)
     tenant_id_file = folder / TENANT_ID_FILE

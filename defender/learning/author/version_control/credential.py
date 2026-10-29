@@ -32,7 +32,7 @@ import httpx
 from defender import _io
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
 
-from .auth import CLOCK_SKEW, ForgejoAuthError, ForgejoIdentity
+from .auth import CLOCK_SKEW, CredentialMisconfigured, ForgejoAuthError, ForgejoIdentity
 
 if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
@@ -90,18 +90,18 @@ class TenantForgeCredential:
     def _secret(self, live: Any) -> str:
         path = Path(live.host_secret_file or "")
         if not live.host_secret_file or not path.is_absolute():
-            raise ForgejoAuthError(
+            raise CredentialMisconfigured(
                 f"tenant {self.tenant_id}'s live credential generation records no host secret file")
         try:
             data = _io.read_plain_bytes(path)
         except OSError as unreadable:
-            raise ForgejoAuthError(
+            raise CredentialMisconfigured(
                 f"tenant {self.tenant_id}'s host secret file {path} could not be read: "
                 f"{unreadable.strerror or type(unreadable).__name__}") from None
         # The file holds the secret id and one newline (r9); bounded and no-follow by `read_plain_bytes`.
         secret = data.decode("utf-8", "replace").strip()
         if not secret or "\n" in secret:
-            raise ForgejoAuthError(f"tenant {self.tenant_id}'s host secret file {path} does not hold one "
+            raise CredentialMisconfigured(f"tenant {self.tenant_id}'s host secret file {path} does not hold one "
                                    "secret id")
         return secret
 
