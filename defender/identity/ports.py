@@ -8,7 +8,6 @@ from collections.abc import Collection
 from typing import Protocol
 
 from defender._model import model
-from defender.records.formats import TenantId
 
 from .models import Membership, MembershipStatus, Session, User
 
@@ -28,7 +27,7 @@ class IdentityRepository(Protocol):
 
     - emails are unique and stored lower-cased;
     - at most one `invited`-or-`active` membership per (user, tenant);
-    - a membership refers to a registered tenant and an existing user;
+    - a membership refers to a stored tenant and an existing user;
     - every status change is conditional on the expected status and reports whether it applied;
     - `active` carries `accepted_at`, `ended` carries `ended_at` and `ended_by`;
     - a session is found by the hash of its value, and the value itself is never kept.
@@ -41,12 +40,10 @@ class IdentityRepository(Protocol):
         """Release what the repository holds (its connection pool)."""
         ...
 
-    # --- tenants
-    async def register_tenant(self, tenant_id: TenantId, *, now: _dt.datetime) -> None:
-        """Idempotent; the first call's `now` is the tenant's creation time."""
+    # --- tenants: rows of the tenant repository (`tenancy`), which alone writes them (#1214)
+    async def tenant_exists(self, tenant_id: str) -> bool:
+        """Present and `active`: a tenant being created or offboarded does not exist here."""
         ...
-    async def tenant_exists(self, tenant_id: str) -> bool: ...
-    async def tenants(self) -> list[str]: ...
     async def tenant_has_ever_had_membership(self, tenant_id: str) -> bool: ...
     async def tenant_has_active_members(self, tenant_id: str) -> bool: ...
 
@@ -76,7 +73,8 @@ class IdentityRepository(Protocol):
         already an active member. Finished rows are never reopened."""
         ...
     async def accept_invitation(self, membership_id: str, *, now: _dt.datetime) -> bool:
-        """`invited` -> `active` while unexpired (`expires_at` unset or after `now`)."""
+        """`invited` -> `active` while unexpired (`expires_at` unset or after `now`) and while its
+        tenant is `active`, checked in the same statement."""
         ...
     async def end_membership(self, membership_id: str, *, ended_by: str, now: _dt.datetime) -> bool: ...
     async def revoke_invitation(self, membership_id: str) -> bool: ...

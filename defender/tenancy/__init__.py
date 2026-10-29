@@ -1,4 +1,7 @@
-"""Tenant registration, acceptance, and tenant ownership."""
+"""Tenant registration, acceptance, and tenant ownership; the tenant record and its lifecycle
+tables (#1214): the models, the repository port with its in-memory and PostgreSQL implementations
+(`tenancy.postgres`, never served here, so importing this door loads no database driver), and the
+synchronous `TenantDirectory` for host code."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -9,6 +12,7 @@ if TYPE_CHECKING:
     from defender.tenancy._command_line_run import (
         open_command_line_run as open_command_line_run,
     )
+    from defender.tenancy._directory import TenantDirectory as TenantDirectory
     from defender.tenancy._exports import (
         DeliveryRefused as DeliveryRefused,
         POINTER as POINTER,
@@ -61,6 +65,7 @@ if TYPE_CHECKING:
         requested_tenant as requested_tenant,
         requested_tenant_id as requested_tenant_id,
         resolve_data_root as resolve_data_root,
+        retire_row as retire_row,
         tenant_id_file_text as tenant_id_file_text,
     )
     from defender.tenancy._tenants import (
@@ -70,15 +75,37 @@ if TYPE_CHECKING:
         add_tenant_arguments as add_tenant_arguments,
         template_dir as template_dir,
     )
+    from defender.tenancy.memory import InMemoryTenantRepository as InMemoryTenantRepository
+    from defender.tenancy.models import (
+        ForgeWiring as ForgeWiring,
+        Generation as Generation,
+        PublishStatus as PublishStatus,
+        TenantRecord as TenantRecord,
+    )
+    from defender.tenancy.repository import (
+        ADOPT_FAILURE as ADOPT_FAILURE,
+        ALL as ALL,
+        Conflict as Conflict,
+        FenceMissed as FenceMissed,
+        HeldTenant as HeldTenant,
+        KEEP as KEEP,
+        NotFound as NotFound,
+        TenantRepository as TenantRepository,
+        claimable_now as claimable_now,
+    )
 
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("open_command_line_run",), "_command_line_run"),
+    **dict.fromkeys(("TenantDirectory",), "_directory"),
     **dict.fromkeys(("DeliveryRefused", "POINTER", "TenantExport", "current_export", "knowledge_lock_holder", "lock_pid", "read_export_text", "regular_files", "remove_entry",), "_exports"),
     **dict.fromkeys(("OWNER_FILE", "owner_alive", "process_start", "write_owner",), "_owner"),
     **dict.fromkeys(("FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT", "read_status", "record_published", "record_refusal", "record_report",), "_publish_status"),
-    **dict.fromkeys(("ForgeBinding", "ISSUER_ROLE", "Tenant", "TenantId", "accept_placed_knowledge", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "clone_halves", "create_tenant", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "learning_root_for_setup", "parse_tenant_id_bytes", "read_forge_binding", "refuse_foreign_data_root", "requested_tenant", "requested_tenant_id", "resolve_data_root", "tenant_id_file_text",), "_tenant"),
+    **dict.fromkeys(("ForgeBinding", "ISSUER_ROLE", "Tenant", "TenantId", "accept_placed_knowledge", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "clone_halves", "create_tenant", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "learning_root_for_setup", "parse_tenant_id_bytes", "read_forge_binding", "refuse_foreign_data_root", "requested_tenant", "requested_tenant_id", "resolve_data_root", "retire_row", "tenant_id_file_text",), "_tenant"),
     **dict.fromkeys(("AGENT_HALF", "SETTINGS_HALF", "TENANT_ID_FILE", "add_tenant_arguments", "template_dir",), "_tenants"),
+    **dict.fromkeys(("InMemoryTenantRepository",), "memory"),
+    **dict.fromkeys(("ForgeWiring", "Generation", "PublishStatus", "TenantRecord",), "models"),
+    **dict.fromkeys(("ADOPT_FAILURE", "ALL", "Conflict", "FenceMissed", "HeldTenant", "KEEP", "NotFound", "TenantRepository", "claimable_now",), "repository"),
 }
 
 __getattr__ = lazy_door(globals(), _HOMES)

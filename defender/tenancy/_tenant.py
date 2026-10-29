@@ -954,3 +954,26 @@ def data_root_for_child(root: DataRoot) -> Path:
     """Explicit owner export of a configured root to a child process, which is handed
     identifiers only (the tenant id and this root, #1108 P4 O8) and accepts the tenant itself."""
     return unwrap_data_root(root)
+
+
+def retire_row(data_root: Path, tenant_id: str) -> bool:
+    """Remove `<data root>/<T>/tenant.json`, the pre-#1214 row, once adoption has moved the tenant
+    into PostgreSQL (O6, O9): True when a regular file was removed, False when there is none. Any
+    other entry there (a link included) is refused and left as it is. Only adoption calls this."""
+    folder = Path(data_root) / str(TenantId(tenant_id))
+    try:
+        fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return False
+    try:
+        try:
+            st = os.stat(ROW_NAME, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        if not stat.S_ISREG(st.st_mode):
+            raise TenantRefused(f"{folder / ROW_NAME} is not a regular file "
+                                f"(mode {stat.filemode(st.st_mode)}); refusing to remove it")
+        os.unlink(ROW_NAME, dir_fd=fd)
+        return True
+    finally:
+        os.close(fd)

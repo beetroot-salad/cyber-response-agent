@@ -10,7 +10,7 @@ import hashlib
 from collections.abc import Collection
 from typing import Any, TypeVar, overload
 
-from defender.records.formats import TenantId
+from defender.tenancy import InMemoryTenantRepository
 
 from .errors import DataRuleViolation
 from .models import Membership, MembershipStatus, Session, User, UserStatus, normalize_email
@@ -53,10 +53,12 @@ def check_membership_fields(
 
 
 class InMemoryIdentityRepository:
-    """For one event loop: an operation never yields partway, so each applies whole."""
+    """For one event loop: an operation never yields partway, so each applies whole. Tenants are
+    read from the in-memory tenant repository given as `tenants` (its store, shared, never copied),
+    or from one of its own; this repository writes none."""
 
-    def __init__(self) -> None:
-        self._tenants: dict[str, _dt.datetime] = {}
+    def __init__(self, tenants: InMemoryTenantRepository | None = None) -> None:
+        self._tenants = tenants if tenants is not None else InMemoryTenantRepository()
         self._users: dict[str, User] = {}
         self._by_email: dict[str, str] = {}
         self._by_account: dict[str, str] = {}
@@ -67,14 +69,11 @@ class InMemoryIdentityRepository:
     async def close(self) -> None:
         """Nothing is held outside this object."""
 
-    async def register_tenant(self, tenant_id: TenantId, *, now: _dt.datetime) -> None:
-        self._tenants.setdefault(str(TenantId(tenant_id)), now)
+    def _active(self, tenant_id: str) -> bool:
+        return self._tenants.state_of(str(tenant_id)) == "active"
 
     async def tenant_exists(self, tenant_id: str) -> bool:
-        return str(tenant_id) in self._tenants
-
-    async def tenants(self) -> list[str]:
-        return sorted(self._tenants)
+        return self._active(tenant_id)
 
     async def tenant_has_ever_had_membership(self, tenant_id: str) -> bool:
         return any(m.tenant_id == str(tenant_id) for m in self._memberships.values())
@@ -164,8 +163,8 @@ class InMemoryIdentityRepository:
     def _refuse_dangling(self, user_id: str, tenant_id: str) -> None:
         if user_id not in self._users:
             raise DataRuleViolation(f"no user {user_id!r}")
-        if tenant_id not in self._tenants:
-            raise DataRuleViolation(f"no registered tenant {tenant_id!r}")
+        if self._tenants.state_of(tenant_id) is None:
+            raise DataRuleViolation(f"no tenant {tenant_id!r}")
 
     def _insert_membership(self, **fields: object) -> Membership:
         row = Membership(**fields)  # type: ignore[arg-type]
@@ -207,7 +206,8 @@ class InMemoryIdentityRepository:
 
     async def accept_invitation(self, membership_id: str, *, now: _dt.datetime) -> bool:
         row = self._memberships.get(membership_id)
-        if row is None or row.status != "invited" or (row.expires_at is not None and row.expires_at <= now):
+        if row is None or row.status != "invited" or (row.expires_at is not None and row.expires_at <= now) \
+                or not self._active(row.tenant_id):
             return False
         self._update_membership(membership_id, status="active", accepted_at=now)
         return True

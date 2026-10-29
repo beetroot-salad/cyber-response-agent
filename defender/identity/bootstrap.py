@@ -1,25 +1,28 @@
-"""The deployment bootstrap file: who the platform administrators are, and which existing
-tenants have which first members. Plain data; the service applies it at start."""
+"""The deployment bootstrap file: who the platform administrators are. Plain data; the service
+applies it at start. Since #1214 it names no tenants: tenants are created through the API and their
+first members invited by an administrator, so a file that still has a `tenants` section is refused."""
 
 from __future__ import annotations
 
-import datetime as _dt
-from collections.abc import Mapping
+from typing import Any
 
-from defender._model import model
-from defender.records.formats import TenantId
+from pydantic import model_validator
 
-from .ports import IdentityRepository
+from defender._model import model, unwrap_before
+
 from .models import Email
 
 
 @model(frozen=True)
 class Bootstrap:
     administrators: tuple[Email, ...]
-    tenants: Mapping[str, tuple[Email, ...]]
 
-
-async def register_tenant(repo: IdentityRepository, tenant_id: TenantId, *, now: _dt.datetime) -> None:
-    """Register a tenant so memberships can refer to it. The one function #1214's tenant
-    creation takes over."""
-    await repo.register_tenant(tenant_id, now=now)
+    # TypeError, as for any unknown field of a dataclass, but naming what replaced the section.
+    @model_validator(mode="before")
+    @classmethod
+    def _no_tenants_section(cls, value: Any) -> Any:
+        given = unwrap_before(cls, value)
+        if isinstance(given, dict) and "tenants" in given:
+            raise TypeError("the bootstrap file has no tenants section since #1214: create a tenant through "
+                            "the API and invite its first members as an administrator")
+        return given
