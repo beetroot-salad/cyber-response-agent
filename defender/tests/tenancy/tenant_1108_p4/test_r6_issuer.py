@@ -173,6 +173,7 @@ def test_r6_no_secret_reaches_a_log_record_or_an_error_text(p4_tenant, tmp_path,
         with pytest.raises(ForgejoAuthError) as refused:
             _credential(p4_tenant, tmp_path, openbao_url="https://openbao.test", fields=fields,
                         transport=httpx.MockTransport(echo)).token()
+    assert "denied" not in str(refused.value), "the issuer's echoed body reached the error text"
     texts = [r.getMessage() for r in caplog.records]
     texts.append(str(refused.value))
     cause = refused.value

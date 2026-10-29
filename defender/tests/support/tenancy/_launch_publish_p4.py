@@ -63,12 +63,20 @@ def in_process_publish() -> Callable[..., str]:
     return publish
 
 
-def directory_for_argv(argv: Any, root: Path | str | None = None, **keywords: Any) -> Any:
-    """The `TenantDirectory` a run's `--tenant T` is admitted from (#1214 Flow 4): `T` active with its forge wiring
-    when `<root>/<T>/knowledge` is placed (or this process has no data root at all, so the data-root fault is what
-    refuses), else an empty directory (every tenant unknown: the refusal side).
-    `root` defaults to this test's data root; `keywords` are `active_directory`'s (`state=`, `wiring=`, ...)."""
+def empty_directory() -> Any:
+    """A `TenantDirectory` that knows no tenant: the unknown-tenant side of a refusal (pass it as `directory=`)."""
     from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+
+    twin = InMemoryTenantRepository()
+    return TenantDirectory(lambda: twin)
+
+
+def directory_for_argv(argv: Any, root: Path | str | None = None, **keywords: Any) -> Any:
+    """The `TenantDirectory` a run's `--tenant T` is admitted from (#1214 Flow 4): `T` ACTIVE with its forge wiring
+    whatever the folder state, so a missing or broken folder is refused by `accept_tenant`'s own folder check, never
+    by this helper. With no `--tenant` nothing is active; a test whose subject is an unknown tenant passes
+    `empty_directory()` itself. `root` defaults to this test's data root (none in this process: a nonexistent one, so
+    the data-root fault refuses); `keywords` are `active_directory`'s (`state=`, `wiring=`, ...)."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
 
     words = [str(a) for a in argv or ()]
@@ -76,20 +84,18 @@ def directory_for_argv(argv: Any, root: Path | str | None = None, **keywords: An
         try:
             root = current_data_root()
         except AssertionError:  # no data root in this process: the tenant is active, the data-root fault refuses
-            root = None
+            root = Path("/nonexistent-data-root")
     tenant = words[words.index("--tenant") + 1] if "--tenant" in words[:-1] else None
-    if tenant is not None and root is None:
-        return tenant_directory(Path("/nonexistent-data-root"), tenant, **keywords)
-    if tenant is not None and (Path(root) / tenant / "knowledge").is_dir():
-        return tenant_directory(Path(root), tenant, **keywords)
-    twin = InMemoryTenantRepository()
-    return TenantDirectory(lambda: twin)
+    if tenant is None:
+        return empty_directory()
+    return tenant_directory(Path(root), tenant, **keywords)
 
 
-def directory_for_root(root: Path | str | None = None) -> Any:
+def directory_for_root(root: Path | str | None = None, *, also: Any = ()) -> Any:
     """The `TenantDirectory` a drain over several tenants is served from (#1214 Flow 4: it re-checks the state per
     claim): every tenant placed under `root` (default: this test's data root; `<root>/<T>/knowledge` is a
-    directory) active with its forge wiring; any other tenant is unknown to it."""
+    directory) active with its forge wiring, and so is every id in `also` (active whatever its folder: acceptance
+    refuses it); any other tenant is unknown to it."""
     import inspect
 
     from defender.tenancy import InMemoryTenantRepository, TenantDirectory
@@ -99,7 +105,7 @@ def directory_for_root(root: Path | str | None = None) -> Any:
     root = Path(root) if root is not None else current_data_root()
     twin: Any = InMemoryTenantRepository()
     placed = sorted(p.name for p in root.iterdir() if (p / "knowledge").is_dir()) if root.is_dir() else []
-    for tenant in placed:
+    for tenant in dict.fromkeys([*placed, *map(str, also)]):
         added = twin.add_tenant(tenant, created_at=_active1214.CREATED, state="active", repo=f"tenants/{tenant}",
                                 origin=_active1214._origin_of(root, tenant, None))
         if inspect.isawaitable(added):

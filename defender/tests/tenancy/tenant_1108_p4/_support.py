@@ -317,6 +317,74 @@ def bind_forge(t: PublishedTenant, *, origin: str | None = None,
     return bound
 
 
+@dataclass
+class Minting:
+    """A live generation provisioned through a fake OpenBao, and the real `forge_credential` over it: handing
+    `credential` to a drain or publish child as `identity=` puts the host secret really inside that process
+    (the provider reads the file on every mint). `secrets` are the values a leak scan must not find."""
+
+    fields: dict[str, Any]
+    bao: Any
+    credential: Any
+    secret: str
+
+    @property
+    def secrets(self) -> tuple[str, str]:
+        return (self.secret, self.fields["role_id"])
+
+    def logins(self) -> list[dict[str, Any]]:
+        return [c.body for c in self.bao.calls if c.path == "/v1/auth/approle/login"]
+
+    def assert_logged_in_with_the_file(self) -> None:
+        """Premise: the fake's recorded login carried the file's secret id and the generation's role id."""
+        assert {"role_id": self.fields["role_id"], "secret_id": self.secret} in self.logins(), (
+            "the host secret never entered the process: no login carried the file's secret")
+
+
+def minting(t: PublishedTenant, tmp_path: Path, *, purpose: str = "drain") -> Minting:
+    """Provision a live generation for `t` over a `FakeOpenBao` (host secret file written), record it with
+    `bind_forge`, and build the real credential provider over that fake (tokens given a JWT's shape)."""
+    import base64
+    import json
+    import time
+    from types import SimpleNamespace
+
+    import httpx
+
+    from defender.learning.author.version_control import forge_credential
+    from defender.tests.support.tenancy._active1214 import provision_generation
+    from defender.tests.tenancy.lifecycle_1214._fakes import FakeOpenBao
+
+    bao = FakeOpenBao()
+    management = httpx.Client(transport=httpx.MockTransport(bao.handle), base_url="https://openbao.test",
+                              headers={"X-Vault-Token": bao.management_token})
+    fields = provision_generation(management, t.tenant_id, tmp_path / "secrets")
+    secret = Path(fields["host_secret_file"]).read_text(encoding="utf-8").strip()
+    bind_forge(t, generations=[fields])
+
+    def part(doc: dict[str, Any]) -> str:
+        return base64.urlsafe_b64encode(json.dumps(doc).encode()).decode().rstrip("=")
+
+    now = int(time.time())
+    claims = {"iss": "https://openbao.test/v1/identity/oidc", "tenant_id": t.tenant_id, "aud": fields["audience"],
+              "iat": now, "exp": now + 600}
+    jwt = f"{part({'alg': 'none'})}.{part(claims)}.sig"
+    t.server.token = jwt  # the fake origin accepts the one token this provider mints
+
+    def signed(request: httpx.Request) -> httpx.Response:
+        # The fake mints opaque strings; the credential decodes claims, so give the token a JWT's shape.
+        answer = bao.handle(request)
+        if request.method != "GET" or "/identity/oidc/token/" not in request.url.path or answer.status_code != 200:
+            return answer
+        return httpx.Response(200, json={"data": {"token": jwt}})
+
+    config = SimpleNamespace(issuer_url="https://openbao.test/v1/identity/oidc", openbao_url="https://openbao.test",
+                             ca_cert=None)
+    credential = forge_credential(t.tenant_id, purpose, directory=t.directory, config=config,
+                                  transport=httpx.MockTransport(signed))
+    return Minting(fields=fields, bao=bao, credential=credential, secret=secret)
+
+
 def default_secrets_dir(t: PublishedTenant) -> Path:
     """Where `bind_forge`'s default generation names its host secret file."""
     return Path(t.data_root).absolute().parent / "operator" / "secrets"

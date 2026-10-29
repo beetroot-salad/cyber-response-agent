@@ -205,9 +205,9 @@ def tree_census(root: Path) -> dict[str, tuple[Any, ...]]:
         return {}
     out: dict[str, tuple[Any, ...]] = {}
     for current, dirnames, filenames in os.walk(root, followlinks=False):
-        # The host lock's folder is no tenant fact: an entry point takes the tenant's shared lock before it judges
+        # The host lock's folder, `<root>/.host-locks` only, is no tenant fact: an entry point takes the tenant's shared lock before it judges
         # the tenant, also one it then refuses (Flow 4, W4-8).
-        if ".host-locks" in dirnames:
+        if Path(current) == root and ".host-locks" in dirnames:
             dirnames.remove(".host-locks")
         for name in (*dirnames, *filenames):
             p = Path(current) / name
