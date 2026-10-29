@@ -11,12 +11,13 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from defender import _io
+from defender.configuration.issuer import ISSUER_URL, OPENBAO_URL
 
-#: The environment `from_env` reads (the dev container and the hosted units set them).
-ISSUER_URL_ENV = "DEFENDER_LIFECYCLE_ISSUER_URL"
+#: The environment `from_env` reads (the dev container and the hosted units set them). The issuer
+#: and OpenBao's address are the deployment's fixed service names (`configuration.issuer`), never
+#: read from the environment.
 FORGE_URL_ENV = "DEFENDER_LIFECYCLE_FORGE_URL"
 FORGE_TOKEN_FILE_ENV = "DEFENDER_LIFECYCLE_FORGE_ADMIN_TOKEN_FILE"
-OPENBAO_URL_ENV = "DEFENDER_LIFECYCLE_OPENBAO_URL"
 OPENBAO_LOGIN_FILE_ENV = "DEFENDER_LIFECYCLE_OPENBAO_LOGIN_FILE"
 OPENBAO_CA_ENV = "DEFENDER_LIFECYCLE_OPENBAO_CA"
 INTEGRATION_ENV = "DEFENDER_LIFECYCLE_INTEGRATION_CONTAINER"
@@ -34,18 +35,20 @@ class LifecycleConfig:
     """The lifecycle's settings (DC-13, F-11).
 
     `issuer_url` is OpenBao's OIDC issuer (https; the integration's `--issuer`, Forgejo fetches its
-    discovery document). `integration_command` names where the fixed integration command runs (dev:
-    the Forgejo container `docker exec` enters). `template_dir` is the committed template tenant.
+    discovery document) and `openbao_url` its address: the deployment's fixed service names by
+    default (`configuration.issuer`), a test's own when it injects them. `integration_command`
+    names where the fixed integration command runs (dev: the Forgejo container `docker exec`
+    enters). `template_dir` is the committed template tenant.
     `secrets_dir` holds one folder per tenant with one file per installed secret, outside every
     tenant's folder. `poll_interval` is the wait between passes (seconds), `lock_keepalive` the bound
     after which the database drops a dead worker's tenant lock (seconds, RC-2), `teardown_wait` how
     long teardown waits for the host lock after SIGTERM before SIGKILL (seconds). `oidc_key` and
     `token_policy` are the deployment's signing key and its one templated policy."""
 
-    issuer_url: str
+    issuer_url: str = ISSUER_URL
     forge_url: str
     forge_admin_token: str = field(repr=False)
-    openbao_url: str
+    openbao_url: str = OPENBAO_URL
     openbao_login: str = field(repr=False)
     integration_command: str
     template_dir: Path
@@ -87,8 +90,8 @@ class LifecycleConfig:
     def from_env(cls, *, template_dir: Path) -> LifecycleConfig:
         """The config of `python -m defender.lifecycle`, from the environment (secrets from the
         files it names)."""
-        missing = [n for n in (ISSUER_URL_ENV, FORGE_URL_ENV, FORGE_TOKEN_FILE_ENV, OPENBAO_URL_ENV,
-                               OPENBAO_LOGIN_FILE_ENV, INTEGRATION_ENV, SECRETS_DIR_ENV, DATA_ROOT_ENV)
+        missing = [n for n in (FORGE_URL_ENV, FORGE_TOKEN_FILE_ENV, OPENBAO_LOGIN_FILE_ENV, INTEGRATION_ENV,
+                               SECRETS_DIR_ENV, DATA_ROOT_ENV)
                    if not os.environ.get(n)]
         if missing:
             raise ConfigRefused(f"set {', '.join(missing)}")
@@ -98,9 +101,8 @@ class LifecycleConfig:
         except ValueError:
             raise ConfigRefused(f"{POLL_ENV} is not a number of seconds") from None
         return cls(
-            issuer_url=os.environ[ISSUER_URL_ENV], forge_url=os.environ[FORGE_URL_ENV],
+            forge_url=os.environ[FORGE_URL_ENV],
             forge_admin_token=_secret_file(os.environ[FORGE_TOKEN_FILE_ENV], FORGE_TOKEN_FILE_ENV),
-            openbao_url=os.environ[OPENBAO_URL_ENV],
             openbao_login=_secret_file(os.environ[OPENBAO_LOGIN_FILE_ENV], OPENBAO_LOGIN_FILE_ENV),
             integration_command=os.environ[INTEGRATION_ENV], template_dir=template_dir,
             secrets_dir=Path(os.environ[SECRETS_DIR_ENV]), data_root=Path(os.environ[DATA_ROOT_ENV]),

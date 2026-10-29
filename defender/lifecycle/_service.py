@@ -214,10 +214,10 @@ class ManagementService(Actor):
         """The forge accepts a push before it registers the branch (it does that after the push returns),
         so `main` is waited for, bounded, before anything reads or protects it."""
         for _ in range(MAIN_WAIT_TRIES):
-            if answered(await self._forge.get(f"/api/v1/repos/{repo}/branches/main"), 404).status_code != 404:
+            if answered(await self._forge.get(f"/api/v1/repos/{repo}")).json().get("empty") is not True:
                 return
             await asyncio.sleep(MAIN_WAIT_SECONDS)
-        raise StepFailed(f"{repo} has no main branch after the template push")
+        raise StepFailed(f"{repo} is still empty after the template push")
 
     async def _bot_jwt(self, gen: Generation) -> str:
         """The bot's JWT, through a short-lived secret id of the recorded AppRole (swept at `sweep`, P1)."""

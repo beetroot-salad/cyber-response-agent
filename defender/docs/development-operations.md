@@ -45,16 +45,27 @@ source records is reported and those records remain for the operator to reconcil
 The drains, standalone author commands, frontend, trace and revert commands require
 `--tenant <T>`. Run-associated writers derive the tenant from the accepted run or episode.
 
+## Host process settings (#1214)
+
+Host processes (`run.py`, the drains, `tenant.py`, `python -m defender.lifecycle`, the launch-time
+publish child) read the tenant records from the PostgreSQL that `DEFENDER_DATABASE_DSN` names
+(dev, on the compose network: `postgresql://defender:dev-only-change-me@postgres:5432/defender`);
+unset, each refuses, naming the variable. The base environment scrub drops it from every box,
+model lane and host child, and only the publish child's launcher adds it back.
+
+OpenBao and its OIDC issuer are fixed service names, not settings: `https://openbao:8200` and
+`https://openbao:8200/v1/identity/oidc`, defined once in `defender/configuration/issuer.py`. The
+infrastructure routes the name (DNS, the compose network) and makes OpenBao's certificate trusted
+where the process's TLS client looks (`SSL_CERT_FILE`/`SSL_CERT_DIR`, as the compose file does for
+Forgejo with the dev CA).
 
 ## Tenant version control credentials (PR #1253)
 
 Since #1108 P4 every corpus write goes through `defender.learning.author.version_control.TenantDelivery`:
-the drains, `tenant.py update`/`propose`/`setup` and the launch-time publish child log in to the
-issuer themselves with the AppRole pair in the tenant's issuer client config file, which the
-tenant row's forge binding names (`<T>/tenant.json`
-`forge: {origin, audience, issuer_role, issuer_config}`, `issuer_config` an absolute path; in
-dev `<repo>/playground-issuer/client/<tenant-id>/issuer.json`). There is no default path and no
-flag: each tenant logs in with its own file. The run process never imports it:
+the drains, `tenant.py update`/`propose` and the launch-time publish child mint the tenant's token
+themselves (`forge_credential`, #1214): the AppRole of the tenant's live credential generation in
+the tenant records, its secret from the host secret file that generation records, and the
+deployment's issuer (the fixed service names above). The run process never imports it:
 a run reads its own copy of one published export. Production deployment is not defined yet.
 `delivery.py` owns publish → draft/batch → commit → push/PR and revert. `repository.py`
 owns git semantics, `forgejo.py` the concrete Forgejo API, `auth.py` Vault identities, and

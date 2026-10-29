@@ -35,11 +35,13 @@ from defender.records import RecordTenant
 from defender.records.formats import TenantId, TenantRefused
 from defender import _io as _real_io
 from defender import _paths
+from defender import _yaml
 from defender._shown import quoted, shown
 from defender.tenancy._tenants import (
     AGENT_HALF,
     REQUIRED_SETTINGS,
     SETTINGS_HALF,
+    SETTINGS_TABLES,
     TENANT_ID_FILE,
     TOP_LEVEL_ALLOWED,
 )
@@ -533,6 +535,10 @@ def _check_knowledge(
         raise TenantRefused("; ".join(mapping_faults))
     for name in (SETTINGS_HALF, AGENT_HALF):
         _refuse_links_and_special_files(bound, folder, name)
+    # After the link walk: each table is read no-follow, but a link at its name is the walk's.
+    for rel, (what, known) in SETTINGS_TABLES.items():
+        _table_parses(bound.read(f"{SETTINGS_HALF}/{rel}"), folder / SETTINGS_HALF / rel,
+                      what=what, known=known)
     tenant_id_file = folder / TENANT_ID_FILE
     if tenant_id is None and _real_io.stat_entry(bound, TENANT_ID_FILE).absent:
         return
@@ -568,6 +574,15 @@ def _required_setting(found: _real_io.StatRead, path: Path) -> None:
         raise TenantRefused(f"{path} could not be checked: {found.reason}")
     if not stat.S_ISREG(found.st.st_mode):
         raise TenantRefused(f"a required settings file must be a regular file: {path}")
+
+
+def _table_parses(found: _real_io.RecordRead, path: Path, *, what: str, known: tuple[str, ...]) -> None:
+    """One of `SETTINGS_TABLES` parses as a reviewed mapping carrying only `known` keys (the
+    file-level rules `_yaml` holds for both tables' loaders), or `TenantRefused` naming `path`."""
+    if found.text is None:
+        raise TenantRefused(f"{what} at {path} could not be read: "
+                            f"{'it is missing' if found.absent else found.reason}")
+    _yaml.parse_reviewed_mapping(found.text, path, what=what, known=known, error=TenantRefused)
 
 
 def _half(found: _real_io.StatRead, half: Path, name: str) -> None:

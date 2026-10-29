@@ -10,9 +10,11 @@ audience. Nothing is cached across mints but the token itself while it is valid,
 made before a rotation mints for the new generation once the old token has run out, and one made
 before an offboarding mints nothing after it.
 
-`config` carries the host's view of the issuer: `issuer_url` (OpenBao's identity endpoint, https),
-`openbao_url` (its address) and, optionally, `ca_cert` (the PEM file OpenBao is trusted by). The
-secret, the client token and the JWT never reach an argv, an environment, a log line or a refusal.
+`config` carries the issuer: `issuer_url` (OpenBao's identity endpoint, https), `openbao_url` (its
+address) and, optionally, `ca_cert` (the PEM file OpenBao is trusted by). A process that passes
+none (every production one) uses the deployment's fixed service names
+(`configuration.issuer.DEPLOYMENT_ISSUER`). The secret, the client token and the JWT never reach
+an argv, an environment, a log line or a refusal.
 """
 
 from __future__ import annotations
@@ -27,9 +29,9 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from defender import _io
+from defender.configuration.issuer import DEPLOYMENT_ISSUER
 
 from .auth import CLOCK_SKEW, ForgejoAuthError, ForgejoIdentity
-from .model import DeliveryRefused
 
 if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
@@ -152,10 +154,8 @@ def forge_credential(
     transport: httpx.BaseTransport | None = None, clock: Callable[[], float] = time.time,
 ) -> TenantForgeCredential:
     """Tenant `tenant_id`'s forge credential for `purpose` (`publish`, `drain`, `connect`: named in
-    refusals). Nothing is read or sent until its first `token()`. With no `config` (the host has no
-    issuer configured) it is `DeliveryRefused` at once."""
-    if config is None:
-        raise DeliveryRefused(
-            f"no issuer is configured on this host: tenant {tenant_id}'s {purpose} credential cannot be minted")
-    return TenantForgeCredential(tenant_id=str(tenant_id), purpose=purpose, directory=directory, config=config,
+    refusals). Nothing is read or sent until its first `token()`. `config` is a test's issuer; with
+    none, the deployment's (`DEPLOYMENT_ISSUER`)."""
+    return TenantForgeCredential(tenant_id=str(tenant_id), purpose=purpose, directory=directory,
+                                 config=DEPLOYMENT_ISSUER if config is None else config,
                                  transport=transport, clock=clock)
