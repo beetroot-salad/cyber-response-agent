@@ -33,8 +33,13 @@ services:
       # Where dev publishes (#1279 A11): named here, never worked out from a checkout.
       # No box mounts the workspace root, so a folder at its top level is safe.
       DEFENDER_RUN_VISUALIZATIONS_DIR: /workspace/run-visualizations
+      # The dev issuer (the `openbao` service) serves a certificate from the private dev CA. Host
+      # processes mint tokens from it (#1214), so this container trusts that CA, as `forgejo` does.
+      SSL_CERT_DIR: /etc/ssl/certs:/etc/ssl/dev-issuer-ca
     volumes:
       - ../:/workspace # Mount full workspace directory
+      # The dev CA's certificate only (never its key).
+      - ../playground-issuer/trust:/etc/ssl/dev-issuer-ca:ro
       # Docker-outside-of-Docker: hand the dev container the HOST daemon so it can
       # build and run the runtime image (Dockerfile.runtime) as a *sibling*
       # container — keeping the actual investigation runtime separate from this

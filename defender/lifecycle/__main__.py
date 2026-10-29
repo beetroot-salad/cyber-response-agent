@@ -4,9 +4,10 @@
     python -m defender.lifecycle adopt <tenant>  # Flow 5: adopt the pre-#1214 lab tenant (dev, O9)
 
 Both read `DEFENDER_DATABASE_DSN` (the database at exactly this code's revision) and the lifecycle's
-settings (`defender.lifecycle.config`: the issuer, forge and OpenBao addresses, the files holding
-the forge admin token and the OpenBao management login, the integration container, the secrets
-directory, `DEFENDER_DATA_ROOT`). `adopt` also takes the old issuer directory (`--issuer-dir`)."""
+settings (`defender.lifecycle.config`: the files holding the forge admin token and the OpenBao
+management login, the integration container, the secrets directory, `DEFENDER_DATA_ROOT`). The
+issuer and OpenBao addresses are fixed service names (`defender.configuration.issuer`); the
+infrastructure routes them. `adopt` also takes the old issuer directory (`--issuer-dir`)."""
 from __future__ import annotations
 
 import argparse
