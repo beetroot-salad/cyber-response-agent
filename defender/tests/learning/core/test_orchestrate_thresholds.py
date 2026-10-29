@@ -62,16 +62,22 @@ def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeyp
             accept_tenant=drains._tenant_acceptor(paths.tenant), directory=directory_for_root())
 
 
-def test_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
+def test_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch, caplog):
+    """The drain is handed its tenant records (#1214 Flow 4), so the exit 2 is the threshold's, which it names."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
     paths = _paths(tmp_path)
-    assert cli._run_stage(lambda: drains.author_drain(paths=paths)) == 2
+    directory = directory_for_root(tmp_path)
+    assert cli._run_stage(lambda: drains.author_drain(paths=paths, directory=directory)) == 2
+    assert "LEARNING_AUTHOR_THRESHOLD" in caplog.text, caplog.text
 
 
-def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
+def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch, caplog):
+    """As above, for the lead-author drain's pitfalls threshold."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
     paths = _paths(tmp_path)
-    assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 2
+    directory = directory_for_root(tmp_path)
+    assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths, directory=directory)) == 2
+    assert "LEARNING_PITFALLS_THRESHOLD" in caplog.text, caplog.text
 
 
 def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkeypatch):

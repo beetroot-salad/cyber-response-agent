@@ -138,14 +138,18 @@ def test_a_bare_module_invocation_beside_a_live_drain_skips_its_tick(tmp_path: P
 
 
 def test_second_author_drain_invocation_returns_without_blocking(tmp_path: Path):
-    """The outer `author_drain` gate: a second drainer exits at once, reaching no channel."""
+    """The outer `author_drain` gate: a second drainer exits at once, reaching no channel. The drain is handed its
+    tenant records (#1214 Flow 4: a drain works only through a `TenantDirectory`); the gate is the subject."""
+    from defender.tests.support.tenancy._active1214 import active_directory
+
     paths = h.make_paths(tmp_path)
     triggered: list[str] = []
+    directory = active_directory(tmp_path / "data", "5b0e6c1a-3f2d-4e8b-9a71-c4d2e0f81b36")
 
     with h.Holder(location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file, blocking_discipline=False):
         rc, seconds = h.elapsed(
             lambda: drains.author_drain(
-                paths, trigger_author=lambda *a, **k: triggered.append(a)
+                paths, trigger_author=lambda *a, **k: triggered.append(a), directory=directory,
             )
         )
     assert rc == 0

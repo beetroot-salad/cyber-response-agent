@@ -7,7 +7,6 @@ import asyncio
 import os
 import shutil
 import stat
-import subprocess
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,7 +17,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
-from defender.tests.tenancy.lifecycle_1214._atk2_fakes import GitStub, host_answering_accessor  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._atk2_fakes import DockerStub, GitStub, host_answering_accessor  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import REPO_ROOT, LifecycleWorld, lifecycle_config  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214.test_1214_host_entry import TENANT, _connect, _drain_start, _run_start  # noqa: E402
@@ -114,22 +113,19 @@ def test_the_real_git_runner_never_puts_the_jwt_in_argv_environment_or_a_file(tm
 
 # --- F-6: the integration command is fixed -----------------------------------------------------------
 
-def test_the_integration_runner_runs_only_the_fixed_command_as_the_git_user(monkeypatch):
+def test_the_integration_runner_runs_only_the_fixed_command_as_the_git_user(tmp_path, monkeypatch):
     """`integration_runner(c)(args)` execs `forgejo admin user create-authorized-integration <args>` as `git` in container
-    `c`, and nothing else (F-6, design Assets 'one fixed command')."""
+    `c`, and nothing else (F-6, design Assets 'one fixed command'). The `docker` it runs is a stub first on PATH that
+    records its argv, one argument per line."""
     from defender.lifecycle import integration_runner
 
-    seen: list[list[str]] = []
-
-    def run(argv: Any, **_kw: Any) -> subprocess.CompletedProcess[str]:
-        seen.append([str(a) for a in argv])
-        return subprocess.CompletedProcess(argv, 0, "{}", "")
-
-    monkeypatch.setattr(subprocess, "run", run)
+    stub = DockerStub(tmp_path / "docker-stub")
+    monkeypatch.setenv("PATH", stub.path())
     args = ["--username", "bot-x", "--scope", "write:repository", "--repo", f"{ORG}/t"]
-    integration_runner("forge-c")(args)
-    assert seen == [["docker", "exec", "-u", "git", "forge-c", "forgejo", "admin", "user",
-                     "create-authorized-integration", *args]]
+    done = integration_runner("forge-c")(args)
+    assert done.returncode == 0, done.stderr
+    assert stub.calls() == [["exec", "-u", "git", "forge-c", "forgejo", "admin", "user",
+                             "create-authorized-integration", *args]]
 
 
 # --- DC-12 / F-1: the clients a process builds carry exactly the credential their actor may hold ----

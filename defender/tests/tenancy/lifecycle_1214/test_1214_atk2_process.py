@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
+import sys
 from typing import Any
 
 import pytest
@@ -52,37 +54,59 @@ def test_the_lifecycle_process_refuses_a_database_behind_naming_both_revisions(c
 def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_credentialed_ones(  # noqa: F811
         empty_database, tmp_path, data_root, monkeypatch):  # noqa: F811
     """`python -m defender.lifecycle serve` builds the host actor over a login client with no token and a forge client with
-    no authorization, and the service over the management and admin clients (DC-12, F-1)."""
-    import defender.lifecycle as lifecycle
+    no authorization, and the service over the management and admin clients (DC-12, F-1).
+
+    The real `_serve` runs over an upgraded empty database with its settings from the environment (`from_env`). Each
+    actor's constructor arguments are read as it is called (a profile hook observes, it replaces nothing); once both
+    actors are built and `_serve` has installed its SIGTERM handler, the hook sends the process SIGTERM, which stops it
+    (SIGINT is not used: `asyncio.run` has its own handler for it)."""
+    from defender.lifecycle import HostActor, ManagementService
     from defender.lifecycle import __main__ as entry
+    from defender.lifecycle import config as settings
     from defender.migrations import upgrade
 
     upgrade(empty_database)
-    monkeypatch.setenv(DSN_ENV, empty_database)
-    config = lifecycle_config(tmp_path, data_root)
-    monkeypatch.setattr(entry, "_lifecycle_settings", lambda: config)
+    expected = lifecycle_config(tmp_path, data_root)
+    for name, value in (("forge-token", expected.forge_admin_token), ("bao-login", expected.openbao_login)):
+        (tmp_path / name).write_text(value + "\n", encoding="utf-8")
+    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_"))]:
+        monkeypatch.delenv(name)
+    for name, value in ((DSN_ENV, empty_database), (settings.FORGE_URL_ENV, expected.forge_url),
+                        (settings.FORGE_TOKEN_FILE_ENV, str(tmp_path / "forge-token")),
+                        (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
+                        (settings.INTEGRATION_ENV, expected.integration_command),
+                        (settings.SECRETS_DIR_ENV, str(expected.secrets_dir)), (settings.DATA_ROOT_ENV, str(data_root)),
+                        (settings.POLL_ENV, "0.05")):
+        monkeypatch.setenv(name, value)
+
+    constructors = {HostActor.__init__.__code__: "host", ManagementService.__init__.__code__: "service"}
     built: dict[str, dict[str, Any]] = {}
+    handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    before = handlers[signal.SIGTERM]
+    stopped: list[bool] = []
 
-    def spy(cls: type, name: str) -> type:
-        class Spy(cls):  # type: ignore[valid-type, misc]
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                built[name] = kwargs
-                super().__init__(*args, **kwargs)
-        return Spy
+    def watch(frame: Any, event: str, _arg: Any) -> None:
+        if event != "call":
+            return
+        role = constructors.get(frame.f_code)
+        if role is not None and role not in built:
+            built[role] = dict(frame.f_locals)
+        if not stopped and len(built) == 2 and signal.getsignal(signal.SIGTERM) is not before:
+            stopped.append(True)
+            os.kill(os.getpid(), signal.SIGTERM)  # lands on `_serve`'s own handler, installed by now
 
-    async def no_loop(_service: Any, _host: Any, **_kw: Any) -> None:
-        return None
-
-    fakes = {"HostActor": spy(lifecycle.HostActor, "host"),
-             "ManagementService": spy(lifecycle.ManagementService, "service"), "serve": no_loop}
-    for name, fake in fakes.items():  # on the package and on `__main__`, however `_serve` reaches them
-        monkeypatch.setattr(lifecycle, name, fake)
-        monkeypatch.setattr(entry, name, fake, raising=False)
-    assert asyncio.run(entry._serve()) == 0
+    sys.setprofile(watch)
+    try:
+        code = asyncio.run(asyncio.wait_for(entry._serve(), 30))
+    finally:
+        sys.setprofile(None)
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
+    assert code == 0 and stopped, (code, sorted(built))
     headers = {role: {k.lower(): v for k, v in client.headers.items()}
                for role, client in (("host forge", built["host"]["forge"]), ("host bao", built["host"]["openbao_login"]),
                                     ("service forge", built["service"]["forge"]), ("service bao", built["service"]["openbao"]))}
-    assert "authorization" not in headers["host forge"] and "x-vault-token" not in headers["host bao"]
-    assert config.forge_admin_token not in str(headers["host forge"]) and config.openbao_login not in str(headers["host bao"])
-    assert headers["service forge"]["authorization"] == f"token {config.forge_admin_token}"
-    assert headers["service bao"]["x-vault-token"] == config.openbao_login
+    assert "authorization" not in headers["host forge"] and "x-vault-token" not in headers["host bao"], headers
+    assert expected.forge_admin_token not in str(headers["host forge"]) and expected.openbao_login not in str(headers["host bao"])
+    assert headers["service forge"]["authorization"] == f"token {expected.forge_admin_token}"
+    assert headers["service bao"]["x-vault-token"] == expected.openbao_login

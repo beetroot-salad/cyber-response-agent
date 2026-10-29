@@ -245,7 +245,8 @@ def test_requests_are_not_blocked_by_a_running_step_and_take_no_lock(migrated_da
 
 class _StartupProxy:
     """A TCP pass-through to the server that records, per connection, the `options` of the startup packet
-    and the local port it connects from (what `pg_stat_activity.client_port` shows the server)."""
+    under the backend's process id, read from the server's BackendKeyData answer (what `pg_locks.pid` and
+    `pg_stat_activity.pid` show). The pid, unlike a client port, survives NAT between the proxy and the server."""
 
     def __init__(self, host: str, port: int) -> None:
         self.upstream = (host, port)
@@ -263,23 +264,25 @@ class _StartupProxy:
         threading.Thread(target=lambda: self.loop.run_until_complete(boot()), daemon=True).start()
         assert ready.wait(WAIT)
 
-    async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        up_reader, up_writer = await asyncio.open_connection(*self.upstream)
-        local = up_writer.get_extra_info("sockname")[1]
-        try:
-            while True:  # SSLRequest / GSSENCRequest are declined, then the startup packet
-                head = await reader.readexactly(8)
-                length, code = int.from_bytes(head[:4], "big"), int.from_bytes(head[4:], "big")
-                body = await reader.readexactly(length - 8)
-                if code in (80877103, 80877104):
-                    writer.write(b"N")
-                    await writer.drain()
-                    continue
+    @staticmethod
+    async def _startup(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> tuple[bytes, str]:
+        """The client's startup packet (SSLRequest / GSSENCRequest declined first) and its `options`."""
+        while True:
+            head = await reader.readexactly(8)
+            length, code = int.from_bytes(head[:4], "big"), int.from_bytes(head[4:], "big")
+            body = await reader.readexactly(length - 8)
+            if code not in (80877103, 80877104):
                 pairs = body.split(b"\0")
                 params = dict(zip(pairs[0::2], pairs[1::2], strict=False))
-                self.options[local] = params.get(b"options", b"").decode()
-                up_writer.write(head + body)
-                break
+                return head + body, params.get(b"options", b"").decode()
+            writer.write(b"N")
+            await writer.drain()
+
+    async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        up_reader, up_writer = await asyncio.open_connection(*self.upstream)
+        try:
+            packet, options = await self._startup(reader, writer)
+            up_writer.write(packet)
             await up_writer.drain()
 
             async def pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
@@ -288,7 +291,22 @@ class _StartupProxy:
                         dst.write(data)
                         await dst.drain()
                     dst.close()
-            await asyncio.gather(pipe(reader, up_writer), pipe(up_reader, writer))
+
+            async def answers() -> None:
+                """The server's messages up to ReadyForQuery (or an error) one by one, BackendKeyData naming the
+                backend's pid; then the rest as bytes. The client's side flows meanwhile (the auth exchange)."""
+                with contextlib.suppress(Exception):
+                    while True:
+                        kind, size = await up_reader.readexactly(1), await up_reader.readexactly(4)
+                        message = await up_reader.readexactly(int.from_bytes(size, "big") - 4)
+                        if kind == b"K":
+                            self.options[int.from_bytes(message[:4], "big")] = options
+                        writer.write(kind + size + message)
+                        await writer.drain()
+                        if kind in (b"Z", b"E"):
+                            break
+                    await pipe(up_reader, writer)
+            await asyncio.gather(pipe(reader, up_writer), answers())
         except (asyncio.IncompleteReadError, ConnectionError):
             pass
         finally:
@@ -319,9 +337,8 @@ def test_the_lock_connection_sets_server_side_keepalives_and_a_user_timeout(migr
     try:
         assert inside.wait(WAIT), f"worker A never reached the bot step: {a_out}"
         [holder] = _advisory_holders(migrated_database)
-        [(port,)] = execute(migrated_database, "SELECT client_port FROM pg_stat_activity WHERE pid = %s", (holder,))
-        assert port in proxy.options, f"the lock holder did not come through the proxy: {sorted(proxy.options)}"
-        options = proxy.options[port]
+        assert holder in proxy.options, f"the lock holder did not come through the proxy: {holder} {sorted(proxy.options)}"
+        options = proxy.options[holder]
         for name in ("tcp_keepalives_idle", "tcp_keepalives_interval", "tcp_keepalives_count", "tcp_user_timeout"):
             found = re.search(rf"{name}\s*=\s*(\d+)", options)
             assert found and int(found.group(1)) > 0, f"{name} is not set on the lock connection: {options!r}"
