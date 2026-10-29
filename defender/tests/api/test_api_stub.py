@@ -246,9 +246,9 @@ class _Unused:
         raise AssertionError(f"a route test reached the unused port: {name}")
 
 
-async def _seed_identity() -> tuple[IdentityService, dict[str, str]]:
+async def _seed_identity() -> tuple[IdentityService, dict[str, str], InMemoryTenantRepository]:
     """Ann is a member of A, Bob of B and Cy of both, each with a seeded session. Returns the
-    service and the seeded user ids by session value."""
+    service, the seeded user ids by session value and the tenant twin the service shares."""
     tenants = InMemoryTenantRepository()
     await tenants.add_tenant(TenantId(A), created_at=NOW)
     await tenants.add_tenant(TenantId(B), created_at=NOW)
@@ -267,20 +267,20 @@ async def _seed_identity() -> tuple[IdentityService, dict[str, str]]:
     await repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
     users[SESSION_AB] = cy.id
     service = IdentityService(repo, signin=_Unused(), mail=_Unused(), clock=lambda: NOW,
-                              bootstrap=Bootstrap(administrators=(), tenants={}))
-    return service, users
+                              bootstrap=Bootstrap(administrators=()))
+    return service, users, tenants
 
 
-def _identity() -> tuple[IdentityService, dict[str, str]]:
+def _identity() -> tuple[IdentityService, dict[str, str], InMemoryTenantRepository]:
     """The seeded identity service, built in a throwaway loop: the in-memory repository holds no
     loop state, so the app's own loop can use it afterwards."""
     return anyio.run(_seed_identity)
 
 
 def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
-    identity, users = _identity()
+    identity, users, tenants = _identity()
     return ApiDeps(
-        identity=identity, frontend_origin=ORIGIN,
+        identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports,
         systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports,
     ), users
@@ -1086,8 +1086,9 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
     fired = [NOW, NOW, NOW, LATER, NOW - _dt.timedelta(hours=1)]
     for n, at in enumerate(fired):
         store.add_alert(A, ALERT.model_copy(update={"alert_id": f"al-{n}", "fired_at": at}))
+    identity, _, tenants = _identity()
     client = TestClient(create_app(ApiDeps(
-        identity=_identity()[0], frontend_origin=ORIGIN,
+        identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
         writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks(),

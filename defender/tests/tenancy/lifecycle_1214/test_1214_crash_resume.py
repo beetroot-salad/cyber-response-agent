@@ -19,6 +19,7 @@ from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
     host_openbao_failing,
     openbao_failing,
     stray_secrets,
+    sweep_failure,
 )
 from defender.tests.tenancy.lifecycle_1214._support import REPO_WINDOW, LifecycleWorld  # noqa: E402
 
@@ -59,8 +60,7 @@ FAILURES = {
                     "invalid issuer"),
     "template": (_git_push, ("template", "service"), "template", "injected failure"),
     "wrap": (lambda w: openbao_failing(w, _wrap), ("wrap", "service"), "wrap", "500"),
-    "sweep": (lambda w: openbao_failing(w, lambda r: r.url.params.get("list") == "true"), ("sweep", "service"),
-              "sweep", "500"),
+    "sweep": (sweep_failure, ("sweep", "service"), "sweep", "500"),
     # DC-4: a login failing after the unwrap has spent the wrapper restarts at `wrap`, in the service.
     "install after the unwrap": (lambda w: host_openbao_failing(w, lambda r: r.url.path.endswith("/approle/login")),
                                  ("wrap", "service"), "install", "500"),

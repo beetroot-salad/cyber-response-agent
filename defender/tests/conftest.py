@@ -159,7 +159,10 @@ def _test_owns_its_stores() -> Iterator[None]:
 @pytest.fixture
 def d9_tenant(data_root) -> str:
     """D9's one tenant, created in this test's data root through the real `create_tenant`,
-    and returned as the id a test hands to `--tenant`."""
+    and returned as the id a test hands to `--tenant`. The id is a `str` subclass with `.directory` (#1214): a
+    `TenantDirectory` holding it active with forge wiring, for a migrated call site's `directory=`.
+    WHEN THE ROW GOES (code-stage census) `create_tenant` is no longer called here; the knowledge folder is
+    still set up and `.directory` is the only record of the tenant."""
     from defender.tests.support.shared.contracts._data_root_1078 import ensure_d9_tenant
 
     return ensure_d9_tenant()

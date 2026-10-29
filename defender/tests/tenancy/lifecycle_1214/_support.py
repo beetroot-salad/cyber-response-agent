@@ -7,7 +7,7 @@ ImportError (the expected red before implementation). Pinned shapes (amendment r
   `generations(T)`, `forge_wiring(T)`; `defender.tenancy.TenantDirectory(open_repository)`.
 - `InMemoryIdentityRepository(tenants=<twin>)`, `Bootstrap(administrators=...)`, `ApiDeps(..., tenants=)`.
 - `defender.lifecycle.ManagementService(tenants, *, identity, forge, openbao, integration, git, config, clock)`
-  and `HostActor(tenants, *, openbao_login, git, publish, config, clock)`; the host has NO management client
+  and `HostActor(tenants, *, forge, openbao_login, git, publish, config, clock)`; `forge` has no credential (F-1); the host has NO management client
   (DC-12): `openbao_login` is `openbao.client(None)` (no management token), and it gets the AppRole `role_id`
   from the generation. Each `await work() -> int` is one pass (DC-14).
 - `LifecycleConfig(...)`: NOT pinned field by field (GAP-0-2). Built in ONE place, `lifecycle_config`, with the
@@ -20,7 +20,7 @@ Interface for the cases (all on `LifecycleWorld(tmp_path, data_root)`):
 `.create() -> T`, `.active_tenant() -> T`, `.item(T)`, `.record(T)`, `.generations(T)`, `.live(T)`,
 `.member_of(T, email)`, `.directory()`, `.tenants` (twin), `.fakes` and its aliases `.forge .integration .openbao
 .git .publish`, `.config`, `.service_actor`, `.host_actor`, `.ops` (administrator browser),
-`.service_pass()` / `.host_pass()` (one `work()` each, the step count), `.drive(limit=, stop=)`
+`.forge.bearer_calls()` / `.admin_token_calls()` (who presented what), `.service_pass()` / `.host_pass()` (one `work()` each, the step count), `.drive(limit=, stop=)`
 (alternate service pass, host pass until neither ran a step or `stop()` is true between passes),
 `.new_service(tenants=None, identity=None, **fakes)` / `.new_host(...)` (another actor over the same fakes, e.g. over a
 second repository), `lifecycle_config(tmp_path, data_root, **overrides)`, `tenant_ids`, `is_uuid4`, `as_dict`.
@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.tests.support.api._identity1306 import NEW, OPS, World, items, tenants_of
-from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, OPENBAO_URL, Fakes
+from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, ISSUER_URL, OPENBAO_URL, Fakes
 
 # Production names #1214 must supply. Kept in this one block so a missing package is one ImportError.
 from defender.lifecycle import HostActor, LifecycleConfig, ManagementService  # noqa: E402
@@ -53,13 +53,14 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 def lifecycle_config(tmp_path: Path, data_root: Path, **overrides: Any) -> Any:
     """The one `LifecycleConfig` of the tests (DC-13): https issuer, forge and OpenBao addresses of the fakes,
-    the real template directory, a per-test secrets directory OUTSIDE `<data root>/<T>/`, a short poll."""
+    the real template directory, a per-test secrets directory OUTSIDE `<data root>/<T>/`, a short poll, and the two
+    r9-pinned defaults spelled out (`lock_keepalive` seconds, `teardown_wait` seconds before SIGKILL, F-11)."""
     fields: dict[str, Any] = {
-        "issuer_url": "https://openbao.test:8200/v1/identity/oidc",
+        "issuer_url": ISSUER_URL,
         "forge_url": FORGE_URL, "forge_admin_token": "forge-admin-token",
         "openbao_url": OPENBAO_URL, "openbao_login": "bao-management-token",
         "integration_command": "forgejo-test", "template_dir": template_dir(REPO_ROOT),
-        "secrets_dir": tmp_path / "secrets", "data_root": data_root, "poll_interval": 0.01,
+        "secrets_dir": tmp_path / "secrets", "data_root": data_root, "poll_interval": 0.01, "lock_keepalive": 30, "teardown_wait": 5.0,
     }
     return LifecycleConfig(**{**fields, **overrides})
 
@@ -90,9 +91,10 @@ class LifecycleWorld(World):
         return ManagementService(tenants, identity=identity, **parts)
 
     def new_host(self, tenants: Any, **overrides: Any) -> Any:
-        """A host actor over `tenants`: NO management client, only the login client (DC-12)."""
+        """A host actor over `tenants`: NO management client, only the login client (DC-12), and a forge client
+        with NO credential (F-1: install presents the bot's own Bearer per request)."""
         parts: dict[str, Any] = {
-            "openbao_login": self.openbao.client(None), "git": self.git, "publish": self.publish,
+            "forge": self.forge.client(None), "openbao_login": self.openbao.client(None), "git": self.git, "publish": self.publish,
             "config": self.config, "clock": self.clock, **overrides}
         return HostActor(tenants, **parts)
 

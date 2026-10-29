@@ -159,3 +159,19 @@ def test_a_tenant_still_being_created_has_no_credential_to_mint(scene):
     scene.shaped.tenant = tenant
     with pytest.raises(Exception, match=r"(?i)generation|credential|tenant|live|refus"):
         scene.make(tenant).token()
+
+
+def test_a_tenant_stopped_at_prepare_mints_with_its_live_generation(scene):
+    """DC-5: the generation is live at the sweep while the tenant is still `creating`, so prepare's first publish
+    mints through the normal provider (P3 does not check the tenant's state)."""
+    world = scene.world
+    tenant = world.create()
+    scene.shaped.tenant = tenant
+    world.drive(stop=lambda: world.item(tenant)["step"] == "prepare")
+    item = world.item(tenant)
+    assert (item["state"], item["step"]) == ("creating", "prepare")
+    live = world.live(tenant)
+    credential = scene.make(tenant, "publish")
+    assert credential.tenant_id == tenant
+    assert scene.role_of(credential.token()) == live.oidc_role
+    assert scene.logins()[-1]["role_id"] == live.role_id

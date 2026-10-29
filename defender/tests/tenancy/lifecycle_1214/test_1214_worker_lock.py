@@ -86,7 +86,7 @@ def _pass(dsn: str, kind: str, fakes: Fakes, config: Any, *, identity: Any = Non
                     openbao=fakes.openbao.client(), integration=integration or fakes.integration,
                     git=fakes.git, config=config, clock=lambda: NOW)
             else:
-                actor = HostActor(repo, openbao_login=fakes.openbao.client(None), git=fakes.git,
+                actor = HostActor(repo, forge=fakes.forge.client(None), openbao_login=fakes.openbao.client(None), git=fakes.git,
                                   publish=publish or fakes.publish, config=config, clock=lambda: NOW)
             return await actor.work()
         finally:

@@ -30,6 +30,9 @@ from defender.tests.support.shared._postgres1339 import migrated_database  # noq
 TENANT = "7f3c1a52-9d4e-4b8a-a1c6-2e5d8b9f0c13"
 OTHER = "0b9e6d2a-41c8-4f57-8e3b-6a7d1c5f9e24"
 NOT_A_REFUSAL_OF_STATE = ("not active", "offboarding", "creating", "offboarded", "no database")
+#: Words of the other refusals an entry point makes before work (no row, no wiring, no address, a bad folder).
+OTHER_REFUSALS = ("unknown", "no row", "no such", "not a tenant", "does not exist", "not found", "no forge wiring",
+                  DSN_ENV)
 DEFENDER = Path(__file__).resolve().parents[3]
 
 
@@ -104,8 +107,9 @@ def _has(text: str, *words: str) -> None:
 
 
 def _admits(text: str) -> bool:
-    """True when the entry point got past the tenant-state check (its text names no state refusal)."""
-    return not any(word in text for word in NOT_A_REFUSAL_OF_STATE)
+    """True when the entry point got past the tenant checks: its text names neither a state refusal nor any other
+    refusal (no row, no address, ...), so a refusal of another kind is never mistaken for admission."""
+    return not any(word in text.lower() for word in (*NOT_A_REFUSAL_OF_STATE, *OTHER_REFUSALS))
 
 
 # --- run start -------------------------------------------------------------------------------------
@@ -113,7 +117,9 @@ def _admits(text: str) -> bool:
 @pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
 def test_run_start_refuses_a_tenant_that_is_not_active_naming_its_state_before_any_work(tmp_path, data_root, state):
     """Run start refuses any non-`active` state, naming it, before preflight or publish run (Flow 4, P3)."""
-    assert _admits(_run_start(TENANT, tmp_path, active_directory(data_root, TENANT)))  # control: active passes the check
+    admitted = _Calls()
+    assert _admits(_run_start(TENANT, tmp_path, active_directory(data_root, TENANT), admitted))  # control: active passes
+    assert admitted.reached, "control: an active tenant reaches the run's first stand-in"
     calls = _Calls()
     refused = _run_start(TENANT, tmp_path, active_directory(data_root, TENANT, state=state), calls)
     _has(refused, "[run.py]", TENANT, state)
@@ -121,11 +127,39 @@ def test_run_start_refuses_a_tenant_that_is_not_active_naming_its_state_before_a
 
 
 def test_run_start_refuses_a_tenant_with_no_row(tmp_path, data_root):
-    """An id the directory does not hold is refused as unknown, before any work (Flow 4, P3)."""
+    """An id the directory does not hold is refused as unknown by the directory alone, though its folder is placed
+    and complete (Flow 4, P3)."""
+    from defender.tests.support.tenancy._tenants1106 import place_tenant
+
+    place_tenant(data_root, OTHER)  # the folder exists and is well-formed: only the directory can refuse
+    admitted = _Calls()
+    text = _run_start(OTHER, tmp_path, active_directory(data_root, OTHER), admitted)
+    assert _admits(text), f"control: the placed folder passes with a row: {text}"
+    assert admitted.reached
     calls = _Calls()
     refused = _run_start(OTHER, tmp_path, active_directory(data_root, TENANT), calls)
     _has(refused, "[run.py]", OTHER)
+    assert not _admits(refused)
     assert calls.reached == []
+
+
+def test_run_start_refuses_an_active_tenant_with_no_forge_wiring(tmp_path, data_root):
+    """Fail closed on bad wiring: an active tenant whose `forge_wiring` is absent has no origin, so run start refuses
+    before any work; the same tenant with wiring is admitted (Flow 4; successor of #1108 P4's binding refusal)."""
+    admitted = _Calls()
+    assert _admits(_run_start(TENANT, tmp_path, active_directory(data_root, TENANT), admitted))
+    assert admitted.reached
+    calls = _Calls()
+    refused = _run_start(TENANT, tmp_path, active_directory(data_root, TENANT, wiring=False), calls)
+    _has(refused, "[run.py]", TENANT)
+    assert calls.reached == []
+
+
+def test_drain_start_refuses_an_active_tenant_with_no_forge_wiring(data_root):
+    """Same channel for drain start: no wiring -> refused naming the tenant; wiring -> admitted (Flow 4)."""
+    assert _admits(_drain_start(TENANT, active_directory(data_root, TENANT)))
+    refused = _drain_start(TENANT, active_directory(data_root, TENANT, wiring=False))
+    _has(refused, TENANT)
 
 
 def test_run_start_with_no_directory_and_no_database_address_refuses(tmp_path, data_root, monkeypatch):

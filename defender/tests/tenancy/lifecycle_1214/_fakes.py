@@ -33,6 +33,23 @@ r9 additions (slice 0):
   unless the caller itself put it there. Tests assert `jwt in git.sealed_tokens()` (positive control)
   and `not git.argv_env_contains(jwt)`.
 - `RecordingPublish` answers a `fresh <commit>` line (RC-7); `publish.answers` queues other lines.
+
+Fidelity review 1 additions (F-1, F-6):
+- `FakeForge.client(token)` defaults to the admin token; `client(None)` carries NO credential (the host actor's
+  `forge=`: its calls present the bot's own `Authorization: Bearer <jwt>`). Every call is classified by its
+  credential: `bearer_calls()` (a bot), `admin_token_calls()` (`token <admin>`), `anonymous_calls()`; so "the host
+  made bot calls and never presented the admin token" is `bearer_calls()` non-empty (control) and
+  `admin_token_calls()` empty over the host's passes (`split_drive` keeps the actors' calls apart).
+- `FakeIntegrationCommand` parses and records its arguments (`created`: user, name, issuer, claims_eq, scopes,
+  repos, audience) and refuses an issuer other than the one the fakes serve or a user the forge lacks.
+  `FakeForge` enforces what was recorded for a Bearer call: the JWT's issuer equals the integration's, every
+  `--claim-eq` claim equals the JWT's claim (else 401), a repo outside `--repo` answers 404, a scope that gives no
+  repository access answers 403. The fake never decides which tenant a claim or repo ought to name.
+- `FakeOpenBao`: an AppRole login resolves its entity through the alias named by the role id (`identity/entity-alias`
+  `name`=role_id, `canonical_id`=entity id); the templated policy lets that token read only
+  `identity/oidc/token/<entity.metadata.oidc_role>` (else 403, also with no alias/entity or a destroyed entity);
+  a minted JWT carries `iss`, `aud` (the role's client id), `role` and the entity's `metadata.tenant_id`
+  (`claims(jwt)`, `mint_entity(jwt)`).
 - `Fakes(tmp_path)` bundles forge, integration, openbao, git, publish and wires JWT resolution.
 """
 from __future__ import annotations
@@ -54,6 +71,10 @@ import httpx
 FORGE_URL = "http://forge.test"
 OPENBAO_URL = "http://openbao.test"
 ORG = "tenants"
+#: The issuer URL the fakes serve (OpenBao's OIDC issuer) and `lifecycle_config` names; the integration command
+#: refuses any other (Forgejo fetches `<issuer>/.well-known/openid-configuration`, G6).
+ISSUER_URL = "https://openbao.test:8200/v1/identity/oidc"
+ADMIN_TOKEN = "forge-admin-token"
 
 
 @dataclasses.dataclass
@@ -117,13 +138,34 @@ class FakeForge(_Recorder):
         self.repos: dict[str, dict[str, Any]] = {}
         #: user -> its authorized integrations' audiences (G7, G8).
         self.integrations: dict[str, list[str]] = {}
+        #: audience -> {"user", "issuer", "claims_eq", "scopes", "repos"} as the integration command recorded it.
+        self.integration_rules: dict[str, dict[str, Any]] = {}
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
 
-    def client(self, token: str = "forge-admin-token") -> httpx.AsyncClient:
-        return httpx.AsyncClient(transport=self.transport(), base_url=FORGE_URL,
-                                 headers={"Authorization": f"token {token}"})
+    def client(self, token: str | None = ADMIN_TOKEN) -> httpx.AsyncClient:
+        """The management service's admin client (default), or, with `token=None`, the host actor's client:
+        a base URL and NO credential (it presents the bot's Bearer JWT per request)."""
+        headers = {} if token is None else {"Authorization": f"token {token}"}
+        return httpx.AsyncClient(transport=self.transport(), base_url=FORGE_URL, headers=headers)
+
+    @staticmethod
+    def credential_of(call: Call) -> str:
+        """`"bearer"` (a bot's JWT), `"token"` (an admin access token) or `"none"`."""
+        auth = call.headers.get("authorization", "")
+        return "bearer" if auth.startswith("Bearer ") else "token" if auth.startswith("token ") else "none"
+
+    def bearer_calls(self) -> list[Call]:
+        return [c for c in self.calls if self.credential_of(c) == "bearer"]
+
+    def admin_token_calls(self, token: str | None = None) -> list[Call]:
+        """Calls that presented an admin access token (that of `token` if given)."""
+        return [c for c in self.calls if self.credential_of(c) == "token"
+                and (token is None or c.headers["authorization"] == f"token {token}")]
+
+    def anonymous_calls(self) -> list[Call]:
+        return [c for c in self.calls if self.credential_of(c) == "none"]
 
     def bare(self, full_name: str) -> Path:
         return self.root / f"{full_name}.git"
@@ -167,7 +209,8 @@ class FakeForge(_Recorder):
                 self.must_change_password.pop(user, None)
                 self.prohibit_login.discard(user)
                 if call.query.get("purge") == ["true"]:
-                    self.integrations.pop(user, None)  # G8
+                    for audience in self.integrations.pop(user, []):  # G8
+                        self.integration_rules.pop(audience, None)
                 for repo in self.repos.values():
                     repo["collaborators"].pop(user, None)
                 return httpx.Response(204)
@@ -212,44 +255,66 @@ class FakeForge(_Recorder):
                 return httpx.Response(200, json=found) if found else httpx.Response(404)
         return httpx.Response(404, json={"message": f"fake forge: no route {call.method} {call.path}"})
 
-    def _bot_of(self, jwt: str) -> str | None:
+    def _bot_of(self, jwt: str) -> tuple[str | None, dict[str, Any] | None, dict[str, Any] | None]:
+        """(bot, its integration's recorded rule, the JWT's claims) for the integration holding the JWT's audience."""
         claims = self.jwt_claims(jwt)
         if claims is None:
-            return None
-        return next((u for u, audiences in self.integrations.items()
-                     if claims.get("aud") in audiences and u in self.users), None)
+            return None, None, None
+        bot = next((u for u, audiences in self.integrations.items()
+                    if claims.get("aud") in audiences and u in self.users), None)
+        rule = self.integration_rules.get(claims.get("aud")) if bot is not None else None
+        return bot, rule, claims
 
     def _integration(self, call: Call, parts: list[str]) -> httpx.Response:
         """A Bearer call: authenticate the bot through its integration, then answer its few routes."""
-        bot = self._bot_of(call.headers["authorization"].removeprefix("Bearer "))
-        response = self._integration_answer(bot, call, parts)
+        bot, rule, claims = self._bot_of(call.headers["authorization"].removeprefix("Bearer "))
+        response = self._integration_answer(bot, rule, claims or {}, call, parts)
         self.integration_calls.append((bot, call.method, call.path, response.status_code))
         return response
 
-    def _integration_answer(self, bot: str | None, call: Call, parts: list[str]) -> httpx.Response:
+    def _integration_answer(self, bot: str | None, rule: dict[str, Any] | None, claims: dict[str, Any],
+                            call: Call, parts: list[str]) -> httpx.Response:
         if bot is None:
             return httpx.Response(401, json={"message": "token is unauthorized"})
+        refused = self._refused_by_rule(rule, claims, parts) if rule is not None else None
+        if refused is not None and refused.status_code == 401:
+            return refused
         if self.must_change_password.get(bot):  # G23
             return httpx.Response(403, json={"message": "You must change your password"})
         if bot in self.prohibit_login:  # G15
             return httpx.Response(403, json={"message": "This account is prohibited from signing in"})
+        if refused is not None:
+            return refused
         match (call.method, parts):
             case ("GET", ["repos", owner, name]) if self._can_read(bot, f"{owner}/{name}"):
                 return httpx.Response(200, json=self._repo(f"{owner}/{name}"))
             case ("GET", ["repos", owner, name, "branches", branch]) if self._can_read(bot, f"{owner}/{name}"):
                 full = f"{owner}/{name}"
-                rule = self.repos[full]["protections"].get(branch)
+                rule_ = self.repos[full]["protections"].get(branch)
                 can_write = self.repos[full]["collaborators"].get(bot) in ("write", "admin")
-                if rule is None:
+                if rule_ is None:
                     push = can_write
                 else:  # G22: protected against pushes unless enabled and (no whitelist or the bot is on it)
-                    whitelist = rule.get("push_whitelist_usernames") or []
-                    push = can_write and bool(rule.get("enable_push")) and (not whitelist or bot in whitelist)
-                return httpx.Response(200, json={"name": branch, "protected": rule is not None,
+                    whitelist = rule_.get("push_whitelist_usernames") or []
+                    push = can_write and bool(rule_.get("enable_push")) and (not whitelist or bot in whitelist)
+                return httpx.Response(200, json={"name": branch, "protected": rule_ is not None,
                                                  "user_can_push": push})
             case ("GET", ["repos", _, _, "branch_protections", *_]):
                 return httpx.Response(403, json={"message": "bot may not read protections"})
         return httpx.Response(404, json={"message": "not found"})
+
+    @staticmethod
+    def _refused_by_rule(rule: dict[str, Any], claims: dict[str, Any], parts: list[str]) -> httpx.Response | None:
+        """What the integration was created with, enforced (F-6): issuer and `--claim-eq` claims (401), `--repo`
+        (404 for another repository) and `--scope` (403 when none gives repository access)."""
+        if rule["issuer"] != claims.get("iss") or any(claims.get(k) != v for k, v in rule["claims_eq"].items()):
+            return httpx.Response(401, json={"message": "token is unauthorized"})
+        if parts[0] == "repos" and len(parts) >= 3:
+            if rule["repos"] != ["all"] and f"{parts[1]}/{parts[2]}" not in rule["repos"]:
+                return httpx.Response(404, json={"message": "repository does not exist"})
+            if not set(rule["scopes"]) & {"all", "read:repository", "write:repository"}:
+                return httpx.Response(403, json={"message": "token does not have the repository scope"})
+        return None
 
     def _can_read(self, bot: str, full: str) -> bool:
         return full in self.repos and bot in self.repos[full]["collaborators"]
@@ -263,32 +328,59 @@ class FakeForge(_Recorder):
 
 class FakeIntegrationCommand:
     """The fixed command's runner: `(arguments) -> CompletedProcess`, the arguments being those after
-    `forgejo admin user create-authorized-integration`. Prints G6's JSON; each run is a new integration."""
+    `forgejo admin user create-authorized-integration`. Prints G6's JSON; each run is a new integration (G7).
+    The arguments (`--username --name --issuer --claim-eq k=v --scope --repo`, Forgejo 17's flags; `--flag=value`
+    also parsed) are recorded in `created` and in `FakeForge.integration_rules`, which the forge enforces."""
 
-    def __init__(self, forge: FakeForge) -> None:
+    def __init__(self, forge: FakeForge, issuer: str = ISSUER_URL) -> None:
         self.forge = forge
+        self.issuer = issuer
         self.calls: list[list[str]] = []
+        self.created: list[dict[str, Any]] = []
         self.fail_next = 0
 
+    @staticmethod
+    def _flags(args: list[str]) -> dict[str, list[str]]:
+        out: dict[str, list[str]] = {}
+        i = 0
+        while i < len(args):
+            flag, eq, value = args[i].partition("=")
+            if not eq and i + 1 < len(args):
+                value, i = args[i + 1], i + 1
+            out.setdefault(flag.lstrip("-"), []).append(value)
+            i += 1
+        return out
+
     def __call__(self, arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
-        args = list(arguments)
+        args = [str(a) for a in arguments]
         self.calls.append(args)
         if self.fail_next:
             self.fail_next -= 1
             return subprocess.CompletedProcess(args, 1, "", "invalid issuer: error when fetching .well-known")
-        user = args[args.index("--username") + 1]
+        flags = self._flags(args)
+        user, name = flags["username"][0], flags["name"][0]
+        issuer = flags.get("issuer", [""])[0]
+        if issuer != self.issuer:  # Forgejo fetches <issuer>/.well-known/openid-configuration (G6)
+            return subprocess.CompletedProcess(args, 1, "", "invalid issuer: error when fetching .well-known")
+        if user not in self.forge.users:
+            return subprocess.CompletedProcess(args, 1, "", f"user does not exist [name: {user}]")
+        claims = dict(c.split("=", 1) for c in flags.get("claim-eq", []))
+        rule = {"user": user, "name": name, "issuer": issuer, "claims_eq": claims,
+                "scopes": flags.get("scope", ["all"]), "repos": flags.get("repo", ["all"])}
         audience = f"u:{len(self.forge.users)}:{uuid.uuid4()}"
         self.forge.integrations.setdefault(user, []).append(audience)
-        out = json.dumps({"name": args[args.index("--name") + 1], "audience": audience})
-        return subprocess.CompletedProcess(args, 0, out + "\n", "")
+        self.forge.integration_rules[audience] = rule
+        self.created.append({**rule, "audience": audience})
+        return subprocess.CompletedProcess(args, 0, json.dumps({"name": name, "audience": audience}) + "\n", "")
 
 
 class FakeOpenBao(_Recorder):
     """OpenBao's HTTP API for the paths #1214 names. `X-Vault-Wrap-TTL` wraps a secret id; an
     unwrap spends the wrapper. Login needs a live AppRole and secret id; minting needs a live role."""
 
-    def __init__(self) -> None:
+    def __init__(self, issuer: str = ISSUER_URL) -> None:
         super().__init__()
+        self.issuer = issuer
         self.oidc_roles: dict[str, dict[str, Any]] = {}
         self.approles: dict[str, dict[str, str]] = {}  # name -> {accessor: secret_id}
         self.entities: dict[str, dict[str, Any]] = {}
@@ -296,6 +388,10 @@ class FakeOpenBao(_Recorder):
         self.wrapped: dict[str, tuple[str, str, str]] = {}  # token -> (approle, secret_id, accessor)
         self.tokens: dict[str, str] = {}  # client token -> approle
         self.minted: list[tuple[str, str]] = []  # (oidc role, jwt)
+        #: the entity name each `minted` entry was minted for (index-aligned with `minted`).
+        self.minted_for: list[str | None] = []
+        #: client token -> its entity (name), or None when the AppRole login resolved no entity alias.
+        self.token_entity: dict[str, str | None] = {}
         #: The token the management login holds; CRUD/list/role-id paths need it (the host has none).
         self.management_token = "bao-management-token"
         self._n = itertools.count(1)
@@ -307,11 +403,29 @@ class FakeOpenBao(_Recorder):
                                  headers={} if token is None else {"X-Vault-Token": token})
 
     def claims(self, jwt: str) -> dict[str, Any] | None:
-        """What Forgejo reads off a minted JWT: its OIDC role and audience (the role's client id)."""
-        role = next((r for r, j in self.minted if j == jwt), None)
-        if role is None or role not in self.oidc_roles:
+        """What Forgejo reads off a minted JWT: issuer, OIDC role, audience (the role's client id) and the
+        `tenant_id` claim the role's template takes from the minting entity's metadata (G10)."""
+        index = next((i for i, (_r, j) in enumerate(self.minted) if j == jwt), None)
+        if index is None:
             return None
-        return {"role": role, "aud": self.oidc_roles[role].get("client_id")}
+        role = self.minted[index][0]
+        if role not in self.oidc_roles:
+            return None
+        entity = self.entities.get(self.minted_for[index] or "", {})
+        return {"iss": self.issuer, "role": role, "aud": self.oidc_roles[role].get("client_id"),
+                "tenant_id": (entity.get("metadata") or {}).get("tenant_id")}
+
+    def mint_entity(self, jwt: str) -> str | None:
+        """The entity name `jwt` was minted for."""
+        return next((e for (_r, j), e in zip(self.minted, self.minted_for, strict=True) if j == jwt), None)
+
+    def _entity_of_login(self, role_id: str) -> str | None:
+        """The entity a login with `role_id` resolves to: the entity-alias named by the role id (OpenBao's AppRole alias)."""
+        for alias in self.aliases:
+            if alias.get("name") == role_id:
+                return next((n for n, e in self.entities.items()
+                             if alias.get("canonical_id") in (e["id"], n)), None)
+        return None
 
     def tokens_used(self) -> set[str]:
         """Every X-Vault-Token value any call carried (SK-5: the host's calls never carry the management one)."""
@@ -382,12 +496,19 @@ class FakeOpenBao(_Recorder):
                     return httpx.Response(400, json={"errors": ["invalid role or secret ID"]})
                 token = f"client-{next(self._n)}"
                 self.tokens[token] = role
+                self.token_entity[token] = self._entity_of_login(body["role_id"])
                 return httpx.Response(200, json={"auth": {"client_token": token, "entity_id": role}})
             case ("GET", ["identity", "oidc", "token", role]):
-                if call.headers.get("x-vault-token") not in self.tokens or role not in self.oidc_roles:
+                client = call.headers.get("x-vault-token")
+                if client not in self.tokens or role not in self.oidc_roles:
+                    return httpx.Response(403, json={"errors": ["permission denied"]})
+                entity = self.token_entity.get(client)
+                # the one templated policy: read identity/oidc/token/{{identity.entity.metadata.oidc_role}}
+                if entity not in self.entities or (self.entities[entity].get("metadata") or {}).get("oidc_role") != role:
                     return httpx.Response(403, json={"errors": ["permission denied"]})
                 jwt = f"jwt.{role}.{next(self._n)}"
                 self.minted.append((role, jwt))
+                self.minted_for.append(entity)
                 return httpx.Response(200, json={"data": {"token": jwt, "client_id": self.oidc_roles[role].get("client_id")}})
             case ("POST" | "PUT", ["identity", "entity", "name", name]):
                 self.entities[name] = {"id": f"entity-{name}", **body}

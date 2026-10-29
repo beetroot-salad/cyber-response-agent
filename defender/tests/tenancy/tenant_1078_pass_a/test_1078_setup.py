@@ -1,43 +1,19 @@
-"""tenant.py setup: row step and refusals on a non-empty data root, re-runs, rowless own folder, alias refusal at the row."""
-from __future__ import annotations
+"""The one-tenant guard is gone (#1214 O7); a used tenant is accepted again and nothing is written.
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+`tenant.py setup`, `new-id` and the row `create_tenant` wrote are retired (#1214 F-12, O6); see the successor map in
+slice-Re-report.md.
+"""
+from __future__ import annotations
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-import json
-import os
 from pathlib import Path
 
 import pytest
 
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 
-O10_TEXT = "the data root is not empty"
 TID = H.VALID_ID
-
-
-def _refused_writing_nothing(root: Path, *, names: str) -> str:
-    """Run setup against `root`, and assert it REFUSED (exit 1, output naming `names`) and
-    wrote nothing (the census of `root` is unchanged). Returns the setup's output."""
-    before = H.census(root)
-    proc = H.run_setup(root, TID)
-    H.assert_setup_ran(proc)
-    out = H.setup_output(proc)
-    assert proc.returncode == 1, f"setup exited {proc.returncode}, not 1 (refused):\n{out}"
-    assert names in out, f"the refusal does not name {names!r}:\n{out}"
-    assert H.census(root) == before, "the refused setup wrote into the data root"
-    return out
-
-
-def _verbatim_owner(out: str, root: Path) -> BaseException:
-    """The setup output passed `create_tenant`'s own refusal through verbatim — the owner is
-    asked AFTER the process, on the same untouched root, and must refuse the same way."""
-    before = H.census(root)
-    owner = H.owner_refusal(H.create_tenant, root, TID)
-    assert H.census(root) == before, "the refusing create_tenant wrote into the data root"
-    H.assert_verbatim(out, owner, entry="tenant.py setup")
-    return owner
 
 
 def _rowless_empty(root: Path, tmp: Path) -> None:
@@ -74,168 +50,17 @@ def test_o10_what_made_a_data_root_not_fresh_refuses_nothing_now(tmp_path, plant
         assert (root / "ghost").is_symlink() and not (tmp_path / "nowhere").exists()  # noqa: PT018 — one fact: the link is left, dangling
 
 
-@pytest.mark.parametrize("shape", ["absent", "empty", "missing-parent"])
-def test_o10_fresh_root_writes_exactly_row_and_empty_learning(tmp_path, shape):
-    top = tmp_path / "top"
-    root = {"absent": top, "empty": top, "missing-parent": top / "a" / "b" / "c"}[shape]
-    if shape == "empty":
-        root.mkdir()
+def test_a_tenant_that_already_has_runs_is_accepted_again_and_nothing_is_written(tmp_path):
+    """Acceptance of a tenant holding runs and sessions is read-only and repeatable; the rows the old setup
+    re-run protected (#1214 O6, O7)."""
+    root = tmp_path / "data"
     H.place_knowledge(root, TID)
-    before = H.census(top)
-    proc = H.run_setup(root, TID)
-    H.assert_setup_ran(proc)
-    assert proc.returncode == 0, H.setup_output(proc)
-    rel_root = root.relative_to(top).as_posix()
-    prefix = "" if rel_root == "." else f"{rel_root}/"
-    after = H.census(top)
-    assert set(after) - set(before) == {
-        f"{prefix}{TID}/{H.ROW_NAME}", f"{prefix}{TID}/learning",
-    }, f"setup did not add exactly the row and learning root: {sorted(set(after) - set(before))}"
-    assert list((H.tenant_dir(root, TID) / "learning").iterdir()) == []
-    assert {k: after[k] for k in before} == before, "setup changed the placed knowledge folder"
-    assert after[f"{prefix}{TID}/{H.ROW_NAME}"][0] == "file"
-    row = json.loads(location_path(H.row_path)(root, TID).read_text(encoding="utf-8"))
-    assert row["tenant_id"] == TID
-
-
-def test_setup_refuses_a_path_shaped_id_before_looking_under_the_data_root(tmp_path):
-    root = tmp_path / "data"
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "secret-name").write_text("x", encoding="utf-8")
-    proc = H.run_setup(root, "../outside")
-    H.assert_setup_ran(proc)
-    said = H.setup_output(proc)
-    assert proc.returncode == 1, said
-    assert "not a valid tenant id" in said, said
-    assert "secret-name" not in said, f"the refusal listed a directory outside the root: {said}"
-    assert not root.exists() or list(root.iterdir()) == []
-    H.place_knowledge(root, H.VALID_ID)  # the operator's clone precedes setup
-    assert H.run_setup(root, H.VALID_ID).returncode == 0
-
-
-def test_setup_reports_a_corrupt_row_instead_of_already_exists(tmp_path):
-    """A row that is already there but corrupt is reported as what is wrong with it — the
-    owner's `require_tenant` refusal, verbatim — not folded into "already exists"."""
-    root = tmp_path / "data"
-    H.place_knowledge(root, H.VALID_ID)  # the operator's clone precedes setup
-    assert H.run_setup(root, H.VALID_ID).returncode == 0
-    location_path(H.row_path)(root, H.VALID_ID).write_text("{torn", encoding="utf-8")
-    proc = H.run_setup(root, H.VALID_ID)
-    said = H.setup_output(proc)
-    assert proc.returncode == 1, said
-    assert "not valid JSON" in said, said
-    assert "already exists" not in said, said
-
-
-def test_o10_rerun_no_second_row(tmp_path):
-    """A re-run of setup with the same id, where the root's only entry is <id>/ holding a valid
-    row, succeeds and leaves that row byte-identical."""
-    root = tmp_path / "data"
-    H.place_knowledge(root, TID)  # the operator's clone precedes setup
-    first = H.run_setup(root, TID)
-    H.assert_setup_ran(first)
-    assert first.returncode == 0, H.setup_output(first)
-    row_bytes = location_path(H.row_path)(root, TID).read_bytes()
-    before = H.census(root)
-    again = H.run_setup(root, TID)
-    assert again.returncode == 0, f"the same-id re-run was refused:\n{H.setup_output(again)}"
-    assert location_path(H.row_path)(root, TID).read_bytes() == row_bytes, "the re-run rewrote the row"
-    assert H.census(root) == before, "the re-run wrote something"
-
-
-def test_setup_re_run_after_the_tenant_already_has_runs(tmp_path):
-    root = tmp_path / "data"
-    H.place_knowledge(root, TID)  # the operator's clone precedes setup
-    first = H.run_setup(root, TID)
-    H.assert_setup_ran(first)
-    assert first.returncode == 0, H.setup_output(first)
     base = H.runs_dir(root, TID)
     (base / "r1").mkdir(parents=True)
     (base / "r1" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
-    # No runs-base record: a used tenant's runs/ holds runs only.
     H.sessions_dir(root, TID).mkdir()
     (H.sessions_dir(root, TID) / "case-1.db").write_bytes(b"SQLite format 3\x00")
+    assert H.accept(root, TID).id == TID
     before = H.census(root)
-    again = H.run_setup(root, TID)
-    assert again.returncode == 0, f"a re-run over a used tenant was refused:\n{H.setup_output(again)}"
-    assert H.census(root) == before, "the re-run changed something under <T>/"
-
-
-
-def test_s7_j08_setup_rerun_completes_rowless_own_folder(tmp_path):
-    root = tmp_path / "data"
-    H.place_knowledge(root, TID)
-    before = H.census(root)
-    done = H.run_setup(root, TID)
-    H.assert_setup_ran(done)
-    assert done.returncode == 0, f"the unfinished setup was not completed:\n{H.setup_output(done)}"
-    after = H.census(root)
-    assert set(after) == set(before) | {f"{TID}/{H.ROW_NAME}", f"{TID}/learning"}
-    assert list((H.tenant_dir(root, TID) / "learning").iterdir()) == []
-    assert {k: after[k] for k in before} == before
-    assert H.require_tenant(fixture_data_root(root), TID).tenant_id == TID
-
-    foreign = tmp_path / "foreign-in-own"
-    H.place_knowledge(foreign, TID)
-    (H.tenant_dir(foreign, TID) / "runs").mkdir()
-    out = _refused_writing_nothing(foreign, names=f"{TID}/runs")
-    assert O10_TEXT in out, out
-
-    other = tmp_path / "other-id"
-    H.tenant_dir(other, fixture_uuid("tenant:other")).mkdir(parents=True)
-    out = _refused_writing_nothing(other, names=fixture_uuid("tenant:other"))
-    assert O10_TEXT in out, out
-
-
-@pytest.mark.parametrize("alias", ["symlink", "hardlink"])
-def test_s7_j60_create_tenant_census_row_reaches_write(tmp_path, alias):
-    for driver in ("owner", "setup"):
-        root = tmp_path / driver / "data"
-        H.tenant_dir(root, TID).mkdir(parents=True)
-        target = tmp_path / driver / "outside.json"
-        target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
-        plant = location_path(H.row_path)(root, TID)
-        if alias == "symlink":
-            plant.symlink_to(target)
-        else:
-            os.link(target, plant)
-        before = os.lstat(target)
-        if driver == "owner":
-            text = str(H.owner_refusal(H.create_tenant, root, TID))
-        else:
-            proc = H.run_setup(root, TID)
-            H.assert_setup_ran(proc)
-            text = H.setup_output(proc)
-            assert proc.returncode == 1, f"setup accepted a planted row alias:\n{text}"
-        assert O10_TEXT not in text, (
-            f"the non-empty-root check short-circuited the plant ({driver}); the guarded write "
-            f"was never reached:\n{text}")
-        assert target.read_text(encoding="utf-8") == "ORIGINAL OUTSIDE\n", (  # lint-stale-ref: ok — a marker word in test data, not the retired curator-test constant
-            f"the {alias} plant was written through ({driver})")
-        assert os.lstat(target).st_mtime_ns == before.st_mtime_ns
-        assert os.path.lexists(plant), "the refusal removed the plant"
-
-    control = tmp_path / "control" / "data"
-    H.tenant_dir(control, TID).mkdir(parents=True)
-    assert H.create_tenant(fixture_data_root(control), TID).tenant_id == TID
-    assert not location_path(H.row_path)(control, TID).is_symlink()
-
-
-def test_new_id_mints_a_canonical_uuid4_without_a_data_root_or_writes(tmp_path):
-    import subprocess
-    import sys
-    import uuid
-
-    before = H.census(tmp_path)
-    proc = subprocess.run(  # noqa: S603 — fixed CLI and this interpreter
-        [sys.executable, str(H.TENANT_PY), "new-id"], env=H.setup_env(None), cwd=tmp_path,
-        capture_output=True, text=True, timeout=120, check=False)
-    assert proc.returncode == 0, H.setup_output(proc)
-    assert proc.stderr == ""
-    text = proc.stdout.strip()
-    parsed = uuid.UUID(text)
-    assert str(parsed) == text
-    assert parsed.version == 4
-    assert parsed.variant == uuid.RFC_4122
-    assert H.census(tmp_path) == before, "new-id wrote a tenant or data-root entry"
+    assert H.accept(root, TID).id == TID
+    assert H.census(root) == before, "a second acceptance wrote something under <T>/"

@@ -68,15 +68,16 @@ def in_order(seen: list[tuple[str | None, str | None]], steps: list[tuple[str, s
 
 class Flaky:
     """An `httpx` transport over a fake's `handle` that answers `status` to the first request `when` accepts
-    (once), before the fake sees it; the call is kept in `hit`."""
+    (once, and only while `armed` is true), before the fake sees it; the call is kept in `hit`."""
 
     def __init__(self, handle: Callable[[httpx.Request], httpx.Response], when: Callable[[httpx.Request], bool],
                  status: int = 500) -> None:
         self.handle, self.when, self.status = handle, when, status
         self.hit: list[httpx.Request] = []
+        self.armed = True
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
-        if not self.hit and self.when(request):
+        if self.armed and not self.hit and self.when(request):
             self.hit.append(request)
             return httpx.Response(self.status, json={"message": "injected"})
         return self.handle(request)
@@ -86,14 +87,47 @@ def body_of(request: httpx.Request) -> dict[str, Any]:
     return json.loads(request.content) if request.content else {}
 
 
-def openbao_failing(world: LifecycleWorld, when: Callable[[httpx.Request], bool], status: int = 500) -> Flaky:
+def secret_id_listing(request: httpx.Request) -> bool:
+    """A listing of an AppRole's secret ids, in either spelling OpenBao accepts: `LIST .../secret-id` or
+    `GET .../secret-id?list=true` (F-10). A predicate for `openbao_failing`."""
+    path = request.url.path
+    return (path.startswith("/v1/auth/approle/role/") and path.endswith("/secret-id")
+            and (request.method == "LIST" or request.url.params.get("list") == "true"))
+
+
+def tenant_steps(world: LifecycleWorld) -> set[str | None]:
+    """The step every tenant row is at now (read between passes, never from inside a call)."""
+    return {t.step for t in world.call(world.tenants.tenants)}
+
+
+def openbao_failing(world: LifecycleWorld, when: Callable[[httpx.Request], bool], status: int = 500, *,
+                    during_step: str | None = None) -> Flaky:
     """Replace the world's service with one whose OpenBao management client fails the first request `when`
-    accepts (same fakes and repository otherwise); the host is replaced likewise by `host_openbao_failing`."""
+    accepts (same fakes and repository otherwise); the host is replaced likewise by `host_openbao_failing`.
+    With `during_step="sweep"` the injection is armed only for a service pass that STARTS with a tenant at that
+    step (steps of the other actor lie between, so an earlier listing, e.g. at `wrap`, never trips it); a pass
+    that starts elsewhere runs unarmed. The world's `service_pass` is wrapped to do this (F-10)."""
     flaky = Flaky(world.openbao.handle, when, status)
     client = httpx.AsyncClient(transport=httpx.MockTransport(flaky), base_url=OPENBAO_URL,
                                headers={"X-Vault-Token": world.openbao.management_token})
     world.service_actor = world.new_service(world.tenants, identity=world.service, openbao=client)
+    if during_step is not None:
+        flaky.armed = False
+        plain = type(world).service_pass.__get__(world)
+
+        def gated() -> int:
+            flaky.armed = during_step in tenant_steps(world)
+            try:
+                return plain()
+            finally:
+                flaky.armed = False
+        world.service_pass = gated  # type: ignore[method-assign]
     return flaky
+
+
+def sweep_failure(world: LifecycleWorld) -> Flaky:
+    """`FAILURES["sweep"]`'s set-up: the first secret-id listing made while a tenant is at `sweep` answers 500."""
+    return openbao_failing(world, secret_id_listing, during_step="sweep")
 
 
 def host_openbao_failing(world: LifecycleWorld, when: Callable[[httpx.Request], bool], status: int = 500) -> Flaky:

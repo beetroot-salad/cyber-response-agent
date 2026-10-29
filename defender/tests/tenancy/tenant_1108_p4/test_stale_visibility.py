@@ -576,19 +576,20 @@ def _client(*investigations: Any) -> Any:
     from defender.api.fakes import (InMemorySecrets, InMemoryStore, StubArtifactLinks,
                                     StubSystemChecker)
     from defender.api.ports import ApiDeps
-    from defender.identity import (Bootstrap, IdentityService, InMemoryIdentityRepository,
-                                   register_tenant)
+    from defender.identity import Bootstrap, IdentityService, InMemoryIdentityRepository
     from defender.records._tenant_id import TenantId
+    from defender.tenancy import InMemoryTenantRepository
 
     store = InMemoryStore(lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC))
     for inv in investigations:
         store.add_investigation(_TENANT, inv)
     now = lambda: _dt.datetime(2026, 10, 22, 12, tzinfo=_dt.UTC)  # noqa: E731
-    repo = InMemoryIdentityRepository()
+    tenants = InMemoryTenantRepository()
+    repo = InMemoryIdentityRepository(tenants=tenants)
 
     async def seed() -> None:
-        # The in-memory repository holds no loop state, so a throwaway loop seeds it.
-        await register_tenant(repo, TenantId(_TENANT), now=now())
+        # The in-memory repositories hold no loop state, so a throwaway loop seeds them.
+        await tenants.add_tenant(TenantId(_TENANT), created_at=now())
         ann = await repo.add_user("ann@example.invalid", created_at=now(), status="active", display_name="Ann")
         await repo.add_membership(ann.id, TenantId(_TENANT), status="active", invited_by="system",
                                   created_at=now(), accepted_at=now())
@@ -596,9 +597,9 @@ def _client(*investigations: Any) -> Any:
 
     anyio.run(seed)
     identity = IdentityService(repo, signin=_NoPort(), mail=_NoPort(), clock=now,
-                               bootstrap=Bootstrap(administrators=(), tenants={}))
+                               bootstrap=Bootstrap(administrators=()))
     deps = ApiDeps(
-        identity=identity, frontend_origin=_ORIGIN,
+        identity=identity, tenants=tenants, frontend_origin=_ORIGIN,
         alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
         writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
         artifact_links=StubArtifactLinks())

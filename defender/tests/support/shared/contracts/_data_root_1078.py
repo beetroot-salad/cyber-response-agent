@@ -5,6 +5,7 @@ from defender.tests.support.shared._locations_1210 import fixture_data_root, loc
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
+import contextlib
 import importlib
 import os
 import shutil
@@ -38,11 +39,61 @@ def current_data_root() -> Path:
     return Path(raw)
 
 
+def tenant_directory(root: Path, tenant_id: str, **keywords: Any) -> Any:
+    """A `TenantDirectory` holding `tenant_id` ACTIVE with its forge wiring (#1214 Flow 4: host entry points
+    take the tenant from the directory, not from `tenant.json`). Imported at CALL time -- the production
+    names it needs exist only after #1214. `keywords` are `_active1214.active_directory`'s (`origin`, `repo`,
+    `state`, `wiring`); the origin defaults to the tenant clone's own `origin` remote when `<root>/<id>` is a
+    clone, else `http://forge.test/tenants/<id>.git`."""
+    from defender.tests.support.tenancy._active1214 import active_directory
+
+    return active_directory(Path(location_path(root)), str(tenant_id), **keywords)
+
+
+class LazyDirectory:
+    """`t.directory` on an object that cannot carry a real property (a frozen production `Tenant`): forwards
+    every attribute to the `TenantDirectory` built on first use, so nothing imports #1214 code until a
+    migrated call site reads `state(T)` / `forge_wiring(T)` off it. (Not an `isinstance` TenantDirectory.)"""
+
+    def __init__(self, make: Any) -> None:
+        self._make = make
+        self._real: Any = None
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__") or name in ("_make", "_real"):
+            raise AttributeError(name)
+        if self._real is None:
+            self._real = self._make()
+        return getattr(self._real, name)
+
+
+class D9Tenant(str):
+    """The id a test hands to `--tenant` (a `str`), with `.directory`: the current test's data root's
+    directory holding it active (see `tenant_directory`). Built lazily, on each read."""
+
+    @property
+    def directory(self) -> Any:
+        return tenant_directory(current_data_root(), str(self))
+
+
+class KnowledgeFolder(type(Path())):  # type: ignore[misc]
+    """`<root>/<id>/knowledge` as `place_tenant` returns it, with `.directory` for the tenant it belongs to."""
+
+    @property
+    def directory(self) -> Any:
+        return tenant_directory(self.parent.parent, self.parent.name)
+
+
 def ensure_d9_tenant(tenant_id: str = D9_TENANT_ID) -> str:
     """Set `tenant_id` up in the current test's data root (`set_up_tenant`), unless its row is
-    already there. Returns the id, ready to hand to `--tenant`."""
+    already there. Returns the id (a `D9Tenant`, a `str`), ready to hand to `--tenant`; a call site migrated
+    to #1214 also passes `directory=<that id>.directory`.
+
+    WHEN THE ROW GOES (code-stage census): this stops calling `create_tenant`/`accept_tenant` (via
+    `set_up_tenant`); the knowledge folder stays and the tenant exists only in `.directory`. Call sites keep
+    this call and add `directory=`; nothing else about them changes."""
     set_up_tenant(current_data_root(), tenant_id)
-    return tenant_id
+    return D9Tenant(tenant_id)
 
 
 #: `tenant_id` -> a published fixture tenant's folder, built once per process (`_published_copy`).
@@ -81,7 +132,12 @@ def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID, *, published: bool 
     `published=True` (opt-in for branch-launch scenes): the same content as a REAL published
     tenant (clone, export, `exports/current`), so a source stamped through
     `_triplet_947.provenance_record` names a commit its clone holds and can be materialised and
-    pinned. Asking for it over a tenant already set up unpublished is a fixture bug, refused."""
+    pinned. Asking for it over a tenant already set up unpublished is a fixture bug, refused.
+
+    `.directory` on the returned `Tenant` (#1214): a `LazyDirectory` over `tenant_directory(root, id)`, the
+    tenant active with its forge wiring; a migrated call site passes `directory=t.directory`. WHEN THE ROW
+    GOES (code-stage census): the `create_tenant` line and the `accept_tenant` return go; this returns an
+    object carrying the tenant's paths and `.directory` instead, built from the same arguments."""
     owner = _tenant_owner()
     root = Path(location_path(root))
     if published:
@@ -97,4 +153,8 @@ def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID, *, published: bool 
         (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
     if not (root / tenant_id / "tenant.json").is_file():
         owner.create_tenant(fixture_data_root(root), tenant_id)
-    return owner.accept_tenant(fixture_data_root(root), tenant_id, defender_dir=DEFENDER)
+    accepted = owner.accept_tenant(fixture_data_root(root), tenant_id, defender_dir=DEFENDER)
+    # a frozen dataclass without slots still takes an instance attribute; eq and hash use the fields only
+    with contextlib.suppress(AttributeError, TypeError):
+        object.__setattr__(accepted, "directory", LazyDirectory(lambda: tenant_directory(root, tenant_id)))
+    return accepted

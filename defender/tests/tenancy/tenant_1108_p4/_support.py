@@ -104,6 +104,22 @@ class PublishedTenant:
         return str(self.tenant.id)
 
     @property
+    def directory(self) -> Any:
+        """A `TenantDirectory` (#1214) holding this tenant active, wired to `repo=tenants/<id>` and
+        `origin=self.origin`: what a migrated call site passes as `directory=` in place of `bind_forge`'s row
+        binding. Built lazily (the production names exist only after #1214). `issuer_role`, `audience` and
+        `issuer_config` are not directory facts: the credential provider derives them from generations."""
+        return self.directory_with()
+
+    def directory_with(self, *, origin: str | None = None, repo: str | None = None, **keywords: Any) -> Any:
+        """`directory` with another `origin`/`repo` (what `bind_forge(t, origin=...)` bound), or `state=`/
+        `wiring=False` for the refusal sides."""
+        from defender.tests.support.tenancy._active1214 import active_directory
+
+        return active_directory(self.data_root, self.tenant_id, origin=self.origin if origin is None else origin,
+                                repo=repo, **keywords)
+
+    @property
     def commit(self) -> str:
         """The commit the first publish exported (the clone's seeded fixture commit)."""
         return self.export.commit
@@ -218,7 +234,10 @@ def published_tenant(scratch: Path, *, root: Path, tenant_id: str = FIXTURE_TENA
     """`place_fixture` then `publish_placed`: the clone holds one commit on `main`, exported and
     named by `current`. Keep `scratch` (served remotes, merge checkouts) apart from `root`; `root`
     must not already hold `tenant_id` (don't combine with `d9_tenant` or `fixture_tenant()` on
-    one id)."""
+    one id).
+
+    The yielded `PublishedTenant` has `.directory` (#1214). WHEN THE ROW GOES, `place_fixture` (via
+    `place_tenant`) stops writing `tenant.json`; nothing else here changes."""
     place_fixture(root, tenant_id, files=files, agent=agent)
     with publish_placed(scratch, root=root, tenant_id=tenant_id, repo_name=repo_name) as done:
         yield done
@@ -260,7 +279,12 @@ def bind_forge(t: PublishedTenant, *, origin: str | None = None, issuer_role: st
     """Write the tenant row's `forge: {origin, audience, issuer_role, issuer_config}` binding and
     return it; other row fields are kept. Defaults agree with the fakes (`t.origin`, the fake's
     audience, role `tenant-<id>`) and name `default_issuer_config(t)`, where a test that logs in
-    for real writes its config. `published_tenant` never binds: P3's publish does not read it."""
+    for real writes its config. `published_tenant` never binds: P3's publish does not read it.
+
+    #1214: `t.directory` / `t.directory_with(origin=...)` replaces the origin part. WHEN THE ROW GOES
+    (code-stage census) this function is deleted: the issuer part (`issuer_role`, `issuer_config`) is derived
+    from the tenant's live generation, so tests of it seed a generation instead (the fail-closed-on-bad-wiring
+    cases become `forge_wiring`/generation cases, see `test_1214_forge_credential`)."""
     if issuer_config is None:
         issuer_config = default_issuer_config(t)
     binding = {"origin": t.origin if origin is None else origin, "audience": ISSUER_AUDIENCE,

@@ -11,7 +11,7 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
 from defender.tests.support.api._identity1306 import NEW, AuditLog, user_id  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import ORG, FakeForge  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
     REPOS,
     as_bot,
@@ -199,8 +199,15 @@ def test_the_host_never_holds_the_management_token_or_the_forge_admin_token(worl
     allowed = (("sys", "wrapping", "unwrap"), ("auth", "approle", "login"), ("identity", "oidc", "token"))
     for call in host:
         assert tuple(call.path.removeprefix("/v1/").split("/")[:3]) in allowed, f"host called {call.method} {call.path}"
-    assert all(c.headers.get("authorization", "").startswith("Bearer ") for c in calls["host"]["forge"])
-    assert not [c for c in calls["host"]["forge"] if "forge-admin-token" in str(c.headers)]
+    host_forge = calls["host"]["forge"]
+    assert host_forge, "control: the host reached the forge (install's bot calls)"
+    assert [c for c in host_forge if FakeForge.credential_of(c) == "bearer"], "control: the host made bot Bearer calls"
+    assert world.forge.integration_calls and all(status == 200 for _bot, _m, _p, status in world.forge.integration_calls), \
+        "control: those bot calls were answered 200"
+    assert {FakeForge.credential_of(c) for c in host_forge} == {"bearer"}
+    assert not [c for c in host_forge if "forge-admin-token" in str(c.headers)]
+    assert [c for c in calls["service"]["forge"] if FakeForge.credential_of(c) == "token"], \
+        "control: the service's own calls do carry the admin token"
 
 
 def test_progress_shows_the_failed_step_its_actor_and_the_failure(world):
