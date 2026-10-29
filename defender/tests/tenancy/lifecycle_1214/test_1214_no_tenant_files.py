@@ -69,8 +69,8 @@ def test_the_owner_touches_the_row_only_to_retire_it():
                   and any(isinstance(t, ast.Name) and t.id == "ROW_NAME"
                           for t in (a.targets if isinstance(a, ast.Assign) else [a.target]))}
     uses = [n for n in ast.walk(tree) if id(n) not in definition  # the module constant's own definition is no use
-            and (isinstance(n, ast.Name) and n.id == "ROW_NAME" and isinstance(n.ctx, ast.Load))
-            or (isinstance(n, ast.Constant) and isinstance(n.value, str) and _spells(n.value, ROW))]
+            and ((isinstance(n, ast.Name) and n.id == "ROW_NAME" and isinstance(n.ctx, ast.Load))
+                 or (isinstance(n, ast.Constant) and isinstance(n.value, str) and _spells(n.value, ROW)))]
     docstring_lines = {f.body[0].lineno for f in functions.values()
                        if f.body and isinstance(f.body[0], ast.Expr) and isinstance(f.body[0].value, ast.Constant)}
     outside = sorted(n.lineno for n in uses if id(n) not in inside and n.lineno not in docstring_lines)
