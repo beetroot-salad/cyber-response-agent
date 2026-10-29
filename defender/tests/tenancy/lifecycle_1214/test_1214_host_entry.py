@@ -265,7 +265,11 @@ def staged(tmp_path) -> Path:
 def test_the_connect_command_refuses_a_tenant_that_is_not_active(data_root, staged, verb, state):
     """`update`, `check`, `propose` refuse a non-active tenant (exit 1, `[tenant.py]`, the state); active passes (Flow 4, P3)."""
     command = [verb, TENANT, *([str(staged)] if verb == "propose" else [])]
-    assert _admits(_connect(command, active_directory(data_root, TENANT)))
+    admitted = _connect(command, active_directory(data_root, TENANT))
+    if verb == "check":
+        assert _admits(admitted), admitted
+    else:  # `update`/`propose` go on to delivery, which may refuse later for its own reasons (FRR-1)
+        assert not any(word in admitted.lower() for word in NOT_A_REFUSAL_OF_STATE), admitted
     refused = _connect(command, active_directory(data_root, TENANT, state=state))
     assert refused.startswith("1\n"), refused
     _has(refused, "[tenant.py]", state)
