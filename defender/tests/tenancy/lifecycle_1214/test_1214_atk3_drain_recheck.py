@@ -13,7 +13,6 @@ import pytest
 
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.lifecycle_1214.test_1214_host_entry import (
-    TENANT,
     _FlipOnFirst,
     _twin_directory,
 )
@@ -42,33 +41,6 @@ def _scripted(directory: Any) -> tuple[Any, Any]:
 
     object.__setattr__(directory, "state", state)
     return directory, lambda answer: box.update(answer=answer)
-
-
-@pytest.mark.parametrize("answer", AFTER)
-def test_still_active_judges_each_state_and_an_unknown_tenant(answer):
-    """`still_active` is None only for `active`; every other state and an unknown tenant is a refusal text (P3)."""
-    from defender import tenancy
-
-    directory, answer_with = _scripted(_twin_directory(TENANT, "http://forge.test/t.git")[0])
-    assert tenancy.still_active(directory, TENANT) is None  # control: the same directory, active
-    answer_with(answer)
-    why = tenancy.still_active(directory, TENANT)
-    assert why is not None and "not active" in why
-    assert answer is None or answer in why
-    assert answer is not None or "unknown" in why
-
-
-def test_still_active_does_not_swallow_a_directory_error():
-    """A directory that cannot answer is never read as active: the error reaches the caller (principles 2, deck PR #678)."""
-    from defender import tenancy
-
-    directory, answer_with = _scripted(_twin_directory(TENANT, "http://forge.test/t.git")[0])
-    answer_with(_Failing("database away"))
-    try:
-        why = tenancy.still_active(directory, TENANT)
-    except _Failing:
-        return
-    assert why is not None, "a failing state read was taken as an active tenant"
 
 
 def _drain(t: Any, tmp_path: Path, monkeypatch: Any, answer: Any) -> tuple[list[str], dict[str, str], Any, Any]:

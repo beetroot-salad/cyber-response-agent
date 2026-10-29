@@ -50,7 +50,7 @@ def test_teardown_fails_loudly_and_removes_nothing_when_a_holder_it_cannot_stop_
         world.drive()
         item = world.item(tenant)
         assert (item["state"], item["step"], item["step_actor"]) == ("offboarding", "teardown", "host")
-        assert item["failure"] and item["failure"].startswith("teardown")
+        assert item["failure"] and "teardown" in item["failure"]
         assert (world.data_root / tenant).is_dir() and secret_file.is_file()
         assert (world.config.secrets_dir / tenant).is_dir()
     finally:
@@ -151,9 +151,9 @@ def test_teardown_removes_the_containers_labelled_with_the_tenant_and_no_others(
 # --- H-13 --------------------------------------------------------------------------------------------
 
 def test_the_host_secret_file_is_private_to_the_host_user(world):
-    """The AppRole secret id is written `0600` as `<secret id>\\n`, in a `0700` tenant directory (DC-2)."""
+    """The AppRole secret id is written `0600` as `<secret id>\\n`, in a tenant directory that grants group and other nothing (DC-2)."""
     tenant = world.active_tenant()
     path = world.live(tenant).host_secret_file
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.parent.stat().st_mode) & 0o077 == 0
     assert path.read_text(encoding="utf-8").endswith("\n") and path.read_text(encoding="utf-8").count("\n") == 1

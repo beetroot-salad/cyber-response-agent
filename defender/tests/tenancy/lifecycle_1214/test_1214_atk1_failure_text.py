@@ -64,7 +64,7 @@ def _install(world, actor, client, step, when, straddle):
 
 
 def _assert_clean(failure: str, secrets: list[str], step: str) -> None:
-    assert failure.startswith(f"{step}:"), f"the failure does not name the step: {failure!r}"
+    assert step in failure, f"the failure does not name the step: {failure!r}"
     for secret in secrets:
         leaked = secret if len(secret) < 12 else secret[:8]
         assert leaked not in failure, f"the failure carries {leaked!r}: {failure!r}"

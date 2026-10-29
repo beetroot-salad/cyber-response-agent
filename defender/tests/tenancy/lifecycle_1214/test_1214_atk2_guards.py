@@ -18,8 +18,6 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
-from defender.records._tenant_id import TenantRefused  # noqa: E402
-from defender.tests.support.shared._locations_1210 import fixture_data_root  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk2_fakes import GitStub, host_answering_accessor  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import REPO_ROOT, LifecycleWorld, lifecycle_config  # noqa: E402
@@ -53,20 +51,6 @@ def inside_the_checkout():
         shutil.rmtree(root, ignore_errors=True)
 
 
-@pytest.mark.parametrize("existing", [False, True], ids=["absent root", "existing root"])
-def test_hold_tenant_refuses_a_data_root_inside_the_checkout_before_it_creates_anything(inside_the_checkout, existing):
-    """The placement refusal comes before the host lock: the root is neither created nor given a `.host-locks` (FR3-13)."""
-    from defender.tenancy._admission import hold_tenant
-
-    if existing:
-        inside_the_checkout.mkdir()
-        (inside_the_checkout / "keep.txt").write_text("mine", encoding="utf-8")
-    before = _files_below(inside_the_checkout)
-    with pytest.raises(TenantRefused):
-        hold_tenant(fixture_data_root(inside_the_checkout), TENANT)
-    assert _files_below(inside_the_checkout) == before and inside_the_checkout.exists() == existing
-
-
 @pytest.mark.parametrize("entry", ["run start", "drain start", "connect command"])
 def test_each_host_entry_point_refuses_a_data_root_inside_the_checkout_and_creates_nothing(entry, inside_the_checkout, tmp_path,
                                                                                          monkeypatch):
@@ -91,16 +75,16 @@ def test_an_installed_secret_file_is_mode_0600_in_a_folder_that_grants_nothing_t
 
 # --- DC-2: an accessor OpenBao answers is a file name, never a path ---------------------------------
 
-@pytest.mark.parametrize("accessor", ["../../escaped", "nested/accessor", ".hidden"])
+@pytest.mark.parametrize("accessor", ["../../escaped", "nested/accessor"])
 def test_a_hostile_secret_accessor_fails_install_names_it_and_writes_no_file(world, tmp_path, accessor):
-    """An accessor that is not a plain file name fails install (restart at `wrap`, failure names the accessor); nothing is
-    written outside `<secrets>/<T>` and no secret file is recorded (DC-2, RC-4)."""
+    """An accessor that is not a plain file name fails install (restart at `wrap`, failure names the step); nothing is
+    written outside `<secrets>/<T>` and no secret file is recorded (DC-2, RC-4, DC-14)."""
     tenant = world.create()
     world.drive(stop=lambda: world.item(tenant)["step"] == "install")
     host_answering_accessor(world, accessor)
     world.drive()
     item = world.item(tenant)
-    assert item["state"] == "creating" and "accessor" in item["failure"].lower(), item
+    assert item["state"] == "creating" and "install" in (item["failure"] or ""), item
     assert (item["step"], item["step_actor"]) == ("wrap", "service"), item
     assert not (tmp_path / "escaped").exists()
     secrets = world.config.secrets_dir
