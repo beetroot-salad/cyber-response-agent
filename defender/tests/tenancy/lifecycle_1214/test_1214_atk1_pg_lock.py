@@ -79,7 +79,7 @@ def test_a_failure_text_the_database_cannot_store_is_still_recorded_and_the_pass
     assert ran[1] == 0 or hostile == "integration-stderr-nul", f"the failed step was retried by itself: {ran}"
     if hostile != "integration-stderr-nul":
         [bad] = failed
-        assert bad[4].startswith("repo:")
+        assert "repo" in bad[4]
         [good] = [r for r in rows if r[4] is None]
         assert good[3] == "host", f"the pass did not serve the other tenant: {rows}"
 

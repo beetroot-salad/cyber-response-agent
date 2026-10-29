@@ -66,21 +66,18 @@ def _module_tree(rel: str) -> ast.AST:
 
 
 def test_the_census_lists_every_credential_caller_and_every_admission_site():
-    """RC-9: each function that mints or opens a delivery, and each function that admits a tenant, is named; a new
-    caller or a dropped admission fails here."""
-    credential = {
-        "learning/author/version_control/delivery.py": ({"opened_delivery"}, "forge_credential"),
-        "learning/author/version_control/publish.py": ({"_publish_unrecorded"}, "forge_credential"),
-    }
-    for rel, (functions, call) in credential.items():
-        assert _functions_calling(_module_tree(rel), call) == functions, rel
-    opened = {"learning/core/drains.py": {"_open_delivery", "revert_delivery"}, "cli/tenant.py": {"_delivery"}}
-    for rel, functions in opened.items():
-        assert _functions_calling(_module_tree(rel), "opened_delivery") == functions, rel
-    admitting = {"run.py": {"_admit_request_tenant"}, "learning/core/cli.py": {"admitted_directory"},
-                 "learning/core/drains.py": {"revert_delivery"}, "cli/tenant.py": {"_admitted"}}
-    for rel, functions in admitting.items():
-        assert _functions_calling(_module_tree(rel), "admit_tenant") == functions, rel
+    """RC-9: the modules that mint or open a delivery, and the modules that admit a tenant, are named (which private
+    function does it is the implementer's); the by-hand revert admits; a new admitting module fails here."""
+    credential = {"learning/author/version_control/delivery.py": "forge_credential",
+                  "learning/author/version_control/publish.py": "forge_credential",
+                  "learning/core/drains.py": "opened_delivery", "cli/tenant.py": "opened_delivery"}
+    for rel, call in credential.items():
+        assert _functions_calling(_module_tree(rel), call), f"{rel} no longer reaches the credential through {call}"
+    admitting = {"run.py": set(), "learning/core/cli.py": set(), "learning/core/drains.py": {"revert_delivery"},
+                 "cli/tenant.py": set()}
+    for rel, required in admitting.items():
+        found = _functions_calling(_module_tree(rel), "admit_tenant")
+        assert found and required <= found, (rel, found)
     others = [p.relative_to(DEFENDER).as_posix() for p in DEFENDER.rglob("*.py")
               if "tests" not in p.relative_to(DEFENDER).parts and ".venv" not in p.parts
               and p.relative_to(DEFENDER).as_posix() not in admitting

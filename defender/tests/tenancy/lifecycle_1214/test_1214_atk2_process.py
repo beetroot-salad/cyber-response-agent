@@ -4,6 +4,7 @@ for `serve` and `adopt` (O11), and `serve` giving each actor the client of its o
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 import pytest
@@ -31,7 +32,9 @@ def test_the_lifecycle_process_refuses_a_database_behind_naming_both_revisions(c
     argv = [command] if command == "serve" else ["adopt", TENANT, "--issuer-dir", str(tmp_path / "issuer")]
     _upgrade_to(empty_database, BASELINE)
     monkeypatch.setenv(DSN_ENV, empty_database)
-    monkeypatch.delenv("DEFENDER_LIFECYCLE_FORGE_URL", raising=False)  # so a passed check ends at the missing settings, never serves
+    for name in [k for k in os.environ if k.startswith(("DEFENDER_", "LIFECYCLE_")) and k != DSN_ENV
+                 and not k.startswith("DEFENDER_TEST_")]:
+        monkeypatch.delenv(name)  # so a passed check ends at the missing settings, never serves
     with pytest.raises((SystemExit, RevisionMismatch)) as refused:
         main(argv)
     text = f"{getattr(refused.value, 'code', '')}\n{refused.value}\n{capsys.readouterr().err}"
@@ -70,9 +73,11 @@ def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_cre
     async def no_loop(_service: Any, _host: Any, **_kw: Any) -> None:
         return None
 
-    monkeypatch.setattr(lifecycle, "HostActor", spy(lifecycle.HostActor, "host"))
-    monkeypatch.setattr(lifecycle, "ManagementService", spy(lifecycle.ManagementService, "service"))
-    monkeypatch.setattr(lifecycle, "serve", no_loop)
+    fakes = {"HostActor": spy(lifecycle.HostActor, "host"),
+             "ManagementService": spy(lifecycle.ManagementService, "service"), "serve": no_loop}
+    for name, fake in fakes.items():  # on the package and on `__main__`, however `_serve` reaches them
+        monkeypatch.setattr(lifecycle, name, fake)
+        monkeypatch.setattr(entry, name, fake, raising=False)
     assert asyncio.run(entry._serve()) == 0
     headers = {role: {k.lower(): v for k, v in client.headers.items()}
                for role, client in (("host forge", built["host"]["forge"]), ("host bao", built["host"]["openbao_login"]),
