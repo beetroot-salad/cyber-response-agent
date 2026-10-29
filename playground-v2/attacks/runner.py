@@ -243,7 +243,13 @@ def run_scenario(
             pre_run["cr_post_rc"] = 0
             pre_run["cr_post_response"] = {"dry_run": True}
         else:
-            rc, resp = post_cr(body)
+            # Ids come from a small, seed-like range, so an earlier run since change-mgmt
+            # last restarted may hold this one; take the next free id.
+            for _ in range(50):
+                rc, resp = post_cr(body)
+                if rc == 0 or "already exists" not in str(resp.get("error", "")):
+                    break
+                body["id"] = f"CHG-{int(body['id'].removeprefix('CHG-')) + 1}"
             pre_run["cr_post_rc"] = rc
             pre_run["cr_post_response"] = resp
             if rc != 0:

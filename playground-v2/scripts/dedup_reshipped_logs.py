@@ -8,21 +8,24 @@ with one copy per line and swaps it in.
 
 A line is (host.name, log.file.path, log.offset, @timestamp, message): the same file, place
 in the file, and parsed time. `message` is absent in some streams (nginx) and then left out.
-`@timestamp` keeps two different lines apart when a rotated file restarts at offset 0. A copy
-whose fields differ at all is kept, so a mistake keeps too much, never too little.
+`@timestamp` keeps two different lines apart when a rotated file restarts at offset 0. Two
+docs that agree on those fields are one line even if other fields (agent metadata,
+`event.ingested`) differ. Every doc in the four streams carries host, path and offset (checked
+2026-10-29); a doc without them would merge with others that match on what remains.
 
-The first-ingested copy is the one kept: the rebuild reads the old indices hour by hour of
-`event.ingested`, oldest first, into an index whose `_id` is the line's fingerprint, so a
-later copy of a line already written is refused. `event.ingested` and every other field are
-carried over unchanged (the integration pipelines, which would restamp `event.ingested`, do
-not run).
+A copy from the earliest ingest hour is the one kept: the rebuild reads the old indices hour
+by hour of `event.ingested`, oldest first, into an index whose `_id` is the line's
+fingerprint, so a copy from a later hour is refused. Within one hour the order is not
+controlled. `event.ingested` and every other field are carried over unchanged (the
+integration pipelines, which would restamp `event.ingested`, do not run).
 
     python3 scripts/dedup_reshipped_logs.py build  system.syslog   # roll over, rebuild (resumable)
     python3 scripts/dedup_reshipped_logs.py verify system.syslog   # counts, per day, sample check
     python3 scripts/dedup_reshipped_logs.py swap   system.syslog   # rebuilt index replaces the old ones
     python3 scripts/dedup_reshipped_logs.py drop   system.syslog   # delete the detached old indices
 
-`swap` leaves the old indices in place, outside the stream; only `drop` deletes anything.
+`swap` leaves the old indices in place, outside the stream; only `drop` deletes anything,
+and only after `verify` has passed.
 Disturbs the live stack, so it is a manual tool, never part of a suite.
 """
 
@@ -42,7 +45,7 @@ KEY_FIELDS = ["host.name", "log.file.path", "log.offset", "@timestamp", "message
 HOUR_MS = 3600 * 1000
 # An hour with fewer old docs than this is rebuilt in one blocking call; a bigger one runs as a
 # task that is polled, so no single HTTP call outlives its timeout.
-SYNC_MAX = 200_000
+SYNC_MAX = 50_000
 # Progress is recorded every this many hours; a resumed build redoes at most this many.
 SAVE_EVERY = 24
 
@@ -136,15 +139,17 @@ def build(dataset: str) -> int:
     _ensure_pipeline()
     meta = _meta(dataset)
     if meta is None:
-        # Roll over first so the current write index, which holds lines re-shipped before the
-        # fix, becomes one of the old indices this rebuild replaces.
-        _es("POST", f"/{_stream(dataset)}/_rollover")
         info = _es("GET", f"/_data_stream/{_stream(dataset)}")["data_streams"][0]
-        sources = [i["index_name"] for i in info["indices"][:-1]]
-        _create_dest(dataset, sources)
+        _create_dest(dataset, [i["index_name"] for i in info["indices"]])
         meta = _meta(dataset)
-        print(f"rolled over; rebuilding {len(sources)} indices into {_dest(dataset)}")
     sources = meta["sources"]
+    # The current write index holds lines re-shipped before the fix, so it is one of the old
+    # indices; roll it over so it stops taking new lines. Checked on every run, so a build
+    # that stopped between creating the index and rolling over finishes the job.
+    info = _es("GET", f"/_data_stream/{_stream(dataset)}")["data_streams"][0]
+    if info["indices"][-1]["index_name"] in sources:
+        _es("POST", f"/{_stream(dataset)}/_rollover")
+        print(f"rolled over; rebuilding {len(sources)} indices into {_dest(dataset)}")
     hours = [(h, d) for h, d in _hours(sources)
              if meta["done_until"] is None or h > meta["done_until"]]
     print(f"{len(hours)} ingest hours to go", flush=True)
@@ -209,18 +214,23 @@ def verify(dataset: str, samples: int) -> int:
         kept = dest_days.get(day, 0)
         if not kept or kept > src_days[day]:
             problems.append(f"{day}: old {src_days[day]} rebuilt {kept}")
-    # Every rebuilt doc is byte-identical to the earliest-ingested old copy of its line.
+    # Every rebuilt doc is byte-identical to an old copy of its line from the line's first
+    # ingest hour.
     hits = _es("POST", f"/{dest}/_search", {"size": samples, "query": {"function_score": {
         "random_score": {"seed": 7, "field": "_seq_no"}}}})["hits"]["hits"]
     for hit in hits:
         copies = _es("POST", f"/{sources}/_search", {
             "size": 100, "query": _key_query(hit["_source"]),
             "sort": [{"event.ingested": "asc"}]})["hits"]["hits"]
-        if not copies or copies[0]["_source"] != hit["_source"]:
-            problems.append(f"{hit['_id']}: not the earliest old copy ({len(copies)} copies)")
+        first_hour = copies[0]["_source"]["event"]["ingested"][:13] if copies else None
+        if not any(c["_source"] == hit["_source"] for c in copies) or \
+                hit["_source"]["event"]["ingested"][:13] != first_hour:
+            problems.append(f"{hit['_id']}: not a first-hour old copy ({len(copies)} copies)")
     print(f"checked {len(hits)} sampled lines against their old copies")
     for p in problems[:40]:
         print("PROBLEM", p)
+    meta["verified"] = not problems
+    _put_meta(dataset, meta)
     return 1 if problems else 0
 
 
@@ -244,6 +254,9 @@ def drop(dataset: str) -> int:
     info = _es("GET", f"/_data_stream/{_stream(dataset)}")["data_streams"][0]
     if meta is None or _dest(dataset) not in {i["index_name"] for i in info["indices"]}:
         print("rebuilt index is not serving the stream; run swap first", file=sys.stderr)
+        return 2
+    if not meta.get("verified"):
+        print("the last verify did not pass; run verify first", file=sys.stderr)
         return 2
     _es("DELETE", f"/{','.join(meta['sources'])}")
     print(f"deleted {meta['sources']}")

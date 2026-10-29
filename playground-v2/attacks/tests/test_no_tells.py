@@ -99,3 +99,29 @@ def test_no_threat_intel_value_names_the_harness():
     values = [entry["value"] for entry in json.loads(INDICATORS.read_text())]
     named = {v: _tells(v.replace("-", " ").replace(".", " ")) for v in values}
     assert not {v: t for v, t in named.items() if t}, named
+
+
+def test_a_change_request_id_already_taken_moves_to_the_next_free_one(runner, tmp_path):
+    # Ids come from a seed-like range, so two runs between change-mgmt restarts can meet.
+    scenario = {
+        "id": "ssh-brute-force-canary", "category": "auth-metadata", "description": "one step\n",
+        "source_host": "office-ws-1", "source_user": "dev.dana", "target_host": "canary-1",
+        "default_intensity": 1,
+        "steps": [{"cmd": "true", "repeat": 1, "delay_s_between": 0, "allow_fail": False}],
+    }
+    taken, posted = set(), []
+
+    def post_cr(body):
+        if not taken:
+            taken.add(body["id"])
+        if body["id"] in taken:
+            return 1, {"error": f'{{"detail":"change {body["id"]} already exists"}}'}
+        posted.append(body["id"])
+        return 0, body
+
+    runner.run_scenario(
+        scenario, seed=1, overrides={}, dry_run=False, cr_mode="valid", runs_dir=tmp_path,
+        post_cr=post_cr, exec_fn=lambda host, command, user, dry_run: (0, "", ""),
+    )
+    first = int(next(iter(taken)).removeprefix("CHG-"))
+    assert posted == [f"CHG-{first + 1}"]

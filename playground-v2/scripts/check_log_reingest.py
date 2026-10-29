@@ -4,7 +4,8 @@
 Restarts one role host container, waits for its agent to settle, then counts documents from
 that host that Elasticsearch ingested after the restart but whose `@timestamp` is older than
 the restart by more than `--slack`. Anything above zero is a re-read of an already-shipped
-file. Exit 0 = clean, 1 = re-ingestion seen, 2 = the check could not run.
+file. A changed /var/log device number fails the check too: it is the cause, and the agent
+may not have re-read anything yet when the settle time runs out. Exit 0 = clean, 1 = re-ingestion seen, 2 = the check could not run.
 
     python3 scripts/check_log_reingest.py web-2 [--settle 150] [--slack 600]
 
@@ -17,13 +18,14 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 ES_SH = Path(__file__).resolve().parents[1] / "infra" / "bin" / "es.sh"
-CONTEXT = "soc-playground"
+CONTEXT = os.environ.get("SOC_PLAYGROUND_DOCKER_CONTEXT", "soc-playground")  # as es.sh
 # The host-side streams a role host ships from its own /var/log.
 INDICES = "logs-system.auth-*,logs-system.syslog-*,logs-nginx.*-*,logs-postgresql.log-*"
 
@@ -84,7 +86,7 @@ def main() -> int:
 
     print(json.dumps({"host": args.host, "restarted_at": restarted_at.isoformat(),
                       "var_log_device": {"before": before, "after": after}, **found}, indent=2))
-    return 1 if found["count"] else 0
+    return 1 if found["count"] or before != after else 0
 
 
 if __name__ == "__main__":
