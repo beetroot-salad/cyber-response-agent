@@ -75,7 +75,7 @@ def integration_runner(container: str) -> Callable[[Sequence[str]], subprocess.C
     """The fixed integration command in the dev Forgejo container (`docker exec`), run with the
     recorded arguments only."""
     def run(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(["docker", "exec", container, *INTEGRATION, *map(str, arguments)],  # noqa: S603, S607 — fixed argv
+        return subprocess.run(["docker", "exec", "-u", "git", container, *INTEGRATION, *map(str, arguments)],  # noqa: S603, S607 — fixed argv
                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CALL_TIMEOUT, check=False)
     return run
 

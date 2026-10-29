@@ -35,6 +35,8 @@ CLAIMS = '{"tenant_id": {{identity.entity.metadata.tenant_id}}}'
 #: How long a JWT of a tenant lives, and a wrapped secret waits for the host.
 TOKEN_TTL = "10m"
 WRAP_TTL = "600"
+MAIN_WAIT_TRIES = 40
+MAIN_WAIT_SECONDS = 0.25
 _COLLABORATOR_PAGE = 50
 
 Git = Callable[..., subprocess.CompletedProcess[str]]
@@ -178,7 +180,7 @@ class ManagementService(Actor):
         gen = await self._building(held)
         done = await asyncio.to_thread(self._run_integration, list(gen.integration_args or ()))
         if done.returncode != 0:
-            raise StepFailed(f"the integration command failed (exit {done.returncode}): {done.stderr.strip()}")
+            raise StepFailed(f"the integration command failed (exit {done.returncode}): {(done.stderr + done.stdout).strip()}")
         try:
             audience = json.loads(done.stdout).get("audience")
         except (ValueError, AttributeError):
@@ -197,6 +199,7 @@ class ManagementService(Actor):
         if repo.json().get("empty") is True:
             credential = Minted(held.tenant_id, await self._bot_jwt(gen))
             await asyncio.to_thread(self._push_template, held.tenant_id, wiring.origin, credential)
+        await self._await_main(wiring.repo)
         rule = f"/api/v1/repos/{wiring.repo}/branch_protections/main"
         if answered(await self._forge.get(rule), 404).status_code == 404:
             answered(await self._forge.post(f"/api/v1/repos/{wiring.repo}/branch_protections", json={
@@ -206,6 +209,15 @@ class ManagementService(Actor):
         if not isinstance(back, dict) or "main" not in (back.get("rule_name"), back.get("branch_name")):
             raise StepFailed(f"the protection of main on {wiring.repo} does not read back")
         await self._commit_next(held)
+
+    async def _await_main(self, repo: str) -> None:
+        """The forge accepts a push before it registers the branch (it does that after the push returns),
+        so `main` is waited for, bounded, before anything reads or protects it."""
+        for _ in range(MAIN_WAIT_TRIES):
+            if answered(await self._forge.get(f"/api/v1/repos/{repo}/branches/main"), 404).status_code != 404:
+                return
+            await asyncio.sleep(MAIN_WAIT_SECONDS)
+        raise StepFailed(f"{repo} has no main branch after the template push")
 
     async def _bot_jwt(self, gen: Generation) -> str:
         """The bot's JWT, through a short-lived secret id of the recorded AppRole (swept at `sweep`, P1)."""
@@ -231,7 +243,7 @@ class ManagementService(Actor):
         done = self._git(args, **kw)
         if done.returncode != 0:
             verb = next(a for i, a in enumerate(args) if not a.startswith("-") and (i == 0 or args[i - 1] != "-c"))
-            raise StepFailed(f"git {verb} failed: {done.stderr.strip()}")
+            raise StepFailed(f"git {verb} failed: {(done.stderr + done.stdout).strip()}")
 
     async def _wrap(self, held: HeldTenant) -> None:
         """A fresh single-use wrapped secret id for the host (Flow 1.7, DC-12)."""
