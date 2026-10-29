@@ -5,8 +5,10 @@ from operator-editable files. Resolving them once, before the box and any model 
 every later frame sees the same values instead of re-reading files that may have changed.
 
 `resolve_run_tenant` is run start's readiness function: it holds the run-start refusals, each
-naming the file an operator edits. `tenant.py setup` calls the same function, so a tenant setup
-passes is one a run can start with.
+naming the file an operator edits.
+
+`entry_directory` is every host entry point's tenant directory (#1214 Flow 4): the one it is
+given, else one over the database `DEFENDER_DATABASE_DSN` names, after the light version check.
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ from defender.kit.faults import ConfigFault
 
 if TYPE_CHECKING:
     from defender.systems.correlation import CorrelationDispatch
+    from defender.tenancy import TenantDirectory
 
 
 def table_pointer(tenant_id: str) -> str:
@@ -199,7 +202,7 @@ def resolve_run_tenant(
     defender_dir: Path | None = None,
 ) -> RunReadiness:
     """Run start's readiness function: load a tenant's grants from its `settings` folder and
-    check them, before the run dir, the box and any model call. `tenant.py setup` calls it too.
+    check them, before the run dir, the box and any model call.
 
     The lead-zero template is resolved against `agent_root`'s catalog (#1108 P4, O2: the run
     copy's, never the product tree's), by default the agent half beside `settings`.
@@ -219,6 +222,25 @@ def resolve_run_tenant(
         if dispatches_lead_zero else None
     )
     return RunReadiness(grants=grants, correlation=correlation)
+
+
+def entry_directory(given: TenantDirectory | None) -> TenantDirectory:
+    """The `TenantDirectory` a host entry point admits its tenant through: `given`, else one over
+    `DEFENDER_DATABASE_DSN` once the database is at this code's revision (#1339's light check,
+    run once at process start and never a migration). No directory and no address, or a database
+    at another revision (named with this code's), is `TenantRefused`."""
+    from defender import tenancy
+
+    return tenancy.host_directory(given, check_version=_check_version)
+
+
+def _check_version(dsn: str) -> None:
+    from defender.migrations import RevisionMismatch, check_version
+
+    try:
+        check_version(dsn)
+    except RevisionMismatch as behind:
+        raise TenantRefused(str(behind)) from behind
 
 
 def resolved_settings(tenant: Tenant, *, settings_root: Path | None = None) -> dict[str, Any]:
@@ -250,6 +272,7 @@ __all__ = [
     "resolve_tenant",
     "catalog_templates",
     "correlation_dispatch",
+    "entry_directory",
     "refusals",
     "resolve_run_tenant",
     "resolve_run_tenant_or_refuse",

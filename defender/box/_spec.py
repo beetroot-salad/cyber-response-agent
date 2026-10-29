@@ -113,6 +113,9 @@ class BoxRequest:
     view: ModelView | None = None
     #: Which words of a command are paths; required with `view` when the host fallback runs.
     path_operands: Callable[[list[str]], Iterable[str]] | None = None
+    #: The tenant the box works for: its container is labelled `defender.tenant=<T>`, so the
+    #: tenant's teardown stops it (#1214 O4).
+    tenant_id: str | None = None
 
     @property
     def model_workdir(self) -> Path:

@@ -5,7 +5,8 @@ actor's step bodies in a worker thread).
 Each call is one `asyncio.run`: it opens a repository, reads, and closes the repository in that same
 loop (#1339's engine rule), so no engine outlives its loop; a connection per call is fine at
 per-drain-claim rates. Called inside a running loop it refuses (RuntimeError) before opening
-anything. Imports no database code: the repository comes from the factory it is given."""
+anything. Its public methods only read; the one write host processes make, the publish outcome
+(P2), goes through `_call` from `tenancy._publish_status`. Imports no database code: the repository comes from the factory it is given."""
 
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
-    from defender.tenancy.models import ForgeWiring
+    from defender.tenancy.models import ForgeWiring, Generation
 
 _R = TypeVar("_R")
 
@@ -34,6 +35,13 @@ class TenantDirectory:
         """The tenant's recorded repo and origin, None when none is recorded."""
         async def read(repository: Any) -> ForgeWiring | None:
             return await repository.forge_wiring(str(tenant_id))
+        return self._call(read)
+
+    def generations(self, tenant_id: str) -> list[Generation]:
+        """The tenant's credential generations (the live one among them), [] when none: what the
+        host's forge credential provider reads on every mint (P4)."""
+        async def read(repository: Any) -> list[Generation]:
+            return await repository.generations(str(tenant_id))
         return self._call(read)
 
     def _call(self, read: Callable[[Any], Awaitable[_R]]) -> _R:

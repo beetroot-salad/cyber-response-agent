@@ -1,53 +1,34 @@
 #!/usr/bin/env python3
-"""defender/cli/tenant.py — the tenant lifecycle's operator command.
+"""defender/cli/tenant.py — the connect skill's tenant command (#1214: what is left of the tenant
+lifecycle's operator command once the lifecycle became a service).
 
-    python3 defender/cli/tenant.py new-id
-    python3 defender/cli/tenant.py scaffold <tenant-id> <empty dir>
-    python3 defender/cli/tenant.py setup <tenant-id>
     python3 defender/cli/tenant.py check <tenant-id> | --folder <path>
     python3 defender/cli/tenant.py update <tenant-id>
     python3 defender/cli/tenant.py propose <tenant-id> <staged dir>
-    python3 defender/cli/tenant.py migrate <tenant-id> <new knowledge folder>   # one-off
 
-A tenant's knowledge (its `settings/` and `agent/` halves) lives in the tenant's OWN repo, never
-in the product repo. `scaffold` starts one: it copies `knowledge/tenant-template` into an empty
-directory, writes `agent/.tenant-id`, and commits it on branch `main`; the operator pushes it to
-a new private repo. To deploy it, the operator clones it ON THE HOST into the data root —
+Tenants are created, rotated and offboarded by platform administrators through the API; the
+tenant management service and the execution host's actor do the work (the repo from the template,
+the bot and its credential, the host folder and its clone, a first publish). The tenant record —
+its state, its forge wiring, its credential generations, its last publish outcome — lives in
+PostgreSQL, and this command reads it from `DEFENDER_DATABASE_DSN`: `check <id>`, `update` and
+`propose` work for a tenant only while it is `active` (#1214 Flow 4). `setup`, `scaffold`,
+`new-id` and `migrate` are retired with the on-disk row.
 
-    git clone <tenant repo> "$DEFENDER_DATA_ROOT/<tenant-id>/knowledge"
-
-(with a credential helper or an ssh agent, never a credential in the URL) — and, once the clone
-has exited 0, runs `setup <tenant-id>`. Setup ADOPTS the placed folder; it never fetches,
-copies or writes into it, and makes no git call. It runs the one-tenant guard, then the folder
-rules (no link or special file in either half, `agent/.tenant-id` naming this tenant, nothing at
-the folder's top level outside the allow-list, the settings files parse) and run start's own
-readiness function (`run_tenant.resolve_run_tenant`: anything that would make a run refuse is
-setup's refusal), and only then writes the tenant's row through `create_tenant`. It provisions that tenant's
-real `learning/` directory, or adopts an explicitly selected legacy source with
-`--learning-state-from PATH`. Adoption requires quiescence and never discovers an ambient
-source. A re-run over a finished, provisioned tenant runs every rule again and writes nothing.
-
-`check` reports what setup does not refuse: the grant census against the RUNNING code (a verb
+`check` reports what acceptance does not refuse: the grant census against the RUNNING code (a verb
 the adapters declare that the table leaves undecided, a row for a verb nobody declares), the
 lead-zero agreement, and — for a git clone — that `agent/.tenant-id` is what the tenant's repo
 commits (failing closed when git cannot answer). `check <id>` judges the tenant under
 `$DEFENDER_DATA_ROOT` through acceptance; `check --folder <path>` judges a tenant repo's working
-folder with no data root at all (tenant CI).
+folder with no data root and no tenant record at all (tenant CI).
 
-`update` publishes (#1108 P4 flow 1): it logs in to the issuer from the issuer client config
-file the tenant row's forge binding names (`forge.issuer_config`), fetches the tenant row's bound origin, fast-forwards the clone, writes the export and points
-`current` at it.
-`setup` does the same once the row carries a forge binding. `check <id>` also reports how far
-`current` trails the clone's `origin/main` and the last publish refusal any trigger met (a run
-launch, a drain start, `update`), so a sealed issuer or a refused merge is visible (O-SEE).
-`propose` hands a staged directory shaped like the tenant's `agent/` root (connect's tenant
-half: a system skill, seed queries, tacit entries) to the commit-maker as one PR on the tenant
-forge; files are added or replaced, nothing is deleted, and only `agent/` is touched.
-
-`migrate` is ONE-OFF, for a tenant set up before #1120 (a row and `runs/` under the data root,
-its settings committed in the product repo until #1120 deleted them): it builds the knowledge
-folder acceptance now requires from the last copy in the checkout's history, as a new repo
-exactly like scaffold's, and the operator then runs `setup <tenant-id>`.
+`update` publishes (#1108 P4 flow 1): it mints the tenant's forge credential through its live
+generation, fetches the recorded origin, fast-forwards the clone, writes the export and points
+`current` at it. `check <id>` also reports how far `current` trails the clone's `origin/main` and
+the last publish refusal any trigger met (a run launch, a drain start, `update`), so a sealed
+issuer or a refused merge is visible (O-SEE). `propose` hands a staged directory shaped like the
+tenant's `agent/` root (connect's tenant half: a system skill, seed queries, tacit entries) to the
+commit-maker as one PR on the tenant forge; files are added or replaced, nothing is deleted, and
+only `agent/` is touched.
 
 Exit status: 0 clean, 1 a finding or a refusal, 2 a usage error. A check that could not judge (the
 grant census not taken, `.tenant-id` unverifiable) is one more finding, not a separate code, and
@@ -56,11 +37,12 @@ the checks that need no census still run. Every refusal is printed as `[tenant.p
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
-import shutil
 import subprocess
 import sys
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+from typing import Any
 
 # Hand-rolled rather than `venv_guard.reexec_into_venv`, matching `run.py`: this must run
 # BEFORE any `defender.*` import resolves, and reaching that helper is itself such an import.
@@ -69,7 +51,7 @@ _REPO_ROOT = _DEFENDER_DIR.parent
 _VENV = _DEFENDER_DIR / ".venv"
 _VENV_PY = _VENV / "bin" / "python3"
 # Re-exec only from OUTSIDE the checkout's venv: an interpreter already running in it (by any
-# of its names, `python` or `python3`) is the venv, and a setup that re-execs itself spawns a
+# of its names, `python` or `python3`) is the venv, and a command that re-execs itself spawns a
 # process DC2 says it never spawns. Either sign counts — the venv's prefix, or an interpreter
 # started from the venv's own `bin/` — so a venv missing its `pyvenv.cfg` (whose prefix is
 # the base install's) is exec'd at most once, never in a loop.
@@ -80,7 +62,7 @@ if (__name__ == "__main__" and _VENV_PY.is_file()
 
 if __name__ == "__main__":
     # An operator command writes nothing it does not name, the checkout it runs from included:
-    # no bytecode cache lands beside the modules it imports (a refused `scaffold` leaves every
+    # no bytecode cache lands beside the modules it imports (a refused command leaves every
     # tree as it found it). Only when run: an importer's interpreter is not this command's.
     sys.dont_write_bytecode = True
     # This checkout first — first, not merely present: `defender` is a namespace tree, so each
@@ -92,13 +74,12 @@ if __name__ == "__main__":
 
 from defender import _git
 from defender import tenancy  # noqa: E402
-from defender._io import guarded_mkdir, read_plain_bytes, write_guarded  # noqa: E402
-from defender.tenancy import SETTINGS_HALF, TENANT_ID_FILE, template_dir  # noqa: E402
+from defender._io import read_plain_bytes  # noqa: E402
+from defender.tenancy import SETTINGS_HALF, TENANT_ID_FILE  # noqa: E402
 from defender.systems import run_tenant  # noqa: E402
-from defender.learning.core import state as learning_state  # noqa: E402
 from defender.systems.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
 from defender.tenancy import case_ticket  # noqa: E402
-from defender.records.formats import TenantId, TenantRefused
+from defender.records.formats import TenantRefused
 
 #: How long one git call of `check`'s committed read may take: each is a local lookup of one
 #: path, so a call still running is blocked (a FIFO where git expects a file), not slow.
@@ -112,50 +93,6 @@ def _say(message: object) -> None:
     print(f"[tenant.py] {message}", file=sys.stderr)
 
 
-# ==========================================================================================
-# setup
-# ==========================================================================================
-
-def setup(tenant_id: str, learning_state_from: Path | None = None, *,
-          issuer_config: Path | None = None) -> int:
-    """Validate the placed knowledge and learning adoption plan before writing the row, then
-    provision or adopt tenant learning state. Refuse at the first rule it fails: the id grammar (before anything
-    under the data root is looked at), the data root, the one-tenant guard (which admits the
-    placed `knowledge/` beside a missing row), a present row that is not this tenant's, the
-    folder rules, the settings files parse, and run start's readiness function. A finished
-    tenant with provisioned learning that still passes is a silent success. Interrupted moves
-    remain completable; recreated source records are preserved and reported. Refusals are
-    printed visibly, exit 1."""
-    try:
-        tid = TenantId(tenant_id)
-        root = tenancy.resolve_data_root()
-        tenancy.refuse_foreign_data_root(root, tid)
-        settings, has_row = tenancy.accept_placed_knowledge(
-            root, tid, defender_dir=_DEFENDER_DIR)
-        _settings_files_parse(settings)
-        run_tenant.resolve_run_tenant_or_refuse(
-            settings, tenant_id=tid, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=True)
-        learning_state.provision_learning(root, tid, learning_state_from, repo_root=_REPO_ROOT,
-                                          create_row=not has_row)
-        if learning_state_from is not None:
-            print(f"learning state adopted from {learning_state_from}")
-        tenant = tenancy.accept_tenant(root, tid, defender_dir=_DEFENDER_DIR)
-    except (OSError, TenantRefused) as refused:
-        _say(refused)
-        return 1
-    if _has_forge_binding(tenant):
-        return _publish(tenant, by="tenant.py setup", issuer_config=issuer_config)
-    return 0
-
-
-def _has_forge_binding(tenant: tenancy.Tenant) -> bool:
-    try:
-        tenancy.read_forge_binding(tenant)
-    except TenantRefused:
-        return False
-    return True
-
-
 def _settings_files_parse(settings: Path) -> None:
     """The folder rule run start does not apply before a run: the case-history mapping parses
     (the grant table and the lead-zero config are run start's own, in its readiness
@@ -166,26 +103,58 @@ def _settings_files_parse(settings: Path) -> None:
         raise TenantRefused(str(bad)) from bad
 
 
+
+# ==========================================================================================
+# admission (#1214 Flow 4)
+# ==========================================================================================
+
+def _admitted(tenant_id: str, directory: tenancy.TenantDirectory | None
+              ) -> tuple[tenancy.TenantDirectory, tenancy.Tenant]:
+    """The id's grammar and the data root (as run start judges them, before anything else), the
+    tenant records (`directory`, else `DEFENDER_DATABASE_DSN`'s after the light version check),
+    the tenant `active` in them with its forge wiring, and its folder accepted under
+    `$DEFENDER_DATA_ROOT` — or `TenantRefused` at the first that fails, before any work."""
+    tenancy.requested_tenant_id(tenant_id)
+    data_root = tenancy.resolve_data_root()
+    records = run_tenant.entry_directory(directory)
+    tenancy.admit_tenant(records, tenant_id)
+    tenant = tenancy.accept_tenant(data_root, tenant_id, defender_dir=_DEFENDER_DIR)
+    return records, tenant
+
+
+def _host_held(tenant_id: str) -> contextlib.AbstractContextManager[object]:
+    """The tenant's host lock under `$DEFENDER_DATA_ROOT`, held shared for as long as the command
+    works for the tenant (`tenancy.hold_tenant`, #1214 P3, Flow 4: lock, then state): the id's
+    grammar and the data root first, `TenantRefused` before anything is held."""
+    tenancy.requested_tenant_id(tenant_id)
+    return tenancy.hold_tenant(tenancy.resolve_data_root(), tenant_id)
+
+
 # ==========================================================================================
 # check
 # ==========================================================================================
 
-def check_tenant(tenant_id: str) -> int:
-    """`check <id>`: the tenant under `$DEFENDER_DATA_ROOT` through acceptance (stopping at
-    its first refusal), then every finding about its settings and its repo, all reported."""
+def check_tenant(tenant_id: str, *, directory: tenancy.TenantDirectory | None = None) -> int:
+    """`check <id>`: the tenant admitted and accepted (stopping at its first refusal), then every
+    finding about its settings, its repo and its last publish, all reported."""
     try:
-        tenant = tenancy.accept_tenant(
-            tenancy.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
+        held = _host_held(tenant_id)
     except TenantRefused as refused:
         _say(refused)
         return 1
-    return _report([*_findings(tenant.knowledge), *_publish_findings(tenant)])
+    with held:
+        try:
+            records, tenant = _admitted(tenant_id, directory)
+        except TenantRefused as refused:
+            _say(refused)
+            return 1
+        return _report([*_findings(tenant.knowledge), *_publish_findings(tenant, records)])
 
 
-def _publish_findings(tenant: tenancy.Tenant) -> list[str]:
+def _publish_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:
     """O-SEE: how far `current` trails the clone's `origin/main` (as the last fetch left it; no
-    network), and the last publish refusal any trigger recorded, while no later publish has
-    succeeded. Read locally only."""
+    network), and the last publish refusal any trigger recorded in the tenant records, while no
+    later publish has succeeded. Read locally only."""
     from defender.learning.author import version_control as vc
     from defender.learning.author.version_control.status import read_status
 
@@ -197,11 +166,11 @@ def _publish_findings(tenant: tenancy.Tenant) -> list[str]:
     trail = _trail(tenant, current)
     if trail is not None:
         findings.append(trail)
-    status = read_status(tenant)
+    status = read_status(records, tenant.id)
     if status is not None and status.get("refused"):
         findings.append(
-            f"the last publish ({status.get('by', 'unknown trigger')}, {status.get('at', '?')}) "
-            f"was refused ({status.get('kind', 'operator')}): {status['refused']}")
+            f"the last publish ({status.get('by', 'unknown trigger')}) was refused "
+            f"({status.get('kind', 'operator')}): {status['refused']}")
     return findings
 
 
@@ -234,24 +203,25 @@ def _trail(tenant: tenancy.Tenant, current: str | None) -> str | None:
 # update / propose (#1108 P4)
 # ==========================================================================================
 
-def _delivery(tenant: tenancy.Tenant, *, client=None, identity=None,
-              issuer_config: Path | None = None):
-    """The tenant's opened `TenantDelivery` (a context manager): its row's bound origin, an
-    identity from the issuer client config the binding names (or the given stand-ins)."""
+def _delivery(tenant: tenancy.Tenant, records: tenancy.TenantDirectory, *, client=None, identity=None,
+              credential_config=None):
+    """The tenant's opened `TenantDelivery` (a context manager): its recorded origin, its forge
+    credential minted through its live generation (or the given stand-ins)."""
     from defender.learning.author import version_control as vc
 
-    return vc.opened_delivery(tenant, defender_dir=_DEFENDER_DIR, client=client,
-                              identity=identity, issuer_config=issuer_config)
+    return vc.opened_delivery(tenant, defender_dir=_DEFENDER_DIR, directory=records, purpose="connect",
+                              client=client, identity=identity, credential_config=credential_config)
 
 
-def _publish(tenant: tenancy.Tenant, *, by: str, client=None, identity=None,
-             issuer_config: Path | None = None) -> int:
+def _publish(tenant: tenancy.Tenant, records: tenancy.TenantDirectory, *, by: str, client=None,
+             identity=None, credential_config=None) -> int:
     from defender.learning.author import version_control as vc
     from defender.learning.author.version_control.status import recording
 
     try:
-        with recording(tenant, by=by), _delivery(
-                tenant, client=client, identity=identity, issuer_config=issuer_config) as delivery:
+        with recording(records, tenant.id, by=by), _delivery(
+                tenant, records, client=client, identity=identity,
+                credential_config=credential_config) as delivery:
             export = delivery.publish()
     except (vc.DeliveryRefused, vc.ForgejoAuthError, TenantRefused) as refused:
         _say(f"publish refused: {refused}")
@@ -260,23 +230,42 @@ def _publish(tenant: tenancy.Tenant, *, by: str, client=None, identity=None,
     return 0
 
 
-def update(tenant_id: str, *, client=None, identity=None,
-           issuer_config: Path | None = None) -> int:
+def update(tenant_id: str, *, directory: tenancy.TenantDirectory | None = None, client=None,
+           identity=None, credential_config=None) -> int:
     """`update <id>`: publish the tenant's merged `main` (flow 1). The keywords are in-process
-    stand-ins for the forge client and the issuer login. Refusals print `[tenant.py] ...`,
-    exit 1, and are what `check` reports afterwards."""
+    stand-ins for the tenant records, the forge client, the credential and the host's issuer
+    configuration. Refusals print `[tenant.py] ...`, exit 1, and are what `check` reports
+    afterwards."""
     try:
-        tenant = tenancy.accept_tenant(
-            tenancy.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
+        held = _host_held(tenant_id)
     except TenantRefused as refused:
         _say(refused)
         return 1
-    return _publish(tenant, by="tenant.py update", client=client, identity=identity,
-                    issuer_config=issuer_config)
+    with held:
+        try:
+            records, tenant = _admitted(tenant_id, directory)
+        except TenantRefused as refused:
+            _say(refused)
+            return 1
+        return _publish(tenant, records, by="tenant.py update", client=client, identity=identity,
+                        credential_config=credential_config)
 
 
-def propose(tenant_id: str, staged: Path, *, client=None, identity=None,
-            issuer_config: Path | None = None) -> int:
+def propose(tenant_id: str, staged: Path, *, directory: tenancy.TenantDirectory | None = None,
+            client=None, identity=None, credential_config=None) -> int:
+    """`propose <id> <dir>` under the tenant's host lock (`_proposed`)."""
+    try:
+        held = _host_held(tenant_id)
+    except TenantRefused as refused:
+        _say(f"propose refused: {refused}")
+        return 1
+    with held:
+        return _proposed(tenant_id, staged, directory=directory, client=client, identity=identity,
+                         credential_config=credential_config)
+
+
+def _proposed(tenant_id: str, staged: Path, *, directory: tenancy.TenantDirectory | None,
+              client: Any, identity: Any, credential_config: Any) -> int:
     """`propose <id> <dir>`: the staged directory (shaped like `agent/`) as one commit-maker
     commit on a branch off the origin's `main`, pushed to the tenant origin with one PR. Files
     are added or replaced; nothing absent from the directory is deleted. A link, a special
@@ -288,10 +277,13 @@ def propose(tenant_id: str, staged: Path, *, client=None, identity=None,
     from defender.learning.author import version_control as vc
     from defender.tenancy import regular_files as _regular_files
 
+    try:
+        records, tenant = _admitted(tenant_id, directory)
+    except TenantRefused as refused:
+        _say(f"propose refused: {refused}")
+        return 1
     batch = None
     try:
-        tenant = tenancy.accept_tenant(
-            tenancy.resolve_data_root(), tenant_id, defender_dir=_DEFENDER_DIR)
         try:
             files = _regular_files(Path(staged))
         except OSError as unreadable:
@@ -306,8 +298,8 @@ def propose(tenant_id: str, staged: Path, *, client=None, identity=None,
         if flat:
             raise vc.DeliveryRefused(
                 f"{', '.join(flat)}: propose stages files below a folder of agent/ only")
-        with _delivery(tenant, client=client, identity=identity,
-                       issuer_config=issuer_config) as opened:
+        with _delivery(tenant, records, client=client, identity=identity,
+                       credential_config=credential_config) as opened:
             delivery = replace(opened, branch_prefix="propose/")
             batch = delivery.start_batch(f"propose-{secrets.token_hex(4)}", lanes=lanes)
             batch.commit(change_set, f"propose: {', '.join(sorted(files))[:200]}")
@@ -348,7 +340,7 @@ def _findings(knowledge: Path) -> list[str]:
     except TenantRefused as bad:
         findings.append(str(bad))
     # Here, not at the top: the census reaches the lead-author's whole extraction stack, which
-    # only `check` uses — `setup`, `scaffold` and `migrate` start without paying for it.
+    # only `check` uses — `update` and `propose` start without paying for it.
     from defender.cli import _tenant_census
 
     table = dispositions_path(settings)
@@ -434,259 +426,15 @@ def _no_commits_yet(folder: Path, env: dict[str, str], bound: float) -> bool:
 
 
 # ==========================================================================================
-# scaffold
-# ==========================================================================================
-
-def scaffold(tenant_id: str, target: Path) -> int:
-    """Start a tenant repo in the empty directory `target`: the template's files as the
-    running checkout's HEAD commits them (never its `examples/`, never an untracked or locally
-    edited file), `agent/.tenant-id`, and one commit on branch `main` holding exactly those
-    files, whatever the operator's ignore rules say. Needs no data root.
-    Refused before any write for a bad id, a target that is not an empty directory outside
-    the running checkout, or a git that is absent or has no commit identity; a failure after
-    the first write leaves `target` empty again — or, when the undo itself fails, says so and
-    names the folder to empty by hand."""
-    try:
-        tid = TenantId(tenant_id)
-    except TenantRefused as refused:
-        _say(refused)
-        return 1
-    target = Path(target).absolute()  # git runs with cwd=target: a relative GIT_DIR would nest
-    refusal = _target_refusal(target) or _git_preflight(target)
-    if refusal is not None:
-        _say(refusal)
-        return 1
-    template = template_dir(_REPO_ROOT).relative_to(_REPO_ROOT).as_posix()
-    try:
-        files = [(rel, sha) for rel, sha in _committed_files(template)
-                 if "examples" not in PurePosixPath(rel).parts]
-        if not files:
-            raise OSError(f"the checkout's HEAD commits no {template}/ to scaffold from")
-        _commit_new_tenant_repo(target, tid, files, f"tenant {tid}: scaffolded from the template")
-    except (OSError, _git.GitError) as failed:
-        try:
-            _empty(target)
-        except OSError as stuck:
-            _say(f"scaffolding {target} failed ({failed}), and undoing it failed too "
-                 f"({stuck}) — empty {target} by hand before retrying")
-            return 1
-        _say(f"scaffolding {target} failed and was undone: {failed}")
-        return 1
-    return 0
-
-
-def _target_refusal(target: Path) -> str | None:
-    try:
-        return _target_fault(target)
-    except OSError as unusable:
-        return f"{target} could not be checked as a scaffold target: {unusable}"
-
-
-def _target_fault(target: Path) -> str | None:
-    if not target.is_dir() or target.is_symlink():
-        return f"{target} is not a directory — scaffold into an empty directory"
-    if any(target.iterdir()):
-        return f"{target} is not empty — scaffold into an empty directory"
-    if target.resolve().is_relative_to(_REPO_ROOT.resolve()):
-        return (f"{target} is inside the product checkout {_REPO_ROOT} — a tenant's repo lives "
-                "outside it")
-    return None
-
-
-def _git_preflight(target: Path) -> str | None:
-    """git is there and can commit as someone, asked before anything is written. The identity
-    is asked as the repository about to be created in `target` will see it: `GIT_DIR` names its
-    `.git` (not yet there, and not created by asking), so an `includeIf "gitdir:…"` rule
-    matches as it will for the commit, and an enclosing repo's identity is not borrowed. Asked
-    from `target`'s parent: migrate's target does not exist yet."""
-    env = _git.env_for_cwd()
-    future = {**env, "GIT_DIR": str(target / ".git")}
-    cwd = target.parent
-    try:
-        _git.git(["--version"], cwd=cwd, env=env)
-        for ident in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
-            _git.git(["var", ident], cwd=cwd, env=future)
-    except FileNotFoundError as absent:
-        return f"scaffold needs git, and git is not available on PATH ({absent})"
-    except OSError as unusable:
-        return f"git could not be run in {target}: {unusable}"
-    except _git.GitError as failed:
-        return (f"git has no commit identity to commit the new tenant repo with — set "
-                f"user.name and user.email: {failed.stderr}")
-    return None
-
-
-def _committed_files(source: str, rev: str = "HEAD") -> list[tuple[str, str]]:
-    """The regular files the running checkout's commit `rev` holds under `source`
-    (repo-relative), as `(path relative to source, blob sha)` — read from git, never from the
-    disk, so an untracked file beside them (a `.DS_Store`, a stray `.env`) or a local edit is
-    never carried into a tenant's repo. A link, a submodule or anything else that is not a
-    plain file is left out."""
-    listing = _git.git(["ls-tree", "-r", "-z", rev, "--", source], cwd=_REPO_ROOT,
-                       env=_git.env_for_cwd())
-    files = []
-    for entry in sorted(filter(None, listing.split("\0"))):
-        meta, path = entry.split("\t", 1)
-        mode, kind, sha = meta.split()
-        if kind == "blob" and mode in ("100644", "100755"):
-            files.append((PurePosixPath(path).relative_to(source).as_posix(), sha))
-    return files
-
-
-def _commit_new_tenant_repo(target: Path, tid: TenantId,
-                            files: list[tuple[str, str]], message: str) -> None:
-    """Write `files` (from `_committed_files`) and `agent/.tenant-id` into `target`, and commit
-    exactly those on a new branch `main`, whatever the operator's ignore rules say."""
-    env = _git.env_for_cwd()
-    written = []
-    for rel, sha in files:
-        guarded_mkdir((target / rel).parent, base=target)
-        write_guarded(target / rel, _git.git_blob_bytes(_REPO_ROOT, sha, env=env), mode="create")
-        written.append(rel)
-    write_guarded(target / TENANT_ID_FILE, tenancy.tenant_id_file_text(tid), mode="create")
-    written.append(TENANT_ID_FILE.as_posix())
-    _git.git(["init", "-q", "-b", "main"], cwd=target, env=env)
-    _git.git(["add", "--force", "--", *written], cwd=target, env=env)
-    staged = set(_git.git(["ls-files", "-z"], cwd=target, env=env).split("\0")) - {""}
-    if staged != set(written):
-        raise OSError(f"git staged {sorted(staged ^ set(written))} differently from what was "
-                      "written")
-    _git.git(["commit", "-q", "-m", message], cwd=target, env=env)
-
-
-def _empty(target: Path) -> None:
-    """Undo a scaffold that failed after it began: everything it put in `target` goes."""
-    for entry in target.iterdir():
-        if entry.is_dir() and not entry.is_symlink():
-            shutil.rmtree(entry)
-        else:
-            entry.unlink()
-
-
-# ==========================================================================================
-# migrate (one-off, #1120)
-# ==========================================================================================
-
-def migrate(tenant_id: str, target: Path) -> int:
-    """ONE-OFF (#1120): build the knowledge folder a tenant set up before #1120 lacks. Such a
-    tenant has a row and `runs/` under the data root, and its settings were committed in the
-    product repo's `knowledge/tenants/<id>/`, which #1120 deleted; acceptance now refuses it for
-    the missing `<root>/<id>/knowledge`, and there is no tenant repo to clone. `target`
-    (normally `$DEFENDER_DATA_ROOT/<id>/knowledge`) becomes a new repo committing the LAST copy
-    of that folder the running checkout's history holds (`_last_committed`) plus
-    `agent/.tenant-id`, built as scaffold builds one from the template. It writes nothing else
-    — no row — and judges nothing: the operator then runs `setup <id>`, which applies every
-    rule to it and, finding the row there, writes nothing. Needs no data root. Refused before
-    any write for a bad id, a target that exists already, whose parent is not a real
-    directory, or that lies in the running checkout's `defender/` tree, a git with no commit
-    identity, or a history with no copy for the id (a shallow clone is told to fetch its
-    history); a failure after it creates `target` removes `target` again."""
-    try:
-        tid = TenantId(tenant_id)
-    except TenantRefused as refused:
-        _say(refused)
-        return 1
-    target = Path(target).absolute()
-    source = f"knowledge/tenants/{tid}"
-    refusal = _migrate_target_refusal(target) or _git_preflight(target)
-    if refusal is not None:
-        _say(refusal)
-        return 1
-    try:
-        rev = _last_committed(source)
-        # migrate writes the id file itself, for the id it is asked to migrate
-        files = [] if rev is None else [(rel, sha) for rel, sha in _committed_files(source, rev)
-                                        if rel != TENANT_ID_FILE.as_posix()]
-        shallow = not files and _git.git(
-            ["rev-parse", "--is-shallow-repository"], cwd=_REPO_ROOT,
-            env=_git.env_for_cwd()).strip() == "true"
-    except (OSError, _git.GitError) as failed:
-        _say(f"could not read {source}/ from the checkout's history: {failed}")
-        return 1
-    if rev is None or not files:
-        _say(f"the checkout's history holds no {source}/ — "
-             + ("it is a shallow clone: fetch its whole history (git fetch --unshallow) and "
-                "run migrate again" if shallow else
-                f"there is nothing to migrate for tenant {tid!r}; clone the tenant repo into "
-                f"{target} on the host, then run tenant.py setup {tid}"))
-        return 1
-    try:
-        # An EXCLUSIVE create: an existing folder, or a link at the name, is refused, so the undo
-        # below only ever removes what migrate made. guarded_mkdir is exist_ok.
-        target.mkdir()  # lint-unguarded-tree-write: ok — exclusive create; parent judged above
-    except OSError as blocked:
-        _say(f"could not create {target}: {blocked}")
-        return 1
-    try:
-        _commit_new_tenant_repo(
-            target, tid, files,
-            f"tenant {tid}: moved out of the product repo's {source} (#1120, from {rev[:12]})")
-    except (OSError, _git.GitError) as failed:
-        try:
-            shutil.rmtree(target)
-        except OSError as stuck:
-            _say(f"migrating into {target} failed ({failed}), and removing it failed too "
-                 f"({stuck}) — remove {target} by hand before retrying")
-            return 1
-        _say(f"migrating into {target} failed and was undone: {failed}")
-        return 1
-    print(f"{target}: built from {source}/ as commit {rev[:12]} last held it, and committed — "
-          f"now run tenant.py setup {tid}")
-    return 0
-
-
-def _last_committed(source: str) -> str | None:
-    """The newest commit in HEAD's history whose tree holds `source`, or None. The last commit
-    to change `source` either holds it (an edit) or deleted it, and then its first parent holds
-    the last copy. Through a merge, git follows the side the merge's tree agrees with, so a
-    branch that deleted the folder is found whether it was merged or squashed."""
-    env = _git.env_for_cwd()
-    last = _git.git(["rev-list", "--max-count=1", "HEAD", "--", source], cwd=_REPO_ROOT,
-                    env=env).strip()
-    for rev in (last, f"{last}^") if last else ():
-        try:
-            if _git.git(["ls-tree", rev, "--", source], cwd=_REPO_ROOT, env=env).strip():
-                return _git.git(["rev-parse", "--verify", f"{rev}^{{commit}}"], cwd=_REPO_ROOT,
-                                env=env).strip()
-        except _git.GitError:  # the root commit has no parent
-            return None
-    return None
-
-
-def _migrate_target_refusal(target: Path) -> str | None:
-    try:
-        if os.path.lexists(target):
-            return (f"{target} already exists — migrate only builds a knowledge folder that "
-                    "is not there yet")
-        parent = target.parent
-        if not parent.is_dir() or parent.is_symlink():
-            return (f"{parent} is not a real directory (a link is refused) — migrate builds the "
-                    "knowledge folder inside it")
-        if parent.resolve().is_relative_to(_DEFENDER_DIR.resolve()):
-            return (f"{target} is inside the checkout's {_DEFENDER_DIR} tree — a tenant's "
-                    "knowledge lives under the data root, outside it")
-    except (OSError, RuntimeError) as unusable:
-        return f"{target} could not be checked as a migrate target: {unusable}"
-    return None
-
-
-# ==========================================================================================
 # the command line
 # ==========================================================================================
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, directory: tenancy.TenantDirectory | None = None) -> int:
+    """The command line. `directory` is the tenant records a test or a launcher hands in; a
+    production process passes none and reads them from `DEFENDER_DATABASE_DSN`."""
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
-    sub.add_parser("new-id", help="mint an opaque tenant UUID; creates no tenant")
-    scaffold_p = sub.add_parser("scaffold", help="start a tenant repo from the template")
-    scaffold_p.add_argument("tenant_id")
-    scaffold_p.add_argument("target", type=Path)
-    setup_p = sub.add_parser(
-        "setup", help="adopt placed knowledge, create the row, and provision tenant learning")
-    setup_p.add_argument("tenant_id")
-    setup_p.add_argument("--learning-state-from", type=Path, default=None,
-                         help="explicit legacy learning directory to adopt offline")
     check_p = sub.add_parser("check", help="report the census and repo findings of a tenant")
     check_p.add_argument("tenant_id", nargs="?")
     check_p.add_argument("--folder", type=Path, default=None)
@@ -696,38 +444,24 @@ def main(argv: list[str]) -> int:
         "propose", help="propose a staged agent/-shaped directory as one PR on the tenant forge")
     propose_p.add_argument("tenant_id")
     propose_p.add_argument("staged", type=Path)
-    migrate_p = sub.add_parser(
-        "migrate", help="one-off (#1120): build a pre-#1120 tenant's knowledge folder from its "
-                        "last copy in the checkout's history")
-    migrate_p.add_argument("tenant_id")
-    migrate_p.add_argument("target", type=Path)
     ns = p.parse_args(argv)
-    if ns.command == "new-id":
-        print(TenantId.mint())
-        return 0
-    if ns.command == "scaffold":
-        return scaffold(ns.tenant_id, ns.target)
-    if ns.command == "setup":
-        return setup(ns.tenant_id, ns.learning_state_from)
-    if ns.command == "migrate":
-        return migrate(ns.tenant_id, ns.target)
     if ns.command == "update":
-        return update(ns.tenant_id)
+        return update(ns.tenant_id, directory=directory)
     if ns.command == "propose":
-        return propose(ns.tenant_id, ns.staged)
+        return propose(ns.tenant_id, ns.staged, directory=directory)
     if (ns.tenant_id is None) == (ns.folder is None):
         check_p.error("give exactly one of <tenant-id> and --folder")
     if ns.folder is not None:
         return check_folder(ns.folder)
-    return check_tenant(ns.tenant_id)
+    return check_tenant(ns.tenant_id, directory=directory)
 
 
 if __name__ == "__main__":
     from defender._log import configure_from_env
     configure_from_env()
     # Every git call this command makes acts on the folder it names — a tenant's clone, the
-    # scaffold target, the running checkout the census reads — never on a repository an
-    # operator's shell exported (J-PO1), so the repo-locating variables go for the process.
+    # running checkout the census reads — never on a repository an operator's shell exported
+    # (J-PO1), so the repo-locating variables go for the process.
     for _name in _git.REPO_LOCATING_ENV:
         os.environ.pop(_name, None)
     sys.exit(main(sys.argv[1:]))

@@ -125,6 +125,10 @@ class IdentityService:
         self._session_idle_limit = session_idle_limit
         self._listed = frozenset(bootstrap.administrators)
 
+    def now(self) -> _dt.datetime:
+        """The service's clock, so the API stamps tenant requests with the one the people use."""
+        return self._clock()
+
     async def close(self) -> None:
         """Close the repository and the sign-in port; the service is not used afterwards."""
         try:

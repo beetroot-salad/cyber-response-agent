@@ -86,6 +86,7 @@ from ._alias import (
 )
 from ._docker import (
     START_TOKEN_LABEL,
+    TENANT_LABEL,
     SharedMountsFn,
     _ALLOW_UNSANDBOXED,
     _BOX_PATH,
@@ -181,6 +182,7 @@ __all__ = [
     "RawExec",
     "RunTainted",
     "START_TOKEN_LABEL",
+    "TENANT_LABEL",
     "Sequence",
     "SharedMountsFn",
     "Transport",

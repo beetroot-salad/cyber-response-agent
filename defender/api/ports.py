@@ -8,6 +8,7 @@ from contextlib import AbstractAsyncContextManager
 from typing import Literal, Protocol
 
 from defender._model import model
+from defender.tenancy import TenantRepository
 from defender.identity import IdentityService
 from defender.records.formats import TenantId
 
@@ -218,6 +219,9 @@ class ApiDeps:
     object that answers the calls it scripts."""
 
     identity: IdentityService
+    #: The tenant rows: read for the administrator's list and progress, written by the request
+    #: methods only (#1214). The same store `identity` reads tenants from.
+    tenants: TenantRepository
     #: The one `Origin` a state-changing request may carry (O6).
     frontend_origin: str
     alerts: AlertsRepository

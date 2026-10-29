@@ -3,7 +3,7 @@
 from .auth import ForgejoAuthError, ForgejoIdentity
 from .batch import Batch
 from .delivery import TenantDelivery, opened_delivery
-from .issuer import issuer_login
+from .credential import TenantForgeCredential, forge_credential
 from .exports import TenantExport, current_export, materialise_export, tenant_lock
 from .model import (
     AgentChange,
@@ -29,8 +29,9 @@ __all__ = [
     "NETWORK_TIMEOUT",
     "TenantDelivery",
     "TenantExport",
+    "TenantForgeCredential",
     "current_export",
-    "issuer_login",
+    "forge_credential",
     "materialise_export",
     "opened_delivery",
     "publish_child_main",

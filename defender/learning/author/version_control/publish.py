@@ -5,16 +5,18 @@ before the run begins, publishes the tenant's merged `main` and reports ONE line
     stale:transient <reason>     an outage (issuer or forge unreachable, a timeout, lock busy)
     stale:operator <reason>      needs a human (a refused login or token, `main` unprotected,
                                  a dirty or diverged clone, a merged commit refused on content)
-    misconfigured <reason>       decided locally, before any network call: no issuer client
-                                 config file, or no forge binding in the tenant row
+    misconfigured <reason>       decided locally, before any network call: no tenant records
+                                 to read, no forge wiring recorded, or no issuer configured
 
 The child exits 0 for every outcome it reports (OD20); anything else is the parent's to read
 as a failed child. The run process never imports this package (P-3): it only spawns
 `python -m defender.learning.author.version_control.publish_child <tenant id> --data-root
 <root> --budget <seconds>`
-and reads the line. The child accepts the tenant itself, reads the row's forge binding and the
-issuer client config file it names itself (never handed over the environment), and logs in
-itself (A-ID); none of that material reaches its report (O8). It holds ONE deadline over its
+and reads the line. The child accepts the tenant itself, reads its forge wiring from the tenant
+records (`DEFENDER_DATABASE_DSN`, the one variable its launcher adds back to the scrubbed
+environment, #1214 DC-9), mints its credential through the tenant's live generation
+(`forge_credential`), and records its outcome there (P2); none of that material reaches its
+report (O8). It holds ONE deadline over its
 whole network phase (`--budget`, inside the launcher's own wait), so an outage ends as its own
 recorded `stale:transient` report rather than as the launcher stopping it.
 """
@@ -27,15 +29,15 @@ import signal
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from types import FrameType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from defender._text import one_line
-from defender.tenancy import Tenant, data_root_from_path, read_forge_binding, requested_tenant
+from defender.tenancy import Tenant, data_root_from_path, requested_tenant
 from defender.records.formats import TenantRefused
 
-from .auth import ForgejoIdentity
+from .auth import ForgeCredential
+from .credential import forge_credential
 from .exports import _pointed_at, publish_locked, tenant_lock
-from .issuer import issuer_config_path, issuer_login, read_issuer_config
 from .model import DeliveryRefused, LockBusy, _refusals
 from .repository import GitRepository
 from .status import (
@@ -50,6 +52,8 @@ from .status import (
 
 if TYPE_CHECKING:
     import httpx
+
+    from defender.tenancy import TenantDirectory
 
 #: Every report line's first word.
 REPORT_CLASSES = (FRESH, STALE_TRANSIENT, STALE_OPERATOR, MISCONFIGURED)
@@ -71,52 +75,67 @@ def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process st
     tenant_id: str,
     *,
     data_root: Path,
-    issuer_config: Path | None = None,
+    directory: TenantDirectory | None = None,
+    credential_config: Any = None,
     client: httpx.Client | None = None,
     issuer_transport: httpx.BaseTransport | None = None,
-    identity: ForgejoIdentity | None = None,
+    identity: ForgeCredential | None = None,
     network_timeout: float | None = None,
     locked_hook: Callable[[], None] | None = None,
     budget: float | None = None,
 ) -> str:
-    """The child's work, in-process: accept the tenant from its id and the data root; decide
-    misconfiguration (the forge binding, and the issuer client config file it names —
-    `issuer_config` is an in-process stand-in for that path) before anything is sent; log in
-    (or use the injected `identity`); open the tenant's delivery against the binding's origin
-    with the forge `client`; fetch; then, under the tenant lock (`locked_hook` first, the
-    locked phase's one injectable slow point), publish. Returns the report line; records the
-    outcome for `tenant.py check` (O-SEE). With the lock busy the outcome is `fresh` when
-    `current` already names the fetched `origin/main`, else `stale:transient`. `budget` is
-    the one deadline over the network phase (login, open, fetch; none when `None`): past it,
-    `stale:transient`. Clients made here are closed before it returns. Every outcome reported
-    for an accepted tenant is recorded, once, from the report line itself."""
+    """The child's work, in-process: accept the tenant from its id and the data root; read its
+    forge wiring from the tenant records (`directory`, else the one `DEFENDER_DATABASE_DSN` names)
+    and decide misconfiguration before anything is sent; mint the tenant's credential through its
+    live generation (or use the injected `identity`; `credential_config` is the host's issuer
+    configuration, `issuer_transport` a stand-in transport to it); open the tenant's delivery
+    against the recorded origin with the forge `client`; fetch; then, under the tenant lock
+    (`locked_hook` first, the locked phase's one injectable slow point), publish. Returns the
+    report line; records the outcome in the tenant records for `tenant.py check` (O-SEE). With
+    the lock busy the outcome is `fresh` when `current` already names the fetched `origin/main`,
+    else `stale:transient`. `budget` is the one deadline over the network phase (login, open,
+    fetch; none when `None`): past it, `stale:transient`. Clients made here are closed before it
+    returns. Every outcome reported for an accepted tenant is recorded, once, from the report line
+    itself."""
+    from defender.systems.run_tenant import entry_directory
+
     try:
         tenant = requested_tenant(data_root_from_path(Path(data_root)), tenant_id)
     except TenantRefused as refused:
         return report(STALE_OPERATOR, f"the tenant was not accepted: {refused}")
+    try:
+        directory = entry_directory(directory)
+    except TenantRefused as unconfigured:
+        return report(MISCONFIGURED, str(unconfigured))
     line = _publish_unrecorded(
-        tenant, issuer_config=issuer_config, client=client, issuer_transport=issuer_transport,
-        identity=identity, network_timeout=network_timeout, locked_hook=locked_hook,
-        budget=budget)
-    record_report(tenant, line, by=_TRIGGER)
+        tenant, directory=directory, credential_config=credential_config, client=client,
+        issuer_transport=issuer_transport, identity=identity, network_timeout=network_timeout,
+        locked_hook=locked_hook, budget=budget)
+    record_report(directory, tenant.id, line, by=_TRIGGER)
     return line
 
 
 def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outcome unrecorded
     tenant: Tenant,
     *,
-    issuer_config: Path | None,
+    directory: TenantDirectory,
+    credential_config: Any,
     client: httpx.Client | None,
     issuer_transport: httpx.BaseTransport | None,
-    identity: ForgejoIdentity | None,
+    identity: ForgeCredential | None,
     network_timeout: float | None,
     locked_hook: Callable[[], None] | None,
     budget: float | None,
 ) -> str:
+    wiring = directory.forge_wiring(str(tenant.id))
+    if wiring is None:
+        return report(MISCONFIGURED, f"tenant {tenant.id} has no forge wiring recorded: its repository is "
+                                     "not bound to a forge")
     try:
-        binding = read_forge_binding(tenant)
-        config = read_issuer_config(issuer_config_path(binding, issuer_config))
-    except (DeliveryRefused, TenantRefused) as misconfigured:
+        credential = identity if identity is not None else forge_credential(
+            str(tenant.id), "publish", directory=directory, config=credential_config,
+            transport=issuer_transport)
+    except DeliveryRefused as misconfigured:
         return report(MISCONFIGURED, str(misconfigured))
     timeout = CHILD_NETWORK_TIMEOUT if network_timeout is None else network_timeout
     repository: GitRepository | None = None
@@ -124,10 +143,8 @@ def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outc
         with contextlib.ExitStack() as owned, _refusals():
             with _deadline(budget):
                 if identity is None:
-                    identity = issuer_login(
-                        tenant, binding=binding, config=config, transport=issuer_transport
-                    )
-                    owned.callback(identity.client.close)
+                    # made here (not the caller's): its OpenBao client closes with the publish
+                    owned.callback(credential.close)  # type: ignore[attr-defined]
                 if client is None:
                     import httpx
 
@@ -135,8 +152,8 @@ def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outc
                 repository = GitRepository.open(
                     tenant.knowledge,
                     tenant_id=str(tenant.id),
-                    identity=identity,
-                    origin=binding.origin,
+                    identity=credential,
+                    origin=wiring.origin,
                     client=client,
                     network_timeout=timeout,
                 )
@@ -239,9 +256,10 @@ def _deadline(budget: float | None) -> Iterator[None]:
 def publish_child_main(
     argv: Sequence[str],
     *,
-    issuer_config: Path | None = None,
+    directory: TenantDirectory | None = None,
+    credential_config: Any = None,
     client: httpx.Client | None = None,
-    identity: ForgejoIdentity | None = None,
+    identity: ForgeCredential | None = None,
     network_timeout: float | None = None,
     locked_hook: Callable[[], None] | None = None,
 ) -> int:
@@ -259,7 +277,8 @@ def publish_child_main(
         line = publish_for_run(
             ns.tenant_id,
             data_root=ns.root,
-            issuer_config=issuer_config,
+            directory=directory,
+            credential_config=credential_config,
             client=client,
             identity=identity,
             network_timeout=network_timeout,

@@ -9,6 +9,13 @@ from typing import TYPE_CHECKING
 from defender.lazy_door import lazy_door
 
 if TYPE_CHECKING:
+    from defender.tenancy._admission import (
+        admit_tenant as admit_tenant,
+        database_address_variable as database_address_variable,
+        host_directory as host_directory,
+        hold_tenant as hold_tenant,
+        still_active as still_active,
+    )
     from defender.tenancy._command_line_run import (
         open_command_line_run as open_command_line_run,
     )
@@ -43,25 +50,19 @@ if TYPE_CHECKING:
         record_report as record_report,
     )
     from defender.tenancy._tenant import (
-        ForgeBinding as ForgeBinding,
         ISSUER_ROLE as ISSUER_ROLE,
         Tenant as Tenant,
         TenantId as TenantId,
-        accept_placed_knowledge as accept_placed_knowledge,
         accept_tenant as accept_tenant,
         box_mounted_arm_container as box_mounted_arm_container,
         box_mounted_episodes as box_mounted_episodes,
         check_knowledge_folder as check_knowledge_folder,
         check_run_settings as check_run_settings,
         clone_halves as clone_halves,
-        create_tenant as create_tenant,
         data_root_for_child as data_root_for_child,
         data_root_from_path as data_root_from_path,
         is_valid_tenant_id as is_valid_tenant_id,
-        learning_root_for_setup as learning_root_for_setup,
         parse_tenant_id_bytes as parse_tenant_id_bytes,
-        read_forge_binding as read_forge_binding,
-        refuse_foreign_data_root as refuse_foreign_data_root,
         requested_tenant as requested_tenant,
         requested_tenant_id as requested_tenant_id,
         resolve_data_root as resolve_data_root,
@@ -96,12 +97,13 @@ if TYPE_CHECKING:
 
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
+    **dict.fromkeys(("admit_tenant", "database_address_variable", "hold_tenant", "host_directory", "still_active",), "_admission"),
     **dict.fromkeys(("open_command_line_run",), "_command_line_run"),
     **dict.fromkeys(("TenantDirectory",), "_directory"),
     **dict.fromkeys(("DeliveryRefused", "POINTER", "TenantExport", "current_export", "knowledge_lock_holder", "lock_pid", "read_export_text", "regular_files", "remove_entry",), "_exports"),
     **dict.fromkeys(("OWNER_FILE", "owner_alive", "process_start", "write_owner",), "_owner"),
     **dict.fromkeys(("FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT", "read_status", "record_published", "record_refusal", "record_report",), "_publish_status"),
-    **dict.fromkeys(("ForgeBinding", "ISSUER_ROLE", "Tenant", "TenantId", "accept_placed_knowledge", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "clone_halves", "create_tenant", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "learning_root_for_setup", "parse_tenant_id_bytes", "read_forge_binding", "refuse_foreign_data_root", "requested_tenant", "requested_tenant_id", "resolve_data_root", "retire_row", "tenant_id_file_text",), "_tenant"),
+    **dict.fromkeys(("ISSUER_ROLE", "Tenant", "TenantId", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "clone_halves", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "parse_tenant_id_bytes", "requested_tenant", "requested_tenant_id", "resolve_data_root", "retire_row", "tenant_id_file_text",), "_tenant"),
     **dict.fromkeys(("AGENT_HALF", "SETTINGS_HALF", "TENANT_ID_FILE", "add_tenant_arguments", "template_dir",), "_tenants"),
     **dict.fromkeys(("InMemoryTenantRepository",), "memory"),
     **dict.fromkeys(("ForgeWiring", "Generation", "PublishStatus", "TenantRecord",), "models"),

@@ -211,6 +211,9 @@ def _container_status(docker: DockerFn, name: str) -> str | None:
 #: under the same name (a failed create-then-start is ambiguous otherwise). Minted per start,
 #: not per run id, since run ids can be reused.
 START_TOKEN_LABEL = "defender.start-token"
+#: The label naming the tenant a box works for (#1214 O4): the tenant's teardown stops its
+#: containers by it.
+TENANT_LABEL = "defender.tenant"
 
 #: Docker's own text for a label the container does not carry, which `-f {{index …}}` prints
 #: rather than failing. It means "not ours" as surely as a mismatch does.
