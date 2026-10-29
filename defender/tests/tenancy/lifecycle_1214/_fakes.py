@@ -69,7 +69,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 FORGE_URL = "http://forge.test"
-OPENBAO_URL = "http://openbao.test"
+OPENBAO_URL = "https://openbao.test"
 ORG = "tenants"
 #: The issuer URL the fakes serve (OpenBao's OIDC issuer) and `lifecycle_config` names; the integration command
 #: refuses any other (Forgejo fetches `<issuer>/.well-known/openid-configuration`, G6).
