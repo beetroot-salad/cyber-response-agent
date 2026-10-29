@@ -168,7 +168,7 @@ def test_retiring_the_lab_deletes_the_row_file_the_issuer_directory_and_the_old_
 
 def test_the_old_secrets_no_longer_log_in(world, lab):
     """The old AppRole pair worked before adoption (control) and is refused after it (O9)."""
-    bao = httpx.Client(transport=httpx.MockTransport(world.openbao.handle), base_url="http://openbao.test")
+    bao = httpx.Client(transport=httpx.MockTransport(world.openbao.handle), base_url="https://openbao.test")
     body = {"role_id": f"role-id-delivery-{LAB}", "secret_id": "old-secret"}
     assert bao.post("/v1/auth/approle/login", json=body).status_code == 200
     lab.adopt()

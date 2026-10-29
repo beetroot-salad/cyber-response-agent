@@ -23,7 +23,7 @@ def world(tmp_path, data_root):
 
 def _login_and_mint(world: LifecycleWorld, gen, role: str | None = None) -> httpx.Response:
     """What the host does with a generation's AppRole pair: log in, then read `identity/oidc/token/<role>`."""
-    bao = httpx.Client(transport=httpx.MockTransport(world.openbao.handle), base_url="http://openbao.test")
+    bao = httpx.Client(transport=httpx.MockTransport(world.openbao.handle), base_url="https://openbao.test")
     secret = world.openbao.approles[gen.approle][gen.secret_accessor]
     logged = bao.post("/v1/auth/approle/login", json={"role_id": gen.role_id, "secret_id": secret})
     assert logged.status_code == 200, logged.text

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import http.server
 import json
+import base64
 import logging
 import ssl
 import threading
@@ -144,7 +145,7 @@ def test_r6_an_http_issuer_is_refused_before_any_request(p4_tenant, tmp_path):
 def test_r6_no_secret_reaches_a_log_record_or_an_error_text(p4_tenant, tmp_path, caplog):
     from defender.learning.author.version_control import ForgejoAuthError
     from defender.tests.support.tenancy._active1214 import provision_generation
-    from defender.tests.tenancy.lifecycle_1214._fakes import FakeOpenBao
+    from defender.tests.tenancy.lifecycle_1214._fakes import ISSUER_URL, FakeOpenBao
 
     bao = FakeOpenBao()
     management = httpx.Client(transport=httpx.MockTransport(bao.handle), base_url="https://openbao.test",
@@ -152,13 +153,22 @@ def test_r6_no_secret_reaches_a_log_record_or_an_error_text(p4_tenant, tmp_path,
     fields = provision_generation(management, p4_tenant.tenant_id, tmp_path / "secrets")
     secret = fields["host_secret_file"].read_text(encoding="utf-8").strip()
 
+    def signed(request: httpx.Request) -> httpx.Response:
+        # The fake mints opaque strings; the credential decodes claims, so give the token a JWT's shape.
+        answer = bao.handle(request)
+        if request.method != "GET" or "/identity/oidc/token/" not in request.url.path or answer.status_code != 200:
+            return answer
+        part = lambda doc: base64.urlsafe_b64encode(json.dumps(doc).encode()).decode().rstrip("=")  # noqa: E731
+        claims = {"iss": ISSUER_URL, "tenant_id": p4_tenant.tenant_id, "aud": fields["audience"], "exp": 4102444800}
+        return httpx.Response(200, json={"data": {"token": f"{part({'alg': 'none'})}.{part(claims)}.sig"}})
+
     def echo(request: httpx.Request) -> httpx.Response:
         # A refusing issuer (or a proxy in front of it) that echoes the request back.
         return httpx.Response(403, text=f"denied {request.url} {request.content.decode()}")
 
     with caplog.at_level(logging.DEBUG):
         _credential(p4_tenant, tmp_path, openbao_url="https://openbao.test", fields=fields,
-                    transport=httpx.MockTransport(bao.handle)).token()
+                    transport=httpx.MockTransport(signed)).token()
         with pytest.raises(ForgejoAuthError) as refused:
             _credential(p4_tenant, tmp_path, openbao_url="https://openbao.test", fields=fields,
                         transport=httpx.MockTransport(echo)).token()

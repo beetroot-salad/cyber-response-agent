@@ -19,7 +19,7 @@ from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F4
 
 TENANT = "5c1e8f30-72ab-4d96-b1f4-0a9d3e6c7b82"
 STATES = ("not active", "offboarding", "creating", "offboarded", "no database")
-OPENBAO = "http://openbao.test"
+OPENBAO = "https://openbao.test"
 
 
 def _placed(data_root: Path, tenant: str = TENANT) -> None:
