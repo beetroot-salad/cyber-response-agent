@@ -1800,8 +1800,9 @@ class InProcessSiblings:
 
         try:
             from defender.systems.verbs import read_roster
+            from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 
-            return mod(RUN).main(tail, lifecycle=lifecycle, visualize=_no_visualize,
+            return mod(RUN).main(tail, lifecycle=lifecycle, directory=directory_for_root(), visualize=_no_visualize,
                                  preflight=_no_preflight, oracle=oracle.model,
                                  verifier=self.verifier.model, roster=read_roster(self.est.adapters))
         except SystemExit as stop:

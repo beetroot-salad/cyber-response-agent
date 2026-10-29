@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, unbind_forge
 
 
 @pytest.fixture
@@ -23,11 +23,7 @@ def _status(t):
 
 def test_r6_a_launch_time_publish_records_a_misconfiguration_and_a_success_clears_it(
         tenant, tmp_path):
-    from defender.tests.support.tenancy._active1214 import generation_fields
-
-    gone = {**generation_fields(tenant.tenant_id, tmp_path / "secrets"),
-            "host_secret_file": tmp_path / "no-such-dir" / "secret"}
-    bind_forge(tenant, generations=[gone])
+    unbind_forge(tenant)  # Flow 4: no forge wiring is the local misconfiguration the design pins
     line = B.run_child(tenant, mint=True)
     assert B.outcome_class(line) == "misconfigured", line
     refused = _status(tenant)
@@ -56,13 +52,14 @@ def test_r6_a_git_fetch_that_cannot_connect_is_a_transient_outage(tenant, tmp_pa
 def test_r6_a_busy_lock_is_not_recorded_as_a_refusal_and_keeps_the_earlier_record(tenant):
     from defender.learning.author.version_control import LockBusy, status
 
-    status.record_refused(tenant.tenant, RuntimeError("a real refusal"), by="r6")
+    directory, tid = tenant.directory, tenant.tenant_id
+    status.record_refused(directory, tid, RuntimeError("a real refusal"), by="r6")
     before = _status(tenant)
     assert before
     assert before["refused"] == "a real refusal"
-    status.record_refused(tenant.tenant, LockBusy("lock busy"), by="r6-later")
+    status.record_refused(directory, tid, LockBusy("lock busy"), by="r6-later")
     assert _status(tenant) == before
-    with pytest.raises(LockBusy), status.recording(tenant.tenant, by="r6-later"):
+    with pytest.raises(LockBusy), status.recording(directory, tid, by="r6-later"):
         raise LockBusy("lock busy")
     assert _status(tenant) == before
 

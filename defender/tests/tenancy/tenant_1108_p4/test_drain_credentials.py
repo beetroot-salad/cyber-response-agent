@@ -239,7 +239,8 @@ def test_o9_a_tenant_open_refuses_is_the_stages_one_line_refusal_and_runs_nothin
     config = _host_secret(t, tmp_path)
     tick = _tick(drain, t, tmp_path, mint=fault in _LOCAL)
     _break_tenant(t, config, fault)
-    t.forge.requests.clear()  # the fixture's own publish asked the forge; only the tick counts
+    t.forge.requests.clear()  # the fixture's own publish asked the forge (and minted); only the tick counts
+    t.vault.calls.clear()
 
     caplog.clear()
     with caplog.at_level(logging.DEBUG):

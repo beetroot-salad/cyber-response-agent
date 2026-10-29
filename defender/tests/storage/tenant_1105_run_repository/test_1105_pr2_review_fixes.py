@@ -230,12 +230,14 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     u = _uuid_tenant(r1, only_in_u, tenant_id=H.U_ID)
     os.symlink(Path(location_path(t.runs)) / r1, Path(location_path(t.runs)) / linked)
     paths = P.loop_paths(tmp_path)
+    #: A claim of a tenant the directory does not know is not served and not counted (Flow 4: the drain
+    #: re-checks each claim's tenant); its row stays queued as it was.
+    unknown = {"case_id": "ghost", "tenant_id": fixture_uuid("tenant:ghost"), "run_id": r1}
     transient = {
-        "ghost": {"case_id": "ghost", "tenant_id": fixture_uuid("tenant:ghost"), "run_id": r1},
         "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": linked},
         "unreachable": {"case_id": "unreachable", "tenant_id": H.U_ID, "run_id": r1},
     }
-    for case_id, body in transient.items():
+    for case_id, body in {**transient, "ghost": unknown}.items():
         P.queue_row(paths, case_id, body)
     gone = {
         "gone": {"case_id": "gone", "tenant_id": H.T_ID, "run_id": nope},
@@ -261,8 +263,12 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
         row = _queued(paths, case_id)
         assert row is not None, f"{case_id} was not re-queued"
         assert row.get("attempts") == 1, f"{case_id}: {row!r}"
+    assert P.dead_letter(paths, "ghost") is None
+    assert _queued(paths, "ghost") == unknown, "an unknown tenant's claim was touched"
 
     P.drain(paths, P.Lane())
+    assert P.dead_letter(paths, "ghost") is None
+    assert _queued(paths, "ghost") == unknown, "an unknown tenant's claim was counted or quarantined"
     for case_id in transient:
         letter = P.dead_letter(paths, case_id)
         assert letter is not None, f"{case_id} was not quarantined at the retry ceiling"
