@@ -941,11 +941,12 @@ def _request_dir(s: LeadScene, *below: str) -> Path:
 
 def _drain(s: LeadScene, lanes: Lanes, **kw: Any) -> Any:
     """`drains._drain_lead_author` over the scene's paths, on a learning-state handle over its
-    root (as the lane's entry opens one), its two work steps `lanes`', serving the scene's batch."""
+    root (as the lane's entry opens one), its two work steps `lanes`', serving the scene's batch.
+    The scene is no tenant's (`paths.tenant` is `None`), so the drain has no directory to ask."""
     lanes.lane = s.lane
     return drains._drain_lead_author(
         s.paths, _state1135.state_for_paths(s.paths), lanes.run_lead, lanes.run_pitfalls,
-        accept_tenant=drains._tenant_acceptor(s.paths.tenant), **kw)
+        accept_tenant=drains._tenant_acceptor(s.paths.tenant), directory=None, **kw)
 
 
 def _caught_drain(s: LeadScene, lanes: Lanes, **kw: Any) -> BaseException | None:

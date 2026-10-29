@@ -203,12 +203,16 @@ def make_fifo(path: Path) -> Path:
 def tree_state(root: Path) -> dict[str, tuple[str, bytes | str | None]]:
     """Every entry under `root`, judged without following links: kind plus, for a regular
     file its bytes, for a link its target. Two calls compare equal iff nothing under `root`
-    was created, removed, retyped or rewritten."""
+    was created, removed, retyped or rewritten. The host lock's folder `<root>/.host-locks/` is not
+    looked at: entry points take the tenant's shared lock before they judge it (Flow 4), also for a
+    tenant they then refuse; it is no tenant folder and holds no tenant fact (W4-8)."""
     root = Path(root)
     out: dict[str, tuple[str, bytes | str | None]] = {}
     if not os.path.lexists(root):
         return out
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        if Path(dirpath) == root and ".host-locks" in dirnames:
+            dirnames.remove(".host-locks")
         for name in [*dirnames, *filenames]:
             p = Path(dirpath) / name
             rel = str(p.relative_to(root))

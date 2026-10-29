@@ -67,9 +67,12 @@ def _origin_of(data_root: Path, tenant: str, origin: str | None) -> str:
         return origin
     folder = Path(data_root) / tenant
     if (folder / ".git").exists():
-        got = subprocess.run(["git", "-C", str(folder), "remote", "get-url", "origin"],  # noqa: S603, S607
-                             capture_output=True, text=True, check=False)
-        if got.returncode == 0 and got.stdout.strip():
+        try:
+            got = subprocess.run(["git", "-C", str(folder), "remote", "get-url", "origin"],  # noqa: S603, S607
+                                 capture_output=True, text=True, check=False)
+        except OSError:  # a process with no runnable git (the git-fault tests): the default origin
+            got = None
+        if got is not None and got.returncode == 0 and got.stdout.strip():
             return got.stdout.strip()
     return f"{FORGE_ORIGIN}/tenants/{tenant}.git"
 
@@ -94,7 +97,7 @@ def active_repository(data_root: Path, tenant: str, *, state: str = "active", re
         extra = {"repo": repo or f"tenants/{tenant}", "origin": _origin_of(data_root, tenant, origin)}
     added = twin.add_tenant(str(tenant), created_at=CREATED, state=state, **extra)
     if inspect.isawaitable(added):  # GAP-0-1: the seeder's sync/async shape is not pinned
-        asyncio.run(_await(added))
+        run_sync(_await(added))
     for fields in generations:
         _seed_generation(twin, str(tenant), fields)
     return twin
@@ -103,11 +106,25 @@ def active_repository(data_root: Path, tenant: str, *, state: str = "active", re
 def _seed_generation(twin: Any, tenant: str, fields: Mapping[str, Any]) -> None:
     added = twin.add_generation(tenant, **fields)  # GAP-Ma-1: not pinned by r9
     if inspect.isawaitable(added):
-        asyncio.run(_await(added))
+        run_sync(_await(added))
 
 
 async def _await(awaitable: Any) -> None:
     await awaitable
+
+
+def run_sync(coroutine: Any) -> None:
+    """Run `coroutine` to completion from sync code, also when the caller sits inside a running event loop (a lazy
+    directory is first read by `run.main` inside its loop; `asyncio.run` there raises): then on a worker thread."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(coroutine)
+        return
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(asyncio.run, coroutine).result()
 
 
 @pytest.fixture

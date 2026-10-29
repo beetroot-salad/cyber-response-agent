@@ -29,6 +29,7 @@ from defender.skills.connect import validate_scaffold
 from defender.tests.support.invlang.validation import _dispositions995 as D995
 from defender.tests.support.shared.contracts import _spec1077 as S1077
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.tenancy._active1214 import active_directory
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as P
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 from defender.records._tenant_id import TenantId
@@ -86,7 +87,6 @@ def _copy_script(checkout: Path, module: Any) -> Path:
 def _knowledge_link(base: Path, root: Path) -> None:
     """`<root>/<id>/knowledge` as a symlink to a complete knowledge folder elsewhere."""
     real = H.place_knowledge(base / "elsewhere")
-    H.plant_row(root)
     H.tenant_folder(root).mkdir(parents=True, exist_ok=True)
     H.knowledge_dir(root).symlink_to(real, target_is_directory=True)
 
@@ -159,12 +159,12 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
 
 #: The refusal cells each entry point takes. O6: there is no row, so no `no-row` cell; `tenant.py
 #: setup` and `scaffold` are retired (F-12); `tenant.check` runs through the launcher (no database
-#: in a subprocess), which cannot stand in a copied checkout, so it has no `mounted-tree` cell.
+#: in a subprocess), and in a copied checkout through `H.checkout_tenant_py`.
 ALL_CELLS = ("bad-id", "knowledge-link", "mounted-tree")
 CELLS_OF = {
     "run.main": ALL_CELLS,
     "branch.cli.main": ALL_CELLS,
-    "tenant.check": ("bad-id", "knowledge-link"),
+    "tenant.check": ALL_CELLS,
     "policy_cli.main": ALL_CELLS,
     "validate_scaffold.main": ALL_CELLS,
 }
@@ -232,8 +232,11 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
     capsys.readouterr()
     if entry == "run.main":
         rec = H.RunRecorder(base / "run")
+        # A root never created holds no knowledge folder: the tenant is active in the directory all the same, so the
+        # refusal is accept_tenant's own (the root's placement), not the directory's.
+        active = (active_directory(Path(cell.root), cell.tenant_id) if cell.never_created else None)
         rc, exc = H.drive_run(run_py, [str(H.plant_alert(base / "in")), "--tenant", cell.tenant_id],
-                              rec)
+                              rec, directory=active)
         said = H.exit_text(exc) if exc is not None else ""
         return exc is not None or rc != 0, said + capsys.readouterr().err, rec.spent
     if entry == "branch.cli.main":
@@ -258,7 +261,12 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
     }[entry]
     if entry == "tenant.check":
         # The launcher's directory holds the asked-for tenant active, so the refusal is accept_tenant's own.
-        proc = H.tenant_py(module, *args, root=cell.root, seed=[cell.tenant_id], unset=("DEFENDER_DIR",), **cell.env)
+        if cell.checkout is not None:
+            proc = H.checkout_tenant_py(cell.checkout, *args, root=cell.root, seed=[cell.tenant_id],
+                                        unset=("DEFENDER_DIR",), **cell.env)
+        else:
+            proc = H.tenant_py(module, *args, root=cell.root, seed=[cell.tenant_id], unset=("DEFENDER_DIR",),
+                               **cell.env)
         text = H.output(proc)
         return proc.returncode != 0 and "Traceback" not in text, text, False
     script = (_copy_script(cell.checkout, module) if cell.checkout is not None

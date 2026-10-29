@@ -112,7 +112,8 @@ class PublishedTenant:
         if cached is None:
             from defender.tenancy import TenantDirectory
 
-            cached = TenantDirectory(lambda: self.repository)
+            twin = self.repository  # built here, outside any loop: the directory opens it inside its own
+            cached = TenantDirectory(lambda: twin)
             object.__setattr__(self, "_dir", cached)
         return cached
 

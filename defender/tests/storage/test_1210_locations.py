@@ -111,7 +111,7 @@ def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):
 
     tenant = set_up_tenant(tmp_path / "data")
     expected = {
-        "data_root": L.DataRoot, "tenant_root": L.TenantRoot, "row_path": L.TenantRecord,
+        "data_root": L.DataRoot, "tenant_root": L.TenantRoot,
         "runs": L.RunsBase, "sessions": L.SessionsRoot, "episodes": L.EpisodesRoot,
         "learning": L.LearningRoot, "worktrees": L.WorktreesRoot, "exports": L.ExportsRoot,
         "drafts": L.DraftsRoot, "knowledge_lock": L.KnowledgeLock,

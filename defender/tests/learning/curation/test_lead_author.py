@@ -469,7 +469,7 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
         lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps, box=box, on_done=on_done)
 
     drains._drain_lead_author_markers(lane.paths, state, serve,
-                                      accept_tenant=drains._tenant_acceptor(None))
+                                      accept_tenant=drains._tenant_acceptor(None), directory=None)
 
     name = run_dir.name
     assert lane.landed() == []
