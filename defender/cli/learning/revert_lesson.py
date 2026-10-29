@@ -7,10 +7,12 @@ its live generation, `TenantDelivery.open`, then `TenantDelivery.revert` (D-peel
 tenant forge. The author drain's lock stays the revert's mutual exclusion with the drain (exit 3)."""
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 
 from pathlib import Path
+from typing import NoReturn
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
@@ -23,10 +25,10 @@ from defender.records.formats import TenantRefused
 _logger = logging.getLogger(__name__)
 
 
-class _Refusing:
+class _Refusing(argparse.ArgumentParser):
     """Stands in for the argument parser in the shared admission: its usage error becomes the refusal the revert reports."""
 
-    def error(self, message: str):
+    def error(self, message: str) -> NoReturn:
         raise TenantRefused(message)
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
@@ -91,8 +93,6 @@ def main(
     """The CLI. The keywords are in-process stand-ins for the forge client, the tenant's
     credential (`identity` given: none is minted), the tenant records (else
     `DEFENDER_DATABASE_DSN`'s) and the host's issuer configuration."""
-    import argparse
-
     parser = argparse.ArgumentParser(description="Revert a lesson under its tenant's drain lock")
     parser.add_argument("--tenant", required=True)
     parser.add_argument("lesson_name")
