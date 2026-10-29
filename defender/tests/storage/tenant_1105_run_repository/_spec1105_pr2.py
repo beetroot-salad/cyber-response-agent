@@ -471,13 +471,16 @@ class Lane:
 
 
 def drain(paths: Any, lane: Lane) -> list[Any]:
-    """One lead-author tick's claim loop over `paths`, with its fresh tenant acceptor.
+    """One lead-author tick's claim loop over `paths`, with its fresh tenant acceptor and the directory holding
+    every tenant placed under the data root active (the drain re-checks the state per claim, Flow 4).
     Scratch paths require a configured data root before any claim is made."""
     from defender.learning.core import drains
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 
     state = _state1135.state_for_paths(paths)
     return drains._drain_lead_author_markers(
-        paths, state, lane, accept_tenant=drains._tenant_acceptor(paths.tenant))
+        paths, state, lane, accept_tenant=drains._tenant_acceptor(paths.tenant),
+        directory=directory_for_root(os.environ[DATA_ROOT_ENV]) if os.environ.get(DATA_ROOT_ENV) else None)
 
 
 def loop_paths(tmp_path: Path) -> Any:

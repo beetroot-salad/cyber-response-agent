@@ -205,6 +205,10 @@ def tree_census(root: Path) -> dict[str, tuple[Any, ...]]:
         return {}
     out: dict[str, tuple[Any, ...]] = {}
     for current, dirnames, filenames in os.walk(root, followlinks=False):
+        # The host lock's folder is no tenant fact: an entry point takes the tenant's shared lock before it judges
+        # the tenant, also one it then refuses (Flow 4, W4-8).
+        if ".host-locks" in dirnames:
+            dirnames.remove(".host-locks")
         for name in (*dirnames, *filenames):
             p = Path(current) / name
             rel = p.relative_to(root).as_posix()
@@ -386,6 +390,36 @@ def tenant_py(module: Any, *args: str, root: Path | str | None, seed: list[str] 
         command, env=env, cwd=str(cwd or REPO_ROOT), capture_output=True, text=True, timeout=180, check=False)
 
 
+#: Runs a COPIED checkout's own `defender.cli.tenant.main` with a directory holding the given tenants active (the
+#: test-side launcher is a test module and a copy carries no `tests/`): the copy's `defender` package is first on
+#: the path, the way its script puts its checkout first.
+_COPY_DRIVER = """
+import asyncio, datetime, inspect, sys
+from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+from defender.cli import tenant
+seeded, argv = sys.argv[1].split(","), sys.argv[2:]
+twin = InMemoryTenantRepository()
+for name in filter(None, seeded):
+    added = twin.add_tenant(name, created_at=datetime.datetime(2026, 10, 26, 9, tzinfo=datetime.timezone.utc),
+                            state="active", repo="tenants/" + name, origin="http://forge.test/tenants/" + name + ".git")
+    if inspect.isawaitable(added):
+        asyncio.run(added)
+sys.exit(tenant.main(argv, directory=TenantDirectory(lambda: twin)))
+"""
+
+
+def checkout_tenant_py(checkout: Path, *args: str, root: Path | str | None, seed: list[str] | None = None,
+                       **kw: Any) -> subprocess.CompletedProcess:
+    """`defender.cli.tenant.main(args, directory=)` of the tmp checkout `checkout` (`tmp_checkout`), run with that
+    checkout first on the path; the directory holds each tenant folder under `root` active (`seed` overrides)."""
+    env = tenant_env(root, **kw)
+    env["PYTHONPATH"] = str(checkout)
+    seeds = placed_tenants(root) if seed is None else seed
+    return subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
+        [sys.executable, "-c", _COPY_DRIVER, ",".join(seeds), *args], env=env, cwd=str(checkout),
+        capture_output=True, text=True, timeout=180, check=False)
+
+
 def output(proc: subprocess.CompletedProcess) -> str:
     return (proc.stdout or "") + (proc.stderr or "")
 
@@ -418,27 +452,9 @@ def assert_clean(proc: subprocess.CompletedProcess) -> str:
     return text
 
 
-def setup(module: Any, root: Path, tenant_id: str = TID, **kw: Any) -> subprocess.CompletedProcess:
-    """`tenant.py setup <tenant_id>` against `root`."""
-    return tenant_py(module, "setup", tenant_id, root=root, **kw)
-
-
 def check(module: Any, root: Path | None, *args: str, **kw: Any) -> subprocess.CompletedProcess:
     """`tenant.py check <args>` against `root` (`None`: `DEFENDER_DATA_ROOT` unset)."""
     return tenant_py(module, "check", *args, root=root, **kw)
-
-
-def assert_first_setup_refused(proc: subprocess.CompletedProcess, root: Path,
-                               before: dict[str, Any], *names: str) -> str:
-    """A first setup over placed knowledge refused for the folder's own fault: the refusal names
-    `names` and is not the one-tenant guard's, and the data root is as `before` found it, with
-    no row. Returns the output."""
-    text = assert_refused(proc, *names)
-    assert "the data root is not empty" not in text, (
-        f"the one-tenant guard refused instead of the placed knowledge's own fault:\n{text}")
-    assert census_diff(before, tree_census(root)) == [], "the refused setup wrote something"
-    assert not location_path(row_path)(root).exists(), "a refused first setup left a row"
-    return text
 
 
 # ======================================================================================

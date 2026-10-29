@@ -403,7 +403,7 @@ class Estate:
         (`_published_template`) and its tenant folder copied in; nothing in it names its root.
         `configs` (`{system: config.env text}`) is written into the published settings."""
         root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
-        if not (root / tenant_id / "tenant.json").is_file():
+        if not (root / tenant_id / "knowledge").is_dir():
             import shutil
 
             shutil.copytree(_published_template(tenant_id, self.table(), dict(configs or {})),

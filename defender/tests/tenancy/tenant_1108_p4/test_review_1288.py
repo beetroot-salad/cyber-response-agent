@@ -118,7 +118,7 @@ def test_the_launcher_records_a_child_that_reports_nothing_valid(p4_tenant, chil
     from defender.investigation import publish_launch
 
     line = publish_launch.launch_publish(
-        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0,
+        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0, directory=p4_tenant.directory,
         command=[sys.executable, "-c", child, "--"])
     assert line.startswith("stale:operator publish child failed:"), line
     status = _status(p4_tenant)
@@ -132,7 +132,7 @@ def test_control_a_child_that_reports_validly_is_not_recorded_by_the_launcher(p4
     from defender.investigation import publish_launch
 
     line = publish_launch.launch_publish(
-        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0,
+        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0, directory=p4_tenant.directory,
         command=[sys.executable, "-c", "print('stale:transient the forge is down')", "--"])
     assert line == "stale:transient the forge is down"
     status = _status(p4_tenant)
@@ -200,7 +200,7 @@ def test_the_launcher_refuses_a_budget_that_is_not_positive_and_records_it(p4_te
 
     spawn = _RecordingSpawn()
     line = publish_launch.launch_publish(p4_tenant.tenant_id, data_root=p4_tenant.data_root,
-                                         budget=budget, spawn=spawn)
+                                         budget=budget, spawn=spawn, directory=p4_tenant.directory)
     assert spawn.calls == [], "a child was started with no time to run in"
     assert line.startswith("stale:operator publish child failed:"), line
     assert "positive" in line, line
@@ -343,7 +343,7 @@ def test_a_child_that_finishes_after_the_stop_is_reported_as_it_said(p4_tenant):
     child = ("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
              f"time.sleep(1.5); print('fresh {commit}')")
     line = publish_launch.launch_publish(
-        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=0.5,
+        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=0.5, directory=p4_tenant.directory,
         command=[sys.executable, "-c", child, "--"])
     assert line == f"fresh {commit}", line
     status = _status(p4_tenant)

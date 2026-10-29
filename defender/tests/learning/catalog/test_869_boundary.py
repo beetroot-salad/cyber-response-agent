@@ -187,7 +187,7 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
 
     capsys.readouterr()
     drains._drain_lead_author(paths, state, lane1, lane2, batch=lane.batch,
-                              accept_tenant=drains._tenant_acceptor(paths.tenant))
+                              accept_tenant=drains._tenant_acceptor(paths.tenant), directory=None)
 
     # Both lanes actually ran, and lane 1 actually refused: without this the residue claim
     # would be green over a drain that never reached either lane.

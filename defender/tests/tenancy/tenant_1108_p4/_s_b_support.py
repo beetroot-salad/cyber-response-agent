@@ -456,7 +456,7 @@ if spec.get("forge_error_body"):
 from defender.tests.support.tenancy._active1214 import active_directory
 
 # #1214 Flow 4: the child admits the tenant from a directory; this process builds its own over the same facts.
-directory = active_directory(Path(spec["data_root"]), spec["tenant_id"], origin=spec["origin"])
+directory = active_directory(Path(spec["data_root"]), spec["tenant_id"], origin=spec["origin"], wiring=spec["wiring"])
 rc = vc.publish_child_main(
     sys.argv[2:], directory=directory, client=client,
     identity=VaultHTTP(spec["tenant_id"]).identity(), network_timeout=spec["network_timeout"],
@@ -479,6 +479,7 @@ def child_command(t: Any, tmp_path: Path, *, network_timeout: float,
     spec = tmp_path / "publish_child_spec.json"
     spec.write_text(json.dumps({
         "tenant_id": t.tenant_id, "remote": str(t.remote), "origin": t.origin, "data_root": str(t.data_root),
+        "wiring": (t.__dict__.get("_bound") or {}).get("wiring", True),  # `unbind_forge` leaves the tenant unwired
         "marks": str(marks),
         "network_timeout": network_timeout, "locked_sleep": locked_sleep,
         "forge_error_body": forge_error_body}), encoding="utf-8")
