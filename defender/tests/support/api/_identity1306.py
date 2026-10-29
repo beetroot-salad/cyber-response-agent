@@ -73,8 +73,8 @@ ANN, BOB, NEW, NINA = "ann@a.example", "bob@b.example", "new@n.example", "nina@n
 OPS, ME = "ops@x.example", "me@x.example"
 
 ALERT = Alert(
-    alert_id="al-1", vendor="tickets", vendor_ticket_id="T-1", title="t", severity="high",
-    rule="r", fired_at=T0, changed_at=T0, received_at=T0, raw={"id": "al-1"},
+    alert_id="al-1", vendor="tickets", vendor_ticket_id="T-1", title="t", description="d",
+    fired_at=T0, changed_at=T0, received_at=T0, raw='{"id": "al-1"}',
 )
 SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
 

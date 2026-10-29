@@ -1,7 +1,7 @@
 """#1342 a worker in its own process: `python _worker_proc1342.py <config.json>`.
 
 The config names the DSN, the data root, the child (`scripted`: `ScriptedChild` with a spec; or
-`entry`: `_blocking_entry1342.py`), the stand-in container folder and the stop grace. The worker
+`entry`: `_blocking_entry1342.py`; `options` are extra `ScriptedChild` fields such as `term`), the stand-in container folder and the stop grace. The worker
 runs `serve()` until SIGTERM/SIGINT (its deliberate stop)."""
 from __future__ import annotations
 
@@ -15,8 +15,9 @@ from defender.tests.support.jobs._jobs1342 import ScriptedChild, StandInContaine
 
 def _child(config: dict):
     if config["child"] == "scripted":
-        return ScriptedChild(Path(config["where"]), Path(config["runs"]), files=config["files"],
-                             wait_for=Path(config["wait_for"]) if config.get("wait_for") else None)
+        return ScriptedChild(Path(config["where"]), Path(config["runs"]), files=config.get("files", {}),
+                             wait_for=Path(config["wait_for"]) if config.get("wait_for") else None,
+                             **config.get("options", {}))
     entry, marks = config["entry"], config["marks"]
     return lambda launch: [sys.executable, entry, marks, config["commit"], "--job",
                            launch.investigation_id, "--tenant", launch.tenant_id,

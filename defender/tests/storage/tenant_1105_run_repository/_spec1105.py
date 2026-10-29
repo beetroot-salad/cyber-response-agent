@@ -30,6 +30,15 @@ U_ID = fixture_uuid("tenant:beta")
 #: that drops one is caught (`.accounting_failures.json` has no writer but stays reserved).
 SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
                     ".ticket-write.json", ".session-pointer.json")
+#: #1342: the job lane's files beside a run folder. The launch record and alert file are accepted
+#: (listed, never refused) but do not mean "this id was used"; the job-end record is both.
+ACCEPTED_ONLY_SUFFIXES = (".launch.json", ".alert.json")
+#: Every suffix that means "this id was used" (run setup refuses it), spelled here and pinned to
+#: the layout's `USED_SIDECAR_SUFFIXES` by `test_1342_the_used_suffixes_are_the_layouts`.
+USED_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json", ".ticket-write.json",
+                 ".session-pointer.json", ".call-join.jsonl", ".ticket-comments.jsonl",
+                 ".knowledge-source.json", ".job-end.json")
+JOB_END_SUFFIX = ".job-end.json"
 #: The staged-name tail a sidecar write creates first (`_io.staged_leaf`: `.staged-` plus 16
 #: lowercase hex digits).
 STAGED_TAIL = ".staged-0123456789abcdef"
@@ -150,11 +159,13 @@ def tenant_with_runs(tmp_path: Path, *run_ids: str) -> tuple[Path, Any]:
     return root, t
 
 
-def plant_sidecars(runs: Path, run_id: str, *, staged: bool = True) -> list[Path]:
-    """A regular file `<runs>/<run_id><suffix>` per `SIDECAR_SUFFIXES`, plus the staged one a
-    sidecar write creates first (`<id>.run-end.json.staged-<16 hex>`)."""
+def plant_sidecars(runs: Path, run_id: str, *, staged: bool = True,
+                   job_lane: bool = False) -> list[Path]:
+    """A regular file `<runs>/<run_id><suffix>` per `SIDECAR_SUFFIXES` (with `job_lane`, the job
+    lane's launch, alert and job-end files too), plus the staged one a sidecar write creates first
+    (`<id>.run-end.json.staged-<16 hex>`)."""
     made = []
-    for suffix in SIDECAR_SUFFIXES:
+    for suffix in (*SIDECAR_SUFFIXES, *((*ACCEPTED_ONLY_SUFFIXES, JOB_END_SUFFIX) if job_lane else ())):
         p = Path(runs) / f"{run_id}{suffix}"
         p.write_text("{}\n", encoding="utf-8")
         made.append(p)

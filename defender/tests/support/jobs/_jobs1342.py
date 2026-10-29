@@ -10,6 +10,7 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import os
 import sys
 import textwrap
 from collections.abc import AsyncIterator, Callable
@@ -22,7 +23,8 @@ from defender.tests.support.shared._postgres1339 import execute
 
 WORKTREE = Path(__file__).resolve().parents[4]
 DEFENDER = WORKTREE / "defender"
-GOLDEN_REPORT = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd" / "report.md"
+GOLDEN_REPORT = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd" / "report.md"  # disposition: inconclusive
+MALICIOUS_REPORT = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3" / "report.md"  # malicious
 
 NOW = dt.datetime(2026, 10, 29, 12, 0, tzinfo=dt.UTC)
 T1 = fixture_uuid("tenant:jobs-1342-a")
@@ -119,61 +121,150 @@ class VisibleAtEmit(logging.Handler):
 
 # --- the worker's seams ------------------------------------------------------------------------
 
-#: The stand-in child: `child.py <spec.json> --job <id> --tenant <T> --parent-pid <pid>`. Records
-#: its argv and whether the launch files existed at start, writes the spec's files (paths relative
-#: to the runs container), optionally waits for a release file, then exits with the spec's code.
+#: The stand-in child: `child.py <spec.json> --job <id> --tenant <T> --parent-pid <pid>`. It records
+#: what it was given (argv, environment, process group, whether the launch files existed) in
+#: `<seen_dir>/<id>.json`, appends `start <id>` / `end <id>` to the events file, optionally waits for
+#: a release file, writes the spec's host records (paths relative to the runs container, `{id}`
+#: expanded) and exits with the spec's code. It never decides an outcome.
 CHILD_SCRIPT = textwrap.dedent("""
-    import json, os, sys, time
+    import json, os, signal, subprocess, sys, time
     from pathlib import Path
 
     spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     argv = sys.argv[2:]
     runs = Path(spec["runs"])
     run_id = argv[argv.index("--job") + 1]
-    Path(spec["seen"]).write_text(json.dumps({
-        "argv": argv, "pid": os.getpid(),
+
+    def fill(text):
+        return text.replace("{id}", run_id)
+
+    def event(kind):
+        with open(spec["events"], "a", encoding="utf-8") as handle:
+            handle.write(f"{kind} {run_id}\\n")
+
+    term = spec.get("term", "default")
+    if term == "ignore":
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    elif term == "mark":
+        def on_term(*_):
+            Path(fill(spec["term_mark"])).touch()
+            event("end")
+            os._exit(0)
+        signal.signal(signal.SIGTERM, on_term)
+    grandchild = None
+    if spec.get("grandchild"):
+        grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"]).pid
+    seen_dir = Path(spec["seen_dir"])
+    seen_dir.mkdir(parents=True, exist_ok=True)
+    (seen_dir / f"{run_id}.json").write_text(json.dumps({
+        "argv": argv, "pid": os.getpid(), "pgid": os.getpgid(0), "sid": os.getsid(0),
+        "data_root": os.environ.get("DEFENDER_DATA_ROOT"), "grandchild": grandchild,
         "launch_at_start": (runs / f"{run_id}.launch.json").is_file(),
         "alert_at_start": (runs / f"{run_id}.alert.json").is_file(),
     }), encoding="utf-8")
+    event("start")
+    if spec.get("print"):
+        print(spec["print"]); print(spec["print"], file=sys.stderr)
     release = spec.get("wait_for")
     deadline = time.monotonic() + 60
     while release and not Path(release).exists() and time.monotonic() < deadline:
         time.sleep(0.02)
+    for rel in spec.get("dirs", []):
+        (runs / fill(rel)).mkdir(parents=True, exist_ok=True)
     for rel, text in spec.get("files", {}).items():
-        path = runs / rel.replace("{id}", run_id)
+        path = runs / fill(rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+    for rel, hexbytes in spec.get("binary", {}).items():
+        path = runs / fill(rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(bytes.fromhex(hexbytes))
+    for rel, (head, size) in spec.get("sparse", {}).items():
+        path = runs / fill(rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(head.encode("utf-8"))
+            handle.truncate(size)
+    for rel, target in spec.get("links", {}).items():
+        path = runs / fill(rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(target)
+    event("end")
     sys.exit(spec.get("exit", 0))
 """)
 
 
 @dataclasses.dataclass
 class ScriptedChild:
-    """`child_argv` for a worker: every launch runs `CHILD_SCRIPT` with this spec."""
+    """`child_argv` for a worker: every launch runs `CHILD_SCRIPT` with this spec.
+
+    `files` (text), `binary` (hex), `sparse` (`{head, size}`), `links` (symlink targets) and `dirs`
+    name what the child leaves in the runs container; `term` is how it takes SIGTERM (`default`,
+    `ignore`, or `mark`: touch `term_mark` and exit); `grandchild` starts a `sleep` in its group."""
 
     where: Path
     runs: Path
     files: dict[str, str] = dataclasses.field(default_factory=dict)
+    binary: dict[str, str] = dataclasses.field(default_factory=dict)
+    sparse: dict[str, tuple[str, int]] = dataclasses.field(default_factory=dict)
+    links: dict[str, str] = dataclasses.field(default_factory=dict)
+    dirs: list[str] = dataclasses.field(default_factory=list)
     exit: int = 0
     wait_for: Path | None = None
+    term: str = "default"
+    term_mark: str | None = None
+    grandchild: bool = False
+    printed: str | None = None
 
     def __post_init__(self) -> None:
         self.where.mkdir(parents=True, exist_ok=True)
         self.script = self.where / "child.py"
         self.script.write_text(CHILD_SCRIPT, encoding="utf-8")
         self.spec = self.where / "spec.json"
-        self.seen_path = self.where / "seen.json"
+        self.seen_dir = self.where / "seen"
+        self.events_path = self.where / "events.log"
+
+    def spec_dict(self) -> dict[str, Any]:
+        return {
+            "runs": str(self.runs), "seen_dir": str(self.seen_dir), "events": str(self.events_path),
+            "files": self.files, "binary": self.binary, "sparse": self.sparse, "links": self.links,
+            "dirs": self.dirs, "exit": self.exit, "term": self.term, "term_mark": self.term_mark,
+            "grandchild": self.grandchild, "print": self.printed,
+            "wait_for": None if self.wait_for is None else str(self.wait_for),
+        }
 
     def __call__(self, launch: Any) -> list[str]:
-        self.spec.write_text(json.dumps({
-            "runs": str(self.runs), "seen": str(self.seen_path), "files": self.files,
-            "exit": self.exit, "wait_for": None if self.wait_for is None else str(self.wait_for),
-        }), encoding="utf-8")
+        self.spec.write_text(json.dumps(self.spec_dict()), encoding="utf-8")
         return [sys.executable, str(self.script), str(self.spec), "--job", launch.investigation_id,
                 "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 
-    def seen(self) -> dict[str, Any] | None:
-        return json.loads(self.seen_path.read_text(encoding="utf-8")) if self.seen_path.exists() else None
+    def seen_all(self) -> dict[str, dict[str, Any]]:
+        """What each child that started saw, keyed by run id."""
+        if not self.seen_dir.exists():
+            return {}
+        return {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in self.seen_dir.glob("*.json")}
+
+    def seen(self, run_id: str | None = None) -> dict[str, Any] | None:
+        """One child's record: `run_id`'s, or the only one (None when none ran)."""
+        everything = self.seen_all()
+        if run_id is not None:
+            return everything.get(run_id)
+        assert len(everything) <= 1, f"{len(everything)} children ran; name one"
+        return next(iter(everything.values()), None)
+
+    def events(self) -> list[tuple[str, str]]:
+        """`("start"|"end", run id)` in the order the children wrote them."""
+        if not self.events_path.exists():
+            return []
+        return [tuple(line.split()) for line in self.events_path.read_text(encoding="utf-8").splitlines()]  # type: ignore[misc]
+
+    def max_alive(self) -> int:
+        """The most children alive at once, from the order of the start and end events."""
+        alive = peak = 0
+        for kind, _ in self.events():
+            alive += 1 if kind == "start" else -1
+            peak = max(peak, alive)
+        return peak
 
 
 class StandInContainers:
@@ -198,25 +289,49 @@ class StandInContainers:
 
 
 def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], *,
-                containers: Any = None, slots: int = 3) -> Any:
+                containers: Any = None, slots: int = 3, stop_grace: float | None = None) -> Any:
     from defender.worker import Worker
 
+    extra = {} if stop_grace is None else {"stop_grace": stop_grace}
     return Worker(store, data_root=data_root, child_argv=child,
                   containers=containers if containers is not None else StandInContainers(data_root.parent / "containers"),
-                  slots=slots, clock=fixed_clock)
+                  slots=slots, clock=fixed_clock, **extra)
+
+
+def plant_queued_investigation(dsn: str, *, tenant: str, alert_id: str, investigation_id: str,
+                               key: str = "planted") -> None:
+    """A `queued` row with a chosen id, as SQL (the store mints ids; a case that must plant a file
+    named for the id before the claim needs to know it)."""
+    execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
+                 "stage, created_at, cost_usd) VALUES (%s, %s, %s, %s, 1, 'queued', %s, 0)",
+            (investigation_id, tenant, alert_id, key, NOW))
+
+
+def tree(root: Path) -> dict[str, bytes | None]:
+    """Every path under `root` (relative) with its bytes, or None for a directory; symlinks are
+    reported as such, not followed."""
+    found: dict[str, bytes | None] = {}
+    for path in sorted(root.rglob("*")):
+        rel = str(path.relative_to(root))
+        if path.is_symlink():
+            found[rel] = b"-> " + os.readlink(path).encode()
+        else:
+            found[rel] = None if path.is_dir() else path.read_bytes()
+    return found
 
 
 # --- host records, in the shapes the runtime writes ----------------------------------------------
 
 def job_end(*, setup: str = "done", box: str = "started", report_committed: bool = True,
             scrub_verified: bool = True) -> str:
-    """The proposed job-end record (`<runs>/<id>.job-end.json`)."""
+    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its four facts."""
     return json.dumps({"setup": setup, "box": box, "report_committed": report_committed,
                        "scrub_verified": scrub_verified})
 
 
 def scrub_verdict(*, ran: bool) -> str:
-    """`box/_scrub.py`'s verdict document, kept consistent with the job-end's `scrub_verified`."""
+    """`box/_scrub.py`'s verdict document. The worker does not read it (M9); a case may plant it
+    to show that."""
     return json.dumps({"ran": ran} if ran else {"ran": False, "reason": "fixture"})
 
 
@@ -225,27 +340,65 @@ def knowledge_record(commit: str) -> str:
     return json.dumps({"kind": "fresh", "commit": commit, "stale_kind": None, "reason": None})
 
 
-def session_pointer(case_id: str) -> str:
+def knowledge_record_of(kind: str, commit: str, *, stale_kind: str | None = None,
+                        reason: str | None = None) -> str:
+    """A knowledge record of any kind, in the shape `KnowledgeSource.host_record()` writes."""
+    return json.dumps({"kind": kind, "commit": commit, "stale_kind": stale_kind, "reason": reason})
+
+
+def session_pointer(case_id: str, *, session_id: str | None = None) -> str:
     """The pointer as `write_case_pointer` writes it, its `store_path` deliberately elsewhere:
     the reader locates the database from the case id, never from this string."""
-    return json.dumps({"case_id": case_id, "store_path": "/nonexistent/elsewhere.db"})
+    body = {"case_id": case_id, "store_path": "/nonexistent/elsewhere.db"}
+    if session_id is not None:
+        body["session_id"] = session_id
+    return json.dumps(body)
 
 
-def plant_sessions(runs: Path, case_id: str, spend: list[tuple[str, str, dict[str, int]]]) -> None:
-    """A session database for `case_id` beside `runs`: one session per `(agent_id, model, usage)`,
-    each holding one priced response. The first is the root (MAIN)."""
+def _paths(runs: Path):
+    from defender.records import SessionPaths
+    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
+    return SessionPaths(fixture_runs_base(runs))
+
+
+def session_db(runs: Path, case_id: str) -> Path:
+    """Where the layout puts `case_id`'s session database beside `runs`."""
+    from defender.records.session_store._write import store_path_for
+
+    return store_path_for(case_id, sessions=_paths(runs))
+
+
+def _response(model: str, usage: dict[str, int]) -> list:
     from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
     from pydantic_ai.usage import RequestUsage
 
-    from defender.records import SessionPaths
-    from defender.records.session_store._write import open_store
-    from defender.tests.support.shared._locations_1210 import fixture_runs_base
+    return [ModelRequest(parts=[UserPromptPart(content="go")]),
+            ModelResponse(parts=[TextPart(content="ok")], model_name=model,
+                          usage=RequestUsage(**usage))]
 
-    with open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(runs))) as handle:
+
+def plant_sessions(runs: Path, case_id: str, spend: list[tuple[str, str, dict[str, int]]],
+                   ) -> dict[str, tuple[str, list[int]]]:
+    """A session database for `case_id` beside `runs`: one root session per `(agent_id, model,
+    usage)`, each holding one priced response. Returns `{agent_id: (session_id, message ids)}`."""
+    from defender.records.session_store._write import open_store
+
+    made: dict[str, tuple[str, list[int]]] = {}
+    with open_store(case_id=case_id, sessions=_paths(runs)) as handle:
         for agent_id, model, usage in spend:
             session = handle.new_session(agent_id)
-            handle.append(session, [
-                ModelRequest(parts=[UserPromptPart(content="go")]),
-                ModelResponse(parts=[TextPart(content="ok")], model_name=model,
-                              usage=RequestUsage(**usage)),
-            ], agent_id=agent_id)
+            made[agent_id] = (session, handle.append(session, _response(model, usage), agent_id=agent_id))
+    return made
+
+
+def plant_fork(runs: Path, case_id: str, parent: tuple[str, list[int]], *, agent_id: str, model: str,
+               usage: dict[str, int]) -> str:
+    """A session forked from `parent`'s response (its inherited prefix is the request and that
+    response) that adds one priced response of its own. Returns the fork's session id."""
+    from defender.records.session_store._write import open_store
+
+    with open_store(case_id=case_id, sessions=_paths(runs)) as handle:
+        fork = handle.fork(parent[0], parent[1][-1])
+        handle.append(fork, _response(model, usage), agent_id=agent_id)
+    return fork

@@ -542,3 +542,82 @@ def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
         revalidated = ModelMessagesTypeAdapter.validate_json(f"[{payload}]")
         assert json.loads(ModelMessagesTypeAdapter.dump_json(revalidated))[0] == body, (
             "the minted row must re-dump byte-identically")
+
+
+# #1342 M2: the summary's `report_committed` is the close tool's `ReviewState.closed` at the end of the run
+
+def _closing_replay(run_dir: Path) -> ReplayFn:
+    return ReplayFn([
+        Turn(tool_calls=[("append_block", {"text": (GOLDEN / "investigation.md").read_text(encoding="utf-8")})]),
+        Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
+        Turn(text="Investigation complete."),
+    ])
+
+
+def _forced_close_run(tmp_path: Path, run_id: str, *, report_blocked: bool = False) -> tuple[Path, dict]:
+    """A run that never closes and hits its request limit, so the host forces the close."""
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
+    if report_blocked:
+        (run_dir / "report.md").mkdir()
+    result = drive(run_dir, run_id=run_id, main=NeverEndsModel(run_dir),
+                   bounds=challenge_gate.Bounds(base_request_limit=_SHORT_BASE_REQUEST_LIMIT))
+    return run_dir, result
+
+
+def test_m2_a_close_the_tool_accepted_is_a_committed_report(tmp_path):
+    """The model's close was accepted: `report_committed` is true. (M2)"""
+    run_dir = materialize(tmp_path, GOLDEN, run_id="m2-closed")
+
+    result = drive(run_dir, run_id="m2-closed", main=_closing_replay(run_dir))
+
+    assert (run_dir / "report.md").is_file(), "premise: the close wrote the report"
+    assert result["exit_reason"] is None, result
+    assert result["report_committed"] is True
+
+
+def test_m2_a_review_record_write_fault_after_the_report_still_counts(tmp_path):
+    """The report was written but the review record could not be: terminality follows the report, so true. (M2)"""
+    run_dir = materialize(tmp_path, GOLDEN, run_id="m2-record-fault")
+    planted = [RunPaths(run_dir).review_record(turn) for turn in (1, 2, 3)]
+    for path in planted:
+        path.mkdir()
+
+    result = drive(run_dir, run_id="m2-record-fault", main=_closing_replay(run_dir))
+
+    assert all(path.is_dir() and not list(path.iterdir()) for path in planted), "premise: no record was written"
+    assert (run_dir / "report.md").is_file(), "premise: the report landed past the record fault"
+    assert result["report_committed"] is True
+
+
+def test_m2_a_forced_close_that_succeeded_is_a_committed_report(tmp_path):
+    """A request-limit end: the host's forced `unresolved` close wrote the report, so true. (M2)"""
+    run_dir, result = _forced_close_run(tmp_path, "m2-forced")
+
+    assert result["truncated_by"] == "request-limit", result
+    assert (run_dir / "report.md").is_file(), "premise: the forced close wrote the report"
+    assert result["exit_reason"] != "ForcedCloseFailed", result
+    assert result["report_committed"] is True
+
+
+def test_m2_a_forced_close_that_failed_is_not_a_committed_report(tmp_path):
+    """The forced close could not write the report: false, and the exit says so. (M2)"""
+    run_dir, result = _forced_close_run(tmp_path, "m2-forced-failed", report_blocked=True)
+
+    assert result["exit_reason"] == "ForcedCloseFailed", result
+    assert (run_dir / "report.md").is_dir(), "premise: nothing was written over the blocked report"
+    assert result["report_committed"] is False
+
+
+def test_m2_a_run_cut_before_any_close_is_not_a_committed_report(tmp_path):
+    """A store end, which the host does not force-close: no report, false. (M2)"""
+    run_dir = materialize(tmp_path, GOLDEN, run_id="m2-cut")
+    opened: list = []
+    replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
+    factory = store_factory(tmp_path, fault=StoreFault(on="append", after=2, mode="corrupt"), sink=opened)
+
+    result = drive(run_dir, run_id="m2-cut", main=replay, store_factory=factory)
+    opened[0].release()
+
+    assert result["truncated_by"] == "store", result
+    assert not (run_dir / "report.md").exists(), "premise: no report was written"
+    assert result["report_committed"] is False

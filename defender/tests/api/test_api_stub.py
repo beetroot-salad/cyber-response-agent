@@ -83,12 +83,13 @@ AUTH_AB = {"Cookie": f"{SESSION_COOKIE}={SESSION_AB}", "Origin": ORIGIN}
 BASE = "https://testserver"
 
 ALERT = Alert(
-    alert_id="al-1", vendor="tickets", vendor_ticket_id="T-1", title="t", severity="high",
-    rule="r", fired_at=NOW, changed_at=NOW, received_at=NOW, raw={"id": "al-1"},
+    alert_id="al-1", vendor="tickets", vendor_ticket_id="T-1", title="t", description="d",
+    fired_at=NOW, changed_at=NOW, received_at=NOW, raw='{"id": "al-1"}',
 )
 SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
 INV = Investigation(
     investigation_id="inv-1", alert_id="al-1", status="completed", disposition="benign",
+    request_key="req-1", attempt=1,
     cost_usd=1.5, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
     # The knowledge revision the run used (`current` = the run record's `fresh`).
     knowledge={"status": "current", "commit": "f4e5c0de0000f4e5c0de0000f4e5c0de0000f4e5",
@@ -809,12 +810,12 @@ def test_an_aware_time_reaches_the_store_as_the_same_instant_in_utc() -> None:
     api = Api(list_alerts=[SUMMARY])
     after = _dt.datetime(2026, 9, 28, 8, 0, tzinfo=_dt.timezone(_dt.timedelta(hours=2)))
     response = api.client.get(f"{T}/alerts", headers=AUTH, params={
-        "fired_after": after.isoformat(), "severity": "high", "limit": 7,
+        "fired_after": after.isoformat(), "severity": "high", "limit": 7,  # a stale client's filter is not passed on
     })
     assert response.json() == {"items": [SUMMARY.model_dump(mode="json")], "next_cursor": None}
     ((tenant,), kwargs), = api.ports.called("list_alerts")
     assert tenant == A
-    assert kwargs == {"fired_after": after, "fired_before": None, "severity": "high",
+    assert kwargs == {"fired_after": after, "fired_before": None,
                       "after": None, "limit": 8}
     assert kwargs["fired_after"].utcoffset() == _dt.timedelta(0)
 
@@ -869,7 +870,7 @@ def test_a_blank_client_request_id_is_refused() -> None:
 def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="not a disposition"):
         Investigation(investigation_id="i", alert_id="a", status="completed", disposition="fine",
-                      cost_usd=0.0, created_at=NOW)
+                      request_key="k", attempt=1, cost_usd=0.0, created_at=NOW)
 
 
 @pytest.mark.parametrize("bad", ["a/b", "a b", "a?b#c", "é", ""])
@@ -890,7 +891,7 @@ def test_a_principal_carries_a_checked_tenant(legacy) -> None:
 def test_a_naive_time_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="timezone"):
         Investigation(investigation_id="i", alert_id="a", status="queued", cost_usd=0.0,
-                      created_at=NOW.replace(tzinfo=None))
+                      request_key="k", attempt=1, created_at=NOW.replace(tzinfo=None))
 
 
 # --- pagination ----------------------------------------------------------------------------
@@ -937,14 +938,15 @@ def test_every_list_pages_by_cursor_from_the_last_row_served(
 
 
 def test_a_cursor_stays_short_whatever_the_filters_and_is_accepted_back() -> None:
-    severity = "x" * 1600
-    api = Api(list_alerts=_rows_after([SUMMARY_2, SUMMARY]))
-    cursor = _cursor(api, f"{T}/alerts", {"severity": severity})
+    # #1342: alerts keep only moment filters, so the longest admitted filter is the investigations list's alert id.
+    alert_id = "a" * 128
+    api = Api(list_investigations=_rows_after([INV_2, INV]))
+    cursor = _cursor(api, f"{T}/investigations", {"alert_id": alert_id})
     assert len(cursor) < 400
-    page = api.client.get(f"{T}/alerts", headers=AUTH,
-                          params={"limit": 1, "severity": severity, "cursor": cursor})
+    page = api.client.get(f"{T}/investigations", headers=AUTH,
+                          params={"limit": 1, "alert_id": alert_id, "cursor": cursor})
     assert page.status_code == 200, page.text
-    assert [a["alert_id"] for a in page.json()["items"]] == ["al-1"]
+    assert [i["investigation_id"] for i in page.json()["items"]] == ["inv-1"]
 
 
 def _edited(cursor: str, **changes: Any) -> str:
