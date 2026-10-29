@@ -7,6 +7,7 @@ import http.server
 import json
 import base64
 import logging
+import time
 import ssl
 import threading
 
@@ -145,7 +146,7 @@ def test_r6_an_http_issuer_is_refused_before_any_request(p4_tenant, tmp_path):
 def test_r6_no_secret_reaches_a_log_record_or_an_error_text(p4_tenant, tmp_path, caplog):
     from defender.learning.author.version_control import ForgejoAuthError
     from defender.tests.support.tenancy._active1214 import provision_generation
-    from defender.tests.tenancy.lifecycle_1214._fakes import ISSUER_URL, FakeOpenBao
+    from defender.tests.tenancy.lifecycle_1214._fakes import FakeOpenBao
 
     bao = FakeOpenBao()
     management = httpx.Client(transport=httpx.MockTransport(bao.handle), base_url="https://openbao.test",
@@ -159,7 +160,7 @@ def test_r6_no_secret_reaches_a_log_record_or_an_error_text(p4_tenant, tmp_path,
         if request.method != "GET" or "/identity/oidc/token/" not in request.url.path or answer.status_code != 200:
             return answer
         part = lambda doc: base64.urlsafe_b64encode(json.dumps(doc).encode()).decode().rstrip("=")  # noqa: E731
-        claims = {"iss": ISSUER_URL, "tenant_id": p4_tenant.tenant_id, "aud": fields["audience"], "exp": 4102444800}
+        claims = {"iss": "https://openbao.test/v1/identity/oidc", "tenant_id": p4_tenant.tenant_id, "aud": fields["audience"], "iat": int(time.time()), "exp": int(time.time()) + 600}
         return httpx.Response(200, json={"data": {"token": f"{part({'alg': 'none'})}.{part(claims)}.sig"}})
 
     def echo(request: httpx.Request) -> httpx.Response:
