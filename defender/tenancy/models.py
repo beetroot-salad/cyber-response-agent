@@ -92,7 +92,7 @@ class TenantRecord(Base, kw_only=True):
 
 
 class ForgeWiring(Base, kw_only=True):
-    """The tenant's repository on the forge: recorded, never derived (the lab keeps `tenants/playground`)."""
+    """The tenant's repository on the forge: recorded, never derived (the lab keeps `tenants/playground`)."""  # lint-shippable: ok — names the lab tenant that adoption keeps
 
     __tablename__ = "forge_wiring"
     __table_args__ = {"schema": SCHEMA}
