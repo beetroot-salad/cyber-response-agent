@@ -55,8 +55,8 @@ from defender.identity import (  # noqa: E402
     Bootstrap,
     IdentityService,
     InMemoryIdentityRepository,
-    register_tenant,
 )
+from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.records._tenant_id import TenantId, TenantRefused  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -249,9 +249,10 @@ class _Unused:
 async def _seed_identity() -> tuple[IdentityService, dict[str, str]]:
     """Ann is a member of A, Bob of B and Cy of both, each with a seeded session. Returns the
     service and the seeded user ids by session value."""
-    repo = InMemoryIdentityRepository()
-    await register_tenant(repo, TenantId(A), now=NOW)
-    await register_tenant(repo, TenantId(B), now=NOW)
+    tenants = InMemoryTenantRepository()
+    await tenants.add_tenant(TenantId(A), created_at=NOW)
+    await tenants.add_tenant(TenantId(B), created_at=NOW)
+    repo = InMemoryIdentityRepository(tenants=tenants)
     users: dict[str, str] = {}
     for email, tenant, session in (("ann@a.example", A, SESSION_A), ("bob@b.example", B, SESSION_B)):
         user = await repo.add_user(email, created_at=NOW, status="active", display_name=email)

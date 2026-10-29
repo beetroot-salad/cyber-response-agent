@@ -1,7 +1,7 @@
 """`tenant.py setup <id>`: adopt the operator-placed knowledge folder and provision learning."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+from defender.tests.support.shared._locations_1210 import location_path
 
 import json
 import os
@@ -15,7 +15,6 @@ import pytest
 from defender.tenancy import _tenant
 from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
-from defender.records._tenant_id import TenantId, TenantRefused
 
 #: Words of the remedy every "no knowledge folder" refusal carries: clone, then run setup.
 REMEDY_WORDS = ("clone", "tenant.py setup")
@@ -401,71 +400,61 @@ def test_1120_setup_adopts_knowledge_and_provisions_tenant_learning(
     assert tenant.id == H.TID
 
 
-def _knowledge_dir_entry(root: Path, tmp: Path) -> None:
-    H.knowledge_dir(root).mkdir(parents=True)
+def _two_tenants(root: Path, tmp: Path) -> None:
+    H.place_knowledge(root, H.OTHER)
 
 
-def _knowledge_symlink(root: Path, tmp: Path) -> None:
-    elsewhere = tmp / "elsewhere-knowledge"
-    elsewhere.mkdir()
-    H.tenant_folder(root).mkdir(parents=True)
-    H.knowledge_dir(root).symlink_to(elsewhere, target_is_directory=True)
-
-
-def _knowledge_file(root: Path, tmp: Path) -> None:
-    H.tenant_folder(root).mkdir(parents=True)
-    H.knowledge_dir(root).write_text("not a folder\n", encoding="utf-8")
-
-
-def _row_alias_beside_knowledge(root: Path, tmp: Path) -> None:
-    # An alias planted at the row's own name is the guarded write's to refuse, never the
-    # guard's: the row's name stays exempt from the inner scan.
-    H.knowledge_dir(root).mkdir(parents=True)
-    location_path(H.row_path)(root).symlink_to(tmp / "nowhere.json")
-
-
-def _runs_beside_knowledge(root: Path, tmp: Path) -> None:
-    H.knowledge_dir(root).mkdir(parents=True)
+def _other_tenant_with_runs(root: Path, tmp: Path) -> None:
+    H.place_knowledge(root, H.OTHER)
+    (H.tenant_folder(root, H.OTHER) / "runs").mkdir()
     (H.tenant_folder(root) / "runs").mkdir()
 
 
-def _other_knowledge(root: Path, tmp: Path) -> None:
-    H.knowledge_dir(root).mkdir(parents=True)
-    H.knowledge_dir(root, H.OTHER).mkdir(parents=True)
+def _lost_and_found(root: Path, tmp: Path) -> None:
+    (root / "lost+found").mkdir()
 
 
-GUARD_CELLS = [
-    pytest.param(_knowledge_dir_entry, None, id="knowledge-directory"),
-    pytest.param(_knowledge_symlink, None, id="knowledge-symlink"),
-    pytest.param(_knowledge_file, None, id="knowledge-file"),
-    pytest.param(_row_alias_beside_knowledge, None, id="row-name-exempt"),
-    pytest.param(_runs_beside_knowledge, f"{H.TID}/runs", id="runs-beside-knowledge"),
-    pytest.param(_other_knowledge, H.OTHER, id="other-knowledge"),
+def _nfs_silly_rename(root: Path, tmp: Path) -> None:
+    (root / ".nfs000000000000abcd00000001").write_bytes(b"\0")
+
+
+def _orphan_partial(root: Path, tmp: Path) -> None:
+    (root / ".knowledge.partial" / "settings").mkdir(parents=True)
+
+
+#: What used to be refused as "not a fresh data root" (#1214 O7): none of it is a refusal now.
+BESIDE_CELLS = [
+    pytest.param(_two_tenants, id="another-tenant-beside-it"),
+    pytest.param(_other_tenant_with_runs, id="both-tenants-hold-runs"),
+    pytest.param(_lost_and_found, id="lost+found"),
+    pytest.param(_nfs_silly_rename, id="nfs-silly-rename"),
+    pytest.param(_orphan_partial, id="orphan-knowledge-partial"),
 ]
 
 
-@pytest.mark.parametrize(("plant", "foreign"), GUARD_CELLS)
-def test_1120_the_one_tenant_guard_admits_only_knowledge_beside_a_missing_row(
-        tmp_path: Path, plant, foreign: str | None) -> None:
+@pytest.mark.parametrize("plant", BESIDE_CELLS)
+def test_1214_the_one_tenant_guard_is_gone_a_tenant_is_accepted_beside_other_entries(
+        tmp_path: Path, plant) -> None:
+    """Another tenant's folder or filesystem debris in the data root refuses nothing; the owner no longer
+    has a fresh-data-root rule (#1214 O7)."""
     root = tmp_path / "data"
+    H.place_knowledge(root)
+    control = H.accept(_tenant, root)  # control: the placed tenant alone is accepted
+    assert control.id == H.TID
     plant(root, tmp_path)
     before = H.tree_census(root)
-    refused: BaseException | None = None
-    try:
-        _tenant.refuse_foreign_data_root(fixture_data_root(root), TenantId(H.TID))
-    except TenantRefused as exc:
-        refused = exc
-    assert H.census_diff(before, H.tree_census(root)) == [], "the guard wrote into the root"
-    if foreign is None:
-        assert refused is None, (
-            f"the one-tenant guard refused the operator-placed knowledge in a rowless own "
-            f"folder: {refused}")
-    else:
-        assert refused is not None, f"the guard admitted {foreign!r} beside the placed knowledge"
-        text = str(refused)
-        assert foreign in text, f"the guard's refusal does not name {foreign!r}: {text}"
-        assert f"{H.TID}/knowledge" not in text, (
-            f"the guard named the placed knowledge as foreign: {text}")
+    accepted = H.accept(_tenant, root)
+    assert accepted.id == H.TID
+    assert H.census_diff(before, H.tree_census(root)) == [], "acceptance wrote into the root"
+    assert not hasattr(_tenant, "refuse_foreign_data_root"), "the one-tenant guard still exists"
+
+
+def test_1214_two_tenants_are_each_accepted_under_one_data_root(tmp_path: Path) -> None:
+    """Both of two tenants placed under one data root are accepted, each as itself (#1214 O7)."""
+    root = tmp_path / "data"
+    H.place_knowledge(root)
+    H.place_knowledge(root, H.OTHER)
+    assert {H.accept(_tenant, root, tid).id for tid in (H.TID, H.OTHER)} == {H.TID, H.OTHER}
 
 
 TENANT_ID_CELLS = [
@@ -737,43 +726,3 @@ def test_1120_s2_data_root_parent_not_writable(tmp_path: Path) -> None:
         folder.chmod(0o755)
     assert not location_path(H.row_path)(root).exists()
     assert H.census_diff(before, _knowledge_census(root)) == []
-
-
-def _lost_and_found(root: Path) -> str:
-    (root / "lost+found").mkdir()
-    return "lost+found"
-
-
-def _nfs_silly_rename(root: Path) -> str:
-    (root / ".nfs000000000000abcd00000001").write_bytes(b"\0")
-    return ".nfs000000000000abcd00000001"
-
-
-def _orphan_partial(root: Path) -> str:
-    (root / ".knowledge.partial" / "settings").mkdir(parents=True)
-    return ".knowledge.partial"
-
-
-DEBRIS = [
-    pytest.param(_lost_and_found, id="lost+found"),
-    pytest.param(_nfs_silly_rename, id="nfs-silly-rename"),
-    pytest.param(_orphan_partial, id="orphan-knowledge-partial"),
-]
-
-
-@pytest.mark.parametrize("plant", DEBRIS)
-def test_1120_s12_refuse_foreign_data_root_meets_filesystem_debris(tmp_path: Path, plant) -> None:
-    root = tmp_path / "data"
-    H.place_knowledge(root)
-    entry = plant(root)
-    before = H.tree_census(root)
-    H.assert_refused(H.setup(tenant_py, root), entry)
-    assert H.census_diff(before, H.tree_census(root)) == [], "the refused setup wrote something"
-
-    target = root / entry
-    if target.is_dir():
-        shutil.rmtree(target)
-    else:
-        target.unlink()
-    H.assert_clean(H.setup(tenant_py, root))
-    _row_is_acme(root)

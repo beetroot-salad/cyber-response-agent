@@ -1,11 +1,19 @@
-"""#1214 O6: production code neither reads nor writes `tenant.json` or `publish-status.json`."""
+"""#1214 O6: production code neither reads nor writes `tenant.json` or `publish-status.json`.
+
+Only the owner (`tenancy/_tenant.py`) may spell `tenant.json` (DC-8, SK-6), and only inside `retire_row`,
+the one function adoption calls to delete it. `publish-status.json` is spelled nowhere.
+"""
 from __future__ import annotations
 
-import re
+import ast
 from pathlib import Path
 
 DEFENDER = Path(__file__).resolve().parents[3]
-RETIRED = re.compile(r"""["'](tenant\.json|publish-status\.json)["']""")
+OWNER = "tenancy/_tenant.py"
+ROW, STATUS = "tenant.json", "publish-status.json"
+#: Names whose use outside the owner is a read or write of the retired row (O6).
+ROW_READERS = {"ROW_NAME", "row_path", "create_tenant", "require_tenant", "read_forge_binding",
+               "refuse_foreign_data_root", "ForgeBinding"}
 
 
 def _production_sources() -> list[Path]:
@@ -13,10 +21,71 @@ def _production_sources() -> list[Path]:
             if "tests" not in p.relative_to(DEFENDER).parts and ".venv" not in p.parts]
 
 
-def test_no_production_module_names_the_retired_tenant_files():
-    """No production module spells either file name as a string (O6)."""
+def _strings(tree: ast.AST) -> list[tuple[int, str]]:
+    """Every string constant of `tree` except docstrings: (line, value)."""
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docstrings.add(id(first.value))
+    return [(n.lineno, n.value) for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docstrings]
+
+
+def _spells(value: str, name: str) -> bool:
+    return value == name or value.endswith("/" + name)
+
+
+def _rel(path: Path) -> str:
+    return path.relative_to(DEFENDER).as_posix()
+
+
+def test_no_production_module_outside_the_owner_spells_tenant_json():
+    """No production module but the owner spells the row's file name (O6, SK-6)."""
     sources = _production_sources()
-    assert any(p.name == "run.py" for p in sources)  # control: the census sees production
-    found = [f"{p.relative_to(DEFENDER)}:{n}" for p in sources
-             for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if RETIRED.search(line)]
+    assert any(_rel(p) == OWNER for p in sources)  # control: the census sees the owner and production
+    found = [f"{_rel(p)}:{n}" for p in sources if _rel(p) != OWNER
+             for n, value in _strings(ast.parse(p.read_text(encoding="utf-8"))) if _spells(value, ROW)]
     assert found == []
+
+
+def test_no_production_module_spells_publish_status_json():
+    """Publish status lives in PostgreSQL: not even the owner names the file (O6)."""
+    found = [f"{_rel(p)}:{n}" for p in _production_sources()
+             for n, value in _strings(ast.parse(p.read_text(encoding="utf-8"))) if _spells(value, STATUS)]
+    assert found == []
+
+
+def test_the_owner_touches_the_row_only_to_retire_it():
+    """Inside the owner every use of the row-name constant or literal sits in `retire_row` (O6, DC-8)."""
+    tree = ast.parse((DEFENDER / OWNER).read_text(encoding="utf-8"))
+    functions = {f.name: f for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    assert "retire_row" in functions, "the owner must expose the one retirement function adoption calls"
+    inside = {id(n) for n in ast.walk(functions["retire_row"])}
+    uses = [n for n in ast.walk(tree)
+            if (isinstance(n, ast.Name) and n.id == "ROW_NAME" and isinstance(n.ctx, ast.Load))
+            or (isinstance(n, ast.Constant) and isinstance(n.value, str) and _spells(n.value, ROW))]
+    docstring_lines = {f.body[0].lineno for f in functions.values()
+                       if f.body and isinstance(f.body[0], ast.Expr) and isinstance(f.body[0].value, ast.Constant)}
+    outside = sorted(n.lineno for n in uses if id(n) not in inside and n.lineno not in docstring_lines)
+    assert outside == []
+    assert any(id(n) in inside for n in uses), "retire_row never names the row it retires"
+
+
+def test_no_production_module_outside_the_owner_reads_the_row_through_its_names():
+    """The row's readers and writers are gone: no import or attribute use of them outside the owner (O6)."""
+    hits = []
+    for path in _production_sources():
+        if _rel(path) == OWNER:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names = []
+            if isinstance(node, ast.ImportFrom):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.Attribute):
+                names = [node.attr]
+            elif isinstance(node, ast.Name):
+                names = [node.id]
+            hits += [f"{_rel(path)}:{node.lineno}:{n}" for n in names if n in ROW_READERS]
+    assert hits == []

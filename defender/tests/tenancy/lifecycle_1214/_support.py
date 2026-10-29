@@ -34,7 +34,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender.tests.support.api._identity1306 import NEW, OPS, World, items
+from defender.tests.support.api._identity1306 import NEW, OPS, World, items, tenants_of
 from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, OPENBAO_URL, Fakes
 
 # Production names #1214 must supply. Kept in this one block so a missing package is one ImportError.
@@ -147,13 +147,13 @@ class LifecycleWorld(World):
         return live
 
     def member_of(self, tenant: str, email: str = NEW) -> Any:
-        """`email` invited by `ops`, sent, signed in and accepted: an active member's browser."""
+        """`email` invited by `ops`, sent and signed in (the first sign-in accepts, #1306): an active
+        member's browser."""
         invited = self.ops.post(f"/admin/tenants/{tenant}/invitations", json={"email": email})
         assert invited.status_code == 202, invited.text
         self.send_pending()
         browser = self.sign_in(email)
-        accepted = browser.post(f"/invitations/{invited.json()['id']}/accept")
-        assert accepted.status_code == 200, accepted.text
+        assert tenant in tenants_of(browser), "the first sign-in did not make an active member"
         return browser
 
     def directory(self) -> Any:

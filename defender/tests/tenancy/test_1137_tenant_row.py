@@ -463,8 +463,6 @@ def _plant_hard_linked_row(w: Where) -> None:
 
 #: The occupied row's own words: unchanged by design.
 _ALREADY_EXISTS = "already exists — a tenant is created once"
-#: The fresh-root refusal's words (`refuse_foreign_data_root`, which does not move).
-_NOT_FRESH = "a tenant is created only into a fresh data root"
 
 CREATE_REFUSED: dict[str, CreateShape] = {
     "row-exists": CreateShape(_plant_occupied_row, None, "row", _ALREADY_EXISTS),
@@ -485,16 +483,6 @@ CREATE_REFUSED: dict[str, CreateShape] = {
                                      lambda w: w.dir.unlink(), "dir", _io._LINKED_FOLDER),
     "file-at-T": CreateShape(_plant_file_at_dir, lambda w: w.dir.unlink(), "dir",
                              _io._NOT_A_FOLDER),
-    # Not a fresh data root, refused before anything is made.
-    "foreign-tenant-folder": CreateShape(lambda w: (w.root / OTHER).mkdir(parents=True),
-                                         lambda w: (w.root / OTHER).rmdir(), "root",
-                                         _NOT_FRESH),
-    "foreign-file-at-root": CreateShape(
-        lambda w: (w.root.mkdir(), (w.root / "notes.txt").write_text("x\n", encoding="utf-8")),
-        lambda w: (w.root / "notes.txt").unlink(), "root", _NOT_FRESH),
-    "foreign-entry-in-rowless-T": CreateShape(lambda w: (w.dir / "runs").mkdir(parents=True),
-                                              lambda w: (w.dir / "runs").rmdir(), "root",
-                                              _NOT_FRESH),
     "root-is-a-file": CreateShape(
         lambda w: w.root.write_text("x\n", encoding="utf-8"), lambda w: w.root.unlink(), "dir",
         os.strerror(errno.ENOTDIR)),
@@ -529,6 +517,33 @@ def test_create_tenant_refuses_as_it_did(tmp_path, shape):
     with umask(0o022):
         row = _served(owner.create_tenant, fixture_data_root(w.root), TID)
     _assert_created(w, row, 0o022)
+
+
+def _foreign_tenant_folder(root: Path) -> None:
+    (root / OTHER).mkdir(parents=True)
+
+
+def _foreign_file(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "notes.txt").write_text("x\n", encoding="utf-8")
+
+
+def _foreign_entry_in_own_folder(root: Path) -> None:
+    (root / TID / "runs").mkdir(parents=True)
+
+
+@pytest.mark.parametrize("plant", [_foreign_tenant_folder, _foreign_file, _foreign_entry_in_own_folder],
+                         ids=["another-tenant-folder", "another-file-at-root", "runs-in-own-folder"])
+def test_1214_a_tenant_is_accepted_beside_what_the_one_tenant_guard_refused(tmp_path, plant):
+    """The three `_NOT_FRESH` shapes are no refusal now (#1214 O7): the tenant is accepted with the same data root contents."""
+    root = tmp_path / "data"
+    H.place_knowledge(root, TID)
+    assert H.accept(root, TID).id == TID  # control: alone it is accepted
+    plant(root)
+    before = _tree_state(tmp_path)
+    assert H.accept(root, TID).id == TID
+    assert _tree_state(tmp_path) == before, "acceptance changed the tree"
+    assert not hasattr(owner, "refuse_foreign_data_root"), "the fresh-data-root rule still exists"
 
 
 _UNPRIVILEGED = pytest.mark.skipif(

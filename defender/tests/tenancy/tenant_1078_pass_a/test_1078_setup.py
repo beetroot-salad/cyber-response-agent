@@ -40,18 +40,38 @@ def _verbatim_owner(out: str, root: Path) -> BaseException:
     return owner
 
 
-@pytest.mark.parametrize("shape", ["empty", "populated"])
-def test_o10_rowless_folder_refused(tmp_path, shape):
-    """Setup into a data root holding a rowless old/ folder is refused naming 'old', and writes
-    nothing."""
-    root = tmp_path / "data"
+def _rowless_empty(root: Path, tmp: Path) -> None:
     (root / "old").mkdir(parents=True)
-    if shape == "populated":
-        (root / "old" / "runs" / "r1").mkdir(parents=True)
-        (root / "old" / "runs" / "r1" / "report.md").write_text("x\n", encoding="utf-8")
-    out = _refused_writing_nothing(root, names="old")
-    assert O10_TEXT in out, f"the refusal is not the non-empty data root's:\n{out}"
-    _verbatim_owner(out, root)
+
+
+def _rowless_populated(root: Path, tmp: Path) -> None:
+    (root / "old" / "runs" / "r1").mkdir(parents=True)
+    (root / "old" / "runs" / "r1" / "report.md").write_text("x\n", encoding="utf-8")
+
+
+def _dangling_symlink(root: Path, tmp: Path) -> None:
+    (root / "ghost").symlink_to(tmp / "nowhere")
+
+
+def _another_tenant(root: Path, tmp: Path) -> None:
+    H.place_knowledge(root, fixture_uuid("tenant:other"))
+
+
+@pytest.mark.parametrize("plant", [_rowless_empty, _rowless_populated, _dangling_symlink, _another_tenant],
+                         ids=["rowless-empty-folder", "rowless-populated-folder", "dangling-symlink", "another-tenant"])
+def test_o10_what_made_a_data_root_not_fresh_refuses_nothing_now(tmp_path, plant):
+    """#1214 O7: a data root with other entries (a rowless folder, a dangling link, another tenant) no longer
+    refuses the tenant placed in it; the entries are left as they were."""
+    root = tmp_path / "data"
+    H.place_knowledge(root, TID)
+    assert H.accept(root, TID).id == TID  # control: alone, accepted
+    plant(root, tmp_path)
+    before = H.census(root)
+    assert H.accept(root, TID).id == TID
+    assert H.census(root) == before
+    assert not hasattr(H.tenant(), "refuse_foreign_data_root"), "the one-tenant guard still exists"
+    if plant is _dangling_symlink:
+        assert (root / "ghost").is_symlink() and not (tmp_path / "nowhere").exists()  # noqa: PT018 — one fact: the link is left, dangling
 
 
 @pytest.mark.parametrize("shape", ["absent", "empty", "missing-parent"])
@@ -141,17 +161,6 @@ def test_setup_re_run_after_the_tenant_already_has_runs(tmp_path):
     assert again.returncode == 0, f"a re-run over a used tenant was refused:\n{H.setup_output(again)}"
     assert H.census(root) == before, "the re-run changed something under <T>/"
 
-
-
-def test_data_root_holds_a_dangling_symlink_entry(tmp_path):
-    """A data root whose only entry is a dangling symlink: setup's non-empty-root refusal names
-    the entry, and it writes nothing."""
-    root = tmp_path / "data"
-    root.mkdir()
-    (root / "ghost").symlink_to(tmp_path / "nowhere")
-    out = _refused_writing_nothing(root, names="ghost")
-    _verbatim_owner(out, root)
-    assert (root / "ghost").is_symlink() and not (tmp_path / "nowhere").exists()  # noqa: PT018 — one fact: the link is left, dangling
 
 
 def test_s7_j08_setup_rerun_completes_rowless_own_folder(tmp_path):
