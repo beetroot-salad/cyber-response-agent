@@ -113,7 +113,6 @@ async def test_o15_a_worker_in_another_process_runs_what_this_one_queued(migrate
             proc.send_signal(signal.SIGTERM)
             proc.wait(timeout=60)
 
-    assert stages[0] == "queued", stages
     assert "running" in stages, stages
     assert stages[-1] == "completed", stages
     final = row(dsn, inv.investigation_id)

@@ -564,17 +564,87 @@ async def test_o7_the_backstop_runs_for_a_run_that_failed_and_never_writes_the_r
     assert _names_code(stored, inv, EXIT), stored["failure_message"]
 
 
+_DOCKER_STAND_IN = """
+import json, re, sys
+from pathlib import Path
+
+home = Path(sys.argv[1])
+argv = sys.argv[2:]
+with open(home / "calls.log", "a", encoding="utf-8") as log:
+    log.write(json.dumps(argv) + "\\n")
+args = argv[1:] if argv[:1] == ["container"] else argv
+verb, rest = (args[0] if args else ""), args[1:]
+held = lambda: sorted(p.name for p in (home / "held").iterdir())
+operands, skip = [], False
+for a in rest:
+    if skip:
+        skip = False
+    elif a in ("--format", "--filter", "--type", "--time") or (a == "-f" and verb == "inspect"):
+        skip = True
+    elif not a.startswith("-"):
+        operands.append(a)
+if verb == "inspect":
+    gone = [n for n in operands if n not in held()]
+    if gone:
+        print("Error: No such object: " + gone[0], file=sys.stderr)
+        sys.exit(1)
+    print("exited")
+elif verb == "rm":
+    for n in operands:
+        if n not in held():
+            print("Error: No such container: " + n, file=sys.stderr)
+            sys.exit(1)
+        (home / "held" / n).unlink()
+elif verb == "ps":
+    wanted = [a.split("=", 1)[1].strip("^$") for a in rest if a.startswith("name=")]
+    for n in held():
+        if not wanted or any(re.search(w, n) for w in wanted):
+            print(n)
+"""
+
+
+class _DockerStandIn:
+    """A docker that answers inspect, rm and ps in their usual forms (also under `container`), over
+    files in `<tmp>/docker-stand-in`; the `docker=` seam and, once `install`ed, `docker` on PATH."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.home = tmp_path / "docker-stand-in"
+        (self.home / "held").mkdir(parents=True)
+        self.script = self.home / "stand_in.py"
+        self.script.write_text(_DOCKER_STAND_IN, encoding="utf-8")
+
+    def __call__(self, argv, **_kw):
+        import subprocess
+        import sys
+
+        return subprocess.run([sys.executable, str(self.script), str(self.home), *map(str, argv)],
+                              capture_output=True, text=True, check=False)
+
+    def hold(self, name: str) -> None:
+        (self.home / "held" / name).touch()
+
+    def names(self) -> list[str]:
+        return sorted(p.name for p in (self.home / "held").iterdir())
+
+    @property
+    def calls(self) -> list[list[str]]:
+        log = self.home / "calls.log"
+        return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
+
+    def install(self, monkeypatch) -> None:
+        import sys
+
+        bin_dir = self.home / "bin"
+        bin_dir.mkdir()
+        shim = bin_dir / "docker"
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{self.script}" "{self.home}" "$@"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+
 def _docker_world(tmp_path: Path):
-    from defender.tests.support.sandbox._box1195 import FakeDaemon
-
-    daemon = FakeDaemon(tmp_path)
-    calls: list[list[str]] = []
-
-    def docker(argv, **kw):
-        calls.append([str(a) for a in argv])
-        return daemon(argv, **kw)
-
-    return daemon, docker, calls
+    daemon = _DockerStandIn(tmp_path)
+    return daemon, daemon
 
 
 def _removes(calls: list[list[str]], name: str) -> bool:
@@ -585,20 +655,20 @@ def test_o7_the_docker_seam_looks_first_and_removes_only_a_container_that_is_the
     """`DockerContainers(docker=fn)`: present → exists and removed (control); absent → looked at, nothing removed, no error. (O7, D-o)"""
     from defender.worker import DockerContainers
 
-    daemon, docker, calls = _docker_world(tmp_path)
+    daemon, docker = _docker_world(tmp_path)
     containers = DockerContainers(docker=docker)
-    daemon.hold("defender-run-here", "exited")
-    daemon.hold("defender-run-other", "running")
+    daemon.hold("defender-run-here")
+    daemon.hold("defender-run-other")
 
     assert containers.exists("defender-run-here") is True
     containers.remove("defender-run-here")
     assert daemon.names() == ["defender-run-other"]
-    assert _removes(calls, "defender-run-here"), calls
+    assert _removes(daemon.calls, "defender-run-here"), daemon.calls
 
-    calls.clear()
+    before = len(daemon.calls)
     assert containers.exists("defender-run-gone") is False
-    assert calls, "an absent container was not even looked at"
-    assert not _removes(calls, "defender-run-gone")
+    assert len(daemon.calls) > before, "an absent container was not even looked at"
+    assert not _removes(daemon.calls, "defender-run-gone")
     assert daemon.names() == ["defender-run-other"]
 
 
@@ -610,7 +680,7 @@ async def test_o7_a_worker_given_no_containers_uses_docker_and_removes_only_its_
     from defender.worker import Worker
     from defender.tests.support.jobs._jobs1342 import fixed_clock
 
-    daemon, _docker, _calls = _docker_world(world["tmp"])
+    daemon, _docker = _docker_world(world["tmp"])
     daemon.install(monkeypatch)
     left_id = str(uuid.uuid4())
     child = _child(world, files=_committed())
@@ -618,8 +688,8 @@ async def test_o7_a_worker_given_no_containers_uses_docker_and_removes_only_its_
         alert = await an_alert(store, T1, ticket="T-L")
         plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=left_id)
         clean = await _queued(store, ticket="T-2", key="k2")
-        daemon.hold(f"defender-run-{left_id}", "exited")
-        daemon.hold("defender-run-someone-else", "running")
+        daemon.hold(f"defender-run-{left_id}")
+        daemon.hold("defender-run-someone-else")
         await Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock).drain()
 
     assert daemon.names() == ["defender-run-someone-else"], daemon.names()
@@ -638,7 +708,14 @@ def test_d2_the_ratified_defaults_are_three_slots_and_a_thirty_second_grace():
 
 async def test_o8_the_childs_output_is_inherited_not_piped(world, capfd):
     """A child's stdout and stderr land on the worker's own descriptors. (design: child output)"""
-    _, stored = await _run_one(world, _child(world, files=_committed(), printed=MARKER))
+    import anyio
+
+    child = _child(world, files=_committed(), printed=MARKER + "x" * (1 << 20))  # well past a pipe buffer
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        with anyio.fail_after(60):  # a worker that pipes the output and copies it later hangs here
+            await make_worker(store, world["root"], child).drain()
+    stored = row(world["dsn"], inv)
     out, err = capfd.readouterr()
 
     assert stored["stage"] == "completed"

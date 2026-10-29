@@ -83,8 +83,8 @@ def test_a_vanished_call_in_a_composition_is_a_finding_not_a_pass(tmp_path, comp
     body = _MAIN[start:end]
     assert name + "(" in body, "premise: the composition makes the call"
     run = _MAIN[:start] + body.replace(name + "(", "other(") + _MAIN[end:]
-    assert _GATE.scan(_tree(tmp_path, run=_MAIN)) == [], "control: the unchanged composition is clean"
-    assert any(composition in f and name in f for f in _GATE.scan(_tree(tmp_path, run=run)))
+    assert _GATE.scan(_tree(tmp_path / "clean", run=_MAIN)) == [], "control: the unchanged composition is clean"
+    assert any(composition in f and name in f for f in _GATE.scan(_tree(tmp_path / "cut", run=run)))
 
 
 def test_a_missing_job_main_or_post_steps_is_a_finding(tmp_path):

@@ -278,6 +278,9 @@ def test_o6_the_run_folder_is_still_made_exclusively(scene):
     first, second = run_job(scene, taken), run_job(scene, used)
 
     assert first.calls["lifecycle"] == second.calls["lifecycle"] == 0
+    assert first.raised is None, first.raised
+    assert scene.job_end(taken) == {"setup": "refused", "box": "not_started",
+                                    "report_committed": False, "scrub_verified": False}
     assert (scene.runs / taken / "mark").read_text(encoding="utf-8") == "theirs"
     assert sorted(p.name for p in (scene.runs / taken).iterdir()) == ["mark"]
     assert not (scene.runs / used).exists()
@@ -525,6 +528,7 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
 
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
+    (scene.root / scene.t.tenant_id / "learning").mkdir()  # tenant setup provides the learning root
     before = set(tree(scene.root))
     got = run_job(scene, run_id)
 
@@ -556,6 +560,28 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
                      publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
     assert seen == ["open", "record", "enqueue"], seen
+
+
+def test_m4_the_disk_check_sees_the_operator_default_enqueue(scene, tmp_path):
+    """Control for the M4 disk check: `run.main`'s own default enqueue writes `learning/author-queue/case-*.json`. (M4)"""
+    from defender import run as run_py
+
+    class Writer:
+        def open_case_ticket(self, *_a: Any, **_k: Any) -> None: ...
+        def record_case_ticket(self, *_a: Any, **_k: Any) -> None: ...
+
+    def lifecycle(**kw: Any) -> dict[str, Any]:
+        kw["run"].facts.scrub_verdict.write('{"ran": true, "reason": "walk completed"}')
+        return summary()
+
+    (scene.root / scene.t.tenant_id / "learning").mkdir()
+    before = set(tree(scene.root))
+    rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id, "--update-ticket"],
+                     lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
+                     ticket_writer=Writer(), publish=lambda *a, **k: B.fresh(scene.t.commit))
+    assert rc == 0
+    made = [k for k in set(tree(scene.root)) - before if re.search(r"learning/author-queue/case-.*\.json$", k)]
+    assert made, "the operator default enqueue left no queue entry the disk check can see"
 
 
 # --- the sidecar split --------------------------------------------------------------------------------------
