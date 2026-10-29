@@ -582,7 +582,7 @@ YAML + FastAPI — the "authorized-change context" primitive from the v2 doc. Se
 
 **Rolling standing CRs.** `change-mgmt/seed/standing.yaml` declares a small set of recurring change windows (`daily` and `weekly` kinds — no croniter dependency). At startup and every `STANDING_REFRESH_SECONDS` (default 300s), the app materializes occurrences covering `[now-7d, now+1d]` into STORE so `/changes/active?host=…&at=…` returns a CR whenever the current time falls inside a standing window. CR ids encode the occurrence start (`CHG-DB-BACKUP-20260520T0200Z`), so the materialization is idempotent. Today's standing set: nightly db-1 backup (covers baseline action `db-backup`) + weekly Tuesday web-tier patching window. Kept tiny on purpose — most baseline activity is *not* CR-covered, and that's realistic; the standing layer covers only the slice that legitimately has a CR backing it.
 
-**Synthetic CRs from the attack runner.** `attacks/runner.py --cr-mode {valid,stale,scope-mismatch}` POSTs a synthetic `CHG-RUNNER-…` CR before firing, exercising the agent's CR scope-check (host scope, time-window scope, identity scope) rather than just presence. The CR ends up in change-mgmt's STORE alongside the seed + standing entries. See `attacks/README.md` for the mode semantics.
+**Synthetic CRs from the attack runner.** `attacks/runner.py --cr-mode {valid,stale,scope-mismatch}` POSTs an ordinary-looking `CHG-<n>` CR before firing (its id is in the run's `meta.json`), exercising the agent's CR scope-check (host scope, time-window scope, identity scope) rather than just presence. The CR ends up in change-mgmt's STORE alongside the seed + standing entries. See `attacks/README.md` for the mode semantics.
 
 #### identity
 
