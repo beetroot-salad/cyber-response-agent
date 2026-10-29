@@ -25,6 +25,7 @@ from defender.tests.tenancy.tenant_1108_p4._support import (
     bind_forge,
     current_commit,
     export_dir,
+    minting,
     unbind_forge,
 )
 
@@ -149,14 +150,16 @@ def test_o_budget_a_stalled_fetch_ends_within_the_childs_timeout_and_leaves_noth
 
 # --- stale:operator ---------------------------------------------------------------------------
 
-def test_o_stale_an_issuer_auth_refusal_is_operator(tenant):
-    """The issuer refuses the mint (the credential is revoked): `stale:operator`."""
+def test_o_stale_an_issuer_auth_refusal_is_operator(tenant, tmp_path):
+    """OpenBao refuses the login (the generation's secret id is revoked): `stale:operator`, and the report line
+    names neither the secret nor the role id."""
     tenant.merge(B.MERGE_FILES)
-    tenant.vault.status = 403
-    tenant.vault.body = {"errors": ["permission denied"]}
-    line = B.run_child(tenant)
-    assert tenant.vault.calls, "premise: the child asked the issuer"
+    scene = minting(tenant, tmp_path, purpose="publish")
+    scene.bao.approles[scene.fields["approle"]].clear()
+    line = B.run_child(tenant, identity=scene.credential)
+    assert any(login["secret_id"] == scene.secret for login in scene.logins()), "premise: the child tried to log in"
     _stale(line, "operator")
+    assert B.leaks(scene.secrets, report_line=line) == []
     _unchanged(tenant)
 
 
@@ -331,26 +334,17 @@ def _misconfigure(t, tmp_path, missing: str) -> None:
 
 # --- wired into run.main ----------------------------------------------------------------------
 
-def _child_publish(t, *, mint: bool = False, lines: list | None = None):
+def _child_publish(t, *, mint: bool = False, lines: list | None = None, identity=None):
     """`run.main`'s `publish=` bound to the REAL child in-process (identifiers from the parent
     are ignored here; the child is told its tenant by closure, as the CLI would by argv). With
-    `mint`, the child mints from the live generation. `lines` collects the report lines."""
+    `mint`, the child mints from the live generation; `identity` hands it the real provider over a fake OpenBao.
+    `lines` collects the report lines."""
     def publish(*_a, **_k):
-        line = B.run_child(t, mint=mint)
+        line = B.run_child(t, mint=mint, identity=identity)
         if lines is not None:
             lines.append(line)
         return line
     return publish
-
-
-def _with_secret_file(t, tmp_path, value: str) -> dict:
-    """A live generation whose recorded host secret file exists and holds `value`."""
-    from defender.tests.support.tenancy._active1214 import generation_fields
-
-    fields = generation_fields(t.tenant_id, tmp_path / "secrets")
-    fields["host_secret_file"].parent.mkdir(parents=True, exist_ok=True)
-    fields["host_secret_file"].write_text(value + "\n", encoding="utf-8")
-    return fields
 
 
 def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp_path, monkeypatch):
@@ -378,12 +372,13 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
         write_report(seen.run_dir)
         S1107.seed_session_store(seen.run_dir)
 
-    secrets = ("s-b-host-secret-id-5f0c1a9e",)
-    bind_forge(tenant, generations=[_with_secret_file(tenant, tmp_path, secrets[0])])
-    out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, lines=lines),
+    scene = minting(tenant, tmp_path, purpose="publish")
+    secrets = scene.secrets
+    out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, lines=lines, identity=scene.credential),
                    argv_extra=("--update-ticket",), during=seed, ticket_writer=writer,
                    visualize=run_common.visualize)
     assert out.reached, out.text()
+    scene.assert_logged_in_with_the_file()
     assert store.calls, "control: the run posted its comment"
     page = out.run_dir / "runtime.html"
     assert page.is_file(), "control: the run page was saved"
@@ -392,8 +387,8 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
         stamp=out.stamp_after, host_record=out.host_after, page=page.read_text(encoding="utf-8") if page.is_file() else "",
         comment=[str(c.body) for c in store.calls],
     ) == [], "the host secret left the publish child"
-    monkeypatch.setenv("S_B_CONTROL_PROBE", secrets[0])
-    assert B.leaks(secrets, env=dict(os.environ)) == [("env", secrets[0])]
+    monkeypatch.setenv("S_B_CONTROL_PROBE", scene.secret)
+    assert B.leaks(secrets, env=dict(os.environ)) == [("env", scene.secret)]
     assert out.rc == 0, out.text()
     assert B.MERGED_MARK in out.seen[0].agent_files[B.LESSON_REL].decode()
     assert B.stamped_commit(out.stamp_after) == {"commit": merged}

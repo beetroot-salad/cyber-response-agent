@@ -91,15 +91,17 @@ def test_the_repo_is_made_from_the_template_and_the_tenant_id_file(world):
     tenant = world.active_tenant()
     bare = world.forge.bare(f"{ORG}/{tenant}")
 
-    def git(*args: str) -> str:
-        done = subprocess.run(["git", *args], cwd=bare, capture_output=True, text=True, check=True)  # noqa: S603, S607
-        return done.stdout
-    tracked = set(git("ls-tree", "-r", "--name-only", "main").split())
+    def git(*args: str) -> bytes:
+        return subprocess.run(["git", *args], cwd=bare, capture_output=True, check=True).stdout  # noqa: S603, S607
+    tracked = set(git("ls-tree", "-r", "--name-only", "main").decode().split())
     template = template_dir(REPO_ROOT)
-    expected = {str(p.relative_to(template)) for p in template.rglob("*") if p.is_file()}
-    assert expected, "control: the template directory has files"
-    assert expected <= tracked
-    assert git("show", "main:agent/.tenant-id").strip() == tenant
+    files = {p.relative_to(template).as_posix(): p for p in template.rglob("*") if p.is_file()}
+    assert files, "control: the template directory has files"
+    assert tracked == set(files) | {"agent/.tenant-id"}
+    for rel, path in files.items():
+        assert git("show", f"main:{rel}") == path.read_bytes(), f"{rel} differs from the template"
+    assert git("show", "main:agent/.tenant-id") == f"{tenant}\n".encode()
+    assert git("rev-list", "--count", "main").decode().strip() == "1"
 
 
 def test_the_bot_is_created_able_to_sign_in_through_its_integration_and_cannot_push_main(world):

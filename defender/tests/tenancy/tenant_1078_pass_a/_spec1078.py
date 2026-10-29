@@ -245,13 +245,13 @@ def plant_alert(where: Path, name: str = "alert.json") -> Path:
 def census(root: Path) -> dict[str, tuple[str, str | None]]:
     """Every entry under `root` and every regular file's bytes — the before/after census a
     "writes nothing" assertion compares (`_spec1077.mutation_census`). An absent root is the
-    empty census, which is itself a value the comparison sees. The host lock's `.host-locks/` folder is not
+    empty census, which is itself a value the comparison sees. The host lock's `<root>/.host-locks/` folder (that one, at the top of the root) is not
     counted: an entry point takes the tenant's shared lock before it judges the tenant, also one it refuses
     (Flow 4); it holds no tenant fact (W4-8)."""
     root = Path(root)
     if not root.is_dir():
         return {}
-    return {rel: v for rel, v in S.mutation_census(root).items() if ".host-locks" not in Path(rel).parts}
+    return {rel: v for rel, v in S.mutation_census(root).items() if Path(rel).parts[0] != ".host-locks"}
 
 
 def entries(root: Path) -> list[str]:
@@ -343,14 +343,18 @@ class Recorder:
         return any(s in self.order for s in ("preflight", "materialize", "lifecycle"))
 
 
-def drive_main(argv: list[str], rec: Recorder) -> tuple[int | None, BaseException | None]:
+def drive_main(argv: list[str], rec: Recorder, *, directory: Any = None) -> tuple[int | None, BaseException | None]:
     """Drive the REAL `run.main` over `argv` with every seam recorded, plus the in-process
-    launch-time publish (it publishes the requested tenant's folder for real). Returns
+    launch-time publish (it publishes the requested tenant's folder for real). `directory` defaults to
+    `directory_for_argv(argv)`: `--tenant` active whatever its folder. Returns
     `(exit status, None)` or `(None, the SystemExit it refused with)`."""
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
+    seams = dict(rec.seams())
+    if directory is not None:
+        seams["directory"] = directory
     try:
-        return run_py().main(list(argv), **with_publish(dict(rec.seams()), argv)), None
+        return run_py().main(list(argv), **with_publish(seams, argv)), None
     except SystemExit as refused:
         return None, refused
 

@@ -192,8 +192,10 @@ def test_a_second_worker_skips_a_locked_tenant_and_takes_another(migrated_databa
         release.set()
         a.join(WAIT)
     assert not a.is_alive() and _advisory_holders(dsn) == []
-    before = _row(dsn, t)  # A's pass carried T on past its own step (DC-14); the host's step is next
-    assert _pass(dsn, "host", fakes, config) >= 1, "control: with A done, T is takeable"
+    before = _row(dsn, t)
+    actor = execute(dsn, "SELECT step_actor FROM tenancy.tenants WHERE id = %s", (t,))[0][0]
+    assert actor in ("service", "host"), f"control: T has a next step ({actor!r})"  # DC-14 leaves open how far A's pass went
+    assert _pass(dsn, actor, fakes, config) >= 1, "control: with A done, T is takeable"
     assert _row(dsn, t) != before
 
 

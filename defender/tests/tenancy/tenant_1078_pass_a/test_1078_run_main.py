@@ -13,13 +13,14 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.tenancy._launch_publish_p4 import empty_directory
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 
 
-def _refused(argv: list[str], rec: H.Recorder, capsys=None) -> str:
+def _refused(argv: list[str], rec: H.Recorder, capsys=None, *, directory=None) -> str:
     """Drive `main`, assert it REFUSED with nothing spent, and return what it said (the exit's
     own message, plus stderr when an argparse-level refusal printed there)."""
-    rc, refused = H.drive_main(argv, rec)
+    rc, refused = H.drive_main(argv, rec, directory=directory)
     assert refused is not None, f"run.py accepted {argv!r} (exit {rc}, ran {rec.order})"
     assert refused.code not in (0, None), f"run.py 'refused' {argv!r} with a success exit"
     assert not rec.spent, f"run.py spent before refusing {argv!r}: {rec.order}"
@@ -91,7 +92,8 @@ def test_o1_fresh_run_without_tenant_refused(tmp_path, data_root, capsys):
 def test_o2_unknown_tenant_refused_writes_nothing(tmp_path, data_root):
     alert = H.plant_alert(tmp_path / "in")
     before = H.census(data_root)
-    said = _refused([str(alert), "--tenant", fixture_uuid("tenant:acme")], H.Recorder(tmp_path / "run"))
+    said = _refused([str(alert), "--tenant", fixture_uuid("tenant:acme")], H.Recorder(tmp_path / "run"),
+                    directory=empty_directory())  # unknown to the directory, not a folder fault
     assert H.census(data_root) == before, "the refused run wrote under the data root"
     assert not (data_root / fixture_uuid("tenant:acme")).exists()
     assert said.startswith("[run.py] "), f"not a '[run.py] ...' refusal: {said!r}"
@@ -148,10 +150,11 @@ def test_launch_whose_source_tenant_folder_disappears_before_the_siblings_start(
     assert H.accept(data_root, fixture_uuid("tenant:acme")).id == fixture_uuid("tenant:acme"), (
         "the launcher's own acceptance must pass first")
     shutil.rmtree(data_root / fixture_uuid("tenant:acme") / "knowledge")
+    owner = H.owner_refusal(H.accept, data_root, fixture_uuid("tenant:acme"))  # the tenant stays active in the directory
     for world in ("a", "b", "c"):
         said = _refused(H.sibling_argv(manifest, world, "--tenant", fixture_uuid("tenant:acme")),
                         H.Recorder(tmp_path / f"sib-{world}"))
-        assert fixture_uuid("tenant:acme") in said, f"sibling {world}: the refusal does not name the tenant: {said!r}"
+        H.assert_verbatim(said, owner, entry=f"sibling {world}")
     assert manifest.is_file(), "the prepared episode dir is not the sibling's to remove"
 
 
@@ -177,6 +180,7 @@ def test_a_tenant_placed_under_another_data_root_is_unknown_to_this_one(tmp_path
     before = (H.census(placed_root), H.census(run_root))
     said = _refused([str(H.plant_alert(tmp_path / "in")), "--tenant", fixture_uuid("tenant:acme")],
                     H.Recorder(tmp_path / "run"))
+    H.assert_verbatim(said, H.owner_refusal(H.accept, run_root, fixture_uuid("tenant:acme")), entry="run.py main")
     assert fixture_uuid("tenant:acme") in said, f"the refusal does not name the tenant: {said!r}"
     assert (H.census(placed_root), H.census(run_root)) == before
 
@@ -219,7 +223,8 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     alert = H.plant_alert(tmp_path / "in")
     # The old root still holds run X; the new root has no such tenant yet.
     argv = [str(alert), "--tenant", fixture_uuid("tenant:acme")]
-    _refused(argv, H.Recorder(tmp_path / "run"))
+    said_first = _refused(argv, H.Recorder(tmp_path / "run"))
+    H.assert_verbatim(said_first, H.owner_refusal(H.accept, new, fixture_uuid("tenant:acme")), entry="run.py main (new root)")
 
     H.place_knowledge(new, fixture_uuid("tenant:acme"))  # the operator's clone under the new root
     assert H.accept(new, fixture_uuid("tenant:acme")).id == fixture_uuid("tenant:acme")

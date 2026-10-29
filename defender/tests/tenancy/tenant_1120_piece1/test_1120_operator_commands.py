@@ -264,7 +264,8 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     assert rc is None, f"run.main ran over an unloadable table: rc={rc}"
     # The run loads the table from its own copy of the export, so the refusal names
     # `<T>/run-knowledge/<run id>/settings/verb-grants.yaml`.
-    # (or the clone's own table when the refusal comes before the export is copied).
+    # Or the clone's own table: acceptance parses the tables (W4-3 owner ruling), so the refusal may come before
+    # the export is copied.
     named = re.findall(r"(/\S*/verb-grants\.yaml)", H.exit_text(exc))
     assert [p for p in named
             if H.run_copy_part(p, data_root) == ("settings", "verb-grants.yaml") or p == str(table)], (

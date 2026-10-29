@@ -20,7 +20,7 @@ import pytest
 
 from defender.tests.support.learning.curation import _spec773 as S
 from defender.learning.core.state import FINDINGS
-from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, bind_forge, git, unbind_forge
+from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, bind_forge, git, minting, unbind_forge
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     SECRET_ID,
     LESSON_NAME,
@@ -85,18 +85,13 @@ def test_a_id_o8_the_drain_pushes_with_its_token_and_hands_no_host_secret_to_the
     """The drain pushes and opens its PR with its token. The host secret (the file the live generation
     records) leaves the host process nowhere: none is in the box request's environment or under its mounts,
     or in the drain's environment while the model step runs. Each check has a positive control."""
-    from defender.tests.support.tenancy._active1214 import generation_fields
-
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     t = p4_tenant
-    fields = generation_fields(t.tenant_id, tmp_path / "secrets")
-    fields["host_secret_file"].parent.mkdir(parents=True)
-    fields["host_secret_file"].write_text(SECRET_ID + "\n", encoding="utf-8")
-    bind_forge(t, generations=[fields])
-    config = fields["host_secret_file"]
+    scene = minting(t, tmp_path)
+    config = scene.fields["host_secret_file"]
     paths = drain_paths(t, product_repo(tmp_path))
     queue(paths, [S.finding_row("f1", run_id="f1")])
-    secrets = (SECRET_ID, fields["role_id"])
+    secrets = scene.secrets
     env_seen: list[dict] = []
     curator = S.FakeCurator(writes={LESSON_NAME: S.lesson("f1")},
                             also=lambda *_a: env_seen.append(dict(os.environ)))
@@ -105,9 +100,10 @@ def test_a_id_o8_the_drain_pushes_with_its_token_and_hands_no_host_secret_to_the
     t.server.authorizations.clear()
 
     with caplog.at_level(logging.INFO):
-        rc = author_drain(t, paths, trigger=trigger, box=box)
+        rc = author_drain(t, paths, trigger=trigger, box=box, identity=scene.credential)
 
     assert rc == 0, critical_text(caplog)
+    scene.assert_logged_in_with_the_file()
     (branch, _tip), = remote_branches(t.remote).items()
     assert [c["head"] for c in t.forge.creates] == [branch]
     assert t.server.authorizations
@@ -123,8 +119,8 @@ def test_a_id_o8_the_drain_pushes_with_its_token_and_hands_no_host_secret_to_the
     assert env_seen, "the model step never ran"
     leaked_env = [k for env in env_seen for k, v in env.items() for s in secrets if s in v]
     assert leaked_env == [], leaked_env
-    monkeypatch.setenv("P4_CONTROL_PROBE", SECRET_ID)
-    assert [k for k, v in os.environ.items() if SECRET_ID in v] == ["P4_CONTROL_PROBE"]
+    monkeypatch.setenv("P4_CONTROL_PROBE", scene.secret)
+    assert [k for k, v in os.environ.items() if scene.secret in v] == ["P4_CONTROL_PROBE"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -164,10 +160,10 @@ def _break_tenant(t: Any, config: Path, fault: str) -> None:
     if fault == "local-origin":
         # Whichever of the binding and the clone's configured origin the drain reads, it is a
         # filesystem path, not a network origin.
-        bind_forge(t, origin="/tmp/p4-local-origin.git")
+        bind_forge(t, origin="/tmp/p4-local-origin.git", generations=t.__dict__["_bound"]["generations"])
         git(t.clone, "remote", "set-url", "origin", "/tmp/p4-local-origin.git")
         return
-    bind_forge(t)
+    # No rebind: `config` is the file the live generation records, so the fault is the one it names.
     if fault == "host-secret-file":
         config.unlink()
     elif fault == "unversioned":
@@ -189,9 +185,11 @@ class _Tick:
     box: BoxSpy
 
 
-def _tick(drain: str, t: Any, tmp_path: Path, *, mint: bool) -> _Tick:
+def _tick(drain: str, t: Any, tmp_path: Path, *, mint: bool, identity: Any = None) -> _Tick:
     box = BoxSpy()
-    seams = {"mint": mint}
+    seams: dict[str, Any] = {"mint": mint}
+    if identity is not None:
+        seams["identity"] = identity
     if drain == "author":
         paths = drain_paths(t, product_repo(tmp_path))
         queue(paths, [S.finding_row("f1", run_id="f1")])
@@ -281,6 +279,28 @@ def test_control_o9_a_deliverable_tenant_serves_the_row(
         rc = tick.run()
 
     assert rc == 0, critical_text(caplog)
+    assert tick.handed() != []
+    assert tick.delivered()
+
+
+@pytest.mark.parametrize("drain", ["author", "lead"])
+def test_control_o9_a_minting_drain_logs_in_with_the_file_and_serves_the_row(
+        p4_tenant, tmp_path, monkeypatch, caplog, drain):
+    """Positive control for the host-secret-file arm: the same scene with the file intact and the real provider
+    over a fake OpenBao logs in with the file's secret and delivers."""
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
+    t = p4_tenant
+    scene = minting(t, tmp_path)
+    tick = _tick(drain, t, tmp_path, mint=True, identity=scene.credential)
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        rc = tick.run()
+
+    assert rc == 0, critical_text(caplog)
+    scene.assert_logged_in_with_the_file()
     assert tick.handed() != []
     assert tick.delivered()
 
