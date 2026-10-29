@@ -34,6 +34,7 @@ from defender.tests.support.jobs._jobs1342 import (
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
 SUPPORT = DEFENDER / "tests" / "support" / "jobs"
+IDLE_BEFORE_QUEUING = 4.0  # seconds the serving worker idles first: several fixed poll intervals (M10)
 
 
 def _env(data_root: Path) -> dict[str, str]:
@@ -78,7 +79,7 @@ def worker_process(tmp_path: Path, config: dict) -> Iterator[subprocess.Popen]:
 # --- O15 -----------------------------------------------------------------------------------------
 
 async def test_o15_a_worker_in_another_process_runs_what_this_one_queued(migrated_database, tmp_path):
-    """Shared only the database and the data root: the stage moves queued → running → completed, read from here. (O15)"""
+    """Queued from here after the worker is up and idle: it polls, runs it, queued → running → completed. (O15, M10)"""
     import anyio
 
     dsn = migrated_database
@@ -90,12 +91,15 @@ async def test_o15_a_worker_in_another_process_runs_what_this_one_queued(migrate
     golden = GOLDEN_REPORT.read_text(encoding="utf-8")
     async with job_store(dsn) as store:
         alert = await an_alert(store, T1)
-        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
-        assert inv.stage == "queued"
         config = {"dsn": dsn, "data_root": str(root), "child": "scripted", "where": str(tmp_path / "child"),
                   "runs": str(runs), "wait_for": str(release), "containers": str(tmp_path / "containers"),
                   "files": {"{id}.job-end.json": job_end(), "{id}/report.md": golden}}
         with worker_process(tmp_path, config) as proc:
+            # M10/D-p: the worker is up and idle for a few poll intervals before anything is queued.
+            await anyio.sleep(IDLE_BEFORE_QUEUING)
+            assert proc.poll() is None, "the idle worker exited"
+            inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+            assert inv.stage == "queued"
             stages = []
             for _ in range(1200):
                 current = (await store.get_investigation(T1, inv.investigation_id)).stage

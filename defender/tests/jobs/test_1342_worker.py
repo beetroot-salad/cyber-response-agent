@@ -12,6 +12,7 @@ import inspect
 import json
 import logging
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -101,8 +102,17 @@ def _no_run_text(stored: dict) -> None:
 
 
 def _warned(caplog, inv: str) -> bool:
+    """A WARNING or worse from the worker that names the row (D-r); routine INFO lines do not count."""
     return any(inv in r.getMessage() for r in caplog.records
-               if r.name.startswith(WORKER_LOGGER) and r.levelno >= logging.INFO)
+               if r.name.startswith(WORKER_LOGGER) and r.levelno >= logging.WARNING)
+
+
+def _names_code(stored: dict, inv: str, code: int) -> bool:
+    """The failure message carries `code` as a delimited number; the row's own id is taken out first."""
+    return re.search(rf"\b{code}\b", stored["failure_message"].replace(inv, "")) is not None
+
+
+EXIT = 77  # no digit of a UUID, timestamp or stage word can stand for it
 
 
 def test_o12_the_worker_entry_points_are_coroutines():
@@ -184,6 +194,7 @@ async def test_o5_a_row_moved_while_its_child_runs_is_left_alone_and_logged(worl
     assert row(world["dsn"], fenced) == snapshot, "the worker's terminal write overwrote the moved row"
     assert snapshot["disposition"] is None
     assert _warned(caplog, fenced), "the refused write was not logged"
+    assert not _warned(caplog, other), "a clean finish was logged as a fault"
     assert row(world["dsn"], other)["stage"] == "completed", "the worker stopped working on every row"
     finishes = [e.target for e in audit.events() if e.action == "investigation.finish"]
     assert finishes == [other], "a finish was audited for a write that changed nothing"
@@ -272,8 +283,8 @@ async def test_o6_a_child_that_cannot_be_spawned_is_a_worker_error_and_the_worke
 
 # --- O8: the worker's rule, one case per branch ----------------------------------------------------
 
-def _spec(*, expect, exit=0, says=(), **spec):  # noqa: A002 — mirrors the child's exit code
-    return {"spec": spec, "exit": exit, "expect": expect, "says": says}
+def _spec(*, expect, exit=0, says=(), lacks=(), code=None, **spec):  # noqa: A002 — mirrors the child's exit code
+    return {"spec": spec, "exit": exit, "expect": expect, "says": says, "lacks": lacks, "code": code}
 
 
 def _refused(**extra) -> dict[str, str]:
@@ -285,12 +296,12 @@ MARKED_REPORT = GOOD + f"\n{MARKER}\n"
 HEADER = "---\ndisposition: benign\n---\n"
 CASES = {
     # rule 1: no job-end record; the run folder, the exit and the report decide nothing
-    "1-no-job-end": _spec(files={"{id}/report.md": MARKED_REPORT}, exit=7,
-                          expect=("failed", "no_report", None), says=("7",)),
+    "1-no-job-end": _spec(files={"{id}/report.md": MARKED_REPORT}, exit=EXIT,
+                          expect=("failed", "no_report", None), code=EXIT),
     "1-no-job-end-exit-zero": _spec(files={"{id}/report.md": MARKED_REPORT}, exit=0,
                                     expect=("failed", "no_report", None)),
     "1-job-end-unreadable": _spec(files={"{id}.job-end.json": "{not json", "{id}/report.md": GOOD},
-                                  expect=("failed", "no_report", None)),
+                                  exit=EXIT, expect=("failed", "no_report", None), code=EXIT),
     # rule 2
     "2-setup-refused": _spec(files=_refused(), exit=1, expect=("failed", "setup_refused", None)),
     "2-refused-before-a-planted-report": _spec(
@@ -338,14 +349,14 @@ CASES = {
     "5-box-planted-report-not-committed": _spec(
         files=_committed(**{"{id}.job-end.json": job_end(report_committed=False),
                             "{id}/report.md": MARKED_REPORT}),
-        exit=4, expect=("failed", "no_report", None), says=("report",)),
+        exit=4, expect=("failed", "no_report", None), says=("report",), lacks=("scrub", "setup")),
     "5-tree-not-verified": _spec(
         files=_committed(**{"{id}.job-end.json": job_end(scrub_verified=False)}),
-        expect=("failed", "no_report", None), says=("scrub",)),
+        expect=("failed", "no_report", None), says=("scrub",), lacks=("setup",)),
     "5-setup-crashed": _spec(
         files={"{id}.job-end.json": job_end(setup="crashed", box="not_started", report_committed=False,
                                             scrub_verified=False)}, exit=1,
-        expect=("failed", "no_report", None), says=("setup",)),
+        expect=("failed", "no_report", None), says=("setup",), lacks=()),
 }
 
 
@@ -365,8 +376,13 @@ async def test_o8_the_stage_comes_from_the_job_end_record_and_the_report(world, 
         assert (stored["failure_reason"], stored["failure_message"]) == (None, None)
     if stage == "failed":
         assert stored["failure_message"], "a failed row carries our own message"
+        message = stored["failure_message"].lower()
         for word in plan["says"]:
-            assert word in stored["failure_message"].lower(), (word, stored["failure_message"])
+            assert word in message, (word, stored["failure_message"])
+        for word in plan["lacks"]:  # a fact that held is not named as the failure
+            assert word not in message, (word, stored["failure_message"])
+        if plan["code"] is not None:
+            assert _names_code(stored, inv, plan["code"]), ("exit code", stored["failure_message"])
     assert stored["finished_at"] == NOW
     assert stored["started_at"] == NOW
     _no_run_text(stored)
@@ -416,11 +432,13 @@ async def test_o8_a_run_that_crashed_still_has_its_spend_recorded(world):
     assert stored["cost_usd"] == pytest.approx(SONNET_OUT)
 
 
-async def test_o8_no_session_pointer_costs_nothing(world):
+async def test_o8_no_session_pointer_costs_nothing(world, caplog):
     """No pointer (the store was never opened) → cost 0, not unknown. (O8 cost)"""
-    _, stored = await _run_one(world, _child(world, files=_committed()))
+    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
+    inv, stored = await _run_one(world, _child(world, files=_committed()))
     assert stored["stage"] == "completed"
     assert stored["cost_usd"] == 0
+    assert not _warned(caplog, inv), "a run with no pointer logged a cost fault"
 
 
 def _break_database(runs: Path, case_id: str) -> None:
@@ -534,7 +552,7 @@ async def test_o7_after_the_child_exits_the_backstop_removes_a_leftover_box_only
 async def test_o7_the_backstop_runs_for_a_run_that_failed_and_never_writes_the_row(world, tmp_path):
     """A failed run's leftover box is removed; the row keeps the rules' verdict, not a backstop's. (O7, M8)"""
     containers = StandInContainers(tmp_path / "containers")
-    child = _child(world, exit=3)  # no job-end record: rule 1
+    child = _child(world, exit=EXIT)  # no job-end record: rule 1
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         containers.plant(f"defender-run-{inv}")
@@ -543,7 +561,89 @@ async def test_o7_the_backstop_runs_for_a_run_that_failed_and_never_writes_the_r
     assert ("remove", f"defender-run-{inv}") in containers.calls
     stored = row(world["dsn"], inv)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
-    assert "3" in stored["failure_message"]
+    assert _names_code(stored, inv, EXIT), stored["failure_message"]
+
+
+def _docker_world(tmp_path: Path):
+    from defender.tests.support.sandbox._box1195 import FakeDaemon
+
+    daemon = FakeDaemon(tmp_path)
+    calls: list[list[str]] = []
+
+    def docker(argv, **kw):
+        calls.append([str(a) for a in argv])
+        return daemon(argv, **kw)
+
+    return daemon, docker, calls
+
+
+def _removes(calls: list[list[str]], name: str) -> bool:
+    return any(name in argv and ("rm" in argv or "remove" in argv) for argv in calls)
+
+
+def test_o7_the_docker_seam_looks_first_and_removes_only_a_container_that_is_there(tmp_path):
+    """`DockerContainers(docker=fn)`: present → exists and removed (control); absent → looked at, nothing removed, no error. (O7, D-o)"""
+    from defender.worker import DockerContainers
+
+    daemon, docker, calls = _docker_world(tmp_path)
+    containers = DockerContainers(docker=docker)
+    daemon.hold("defender-run-here", "exited")
+    daemon.hold("defender-run-other", "running")
+
+    assert containers.exists("defender-run-here") is True
+    containers.remove("defender-run-here")
+    assert daemon.names() == ["defender-run-other"]
+    assert _removes(calls, "defender-run-here"), calls
+
+    calls.clear()
+    assert containers.exists("defender-run-gone") is False
+    assert calls, "an absent container was not even looked at"
+    assert not _removes(calls, "defender-run-gone")
+    assert daemon.names() == ["defender-run-other"]
+
+
+async def test_o7_a_worker_given_no_containers_uses_docker_and_removes_only_its_own_leftover(
+        world, monkeypatch):
+    """Omitting `containers` → the backstop is the docker one (a `docker` first on PATH): the row's leftover box goes, another run's stays, a clean run is no error. (O7, D-o)"""
+    import uuid
+
+    from defender.worker import Worker
+    from defender.tests.support.jobs._jobs1342 import fixed_clock
+
+    daemon, _docker, _calls = _docker_world(world["tmp"])
+    daemon.install(monkeypatch)
+    left_id = str(uuid.uuid4())
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        alert = await an_alert(store, T1, ticket="T-L")
+        plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=left_id)
+        clean = await _queued(store, ticket="T-2", key="k2")
+        daemon.hold(f"defender-run-{left_id}", "exited")
+        daemon.hold("defender-run-someone-else", "running")
+        await Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock).drain()
+
+    assert daemon.names() == ["defender-run-someone-else"], daemon.names()
+    assert row(world["dsn"], left_id)["stage"] == "completed"
+    assert row(world["dsn"], clean)["stage"] == "completed", "an absent container broke the clean run"
+
+
+def test_d2_the_ratified_defaults_are_three_slots_and_a_thirty_second_grace():
+    """`Worker(...)` defaults: `slots=3`, `stop_grace=30`. (O4, O7, D2)"""
+    from defender.worker import Worker
+
+    params = inspect.signature(Worker).parameters
+    assert params["slots"].default == 3
+    assert params["stop_grace"].default == 30
+
+
+async def test_o8_the_childs_output_is_inherited_not_piped(world, capfd):
+    """A child's stdout and stderr land on the worker's own descriptors. (design: child output)"""
+    _, stored = await _run_one(world, _child(world, files=_committed(), printed=MARKER))
+    out, err = capfd.readouterr()
+
+    assert stored["stage"] == "completed"
+    assert (MARKER in out, MARKER in err) == (True, True), "the child's output did not reach the worker's stdout and stderr"
+    _no_run_text(stored)
 
 
 # --- O13 -----------------------------------------------------------------------------------------

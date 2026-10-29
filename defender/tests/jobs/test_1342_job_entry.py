@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -25,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, DEFENDER, TITLE, WORKTREE
+from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, DEFENDER, TITLE, WORKTREE, tree
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
 ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
@@ -97,15 +98,13 @@ class Ran:
     out: str = ""
     calls: dict[str, int] = field(default_factory=lambda: {"lifecycle": 0, "publish": 0})
 
-    @property
-    def refused(self) -> bool:
-        if self.exit is not None:
-            return self.exit.code not in (0, None)
-        return bool(self.rc)
+    err: str = ""
 
     @property
     def message(self) -> str:
-        return str(self.exit.code) if self.exit is not None else ""
+        """Whatever the entry said about itself, by any channel (D-j: no exit code is pinned)."""
+        said = [str(self.exit.code) if self.exit is not None else "", str(self.raised or ""), self.out, self.err]
+        return "\n".join(said)
 
 
 def summary(*, report_committed: bool = True) -> dict[str, Any]:
@@ -139,15 +138,15 @@ def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = No
         "publish": publish}
     if materialize is not None:
         seams["materialize"] = materialize
-    out = io.StringIO()
+    out, err = io.StringIO(), io.StringIO()
     try:
-        with contextlib.redirect_stdout(out):
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             ran.rc = run_py.job_main(s.argv(run_id), **seams)
     except SystemExit as e:
         ran.exit = e
     except Exception as e:  # noqa: BLE001 — kept for the assertions to name
         ran.raised = e
-    ran.out = out.getvalue()
+    ran.out, ran.err = out.getvalue(), err.getvalue()
     return ran
 
 
@@ -160,8 +159,8 @@ def test_o6_a_job_with_a_valid_launch_record_sets_up_and_runs_the_lifecycle(scen
 
     ran = run_job(scene, run_id)
 
-    assert (ran.exit, ran.raised) == (None, None), ran
-    assert ran.rc == 0
+    assert ran.raised is None, ran
+    assert ran.exit is None or ran.exit.code in (0, None), ran
     assert ran.calls == {"lifecycle": 1, "publish": 1}
     assert ran.out.splitlines()[0] == f"run_id={run_id}"
     assert (scene.runs / run_id).is_dir()
@@ -199,7 +198,6 @@ def test_o6_setup_refuses_an_id_without_a_launch_record_that_names_this_tenant_a
 
     ran = run_job(scene, run_id)
 
-    assert ran.refused, f"{kind}: setup went on: {ran}"
     assert ran.raised is None, ran.raised
     assert ran.calls["lifecycle"] == 0
     assert not (scene.runs / run_id).exists(), "a run folder was made past a refused launch"
@@ -222,7 +220,6 @@ def test_o6_an_alert_that_admission_refuses_is_refused_and_recorded_even_with_a_
 
     ran = run_job(scene, run_id)
 
-    assert ran.refused
     assert ran.calls["lifecycle"] == 0
     assert not (scene.runs / run_id).exists()
     assert scene.job_end(run_id)["setup"] == "refused"
@@ -236,20 +233,18 @@ def test_m1_a_tenant_acceptance_refusal_is_recorded_as_setup_refused(scene):
 
     ran = run_job(scene, run_id)
 
-    assert ran.refused
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "refused", "box": "not_started",
                                      "report_committed": False, "scrub_verified": False}
 
 
 def test_m1_a_preflight_that_returns_non_zero_is_a_refusal(scene):
-    """Preflight's non-zero return, before the lifecycle, is `setup: refused` and ends non-zero. (M1, M3)"""
+    """Preflight's non-zero return, before the lifecycle, is `setup: refused`. (M1, M3)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
 
     ran = run_job(scene, run_id, preflight=lambda *a, **k: 2)
 
-    assert ran.refused
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id)["setup"] == "refused"
 
@@ -282,12 +277,61 @@ def test_o6_the_run_folder_is_still_made_exclusively(scene):
 
     first, second = run_job(scene, taken), run_job(scene, used)
 
-    assert first.refused
-    assert second.refused
     assert first.calls["lifecycle"] == second.calls["lifecycle"] == 0
     assert (scene.runs / taken / "mark").read_text(encoding="utf-8") == "theirs"
     assert sorted(p.name for p in (scene.runs / taken).iterdir()) == ["mark"]
     assert not (scene.runs / used).exists()
+    assert (scene.runs / f"{used}.job-end.json").read_text(encoding="utf-8") == "{}", \
+        "the first job-end record was overwritten (D-i: create-only)"
+
+
+def test_r1_a_tenant_with_no_runs_container_is_refused_and_the_job_entry_does_not_make_one(scene):
+    """`<T>/runs` absent: the job does not go on and `runs/` is still absent after; with `runs/` present the same job runs. (R1)"""
+    import shutil
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    shutil.rmtree(scene.runs)
+
+    ran = run_job(scene, run_id)
+
+    assert ran.calls == {"lifecycle": 0, "publish": 0}, ran
+    assert not scene.runs.exists(), "the job entry made the runs container"
+    assert not (scene.root / scene.t.tenant_id / "runs").exists()
+
+    scene.runs.mkdir()  # control: the same job with `runs/` present
+    scene.plant(run_id)
+    control = run_job(scene, run_id)
+    assert control.calls["lifecycle"] == 1, control
+
+
+def test_m3_the_job_lane_removes_its_knowledge_copy_on_the_way_out(scene):
+    """The run copy `<T>/run-knowledge/<id>` is gone after a clean job, and after a lifecycle crash. (M3, D-q)"""
+    copies = B.run_copies(scene.t)
+    clean, crashed = str(uuid.uuid4()), str(uuid.uuid4())
+    scene.plant(clean)
+    scene.plant(crashed)
+    seen: list[bool] = []
+
+    def lifecycle_seeing_the_copy(ran: Ran):
+        inner = verified_lifecycle(ran)
+
+        def lifecycle(**kw: Any) -> dict[str, Any]:
+            seen.append(any(copies.glob("*")))
+            return inner(**kw)
+        return lifecycle
+
+    run_job(scene, clean, lifecycle=lifecycle_seeing_the_copy(Ran()))
+    assert seen == [True], "control: the copy exists while the lifecycle runs"
+    assert not any(copies.glob("*")), "a clean job left its knowledge copy"
+
+    def boom(**_kw: Any) -> dict[str, Any]:
+        seen.append(any(copies.glob("*")))
+        raise RuntimeError("investigation blew up")
+
+    run_job(scene, crashed, lifecycle=_lifecycle(scene, investigate=boom))
+    assert seen == [True, True]
+    assert not any(copies.glob("*")), "a crashed job left its knowledge copy"
 
 
 # --- the job-end record's facts (O8 child side, M3) ------------------------------------------------------
@@ -375,9 +419,8 @@ def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
     ran = Ran()
     start = functools.partial(box_mod.start_box, docker=RH._no_docker_daemon)
 
-    got = run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=start))
+    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=start))
 
-    assert got.raised is not None or got.refused, got
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
                                      "report_committed": False, "scrub_verified": False}
@@ -414,24 +457,36 @@ def test_o8_a_crash_in_the_post_steps_leaves_the_facts_set_before_it(scene):
 
 # --- R2: the job lane never runs unsandboxed ---------------------------------------------------------
 
-def test_r2_the_job_entry_ignores_the_unsandboxed_opt_out_and_the_operator_path_honours_it(scene, tmp_path, monkeypatch):
-    """With the env set and no docker, a job is `start_failed` and nothing runs; the operator run with the same seams runs. (R2)"""
+def test_r2_with_the_opt_out_set_and_no_docker_a_job_is_start_failed_and_nothing_runs(scene, monkeypatch):
+    """`DEFENDER_ALLOW_UNSANDBOXED` set, no daemon: `box: start_failed` and the investigation never ran on the host. (R2)"""
     from defender import box as box_mod
     from defender.tests.e2e import _replay_harness as RH
 
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     start = functools.partial(box_mod.start_box, docker=RH._no_docker_daemon)
-
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     job = Ran()
+
     run_job(scene, run_id, ran=job, lifecycle=_lifecycle(scene, investigate=_investigate(job), start_box=start))
+
     assert job.calls["lifecycle"] == 0, "the job lane ran the investigation on the host"
     assert scene.job_end(run_id)["box"] == "start_failed"
 
+
+def test_r2_control_the_operator_path_with_the_same_environment_and_seams_does_run_on_the_host(
+        scene, tmp_path, monkeypatch):
+    """Control for R2: same opt-out, same no-daemon start; the operator run runs its investigation. (R2)"""
+    from defender import box as box_mod
+    from defender.tests.e2e import _replay_harness as RH
+
+    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    start = functools.partial(box_mod.start_box, docker=RH._no_docker_daemon)
     operator = Ran()
+
     launched = B.launch(scene.t, tmp_path, publish=lambda *a, **k: B.fresh(scene.t.commit),
                         lifecycle=_lifecycle(scene, investigate=_investigate(operator), start_box=start))
+
     assert launched.raised is None, launched.text()
     assert operator.calls["lifecycle"] == 1, launched.text()
 
@@ -470,11 +525,15 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
 
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
+    before = set(tree(scene.root))
     got = run_job(scene, run_id)
 
     assert got.calls["lifecycle"] == 1, got
-    assert got.rc == 0, got
+    assert got.raised is None, got
     assert (tripped, wire.called) == ([], [])
+    # a helper that captured `enqueue_curation` at definition time escapes the module patch: look at disk too
+    made = [k for k in set(tree(scene.root)) - before if re.search(r"curat|queue|learn", k, re.IGNORECASE)]
+    assert made == [], f"the job lane left curation state behind: {made}"
 
     # positive control: the operator composition, through its seams, still opens, records and enqueues
     seen: list[str] = []

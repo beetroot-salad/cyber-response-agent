@@ -1,6 +1,8 @@
 """#1342 M5: the alert byte cap at the store's insert (admission owns one cap, `READ_LIMIT`)."""
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from defender.tests.support.jobs._jobs1342 import T1, an_alert, job_store, register_tenant
@@ -23,6 +25,7 @@ def _json_of_size(size: int) -> bytes:
 async def test_m5_an_alert_of_exactly_the_cap_is_stored_whole_and_one_byte_more_is_refused(dsn):
     """At `READ_LIMIT` the bytes round-trip; at `READ_LIMIT + 1` the insert refuses and stores nothing. (M5, O2)"""
     from defender._io import READ_LIMIT
+    from defender.records._alert_input import REFUSE_SIZE
     from defender.records.formats import AlertRefused
 
     at_cap = _json_of_size(READ_LIMIT)
@@ -32,6 +35,6 @@ async def test_m5_an_alert_of_exactly_the_cap_is_stored_whole_and_one_byte_more_
         assert len(read.raw) == READ_LIMIT
         assert read.raw == at_cap
         del read
-        with pytest.raises(AlertRefused):
+        with pytest.raises(AlertRefused, match=re.escape(REFUSE_SIZE)):  # D-b: the size reason
             await an_alert(store, T1, ticket="OVER", raw=_json_of_size(READ_LIMIT + 1))
     assert execute(dsn, "SELECT count(*), max(length(raw)) FROM jobs.alerts") == [(1, READ_LIMIT)]

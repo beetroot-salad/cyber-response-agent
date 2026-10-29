@@ -943,6 +943,8 @@ def test_a_cursor_stays_short_whatever_the_filters_and_is_accepted_back() -> Non
     api = Api(list_investigations=_rows_after([INV_2, INV]))
     cursor = _cursor(api, f"{T}/investigations", {"alert_id": alert_id})
     assert len(cursor) < 400
+    short = _cursor(Api(list_investigations=_rows_after([INV_2, INV])), f"{T}/investigations", {"alert_id": "a"})
+    assert len(cursor) == len(short), "the cursor grows with the filter: it carries it, not a digest"
     page = api.client.get(f"{T}/investigations", headers=AUTH,
                           params={"limit": 1, "alert_id": alert_id, "cursor": cursor})
     assert page.status_code == 200, page.text

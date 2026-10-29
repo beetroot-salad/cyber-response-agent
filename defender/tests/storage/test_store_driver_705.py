@@ -546,6 +546,10 @@ def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
 
 # #1342 M2: the summary's `report_committed` is the close tool's `ReviewState.closed` at the end of the run
 
+#: Store appends the closing replay makes up to and including the close turn's; the next one faults.
+_APPENDS_THROUGH_THE_CLOSE = 3
+
+
 def _closing_replay(run_dir: Path) -> ReplayFn:
     return ReplayFn([
         Turn(tool_calls=[("append_block", {"text": (GOLDEN / "investigation.md").read_text(encoding="utf-8")})]),
@@ -621,3 +625,19 @@ def test_m2_a_run_cut_before_any_close_is_not_a_committed_report(tmp_path):
     assert result["truncated_by"] == "store", result
     assert not (run_dir / "report.md").exists(), "premise: no report was written"
     assert result["report_committed"] is False
+
+
+def test_m2_a_close_before_a_cut_is_a_committed_report(tmp_path):
+    """The model closed, then a store fault cut the run: the close still counts, whatever the exit. (M2)"""
+    run_dir = materialize(tmp_path, GOLDEN, run_id="m2-closed-then-cut")
+    opened: list = []
+    factory = store_factory(tmp_path, fault=StoreFault(on="append", after=_APPENDS_THROUGH_THE_CLOSE, mode="corrupt"),
+                            sink=opened)
+
+    result = drive(run_dir, run_id="m2-closed-then-cut", main=_closing_replay(run_dir), store_factory=factory)
+    opened[0].release()
+
+    assert result["truncated_by"] == "store", result
+    assert (run_dir / "report.md").is_file(), "premise: the close wrote the report before the cut"
+    assert result["closed_before_cut"] is True, result
+    assert result["report_committed"] is True

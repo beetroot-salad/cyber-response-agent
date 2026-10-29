@@ -169,6 +169,18 @@ async def test_o1_an_alert_needs_its_tenant_row(dsn):
         _plant_alert(dsn, tenant=str(uuid.uuid4()))
 
 
+async def test_d_c_an_alert_for_a_tenant_with_no_row_is_an_unknown_reference_and_stores_nothing(dsn):
+    """`insert_alert` for an unregistered tenant → `UnknownReference`, zero rows; a registered tenant's insert works. (D-c, O2)"""
+    from defender.jobs import UnknownReference
+
+    async with job_store(dsn) as store:
+        stored = await an_alert(store, T1)  # control: the same call for a registered tenant
+        with pytest.raises(UnknownReference):
+            await an_alert(store, str(uuid.uuid4()), ticket="T-2")
+    assert execute(dsn, "SELECT count(*) FROM jobs.alerts") == [(1,)]
+    assert stored.alert_id
+
+
 async def test_o1_one_attempt_number_per_alert_and_request_key(dsn):
     """`(tenant, alert, request key, attempt)` is unique, whatever the stages; the next attempt, another key, another alert are not. (O1)"""
     import psycopg
@@ -353,6 +365,7 @@ async def test_o3_a_first_request_queues_attempt_one(dsn):
     stored = row(dsn, inv.investigation_id)
     assert (stored["stage"], stored["attempt"], stored["request_key"], stored["started_at"]) == (
         "queued", 1, "k1", None)
+    assert (inv.cost_usd, stored["cost_usd"]) == (0, 0), "cost reads 0 (not unknown) until the end (D-n)"
     assert execute(dsn, "SELECT tenant_id, created_at FROM jobs.investigations WHERE id = %s",
                    (inv.investigation_id,)) == [(T1, NOW)]
 
@@ -547,6 +560,22 @@ async def test_o4_a_claim_runs_the_oldest_queued_row_first_and_stamps_started_at
     first = row(dsn, ids[2])
     assert (first["stage"], first["started_at"], first["finished_at"]) == ("running", claimed_at, None)
     assert got[0].stage == "running"
+    assert (got[0].cost_usd, first["cost_usd"]) == (0, 0), "a claimed row reads cost 0 (D-n)"
+
+
+async def test_o4_rows_created_together_are_claimed_lowest_id_first(dsn):
+    """Equal `created_at`: the lower id is claimed first, whatever the insert order. (O4, D-e)"""
+    low, high = "00000000-0000-4000-8000-000000000001", "ffffffff-ffff-4fff-8fff-ffffffffffff"
+    alerts = [_plant_alert(dsn, ticket=f"P-{n}") for n in range(2)]
+    for investigation_id, alert_id in ((high, alerts[0]), (low, alerts[1])):  # the higher id goes in first
+        execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
+                     "stage, created_at, cost_usd) VALUES (%s, %s, %s, 'k', 1, 'queued', %s, 0)",
+                (investigation_id, T1, alert_id, NOW))
+    async with job_store(dsn) as store:
+        got = [await store.claim() for _ in range(3)]
+
+    assert [g.investigation_id for g in got[:2]] == [low, high]
+    assert got[2] is None
 
 
 async def test_o4_a_claim_skips_every_other_stage(dsn):
@@ -667,6 +696,7 @@ async def test_o9_cancel_aborts_queued_and_refuses_running_and_ended(dsn):
     stored = row(dsn, queued.investigation_id)
     assert (stored["stage"], stored["failure_reason"], stored["finished_at"]) == ("aborted", "cancelled", NOW)
     assert (stored["started_at"], stored["disposition"]) == (None, None)
+    assert (cancelled.cost_usd, stored["cost_usd"]) == (0, 0), "a cancelled row reads cost 0 (D-n)"
     assert row(dsn, running.investigation_id)["stage"] == "running"
 
 

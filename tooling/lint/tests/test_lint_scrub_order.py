@@ -73,11 +73,18 @@ def test_a_reader_before_the_lifecycle_is_found(tmp_path):
     assert "enqueue_curation" in found[0], found
 
 
-@pytest.mark.parametrize("name", ["lifecycle", "_post_steps"])
-def test_a_vanished_call_in_job_main_is_a_finding_not_a_pass(tmp_path, name):
-    body = "def job_main():\n    summary = lifecycle()\n    _post_steps(summary)\n"
-    run = _MAIN.replace(body, body.replace(name + "(", "other("))
-    assert any("job_main" in f and name in f for f in _GATE.scan(_tree(tmp_path, run=run)))
+@pytest.mark.parametrize(("composition", "name"), [
+    ("job_main", "lifecycle"), ("job_main", "_post_steps"),
+    ("main", "lifecycle"), ("main", "_post_steps"), ("main", "record_case_ticket"), ("main", "enqueue_curation"),
+])
+def test_a_vanished_call_in_a_composition_is_a_finding_not_a_pass(tmp_path, composition, name):
+    start = _MAIN.index(f"def {composition}():\n")
+    end = _MAIN.index("def ", start + 1)
+    body = _MAIN[start:end]
+    assert name + "(" in body, "premise: the composition makes the call"
+    run = _MAIN[:start] + body.replace(name + "(", "other(") + _MAIN[end:]
+    assert _GATE.scan(_tree(tmp_path, run=_MAIN)) == [], "control: the unchanged composition is clean"
+    assert any(composition in f and name in f for f in _GATE.scan(_tree(tmp_path, run=run)))
 
 
 def test_a_missing_job_main_or_post_steps_is_a_finding(tmp_path):
