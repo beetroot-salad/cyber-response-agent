@@ -25,6 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -105,8 +106,12 @@ class TenantForgeCredential:
         return secret
 
     def _login(self, live: Any) -> ForgejoIdentity:
-        secret = self._secret(live)
         address = str(self.config.openbao_url).rstrip("/")
+        # Before the secret is read, let alone sent: a cleartext issuer (either address) gets nothing.
+        for name, url in (("OpenBao address", address), ("issuer URL", str(self.config.issuer_url))):
+            if urlsplit(url).scheme != "https":
+                raise ForgejoAuthError(f"the {name} must be an HTTPS URL: the AppRole secret is never sent in cleartext")
+        secret = self._secret(live)
         login = self._client()
         try:
             response = login.post(f"{address}{LOGIN_PATH}", json={"role_id": live.role_id, "secret_id": secret},

@@ -165,6 +165,15 @@ class _TenantPaths(_TenantLayout):
         super().__init__(root_path / self.tenant_id)
 
 
+def refuse_unplaceable_data_root(root: DataRoot) -> None:
+    """The data root's placement (J03, O11a): absolute, and not inside the running checkout's
+    `defender/` tree. `accept_tenant` judges it as its first act; the host lock's entry points
+    judge it before taking the lock (#1214 Flow 4: id, placement, lock), because the lock creates
+    folders under the root and a refused request must create nothing in the checkout. Reads
+    nothing but the paths."""
+    _refuse_unusable_data_root(unwrap_data_root(root))
+
+
 def _refuse_unusable_data_root(root: Path) -> None:
     """J03 and O11a on the data root itself, before anything under it is named: it must be
     absolute, and it may not lie inside the running checkout's `defender/` tree."""

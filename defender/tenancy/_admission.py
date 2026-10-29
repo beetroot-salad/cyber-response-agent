@@ -58,14 +58,17 @@ def host_directory(
 def hold_tenant(data_root: DataRoot, raw_id: object) -> contextlib.ExitStack:
     """`raw_id`'s host lock under `data_root`, entered SHARED with this process recorded under it
     first (`host_lock.hold_shared`, P3/RC-5) and held until the returned stack closes: run start,
-    drain start and the connect command enter it before the state check (Flow 4: lock, then
-    state) and hold it for as long as they work for the tenant, so prepare and teardown wait for
-    them and teardown can find them. `TenantRefused` (the id's grammar, or a lock this process
-    cannot take or record itself under) before anything is held."""
+    drain start and the connect command enter it before the state check (Flow 4: id, data root
+    placement, lock, then state) and hold it for as long as they work for the tenant, so prepare
+    and teardown wait for them and teardown can find them. `TenantRefused` (the id's grammar, a
+    data root that is relative or inside the checkout, or a lock this process cannot take or
+    record itself under) before anything is held or made: the lock creates folders under the
+    root, so the placement is judged first."""
     from defender.tenancy import host_lock
-    from defender.tenancy._tenant import data_root_for_child, requested_tenant_id
+    from defender.tenancy._tenant import data_root_for_child, refuse_unplaceable_data_root, requested_tenant_id
 
     tenant_id = requested_tenant_id(raw_id)
+    refuse_unplaceable_data_root(data_root)
     held = contextlib.ExitStack()
     try:
         held.enter_context(host_lock.hold_shared(data_root_for_child(data_root), tenant_id))
