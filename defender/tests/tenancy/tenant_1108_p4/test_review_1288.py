@@ -20,9 +20,9 @@ from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
 
 
 def _status(t) -> dict | None:
-    from defender.tenancy._publish_status import read_status
+    import asyncio
 
-    return read_status(t.tenant)
+    return asyncio.run(t.repository.publish_status(t.tenant_id))
 
 
 # --- a run copy is owned while it is built --------------------------------------------------------
@@ -79,7 +79,6 @@ def test_the_child_reports_and_records_running_out_of_its_network_budget(child_t
     budget. The child ends itself at the budget with `stale:transient` and records it, so
     `tenant.py check` names the outage."""
     t = child_tenant
-    config = B.write_issuer_config(tmp_path / "operator")
     t.merge(B.MERGE_FILES)
 
     def slow(_request):
@@ -87,7 +86,7 @@ def test_the_child_reports_and_records_running_out_of_its_network_budget(child_t
 
     t.forge.fault = slow
     began = time.monotonic()
-    line = B.run_child(t, config, budget=1.0)
+    line = B.run_child(t, budget=1.0)
     took = time.monotonic() - began
     assert line.startswith("stale:transient "), line
     assert "budget" in line, line
@@ -153,13 +152,13 @@ def test_a_lock_busy_publish_records_its_outcome_and_clears_an_earlier_refusal(
     """A refusal is recorded; then every launch overlaps a drain holding the lock while
     `current` already names `origin/main`. Each reports `fresh`, and `check` must say so
     rather than keep showing the old refusal."""
-    from defender.tenancy._publish_status import OPERATOR, record_refusal
+    import asyncio
 
     t = child_tenant
-    config = B.write_issuer_config(tmp_path / "operator")
-    record_refusal(t.tenant, kind=OPERATOR, reason="the issuer is sealed", by="launch-time publish")
+    asyncio.run(t.repository.record_publish_status(
+        t.tenant_id, "stale:operator the issuer is sealed", by="launch-time publish"))
     with _lock(t):
-        line = B.run_child(t, config)
+        line = B.run_child(t)
     assert line.startswith("fresh "), line
     status = _status(t)
     assert status is not None
@@ -169,10 +168,9 @@ def test_a_lock_busy_publish_records_its_outcome_and_clears_an_earlier_refusal(
 
 def test_a_lock_busy_stale_publish_is_recorded_transient(child_tenant, tmp_path):
     t = child_tenant
-    config = B.write_issuer_config(tmp_path / "operator")
     t.merge(B.MERGE_FILES)
     with _lock(t):
-        line = B.run_child(t, config)
+        line = B.run_child(t)
     assert line.startswith("stale:transient "), line
     status = _status(t)
     assert status is not None
@@ -183,14 +181,13 @@ def test_a_lock_busy_stale_publish_is_recorded_transient(child_tenant, tmp_path)
 def test_a_zero_budget_is_already_out_not_unbounded(child_tenant, tmp_path):
     """`setitimer(0)` disarms a timer: a budget of 0 must end the network phase at once."""
     t = child_tenant
-    config = B.write_issuer_config(tmp_path / "operator")
 
     def slow(_request):
         time.sleep(3.0)
 
     t.forge.fault = slow
     began = time.monotonic()
-    line = B.run_child(t, config, budget=0.0)
+    line = B.run_child(t, budget=0.0)
     assert time.monotonic() - began < 2.0, "a zero budget let the network phase run"
     assert line.startswith("stale:transient "), line
     assert "budget" in line, line
@@ -383,17 +380,6 @@ def test_what_the_child_left_running_dies_with_it(p4_tenant, tmp_path):
         time.sleep(0.05)
     else:
         raise AssertionError("a process the child started outlived the publish")
-
-
-# --- the binding is judged once, when read -----------------------------------------------------
-
-def test_an_issuer_role_that_is_not_a_plain_name_is_a_refused_binding(p4_tenant):
-    from defender.tenancy._tenant import read_forge_binding
-    from defender.records._tenant_id import TenantRefused
-
-    bind_forge(p4_tenant, issuer_role="tenant role!")
-    with pytest.raises(TenantRefused, match="issuer_role"):
-        read_forge_binding(p4_tenant.tenant)
 
 
 # --- a run box is always a run copy's ----------------------------------------------------------

@@ -12,7 +12,7 @@ from typing import Any
 from defender import run as run_py
 from defender import run_common
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
-from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
     author_markers,
@@ -95,7 +95,8 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
         argv = [str(alert), "--tenant", str(tenant.id), "--update-ticket"]
         try:
             # Plus the in-process launch-time publish.
-            outcome: Any = run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize,
+            outcome: Any = run_py.main(argv, directory=directory_for_argv(argv), lifecycle=tail.lifecycle,
+                                       visualize=tail.visualize,
                                        ticket_writer=tail, enqueue=tail.enqueue,
                                        publish=in_process_publish())
         except Exception as exc:  # noqa: BLE001 — a raising step's propagation is observed

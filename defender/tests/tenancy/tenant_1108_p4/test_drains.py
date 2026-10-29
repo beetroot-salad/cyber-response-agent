@@ -648,7 +648,7 @@ def _default_box_tick(t: Any, tmp_path: Path, monkeypatch: Any, drain: str) -> t
     """One tick through the real drain entry with no `start_box`/`stop_box` seam (production's
     default box start): `(rc, the lane calls made)`."""
     ran: list[str] = []
-    seams = {"client": t.forge.client, "identity": t.vault.identity()}
+    seams = {"client": t.forge.client, "identity": t.vault.identity(), "directory": t.directory}
     if drain == "author":
         paths = drain_paths(t, product_repo(tmp_path))
         queue(paths, [S.finding_row("f1", run_id="f1")])

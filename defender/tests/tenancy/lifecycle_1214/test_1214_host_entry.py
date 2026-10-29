@@ -296,12 +296,12 @@ def test_the_connect_command_has_only_update_propose_and_check(data_root, retire
 
 # --- each lead-drain claim -------------------------------------------------------------------------
 
-def _twin_directory(tenant: str) -> tuple[Any, Any]:
+def _twin_directory(tenant: str, origin: str) -> tuple[Any, Any]:
     from defender.tenancy import InMemoryTenantRepository, TenantDirectory
 
     twin: Any = InMemoryTenantRepository()
     asyncio.run(twin.add_tenant(tenant, created_at=CREATED, state="active", repo=f"tenants/{tenant}",
-                                origin=f"http://forge.test/tenants/{tenant}.git"))
+                                origin=origin))
     directory = TenantDirectory(lambda: twin)
 
     def offboard() -> None:
@@ -339,7 +339,7 @@ def test_the_lead_drain_rechecks_the_tenant_state_at_each_claim(p4_tenant, tmp_p
     t = p4_tenant
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
-    directory, offboard = _twin_directory(t.tenant_id)
+    directory, offboard = _twin_directory(t.tenant_id, t.origin)  # the origin the tenant's forge fake serves
     paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
     labels = ("claim-1", "claim-2")
     runs = {queued_run(t, paths, label).name: label for label in labels}

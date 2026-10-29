@@ -412,7 +412,7 @@ def drive_main(argv: list[str], rec: Recorder) -> tuple[int | None, BaseExceptio
 
     try:
         place_knowledge_for_rows()
-        return run_py().main(list(argv), **with_publish(dict(rec.seams()))), None
+        return run_py().main(list(argv), **with_publish(dict(rec.seams()), argv)), None
     except SystemExit as refused:
         return None, refused
 

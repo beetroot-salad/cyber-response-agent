@@ -242,10 +242,10 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
 
     argv = ["--tenant", S.FIXTURE_TENANT, "--episode", ep.name, "--world", label]
     try:
-        from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+        from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 
         # The launch-time publish, in process.
-        sib.rc = S.mod(S.RUN).main(argv, lifecycle=lifecycle, visualize=_no_visualize,
+        sib.rc = S.mod(S.RUN).main(argv, directory=directory_for_argv(argv), lifecycle=lifecycle, visualize=_no_visualize,
                                    preflight=_no_preflight, oracle=oracle.model,
                                    verifier=verifier.model, roster=est.roster(),
                                    publish=in_process_publish())

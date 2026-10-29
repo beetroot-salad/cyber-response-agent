@@ -12,9 +12,8 @@ The pytest fixture `p4_tenant` (conftest.py) is a `PublishedTenant` under the te
 from __future__ import annotations
 
 import contextlib
-import json
 import shutil
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -105,21 +104,47 @@ class PublishedTenant:
 
     @property
     def directory(self) -> Any:
-        """A `TenantDirectory` (#1214) holding this tenant active, wired to `repo=tenants/<id>` and
-        `origin=self.origin`: what a migrated call site passes as `directory=` in place of `bind_forge`'s row
-        binding. Built lazily (the production names exist only after #1214). `issuer_role`, `audience` and
-        `issuer_config` are not directory facts: the credential provider derives them from generations."""
-        return self.directory_with()
+        """A `TenantDirectory` (#1214) over `repository`: this tenant active, wired to `repo=tenants/<id>` and
+        `origin=self.origin`, plus what `bind_forge(t, ...)` / `unbind_forge(t)` recorded: what a call site passes
+        as `directory=`. One per tenant (reset by bind/unbind). `issuer_role`, `audience` and `issuer_config` are not
+        directory facts: the credential provider derives them from generations."""
+        cached = self.__dict__.get("_dir")
+        if cached is None:
+            from defender.tenancy import TenantDirectory
 
-    def directory_with(self, *, origin: str | None = None, repo: str | None = None, **keywords: Any) -> Any:
-        """`directory` with another `origin`/`repo` (what `bind_forge(t, origin=...)` bound), or `state=`/
-        `wiring=False` for the refusal sides, or `generations=[fields]` to seed the live generation a minting call
-        site (drain credential, publish child) needs: `fields = _active1214.provision_generation(openbao, T,
-        secrets_dir)` builds its OpenBao chain and host secret file (GAP-Ma-1, see `_active1214`)."""
-        from defender.tests.support.tenancy._active1214 import active_directory
+            cached = TenantDirectory(lambda: self.repository)
+            object.__setattr__(self, "_dir", cached)
+        return cached
 
-        return active_directory(self.data_root, self.tenant_id, origin=self.origin if origin is None else origin,
-                                repo=repo, **keywords)
+    @property
+    def repository(self) -> Any:
+        """The in-memory tenant repository behind `directory` (cached): a test reads back what a process recorded
+        on it (`await t.repository.publish_status(T)`, GAP-Rc-2)."""
+        cached = self.__dict__.get("_repo")
+        if cached is None:
+            cached = self.repository_with()
+            object.__setattr__(self, "_repo", cached)
+        return cached
+
+    def repository_with(self, *, origin: str | None = None, repo: str | None = None, **keywords: Any) -> Any:
+        """A fresh repository like `repository` with another `origin`/`repo`, or `state=`/`wiring=False` for the
+        refusal sides, or `generations=[fields]` to seed the live generation a minting call site needs:
+        `fields = _active1214.provision_generation(openbao, T, secrets_dir)` builds its OpenBao chain and host
+        secret file (GAP-Ma-1, see `_active1214`). Keywords win over what `bind_forge` recorded."""
+        from defender.tests.support.tenancy._active1214 import active_repository
+
+        bound: dict[str, Any] = dict(self.__dict__.get("_bound") or {})
+        if origin is not None:
+            bound["origin"] = origin
+        bound.setdefault("origin", self.origin)
+        return active_repository(self.data_root, self.tenant_id, repo=repo, **{**bound, **keywords})
+
+    def directory_with(self, **keywords: Any) -> Any:
+        """A fresh `TenantDirectory` over `repository_with(**keywords)`."""
+        from defender.tenancy import TenantDirectory
+
+        twin = self.repository_with(**keywords)
+        return TenantDirectory(lambda: twin)
 
     @property
     def commit(self) -> str:
@@ -238,8 +263,7 @@ def published_tenant(scratch: Path, *, root: Path, tenant_id: str = FIXTURE_TENA
     must not already hold `tenant_id` (don't combine with `d9_tenant` or `fixture_tenant()` on
     one id).
 
-    The yielded `PublishedTenant` has `.directory` (#1214). WHEN THE ROW GOES, `place_fixture` (via
-    `place_tenant`) stops writing `tenant.json`; nothing else here changes."""
+    The yielded `PublishedTenant` has `.directory` (#1214); no row is written (O6)."""
     place_fixture(root, tenant_id, files=files, agent=agent)
     with publish_placed(scratch, root=root, tenant_id=tenant_id, repo_name=repo_name) as done:
         yield done
@@ -272,45 +296,36 @@ def export_dir(tenant: Any, commit: str) -> Path:
     return Path(location_path(tenant.tenant_root)) / "exports" / commit
 
 
-def _row_path(t: PublishedTenant) -> Path:
-    return Path(location_path(t.tenant.row_path))
+def bind_forge(t: PublishedTenant, *, origin: str | None = None,
+               generations: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    """Record the tenant's forge wiring and a live generation on `t`, so `t.directory` (what a call site passes as
+    `directory=`) holds the tenant active with `origin` (default `t.origin`) and `generations` (default: one live
+    generation from `_active1214.generation_fields`, no OpenBao behind it: a call site that mints for real passes
+    `[provision_generation(...)]`). Returns what it recorded.
+
+    #1214 O6: nothing is written to the tenant folder; `issuer_role`/`issuer_config`/`audience` are not facts of the
+    wiring: the provider derives them from the live generation and its host secret file."""
+    from defender.tests.support.tenancy._active1214 import generation_fields
+
+    if generations is None:
+        generations = [generation_fields(t.tenant_id, default_secrets_dir(t))]
+    bound = {"origin": t.origin if origin is None else origin, "generations": list(generations)}
+    object.__setattr__(t, "_bound", bound)
+    object.__setattr__(t, "_dir", None)
+    object.__setattr__(t, "_repo", None)
+    return bound
 
 
-def bind_forge(t: PublishedTenant, *, origin: str | None = None, issuer_role: str | None = None,
-               issuer_config: Path | None = None) -> dict:
-    """Write the tenant row's `forge: {origin, audience, issuer_role, issuer_config}` binding and
-    return it; other row fields are kept. Defaults agree with the fakes (`t.origin`, the fake's
-    audience, role `tenant-<id>`) and name `default_issuer_config(t)`, where a test that logs in
-    for real writes its config. `published_tenant` never binds: P3's publish does not read it.
-
-    #1214: `t.directory` / `t.directory_with(origin=...)` replaces the origin part. WHEN THE ROW GOES
-    (code-stage census) this function is deleted: the issuer part (`issuer_role`, `issuer_config`) is derived
-    from the tenant's live generation, so tests of it seed a generation instead
-    (`t.directory_with(generations=[provision_generation(...)])`; the fail-closed-on-bad-wiring
-    cases become `forge_wiring`/generation cases, see `test_1214_forge_credential`)."""
-    if issuer_config is None:
-        issuer_config = default_issuer_config(t)
-    binding = {"origin": t.origin if origin is None else origin, "audience": ISSUER_AUDIENCE,
-               "issuer_role": f"tenant-{t.tenant_id}" if issuer_role is None else issuer_role,
-               "issuer_config": str(Path(issuer_config).absolute())}
-    path = _row_path(t)
-    row = json.loads(path.read_text(encoding="utf-8"))
-    row["forge"] = binding
-    path.write_text(json.dumps(row, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return binding
-
-
-def default_issuer_config(t: PublishedTenant) -> Path:
-    """Where `bind_forge`'s binding names the tenant's issuer client config by default."""
-    return Path(t.data_root).absolute().parent / "operator" / "issuer.json"
+def default_secrets_dir(t: PublishedTenant) -> Path:
+    """Where `bind_forge`'s default generation names its host secret file."""
+    return Path(t.data_root).absolute().parent / "operator" / "secrets"
 
 
 def unbind_forge(t: PublishedTenant) -> None:
-    """Remove the tenant row's `forge` field (absent stays absent); other fields are kept."""
-    path = _row_path(t)
-    row = json.loads(path.read_text(encoding="utf-8"))
-    row.pop("forge", None)
-    path.write_text(json.dumps(row, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    """Remove what `bind_forge` recorded and the forge wiring: `t.directory` knows the tenant active with no wiring."""
+    object.__setattr__(t, "_bound", {"wiring": False})
+    object.__setattr__(t, "_dir", None)
+    object.__setattr__(t, "_repo", None)
 
 
 def fixture_agent_files() -> dict[str, bytes]:
@@ -332,7 +347,7 @@ def committed_blobs(clone: Path, rev: str, pathspec: str) -> dict[str, bytes]:
 
 __all__ = [
     "committed_blobs",
-    "default_issuer_config",
+    "default_secrets_dir",
     "DEFENDER",
     "FIXTURE",
     "FIXTURE_AGENT",

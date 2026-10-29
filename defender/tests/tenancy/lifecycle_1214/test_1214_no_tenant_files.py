@@ -60,13 +60,16 @@ def test_no_production_module_spells_publish_status_json():
 
 
 def test_the_owner_touches_the_row_only_to_retire_it():
-    """Inside the owner every use of the row-name constant or literal sits in `retire_row` (O6, DC-8)."""
+    """Inside the owner every use of the row-name constant or literal sits in `retire_row`; its one definition is no use (O6, DC-8)."""
     tree = ast.parse((DEFENDER / OWNER).read_text(encoding="utf-8"))
     functions = {f.name: f for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
     assert "retire_row" in functions, "the owner must expose the one retirement function adoption calls"
     inside = {id(n) for n in ast.walk(functions["retire_row"])}
-    uses = [n for n in ast.walk(tree)
-            if (isinstance(n, ast.Name) and n.id == "ROW_NAME" and isinstance(n.ctx, ast.Load))
+    definition = {id(a.value) for a in ast.walk(tree) if isinstance(a, (ast.Assign, ast.AnnAssign)) and a.value
+                  and any(isinstance(t, ast.Name) and t.id == "ROW_NAME"
+                          for t in (a.targets if isinstance(a, ast.Assign) else [a.target]))}
+    uses = [n for n in ast.walk(tree) if id(n) not in definition  # the module constant's own definition is no use
+            and (isinstance(n, ast.Name) and n.id == "ROW_NAME" and isinstance(n.ctx, ast.Load))
             or (isinstance(n, ast.Constant) and isinstance(n.value, str) and _spells(n.value, ROW))]
     docstring_lines = {f.body[0].lineno for f in functions.values()
                        if f.body and isinstance(f.body[0], ast.Expr) and isinstance(f.body[0].value, ast.Constant)}

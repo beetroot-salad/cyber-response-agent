@@ -16,22 +16,27 @@ def tenant(tmp_path, data_root):
 
 
 def _status(t):
-    from defender.learning.author.version_control import status
-    return status.read_status(t.tenant)
+    import asyncio
+
+    return asyncio.run(t.repository.publish_status(t.tenant_id))
 
 
 def test_r6_a_launch_time_publish_records_a_misconfiguration_and_a_success_clears_it(
         tenant, tmp_path):
-    missing = tmp_path / "no-such-dir" / "issuer.json"
-    line = B.run_child(tenant, missing)
+    from defender.tests.support.tenancy._active1214 import generation_fields
+
+    gone = {**generation_fields(tenant.tenant_id, tmp_path / "secrets"),
+            "host_secret_file": tmp_path / "no-such-dir" / "secret"}
+    bind_forge(tenant, generations=[gone])
+    line = B.run_child(tenant, mint=True)
     assert B.outcome_class(line) == "misconfigured", line
     refused = _status(tenant)
     assert refused, f"a misconfiguration is invisible to check: {refused}"
     assert refused.get("refused"), f"a misconfiguration is invisible to check: {refused}"
 
+    bind_forge(tenant)
     merged = tenant.merge(B.MERGE_FILES)
-    good = B.write_issuer_config(tmp_path / "operator")
-    line = B.run_child(tenant, good)
+    line = B.run_child(tenant)
     assert B.outcome_class(line) == "fresh", line
     published = _status(tenant)
     assert published, published
@@ -41,8 +46,7 @@ def test_r6_a_launch_time_publish_records_a_misconfiguration_and_a_success_clear
 
 def test_r6_a_git_fetch_that_cannot_connect_is_a_transient_outage(tenant, tmp_path):
     tenant.server.close()  # the origin's port now refuses connections
-    good = B.write_issuer_config(tmp_path / "operator")
-    line = B.run_child(tenant, good)
+    line = B.run_child(tenant)
     assert B.outcome_class(line) == "stale:transient", line
     recorded = _status(tenant)
     assert recorded, recorded

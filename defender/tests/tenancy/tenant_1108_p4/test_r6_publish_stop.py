@@ -145,8 +145,7 @@ def test_r6_a_child_that_takes_the_lock_after_being_asked_to_stop_is_let_finish(
 def test_r6_a_real_child_in_its_locked_phase_ignores_sigterm_and_finishes(
         tenant, tmp_path, child_env):
     merged = tenant.merge(B.MERGE_FILES)
-    config = B.write_issuer_config(tmp_path / "operator")
-    command, _spec, marks = B.child_command(tenant, tmp_path, config, network_timeout=60.0,
+    command, _spec, marks = B.child_command(tenant, tmp_path, network_timeout=60.0,
                                             locked_sleep=3.0)
     proc = subprocess.Popen([*command, tenant.tenant_id, "--data-root", str(tenant.data_root)],  # noqa: S603
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -174,11 +173,10 @@ def test_r6_the_child_entry_restores_the_sigterm_handler_and_clears_its_locked_f
     from defender.learning.author import version_control as vc
     from defender.learning.author.version_control import publish
 
-    config = B.write_issuer_config(tmp_path / "operator")
     before = signal.getsignal(signal.SIGTERM)
     for _ in range(2):
         rc = vc.publish_child_main(
-            [tenant.tenant_id, "--data-root", str(tenant.data_root)], issuer_config=config,
+            [tenant.tenant_id, "--data-root", str(tenant.data_root)], directory=tenant.directory,
             client=tenant.forge.client, identity=tenant.vault.identity(), network_timeout=30.0)
         assert rc == 0
         assert signal.getsignal(signal.SIGTERM) is before

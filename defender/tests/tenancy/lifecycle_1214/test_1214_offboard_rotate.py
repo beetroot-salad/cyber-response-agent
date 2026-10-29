@@ -203,6 +203,7 @@ def test_a_failed_repo_deletion_is_not_audited_and_resume_finishes_it(world, cap
     record = world.record(tenant)
     assert record.failure and "500" in record.failure and record.repo_url is not None
     assert audit.actions(mark) == []
+    world.ops = world.sign_in_admin()  # the 30-day jump expired the first session
     assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
     mark = audit.mark()
     world.drive()

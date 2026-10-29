@@ -158,12 +158,16 @@ def _hold_forge(fakes: Fakes, method: str, path: str) -> tuple[threading.Event, 
 
 
 def _settle(dsn: str, tenant: str, fakes: Fakes, config: Any, until, *, rounds: int = 40, **kw: Any) -> None:
-    """Alternate service and host passes until `until(row)`; fails if it does not get there."""
+    """Alternate service and host passes, testing `until(row)` after each pass; fails if it is never true."""
     for _ in range(rounds):
         if until(_row(dsn, tenant)):
             return
-        ran = sum(_pass(dsn, kind, fakes, config, **kw) for kind in ("service", "host"))
-        assert ran or until(_row(dsn, tenant)), f"nothing ran and the job is at {_row(dsn, tenant)}"
+        ran = 0
+        for kind in ("service", "host"):
+            ran += _pass(dsn, kind, fakes, config, **kw)
+            if until(_row(dsn, tenant)):
+                return
+        assert ran, f"nothing ran and the job is at {_row(dsn, tenant)}"
     raise AssertionError(f"the job did not get there: {_row(dsn, tenant)}")
 
 
@@ -188,8 +192,8 @@ def test_a_second_worker_skips_a_locked_tenant_and_takes_another(migrated_databa
         release.set()
         a.join(WAIT)
     assert not a.is_alive() and _advisory_holders(dsn) == []
-    before = _row(dsn, t)
-    assert _pass(dsn, "service", fakes, config) >= 1, "control: with A done, T is takeable"
+    before = _row(dsn, t)  # A's pass carried T on past its own step (DC-14); the host's step is next
+    assert _pass(dsn, "host", fakes, config) >= 1, "control: with A done, T is takeable"
     assert _row(dsn, t) != before
 
 

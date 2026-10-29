@@ -385,7 +385,7 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
     from defender import run as run_py
 
-    rc = run_py.main(argv, publish=publish, ticket_writer=writer, **seams)
+    rc = run_py.main(argv, directory=p4_tenant.directory, publish=publish, ticket_writer=writer, **seams)
 
     assert rc == 0, f"a stale launch with a snapshot must run to the end; rc={rc}"
     assert len(publish_calls) == 1, f"the launch published {len(publish_calls)} times"
@@ -451,7 +451,7 @@ def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_te
     rec = S1107.RunRecorder(tmp_path / "unused" / "s-c-fresh", before_lifecycle=before_lifecycle)
     seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
     argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
-    rc = run_py.main(argv, publish=lambda *a, **k: f"fresh {p4_tenant.commit}",
+    rc = run_py.main(argv, directory=p4_tenant.directory, publish=lambda *a, **k: f"fresh {p4_tenant.commit}",
                      ticket_writer=writer, **seams)
     assert rc == 0
     body = store.comment_body()
@@ -505,7 +505,7 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
                             before_lifecycle=box_rewrites_the_record)
     seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
     argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
-    rc = run_py.main(argv, publish=lambda *a, **k: outcome, ticket_writer=writer, **seams)
+    rc = run_py.main(argv, directory=p4_tenant.directory, publish=lambda *a, **k: outcome, ticket_writer=writer, **seams)
 
     assert rc == 0, rc
     assert tampered, "fixture: the lifecycle stand-in never rewrote the record"

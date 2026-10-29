@@ -1,5 +1,5 @@
 """#1108 P4 operator CLIs, each case a wrong-but-green production variant: every CLI that logs in
-reads the issuer client config its forge binding names (no flag, no dev default), and the CLIs
+reads the host secret file its tenant's live generation records (no flag, no default), and the CLIs
 that show a tenant's knowledge read an export (the run's, or `current`), never the clone."""
 from __future__ import annotations
 
@@ -54,25 +54,32 @@ def test_r6_the_trace_and_frontend_defaults_read_currents_export_not_the_clone(p
     assert Path(t.clone) not in published_agent_root(t.tenant).parents
 
 
-# --- `tenant.py setup` publishes a forge-bound tenant; every login reads the bound config -------
+# --- every login reads the secret file the live generation records ---------------------------
 
 def _missing(tmp_path) -> Path:
-    return tmp_path / "r6-no-such-dir" / "issuer.json"
+    return tmp_path / "r6-no-such-dir" / "host-secret"
 
 
-@pytest.mark.parametrize("command", ["setup", "update", "propose"])
-def test_r6_tenant_cli_logs_in_from_the_config_the_binding_names(p4_tenant, tmp_path, capsys,
-                                                                 command):
-    """With a forge-bound tenant, each command logs in from the config its binding names: a
-    config that is not there is refused naming THAT path (there is no default), exit 1. For
-    `setup` this also proves a forge-bound tenant is published at setup."""
-    t = p4_tenant
+def _bind_missing_secret(t, tmp_path) -> Path:
+    """Bind `t` to a live generation whose recorded host secret file is absent; returns that path."""
+    from defender.tests.support.tenancy._active1214 import generation_fields
+
     missing = _missing(tmp_path)
-    bind_forge(t, issuer_config=missing)
-    argv = {"setup": ["setup", t.tenant_id], "update": ["update", t.tenant_id],
+    bind_forge(t, generations=[{**generation_fields(t.tenant_id, tmp_path / "secrets"), "host_secret_file": missing}])
+    return missing
+
+
+@pytest.mark.parametrize("command", ["update", "propose"])
+def test_r6_tenant_cli_logs_in_from_the_secret_file_the_generation_records(p4_tenant, tmp_path, capsys,
+                                                                           command):
+    """With a forge-wired tenant, each command mints from the live generation's recorded host secret
+    file: one that is not there is refused naming THAT path (there is no default), exit 1."""
+    t = p4_tenant
+    missing = _bind_missing_secret(t, tmp_path)
+    argv = {"update": ["update", t.tenant_id],
             "propose": ["propose", t.tenant_id, str(_staged(tmp_path))]}[command]
     capsys.readouterr()
-    rc = _tenant_cli().main(argv)
+    rc = _tenant_cli().main(argv, directory=t.directory)
     said = capsys.readouterr()
     assert rc == 1, said
     assert str(missing) in said.err, said.err
@@ -85,29 +92,27 @@ def _staged(tmp_path) -> Path:
     return staged.parent
 
 
-def test_r6_revert_lesson_logs_in_from_the_config_the_binding_names(p4_tenant, tmp_path,
-                                                                    caplog):
+def test_r6_revert_lesson_logs_in_from_the_secret_file_the_generation_records(p4_tenant, tmp_path,
+                                                                             caplog):
     from defender.cli.learning import revert_lesson
 
     t = p4_tenant
-    missing = _missing(tmp_path)
-    bind_forge(t, issuer_config=missing)
+    missing = _bind_missing_secret(t, tmp_path)
     with caplog.at_level(logging.CRITICAL):
-        rc = revert_lesson.main(["--tenant", t.tenant_id, "some-lesson"])
+        rc = revert_lesson.main(["--tenant", t.tenant_id, "some-lesson"], directory=t.directory)
     assert rc == 2
     assert str(missing) in "\n".join(r.getMessage() for r in caplog.records), caplog.text
 
 
-def test_r6_the_publish_child_logs_in_from_the_config_the_binding_names(p4_tenant, tmp_path,
-                                                                        capsys):
-    """The child is handed identifiers only: the config comes from the tenant's binding."""
+def test_r6_the_publish_child_logs_in_from_the_secret_file_the_generation_records(p4_tenant, tmp_path,
+                                                                                 capsys):
+    """The child is handed identifiers only: the secret file comes from the tenant's live generation."""
     from defender.learning.author import version_control as vc
 
     t = p4_tenant
-    missing = _missing(tmp_path)
-    bind_forge(t, issuer_config=missing)
+    missing = _bind_missing_secret(t, tmp_path)
     capsys.readouterr()
-    rc = vc.publish_child_main([t.tenant_id, "--data-root", str(t.data_root)])
+    rc = vc.publish_child_main([t.tenant_id, "--data-root", str(t.data_root)], directory=t.directory)
     line = capsys.readouterr().out.strip().splitlines()[-1]
     assert rc == 0
     assert line.startswith("misconfigured"), line

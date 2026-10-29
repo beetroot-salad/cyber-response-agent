@@ -55,7 +55,7 @@ def _stage(root: Path, files: Mapping[str, str | bytes]) -> Path:
 
 def _propose(t: Any, staged: Path) -> int:
     return _tenant_cli().propose(t.tenant_id, staged, client=t.forge.client,
-                                 identity=t.vault.identity())
+                                 identity=t.vault.identity(), directory=t.directory)
 
 
 def _product_trace(repo: Path = REPO_ROOT) -> dict:

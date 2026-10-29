@@ -330,8 +330,8 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
         # Plus the in-process launch-time publish.
-        rc = run_py.main([str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"],
-                         **with_publish({**rec.seams(), "lifecycle": lifecycle}))
+        argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
+        rc = run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv))
     except SystemExit as refused:
         pytest.fail(f"run.main refused a finished tenant: {H.exit_text(refused)}")
     assert rc == 0

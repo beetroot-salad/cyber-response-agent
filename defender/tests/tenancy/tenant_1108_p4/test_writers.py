@@ -395,7 +395,7 @@ def test_o7_path_a_drained_lesson_a_human_merged_is_reverted_by_the_cli_on_the_t
 
     def cli() -> int:
         return revert.main(["--tenant", t.tenant_id, "p4-composed"], client=t.forge.client,
-                           identity=t.vault.identity())
+                           identity=t.vault.identity(), directory=t.directory)
 
     assert author_drain(t, paths, trigger=CuratorTrigger(author=curator), box=BoxSpy()) == 0, \
         critical_text(caplog)

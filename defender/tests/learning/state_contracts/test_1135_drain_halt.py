@@ -375,10 +375,13 @@ logging.getLogger().setLevel(logging.INFO)
 tenant = tenants.accept(Path(spec["data_root"]), spec["tenant_id"])
 paths = tenant.learning_paths(LoopPaths, repo_root=Path(spec["product"]))
 forge = ForgeHTTP(remote=spec["remote"], origin=spec["origin"])
+from defender.tests.support.tenancy._active1214 import active_directory
+
+directory = active_directory(Path(spec["data_root"]), spec["tenant_id"], origin=spec["origin"])  # #1214 Flow 4
 box = BoxSpy()
 resource.setrlimit(resource.RLIMIT_FSIZE, (spec["limit"], resource.RLIM_INFINITY))
 rc = _run_stage(lambda: drains.author_drain(
-    paths, client=forge.client, identity=VaultHTTP(spec["tenant_id"]).identity(),
+    paths, client=forge.client, identity=VaultHTTP(spec["tenant_id"]).identity(), directory=directory,
     start_box=box.start, stop_box=box.stop))
 print(json.dumps({"rc": rc, "lines": lines}))
 '''

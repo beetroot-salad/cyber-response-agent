@@ -302,7 +302,7 @@ def drive_run_py(argv: list[str], rec: SiblingRecorder, **override: Any) -> tupl
     try:
         with redirect_stderr(err):
             # Plus the in-process launch-time publish.
-            rc = run_py.main(list(argv), **with_publish({**rec.seams(), **override}))
+            rc = run_py.main(list(argv), **with_publish({**rec.seams(), **override}, argv))
     except SystemExit as refused:
         return None, refused, err.getvalue()
     return rc, None, err.getvalue()
