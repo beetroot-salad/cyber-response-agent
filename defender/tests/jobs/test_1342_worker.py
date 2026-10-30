@@ -28,11 +28,13 @@ from defender.tests.support.jobs._jobs1342 import (
     T2,
     TITLE,
     WORKER_LOGGER,
+    FaultyContainers,
     JobsAudit,
     ScriptedChild,
     StandInContainers,
     VisibleAtEmit,
     an_alert,
+    fd_identity,
     job_end,
     job_store,
     knowledge_record,
@@ -169,15 +171,17 @@ async def test_o4_two_workers_never_run_one_row_twice(world):
 
 # --- O5: the fence ---------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("moved", ["failed", "cancelled"])
+@pytest.mark.parametrize("moved", ["failed", "cancelled", "completed", "queued"])
 async def test_o5_a_row_moved_while_its_child_runs_is_left_alone_and_logged(world, caplog, moved):
-    """After SQL moves a running row, the finish changes nothing, is logged, emits no finish event; the worker carries on. (O5)"""
+    """After SQL moves a running row to any other stage, the finish changes nothing, is logged, emits no finish event for it; the worker carries on. (O5)"""
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
     audit = JobsAudit(caplog)
     release = world["tmp"] / "release"
     child = _child(world, files=_committed(), wait_for=release)
-    sql = {"failed": "stage = 'failed', failure_reason = 'worker_error', failure_message = 'moved by test'",
-           "cancelled": "stage = 'aborted', failure_reason = 'cancelled'"}[moved]
+    sql = {"failed": "stage = 'failed', failure_reason = 'worker_error', failure_message = 'moved by test', finished_at = %s",
+           "cancelled": "stage = 'aborted', failure_reason = 'cancelled', finished_at = %s",
+           "completed": "stage = 'completed', disposition = 'benign', finished_at = %s",
+           "queued": "stage = 'queued', started_at = NULL, finished_at = NULL"}[moved]
     async with job_store(world["dsn"]) as store:
         fenced = await _queued(store, ticket="T-1", key="k1")
         other = await _queued(store, ticket="T-2", key="k2")
@@ -187,19 +191,28 @@ async def test_o5_a_row_moved_while_its_child_runs_is_left_alone_and_logged(worl
                 break
             await asyncio.sleep(0.01)
         assert len(child.seen_all()) == 2, "the children never started"
-        execute(world["dsn"], f"UPDATE jobs.investigations SET {sql}, finished_at = %s WHERE id = %s",  # noqa: S608
-                (NOW, fenced))
+        execute(world["dsn"], f"UPDATE jobs.investigations SET {sql} WHERE id = %s",  # noqa: S608
+                (fenced,) if moved == "queued" else (NOW, fenced))
         snapshot = row(world["dsn"], fenced)
         release.touch()
         await asyncio.wait_for(drained, timeout=60)
 
-    assert row(world["dsn"], fenced) == snapshot, "the worker's terminal write overwrote the moved row"
-    assert snapshot["disposition"] is None
+    final = row(world["dsn"], fenced)
+    if moved != "queued":
+        assert final == snapshot, "the worker's terminal write overwrote the moved row"
+    # A row put back to `queued` is claimed again by the draining worker (its launch files then
+    # exist, so that second go ends `worker_error`); what it must never carry is the first child's finish.
+    assert final["disposition"] == snapshot["disposition"]
+    assert moved == "completed" or final["stage"] != "completed", "the first child's finish overwrote the moved row"
     assert _warned(caplog, fenced), "the refused write was not logged"
     assert not _warned(caplog, other), "a clean finish was logged as a fault"
     assert row(world["dsn"], other)["stage"] == "completed", "the worker stopped working on every row"
-    finishes = [e.target for e in audit.events() if e.action == "investigation.finish"]
-    assert finishes == [other], "a finish was audited for a write that changed nothing"
+    finishes = [e for e in audit.events() if e.action == "investigation.finish" and e.target == fenced]
+    if moved == "queued":
+        assert not any("completed" in (e.detail or "") for e in finishes), finishes
+    else:
+        assert finishes == [], "a finish was audited for a write that changed nothing"
+    assert [e.target for e in audit.events() if e.action == "investigation.finish" and e.target == other] == [other]
 
 
 # --- O6: the job lane ------------------------------------------------------------------------------
@@ -247,6 +260,7 @@ async def test_o6_launch_files_are_create_only_and_a_failed_write_is_a_worker_er
     stored = row(world["dsn"], inv)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
     assert stored["failure_message"]
+    assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
     assert (world["runs"] / f"{inv}{present}").read_text(encoding="utf-8") == "planted"
     assert child.seen() is None, "a child started although its launch files could not be written"
 
@@ -267,6 +281,7 @@ async def test_o6_a_tenant_with_no_runs_container_fails_as_a_worker_error_and_no
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
     assert stored["failure_message"]
     assert stored["finished_at"] == NOW
+    assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
     assert child.seen() is None, "a child was started without a runs container"
     assert tree(world["root"]) == before, f"the worker made something for {inv}"
     assert not world["runs"].exists()
@@ -280,6 +295,7 @@ async def test_o6_a_child_that_cannot_be_spawned_is_a_worker_error_and_the_worke
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
     assert stored["failure_message"]
     assert stored["finished_at"] == NOW
+    assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
     assert inv
 
 
@@ -294,6 +310,13 @@ def _refused(**extra) -> dict[str, str]:
                                          scrub_verified=False), **extra}
 
 
+def _job_end_with(**changes) -> str:
+    """A job-end record of the ratified keys with `changes` applied (a `None` value drops the key)."""
+    body = json.loads(job_end())
+    body.update(changes)
+    return json.dumps({k: v for k, v in body.items() if v is not None})
+
+
 MARKED_REPORT = GOOD + f"\n{MARKER}\n"
 HEADER = "---\ndisposition: benign\n---\n"
 CASES = {
@@ -304,6 +327,30 @@ CASES = {
                                     expect=("failed", "no_report", None)),
     "1-job-end-unreadable": _spec(files={"{id}.job-end.json": "{not json", "{id}/report.md": GOOD},
                                   exit=EXIT, expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-empty-object": _spec(files=_committed(**{"{id}.job-end.json": "{}"}), exit=EXIT,
+                                    expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-an-array": _spec(files=_committed(**{"{id}.job-end.json": "[]"}), exit=EXIT,
+                                expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-a-string": _spec(files=_committed(**{"{id}.job-end.json": '"done"'}), exit=EXIT,
+                                expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-committed-as-a-string": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed="false")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-verified-as-a-number": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=0)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-unknown-setup-word": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="skipped")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-unknown-box-word": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box="paused")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-an-extra-key": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(extra="x")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-a-missing-key": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=None)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
     # rule 2
     "2-setup-refused": _spec(files=_refused(), exit=1, expect=("failed", "setup_refused", None)),
     "2-refused-before-a-planted-report": _spec(
@@ -449,8 +496,20 @@ def _break_database(runs: Path, case_id: str) -> None:
     db.write_bytes(b"this is not a sqlite database" * 64)
 
 
+def _sqlite(runs: Path, sql: str) -> None:
+    import sqlite3
+
+    conn = sqlite3.connect(session_db(runs, CASE))
+    try:
+        conn.execute(sql)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 @pytest.mark.parametrize("fault", ["pointer-not-json", "case-id-escapes", "no-database",
-                                   "database-will-not-open", "main-has-a-parent"])
+                                   "database-will-not-open", "main-has-a-parent", "stale-schema-version",
+                                   "corrupt-payload", "no-main-session", "pointed-session-not-in-database"])
 async def test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown(world, caplog, fault):
     """Pointer present but unusable → stage and disposition kept, `cost_usd` null, the fault logged. (O8 cost, R3)"""
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
@@ -466,6 +525,17 @@ async def test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown(worl
         pointer = session_pointer(CASE, session_id=plant_fork(
             world["runs"], CASE, made["main"], agent_id="main", model="claude-sonnet-4-6",
             usage={"output_tokens": 10}))
+    elif fault == "stale-schema-version":
+        plant_sessions(world["runs"], CASE, [("main", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
+        _sqlite(world["runs"], "PRAGMA user_version = 4242")
+    elif fault == "corrupt-payload":
+        plant_sessions(world["runs"], CASE, [("main", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
+        _sqlite(world["runs"], "UPDATE message_payload SET payload = '{\"parts\": ['")
+    elif fault == "no-main-session":
+        plant_sessions(world["runs"], CASE, [("l-001", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
+    elif fault == "pointed-session-not-in-database":
+        plant_sessions(world["runs"], CASE, [("main", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
+        pointer = session_pointer(CASE, session_id="no-such-session")
     child = _child(world, files=_committed(**{"{id}.session-pointer.json": pointer}))
     inv, stored = await _run_one(world, child)
 
@@ -566,6 +636,24 @@ async def test_o7_the_backstop_runs_for_a_run_that_failed_and_never_writes_the_r
     assert _names_code(stored, inv, EXIT), stored["failure_message"]
 
 
+@pytest.mark.parametrize("fail", ["exists", "remove"])
+async def test_o7_a_backstop_that_cannot_ask_or_remove_leaves_the_row_to_the_rules_and_the_worker_goes_on(
+        world, tmp_path, fail):
+    """A containers seam whose `exists` or `remove` raises: both rows keep the stage the rules gave, the worker carries on. (O7)"""
+    containers = FaultyContainers(tmp_path / "containers", fail=fail)
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(2)]
+        for i in ids:
+            containers.plant(f"defender-run-{i}")
+        await make_worker(store, world["root"], child, containers=containers).drain()
+
+    assert sorted(name for kind, name in containers.calls if kind == fail) == sorted(f"defender-run-{i}" for i in ids)
+    for i in ids:
+        stored = row(world["dsn"], i)
+        assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("completed", "inconclusive", None)
+
+
 _DOCKER_STAND_IN = """
 import json, re, sys
 from pathlib import Path
@@ -582,6 +670,7 @@ args = args[1:] if args[:1] == ["container"] else args
 verb, rest = (args[0] if args else ""), args[1:]
 verb = {"remove": "rm", "ls": "ps", "list": "ps"}.get(verb, verb)
 held = lambda: sorted(p.name for p in (home / "held").iterdir())
+state_of = lambda n: (home / "held" / n).read_text(encoding="utf-8").strip() or "exited"  # exited, running or paused
 operands, filters, fmt, skip = [], [], None, None
 for a in rest:
     if skip:
@@ -603,24 +692,32 @@ if verb == "inspect":
     if gone:
         print("Error: No such object: " + gone[0], file=sys.stderr)
         sys.exit(1)
+    states = {n: {"Status": state_of(n), "Running": state_of(n) in ("running", "paused"), "Paused": state_of(n) == "paused"}
+              for n in operands}
     if fmt is None:
-        print(json.dumps([{"Name": "/" + n, "State": {"Status": "exited", "Running": False}} for n in operands]))
+        print(json.dumps([{"Name": "/" + n, "State": states[n]} for n in operands]))
     else:
-        state = {"Status": "exited", "Running": False}
-        fields = {"{{.State.Status}}": "exited", "{{.State.Running}}": "false", "{{.Name}}": None,
-                  "{{json .State}}": json.dumps(state), "{{.Id}}": None}
         for n in operands:
-            print(fields.get(fmt.strip()) or ("/" + n if "Name" in fmt else n if "Id" in fmt else "exited"))
+            fields = {"{{.State.Status}}": states[n]["Status"], "{{.State.Running}}": str(states[n]["Running"]).lower(),
+                      "{{.State.Paused}}": str(states[n]["Paused"]).lower(), "{{json .State}}": json.dumps(states[n])}
+            print(fields.get(fmt.strip()) or ("/" + n if "Name" in fmt else n if "Id" in fmt else states[n]["Status"]))
 elif verb == "rm":
+    force = any(a in ("-f", "--force") for a in rest)
     for n in operands:
         if n not in held():
             print("Error: No such container: " + n, file=sys.stderr)
+            sys.exit(1)
+        if state_of(n) in ("running", "paused") and not force:
+            print(f"Error response from daemon: cannot remove container {n}: container is {state_of(n)}: "
+                  "stop the container before removing or force remove", file=sys.stderr)
             sys.exit(1)
         (home / "held" / n).unlink()
 elif verb == "ps":
     wanted = [f.split("=", 1)[1].strip("^$").lstrip("/") for f in filters if f.startswith("name=")]
     every = any(a == "--all" or (a.startswith("-") and not a.startswith("--") and "a" in a) for a in rest)
-    for n in held() if every else []:  # every held container has exited; plain `ps` shows running ones
+    for n in held():  # plain `ps` shows the running (and paused) ones; `-a` every one
+        if not every and state_of(n) == "exited":
+            continue
         if not wanted or any(re.search(w, n) for w in wanted):
             print(n)
 elif verb == "wait":
@@ -654,8 +751,9 @@ class _DockerStandIn:
         return subprocess.run([sys.executable, str(self.script), str(self.home), *map(str, argv)],
                               capture_output=True, text=True, check=False)
 
-    def hold(self, name: str) -> None:
-        (self.home / "held" / name).touch()
+    def hold(self, name: str, state: str = "exited") -> None:
+        """The daemon holds `name` in `state`: `exited`, `running` or `paused`."""
+        (self.home / "held" / name).write_text(state, encoding="utf-8")
 
     def names(self) -> list[str]:
         return sorted(p.name for p in (self.home / "held").iterdir())
@@ -685,13 +783,14 @@ def _removes(calls: list[list[str]], name: str) -> bool:
     return any(name in argv and ("rm" in argv or "remove" in argv) for argv in calls)
 
 
-def test_o7_the_docker_seam_looks_first_and_removes_only_a_container_that_is_there(tmp_path):
-    """`DockerContainers(docker=fn)`: present → exists and removed (control); absent → looked at, nothing removed, no error. (O7, D-o)"""
+@pytest.mark.parametrize("state", ["exited", "running", "paused"])
+def test_o7_the_docker_seam_looks_first_and_removes_only_a_container_that_is_there(tmp_path, state):
+    """`DockerContainers(docker=fn)`: present in any state (running and paused included) → exists and removed; absent → looked at, nothing removed, no error. (O7, D-o)"""
     from defender.worker import DockerContainers
 
     daemon, docker = _docker_world(tmp_path)
     containers = DockerContainers(docker=docker)
-    daemon.hold("defender-run-here")
+    daemon.hold("defender-run-here", state)
     daemon.hold("defender-run-other")
 
     assert containers.exists("defender-run-here") is True
@@ -706,8 +805,9 @@ def test_o7_the_docker_seam_looks_first_and_removes_only_a_container_that_is_the
     assert daemon.names() == ["defender-run-other"]
 
 
+@pytest.mark.parametrize("state", ["exited", "running"])
 async def test_o7_a_worker_given_no_containers_uses_docker_and_removes_only_its_own_leftover(
-        world, monkeypatch):
+        world, monkeypatch, state):
     """Omitting `containers` → the backstop is the docker one (a `docker` first on PATH): the row's leftover box goes, another run's stays, a clean run is no error. (O7, D-o)"""
     import uuid
 
@@ -722,8 +822,8 @@ async def test_o7_a_worker_given_no_containers_uses_docker_and_removes_only_its_
         alert = await an_alert(store, T1, ticket="T-L")
         plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=left_id)
         clean = await _queued(store, ticket="T-2", key="k2")
-        daemon.hold(f"defender-run-{left_id}")
-        daemon.hold("defender-run-someone-else")
+        daemon.hold(f"defender-run-{left_id}", state)
+        daemon.hold("defender-run-someone-else", "running")
         await Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock).drain()
 
     assert daemon.names() == ["defender-run-someone-else"], daemon.names()
@@ -755,6 +855,183 @@ async def test_o8_the_childs_output_is_inherited_not_piped(world, capfd):
     assert stored["stage"] == "completed"
     assert (MARKER in out, MARKER in err) == (True, True), "the child's output did not reach the worker's stdout and stderr"
     _no_run_text(stored)
+
+
+async def test_o4_serve_also_holds_three_children_and_never_a_fourth(world):
+    """`serve()` with four queued rows and held children: three alive together, never four; the fourth runs once one ends. (O4, D2)"""
+    import signal
+
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release)
+    async with job_store(world["dsn"]) as store:
+        ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(4)]
+        serving = asyncio.create_task(make_worker(store, world["root"], child, slots=3).serve())
+        try:
+            for _ in range(1500):
+                if len(child.seen_all()) >= 3:
+                    break
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(1.0)  # a fourth would have started by now
+            assert len(child.seen_all()) == 3, "serve did not hold the slot cap"
+            assert child.max_alive() == 3
+            release.touch()
+            for _ in range(3000):
+                if [row(world["dsn"], i)["stage"] for i in ids] == ["completed"] * 4:
+                    break
+                await asyncio.sleep(0.02)
+        finally:
+            release.touch()
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+
+    assert child.max_alive() == 3, "a fourth child overlapped the three"
+    assert [row(world["dsn"], i)["stage"] for i in ids] == ["completed"] * 4
+
+
+class _StoreWhoseAlertReadFails:
+    """The real store, except that reading one alert raises an error nobody planned for."""
+
+    def __init__(self, store, alert_id: str) -> None:
+        self._store, self._alert_id = store, alert_id
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def get_alert(self, tenant_id, alert_id):
+        if alert_id == self._alert_id:
+            raise RuntimeError("the store fell over")
+        return await self._store.get_alert(tenant_id, alert_id)
+
+
+@pytest.mark.parametrize("seam", ["child-argv", "store-read", "job-end-read"])
+async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and_the_worker_goes_on(
+        world, monkeypatch, seam):
+    """A fault nobody planned for (not an OS error) in one row's task: that row `failed`/`worker_error`, another row still completes. (O6, design flows)"""
+    from defender.records import job_lane
+
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        bad = await _queued(store, ticket="T-1", key="k1")
+        good = await _queued(store, ticket="T-2", key="k2")
+        used = store
+        argv = child
+        if seam == "child-argv":
+            def argv(launch):  # noqa: F811
+                if launch.investigation_id == bad:
+                    raise RuntimeError("the argv builder fell over")
+                return child(launch)
+        elif seam == "store-read":
+            used = _StoreWhoseAlertReadFails(store, (await store.get_investigation(T1, bad)).alert_id)
+        else:
+            original = job_lane.JobLane.read_job_end
+
+            def read_job_end(self, run_id):
+                if run_id == bad:
+                    raise RuntimeError("the job-end read fell over")
+                return original(self, run_id)
+            monkeypatch.setattr(job_lane.JobLane, "read_job_end", read_job_end)
+        await make_worker(used, world["root"], argv).drain()
+
+    stored = row(world["dsn"], bad)
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert stored["failure_message"]
+    assert stored["finished_at"] == NOW
+    assert row(world["dsn"], good)["stage"] == "completed", "one row's fault stopped the others"
+
+
+# --- M1: what the worker reads, and where ------------------------------------------------------------
+
+OVER_THE_LIMIT = 70 * 1024 * 1024
+
+
+def _tampered(world: dict, which: str, shape: str) -> tuple[dict[str, str], dict]:
+    """Host records with `which` replaced by a symlink to a valid copy, or by a valid copy padded past
+    any size limit; returns the child's files and its extra spec."""
+    name = {"job-end": "{id}.job-end.json", "knowledge": "{id}.knowledge-source.json",
+            "pointer": "{id}.session-pointer.json"}[which]
+    text = {"job-end": job_end(), "knowledge": knowledge_record(COMMIT), "pointer": session_pointer(CASE)}[which]
+    files = _committed(**{name: None})
+    if shape == "symlinked":
+        target = world["tmp"] / "elsewhere" / "record.json"
+        target.parent.mkdir()
+        target.write_text(text, encoding="utf-8")
+        return files, {"links": {name: str(target)}}
+    return files, {"padded": {name: (text, OVER_THE_LIMIT)}}
+
+
+@pytest.mark.parametrize("shape", ["symlinked", "oversize"])
+@pytest.mark.parametrize("which", ["job-end", "knowledge", "pointer"])
+async def test_m1_a_symlinked_or_oversize_host_record_is_unreadable_not_followed_or_swallowed(
+        world, caplog, which, shape):
+    """The job-end record, knowledge record and session pointer are read no-follow and size-limited: tampered, each counts as unreadable. (M1, D-f, R3, O8)"""
+    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
+    plant_sessions(world["runs"], CASE, [("main", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
+    files, extra = _tampered(world, which, shape)
+    child = _child(world, files=files, exit=EXIT, **extra)
+    inv, stored = await _run_one(world, child)
+
+    if which == "job-end":  # unreadable = absent: rule 1
+        assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
+        assert _names_code(stored, inv, EXIT), stored["failure_message"]
+    else:
+        assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
+    if which == "knowledge":
+        assert stored["knowledge"] == STALE_OPERATOR
+    if which == "pointer":
+        assert stored["cost_usd"] is None
+        assert _warned(caplog, inv)
+
+
+@pytest.mark.parametrize("linked", ["tenant folder", "runs container"])
+async def test_m1_a_symlinked_tenant_folder_or_runs_container_is_refused_and_nothing_is_written(world, linked):
+    """`<root>/<T>` or `<root>/<T>/runs` a symlink: `failed`/`worker_error`, no child, nothing written anywhere. (M1, O6)"""
+    real = world["tmp"] / "real"
+    if linked == "tenant folder":
+        (world["root"] / T1).rename(real)
+        (world["root"] / T1).symlink_to(real)
+    else:
+        world["runs"].rename(real)
+        world["runs"].symlink_to(real)
+    before, before_real = tree(world["root"]), tree(real)
+    child = _child(world, files=_committed())
+    inv, stored = await _run_one(world, child)
+
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert stored["failure_message"]
+    assert child.seen() is None, "a child started through a symlinked path"
+    assert tree(real) == before_real, f"the worker wrote through the symlink for {inv}"
+    assert tree(world["root"]) == before
+
+
+@pytest.mark.parametrize("present", [".launch.json", ".alert.json"])
+async def test_m1_a_symlink_where_a_launch_file_goes_is_not_written_through(world, present):
+    """A symlink planted at a launch file's name is refused: its target is never created; `failed`/`worker_error`, no child. (M1, O6)"""
+    import uuid
+
+    inv = str(uuid.uuid4())
+    target = world["tmp"] / "elsewhere" / "target"
+    target.parent.mkdir()
+    (world["runs"] / f"{inv}{present}").symlink_to(target)
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        alert = await an_alert(store, T1)
+        plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
+        await make_worker(store, world["root"], child).drain()
+
+    stored = row(world["dsn"], inv)
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert not target.exists(), "the worker wrote through a planted symlink"
+    assert child.seen() is None
+
+
+async def test_o8_the_childs_stdout_and_stderr_are_the_workers_own_descriptors(world, capfd):
+    """The child's fd 1 and fd 2 are open on what the worker's are (not a pipe the worker reads). (design: child output)"""
+    child = _child(world, files=_committed(), printed=MARKER)
+    await _run_one(world, child)
+
+    seen = child.seen()
+    assert seen is not None
+    assert seen["stdio"] == [fd_identity(1), fd_identity(2)], "the child's output does not go straight to the worker's descriptors"
 
 
 # --- O13 -----------------------------------------------------------------------------------------

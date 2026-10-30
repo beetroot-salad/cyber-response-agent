@@ -38,3 +38,26 @@ async def test_m5_an_alert_of_exactly_the_cap_is_stored_whole_and_one_byte_more_
         with pytest.raises(AlertRefused, match=re.escape(REFUSE_SIZE)):  # D-b: the size reason
             await an_alert(store, T1, ticket="OVER", raw=_json_of_size(READ_LIMIT + 1))
     assert execute(dsn, "SELECT count(*), max(length(raw)) FROM jobs.alerts") == [(1, READ_LIMIT)]
+
+
+def test_m5_admission_owns_the_cap_it_accepts_the_cap_and_refuses_one_byte_more():
+    """`admit` itself refuses `READ_LIMIT + 1` bytes with the size reason and accepts `READ_LIMIT`. (M5)"""
+    from defender._io import READ_LIMIT
+    from defender.records.formats import REFUSE_SIZE, AlertRefused, admit
+
+    admit(_json_of_size(READ_LIMIT))  # control: the cap itself
+    with pytest.raises(AlertRefused, match=re.escape(REFUSE_SIZE)):
+        admit(_json_of_size(READ_LIMIT + 1))
+
+
+def test_m5_the_operator_read_accepts_a_file_of_exactly_the_cap_and_refuses_one_byte_more(tmp_path):
+    """`read_operator_alert` returns a `READ_LIMIT`-byte file whole and refuses a longer one as too big. (M5)"""
+    from defender._io import READ_LIMIT
+    from defender.records.formats import REFUSE_SIZE, AlertRefused, read_operator_alert
+
+    at_cap, over = tmp_path / "at.json", tmp_path / "over.json"
+    at_cap.write_bytes(_json_of_size(READ_LIMIT))
+    over.write_bytes(_json_of_size(READ_LIMIT + 1))
+    assert len(read_operator_alert(at_cap)) == READ_LIMIT
+    with pytest.raises(AlertRefused, match=re.escape(REFUSE_SIZE)):
+        read_operator_alert(over)

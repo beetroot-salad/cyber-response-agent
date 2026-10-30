@@ -66,6 +66,34 @@ def test_a_reader_called_from_a_composition_instead_of_the_post_steps_is_found(t
     assert composition in found[0], found
 
 
+_READER_CALLS = {"iterdir": "run_dir.iterdir()", "cross_check_tables": "_run.cross_check_tables(run_dir)",
+                 "visualize": "visualize()"}
+
+
+@pytest.mark.parametrize("reader", sorted(_READER_CALLS))
+def test_a_post_steps_that_loses_a_reader_is_a_finding(tmp_path, reader):
+    """`_post_steps` must itself call each reader; moving one behind a helper leaves a finding naming it. (M3)"""
+    assert _GATE.scan(_tree(tmp_path / "clean")) == [], "control: the unchanged tree is clean"
+    call = _READER_CALLS[reader]
+    assert f"    {call}\n" in _MAIN, "premise: the fixture's post-steps makes the call"
+    run = _MAIN.replace(f"    {call}\n", "    _helper()\n")
+    found = _GATE.scan(_tree(tmp_path / "cut", run=run))
+    assert any("_post_steps" in f and reader in f for f in found), found
+
+
+@pytest.mark.parametrize("reader", sorted(_READER_CALLS))
+@pytest.mark.parametrize("home", ["def _page(started):\n    {call}\n",
+                                  "class Steps:\n    def page(self):\n        {call}\n"],
+                         ids=["helper function", "method"])
+def test_any_function_other_than_the_post_steps_calling_a_reader_is_a_finding(tmp_path, reader, home):
+    """A reader called from any other `run.py` function (a helper the compositions reach) is found, wherever it sits. (M3)"""
+    call = _READER_CALLS[reader]
+    run = _MAIN + home.format(call=call)
+    found = _GATE.scan(_tree(tmp_path, run=run))
+    assert any(reader in f for f in found), found
+    assert _GATE.scan(_tree(tmp_path / "clean")) == [], "control: without the helper the tree is clean"
+
+
 def test_a_reader_before_the_lifecycle_is_found(tmp_path):
     run = _MAIN.replace("def main():\n    summary = lifecycle()", "def main():\n    enqueue_curation()\n    summary = lifecycle()")
     found = _GATE.scan(_tree(tmp_path, run=run))

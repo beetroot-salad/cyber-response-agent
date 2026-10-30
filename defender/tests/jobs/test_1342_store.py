@@ -1057,6 +1057,85 @@ async def test_o13_a_transaction_that_fails_at_commit_emits_nothing_and_stores_n
     assert len(audit.events()) == len(before_events) + 1
 
 
+# --- D-a: an id PostgreSQL cannot hold names nothing -------------------------------------------------------------
+
+UNSTORABLE_IDS = {"NUL": "a\x00b", "lone NUL": "\x00", "lone surrogate": "\ud800", "surrogate inside": "x\udfffy"}
+
+
+@pytest.mark.parametrize("bad", sorted(UNSTORABLE_IDS))
+async def test_d_a_an_id_the_database_cannot_hold_reads_as_unknown_and_never_crashes(dsn, bad):
+    """Get, create, cancel, delete and finish treat a NUL or lone-surrogate id as an unknown one. (D-a)"""
+    from defender.jobs import NotFound, UnknownReference
+
+    ident = UNSTORABLE_IDS[bad]
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        await _absent(store.get_alert(T1, ident))
+        await _absent(store.get_investigation(T1, ident))
+        with pytest.raises(UnknownReference):
+            await store.create_investigation(T1, ident, "k2", actor="u-1")
+        with pytest.raises(NotFound):
+            await store.cancel_investigation(T1, ident, actor="u-1")
+        with pytest.raises(NotFound):
+            await store.delete_investigation(T1, ident, actor="u-1")
+        assert await store.finish(T1, ident, stage="failed", failure_reason="worker_error") is None
+        assert row(dsn, inv.investigation_id)["stage"] == "queued"
+    assert _count(dsn, "investigations") == 1
+
+
+# --- O5: the store's finish is fenced on `running` -----------------------------------------------------------------
+
+async def test_o5_finish_ends_a_running_row_once_and_returns_it(dsn):
+    """A running row finishes with its stage, disposition and cost; a second finish changes nothing. (O5, O8)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        assert (await store.claim()).investigation_id == inv.investigation_id
+        done = await store.finish(T1, inv.investigation_id, stage="completed", disposition="benign", cost_usd=1.5)
+        again = await store.finish(T1, inv.investigation_id, stage="failed", failure_reason="no_report")
+
+    assert (done.stage, done.disposition, done.cost_usd) == ("completed", "benign", 1.5)
+    assert again is None
+    stored = row(dsn, inv.investigation_id)
+    assert (stored["stage"], stored["disposition"], stored["failure_reason"], stored["finished_at"]) == (
+        "completed", "benign", None, NOW)
+
+
+async def test_o5_finish_of_a_queued_row_changes_nothing(dsn):
+    """A row the worker never claimed is not finished: `None`, row untouched. (O5)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        before = row(dsn, inv.investigation_id)
+        assert await store.finish(T1, inv.investigation_id, stage="failed", failure_reason="worker_error") is None
+    assert row(dsn, inv.investigation_id) == before
+    assert before["stage"] == "queued"
+
+
+@pytest.mark.parametrize("moved_to", TERMINAL)
+async def test_o5_finish_of_a_row_that_moved_to_a_terminal_stage_changes_nothing(dsn, moved_to):
+    """A row ended elsewhere (cancel, B) keeps its stage and fields against a late finish. (O5)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        await store.claim()
+        _set_stage(dsn, inv.investigation_id, moved_to)
+        before = row(dsn, inv.investigation_id)
+        assert await store.finish(T1, inv.investigation_id, stage="completed", disposition="benign") is None
+    assert row(dsn, inv.investigation_id) == before
+
+
+async def test_o5_finish_of_another_tenants_row_changes_nothing(dsn):
+    """Only the owning tenant's running row finishes. (O5)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        await store.claim()
+        assert await store.finish(T2, inv.investigation_id, stage="failed", failure_reason="worker_error") is None
+        assert row(dsn, inv.investigation_id)["stage"] == "running"
+
+
 # --- O14 (store side): what the reads carry ----------------------------------------------------------------------------
 
 async def test_o14_a_read_investigation_carries_the_wire_models_fields(dsn):
