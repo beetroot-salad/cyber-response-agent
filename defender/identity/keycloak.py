@@ -34,6 +34,15 @@ def _utc_now() -> _dt.datetime:
     return _dt.datetime.now(_dt.UTC)
 
 
+def _server_base(server_url: str) -> str:
+    """An absolute http(s) URL with a host and no query or fragment; a path prefix is kept."""
+    parts = urllib.parse.urlsplit(server_url)
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.query or parts.fragment \
+            or server_url.endswith(("?", "#")):
+        raise ValueError(f"keycloak server_url {server_url!r} is not an absolute http(s) URL without query or fragment")
+    return server_url.rstrip("/")
+
+
 class KeycloakSignIn:
     """Sign-in and account administration against one Keycloak realm."""
 
@@ -46,6 +55,7 @@ class KeycloakSignIn:
         redirect_uri: str,
         admin_client_id: str,
         admin_client_secret: str,
+        server_url: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], _dt.datetime] = _utc_now,
     ) -> None:
@@ -58,9 +68,14 @@ class KeycloakSignIn:
         self._http = httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS)
         # Keycloak serves every realm under <base>/realms/<name>; the admin API sits beside it. The
         # admin client's `manage-users` role reaches only its own realm, which is the sign-in realm.
+        # `server_url`, when the API reaches Keycloak at another address than the browser does
+        # (#1349), replaces that base for every request the API sends itself; the browser's
+        # sign-in URL and the token's `iss` stay the issuer.
         base, realm = self._issuer.rsplit("/realms/", 1)
-        self._oidc = f"{self._issuer}/protocol/openid-connect"
-        self._admin_users_url = f"{base}/admin/realms/{realm}/users"
+        server = base if server_url is None else _server_base(server_url)
+        self._signin_url = f"{self._issuer}/protocol/openid-connect/auth"
+        self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
+        self._admin_users_url = f"{server}/admin/realms/{realm}/users"
         self._keys: dict[str, Any] = {}
         self._admin_token_held: tuple[str, _dt.datetime] | None = None
 
@@ -82,7 +97,7 @@ class KeycloakSignIn:
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         })
-        return f"{self._oidc}/auth?{query}"
+        return f"{self._signin_url}?{query}"
 
     async def finish_signin(self, *, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
         """Exchange the code, verify the ID token, and return who signed in and how."""
