@@ -572,15 +572,25 @@ home = Path(sys.argv[1])
 argv = sys.argv[2:]
 with open(home / "calls.log", "a", encoding="utf-8") as log:
     log.write(json.dumps(argv) + "\\n")
-args = argv[1:] if argv[:1] == ["container"] else argv
+args = argv[1:] if argv[:1] and Path(argv[0]).name == "docker" else argv
+args = args[1:] if args[:1] == ["container"] else args
 verb, rest = (args[0] if args else ""), args[1:]
+verb = {"remove": "rm", "ls": "ps", "list": "ps"}.get(verb, verb)
 held = lambda: sorted(p.name for p in (home / "held").iterdir())
-operands, skip = [], False
+operands, filters, fmt, skip = [], [], None, None
 for a in rest:
     if skip:
-        skip = False
+        if skip == "--filter":
+            filters.append(a)
+        elif skip == "--format":
+            fmt = a
+        skip = None
     elif a in ("--format", "--filter", "--type", "--time") or (a == "-f" and verb == "inspect"):
-        skip = True
+        skip = "--format" if a == "-f" else a
+    elif a.startswith("--filter="):
+        filters.append(a.split("=", 1)[1])
+    elif a.startswith("--format="):
+        fmt = a.split("=", 1)[1]
     elif not a.startswith("-"):
         operands.append(a)
 if verb == "inspect":
@@ -588,7 +598,10 @@ if verb == "inspect":
     if gone:
         print("Error: No such object: " + gone[0], file=sys.stderr)
         sys.exit(1)
-    print("exited")
+    if fmt is None:
+        print(json.dumps([{"Name": "/" + n, "State": {"Status": "exited", "Running": False}} for n in operands]))
+    else:
+        print("\\n".join(("false" if "Running" in fmt else "exited") for _ in operands))
 elif verb == "rm":
     for n in operands:
         if n not in held():
@@ -596,10 +609,13 @@ elif verb == "rm":
             sys.exit(1)
         (home / "held" / n).unlink()
 elif verb == "ps":
-    wanted = [a.split("=", 1)[1].strip("^$") for a in rest if a.startswith("name=")]
+    wanted = [f.split("=", 1)[1].strip("^$").lstrip("/") for f in filters if f.startswith("name=")]
     for n in held():
         if not wanted or any(re.search(w, n) for w in wanted):
             print(n)
+else:
+    print("unknown command: " + " ".join(argv), file=sys.stderr)
+    sys.exit(1)
 """
 
 
