@@ -216,3 +216,38 @@ def test_capture_reports_what_the_guaranteed_window_holds_per_source(tmp_path, c
     assert str(instant(start).date()) in text and str(instant(end).date()) in text
     for part in PART_BYTES:
         assert part in text
+
+
+def test_without_an_injected_clock_and_fingerprint_capture_builds_the_production_lab_ops(
+        tmp_path, monkeypatch):
+    """FR1/O1: an ops object with no es_now/fingerprint leaves capture to build `LabOps` itself."""
+    built, fingerprint = [], {"spy|2026-10-20T08": [3, 3]}
+
+    class SpyLabOps:
+        def __init__(self, *args, **kwargs):
+            built.append((args, kwargs))
+
+        def es_now(self):
+            return ES_NOW
+
+        def fingerprint(self, window, as_of, arrived_by):
+            return fingerprint
+
+    class WithoutClockAndFingerprint:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            if name in ("es_now", "fingerprint"):
+                raise AttributeError(name)
+            return getattr(self._inner, name)
+
+    rig = Rig(tmp_path)
+    module = _module()
+    monkeypatch.setattr(module, "LabOps", SpyLabOps)
+    module.capture(rig.case_dir, scenario="ssh-brute-force-canary", chaos=rig.chaos,
+                   ops=WithoutClockAndFingerprint(rig.ops), lock_store=rig.store,
+                   parts_dir=rig.parts_dir, clock=rig.clock, history_start=rig.history_start)
+    assert built
+    assert rig.freeze["fingerprint"] == fingerprint
+    assert instant(rig.freeze["captured_at"]) == instant(ES_NOW)

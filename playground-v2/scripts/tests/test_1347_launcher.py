@@ -12,16 +12,17 @@ parsed freeze.yaml.
 
 Production ops (FR1): `playground-v2/scripts/lab_ops.py::LabOps` implements `fingerprint(window,
 as_of, arrived_by)` (tested in test_1347_lab_ops.py); `launch_frozen.py` binds it as `launch_frozen.LabOps`.
-A run that crashes before printing `run_id=` gets no row (r6.1); the launcher does not refuse an
-unconfirmed freeze (only the scorer does), and reference mode works on one. The agent's environment
-(`run_fn`'s `env`) carries no DOCKER_HOST / DOCKER_CONTEXT and nothing naming a freeze, slug or as_of.
+A run that crashes before printing `run_id=` gets no row (r6.1); reference mode works on a freeze
+whose `confirmed` is still empty. The launcher never sets or changes DOCKER_HOST / DOCKER_CONTEXT in
+the agent's environment (`run_fn`'s `env`; an inherited operator value is left alone) and adds
+nothing naming a freeze, slug or as_of.
 """
 from __future__ import annotations
 
 import hashlib
 import importlib.util
-import contextlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,7 @@ class Rig:
         (self.operator_cfg / "config.json").write_text('{"currentContext": "soc-playground"}')
         self.ops = Ops(self.journal, fingerprint, fail_at, self.index)
         self.rc, self.fail_at = rc, fail_at
+        self.module = None
         self.argv = self.env = self.config_seen = None
         self.run_ended = self.lock_held_in_run = self.index_in_run = None
         self.store.on_delete = lambda name: setattr(
@@ -128,7 +130,7 @@ class Rig:
 
     def launch(self, **kw):
         before = _tree(self.operator_cfg)
-        out = _module().launch(
+        out = (self.module or _module()).launch(
             self.case_dir, index=self.index, parts_dir=self.parts_dir, lock_store=self.store,
             ops=self.ops, run_fn=self.run_fn, clock=self.clock, work_dir=self.work,
             operator_docker_config=self.operator_cfg, tenant="tenant-1", **kw)
@@ -182,10 +184,12 @@ def test_the_row_binds_the_run_to_the_freeze_and_is_appended_after_the_fingerpri
     rig = Rig(tmp_path)
     older = {"slug": SLUG, "run_id": "older-run", "freeze": DIGEST, "verdict": "valid",
              "reason": "", "verified_at": "2026-10-20T11:00:00Z"}
-    rig.index.write_text(json.dumps(older) + "\n")
+    older_bytes = (json.dumps(older, sort_keys=True) + "\n").encode()
+    rig.index.write_bytes(older_bytes)
     assert rig.launch() == RUN_ID
     first, row = rig.rows()
-    assert first == older, "an existing row was rewritten"
+    assert rig.index.read_bytes().startswith(older_bytes), "an existing row was rewritten"
+    assert first == older
     assert set(row) == ROW_KEYS
     assert (row["slug"], row["run_id"], row["freeze"], row["verdict"]) == (SLUG, RUN_ID, DIGEST, "valid")
     assert isinstance(row["reason"], str)
@@ -264,8 +268,10 @@ def test_a_missing_or_altered_part_refuses_the_run_and_names_it(tmp_path, damage
     rig = Rig(tmp_path)
     part = rig.parts_dir / SLUG / "stubs.tar"
     part.unlink() if damage == "missing" else part.write_bytes(b"tampered")
-    with pytest.raises(Exception, match="stubs.tar"):
+    _module()  # a missing launch_frozen.py fails here, outside the refusal being tested
+    with pytest.raises(Exception, match="stubs.tar") as caught:
         rig.launch()
+    assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
     assert {"run", "load_frozen"}.isdisjoint(rig.journal.ops())
     assert rig.rows() == [] and "frozen-engine" not in rig.store.records
 
@@ -302,24 +308,33 @@ def test_a_run_that_crashes_before_announcing_its_id_gets_no_row_and_cleans_up(t
     rig = Rig(tmp_path)
     rig.run_fn = lambda argv, env: (rig.journal.append(("run", None)) or
                                     (1, "Traceback (most recent call last):\n", "boom"))
-    with contextlib.suppress(Exception):
+    _module()  # a missing launch_frozen.py fails here, not inside the tolerated refusal
+    try:
         rig.launch()
+    except (AttributeError, TypeError, NameError, ImportError):
+        raise  # a launcher bug is not a refusal of the crashed run
+    except Exception:  # noqa: BLE001 - raising or returning are both acceptable for a dead run
+        pass
     assert rig.rows() == []
     assert "teardown" in rig.journal.ops() and "frozen-engine" not in rig.store.records
 
 
-def test_the_agents_environment_names_no_docker_host_freeze_slug_or_as_of(tmp_path, monkeypatch):
-    """P4/D2: no DOCKER_HOST/DOCKER_CONTEXT, and no variable whose name or value names a freeze,
-    the slug or the as_of moment."""
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+def test_the_agents_environment_adds_nothing_naming_a_freeze_and_leaves_docker_vars_alone(
+        tmp_path, monkeypatch):
+    """P4/D2: variables the launcher adds or changes name no freeze, slug or as_of (paths read
+    relative to work_dir), and DOCKER_HOST / DOCKER_CONTEXT are never set or changed by it."""
     monkeypatch.setenv("DOCKER_HOST", "tcp://elsewhere:1")
     monkeypatch.setenv("DOCKER_CONTEXT", "elsewhere")
+    monkeypatch.setenv("GITHUB_HEAD_REF", "contract/1347-frozen-cases")
     rig = Rig(tmp_path)
     rig.launch()
     assert "DOCKER_CONFIG" in rig.env
-    assert not {"DOCKER_HOST", "DOCKER_CONTEXT"} & set(rig.env)
-    for name, value in rig.env.items():
-        blob = f"{name}={value}".lower()
+    for name in ("DOCKER_HOST", "DOCKER_CONTEXT"):
+        assert rig.env.get(name) in (None, os.environ[name]), f"launcher changed {name}"
+    touched = {k: v for k, v in rig.env.items() if os.environ.get(k) != v}
+    assert "DOCKER_CONFIG" in touched
+    for name, value in touched.items():
+        blob = f"{name}={str(value).replace(str(rig.work), '')}".lower()
         for word in ("freeze", "frozen", SLUG, "as_of", "as-of", "2026-10-20t09:00"):
             assert word not in blob, f"{name} names {word}"
 
@@ -331,3 +346,33 @@ def test_reference_mode_works_on_a_freeze_whose_confirmation_is_still_empty(tmp_
     assert rig.launch(reference=True) == RUN_ID
     assert "--as-of" in rig.argv and not rig.index.exists()
     assert "frozen-engine" not in rig.store.records
+
+
+def test_without_an_injected_fingerprint_the_launcher_builds_the_production_lab_ops(
+        tmp_path, monkeypatch):
+    """FR1/O6: an ops object with no `fingerprint` leaves the launcher to build `LabOps` itself."""
+    built = []
+
+    class SpyLabOps:
+        def __init__(self, *args, **kwargs):
+            built.append((args, kwargs))
+
+        def fingerprint(self, window, as_of, arrived_by):
+            return {"spy|2026-10-20T08": [3, 3]}
+
+    class WithoutFingerprint:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            if name == "fingerprint":
+                raise AttributeError(name)
+            return getattr(self._inner, name)
+
+    rig = Rig(tmp_path)
+    rig.module = _module()
+    monkeypatch.setattr(rig.module, "LabOps", SpyLabOps)
+    rig.ops = WithoutFingerprint(rig.ops)
+    rig.launch()
+    assert built
+    assert [r["verdict"] for r in rig.rows()] == ["stale"]  # the spy's fingerprint was compared

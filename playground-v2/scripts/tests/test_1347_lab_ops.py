@@ -9,7 +9,11 @@ module attribute `LabOps`). Its methods are those the capture and launcher fakes
   sends one ES|QL `POST .../_query` inside the ES container with `docker --context <context>
   exec`; the JSON request body rides in argv after `-d` (or on stdin as `input=`). The reply is
   the ES|QL JSON result, `-w "\\n%{http_code}"` style (body, newline, status); result columns are
-  read by position: count, version sum, `_index`, hour (ES|QL's order for STATS ... BY).
+  read by position: count, version sum, `_index`, hour (pinned because ES|QL fixes the output
+  order of STATS ... BY). The fingerprint must cover the whole window: ES|QL returns at most 1000
+  rows by default, so either one request with a LIMIT large enough or several (paged) requests
+  whose union covers it, and a reply that looks truncated (row count == the request's LIMIT, or
+  1000 when it has none) is refused with an exception (r6.1), never accepted.
 * `es_now() -> str` sends an ES|QL query to the same door and returns the instant in the first
   cell of the reply; it never reads the local clock.
 
@@ -21,6 +25,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 import pytest
@@ -41,32 +46,67 @@ def _load(name: str):
     return module
 
 
-class Docker:
-    """Records every command and answers each `_query` with a canned ES|QL result."""
+def _limit(query: str) -> int:
+    found = re.findall(r"\bLIMIT\s+(\d+)", query, flags=re.IGNORECASE)
+    return int(found[-1]) if found else 1000  # ES|QL's default row cap
 
-    def __init__(self, values):
-        self.values, self.calls = values, []
+
+def _dataset(indexes=3):
+    """Every index x hour bucket of the 31-day window (745 hours): far more than 1000 rows."""
+    start = datetime(2026, 9, 19, 8, tzinfo=UTC)
+    return [[10, 10, f"evt-lab-system.auth-{i}", (start + timedelta(hours=h)).strftime(
+        "%Y-%m-%dT%H:00:00.000Z")] for i in range(indexes) for h in range(745)]
+
+
+class Docker:
+    """Records every command and answers each `_query` with a canned ES|QL result.
+
+    `values` rows are served in full. `serve_rows` models Elasticsearch: rows inside the time
+    range named by the query's own timestamps (all rows if it names fewer than two), cut to the
+    query's LIMIT (default 1000). `endless` answers every query with exactly LIMIT rows.
+    """
+
+    def __init__(self, values=None, serve_rows=None, endless=False):
+        self.values, self.serve_rows, self.endless, self.calls = values, serve_rows, endless, []
+
+    def _rows(self, query):
+        if self.endless:
+            return [[1, 1, f"idx-{i}", f"2026-09-{1 + i // 24 % 28:02d}T{i % 24:02d}:00:00.000Z"]
+                    for i in range(_limit(query))]
+        if self.serve_rows is None:
+            return self.values
+        stamps = sorted(re.findall(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d", query))
+        rows = self.serve_rows
+        if len(stamps) >= 2:
+            rows = [r for r in rows if stamps[0] <= r[3][:19] <= stamps[-1]]
+        return rows[:_limit(query)]
 
     def __call__(self, argv, **kw):
         self.calls.append((list(argv), kw))
+        body = json.loads(argv[argv.index("-d") + 1]) if "-d" in argv else json.loads(kw["input"])
         reply = {"columns": [{"name": "a", "type": "long"}, {"name": "b", "type": "long"},
                              {"name": "c", "type": "keyword"}, {"name": "d", "type": "date"}],
-                 "values": self.values}
+                 "values": self._rows(body["query"])}
 
         class Done:
             returncode, stderr = 0, ""
             stdout = json.dumps(reply) + "\n200"
         return Done()
 
+    def requests(self) -> list[dict]:
+        bodies = []
+        for argv, kw in self.calls:
+            assert argv[:5] == ["docker", "--context", "soc-playground", "exec", argv[4]]
+            assert "elasticsearch" in argv
+            assert any(a.endswith("/_query") or "/_query?" in a for a in argv), argv
+            bodies.append(json.loads(argv[argv.index("-d") + 1]) if "-d" in argv
+                          else json.loads(kw["input"]))
+        assert bodies, "no lab request was sent"
+        return bodies
+
     def request(self) -> dict:
         assert len(self.calls) == 1, f"expected one lab request, saw {len(self.calls)}"
-        argv, kw = self.calls[0]
-        assert argv[:5] == ["docker", "--context", "soc-playground", "exec", argv[4]]
-        assert "elasticsearch" in argv
-        assert any(a.endswith("/_query") or "/_query?" in a for a in argv), argv
-        if "-d" in argv:
-            return json.loads(argv[argv.index("-d") + 1])
-        return json.loads(kw["input"])
+        return self.requests()[0]
 
 
 def _ops(docker):
@@ -81,26 +121,50 @@ def _fingerprint(as_of=AS_OF, arrived_by=ARRIVED_BY):
 
 
 def test_fingerprint_sends_the_per_index_hour_esql_over_the_configured_patterns():
-    """O1/D1: METADATA _index, _version; COUNT(*) and SUM(_version) per index x hour; both patterns."""
+    """O1/D1/C25: COUNT per index x hour (1 h buckets) over both patterns; SUM(_version) for events."""
     docker, _ = _fingerprint()
-    query = re.sub(r"\s+", " ", docker.request()["query"])
-    upper = re.sub(r"\s*,\s*", ", ", query.upper())
-    assert "METADATA _INDEX, _VERSION" in upper
-    assert "COUNT(*)" in upper.replace(" ", "") and "SUM(_VERSION)" in upper.replace(" ", "")
-    assert EVENTS in query and ALERTS in query
-    assert "logs-*" not in query
-    by = upper.split(" BY ", 1)[1]
-    assert "_INDEX" in by and ("DATE_TRUNC" in by or "BUCKET" in by)
-    assert "2026-09-19T08:00:00" in query and "2026-10-20T09:00:00" in query
+    queries = [re.sub(r"\s+", " ", b["query"]) for b in docker.requests()]
+    assert any(EVENTS in q for q in queries) and any(ALERTS in q for q in queries)
+    for query in queries:
+        upper = re.sub(r"\s*,\s*", ", ", query.upper())
+        squeezed = upper.replace(" ", "")
+        assert "METADATA _INDEX, _VERSION" in upper and "COUNT(*)" in squeezed
+        assert "logs-*" not in query
+        by = upper.split(" BY ", 1)[1]
+        assert "_INDEX" in by
+        assert re.search(r"(DATE_TRUNC\(\s*1\s*HOURS?\s*,|BUCKET\([^,()]+,\s*1\s*HOURS?\s*\))", by), by
+        if EVENTS in query:
+            assert "SUM(_VERSION)" in squeezed  # alerts are not pinned: C25 is unprobed
 
 
 @pytest.mark.parametrize(("as_of", "arrived_by"), [
     (AS_OF, ARRIVED_BY), ("2026-03-02T01:00:00Z", "2026-03-02T01:05:00Z")])
 def test_fingerprint_filter_is_the_shared_cut_clause(as_of, arrived_by):
-    """P5/D12: the request `filter` equals cut_clause(as_of, arrived_by), whatever the moments."""
+    """P5/D12: every request `filter` equals cut_clause(as_of, arrived_by), whatever the moments."""
     from defender.integrations.elastic_adapter import cut_clause
     docker, _ = _fingerprint(as_of, arrived_by)
-    assert docker.request()["filter"] == cut_clause(as_of, arrived_by)
+    want = cut_clause(instant(as_of), instant(arrived_by))
+    assert all(body["filter"] == want for body in docker.requests())
+
+
+def test_fingerprint_covers_the_whole_window_even_when_it_exceeds_one_default_page():
+    """O1/D1: 2235 index x hour buckets come back whole (one big LIMIT, or paged requests)."""
+    data = _dataset()
+    docker = Docker(serve_rows=data)
+    got = _ops(docker).fingerprint(WINDOW, AS_OF, ARRIVED_BY)
+    assert got == {f"{r[2]}|{r[3][:13]}": [r[0], r[1]] for r in data}
+
+
+def test_fingerprint_refuses_a_reply_that_looks_truncated():
+    """O1/r6.1: a reply with exactly as many rows as the request's LIMIT (1000 if none) raises."""
+    ops = _ops(Docker(endless=True))
+    try:
+        ops.fingerprint(WINDOW, AS_OF, ARRIVED_BY)
+    except (AttributeError, TypeError, NameError):
+        raise  # an implementation bug is not a refusal
+    except Exception:  # noqa: BLE001 - the refusal's type is the implementation's choice
+        return
+    pytest.fail("a reply with exactly LIMIT rows was accepted")
 
 
 def test_fingerprint_answers_count_and_version_sum_keyed_by_index_and_hour():
