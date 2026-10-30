@@ -402,14 +402,16 @@ def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
     assert [(kind, cols) for kind, cols, _ in alerts] == sorted([
         ("f", ("tenant_id",)), ("p", ("id",)), ("u", ("id", "tenant_id")),
         ("u", ("tenant_id", "vendor", "vendor_ticket_id"))])
-    assert "REFERENCES identity.tenants(id)" in next(d for k, _, d in alerts if k == "f")
+    assert next(d for k, _, d in alerts if k == "f") == "FOREIGN KEY (tenant_id) REFERENCES identity.tenants(id)", \
+        "no ON DELETE / ON UPDATE action: the default restricts (M10)"
 
     investigations = _jobs_constraints(migrated_database, "investigations")
     assert sorted((kind, cols) for kind, cols, _ in investigations if kind != "c") == sorted([
         ("f", ("alert_id", "tenant_id")), ("p", ("id",)),
         ("u", ("alert_id", "attempt", "request_key", "tenant_id"))])
     foreign = next(d for k, _, d in investigations if k == "f")
-    assert "REFERENCES jobs.alerts(tenant_id, id)" in foreign
+    assert foreign == "FOREIGN KEY (tenant_id, alert_id) REFERENCES jobs.alerts(tenant_id, id)", \
+        "no ON DELETE / ON UPDATE action: delete and cascade are the store's, under the alert lock (M10, O10)"
     [check] = [d for k, _, d in investigations if k == "c"]
     for stage in ("queued", "running", "completed", "unparseable", "failed", "aborted"):
         assert f"'{stage}'" in check

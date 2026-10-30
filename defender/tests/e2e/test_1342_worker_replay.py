@@ -6,6 +6,7 @@ seams (an unboxed executor handed through the lifecycle's `start_box` seam, neve
 a replay model closing with the golden's disposition). The row is read back from the database."""
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -66,3 +67,10 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         assert Path(runs / f"{inv.investigation_id}.launch.json").is_file()
         assert json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8")) == {
             "setup": "done", "box": "started", "report_committed": True, "scrub_verified": True}
+        from defender.records import RunPaths
+
+        golden_bytes = (golden / "alert.json").read_bytes()
+        launch = json.loads((runs / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
+        held = RunPaths(runs / inv.investigation_id).alert.read_bytes()
+        assert held == (runs / f"{inv.investigation_id}.alert.json").read_bytes() == golden_bytes
+        assert hashlib.sha256(held).hexdigest() == launch["digest"]

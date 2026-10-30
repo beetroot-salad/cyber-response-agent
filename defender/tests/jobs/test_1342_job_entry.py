@@ -168,6 +168,48 @@ def test_o6_a_job_with_a_valid_launch_record_sets_up_and_runs_the_lifecycle(scen
     assert scene.job_end(run_id) == SETTLED
 
 
+def test_o6_the_runs_input_alert_is_the_launch_files_exact_bytes_and_hashes_to_the_record(scene):
+    """The alert the run holds equals the alert file byte for byte (trailing newline too) and matches the launch digest. (O6, O2, M5)"""
+    from defender.records import RunPaths
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    wanted = json.loads((scene.runs / f"{run_id}.launch.json").read_text(encoding="utf-8"))["digest"]
+
+    ran = run_job(scene, run_id)
+
+    assert ran.raised is None, ran
+    held = RunPaths(scene.runs / run_id).alert.read_bytes()
+    assert ALERT_BYTES.endswith(b"\n"), "premise: the fixture ends in a newline"
+    assert held == (scene.runs / f"{run_id}.alert.json").read_bytes() == ALERT_BYTES
+    assert hashlib.sha256(held).hexdigest() == wanted
+
+
+def test_m5_the_alert_file_is_read_once_and_the_digest_is_checked_on_those_bytes(scene, monkeypatch):
+    """One admission read; a file swapped after it changes neither the verdict nor the bytes the run holds. (M5)"""
+    from defender.records import RunPaths, formats
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    alert_file = scene.runs / f"{run_id}.alert.json"
+    real, reads = formats.read_operator_alert, []
+
+    def read_then_swap(path: Any) -> bytes:
+        raw = real(path)
+        reads.append(Path(path).name)
+        Path(path).write_bytes(b'{"swapped": true}\n')  # a later read would see these bytes
+        return raw
+
+    monkeypatch.setattr(formats, "read_operator_alert", read_then_swap)  # lint-monkeypatch: ok — a counting wrapper of the one read, no seam exists for it
+
+    ran = run_job(scene, run_id)
+
+    assert reads == [alert_file.name], f"the alert file was read {len(reads)} times"
+    assert ran.raised is None and ran.calls["lifecycle"] == 1, ran
+    assert RunPaths(scene.runs / run_id).alert.read_bytes() == ALERT_BYTES
+    assert scene.job_end(run_id) == SETTLED
+
+
 _REFUSALS = {
     "no-launch-record": dict(launch=None),
     "launch-names-another-tenant": dict(launch="tenant"),
@@ -353,26 +395,68 @@ def _lifecycle(s: Scene, *, investigate: Any, start_box: Any = None, stop_box: A
         scrub=scrub if scrub is not None else verdict_scrub)
 
 
-def _investigate(ran: Ran, **summary_kw: Any):
+def _investigate(ran: Ran, *, without: str | None = None, **summary_kw: Any):
     def investigate(**_kw: Any) -> dict[str, Any]:
         ran.calls["lifecycle"] += 1
-        return summary(**summary_kw)
+        doc = summary(**summary_kw)
+        if without is not None:
+            del doc[without]
+        return doc
     return investigate
+
+
+def _verdict_scrub(verdict: dict[str, Any] | None):
+    """A scrub seam that leaves this host verdict (`None`: none at all) beside the folder."""
+    def scrub(tree: Path, *, write_verdict: Any) -> None:
+        if verdict is not None:
+            write_verdict(verdict)
+    return scrub
 
 
 @pytest.mark.parametrize(("committed", "verified", "want"), [
     (True, True, SETTLED),
     (False, True, {**SETTLED, "report_committed": False}),
+    (True, False, {**SETTLED, "scrub_verified": False}),
+    (False, False, {**SETTLED, "report_committed": False, "scrub_verified": False}),
 ])
 def test_o8_report_committed_comes_from_the_drivers_summary(scene, committed, verified, want):
     """The job-end record carries the driver summary's `report_committed`, and the scrub verdict's `ran`. (O8, M2)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     ran = Ran()
+    scrub = _verdict_scrub({"ran": verified, "reason": "walk"})
 
-    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran, report_committed=committed)))
+    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(
+        scene, investigate=_investigate(ran, report_committed=committed), scrub=scrub))
 
     assert scene.job_end(run_id) == want
+
+
+def test_m2_a_summary_without_the_report_committed_key_is_not_a_committed_report(scene):
+    """A driver summary that lacks `report_committed` records `report_committed: false`. (M2)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    ran = Ran()
+
+    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(
+        scene, investigate=_investigate(ran, without="report_committed")))
+
+    assert scene.job_end(run_id) == {**SETTLED, "report_committed": False}
+
+
+@pytest.mark.parametrize("verdict", [{"ran": False, "reason": "unreadable entry"}, {"reason": "no ran key"}, None],
+                         ids=["ran-false", "ran-missing", "no-verdict-file"])
+def test_o8_scrub_verified_comes_from_the_host_scrub_verdict_not_from_the_lifecycle_returning(scene, verdict):
+    """A lifecycle that returns normally with `ran: false`, no `ran`, or no verdict file records `scrub_verified: false`. (O8)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    ran = Ran()
+
+    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(
+        scene, investigate=_investigate(ran), scrub=_verdict_scrub(verdict)))
+
+    assert ran.raised is None, ran
+    assert scene.job_end(run_id) == {**SETTLED, "scrub_verified": False}
 
 
 def test_o8_a_tree_the_scrub_found_tainted_is_not_verified(scene):
@@ -523,8 +607,13 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
 
     monkeypatch.setattr(run_common, "enqueue_curation", enqueue)  # lint-monkeypatch: ok — a tripwire on the module attribute the job entry would reach; no seam exists by design
     wire = _Tripwire()
-    for name in ("open_case_ticket", "record_case_ticket"):
-        monkeypatch.setattr(run_py._default_ticket_writer, name, getattr(wire, name))  # lint-monkeypatch: ok — same tripwire, ticket writer
+    writer_module = run_py._default_ticket_writer
+    real_open, real_record = writer_module.open_case_ticket, writer_module.record_case_ticket
+    # the writer's own entry points swallow every fault, and an import-time alias escapes a patch of the
+    # public names: trip the names both entry points resolve at call time, recording before raising
+    for name in ("open_case_ticket", "record_case_ticket", "_verb_context", "_config_of", "_post_comment",
+                 "_write_receipt"):
+        monkeypatch.setattr(writer_module, name, getattr(wire, name))  # lint-monkeypatch: ok — same tripwire, ticket writer
 
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
@@ -535,6 +624,14 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     assert got.calls["lifecycle"] == 1, got
     assert got.raised is None, got
     assert (tripped, wire.called) == ([], [])
+    # control: the tripwire is live, so an alias of the real entry points would have been caught
+    from types import SimpleNamespace
+    probe = SimpleNamespace(run_dir=tmp_path / "probe")
+    real_open(probe, tenant=None, defender_dir=tmp_path, env={})
+    with contextlib.suppress(AssertionError):  # the record leg's own handler reaches another tripped name
+        real_record(probe, tenant=None, defender_dir=tmp_path, env={}, truncated_by=None, closed_before_cut=False)
+    assert wire.called.count("_verb_context") == 2
+    wire.called.clear()
     # a helper that captured `enqueue_curation` at definition time escapes the module patch: look at disk too
     made = [k for k in set(tree(scene.root)) - before if re.search(r"curat|queue|learn", k, re.IGNORECASE)]
     assert made == [], f"the job lane left curation state behind: {made}"
@@ -667,6 +764,8 @@ def test_o7_a_sigterm_is_one_keyboard_interrupt_and_later_ones_do_not_interrupt_
         proc.wait(timeout=30)
     assert (marks / "interrupted").read_text(encoding="utf-8") == "KeyboardInterrupt"
     assert (marks / "stop-box-done").exists(), "a second SIGTERM interrupted the teardown"
+    assert scene.job_end(run_id) == {"setup": "done", "box": "started", "report_committed": False,
+                                     "scrub_verified": False}, "an interrupted run still leaves its job-end record"
 
 
 _INTERMEDIATE = """
@@ -675,6 +774,30 @@ child = subprocess.Popen(sys.argv[2:])
 open(sys.argv[1], "w").write(str(child.pid))
 time.sleep(600)
 """
+
+
+def test_o7_the_parent_check_runs_with_the_death_signal_already_set(scene, monkeypatch):
+    """When the check of the given parent pid runs, the process's parent-death signal is already SIGTERM. (O7)"""
+    from defender import run as run_py
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.prctl(1, 0)  # PR_SET_PDEATHSIG: clear, so only the entry itself can have set it
+    real, seen = run_py._require_parent, []
+
+    def observing(parent_pid: int) -> None:
+        got = ctypes.c_int(-1)
+        libc.prctl(2, ctypes.byref(got))  # PR_GET_PDEATHSIG
+        seen.append(got.value)
+        real(parent_pid)
+
+    monkeypatch.setattr(run_py, "_require_parent", observing)  # lint-monkeypatch: ok — an observer of the entry's own check, no seam exists for it
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+
+    ran = run_job(scene, run_id)
+
+    assert ran.raised is None, ran
+    assert seen == [int(signal.SIGTERM)], "the parent check ran before the death signal was set (a race with the worker's death)"
 
 
 def test_o7_a_child_ends_through_its_box_teardown_when_its_parent_is_killed(scene, tmp_path):

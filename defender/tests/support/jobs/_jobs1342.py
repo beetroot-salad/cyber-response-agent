@@ -161,6 +161,7 @@ CHILD_SCRIPT = textwrap.dedent("""
         "data_root": os.environ.get("DEFENDER_DATA_ROOT"), "grandchild": grandchild,
         "launch_at_start": (runs / f"{run_id}.launch.json").is_file(),
         "alert_at_start": (runs / f"{run_id}.alert.json").is_file(),
+        "stdio": [[os.fstat(fd).st_dev, os.fstat(fd).st_ino] for fd in (1, 2)],
     }), encoding="utf-8")
     event("start")
     if spec.get("print"):
@@ -179,6 +180,13 @@ CHILD_SCRIPT = textwrap.dedent("""
         path = runs / fill(rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(bytes.fromhex(hexbytes))
+    for rel, (head, size) in spec.get("padded", {}).items():
+        path = runs / fill(rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(head.encode("utf-8"))
+            for _ in range(size // (1 << 20)):
+                handle.write(b" " * (1 << 20))
     for rel, (head, size) in spec.get("sparse", {}).items():
         path = runs / fill(rel)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -199,7 +207,8 @@ class ScriptedChild:
     """`child_argv` for a worker: every launch runs `CHILD_SCRIPT` with this spec.
 
     `files` (text), `binary` (hex), `sparse` (`{head, size}`), `links` (symlink targets) and `dirs`
-    name what the child leaves in the runs container; `term` is how it takes SIGTERM (`default`,
+    name what the child leaves in the runs container (`padded`: `{head, size}`, the head then spaces
+    up to `size` bytes, so a document that stays valid however much of it is read); `term` is how it takes SIGTERM (`default`,
     `ignore`, or `mark`: touch `term_mark` and exit); `grandchild` starts a `sleep` in its group."""
 
     where: Path
@@ -207,6 +216,7 @@ class ScriptedChild:
     files: dict[str, str] = dataclasses.field(default_factory=dict)
     binary: dict[str, str] = dataclasses.field(default_factory=dict)
     sparse: dict[str, tuple[str, int]] = dataclasses.field(default_factory=dict)
+    padded: dict[str, tuple[str, int]] = dataclasses.field(default_factory=dict)
     links: dict[str, str] = dataclasses.field(default_factory=dict)
     dirs: list[str] = dataclasses.field(default_factory=list)
     exit: int = 0
@@ -227,7 +237,7 @@ class ScriptedChild:
     def spec_dict(self) -> dict[str, Any]:
         return {
             "runs": str(self.runs), "seen_dir": str(self.seen_dir), "events": str(self.events_path),
-            "files": self.files, "binary": self.binary, "sparse": self.sparse, "links": self.links,
+            "files": self.files, "binary": self.binary, "sparse": self.sparse, "padded": self.padded, "links": self.links,
             "dirs": self.dirs, "exit": self.exit, "term": self.term, "term_mark": self.term_mark,
             "grandchild": self.grandchild, "print": self.printed,
             "wait_for": None if self.wait_for is None else str(self.wait_for),
@@ -286,6 +296,33 @@ class StandInContainers:
     def remove(self, name: str) -> None:
         self.calls.append(("remove", name))
         (self.where / name).unlink()
+
+
+class FaultyContainers(StandInContainers):
+    """The stand-in containers whose `exists` or `remove` (named by `fail`) raises: a daemon that
+    cannot be asked or will not remove."""
+
+    def __init__(self, where: Path, *, fail: str) -> None:
+        super().__init__(where)
+        self.fail = fail
+
+    def exists(self, name: str) -> bool:
+        if self.fail == "exists":
+            self.calls.append(("exists", name))
+            raise RuntimeError("the container daemon cannot be asked")
+        return super().exists(name)
+
+    def remove(self, name: str) -> None:
+        if self.fail == "remove":
+            self.calls.append(("remove", name))
+            raise RuntimeError("the container daemon will not remove it")
+        super().remove(name)
+
+
+def fd_identity(fd: int) -> list[int]:
+    """`[device, inode]` of what `fd` is open on, comparable with a child's `seen()["stdio"]`."""
+    found = os.fstat(fd)
+    return [found.st_dev, found.st_ino]
 
 
 def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], *,

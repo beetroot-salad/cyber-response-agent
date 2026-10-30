@@ -105,6 +105,44 @@ def test_o14_the_fake_stamps_a_created_investigation_with_its_request_key_and_at
     assert (inv.request_key, inv.attempt) == ("req-9", 1)
 
 
+def _cancel(status):
+    """Cancel an investigation of this stage in a fresh fake; returns the store and the outcome or the error."""
+    async def run():
+        store = InMemoryStore(lambda: NOW)
+        store.add_investigation("t", models.Investigation(
+            investigation_id="i-1", alert_id="a-1", status=status, created_at=NOW,
+            cost_usd=0.0, request_key="k1", attempt=1))
+        try:
+            return store, await store.cancel_investigation("t", "i-1")
+        except ports.Conflict as conflict:
+            return store, conflict
+
+    return anyio.run(run)
+
+
+def test_o9_the_fake_cancels_a_queued_investigation_as_aborted_with_reason_cancelled():
+    """Queued becomes `aborted` with `failure_reason` `cancelled` and a finish time, as the job store's cancel does. (O9, O14)"""
+    _, got = _cancel("queued")
+    assert (got.status, got.failure_reason, got.finished_at) == ("aborted", "cancelled", NOW)
+
+
+def test_o9_the_fake_refuses_to_cancel_a_running_investigation_and_leaves_it_running():
+    """Running is a `Conflict` ("cannot cancel a running investigation yet"); the stored row is unchanged. (O9, O14)"""
+    store, got = _cancel("running")
+    assert isinstance(got, ports.Conflict), got
+    assert "running investigation yet" in str(got)
+    assert anyio.run(store.get_investigation, "t", "i-1").status == "running"
+
+
+@pytest.mark.parametrize("status", ["completed", "unparseable", "failed", "aborted"])
+def test_o9_the_fake_refuses_to_cancel_an_ended_investigation_and_leaves_it_as_it_was(status):
+    """A terminal stage is a `Conflict` ("already ended"); the stored row keeps its stage. (O9, O14)"""
+    store, got = _cancel(status)
+    assert isinstance(got, ports.Conflict), got
+    assert "already ended" in str(got)
+    assert anyio.run(store.get_investigation, "t", "i-1").status == status
+
+
 def test_m11_the_client_request_id_describes_the_latest_attempt():
     """`ClientRequestId`'s text says it answers the latest attempt of the request the id started. (M11)"""
     description = typing.get_args(models.ClientRequestId)[1].description
