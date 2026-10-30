@@ -52,7 +52,8 @@ def test_an_invitation_answers_alike_for_new_existing_and_invited_people_before_
     assert (world.signin.every_call, world.mail.attempts, len(world.signin.create_calls)) == (calls, mails, accounts)
 
 
-@pytest.mark.parametrize("email", ["a\x00b@n.example", "\x1fnew@n.example", "new@n.example\x85"])
+@pytest.mark.parametrize("email", ["a\x00b@n.example", "\x1fnew@n.example", "new@n.example\x85",
+                                   "\u200bnew@n.example", "new\u202e@n.example", "\ufeffnew@n.example"])
 def test_an_email_with_a_control_character_is_invalid_input_and_invites_nobody(email: str) -> None:
     """#1349 B1.1: a 422 like any malformed email, not a server error and not a repaired address."""
     world, ann, _ = two_tenants()

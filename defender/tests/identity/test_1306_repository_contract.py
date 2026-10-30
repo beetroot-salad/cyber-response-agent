@@ -196,6 +196,9 @@ async def test_the_seeder_refuses_a_duplicate_email_in_any_case(seeded):
     "ann@x.org\x85",   # ditto, at the end
     "an\x07n@x.org",   # inside
     "a\ud800b@x.org",  # a lone surrogate: not UTF-8 at all
+    "\u200bann@x.org",  # invisible format characters: look like ann@x.org, never match it
+    "ann\u202e@x.org",
+    "\ufeffann@x.org",  # a byte-order mark, as a file saved with one starts
 ])
 async def test_an_email_with_a_control_or_unencodable_character_is_refused_and_nothing_is_written(seeded, email):
     """#1349 B1.2: both repositories refuse it alike, never repair it into another address."""
@@ -208,6 +211,13 @@ async def test_an_email_with_a_control_or_unencodable_character_is_refused_and_n
     assert await seeded.user_by_email("ann@x.org") is None
     plain = await seeded.ensure_user(" \tAnn@X.org\r\n", now=NOW)  # positive control: ordinary whitespace is trimmed
     assert plain.email == "ann@x.org"
+
+
+@pytest.mark.parametrize("email", ["ann@x.org\u00a0", "\u3000Ann@X.org", "\u2028ann@x.org\u2009"])
+async def test_unicode_whitespace_around_an_email_is_trimmed(seeded, email):
+    """#1349: a non-breaking or other Unicode space pasted around an address is not part of it."""
+    assert (await seeded.ensure_user(email, now=NOW)).email == "ann@x.org"
+    assert (await seeded.user_by_email("ann@x.org")) is not None
 
 
 async def test_a_signin_account_is_recorded_once(seeded):

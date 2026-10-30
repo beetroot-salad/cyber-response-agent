@@ -35,11 +35,25 @@ def _utc_now() -> _dt.datetime:
 
 
 def _server_base(server_url: str) -> str:
-    """An absolute http(s) URL with a host and no query or fragment; a path prefix is kept."""
+    """An absolute http(s) URL with a host, a valid port if any, and no credentials, query, fragment
+    or whitespace; a path prefix is kept, but not one reaching into `/realms` (that is the issuer)."""
+    def refuse(why: str) -> ValueError:
+        return ValueError(f"keycloak server_url {server_url!r} {why}")
+
+    if any(c.isspace() or not c.isprintable() for c in server_url):
+        raise refuse("contains whitespace or a control character")
     parts = urllib.parse.urlsplit(server_url)
     if parts.scheme not in ("http", "https") or not parts.hostname or parts.query or parts.fragment \
             or server_url.endswith(("?", "#")):
-        raise ValueError(f"keycloak server_url {server_url!r} is not an absolute http(s) URL without query or fragment")
+        raise refuse("is not an absolute http(s) URL without query or fragment")
+    try:
+        parts.port  # noqa: B018 — reading it is the check: a non-numeric or out-of-range port raises
+    except ValueError:
+        raise refuse("has an invalid port") from None
+    if parts.username is not None:
+        raise refuse("carries credentials")
+    if "realms" in parts.path.split("/"):
+        raise refuse("names a realm path; give the server's base, not the issuer")
     return server_url.rstrip("/")
 
 

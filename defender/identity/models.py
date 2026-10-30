@@ -23,19 +23,23 @@ from .errors import DataRuleViolation
 SCHEMA = "identity"
 
 
-#: Only ordinary whitespace is trimmed: a bare `strip()` also removes control characters, which
-#: would store an address the caller never gave (#1349).
+#: The control characters that are also ordinary whitespace, trimmed at the ends before the refusal;
+#: a bare `strip()` would also remove other control characters, storing an address the caller never
+#: gave (#1349).
 _TRIMMED = " \t\r\n"
+#: Control characters, lone surrogates (not valid text) and invisible format characters (zero-width
+#: space, byte-order mark, direction overrides): each makes an address that looks like another.
+_REFUSED = ("Cc", "Cs", "Cf")
 
 
 def normalize_email(raw: str) -> str:
-    """The one form an email is stored and compared in. An email with a control character, or one
-    that is not valid text (a lone surrogate), is refused, never repaired: PostgreSQL cannot store
-    NUL, and both repositories must refuse alike."""
-    email = raw.strip(_TRIMMED).lower()
-    if any(unicodedata.category(c) in ("Cc", "Cs") for c in email):
-        raise DataRuleViolation(f"{raw!r} is not an email address: it has a control character")
-    return email
+    """The one form an email is stored and compared in. An email with a control, invisible or
+    invalid character is refused, never repaired: PostgreSQL cannot store NUL, and both repositories
+    must refuse alike. Any other Unicode whitespace around it (a non-breaking space) is trimmed."""
+    email = raw.strip(_TRIMMED)
+    if any(unicodedata.category(c) in _REFUSED for c in email):
+        raise DataRuleViolation(f"{raw!r} is not an email address: it has a control or invisible character")
+    return email.strip().lower()
 
 
 #: An email field normalized as it is built, so nothing after the boundary normalizes again.

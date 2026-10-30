@@ -269,7 +269,7 @@ def test_entering_the_apps_lifespan_runs_start_and_the_senders_first_pass() -> N
         assert tenants_of(world.sign_in(ME)) == {LAB}
 
 
-@pytest.mark.parametrize("email", ["a\x00b@x.example", "\x1fops@x.example"])
+@pytest.mark.parametrize("email", ["a\x00b@x.example", "\x1fops@x.example", "\ufeffops@x.example"])
 def test_a_bootstrap_file_naming_an_email_with_a_control_character_is_refused_at_load(email: str) -> None:
     """#1349 B1.3: refused as the file is read, never stored as a repaired address."""
     from pydantic import ValidationError
@@ -281,3 +281,5 @@ def test_a_bootstrap_file_naming_an_email_with_a_control_character_is_refused_at
     with pytest.raises(ValidationError):
         Bootstrap(administrators=(), tenants={LAB: (email,)})
     assert Bootstrap(administrators=(" Ops@X.example ",), tenants={}).administrators == ("ops@x.example",)
+    # a non-breaking space copied from a web page is trimmed, so the administrator stays the same person
+    assert Bootstrap(administrators=("ops@x.example\u00a0",), tenants={}).administrators == ("ops@x.example",)

@@ -215,9 +215,10 @@ class Problem(BaseModel):
 
 # --- people, memberships and sign-in (#1306) ---------------------------------------------------
 
-#: An email as typed: the shape is checked, deliverability is not. Stored lower-cased. Control
-#: characters (Unicode Cc) are spelled out: `\s` does not cover all of them in every engine.
-EMAIL_PATTERN = r"^[^@\s\x00-\x1f\x7f-\x9f]+@[^@\s\x00-\x1f\x7f-\x9f]+$"
+#: An email as typed: the shape is checked, deliverability is not. Stored lower-cased. Control and
+#: invisible format characters (Unicode Cc, Cf) are named: `\s` does not cover them, and the identity
+#: rule refuses them.
+EMAIL_PATTERN = r"^[^@\s\p{Cc}\p{Cf}]+@[^@\s\p{Cc}\p{Cf}]+$"
 
 
 class InviteCreate(BaseModel):

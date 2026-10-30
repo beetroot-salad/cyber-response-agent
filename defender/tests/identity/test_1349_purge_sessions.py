@@ -22,13 +22,13 @@ ROOT = Path(__file__).resolve().parents[3]  # the checkout under test, put first
 HOUR = dt.timedelta(hours=1)
 
 
-def purge(dsn: str | None) -> subprocess.CompletedProcess[str]:
+def purge(dsn: str | None, python_flags: list[str] = []) -> subprocess.CompletedProcess[str]:  # noqa: B006 — never mutated
     """The command as a deployment's scheduler runs it: only the DSN in the environment."""
     child = {k: v for k, v in os.environ.items() if k != "DEFENDER_DATABASE_DSN"}
     child["PYTHONPATH"] = os.pathsep.join([str(ROOT), os.environ.get("PYTHONPATH", "")])
     if dsn is not None:
         child["DEFENDER_DATABASE_DSN"] = dsn
-    return subprocess.run([sys.executable, "-m", "defender.cli.purge_sessions"], env=child, cwd=ROOT,
+    return subprocess.run([sys.executable, *python_flags, "-m", "defender.cli.purge_sessions"], env=child, cwd=ROOT,
                           capture_output=True, text=True, timeout=120)
 
 
@@ -74,10 +74,14 @@ def test_the_command_refuses_a_database_not_at_the_migrations_head_and_deletes_n
     done = purge(migrated)
     assert done.returncode != 0
     assert "f00dfeedbeef" in done.stderr, done.stderr
+    assert done.returncode == 1, done.stderr  # a refusal, not a crash
+    assert "Traceback" not in done.stderr, done.stderr
     assert _left(migrated) == {hashlib.sha256(b"old").hexdigest()}
 
 
-def test_the_command_without_a_database_refuses_loudly():
-    done = purge(None)
-    assert done.returncode == 2
+@pytest.mark.parametrize("optimize", [[], ["-OO"]])
+def test_the_command_without_a_database_refuses_loudly(optimize):
+    """Also under -OO, which strips the docstrings a help text might be built from."""
+    done = purge(None, optimize)
+    assert done.returncode == 2, done.stderr
     assert "DEFENDER_DATABASE_DSN" in done.stderr

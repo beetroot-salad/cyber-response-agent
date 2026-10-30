@@ -12,7 +12,7 @@ import os
 import sys
 
 from defender._log import configure_from_env
-from defender.migrations import check_version
+from defender.migrations import RevisionMismatch, check_version
 
 from defender.identity.postgres import PostgresIdentityRepository
 
@@ -28,12 +28,17 @@ async def _purge(dsn: str) -> int:
 
 
 def main() -> int:
-    argparse.ArgumentParser(prog="python -m defender.cli.purge_sessions", description=__doc__.splitlines()[0]).parse_args()
+    argparse.ArgumentParser(prog="python -m defender.cli.purge_sessions",
+                            description="Remove the sessions sign-in already refuses as expired.").parse_args()
     dsn = os.environ.get(DSN_ENV)
     if not dsn:
         print(f"{DSN_ENV} is not set; it names the database to purge", file=sys.stderr)
         return 2
-    check_version(dsn)
+    try:
+        check_version(dsn)
+    except RevisionMismatch as refused:
+        print(f"purge_sessions: refused, nothing removed: {refused}", file=sys.stderr)
+        return 1
     print(f"purged {asyncio.run(_purge(dsn))} expired sessions")
     return 0
 

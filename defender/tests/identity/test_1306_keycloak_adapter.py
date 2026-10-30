@@ -625,6 +625,10 @@ async def test_the_server_url_replaces_what_comes_before_realms_in_the_issuer(kc
 @pytest.mark.parametrize("server_url", [
     "keycloak:8080", "//keycloak:8080", "ftp://keycloak:8080", "http://keycloak:8080/?x=1",
     "http://keycloak:8080/#f", "", "http:///auth",
+    "http://keycloak:8080\n", " http://keycloak:8080", "http://key\tcloak:8080",  # pasted with whitespace
+    "http://keycloak:abc", "http://keycloak:99999",  # a port that is not one
+    "http://user:pw@keycloak:8080",  # credentials in the address
+    "http://kc-int:8080/realms/defender", "http://kc-int:8080/auth/realms",  # the issuer, not the server
 ])
 def test_a_malformed_server_url_refuses_construction(server_url):
     with pytest.raises(ValueError, match="server_url"):
