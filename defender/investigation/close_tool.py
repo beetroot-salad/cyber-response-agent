@@ -267,8 +267,10 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     deps: AgentDeps, disposition: str, fields: _CloseFields, record: dict, *,
     validator: ArtifactValidator, evidence: str | None = None,
 ) -> CloseResult:
-    """Write the review record, then the report; both are attempted, and any fault is raised
-    only after both.
+    """Write the review record, then the report; both are attempted, and a fault is raised only
+    after both. Once the report is on disk the close stands (#1342 M2: terminality follows the
+    report alone), so a record fault beside it is logged, not raised: raised, it would end the
+    run as a crash after its report was committed.
 
     `fields.detail` (which may quote a stage) reaches only the record, never the report, so
     review prose stays out of the judge's prompt and the ticket bridge."""
@@ -306,8 +308,12 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
         state.closed = True
         state.disposition = disposition
 
-    if record_error is not None or report_error is not None:
-        raise record_error if record_error is not None else report_error  # type: ignore[misc]
+    if report_error is not None:
+        raise record_error if record_error is not None else report_error
+    if record_error is not None:
+        _logger.error(f"the review record of turn {turn_for_record} could not be written "
+                      f"({record_error!r}); the report is committed and the close stands")
+        record_path = None
     return CloseResult(
         outcome=fields.outcome, message=f"closed: {fields.outcome} (disposition={disposition})",
         material=fields.material, record_path=record_path, cause=fields.cause,

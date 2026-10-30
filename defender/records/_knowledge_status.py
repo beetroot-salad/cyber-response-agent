@@ -102,7 +102,23 @@ def read_knowledge_status(record: Path, stamp: Path) -> KnowledgeStatus | None:
     return knowledge_status(text, stamp_names_source=True)
 
 
+#: The API's word for a fresh export: the latest approved knowledge.
+API_CURRENT = "current"
+
+
+def api_knowledge(status: KnowledgeStatus | None) -> dict[str, str | None] | None:
+    """The one mapping from the host record's status to the API's `knowledge` shape (#1342 M6),
+    `{status, commit, stale_kind}`: `fresh` is `current`, `stale` and `pinned` keep their names,
+    the commit is carried and the publish's raw `reason` dropped (it never leaves the host).
+    `None` stays `None`: no status to show."""
+    if status is None:
+        return None
+    return {"status": API_CURRENT if status.kind == FRESH else status.kind,
+            "commit": status.commit, "stale_kind": status.stale_kind}
+
+
 __all__ = [
-    "FRESH", "OPERATOR", "PINNED", "STALE", "TRANSIENT", "UNREADABLE", "UNREADABLE_REASON",
-    "KnowledgeStatus", "knowledge_status", "read_knowledge_status",
+    "API_CURRENT", "FRESH", "OPERATOR", "PINNED", "STALE", "TRANSIENT", "UNREADABLE",
+    "UNREADABLE_REASON", "KnowledgeStatus", "api_knowledge", "knowledge_status",
+    "read_knowledge_status",
 ]

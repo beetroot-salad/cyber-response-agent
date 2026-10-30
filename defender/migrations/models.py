@@ -5,5 +5,6 @@ from __future__ import annotations
 
 from defender.database import Base
 from defender.identity import models as _identity  # noqa: F401 — registers identity's tables
+from defender.jobs import models as _jobs  # noqa: F401 — registers the job store's tables
 
 target_metadata = Base.metadata

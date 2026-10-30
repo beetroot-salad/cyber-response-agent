@@ -46,6 +46,12 @@ def _ids_after(rows: list[T], key: Callable[[T], str], after: str | None, limit:
     return [r for r in sorted(rows, key=key) if after is None or key(r) > after][:limit]
 
 
+def _api_knowledge(record_text: str | None, *, stamp_names_source: bool) -> InvestigationKnowledge | None:
+    """The API's `knowledge` for a run's host-held record, by the one mapping records owns."""
+    mapped = formats.api_knowledge(formats.knowledge_status(record_text, stamp_names_source=stamp_names_source))
+    return None if mapped is None else InvestigationKnowledge.model_validate(mapped)
+
+
 class _Table(dict[tuple[str, str], T]):
     """One tenant-keyed table."""
 
@@ -76,7 +82,6 @@ class InMemoryStore:
         self._ids = itertools.count(1)
         self._alerts: _Table[Alert] = _Table()
         self._investigations: _Table[Investigation] = _Table()
-        self._deleted: set[tuple[str, str]] = set()
         self._learning_jobs: _Table[LearningJob] = _Table()
         self._lessons: _Table[Lesson] = _Table()
         self._systems: _Table[SystemSettings] = _Table()
@@ -106,11 +111,7 @@ class InMemoryStore:
         stamp has none, or there is no run), by the rule `InvestigationsRepository` states."""
         key = (tenant_id, investigation_id)
         investigation = self._investigations[key]
-        status = formats.knowledge_status(
-            record_text, stamp_names_source=stamp_knowledge_source is not None)
-        knowledge = None if status is None else InvestigationKnowledge.model_validate({
-            "status": "current" if status.kind == formats.FRESH else status.kind,
-            "commit": status.commit, "stale_kind": status.stale_kind})
+        knowledge = _api_knowledge(record_text, stamp_names_source=stamp_knowledge_source is not None)
         updated = investigation.model_copy(update={"knowledge": knowledge})
         self._investigations[key] = updated
         return updated
@@ -135,7 +136,6 @@ class InMemoryStore:
         *,
         fired_after: _dt.datetime | None,
         fired_before: _dt.datetime | None,
-        severity: str | None,
         after: TimePosition | None,
         limit: int,
     ) -> list[AlertSummary]:
@@ -143,7 +143,6 @@ class InMemoryStore:
             a for a in self._alerts.of(tenant_id)
             if (fired_after is None or a.fired_at >= fired_after)
             and (fired_before is None or a.fired_at < fired_before)
-            and (severity is None or a.severity == severity)
         ]
         page = _newest_after(selected, lambda a: (a.fired_at, a.alert_id), after, limit)
         return [AlertSummary.model_validate(a.model_dump(exclude={"raw"})) for a in page]
@@ -156,11 +155,12 @@ class InMemoryStore:
     async def create_investigation(
         self, tenant_id: str, alert_id: str, client_request_id: str
     ) -> tuple[Investigation, bool]:
+        """Always a new attempt 1 stamped with the request key: the replay rules are the store's."""
         if await self.get_alert(tenant_id, alert_id) is None:
             raise UnknownReference(f"no alert {alert_id!r}")
         investigation = Investigation(
             investigation_id=self._mint("inv"), alert_id=alert_id, status="queued",
-            cost_usd=0.0, created_at=self._clock(),
+            request_key=client_request_id, attempt=1, cost_usd=0.0, created_at=self._clock(),
         )
         return self.add_investigation(tenant_id, investigation), True
 
@@ -169,14 +169,11 @@ class InMemoryStore:
     ) -> list[Investigation]:
         found = [
             i for i in self._investigations.of(tenant_id)
-            if (tenant_id, i.investigation_id) not in self._deleted
-            and (alert_id is None or i.alert_id == alert_id)
+            if alert_id is None or i.alert_id == alert_id
         ]
         return _newest_after(found, lambda i: (i.created_at, i.investigation_id), after, limit)
 
     async def get_investigation(self, tenant_id: str, investigation_id: str) -> Investigation | None:
-        if (tenant_id, investigation_id) in self._deleted:
-            return None
         return self._investigations.get((tenant_id, investigation_id))
 
     async def _existing(self, tenant_id: str, investigation_id: str) -> Investigation:
@@ -192,7 +189,7 @@ class InMemoryStore:
 
     async def delete_investigation(self, tenant_id: str, investigation_id: str) -> None:
         await self._existing(tenant_id, investigation_id)
-        self._deleted.add((tenant_id, investigation_id))
+        del self._investigations[(tenant_id, investigation_id)]
 
     # --- LearningJobsRepository ---------------------------------------------------------
 

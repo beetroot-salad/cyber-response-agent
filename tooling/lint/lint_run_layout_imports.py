@@ -82,7 +82,10 @@ _VE = "presentation/visualize_episode.py"
 #: module in no row gets no exemption.
 CATEGORIES: Mapping[str, Sequence[str]] = {
     # And every file of the runs repository (`_astlib.run_repository_files`, `_row_of`).
-    "owners": ("records/_episode_paths.py", "records/_episode_handle.py", "tenancy/_tenant.py"),
+    "owners": ("records/_episode_paths.py", "records/_episode_handle.py", "tenancy/_tenant.py",
+               # #1342 M1: the job lane's door, the one owner of the host files beside a job's
+               # run folder for the worker and the job entry (outside the door's pinned names).
+               "records/job_lane.py"),
     # N-a: the running investigation does not migrate; its record writes are #1165.
     "running-investigation": (
         "hooks/record_lead.py",

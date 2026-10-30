@@ -87,6 +87,8 @@
     "defender/identity/models.py: unused variable 'set_password_requested_at' (60% confidence)": "a record column the repositories write and the rows carry for the data model's audit (set-password and notification times, activation, update): read by the contract tests and the PostgreSQL mapping (the model is the table), not by service code.",
     "defender/identity/models.py: unused variable 'updated_at' (60% confidence)": "a record column the repositories write and the rows carry for the data model's audit (set-password and notification times, activation, update): read by the contract tests and the PostgreSQL mapping (the model is the table), not by service code.",
     "defender/migrations/__init__.py: unused function 'check_version' (60% confidence)": "test-only until #1083: the API server calls it at startup before its event loop starts (design #1339 D8); tests/migrations/test_1339_migrations.py exercises it.",
-    "defender/migrations/versions/0001_baseline.py: unused variable 'down_revision' (60% confidence)": "read by Alembic when it loads the revision file, which vulture cannot see."
+    "defender/migrations/versions/0001_baseline.py: unused variable 'down_revision' (60% confidence)": "read by Alembic when it loads the revision file, which vulture cannot see.",
+    "defender/jobs/store.py: unused method 'insert_alert' (60% confidence)": "test-only until the alert pull (a later piece of #1081) calls it: the trusted alert insert has no production caller yet. Driven by tests/jobs/test_1342_store.py, which CI's test job runs.",
+    "defender/migrations/versions/0002_jobs.py: unused variable 'down_revision' (60% confidence)": "read by Alembic when it loads the revision file, which vulture cannot see."
   }
 }

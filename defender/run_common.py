@@ -28,6 +28,7 @@ from defender.records.formats import TenantId, TenantRefused
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from defender.records.job_lane import Launched
     from defender.records.formats import ResumeWorld
     from defender.tenancy.run_knowledge import KnowledgeSource
 
@@ -42,6 +43,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     alert: Path, *, tenant: tenancy.Tenant, run: Run | None = None, model: str | None = None,
     world: ResumeWorld | None = None,
     settings: Path | None = None, knowledge: KnowledgeSource | None = None,
+    launch: Launched | None = None,
 ) -> Run:
     """Build the run directory of a fresh run and return the tenant-bound handle the run's later
     records are saved through. No caller names the run's id (#1279 A3): `run` is the handle the
@@ -54,7 +56,11 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     `settings` is the settings half the run reads (its run copy's, #1108 P4: the alert mapping
     comes from it) and `knowledge` the source of the knowledge it reads, whose commit the stamp
     records (O-B: the export copied, never a clone's HEAD). Both default to what a caller that
-    names no run copy has: the tenant's own folder, and a stamp that says nothing of knowledge."""
+    names no run copy has: the tenant's own folder, and a stamp that says nothing of knowledge.
+
+    `launch` is a job's checked launch record (#1342 O6, M5): `alert` is then its alert file, the
+    bytes admitted are compared to the record's digest (one read, as a sibling's are to its
+    record), and the stamp's label is the record's (the alert's title), not the file's name."""
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     if world is not None and run is None:
@@ -63,7 +69,8 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     started_at = _started_at()
     if settings is None:
         settings = tenancy.clone_halves(tenant)[1]
-    front_door = _admit_input(alert, settings=settings, world=world)
+    front_door = _admit_input(alert, settings=settings, world=world,
+                              digest=None if launch is None else launch.record.digest)
     world_id: str | None = None
     if run is None:
         try:
@@ -92,7 +99,8 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     _stamp(
         run, knowledge=knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
-        started_at=started_at, alert_label=_alert_label(alert),
+        started_at=started_at,
+        alert_label=_alert_label(alert) if launch is None else launch.record.label,
     )
     return run
 
@@ -111,12 +119,14 @@ class _FrontDoor:
     record: str
 
 
-def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None) -> _FrontDoor:
+def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None,
+                 digest: str | None = None) -> _FrontDoor:
     """Admit the operator's alert (A8) and settle its facts through the alert mapping of the
     run's `settings`, read once (A1) — or exit with the fixed reason, before a run folder
     exists. A sibling's input
     is its episode's copy of the source run's alert, carried with the record launch copied
-    beside it; neither is derived again."""
+    beside it; neither is derived again. A job's alert (`digest`, its launch record's) must be
+    the bytes its worker recorded."""
     try:
         raw = formats.read_operator_alert(alert)
         admitted = formats.admit(raw)
@@ -124,6 +134,9 @@ def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None) -> _
         sys.exit(f"[run.py] {refused}")
     except OSError as e:
         sys.exit(f"[run.py] the alert {alert} could not be read: {e}")
+    if digest is not None and admitted.digest != digest:
+        sys.exit(f"[run.py] the alert {alert} is not the one its launch record names: its digest "
+                 "differs from the record's")
     if world is not None:
         from defender.records.formats import EpisodePaths
 

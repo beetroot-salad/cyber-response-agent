@@ -100,8 +100,11 @@ from ._read import (
     displaced_tip as displaced_tip,
     ends_on_complete_pair as ends_on_complete_pair,
     fold_history as fold_history,
+    SessionRow as SessionRow,
     hydrate as hydrate,
+    list_sessions as list_sessions,
     main_session_id as main_session_id,
+    own_responses as own_responses,
     path_row_ids as path_row_ids,
     synthesized_flags as synthesized_flags,
 )

@@ -64,7 +64,6 @@ class AlertsRepository(Protocol):
         *,
         fired_after: _dt.datetime | None,
         fired_before: _dt.datetime | None,
-        severity: str | None,
         after: TimePosition | None,
         limit: int,
     ) -> list[AlertSummary]:
@@ -77,23 +76,23 @@ class AlertsRepository(Protocol):
 
 
 class InvestigationsRepository(Protocol):
-    """An investigation's `knowledge` is its run's HOST-held knowledge record (beside the run
-    dir, never the box-writable provenance stamp), mapped `fresh` -> `current`, `stale` ->
-    `stale` with its kind, `pinned` -> `pinned`, the commit carried and the publish's raw reason
-    dropped. Null when no record should exist: no run yet, or a run from before the record (its
-    stamp names no knowledge source). A record that is missing while the stamp names a source,
-    or that does not parse, is `{status: stale, stale_kind: operator, commit: null}` — never
-    claimed current (#1108 P4, OD22')."""
+    """An investigation's `knowledge` is stored on its row from its run's HOST-held knowledge
+    record (beside the run dir, never anything the box can write), mapped `fresh` ->
+    `current`, `stale` -> `stale` with its kind, `pinned` -> `pinned`, the commit carried and the
+    publish's raw reason dropped. Null when the run never started: setup was refused before the
+    run existed. A run that started but whose record is missing or does not parse is
+    `{status: stale, stale_kind: operator, commit: null}` — never claimed current (#1108 P4,
+    OD22')."""
 
     async def list_investigations(
         self, tenant_id: str, *, alert_id: str | None, after: TimePosition | None, limit: int
     ) -> list[Investigation]:
         """Up to `limit` strictly after `after`, newest first by `(created_at,
-        investigation_id)`; deleted investigations are left out, and never make a page short."""
+        investigation_id)`."""
         ...
 
     async def get_investigation(self, tenant_id: str, investigation_id: str) -> Investigation | None:
-        """`None` for a deleted investigation too."""
+        """`None` for an investigation this tenant does not have."""
         ...
 
 
@@ -131,6 +130,8 @@ AuditAction = Literal[
     "investigation.start",
     "investigation.cancel",
     "investigation.delete",
+    "investigation.claim",
+    "investigation.finish",
     "artifact.read",
     "learning_job.start",
     "system.update",
@@ -140,26 +141,28 @@ AuditAction = Literal[
 
 class WriteTransaction(Protocol):
     """One store transaction, opened for one tenant and one acting user. Everything written
-    through it — records and audit events — commits together when the `async with` block exits
-    normally, and none of it when the block raises."""
+    through it — the records — commits together when the `async with` block exits normally, and
+    none of it when the block raises. Audit events are emitted after commit, so a rolled-back
+    block emits none and an event can be lost in a crash between the commit and its emission."""
 
     async def create_investigation(
         self, alert_id: str, client_request_id: str
     ) -> tuple[Investigation, bool]:
         """Start an investigation of `alert_id`, or answer the one this request already has —
-        the rules are §4.1's (request-id replay, one live investigation per alert). Returns
-        `(investigation, created)`, `created` only when this call inserted the row.
-        `UnknownReference` for an alert this tenant does not have; `Conflict` for a repeated
-        request whose investigation was deleted since."""
+        the rules are §4.1's (the latest attempt of a repeated request, one live investigation
+        per alert). Returns `(investigation, created)`, `created` only when this call inserted
+        the row. `UnknownReference` for an alert this tenant does not have."""
         ...
 
     async def cancel_investigation(self, investigation_id: str) -> Investigation:
-        """Stop a live investigation. `NotFound`, or `Conflict` if it already ended."""
+        """Abort a queued investigation. `NotFound`; `Conflict` if it is running (not supported
+        yet) or already ended."""
         ...
 
     async def delete_investigation(self, investigation_id: str) -> None:
-        """Soft delete: hidden from every read, kept because lessons cite it. `NotFound`, or
-        `Conflict` while it is live."""
+        """Remove every attempt of the request the investigation belongs to (its run folders
+        stay). `NotFound`, or `Conflict` while any attempt is live. A replay of the request
+        afterwards starts a new investigation."""
         ...
 
     async def create_learning_job(

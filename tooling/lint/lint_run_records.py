@@ -78,7 +78,7 @@ OWNER_PACKAGE = "records"
 #: The owners outside the package. `records/_episode_handle.py` owns the episode folder with
 #: `records/_episode_paths.py` (#1105 rev 5.1's data model): its private `runs/` container, on which the
 #: runs repository's episode view is built, is an owner read.
-_OWNER_FLAT_MODULES = ("records/_episode_paths.py", "records/_episode_handle.py", "tenancy/_tenant.py")
+_OWNER_FLAT_MODULES = ("records/_episode_paths.py", "records/_episode_handle.py", "records/job_lane.py", "tenancy/_tenant.py")
 
 #: The owner modules by their path under `defender/`, the exempt set everything below is
 #: defined relative to. Matched by path, never by basename — a package submodule's basename
@@ -91,8 +91,8 @@ OWNER_MODULES: frozenset[str] = frozenset({
 
 #: The sweep set. Never shrinks below this.
 SWEEP_DIRS: tuple[str, ...] = ("investigation", "learning", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
-                               "api", "tenancy", "identity", "knowledge", "configuration", "records", "kit", "providers",
-                               "systems", "database", "migrations")
+                               "api", "tenancy", "identity", "jobs", "knowledge", "configuration", "records", "kit", "providers",
+                               "systems", "database", "migrations", "worker")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 

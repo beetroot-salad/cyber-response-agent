@@ -131,8 +131,8 @@ alerts(alert_id PK, tenant_id, source_vendor, remote_alert_id NOT NULL, signatur
        disposition_source, disposition_set_by, disposition_set_at, disposition_reason,
        investigation_count, last_investigated_at, ...)
 
-investigations(investigation_id PK, tenant_id, alert_id FK, investigation_counter, client_request_id,
-       job_status, claim_epoch,
+investigations(investigation_id PK, tenant_id, alert_id FK, request_key, attempt,
+       job_status, failure_reason, failure_message,
        defender_image_digest, defender_git_sha, lessons_corpus_version,
        container_kind, container_handle, claimed_by_worker, lease_expires_at, last_heartbeat_at, cost_so_far,
        disposition, confidence, cost, artifact_manifest, status_detail,
@@ -159,17 +159,22 @@ learning_jobs(learning_job_id PK, tenant_id, alert_id FK, investigation_id FK, c
   artifacts exist; URLs are minted per read (no durable signed URLs — they expire and aren't
   access-controlled).
 - `latest_*` — the projection fields (§2.4); derived, not authoritative.
-- `investigation_counter` — per-alert sequence number (1st, 2nd, … investigation of this alert), for
-  display; not an idempotency key.
+- `request_key` — the `client_request_id` of the request that started the investigation (a system
+  start, such as the alert pull, sets a key of its own). `attempt` — 1 for the first attempt under the
+  key, then 2, 3… for retries; it orders the chain and is the retry cap. The investigation id is per
+  attempt; `(tenant_id, alert_id, request_key, attempt)` is unique.
+- `failure_reason` / `failure_message` — set with `failed` or `aborted`: a reason from a fixed set
+  and a short message from our own code, never text from the run.
 - `job_status` — the execution **lifecycle** (§2.3), the only progress axis tracked. **No `phase` field** —
   within-run phase is inferred from `investigation.md` headers and that inference is fragile, so the live
   view is heartbeat-based (§4.5).
 - `cost` — final cost at completion; live `cost_so_far` is updated on the same row by the heartbeat.
-- **Infra is on the row, fenced by `claim_epoch`.** The single `investigations` row carries both durable
-  data and the playground-v2/infra/liveness of its *current* run (`container_kind`, `container_handle`,
-  `claimed_by_worker`, lease, heartbeat, `cost_so_far`). There is **no attempts table and no queue table**;
-  a recovery overwrites the infra columns in place. Mechanism — fencing, reconciler, recovery SQL — in
-  §4.1. A `runs` history table graduates only for per-run forensics (§6).
+- **Infra is on the row, one run per investigation.** The `investigations` row carries both durable
+  data and the playground-v2/infra/liveness of its run (`container_kind`, `container_handle`,
+  `claimed_by_worker`, lease, heartbeat, `cost_so_far`). There is **no attempts table and no queue table**:
+  a retry is a new investigation row under the same request key, linked by `attempt`, so no run is ever
+  overwritten and the run folder name is the investigation id. Mechanism — fencing, reconciler,
+  take-over — in §4.1. A `runs` history table graduates only for per-run forensics (§6).
 
 **The alert table is a thin index, not a system-of-record.** Be **loose** on SIEM-owned fields (store the
 full payload as opaque `raw_alert_json` JSONB, don't validate; don't mint per-field columns) and **strict**
@@ -191,8 +196,8 @@ owns, replacing the dev-era FS-presence heuristic). **`disposition`** is the out
 | `running`     | A container owns the investigation and should be heartbeating.                                               |
 | `completed`   | Terminal success: blobs uploaded, frontmatter parsed, metadata committed.                                    |
 | `unparseable` | Terminal: container exited cleanly but `report.md` frontmatter failed to parse — null disposition + note, artifacts kept. **Blocks learning**; recovery is a fresh investigation (§4.6). |
-| `failed`      | Terminal playground-v2/infra/runtime failure; retry is a new investigation.                                                |
-| `aborted`     | Terminal intentional stop/cancel, timeout, or supersession.                                                  |
+| `failed`      | Terminal playground-v2/infra/runtime failure, including a lapsed lease taken over by a retry; retry is a new investigation (a new attempt under the same request key). |
+| `aborted`     | Terminal intentional stop/cancel or timeout. Supersession by a retry is `failed`, not `aborted`.             |
 
 **`disposition`** (`malicious` / `benign` / `inconclusive`) is the outcome. Defender's `report.md`
 frontmatter is exactly `{case_id, disposition, confidence}` — free-form YAML with **no write-time
@@ -461,74 +466,68 @@ columns move.
 **Idempotency, enforced in the DAL _and_ by constraints.** Keyed by the local `alert_id`:
 `alerts(tenant_id, source_vendor, remote_alert_id)` unique; a partial unique index allowing at most one
 live (`queued`/`running`) investigation per `(tenant_id, alert_id)` — this is **both** the enqueue-dedup
-and the live-collapse guarantee; `client_request_id` unique per `(tenant_id, alert_id)` so a
-retried/double-clicked create collapses onto the same investigation. **This paragraph is the one
+and the live-collapse guarantee; `(tenant_id, alert_id, request_key, attempt)` unique, so a
+retried/double-clicked create collapses onto the same request. **This paragraph is the one
 statement of the start and replay rules**; the API's port (`defender/api/ports.py`) points here rather
-than restating them. A request id is bound **only to the investigation it created** (the row's own
-`client_request_id`): a request that collapsed onto a live investigation answers that one but is not
-bound to it, so a retry of it after that investigation ended starts a rerun. That retry needs a lost
-response and a gap of minutes; the price of keeping the binding in the row instead of a separate table.
-The DAL transaction `create_investigation_for_alert(alert, client_request_id)`, in order:
+than restating them. A request key is bound **only to the request that started it**: a request that
+collapsed onto a live investigation answers that one but is not recorded on it, so a retry of it after
+that investigation ended starts a rerun. That retry needs a lost response and a gap of minutes; the price
+of keeping the binding in the row instead of a separate table. A replay answers the **latest attempt** of
+its request, not the original: a client that asks again lands on the live retry.
+The DAL transaction `create_investigation_for_alert(alert, request_key)`, in order:
 
 1. lock the alert (`FOR UPDATE`);
-2. a row with this `(tenant_id, alert_id, client_request_id)` exists → this request already started it:
-   return it, `created=false`, whatever its status since (a repeat after it ended is never a rerun) —
-   unless it was deleted since, which is refused (`Conflict`): it is hidden from every read, and a
-   repeat must not start another;
+2. a row with this `(tenant_id, alert_id, request_key)` exists → this request already started it:
+   return its latest attempt (highest `attempt`), `created=false`, whatever its status since (a repeat
+   after it ended is never a rerun);
 3. a live investigation of the alert exists → return it, `created=false`, without recording the request
-   id on it;
-4. else insert (`job_status='queued'`, the request id on the row) and its `investigation.start` audit
-   row (§2.10); return it, `created=true`.
+   key on it;
+4. else insert attempt 1 (`job_status='queued'`, the request key on the row) and emit its
+   `investigation.start` audit event after the commit (§2.10); return it, `created=true`.
+
+**A replay after a delete is a new investigation.** Delete removes every attempt under the request key
+(refused with `Conflict` while any is live); the key's protection ends with its request, so the same key
+afterwards starts a new investigation with a new id. Ids are system-minted and never reused.
 
 Starting _another_ investigation: a live one **blocks** (returns the existing); only `failed`/`aborted`
 priors → fresh start, no friction; a `completed` prior → allowed but the UI requires an explicit "start
 another?" confirm (a **rerun** — new id, audited).
 
-**Claim and lease — short transactions.** A worker claims a queued (or stale-lease) row with
-`SELECT … FOR UPDATE SKIP LOCKED`, bumps `claim_epoch`, sets the lease, flips to `running`, commits. It
-must **not** hold a transaction while the 5–15 min container runs. Liveness is the container's heartbeat
-on its own row; a stale `last_heartbeat_at` past `lease_expires_at` with no live container is recoverable
-while non-terminal.
+**Claim — short transactions.** A worker claims the oldest queued row (`created_at`, ties by id) with
+`SELECT … FOR UPDATE SKIP LOCKED` and a compare-and-set to `running`, stamping `started_at`, and commits.
+It must **not** hold a transaction while the 5–15 min container runs. Every later write the worker makes
+for the row is conditional on the row still being `running`; a write that changes nothing is logged and
+the worker stops working on that row.
 
-**Recovery is in place, fenced by `claim_epoch`.** With one row, a recovery **overwrites** the infra
-columns (the dead run's infra lives only in logs — the accepted cost of one table). The hazard is a
-**zombie**: the reconciler declares a container dead on a stale lease and recovers, but the "dead"
-container was only partitioned. Recommend-only makes this externally harmless (below), but two writers
-would race. `claim_epoch` resolves it: each claim/recovery increments it and injects it into the container;
-the container is labeled `(investigation_id, claim_epoch)`; **every** infra and completion write is
-conditional on `claim_epoch = :my_epoch`, so a stale zombie touches 0 rows and exits.
+**A retry is a new investigation, not a recovery in place.** There is no `claim_epoch`. When a lease
+lapses, the lapsed investigation ends `failed` and a linked retry (the next `attempt` under the same
+request key) is queued in the same transaction; the dead run's folder is kept, and a late write from a
+"dead" worker finds its row no longer `running` and touches nothing. The hazard is a **zombie** — the
+reconciler declares a run dead on a stale lease but it was only partitioned — and the stage fence is what
+stops it: recommend-only makes the extra run externally harmless (below), and the zombie's terminal
+write changes 0 rows.
 
 ```sql
--- claim or recover (initial claim and stale-lease recovery are one path)
-UPDATE investigations
-SET claimed_by_worker = :worker, claim_epoch = claim_epoch + 1, job_status = 'running',
-    container_kind = :kind, lease_expires_at = now() + :ttl, last_heartbeat_at = now()
-WHERE investigation_id = :id
-  AND (job_status = 'queued'
-       OR (job_status = 'running' AND lease_expires_at < now()))   -- stale → reclaim in place
-RETURNING claim_epoch;                                             -- injected into the container
+-- claim
+UPDATE investigations SET job_status = 'running', started_at = :now
+WHERE investigation_id = :id AND job_status = 'queued'
+RETURNING investigation_id;
 
--- heartbeat (fenced)
-UPDATE investigations SET last_heartbeat_at = now(), cost_so_far = :c, lease_expires_at = now() + :ttl
-WHERE investigation_id = :id AND claim_epoch = :my_epoch;          -- 0 rows ⇒ superseded ⇒ exit
-
--- completion (commit point: blobs first, then this; fenced)
-UPDATE investigations SET job_status = 'completed', disposition = …, artifact_manifest = …
-WHERE investigation_id = :id AND claim_epoch = :my_epoch AND job_status = 'running';  -- 0 rows ⇒ zombie ⇒ discard + GC blobs
+-- every later worker write (fenced; completion shown)
+UPDATE investigations SET job_status = 'completed', disposition = …, cost = …
+WHERE investigation_id = :id AND job_status = 'running';           -- 0 rows ⇒ superseded ⇒ log and stop
 ```
 
-**Reconciler.** Lists containers by their `(investigation_id, claim_epoch)` label: an epoch below the
-row's `claim_epoch` is a zombie → kill; a `running` row with a stale lease and no live container at the
-current epoch → run the claim/recover statement. The label is the source of truth, so `container_handle`
-need not be unique. `cost_so_far` is overwritten on recovery (the dead run's spend stays in logs; make the
-final `cost` additive only if budget enforcement needs it); the dead run's partial blobs are orphans the
-GC sweeps.
+**Reconciler.** Lists containers labeled by `investigation_id`: a container whose row is no longer
+`running` is a zombie → kill; a `running` row with a stale lease and no live container → fail it and
+queue its retry. `cost_so_far` belongs to the run that wrote it; the dead run's partial blobs are orphans
+the GC sweeps.
 
-> **Recovery is unconditionally safe here: defender is recommend-only.** No `act` verbs → no external
+> **A repeat is unconditionally safe here: defender is recommend-only.** No `act` verbs → no external
 > side-effect to double-apply. _If act-mode graduates, recovery safety must be revisited — a
 > partially-acted investigation is no longer freely re-runnable._
 
-**Don't reach for Temporal yet.** A task table + status + `claim_epoch` + reconciler cron is right at this
+**Don't reach for Temporal yet.** A task table + status + a stage fence + reconciler cron is right at this
 scale. Graduate when orchestration grows multi-step retries/timeouts/human-in-loop — which surfaces first
 in learning (§4.3), not here (§6).
 

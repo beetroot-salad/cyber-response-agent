@@ -248,6 +248,12 @@ class BoxStartConflict(BoxFault):
     the box's name (O6). These are configuration and collision faults, not "no sandbox here"."""
 
 
+class BoxStartFault(BoxFault):
+    """The run box did not start (#1342 M3): raised by a job-lane run's lifecycle at its start
+    arm, chaining the start's own fault, so the job entry can tell a box that never started from
+    one whose teardown faulted (a plain `BoxFault` out of the same lifecycle)."""
+
+
 def _refuse_an_existing_container(docker: DockerFn, name: str) -> None:
     """The pre-create check (#1279 O6): every box name is fresh, so a container already holding
     it is never legitimate, whatever its state, and is neither named as ours nor removed.

@@ -185,18 +185,16 @@ async def list_alerts(
     caller: Caller,
     fired_after: Instant | None = None,
     fired_before: Instant | None = None,
-    severity: str | None = None,
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> Page[AlertSummary]:
     return await paginate(
         lambda after, n: deps.alerts.list_alerts(
             caller.tenant_id, fired_after=fired_after, fired_before=fired_before,
-            severity=severity, after=after, limit=n,
+            after=after, limit=n,
         ),
         _ALERT_ORDER, list_name="alerts", tenant_id=caller.tenant_id, cursor=cursor, limit=limit,
-        filters={"fired_after": _filter_moment(fired_after), "fired_before": _filter_moment(fired_before),
-                 "severity": severity},
+        filters={"fired_after": _filter_moment(fired_after), "fired_before": _filter_moment(fired_before)},
     )
 
 

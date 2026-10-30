@@ -647,12 +647,13 @@ def _probe_cwd_for_request(request: BoxRequest) -> Path:
     return Path("/tmp")
 
 
-def _opt_out_or_raise(fault: BoxFault) -> None:
+def _opt_out_or_raise(fault: BoxFault, *, require_sandbox: bool = False) -> None:
     """Without `DEFENDER_ALLOW_UNSANDBOXED=1` a startup fault aborts; with it, the caller
     degrades to `unboxed_executor` after a warning carrying the fault verbatim (so remedies
     such as the image build command still reach the operator). A `BoxStartConflict` is never
-    degraded (#1279 A2): the opt-out is for "no sandbox here", not for a leak or a collision."""
-    if isinstance(fault, BoxStartConflict):
+    degraded (#1279 A2): the opt-out is for "no sandbox here", not for a leak or a collision.
+    Nor is a start that requires its sandbox (#1342 R2, the job lane): the opt-out is not read."""
+    if require_sandbox or isinstance(fault, BoxStartConflict):
         raise fault
     if os.environ.get(_ALLOW_UNSANDBOXED) != "1":
         raise fault
@@ -688,16 +689,18 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     return env
 
 
-def start_box(
+def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's sandbox requirement
     run_dir_or_request: Path | BoxRequest, defender_dir: Path | None = None, *,
     spec: BoxSpec | None = None, docker: DockerFn = run_docker, tenant_agent: Path | None = None,
     write_verdict: Callable[[dict], None] | None = None,
     tenant_id: TenantId | None = None, staged_token: Path | None = None,
+    require_sandbox: bool = False,
 ) -> BoxExecutor:
-    """Start the run's box. `tenant_agent` is the run's agent half (its run copy's
-    `stage/agent/`, #1108 P4), bound read-only at the model view's `/agent`; `staged_token` is
-    the startup token beside it in the copy's `stage/`, read back through the box before the
-    executor is returned (O-A). `tenant_id` is accepted for callers that still pass it and is
+    """Start the run's box. `require_sandbox` refuses the unsandboxed opt-out whatever the
+    environment says (#1342 R2: a job-lane run never degrades to host execution).
+    `tenant_agent` is the run's agent half (its run copy's `stage/agent/`, #1108 P4), bound
+    read-only at the model view's `/agent`; `staged_token` is the startup token beside it in the
+    copy's `stage/`, read back through the box before the executor is returned (O-A). `tenant_id` is accepted for callers that still pass it and is
     not read: P2's in-box `.tenant-id` check is retired (identity is checked at publish). The
     tenant arguments are illegal with a `BoxRequest`, which carries its own mounts."""
     if isinstance(run_dir_or_request, BoxRequest):
@@ -722,7 +725,7 @@ def start_box(
         try:
             return _start_boxed_request(request, docker)
         except BoxFault as e:
-            if request.require_sandbox:
+            if request.require_sandbox or require_sandbox:
                 raise
             _opt_out_or_raise(e)
         return BoxExecutor(spec=request.spec,
@@ -731,13 +734,13 @@ def start_box(
 
     del tenant_id
     return _start_run_box(run_dir_or_request, defender_dir, spec, docker, tenant_agent,
-                          staged_token, write_verdict)
+                          staged_token, write_verdict, require_sandbox=require_sandbox)
 
 
 def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged token
     run_dir: Path, defender_dir: Path | None, spec: BoxSpec | None, docker: DockerFn,
     tenant_agent: Path | None, staged_token: Path | None,
-    write_verdict: Callable[[dict], None] | None,
+    write_verdict: Callable[[dict], None] | None, *, require_sandbox: bool = False,
 ) -> BoxExecutor:
     if defender_dir is None:
         raise TypeError("start_box(run_dir, defender_dir, ...) needs defender_dir")
@@ -760,7 +763,7 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
                             tenant_agent=tenant_agent, staged_token=staged_token,
                             write_verdict=write_verdict)
     except BoxFault as e:
-        _opt_out_or_raise(e)
+        _opt_out_or_raise(e, require_sandbox=require_sandbox)
     # The host runs the bash lane in the model view too (#1255 "Every mode"): over a per-run
     # staging tree, never the real runs folder.
     from ._stage import staged_executor
