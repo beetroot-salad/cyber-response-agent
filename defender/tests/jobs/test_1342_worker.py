@@ -573,6 +573,9 @@ argv = sys.argv[2:]
 with open(home / "calls.log", "a", encoding="utf-8") as log:
     log.write(json.dumps(argv) + "\\n")
 args = argv[1:] if argv[:1] and Path(argv[0]).name == "docker" else argv
+while args[:1] and args[0].startswith("-"):  # global flags before the verb
+    args = args[2:] if "=" not in args[0] and args[0] in ("--log-level", "-l", "--context", "-c",
+                                                          "--host", "-H", "--config") else args[1:]
 args = args[1:] if args[:1] == ["container"] else args
 verb, rest = (args[0] if args else ""), args[1:]
 verb = {"remove": "rm", "ls": "ps", "list": "ps"}.get(verb, verb)
@@ -585,8 +588,8 @@ for a in rest:
         elif skip == "--format":
             fmt = a
         skip = None
-    elif a in ("--format", "--filter", "--type", "--time") or (a == "-f" and verb == "inspect"):
-        skip = "--format" if a == "-f" else a
+    elif a in ("--format", "--filter", "--type", "--time", "-t") or (a == "-f" and verb in ("inspect", "ps")):
+        skip = {"-f": "--filter" if verb == "ps" else "--format"}.get(a, a)
     elif a.startswith("--filter="):
         filters.append(a.split("=", 1)[1])
     elif a.startswith("--format="):
@@ -601,7 +604,11 @@ if verb == "inspect":
     if fmt is None:
         print(json.dumps([{"Name": "/" + n, "State": {"Status": "exited", "Running": False}} for n in operands]))
     else:
-        print("\\n".join(("false" if "Running" in fmt else "exited") for _ in operands))
+        state = {"Status": "exited", "Running": False}
+        fields = {"{{.State.Status}}": "exited", "{{.State.Running}}": "false", "{{.Name}}": None,
+                  "{{json .State}}": json.dumps(state), "{{.Id}}": None}
+        for n in operands:
+            print(fields.get(fmt.strip()) or ("/" + n if "Name" in fmt else n if "Id" in fmt else "exited"))
 elif verb == "rm":
     for n in operands:
         if n not in held():
@@ -610,9 +617,18 @@ elif verb == "rm":
         (home / "held" / n).unlink()
 elif verb == "ps":
     wanted = [f.split("=", 1)[1].strip("^$").lstrip("/") for f in filters if f.startswith("name=")]
-    for n in held():
+    every = any(a == "--all" or (a.startswith("-") and not a.startswith("--") and "a" in a) for a in rest)
+    for n in held() if every else []:  # every held container has exited; plain `ps` shows running ones
         if not wanted or any(re.search(w, n) for w in wanted):
             print(n)
+elif verb == "wait":
+    for n in operands:
+        if n not in held():
+            print("Error: No such container: " + n, file=sys.stderr)
+            sys.exit(1)
+        print("0")
+elif verb == "version":
+    print("27.0.0")
 else:
     print("unknown command: " + " ".join(argv), file=sys.stderr)
     sys.exit(1)
