@@ -285,20 +285,24 @@ def test_a_crashed_or_unparseable_run_with_clean_queries_still_scores_wrong(tmp_
 
 
 def _unscorable_after(tmp_path: Path, sequence: str) -> tuple[int, str]:
-    """Score OTHER from rows `sequence` (`d` dropped, `c` clean; an uppercase letter is a row
-    bound to another freeze); GOOD scores from one clean row."""
+    """Score OTHER from rows `sequence`, oldest first: `d` a dropped row, `c` a clean row, `s` a
+    stale-verdict row (clean queries); an uppercase letter is the same row bound to another
+    freeze. GOOD scores from one clean row."""
     fixtures, runs = _cases(tmp_path)
     rows: list[Any] = []
     for ch in sequence:
         run = _dropped(runs) if ch.lower() == "d" else _ok(runs, "malicious")
-        rows.append(_row(fixtures, OTHER, run, **({"freeze": "f" * 64} if ch.isupper() else {})))
+        extra: dict[str, Any] = {"freeze": "f" * 64} if ch.isupper() else {}
+        if ch.lower() == "s":
+            extra["verdict"] = "stale"
+        rows.append(_row(fixtures, OTHER, run, **extra))
     return _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), *rows)
 
 
-@pytest.mark.parametrize("sequence", ["ddd", "dddd", "cddd"])
+@pytest.mark.parametrize("sequence", ["ddd", "dddd", "cddd", "dDdd", "ddCd", "dDDddD"])
 def test_three_consecutive_dropped_rows_make_the_case_unscorable(tmp_path, sequence):
-    """D13: three dropped rows in a row for one slug and freeze (a longer run, or one after an
-    earlier clean row, included) make it unscorable, not another re-run."""
+    """D13: rows for another freeze are filtered out first; three consecutive dropped
+    current-freeze rows remain (`dDdd` is `ddd`) and make it unscorable, not another re-run."""
     rc, said = _unscorable_after(tmp_path, sequence)
 
     assert "unscorable" in _why(said, OTHER), said
@@ -306,10 +310,10 @@ def test_three_consecutive_dropped_rows_make_the_case_unscorable(tmp_path, seque
     assert (rc != 0, "incomplete" in said.lower()) == (True, True), said
 
 
-@pytest.mark.parametrize("sequence", ["dd", "ddcd", "dcdd", "dDd", "dDdd"])
+@pytest.mark.parametrize("sequence", ["dd", "ddcd", "dcdd", "dDd", "dDDd", "ddsd", "dsdd"])
 def test_fewer_than_three_consecutive_drops_stay_a_rerun(tmp_path, sequence):
-    """D13: a clean row resets the count and rows for another freeze do not count toward it, so
-    these stay at a re-run."""
+    """D13: with other-freeze rows filtered out, a clean or stale current-freeze row breaks the
+    run of drops; the newest row is a drop, so these stay at a re-run."""
     _rc, said = _unscorable_after(tmp_path, sequence)
 
     assert "re-run" in _why(said, OTHER), said
@@ -351,3 +355,68 @@ def test_every_case_not_scored_is_listed_with_its_reason_and_the_set_is_incomple
     assert "Aggregate accuracy: 1/1" in said, said
     assert rc != 0, said
     assert "incomplete" in said.lower(), said
+
+
+@pytest.mark.parametrize("verdict", [None, "ok", "VALID", "", 1], ids=["missing", "ok", "case", "empty", "number"])
+def test_an_index_row_without_a_valid_or_stale_verdict_refuses_the_whole_index(tmp_path, verdict):
+    """FR8/r6.1: a row missing `verdict`, or carrying anything but `valid`/`stale`, is
+    malformed: exit 2, nothing scored, even beside a well-formed row."""
+    fixtures, runs = _cases(tmp_path)
+    bad = _row(fixtures, OTHER, _ok(runs, "malicious"), verdict=verdict)
+    if verdict is None:
+        assert "verdict" not in bad
+
+    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), bad)
+
+    assert rc == 2, said
+    assert _verdicts(said) == {}, said
+
+
+def _host_row(system: str, verb: str, query_id: str, params: dict, raw: str) -> dict:
+    return {"lead_id": "l-002", "seq": 1, "system": system, "verb": verb, "query_id": query_id,
+            "params": params, "raw_command": raw, "payload_path": "gather_raw/l-002/1.json",
+            "exit_code": 0, "error_class": None, "payload_status": "ok"}
+
+
+NOT_ELASTIC = [
+    _host_row("host-state", "fim-checksum", "host-state.entrypoint-checksum",
+              {"host": "db-1", "path": "/var/log/now(1).log"},
+              "host-state fim-checksum host=db-1 path=/var/log/now(1).log"),
+    _host_row("change-mgmt", "active-changes", "change-mgmt.active-changes",
+              {"host": "db-1", "at": "now-1d"}, "change-mgmt active-changes host=db-1 at=now-1d"),
+    _host_row("cmdb", "get-host", "cmdb.host-trust-edges",
+              {"host": "now(host"}, "cmdb get-host host=now(host"),
+]
+
+
+def test_now_text_in_non_elasticsearch_recorded_params_does_not_drop_the_run(tmp_path):
+    """FR8/r6.1: the `now` scan covers Elasticsearch verbs only: `now(` / `now-1d` in host-state,
+    change-mgmt or CMDB params score normally; the same text in an Elastic esql drops (control)."""
+    fixtures, runs = _cases(tmp_path)
+    quiet = _run(runs, says="malicious", queries=[*CLEAN, *NOT_ELASTIC]).name
+    loud = _run(runs, says="malicious", queries=[*NOT_ELASTIC, *NOW_ESQL]).name
+
+    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, quiet))
+    assert (rc, _verdicts(said)) == (0, {GOOD: "OK", OTHER: "OK"}), said
+
+    _rc, dropped = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, loud))
+    assert "re-run" in _why(dropped, OTHER), dropped
+    assert OTHER not in _verdicts(dropped), dropped
+
+
+def test_a_freeze_value_canonical_json_cannot_carry_refuses_the_whole_set(tmp_path):
+    """FR8/r6.1: an unquoted YAML timestamp parses to a datetime, which sorted compact JSON
+    cannot carry: exit 2, the case named, nothing scored."""
+    fixtures, runs = _cases(tmp_path)
+    text = (fixtures / OTHER / "freeze.yaml").read_text(encoding="utf-8")
+    unquoted = text.replace("captured_at: '2026-10-20T09:03:17Z'", "captured_at: 2026-10-20T09:03:17Z")
+    assert unquoted != text
+    assert not isinstance(yaml.safe_load(unquoted)["captured_at"], str)
+    (fixtures / OTHER / "freeze.yaml").write_text(unquoted, encoding="utf-8")
+
+    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)))
+
+    assert rc == 2, said
+    assert OTHER in said, said
+    assert "refused" in said, said
+    assert _verdicts(said) == {}, said

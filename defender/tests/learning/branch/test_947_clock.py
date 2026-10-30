@@ -285,7 +285,8 @@ def clause_keeps(clause: dict, doc: dict[str, Any]) -> bool:
             return False
         value = _z(doc[field])
         ops = {"lte": value.__le__, "lt": value.__lt__, "gte": value.__ge__, "gt": value.__gt__}
-        return all(ops[op](_z(bound)) for op, bound in bounds.items())
+        # Only the four bounds mean anything here; `format`, `time_zone` ... are the builder's.
+        return all(ops[op](_z(bound)) for op, bound in bounds.items() if op in ops)
     if kind == "match_all":
         return True
     assert kind == "bool", f"a cut clause uses a form this oracle does not read: {kind}"
@@ -301,6 +302,29 @@ def clause_keeps(clause: dict, doc: dict[str, Any]) -> bool:
     should = many("should")
     floor = body.get("minimum_should_match", 0 if many("must") + many("filter") else 1)
     return not should or sum(clause_keeps(c, doc) for c in should) >= int(floor)
+
+
+RANGE_BOUNDS = ("gte", "gt", "lte", "lt")
+
+
+def range_bounds(clause: Any) -> dict[str, list[str]]:
+    """Every gte/gt/lte/lt bound a clause spells, by field; other `range` keys (`format`,
+    `time_zone`) are not bounds."""
+    found: dict[str, list[str]] = {}
+    if isinstance(clause, dict):
+        for key, value in clause.items():
+            if key == "range":
+                for field, bounds in value.items():
+                    found.setdefault(field, []).extend(
+                        b for op, b in bounds.items() if op in RANGE_BOUNDS)
+            else:
+                for field, spelled in range_bounds(value).items():
+                    found.setdefault(field, []).extend(spelled)
+    elif isinstance(clause, list):
+        for item in clause:
+            for field, spelled in range_bounds(item).items():
+                found.setdefault(field, []).extend(spelled)
+    return found
 
 
 def stamped(offset: dt.timedelta = dt.timedelta(0)) -> dict[str, str]:

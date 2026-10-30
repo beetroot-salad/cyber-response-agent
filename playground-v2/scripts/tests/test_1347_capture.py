@@ -8,6 +8,14 @@ copy_volumes(dest) each write part files under `dest` and return their names; re
 es_now(); refresh(); fingerprint(window, as_of, arrived_by). `clock` offers sleep_until(moment)
 and sleep(seconds). The lock is taken through `chaos.lock` on `lock_store`; parts go under
 `parts_dir/<case_dir.name>/`. Writes `case_dir/freeze.yaml`.
+
+Production ops (FR1): `playground-v2/scripts/lab_ops.py::LabOps` implements `es_now()` and
+`fingerprint(window, as_of, arrived_by)` (tested in test_1347_lab_ops.py) and is what
+`capture_case.py` binds as its default `ops` fingerprint/clock implementation (`capture_case.LabOps`).
+
+O8 report: `capture` prints (stdout) and/or returns a report that names each fingerprinted index
+(the part of a fingerprint key before `|`) with its total document count, the window bounds, and
+the name of each stored part. The exact format is unpinned.
 """
 from __future__ import annotations
 
@@ -37,11 +45,13 @@ def _module():
 
 class Rig:
     def __init__(self, tmp_path: Path, fail_at: str | None = None, chaos: str = "stale-cmdb",
-                 history_start: str = HISTORY_START, alert_at_ledger: str | None = "chaos-abc123"):
+                 history_start: str = HISTORY_START, alert_at_ledger: str | None = "chaos-abc123",
+                 fingerprint: dict | None = None):
         self.journal = Journal()
         self.store = FakeLockStore(self.journal)
         self.clock = FakeClock(self.journal, fail_at=fail_at if fail_at in ("wait_as_of", "settle") else None)
-        self.ops = FakeCaptureOps(self.journal, fail_at=fail_at, ledger_ref=alert_at_ledger if chaos != "none" else None)
+        self.ops = FakeCaptureOps(self.journal, fail_at=fail_at, ledger_ref=alert_at_ledger if chaos != "none" else None,
+                                 fingerprint_result=fingerprint)
         self.case_dir = tmp_path / "held-out" / SLUG
         self.case_dir.mkdir(parents=True)
         self.parts_dir = tmp_path / "parts"
@@ -50,7 +60,7 @@ class Rig:
         self.chaos, self.history_start = chaos, history_start
 
     def run(self):
-        _module().capture(self.case_dir, scenario="ssh-brute-force-canary", chaos=self.chaos,
+        self.result = _module().capture(self.case_dir, scenario="ssh-brute-force-canary", chaos=self.chaos,
                           ops=self.ops, lock_store=self.store, parts_dir=self.parts_dir,
                           clock=self.clock, history_start=self.history_start)
 
@@ -175,6 +185,8 @@ def test_a_failure_at_any_stage_reverts_releases_and_writes_nothing(tmp_path, st
     if stage != "revert":
         assert not rig.ops.fault_live
         assert "capture" not in rig.store.records
+    else:
+        assert "capture" in rig.store.records, "a failed revert must keep the capture lock held"
 
 
 def test_capture_refuses_while_another_holder_has_the_lock(tmp_path):
@@ -186,3 +198,21 @@ def test_capture_refuses_while_another_holder_has_the_lock(tmp_path):
         rig.run()
     assert [op for op in rig.journal.ops() if not op.startswith("lock.")] == []
     assert list(rig.case_dir.iterdir()) == []
+
+
+def test_capture_reports_what_the_guaranteed_window_holds_per_source(tmp_path, capsys):
+    """O8/FR13: the report names each fingerprinted index with its document count, the window
+    bounds and the stored parts; the format is unpinned."""
+    fp = {"logs-system.auth-2026.10.20|2026-10-20T08": [1200, 1200],
+          "logs-system.auth-2026.10.20|2026-10-20T09": [300, 300],
+          "logs-falco.alerts-2026.10.20|2026-10-20T08": [4321, 4321]}
+    rig = Rig(tmp_path, fingerprint=fp)
+    rig.run()
+    seen = capsys.readouterr()
+    text = seen.out + seen.err + repr(rig.result)
+    assert "logs-system.auth-2026.10.20" in text and "1500" in text
+    assert "logs-falco.alerts-2026.10.20" in text and "4321" in text
+    start, end = rig.freeze["window"]
+    assert str(instant(start).date()) in text and str(instant(end).date()) in text
+    for part in PART_BYTES:
+        assert part in text

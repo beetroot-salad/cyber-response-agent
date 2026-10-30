@@ -9,11 +9,18 @@ agent (stdout line 1 is `run_id=<uuid>`). `ops` offers load_frozen(parts_dir, as
 is made under `work_dir`. A refusal (part missing or altered, lock held) raises an exception
 naming the offending part or lock. Row digest: bare hex sha256 of sorted-key compact JSON of the
 parsed freeze.yaml.
+
+Production ops (FR1): `playground-v2/scripts/lab_ops.py::LabOps` implements `fingerprint(window,
+as_of, arrived_by)` (tested in test_1347_lab_ops.py); `launch_frozen.py` binds it as `launch_frozen.LabOps`.
+A run that crashes before printing `run_id=` gets no row (r6.1); the launcher does not refuse an
+unconfirmed freeze (only the scorer does), and reference mode works on one. The agent's environment
+(`run_fn`'s `env`) carries no DOCKER_HOST / DOCKER_CONTEXT and nothing naming a freeze, slug or as_of.
 """
 from __future__ import annotations
 
 import hashlib
 import importlib.util
+import contextlib
 import json
 from pathlib import Path
 
@@ -173,14 +180,19 @@ def test_the_row_binds_the_run_to_the_freeze_and_is_appended_after_the_fingerpri
     freeze digest of the parsed freeze.yaml, verdict valid; appended after fingerprint and
     teardown, before the lock is released."""
     rig = Rig(tmp_path)
+    older = {"slug": SLUG, "run_id": "older-run", "freeze": DIGEST, "verdict": "valid",
+             "reason": "", "verified_at": "2026-10-20T11:00:00Z"}
+    rig.index.write_text(json.dumps(older) + "\n")
     assert rig.launch() == RUN_ID
-    (row,) = rig.rows()
+    first, row = rig.rows()
+    assert first == older, "an existing row was rewritten"
     assert set(row) == ROW_KEYS
     assert (row["slug"], row["run_id"], row["freeze"], row["verdict"]) == (SLUG, RUN_ID, DIGEST, "valid")
     assert isinstance(row["reason"], str)
     ops = rig.journal.ops()
     assert ops.index("run") < ops.index("fingerprint") < ops.index("teardown") < ops.index("lock.delete")
-    assert rig.ops.index_at_teardown == b"" and rig.index_at_release.strip() != b""
+    assert json.loads(rig.ops.index_at_teardown.splitlines()[-1]) == older
+    assert len(rig.index_at_release.splitlines()) == 2
     kw = rig.ops.fp_kwargs
     assert [instant(x) for x in kw["window"]] == [instant(x) for x in FREEZE["window"]]
     assert instant(kw["as_of"]) == instant(FREEZE["as_of"])
@@ -194,9 +206,17 @@ def test_verified_at_is_after_the_run_ended(tmp_path):
     assert instant(rig.rows()[0]["verified_at"]) > rig.run_ended
 
 
-def test_a_differing_fingerprint_records_a_stale_verdict_with_a_reason(tmp_path):
-    """O6: the post-run fingerprint differing from the freeze's marks the row stale."""
-    rig = Rig(tmp_path, fingerprint={"logs-system.auth-2026.10.20|2026-10-20T08": [1200, 1199]})
+_BUCKET = "logs-system.auth-2026.10.20|2026-10-20T08"
+
+
+@pytest.mark.parametrize("fingerprint", [
+    {_BUCKET: [1200, 1199]},
+    {**FINGERPRINT, "logs-system.auth-2026.10.20|2026-10-20T09": [5, 5]},
+    {},
+], ids=["changed-value", "added-bucket", "removed-bucket"])
+def test_a_differing_fingerprint_records_a_stale_verdict_with_a_reason(tmp_path, fingerprint):
+    """O6: a post-run fingerprint with a changed value, an added or a removed bucket is stale."""
+    rig = Rig(tmp_path, fingerprint=fingerprint)
     rig.launch()
     (row,) = rig.rows()
     assert row["verdict"] == "stale" and row["reason"].strip()
@@ -275,3 +295,39 @@ def test_reference_mode_writes_no_row_prints_the_run_id_and_cleans_up(tmp_path, 
     assert "--as-of" in rig.argv and "--no-learn" in rig.argv
     ops = rig.journal.ops()
     assert "teardown" in ops and "frozen-engine" not in rig.store.records
+
+
+def test_a_run_that_crashes_before_announcing_its_id_gets_no_row_and_cleans_up(tmp_path):
+    """O9/r6.1: no `run_id=` line means no row; teardown still ran and the lock is free."""
+    rig = Rig(tmp_path)
+    rig.run_fn = lambda argv, env: (rig.journal.append(("run", None)) or
+                                    (1, "Traceback (most recent call last):\n", "boom"))
+    with contextlib.suppress(Exception):
+        rig.launch()
+    assert rig.rows() == []
+    assert "teardown" in rig.journal.ops() and "frozen-engine" not in rig.store.records
+
+
+def test_the_agents_environment_names_no_docker_host_freeze_slug_or_as_of(tmp_path, monkeypatch):
+    """P4/D2: no DOCKER_HOST/DOCKER_CONTEXT, and no variable whose name or value names a freeze,
+    the slug or the as_of moment."""
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("DOCKER_HOST", "tcp://elsewhere:1")
+    monkeypatch.setenv("DOCKER_CONTEXT", "elsewhere")
+    rig = Rig(tmp_path)
+    rig.launch()
+    assert "DOCKER_CONFIG" in rig.env
+    assert not {"DOCKER_HOST", "DOCKER_CONTEXT"} & set(rig.env)
+    for name, value in rig.env.items():
+        blob = f"{name}={value}".lower()
+        for word in ("freeze", "frozen", SLUG, "as_of", "as-of", "2026-10-20t09:00"):
+            assert word not in blob, f"{name} names {word}"
+
+
+def test_reference_mode_works_on_a_freeze_whose_confirmation_is_still_empty(tmp_path):
+    """O8: the labelling run is launched before `confirmed` is filled; it serves the freeze and
+    writes no row."""
+    rig = Rig(tmp_path, freeze={**FREEZE, "confirmed": {}})
+    assert rig.launch(reference=True) == RUN_ID
+    assert "--as-of" in rig.argv and not rig.index.exists()
+    assert "frozen-engine" not in rig.store.records

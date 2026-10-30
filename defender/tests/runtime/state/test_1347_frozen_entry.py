@@ -179,6 +179,26 @@ def test_the_hosts_own_capture_stamp_is_the_run_clock_not_the_arrival_cut(tmp_pa
     assert stamps[0] != ARRIVED_BY_Z
 
 
+def test_a_cut_run_writes_nothing_about_the_cut_beyond_the_clock_stamps(tmp_path):
+    """FR10/P4: neither arrived_by nor the launch's wall-clock date appears in any file under the
+    run dir; the as_of-derived stamps do (positive control: the walk reads real files)."""
+    as_of, arrived_by = "2026-03-02T09:00:00Z", "2026-03-04T14:41:53Z"
+    wall = {dt.datetime.now(dt.UTC).date().isoformat(), dt.date.today().isoformat(),
+            C.ARM_START.date().isoformat()}
+    assert not wall & {"2026-03-02", "2026-03-04"}, "fixture dates collide with the wall clock"
+
+    out, _seen, _clock = launch(tmp_path, ["--as-of", as_of, "--arrived-by", arrived_by])
+
+    assert out.exit == 0, f"refusal={out.refusal}"
+    files = [p for p in Path(out.run_dir).rglob("*") if p.is_file()]
+    text = {p: p.read_bytes().decode("utf-8", "replace") for p in files}
+    assert any("2026-03-02T09:00:20" in t for t in text.values()), (
+        "no file carries the as_of-derived run-clock stamp: the walk is not reading the run")
+    leaks = {str(p.relative_to(out.run_dir)): needle for p, t in text.items()
+             for needle in ("2026-03-04", "14:41:53", "20260304", *wall) if needle in t or needle in str(p)}
+    assert not leaks, f"the cut or the launch's wall time is written into the run dir: {leaks}"
+
+
 def refused(out, capsys, tmp_path, needle: str, runs_before: list[str], base: Path) -> None:
     """The launch exited through the CLI's refusal path, naming `needle` (not argparse's
     "unrecognized arguments"), and minted no run."""

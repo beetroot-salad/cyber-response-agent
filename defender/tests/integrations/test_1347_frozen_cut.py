@@ -18,6 +18,7 @@ from defender.tests.learning.branch.test_947_clock import (  # noqa: E402
     _fixture_tenant,
     clause_keeps,
     fake_docker,
+    range_bounds,
     range_filter,
     search_body,
 )
@@ -78,21 +79,21 @@ def cut_ctx(tmp_path: Path, *, as_of: dt.datetime | None = AS_OF,
 
 
 def _ranges(clause: Any) -> dict[str, list[str]]:
-    """Every `range` bound the clause spells, by field: pins the spelling, not the nesting."""
-    found: dict[str, list[str]] = {}
-    if isinstance(clause, dict):
-        for key, value in clause.items():
-            if key == "range":
-                for field, bounds in value.items():
-                    found.setdefault(field, []).extend(bounds.values())
-            else:
-                for field, spelled in _ranges(value).items():
-                    found.setdefault(field, []).extend(spelled)
-    elif isinstance(clause, list):
-        for item in clause:
-            for field, spelled in _ranges(item).items():
-                found.setdefault(field, []).extend(spelled)
-    return found
+    """Every gte/gt/lte/lt bound the clause spells, by field: pins the spelling, not the nesting;
+    keys like `format` / `time_zone` are the builder's and are not bounds."""
+    return range_bounds(clause)
+
+
+def test_the_clause_oracles_ignore_range_keys_that_are_not_bounds():
+    """FR13 self-check: a clause carrying `format` / `time_zone` reads the same as one without."""
+    bare = {"range": {"@timestamp": {"lte": "2026-10-20T09:00:00.000Z"}}}
+    decorated = {"range": {"@timestamp": {"lte": "2026-10-20T09:00:00.000Z",
+                                          "format": "strict_date_optional_time",
+                                          "time_zone": "+00:00"}}}
+
+    assert _ranges(decorated) == _ranges(bare) == {"@timestamp": ["2026-10-20T09:00:00.000Z"]}
+    assert clause_keeps(decorated, {"@timestamp": "2026-10-20T08:59:59Z"})
+    assert not clause_keeps(decorated, {"@timestamp": "2026-10-20T09:00:01Z"})
 
 
 # the public pure builder (D12): (as_of, arrived_by) -> clause

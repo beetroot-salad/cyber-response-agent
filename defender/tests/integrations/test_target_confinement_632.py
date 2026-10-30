@@ -350,6 +350,7 @@ ESQL_OUTSIDE = [
     pytest.param("FROM logs-*, (FROM .security-7)", id="subquery-source"),
     pytest.param("FROM (FROM .security-7)", id="only-a-subquery"),
     pytest.param("FROM logs-*, (FROM security-audit-*, (FROM .security-7))", id="nested-subquery"),
+    pytest.param("ROW a = 1 | LOOKUP JOIN .security-7 ON a", id="row-does-not-exempt-later-sources"),
     pytest.param("FROM logs-* | ENRICH some-policy ON host.name", id="enrich"),
     pytest.param("FROM logs-* | WHERE x == 1 // c\n| LOOKUP JOIN .security-7 ON y",
                  id="lookup-after-trailing-comment"),
@@ -359,8 +360,9 @@ ESQL_UNCLASSIFIABLE = [
     pytest.param("", id="empty"),
     pytest.param("lorem ipsum", id="not-a-query"),
     pytest.param("FROM", id="from-without-target"),
-    pytest.param("METRICS .security-7", id="unknown-source-command"),
-    pytest.param("EXPLAIN (FROM .security-7)", id="unknown-wrapper"),
+    # Every named index is INSIDE the patterns: only "unclassifiable" can refuse these.
+    pytest.param("METRICS logs-*", id="unknown-source-command"),
+    pytest.param("EXPLAIN (FROM logs-*)", id="unknown-wrapper"),
 ]
 
 ESQL_INSIDE = [

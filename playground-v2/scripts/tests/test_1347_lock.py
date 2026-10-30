@@ -7,8 +7,10 @@
   `create_exclusive(name, record) -> bool`, `read(name) -> str | None`, `delete(name)`.
 * `attacks/runner.py::run_scenario(..., lock_store=None, lock_token=None)` and
   `cmd_run(args, ..., lock_store=None)` with a `--lock-token` flag; `None` = no check at the
-  library level, `cmd_run` supplies the real store by default.
-* `chaos/ctl.py::activate(..., lock_store=None, lock_token=None)` and `activate --lock-token`.
+  library level, `cmd_run` supplies a `DockerLockStore()` by default.
+* `chaos/ctl.py::activate(..., lock_store=None, lock_token=None)` and `activate --lock-token`;
+  the CLI (`ctl.main(["activate", ...])`) calls `ctl.activate` with `lock_store=` a
+  `DockerLockStore()` and `lock_token=` the flag's value.
 """
 from __future__ import annotations
 
@@ -202,6 +204,21 @@ def test_the_runner_cli_takes_a_lock_token_flag_and_forwards_it(runner):
     assert captured["lock_token"] == "T-1" and captured["lock_store"] is store
 
 
+def test_cmd_run_without_an_injected_store_checks_the_lab_server_lock(runner, lock):
+    """O10/D14 (FR2): the production CLI path hands run_scenario the lab-server DockerLockStore."""
+    captured: dict = {}
+
+    def fake_run_scenario(scenario, seed, overrides, dry_run, cr_mode, **kwargs):
+        captured.update(kwargs)
+        return "rid", Path("."), []
+
+    args = runner.build_arg_parser().parse_args(["run", "demo"])
+    runner.cmd_run(args, run_scenario_fn=fake_run_scenario,
+                   load_catalog_fn=lambda: {"demo": SCENARIO})
+    assert isinstance(captured.get("lock_store"), lock.DockerLockStore)
+    assert captured["lock_token"] is None
+
+
 # -- chaos control activate ---------------------------------------------------------------
 
 
@@ -260,3 +277,20 @@ def test_chaos_activate_cli_takes_a_lock_token_flag():
     from chaos import ctl
     ns = ctl.build_arg_parser().parse_args(["activate", "cmdb-stale-owner", "--lock-token", "T"])
     assert ns.lock_token == "T"
+
+
+def test_chaos_activate_cli_without_an_injected_store_checks_the_lab_server_lock(
+        lock, monkeypatch, capsys):
+    """O10/D14 (FR2): `ctl.main(["activate", ...])` passes activate a DockerLockStore and the
+    flag's token; nothing is injected."""
+    from chaos import ctl
+    seen: dict = {}
+
+    def fake_activate(profile_id, **kwargs):
+        seen.update(kwargs)
+        return {"ledger_ref": "r-1"}
+
+    monkeypatch.setattr(ctl, "activate", fake_activate)
+    assert ctl.main(["activate", "cmdb-stale-owner", "--lock-token", "T-9"]) == 0
+    assert isinstance(seen.get("lock_store"), lock.DockerLockStore)
+    assert seen["lock_token"] == "T-9"

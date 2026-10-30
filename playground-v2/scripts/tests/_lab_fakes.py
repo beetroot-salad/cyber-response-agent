@@ -111,7 +111,9 @@ class FakeCaptureOps:
     `fail_at` names the step that raises. Snapshot steps write their part files into `dest`."""
 
     def __init__(self, journal: Journal, fail_at: str | None = None,
-                 ledger_ref: str | None = "chaos-abc123") -> None:
+                 ledger_ref: str | None = "chaos-abc123",
+                 fingerprint_result: dict | None = None) -> None:
+        self.fingerprint_result = fingerprint_result if fingerprint_result is not None else FINGERPRINT
         self.journal, self.fail_at, self.ledger_ref = journal, fail_at, ledger_ref
         self.fault_live = False
         self.fire_kwargs: dict[str, Any] = {}
@@ -168,4 +170,4 @@ class FakeCaptureOps:
     def fingerprint(self, window: Any, as_of: Any, arrived_by: Any) -> dict:
         self.fingerprint_kwargs = {"window": window, "as_of": as_of, "arrived_by": arrived_by}
         self._step("fingerprint", dict(self.fingerprint_kwargs))
-        return FINGERPRINT
+        return self.fingerprint_result
