@@ -269,7 +269,7 @@ revoke_other_secrets() {  # revoke_other_secrets token keep: destroy every role 
 bind_forge() {  # bind_forge tenant repo: the row's forge: {origin, audience, issuer_role, issuer_config}
   local tenant=$1 repo=$2 row
   row="${DEFENDER_DATA_ROOT:?the dev container sets DEFENDER_DATA_ROOT}/$tenant/tenant.json"
-  [ -s "$row" ] || die "no tenant row at $row: run \`python3 defender/cli/tenant.py setup $tenant\` first"
+  [ -s "$row" ] || die "no tenant row at $row: tenants are rows in PostgreSQL now (#1214); the lifecycle service does this binding. A lab tenant from before is brought over with \`python -m defender.lifecycle adopt\`"
   jq --arg origin "http://forgejo:3000/$repo.git" --arg audience "$AUDIENCE" --arg role "$ROLE" \
     --arg config "$(client_config "$tenant")" \
     '.forge = {origin: $origin, audience: $audience, issuer_role: $role, issuer_config: $config}' \

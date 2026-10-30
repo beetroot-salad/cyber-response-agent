@@ -142,8 +142,8 @@ python3 defender/cli/tenant.py check "$TENANT_ID"   # the tenant admitted and it
 A tenant that predates #1214 (the lab's) is brought over once with
 `python -m defender.lifecycle adopt <id> --issuer-dir <old issuer dir>`; see
 "Upgrade from before #1214" in [`defender/CLAUDE.md`](defender/CLAUDE.md). A data root made before
-#1120 has no `knowledge/` repository; recover it using the old checkout's one-off `tenant.py migrate`
-before upgrading, then follow the
+#1120 has no `knowledge/` repository; recover it with the old checkout's one-off `tenant.py migrate`
+before upgrading (the command is retired here), then follow the
 [named-tenant UUID migration](defender/docs/development-operations.md#migrating-named-tenants-to-uuids-1187).
 
 Then investigate one alert end-to-end (runtime loop + post-steps + learning loop):

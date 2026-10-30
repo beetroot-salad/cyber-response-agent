@@ -224,20 +224,19 @@ def run_batch(
 
 def main(argv: list[str]) -> int:
     import argparse
-    from defender.learning.core.cli import command_line_paths
 
-    from defender.learning.core.cli import _run_stage
-    from defender.learning.core.drains import author_drain
+    from defender.learning.core import cli
 
     parser = argparse.ArgumentParser(description="Curate this tenant's queued findings")
     parser.add_argument("--tenant", required=True)
     args = parser.parse_args(argv[1:])
-    paths = command_line_paths(parser, args.tenant)
     # A curator commits only into a batch's draft of the tenant's repo, and it has no batch of
     # its own: both corpus curators run as claims of the author lane's one tick (batch, box,
     # branch, PR lease). So this command is that tick, `loop.py --author-drain --tenant T`
-    # (#1108 P4) — never a curator over the checkout, which holds no corpus.
-    return _run_stage(lambda: author_drain(paths))
+    # (#1108 P4) — never a curator over the checkout, which holds no corpus. It goes through the
+    # drain entry itself, so the tenant's host lock and admission apply as they do to `loop.py`
+    # (#1214 P3).
+    return cli.main(["loop.py", "--author-drain", "--tenant", args.tenant])
 
 
 if __name__ == "__main__":
