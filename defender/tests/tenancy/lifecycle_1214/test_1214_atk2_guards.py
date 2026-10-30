@@ -4,7 +4,6 @@ production adapters (`_process`), `LifecycleConfig` refusals and the teardown/re
 from __future__ import annotations
 
 import asyncio
-import os
 import shutil
 import stat
 import uuid
@@ -217,7 +216,7 @@ def test_a_cleartext_issuer_or_openbao_address_is_refused(tmp_path, data_root, n
     _refused(tmp_path, data_root, **{name: "http://openbao.test:8200" + ("/v1/identity/oidc" if name == "issuer_url" else "")})
 
 
-# --- O4 / GAP-Re-3 / O6: link guards at teardown and retirement -------------------------------------
+# --- O4: link guards at teardown ----------------------------------------------------------------------
 
 def test_teardown_unlinks_a_link_at_the_tenant_folder_or_secrets_folder_and_leaves_its_target(world, tmp_path):
     """A link standing where `<data root>/<T>` and `<secrets>/<T>` are is removed as a link; the directories it points to
@@ -237,54 +236,6 @@ def test_teardown_unlinks_a_link_at_the_tenant_folder_or_secrets_folder_and_leav
     for name, link in (("folder", folder), ("secrets", secrets)):
         assert (witnesses[name] / "keep.txt").read_text(encoding="utf-8") == "mine", f"the {name} link was followed"
         assert not link.is_symlink() and not link.exists()
-
-
-def _make(kind: str, path: Path, tmp_path: Path) -> None:
-    if kind == "fifo":
-        os.mkfifo(path)
-    elif kind == "socket":
-        os.mknod(path, stat.S_IFSOCK | 0o600)
-    elif kind == "directory":
-        path.mkdir()
-        (path / "inside.txt").write_text("kept", encoding="utf-8")
-    else:
-        target = tmp_path / "elsewhere.json"
-        target.write_text("{}", encoding="utf-8")
-        path.symlink_to(target)
-
-
-@pytest.mark.parametrize("kind", ["fifo", "socket", "directory", "link"])
-def test_retire_row_refuses_anything_but_a_regular_file_and_leaves_it_where_it_was(tmp_path, kind):
-    """A FIFO, a socket, a directory or a link at `<T>/tenant.json` is refused and still there afterwards (GAP-Re-3, O6)."""
-    from defender.tenancy import retire_row
-
-    folder = tmp_path / "data" / TENANT
-    folder.mkdir(parents=True)
-    row = folder / "tenant.json"
-    _make(kind, row, tmp_path)
-    before = os.lstat(row).st_mode
-    with pytest.raises(Exception):  # noqa: B017, PT011 — a refusal; its type is not pinned
-        retire_row(tmp_path / "data", TENANT)
-    assert os.lstat(row).st_mode == before, "the entry was removed or replaced"
-    if kind == "link":
-        assert (tmp_path / "elsewhere.json").read_text(encoding="utf-8") == "{}"
-    if kind == "directory":
-        assert (row / "inside.txt").read_text(encoding="utf-8") == "kept"
-
-
-def test_retire_row_refuses_a_linked_tenant_folder_and_leaves_the_other_folders_row(tmp_path):
-    """`<data root>/<T>` linked to another directory is refused; the row inside that directory survives (GAP-Re-3, GAP-Re-4)."""
-    from defender.tenancy import retire_row
-
-    other = tmp_path / "other"
-    other.mkdir()
-    (other / "tenant.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "data").mkdir()
-    (tmp_path / "data" / TENANT).symlink_to(other)
-    with pytest.raises(Exception):  # noqa: B017, PT011 — a refusal; its type is not pinned
-        retire_row(tmp_path / "data", TENANT)
-    assert (other / "tenant.json").read_text(encoding="utf-8") == "{}"
-    assert (tmp_path / "data" / TENANT).is_symlink()
 
 
 # --- F-6: exactly the repository write scope ----------------------------------------------------------

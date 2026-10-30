@@ -66,7 +66,6 @@ if TYPE_CHECKING:
         requested_tenant as requested_tenant,
         requested_tenant_id as requested_tenant_id,
         resolve_data_root as resolve_data_root,
-        retire_row as retire_row,
         tenant_id_file_text as tenant_id_file_text,
     )
     from defender.tenancy._tenants import (
@@ -84,7 +83,6 @@ if TYPE_CHECKING:
         TenantRecord as TenantRecord,
     )
     from defender.tenancy.repository import (
-        ADOPT_FAILURE as ADOPT_FAILURE,
         ALL as ALL,
         Conflict as Conflict,
         FenceMissed as FenceMissed,
@@ -103,11 +101,11 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("DeliveryRefused", "POINTER", "TenantExport", "current_export", "knowledge_lock_holder", "lock_pid", "read_export_text", "regular_files", "remove_entry",), "_exports"),
     **dict.fromkeys(("OWNER_FILE", "owner_alive", "process_start", "write_owner",), "_owner"),
     **dict.fromkeys(("FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT", "read_status", "record_published", "record_refusal", "record_report",), "_publish_status"),
-    **dict.fromkeys(("ISSUER_ROLE", "Tenant", "TenantId", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "clone_halves", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "parse_tenant_id_bytes", "requested_tenant", "requested_tenant_id", "resolve_data_root", "retire_row", "tenant_id_file_text",), "_tenant"),
+    **dict.fromkeys(("ISSUER_ROLE", "Tenant", "TenantId", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "clone_halves", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "parse_tenant_id_bytes", "requested_tenant", "requested_tenant_id", "resolve_data_root", "tenant_id_file_text",), "_tenant"),
     **dict.fromkeys(("AGENT_HALF", "SETTINGS_HALF", "TENANT_ID_FILE", "add_tenant_arguments", "template_dir",), "_tenants"),
     **dict.fromkeys(("InMemoryTenantRepository",), "memory"),
     **dict.fromkeys(("ForgeWiring", "Generation", "PublishStatus", "TenantRecord",), "models"),
-    **dict.fromkeys(("ADOPT_FAILURE", "ALL", "Conflict", "FenceMissed", "HeldTenant", "KEEP", "NotFound", "TenantRepository", "claimable_now",), "repository"),
+    **dict.fromkeys(("ALL", "Conflict", "FenceMissed", "HeldTenant", "KEEP", "NotFound", "TenantRepository", "claimable_now",), "repository"),
 }
 
 __getattr__ = lazy_door(globals(), _HOMES)

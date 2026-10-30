@@ -34,7 +34,6 @@ from sqlalchemy.pool import NullPool
 from defender.database import async_engine, url
 from defender.tenancy.models import SCHEMA, ForgeWiring, Generation, PublishStatus, TenantRecord
 from defender.tenancy.repository import (
-    ADOPT_STEP,
     ALL,
     KEEP,
     LOCK_NAMESPACE,
@@ -150,8 +149,7 @@ class PostgresTenantRepository:
 
     async def request_resume(self, tenant_id: str) -> TenantRecord:
         return await self._request(
-            tenant_id, _T.c.failure.is_not(None) & _T.c.step.is_distinct_from(ADOPT_STEP),
-            "nothing to resume, or a failure only adoption clears", failure=None)
+            tenant_id, _T.c.failure.is_not(None), "nothing to resume", failure=None)
 
     async def request_offboard(self, tenant_id: str, *, now: _dt.datetime) -> TenantRecord:
         return await self._request(
@@ -256,12 +254,11 @@ class _Held:
         update_generations: Mapping[str, Mapping[str, Any]] | None = None,
         go_live: str | None = None, destroy: Collection[str] | Literal["all"] = (),
         wiring: ForgeWiring | None = None, drop_wiring: bool = False, drop_publish_status: bool = False,
-        expect_failure: str | None = None,
     ) -> TenantRecord:
         columns = {k: v for k, v in dict(state=state, pending_action=pending_action, repo_url=repo_url,
                                          offboarded_at=offboarded_at, repo_delete_after=repo_delete_after).items()
                    if v is not KEEP}
-        statement = _Statement(self.record, expect_failure)
+        statement = _Statement(self.record)
         statement.tenant(step=step, step_actor=actor, failure=None, **columns)
         statement.generations(add_generation, update_generations, go_live, destroy)
         if wiring is not None:
@@ -277,7 +274,7 @@ class _Held:
         return await self._land(statement)
 
     async def fail(self, failure: str, *, step: str, actor: str) -> TenantRecord:
-        statement = _Statement(self.record, None)
+        statement = _Statement(self.record)
         statement.tenant(step=step, step_actor=actor, failure=failure)
         return await self._land(statement)
 
@@ -294,15 +291,14 @@ class _Statement:
     """One fenced write: the tenant row's `UPDATE` as the CTE `fence`, other tables' changes as CTEs
     that act only on what `fence` returned, and `fence`'s row as the result."""
 
-    def __init__(self, seen: TenantRecord, expect_failure: str | None) -> None:
+    def __init__(self, seen: TenantRecord) -> None:
         self._seen = seen
         self._ctes: list[str] = []
         self._params: list[Any] = [
             bindparam("ns", LOCK_NAMESPACE), bindparam("tid", seen.id),
             bindparam("was_action", seen.pending_action, type_=_T.c.pending_action.type),
             bindparam("was_step", seen.step, type_=_T.c.step.type),
-            bindparam("was_actor", seen.step_actor, type_=_T.c.step_actor.type),
-            bindparam("was_failure", expect_failure, type_=_T.c.failure.type)]
+            bindparam("was_actor", seen.step_actor, type_=_T.c.step_actor.type)]
 
     def cte(self, name: str, sql: str, **params: Any) -> None:
         self._ctes.append(f"{name} AS ({sql})")
@@ -314,7 +310,7 @@ class _Statement:
         self._ctes.insert(0, f"""fence AS (UPDATE {SCHEMA}.tenants SET {sets}
             WHERE id = :tid AND pending_action IS NOT DISTINCT FROM :was_action
               AND step IS NOT DISTINCT FROM :was_step AND step_actor IS NOT DISTINCT FROM :was_actor
-              AND failure IS NOT DISTINCT FROM :was_failure AND {_HOLDS_LOCK}
+              AND failure IS NULL AND {_HOLDS_LOCK}
             RETURNING *)""")
 
     def generations(self, add: Generation | None, updates: Mapping[str, Mapping[str, Any]] | None,

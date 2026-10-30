@@ -68,12 +68,13 @@ def test_a_host_process_refuses_a_database_behind_naming_both_revisions(entry, e
 
 # --- python -m defender.lifecycle (DC-14) -----------------------------------------------------------
 
-def test_the_lifecycle_command_offers_serve_and_adopt():
-    """`python -m defender.lifecycle` has the `serve` and `adopt` subcommands (DC-14)."""
+def test_the_lifecycle_command_offers_serve_alone():
+    """`python -m defender.lifecycle` has the `serve` subcommand and no other: the lab moved by hand, not by an
+    `adopt` command (DC-14)."""
     done = subprocess.run([sys.executable, "-m", "defender.lifecycle", "--help"], cwd=DEFENDER.parent,  # noqa: S603
                           capture_output=True, text=True, timeout=60, check=False)
     assert done.returncode == 0, done.stderr
-    assert "serve" in done.stdout and "adopt" in done.stdout
+    assert "serve" in done.stdout and "adopt" not in done.stdout
 
 
 def test_serve_runs_both_actors_every_round_until_stopped(world):

@@ -1,6 +1,6 @@
 # ruff: noqa: PT018
 """#1214 attack-2: the lifecycle process's entry (`python -m defender.lifecycle`): the version check before any other work
-for `serve` and `adopt` (O11), and `serve` giving each actor the client of its own credential (DC-12, F-1)."""
+for `serve` (O11), and `serve` giving each actor the client of its own credential (DC-12, F-1)."""
 from __future__ import annotations
 
 import asyncio
@@ -22,16 +22,14 @@ TENANT = "7f3c1a52-9d4e-4b8a-a1c6-2e5d8b9f0c13"
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize("command", ["serve", "adopt"])
-def test_the_lifecycle_process_refuses_a_database_behind_naming_both_revisions(command, empty_database, tmp_path,  # noqa: F811
-                                                                              monkeypatch, capsys):
-    """`serve` and `adopt` run the light version check before reading any setting: a baseline database is refused naming its
+def test_the_lifecycle_process_refuses_a_database_behind_naming_both_revisions(empty_database, monkeypatch, capsys):  # noqa: F811
+    """`serve` runs the light version check before reading any setting: a baseline database is refused naming its
     revision and head; the upgraded one passes that check (O11)."""
     from defender.lifecycle.__main__ import main
     from defender.migrations import RevisionMismatch, head, upgrade
     from defender.tests.migrations.test_1214_migrations import BASELINE, _upgrade_to
 
-    argv = [command] if command == "serve" else ["adopt", TENANT, "--issuer-dir", str(tmp_path / "issuer")]
+    argv = ["serve"]
     _upgrade_to(empty_database, BASELINE)
     monkeypatch.setenv(DSN_ENV, empty_database)
     for name in [k for k in os.environ if k.startswith(("DEFENDER_", "LIFECYCLE_")) and k != DSN_ENV

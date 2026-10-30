@@ -1,5 +1,5 @@
-"""#1214 O11: one revision moves `tenants` to `tenancy`, adds the lifecycle tables, backfills existing rows for
-adoption; code at the new head refuses a database still at #1339's baseline; models match migrations.
+"""#1214 O11: one revision moves `tenants` to `tenancy`, adds the lifecycle tables, backfills existing rows as
+failed creates; code at the new head refuses a database still at #1339's baseline; models match migrations.
 
 Database cases are marked `postgres`; each runs on a database of its own (`conftest.py`).
 """
@@ -131,12 +131,15 @@ def test_set_schema_keeps_the_rows_the_memberships_and_the_foreign_keys_name(emp
     execute(empty_database, "DELETE FROM tenancy.tenants WHERE id = %s", (OTHER,))  # control: one without can
 
 
+BACKFILL_FAILURE = "registered before #1214: record its forge wiring if it has a repository, then resume"
+
 # --- the backfill -----------------------------------------------------------------------------------
 
 
 @pytest.mark.postgres
-def test_existing_tenant_rows_are_backfilled_as_failed_creates_awaiting_adoption(empty_database):
-    """Every pre-#1214 row becomes `creating`/`create`/step `adopt`/actor `service` with a failure naming adoption, dates kept (O11, O9)."""
+def test_existing_tenant_rows_are_backfilled_as_failed_creates_at_names(empty_database):
+    """Every pre-#1214 row becomes `creating`/`create`/step `names`/actor `service` with the backfill failure (so no
+    worker takes it until an administrator resumes it), dates kept (O11)."""
     from defender.migrations import upgrade
 
     _at_baseline(empty_database, tenants=(LAB, OTHER, THIRD))
@@ -145,11 +148,11 @@ def test_existing_tenant_rows_are_backfilled_as_failed_creates_awaiting_adoption
                                       repo_url, offboarded_at, repo_delete_after FROM tenancy.tenants ORDER BY id""")
     assert len(rows) == 3
     for row in rows:
-        assert row[1:6] == (CREATED, "creating", "create", "adopt", "service"), row
-        assert "adopt" in row[6]
+        assert row[1:6] == (CREATED, "creating", "create", "names", "service"), row
+        assert row[6] == BACKFILL_FAILURE
         assert row[7:] == (None, None, None)
     assert {r[0] for r in rows} == {LAB, OTHER, THIRD}
-    for table in ("forge_wiring", "generations", "publish_status"):  # adoption, not the migration, records these
+    for table in ("forge_wiring", "generations", "publish_status"):  # the administrator, not the migration, records the wiring
         assert execute(empty_database, f"SELECT count(*) FROM tenancy.{table}") == [(0,)]  # noqa: S608
 
 

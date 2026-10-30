@@ -589,7 +589,7 @@ CENSUS_MODULES: frozenset[str] = frozenset(w.module for w in CENSUS)
 DRAIN_MODULES: frozenset[str] = frozenset({"learning/author/drain.py"})
 LINT_HARD_GATED_MODULES: frozenset[str] = CENSUS_MODULES | DRAIN_MODULES | {
     "_filesystem/", "investigation/query_catalog.py", "records/session_store/_pointers.py",
-    # O6: the row writer left the census with `create_tenant`; the owner still holds `retire_row`'s unlink.
+    # O6: the row writer left the census with `create_tenant`, and its remover with lab adoption.
     "tenancy/_tenant.py",
 }
 

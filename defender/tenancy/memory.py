@@ -19,7 +19,6 @@ from typing import Any, Literal, TypeVar, overload
 
 from defender.tenancy.models import ALLOWED_ACTIONS, ForgeWiring, Generation, PublishStatus, TenantRecord
 from defender.tenancy.repository import (
-    ADOPT_STEP,
     KEEP,
     SERVICE,
     Conflict,
@@ -160,9 +159,7 @@ class InMemoryTenantRepository:
         with self._mutex:
             row = self._row(tenant_id)
             return self._request(
-                tenant_id, row.failure is not None and row.step != ADOPT_STEP,
-                "nothing to resume" if row.failure is None else "only adoption clears this failure",
-                failure=None)
+                tenant_id, row.failure is not None, "nothing to resume", failure=None)
 
     async def request_offboard(self, tenant_id: str, *, now: _dt.datetime) -> TenantRecord:
         with self._mutex:
@@ -248,13 +245,13 @@ class _Held:
         if self.spent:
             raise FenceMissed(f"the hold on tenant {self.tenant_id} is spent")
 
-    def _fenced(self, expect_failure: str | None) -> TenantRecord:
+    def _fenced(self) -> TenantRecord:
         """The stored row, if the fence holds; else the hold is spent and `FenceMissed`."""
         self._live()
         row = self._store._tenants.get(self.tenant_id)
         seen = self.record
         if row is None or (row.pending_action, row.step, row.step_actor, row.failure) != (
-                seen.pending_action, seen.step, seen.step_actor, expect_failure):
+                seen.pending_action, seen.step, seen.step_actor, None):
             self.spent = True
             raise FenceMissed(f"tenant {self.tenant_id}'s job moved since the step started")
         return row
@@ -267,14 +264,13 @@ class _Held:
         update_generations: Mapping[str, Mapping[str, Any]] | None = None,
         go_live: str | None = None, destroy: Collection[str] | Literal["all"] = (),
         wiring: ForgeWiring | None = None, drop_wiring: bool = False, drop_publish_status: bool = False,
-        expect_failure: str | None = None,
     ) -> TenantRecord:
         store = self._store
         columns: dict[str, Any] = {k: v for k, v in dict(state=state, pending_action=pending_action, repo_url=repo_url,
                                          offboarded_at=offboarded_at, repo_delete_after=repo_delete_after).items()
                    if v is not KEEP}
         with store._mutex:
-            row = self._fenced(expect_failure)
+            row = self._fenced()
             after = dataclasses.replace(row, step=step, step_actor=actor, failure=None, **columns)
             _check_pair(after.state, after.pending_action)
             generations = self._changed_generations(add_generation, update_generations, go_live, destroy)
@@ -311,7 +307,7 @@ class _Held:
     async def fail(self, failure: str, *, step: str, actor: str) -> TenantRecord:
         store = self._store
         with store._mutex:
-            row = self._fenced(None)
+            row = self._fenced()
             after = dataclasses.replace(row, step=step, step_actor=actor, failure=failure)
             store._tenants[self.tenant_id] = after
             self.record = _detached(after)

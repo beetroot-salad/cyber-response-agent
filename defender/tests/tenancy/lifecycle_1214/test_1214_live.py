@@ -1,7 +1,8 @@
 # ruff: noqa: PT018
-"""#1214 on real services (`live`): O8 two-tenant isolation, O9 lab adoption, and the OpenBao behaviours the in-memory
-fakes can only assume (an old token's read of a deleted OIDC role is refused; the templated policy resolves per entity;
-wrapped secret-id creation and accessor listing work under the management policy). Owner: the #1214 implementer, run
+"""#1214 on real services (`live`): O8 two-tenant isolation, the lab's move (backfill, wiring by hand, resume), and the
+OpenBao behaviours the in-memory fakes can only assume (an old token's read of a deleted OIDC role is refused; the
+templated policy resolves per entity; wrapped secret-id creation and accessor listing work under the management
+policy). Owner: the #1214 implementer, run
 by hand on the dev stack after the revision is applied and Forgejo is 17.
 
 Skips are for absent infrastructure only, each with the variable that is missing. Inputs (test-only environment):
@@ -13,7 +14,7 @@ Skips are for absent infrastructure only, each with the variable that is missing
     DEFENDER_LIVE_OPENBAO_ROOT_TOKEN    to set up the OpenBao-only cases (policies, keys, entities)
     DEFENDER_LIVE_OPENBAO_MANAGEMENT_TOKEN  a token holding the management policy the service logs in with
     DEFENDER_LIVE_OPENBAO_CA            the dev CA file (optional)
-    DEFENDER_LIVE_LAB_TENANT, DEFENDER_LIVE_LAB_ISSUER_DIR, DEFENDER_LIVE_DATA_ROOT   the lab (O9 only)
+    DEFENDER_LIVE_LAB_TENANT, DEFENDER_LIVE_DATA_ROOT   the lab (its move only)
 
     PYTHONPATH="$PWD" flock /tmp/defender-pytest.lock defender/.venv/bin/python -m pytest \\
         -m live defender/tests/tenancy/lifecycle_1214/test_1214_live.py
@@ -178,39 +179,30 @@ def test_two_tenants_on_real_services_cannot_reach_each_other(tmp_path):
     asyncio.run(scenario())
 
 
-def test_the_lab_is_adopted_and_its_old_facts_are_destroyed(tmp_path):
-    """O9 on the lab: backfilled-style row -> `adopt` -> the actors -> `active` on the existing repo with only its new bot
-    collaborating; `tenant.json`, the issuer directory and the old AppRole, role and entity are gone (O9, Flow 5)."""
+def test_the_backfilled_lab_resumed_with_its_wiring_is_made_active_on_its_own_repo(tmp_path):
+    """The lab's move on real services: backfilled row + wiring recorded by hand -> resume -> the actors -> `active` on
+    the existing `tenants/playground` with only its new bot collaborating (O11, RC-9, Flow 1.5)."""
     live = _live()
-    env = _need("DEFENDER_LIVE_LAB_TENANT", "DEFENDER_LIVE_LAB_ISSUER_DIR", "DEFENDER_LIVE_DATA_ROOT")
+    env = _need("DEFENDER_LIVE_LAB_TENANT", "DEFENDER_LIVE_DATA_ROOT")
     if _forgejo_major(live) < 17:
         pytest.skip("needs Forgejo 17 (authorized integrations)")
-    lab, data_root, issuer_dir = env["DEFENDER_LIVE_LAB_TENANT"], Path(env["DEFENDER_LIVE_DATA_ROOT"]), Path(env["DEFENDER_LIVE_LAB_ISSUER_DIR"])
+    lab, data_root = env["DEFENDER_LIVE_LAB_TENANT"], Path(env["DEFENDER_LIVE_DATA_ROOT"])
     stack = _stack(tmp_path, live, data_root)
 
     async def scenario() -> None:
-        from defender.lifecycle import adopt
-
         await stack.tenants.add_tenant(
-            lab, created_at=NOW, state="creating", pending_action="create", step="adopt", step_actor="service",
-            failure="registered before #1214: adopt it", repo="tenants/playground",
-            origin=f"{live.forge_url}/tenants/playground.git")
-        await adopt(lab, tenants=stack.tenants, openbao=stack.openbao, config=stack.config,
-                    clock=lambda: NOW, issuer_dir=issuer_dir)
+            lab, created_at=NOW, state="creating", pending_action="create", step="names", step_actor="service",
+            failure="registered before #1214: record its forge wiring if it has a repository, then resume",
+            repo="tenants/playground", origin=f"{live.forge_url}/tenants/playground.git")
+        await stack.tenants.request_resume(lab)
         await stack.drive()
         assert (await stack.tenants.tenant(lab)).state == "active"
-        await adopt(lab, tenants=stack.tenants, openbao=stack.openbao, config=stack.config,
-                    clock=lambda: NOW, issuer_dir=issuer_dir)
+        assert (await stack.tenants.forge_wiring(lab)).repo == "tenants/playground"
         [live_gen] = [g for g in await stack.tenants.generations(lab) if g.status == "live"]
         headers = {"Authorization": f"token {live.forge_token}"}
         async with httpx.AsyncClient(base_url=live.forge_url, headers=headers) as forge:
             collaborators = {c["login"] for c in (await forge.get("/api/v1/repos/tenants/playground/collaborators")).json()}
         assert collaborators == {live_gen.bot_login}
-        assert not (data_root / lab / "tenant.json").exists() and not (issuer_dir / "client" / lab).exists()
-        async with httpx.AsyncClient(base_url=live.bao_url, verify=live.ca,
-                                     headers={"X-Vault-Token": stack.config.openbao_login}) as bao:
-            assert (await bao.get(f"/v1/auth/approle/role/delivery-{lab}")).status_code == 404
-            assert (await bao.get(f"/v1/identity/oidc/role/tenant-{lab}")).status_code == 404
     asyncio.run(scenario())
 
 

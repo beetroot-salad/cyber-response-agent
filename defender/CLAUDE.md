@@ -56,13 +56,18 @@ records from `DEFENDER_DATABASE_DSN`, at exactly this code's revision, and works
 
 1. Forgejo 17 or newer first (the dev image is 17.0.0; back up and follow Forgejo's upgrade notes, see
    `docs/development-operations.md`), then run migrations: the lab's row is backfilled as a failed
-   create waiting for adoption.
-2. Run `python -m defender.lifecycle adopt <T> --issuer-dir <the old issuer directory>`, with the
-   lifecycle's settings in place and `serve` running. The first call hands the lab's row to the
-   job (it keeps the recorded repository and the existing clone); run it again once the tenant
-   is `active` to delete `tenant.json`, the old `client/<T>/` issuer directory and the old
-   unsalted OpenBao entries.
-3. Learning starts empty: prepare creates `<data root>/<T>/learning/` and nothing is copied. By
+   create at its first step, which no worker takes until it is resumed.
+2. Record the lab's repository by hand, so the create job keeps it and its clone instead of making
+   `tenants/<T>`: `INSERT INTO tenancy.forge_wiring (tenant_id, repo, origin) VALUES ('<T>', '<repo>',
+   '<origin>')`, where `<origin>` is exactly what `git -C <data root>/<T> remote get-url origin`
+   prints (prepare refuses a clone of anything else) and `<repo>` is its `<org>/<name>` path.
+3. With the lifecycle's settings in place and `serve` running, `POST /admin/tenants/<T>/resume`
+   and wait for `active` (`GET /admin/tenants/<T>`).
+4. Then delete by hand what the old setup left: `<data root>/<T>/tenant.json`, `client/<T>/` in
+   the old issuer directory, and the unsalted OpenBao entries
+   (`bao delete` each of `identity/oidc/role/tenant-<T>`, `auth/approle/role/delivery-<T>` and
+   `identity/entity/name/tenant-<T>`).
+5. Learning starts empty: prepare creates `<data root>/<T>/learning/` and nothing is copied. By
    hand, once: delete the old learning state left under the checkout's `defender/learning/`
    (queues, markers, locks, deliveries, legacy `runs/` bundles).
 

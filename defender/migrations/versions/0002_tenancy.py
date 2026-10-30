@@ -2,9 +2,9 @@
 the forge wiring, credential generations and publish status tables are added.
 
 The move keeps the rows, the memberships' foreign key (its name is schema-free) and the primary
-key. Every tenant registered before this revision becomes a failed create waiting for adoption:
-`creating`, `create` pending at step `adopt` (service), with the failure naming adoption; only
-adoption clears it. Columns are added nullable, filled, then made NOT NULL, leaving no default.
+key. Every tenant registered before this revision becomes a failed create: `creating`, `create`
+pending at step `names` (service), with a failure saying what to do. An administrator records the
+tenant's forge wiring by hand, if it has a repository already, and resumes it. Columns are added nullable, filled, then made NOT NULL, leaving no default.
 
 Revision ID: 0002_tenancy
 Revises: 0001_baseline
@@ -17,7 +17,7 @@ down_revision = "0001_baseline"
 
 SCHEMA = "tenancy"
 #: Spelled here, not imported: a revision says what it wrote when it ran.
-ADOPT_FAILURE = "registered before #1214: adopt it"
+BACKFILL_FAILURE = "registered before #1214: record its forge wiring if it has a repository, then resume"
 #: A state only with the pending actions it allows. NULL-safe: a CHECK lets a NULL result through,
 #: so `pending_action = 'create'` alone would admit `creating` with nothing pending.
 STATE_ALLOWS_PENDING_ACTION = (
@@ -43,8 +43,8 @@ def upgrade() -> None:
     for name in ("offboarded_at", "repo_delete_after"):
         op.add_column("tenants", _time(name), schema=SCHEMA)
     op.execute(sa.text(
-        f"UPDATE {SCHEMA}.tenants SET state = 'creating', pending_action = 'create', step = 'adopt',"
-        " step_actor = 'service', failure = :failure").bindparams(failure=ADOPT_FAILURE))
+        f"UPDATE {SCHEMA}.tenants SET state = 'creating', pending_action = 'create', step = 'names',"
+        " step_actor = 'service', failure = :failure").bindparams(failure=BACKFILL_FAILURE))
     op.alter_column("tenants", "state", nullable=False, schema=SCHEMA)
     op.create_check_constraint(
         op.f("ck_tenants_state"), "tenants", "state IN ('creating', 'active', 'offboarding', 'offboarded')",

@@ -1,5 +1,5 @@
 """#1214 attack-3 hole 11 (DC-6): no tenancy port, repository or directory can register a tenant; rows are written only by
-`request_create`, the workers, the backfill and adoption (seeders are named `add_*`).
+`request_create`, the workers and the backfill (seeders are named `add_*`).
 """
 from __future__ import annotations
 

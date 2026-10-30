@@ -28,13 +28,13 @@ T1 = fixture_uuid("tenant:1214-repo-1")
 T2 = fixture_uuid("tenant:1214-repo-2")
 ABSENT = fixture_uuid("tenant:1214-repo-absent")
 ORIGIN = "http://forge.test/tenants/t1.git"
-ADOPT_FAILURE = "registered before #1214: adopt it"
+BACKFILL_FAILURE = "registered before #1214: record its forge wiring if it has a repository, then resume"
 
 #: A row to seed: (state, pending_action, step, step_actor, failure).
 ACTIVE = ("active", None, None, None, None)
 CREATING = ("creating", "create", "provider", "service", None)
 CREATING_FAILED = ("creating", "create", "provider", "service", "forge answered 502: bad gateway")
-UNADOPTED = ("creating", "create", "adopt", "service", ADOPT_FAILURE)
+BACKFILLED = ("creating", "create", "names", "service", BACKFILL_FAILURE)
 ROTATING = ("active", "rotate", "install", "host", None)
 ROTATING_FAILED = ("active", "rotate", "retire", "service", "openbao answered 500")
 OFFBOARDING = ("offboarding", "offboard", "teardown", "host", None)
@@ -43,7 +43,7 @@ OFFBOARDED = ("offboarded", None, None, None, None)
 DELETING = ("offboarded", "delete_repo", "delete_repo", "service", None)
 DELETING_FAILED = ("offboarded", "delete_repo", "delete_repo", "service", "forge answered 500")
 ALL_ROWS = {
-    "creating": CREATING, "creating-failed": CREATING_FAILED, "unadopted": UNADOPTED, "active": ACTIVE,
+    "creating": CREATING, "creating-failed": CREATING_FAILED, "backfilled": BACKFILLED, "active": ACTIVE,
     "rotating": ROTATING, "rotating-failed": ROTATING_FAILED, "offboarding": OFFBOARDING,
     "offboarding-failed": OFFBOARDING_FAILED, "offboarded": OFFBOARDED, "deleting": DELETING,
     "deleting-failed": DELETING_FAILED}
@@ -176,7 +176,8 @@ async def test_tenants_lists_every_state_and_nothing_else(store):
 # --- request_resume ---------------------------------------------------------------------------------
 
 #: Rows with a failure the API may resume: resume clears the failure and nothing else.
-RESUMABLE = ["creating-failed", "rotating-failed", "offboarding-failed", "deleting-failed"]
+#: The backfilled row has no special standing (O11): it resumes like any failed create.
+RESUMABLE = ["creating-failed", "backfilled", "rotating-failed", "offboarding-failed", "deleting-failed"]
 
 
 @pytest.mark.parametrize("name", RESUMABLE)
@@ -201,16 +202,6 @@ async def test_resume_with_no_failure_is_a_conflict_and_changes_nothing(store, n
     assert _values(await store.repo.tenant(T1)) == before
 
 
-async def test_resume_at_adopt_is_a_conflict_only_adoption_clears(store):
-    """A backfilled row at step `adopt` keeps its failure: resume is refused (O9, RC-3)."""
-    await store.seed(T1, UNADOPTED)
-    await _refused(store.repo.request_resume(T1), "Conflict")
-    record = await store.repo.tenant(T1)
-    assert (record.step, record.failure) == ("adopt", ADOPT_FAILURE)
-    await store.seed(T2, CREATING_FAILED)  # control: the same state at another step resumes
-    assert (await store.repo.request_resume(T2)).failure is None
-
-
 async def test_a_second_resume_is_a_conflict(store):
     """Resume twice: the first clears, the second finds no failure and is refused (RC-3)."""
     await store.seed(T1, CREATING_FAILED)
@@ -221,7 +212,7 @@ async def test_a_second_resume_is_a_conflict(store):
 # --- request_offboard -------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["creating", "creating-failed", "unadopted", "active", "rotating", "rotating-failed"])
+@pytest.mark.parametrize("name", ["creating", "creating-failed", "backfilled", "active", "rotating", "rotating-failed"])
 async def test_offboard_from_creating_or_active_replaces_any_pending_action_and_clears_the_failure(store, name):
     """request_offboard from `creating`|`active` sets `offboarding`, `offboard` pending, first step `offboard` (service), no failure (RC-3, DC-3)."""
     await store.seed(T1, ALL_ROWS[name])
@@ -256,7 +247,7 @@ async def test_rotate_from_active_with_nothing_pending_starts_at_names(store):
     assert _job(await store.repo.tenant(T2)) == ACTIVE
 
 
-@pytest.mark.parametrize("name", ["rotating", "rotating-failed", "creating", "creating-failed", "unadopted",
+@pytest.mark.parametrize("name", ["rotating", "rotating-failed", "creating", "creating-failed", "backfilled",
                                   "offboarding", "offboarded", "deleting"])
 async def test_rotate_unless_active_with_nothing_pending_is_a_conflict_and_changes_nothing(store, name):
     """request_rotate is refused (409) unless `active` with nothing pending, a failed rotation included (RC-3)."""

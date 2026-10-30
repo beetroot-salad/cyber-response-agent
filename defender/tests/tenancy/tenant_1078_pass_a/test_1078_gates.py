@@ -34,23 +34,15 @@ def test_d1_tenantpaths_owner_class(tmp_path):
     assert not missing, f"_accessor_names() does not list Tenant's {sorted(missing)}"
 
 
-def test_d1_the_row_name_is_spelled_only_by_its_owner_and_the_kind_is_retired():
-    """The row file is retired (#1214 O6, SK-6): the owner alone spells `tenant.json` and exposes `retire_row`;
-    no other production module imports a name bound to it; the registry marks the kind retired (DC-8)."""
+def test_d1_the_row_name_is_spelled_by_no_one_and_the_kind_is_retired():
+    """The row file is retired (#1214 O6, SK-6): its former owner neither binds `tenant.json` to a constant nor keeps a
+    function that touches it (the lab's row file is deleted by hand); the registry marks the kind retired (DC-8)."""
     tenant = S.tenant()
-    assert callable(getattr(tenant, "retire_row", None)), "the owner must expose the one retirement function"
+    assert not hasattr(tenant, "retire_row"), "the owner still keeps a function for the retired row"
     owner_source = (DEFENDER / "tenancy/_tenant.py").read_text(encoding="utf-8")
+    assert _upper_str_constants(owner_source), "control: the census reads the owner's constants"
     bound = {n for n, v in _upper_str_constants(owner_source).items() if v == "tenant.json"}
-    assert bound, "control: the owner binds the row name to a constant"
-    offenders = []
-    for path in DEFENDER.rglob("*.py"):
-        rel = path.relative_to(DEFENDER)
-        if "tests" in rel.parts or ".venv" in path.parts or rel.as_posix() == "tenancy/_tenant.py":
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.ImportFrom) and any(a.name in bound for a in node.names):
-                offenders.append(f"{rel}:{node.lineno}")
-    assert offenders == []
+    assert bound == set(), f"the owner still binds the row name: {bound}"
     rows = [line.split("\t") for line in (DEFENDER / "docs/run-records-kinds.tsv").read_text(encoding="utf-8").splitlines()]
     [row] = [r for r in rows if r[0] == "tenant_row"]
     assert "retired" in "\t".join(row[6:]).lower(), f"the tenant_row kind is not marked retired: {row}"

@@ -34,8 +34,7 @@ publish. Then the tenant is `active`. Nothing is cloned or set up by hand, and t
 `tenant.json` or other on-disk tenant row.
 
 - `GET /admin/tenants/<id>` shows the state, the pending action, the step and the actor, and the
-  failure of a failed step; `POST /admin/tenants/<id>/resume` retries it (a failure at `adopt` is
-  cleared only by `python -m defender.lifecycle adopt`).
+  failure of a failed step; `POST /admin/tenants/<id>/resume` retries it.
 - `POST /admin/tenants/<id>/invitations` invites the first member (an `active` tenant with no
   members); `POST /admin/tenants/<id>/rotate-forge-credential` replaces the credential generation;
   `POST /admin/tenants/<id>/offboard` removes the tenant's folder, secrets, credentials and

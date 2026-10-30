@@ -33,8 +33,7 @@ lock's connection, raises `FenceMissed`: the connection is closed, nothing more 
 this hold (no failure either), and the worker stops working on the tenant. Any other exception
 of a step is the worker's to record with `fail` (its text names the step and the external answer,
 never a secret). `PostgresTenantRepository(dsn, lock_keepalive=)` takes the keepalive bound in
-seconds (`LifecycleConfig.lock_keepalive`). Adoption's clearing commit is `commit(step="names",
-actor="service", expect_failure=ADOPT_FAILURE)` on a row at step `adopt`.
+seconds (`LifecycleConfig.lock_keepalive`).
 
 `claimable(actor, now=)` lists the tenants whose current step is `actor`'s with no failure
 (`delete_repo` only once `repo_delete_after` has passed), oldest first; it does not look at locks.
@@ -54,9 +53,6 @@ if TYPE_CHECKING:
 
 #: The first key of every tenant lock: a fixed int4 naming tenancy's advisory locks.
 LOCK_NAMESPACE = 1214
-#: The failure the #1214 revision gave every tenant registered before it; only adoption clears it.
-ADOPT_FAILURE = "registered before #1214: adopt it"
-ADOPT_STEP = "adopt"
 SERVICE = "service"
 HOST = "host"
 
@@ -101,7 +97,6 @@ class HeldTenant(Protocol):
         update_generations: Mapping[str, Mapping[str, Any]] | None = None,
         go_live: str | None = None, destroy: Collection[str] | Literal["all"] = (),
         wiring: ForgeWiring | None = None, drop_wiring: bool = False, drop_publish_status: bool = False,
-        expect_failure: str | None = None,
     ) -> TenantRecord:
         """Record a step's outcome and the next step (`step`, `actor`; both None when nothing is
         left pending), in one fenced statement; the tenant's failure is left None. With it:
@@ -109,9 +104,7 @@ class HeldTenant(Protocol):
         `go_live` makes that generation `live` and the one live before it `retiring`; `destroy`
         marks generations (or `ALL` not yet destroyed) `destroyed`; `wiring` is recorded unless
         the tenant already has one (the lab keeps its own); `drop_wiring`/`drop_publish_status`
-        delete those rows. `expect_failure` fences on that failure instead of none (adoption's
-        clearing commit, which also clears it). Returns the row as written; `FenceMissed` when
-        it did not land."""
+        delete those rows. Returns the row as written; `FenceMissed` when it did not land."""
         ...
 
     async def fail(self, failure: str, *, step: str, actor: str) -> TenantRecord:
@@ -142,7 +135,7 @@ class TenantRepository(Protocol):
         """A new tenant with a minted UUID: `creating`, `create` pending at step `names` (service)."""
         ...
     async def request_resume(self, tenant_id: str) -> TenantRecord:
-        """Clear the failure, and nothing else; `Conflict` with no failure or at step `adopt`."""
+        """Clear the failure, and nothing else; `Conflict` with no failure."""
         ...
     async def request_offboard(self, tenant_id: str, *, now: _dt.datetime) -> TenantRecord:
         """From `creating` or `active`: `offboarding`, `offboard` pending at step `offboard`
