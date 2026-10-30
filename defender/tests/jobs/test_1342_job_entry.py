@@ -125,14 +125,14 @@ def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = No
             visualize: Any = None, ran: Ran | None = None) -> Ran:
     from defender import run as run_py
 
-    ran = ran if ran is not None else Ran()
+    result = Ran() if ran is None else ran
 
     def publish(*_a: Any, **_k: Any) -> str:
-        ran.calls["publish"] += 1
+        result.calls["publish"] += 1
         return B.fresh(s.t.commit)
 
     seams: dict[str, Any] = {
-        "lifecycle": lifecycle if lifecycle is not None else verified_lifecycle(ran),
+        "lifecycle": lifecycle if lifecycle is not None else verified_lifecycle(result),
         "preflight": preflight if preflight is not None else (lambda *a, **k: 0),
         "visualize": visualize if visualize is not None else (lambda *a, **k: None),
         "publish": publish}
@@ -141,13 +141,13 @@ def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = No
     out, err = io.StringIO(), io.StringIO()
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            ran.rc = run_py.job_main(s.argv(run_id), **seams)
+            result.rc = run_py.job_main(s.argv(run_id), **seams)
     except SystemExit as e:
-        ran.exit = e
+        result.exit = e
     except Exception as e:  # noqa: BLE001 — kept for the assertions to name
-        ran.raised = e
-    ran.out, ran.err = out.getvalue(), err.getvalue()
-    return ran
+        result.raised = e
+    result.out, result.err = out.getvalue(), err.getvalue()
+    return result
 
 
 # --- O6 / M1 / M5: setup in the job lane -----------------------------------------------------------
