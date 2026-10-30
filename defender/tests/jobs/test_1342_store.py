@@ -1126,6 +1126,20 @@ async def test_o5_finish_of_a_row_that_moved_to_a_terminal_stage_changes_nothing
     assert row(dsn, inv.investigation_id) == before
 
 
+@pytest.mark.parametrize("stage", ["running", "queued", "nonsense"])
+async def test_o5_finish_to_a_stage_that_is_not_terminal_is_refused_and_the_row_is_untouched(dsn, stage):
+    """`finish` with `running`, `queued` or any other non-terminal stage raises `ValueError` and changes no field of the running row. (O5)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        await store.claim()
+        before = row(dsn, inv.investigation_id)
+        with pytest.raises(ValueError, match="terminal"):
+            await store.finish(T1, inv.investigation_id, stage=stage, failure_reason="worker_error")
+    assert row(dsn, inv.investigation_id) == before
+    assert before["stage"] == "running"
+
+
 async def test_o5_finish_of_another_tenants_row_changes_nothing(dsn):
     """Only the owning tenant's running row finishes. (O5)"""
     async with job_store(dsn) as store:

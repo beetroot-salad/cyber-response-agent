@@ -4,13 +4,21 @@
 * `run.py` has two compositions, the operator's `main` and the job entry's `job_main`. Each
   calls the box lifecycle (which scrubs the run folder) and then the shared `_post_steps`, in
   that order. The readers of the run folder — listing it, the table cross-check and the page
-  render — live only in `_post_steps`; a composition calling one itself is a finding. The
-  operator's own readers, the case ticket and the curation enqueue, come after its lifecycle.
+  render — live only in `_post_steps`: any reference to one anywhere else in `run.py` is a
+  finding, whatever its form (a call, an alias, a `partial`, a lambda, a class body, a
+  `getattr` string, `os.listdir` or `glob` for `iterdir`). The one allowance is the page-render
+  seam: a parameter named `visualize` defaulting to the reader, and `visualize=visualize`
+  handed to `_post_steps`. The operator's own readers, the case ticket and the curation
+  enqueue, come after its lifecycle.
 * None of `main`, `job_main`, `_post_steps` or `_run_investigation_lifecycle` has an `except`
   that would swallow the taint signal: none names `RunTainted`, `Exception` or `BaseException`,
   and none is bare.
 * The bash tool never calls `run_parsed` on the in-process executor `bash_exec`: a box failure
   has no in-process fallback.
+
+Not covered, by design: a reader named by a computed string (`"cross_" + "check_tables"`, a
+variable), reached from another module, or a read of the folder by a means the census does not
+name (`open`, `read_text`, `shutil`, a subprocess).
 
 Order is source position inside the one function; attribute calls read as their attribute
 name. A file or function that is missing, or a named call that is gone, is a finding (the rule
@@ -37,11 +45,16 @@ _RUN = "run.py"
 _BASH = "investigation/tools/_bash.py"
 #: The readers of the scrubbed folder that live only in the shared post-steps.
 _READERS = ("iterdir", "cross_check_tables", "visualize")
+#: Other ways to list a folder, which count as the listing reader wherever they appear.
+_LISTERS = ("listdir", "scandir", "walk", "glob", "rglob", "iglob")
+_CENSUS = (*_READERS, *_LISTERS)
 #: The operator composition's own readers, after its lifecycle.
 _OPERATOR_READERS = ("record_case_ticket", "enqueue_curation")
 _COMPOSITIONS = ("main", "job_main")
 _LIFECYCLE = "lifecycle"
 _POST_STEPS = "_post_steps"
+#: The page-render seam, which the compositions take as a parameter and hand to the post-steps.
+_SEAM = "visualize"
 _SWALLOWERS = ("RunTainted", "Exception", "BaseException")
 
 
@@ -86,7 +99,7 @@ def _caught(fn: ast.AST) -> list[tuple[int, str]]:
 
 def _composition_findings(name: str, order: list[str]) -> list[str]:
     """One composition's order: the lifecycle, then the post-steps (and, for `main`, its own
-    readers) after it; no reader of the folder called here instead of in the post-steps."""
+    readers) after it. A reader named here instead is found by `_readers_elsewhere`."""
     if _LIFECYCLE not in order:
         return [f"{_RUN}: `{name}` no longer drives the lifecycle through its `{_LIFECYCLE}` seam; "
                 "re-site the scrub-order rule"]
@@ -99,38 +112,65 @@ def _composition_findings(name: str, order: list[str]) -> list[str]:
         elif order.index(call) < reap:
             found.append(f"{_RUN}: `{name}` calls `{call}` before the lifecycle has scrubbed the "
                          "run folder")
-    for reader in _READERS:
-        if reader in order:
-            found.append(f"{_RUN}: `{name}` calls `{reader}` itself; the readers of the scrubbed "
-                         f"folder live only in `{_POST_STEPS}`")
     return found
 
 
 def _readers_elsewhere(root: Path) -> list[str]:
-    """A reader called from a `run.py` function that is neither `_post_steps` nor a composition (those are
-    checked by order above): a helper the compositions
-    reach would read the folder before the scrub whatever order the compositions show."""
+    """A reference to a reader, in any form, anywhere in `run.py` but the module-level `_post_steps`: a
+    name or attribute, a `"reader"` string, an import of one. A reference in a helper, a composition,
+    a lambda, a class body or the module itself reads the folder before the scrub or hands the
+    reader on, whatever order the compositions show."""
     path = root / _RUN
     if not path.is_file():
         return []
     _text, tree = _astlib.read_and_parse(path, _RUN)
     found: list[str] = []
+    allowed: set[int] = set()  # `visualize=visualize` handed to the post-steps, and the seam's default
 
-    def visit(node: ast.AST, owner: str | None) -> None:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == _POST_STEPS:
+            allowed.update(id(kw.value) for kw in node.keywords
+                           if kw.arg == _SEAM and isinstance(kw.value, ast.Name) and kw.value.id == _SEAM)
+        elif isinstance(node, ast.arguments):
+            named = [*node.posonlyargs, *node.args]
+            pairs = [*zip(named[len(named) - len(node.defaults):], node.defaults, strict=True),
+                     *((a, d) for a, d in zip(node.kwonlyargs, node.kw_defaults, strict=True) if d is not None)]
+            allowed.update(id(d) for a, d in pairs if a.arg == _SEAM and _reference(d) == _SEAM)
+
+    def report(lineno: int, owner: str, name: str) -> None:
+        found.append(f"{_RUN}:{lineno}: `{owner}` refers to `{name}`; the readers of the run "
+                     f"folder live only in `{_POST_STEPS}`")
+
+    def visit(node: ast.AST, owner: str) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if not (node is tree and child.name == _POST_STEPS):
+                    visit(child, child.name)
+                continue
+            if isinstance(child, ast.ClassDef):
                 visit(child, child.name)
                 continue
-            if isinstance(child, ast.Call) and owner not in (None, _POST_STEPS, *_COMPOSITIONS):
-                f = child.func
-                name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
-                if name in _READERS:
-                    found.append(f"{_RUN}:{child.lineno}: `{owner}` calls `{name}`; the readers of the "
-                                 f"run folder live only in `{_POST_STEPS}`")
+            if id(child) not in allowed:
+                name = _reference(child)
+                if name in _CENSUS:
+                    report(child.lineno, owner, name)
+                elif isinstance(child, ast.alias) and child.name.rsplit(".", 1)[-1] in _CENSUS:
+                    report(child.lineno, owner, child.name)
             visit(child, owner)
 
-    visit(tree, None)
+    visit(tree, "<module>")
     return found
+
+
+def _reference(node: ast.AST) -> str | None:
+    """The reader-shaped name `node` refers to: a name, an attribute, or a string that is exactly one."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
 
 
 def scan(root: Path) -> list[str]:

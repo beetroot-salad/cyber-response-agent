@@ -8,6 +8,7 @@ Entry: `defender.worker.Worker(store, data_root=, child_argv=, containers=, slot
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import logging
@@ -20,6 +21,7 @@ import pytest
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     ALERT_DIGEST,
+    AWKWARD_ALERT_BYTES,
     GOLDEN_REPORT,
     JOBS_AUDIT_LOGGER,
     MALICIOUS_REPORT,
@@ -244,6 +246,23 @@ async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_no
     assert tree(world["other_runs"]) == other_before
 
 
+
+async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(world):
+    """An alert with CRLF line ends, tabs and multibyte text reaches `<id>.alert.json` byte for byte, and the launch record's digest is of those bytes. (O6, M5)"""
+    child = _child(world)
+    async with job_store(world["dsn"]) as store:
+        alert = await an_alert(store, T1, raw=AWKWARD_ALERT_BYTES)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        await make_worker(store, world["root"], child).drain()
+
+    assert b"\r\n" in AWKWARD_ALERT_BYTES
+    assert len(AWKWARD_ALERT_BYTES.decode()) < len(AWKWARD_ALERT_BYTES), "premise: multibyte text"
+    written = (world["runs"] / f"{inv.investigation_id}.alert.json").read_bytes()
+    assert written == AWKWARD_ALERT_BYTES
+    launch = json.loads((world["runs"] / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
+    assert launch["digest"] == hashlib.sha256(AWKWARD_ALERT_BYTES).hexdigest()
+
+
 @pytest.mark.parametrize("present", [".launch.json", ".alert.json"])
 async def test_o6_launch_files_are_create_only_and_a_failed_write_is_a_worker_error(world, present):
     """A launch file that already exists is not overwritten; no child; `failed`/`worker_error`. (O6)"""
@@ -350,6 +369,15 @@ CASES = {
         expect=("failed", "no_report", None), code=EXIT),
     "1-job-end-a-missing-key": _spec(
         files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=None)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-setup-as-a-list": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=["done"])}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-box-as-an-object": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box={})}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-setup-a-list-and-box-an-object": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=["done"], box={})}), exit=EXIT,
         expect=("failed", "no_report", None), code=EXIT),
     # rule 2
     "2-setup-refused": _spec(files=_refused(), exit=1, expect=("failed", "setup_refused", None)),
@@ -544,6 +572,22 @@ async def test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown(worl
     assert _warned(caplog, inv), "the cost fault was not logged"
 
 
+@pytest.mark.parametrize("shape", ["an array", "an empty object", "a case id that is a number"])
+async def test_o8_a_session_pointer_of_the_wrong_shape_keeps_the_stage_and_leaves_cost_unknown(
+        world, caplog, shape):
+    """A pointer that is an array, lacks `case_id` or has a numeric one: stage and disposition kept, `cost_usd` null, the fault logged, no crash. (O8 cost, R3)"""
+    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
+    if shape == "a case id that is a number":  # a database exists under the number's spelling
+        plant_sessions(world["runs"], "5", [("main", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
+    pointer = {"an array": "[]", "an empty object": "{}",
+               "a case id that is a number": json.dumps({"case_id": 5, "store_path": "/nonexistent/elsewhere.db"})}[shape]
+    inv, stored = await _run_one(world, _child(world, files=_committed(**{"{id}.session-pointer.json": pointer})))
+
+    assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
+    assert stored["cost_usd"] is None
+    assert _warned(caplog, inv), "the cost fault was not logged"
+
+
 # --- knowledge --------------------------------------------------------------------------------------
 
 def _knowledge(status: str, commit: str | None, stale_kind: str | None = None) -> dict:
@@ -662,6 +706,9 @@ home = Path(sys.argv[1])
 argv = sys.argv[2:]
 with open(home / "calls.log", "a", encoding="utf-8") as log:
     log.write(json.dumps(argv) + "\\n")
+if (home / "down").exists():  # the daemon does not answer anything
+    print("Cannot connect to the Docker daemon at unix:///var/run/docker.sock", file=sys.stderr)
+    sys.exit(1)
 args = argv[1:] if argv[:1] and Path(argv[0]).name == "docker" else argv
 while args[:1] and args[0].startswith("-"):  # global flags before the verb
     args = args[2:] if "=" not in args[0] and args[0] in ("--log-level", "-l", "--context", "-c",
@@ -707,6 +754,9 @@ elif verb == "rm":
         if n not in held():
             print("Error: No such container: " + n, file=sys.stderr)
             sys.exit(1)
+        if (home / "stuck" / n).exists() and not (home / "waited" / n).exists():  # paused under runsc
+            print(f"Error response from daemon: cannot remove container {n}: container is paused", file=sys.stderr)
+            sys.exit(1)
         if state_of(n) in ("running", "paused") and not force:
             print(f"Error response from daemon: cannot remove container {n}: container is {state_of(n)}: "
                   "stop the container before removing or force remove", file=sys.stderr)
@@ -725,6 +775,7 @@ elif verb == "wait":
         if n not in held():
             print("Error: No such container: " + n, file=sys.stderr)
             sys.exit(1)
+        (home / "waited" / n).write_text("", encoding="utf-8")
         print("0")
 elif verb == "version":
     print("27.0.0")
@@ -740,7 +791,8 @@ class _DockerStandIn:
 
     def __init__(self, tmp_path: Path) -> None:
         self.home = tmp_path / "docker-stand-in"
-        (self.home / "held").mkdir(parents=True)
+        for sub in ("held", "stuck", "waited"):
+            (self.home / sub).mkdir(parents=True)
         self.script = self.home / "stand_in.py"
         self.script.write_text(_DOCKER_STAND_IN, encoding="utf-8")
 
@@ -754,6 +806,14 @@ class _DockerStandIn:
     def hold(self, name: str, state: str = "exited") -> None:
         """The daemon holds `name` in `state`: `exited`, `running` or `paused`."""
         (self.home / "held" / name).write_text(state, encoding="utf-8")
+
+    def stick(self, name: str) -> None:
+        """Every `rm` of `name` fails until a `docker wait` on it has returned (a paused box under runsc)."""
+        (self.home / "stuck" / name).write_text("", encoding="utf-8")
+
+    def go_down(self) -> None:
+        """The daemon answers nothing: every call exits non-zero."""
+        (self.home / "down").write_text("", encoding="utf-8")
 
     def names(self) -> list[str]:
         return sorted(p.name for p in (self.home / "held").iterdir())
@@ -803,6 +863,38 @@ def test_o7_the_docker_seam_looks_first_and_removes_only_a_container_that_is_the
     assert len(daemon.calls) > before, "an absent container was not even looked at"
     assert not _removes(daemon.calls, "defender-run-gone")
     assert daemon.names() == ["defender-run-other"]
+
+
+@pytest.mark.parametrize("held", [True, False])
+def test_o7_a_daemon_that_does_not_answer_leaves_existence_unanswered_not_absent(tmp_path, held):
+    """`DockerContainers.exists` when both `inspect` and `version` fail raises `ContainerUnanswered`, held or not; it never reads as absent. (O7, D-o)"""
+    from defender.worker import DockerContainers
+    from defender.worker._containers import ContainerUnanswered
+
+    daemon, docker = _docker_world(tmp_path)
+    if held:
+        daemon.hold("defender-run-here", "running")
+    daemon.go_down()
+
+    with pytest.raises(ContainerUnanswered):
+        DockerContainers(docker=docker).exists("defender-run-here")
+
+
+def test_o7_a_paused_box_that_survives_the_first_forced_removal_is_removed_after_waiting(tmp_path):
+    """`DockerContainers.remove` when `rm -f` fails on a paused box: it waits on the box and removes it again, so the box is gone and nothing is raised. (O7, D-o)"""
+    from defender.worker import DockerContainers
+
+    daemon, docker = _docker_world(tmp_path)
+    daemon.hold("defender-run-here", "paused")
+    daemon.hold("defender-run-other", "running")
+    daemon.stick("defender-run-here")
+
+    DockerContainers(docker=docker).remove("defender-run-here")
+
+    assert daemon.names() == ["defender-run-other"], daemon.calls
+    verbs = [argv[1] for argv in daemon.calls if argv[1:2] and "defender-run-here" in argv]
+    assert verbs[-1] == "rm", verbs
+    assert verbs.index("wait") < len(verbs) - 1, verbs
 
 
 @pytest.mark.parametrize("state", ["exited", "running"])
@@ -891,24 +983,26 @@ async def test_o4_serve_also_holds_three_children_and_never_a_fourth(world):
 class _StoreWhoseAlertReadFails:
     """The real store, except that reading one alert raises an error nobody planned for."""
 
-    def __init__(self, store, alert_id: str) -> None:
-        self._store, self._alert_id = store, alert_id
+    def __init__(self, store, alert_id: str, fault: Exception) -> None:
+        self._store, self._alert_id, self._fault = store, alert_id, fault
 
     def __getattr__(self, name):
         return getattr(self._store, name)
 
     async def get_alert(self, tenant_id, alert_id):
         if alert_id == self._alert_id:
-            raise RuntimeError("the store fell over")
+            raise self._fault
         return await self._store.get_alert(tenant_id, alert_id)
 
 
-@pytest.mark.parametrize("seam", ["child-argv", "store-read", "job-end-read"])
+@pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError])
+@pytest.mark.parametrize("seam", ["child-argv", "store-read", "job-end-read", "lane-cost", "lane-knowledge"])
 async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and_the_worker_goes_on(
-        world, monkeypatch, seam):
-    """A fault nobody planned for (not an OS error) in one row's task: that row `failed`/`worker_error`, another row still completes. (O6, design flows)"""
+        world, monkeypatch, seam, fault_type):
+    """A fault of any kind nobody planned for (not an OS error) in one row's task: that row `failed`/`worker_error`, another row still completes. (O6, design flows)"""
     from defender.records import job_lane
 
+    fault = fault_type("a seam fell over")
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
         bad = await _queued(store, ticket="T-1", key="k1")
@@ -918,18 +1012,19 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
         if seam == "child-argv":
             def argv(launch):  # noqa: F811
                 if launch.investigation_id == bad:
-                    raise RuntimeError("the argv builder fell over")
+                    raise fault
                 return child(launch)
         elif seam == "store-read":
-            used = _StoreWhoseAlertReadFails(store, (await store.get_investigation(T1, bad)).alert_id)
+            used = _StoreWhoseAlertReadFails(store, (await store.get_investigation(T1, bad)).alert_id, fault)
         else:
-            original = job_lane.JobLane.read_job_end
+            method = {"job-end-read": "read_job_end", "lane-cost": "cost", "lane-knowledge": "knowledge"}[seam]
+            original = getattr(job_lane.JobLane, method)
 
-            def read_job_end(self, run_id):
+            def failing(self, run_id):
                 if run_id == bad:
-                    raise RuntimeError("the job-end read fell over")
+                    raise fault
                 return original(self, run_id)
-            monkeypatch.setattr(job_lane.JobLane, "read_job_end", read_job_end)  # lint-monkeypatch: ok — the lane is built inside the Worker and no seam injects a lane stand-in; this fails exactly one run's job-end read
+            monkeypatch.setattr(job_lane.JobLane, method, failing)  # lint-monkeypatch: ok — the lane is built inside the Worker and no seam injects a lane stand-in; this fails exactly one run's read
         await make_worker(used, world["root"], argv).drain()
 
     stored = row(world["dsn"], bad)
