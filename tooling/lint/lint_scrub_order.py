@@ -106,6 +106,33 @@ def _composition_findings(name: str, order: list[str]) -> list[str]:
     return found
 
 
+def _readers_elsewhere(root: Path) -> list[str]:
+    """A reader called from a `run.py` function that is neither `_post_steps` nor a composition (those are
+    checked by order above): a helper the compositions
+    reach would read the folder before the scrub whatever order the compositions show."""
+    path = root / _RUN
+    if not path.is_file():
+        return []
+    _text, tree = _astlib.read_and_parse(path, _RUN)
+    found: list[str] = []
+
+    def visit(node: ast.AST, owner: str | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                visit(child, child.name)
+                continue
+            if isinstance(child, ast.Call) and owner not in (None, _POST_STEPS, *_COMPOSITIONS):
+                f = child.func
+                name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+                if name in _READERS:
+                    found.append(f"{_RUN}:{child.lineno}: `{owner}` calls `{name}`; the readers of the "
+                                 f"run folder live only in `{_POST_STEPS}`")
+            visit(child, owner)
+
+    visit(tree, None)
+    return found
+
+
 def scan(root: Path) -> list[str]:
     root = Path(root).resolve()
     if not root.is_dir():
@@ -127,6 +154,8 @@ def scan(root: Path) -> list[str]:
             if reader not in order:
                 findings.append(f"{_RUN}: `{_POST_STEPS}` no longer calls `{reader}`; re-site the "
                                 "scrub-order rule")
+
+    findings.extend(_readers_elsewhere(root))
 
     for name, fn in functions.items():
         if fn is None:

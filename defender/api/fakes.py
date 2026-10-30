@@ -26,6 +26,7 @@ from .models import (
 )
 from .ports import (
     AuditAction,
+    Conflict,
     NotFound,
     TimePosition,
     UnknownReference,
@@ -184,7 +185,12 @@ class InMemoryStore:
 
     async def cancel_investigation(self, tenant_id: str, investigation_id: str) -> Investigation:
         existing = await self._existing(tenant_id, investigation_id)
-        aborted = existing.model_copy(update={"status": "aborted", "finished_at": self._clock()})
+        if existing.status == "running":
+            raise Conflict("cannot cancel a running investigation yet")
+        if existing.status != "queued":
+            raise Conflict("already ended")
+        aborted = existing.model_copy(update={"status": "aborted", "failure_reason": "cancelled",
+                                              "finished_at": self._clock()})
         return self.add_investigation(tenant_id, aborted)
 
     async def delete_investigation(self, tenant_id: str, investigation_id: str) -> None:
