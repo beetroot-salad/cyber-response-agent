@@ -736,6 +736,19 @@ async def test_a_session_needs_an_existing_user(seeded):
         await seeded.add_session("v", "no-such-user", now=NOW, expires_at=NOW + WEEK)
 
 
+async def test_purging_removes_exactly_the_sessions_sign_in_would_refuse_as_expired(seeded):
+    """#1349 B2: a session is gone once `now >= expires_at` (the same boundary `authenticate`
+    refuses at) and kept a moment before; the count says how many went; a second purge is a no-op."""
+    user = await _user(seeded)
+    for value, expires in (("past", NOW - HOUR), ("at-now", NOW), ("just-alive", NOW + dt.timedelta(microseconds=1))):
+        await seeded.add_session(value, user.id, now=NOW - WEEK, expires_at=expires)
+    assert await seeded.purge_expired_sessions(now=NOW) == 2
+    assert await seeded.session_by_value("past") is None
+    assert await seeded.session_by_value("at-now") is None
+    assert (await seeded.session_by_value("just-alive")).user_id == user.id
+    assert await seeded.purge_expired_sessions(now=NOW) == 0
+
+
 async def test_sign_out_deletes_that_session_only(seeded):
     """O6/flow 7: delete the session row; other devices stay signed in."""
     user, _ = await _session(seeded, "device-1")

@@ -335,3 +335,6 @@ class PostgresIdentityRepository:
             update(Session).where(
                 Session.token_hash == session_hash(value), now - Session.last_seen_at > TOUCH_AFTER)
             .values(last_seen_at=now).returning(Session.token_hash))
+
+    async def purge_expired_sessions(self, *, now: _dt.datetime) -> int:
+        return len(await self._all(delete(Session).where(Session.expires_at <= now).returning(Session.token_hash)))
