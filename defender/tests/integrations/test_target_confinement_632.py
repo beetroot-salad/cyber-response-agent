@@ -325,3 +325,16 @@ def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_qu
     with pytest.raises(ConfinementFault):
         confine_read_endpoint("elastic", "http://es:9200/%5Flogs/../_update/1", method="POST",
                               verb_class="r")
+
+
+def test_an_esql_from_outside_the_configured_patterns_is_refused_and_one_inside_runs(
+    tmp_path: Path,
+):
+    """#1347 O2: ES|QL `FROM` targets are confined to the events/alerts patterns on every run,
+    as search's `index` is."""
+    ctx = _ctx(tmp_path)
+
+    with pytest.raises(ConfinementFault):
+        elastic_adapter.VERBS["esql"](ctx, query="FROM .security-7 | LIMIT 1")
+    with pytest.raises(TransportFault):
+        elastic_adapter.VERBS["esql"](ctx, query="FROM logs-system.auth-* | LIMIT 1")
