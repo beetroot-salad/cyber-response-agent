@@ -29,10 +29,10 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.e2e]
 ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
 
 
-@pytest.mark.parametrize("line_ends", ["as stored", "CRLF"])
+@pytest.mark.parametrize("line_ends", ["as stored", "CRLF", "padded", "decomposed"])
 async def test_o16_a_replay_through_the_worker_lane_completes_with_its_disposition(
         migrated_database, tmp_path, monkeypatch, line_ends):  # noqa: F811
-    """queued → completed with the golden's disposition, cost read from its sessions, knowledge current at the published commit; the run holds the alert's exact bytes, CRLF line ends included. (O16)"""
+    """queued → completed with the golden's disposition, cost read from its sessions, knowledge current at the published commit; the run holds the alert's exact bytes, CRLF, padding whitespace and decomposed text included. (O16)"""
     from defender.records.formats import parse_report_text
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
@@ -46,6 +46,13 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
     if line_ends == "CRLF":
         golden_bytes = golden_bytes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
         assert b"\r\n" in golden_bytes, "premise: the alert has line ends to turn into CRLF"
+    elif line_ends == "padded":
+        golden_bytes = b"\n\t " + golden_bytes.rstrip(b"\n") + b"   \n"
+    elif line_ends == "decomposed":
+        document = json.loads(golden_bytes)
+        document["analyst_note"] = "cafe\u0301"
+        golden_bytes = (json.dumps(document, indent=2, ensure_ascii=False) + "\n").encode()
+        assert "e\u0301".encode() in golden_bytes, "premise: a decomposed sequence in the stored bytes"
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)  # R1: a set-up tenant has runs/

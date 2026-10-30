@@ -40,6 +40,11 @@ ALERT_DIGEST = hashlib.sha256(ALERT_BYTES).hexdigest()
 #: Exact bytes `admit()` accepts that a text-mode read or a line-end normalization would change:
 #: CRLF line ends, a tab, multibyte text, a trailing CRLF.
 AWKWARD_ALERT_BYTES = '{"rule":\t"caf\u00e9 \u2713",\r\n "n": 1,\r\n\t"text": "line\\r\\nend"}\r\n'.encode()
+#: Exact bytes `admit()` accepts that a strip of whitespace would change: leading whitespace (a line
+#: end, a tab) and spaces before the final line end.
+PADDED_ALERT_BYTES = b'\n\t {"rule": {"id": "r-1342"},  "n": 1}   \n'
+#: Exact bytes `admit()` accepts that a Unicode normalization would change: "e" + U+0301 (NFD).
+DECOMPOSED_ALERT_BYTES = '{"rule": {"id": "r-1342"}, "text": "cafe\u0301"}\n'.encode()
 TITLE = "SSH success after failures"
 DESCRIPTION = "Three failures then a success from one source."
 

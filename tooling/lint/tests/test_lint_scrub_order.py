@@ -224,6 +224,44 @@ def test_a_handler_for_an_unrelated_error_is_not_a_finding(tmp_path, function):
     assert _GATE.scan(_tree(tmp_path, run=run)) == []
 
 
+@pytest.mark.parametrize("function", ["main", "job_main", "_post_steps", "_run_investigation_lifecycle"])
+@pytest.mark.parametrize("context", ["contextlib.suppress(RunTainted)", "contextlib.suppress(errors.RunTainted)",
+                                     "suppress(*errors)", "contextlib.suppress(Exception)"])
+def test_a_with_that_suppresses_the_taint_is_found(tmp_path, function, context):
+    """`contextlib.suppress` ends the taint signal without an `except`: a `with` naming it or a swallower is found. (M3)"""
+    run = _plant_handler(function, f"    with {context}:\n        pass\n")
+    found = _GATE.scan(_tree(tmp_path, run=run))
+    assert len(found) == 1, found
+    assert "swallow" in found[0], found
+    assert function in found[0], found
+
+
+@pytest.mark.parametrize("function", ["main", "job_main", "_post_steps"])
+def test_a_with_for_something_else_is_not_a_finding(tmp_path, function):
+    run = _plant_handler(function, "    with contextlib.nullcontext():\n        pass\n")
+    assert _GATE.scan(_tree(tmp_path, run=run)) == []
+
+
+_SECOND = {
+    "def": "def {name}():\n    pass\n",
+    "assignment": "{name} = other\n",
+    "annotated assignment": "{name}: object = other\n",
+    "import": "from elsewhere import other as {name}\n",
+    "class": "class {name}:\n    pass\n",
+    "for target": "for {name} in other:\n    pass\n",
+}
+
+
+@pytest.mark.parametrize("name", ["main", "job_main", "_post_steps", "_run_investigation_lifecycle"])
+@pytest.mark.parametrize("form", sorted(_SECOND))
+def test_a_second_binding_of_a_composition_or_phase_name_is_a_finding(tmp_path, name, form):
+    """Each of the four functions is bound once in `run.py`; a later `def`, assignment, import or class shadows the one read. (M3)"""
+    assert _GATE.scan(_tree(tmp_path / "clean")) == [], "control: the unchanged tree is clean"
+    run = _MAIN + _SECOND[form].format(name=name)
+    found = _GATE.scan(_tree(tmp_path / "cut", run=run))
+    assert any(f"`{name}` is bound 2 times" in f for f in found), found
+
+
 def _plant_handler(function: str, block: str) -> str:
     """`_MAIN` with `block` added at the end of `function`'s body."""
     if function == "_run_investigation_lifecycle":

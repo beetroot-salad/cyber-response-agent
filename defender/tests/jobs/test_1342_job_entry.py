@@ -26,7 +26,16 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, AWKWARD_ALERT_BYTES, DEFENDER, TITLE, WORKTREE, tree
+from defender.tests.support.jobs._jobs1342 import (
+    ALERT_BYTES,
+    AWKWARD_ALERT_BYTES,
+    DECOMPOSED_ALERT_BYTES,
+    DEFENDER,
+    PADDED_ALERT_BYTES,
+    TITLE,
+    WORKTREE,
+    tree,
+)
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
 ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
@@ -150,6 +159,42 @@ def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = No
     return result
 
 
+class ReaderSpies:
+    """Records, in order, every reader of the run folder and of the page that `run.py` could reach: listing
+    the run folder, the table cross-check, the module-default page render and the renderer beneath it."""
+
+    def __init__(self, monkeypatch: Any, run_dir: Path) -> None:
+        from defender import run as run_py  # noqa: F401 — imported first: its seam defaults bind the real readers, never a spy
+        from defender import run_common
+        from defender.presentation import visualize_run
+
+        self.events: list[str] = []
+        real_iterdir, real_cross = Path.iterdir, run_common.cross_check_tables
+
+        def iterdir(path: Path) -> Any:
+            if path == run_dir:
+                self.events.append("list")
+            return real_iterdir(path)
+
+        def cross_check(*a: Any, **k: Any) -> Any:
+            self.events.append("cross-check")
+            return real_cross(*a, **k)
+
+        def note(event: str) -> Any:
+            return lambda *_a, **_k: self.events.append(event)
+
+        monkeypatch.setattr(Path, "iterdir", iterdir)  # lint-monkeypatch: ok — a recording wrapper; no seam lists the run folder
+        monkeypatch.setattr(run_common, "cross_check_tables", cross_check)  # lint-monkeypatch: ok — a recording wrapper of the reader the post-steps reach by module attribute
+        monkeypatch.setattr(run_common, "visualize", note("module-visualize"))  # lint-monkeypatch: ok — the module default must not be what renders
+        monkeypatch.setattr(visualize_run, "publish_page", note("renderer"))  # lint-monkeypatch: ok — beneath the module default, whatever name reached it
+        self.seam_calls = 0
+
+    def seam(self, *_a: Any, **_k: Any) -> None:
+        """The injected page seam."""
+        self.seam_calls += 1
+        self.events.append("seam-visualize")
+
+
 # --- O6 / M1 / M5: setup in the job lane -----------------------------------------------------------
 
 def test_o6_a_job_with_a_valid_launch_record_sets_up_and_runs_the_lifecycle(scene):
@@ -168,9 +213,11 @@ def test_o6_a_job_with_a_valid_launch_record_sets_up_and_runs_the_lifecycle(scen
     assert scene.job_end(run_id) == SETTLED
 
 
-@pytest.mark.parametrize("raw", [ALERT_BYTES, AWKWARD_ALERT_BYTES], ids=["as the fixture", "crlf tab multibyte"])
+@pytest.mark.parametrize("raw", [ALERT_BYTES, AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES],
+                         ids=["as the fixture", "crlf tab multibyte", "leading whitespace and trailing spaces",
+                              "decomposed unicode"])
 def test_o6_the_runs_input_alert_is_the_launch_files_exact_bytes_and_hashes_to_the_record(scene, raw):
-    """The alert the run holds equals the alert file byte for byte (trailing newline and CRLF line ends too) and matches the launch digest. (O6, O2, M5)"""
+    """The alert the run holds equals the alert file byte for byte (trailing newline, CRLF, padding whitespace and decomposed text too) and matches the launch digest. (O6, O2, M5)"""
     from defender.records import RunPaths
 
     run_id = str(uuid.uuid4())
@@ -431,6 +478,32 @@ def test_m3_the_job_lane_removes_its_knowledge_copy_on_the_way_out(scene):
     assert not any(copies.glob("*")), "a crashed job left its knowledge copy"
 
 
+def test_m3_no_reader_of_the_run_folder_or_the_page_ran_before_the_lifecycle_returned_and_each_ran_after(
+        scene, monkeypatch):
+    """The lifecycle double sees no listing, cross-check or page render so far; afterwards the listing, one cross-check and one render through the injected seam have run. (M3)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    spies = ReaderSpies(monkeypatch, scene.runs / run_id)
+    ran = Ran()
+    inner = verified_lifecycle(ran)
+    before_lifecycle: list[list[str]] = []
+
+    def lifecycle(**kw: Any) -> dict[str, Any]:
+        before_lifecycle.append(list(spies.events))
+        return inner(**kw)
+
+    got = run_job(scene, run_id, ran=ran, lifecycle=lifecycle, visualize=spies.seam)
+
+    assert got.raised is None, got
+    assert before_lifecycle == [[]], f"a reader ran before the lifecycle returned the scrubbed folder: {before_lifecycle}"
+    assert spies.events.count("cross-check") == 1, spies.events
+    assert spies.events.count("seam-visualize") == 1, spies.events
+    assert "list" in spies.events, spies.events
+    assert "module-visualize" not in spies.events, spies.events
+    assert "renderer" not in spies.events, spies.events
+    assert spies.events.index("list") < spies.events.index("cross-check") < spies.events.index("seam-visualize")
+
+
 # --- the job-end record's facts (O8 child side, M3) ------------------------------------------------------
 
 def _lifecycle(s: Scene, *, investigate: Any, start_box: Any = None, stop_box: Any = None, scrub: Any = None):
@@ -511,7 +584,7 @@ def test_o8_scrub_verified_comes_from_the_host_scrub_verdict_not_from_the_lifecy
     assert scene.job_end(run_id) == {**SETTLED, "scrub_verified": False}
 
 
-def test_o8_a_tree_the_scrub_found_tainted_is_not_verified(scene):
+def test_o8_a_tree_the_scrub_found_tainted_is_not_verified(scene, monkeypatch):
     """The verdict says `ran: true` and the scrub raises `RunTainted`: `scrub_verified` is false. (O8)"""
     from defender.box import RunTainted
 
@@ -523,11 +596,17 @@ def test_o8_a_tree_the_scrub_found_tainted_is_not_verified(scene):
         write_verdict({"ran": True, "reason": "walk completed"})
         raise RunTainted("a planted link")
 
-    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), scrub=taint))
+    spies = ReaderSpies(monkeypatch, scene.runs / run_id)
+    got = run_job(scene, run_id, ran=ran, visualize=spies.seam,
+                  lifecycle=_lifecycle(scene, investigate=_investigate(ran), scrub=taint))
 
     record = scene.job_end(run_id)
     assert record["box"] == "started"
     assert record["scrub_verified"] is False
+    assert (isinstance(got.raised, RunTainted) or (got.exit is not None and got.exit.code not in (0, None))
+            or got.rc not in (0, None)), got
+    assert spies.seam_calls == 0, "the page was rendered from a tainted tree"
+    assert spies.events == [], f"a reader of the tainted tree ran: {spies.events}"
 
 
 def test_m3_a_teardown_fault_is_told_from_a_start_fault(scene):
@@ -669,6 +748,21 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     # an import-time alias of the writer's helpers or of `DEFAULT_DEPS.request` escapes all of those: the
     # transport every route ends in is tripped too
     monkeypatch.setattr(writer_module.integrations, "docker_exec_curl", wire.docker_exec_curl)  # lint-monkeypatch: ok — same tripwire, the writer's transport
+    # a function object bound at import time escapes even that: trip the process launch beneath it, on
+    # any `docker ... exec` (the one thing the transport does), whatever route reached it
+    import subprocess
+
+    launched: list[list[str]] = []
+    real_run = subprocess.run
+
+    def run_unless_docker_exec(cmd: Any, *a: Any, **k: Any) -> Any:
+        argv = [str(part) for part in cmd] if isinstance(cmd, (list, tuple)) else [str(cmd)]
+        if argv and Path(argv[0]).name == "docker" and "exec" in argv:
+            launched.append(argv)
+            raise AssertionError("a job-lane run launched a docker exec")
+        return real_run(cmd, *a, **k)
+
+    monkeypatch.setattr(subprocess, "run", run_unless_docker_exec)  # lint-monkeypatch: ok — a tripwire beneath the writer's transport; no seam exists by design
 
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
@@ -678,7 +772,7 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
 
     assert got.calls["lifecycle"] == 1, got
     assert got.raised is None, got
-    assert (tripped, wire.called) == ([], [])
+    assert (tripped, wire.called, launched) == ([], [], [])
     # control: the tripwire is live, so an alias of the real entry points would have been caught
     from types import SimpleNamespace
     probe = SimpleNamespace(run_dir=tmp_path / "probe")
@@ -692,6 +786,10 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
         writer_module.DEFAULT_DEPS.request(config, "POST", "/tickets", {}, ctx=None)
     assert wire.called == ["docker_exec_curl"]
     wire.called.clear()
+    with pytest.raises(AssertionError):  # control: the process tripwire is live
+        subprocess.run(["docker", "--context", "c", "exec", "box", "curl"], check=False)
+    assert launched, "the launch tripwire never saw the docker exec"
+    launched.clear()
     # a helper that captured `enqueue_curation` at definition time escapes the module patch: look at disk too
     made = [k for k in set(tree(scene.root)) - before if re.search(r"curat|queue|learn", k, re.IGNORECASE)]
     assert made == [], f"the job lane left curation state behind: {made}"
@@ -717,6 +815,42 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
                      publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
     assert seen == ["open", "record", "enqueue"], seen
+
+
+def test_m4_the_job_entry_has_no_open_seam_and_refuses_a_ticket_writer(scene):
+    """`job_main` takes no `*args` or `**kwargs`, and a call handing it a `ticket_writer` or an `enqueue` is a `TypeError`. (M4, O11)"""
+    import inspect
+
+    from defender import run as run_py
+
+    kinds = {p.kind for p in inspect.signature(run_py.job_main).parameters.values()}
+    assert inspect.Parameter.VAR_KEYWORD not in kinds, kinds
+    assert inspect.Parameter.VAR_POSITIONAL not in kinds, kinds
+    for seam in ("ticket_writer", "enqueue"):
+        run_id = str(uuid.uuid4())
+        scene.plant(run_id)
+        ran = Ran()
+        seams: dict[str, Any] = {
+            "lifecycle": verified_lifecycle(ran), "preflight": lambda *a, **k: 0,
+            "visualize": lambda *a, **k: None, "publish": lambda *a, **k: B.fresh(scene.t.commit),
+            seam: _Tripwire()}
+        with pytest.raises(TypeError):
+            run_py.job_main(scene.argv(run_id), **seams)
+        assert ran.calls["lifecycle"] == 0, f"a {seam} seam was accepted and the job ran"
+
+
+def test_m4_run_py_binds_nothing_of_the_ticket_writer_or_its_transport_at_import():
+    """No name in `run.py`'s namespace is a function, class or object defined in the ticket writer or the integrations transport (the writer module itself apart). (M4, O11)"""
+    import types
+
+    from defender import run as run_py
+
+    homes = ("defender.investigation.ticket_writer", "defender.integrations")
+    bound = {name: getattr(value, "__module__", None) for name, value in vars(run_py).items()
+             if not isinstance(value, types.ModuleType)
+             and (getattr(value, "__module__", None) or "").startswith(homes)}
+    assert bound == {}, f"run.py holds import-time aliases of the writer's internals: {bound}"
+    assert run_py._default_ticket_writer.__name__ == "defender.investigation.ticket_writer", "premise: the one module binding"
 
 
 def test_m4_the_disk_check_sees_the_operator_default_enqueue(scene, tmp_path):
