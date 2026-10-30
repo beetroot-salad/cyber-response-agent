@@ -52,6 +52,15 @@ def test_an_invitation_answers_alike_for_new_existing_and_invited_people_before_
     assert (world.signin.every_call, world.mail.attempts, len(world.signin.create_calls)) == (calls, mails, accounts)
 
 
+@pytest.mark.parametrize("email", ["a\x00b@n.example", "\x1fnew@n.example", "new@n.example\x85"])
+def test_an_email_with_a_control_character_is_invalid_input_and_invites_nobody(email: str) -> None:
+    """#1349 B1.1: a 422 like any malformed email, not a server error and not a repaired address."""
+    world, ann, _ = two_tenants()
+    assert world.invite(ann, T1, email).status_code == 422
+    assert [r["email"] for r in invitation_rows(ann, T1)] == []
+    assert world.invite(ann, T1, NEW).status_code == 202  # positive control
+
+
 def test_the_listing_shows_id_email_status_and_created_at_and_sends_change_nothing() -> None:
     """Rows are exactly id/email/status/created_at, unchanged by a send or a re-invite (P-E, DC-7)."""
     world, ann, _ = two_tenants()

@@ -267,3 +267,17 @@ def test_entering_the_apps_lifespan_runs_start_and_the_senders_first_pass() -> N
             time.sleep(0.02)
         assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (1, 1)
         assert tenants_of(world.sign_in(ME)) == {LAB}
+
+
+@pytest.mark.parametrize("email", ["a\x00b@x.example", "\x1fops@x.example"])
+def test_a_bootstrap_file_naming_an_email_with_a_control_character_is_refused_at_load(email: str) -> None:
+    """#1349 B1.3: refused as the file is read, never stored as a repaired address."""
+    from pydantic import ValidationError
+
+    from defender.identity import Bootstrap
+
+    with pytest.raises(ValidationError):
+        Bootstrap(administrators=(email,), tenants={})
+    with pytest.raises(ValidationError):
+        Bootstrap(administrators=(), tenants={LAB: (email,)})
+    assert Bootstrap(administrators=(" Ops@X.example ",), tenants={}).administrators == ("ops@x.example",)

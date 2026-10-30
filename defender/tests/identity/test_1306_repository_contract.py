@@ -190,6 +190,26 @@ async def test_the_seeder_refuses_a_duplicate_email_in_any_case(seeded):
         await _user(seeded, "Ann@X.org")
 
 
+@pytest.mark.parametrize("email", [
+    "a\x00b@x.org",    # NUL: PostgreSQL text cannot hold it
+    "\x1fann@x.org",   # a control character a default strip() silently removes
+    "ann@x.org\x85",   # ditto, at the end
+    "an\x07n@x.org",   # inside
+    "a\ud800b@x.org",  # a lone surrogate: not UTF-8 at all
+])
+async def test_an_email_with_a_control_or_unencodable_character_is_refused_and_nothing_is_written(seeded, email):
+    """#1349 B1.2: both repositories refuse it alike, never repair it into another address."""
+    with pytest.raises(DataRuleViolation):
+        await seeded.ensure_user(email, now=NOW)
+    with pytest.raises(DataRuleViolation):
+        await _user(seeded, email)
+    with pytest.raises(DataRuleViolation):
+        await seeded.user_by_email(email)
+    assert await seeded.user_by_email("ann@x.org") is None
+    plain = await seeded.ensure_user(" \tAnn@X.org\r\n", now=NOW)  # positive control: ordinary whitespace is trimmed
+    assert plain.email == "ann@x.org"
+
+
 async def test_a_signin_account_is_recorded_once(seeded):
     """signin_account_id is unique and recorded once (data model)."""
     a, b = await _user(seeded, "a@x.org"), await _user(seeded, "b@x.org")

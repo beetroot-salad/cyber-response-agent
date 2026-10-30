@@ -6,6 +6,7 @@ A status outside the model is refused as it is set, so both repositories refuse 
 from __future__ import annotations
 
 import datetime as _dt
+import unicodedata
 import uuid
 from typing import Annotated, Literal, get_args
 
@@ -22,9 +23,19 @@ from .errors import DataRuleViolation
 SCHEMA = "identity"
 
 
+#: Only ordinary whitespace is trimmed: a bare `strip()` also removes control characters, which
+#: would store an address the caller never gave (#1349).
+_TRIMMED = " \t\r\n"
+
+
 def normalize_email(raw: str) -> str:
-    """The one form an email is stored and compared in."""
-    return raw.strip().lower()
+    """The one form an email is stored and compared in. An email with a control character, or one
+    that is not valid text (a lone surrogate), is refused, never repaired: PostgreSQL cannot store
+    NUL, and both repositories must refuse alike."""
+    email = raw.strip(_TRIMMED).lower()
+    if any(unicodedata.category(c) in ("Cc", "Cs") for c in email):
+        raise DataRuleViolation(f"{raw!r} is not an email address: it has a control character")
+    return email
 
 
 #: An email field normalized as it is built, so nothing after the boundary normalizes again.
