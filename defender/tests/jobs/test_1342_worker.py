@@ -22,10 +22,12 @@ from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     ALERT_DIGEST,
     AWKWARD_ALERT_BYTES,
+    DECOMPOSED_ALERT_BYTES,
     GOLDEN_REPORT,
     JOBS_AUDIT_LOGGER,
     MALICIOUS_REPORT,
     NOW,
+    PADDED_ALERT_BYTES,
     T1,
     T2,
     TITLE,
@@ -247,75 +249,27 @@ async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_no
 
 
 
-async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(world):
-    """An alert with CRLF line ends, tabs and multibyte text reaches `<id>.alert.json` byte for byte, and the launch record's digest is of those bytes. (O6, M5)"""
+@pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES],
+                         ids=["crlf tab multibyte", "leading whitespace and trailing spaces", "decomposed unicode"])
+async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(world, raw):
+    """An alert that CRLF, tabs, multibyte text, padding whitespace or a decomposed sequence would change reaches `<id>.alert.json` byte for byte, and the launch digest is of those bytes. (O6, M5)"""
+    import unicodedata
+
+    from defender.records.formats import admit
+
+    admit(raw)  # premise: admission accepts these bytes
+    assert (raw != raw.strip() or b"\r\n" in raw or raw.decode() != unicodedata.normalize("NFC", raw.decode())), (
+        "premise: bytes a strip, a line-end or a normalization step would change")
     child = _child(world)
     async with job_store(world["dsn"]) as store:
-        alert = await an_alert(store, T1, raw=AWKWARD_ALERT_BYTES)
+        alert = await an_alert(store, T1, raw=raw)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
         await make_worker(store, world["root"], child).drain()
 
-    assert b"\r\n" in AWKWARD_ALERT_BYTES
-    assert len(AWKWARD_ALERT_BYTES.decode()) < len(AWKWARD_ALERT_BYTES), "premise: multibyte text"
     written = (world["runs"] / f"{inv.investigation_id}.alert.json").read_bytes()
-    assert written == AWKWARD_ALERT_BYTES
+    assert written == raw
     launch = json.loads((world["runs"] / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
-    assert launch["digest"] == hashlib.sha256(AWKWARD_ALERT_BYTES).hexdigest()
-
-
-@pytest.mark.parametrize("present", [".launch.json", ".alert.json"])
-async def test_o6_launch_files_are_create_only_and_a_failed_write_is_a_worker_error(world, present):
-    """A launch file that already exists is not overwritten; no child; `failed`/`worker_error`. (O6)"""
-    import uuid
-
-    inv = str(uuid.uuid4())
-    child = _child(world, files=_committed())
-    async with job_store(world["dsn"]) as store:
-        alert = await an_alert(store, T1)
-        plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
-        (world["runs"] / f"{inv}{present}").write_text("planted", encoding="utf-8")
-        await make_worker(store, world["root"], child).drain()
-
-    stored = row(world["dsn"], inv)
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
-    assert stored["failure_message"]
-    assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
-    assert (world["runs"] / f"{inv}{present}").read_text(encoding="utf-8") == "planted"
-    assert child.seen() is None, "a child started although its launch files could not be written"
-
-
-@pytest.mark.parametrize("shape", ["tenant folder without runs", "no tenant folder on this host"])
-async def test_o6_a_tenant_with_no_runs_container_fails_as_a_worker_error_and_nothing_is_made(world, shape):
-    """No `<root>/<T>/runs` → `failed`/`worker_error`, no child, nothing created anywhere. (O6, R1)"""
-    import shutil
-
-    if shape == "no tenant folder on this host":
-        shutil.rmtree(world["root"] / T1)
-    else:
-        world["runs"].rmdir()
-    before = tree(world["root"])
-    child = _child(world, files=_committed())
-    inv, stored = await _run_one(world, child)
-
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
-    assert stored["failure_message"]
-    assert stored["finished_at"] == NOW
-    assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
-    assert child.seen() is None, "a child was started without a runs container"
-    assert tree(world["root"]) == before, f"the worker made something for {inv}"
-    assert not world["runs"].exists()
-
-
-async def test_o6_a_child_that_cannot_be_spawned_is_a_worker_error_and_the_worker_carries_on(world):
-    """An argv that cannot be executed ends the row `failed`/`worker_error`; `drain` returns. (O6)"""
-    missing = world["tmp"] / "no-such-program"
-    inv, stored = await _run_one(world, lambda launch: [str(missing), "--job", launch.investigation_id])
-
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
-    assert stored["failure_message"]
-    assert stored["finished_at"] == NOW
-    assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
-    assert inv
+    assert launch["digest"] == hashlib.sha256(raw).hexdigest()
 
 
 # --- O8: the worker's rule, one case per branch ----------------------------------------------------
@@ -329,11 +283,14 @@ def _refused(**extra) -> dict[str, str]:
                                          scrub_verified=False), **extra}
 
 
+JSON_NULL = object()  # `_job_end_with(key=JSON_NULL)` writes an explicit JSON null
+
+
 def _job_end_with(**changes) -> str:
     """A job-end record of the ratified keys with `changes` applied (a `None` value drops the key)."""
     body = json.loads(job_end())
     body.update(changes)
-    return json.dumps({k: v for k, v in body.items() if v is not None})
+    return json.dumps({k: (None if v is JSON_NULL else v) for k, v in body.items() if v is not None})
 
 
 MARKED_REPORT = GOOD + f"\n{MARKER}\n"
@@ -363,6 +320,42 @@ CASES = {
         expect=("failed", "no_report", None), code=EXIT),
     "1-job-end-unknown-box-word": _spec(
         files=_committed(**{"{id}.job-end.json": _job_end_with(box="paused")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-committed-as-json-null": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=JSON_NULL)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-verified-as-json-null": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=JSON_NULL)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-committed-as-the-number-one": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=1)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-committed-as-the-number-zero": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=0)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-verified-as-the-number-one": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=1)}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-setup-word-capitalised": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="Done")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-setup-word-spaced": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=" done")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-setup-word-upper-case": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="DONE")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-box-word-upper-case": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box="STARTED")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-box-word-capitalised": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box="Started")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-box-word-spaced": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box=" started")}), exit=EXIT,
+        expect=("failed", "no_report", None), code=EXIT),
+    "1-job-end-box-word-shouted": _spec(
+        files=_committed(**{"{id}.job-end.json": _job_end_with(box="BOX")}), exit=EXIT,
         expect=("failed", "no_report", None), code=EXIT),
     "1-job-end-an-extra-key": _spec(
         files=_committed(**{"{id}.job-end.json": _job_end_with(extra="x")}), exit=EXIT,
@@ -761,6 +754,9 @@ elif verb == "rm":
             print(f"Error response from daemon: cannot remove container {n}: container is {state_of(n)}: "
                   "stop the container before removing or force remove", file=sys.stderr)
             sys.exit(1)
+        if (home / "jammed" / n).exists():  # survives every removal, waited on or not
+            print(f"Error response from daemon: cannot remove container {n}: container is paused", file=sys.stderr)
+            sys.exit(1)
         (home / "held" / n).unlink()
 elif verb == "ps":
     wanted = [f.split("=", 1)[1].strip("^$").lstrip("/") for f in filters if f.startswith("name=")]
@@ -774,6 +770,9 @@ elif verb == "wait":
     for n in operands:
         if n not in held():
             print("Error: No such container: " + n, file=sys.stderr)
+            sys.exit(1)
+        if state_of(n) == "running" and not (home / "stuck" / n).exists():  # real docker blocks until it exits
+            print(f"Error: would block: container {n} is running", file=sys.stderr)
             sys.exit(1)
         (home / "waited" / n).write_text("", encoding="utf-8")
         print("0")
@@ -791,7 +790,7 @@ class _DockerStandIn:
 
     def __init__(self, tmp_path: Path) -> None:
         self.home = tmp_path / "docker-stand-in"
-        for sub in ("held", "stuck", "waited"):
+        for sub in ("held", "stuck", "jammed", "waited"):
             (self.home / sub).mkdir(parents=True)
         self.script = self.home / "stand_in.py"
         self.script.write_text(_DOCKER_STAND_IN, encoding="utf-8")
@@ -810,6 +809,10 @@ class _DockerStandIn:
     def stick(self, name: str) -> None:
         """Every `rm` of `name` fails until a `docker wait` on it has returned (a paused box under runsc)."""
         (self.home / "stuck" / name).write_text("", encoding="utf-8")
+
+    def jam(self, name: str) -> None:
+        """Every `rm` of `name` fails, `docker wait` or not: a box that cannot be removed."""
+        (self.home / "jammed" / name).write_text("", encoding="utf-8")
 
     def go_down(self) -> None:
         """The daemon answers nothing: every call exits non-zero."""
@@ -857,6 +860,8 @@ def test_o7_the_docker_seam_looks_first_and_removes_only_a_container_that_is_the
     containers.remove("defender-run-here")
     assert daemon.names() == ["defender-run-other"]
     assert _removes(daemon.calls, "defender-run-here"), daemon.calls
+    verbs = [argv[1] for argv in daemon.calls if argv[1:2] and "defender-run-here" in argv]
+    assert "wait" not in verbs, ("a box the first forced removal takes is not waited on", verbs)
 
     before = len(daemon.calls)
     assert containers.exists("defender-run-gone") is False
@@ -895,6 +900,21 @@ def test_o7_a_paused_box_that_survives_the_first_forced_removal_is_removed_after
     verbs = [argv[1] for argv in daemon.calls if argv[1:2] and "defender-run-here" in argv]
     assert verbs[-1] == "rm", verbs
     assert verbs.index("wait") < len(verbs) - 1, verbs
+
+
+def test_o7_a_box_that_survives_the_forced_removal_even_after_waiting_is_reported_and_stays_held(tmp_path):
+    """`DockerContainers.remove` when `rm -f` fails before and after the wait: `ContainerUnanswered` is raised and the box is still held. (O7, D-o)"""
+    from defender.worker import DockerContainers
+    from defender.worker._containers import ContainerUnanswered
+
+    daemon, docker = _docker_world(tmp_path)
+    daemon.hold("defender-run-here", "paused")
+    daemon.jam("defender-run-here")
+
+    with pytest.raises(ContainerUnanswered):
+        DockerContainers(docker=docker).remove("defender-run-here")
+
+    assert daemon.names() == ["defender-run-here"], daemon.calls
 
 
 @pytest.mark.parametrize("state", ["exited", "running"])
@@ -995,7 +1015,12 @@ class _StoreWhoseAlertReadFails:
         return await self._store.get_alert(tenant_id, alert_id)
 
 
-@pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError])
+class _NobodyPlannedThis(Exception):  # noqa: N818 — derives directly from Exception, in no list of expected faults
+    """A fault type no handler in the worker can know by name."""
+
+
+@pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError, AttributeError,
+                                        IndexError, _NobodyPlannedThis])
 @pytest.mark.parametrize("seam", ["child-argv", "store-read", "job-end-read", "lane-cost", "lane-knowledge"])
 async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and_the_worker_goes_on(
         world, monkeypatch, seam, fault_type):

@@ -10,15 +10,22 @@
   seam: a parameter named `visualize` defaulting to the reader, and `visualize=visualize`
   handed to `_post_steps`. The operator's own readers, the case ticket and the curation
   enqueue, come after its lifecycle.
-* None of `main`, `job_main`, `_post_steps` or `_run_investigation_lifecycle` has an `except`
-  that would swallow the taint signal: none names `RunTainted`, `Exception` or `BaseException`,
-  and none is bare.
+* `main`, `job_main`, `_post_steps` and `_run_investigation_lifecycle` are each bound exactly once
+  in `run.py` (a second `def`, assignment, import or class of the name would shadow the one this
+  rule reads).
+* None of those four has an `except` that would swallow the taint signal: none names
+  `RunTainted`, `Exception` or `BaseException`, and none is bare; none has a `with` that names one
+  of those or `suppress` (which swallows without an `except`).
 * The bash tool never calls `run_parsed` on the in-process executor `bash_exec`: a box failure
   has no in-process fallback.
 
-Not covered, by design: a reader named by a computed string (`"cross_" + "check_tables"`, a
-variable), reached from another module, or a read of the folder by a means the census does not
-name (`open`, `read_text`, `shutil`, a subprocess).
+Not covered, by design (name-based evasions; the behaviour test in
+`tests/jobs/test_1342_job_entry.py`, which records every reader before and after the lifecycle
+double, is the enforcement): a reader named by a computed string (`"cross_" + "check_tables"`, a
+variable), reached from another module, through a function's `__defaults__`, or a read of the
+folder by a means the census does not name (`open`, `read_text`, `shutil`, a subprocess); the
+post-steps called from a helper before the lifecycle; a swallow by a helper context manager or
+decorator of one's own; a rebinding of a composition at run time (`globals()`, `setattr`, `exec`).
 
 Order is source position inside the one function; attribute calls read as their attribute
 name. A file or function that is missing, or a named call that is gone, is a finding (the rule
@@ -71,6 +78,19 @@ def _function(root: Path, rel: str, name: str, findings: list[str]) -> ast.AST |
     return None
 
 
+def _bindings(tree: ast.AST, name: str) -> list[int]:
+    """The lines at which `name` is bound in the module: a def, a class, a stored name, an import."""
+    lines = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
+            lines.append(node.lineno)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name:
+            lines.append(node.lineno)
+        elif isinstance(node, ast.alias) and (node.asname or node.name.split(".")[0]) == name:
+            lines.append(getattr(node, "lineno", 0))
+    return sorted(lines)
+
+
 def _call_order(fn: ast.AST) -> list[str]:
     hits = []
     for node in ast.walk(fn):
@@ -94,6 +114,20 @@ def _caught(fn: ast.AST) -> list[tuple[int, str]]:
                     out.append((node.lineno, sub.id))
                 elif isinstance(sub, ast.Attribute):
                     out.append((node.lineno, sub.attr))
+    return out
+
+
+def _swallowing_withs(fn: ast.AST) -> list[tuple[int, str]]:
+    """A `with` whose context names a swallower or `suppress`: it ends the taint signal as an `except` would."""
+    out = []
+    for node in ast.walk(fn):
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            names = [sub.id if isinstance(sub, ast.Name) else sub.attr
+                     for item in node.items for sub in ast.walk(item.context_expr)
+                     if isinstance(sub, (ast.Name, ast.Attribute))]
+            hit = next((name for name in names if name in (*_SWALLOWERS, "suppress")), None)
+            if hit is not None:
+                out.append((node.lineno, hit))
     return out
 
 
@@ -181,6 +215,14 @@ def scan(root: Path) -> list[str]:
 
     functions = {name: _function(root, _RUN, name, findings)
                  for name in (*_COMPOSITIONS, _POST_STEPS, "_run_investigation_lifecycle")}
+    if (root / _RUN).is_file():
+        _text, run_tree = _astlib.read_and_parse(root / _RUN, _RUN)
+        for name in functions:
+            lines = _bindings(run_tree, name)
+            if len(lines) > 1:
+                findings.append(f"{_RUN}: `{name}` is bound {len(lines)} times (lines "
+                                f"{', '.join(map(str, lines))}); exactly one definition, or a second "
+                                "shadows the one this rule reads")
 
     for name in _COMPOSITIONS:
         fn = functions[name]
@@ -204,6 +246,9 @@ def scan(root: Path) -> list[str]:
             if caught == "(bare except)" or caught in _SWALLOWERS:
                 findings.append(f"{_RUN}:{lineno}: `{name}` has an `except` naming {caught} "
                                 "that would swallow the run-tainted signal")
+        for lineno, caught in _swallowing_withs(fn):
+            findings.append(f"{_RUN}:{lineno}: `{name}` has a `with` naming {caught} that would "
+                            "swallow the run-tainted signal")
 
     bash = _function(root, _BASH, "_tool_bash", findings)
     if bash is not None:
