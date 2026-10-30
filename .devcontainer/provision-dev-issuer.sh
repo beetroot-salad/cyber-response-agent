@@ -72,6 +72,9 @@ prepare() {
       2>/dev/null
   fi
   install -m 0644 "$STATE/ca/ca.pem" "$STATE/trust/dev-issuer-ca.pem"
+  # `SSL_CERT_DIR` names this folder: Go reads every file in it, but OpenSSL (Python's TLS client,
+  # so every host process minting a tenant token) finds a CA only under its hash name.
+  openssl rehash "$STATE/trust" >/dev/null
   if [ ! -s "$STATE/tls/server.pem" ]; then
     say "making the openbao TLS certificate"
     local ext
@@ -269,7 +272,7 @@ revoke_other_secrets() {  # revoke_other_secrets token keep: destroy every role 
 bind_forge() {  # bind_forge tenant repo: the row's forge: {origin, audience, issuer_role, issuer_config}
   local tenant=$1 repo=$2 row
   row="${DEFENDER_DATA_ROOT:?the dev container sets DEFENDER_DATA_ROOT}/$tenant/tenant.json"
-  [ -s "$row" ] || die "no tenant row at $row: tenants are rows in PostgreSQL now (#1214); the lifecycle service does this binding. A lab tenant from before is brought over with \`python -m defender.lifecycle adopt\`"
+  [ -s "$row" ] || die "no tenant row at $row: tenants are rows in PostgreSQL now (#1214); the lifecycle service does this binding. A lab tenant from before is moved by hand: see \"Upgrade from before #1214\" in defender/CLAUDE.md"
   jq --arg origin "http://forgejo:3000/$repo.git" --arg audience "$AUDIENCE" --arg role "$ROLE" \
     --arg config "$(client_config "$tenant")" \
     '.forge = {origin: $origin, audience: $audience, issuer_role: $role, issuer_config: $config}' \

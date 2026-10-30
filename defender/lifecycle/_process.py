@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import ssl
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -87,10 +86,6 @@ def integration_runner(container: str) -> Callable[[Sequence[str]], subprocess.C
     return run
 
 
-def _openbao_verify(config: LifecycleConfig) -> ssl.SSLContext | bool:
-    return ssl.create_default_context(cafile=str(config.openbao_ca)) if config.openbao_ca else True
-
-
 def forge_admin(config: LifecycleConfig) -> httpx.AsyncClient:
     """The management service's forge client: the admin token on every call."""
     return httpx.AsyncClient(base_url=config.forge_url, timeout=CALL_TIMEOUT,
@@ -104,10 +99,10 @@ def forge_anonymous(config: LifecycleConfig) -> httpx.AsyncClient:
 
 def openbao_management(config: LifecycleConfig) -> httpx.AsyncClient:
     """The management service's OpenBao client: the management login on every call."""
-    return httpx.AsyncClient(base_url=config.openbao_url, timeout=CALL_TIMEOUT, verify=_openbao_verify(config),
+    return httpx.AsyncClient(base_url=config.openbao_url, timeout=CALL_TIMEOUT,
                              headers={"X-Vault-Token": config.openbao_login})
 
 
 def openbao_login(config: LifecycleConfig) -> httpx.AsyncClient:
     """The host actor's OpenBao client: no token (unwrap, AppRole login, token reads; DC-12)."""
-    return httpx.AsyncClient(base_url=config.openbao_url, timeout=CALL_TIMEOUT, verify=_openbao_verify(config))
+    return httpx.AsyncClient(base_url=config.openbao_url, timeout=CALL_TIMEOUT)

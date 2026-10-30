@@ -35,8 +35,7 @@ lifecycle service's admin API (`python -m defender.lifecycle serve`; see "Creati
 credentials and records the tenant in PostgreSQL, and a run works only for an `active` tenant. The
 runtime container needs `DEFENDER_DATABASE_DSN` and the same `DEFENDER_DATA_ROOT` mount the
 lifecycle's host side prepares; nothing is cloned or set up by hand. A tenant from before #1214 is
-brought over once with `python -m defender.lifecycle adopt` (see "Upgrade from before #1214" in
-`defender/CLAUDE.md`).
+moved once by hand (see "Upgrade from before #1214" in `defender/CLAUDE.md`).
 
 ```bash
 # live investigation — needs the LLM key and the same data root (the tenant's knowledge is in it)

@@ -5,8 +5,9 @@ before the run begins, publishes the tenant's merged `main` and reports ONE line
     stale:transient <reason>     an outage (issuer or forge unreachable, a timeout, lock busy)
     stale:operator <reason>      needs a human (a refused login or token, `main` unprotected,
                                  a dirty or diverged clone, a merged commit refused on content)
-    misconfigured <reason>       decided locally, before any network call: no tenant records
-                                 to read, no forge wiring recorded, or no issuer configured
+    misconfigured <reason>       needs a setting or a host file, not a retry: no tenant
+                                 records to read, no forge wiring recorded, or a host secret
+                                 file missing, unreadable or malformed
 
 The child exits 0 for every outcome it reports (OD20); anything else is the parent's to read
 as a failed child. The run process never imports this package (P-3): it only spawns
@@ -86,8 +87,8 @@ def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process st
     budget: float | None = None,
 ) -> str:
     """The child's work, in-process: accept the tenant from its id and the data root; read its
-    forge wiring from the tenant records (`directory`, else the one `DEFENDER_DATABASE_DSN` names)
-    and decide misconfiguration before anything is sent; mint the tenant's credential through its
+    forge wiring from the tenant records (`directory`, else the one `DEFENDER_DATABASE_DSN` names),
+    refusing a tenant with none before anything is sent; mint the tenant's credential through its
     live generation (or use the injected `identity`; `credential_config` is the host's issuer
     configuration, `issuer_transport` a stand-in transport to it); open the tenant's delivery
     against the recorded origin with the forge `client`; fetch; then, under the tenant lock
@@ -134,12 +135,11 @@ def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outc
     if wiring is None:
         return report(MISCONFIGURED, f"tenant {tenant.id} has no forge wiring recorded: its repository is "
                                      "not bound to a forge")
-    try:
-        credential = identity if identity is not None else forge_credential(
-            str(tenant.id), "publish", directory=directory, config=credential_config,
-            transport=issuer_transport)
-    except DeliveryRefused as misconfigured:
-        return report(MISCONFIGURED, str(misconfigured))
+    # Reads and sends nothing until its first token: a host secret file it cannot use is refused
+    # in the network phase below, as `misconfigured`.
+    credential = identity if identity is not None else forge_credential(
+        str(tenant.id), "publish", directory=directory, config=credential_config,
+        transport=issuer_transport)
     timeout = CHILD_NETWORK_TIMEOUT if network_timeout is None else network_timeout
     repository: GitRepository | None = None
     try:

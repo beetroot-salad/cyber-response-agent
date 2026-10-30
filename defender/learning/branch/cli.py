@@ -545,71 +545,79 @@ def _launch(  # noqa: PLR0913 — see `main`
         data_root = tenancy.resolve_data_root()
     except TenantRefused as refusal:
         raise LauncherRefused(f"[branch] {refusal}") from refusal
-    tenant = _episode_tenant(tenant_id, data_root)
-    runs = tenant.tenant.runs_repository()
-    source = _open_launch_source(runs, ns.source_run_id)
-    _source_stamp_agrees(source, tenant.tenant_id)
-    # N05 / O-20: a tenant whose gather grant serves no system has nothing a world could
-    # change. Refused here, before the question-writer or anything else is spent.
-    served = served_systems(tenant.grants.gather)
-    if not served:
-        raise LauncherRefused(
-            f"[branch] tenant {tenant.tenant_id!r}: its gather grant serves no system (no read "
-            "verb other than health-check is granted), so no world of a branch could be served "
-            "— grant gather a read verb on at least one system before branching this tenant")
-    # O1: any tenant branches. No system of the lab's is assumed, so a tenant with no
-    # corpus-engine part (or one whose part does not resolve) launches like any other.
-    # SAME RULE, #1007 M8/O7: production's questioner-lessons root is `PATHS.lessons_
-    # questioner_dir`, resolved here rather than as a literal default so a test can hand in a
-    # `tmp_path` corpus and this frame is the only one that ever sees the production path.
-    # #1108 P4 flow 7: the family's knowledge is the source's commit, its export materialised
-    # here (git-capable) before anything is spent; the questioner's corpus is that export's.
-    pinned = _pinned_export(tenant, source)
-    questioner_lessons_dir = (
-        KnowledgePaths(Path(pinned.path) / "agent").lessons_questioner_dir
-        if lessons_dir is None else lessons_dir)
-    # Injectable so end-to-end tests aren't compared against the suite's own HEAD. The
-    # knowledge half is the export every sibling is pinned to, as every sibling's stamp will
-    # be (#1204 D3, O-B): never the clone's HEAD, which a publish moves.
-    live_capture = ((lambda: dataclasses.replace(
-        formats.capture_tree(REPO_ROOT),
-        knowledge=formats.KnowledgeRevision.at(pinned.commit)))
-                    if live_tree is None else live_tree)
-    source_stamp = preflight_episode(
-        source=source, branch_message_id=ns.branch_message_id,
-        preflight=preflight, model=ns.model,
-        allow_dirty=ns.allow_dirty,
-        live_tree=live_capture, oracle=oracle, verifier=verifier)
-    if roster is None:
-        from defender._paths import adapters_under
-        from defender.systems.verbs import read_roster
-
-        roster = read_roster(adapters_under(_DEFENDER_DIR))
-
-    view = prepare_episode(runs, source, knowledge_commit=pinned.commit)
-    episode = view.episode
-    # Set once the first sibling is about to start: past it, the abort message below ("no
-    # sibling started") would be false, so anything raised later is re-raised unchanged.
-    started = threading.Event()
-    with view:
-        try:
-            # The claimed episode's view: its arm container and roster are made only once the
-            # first sibling is about to start (`start_runs`).
-            author = seams.model_seam(episode.dir) if questioner is None else questioner
-            return _run_episode(
-                ns, source=source, source_stamp=source_stamp, episode=episode, view=view,
-                questioner=author, spawn=spawn, judge=judge, lessons_dir=questioner_lessons_dir,
-                tenant=tenant, runs=runs, served=served, oracle=oracle,
-                verifier=verifier, roster=roster, started=started,
-                knowledge_commit=pinned.commit, render_page=render_page)
-        except SystemExit:
-            raise
-        except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
-            if started.is_set():
-                raise
+    # The tenant's host lock, held shared for the whole launch, this process recorded under it
+    # first (#1214 P3, Flow 4): prepare and teardown wait for the launch, and a teardown finds
+    # it to stop it (its siblings hold their own).
+    try:
+        held = tenancy.hold_tenant(data_root, tenant_id)
+    except TenantRefused as refusal:
+        raise LauncherRefused(f"[branch] {refusal}") from refusal
+    with held:
+        tenant = _episode_tenant(tenant_id, data_root)
+        runs = tenant.tenant.runs_repository()
+        source = _open_launch_source(runs, ns.source_run_id)
+        _source_stamp_agrees(source, tenant.tenant_id)
+        # N05 / O-20: a tenant whose gather grant serves no system has nothing a world could
+        # change. Refused here, before the question-writer or anything else is spent.
+        served = served_systems(tenant.grants.gather)
+        if not served:
             raise LauncherRefused(
-                f"[branch] episode {episode.dir.name} aborted: {failed!r} — no sibling "
-                "started") from failed
+                f"[branch] tenant {tenant.tenant_id!r}: its gather grant serves no system (no read "
+                "verb other than health-check is granted), so no world of a branch could be served "
+                "— grant gather a read verb on at least one system before branching this tenant")
+        # O1: any tenant branches. No system of the lab's is assumed, so a tenant with no
+        # corpus-engine part (or one whose part does not resolve) launches like any other.
+        # SAME RULE, #1007 M8/O7: production's questioner-lessons root is `PATHS.lessons_
+        # questioner_dir`, resolved here rather than as a literal default so a test can hand in a
+        # `tmp_path` corpus and this frame is the only one that ever sees the production path.
+        # #1108 P4 flow 7: the family's knowledge is the source's commit, its export materialised
+        # here (git-capable) before anything is spent; the questioner's corpus is that export's.
+        pinned = _pinned_export(tenant, source)
+        questioner_lessons_dir = (
+            KnowledgePaths(Path(pinned.path) / "agent").lessons_questioner_dir
+            if lessons_dir is None else lessons_dir)
+        # Injectable so end-to-end tests aren't compared against the suite's own HEAD. The
+        # knowledge half is the export every sibling is pinned to, as every sibling's stamp will
+        # be (#1204 D3, O-B): never the clone's HEAD, which a publish moves.
+        live_capture = ((lambda: dataclasses.replace(
+            formats.capture_tree(REPO_ROOT),
+            knowledge=formats.KnowledgeRevision.at(pinned.commit)))
+                        if live_tree is None else live_tree)
+        source_stamp = preflight_episode(
+            source=source, branch_message_id=ns.branch_message_id,
+            preflight=preflight, model=ns.model,
+            allow_dirty=ns.allow_dirty,
+            live_tree=live_capture, oracle=oracle, verifier=verifier)
+        if roster is None:
+            from defender._paths import adapters_under
+            from defender.systems.verbs import read_roster
+
+            roster = read_roster(adapters_under(_DEFENDER_DIR))
+
+        view = prepare_episode(runs, source, knowledge_commit=pinned.commit)
+        episode = view.episode
+        # Set once the first sibling is about to start: past it, the abort message below ("no
+        # sibling started") would be false, so anything raised later is re-raised unchanged.
+        started = threading.Event()
+        with view:
+            try:
+                # The claimed episode's view: its arm container and roster are made only once the
+                # first sibling is about to start (`start_runs`).
+                author = seams.model_seam(episode.dir) if questioner is None else questioner
+                return _run_episode(
+                    ns, source=source, source_stamp=source_stamp, episode=episode, view=view,
+                    questioner=author, spawn=spawn, judge=judge, lessons_dir=questioner_lessons_dir,
+                    tenant=tenant, runs=runs, served=served, oracle=oracle,
+                    verifier=verifier, roster=roster, started=started,
+                    knowledge_commit=pinned.commit, render_page=render_page)
+            except SystemExit:
+                raise
+            except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
+                if started.is_set():
+                    raise
+                raise LauncherRefused(
+                    f"[branch] episode {episode.dir.name} aborted: {failed!r} — no sibling "
+                    "started") from failed
 
 
 def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its seams

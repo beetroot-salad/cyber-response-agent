@@ -150,31 +150,34 @@ def test_the_host_clients_carry_no_credential_and_the_service_clients_carry_thei
     assert _closed(_process.forge_admin(config))["authorization"] == f"token {config.forge_admin_token}"
 
 
-# --- DC-13: OpenBao is reached over TLS verified against the configured CA --------------------------
+# --- DC-13: OpenBao is reached over TLS verified against the process's trust --------------------------
 
-def test_the_openbao_clients_refuse_a_server_the_configured_ca_did_not_sign(tls_issuer, data_root):  # noqa: F811
-    """`openbao_login` and `openbao_management` fail the handshake with a server another CA signed, and send it nothing; a
-    server the named CA signed is reached (control) (DC-13)."""
+def test_the_openbao_clients_refuse_a_server_the_trusted_ca_did_not_sign(tls_issuer, data_root, monkeypatch):  # noqa: F811
+    """`openbao_login` and `openbao_management` trust what every host process trusts (the TLS client's default, which
+    the infrastructure provides; no CA setting of the lifecycle's own): they fail the handshake with a server another
+    CA signed, and send it nothing; a server the trusted CA signed is reached (control) (DC-13)."""
     import httpx
 
     from defender.lifecycle import _process
 
     port, got, folder = tls_issuer
     url = f"https://localhost:{port}"
+    config = lifecycle_config(folder, data_root, openbao_url=url)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
 
     async def post(client: Any) -> None:
         async with client:
             await client.post("/v1/auth/approle/login", json={"role_id": "r", "secret_id": "s"})
 
-    trusting = lifecycle_config(folder, data_root, openbao_url=url, openbao_ca=folder / "server.pem")
-    asyncio.run(post(_process.openbao_login(trusting)))
-    assert got, "control: a server the configured CA signed was reached"
+    monkeypatch.setenv("SSL_CERT_FILE", str(folder / "server.pem"))
+    asyncio.run(post(_process.openbao_login(config)))
+    assert got, "control: a server the trusted CA signed was reached"
     got.clear()
-    distrusting = lifecycle_config(folder, data_root, openbao_url=url, openbao_ca=folder / "trusted.pem")
+    monkeypatch.setenv("SSL_CERT_FILE", str(folder / "trusted.pem"))
     for factory in (_process.openbao_login, _process.openbao_management):
         with pytest.raises(httpx.ConnectError):
-            asyncio.run(post(factory(distrusting)))
-    assert got == [], f"a body reached a server the configured CA did not sign: {got}"
+            asyncio.run(post(factory(config)))
+    assert got == [], f"a body reached a server the trusted CA did not sign: {got}"
 
 
 # --- DC-13 / DC-2: what a LifecycleConfig refuses ----------------------------------------------------

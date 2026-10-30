@@ -429,6 +429,17 @@ def test_the_retired_row_readers_have_no_callers():
     assert _referencing("read_forge_binding") == set()
 
 
+def test_no_tracked_doc_or_script_teaches_the_retired_adopt_command():
+    """The lab moves by hand ("Upgrade from before #1214"): the lifecycle has no adopt command, and nothing tracked
+    tells an operator to run one (RC-9)."""
+    import subprocess
+
+    found = subprocess.run(["git", "-C", str(DEFENDER.parent), "grep", "-n", "-E", r"defender\.lifecycle adopt"],  # noqa: S603, S607
+                           capture_output=True, text=True, check=False)
+    assert found.returncode in (0, 1), found.stderr
+    assert found.stdout.splitlines() == []
+
+
 def test_the_opened_delivery_is_reached_only_by_drains_and_the_connect_command():
     """P3 census (RC-9): `opened_delivery` callers are the drains, the connect command and the delivery package."""
     allowed = ("learning/core/drains.py", "cli/tenant.py", "learning/author/version_control/")

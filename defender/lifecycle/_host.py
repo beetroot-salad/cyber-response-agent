@@ -191,20 +191,17 @@ class HostActor(Actor):
         return folder
 
     def _existing_clone(self, tenant: str, origin: str) -> Path | None:
-        """The tenant's clone if one is there (`<T>/knowledge`, or `<T>` itself as the lab keeps it),
+        """The tenant's clone if one is there (`<T>/knowledge`, where every entry point accepts it),
         after checking its origin is the recorded one; None when there is none to keep."""
-        folder = self._folder(tenant)
-        if not folder.exists():
+        clone = self._folder(tenant) / _KNOWLEDGE
+        if clone.is_symlink():
+            raise StepFailed(f"{clone} is a link; the tenant's clone must be a real directory")
+        if not (clone / ".git").exists() or (clone / ".git").is_symlink():
             return None
-        for clone in (folder / _KNOWLEDGE, folder):
-            if clone.is_symlink():
-                raise StepFailed(f"{clone} is a link; the tenant's clone must be a real directory")
-            if (clone / ".git").exists() and not (clone / ".git").is_symlink():
-                found = self._git_out(["remote", "get-url", "origin"], clone)
-                if found != origin and found != self._git_out(["ls-remote", "--get-url", origin], clone):
-                    raise StepFailed(f"{clone} is a clone of {found}, not of the recorded {origin}")
-                return clone
-        return None
+        found = self._git_out(["remote", "get-url", "origin"], clone)
+        if found != origin and found != self._git_out(["ls-remote", "--get-url", origin], clone):
+            raise StepFailed(f"{clone} is a clone of {found}, not of the recorded {origin}")
+        return clone
 
     def _git_out(self, args: list[str], clone: Path) -> str:
         """What a local git call in `clone` prints (`ls-remote --get-url` names a URL as git resolves

@@ -406,7 +406,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
         # event loop, so the production models — each with its provider and HTTP client — are
         # never shared across loops. Only the limiter is the pass's one (S18).
         serving = oracle_serving(settings, oracle=oracle, verifier=verifier, box=box,
-                                 restart_after=restart_after)
+                                 tenant_id=str(tenant.tenant_id), restart_after=restart_after)
         registry = WorldRegistry(
             roster, tenant.grants.gather, world=world, ledger=ledger, as_of=family.as_of,
             serving=serving, oracle_dir=default_oracle_dir(world, ledger), limiter=limiter,

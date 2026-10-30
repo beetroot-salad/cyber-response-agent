@@ -139,8 +139,7 @@ export TENANT_ID=<the id POST /admin/tenants answered>
 python3 defender/cli/tenant.py check "$TENANT_ID"   # the tenant admitted and its folder accepted
 ```
 
-A tenant that predates #1214 (the lab's) is brought over once with
-`python -m defender.lifecycle adopt <id> --issuer-dir <old issuer dir>`; see
+A tenant that predates #1214 (the lab's) is moved once by hand; see
 "Upgrade from before #1214" in [`defender/CLAUDE.md`](defender/CLAUDE.md). A data root made before
 #1120 has no `knowledge/` repository; recover it with the old checkout's one-off `tenant.py migrate`
 before upgrading (the command is retired here), then follow the

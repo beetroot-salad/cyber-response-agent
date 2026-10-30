@@ -844,17 +844,18 @@ def _case_input(ns: argparse.Namespace, world: Any, episode_runs: Any) -> Path:
     return ns.alert.resolve()
 
 
-def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None) -> dict[str, Any]:
+def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None, tenant_id: str) -> dict[str, Any]:
     """The lifecycle's world-only keywords: none for an ordinary run; for a sibling its oracle
     side, settled once here from its knobs (the launcher hands it its rate slice through the
-    environment) and threaded inward whole, and the opened source run it forks."""
+    environment), its box labelled with the run's tenant, and threaded inward whole, and the
+    opened source run it forks."""
     if world is None:
         return {}
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.learning.core.config import process_oracle_settings
 
     return {"serving": oracle_serving(process_oracle_settings(), oracle=oracle,
-                                      verifier=verifier),
+                                      verifier=verifier, tenant_id=tenant_id),
             "source": source}
 
 
@@ -972,7 +973,8 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                 rc = preflight(ns.model, branching=True) if world is not None else preflight(ns.model)
                 if rc:
                     return rc
-                seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source)
+                seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source,
+                                     tenant_id=str(tenant.tenant_id))
 
                 # The input is read after the tenant check and the role preflight: a tenant the check
                 # refuses is told so before anything about its input is — save that an ordinary

@@ -15,11 +15,11 @@ from defender.configuration.issuer import ISSUER_URL, OPENBAO_URL
 
 #: The environment `from_env` reads (the dev container and the hosted units set them). The issuer
 #: and OpenBao's address are the deployment's fixed service names (`configuration.issuer`), never
-#: read from the environment.
+#: read from the environment; OpenBao's certificate is trusted where the TLS client looks by
+#: default, as for every other host process (no setting of the lifecycle's own).
 FORGE_URL_ENV = "DEFENDER_LIFECYCLE_FORGE_URL"
 FORGE_TOKEN_FILE_ENV = "DEFENDER_LIFECYCLE_FORGE_ADMIN_TOKEN_FILE"
 OPENBAO_LOGIN_FILE_ENV = "DEFENDER_LIFECYCLE_OPENBAO_LOGIN_FILE"
-OPENBAO_CA_ENV = "DEFENDER_LIFECYCLE_OPENBAO_CA"
 INTEGRATION_ENV = "DEFENDER_LIFECYCLE_INTEGRATION_CONTAINER"
 SECRETS_DIR_ENV = "DEFENDER_LIFECYCLE_SECRETS_DIR"
 POLL_ENV = "DEFENDER_LIFECYCLE_POLL_INTERVAL"
@@ -36,8 +36,9 @@ class LifecycleConfig:
 
     `issuer_url` is OpenBao's OIDC issuer (https; the integration's `--issuer`, Forgejo fetches its
     discovery document) and `openbao_url` its address (https as well: the AppRole secret and the
-    management login never travel in cleartext): the deployment's fixed service names by default
-    (`configuration.issuer`), a test's own when it injects them. `integration_command`
+    management login never travel in cleartext, verified against the TLS client's default trust):
+    the deployment's fixed service names by default (`configuration.issuer`), a test's own when it
+    injects them. `integration_command`
     names where the fixed integration command runs (dev: the Forgejo container `docker exec`
     enters). `template_dir` is the committed template tenant.
     `secrets_dir` holds one folder per tenant with one file per installed secret, outside every
@@ -58,7 +59,6 @@ class LifecycleConfig:
     poll_interval: float = 5.0
     lock_keepalive: int = 30
     teardown_wait: float = 10.0
-    openbao_ca: Path | None = None
     oidc_key: str = "default"
     token_policy: str = "defender-tenant-token"
 
@@ -84,11 +84,6 @@ class LifecycleConfig:
         if secrets == tenants_root or tenants_root in secrets.parents:
             raise ConfigRefused(f"the secrets directory {self.secrets_dir} must lie outside the data root {root}")
 
-    @property
-    def ca_cert(self) -> Path | None:
-        """`openbao_ca` under the name `forge_credential` reads (the PEM file OpenBao is trusted by)."""
-        return self.openbao_ca
-
     @classmethod
     def from_env(cls, *, template_dir: Path) -> LifecycleConfig:
         """The config of `python -m defender.lifecycle`, from the environment (secrets from the
@@ -98,7 +93,6 @@ class LifecycleConfig:
                    if not os.environ.get(n)]
         if missing:
             raise ConfigRefused(f"set {', '.join(missing)}")
-        ca = os.environ.get(OPENBAO_CA_ENV)
         try:
             poll = float(os.environ.get(POLL_ENV) or "5")
         except ValueError:
@@ -109,7 +103,7 @@ class LifecycleConfig:
             openbao_login=_secret_file(os.environ[OPENBAO_LOGIN_FILE_ENV], OPENBAO_LOGIN_FILE_ENV),
             integration_command=os.environ[INTEGRATION_ENV], template_dir=template_dir,
             secrets_dir=Path(os.environ[SECRETS_DIR_ENV]), data_root=Path(os.environ[DATA_ROOT_ENV]),
-            poll_interval=poll, openbao_ca=Path(ca) if ca else None)
+            poll_interval=poll)
 
 
 def _secret_file(path: str, variable: str) -> str:

@@ -694,3 +694,37 @@ def test_o6_every_oracle_box_name_is_fresh(tmp_path, oracle_tree):
     env = {"DEFENDER_BOX_RUNTIME": "runc"}
     names = [_oracle.oracle_box_request(scratch, runner, env=env).name for _ in range(3)]
     assert len(set(names)) == 3, f"an oracle name repeated: {names}"
+
+
+def _sibling_serving(tenant: str):
+    """A sibling's oracle side, as `run.py` settles it for its world."""
+    from defender import run as run_mod
+
+    return run_mod._world_seams(object(), oracle=None, verifier=None, source=None, tenant_id=tenant)["serving"]
+
+
+def _launcher_serving(tenant: str):
+    from defender.learning.branch.estate.registry import oracle_serving
+    from defender.learning.core.config import oracle_settings_with
+
+    return oracle_serving(oracle_settings_with(), tenant_id=tenant)
+
+
+@pytest.mark.parametrize("serving", [_launcher_serving, _sibling_serving], ids=["registry", "sibling"])
+def test_the_production_oracle_box_carries_its_tenant_label(tmp_path, monkeypatch, serving):
+    """The oracle's box a world is served with is labelled `defender.tenant=<T>` as the run box is, so the tenant's
+    teardown finds and removes it (#1214 O4)."""
+    tenant = fixture_uuid("oracle-label-tenant")
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
+    daemon = FakeDaemon(tmp_path / "daemon")
+    daemon.install(monkeypatch)
+    started = serving(tenant).box()
+    try:
+        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+        labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
+        assert f"defender.tenant={tenant}" in labels, labels
+    finally:
+        from defender.box import _oracle
+
+        _oracle.stop_oracle_box(started)

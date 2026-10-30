@@ -59,8 +59,9 @@ records from `DEFENDER_DATABASE_DSN`, at exactly this code's revision, and works
    create at its first step, which no worker takes until it is resumed.
 2. Record the lab's repository by hand, so the create job keeps it and its clone instead of making
    `tenants/<T>`: `INSERT INTO tenancy.forge_wiring (tenant_id, repo, origin) VALUES ('<T>', '<repo>',
-   '<origin>')`, where `<origin>` is exactly what `git -C <data root>/<T> remote get-url origin`
-   prints (prepare refuses a clone of anything else) and `<repo>` is its `<org>/<name>` path.
+   '<origin>')`, where `<origin>` is exactly what `git -C <data root>/<T>/knowledge remote get-url
+   origin` prints (prepare keeps only the clone at `<T>/knowledge`, and refuses a clone of anything
+   else) and `<repo>` is its `<org>/<name>` path.
 3. With the lifecycle's settings in place and `serve` running, `POST /admin/tenants/<T>/resume`
    and wait for `active` (`GET /admin/tenants/<T>`).
 4. Then delete by hand what the old setup left: `<data root>/<T>/tenant.json`, `client/<T>/` in

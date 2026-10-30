@@ -60,7 +60,11 @@ OpenBao and its OIDC issuer are fixed service names, not settings: `https://open
 `https://openbao:8200/v1/identity/oidc`, defined once in `defender/configuration/issuer.py`. The
 infrastructure routes the name (DNS, the compose network) and makes OpenBao's certificate trusted
 where the process's TLS client looks (`SSL_CERT_FILE`/`SSL_CERT_DIR`, as the compose file does for
-Forgejo with the dev CA).
+the dev container and Forgejo with the dev CA). There is no CA setting of any process's own: the
+lifecycle, the publish child and the drains all trust what that default trusts. A folder named in
+`SSL_CERT_DIR` needs OpenSSL's hash names for Python to find a CA in it (provisioning runs
+`openssl rehash` on the dev one; a dev stack provisioned before that needs `openssl rehash
+playground-issuer/trust` once).
 
 ## Tenant version control credentials (PR #1253)
 

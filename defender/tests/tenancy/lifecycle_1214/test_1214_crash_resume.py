@@ -153,7 +153,7 @@ def test_prepare_fails_unless_the_first_publish_answers_fresh_and_a_commit(world
 
 
 def _plant_clone(world, tenant: str, origin: str) -> None:
-    folder = world.data_root / tenant
+    folder = world.data_root / tenant / "knowledge"
     folder.mkdir(parents=True)
     for args in (["init", "-q", str(folder)], ["-C", str(folder), "remote", "add", "origin", origin]):
         subprocess.run(["git", *args], check=True, capture_output=True)  # noqa: S603, S607
@@ -170,11 +170,11 @@ def test_prepare_keeps_an_existing_clone_of_the_recorded_repo_and_refuses_any_ot
     _plant_clone(world, bad, "http://elsewhere.test/other.git")
     world.drive()
     assert world.item(good)["state"] == "active"
-    assert (world.data_root / good / "keep.txt").read_text() == "mine"
+    assert (world.data_root / good / "knowledge" / "keep.txt").read_text() == "mine"
     item = world.item(bad)
     assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host")
     assert item["failure"]
-    assert (world.data_root / bad / "keep.txt").read_text() == "mine"
+    assert (world.data_root / bad / "knowledge" / "keep.txt").read_text() == "mine"
     assert [t for t, _ in world.publish.calls] == [good]
 
 
