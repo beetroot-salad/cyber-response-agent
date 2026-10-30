@@ -92,9 +92,11 @@ def _child(world: dict, **kw) -> ScriptedChild:
 
 
 def _committed(**overrides) -> dict[str, str]:
-    """Host records for a run whose report the host committed and whose tree the scrub walked."""
-    return {"{id}.job-end.json": job_end(), "{id}/report.md": GOOD,
-            "{id}.knowledge-source.json": knowledge_record(COMMIT), **overrides}
+    """Host records for a run whose report the host committed and whose tree the scrub walked.
+    An override of `None` leaves that record out (a shape whose file the case makes another way)."""
+    files = {"{id}.job-end.json": job_end(), "{id}/report.md": GOOD,
+             "{id}.knowledge-source.json": knowledge_record(COMMIT), **overrides}
+    return {name: text for name, text in files.items() if text is not None}
 
 
 def _no_run_text(stored: dict) -> None:
@@ -331,19 +333,19 @@ CASES = {
     "4-two-dispositions": _spec(
         files=_committed(**{"{id}/report.md": f"---\ndisposition: benign\ndisposition: malicious\n---\n{MARKER}\n"}),
         expect=("unparseable", None, None)),
-    "4-report-missing": _spec(files=_committed(**{"{id}/notes.md": MARKER}),
+    "4-report-missing": _spec(files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
                               expect=("unparseable", None, None)),
-    "4-report-is-a-directory": _spec(files=_committed(**{"{id}/notes.md": MARKER}),
+    "4-report-is-a-directory": _spec(files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
                                      dirs=["{id}/report.md"], expect=("unparseable", None, None)),
     "4-report-not-utf8": _spec(
-        files=_committed(**{"{id}/notes.md": MARKER}),
+        files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
         binary={"{id}/report.md": (HEADER + "\n").encode().hex() + "fffe"},
         expect=("unparseable", None, None)),
     "4-report-oversize": _spec(
-        files=_committed(**{"{id}/notes.md": MARKER}),
+        files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
         sparse={"{id}/report.md": [HEADER, 70 * 1024 * 1024]}, expect=("unparseable", None, None)),
     "4-report-symlinked": _spec(
-        files=_committed(**{"{id}/notes.md": MARKER}),
+        files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
         links={"{id}/report.md": str(GOLDEN_REPORT)}, expect=("unparseable", None, None)),
     # rule 5: each failed fact, named
     "5-box-planted-report-not-committed": _spec(
