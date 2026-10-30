@@ -80,8 +80,13 @@ if "inspect" in argv:
 elif "sh" in argv:
     # The curl lane: `docker exec -i <c> sh -c 'exec curl … "$@"' -- …`. `curl -w` writes the
     # status on its own trailing line and `split_status` recovers it with `rfind`, so the
-    # status must be LAST with no newline after it.
-    sys.stdout.write(json.dumps({"hits": {"total": {"value": 0}, "hits": []}}))
+    # status must be LAST with no newline after it. `DOCKER_CANNED` names a file holding the
+    # response body a test wants the cluster to give back.
+    canned = os.environ.get("DOCKER_CANNED")
+    if canned:
+        sys.stdout.write(open(canned, encoding="utf-8").read())
+    else:
+        sys.stdout.write(json.dumps({"hits": {"total": {"value": 0}, "hits": []}}))
     sys.stdout.write("\n200")
 elif "getent" in argv:
     sys.stdout.write("root:x:0:0:root:/root:/bin/bash\n")
@@ -261,6 +266,46 @@ def range_filter(body: dict) -> dict | None:
         if "range" in entry:
             return entry["range"]["@timestamp"]
     return None
+
+
+def _z(text: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def clause_keeps(clause: dict, doc: dict[str, Any]) -> bool:
+    """Elasticsearch's own reading of the few Query DSL forms a cut can use (bool, range, exists,
+    match_all), over a flat doc. A test oracle for what a cut clause MEANS, so its nesting and
+    timestamp spelling are not pinned by the callers."""
+    (kind, body), = clause.items()
+    if kind == "exists":
+        return body["field"] in doc
+    if kind == "range":
+        (field, bounds), = body.items()
+        if field not in doc:
+            return False
+        value = _z(doc[field])
+        ops = {"lte": value.__le__, "lt": value.__lt__, "gte": value.__ge__, "gt": value.__gt__}
+        return all(ops[op](_z(bound)) for op, bound in bounds.items())
+    if kind == "match_all":
+        return True
+    assert kind == "bool", f"a cut clause uses a form this oracle does not read: {kind}"
+
+    def many(key: str) -> list[dict]:
+        got = body.get(key, [])
+        return got if isinstance(got, list) else [got]
+
+    if not all(clause_keeps(c, doc) for c in many("must") + many("filter")):
+        return False
+    if any(clause_keeps(c, doc) for c in many("must_not")):
+        return False
+    should = many("should")
+    floor = body.get("minimum_should_match", 0 if many("must") + many("filter") else 1)
+    return not should or sum(clause_keeps(c, doc) for c in should) >= int(floor)
+
+
+def stamped(offset: dt.timedelta = dt.timedelta(0)) -> dict[str, str]:
+    """A doc dated T0 plus `offset`, with no arrival stamp."""
+    return {"@timestamp": (T0 + offset).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"}
 
 
 def pass_through() -> dict[str, Any]:
@@ -505,7 +550,7 @@ def test_a_search_that_names_its_own_end_is_never_rewritten(tmp_path, start, end
 @pytest.mark.parametrize("verb", ["query", "alerts"])
 def test_a_branched_search_bounds_its_hits_at_the_cluster_and_keeps_its_window(tmp_path, verb):
     """A branched search carries the clock as a `post_filter` beside the caller's own `query`
-    window, so the cluster drops hits past T0 without the window being rewritten."""
+    window (O2, r6: judged by what the clause keeps, not by its nesting or spelling)."""
     ctx = elastic_ctx(tmp_path, as_of=T0)
 
     getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login",
@@ -513,9 +558,12 @@ def test_a_branched_search_bounds_its_hits_at_the_cluster_and_keeps_its_window(t
 
     body = search_body(tmp_path)
     assert range_filter(body) == {"gte": "2026-05-01T00:00:00Z", "lte": "2026-06-01T00:00:00Z"}
-    bounds = [c["range"]["@timestamp"] for c in body["post_filter"]["bool"]["should"]
-              if "range" in c]
-    assert bounds == [{"lte": T0_Z}]
+    cut = body["post_filter"]
+    assert clause_keeps(cut, stamped())
+    assert clause_keeps(cut, stamped(-dt.timedelta(days=3)))
+    assert clause_keeps(cut, {"message": "undated"})
+    assert not clause_keeps(cut, stamped(dt.timedelta(milliseconds=1)))
+    assert not clause_keeps(cut, stamped(dt.timedelta(days=3)))
 
 
 def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path):
@@ -532,73 +580,59 @@ def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path):
     assert second == {"gte": "2026-05-01T00:00:00Z", "lte": T0_Z}
 
 
-# the ES|QL half of the window: a stage appended, never a predicate edited
+# the ES|QL half of the window: the same cut as the request's `filter`, the text never edited
+# (O2, r6: the old splice and `bounded_esql` are gone; each former splice test is a case below)
 
-BOUND = f'| WHERE @timestamp <= "{T0_Z}"'
-
-
-def test_the_bound_lands_after_the_source_command_not_after_the_first_line(tmp_path):
-    """A whole pipeline written on ONE line still takes the bound immediately after its source command."""
-    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0),
-                                       "FROM logs-zeek.ssh-* | LIMIT 1")
-
-    assert out == f"FROM logs-zeek.ssh-*\n{BOUND}\n| LIMIT 1"
+def esql_wire(tmp_path: Path, asked: str) -> tuple[dict, dict]:
+    """`(the verb's payload, the request body the cluster received)` for one branched ES|QL."""
+    payload = elastic_adapter.esql(elastic_ctx(tmp_path, as_of=T0), query=asked)
+    return payload, search_body(tmp_path)
 
 
-def test_the_source_commands_own_suffix_stays_attached_to_it(tmp_path):
-    """A `METADATA` clause belongs to the source command, so the bound goes after it."""
-    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0),
-                                       "FROM logs-x-* METADATA _id | LIMIT 5")
+@pytest.mark.parametrize("asked", [
+    pytest.param("FROM logs-zeek.ssh-* | LIMIT 1", id="one-line-pipeline"),  # was :540
+    pytest.param("FROM logs-x-* METADATA _id | LIMIT 5", id="source-suffix"),  # was :548
+    pytest.param('FROM "logs-wei|rd"', id="pipe-in-quoted-name"),  # was :556 (name moved inside logs-*: O2a)
+    pytest.param(
+        'FROM logs-system.auth-*\n'
+        '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
+        '| STATS events = COUNT(*) BY user = user.name', id="callers-own-time-predicate"),  # was :563
+])
+def test_a_branched_esql_is_sent_exactly_as_written_whatever_its_shape(tmp_path, asked):
+    """O2: no stage is spliced into any shape of query; the text on the wire is the agent's."""
+    _, wire = esql_wire(tmp_path, asked)
 
-    assert out == f"FROM logs-x-* METADATA _id\n{BOUND}\n| LIMIT 5"
-
-
-def test_a_pipe_inside_a_quoted_name_is_not_a_stage_boundary(tmp_path):
-    """A `|` inside a quoted index name is part of the NAME, not the end of the source command."""
-    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0), 'FROM "logs|weird"')
-
-    assert out.splitlines() == ['FROM "logs|weird"', BOUND]
-
-
-def test_the_models_own_time_predicate_is_left_exactly_as_written(tmp_path):
-    """A query that already bounds `@timestamp` keeps that clause BYTE-IDENTICAL, with the run's bound alongside it."""
-    asked = ('FROM logs-system.auth-*\n'
-             '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
-             '| STATS events = COUNT(*) BY user = user.name')
-
-    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0), asked)
-
-    assert out == ('FROM logs-system.auth-*\n'
-                   f'{BOUND}\n'
-                   '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
-                   '| STATS events = COUNT(*) BY user = user.name')
-    assert asked.partition("\n")[2] in out, (
-        "the model's own predicate was edited — the clock reads no predicate and writes none")
+    assert wire["query"] == asked
+    assert "filter" in wire, "the cut is no longer in the request, so nothing bounds the read"
 
 
 def test_the_bound_reaches_the_wire_and_stays_out_of_the_evidence(tmp_path):
-    """The BOUNDED query is what Elasticsearch runs; the payload records the query as asked."""
-    ctx = elastic_ctx(tmp_path, as_of=T0)
+    """O2: the cut rides as the request `filter`; payload and wire text are both as asked."""
     asked = "FROM logs-zeek.ssh-*\n| LIMIT 5"
 
-    payload = elastic_adapter.esql(ctx, query=asked)
+    payload, wire = esql_wire(tmp_path, asked)
 
-    assert payload["query"] == asked, (
-        f"the payload records {payload['query']!r} — a clause the model never wrote is now in "
-        "the run's own record of the question it asked")
-    assert search_body(tmp_path)["query"] == f"FROM logs-zeek.ssh-*\n{BOUND}\n| LIMIT 5", (
-        "the query that reached the cluster carries no bound, so the episode reads the live "
-        "tail and cannot be replayed")
+    assert payload["query"] == asked
+    assert wire["query"] == asked, "a clause the model never wrote is now in the query text"
+    cut = wire["filter"]
+    assert clause_keeps(cut, stamped(-dt.timedelta(hours=1)))
+    assert not clause_keeps(cut, stamped(dt.timedelta(seconds=1))), (
+        "the request carries no bound, so the episode reads the live tail and cannot be replayed")
 
 
 def test_both_halves_of_the_window_include_the_branch_point_itself(tmp_path):
-    """The ES|QL clause and the search body close the window INCLUSIVELY, both of them."""
+    """The ES|QL filter and the search post_filter keep a document dated exactly T0 (inclusive)
+    and drop one a millisecond later."""
     ctx = elastic_ctx(tmp_path, as_of=T0)
 
-    clause = elastic_adapter.bounded_esql(ctx, "FROM logs-zeek.ssh-*")
+    elastic_adapter.esql(ctx, query="FROM logs-zeek.ssh-*")
+    esql_cut = search_body(tmp_path)["filter"]
     elastic_adapter.query(ctx, native_query="event.action:ssh_login")
+    search_cut = search_body(tmp_path)["post_filter"]
 
-    assert clause.splitlines()[-1] == f'| WHERE @timestamp <= "{T0_Z}"'
+    for cut in (esql_cut, search_cut):
+        assert clause_keeps(cut, stamped())
+        assert not clause_keeps(cut, stamped(dt.timedelta(milliseconds=1)))
     assert range_filter(search_body(tmp_path)) == {"lte": T0_Z}
 
 
