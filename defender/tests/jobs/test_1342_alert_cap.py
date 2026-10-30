@@ -22,6 +22,16 @@ def _json_of_size(size: int) -> bytes:
     return head + b"x" * (size - len(head) - len(tail)) + tail
 
 
+def _multibyte_over_the_cap() -> bytes:
+    """A valid alert of fewer characters than the cap and more bytes than it."""
+    from defender._io import READ_LIMIT
+
+    head, tail = b'{"a": "', b'"}'
+    raw = head + "\u00e9".encode() * (READ_LIMIT // 2 + 1) + tail
+    assert len(raw.decode()) < READ_LIMIT < len(raw), "premise: under the cap in characters, over it in bytes"
+    return raw
+
+
 async def test_m5_an_alert_of_exactly_the_cap_is_stored_whole_and_one_byte_more_is_refused(dsn):
     """At `READ_LIMIT` the bytes round-trip; at `READ_LIMIT + 1` the insert refuses and stores nothing. (M5, O2)"""
     from defender._io import READ_LIMIT
@@ -61,3 +71,21 @@ def test_m5_the_operator_read_accepts_a_file_of_exactly_the_cap_and_refuses_one_
     assert len(read_operator_alert(at_cap)) == READ_LIMIT
     with pytest.raises(AlertRefused, match=re.escape(REFUSE_SIZE)):
         read_operator_alert(over)
+
+
+def test_m5_the_cap_counts_bytes_not_characters_at_admission():
+    """`admit` refuses a multibyte alert over `READ_LIMIT` bytes with the size reason though it has fewer characters. (M5)"""
+    from defender.records.formats import REFUSE_SIZE, AlertRefused, admit
+
+    with pytest.raises(AlertRefused, match=re.escape(REFUSE_SIZE)):
+        admit(_multibyte_over_the_cap())
+
+
+async def test_m5_the_cap_counts_bytes_not_characters_at_the_insert(dsn):
+    """The store's insert refuses a multibyte alert over `READ_LIMIT` bytes with the size reason and stores nothing. (M5, D-b)"""
+    from defender.records.formats import REFUSE_SIZE, AlertRefused
+
+    async with job_store(dsn) as store:
+        with pytest.raises(AlertRefused, match=re.escape(REFUSE_SIZE)):
+            await an_alert(store, T1, ticket="WIDE", raw=_multibyte_over_the_cap())
+    assert execute(dsn, "SELECT count(*) FROM jobs.alerts") == [(0,)]

@@ -37,6 +37,9 @@ WORKER_LOGGER = "defender.worker"
 ALERT_BYTES = (b'{"rule": {"id": "r-1342",  "description": "sketch"},\n'
                b' "z": 1.50, "a": "\\u00e9", "alert_timestamp": "2026-10-29T00:00:00Z"}\n')
 ALERT_DIGEST = hashlib.sha256(ALERT_BYTES).hexdigest()
+#: Exact bytes `admit()` accepts that a text-mode read or a line-end normalization would change:
+#: CRLF line ends, a tab, multibyte text, a trailing CRLF.
+AWKWARD_ALERT_BYTES = '{"rule":\t"caf\u00e9 \u2713",\r\n "n": 1,\r\n\t"text": "line\\r\\nend"}\r\n'.encode()
 TITLE = "SSH success after failures"
 DESCRIPTION = "Three failures then a success from one source."
 

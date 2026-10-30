@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
-"""Scrub-order fence (#540): three rules over the entrypoint and the bash tool.
+"""Scrub-order fence (#540, re-sited by #1342): three rules over the entrypoint and the bash tool.
 
-* In `run.py`'s `main`, the call to the box lifecycle (which scrubs the run folder) comes
-  before every reader of that folder: listing it, the table cross-check, the curation enqueue,
-  the case ticket and the page render.
-* Neither `main` nor `_run_investigation_lifecycle` has an `except` that would swallow the
-  taint signal: none names `RunTainted`, `Exception` or `BaseException`, and none is bare.
+* `run.py` has two compositions, the operator's `main` and the job entry's `job_main`. Each
+  calls the box lifecycle (which scrubs the run folder) and then the shared `_post_steps`, in
+  that order. The readers of the run folder — listing it, the table cross-check and the page
+  render — live only in `_post_steps`: any reference to one anywhere else in `run.py` is a
+  finding, whatever its form (a call, an alias, a `partial`, a lambda, a class body, a
+  `getattr` string, `os.listdir` or `glob` for `iterdir`). The one allowance is the page-render
+  seam: a parameter named `visualize` defaulting to the reader, and `visualize=visualize`
+  handed to `_post_steps`. The operator's own readers, the case ticket and the curation
+  enqueue, come after its lifecycle.
+* None of `main`, `job_main`, `_post_steps` or `_run_investigation_lifecycle` has an `except`
+  that would swallow the taint signal: none names `RunTainted`, `Exception` or `BaseException`,
+  and none is bare.
 * The bash tool never calls `run_parsed` on the in-process executor `bash_exec`: a box failure
   has no in-process fallback.
+
+Not covered, by design: a reader named by a computed string (`"cross_" + "check_tables"`, a
+variable), reached from another module, or a read of the folder by a means the census does not
+name (`open`, `read_text`, `shutil`, a subprocess).
 
 Order is source position inside the one function; attribute calls read as their attribute
 name. A file or function that is missing, or a named call that is gone, is a finding (the rule
@@ -32,8 +43,18 @@ DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
 _RUN = "run.py"
 _BASH = "investigation/tools/_bash.py"
-_CONSUMERS = ("iterdir", "cross_check_tables", "enqueue_curation", "record_case_ticket",
-              "visualize")
+#: The readers of the scrubbed folder that live only in the shared post-steps.
+_READERS = ("iterdir", "cross_check_tables", "visualize")
+#: Other ways to list a folder, which count as the listing reader wherever they appear.
+_LISTERS = ("listdir", "scandir", "walk", "glob", "rglob", "iglob")
+_CENSUS = (*_READERS, *_LISTERS)
+#: The operator composition's own readers, after its lifecycle.
+_OPERATOR_READERS = ("record_case_ticket", "enqueue_curation")
+_COMPOSITIONS = ("main", "job_main")
+_LIFECYCLE = "lifecycle"
+_POST_STEPS = "_post_steps"
+#: The page-render seam, which the compositions take as a parameter and hand to the post-steps.
+_SEAM = "visualize"
 _SWALLOWERS = ("RunTainted", "Exception", "BaseException")
 
 
@@ -76,31 +97,107 @@ def _caught(fn: ast.AST) -> list[tuple[int, str]]:
     return out
 
 
+def _composition_findings(name: str, order: list[str]) -> list[str]:
+    """One composition's order: the lifecycle, then the post-steps (and, for `main`, its own
+    readers) after it. A reader named here instead is found by `_readers_elsewhere`."""
+    if _LIFECYCLE not in order:
+        return [f"{_RUN}: `{name}` no longer drives the lifecycle through its `{_LIFECYCLE}` seam; "
+                "re-site the scrub-order rule"]
+    reap = order.index(_LIFECYCLE)
+    found = []
+    after = (_POST_STEPS, *(_OPERATOR_READERS if name == "main" else ()))
+    for call in after:
+        if call not in order:
+            found.append(f"{_RUN}: `{name}` no longer calls `{call}`; re-site the scrub-order rule")
+        elif order.index(call) < reap:
+            found.append(f"{_RUN}: `{name}` calls `{call}` before the lifecycle has scrubbed the "
+                         "run folder")
+    return found
+
+
+def _readers_elsewhere(root: Path) -> list[str]:
+    """A reference to a reader, in any form, anywhere in `run.py` but the module-level `_post_steps`: a
+    name or attribute, a `"reader"` string, an import of one. A reference in a helper, a composition,
+    a lambda, a class body or the module itself reads the folder before the scrub or hands the
+    reader on, whatever order the compositions show."""
+    path = root / _RUN
+    if not path.is_file():
+        return []
+    _text, tree = _astlib.read_and_parse(path, _RUN)
+    found: list[str] = []
+    allowed: set[int] = set()  # `visualize=visualize` handed to the post-steps, and the seam's default
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == _POST_STEPS:
+            allowed.update(id(kw.value) for kw in node.keywords
+                           if kw.arg == _SEAM and isinstance(kw.value, ast.Name) and kw.value.id == _SEAM)
+        elif isinstance(node, ast.arguments):
+            named = [*node.posonlyargs, *node.args]
+            pairs = [*zip(named[len(named) - len(node.defaults):], node.defaults, strict=True),
+                     *((a, d) for a, d in zip(node.kwonlyargs, node.kw_defaults, strict=True) if d is not None)]
+            allowed.update(id(d) for a, d in pairs if a.arg == _SEAM and _reference(d) == _SEAM)
+
+    def report(lineno: int, owner: str, name: str) -> None:
+        found.append(f"{_RUN}:{lineno}: `{owner}` refers to `{name}`; the readers of the run "
+                     f"folder live only in `{_POST_STEPS}`")
+
+    def visit(node: ast.AST, owner: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if not (node is tree and child.name == _POST_STEPS):
+                    visit(child, child.name)
+                continue
+            if isinstance(child, ast.ClassDef):
+                visit(child, child.name)
+                continue
+            if id(child) not in allowed:
+                name = _reference(child)
+                if name in _CENSUS:
+                    report(child.lineno, owner, name)
+                elif isinstance(child, ast.alias) and child.name.rsplit(".", 1)[-1] in _CENSUS:
+                    report(child.lineno, owner, child.name)
+            visit(child, owner)
+
+    visit(tree, "<module>")
+    return found
+
+
+def _reference(node: ast.AST) -> str | None:
+    """The reader-shaped name `node` refers to: a name, an attribute, or a string that is exactly one."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
 def scan(root: Path) -> list[str]:
     root = Path(root).resolve()
     if not root.is_dir():
         raise _astlib.ScanBlind(f"{root} is not a directory")
     findings: list[str] = []
 
-    main = _function(root, _RUN, "main", findings)
-    if main is not None:
-        order = _call_order(main)
-        if "lifecycle" not in order:
-            findings.append(f"{_RUN}: `main` no longer drives the lifecycle through its "
-                            "`lifecycle` seam; re-site the scrub-order rule")
-        else:
-            reap = order.index("lifecycle")
-            for consumer in _CONSUMERS:
-                if consumer not in order:
-                    findings.append(f"{_RUN}: `main` no longer calls `{consumer}`; re-site the "
-                                    "scrub-order rule")
-                elif order.index(consumer) < reap:
-                    findings.append(f"{_RUN}: `main` calls `{consumer}` before the lifecycle "
-                                    "has scrubbed the run folder")
+    functions = {name: _function(root, _RUN, name, findings)
+                 for name in (*_COMPOSITIONS, _POST_STEPS, "_run_investigation_lifecycle")}
 
-    for name, fn in (("main", main),
-                     ("_run_investigation_lifecycle",
-                      _function(root, _RUN, "_run_investigation_lifecycle", findings))):
+    for name in _COMPOSITIONS:
+        fn = functions[name]
+        if fn is not None:
+            findings.extend(_composition_findings(name, _call_order(fn)))
+
+    steps = functions[_POST_STEPS]
+    if steps is not None:
+        order = _call_order(steps)
+        for reader in _READERS:
+            if reader not in order:
+                findings.append(f"{_RUN}: `{_POST_STEPS}` no longer calls `{reader}`; re-site the "
+                                "scrub-order rule")
+
+    findings.extend(_readers_elsewhere(root))
+
+    for name, fn in functions.items():
         if fn is None:
             continue
         for lineno, caught in _caught(fn):
@@ -120,7 +217,8 @@ def scan(root: Path) -> list[str]:
                     and node.func.value.id == "bash_exec"):
                 findings.append(f"{_BASH}:{node.lineno}: the bash tool reaches the in-process "
                                 "executor directly; a box failure must not fall back to it")
-    return findings
+    # One finding per fault: a missing `run.py` is found once, not once per function.
+    return list(dict.fromkeys(findings))
 
 
 def main(argv: list[str] | None = None) -> int:

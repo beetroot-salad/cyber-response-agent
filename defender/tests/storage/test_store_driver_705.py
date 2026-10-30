@@ -643,6 +643,19 @@ def test_m2_a_report_file_planted_before_a_cut_is_not_a_committed_report(tmp_pat
     assert result["report_committed"] is False
 
 
+def test_m2_a_report_file_planted_in_a_run_that_ends_normally_is_not_a_committed_report(tmp_path):
+    """A `report.md` the host did not commit (planted; the model answers "done", no fault, no close): false. (M2)"""
+    run_dir = materialize(tmp_path, GOLDEN, run_id="m2-planted-ends")
+    (run_dir / "report.md").write_text("# planted by the box\n\nDisposition: benign\n", encoding="utf-8")
+    replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
+
+    result = drive(run_dir, run_id="m2-planted-ends", main=replay)
+
+    assert result["truncated_by"] is None, result
+    assert (run_dir / "report.md").is_file(), "premise: a report file is there, the host never closed"
+    assert result["report_committed"] is False
+
+
 def test_m2_a_close_before_a_cut_is_a_committed_report(tmp_path):
     """The model closed, then a store fault cut the run: the close still counts, whatever the exit. (M2)"""
     run_dir = materialize(tmp_path, GOLDEN, run_id="m2-closed-then-cut")

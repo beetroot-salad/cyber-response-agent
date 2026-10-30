@@ -94,6 +94,82 @@ def test_any_function_other_than_the_post_steps_calling_a_reader_is_a_finding(tm
     assert _GATE.scan(_tree(tmp_path / "clean")) == [], "control: without the helper the tree is clean"
 
 
+_REFS = {"iterdir": "run_dir.iterdir", "cross_check_tables": "_run.cross_check_tables", "visualize": "visualize"}
+_FORMS = {  # (where, source with {r} the reader and {ref} a reference to it)
+    "getattr string": ("body", 'getattr(_run, "{r}")(run_dir)'),
+    "alias": ("body", "f = {ref}"),
+    "partial": ("body", "functools.partial({ref}, run_dir)"),
+    "lambda in a composition": ("body", "g = lambda: {ref}()"),
+    "module-scope lambda": ("module", "L = lambda: {ref}()"),
+    "module-scope call": ("module", "{ref}()"),
+    "class body": ("module", "class Steps:\n    x = {ref}()"),
+}
+
+
+def _with(form: str, reader: str) -> str:
+    """`_MAIN` with one reference to `reader` in `form`: inside `job_main`, or at module level."""
+    where, source = _FORMS[form]
+    text = source.format(r=reader, ref=_REFS[reader])
+    marker = "def job_main():\n    summary = lifecycle()\n"
+    if where == "body":
+        return _MAIN.replace(marker, marker + f"    {text}\n", 1)
+    return _MAIN + text + "\n"
+
+
+@pytest.mark.parametrize("reader", sorted(_REFS))
+@pytest.mark.parametrize("form", sorted(_FORMS))
+def test_a_reference_to_a_reader_in_any_form_outside_the_post_steps_is_a_finding(tmp_path, form, reader):
+    """A reader named outside `_post_steps` as an alias, string, `partial`, lambda or class body is found, not only a direct call. (M3)"""
+    assert _GATE.scan(_tree(tmp_path / "clean")) == [], "control: the unchanged tree is clean"
+    found = _GATE.scan(_tree(tmp_path / "cut", run=_with(form, reader)))
+    assert any(reader in f for f in found), found
+    if _FORMS[form][0] == "body":
+        assert any("job_main" in f for f in found), found
+
+
+_LISTINGS = ["os.listdir(run_dir)", "os.scandir(run_dir)", "os.walk(run_dir)", "glob.glob(pattern)",
+             "run_dir.glob('*')", "run_dir.rglob('*')", "[*map(g, [1])] if (g := glob.iglob) else 0"]
+
+
+@pytest.mark.parametrize("listing", _LISTINGS)
+@pytest.mark.parametrize("where", ["a composition", "a helper", "the module"])
+def test_another_way_to_list_the_folder_outside_the_post_steps_is_a_finding(tmp_path, listing, where):
+    """`os.listdir`, `scandir`, `walk` or a `glob` in place of `iterdir` is the listing reader and lives only in `_post_steps`. (M3)"""
+    marker = "def job_main():\n    summary = lifecycle()\n"
+    run = {"a composition": _MAIN.replace(marker, marker + f"    {listing}\n", 1),
+           "a helper": _MAIN + f"def _page(started):\n    {listing}\n",
+           "the module": _MAIN + f"{listing}\n"}[where]
+    found = _GATE.scan(_tree(tmp_path, run=run))
+    assert found, f"{listing} in {where} passed"
+
+
+@pytest.mark.parametrize("statement", ["from os import listdir", "from glob import glob as find",
+                                       "from run_common import cross_check_tables as check",
+                                       "from run_common import visualize"])
+def test_importing_a_reader_into_run_py_is_a_finding(tmp_path, statement):
+    """A reader imported by name into `run.py` is a reference outside `_post_steps`, whatever it is bound to. (M3)"""
+    found = _GATE.scan(_tree(tmp_path, run=statement + "\n" + _MAIN))
+    assert found, found
+
+
+def test_the_page_render_seam_handed_to_the_post_steps_is_the_one_allowed_reference(tmp_path):
+    """A `visualize` parameter defaulting to the reader and `visualize=visualize` passed to `_post_steps` are clean. (M3)"""
+    seamed = (_MAIN.replace("def main():", "def main(visualize=_run.visualize):")
+              .replace("def job_main():", "def job_main(*, visualize=_run.visualize):")
+              .replace("_post_steps(summary)\n", "_post_steps(summary, visualize=visualize)\n"))
+    assert "visualize=visualize" in seamed, "premise: the fixture hands the seam on"
+    assert _GATE.scan(_tree(tmp_path, run=seamed)) == []
+
+
+@pytest.mark.parametrize("handed", ["other(visualize=visualize)", "other(visualize)", "v = visualize"])
+def test_the_page_render_seam_handed_anywhere_but_the_post_steps_is_a_finding(tmp_path, handed):
+    """The seam passed on to anything but `_post_steps` is a reference to the reader and is found. (M3)"""
+    seamed = (_MAIN.replace("def job_main():\n    summary = lifecycle()\n",
+                            f"def job_main(visualize=_run.visualize):\n    summary = lifecycle()\n    {handed}\n"))
+    found = _GATE.scan(_tree(tmp_path, run=seamed))
+    assert any("visualize" in f and "job_main" in f for f in found), found
+
+
 def test_a_reader_before_the_lifecycle_is_found(tmp_path):
     run = _MAIN.replace("def main():\n    summary = lifecycle()", "def main():\n    enqueue_curation()\n    summary = lifecycle()")
     found = _GATE.scan(_tree(tmp_path, run=run))

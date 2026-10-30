@@ -29,9 +29,10 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.e2e]
 ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
 
 
+@pytest.mark.parametrize("line_ends", ["as stored", "CRLF"])
 async def test_o16_a_replay_through_the_worker_lane_completes_with_its_disposition(
-        migrated_database, tmp_path, monkeypatch):  # noqa: F811
-    """queued → completed with the golden's disposition, cost read from its sessions, knowledge current at the published commit. (O16)"""
+        migrated_database, tmp_path, monkeypatch, line_ends):  # noqa: F811
+    """queued → completed with the golden's disposition, cost read from its sessions, knowledge current at the published commit; the run holds the alert's exact bytes, CRLF line ends included. (O16)"""
     from defender.records.formats import parse_report_text
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
@@ -41,6 +42,10 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     disposition = parse_report_text((golden / "report.md").read_text(encoding="utf-8")).disposition
+    golden_bytes = (golden / "alert.json").read_bytes()
+    if line_ends == "CRLF":
+        golden_bytes = golden_bytes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        assert b"\r\n" in golden_bytes, "premise: the alert has line ends to turn into CRLF"
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)  # R1: a set-up tenant has runs/
@@ -50,7 +55,7 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
                     "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 
         async with job_store(migrated_database) as store:
-            alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
+            alert = await an_alert(store, t.tenant_id, raw=golden_bytes)
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
             worker = make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers"))
             await worker.drain()
@@ -69,7 +74,6 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
             "setup": "done", "box": "started", "report_committed": True, "scrub_verified": True}
         from defender.records import RunPaths
 
-        golden_bytes = (golden / "alert.json").read_bytes()
         launch = json.loads((runs / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
         held = RunPaths(runs / inv.investigation_id).alert.read_bytes()
         assert held == (runs / f"{inv.investigation_id}.alert.json").read_bytes() == golden_bytes

@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, DEFENDER, TITLE, WORKTREE, tree
+from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, AWKWARD_ALERT_BYTES, DEFENDER, TITLE, WORKTREE, tree
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
 ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
@@ -168,20 +168,21 @@ def test_o6_a_job_with_a_valid_launch_record_sets_up_and_runs_the_lifecycle(scen
     assert scene.job_end(run_id) == SETTLED
 
 
-def test_o6_the_runs_input_alert_is_the_launch_files_exact_bytes_and_hashes_to_the_record(scene):
-    """The alert the run holds equals the alert file byte for byte (trailing newline too) and matches the launch digest. (O6, O2, M5)"""
+@pytest.mark.parametrize("raw", [ALERT_BYTES, AWKWARD_ALERT_BYTES], ids=["as the fixture", "crlf tab multibyte"])
+def test_o6_the_runs_input_alert_is_the_launch_files_exact_bytes_and_hashes_to_the_record(scene, raw):
+    """The alert the run holds equals the alert file byte for byte (trailing newline and CRLF line ends too) and matches the launch digest. (O6, O2, M5)"""
     from defender.records import RunPaths
 
     run_id = str(uuid.uuid4())
-    scene.plant(run_id)
+    scene.plant(run_id, launch=scene.launch_doc(run_id, digest=hashlib.sha256(raw).hexdigest()), alert=raw)
     wanted = json.loads((scene.runs / f"{run_id}.launch.json").read_text(encoding="utf-8"))["digest"]
 
     ran = run_job(scene, run_id)
 
     assert ran.raised is None, ran
     held = RunPaths(scene.runs / run_id).alert.read_bytes()
-    assert ALERT_BYTES.endswith(b"\n"), "premise: the fixture ends in a newline"
-    assert held == (scene.runs / f"{run_id}.alert.json").read_bytes() == ALERT_BYTES
+    assert raw.endswith((b"\n", b"\r\n")), "premise: the fixture ends in a line end"
+    assert held == (scene.runs / f"{run_id}.alert.json").read_bytes() == raw
     assert hashlib.sha256(held).hexdigest() == wanted
 
 
@@ -211,6 +212,29 @@ def test_m5_the_alert_file_is_read_once_and_the_digest_is_checked_on_those_bytes
     assert scene.job_end(run_id) == SETTLED
 
 
+def test_m5_a_file_that_changes_before_the_admission_read_is_refused_whatever_an_earlier_look_saw(scene, monkeypatch):
+    """The digest is checked on the very bytes admitted: a file swapped just before the admission read is refused, not trusted on an earlier look. (M5)"""
+    from defender.records import formats
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    real = formats.read_operator_alert
+
+    def swap_then_read(path: Any) -> bytes:
+        Path(path).write_bytes(b'{"swapped": true}\n')  # an earlier read of the path saw the launch bytes
+        return real(path)
+
+    monkeypatch.setattr(formats, "read_operator_alert", swap_then_read)  # lint-monkeypatch: ok — a wrapper of the one read that changes the file just before it, no seam exists for it
+
+    ran = run_job(scene, run_id)
+
+    assert ran.raised is None, ran
+    assert ran.calls["lifecycle"] == 0, "the run went ahead on bytes its launch record does not name"
+    assert not (scene.runs / run_id).exists()
+    assert scene.job_end(run_id) == {"setup": "refused", "box": "not_started",
+                                     "report_committed": False, "scrub_verified": False}
+
+
 _REFUSALS = {
     "no-launch-record": dict(launch=None),
     "launch-names-another-tenant": dict(launch="tenant"),
@@ -221,22 +245,49 @@ _REFUSALS = {
     "launch-lacks-the-digest": dict(launch="nodigest"),
     "no-alert-file": dict(alert=None),
     "digest-mismatch-on-the-admitted-bytes": dict(alert=ALERT_BYTES.replace(b"1.50", b"1.51")),
+    "launch-record-symlinked": dict(tamper="launch-link"),
+    "launch-record-oversize": dict(tamper="launch-oversize"),
+    "alert-file-symlinked": dict(tamper="alert-link"),
 }
+OVER_THE_LIMIT = 70 * 1024 * 1024
+
+
+def _tamper(scene: Scene, run_id: str, how: str) -> None:
+    """Plant the launch pair with one of its two files a symlink to a valid copy, or the launch record
+    padded with blanks past any size limit (still valid JSON)."""
+    elsewhere = scene.root.parent / "elsewhere"
+    elsewhere.mkdir(exist_ok=True)
+    record = json.dumps(scene.launch_doc(run_id))
+    scene.plant(run_id, launch=None if how.startswith("launch") else "default",
+                alert=None if how == "alert-link" else ALERT_BYTES)
+    if how == "launch-link":
+        (elsewhere / "launch.json").write_text(record, encoding="utf-8")
+        (scene.runs / f"{run_id}.launch.json").symlink_to(elsewhere / "launch.json")
+    elif how == "launch-oversize":
+        (scene.runs / f"{run_id}.launch.json").write_text(record + " " * OVER_THE_LIMIT, encoding="utf-8")
+    else:
+        (elsewhere / "alert.json").write_bytes(ALERT_BYTES)
+        (scene.runs / f"{run_id}.alert.json").symlink_to(elsewhere / "alert.json")
+
 
 
 @pytest.mark.parametrize("kind", sorted(_REFUSALS))
 def test_o6_setup_refuses_an_id_without_a_launch_record_that_names_this_tenant_and_checks(scene, kind):
-    """No launch record, another tenant's, another id's, unparseable, or a digest the alert bytes miss: refused and recorded `setup: refused`; nothing spent, nothing made. (O6, M1, M5)"""
+    """No launch record, another tenant's, another id's, unparseable, symlinked or oversize, an alert file that is a symlink, or a digest the alert bytes miss: refused and recorded `setup: refused`; nothing spent, nothing made. (O6, M1, M5)"""
     run_id = str(uuid.uuid4())
     spec = dict(_REFUSALS[kind])
     launch = spec.pop("launch", "default")
+    tamper = spec.pop("tamper", None)
     if launch == "tenant":
         launch = scene.launch_doc(run_id, tenant_id=OTHER_TENANT)
     elif launch == "id":
         launch = scene.launch_doc(run_id, investigation_id=str(uuid.uuid4()))
     elif launch == "nodigest":
         launch = {k: v for k, v in scene.launch_doc(run_id).items() if k != "digest"}
-    scene.plant(run_id, launch=launch, **spec)
+    if tamper is None:
+        scene.plant(run_id, launch=launch, **spec)
+    else:
+        _tamper(scene, run_id, tamper)
     before = sorted(p.name for p in scene.runs.iterdir())
 
     ran = run_job(scene, run_id)
@@ -615,6 +666,9 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     for name in ("open_case_ticket", "record_case_ticket", "_verb_context", "_config_of", "_post_comment",
                  "_write_receipt"):
         monkeypatch.setattr(writer_module, name, getattr(wire, name))  # lint-monkeypatch: ok — same tripwire, ticket writer
+    # an import-time alias of the writer's helpers or of `DEFAULT_DEPS.request` escapes all of those: the
+    # transport every route ends in is tripped too
+    monkeypatch.setattr(writer_module.integrations, "docker_exec_curl", wire.docker_exec_curl)  # lint-monkeypatch: ok — same tripwire, the writer's transport
 
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
@@ -632,6 +686,11 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     with contextlib.suppress(AssertionError):  # the record leg's own handler reaches another tripped name
         real_record(probe, tenant=None, defender_dir=tmp_path, env={}, truncated_by=None, closed_before_cut=False)
     assert wire.called.count("_verb_context") == 2
+    wire.called.clear()
+    config = {"URL_BASE": "http://store.invalid", "BASTION_HOST": "bastion.invalid"}
+    with pytest.raises(AssertionError):  # control: a call through the writer's default deps reaches the tripped transport
+        writer_module.DEFAULT_DEPS.request(config, "POST", "/tickets", {}, ctx=None)
+    assert wire.called == ["docker_exec_curl"]
     wire.called.clear()
     # a helper that captured `enqueue_curation` at definition time escapes the module patch: look at disk too
     made = [k for k in set(tree(scene.root)) - before if re.search(r"curat|queue|learn", k, re.IGNORECASE)]
