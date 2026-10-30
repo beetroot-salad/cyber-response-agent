@@ -622,6 +622,16 @@ async def test_the_server_url_replaces_what_comes_before_realms_in_the_issuer(kc
     assert all(u.startswith((f"{reached}/realms/{REALM}/", f"{reached}/admin/realms/{REALM}/")) for u in wire.urls), wire.urls
 
 
+@pytest.mark.parametrize("issuer", ["https://kc.test", "https://kc.test/auth", "https://kc.test/realms/",
+                                    "kc.test/realms/defender", "https://kc.test/realms/defender?x=1",
+                                    "https://kc.test/realms/defender/account"])
+def test_an_issuer_that_is_not_a_realm_url_refuses_construction_naming_the_setting(issuer):
+    with pytest.raises(ValueError, match="issuer"):
+        KeycloakSignIn(
+            issuer=issuer, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI,
+            admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET)
+
+
 @pytest.mark.parametrize("server_url", [
     "keycloak:8080", "//keycloak:8080", "ftp://keycloak:8080", "http://keycloak:8080/?x=1",
     "http://keycloak:8080/#f", "", "http:///auth",
@@ -629,6 +639,7 @@ async def test_the_server_url_replaces_what_comes_before_realms_in_the_issuer(kc
     "http://keycloak:abc", "http://keycloak:99999",  # a port that is not one
     "http://user:pw@keycloak:8080",  # credentials in the address
     "http://kc-int:8080/realms/defender", "http://kc-int:8080/auth/realms",  # the issuer, not the server
+    "http://[::1:8080",  # a broken IPv6 host, which the URL parser refuses in its own words
 ])
 def test_a_malformed_server_url_refuses_construction(server_url):
     with pytest.raises(ValueError, match="server_url"):

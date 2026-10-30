@@ -25,7 +25,6 @@ ADMIN_CLIENT = "defender-api-admin"
 AMR_MAPPER = "oidc-amr-mapper"
 USER_PROFILE = "kc.user.profile.config"
 CODE_LIFESPAN_DEFAULT = 60  # Keycloak's accessCodeLifespan when the realm does not set it
-USER_ACTION_LIFESPAN_DEFAULT = 300  # its accessCodeLifespanUserAction: a required-action page's life
 
 
 # --- checks (each raises AssertionError) ---------------------------------------------------------
@@ -88,11 +87,11 @@ def check_browser_flow_labels_password_and_otp(realm: dict) -> None:
 def check_amr_outlives_the_authorization_code(realm: dict) -> None:
     """#1349: Keycloak drops a reference from amr once it is older than its maxAge (default 0: the same second).
     A code exchanged a second after the code step would then carry no otp, and a platform admin is refused.
-    Between the code step and the code, a required-action page (set a password) may sit for its own lifespan."""
-    lifespan = int(realm.get("accessCodeLifespan", CODE_LIFESPAN_DEFAULT)) \
-        + int(realm.get("accessCodeLifespanUserAction", USER_ACTION_LIFESPAN_DEFAULT))
+    It is also how long a later sign-in that Keycloak satisfies from its own session still counts the step,
+    so it is kept to the code's lifespan, no longer."""
+    lifespan = int(realm.get("accessCodeLifespan", CODE_LIFESPAN_DEFAULT))
     for authenticator in ("auth-username-password-form", "auth-otp-form"):
-        assert int(_reference_config(realm, authenticator).get("default.reference.maxAge", 0)) >= lifespan
+        assert int(_reference_config(realm, authenticator).get("default.reference.maxAge", 0)) == lifespan
 
 
 def check_service_account_is_limited_to_manage_users(realm: dict) -> None:
@@ -146,7 +145,7 @@ def test_the_browser_flow_labels_the_password_step_pwd_and_the_code_step_otp():
 
 
 def test_amr_still_lists_the_code_step_when_the_code_is_exchanged_late():
-    """The pwd and otp references stay in amr until the authorization code expires, even after a required action (#1349)."""
+    """The pwd and otp references stay in amr exactly as long as the authorization code is valid (#1349)."""
     check_amr_outlives_the_authorization_code(_committed_realm())
 
 
@@ -184,8 +183,8 @@ def _good_realm() -> dict:
                 {"authenticator": "auth-username-password-form", "authenticatorConfig": "pwd-ref"},
                 {"authenticator": "auth-otp-form", "authenticatorConfig": "otp-ref"}]}],
         "authenticatorConfig": [
-            {"alias": "pwd-ref", "config": {"default.reference.value": "pwd", "default.reference.maxAge": "360"}},
-            {"alias": "otp-ref", "config": {"default.reference.value": "otp", "default.reference.maxAge": "360"}}],
+            {"alias": "pwd-ref", "config": {"default.reference.value": "pwd", "default.reference.maxAge": "60"}},
+            {"alias": "otp-ref", "config": {"default.reference.value": "otp", "default.reference.maxAge": "60"}}],
     }
 
 
@@ -221,13 +220,13 @@ def test_every_check_accepts_a_good_realm():
         ["authenticatorConfig", 0, "config", "default.reference.value"], "password"), id="pwd-label"),
     pytest.param(check_browser_flow_labels_password_and_otp, _mutate(["authenticatorConfig", 1, "config"], {}), id="otp-label"),
     pytest.param(check_amr_outlives_the_authorization_code, _mutate(
-        ["authenticatorConfig", 1, "config"], {"default.reference.value": "otp", "default.reference.max.age": "360"}),
+        ["authenticatorConfig", 1, "config"], {"default.reference.value": "otp", "default.reference.max.age": "60"}),
         id="otp-max-age-misspelt"),
     pytest.param(check_amr_outlives_the_authorization_code, _mutate(
-        ["authenticatorConfig", 0, "config", "default.reference.maxAge"], "359"), id="pwd-max-age-short"),
+        ["authenticatorConfig", 0, "config", "default.reference.maxAge"], "59"), id="pwd-max-age-short"),
+    pytest.param(check_amr_outlives_the_authorization_code, _mutate(
+        ["authenticatorConfig", 1, "config", "default.reference.maxAge"], "360"), id="otp-max-age-long"),
     pytest.param(check_amr_outlives_the_authorization_code, _mutate(["accessCodeLifespan"], 61), id="code-outlives-max-age"),
-    pytest.param(check_amr_outlives_the_authorization_code, _mutate(["accessCodeLifespanUserAction"], 301),
-                 id="required-action-outlives-max-age"),
     pytest.param(check_service_account_is_limited_to_manage_users, _mutate(
         ["users", 0, "clientRoles"], {"realm-management": ["manage-users", "realm-admin"]}), id="extra-role"),
     pytest.param(check_service_account_is_limited_to_manage_users, _mutate(["users", 0, "clientRoles"], {}), id="no-role"),

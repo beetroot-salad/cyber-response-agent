@@ -34,26 +34,42 @@ def _utc_now() -> _dt.datetime:
     return _dt.datetime.now(_dt.UTC)
 
 
-def _server_base(server_url: str) -> str:
+def _split_url(setting: str, value: str) -> urllib.parse.SplitResult:
     """An absolute http(s) URL with a host, a valid port if any, and no credentials, query, fragment
-    or whitespace; a path prefix is kept, but not one reaching into `/realms` (that is the issuer)."""
+    or whitespace; else a ValueError naming the setting."""
     def refuse(why: str) -> ValueError:
-        return ValueError(f"keycloak server_url {server_url!r} {why}")
+        return ValueError(f"keycloak {setting} {value!r} {why}")
 
-    if any(c.isspace() or not c.isprintable() for c in server_url):
+    if any(c.isspace() or not c.isprintable() for c in value):
         raise refuse("contains whitespace or a control character")
-    parts = urllib.parse.urlsplit(server_url)
-    if parts.scheme not in ("http", "https") or not parts.hostname or parts.query or parts.fragment \
-            or server_url.endswith(("?", "#")):
-        raise refuse("is not an absolute http(s) URL without query or fragment")
     try:
+        parts = urllib.parse.urlsplit(value)
         parts.port  # noqa: B018 — reading it is the check: a non-numeric or out-of-range port raises
-    except ValueError:
-        raise refuse("has an invalid port") from None
+    except ValueError as e:
+        raise refuse(f"is not a URL: {e}") from None
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.query or parts.fragment \
+            or value.endswith(("?", "#")):
+        raise refuse("is not an absolute http(s) URL without query or fragment")
     if parts.username is not None:
         raise refuse("carries credentials")
-    if "realms" in parts.path.split("/"):
-        raise refuse("names a realm path; give the server's base, not the issuer")
+    return parts
+
+
+def _realm_url(issuer: str) -> tuple[str, str, str]:
+    """The issuer as (itself without a trailing slash, the server base before `/realms/`, the realm)."""
+    parts = _split_url("issuer", issuer)
+    base, sep, realm = parts.path.rstrip("/").rpartition("/realms/")
+    if not realm or "/" in realm:  # without `/realms/`, `realm` is the whole path, which has a slash
+        raise ValueError(f"keycloak issuer {issuer!r} is not <server>/realms/<realm>")
+    issuer = issuer.rstrip("/")
+    return issuer, issuer[: len(issuer) - len(sep + realm)], realm
+
+
+def _server_base(server_url: str) -> str:
+    """A URL as `_split_url` takes it; a path prefix is kept, but not one reaching into `/realms`
+    (that is the issuer)."""
+    if "realms" in _split_url("server_url", server_url).path.split("/"):
+        raise ValueError(f"keycloak server_url {server_url!r} names a realm path; give the server's base, not the issuer")
     return server_url.rstrip("/")
 
 
@@ -73,7 +89,7 @@ class KeycloakSignIn:
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], _dt.datetime] = _utc_now,
     ) -> None:
-        self._issuer = issuer.rstrip("/")
+        self._issuer, base, realm = _realm_url(issuer)
         self._client_id = client_id
         self._client_secret = client_secret
         self._redirect_uri = redirect_uri
@@ -85,7 +101,6 @@ class KeycloakSignIn:
         # `server_url`, when the API reaches Keycloak at another address than the browser does
         # (#1349), replaces that base for every request the API sends itself; the browser's
         # sign-in URL and the token's `iss` stay the issuer.
-        base, realm = self._issuer.rsplit("/realms/", 1)
         server = base if server_url is None else _server_base(server_url)
         self._signin_url = f"{self._issuer}/protocol/openid-connect/auth"
         self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
