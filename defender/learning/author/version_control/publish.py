@@ -98,7 +98,7 @@ def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process st
     fetch; none when `None`): past it, `stale:transient`. Clients made here are closed before it
     returns. Every outcome reported for an accepted tenant is recorded, once, from the report line
     itself."""
-    from defender.systems.run_tenant import entry_directory
+    from defender.systems.run_tenant import RecordsUnreachable, entry_directory
 
     try:
         tenant = requested_tenant(data_root_from_path(Path(data_root)), tenant_id)
@@ -106,6 +106,8 @@ def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process st
         return report(STALE_OPERATOR, f"the tenant was not accepted: {refused}")
     try:
         directory = entry_directory(directory)
+    except RecordsUnreachable as down:
+        return report(STALE_TRANSIENT, str(down))
     except TenantRefused as unconfigured:
         return report(MISCONFIGURED, str(unconfigured))
     line = _publish_unrecorded(

@@ -6,38 +6,25 @@ from __future__ import annotations
 import logging
 import os
 import signal
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from defender.box import TENANT_LABEL
+from defender.box import remove_tenant_containers
 from defender.lifecycle._job import StepFailed
 from defender.tenancy import host_lock, process_start
 
 _logger = logging.getLogger(__name__)
 
-_DOCKER_TIMEOUT = 120
-
 Containers = Callable[[str], None]
 
 
 def stop_containers(tenant_id: str) -> None:
-    """Remove every container labelled with the tenant. A host with no docker has no box to stop;
-    a docker that answers with an error fails the step."""
-    try:
-        listed = subprocess.run(["docker", "ps", "-aq", "--filter", f"label={TENANT_LABEL}={tenant_id}"],  # noqa: S603, S607 — fixed argv
-                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_DOCKER_TIMEOUT, check=False)
-    except FileNotFoundError:
-        return
-    if listed.returncode != 0:
-        raise StepFailed(f"docker could not list the tenant's containers: {listed.stderr.strip()}")
-    ids = listed.stdout.split()
-    if not ids:
-        return
-    removed = subprocess.run(["docker", "rm", "-f", *ids], capture_output=True, text=True, encoding="utf-8", errors="replace",  # noqa: S603, S607 — fixed argv
-                             timeout=_DOCKER_TIMEOUT, check=False)
-    if removed.returncode != 0:
-        raise StepFailed(f"docker could not remove the tenant's containers: {removed.stderr.strip()}")
+    """Remove every container labelled with the tenant, through box's one removal step (a paused
+    box is waited for). A host with no docker has no box to stop; a docker that answers with an
+    error fails the step."""
+    why = remove_tenant_containers(tenant_id)
+    if why is not None:
+        raise StepFailed(why)
 
 
 def _signal(data_root: Path, tenant_id: str, sig: signal.Signals) -> list[int]:
@@ -60,10 +47,14 @@ def take_exclusive(data_root: Path, tenant_id: str, *, wait: float,
     processes still recorded get SIGKILL; still held after another `wait`, the step fails loudly.
     Returns the lock's descriptor (`host_lock.release_lock` it)."""
     fd = host_lock.acquire(data_root, tenant_id, exclusive=True, timeout=0)
-    if fd is None:
-        terminated = _signal(data_root, tenant_id, signal.SIGTERM)
-        _logger.info("tenant %s: teardown sent SIGTERM to %s", tenant_id, terminated)
-    containers(tenant_id)
+    try:
+        if fd is None:
+            terminated = _signal(data_root, tenant_id, signal.SIGTERM)
+            _logger.info("tenant %s: teardown sent SIGTERM to %s", tenant_id, terminated)
+        containers(tenant_id)
+    except BaseException:
+        host_lock.release_lock(fd)  # a failed step never keeps the lock: the tenant's entry points wait on it
+        raise
     if fd is None:
         fd = host_lock.acquire(data_root, tenant_id, exclusive=True, timeout=wait)
     if fd is None:

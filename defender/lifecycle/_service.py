@@ -168,9 +168,12 @@ class ManagementService(Actor):
                                                     params={"page": page, "limit": _COLLABORATOR_PAGE})).json()
             if not isinstance(listed, list):
                 raise StepFailed(f"the collaborators of {repo} are not a list")
-            found += [str(c.get("login")) for c in listed if isinstance(c, dict)]
-            if len(listed) < _COLLABORATOR_PAGE:
+            # The forge may page by fewer than asked (its own maximum), so only an empty page, or one
+            # that adds nobody (a forge ignoring `page`), ends the listing.
+            logins = [str(c.get("login")) for c in listed if isinstance(c, dict)]
+            if not set(logins) - set(found):
                 return found
+            found += logins
             page += 1
 
     async def _integration(self, held: HeldTenant) -> None:

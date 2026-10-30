@@ -120,8 +120,15 @@ _DOCKER = textwrap.dedent('''\
         key, sep, value = wanted.partition("=")
         out = "\\n".join(c for c, labels in data["containers"].items()
                         if key in labels and (not sep or labels[key] == value))
+    elif args[:1] == ["wait"]:
+        data["waited"] += args[1:]
     elif args[:1] == ["rm"]:
         ids = [a for a in args[1:] if not a.startswith("-")]
+        stuck = [i for i in ids if data["containers"].get(i, {}).get("paused") and i not in data["waited"]]
+        if stuck:
+            state.write_text(json.dumps(data))
+            sys.stderr.write("PID is zombie and can not be killed\\n")
+            sys.exit(1)
         data["removed"] += ids
         for i in ids:
             data["containers"].pop(i, None)
@@ -132,12 +139,13 @@ _DOCKER = textwrap.dedent('''\
 
 class DockerShim:
     """A `docker` executable in `root`: `ps -aq --filter label=K[=V]` lists the containers (id -> labels) carrying the
-    label, `rm -f ids` removes them. Every call is recorded. Put `root` first on PATH."""
+    label, `rm -f ids` removes them; a container labelled `paused` refuses `rm` until it was `wait`ed for (gVisor's
+paused box, #1202). Every call is recorded. Put `root` first on PATH."""
 
     def __init__(self, root: Path, containers: dict[str, dict[str, str]]) -> None:
         root.mkdir(parents=True)
         self.root, self.state = root, root / "state.json"
-        self.state.write_text(json.dumps({"containers": containers, "calls": [], "removed": []}))
+        self.state.write_text(json.dumps({"containers": containers, "calls": [], "removed": [], "waited": []}))
         script = root / "docker"
         script.write_text(_DOCKER.replace("PYTHON", sys.executable).replace("STATE", str(self.state)))
         script.chmod(0o755)

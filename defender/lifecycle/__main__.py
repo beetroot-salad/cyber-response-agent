@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime as _dt
+import functools
 import logging
 import os
 import signal
@@ -19,7 +20,6 @@ import sys
 from typing import Any
 
 _logger = logging.getLogger(__name__)
-_DSN_ENV = "DEFENDER_DATABASE_DSN"
 
 
 def _now() -> _dt.datetime:
@@ -39,10 +39,12 @@ class _NoPeople:
 
 def _dsn() -> str:
     from defender.migrations import check_version
+    from defender.tenancy import database_address_variable
 
-    dsn = os.environ.get(_DSN_ENV, "")
+    variable = database_address_variable()
+    dsn = os.environ.get(variable, "")
     if not dsn:
-        raise SystemExit(f"{_DSN_ENV} is not set: the lifecycle works the tenant records in PostgreSQL")
+        raise SystemExit(f"{variable} is not set: the lifecycle works the tenant records in PostgreSQL")
     check_version(dsn)
     return dsn
 
@@ -61,6 +63,7 @@ async def _serve() -> int:
     from defender.investigation.publish_launch import launch_publish
     from defender.lifecycle import HostActor, ManagementService, git_runner, integration_runner, serve
     from defender.lifecycle import _process as clients
+    from defender.tenancy import TenantDirectory
     from defender.tenancy.postgres import PostgresTenantRepository
 
     dsn, config = _dsn(), _lifecycle_settings()
@@ -76,7 +79,10 @@ async def _serve() -> int:
                                 integration=integration_runner(config.integration_command), git=git_runner,
                                 config=config, clock=_now)
     host = HostActor(tenants, forge=clients.forge_anonymous(config), openbao_login=clients.openbao_login(config),
-                     git=git_runner, publish=launch_publish, config=config, clock=_now)
+                     git=git_runner, config=config, clock=_now,
+                     # as run start's: the outcomes only the launcher sees are recorded for `tenant.py check`
+                     publish=functools.partial(launch_publish,
+                                               directory=TenantDirectory(lambda: PostgresTenantRepository(dsn))))
     _logger.info("lifecycle: serving both actors every %ss", config.poll_interval)
     try:
         await serve(service, host, config=config, stop=stopping.is_set)

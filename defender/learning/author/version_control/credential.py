@@ -55,29 +55,28 @@ class TenantForgeCredential:
     transport: httpx.BaseTransport | None = field(default=None, repr=False)
     clock: Callable[[], float] = field(default=time.time, repr=False)
     _identity: ForgejoIdentity | None = field(default=None, init=False, repr=False)
-    _salt: str | None = field(default=None, init=False, repr=False)
 
     def token(self, *, min_validity: float = CLOCK_SKEW) -> str:
         """A bearer JWT for the tenant's live generation valid for `min_validity` more seconds:
-        the token already held while it lasts and its generation is still the live one, else a new
-        login and mint. Refused (`ForgejoAuthError`) when the tenant has no live generation, its
-        secret file cannot be read, or OpenBao refuses the login or the token."""
-        live = self._live()
+        the token already held while it lasts (nothing read), else a new login and mint for the
+        generation that is live now. Refused (`ForgejoAuthError`) when the tenant has no live
+        generation, its secret file cannot be read, or OpenBao refuses the login or the token."""
         held = self._identity
-        if held is not None and self._salt == live.salt:
+        if held is not None:
             current = held._current  # noqa: SLF001 — the identity's own cache, read to keep it across mints
             if current is not None and current.expires_at > self.clock() + min_validity:
                 return current.value
+        live = self._live()
         self.close()
         identity = self._login(live)
-        self._identity, self._salt = identity, live.salt
+        self._identity = identity
         return identity.token(min_validity=min_validity)
 
     def close(self) -> None:
         """Close the OpenBao client the last login opened (its token is dropped with it)."""
         if self._identity is not None:
             self._identity.client.close()
-            self._identity, self._salt = None, None
+            self._identity = None
 
     def _live(self) -> Any:
         live = [g for g in self.directory.generations(self.tenant_id) if g.status == "live"]

@@ -245,6 +245,22 @@ def _remove_container(docker: DockerFn, name: str) -> str | None:
     return f"{(first.stderr or '').strip()}; after waiting: {(second.stderr or '').strip()}"
 
 
+def remove_tenant_containers(tenant_id: str, *, docker: DockerFn = run_docker) -> str | None:
+    """Remove every container labelled with the tenant (`TENANT_LABEL`), each through
+    `_remove_container`: `None` once none is left, else why not. A host with no docker binary has
+    no box to remove (the offboarding of a tenant on a host that never ran one)."""
+    try:
+        listed = docker(["docker", "ps", "-aq", "--filter", f"label={TENANT_LABEL}={tenant_id}"])
+    except FileNotFoundError:
+        return None
+    except (OSError, subprocess.SubprocessError) as e:
+        return f"could not invoke docker: {e}"
+    if listed.returncode != 0:
+        return f"docker could not list the tenant's containers: {(listed.stderr or '').strip()}"
+    faults = [f"{name}: {why}" for name in listed.stdout.split() if (why := _remove_container(docker, name)) is not None]
+    return f"docker could not remove the tenant's containers: {'; '.join(faults)}" if faults else None
+
+
 class BoxStartConflict(BoxFault):
     """A start refused for what it would collide with, never degraded by the unsandboxed opt-out
     (#1279 A2): a mount that overlaps the publish root (O3), or a container that already holds

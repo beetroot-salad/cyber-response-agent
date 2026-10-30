@@ -138,6 +138,54 @@ def test_serve_waits_the_poll_interval_between_rounds(tmp_path, data_root):
     assert len(stamps) >= 2 and min(gaps) >= interval * 0.8, gaps
 
 
+def test_serve_goes_on_after_a_pass_that_raised(tmp_path, data_root, caplog):
+    """The service's first pass raises (the database is unreachable): `serve` logs it, the host still works that round,
+    and the next round runs; the process does not end on one failed pass (DC-14)."""
+    from defender.lifecycle import serve
+
+    service_rounds: list[int] = []
+    host_rounds: list[int] = []
+
+    class Service:
+        async def work(self) -> int:
+            service_rounds.append(1)
+            if len(service_rounds) == 1:
+                raise ConnectionError("the database is unreachable")
+            return 0
+
+    class Host:
+        async def work(self) -> int:
+            host_rounds.append(1)
+            return 0
+    asyncio.run(serve(Service(), Host(), config=lifecycle_config(tmp_path, data_root, poll_interval=0.01),
+                      stop=lambda: len(service_rounds) >= 2))
+    assert (len(service_rounds), len(host_rounds)) == (2, 2)
+    assert "the database is unreachable" in caplog.text
+
+
+def test_a_tenant_whose_lock_cannot_be_taken_does_not_stop_the_pass_for_the_others(world):
+    """Taking the first listed tenant's lock raises (its connection dropped): the pass goes on and the other claimable
+    tenant's steps run; once the lock can be taken again the first one is done too (DC-14)."""
+    first, second = world.create(), world.create()
+    real = world.tenants.lock
+    broken: list[str] = []
+
+    def lock(tenant_id: str) -> Any:
+        if not broken or broken == [tenant_id]:
+            broken[:] = [tenant_id]
+            raise ConnectionError("the lock's connection was dropped")
+        return real(tenant_id)
+    world.tenants.lock = lock
+    world.service_pass()
+    [skipped] = broken
+    [other] = {first, second} - {skipped}
+    assert world.item(skipped)["step"] == "names"
+    assert world.item(other)["step"] != "names", "the pass ended at the tenant whose lock failed"
+    world.tenants.lock = real
+    world.drive()
+    assert {world.item(t)["state"] for t in (first, second)} == {"active"}
+
+
 # --- H-7 ---------------------------------------------------------------------------------------------
 
 def _offboarded(world):

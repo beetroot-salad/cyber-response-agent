@@ -8,6 +8,7 @@ import os
 import stat
 import threading
 import time
+from typing import Any
 
 import pytest
 
@@ -59,6 +60,28 @@ def test_teardown_fails_loudly_and_removes_nothing_when_a_holder_it_cannot_stop_
     world.drive()
     assert world.item(tenant)["state"] == "offboarded"
     assert not (world.data_root / tenant).exists()
+
+
+def test_a_teardown_whose_container_removal_fails_gives_the_host_lock_back(tmp_path, data_root):
+    """Nothing else holds T's lock and removing T's containers fails: teardown fails naming why, and the exclusive lock
+    it took is released, so a resume (and every entry point for T) is not locked out until the process restarts."""
+    w = LifecycleWorld(tmp_path, data_root)
+
+    def broken(_tenant: str) -> None:
+        raise RuntimeError("docker could not remove the containers")
+    try:
+        w.host_actor = w.new_host(w.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=WAIT),
+                                  containers=broken)
+        tenant = w.active_tenant()
+        assert w.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        w.drive()
+        item = w.item(tenant)
+        assert item["step"] == "teardown" and "docker could not remove" in (item["failure"] or ""), item
+        fd = host_lock.acquire(w.data_root, tenant, exclusive=True, timeout=0)
+        assert fd is not None, "the failed teardown kept T's host lock"
+        host_lock.release_lock(fd)
+    finally:
+        w.close()
 
 
 # --- H-10 --------------------------------------------------------------------------------------------
@@ -146,6 +169,37 @@ def test_teardown_removes_the_containers_labelled_with_the_tenant_and_no_others(
         assert shim.remaining() == {"box-other", "box-plain"}
     finally:
         w.close()
+
+
+def test_teardown_removes_a_paused_box_that_refuses_the_first_removal(tmp_path, data_root, monkeypatch):
+    """A tenant's box paused under gVisor refuses `rm -f` until it has exited: teardown waits for it and removes it, as
+    every other box removal does (#1202), so the offboarding finishes (P3)."""
+    w = LifecycleWorld(tmp_path, data_root)
+    try:
+        w.host_actor = w.new_host(w.tenants, config=lifecycle_config(tmp_path, data_root, teardown_wait=WAIT))
+        tenant = w.active_tenant()
+        shim = DockerShim(tmp_path / "bin", {"box-paused": {"defender.tenant": tenant, "paused": "1"}})
+        monkeypatch.setenv("PATH", f"{shim.root}{os.pathsep}{os.environ['PATH']}")
+        assert w.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+        w.drive()
+        assert w.item(tenant)["state"] == "offboarded", w.item(tenant)
+        assert shim.remaining() == set()
+    finally:
+        w.close()
+
+
+def test_a_host_with_no_docker_has_no_box_to_remove():
+    """No `docker` binary: there is nothing to remove and nothing failed; a docker that cannot be run for another
+    reason is a failure naming it (P3)."""
+    from defender.box import remove_tenant_containers
+
+    def missing(_argv: list[str]) -> Any:
+        raise FileNotFoundError("docker")
+
+    def denied(_argv: list[str]) -> Any:
+        raise PermissionError("docker")
+    assert remove_tenant_containers("some-tenant", docker=missing) is None
+    assert "could not invoke docker" in (remove_tenant_containers("some-tenant", docker=denied) or "")
 
 
 # --- H-13 --------------------------------------------------------------------------------------------

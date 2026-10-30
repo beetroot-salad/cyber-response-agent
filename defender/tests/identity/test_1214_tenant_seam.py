@@ -79,6 +79,43 @@ async def test_only_an_active_tenant_exists_for_identity(world):
     assert await world.identity.tenant_exists(ABSENT) is False
 
 
+async def test_the_active_tenants_among_several_are_read_at_once(world):
+    """`active_tenants(ids)` is `tenant_exists` over a set of ids in one read: only the active ones come back, an absent
+    one and an empty set included (seam, O4)."""
+    ids = {state: fixture_uuid(f"tenant:1214-seam-{state}") for state in ROWS}
+    for state, tenant in ids.items():
+        await world.seed(tenant, state)
+    assert await world.identity.active_tenants([*ids.values(), ABSENT]) == {ids["active"]}
+    assert await world.identity.active_tenants([]) == set()
+
+
+def test_me_reads_the_tenant_states_once_however_many_memberships():
+    """`/me` for a member of three tenants, one of them offboarding: one read of the tenant states, not one per
+    membership, and the view still leaves the offboarding tenant out."""
+    pytest.importorskip("fastapi")
+    from defender.tests.support.api._identity1306 import ANN, BOB, LAB, T1, T2, World
+
+    world = World(tenants={T1: [ANN], T2: [ANN], LAB: [ANN, BOB]})
+    try:
+        world.call(world.tenants.request_offboard, LAB, now=world.clock())
+        reads: list[str] = []
+        for name in ("tenant_exists", "active_tenants"):
+            real = getattr(world.raw_repo, name, None)
+            if real is not None:
+                async def counted(*a: Any, _real: Any = real, _name: str = name, **k: Any) -> Any:
+                    reads.append(_name)
+                    return await _real(*a, **k)
+                setattr(world.raw_repo, name, counted)
+        browser = world.sign_in(ANN)
+        reads.clear()
+        me = browser.get("/me")
+        assert me.status_code == 200, me.text
+        assert {t["tenant_id"] for t in me.json()["tenants"]} == {T1, T2}
+        assert len(reads) == 1, reads
+    finally:
+        world.close()
+
+
 async def test_offboarding_ends_existence_for_identity_at_once(world):
     """The request that moves an active tenant to offboarding is what identity sees next: no cache, no second step (O4, DC-6)."""
     await world.seed(T1)

@@ -228,19 +228,26 @@ def entry_directory(given: TenantDirectory | None) -> TenantDirectory:
     """The `TenantDirectory` a host entry point admits its tenant through: `given`, else one over
     `DEFENDER_DATABASE_DSN` once the database is at this code's revision (#1339's light check,
     run once at process start and never a migration). No directory and no address, or a database
-    at another revision (named with this code's), is `TenantRefused`."""
+    at another revision (named with this code's), is `TenantRefused`; a database that cannot be
+    reached is its `RecordsUnreachable`, which a caller may treat as transient."""
     from defender import tenancy
 
     return tenancy.host_directory(given, check_version=_check_version)
 
 
+class RecordsUnreachable(TenantRefused):
+    """The tenant records' database could not be reached: the next attempt may find it up."""
+
+
 def _check_version(dsn: str) -> None:
-    from defender.migrations import RevisionMismatch, check_version
+    from defender.migrations import DatabaseUnreachable, RevisionMismatch, check_version
 
     try:
         check_version(dsn)
     except RevisionMismatch as behind:
         raise TenantRefused(str(behind)) from behind
+    except DatabaseUnreachable as down:
+        raise RecordsUnreachable(str(down)) from down
 
 
 def resolved_settings(tenant: Tenant, *, settings_root: Path | None = None) -> dict[str, Any]:
@@ -265,6 +272,7 @@ def resolved_settings(tenant: Tenant, *, settings_root: Path | None = None) -> d
 
 __all__ = [
     "CaseMapping",
+    "RecordsUnreachable",
     "RunReadiness",
     "RunTenant",
     "SystemConfig",

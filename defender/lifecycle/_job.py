@@ -133,13 +133,17 @@ class Actor:
         return value
 
     async def work(self) -> int:
-        """One pass (DC-14): the number of steps run, failed ones included."""
+        """One pass (DC-14): the number of steps run, failed ones included. A tenant whose lock cannot
+        be taken or given back (its connection failed) is logged and left for the next pass."""
         ran = 0
         for tenant_id in await self._tenants.claimable(self.actor, now=self._clock()):
-            async with self._tenants.lock(tenant_id) as held:
-                if held is None or not claimable_now(held.record, self.actor, self._clock()):
-                    continue  # another worker holds it, or the job moved since the listing
-                ran += await self._run(held)
+            try:
+                async with self._tenants.lock(tenant_id) as held:
+                    if held is None or not claimable_now(held.record, self.actor, self._clock()):
+                        continue  # another worker holds it, or the job moved since the listing
+                    ran += await self._run(held)
+            except Exception:  # noqa: BLE001 — one tenant's lock failing never ends the pass for the others
+                _logger.exception("tenant %s: the %s could not work on it this pass", tenant_id, self.actor)
         return ran
 
     async def _run(self, held: HeldTenant) -> int:

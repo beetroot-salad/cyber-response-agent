@@ -175,3 +175,22 @@ def test_a_tenant_stopped_at_prepare_mints_with_its_live_generation(scene):
     assert credential.tenant_id == tenant
     assert scene.role_of(credential.token()) == live.oidc_role
     assert scene.logins()[-1]["role_id"] == live.role_id
+
+
+def test_a_token_still_valid_is_handed_out_without_reading_the_tenant_records(scene):
+    """Within the token's lifetime a second `token()` is the same token and reads neither the tenant records nor
+    OpenBao (a drain asks once per forge call); past it, the next mint reads the live generation again (P4)."""
+    tenant, _gen = _active(scene)
+    credential = scene.make(tenant)
+    reads: list[str] = []
+    real = credential.directory.generations
+    credential.directory.generations = lambda t: (reads.append(t), real(t))[1]
+    first = credential.token()
+    assert len(reads) == 1
+    logins = len(scene.logins())
+    assert credential.token() == first
+    assert len(reads) == 1, "a valid token was handed out only after a database read"
+    assert len(scene.logins()) == logins
+    scene.later()
+    assert credential.token() != first
+    assert len(reads) == 2

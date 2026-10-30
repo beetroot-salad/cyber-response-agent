@@ -108,3 +108,8 @@ def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_cre
     assert expected.forge_admin_token not in str(headers["host forge"]) and expected.openbao_login not in str(headers["host bao"])
     assert headers["service forge"]["authorization"] == f"token {expected.forge_admin_token}"
     assert headers["service bao"]["x-vault-token"] == expected.openbao_login
+    # The first publish records what only its launcher sees (a child with no report) in the tenant records, as run
+    # start's does, so `tenant.py check` can say why a tenant stuck at prepare never published.
+    from defender.tenancy import TenantDirectory
+
+    assert isinstance(getattr(built["host"]["publish"], "keywords", {}).get("directory"), TenantDirectory)

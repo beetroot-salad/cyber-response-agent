@@ -4,6 +4,7 @@ builds from its `LifecycleConfig`."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import ssl
 import subprocess
@@ -17,6 +18,8 @@ import httpx
 from defender import _git
 from defender.lifecycle.config import LifecycleConfig
 
+_logger = logging.getLogger(__name__)
+
 #: Each external call's own bound (seconds): a hung call ends, so a lock is never held forever.
 CALL_TIMEOUT = 60.0
 #: The integration command after `docker exec <container>` (dev; hosted: an SSH forced command).
@@ -25,10 +28,14 @@ INTEGRATION = ("forgejo", "admin", "user", "create-authorized-integration")
 
 async def serve(service: Any, host: Any, *, config: LifecycleConfig, stop: Callable[[], bool]) -> None:
     """One pass of each actor, then `config.poll_interval`, until `stop()` (asked once per round) is
-    true. `python -m defender.lifecycle serve` runs both actors this way (dev); hosted runs one each."""
+    true. `python -m defender.lifecycle serve` runs both actors this way (dev); hosted runs one each.
+    A pass that raises (the database unreachable) is logged and the next round runs as usual."""
     while True:
-        await service.work()
-        await host.work()
+        for actor in (service, host):
+            try:
+                await actor.work()
+            except Exception:  # noqa: BLE001 — a failed pass never ends the process: the next round retries
+                _logger.exception("lifecycle: a %s pass failed", type(actor).__name__)
         if stop():
             return
         await asyncio.sleep(config.poll_interval)

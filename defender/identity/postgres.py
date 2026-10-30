@@ -70,6 +70,13 @@ class PostgresIdentityRepository:
     async def tenant_exists(self, tenant_id: str) -> bool:
         return await self._one(select(exists().where(_active_tenant(str(tenant_id))))) is True
 
+    async def active_tenants(self, tenant_ids: Collection[str]) -> set[str]:
+        wanted = {str(t) for t in tenant_ids}
+        if not wanted:
+            return set()
+        return set(await self._all(select(TenantRecord.id).where(
+            TenantRecord.id.in_(wanted), TenantRecord.state == "active")))
+
     async def tenant_has_ever_had_membership(self, tenant_id: str) -> bool:
         return await self._one(select(exists().where(Membership.tenant_id == str(tenant_id)))) is True
 

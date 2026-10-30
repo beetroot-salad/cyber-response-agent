@@ -75,3 +75,21 @@ def test_offboarding_removes_the_tenants_secrets_directory_itself(world):
     assert world.item(tenant)["state"] == "offboarded"
     assert not (world.config.secrets_dir / tenant).exists()
     assert not (world.data_root / tenant).exists()
+
+
+def test_create_removes_every_foreign_collaborator_when_the_forge_pages_by_fewer_than_asked(tmp_path, data_root):
+    """A forge configured to answer at most 10 per page (Forgejo's `MAX_RESPONSE_ITEMS`) with 25 foreign collaborators:
+    every page is shorter than the limit asked for, and still every one of them is removed (O1, DC-3)."""
+    w = LifecycleWorld(tmp_path, data_root)
+    try:
+        page_collaborators(w.forge, max_limit=10)
+        w.service_actor = w.new_service(w.tenants, identity=w.service)
+        tenant = w.create()
+        repo = f"{ORG}/{tenant}"
+        w.forge.during[("POST", USERS)] = lambda: w.forge.repos[repo]["collaborators"].update(
+            {f"outsider-{i:03d}": "write" for i in range(25)})
+        w.drive()
+        assert w.item(tenant)["state"] == "active"
+        assert w.forge.collaborators(repo) == {w.live(tenant).bot_login: "write"}
+    finally:
+        w.close()

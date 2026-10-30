@@ -75,6 +75,9 @@ class InMemoryIdentityRepository:
     async def tenant_exists(self, tenant_id: str) -> bool:
         return self._active(tenant_id)
 
+    async def active_tenants(self, tenant_ids: Collection[str]) -> set[str]:
+        return {str(t) for t in tenant_ids if self._active(t)}
+
     async def tenant_has_ever_had_membership(self, tenant_id: str) -> bool:
         return any(m.tenant_id == str(tenant_id) for m in self._memberships.values())
 

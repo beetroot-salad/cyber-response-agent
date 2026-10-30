@@ -13,6 +13,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, pool
+from sqlalchemy.exc import OperationalError
 
 from defender.database import CONNECT_ARGS, url
 
@@ -37,6 +38,14 @@ class RevisionMismatch(Exception):
         recorded = "no recorded revision (unmigrated)" if database is None else f"revision {database}"
         super().__init__(f"the database is at {recorded}, but this code expects revision {head}; "
                          "stop every process, run `python -m defender.migrations upgrade`, then start them")
+
+
+class DatabaseUnreachable(Exception):
+    """No connection to the database could be made; the message is the driver's first line (it
+    names the host and port, never the password)."""
+
+    def __init__(self, why: str) -> None:
+        super().__init__(f"the database could not be reached: {why}")
 
 
 def _config() -> Config:
@@ -69,12 +78,14 @@ def upgrade(dsn: str) -> None:
 
 def check_version(dsn: str) -> None:
     """Pass only when the database's recorded revision is exactly head, else raise
-    `RevisionMismatch` naming both. Reads only."""
+    `RevisionMismatch` naming both; `DatabaseUnreachable` when no connection can be made. Reads only."""
     engine = create_engine(url(dsn), connect_args=CONNECT_ARGS, poolclass=pool.NullPool)
     try:
         with engine.connect() as conn:
             context = MigrationContext.configure(conn, opts={"version_table_schema": VERSION_TABLE_SCHEMA})
             recorded = context.get_current_heads()
+    except OperationalError as down:
+        raise DatabaseUnreachable(str(down.orig).splitlines()[0] if down.orig else type(down).__name__) from down
     finally:
         engine.dispose()
     if recorded != (head(),):

@@ -116,8 +116,9 @@ class InjectedFailure(Exception):
 class FailingRepository:
     """The in-memory identity repository with scripted write failures: every method named in
     `failing` raises `InjectedFailure` instead of running; everything else is delegated.
-    `missing_tenants` scripts the answer of `tenant_exists` (False) for a tenant whose row is
-    gone or no longer active (#1214's lifecycle); nothing else about the tenant changes.
+    `missing_tenants` scripts the answer of `tenant_exists` (False) and `active_tenants` (left out)
+    for a tenant whose row is gone or no longer active (#1214's lifecycle); nothing else about the
+    tenant changes.
     `after` maps a method name to a hook (a coroutine function, no arguments) awaited once right
     after that method returns (an interleaving point: the hook is the test's own action, e.g. a
     sign-in; it decides nothing). Every delegated method is a coroutine function and the inner
@@ -146,6 +147,8 @@ class FailingRepository:
             if name == "tenant_exists" and args and str(args[0]) in self.missing_tenants:
                 return False
             result = await attribute(*args, **kwargs)
+            if name == "active_tenants":
+                result = result - self.missing_tenants
             hook = self.after.pop(name, None)
             if hook is not None:
                 await hook()

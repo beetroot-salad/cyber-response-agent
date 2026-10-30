@@ -342,12 +342,11 @@ class IdentityService:
     async def me(self, auth: Authenticated) -> MeView:
         now = self._clock()
         rows = await self._repo.memberships_of_user(auth.user.id)
-        open_rows: list[OpenInvitation] = []
-        for m in () if auth.user.is_platform_admin else rows:
-            if m.status == "invited" and (m.expires_at is None or m.expires_at > now) \
-                    and await self._repo.tenant_exists(m.tenant_id):
-                open_rows.append(OpenInvitation(id=m.id, tenant_id=m.tenant_id))
-        tenants = [m.tenant_id for m in rows if m.status == "active" and await self._repo.tenant_exists(m.tenant_id)]
+        active = await self._repo.active_tenants({m.tenant_id for m in rows}) if rows else set()
+        open_rows = [OpenInvitation(id=m.id, tenant_id=m.tenant_id)
+                     for m in (() if auth.user.is_platform_admin else rows)
+                     if m.status == "invited" and (m.expires_at is None or m.expires_at > now) and m.tenant_id in active]
+        tenants = [m.tenant_id for m in rows if m.status == "active" and m.tenant_id in active]
         return MeView(
             user=auth.user, tenants=tuple(tenants),
             administrator=auth.administrator, invitations=tuple(open_rows))

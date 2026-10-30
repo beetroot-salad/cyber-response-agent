@@ -184,6 +184,35 @@ def test_run_start_with_no_directory_and_no_database_address_refuses(tmp_path, d
     assert calls.reached == []
 
 
+#: A database address nothing listens on (port 1).
+UNREACHABLE = "postgresql://nobody:not-the-password@127.0.0.1:1/postgres"
+
+
+def test_run_start_with_an_unreachable_database_refuses_naming_it(tmp_path, data_root, monkeypatch):
+    """The address is set but nothing answers: run start refuses before any work, saying the database could not be
+    reached, with no traceback and no password (Flow 4)."""
+    monkeypatch.setenv(DSN_ENV, UNREACHABLE)
+    calls = _Calls()
+    refused = _run_start(TENANT, tmp_path, calls=calls)
+    _has(refused, "[run.py]", "could not be reached")
+    assert "not-the-password" not in refused, refused
+    assert "OperationalError" not in refused, refused
+    assert calls.reached == []
+
+
+def test_the_publish_child_reports_an_unreachable_database_as_transient(data_root, monkeypatch):
+    """The publish child with an unreachable database: `stale:transient` (the next run may find it up), not
+    `misconfigured`, which asks a human to fix the deployment (O-SEE)."""
+    from defender.learning.author import version_control as vc
+    from defender.learning.author.version_control.status import STALE_TRANSIENT
+
+    monkeypatch.setenv(DSN_ENV, UNREACHABLE)
+    line = vc.publish_for_run(TENANT, data_root=data_root)
+    assert line.startswith(STALE_TRANSIENT + " "), line
+    assert "could not be reached" in line, line
+    assert "not-the-password" not in line, line
+
+
 @pytest.mark.postgres
 def test_run_start_builds_its_directory_from_the_database_address(tmp_path, data_root, monkeypatch, migrated_database):  # noqa: F811
     """Same channel as the refusal above, address set: an active row passes the check, an offboarding one is refused (Flow 4)."""
