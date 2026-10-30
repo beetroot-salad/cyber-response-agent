@@ -6,8 +6,6 @@ from defender.tests.support.shared._locations_1210 import fixture_data_root, loc
 import json
 import os
 import shutil
-import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,16 +25,15 @@ sym = T.sym
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFENDER = REPO_ROOT / "defender"
 
-#: `defender/cli/tenant.py` — the setup command, the ONLY production caller of
-#: `create_tenant`, driven here as a process.
+#: `defender/cli/tenant.py` — the connect command (`update`, `propose`, `check`).
 TENANT_PY = DEFENDER / "cli" / "tenant.py"
 
 # ======================================================================================
 # The vocabulary the tests assert against, spelled once.
 # ======================================================================================
 
-#: The tenant row's name inside `<root>/<T>/`. The owner does not export it, so the tests
-#: spell it.
+#: The retired tenant row's name inside `<root>/<T>/` (#1214 O6): nothing writes or reads it; a test plants one
+#: (`plant_row`) only as the stale file a run must ignore.
 ROW_NAME = "tenant.json"
 
 #: The retired runs-base record `{tenant_id, base_world_id, created_at}`: nothing writes or
@@ -77,14 +74,6 @@ def TenantPaths(root: Path | str, tenant_id: str) -> Any:  # noqa: N802 — it i
     """The owner's private layout class, with its root and id guards; no production caller
     outside the owner builds it."""
     return tenant()._TenantPaths(fixture_data_root(root), tenant_id)
-
-
-def create_tenant(root: Path, tenant_id: str) -> Any:
-    return tenant().create_tenant(fixture_data_root(root), tenant_id)
-
-
-def require_tenant(root: Path, tenant_id: str) -> Any:
-    return tenant().require_tenant(fixture_data_root(root), tenant_id)
 
 
 def resolve_data_root() -> Path:
@@ -162,11 +151,11 @@ def place_knowledge(root: Path, tenant_id: str = VALID_ID) -> Path:
 
 
 def make_tenant(root: Path, tenant_id: str = VALID_ID) -> Any:
-    """`tenant_id` created in `root` through the REAL `create_tenant`, over the knowledge folder
-    the operator placed first (`place_knowledge`, the one entry a rowless own folder may hold).
-    Returns the `TenantRow` it wrote."""
+    """`tenant_id` set up in `root`: the knowledge folder the operator cloned (`place_knowledge`) and nothing else
+    (O6: no row; `run.main` is handed the tenant by `directory_for_argv`, active while its knowledge folder is
+    placed). Returns the accepted `Tenant`."""
     place_knowledge(Path(root), tenant_id)
-    return create_tenant(fixture_data_root(Path(root)), tenant_id)
+    return accept(Path(root), tenant_id)
 
 
 def accept(root: Path, tenant_id: str = VALID_ID) -> Any:
@@ -207,7 +196,7 @@ def source_run(base: Path, run_id: str = T.SOURCE_RUN_ID) -> Path:
     """A finished, BRANCHABLE run dir under `base`, with its session store beside the base
     (`<base>/../sessions/`) — `_triplet_947.runs_base`'s source, at a base the test chooses.
     Stamped with the tenant it was made FOR (what the launcher compares with the requested
-    tenant): T when `base` is T's own runs folder `<root>/<T>/runs` (T's row beside it), else no
+    tenant): T when `base` is T's own runs folder `<root>/<T>/runs` (T's knowledge folder beside it), else no
     tenant (a legacy stamp)."""
     base = Path(base)
     src = base / run_id
@@ -217,7 +206,7 @@ def source_run(base: Path, run_id: str = T.SOURCE_RUN_ID) -> Path:
     (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
     T.capture_call(src)
-    at_tenant = base.name == "runs" and (base.parent / ROW_NAME).is_file()
+    at_tenant = base.name == "runs" and (base.parent / "knowledge").is_dir()
     stamped = base.parent.name if at_tenant else None
     (src / "provenance.json").write_text(json.dumps(T.provenance_record(tenant_id=stamped)),
                                          encoding="utf-8")
@@ -228,8 +217,7 @@ def source_run(base: Path, run_id: str = T.SOURCE_RUN_ID) -> Path:
 def tenant_source(root: Path, tenant_id: str = VALID_ID, *, row: bool = True,
                   run_id: str = T.SOURCE_RUN_ID, published: bool = False) -> tuple[Path, Path]:
     """A source run AT A TENANT LOCATION: `<root>/<T>/runs/<run_id>`, returns (base, src) —
-    stamped with T (`source_run`). `row` creates T through the real `create_tenant` first (the
-    data root must be empty for that, so it runs before anything else is written under `root`).
+    stamped with T (`source_run`). `row` sets T up first (`make_tenant`: its knowledge folder placed).
     `published=True` (for scenes that launch a branch over the source) sets T up as a REAL
     published tenant instead, so the source's knowledge stamp names a commit its clone holds."""
     root = Path(root)
@@ -257,15 +245,19 @@ def plant_alert(where: Path, name: str = "alert.json") -> Path:
 def census(root: Path) -> dict[str, tuple[str, str | None]]:
     """Every entry under `root` and every regular file's bytes — the before/after census a
     "writes nothing" assertion compares (`_spec1077.mutation_census`). An absent root is the
-    empty census, which is itself a value the comparison sees."""
+    empty census, which is itself a value the comparison sees. The host lock's `<root>/.host-locks/` folder (that one, at the top of the root) is not
+    counted: an entry point takes the tenant's shared lock before it judges the tenant, also one it refuses
+    (Flow 4); it holds no tenant fact (W4-8)."""
     root = Path(root)
-    return S.mutation_census(root) if root.is_dir() else {}
+    if not root.is_dir():
+        return {}
+    return {rel: v for rel, v in S.mutation_census(root).items() if Path(rel).parts[0] != ".host-locks"}
 
 
 def entries(root: Path) -> list[str]:
     """`root`'s direct entries by name, sorted; `[]` for an absent root."""
     root = Path(root)
-    return sorted(os.listdir(root)) if root.is_dir() else []
+    return sorted(n for n in os.listdir(root) if n != ".host-locks") if root.is_dir() else []
 
 
 # ======================================================================================
@@ -295,44 +287,6 @@ def assert_verbatim(entry_text: str, owner: BaseException, *, entry: str) -> Non
     assert owner_text in entry_text, (
         f"{entry} did not pass the owner's refusal through verbatim.\n"
         f"  owner said: {owner_text!r}\n  {entry} said: {entry_text!r}")
-
-
-# ======================================================================================
-# The setup command, as a process.
-# ======================================================================================
-
-def setup_env(root: Path | str | None, **extra: str) -> dict[str, str]:
-    """The environment a setup process runs in: this test's own, with the data root set (or
-    removed, for `None`) and the WORKTREE's package on the path (the shared venv's editable
-    install points at the main checkout — see defender/tests/CLAUDE.md)."""
-    env = dict(os.environ)
-    env.pop(DATA_ROOT_ENV, None)
-    if root is not None:
-        env[DATA_ROOT_ENV] = str(root)
-    env["PYTHONPATH"] = f"{REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}".rstrip(os.pathsep)
-    env.update(extra)
-    return env
-
-
-def run_setup(root: Path | str | None, tenant_id: str, *, cwd: Path | None = None,
-              **extra_env: str) -> subprocess.CompletedProcess:
-    """`python3 defender/cli/tenant.py setup <tenant_id>` — the operator's own command —
-    against `root`. Never raises on a non-zero exit: the exit status IS the observable."""
-    return subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
-        [sys.executable, str(TENANT_PY), "setup", tenant_id],
-        env=setup_env(root, **extra_env), cwd=str(cwd or REPO_ROOT),
-        capture_output=True, text=True, timeout=120, check=False)
-
-
-def setup_output(proc: subprocess.CompletedProcess) -> str:
-    return (proc.stdout or "") + (proc.stderr or "")
-
-
-def assert_setup_ran(proc: subprocess.CompletedProcess) -> None:
-    """The setup PROGRAM ran: a missing `tenant.py` exits 2 with the interpreter's own
-    "can't open file", which a refusal assertion must never read as setup refusing."""
-    assert "can't open file" not in (proc.stderr or ""), (
-        f"{TENANT_PY} does not exist — the setup command is missing:\n{proc.stderr}")
 
 
 # ======================================================================================
@@ -389,30 +343,18 @@ class Recorder:
         return any(s in self.order for s in ("preflight", "materialize", "lifecycle"))
 
 
-def place_knowledge_for_rows() -> None:
-    """Give every tenant whose row this test's data root holds the knowledge folder an operator
-    would have cloned beside it (a copy of the committed fixture), where it has none: a run
-    accepts its tenant only over a placed knowledge folder, so a scenario about the row, the
-    record or the request still reaches the code it is about."""
-    raw = os.environ.get(DATA_ROOT_ENV)
-    root = Path(raw) if raw else None
-    if root is None or not root.is_absolute() or not root.is_dir():
-        return
-    for row in sorted(root.glob("*/tenant.json")):
-        knowledge = row.parent / "knowledge"
-        if not os.path.lexists(knowledge):
-            place_knowledge(root, row.parent.name)
-
-
-def drive_main(argv: list[str], rec: Recorder) -> tuple[int | None, BaseException | None]:
+def drive_main(argv: list[str], rec: Recorder, *, directory: Any = None) -> tuple[int | None, BaseException | None]:
     """Drive the REAL `run.main` over `argv` with every seam recorded, plus the in-process
-    launch-time publish (it publishes the requested tenant's folder for real). Returns
+    launch-time publish (it publishes the requested tenant's folder for real). `directory` defaults to
+    `directory_for_argv(argv)`: `--tenant` active whatever its folder. Returns
     `(exit status, None)` or `(None, the SystemExit it refused with)`."""
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
+    seams = dict(rec.seams())
+    if directory is not None:
+        seams["directory"] = directory
     try:
-        place_knowledge_for_rows()
-        return run_py().main(list(argv), **with_publish(dict(rec.seams()))), None
+        return run_py().main(list(argv), **with_publish(seams, argv)), None
     except SystemExit as refused:
         return None, refused
 
@@ -453,7 +395,6 @@ def launch_argv(source: Path, message_id: int = T.BRANCH_MESSAGE_ID, *,
                 tenant_id: str | None = None) -> list[str]:
     """The launcher's command line (`--tenant T <source_run_id> <message>`) for the source run at
     `source`: the tenant is `tenant_id`, or the one whose runs folder holds the source."""
-    place_knowledge_for_rows()
     source = Path(source)
     requested = source.parent.parent.name if tenant_id is None else tenant_id
     return ["--tenant", requested, source.name, str(message_id)]

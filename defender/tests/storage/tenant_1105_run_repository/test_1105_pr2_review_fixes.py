@@ -230,12 +230,17 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     u = _uuid_tenant(r1, only_in_u, tenant_id=H.U_ID)
     os.symlink(Path(location_path(t.runs)) / r1, Path(location_path(t.runs)) / linked)
     paths = P.loop_paths(tmp_path)
+    #: A claim of a tenant the directory does not know is not served and not counted (Flow 4: the drain
+    #: re-checks each claim's tenant); its row stays queued as it was. `ghost` is ACTIVE with no folder, so
+    #: acceptance refuses it: that one is a counted transient.
+    ghost_tenant = fixture_uuid("tenant:ghost")
+    unknown = {"case_id": "stranger", "tenant_id": fixture_uuid("tenant:stranger"), "run_id": r1}
     transient = {
-        "ghost": {"case_id": "ghost", "tenant_id": fixture_uuid("tenant:ghost"), "run_id": r1},
+        "ghost": {"case_id": "ghost", "tenant_id": ghost_tenant, "run_id": r1},
         "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": linked},
         "unreachable": {"case_id": "unreachable", "tenant_id": H.U_ID, "run_id": r1},
     }
-    for case_id, body in transient.items():
+    for case_id, body in {**transient, "stranger": unknown}.items():
         P.queue_row(paths, case_id, body)
     gone = {
         "gone": {"case_id": "gone", "tenant_id": H.T_ID, "run_id": nope},
@@ -249,7 +254,7 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     os.symlink(moved, location_path(u.runs))
 
     lane = P.Lane()
-    P.drain(paths, lane)
+    P.drain(paths, lane, active=[ghost_tenant])
     assert lane.run_dirs == [Path(location_path(t.runs)) / r1], f"served {lane.run_dirs}"
     for case_id in gone:
         letter = P.dead_letter(paths, case_id)
@@ -261,8 +266,12 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
         row = _queued(paths, case_id)
         assert row is not None, f"{case_id} was not re-queued"
         assert row.get("attempts") == 1, f"{case_id}: {row!r}"
+    assert P.dead_letter(paths, "stranger") is None
+    assert _queued(paths, "stranger") == unknown, "an unknown tenant's claim was touched"
 
-    P.drain(paths, P.Lane())
+    P.drain(paths, P.Lane(), active=[ghost_tenant])
+    assert P.dead_letter(paths, "stranger") is None
+    assert _queued(paths, "stranger") == unknown, "an unknown tenant's claim was counted or quarantined"
     for case_id in transient:
         letter = P.dead_letter(paths, case_id)
         assert letter is not None, f"{case_id} was not quarantined at the retry ceiling"
@@ -310,7 +319,7 @@ def _tick(t: Any, paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> i
 
     return drains.lead_author_drain(
         paths, run_lead_author=lane, run_pitfalls=run_pitfalls,
-        client=t.forge.client, identity=t.vault.identity(), start_box=box.start,
+        client=t.forge.client, identity=t.vault.identity(), directory=t.directory, start_box=box.start,
         stop_box=lambda *_a, **_k: None)
 
 

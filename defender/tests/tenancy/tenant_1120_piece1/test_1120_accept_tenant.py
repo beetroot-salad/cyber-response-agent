@@ -48,8 +48,8 @@ def test_1120_accept_tenant_refuses_an_off_grammar_id_before_touching_the_root(
     assert not root.exists(), "accepting a tenant created the data root"
 
     control = H.accept_refusal(_tenant, root, H.TID)
-    assert str(location_path(H.row_path)(root, H.TID)) in control, (
-        f"a valid id over an absent root must be refused for its row, naming it: {control!r}")
+    assert str(H.knowledge_dir(root, H.TID)) in control, (
+        f"a valid id over an absent root must be refused for its knowledge folder, naming it: {control!r}")
 
 
 def _other_file(tmp_path: Path) -> Path:
@@ -101,19 +101,14 @@ def _accept_within(owner, root: Path, *,
     return box.get("value"), box.get("exc")  # type: ignore[return-value]
 
 
-def _off_grammar_and_no_row(root: Path, tmp_path: Path) -> tuple[str, str, str]:
-    return "A", repr("A"), str(location_path(H.row_path)(root, "A"))
-
-
-def _no_row_and_no_knowledge(root: Path, tmp_path: Path) -> tuple[str, str, str]:
-    (root / H.TID).mkdir(parents=True)
-    return H.TID, str(location_path(H.row_path)(root)), str(H.knowledge_dir(root))
+def _off_grammar_and_no_knowledge(root: Path, tmp_path: Path) -> tuple[str, str, str]:
+    return "A", repr("A"), str(H.knowledge_dir(root, "A"))
 
 
 def _knowledge_link_over_missing_settings(root: Path, tmp_path: Path) -> tuple[str, str, str]:
-    H.plant_row(root)
     elsewhere = tmp_path / "linked-knowledge"
     (elsewhere / "agent").mkdir(parents=True)
+    H.knowledge_dir(root).parent.mkdir(parents=True)
     H.knowledge_dir(root).symlink_to(elsewhere, target_is_directory=True)
     return H.TID, str(H.knowledge_dir(root)), str(H.settings_dir(root))
 
@@ -138,8 +133,7 @@ def _wrong_tenant_id_and_mounted_settings(root: Path, tmp_path: Path) -> tuple[s
 
 #: Each case plants the faults of two adjacent checks; the refusal must name the earlier one's.
 ADJACENT_PAIRS = [
-    pytest.param(_off_grammar_and_no_row, id="grammar-before-row"),
-    pytest.param(_no_row_and_no_knowledge, id="row-before-knowledge"),
+    pytest.param(_off_grammar_and_no_knowledge, id="grammar-before-knowledge"),
     pytest.param(_knowledge_link_over_missing_settings, id="knowledge-before-halves"),
     pytest.param(_missing_settings_and_agent_link, id="halves-before-link-walk"),
     pytest.param(_hardlink_and_wrong_tenant_id, id="link-walk-before-tenant-id"),
@@ -157,23 +151,23 @@ def test_1120_accept_tenant_reports_the_earliest_failing_check(tmp_path: Path, p
 
 
 def _knowledge_absent(root: Path, tmp_path: Path) -> None:
-    H.plant_row(root)
+    (root / H.TID).mkdir(parents=True)
 
 
 def _knowledge_symlink(root: Path, tmp_path: Path) -> None:
-    H.plant_row(root)
     complete = H.place_knowledge(tmp_path / "other-place")
+    H.knowledge_dir(root).parent.mkdir(parents=True)
     H.knowledge_dir(root).symlink_to(complete, target_is_directory=True)
 
 
 def _knowledge_file(root: Path, tmp_path: Path) -> None:
-    H.plant_row(root)
+    (root / H.TID).mkdir(parents=True)
     H.knowledge_dir(root).write_text("a file, not a folder\n", encoding="utf-8")
 
 
 def _tenant_dir_symlink(root: Path, tmp_path: Path) -> None:
-    """`<root>/acme` itself links to a complete tenant folder elsewhere: its row reads, but its
-    knowledge/ does not resolve to `<root>/acme/knowledge`."""
+    """`<root>/acme` itself links to a complete tenant folder elsewhere: its knowledge/ does not resolve to
+    `<root>/acme/knowledge`."""
     elsewhere = tmp_path / "elsewhere-tenant"
     H.adopted(elsewhere)
     root.mkdir(parents=True)
@@ -197,9 +191,8 @@ def test_1120_accept_tenant_refuses_a_knowledge_folder_that_is_not_a_real_unlink
     text = H.accept_refusal(_tenant, root)
     assert str(H.knowledge_dir(root)) in text, f"the refusal does not name knowledge/: {text!r}"
     if not H.knowledge_dir(root).exists() and not H.knowledge_dir(root).is_symlink():
-        for remedy in ("clone", f"tenant.py setup {H.TID}"):
-            assert remedy in text, (
-                f"the absent-knowledge refusal carries no remedy ({remedy!r}): {text!r}")
+        for retired in ("tenant.py setup", "migrate"):
+            assert retired not in text, f"the absent-knowledge refusal names the retired {retired!r}: {text!r}"
 
     control = tmp_path / "control"
     H.adopted(control)
@@ -283,12 +276,10 @@ def test_1120_accept_tenant_refuses_a_symlink_or_hard_link_inside_either_half(
     assert H.accept(_tenant, root).id == H.TID
 
 
-def _cloned_with_row(tmp_path: Path) -> Path:
-    """A plain local clone into `<root>/<T>/knowledge` plus the row setup would write.
-    Returns the data root."""
+def _cloned(tmp_path: Path) -> Path:
+    """A plain local clone into `<root>/<T>/knowledge` (no row: O6). Returns the data root."""
     root = tmp_path / "data"
     H.cloned_tenant(tmp_path, root)
-    H.plant_row(root)
     return root
 
 
@@ -303,7 +294,7 @@ def _assert_hardlinked_objects(root: Path) -> None:
 def test_1120_accept_tenant_accepts_a_plain_local_clone_whose_git_objects_are_hard_linked(
         tmp_path: Path) -> None:
     """A plain local clone (no `--no-hardlinks`) leaves `.git/objects` files with st_nlink > 1."""
-    root = _cloned_with_row(tmp_path)
+    root = _cloned(tmp_path)
     _assert_hardlinked_objects(root)
     tenant = H.accept(_tenant, root)
     assert tenant.knowledge == H.knowledge_dir(root)
@@ -320,7 +311,7 @@ def _dot_git(knowledge: Path) -> Path:
 def test_1120_accept_tenant_walks_links_in_settings_and_agent_only(tmp_path: Path) -> None:
     """Links under knowledge/.github/ and knowledge/.git/ (a local clone's objects are hard
     links) are not walked; a link in agent/, even under a nested .git, is refused."""
-    root = _cloned_with_row(tmp_path)
+    root = _cloned(tmp_path)
     knowledge = H.knowledge_dir(root)
     for outside_the_halves in (_dot_github(knowledge), _dot_git(knowledge)):
         outside_the_halves.mkdir(exist_ok=True)
@@ -427,14 +418,10 @@ def test_1120_accept_tenant_refuses_a_knowledge_entry_outside_the_allow_list(
     H.assert_refused(H.check(tenant_py, None, "--folder", str(H.knowledge_dir(root))),
                      str(entry))
 
-    location_path(H.row_path)(root).unlink()
-    before = H.tree_census(root)
-    H.assert_first_setup_refused(H.setup(tenant_py, root), root, before, str(entry))
 
     control = tmp_path / "control"
     knowledge = _clone_with_every_allowed_entry(tmp_path, control)
     assert sorted(p.name for p in knowledge.iterdir()) == ALLOWED_TOP_LEVEL
-    H.plant_row(control)
     assert H.accept(_tenant, control).id == H.TID
     H.assert_clean(H.check(tenant_py, None, "--folder", str(knowledge)))
 
@@ -616,15 +603,10 @@ def test_1120_accept_tenant_names_an_unreadable_entry_as_a_refusal_never_a_trace
     H.place_knowledge(root)
     target = plant(H.knowledge_dir(root))
     try:
-        H.plant_row(root)
         text = H.accept_refusal(_tenant, root)
         assert str(target) in text, f"the refusal does not name the unreadable path: {text!r}"
         assert any(e in text for e in ("Permission denied", "EACCES", "Errno 13")), (
             f"the refusal does not name the errno: {text!r}")
-        location_path(H.row_path)(root).unlink()
-        H.assert_refused(H.setup(tenant_py, root), "[tenant.py]", str(target))
-        assert not location_path(H.row_path)(root).exists(), "the refused setup wrote the row"
-        H.plant_row(root)
         H.assert_refused(H.check(tenant_py, root, H.TID), "[tenant.py]", str(target))
     finally:
         target.chmod(0o755 if target.is_dir() else 0o644)

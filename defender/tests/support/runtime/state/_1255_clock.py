@@ -316,7 +316,7 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
         else functools.partial(box_mod.start_box, docker=_no_daemon),
         stop_box=lambda *_a, **_k: None,
         scrub=lambda *_a, **_k: None)
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 
     tenant_id = _argv_tenant(argv)
     if tenant_id is not None:
@@ -324,7 +324,7 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
     try:
         # The launch-time publish, in-process: it publishes the tenant for real.
         launched.exit = run_mod.main(
-            argv, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
+            argv, directory=directory_for_argv(argv), lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
             visualize=lambda *_a, **_k: None, enqueue=lambda *_a, **_k: False,
             oracle=oracle, verifier=verifier, publish=in_process_publish())
     except SystemExit as refused:

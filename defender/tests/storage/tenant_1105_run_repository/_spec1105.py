@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
-from defender.records._tenant_id import TenantId
 
 WORKTREE = Path(__file__).resolve().parents[4]
 DEFENDER = WORKTREE / "defender"
@@ -21,8 +20,7 @@ PACKAGE = DEFENDER / "records"
 #: The committed fixture tenant: the knowledge every test tenant is set up from.
 FIXTURE = WORKTREE / "knowledge" / "tenant-fixture"
 
-#: The two tenants a test may need. `create_tenant` admits ONE tenant per data root, so the
-#: second one's row is planted by hand, in the row's own shape.
+#: The two tenants a test may need (any number may share a data root: O6, O7).
 T_ID = fixture_uuid("tenant:acme")
 U_ID = fixture_uuid("tenant:beta")
 
@@ -79,9 +77,8 @@ def has_raw_control(text: str) -> bool:
 def tenant(root: Path, tenant_id: str = T_ID) -> Any:
     """`tenant_id` set up under the data root `root` and accepted by the REAL `accept_tenant`.
 
-    The committed fixture's knowledge is copied to `<root>/<id>/knowledge`. The first tenant of
-    a root goes through the real `create_tenant`; any further one's row is planted by hand (see
-    `T_ID`). Nothing under `<id>/runs` is made."""
+    The committed fixture's knowledge is copied to `<root>/<id>/knowledge`; no row is written
+    (O6), so any number of tenants share a root. Nothing under `<id>/runs` is made."""
     from defender.tenancy import _tenant
 
     root = Path(root)
@@ -89,15 +86,6 @@ def tenant(root: Path, tenant_id: str = T_ID) -> Any:
     if not knowledge.exists():
         shutil.copytree(FIXTURE, knowledge, symlinks=True)
         (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
-    row = root / tenant_id / "tenant.json"
-    if not row.is_file():
-        others = [p for p in root.iterdir() if p.name != tenant_id]
-        if not others:
-            _tenant.create_tenant(fixture_data_root(root), TenantId(tenant_id))
-        else:
-            row.write_text(json.dumps(
-                {"tenant_id": tenant_id, "created_at": "2026-10-04T00:00:00+00:00"},
-                indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return _tenant.accept_tenant(fixture_data_root(root), tenant_id, defender_dir=DEFENDER)
 
 
@@ -215,12 +203,16 @@ def make_fifo(path: Path) -> Path:
 def tree_state(root: Path) -> dict[str, tuple[str, bytes | str | None]]:
     """Every entry under `root`, judged without following links: kind plus, for a regular
     file its bytes, for a link its target. Two calls compare equal iff nothing under `root`
-    was created, removed, retyped or rewritten."""
+    was created, removed, retyped or rewritten. The host lock's folder `<root>/.host-locks/` is not
+    looked at: entry points take the tenant's shared lock before they judge it (Flow 4), also for a
+    tenant they then refuse; it is no tenant folder and holds no tenant fact (W4-8)."""
     root = Path(root)
     out: dict[str, tuple[str, bytes | str | None]] = {}
     if not os.path.lexists(root):
         return out
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        if Path(dirpath) == root and ".host-locks" in dirnames:
+            dirnames.remove(".host-locks")
         for name in [*dirnames, *filenames]:
             p = Path(dirpath) / name
             rel = str(p.relative_to(root))

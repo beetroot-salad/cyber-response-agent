@@ -16,6 +16,8 @@ from typing import Any
 import pytest
 
 from defender.tests.support.shared.contracts._frontend_outputs import frontend_outputs_lock  # noqa: F401 — shared pytest fixture
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — shared pytest fixture
+from defender.tests.support.tenancy._active1214 import database_env, insert_active_tenant
 
 from defender.tenancy import _tenant
 from defender import run as run_py
@@ -142,8 +144,8 @@ def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_witho
     H.write_tenant_id_file(elsewhere, H.TID, "id")
     _mark_ticket_config(elsewhere / "settings", "TICKET_SPEC1120_CONTROL_TOKEN",
                         drop_timeout=True)
-    H.plant_row(data_root)
     link = H.knowledge_dir(data_root)
+    link.parent.mkdir(parents=True)
     link.symlink_to(elsewhere, target_is_directory=True)
     owner = H.accept_refusal(_tenant, data_root, H.TID)
 
@@ -247,7 +249,7 @@ def _launch(source: Path) -> BaseException | int:
 def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_table(
         data_root: Path, tmp_path: Path, capsys) -> None:
     """An unparseable verb-grants.yaml is a named refusal from check, run.main, the launcher,
-    policy_cli and setup; validate_scaffold, which never loads the table, accepts the tenant."""
+    and policy_cli; validate_scaffold, which never loads the table, accepts the tenant."""
     H.adopted(data_root)
     table = H.settings_dir(data_root) / "verb-grants.yaml"
     table.write_text(UNPARSEABLE_TABLE, encoding="utf-8")
@@ -262,9 +264,11 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     assert rc is None, f"run.main ran over an unloadable table: rc={rc}"
     # The run loads the table from its own copy of the export, so the refusal names
     # `<T>/run-knowledge/<run id>/settings/verb-grants.yaml`.
+    # Or the clone's own table: acceptance parses the tables (W4-3 owner ruling), so the refusal may come before
+    # the export is copied.
     named = re.findall(r"(/\S*/verb-grants\.yaml)", H.exit_text(exc))
     assert [p for p in named
-            if H.run_copy_part(p, data_root) == ("settings", "verb-grants.yaml")], (
+            if H.run_copy_part(p, data_root) == ("settings", "verb-grants.yaml") or p == str(table)], (
         f"run.main did not refuse the unloadable table naming it: {H.exit_text(exc)!r}")
     assert not rec.spent, f"run.main spent before refusing the table: {rec.order}"
 
@@ -276,14 +280,6 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     rc, text = _policy_gather(tmp_path, H.TID)
     assert rc is None, f"policy_cli built gather's policy over an unloadable table: {rc}"
     assert str(table) in text, f"policy_cli did not refuse naming the table: {text!r}"
-
-    setup_root = tmp_path / "setup-root"
-    H.place_knowledge(setup_root)
-    (H.settings_dir(setup_root) / "verb-grants.yaml").write_text(UNPARSEABLE_TABLE,
-                                                                 encoding="utf-8")
-    before = H.tree_census(setup_root)
-    H.assert_refused(H.setup(tenant_py, setup_root), "verb-grants.yaml")
-    assert H.census_diff(before, H.tree_census(setup_root)) == [], "the refused setup wrote"
 
     # The consumer that never loads the table accepts the tenant.
     capsys.readouterr()
@@ -313,7 +309,6 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
     """run.py hands start_box its run copy's agent half; no bind exposes settings, the clone (a
     local git clone here, so its .git exists) or tenant learning."""
     H.cloned_tenant(tmp_path, data_root)
-    H.plant_row(data_root)
     started: list[tuple[tuple, dict]] = []
 
     def start_box(*args: Any, **kwargs: Any) -> Any:
@@ -330,8 +325,8 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
         # Plus the in-process launch-time publish.
-        rc = run_py.main([str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"],
-                         **with_publish({**rec.seams(), "lifecycle": lifecycle}))
+        argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
+        rc = run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv))
     except SystemExit as refused:
         pytest.fail(f"run.main refused a finished tenant: {H.exit_text(refused)}")
     assert rc == 0
@@ -429,10 +424,15 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
 @pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     data_root: Path, tmp_path: Path, script: str, args: list[str], identity: list[str],
-    run_visualizations_dir: Path,
+    run_visualizations_dir: Path, request: pytest.FixtureRequest,
 ):
     """A missing, malformed or unknown --tenant is refused before any state access: it selects
-    no ambient queue and publishes no page."""
+    no ambient queue and publishes no page. For the unknown id the command has tenant records to
+    read (#1214 Flow 4: an empty migrated database, which knows no tenant), so the refusal is the
+    id's, not a missing database address's."""
+    records: dict[str, str] = {}
+    if identity[-1:] == [H.OTHER]:
+        records = database_env(request.getfixturevalue("migrated_database"))
     poison = tmp_path / "ambient-state"
     poison.mkdir()
     (poison / "operator-sentinel").write_bytes(b"untouched")
@@ -444,15 +444,17 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     before_pages = {p: p.read_bytes() if p.exists() else None for p in outputs}
     try:
         proc = H.run_script(H.REPO_ROOT / script, *args, *identity, root=data_root, DEFENDER_DEPLOYMENT="dev",
-                            DEFENDER_LEARNING_STATE_DIR=str(poison))
+                            DEFENDER_LEARNING_STATE_DIR=str(poison), **records)
         out = H.output(proc)
         assert proc.returncode != 0, f"tenant-free command ran successfully: {out}"
         assert "tenant" in out.lower(), out
+        assert not records or H.OTHER in out, f"the unknown id's refusal does not name it: {out}"
         assert "traceback" not in out.lower(), out
         assert {p.relative_to(poison): p.read_bytes() for p in poison.rglob("*") if p.is_file()} == before_state
         assert {p: p.read_bytes() if p.exists() else None for p in outputs} == before_pages
         assert not list(run_visualizations_dir.iterdir()), "identity refusal published a page"
-        assert not list(data_root.iterdir()), "identity refusal touched a tenant directory"
+        assert not [p for p in data_root.iterdir() if p.name != ".host-locks"], (
+            "identity refusal touched a tenant directory")
     finally:
         for p, blob in before_pages.items():
             if blob is None:
@@ -475,9 +477,10 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     ("defender/cli/learning/revert_lesson.py", ["example-lesson"], ".author-drain.lock",
      "an author drain is in progress", 3),
 ])
+@pytest.mark.postgres
 def test_1186_learning_operator_cli_uses_the_explicit_tenants_lock(
     data_root: Path, tmp_path: Path, script: str, args: list[str], lock_name: str,
-    diagnostic: str, status: int,
+    diagnostic: str, status: int, migrated_database: str,  # noqa: F811
 ):
     """A valid --tenant meets its own tenant's held lock despite a conflicting retired
     state-dir override."""
@@ -485,10 +488,12 @@ def test_1186_learning_operator_cli_uses_the_explicit_tenants_lock(
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     tenant = set_up_tenant(data_root, H.TID)
+    # The script is the operator's own command, so it reads its directory from the database address (Flow 4).
+    insert_active_tenant(migrated_database, H.TID, data_root=data_root)
     location_path(tenant.learning).mkdir(parents=True, exist_ok=True)
     with Holder(location_path(tenant.learning) / lock_name, blocking_discipline=False):
         proc = H.run_script(H.REPO_ROOT / script, *args, "--tenant", H.TID, root=data_root,
-                            DEFENDER_LEARNING_STATE_DIR=str(data_root))
+                            DEFENDER_LEARNING_STATE_DIR=str(data_root), **database_env(migrated_database))
     assert proc.returncode == status, H.output(proc)
     assert diagnostic in H.output(proc), H.output(proc)
     assert not (data_root / lock_name).exists(), "retired ambient root received the lock"

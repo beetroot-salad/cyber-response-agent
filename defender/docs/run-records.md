@@ -114,7 +114,7 @@ unreachable by root containment rather than by a named deny.
 | episode_runs | 4 | `runs/<uuid>/` | — | — | episode.episode_runs | an arm's real run dir, named by its roster uuid (never its label); its files take their table-1 kinds |
 | archive_proj | 4 | `worlds/<world UUID>` | — | — | episode.archive_proj | the archive copy itself (section 5) |
 | tool_seam |  | `(the role's declared read/write targets)` | — | — | — | the model's generic read/write/edit file tools; the kind is decided by the gate at the call |
-| tenant_row | 5 | `<tenant>/tenant.json` | — | — | tenant.row | #1078 D1: the tenant's own row, created once per data root by the tenant setup command |
+| tenant_row | 5 | `<tenant>/tenant.json` | — | — | tenant.row | RETIRED by #1214 (O6): the tenant record lives in PostgreSQL (`tenancy.tenants`); nothing reads or writes this file, and lab adoption's `tenancy.retire_row` deletes a pre-#1214 one. Was #1078 D1: the tenant's own row, created once per data root by the tenant setup command |
 
 <!-- end generated -->
 

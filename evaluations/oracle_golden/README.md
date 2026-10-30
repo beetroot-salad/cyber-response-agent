@@ -322,13 +322,9 @@ explicit denylist, `--strict-mcp-config`, a neutral temp working directory, and
    `defender/run.py <alert.json> --tenant playground --no-learn` (the run is named by a minted
    UUID — `run.py` takes no run id since #1279; every run
    names its tenant, and there is no default — #1078;
-   clone the tenant repo into `$DEFENDER_DATA_ROOT/playground/knowledge` on the host, then,
-   once the clone exits 0, run
-   `python3 defender/cli/tenant.py setup playground` once, from the main checkout, with
-   `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as
-   the same user that runs defender; a destination already occupied makes setup refuse, naming
-   it in the message — adopting an existing (B)/(C) installation whose old entries are
-   root-owned may need setup run as root, that adoption case only).
+   the tenant is created through the lifecycle service and must be `active`, with
+   `DEFENDER_DATABASE_DSN` and `DEFENDER_DATA_ROOT` set; see "Creating a tenant" in
+   `defender/docs/development-operations.md`).
 4. Author `story.md` from that record — state **only what happened** (an invented
    step makes the oracle "wrong" for a story reason), and **nothing about the
    evaluation**: no result class, no "a faithful oracle would…", no mention of

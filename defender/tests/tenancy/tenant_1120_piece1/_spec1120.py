@@ -185,10 +185,9 @@ def write_tenant_id_file(knowledge: Path, tenant_id: str, content: str | bytes |
 
 
 def adopted(root: Path, tenant_id: str = TID, **kw: Any) -> Path:
-    """A finished tenant built by hand — a placed `knowledge/` plus a valid row — so a test
-    about acceptance does not depend on `setup`. Returns the tenant folder."""
+    """A finished tenant folder built by hand: a placed `knowledge/` (O6: the tenant record is not on disk).
+    Returns the tenant folder."""
     place_knowledge(root, tenant_id, **kw)
-    plant_row(root, tenant_id)
     return tenant_folder(root, tenant_id)
 
 
@@ -206,6 +205,10 @@ def tree_census(root: Path) -> dict[str, tuple[Any, ...]]:
         return {}
     out: dict[str, tuple[Any, ...]] = {}
     for current, dirnames, filenames in os.walk(root, followlinks=False):
+        # The host lock's folder, `<root>/.host-locks` only, is no tenant fact: an entry point takes the tenant's shared lock before it judges
+        # the tenant, also one it then refuses (Flow 4, W4-8).
+        if Path(current) == root and ".host-locks" in dirnames:
+            dirnames.remove(".host-locks")
         for name in (*dirnames, *filenames):
             p = Path(current) / name
             rel = p.relative_to(root).as_posix()
@@ -361,10 +364,60 @@ def script_of(module: Any) -> Path:
     return Path(module.__file__).resolve()
 
 
-def tenant_py(module: Any, *args: str, root: Path | str | None, **kw: Any,
-              ) -> subprocess.CompletedProcess:
-    """`python3 defender/cli/tenant.py <args>` — `module` is the imported `tenant.py`."""
-    return run_script(script_of(module), *args, root=root, **kw)
+def placed_tenants(root: Path | str | None) -> list[str]:
+    """The tenants whose `<root>/<T>/knowledge` is a folder: what a launched command's directory holds active."""
+    if root is None or not Path(root).is_dir():
+        return []
+    return sorted(p.name for p in Path(root).iterdir() if (p / "knowledge").is_dir())
+
+
+def tenant_py(module: Any, *args: str, root: Path | str | None, seed: list[str] | None = None,
+              script: bool = False, **kw: Any) -> subprocess.CompletedProcess:
+    """`tenant.py <args>` as the operator's command line, through the test-side launcher (#1214 Flow 4: the entry
+    admits a tenant only from a directory, and a subprocess has no database). The launcher's directory holds
+    each tenant folder under `root` active (`seed` overrides: items `T[:STATE[:ORIGIN]]`). `script=True` runs the
+    script file itself, which has no directory and refuses by design: for tests whose subject is the shim."""
+    if script:
+        return run_script(script_of(module), *args, root=root, **kw)
+    from defender.tests.support.tenancy import _launcher1214 as launcher
+
+    unset = kw.pop("unset", ())
+    cwd = kw.pop("cwd", None)
+    env = launcher.environment(tenant_env(root, unset=unset, **kw))
+    seeds = placed_tenants(root) if seed is None else seed
+    command = launcher.command("connect", list(args), seed=seeds, data_root=Path(root) if root is not None else None)
+    return subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
+        command, env=env, cwd=str(cwd or REPO_ROOT), capture_output=True, text=True, timeout=180, check=False)
+
+
+#: Runs a COPIED checkout's own `defender.cli.tenant.main` with a directory holding the given tenants active (the
+#: test-side launcher is a test module and a copy carries no `tests/`): the copy's `defender` package is first on
+#: the path, the way its script puts its checkout first.
+_COPY_DRIVER = """
+import asyncio, datetime, inspect, sys
+from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+from defender.cli import tenant
+seeded, argv = sys.argv[1].split(","), sys.argv[2:]
+twin = InMemoryTenantRepository()
+for name in filter(None, seeded):
+    added = twin.add_tenant(name, created_at=datetime.datetime(2026, 10, 26, 9, tzinfo=datetime.timezone.utc),
+                            state="active", repo="tenants/" + name, origin="http://forge.test/tenants/" + name + ".git")
+    if inspect.isawaitable(added):
+        asyncio.run(added)
+sys.exit(tenant.main(argv, directory=TenantDirectory(lambda: twin)))
+"""
+
+
+def checkout_tenant_py(checkout: Path, *args: str, root: Path | str | None, seed: list[str] | None = None,
+                       **kw: Any) -> subprocess.CompletedProcess:
+    """`defender.cli.tenant.main(args, directory=)` of the tmp checkout `checkout` (`tmp_checkout`), run with that
+    checkout first on the path; the directory holds each tenant folder under `root` active (`seed` overrides)."""
+    env = tenant_env(root, **kw)
+    env["PYTHONPATH"] = str(checkout)
+    seeds = placed_tenants(root) if seed is None else seed
+    return subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
+        [sys.executable, "-c", _COPY_DRIVER, ",".join(seeds), *args], env=env, cwd=str(checkout),
+        capture_output=True, text=True, timeout=180, check=False)
 
 
 def output(proc: subprocess.CompletedProcess) -> str:
@@ -399,27 +452,9 @@ def assert_clean(proc: subprocess.CompletedProcess) -> str:
     return text
 
 
-def setup(module: Any, root: Path, tenant_id: str = TID, **kw: Any) -> subprocess.CompletedProcess:
-    """`tenant.py setup <tenant_id>` against `root`."""
-    return tenant_py(module, "setup", tenant_id, root=root, **kw)
-
-
 def check(module: Any, root: Path | None, *args: str, **kw: Any) -> subprocess.CompletedProcess:
     """`tenant.py check <args>` against `root` (`None`: `DEFENDER_DATA_ROOT` unset)."""
     return tenant_py(module, "check", *args, root=root, **kw)
-
-
-def assert_first_setup_refused(proc: subprocess.CompletedProcess, root: Path,
-                               before: dict[str, Any], *names: str) -> str:
-    """A first setup over placed knowledge refused for the folder's own fault: the refusal names
-    `names` and is not the one-tenant guard's, and the data root is as `before` found it, with
-    no row. Returns the output."""
-    text = assert_refused(proc, *names)
-    assert "the data root is not empty" not in text, (
-        f"the one-tenant guard refused instead of the placed knowledge's own fault:\n{text}")
-    assert census_diff(before, tree_census(root)) == [], "the refused setup wrote something"
-    assert not location_path(row_path)(root).exists(), "a refused first setup left a row"
-    return text
 
 
 # ======================================================================================
@@ -490,15 +525,24 @@ def plant_alert(where: Path) -> Path:
     return alert
 
 
-def drive_run(run_module: Any, argv: list[str], rec: RunRecorder,
+def directory_for(argv: list[str], root: Path | str | None = None, **keywords: Any) -> Any:
+    """`_launch_publish_p4.directory_for_argv`: the directory a run's `--tenant` is admitted from (#1214 Flow 4)."""
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
+    return directory_for_argv(argv, root, **keywords)
+
+
+def drive_run(run_module: Any, argv: list[str], rec: RunRecorder, *, directory: Any = None,
               ) -> tuple[int | None, BaseException | None]:
-    """The REAL `run.main(argv)` (`run_module` is the imported `defender/run.py`) with every
-    seam recorded: `(exit status, None)`, or `(None, the SystemExit it refused with)`."""
+    """The REAL `run.main(argv, directory=)` (`run_module` is the imported `defender/run.py`) with every
+    seam recorded: `(exit status, None)`, or `(None, the SystemExit it refused with)`. `directory`
+    defaults to `directory_for(argv)`."""
     try:
         # Plus the in-process launch-time publish.
         from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
-        return run_module.main(list(argv), **with_publish(dict(rec.seams()))), None
+        return run_module.main(list(argv), directory=directory if directory is not None else directory_for(argv),
+                               **with_publish(dict(rec.seams()))), None
     except SystemExit as refused:
         return None, refused
 

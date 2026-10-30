@@ -1,6 +1,6 @@
 """The PostgreSQL identity repository: the same rules as `InMemoryIdentityRepository`, held by the
 schema the migrations create (unique indexes, CHECKs, foreign keys) and by conditional updates, and
-answering the same contract suite. Needs `psycopg` and SQLAlchemy (the `api` extra); nothing else
+answering the same contract suite. Needs `psycopg` and SQLAlchemy (the `database` extra); nothing else
 imports this module.
 
 Each operation is one transaction on a pooled async connection. Concurrency-sensitive writes are
@@ -21,13 +21,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender.database import async_engine, sessions
-from defender.records.formats import TenantId
+from defender.tenancy.models import TenantRecord
 
 from .errors import DataRuleViolation
 from .memory import TOUCH_AFTER, check_membership_fields, session_hash
-from .models import Membership, MembershipStatus, Session, Tenant, User, UserStatus, normalize_email
+from .models import Membership, MembershipStatus, Session, User, UserStatus, normalize_email
 
 _LIVE = ("invited", "active")
+
+
+def _active_tenant(tenant_id: Any) -> Any:
+    """`tenant_id` names an `active` tenant: a condition to put inside the statement that needs it."""
+    return (TenantRecord.id == tenant_id) & (TenantRecord.state == "active")
 
 
 class PostgresIdentityRepository:
@@ -61,17 +66,16 @@ class PostgresIdentityRepository:
         async with self._tx() as s:
             return (await s.execute(statement)).first() is not None
 
-    # --- tenants -----------------------------------------------------------------------------
-    async def register_tenant(self, tenant_id: TenantId, *, now: _dt.datetime) -> None:
-        async with self._tx() as s:
-            await s.execute(insert(Tenant).values(id=str(TenantId(tenant_id)), created_at=now)
-                            .on_conflict_do_nothing())
-
+    # --- tenants: read from `tenancy.tenants`, never written here (#1214) ----------------------
     async def tenant_exists(self, tenant_id: str) -> bool:
-        return await self._one(select(Tenant.id).where(Tenant.id == str(tenant_id))) is not None
+        return await self._one(select(exists().where(_active_tenant(str(tenant_id))))) is True
 
-    async def tenants(self) -> list[str]:
-        return await self._all(select(Tenant.id).order_by(Tenant.id))
+    async def active_tenants(self, tenant_ids: Collection[str]) -> set[str]:
+        wanted = {str(t) for t in tenant_ids}
+        if not wanted:
+            return set()
+        return set(await self._all(select(TenantRecord.id).where(
+            TenantRecord.id.in_(wanted), TenantRecord.state == "active")))
 
     async def tenant_has_ever_had_membership(self, tenant_id: str) -> bool:
         return await self._one(select(exists().where(Membership.tenant_id == str(tenant_id)))) is True
@@ -182,7 +186,8 @@ class PostgresIdentityRepository:
         return await self._applied(
             update(Membership).where(
                 Membership.id == membership_id, Membership.status == "invited",
-                (Membership.expires_at.is_(None)) | (Membership.expires_at > now))
+                (Membership.expires_at.is_(None)) | (Membership.expires_at > now),
+                exists().where(_active_tenant(Membership.tenant_id)))
             .values(status="active", accepted_at=now).returning(Membership.id))
 
     async def end_membership(self, membership_id: str, *, ended_by: str, now: _dt.datetime) -> bool:

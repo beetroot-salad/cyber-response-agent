@@ -46,6 +46,32 @@ checkout's `run-visualizations/`); unset, nothing is published. By hand, once: d
 `defender/learning/` (`_author.lock`, `.author-drain.lock`, `author-queue/`); delete old flat
 `run-visualizations/<run id>/` folders.
 
+## Upgrade from before #1214
+
+Tenants are rows in PostgreSQL that the lifecycle (`python -m defender.lifecycle serve`) creates, rotates
+and offboards; the on-disk `tenant.json` is retired, and so are `tenant.py setup`, `new-id`,
+`scaffold` and `migrate` (and `setup --learning-state-from`). Every host entry point reads the tenant
+records from `DEFENDER_DATABASE_DSN`, at exactly this code's revision, and works only for an
+`active` tenant. The lab tenant moves once:
+
+1. Forgejo 17 or newer first (the dev image is 17.0.0; back up and follow Forgejo's upgrade notes, see
+   `docs/development-operations.md`), then run migrations: the lab's row is backfilled as a failed
+   create at its first step, which no worker takes until it is resumed.
+2. Record the lab's repository by hand, so the create job keeps it and its clone instead of making
+   `tenants/<T>`: `INSERT INTO tenancy.forge_wiring (tenant_id, repo, origin) VALUES ('<T>', '<repo>',
+   '<origin>')`, where `<origin>` is exactly what `git -C <data root>/<T>/knowledge remote get-url
+   origin` prints (prepare keeps only the clone at `<T>/knowledge`, and refuses a clone of anything
+   else) and `<repo>` is its `<org>/<name>` path.
+3. With the lifecycle's settings in place and `serve` running, `POST /admin/tenants/<T>/resume`
+   and wait for `active` (`GET /admin/tenants/<T>`).
+4. Then delete by hand what the old setup left: `<data root>/<T>/tenant.json`, `client/<T>/` in
+   the old issuer directory, and the unsalted OpenBao entries
+   (`bao delete` each of `identity/oidc/role/tenant-<T>`, `auth/approle/role/delivery-<T>` and
+   `identity/entity/name/tenant-<T>`).
+5. Learning starts empty: prepare creates `<data root>/<T>/learning/` and nothing is copied. By
+   hand, once: delete the old learning state left under the checkout's `defender/learning/`
+   (queues, markers, locks, deliveries, legacy `runs/` bundles).
+
 ## Upgrade from before #1187
 
 Tenant, run, episode and world ids are opaque UUIDs and episodes live under each tenant's data root. Before upgrading a

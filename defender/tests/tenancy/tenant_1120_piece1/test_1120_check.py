@@ -1,7 +1,6 @@
 """`tenant.py check <id> | --folder <path>`: the tenant's own checks."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
 
 import os
 import re
@@ -205,7 +204,7 @@ def test_1120_s6_defender_dir_env_names_another_tree(
     assert EXTRA_PAIR not in text, f"check took its census from DEFENDER_DIR:\n{text}"
 
     script = _copy_script(extra_checkout)
-    H.assert_refused(H.run_script(script, "check", H.TID, root=root), str(copy_defender))
+    H.assert_refused(H.checkout_tenant_py(extra_checkout, "check", H.TID, root=root), str(copy_defender))
     H.assert_refused(
         H.run_script(script, "check", "--folder", str(_folder(tmp_path, "tenant")), root=None),
         EXTRA_PAIR)
@@ -305,22 +304,22 @@ LEAD_ZERO_DISAGREEMENTS = [
 
 
 @pytest.mark.parametrize("template", LEAD_ZERO_DISAGREEMENTS)
-def test_1120_setup_and_check_refuse_a_lead_zero_table_that_disagrees_with_the_running_catalog(
+def test_1120_check_refuses_a_lead_zero_table_that_disagrees_with_the_running_catalog(
         tmp_path: Path, template: str) -> None:
     first = tmp_path / "first"
     knowledge = H.place_knowledge(first)
     _write_lead_zero(knowledge / "settings", template)
     before = H.tree_census(first)
-    H.assert_first_setup_refused(H.setup(tenant_py, first), first, before, "lead-zero.yaml", template)
+    H.assert_refused(_check_id(first), "lead-zero.yaml", template)
+    assert H.census_diff(before, H.tree_census(first)) == [], "the refused check wrote something"
 
     rerun = tmp_path / "rerun"
     H.place_knowledge(rerun)
-    H.assert_clean(H.setup(tenant_py, rerun))
+    H.assert_clean(_check_id(rerun))
     _write_lead_zero(H.settings_dir(rerun), template)
     before = H.tree_census(rerun)
-    H.assert_refused(H.setup(tenant_py, rerun), "lead-zero.yaml", template)
-    assert H.census_diff(before, H.tree_census(rerun)) == [], "the refused re-run wrote something"
     H.assert_refused(_check_id(rerun), "lead-zero.yaml", template)
+    assert H.census_diff(before, H.tree_census(rerun)) == [], "the refused re-check wrote something"
 
 
 def test_1120_s9_check_over_a_grant_table_repeats_a_top_level_key(tmp_path: Path) -> None:
@@ -359,33 +358,16 @@ def test_1120_s9_check_over_grant_table_verb_filed_under_wrong_real_system(
 
 def test_1186_tenant_commands_ignore_the_retired_learning_overlap(
         tmp_path: Path) -> None:
-    git_identity = dict(H.GIT_IDENTITY)
-    unset = tuple(k for k in os.environ if k.startswith("GIT_")) + (OVERLAP_ENV,)
-
-    first = tmp_path / "scaffolded"
-    first.mkdir()
-    H.assert_clean(H.tenant_py(tenant_py, "scaffold", H.TID, str(first), root=None,
-                               unset=unset, **git_identity))
-    H.assert_clean(_check_folder(first, unset=unset))
-
     root = tmp_path / "data"
     H.adopted(root)
     overlap = {OVERLAP_ENV: str(root / "learning-state")}
-    second = tmp_path / "scaffolded-under-overlap"
-    second.mkdir()
-    H.assert_clean(H.tenant_py(tenant_py, "scaffold", H.TID, str(second), root=root,
-                               unset=unset, **git_identity, **overlap))
-    H.assert_clean(H.check(tenant_py, root, "--folder", str(second), **overlap))
+    folder = _folder(tmp_path, "tenant")
+    H.assert_clean(H.check(tenant_py, root, "--folder", str(folder), **overlap))
 
     before = H.tree_census(root)
     H.assert_clean(_check_id(root, **overlap))
     assert H.tree_census(root) == before, "check wrote into the tenant"
-    H.assert_clean(H.setup(tenant_py, root, **overlap))
-    assert H.census_diff(before, H.tree_census(root)) == [f"added: {H.TID}/learning"]
-    assert list((H.tenant_folder(root) / "learning").iterdir()) == []
-    initialized = H.tree_census(root)
-    H.assert_clean(H.setup(tenant_py, root, **overlap))
-    assert H.tree_census(root) == initialized, "setup rewrote initialized state"
+    assert not (H.tenant_folder(root) / "learning").exists(), "check created learning state"
 
 
 def test_1120_check_with_both_or_neither_selector_is_a_usage_error(tmp_path: Path) -> None:
@@ -445,27 +427,19 @@ def _gather_health_checks_only(settings: Path) -> None:
     pytest.param(_withhold_all, id="all-withheld"),
     pytest.param(_gather_health_checks_only, id="health-checks-only"),
 ])
-def test_1120_setup_refuses_a_table_granting_gather_no_query_verb_that_check_accepts(
+def test_1120_check_accepts_a_table_granting_gather_no_query_verb(
         tmp_path: Path, plant: Callable[[Path], None]) -> None:
     """A table granting gather no query verb (the template's all-withheld one, or one granting
-    only `health-check`) fails `require_gather_query` for every run: setup refuses it, check
-    does not."""
-    first = tmp_path / "first"
-    knowledge = H.place_knowledge(first)
-    plant(knowledge / "settings")
-    table = knowledge / "settings" / "verb-grants.yaml"
-    before = H.tree_census(first)
-    H.assert_first_setup_refused(H.setup(tenant_py, first), first, before, str(table))
-
+    only `health-check`) fails `require_gather_query` for every run, yet `check` does not report it
+    (the refusal at `setup` retired with `setup`, F-12)."""
     rerun = tmp_path / "rerun"
     H.place_knowledge(rerun)
-    H.assert_clean(H.setup(tenant_py, rerun))
+    H.assert_clean(_check_id(rerun))
     plant(H.settings_dir(rerun))
     before = H.tree_census(rerun)
-    H.assert_refused(H.setup(tenant_py, rerun), str(H.settings_dir(rerun) / "verb-grants.yaml"))
-    assert H.census_diff(before, H.tree_census(rerun)) == [], "the refused re-run wrote something"
     H.assert_clean(_check_id(rerun))
     H.assert_clean(_check_folder(H.knowledge_dir(rerun)))
+    assert H.census_diff(before, H.tree_census(rerun)) == [], "check wrote into the tenant"
 
 
 def _decoy_repo(tmp_path: Path) -> Path:
@@ -492,8 +466,6 @@ def test_1120_check_refuses_a_clones_tenant_id_that_its_repo_does_not_commit(
     status = H.git_status(knowledge)
     assert named in status, f"precondition: the clone's .tenant-id is not uncommitted:\n{status!r}"
 
-    H.assert_clean(H.setup(tenant_py, root))
-    assert location_path(H.row_path)(root).is_file(), "setup refused a matching but uncommitted .tenant-id"
     assert H.accept(_tenant, root).id == H.TID
 
     H.assert_refused(_check_id(root), named)
@@ -504,7 +476,6 @@ def test_1120_check_refuses_a_clones_tenant_id_that_its_repo_does_not_commit(
 
     committed = tmp_path / "committed"
     clean_clone = H.cloned_tenant(tmp_path / "committed-src", committed)
-    H.plant_row(committed)
     H.assert_clean(_check_id(committed))
     H.assert_clean(_check_folder(clean_clone))
     H.assert_clean(_check_folder(_folder(tmp_path, "plain", tenant_id_file="id")))
@@ -605,18 +576,12 @@ def test_1120_check_fails_closed_when_git_cannot_say_the_tenant_id_is_committed(
         tmp_path: Path, fault: GitFault) -> None:
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "src", root)
-    H.plant_row(root)
-    # Fully provisioned, so setup's re-run below has nothing to write.
-    (H.tenant_folder(root) / "learning").mkdir()
     env, reason, repair = fault(tmp_path, knowledge)
     try:
         for proc in (_check_id(root, **env), _check_folder(knowledge, **env)):
             text = H.assert_refused(proc, H.CANNOT_VERIFY_TENANT_ID)
             assert re.search(reason, _without(text, str(tmp_path), H.CANNOT_VERIFY_TENANT_ID)), (
                 f"check does not give git's reason (/{reason}/) for not answering:\n{text}")
-        before = H.tree_census(root)
-        H.assert_clean(H.setup(tenant_py, root, **env))
-        assert H.census_diff(before, H.tree_census(root)) == [], "setup's re-run wrote something"
     finally:
         repair()
     H.assert_clean(_check_id(root))
@@ -641,7 +606,6 @@ def test_1159_check_says_this_machines_git_failed_and_exits_1(
     folder = _folder(tmp_path, "tenant")
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "src", root)
-    H.plant_row(root)
     env, _reason, _repair = fault(tmp_path, knowledge)
 
     def assert_census_taken(text: str) -> None:

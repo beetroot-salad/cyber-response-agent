@@ -56,12 +56,11 @@ from defender.learning.core.state import (
 from defender.records.formats import TenantRefused
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import httpx
 
-    from defender.learning.author.version_control import Batch, ForgejoIdentity, TenantDelivery
-    from defender.tenancy import Tenant
+    from defender.learning.author.version_control import Batch, TenantDelivery
+    from defender.learning.author.version_control.auth import ForgeCredential
+    from defender.tenancy import Tenant, TenantDirectory
 
 _logger = logging.getLogger(__name__)
 
@@ -427,6 +426,23 @@ def _retry_or_exhaust(
     )
 
 
+def _set_aside(paths: LoopPaths, state: LearningState, claim: Any, directory: TenantDirectory) -> bool:
+    """Is `claim` not to be served this tick? A claim of a tenant other than the selected one is
+    quarantined; one whose tenant is no longer `active` (read afresh now, #1214 Flow 4) is handed
+    back to the queue unserved and uncounted."""
+    from defender import tenancy
+
+    owner = claim.spec.get("tenant_id")
+    if paths.tenant is not None and owner != str(paths.tenant.id):
+        state.quarantine(claim, f"tenant {owner!r} does not own selected tenant {paths.tenant.id}'s queue")
+        return True
+    inactive = tenancy.still_active(directory, claim.address.tenant_id)
+    if inactive is not None:
+        _requeue_or_drop(state, claim, note=f"{claim.identity} not served: {inactive}")
+        return True
+    return False
+
+
 def _drain_lead_author_markers(
     paths: LoopPaths,
     state: LearningState,
@@ -435,10 +451,14 @@ def _drain_lead_author_markers(
     box: Any = None,
     batch: Batch | None = None,
     accept_tenant: Callable[[object], Tenant],
+    directory: TenantDirectory,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> list[ServedMarker]:
     """Claim the queued curation requests and serve each one's run to `run_lead_author`, each
-    one claim of `batch` (the draft re-synced after it, OD15). A claim the commit-maker refuses
+    one claim of `batch` (the draft re-synced after it, OD15). Before each claim is served its
+    tenant's state is read afresh from `directory` (#1214 Flow 4, P3): a claim of a tenant no
+    longer `active` (offboarded since the tick began) is handed back to the queue unserved and
+    uncounted. A claim the commit-maker refuses
     (P3's `DeliveryRefused`: a link, a FIFO, an out-of-lane path...) is U10's refused claim:
     its draft is reset, it counts its attempt and its row is re-queued until the ceiling
     quarantines it; the other claims go ahead."""
@@ -455,8 +475,7 @@ def _drain_lead_author_markers(
     served: list[ServedMarker] = []
     for claim in claims:
         spec = claim.spec
-        if paths.tenant is not None and spec.get("tenant_id") != str(paths.tenant.id):
-            state.quarantine(claim, f"tenant {spec.get('tenant_id')!r} does not own selected tenant {paths.tenant.id}'s queue")
+        if _set_aside(paths, state, claim, directory):
             continue
         run = _rehydrate(claim, accept_tenant, accepted)
         if isinstance(run, RunAbsent):
@@ -612,6 +631,7 @@ def _drain_lead_author(  # noqa: PLR0913 — the tick's two steps and its batch,
     run_pitfalls: Callable[..., int],
     *,
     accept_tenant: Callable[[object], Tenant] | None,
+    directory: TenantDirectory,
     box: Any = None,
     batch: Batch | None = None,
     lock_wait_seconds: int | None = None,
@@ -625,7 +645,7 @@ def _drain_lead_author(  # noqa: PLR0913 — the tick's two steps and its batch,
     # `box_for_run`, so no host step of the tick runs beside a process an agent left (#1195).
     served = [] if accept_tenant is None else _drain_lead_author_markers(
         paths, state, run_lead_author, box=box, batch=batch, accept_tenant=accept_tenant,
-        git_timeout=git_timeout)
+        directory=directory, git_timeout=git_timeout)
     pitfalls = _drain_pitfalls(
         paths, state, run_pitfalls, box=box, batch=batch, lock_wait_seconds=lock_wait_seconds,
     )
@@ -668,15 +688,15 @@ def _classified_refusal(message: str, fault: BaseException) -> _Refused:
 
 @contextlib.contextmanager
 def _open_delivery(
-    paths: LoopPaths, *, client: httpx.Client | None,
-    identity: ForgejoIdentity | None, issuer_config: Path | None,
+    paths: LoopPaths, *, directory: TenantDirectory, client: httpx.Client | None,
+    identity: ForgeCredential | None, credential_config: Any,
     issuer_transport: httpx.BaseTransport | None,
 ) -> Iterator[TenantDelivery]:
-    """Flow 4's front: the selected tenant's delivery, opened by `vc.opened_delivery` (its
-    forge binding, then its identity — the given one, else an AppRole login with the issuer
-    client config the binding names, A-ID, OD4 — then `TenantDelivery.open` against the
-    binding's origin), its own clients closed on exit. A missing binding or config is decided
-    locally, before any request (O9); every refusal is `_Refused`, naming why."""
+    """Flow 4's front: the selected tenant's delivery, opened by `vc.opened_delivery` (its forge
+    wiring from the tenant records, then its credential — the given one, else the tenant's forge
+    credential minted through its live generation — then `TenantDelivery.open` against the
+    recorded origin), its own clients closed on exit. Missing wiring or issuer configuration is
+    decided locally, before any request (O9); every refusal is `_Refused`, naming why."""
     from defender.learning.author import version_control as vc
 
     tenant = paths.tenant
@@ -687,15 +707,48 @@ def _open_delivery(
             # The batch box's code mount is this process's own code tree, never the checkout
             # the learning paths name (whose adapters the lanes read).
             delivery = opened.enter_context(vc.opened_delivery(
-                tenant, defender_dir=process_defender_dir(), client=client, identity=identity,
-                issuer_config=issuer_config, issuer_transport=issuer_transport))
+                tenant, defender_dir=process_defender_dir(), directory=directory, purpose="drain",
+                client=client, identity=identity, credential_config=credential_config,
+                issuer_transport=issuer_transport))
         except TenantRefused as unbound:
             raise _Refused(
-                f"the tenant {tenant.id} has no usable forge binding: {unbound}") from None
+                f"the tenant {tenant.id} has no usable forge wiring: {unbound}") from None
         except (vc.DeliveryRefused, vc.ForgejoAuthError) as refused:
             raise _classified_refusal(
                 f"the tenant {tenant.id}'s delivery refused: {refused}", refused) from None
         yield delivery
+
+
+def revert_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-process stand-ins
+    tenant: Tenant, *, directory: TenantDirectory | None = None, client: httpx.Client | None = None,
+    identity: ForgeCredential | None = None, credential_config: Any = None,
+    issuer_transport: httpx.BaseTransport | None = None,
+) -> contextlib.AbstractContextManager[TenantDelivery]:
+    """The author lane's delivery for a by-hand lesson revert (`revert_lesson.py`, flow 5), which
+    runs under the author drain's lock: the tenant admitted as a drain admits it (its records,
+    else `DEFENDER_DATABASE_DSN`'s; `active`, its forge wiring recorded, #1214 Flow 4), then
+    `vc.opened_delivery` as `_open_delivery` opens it. A refusal is `TenantRefused`,
+    `DeliveryRefused` or `ForgejoAuthError`."""
+    from defender import tenancy
+    from defender.learning.author import version_control as vc
+    from defender.systems.run_tenant import entry_directory
+
+    records = entry_directory(directory)
+    tenancy.admit_tenant(records, tenant.id)
+    return vc.opened_delivery(
+        tenant, defender_dir=process_defender_dir(), directory=records, purpose="revert", client=client,
+        identity=identity, credential_config=credential_config, issuer_transport=issuer_transport)
+
+
+def _drain_directory(directory: TenantDirectory | None) -> TenantDirectory:
+    """The drain's tenant records: the one its entry hands it, else the one
+    `DEFENDER_DATABASE_DSN` names (#1214 Flow 4); neither is the stage's configuration refusal."""
+    from defender.systems.run_tenant import entry_directory
+
+    try:
+        return entry_directory(directory)
+    except TenantRefused as refused:
+        raise FatalConfigError(str(refused)) from refused
 
 
 def _record_pending_delivery(
@@ -890,25 +943,28 @@ def _refusing(entry: Callable[[], int]) -> int:
     raise FatalConfigError(one_line(refused))
 
 
-def author_drain(
+def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the forge, the tenant records, the issuer, the box
     paths: LoopPaths,
     *,
     # `(paths, state, channel, threshold_env, module_name, pending_label, *, batch, box)`.
     trigger_author: Callable[..., None] | None = None,
     client: httpx.Client | None = None,
-    identity: ForgejoIdentity | None = None,
-    issuer_config: Path | None = None,
+    identity: ForgeCredential | None = None,
+    directory: TenantDirectory | None = None,
+    credential_config: Any = None,
     issuer_transport: httpx.BaseTransport | None = None,
     start_box: Callable[..., Any] | None = None,
     stop_box: Callable[..., None] = box_mod.stop_box,
 ) -> int:
-    """The lessons lane's tick into the selected tenant's repository (flow 4). `client` is the
-    forge's HTTP client (one is built when absent); `identity` the tenant's delivery identity,
-    else the drain logs in with the issuer client config the forge binding names (A-ID;
-    `issuer_config` stands in for it), its
-    requests through `issuer_transport` when given; `start_box`/`stop_box` the batch's box
-    (default `TenantDelivery.start_box`, sandbox required, and `box.stop_box`)."""
+    """The lessons lane's tick into the selected tenant's repository (flow 4). `directory` is
+    the tenant records (else the ones `DEFENDER_DATABASE_DSN` names); `client` the forge's HTTP
+    client (one is built when absent); `identity` the tenant's delivery credential, else the
+    tenant's forge credential minted through its live generation (`credential_config` the host's
+    issuer configuration, its requests through `issuer_transport` when given);
+    `start_box`/`stop_box` the batch's box (default `TenantDelivery.start_box`, sandbox
+    required, and `box.stop_box`)."""
     _validate_merge_mode()
+    records = _drain_directory(directory)
     # The lane's label reaches its work step bound into the DEFAULT seam, so an injected seam
     # keeps its call shape (#1134).
     if trigger_author is None:
@@ -916,9 +972,8 @@ def author_drain(
     seam = trigger_author
 
     def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
-        return _open_delivery(paths, client=client,
-                              identity=identity, issuer_config=issuer_config,
-                              issuer_transport=issuer_transport)
+        return _open_delivery(paths, directory=records, client=client, identity=identity,
+                              credential_config=credential_config, issuer_transport=issuer_transport)
 
     # The root is opened once, here, and handed inward; a missing root stops the stage.
     with LearningState.open(paths) as state, state.lock(
@@ -942,17 +997,20 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     run_lead_author: Callable[..., None] | None = None,
     run_pitfalls: Callable[..., int] | None = None,
     client: httpx.Client | None = None,
-    identity: ForgejoIdentity | None = None,
-    issuer_config: Path | None = None,
+    identity: ForgeCredential | None = None,
+    directory: TenantDirectory | None = None,
+    credential_config: Any = None,
     issuer_transport: httpx.BaseTransport | None = None,
     start_box: Callable[..., Any] | None = None,
     stop_box: Callable[..., None] = box_mod.stop_box,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
     """The lead-author lane's tick into the selected tenant's repository (flow 4), its
-    delivery seams as `author_drain`'s. `git_timeout` is bound into the DEFAULT work steps only
-    (the lanes' own bounded reads, #1175)."""
+    delivery seams as `author_drain`'s; each claim's tenant is re-admitted through `directory`
+    before it is served. `git_timeout` is bound into the DEFAULT work steps only (the lanes' own
+    bounded reads, #1175)."""
     _validate_merge_mode()
+    records = _drain_directory(directory)
     # Read every configured value before a batch, box or agent exists, so a malformed setting
     # refuses the tick rather than a commit.
     lock_wait_seconds = repo_lock_wait_seconds()
@@ -970,9 +1028,8 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     lead_step, pitfalls_step = run_lead_author, run_pitfalls
 
     def open_delivery() -> contextlib.AbstractContextManager[TenantDelivery]:
-        return _open_delivery(paths, client=client,
-                              identity=identity, issuer_config=issuer_config,
-                              issuer_transport=issuer_transport)
+        return _open_delivery(paths, directory=records, client=client, identity=identity,
+                              credential_config=credential_config, issuer_transport=issuer_transport)
 
     with LearningState.open(paths) as state, state.lock(
             LEAD_AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as locked:
@@ -998,7 +1055,7 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
                 do_work=lambda work_paths, *, batch, box=None: _drain_lead_author(
                     work_paths, state, lead_step, pitfalls_step, box=box, batch=batch,
                     lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
-                    accept_tenant=accept_tenant,
+                    accept_tenant=accept_tenant, directory=records,
                 ),
                 open_delivery=open_delivery, start_box=start_box, stop_box=stop_box,
             ))

@@ -12,6 +12,7 @@ import datetime as dt
 import hashlib
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from typing import Any
 
 import pytest
 
@@ -39,6 +40,11 @@ T2 = TenantId(fixture_uuid("tenant:t2"))
 T_UNREGISTERED = TenantId(fixture_uuid("tenant:unregistered"))
 
 
+def insert_active_tenant(dsn: str, tenant: str, *, wiring: bool = False) -> None:
+    """An `active` tenant row, written as test support (no port registers tenants, r9 DC-6)."""
+    execute(dsn, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, %s, 'active')", (tenant, NOW))
+
+
 def _postgres(dsn: str):
     from defender.identity.postgres import PostgresIdentityRepository
 
@@ -64,9 +70,32 @@ def backend(request) -> Iterator[str | None]:
 
 
 @pytest.fixture
-async def repo(backend) -> AsyncIterator[object]:
+async def tenants(backend) -> AsyncIterator[Any]:
+    """How a tenant gets into the store: the in-memory tenant twin (shared with the identity twin), or raw rows
+    in `tenancy.tenants` (r9 DC-6: no identity port registers tenants)."""
+    if backend is not None:
+        yield None
+        return
+    from defender.tenancy import InMemoryTenantRepository
+
+    twin: Any = InMemoryTenantRepository()
+    yield twin
+    await twin.close()
+
+
+async def _seed_tenant(backend, tenants, tenant, *, state: str = "active") -> None:
+    if backend is None:
+        await tenants.add_tenant(str(tenant), created_at=NOW, state=state)
+    else:
+        job = {"active": (None, None, None), "creating": ("create", "names", "service")}[state]
+        execute(backend, """INSERT INTO tenancy.tenants (id, created_at, state, pending_action, step, step_actor)
+                            VALUES (%s, %s, %s, %s, %s, %s)""", (str(tenant), NOW, state, *job))
+
+
+@pytest.fixture
+async def repo(backend, tenants) -> AsyncIterator[object]:
     """The repository under test; its engine connects and closes inside the test's loop."""
-    r = InMemoryIdentityRepository() if backend is None else _postgres(backend)
+    r = InMemoryIdentityRepository(tenants=tenants) if backend is None else _postgres(backend)
     try:
         yield r
     finally:
@@ -74,10 +103,10 @@ async def repo(backend) -> AsyncIterator[object]:
 
 
 @pytest.fixture
-async def seeded(repo):
-    """The repository with T1 and T2 registered."""
-    await repo.register_tenant(T1, now=NOW)
-    await repo.register_tenant(T2, now=NOW)
+async def seeded(repo, backend, tenants):
+    """The repository with T1 and T2 active in the tenant store."""
+    await _seed_tenant(backend, tenants, T1)
+    await _seed_tenant(backend, tenants, T2)
     return repo
 
 
@@ -96,23 +125,13 @@ async def _active(repo, user, tenant=T1):
 # --- tenants ---------------------------------------------------------------------------------
 
 
-async def test_register_tenant_is_idempotent_and_decides_existence(seeded):
-    """register_tenant twice is one tenant; an unregistered id does not exist (O8, DC-4)."""
-    await seeded.register_tenant(T1, now=NOW + HOUR)
+async def test_a_seeded_active_tenant_exists_and_an_unseeded_one_does_not(seeded, backend, tenants):
+    """tenant_exists is true for an active tenant, false for an absent one or one still `creating` (O8, DC-4, DC-6)."""
+    creating = TenantId(fixture_uuid("tenant:creating"))
+    await _seed_tenant(backend, tenants, creating, state="creating")
     assert await seeded.tenant_exists(T1) is True
     assert await seeded.tenant_exists(T_UNREGISTERED) is False
-
-
-@pytest.mark.postgres
-async def test_register_tenant_stores_the_given_time_and_keeps_the_first(pg_dsn):
-    """D: `tenants.created_at` is the `now` the caller passed; registering again does not move it."""
-    repo = _postgres(pg_dsn)
-    try:
-        await repo.register_tenant(T1, now=NOW)
-        await repo.register_tenant(T1, now=NOW + HOUR)
-    finally:
-        await repo.close()
-    assert execute(pg_dsn, "SELECT created_at FROM identity.tenants WHERE id = %s", (str(T1),)) == [(NOW,)]
+    assert await seeded.tenant_exists(creating) is False
 
 
 async def test_a_membership_in_an_unregistered_tenant_is_refused(seeded):
@@ -872,7 +891,7 @@ async def two_repositories(pg_dsn) -> AsyncIterator[tuple[object, object]]:
     """Two repositories, so two engines and two sets of connections, over one database."""
     first, second = _postgres(pg_dsn), _postgres(pg_dsn)
     try:
-        await first.register_tenant(T1, now=NOW)
+        insert_active_tenant(pg_dsn, str(T1), wiring=False)
         yield first, second
     finally:
         await first.close()
@@ -943,7 +962,7 @@ async def test_a_revoke_racing_an_accept_on_one_invitation_applies_exactly_one(t
 async def test_closing_a_repository_disposes_its_engine(pg_dsn):
     """Lifecycle (E): close releases every database connection the repository opened."""
     repo = _postgres(pg_dsn)
-    await repo.register_tenant(T1, now=NOW)
+    insert_active_tenant(pg_dsn, str(T1), wiring=False)
     await repo.ensure_user("a@x.org", now=NOW)
 
     async def idle() -> bool:
@@ -961,7 +980,7 @@ async def test_a_returned_datetime_is_utc_whatever_zone_the_database_defaults_to
     execute(pg_dsn, f'ALTER DATABASE "{name}" SET timezone TO \'Pacific/Chatham\'')
     repo = _postgres(pg_dsn)
     try:
-        await repo.register_tenant(T1, now=NOW)
+        insert_active_tenant(pg_dsn, str(T1), wiring=False)
         ann = await repo.add_user("ann@x.org", created_at=NOW)
         row = await repo.ensure_invitation(ann.id, T1, invited_by="system", now=NOW)
         await repo.accept_invitation(row.id, now=NOW)

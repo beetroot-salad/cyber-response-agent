@@ -131,7 +131,7 @@ def drive_tenant_author_drain(t, paths, trigger, *, rec=None):
     over its issuer fake, and the box seams."""
     rec = rec or B.BoxLifecycleRecorder()
     rc = drains.author_drain(
-        paths, trigger_author=trigger, client=t.forge.client, identity=t.vault.identity(),
+        paths, trigger_author=trigger, client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
         start_box=rec.start_box, stop_box=rec.stop_box)
     return rc, rec
 

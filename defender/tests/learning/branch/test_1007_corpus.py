@@ -197,7 +197,7 @@ def test_the_lead_author_label_never_mounts_the_questioner_corpus(tenant, tmp_pa
 
     rc = drains.lead_author_drain(
         paths, run_lead_author=lambda *_a, **_k: None, run_pitfalls=lambda *_a, **_k: 0,
-        client=t.forge.client, identity=t.vault.identity(),
+        client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
         start_box=rec.start_box, stop_box=rec.stop_box)
 
     assert rc == 0

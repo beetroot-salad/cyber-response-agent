@@ -126,7 +126,7 @@ def test_1279_a4_the_publisher_follows_the_root_at_call_time(dev, tenants, monke
 
 _ACCEPTANCE = frozenset({
     "accept_tenant", "requested_tenant", "requested_tenant_id", "accept_requested_tenant",
-    "resolve_data_root", "command_line_paths", "accept_placed_knowledge",
+    "resolve_data_root", "command_line_paths",
     "open_requested_run", "open_command_line_run",
 })
 

@@ -6,8 +6,8 @@ raised from stays its cause. `classify` reads that chain: an outage that may pas
 out, the tenant lock busy) is `transient`; anything else needs a human (`operator`): a refused
 login or token, `main` unprotected, a dirty or diverged clone, a commit refused on content.
 
-Every publish trigger records its outcome in `<T>/publish-status.json`
-(`tenancy._publish_status`): the refusal classified here, or the commit it published.
+Every publish trigger records its outcome in the tenant records (`tenancy.publish_status`, #1214
+O6, through `tenancy`'s recorders): the refusal classified here, or the commit it published.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import contextlib
 import re
 import subprocess
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -33,8 +34,11 @@ from defender.tenancy import (
     record_refusal,
     record_report,
 )
-from defender.tenancy import Tenant
 
+if TYPE_CHECKING:
+    from defender.tenancy import TenantDirectory
+
+from .auth import CredentialMisconfigured
 from .forgejo import ForgeError
 from .model import LockBusy
 
@@ -73,6 +77,12 @@ def classify(error: BaseException) -> tuple[str, str]:
     return _fault_kind(error), one_line(reason)
 
 
+def is_misconfigured(error: BaseException) -> bool:
+    """Whether `error` stems from a credential the host cannot even log in with (its host secret
+    file missing, unreadable or malformed): the `misconfigured` outcome, not a `stale` one."""
+    return any(isinstance(fault, CredentialMisconfigured) for fault in _chain(error))
+
+
 def _fault_kind(error: BaseException) -> str:
     if isinstance(error, LockBusy):
         return TRANSIENT
@@ -87,26 +97,28 @@ def _fault_kind(error: BaseException) -> str:
     return OPERATOR
 
 
-def record_refused(tenant: Tenant, error: BaseException, *, by: str) -> None:
+def record_refused(directory: TenantDirectory | None, tenant_id: object, error: BaseException, *,
+                   by: str) -> None:
     """A publish by `by` was refused (the lock busy is not a refusal, and is not recorded)."""
     if isinstance(error, LockBusy):
         return
     kind, reason = classify(error)
-    record_refusal(tenant, kind=kind, reason=reason, by=by)
+    record_refusal(directory, tenant_id, kind=kind, reason=reason, by=by)
 
 
 @contextlib.contextmanager
-def recording(tenant: Tenant, *, by: str) -> Iterator[None]:
-    """Record a refusal raised inside as `by`'s publish refusal, and re-raise it."""
+def recording(directory: TenantDirectory | None, tenant_id: object, *, by: str) -> Iterator[None]:
+    """Record a refusal raised inside as `by`'s publish refusal of `tenant_id` (through
+    `directory`, the host's tenant records; none: nothing is recorded), and re-raise it."""
     try:
         yield
     except Exception as refused:
-        record_refused(tenant, refused, by=by)
+        record_refused(directory, tenant_id, refused, by=by)
         raise
 
 
 __all__ = [
     "FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT",
-    "classify", "read_status", "record_published", "record_refused", "record_report",
+    "classify", "is_misconfigured", "read_status", "record_published", "record_refused", "record_report",
     "recording",
 ]

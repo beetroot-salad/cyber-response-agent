@@ -346,13 +346,16 @@ _ORPHAN_SCRIPT = textwrap.dedent("""
     from pathlib import Path
     from defender import run as run_py
 
-    alert, tenant_id, commit, ready = sys.argv[1:5]
+    alert, tenant_id, commit, ready, data_root, origin = sys.argv[1:7]
+    from defender.tests.support.tenancy._active1214 import active_directory
+
+    directory = active_directory(Path(data_root), tenant_id, origin=origin)  # #1214 Flow 4
 
     def lifecycle(**kw):
         Path(ready).write_text(str(kw["run"].run_dir), encoding="utf-8")
         time.sleep(600)
 
-    run_py.main([alert, "--tenant", tenant_id, "--no-learn"], lifecycle=lifecycle,
+    run_py.main([alert, "--tenant", tenant_id, "--no-learn"], directory=directory, lifecycle=lifecycle,
                 publish=lambda *a, **k: f"fresh {commit}", preflight=lambda *a, **k: 0,
                 visualize=lambda *a, **k: None, enqueue=lambda *a, **k: False)
 """)
@@ -386,7 +389,7 @@ def _start_run_process(tenant, tmp_path) -> tuple[subprocess.Popen, Path]:
     env = {**os.environ, "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
     proc = subprocess.Popen(  # noqa: S603 — a test's own child run process
         [sys.executable, str(script), str(B.plant_alert(tmp_path / "alert")), tenant.tenant_id,
-         tenant.commit, str(ready)], env=env, cwd=str(WORKTREE),
+         tenant.commit, str(ready), str(tenant.data_root), tenant.origin], env=env, cwd=str(WORKTREE),
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     deadline = time.monotonic() + 120
     while not ready.exists() and proc.poll() is None and time.monotonic() < deadline:
@@ -417,7 +420,7 @@ def test_r_s5_a_live_run_in_another_process_keeps_its_copy_and_a_locked_out_publ
         proc.wait(timeout=30)
     tenant.merge(B.MERGE_FILES)  # origin ahead, so a locked-out child cannot be fresh
     with tenant_lock(tenant.tenant):
-        line = B.run_child(tenant, issuer_config)
+        line = B.run_child(tenant)
         assert copy.is_dir(), "a sweep ran without the tenant lock"
     assert B.outcome_class(line) == "stale:transient", line
     tenant.publish()

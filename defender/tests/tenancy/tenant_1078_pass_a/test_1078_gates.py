@@ -34,28 +34,18 @@ def test_d1_tenantpaths_owner_class(tmp_path):
     assert not missing, f"_accessor_names() does not list Tenant's {sorted(missing)}"
 
 
-def test_d1_row_constant_not_exempt(tmp_path):
-    """The row-name constant is not in _OWNER_NON_RECORD_EXPORTS, so the lint flags a
-    'tenant.json' literal outside the owner."""
-    found = S.gate_findings(tmp_path, "investigation/forges_the_row.py",
-                            "from pathlib import Path\n\n"
-                            "def row(root: Path, t: str) -> Path:\n"
-                            "    return root / t / 'tenant.json'\n")
-    assert S.reports(found, "forges_the_row.py"), (
-        "a 'tenant.json' literal outside the owner is not flagged: " + S.displays(found))
-
+def test_d1_the_row_name_is_spelled_by_no_one_and_the_kind_is_retired():
+    """The row file is retired (#1214 O6, SK-6): its former owner neither binds `tenant.json` to a constant nor keeps a
+    function that touches it (the lab's row file is deleted by hand); the registry marks the kind retired (DC-8)."""
     tenant = S.tenant()
-    gate = S.gate()
-    exported_row = [n for n in gate._OWNER_NON_RECORD_EXPORTS
-                    if getattr(tenant, n, None) == "tenant.json"]
-    assert exported_row == [], f"the row name is exported as a non-record: {exported_row}"
-    public_row = [n for n, v in vars(tenant).items()
-                  if v == "tenant.json" and not n.startswith("_")]
-    for name in public_row:
-        imported = S.gate_findings(tmp_path / f"imp-{name}", "investigation/imports_it.py",
-                                   f"from defender.tenancy._tenant import {name}\n")
-        assert S.reports(imported, "imports_it.py"), (
-            f"importing the row-name constant {name} outside the owner is not refused")
+    assert not hasattr(tenant, "retire_row"), "the owner still keeps a function for the retired row"
+    owner_source = (DEFENDER / "tenancy/_tenant.py").read_text(encoding="utf-8")
+    assert _upper_str_constants(owner_source), "control: the census reads the owner's constants"
+    bound = {n for n, v in _upper_str_constants(owner_source).items() if v == "tenant.json"}
+    assert bound == set(), f"the owner still binds the row name: {bound}"
+    rows = [line.split("\t") for line in (DEFENDER / "docs/run-records-kinds.tsv").read_text(encoding="utf-8").splitlines()]
+    [row] = [r for r in rows if r[0] == "tenant_row"]
+    assert "retired" in "\t".join(row[6:]).lower(), f"the tenant_row kind is not marked retired: {row}"
 
 
 def test_rename_proof_with_a_new_row_constant(tmp_path):

@@ -174,8 +174,7 @@ def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_t
     # `exports/current` names), not the clone's working tree.
     current = (folder / "exports" / "current").read_text(encoding="utf-8").strip()
     assert handed.resolve() == (folder / "exports" / current / "settings").resolve()
-    row = (folder / H.ROW_NAME).read_text(encoding="utf-8")
-    assert f'"tenant_id": "{tenant_id}"' in row, f"the row does not name {tenant_id!r}: {row}"
+    assert not (folder / H.ROW_NAME).exists(), "the replay wrote a tenant row (O6: the tenant is not on disk)"
     id_file = (folder / "knowledge" / H.TENANT_ID_FILE).read_text(encoding="utf-8")
     assert id_file.rstrip("\r\n") == tenant_id, f"agent/.tenant-id reads {id_file!r}"
 

@@ -18,6 +18,11 @@ _ISSUER_NAME = re.compile(
     r"BAO|VAULT|OPENBAO|ISSUER|APPROLE|ROLE_ID|SECRET_ID|FORGEJO_TOKEN", re.IGNORECASE)
 
 
+#: The host's database address (#1214 DC-9), dropped from every host child's base environment;
+#: `tenancy.database_address_variable()` names the same variable for the launchers that add it back.
+_DATABASE_ADDRESS = "DEFENDER_DATABASE_DSN"
+
+
 def _issuer_variable(name: str) -> bool:
     return _ISSUER_NAME.search(name) is not None
 
@@ -27,9 +32,12 @@ def provider_scrubbed_environ() -> dict[str, str]:
     and every issuer/forge login variable (`_issuer_variable`) removed — the base of every host
     child's environment (`run_env` adds a run's variables on top; the branch launcher's write
     door, which has no run yet, takes it as is). The ONE scrub, so no host child is handed a
-    registered provider's key or an operator's issuer token by a caller that forgot to drop it."""
+    registered provider's key or an operator's issuer token by a caller that forgot to drop it.
+    The host's database address (`DEFENDER_DATABASE_DSN`) is dropped too (#1214 DC-9): the
+    launchers of host processes that read the tenant records add it back themselves, so no box,
+    agent or model child ever holds it."""
 
-    env = {k: v for k, v in os.environ.items() if not _issuer_variable(k)}
+    env = {k: v for k, v in os.environ.items() if not _issuer_variable(k) and k != _DATABASE_ADDRESS}
     for var in providers.api_key_vars():
         env.pop(var, None)
     return env

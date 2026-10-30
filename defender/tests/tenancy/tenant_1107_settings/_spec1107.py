@@ -525,7 +525,7 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
     try:
-        return run_py().main(argv, **with_publish({**rec.seams(), **seams})), None
+        return run_py().main(argv, **with_publish({**rec.seams(), **seams}, argv)), None
     except SystemExit as refused:
         return None, refused
 

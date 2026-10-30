@@ -216,18 +216,21 @@ def parse_create(argv: Sequence[str]) -> Create:
 
 _SOURCE_RE = re.compile(r"(?<=source=)[^,]*")
 _TOKEN_LABEL_RE = re.compile(r"^(defender\.start-token=).*$")
+#: The tenant label teardown stops a tenant's boxes by (#1214 O4): container metadata on the host, never in the box.
+_TENANT_LABEL_RE = re.compile(r"^(defender\.tenant=).*$")
 _SECCOMP_RE = re.compile(r"^(seccomp=).*$")
 
 
 def masked_create(argv: Sequence[str]) -> list[str]:
-    """Mask only daemon-owned sources, seccomp path, container name, and start token."""
+    """Mask only daemon-owned sources, seccomp path, container name, start token and tenant label (the `--label`
+    values are host-side container metadata the model never sees; a tenant id anywhere else still shows)."""
     out: list[str] = []
     for i, tok in enumerate(argv):
         prev = argv[i - 1] if i else ""
         if prev == "--name":
             tok = "<NAME>"
         elif prev == "--label":
-            tok = _TOKEN_LABEL_RE.sub(r"\1<TOKEN>", tok)
+            tok = _TENANT_LABEL_RE.sub(r"\1<TENANT>", _TOKEN_LABEL_RE.sub(r"\1<TOKEN>", tok))
         elif prev == "--security-opt":
             tok = _SECCOMP_RE.sub(r"\1<PROFILE>", tok)
         elif prev == "--mount":

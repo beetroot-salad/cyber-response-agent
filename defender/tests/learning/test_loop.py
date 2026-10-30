@@ -145,7 +145,7 @@ def _tenant_paths(t, tmp_path: Path):
 def _seams(t) -> dict:
     """The drain's delivery and box seams over the tenant: the tenant forge fake's client, an
     identity over its issuer fake, a no-op box."""
-    return {"client": t.forge.client, "identity": t.vault.identity(),
+    return {"client": t.forge.client, "identity": t.vault.identity(), "directory": t.directory,
             "start_box": _noop_start_box, "stop_box": _noop_stop_box}
 
 

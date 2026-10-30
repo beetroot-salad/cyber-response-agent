@@ -5,5 +5,6 @@ from __future__ import annotations
 
 from defender.database import Base
 from defender.identity import models as _identity  # noqa: F401 — registers identity's tables
+from defender.tenancy import models as _tenancy  # noqa: F401 — registers tenancy's tables
 
 target_metadata = Base.metadata

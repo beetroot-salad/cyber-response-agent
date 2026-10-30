@@ -5,6 +5,7 @@ its adapters in a scratch product checkout (`seed_product`), and takes the batch
 landings commit to that product checkout; mid-tick markers and skills go into the draft."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared._locations_1210 import location_path
 
 import json
@@ -187,7 +188,7 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
 
     capsys.readouterr()
     drains._drain_lead_author(paths, state, lane1, lane2, batch=lane.batch,
-                              accept_tenant=drains._tenant_acceptor(paths.tenant))
+                              accept_tenant=drains._tenant_acceptor(paths.tenant), directory=directory_for_root())
 
     # Both lanes actually ran, and lane 1 actually refused: without this the residue claim
     # would be green over a drain that never reached either lane.

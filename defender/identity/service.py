@@ -123,8 +123,11 @@ class IdentityService:
         self.send_interval = send_interval
         self.send_deadline = send_deadline
         self._session_idle_limit = session_idle_limit
-        self._listed = frozenset(
-            {*bootstrap.administrators, *(e for emails in bootstrap.tenants.values() for e in emails)})
+        self._listed = frozenset(bootstrap.administrators)
+
+    def now(self) -> _dt.datetime:
+        """The service's clock, so the API stamps tenant requests with the one the people use."""
+        return self._clock()
 
     async def close(self) -> None:
         """Close the repository and the sign-in port; the service is not used afterwards."""
@@ -135,35 +138,19 @@ class IdentityService:
 
     # --- start: the bootstrap file ---------------------------------------------------------
     async def start(self) -> None:
-        """Make the people and tenants in the bootstrap file reachable. First members are invited
-        only into a tenant that never had a membership; any listed person still `invited` gets a
-        fresh set-password email once the last is over 7 days old, even if a member revoked their
-        invitation (O8). Raises `BootstrapRefused` before writing anything if the file cannot be
-        applied."""
+        """Make the administrators in the bootstrap file reachable: each is flagged, and any listed
+        person still `invited` gets a fresh set-password email once the last is over 7 days old.
+        Raises `BootstrapRefused` before writing anything if the file cannot be applied."""
         now = self._clock()
         admins = tuple(dict.fromkeys(self._bootstrap.administrators))
-        firsts = self._first_members()
-        await self._refuse_unsafe_file(admins, firsts)
-        for tenant in firsts:
-            await self._repo.register_tenant(TenantId(tenant), now=now)
-        requested: set[str] = set()
-
-        async def ask_set_password(user: User) -> None:
-            if user.id not in requested:
-                requested.add(user.id)
-                await self._repo.request_set_password(user.id, now=now)
-
+        await self._refuse_unsafe_file(admins)
         await self._flag_administrators(admins, now)
-        for tenant, emails in firsts.items():
-            if not await self._repo.tenant_has_ever_had_membership(tenant):
-                await self._invite_first_members(tenant, emails, now, ask_set_password)
-        listed = dict.fromkeys([*admins, *(e for emails in firsts.values() for e in emails)])
-        for email in listed:
+        for email in admins:
             pending = await self._repo.user_by_email(email)
             if pending is not None and pending.status == "invited" and (
                     pending.set_password_sent_at is None
                     or now - pending.set_password_sent_at > INVITATION_LIFETIME):
-                await ask_set_password(pending)
+                await self._repo.request_set_password(pending.id, now=now)
         await self._unflag_removed_administrators(admins)
 
     async def _unflag_removed_administrators(self, admins: tuple[str, ...]) -> None:
@@ -179,41 +166,13 @@ class IdentityService:
                 await self._repo.set_platform_admin(user.id, True)
                 audit.emit("admin.flag.set", actor=audit.SYSTEM, tenant_id=None, target=user.id)
 
-    def _first_members(self) -> dict[str, tuple[str, ...]]:
-        firsts: dict[str, tuple[str, ...]] = {}
-        for raw, emails in self._bootstrap.tenants.items():
-            try:
-                tenant = str(TenantId(raw))
-            except TenantRefused as e:
-                raise BootstrapRefused(f"not a tenant id: {raw!r}") from e
-            firsts[tenant] = tuple(dict.fromkeys(emails))
-        return firsts
-
-    async def _refuse_unsafe_file(self, admins: tuple[str, ...], firsts: dict[str, tuple[str, ...]]) -> None:
-        both = sorted(set(admins) & {e for emails in firsts.values() for e in emails})
-        if both:
-            raise BootstrapRefused(f"{both[0]} is listed as an administrator and as a first member")
+    async def _refuse_unsafe_file(self, admins: tuple[str, ...]) -> None:
         for email in admins:
             known = await self._repo.user_by_email(email)
             if known is not None and not known.is_platform_admin and any(
                     m.status in ("invited", "active") for m in await self._repo.memberships_of_user(known.id)):
                 raise BootstrapRefused(
                     f"{email} would become an administrator but holds a membership or invitation")
-
-    async def _invite_first_members(
-        self, tenant: str, emails: tuple[str, ...], now: _dt.datetime,
-        ask_set_password: Callable[[User], Awaitable[None]],
-    ) -> None:
-        for email in emails:
-            user = await self._repo.ensure_user(email, now=now)
-            row = await self._repo.ensure_invitation(user.id, tenant, invited_by=audit.SYSTEM, now=now)
-            if row is None:
-                continue
-            if user.status == "invited":
-                await ask_set_password(user)
-            else:
-                await self._repo.request_notification(row.id, now=now)
-            audit.emit("member.invite", actor=audit.SYSTEM, tenant_id=tenant, target=row.id)
 
     # --- the sender --------------------------------------------------------------------------
     async def run_sender(self, stop: asyncio.Event) -> None:
@@ -367,10 +326,12 @@ class IdentityService:
 
     # --- the caller's own view ---------------------------------------------------------------
     async def member_of(self, auth: Authenticated, tenant_id: str) -> str:
-        """The tenant's id when the caller is an active member, else `NotFound` (the same
-        answer for a tenant that does not exist, a malformed id and a non-member)."""
+        """The tenant's id when the tenant is `active` and the caller an active member, else
+        `NotFound` (the same answer for a tenant that does not exist or is not active, a
+        malformed id and a non-member): offboarding ends access with its request (#1214)."""
         tenant = _accept_tenant(tenant_id)
-        if await self._repo.active_membership(auth.user.id, tenant) is None:
+        if not await self._repo.tenant_exists(tenant) \
+                or await self._repo.active_membership(auth.user.id, tenant) is None:
             raise NotFound("no such tenant")
         return tenant
 
@@ -381,13 +342,13 @@ class IdentityService:
     async def me(self, auth: Authenticated) -> MeView:
         now = self._clock()
         rows = await self._repo.memberships_of_user(auth.user.id)
-        open_rows: list[OpenInvitation] = []
-        for m in () if auth.user.is_platform_admin else rows:
-            if m.status == "invited" and (m.expires_at is None or m.expires_at > now) \
-                    and await self._repo.tenant_exists(m.tenant_id):
-                open_rows.append(OpenInvitation(id=m.id, tenant_id=m.tenant_id))
+        active = await self._repo.active_tenants({m.tenant_id for m in rows}) if rows else set()
+        open_rows = [OpenInvitation(id=m.id, tenant_id=m.tenant_id)
+                     for m in (() if auth.user.is_platform_admin else rows)
+                     if m.status == "invited" and (m.expires_at is None or m.expires_at > now) and m.tenant_id in active]
+        tenants = [m.tenant_id for m in rows if m.status == "active" and m.tenant_id in active]
         return MeView(
-            user=auth.user, tenants=tuple(m.tenant_id for m in rows if m.status == "active"),
+            user=auth.user, tenants=tuple(tenants),
             administrator=auth.administrator, invitations=tuple(open_rows))
 
     # --- tenant people -----------------------------------------------------------------------
@@ -467,11 +428,13 @@ class IdentityService:
         audit.emit("invitation.accept", actor=auth.user.id, tenant_id=row.tenant_id, target=row.id)
         return row.tenant_id
 
-    # --- platform ----------------------------------------------------------------------------
-    async def all_tenants(self, auth: Authenticated) -> list[str]:
-        self.require_administrator(auth)
-        tenants = await self._repo.tenants()
-        audit.emit("admin.tenants.list", actor=auth.user.id, tenant_id=None, target=None)
-        return tenants
-
-
+    # --- tenants ending ---------------------------------------------------------------------
+    async def end_tenant(self, tenant_id: str, *, now: _dt.datetime) -> None:
+        """Offboarding's people step (#1214): end every active membership of the tenant
+        (`ended_by="system"`) and revoke every open invitation, each with its usual audit line
+        by `system`. Idempotent: a row already finished is left as it is."""
+        for row in await self._repo.memberships_of_tenant(tenant_id):
+            if row.status == "active" and await self._repo.end_membership(row.id, ended_by=audit.SYSTEM, now=now):
+                audit.emit("member.remove", actor=audit.SYSTEM, tenant_id=row.tenant_id, target=row.user_id)
+            elif row.status == "invited" and await self._repo.revoke_invitation(row.id):
+                audit.emit("invitation.revoke", actor=audit.SYSTEM, tenant_id=row.tenant_id, target=row.id)

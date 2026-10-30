@@ -877,7 +877,7 @@ def _lead_tick(tmp_path: Path, data_root: Path, plant: Callable[[Path], None]):
         seed_executed_query(run_dir, query_id="elastic.newthing", system="elastic", verb="esql")
         state_for_paths(paths).enqueue_curation("case-1", curation_row("case-1", run_dir))
         rc = run_stage(lambda: drains().lead_author_drain(
-            paths, client=t.forge.client, identity=t.vault.identity(),
+            paths, client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
             start_box=box.start, stop_box=box.stop))
         delivered = (remote_branches(t.remote, prefix=LEAD_PREFIX), list(t.forge.creates))
     return rc, box, paths, run_dir, delivered

@@ -12,9 +12,8 @@ The pytest fixture `p4_tenant` (conftest.py) is a `PublishedTenant` under the te
 from __future__ import annotations
 
 import contextlib
-import json
 import shutil
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -102,6 +101,51 @@ class PublishedTenant:
     @property
     def tenant_id(self) -> str:
         return str(self.tenant.id)
+
+    @property
+    def directory(self) -> Any:
+        """A `TenantDirectory` (#1214) over `repository`: this tenant active, wired to `repo=tenants/<id>` and
+        `origin=self.origin`, plus what `bind_forge(t, ...)` / `unbind_forge(t)` recorded: what a call site passes
+        as `directory=`. One per tenant (reset by bind/unbind). `issuer_role`, `audience` and `issuer_config` are not
+        directory facts: the credential provider derives them from generations."""
+        cached = self.__dict__.get("_dir")
+        if cached is None:
+            from defender.tenancy import TenantDirectory
+
+            twin = self.repository  # built here, outside any loop: the directory opens it inside its own
+            cached = TenantDirectory(lambda: twin)
+            object.__setattr__(self, "_dir", cached)
+        return cached
+
+    @property
+    def repository(self) -> Any:
+        """The in-memory tenant repository behind `directory` (cached): a test reads back what a process recorded
+        on it (`await t.repository.publish_status(T)`, GAP-Rc-2)."""
+        cached = self.__dict__.get("_repo")
+        if cached is None:
+            cached = self.repository_with()
+            object.__setattr__(self, "_repo", cached)
+        return cached
+
+    def repository_with(self, *, origin: str | None = None, repo: str | None = None, **keywords: Any) -> Any:
+        """A fresh repository like `repository` with another `origin`/`repo`, or `state=`/`wiring=False` for the
+        refusal sides, or `generations=[fields]` to seed the live generation a minting call site needs:
+        `fields = _active1214.provision_generation(openbao, T, secrets_dir)` builds its OpenBao chain and host
+        secret file (GAP-Ma-1, see `_active1214`). Keywords win over what `bind_forge` recorded."""
+        from defender.tests.support.tenancy._active1214 import active_repository
+
+        bound: dict[str, Any] = dict(self.__dict__.get("_bound") or {})
+        if origin is not None:
+            bound["origin"] = origin
+        bound.setdefault("origin", self.origin)
+        return active_repository(self.data_root, self.tenant_id, repo=repo, **{**bound, **keywords})
+
+    def directory_with(self, **keywords: Any) -> Any:
+        """A fresh `TenantDirectory` over `repository_with(**keywords)`."""
+        from defender.tenancy import TenantDirectory
+
+        twin = self.repository_with(**keywords)
+        return TenantDirectory(lambda: twin)
 
     @property
     def commit(self) -> str:
@@ -218,7 +262,9 @@ def published_tenant(scratch: Path, *, root: Path, tenant_id: str = FIXTURE_TENA
     """`place_fixture` then `publish_placed`: the clone holds one commit on `main`, exported and
     named by `current`. Keep `scratch` (served remotes, merge checkouts) apart from `root`; `root`
     must not already hold `tenant_id` (don't combine with `d9_tenant` or `fixture_tenant()` on
-    one id)."""
+    one id).
+
+    The yielded `PublishedTenant` has `.directory` (#1214); no row is written (O6)."""
     place_fixture(root, tenant_id, files=files, agent=agent)
     with publish_placed(scratch, root=root, tenant_id=tenant_id, repo_name=repo_name) as done:
         yield done
@@ -251,39 +297,104 @@ def export_dir(tenant: Any, commit: str) -> Path:
     return Path(location_path(tenant.tenant_root)) / "exports" / commit
 
 
-def _row_path(t: PublishedTenant) -> Path:
-    return Path(location_path(t.tenant.row_path))
+def bind_forge(t: PublishedTenant, *, origin: str | None = None,
+               generations: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    """Record the tenant's forge wiring and a live generation on `t`, so `t.directory` (what a call site passes as
+    `directory=`) holds the tenant active with `origin` (default `t.origin`) and `generations` (default: one live
+    generation from `_active1214.generation_fields`, no OpenBao behind it: a call site that mints for real passes
+    `[provision_generation(...)]`). Returns what it recorded.
+
+    #1214 O6: nothing is written to the tenant folder; `issuer_role`/`issuer_config`/`audience` are not facts of the
+    wiring: the provider derives them from the live generation and its host secret file."""
+    from defender.tests.support.tenancy._active1214 import generation_fields
+
+    if generations is None:
+        generations = [generation_fields(t.tenant_id, default_secrets_dir(t))]
+    bound = {"origin": t.origin if origin is None else origin, "generations": list(generations)}
+    object.__setattr__(t, "_bound", bound)
+    object.__setattr__(t, "_dir", None)
+    object.__setattr__(t, "_repo", None)
+    return bound
 
 
-def bind_forge(t: PublishedTenant, *, origin: str | None = None, issuer_role: str | None = None,
-               issuer_config: Path | None = None) -> dict:
-    """Write the tenant row's `forge: {origin, audience, issuer_role, issuer_config}` binding and
-    return it; other row fields are kept. Defaults agree with the fakes (`t.origin`, the fake's
-    audience, role `tenant-<id>`) and name `default_issuer_config(t)`, where a test that logs in
-    for real writes its config. `published_tenant` never binds: P3's publish does not read it."""
-    if issuer_config is None:
-        issuer_config = default_issuer_config(t)
-    binding = {"origin": t.origin if origin is None else origin, "audience": ISSUER_AUDIENCE,
-               "issuer_role": f"tenant-{t.tenant_id}" if issuer_role is None else issuer_role,
-               "issuer_config": str(Path(issuer_config).absolute())}
-    path = _row_path(t)
-    row = json.loads(path.read_text(encoding="utf-8"))
-    row["forge"] = binding
-    path.write_text(json.dumps(row, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return binding
+@dataclass
+class Minting:
+    """A live generation provisioned through a fake OpenBao, and the real `forge_credential` over it: handing
+    `credential` to a drain or publish child as `identity=` puts the host secret really inside that process
+    (the provider reads the file on every mint). `secrets` are the values a leak scan must not find."""
+
+    fields: dict[str, Any]
+    bao: Any
+    credential: Any
+    secret: str
+
+    @property
+    def secrets(self) -> tuple[str, str]:
+        return (self.secret, self.fields["role_id"])
+
+    def logins(self) -> list[dict[str, Any]]:
+        return [c.body for c in self.bao.calls if c.path == "/v1/auth/approle/login"]
+
+    def assert_logged_in_with_the_file(self) -> None:
+        """Premise: the fake's recorded login carried the file's secret id and the generation's role id."""
+        assert {"role_id": self.fields["role_id"], "secret_id": self.secret} in self.logins(), (
+            "the host secret never entered the process: no login carried the file's secret")
 
 
-def default_issuer_config(t: PublishedTenant) -> Path:
-    """Where `bind_forge`'s binding names the tenant's issuer client config by default."""
-    return Path(t.data_root).absolute().parent / "operator" / "issuer.json"
+def minting(t: PublishedTenant, tmp_path: Path, *, purpose: str = "drain") -> Minting:
+    """Provision a live generation for `t` over a `FakeOpenBao` (host secret file written), record it with
+    `bind_forge`, and build the real credential provider over that fake (tokens given a JWT's shape)."""
+    import base64
+    import json
+    import time
+    from types import SimpleNamespace
+
+    import httpx
+
+    from defender.learning.author.version_control import forge_credential
+    from defender.tests.support.tenancy._active1214 import provision_generation
+    from defender.tests.tenancy.lifecycle_1214._fakes import FakeOpenBao
+
+    bao = FakeOpenBao()
+    management = httpx.Client(transport=httpx.MockTransport(bao.handle), base_url="https://openbao.test",
+                              headers={"X-Vault-Token": bao.management_token})
+    fields = provision_generation(management, t.tenant_id, tmp_path / "secrets")
+    secret = Path(fields["host_secret_file"]).read_text(encoding="utf-8").strip()
+    bind_forge(t, generations=[fields])
+
+    def part(doc: dict[str, Any]) -> str:
+        return base64.urlsafe_b64encode(json.dumps(doc).encode()).decode().rstrip("=")
+
+    now = int(time.time())
+    claims = {"iss": "https://openbao.test/v1/identity/oidc", "tenant_id": t.tenant_id, "aud": fields["audience"],
+              "iat": now, "exp": now + 600}
+    jwt = f"{part({'alg': 'none'})}.{part(claims)}.sig"
+    t.server.token = jwt  # the fake origin accepts the one token this provider mints
+
+    def signed(request: httpx.Request) -> httpx.Response:
+        # The fake mints opaque strings; the credential decodes claims, so give the token a JWT's shape.
+        answer = bao.handle(request)
+        if request.method != "GET" or "/identity/oidc/token/" not in request.url.path or answer.status_code != 200:
+            return answer
+        return httpx.Response(200, json={"data": {"token": jwt}})
+
+    config = SimpleNamespace(issuer_url="https://openbao.test/v1/identity/oidc", openbao_url="https://openbao.test",
+                             ca_cert=None)
+    credential = forge_credential(t.tenant_id, purpose, directory=t.directory, config=config,
+                                  transport=httpx.MockTransport(signed))
+    return Minting(fields=fields, bao=bao, credential=credential, secret=secret)
+
+
+def default_secrets_dir(t: PublishedTenant) -> Path:
+    """Where `bind_forge`'s default generation names its host secret file."""
+    return Path(t.data_root).absolute().parent / "operator" / "secrets"
 
 
 def unbind_forge(t: PublishedTenant) -> None:
-    """Remove the tenant row's `forge` field (absent stays absent); other fields are kept."""
-    path = _row_path(t)
-    row = json.loads(path.read_text(encoding="utf-8"))
-    row.pop("forge", None)
-    path.write_text(json.dumps(row, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    """Remove what `bind_forge` recorded and the forge wiring: `t.directory` knows the tenant active with no wiring."""
+    object.__setattr__(t, "_bound", {"wiring": False})
+    object.__setattr__(t, "_dir", None)
+    object.__setattr__(t, "_repo", None)
 
 
 def fixture_agent_files() -> dict[str, bytes]:
@@ -305,7 +416,7 @@ def committed_blobs(clone: Path, rev: str, pathspec: str) -> dict[str, bytes]:
 
 __all__ = [
     "committed_blobs",
-    "default_issuer_config",
+    "default_secrets_dir",
     "DEFENDER",
     "FIXTURE",
     "FIXTURE_AGENT",

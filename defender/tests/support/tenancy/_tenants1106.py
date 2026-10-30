@@ -7,7 +7,6 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import dataclasses
 import importlib
-import json
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +53,7 @@ def run_grants(settings_dir: Path) -> Any:
 def fixture_tenant(tenant_id: str | None = None) -> Any:
     """The committed fixture tenant set up under the current test's data root and accepted
     through the real `accept_tenant`: what every replay that names no tenant runs as.
-    Idempotent within one test."""
+    Idempotent within one test. The returned `Tenant` carries `.directory` (see `set_up_tenant`)."""
     from defender.tests.support.shared.contracts import _data_root_1078
 
     return _data_root_1078.set_up_tenant(
@@ -423,17 +422,19 @@ def system_skill_text(system: str) -> str:
 
 def place_tenant(root: Path, tenant_id: str, **kw: Any) -> Path:
     """A set-up tenant under `root`: `plant_tenant`'s folder as `root/<tenant_id>/knowledge/`,
-    `agent/.tenant-id` naming it, and its row written by hand (so one root can hold several
-    tenants: `create_tenant`'s one-tenant guard is setup's, not acceptance's). Returns the
-    knowledge folder; `accept(root, tenant_id)` accepts it."""
+    `agent/.tenant-id` naming it (no row: O6; one root can hold several tenants). Returns the
+    knowledge folder; `accept(root, tenant_id)` accepts it.
+
+    The returned folder (a `KnowledgeFolder`, equal to the plain path) carries `.directory` (#1214): a
+    `TenantDirectory` holding the tenant active with its forge wiring, for `directory=` at a migrated call
+    site; it is the only record that the tenant exists, and `accept(root, tenant_id)` accepts the folder."""
     folder = Path(root) / tenant_id
     defaults = {"marker": tenant_id, "agent_files": {"AGENT.md": f"agent half of {tenant_id}\n"}}
     knowledge = plant_tenant(folder, "knowledge", **{**defaults, **kw})
     (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
-    (folder / "tenant.json").write_text(json.dumps(
-        {"tenant_id": tenant_id, "created_at": "2026-09-28T00:00:00+00:00"},
-        indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return knowledge
+    from defender.tests.support.shared.contracts._data_root_1078 import KnowledgeFolder
+
+    return KnowledgeFolder(knowledge)
 
 
 #: The lead-zero id a planted census repo's folders name, and the template carrying it: the CI

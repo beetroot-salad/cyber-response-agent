@@ -71,6 +71,30 @@ def _launch(tmp_path, *, spawn=None, argv_extra=(), oracle=None, verifier=None, 
     return run.rc, run.spawn, run.ep, run.message
 
 
+def test_the_launcher_holds_its_tenants_host_lock_while_its_siblings_start(tmp_path):
+    """The launcher works for its tenant under the tenant's host lock, held shared and recorded, as every other
+    host entry point does (#1214 P3, Flow 4): while it starts its siblings, prepare or teardown cannot take the
+    lock exclusive, and teardown finds the launcher to stop it."""
+    import os
+
+    from defender.tenancy import host_lock
+
+    taken: list[bool] = []
+    inner = T.FakeSpawn()
+
+    def spawn(argv, **kw):
+        tenant = argv[argv.index("--tenant") + 1]
+        fd = host_lock.acquire(Path(os.environ["DEFENDER_DATA_ROOT"]), tenant, exclusive=True, timeout=0)
+        taken.append(fd is not None)
+        if fd is not None:
+            host_lock.release_lock(fd)
+        return inner(argv, **kw)
+    rc, _spawn, _ep, message = _launch(tmp_path, spawn=spawn)
+    assert rc == 0, message
+    assert taken, "control: the launcher started no sibling"
+    assert not any(taken), "the tenant's lock was free while the launcher started a sibling"
+
+
 # preflight — what is checked before anything is spent
 
 

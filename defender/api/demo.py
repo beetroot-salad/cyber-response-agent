@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from functools import partial
 
 from defender.records import RUN_LAYOUT
-from defender.tenancy import is_valid_tenant_id
+from defender.tenancy import InMemoryTenantRepository, is_valid_tenant_id
 from defender.records.formats import TenantId
 
 from defender.identity import (
@@ -25,7 +25,6 @@ from defender.identity import (
     InMemoryIdentityRepository,
     SignInUnavailable,
     VerifiedSignIn,
-    register_tenant,
 )
 
 from .fakes import (
@@ -111,9 +110,11 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
             tenant, n, fired=now - _dt.timedelta(hours=2), title=f"An alert of {tenant}'s",
             severity="low", rule="misc",
         ))
-    people = InMemoryIdentityRepository()
+    # One store: the tenants are seeded `active` in the tenant twin, and identity reads them there.
+    tenant_rows = InMemoryTenantRepository()
+    people = InMemoryIdentityRepository(tenants=tenant_rows)
     for tenant in tenants:
-        await register_tenant(people, TenantId(tenant), now=now)
+        await tenant_rows.add_tenant(TenantId(tenant), created_at=now)
         for role in DEMO_ROLES:
             user = await people.add_user(f"{role}@{tenant}.example", created_at=now, status="active",
                                    display_name=role.title())
@@ -122,10 +123,11 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
             await people.add_session(demo_sessions([tenant])[f"{tenant}-{role}"], user.id, now=now,
                                expires_at=now + _SESSION_LIFETIME)
     identity = IdentityService(people, signin=_NoSignIn(), mail=_LoggedMail(), clock=clock,
-                               bootstrap=Bootstrap(administrators=(), tenants={}),
+                               bootstrap=Bootstrap(administrators=()),
                                session_idle_limit=_SESSION_LIFETIME)
     return ApiDeps(
         identity=identity,
+        tenants=tenant_rows,
         frontend_origin=frontend_origin,
         alerts=store,
         investigations=store,

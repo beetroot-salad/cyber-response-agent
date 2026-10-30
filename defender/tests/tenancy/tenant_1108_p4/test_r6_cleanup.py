@@ -90,7 +90,7 @@ def test_r6_propose_discards_its_draft_whether_it_succeeds_or_is_refused(p4_tena
             httpx.ConnectError("the forge is down", request=request)
             if request.method == "POST" and request.url.path.endswith("/pulls") else None)
     rc = cli.propose(t.tenant_id, _staged(tmp_path), client=t.forge.client,
-                     identity=t.vault.identity())
+                     identity=t.vault.identity(), directory=t.directory)
     assert rc == (0 if outcome == "proposed" else 1), capsys.readouterr()
     assert draft_entries(t) == [], "propose left its draft behind"
 

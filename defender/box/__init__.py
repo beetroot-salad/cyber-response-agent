@@ -86,6 +86,7 @@ from ._alias import (
 )
 from ._docker import (
     START_TOKEN_LABEL,
+    TENANT_LABEL,
     SharedMountsFn,
     _ALLOW_UNSANDBOXED,
     _BOX_PATH,
@@ -101,6 +102,7 @@ from ._docker import (
     _daemon_source,
     _derived_infra_env,
     run_docker,
+    remove_tenant_containers,
     _inspect_field,
     _own_container_ids,
     _own_container_mounts,
@@ -181,6 +183,7 @@ __all__ = [
     "RawExec",
     "RunTainted",
     "START_TOKEN_LABEL",
+    "TENANT_LABEL",
     "Sequence",
     "SharedMountsFn",
     "Transport",
@@ -213,6 +216,7 @@ __all__ = [
     "_derived_infra_env",
     "_did_not_run_for_request",
     "run_docker",
+    "remove_tenant_containers",
     "_host_fallback_env",
     "_inspect_field",
     "_opt_out_or_raise",

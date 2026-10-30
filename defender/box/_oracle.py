@@ -63,9 +63,11 @@ def _make_runner() -> Path:
     return runner
 
 
-def oracle_box_request(scratch: Path, runner: Path, *, env: Mapping[str, str]) -> BoxRequest:
+def oracle_box_request(scratch: Path, runner: Path, *, env: Mapping[str, str],
+                       tenant_id: str | None = None) -> BoxRequest:
     """The oracle box's request: the runner read-only at the checkout's path as the box's
-    `code` mount, the scratch folder writable, no env of the caller's. It requires a sandbox
+    `code` mount, the scratch folder writable, no env of the caller's, labelled with the tenant
+    it serves (`tenant_id`, #1214 O4: the tenant's teardown removes it). It requires a sandbox
     (#1108 amendment 3, C3): a start fault raises, never an unsandboxed fallback, and leaves
     no did-not-run marker beside the scratch folder."""
     return BoxRequest(
@@ -73,12 +75,13 @@ def oracle_box_request(scratch: Path, runner: Path, *, env: Mapping[str, str]) -
         mounts=(Mount(source=runner, target=CHECKOUT, writable=False, kind="code"),
                 Mount(source=scratch, target=scratch, writable=True)),
         workdir=CHECKOUT, env={}, spec=BoxSpec.from_env(env), require_sandbox=True,
+        tenant_id=tenant_id,
     )
 
 
-def start_oracle_box(*, env: Mapping[str, str]) -> Any:
-    """Start the oracle's sandboxed box; `env` is the process environment handed in (its
-    `PATH` finds the `docker` binary, its box knobs size the container)."""
+def start_oracle_box(*, env: Mapping[str, str], tenant_id: str | None = None) -> Any:
+    """Start the oracle's sandboxed box for `tenant_id`; `env` is the process environment handed
+    in (its `PATH` finds the `docker` binary, its box knobs size the container)."""
     runner = _make_runner()
     try:
         scratch = Path(tempfile.mkdtemp(prefix="defender-oracle-"))
@@ -90,7 +93,7 @@ def start_oracle_box(*, env: Mapping[str, str]) -> Any:
         shutil.rmtree(scratch, ignore_errors=True)
         shutil.rmtree(runner, ignore_errors=True)
 
-    request = oracle_box_request(scratch, runner, env=env)
+    request = oracle_box_request(scratch, runner, env=env, tenant_id=tenant_id)
     path = env.get("PATH")
 
     def docker(argv: Any, **kw: Any) -> Any:
@@ -124,6 +127,6 @@ def stop_oracle_box(box: Any) -> None:
                 shutil.rmtree(folder, ignore_errors=True)
 
 
-def start_process_oracle_box() -> Any:
+def start_process_oracle_box(tenant_id: str | None = None) -> Any:
     """`start_oracle_box` over this process's environment."""
-    return start_oracle_box(env=os.environ)
+    return start_oracle_box(env=os.environ, tenant_id=tenant_id)

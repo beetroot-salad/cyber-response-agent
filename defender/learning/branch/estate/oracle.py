@@ -134,10 +134,11 @@ def start_box(*, env: Mapping[str, str]) -> Any:  # lint-dup: ok — the spec's 
         raise OracleSandboxError(str(exc)) from exc
 
 
-def start_process_box() -> Any:
-    """`start_box` over this process's environment: the registry's default box factory."""
+def start_process_box(tenant_id: str | None = None) -> Any:
+    """`start_box` over this process's environment, labelled with the tenant the world is served
+    for (#1214 O4): the registry's default box factory."""
     try:
-        return start_process_oracle_box()
+        return start_process_oracle_box(tenant_id)
     except BoxStartRefused as exc:
         raise OracleSandboxError(str(exc)) from exc
 

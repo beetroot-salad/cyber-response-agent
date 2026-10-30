@@ -28,6 +28,8 @@ dependencies = [
 # is the default provider; openai backs the Fireworks OpenAI-compatible path (GLM 5.3, selected
 # via a `fireworks:`/`glm-*` model id). Install with: uv pip install -e '.[runtime]'.
 runtime = [
+    # Host processes read the tenant's record from PostgreSQL (#1214 Flow 4); the box image does not.
+    "defender[database]",
     # Host-side Forgejo tenant delivery; kept outside the sandbox's core+box closure.
     "httpx",
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.43",
@@ -96,7 +98,13 @@ api = [
     # The HTTP client `identity/keycloak.py` uses for the token endpoint and admin API; the `dev`
     # extra's `httpx` is not installed in a production `api` sync.
     "httpx",
-    # The Postgres driver for the people and memberships store (#1306); `[binary]` ships libpq.
+    # The people, memberships and tenants stores (#1306, #1214).
+    "defender[database]",
+]
+# The database packages (#1339, #1214): what the API and the host processes need to reach
+# PostgreSQL. Included by `api` and `runtime`; never by `box`.
+database = [
+    # The Postgres driver; `[binary]` ships libpq.
     "psycopg[binary]>=3.2",
     # The async ORM the stores are written against, and the one migration history for every
     # feature's tables (#1339). The revisions ship with the source tree.

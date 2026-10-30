@@ -47,7 +47,6 @@ def _launch_id(source_run_id: str):
     seams = _seams()
     spawn = seams.pop("spawn")
     seams.setdefault("preflight", H.no_preflight)
-    H.place_knowledge_for_rows()
     argv = ["--tenant", TID, source_run_id, str(T.BRANCH_MESSAGE_ID)]
     try:
         result = H.branch_entry().main(argv, spawn=spawn, **seams)
@@ -110,15 +109,15 @@ def test_o5_no_record_opens_as_tenant_and_none_minted(data_root):
     assert H.census(data_root) == before, "opening the source wrote under the data root"
 
 
-def test_o5_requires_row(tmp_path, data_root):
+def test_o5_requires_a_placed_knowledge_folder(tmp_path, data_root):
     base, src = H.tenant_source(data_root, TID, row=False)
-    assert not location_path(H.row_path)(data_root, TID).exists()
-    H.place_knowledge(data_root, TID)
+    assert not (data_root / TID / "knowledge").exists()
     before = H.census(data_root)
     H.owner_refusal(H.accept, data_root, TID)
     assert H.census(data_root) == before, "the refused acceptance wrote under the data root"
-    H.plant_row(data_root, TID)
+    H.place_knowledge(data_root, TID)
     assert _opens_as(data_root, src.name) == TID
+    assert not location_path(H.row_path)(data_root, TID).exists(), "opening the source wrote a tenant row"
 
 
 def test_d4_launch_location_check(tmp_path, data_root):
@@ -191,8 +190,7 @@ def test_s7_j26_symlinked_tenant_folder_refused(tmp_path, monkeypatch, data_root
     real_tenant = tmp_path / "real-tenant-folder"
     real_tenant.mkdir()
     (data_root / TID).symlink_to(real_tenant, target_is_directory=True)
-    H.place_knowledge(data_root, TID)  # the operator's clone, before the row
-    H.plant_row(data_root, TID)
+    H.place_knowledge(data_root, TID)  # the operator's clone
     _base, src = H.tenant_source(data_root, TID, row=False)
     owner = H.owner_refusal(H.accept, data_root, TID)
     assert str(data_root / TID / "knowledge") in str(owner), owner

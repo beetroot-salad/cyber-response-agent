@@ -252,6 +252,20 @@ class TenantRef(BaseModel):
     tenant_id: str
 
 
+class TenantItem(BaseModel):
+    """A tenant and its one job, as an administrator sees it (#1214): the state, the pending action,
+    the current step and whose it is, and the last failure (which names the step and the external
+    answer, never a secret). Nothing pending means `pending_action`, `step` and `step_actor` are null."""
+
+    tenant_id: str
+    state: Literal["creating", "active", "offboarding", "offboarded"]
+    pending_action: Literal["create", "rotate", "offboard", "delete_repo"] | None
+    step: str | None
+    step_actor: Literal["service", "host"] | None
+    failure: str | None
+    created_at: Instant
+
+
 class InvitationRef(BaseModel):
     id: str
     tenant_id: str

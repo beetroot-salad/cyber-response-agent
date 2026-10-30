@@ -115,8 +115,7 @@ def test_r6_a_child_stopped_while_fetching_exits_with_the_sigterm_status_and_rep
         t.server.on_service = lambda service: (
             Trickle(stop, limit=120.0) if service == "git-upload-pack" else None)
         t.server.rearm()
-        config = B.write_issuer_config(tmp_path / "operator")
-        command, _spec, _marks = B.child_command(t, tmp_path, config, network_timeout=120.0,
+        command, _spec, _marks = B.child_command(t, tmp_path, network_timeout=120.0,
                                                  locked_sleep=0)
         before = len(t.server.seen)
         proc = subprocess.Popen([*command, t.tenant_id, "--data-root", str(t.data_root)],  # noqa: S603

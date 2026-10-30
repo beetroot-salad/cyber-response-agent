@@ -54,6 +54,7 @@ API_FORBIDDEN = (
     "defender.records.session_store", "defender.records.selection", "defender.records._wire",
     "defender.records.run_end", "defender.tenancy.case_ticket", "defender.tenancy.run_knowledge",
     "defender.tenancy.tenant_settings", "defender.records._family", "defender._exception_groups",
+    "defender.lifecycle",  # #1214: the management service and host actor (forge admin, OpenBao management)
 )
 
 

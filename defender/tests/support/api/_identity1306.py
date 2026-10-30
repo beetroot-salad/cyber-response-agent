@@ -5,7 +5,24 @@ mail port and one injected clock — NO test functions. The fakes record calls a
 #1339 (D11): the service, the repository and the two ports are async. `World` keeps the sync
 `TestClient` for requests and runs every service/repository call on ONE event loop, the loop its
 clients' requests run on: `world.call(async_fn, *args)` is the bridge. Hooks are coroutines
-awaited on that loop; a hook that needs HTTP runs the sync client through `asyncio.to_thread`, never on the loop."""
+awaited on that loop; a hook that needs HTTP runs the sync client through `asyncio.to_thread`, never on the loop.
+
+#1214 r9 (DC-6, DC-7): the world is built the Q3 way. ONE `InMemoryTenantRepository` (`world.tenants`) is
+shared with `InMemoryIdentityRepository(tenants=...)` and handed to `ApiDeps(tenants=...)`; every tenant
+named in `World(tenants={T: [emails]})` is seeded `active` through the twin's `add_tenant` seeder (never a
+`register_tenant`, which no port has). `Bootstrap(administrators=...)` only.
+First members (the `[emails]`) are seeded, NOT invited through an administrator: when the world is built,
+and on `restart(tenants=...)` for a tenant that never had a membership, each email gets its user, an
+invitation `invited_by="system"` and the same set-password / notification request the old bootstrap made,
+all through the raw identity repository's existing seeders (so `failing_writes` never touches seeding).
+So every old observable (sends, first sign-in accepting the invitation, audit lines) is unchanged; the
+administrator invite path is `World.member(admin_browser, tenant, email)` (a world with an administrator
+that wants the r9 route uses it). Seeding is idempotent.
+
+Interface: `World(administrators=, tenants=, start=, failing_sends=, send_interval=, send_deadline=,
+failing_writes=, tenant_repo=None)`; `world.tenants` (the twin), `world.repo` (identity repository,
+failure-wrapped if `failing_writes`), `world.raw_repo` (never wrapped); `world.register(T, *, state="active")`;
+`world.seed_first_members(T, emails)`; `world.restart(administrators=, tenants=)`."""
 from __future__ import annotations
 
 import base64
@@ -41,9 +58,9 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
     SignInRefused,
     SignInUnavailable,
     VerifiedSignIn,
-    register_tenant,
 )
-from defender.records._tenant_id import TenantId
+from defender.identity.audit import SYSTEM as _SYSTEM
+from defender.tenancy import InMemoryTenantRepository
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 T0 = _dt.datetime(2026, 10, 26, 9, 0, tzinfo=_dt.UTC)
@@ -99,8 +116,9 @@ class InjectedFailure(Exception):
 class FailingRepository:
     """The in-memory identity repository with scripted write failures: every method named in
     `failing` raises `InjectedFailure` instead of running; everything else is delegated.
-    `missing_tenants` scripts the answer of `tenant_exists` (False) for a tenant whose row is
-    gone or no longer active (#1214's lifecycle); nothing else about the tenant changes.
+    `missing_tenants` scripts the answer of `tenant_exists` (False) and `active_tenants` (left out)
+    for a tenant whose row is gone or no longer active (#1214's lifecycle); nothing else about the
+    tenant changes.
     `after` maps a method name to a hook (a coroutine function, no arguments) awaited once right
     after that method returns (an interleaving point: the hook is the test's own action, e.g. a
     sign-in; it decides nothing). Every delegated method is a coroutine function and the inner
@@ -129,6 +147,8 @@ class FailingRepository:
             if name == "tenant_exists" and args and str(args[0]) in self.missing_tenants:
                 return False
             result = await attribute(*args, **kwargs)
+            if name == "active_tenants":
+                result = result - self.missing_tenants
             hook = self.after.pop(name, None)
             if hook is not None:
                 await hook()
@@ -547,12 +567,14 @@ class World:
     def __init__(self, *, administrators: Sequence[str] = (),
                  tenants: Mapping[str, Sequence[str]] | None = None, start: bool = True,
                  failing_sends: int = 0, send_interval: _dt.timedelta | None = None,
-                 send_deadline: _dt.timedelta | None = None, failing_writes: bool = False) -> None:
+                 send_deadline: _dt.timedelta | None = None, failing_writes: bool = False,
+                 tenant_repo: Any = None) -> None:
         self.clock = Clock()
         self.store = InMemoryStore(self.clock)
-        self.repo: Any = InMemoryIdentityRepository()
-        if failing_writes:
-            self.repo = FailingRepository(self.repo)
+        #: The one tenant twin, shared with the identity repository and the API (r9 DC-7).
+        self.tenants: Any = tenant_repo if tenant_repo is not None else InMemoryTenantRepository()
+        self.raw_repo: Any = InMemoryIdentityRepository(tenants=self.tenants)
+        self.repo: Any = FailingRepository(self.raw_repo) if failing_writes else self.raw_repo
         self._loop = _AppLoop()
         weakref.finalize(self, self._loop.stop)
         self.signin = FakeSignIn()
@@ -564,6 +586,7 @@ class World:
         self.send_interval = send_interval
         self.send_deadline = send_deadline
         self.build(administrators=administrators, tenants=tenants or {})
+        self.call(self._seed, tenants or {})
         if start:
             self.call(self.service.start)
             self.send_pending()
@@ -587,13 +610,14 @@ class World:
         self._loop.stop()
 
     def build(self, *, administrators: Sequence[str], tenants: Mapping[str, Sequence[str]]) -> None:
+        """A fresh service and app over the same repositories. `tenants` is not read here (the bootstrap
+        file has no tenants, Q3); `_seed` applies it."""
         extra: dict[str, Any] = {} if self.send_interval is None else {"send_interval": self.send_interval}
         if self.send_deadline is not None:
             extra["send_deadline"] = self.send_deadline
         self.service = IdentityService(
             self.repo, signin=self.signin, mail=self.mail, clock=self.clock,
-            bootstrap=Bootstrap(administrators=tuple(administrators),
-                                tenants={t: tuple(e) for t, e in tenants.items()}),
+            bootstrap=Bootstrap(administrators=tuple(administrators)),
             **extra,
         )
         self.app = create_app(ApiDeps(
@@ -601,22 +625,54 @@ class World:
             lessons=self.store, systems=self.store, writes=self.store,
             secrets=InMemorySecrets(), checker=StubSystemChecker(),
             artifact_links=StubArtifactLinks(),
-            identity=self.service, frontend_origin=FRONTEND_ORIGIN,
+            identity=self.service, frontend_origin=FRONTEND_ORIGIN, tenants=self.tenants,
         ))
 
     def restart(self, *, administrators: Sequence[str] = (),
                 tenants: Mapping[str, Sequence[str]] | None = None) -> None:
         """A process start: bootstrap (may raise `BootstrapRefused`), then the sender's first pass."""
         self.build(administrators=administrators, tenants=tenants or {})
+        self.call(self._seed, tenants or {})
         self.call(self.service.start)
         self.send_pending()
+
+    async def _seed(self, tenants: Mapping[str, Sequence[str]]) -> None:
+        for tenant, emails in tenants.items():
+            await self._add_tenant(str(tenant), "active")
+            await self._seed_first_members(str(tenant), tuple(emails))
+
+    async def _add_tenant(self, tenant: str, state: str) -> None:
+        if tenant in {r.id for r in await self.tenants.tenants()}:
+            return
+        added = self.tenants.add_tenant(tenant, created_at=self.clock(), state=state)
+        if inspect.isawaitable(added):  # GAP-0-1: the seeder's sync/async shape is not pinned
+            await added
+
+    async def _seed_first_members(self, tenant: str, emails: Sequence[str]) -> None:
+        repo, now = self.raw_repo, self.clock()
+        if await repo.tenant_has_ever_had_membership(tenant):
+            return
+        for email in dict.fromkeys(emails):
+            user = await repo.ensure_user(email, now=now)
+            row = await repo.ensure_invitation(user.id, tenant, invited_by=_SYSTEM, now=now)
+            if row is None:
+                continue
+            if user.status == "invited":
+                await repo.request_set_password(user.id, now=now)
+            else:
+                await repo.request_notification(row.id, now=now)
+
+    def seed_first_members(self, tenant: str, emails: Sequence[str]) -> None:
+        """Seed `emails` as first members of an existing tenant (see the module docstring)."""
+        self.call(self._seed_first_members, str(tenant), tuple(emails))
 
     def send_pending(self) -> None:
         """One run of the sender. It must not raise: a port failure only leaves that send pending."""
         self.call(self.service.send_pending)
 
-    def register(self, tenant: str) -> None:
-        self.call(register_tenant, self.repo, TenantId(tenant), now=self.clock())
+    def register(self, tenant: str, *, state: str = "active") -> None:
+        """Seed `tenant` through the tenant twin's seeder (r9 DC-6: no port method registers a tenant)."""
+        self.call(self._add_tenant, str(tenant), state)
 
     async def _asgi(self, scope: Any, receive: Any, send: Any) -> None:
         await self.app(scope, receive, send)
