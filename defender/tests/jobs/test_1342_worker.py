@@ -929,7 +929,7 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
                 if run_id == bad:
                     raise RuntimeError("the job-end read fell over")
                 return original(self, run_id)
-            monkeypatch.setattr(job_lane.JobLane, "read_job_end", read_job_end)
+            monkeypatch.setattr(job_lane.JobLane, "read_job_end", read_job_end)  # lint-monkeypatch: ok — the lane is built inside the Worker and no seam injects a lane stand-in; this fails exactly one run's job-end read
         await make_worker(used, world["root"], argv).drain()
 
     stored = row(world["dsn"], bad)

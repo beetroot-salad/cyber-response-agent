@@ -205,7 +205,8 @@ def test_m5_the_alert_file_is_read_once_and_the_digest_is_checked_on_those_bytes
     ran = run_job(scene, run_id)
 
     assert reads == [alert_file.name], f"the alert file was read {len(reads)} times"
-    assert ran.raised is None and ran.calls["lifecycle"] == 1, ran
+    assert ran.raised is None, ran
+    assert ran.calls["lifecycle"] == 1, ran
     assert RunPaths(scene.runs / run_id).alert.read_bytes() == ALERT_BYTES
     assert scene.job_end(run_id) == SETTLED
 
