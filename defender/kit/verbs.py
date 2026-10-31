@@ -84,6 +84,9 @@ class VerbContext(Protocol):
     @property
     def as_of(self) -> datetime | None: ...
 
+    @property
+    def arrived_by(self) -> datetime | None: ...
+
 
 Verb = Callable[..., Any]
 

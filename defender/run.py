@@ -45,13 +45,15 @@ import asyncio  # noqa: E402
 import contextlib  # noqa: E402
 import functools  # noqa: E402
 import inspect  # noqa: E402
+import re  # noqa: E402
 from collections.abc import Callable, Collection, Mapping  # noqa: E402
+from datetime import UTC, datetime  # noqa: E402
 from typing import Any, Protocol  # noqa: E402
 
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _log  # noqa: E402
+from defender import _clock, _log  # noqa: E402
 from defender.records import formats  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
@@ -71,6 +73,7 @@ from defender.systems.system_status import RunSystems  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
 from defender.systems.verbs import (  # noqa: E402
     ModuleVerbRegistry,
+    ReadCut,
     RegistryError,
     RosterRead,
     ServingAbort,
@@ -122,7 +125,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="the tenant this run belongs to; required on every run, --episode "
                         "included (there is no default). On --episode the episode is looked "
                         "up under this tenant's folder, and its arm roster must name --world")
+    p.add_argument("--as-of", default=None, type=_aware_moment, metavar="T",
+                   help="serve the run as of T (ISO-8601 with an offset or Z): the run clock "
+                        "starts at T and every read is cut at event time T")
+    p.add_argument("--arrived-by", default=None, type=_aware_moment, metavar="A",
+                   help="also cut every read at arrival time A (needs --as-of)")
     ns = p.parse_args(argv)
+    # A cut run's refusals, before any run dir or episode is looked up (#1347).
+    if ns.arrived_by is not None and ns.as_of is None:
+        p.error("--arrived-by needs --as-of: an arrival cut is only ever beside an event-time cut")
+    if ns.as_of is not None and (ns.episode is not None or ns.world is not None):
+        p.error("--as-of is not available with --episode/--world: a sibling's clock and cut are "
+                "its branch point's")
+    if ns.as_of is not None and ns.update_ticket:
+        p.error("--update-ticket is not available with --as-of: a run served as of another "
+                "moment is not a live investigation, and its ticket row would enter the case "
+                "history as one")
     if ns.episode is not None and ns.alert is not None:
         p.error(
             "the positional alert is illegal with --episode: the manifest already names the "
@@ -134,6 +152,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         p.error("--episode needs --world: a manifest declares a family, and a process is one "
                 "arm")
     return ns
+
+
+#: The offset an `--as-of` / `--arrived-by` value must end with.
+_SPELLED_OFFSET = re.compile(r"(Z|[+-]\d\d:?\d\d)\Z")
+
+
+def _aware_moment(text: str) -> datetime:
+    """An `--as-of` / `--arrived-by` value: ISO-8601 carrying its offset (or `Z`), as aware UTC.
+    A time with no offset is refused rather than read as UTC: the operator says which instant."""
+    text = text.strip()
+    if not _SPELLED_OFFSET.search(text):
+        raise argparse.ArgumentTypeError(f"{text!r} names no offset; spell it with Z or +HH:MM")
+    moment = _clock.parse_iso_utc(text)
+    if moment is None:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an ISO-8601 time")
+    return moment.astimezone(UTC)
+
+
+def _read_cut(ns: argparse.Namespace) -> ReadCut | None:
+    """The run's read cut from `--as-of` / `--arrived-by`, or `None` for an ordinary run."""
+    return None if ns.as_of is None else ReadCut(ns.as_of, ns.arrived_by)
 
 
 def _source_one_provider_key(prov: providers.Provider) -> int:
@@ -265,7 +304,7 @@ class _Investigate(Protocol):
         self, *, alert_path: Path, run: Run, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
-        source: Run | None = None,
+        source: Run | None = None, cut: ReadCut | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -304,6 +343,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     #: judged once. `None` (a direct caller with no `main` before it): the roster is
     #: `defender_dir`'s, read here, and the driver judges it.
     systems: RunSystems | None = None,
+    #: The run's read cut (`--as-of` / `--arrived-by`, #1347): set on every call by the
+    #: registry, and its `as_of` is the run clock's origin. `None` on an ordinary run and on a
+    #: world, whose cut is its branch point.
+    cut: ReadCut | None = None,
 ) -> dict[str, Any]:
     """The production investigation call, as a synchronous callable (injected by the
     lifecycle so tests can pass a plain function).
@@ -367,11 +410,17 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             )
         finally:
             verbs.close()
-    verbs = registry_cls(roster, tenant.grants.gather, grant_home=tenant.table_pointer)
+    if cut is not None and world is not None:
+        raise TypeError("_drive_investigation(cut=…) is refused with world=…: a world's cut is "
+                        "its branch point")
+    # Passed only when set, so an ordinary run calls its seams exactly as before the cut existed.
+    cut_kw: dict[str, Any] = {} if cut is None else {"cut": cut}
+    clock_kw: dict[str, Any] = {} if cut is None else {"clock_origin": cut.as_of}
+    verbs = registry_cls(roster, tenant.grants.gather, grant_home=tenant.table_pointer, **cut_kw)
     return investigate(
         alert_path=alert_path, run=run, defender_dir=defender_dir,
         model_name=model_name, model_override=model_override, box=box, verbs=verbs,
-        roster=roster, systems=systems, tenant=tenant,
+        roster=roster, systems=systems, tenant=tenant, **clock_kw,
     )
 
 
@@ -412,6 +461,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: holds that verdict (`None`: the drive reads `defender_dir`'s roster and the driver
     #: judges it, as for a direct caller).
     systems: RunSystems | None = None,
+    #: The run's read cut (#1347), threaded to the drive; `None` on an ordinary run.
+    cut: ReadCut | None = None,
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
@@ -437,6 +488,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent, tenant_id=tenant.tenant_id,
                     write_verdict=write_verdict, **staged)
     drive = _judged(investigate, systems)
+    # Passed only when set: an injected seam that predates the cut is called as before.
+    cut_kw: dict[str, Any] = {} if cut is None else {"cut": cut}
     investigation_ok = False
     try:
         summary = drive(
@@ -451,6 +504,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             episode=episode,
             serving=serving,
             source=source,
+            **cut_kw,
         )
         investigation_ok = True
     finally:
@@ -736,6 +790,7 @@ def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     alert: Path, *, tenant: tenancy.Tenant, model: str | None, run: Run | None = None,
     world: Any = None, settings: Path | None = None,
     knowledge: run_knowledge.KnowledgeSource | None = None,
+    started_at: datetime | None = None,
 ) -> Run:
     """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
     handle, stamped with code, model, the request's tenant and (for a sibling) the manifest's
@@ -747,7 +802,8 @@ def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     """
     try:
         run = _run.materialize_run(alert, run=run, tenant=tenant, model=model, world=world,
-                                   settings=settings, knowledge=knowledge)
+                                   settings=settings, knowledge=knowledge,
+                                   started_at=started_at)
     except TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
@@ -867,6 +923,9 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
     # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
     # injection seams defaulting to production.
     ns = parse_args(argv)
+    cut = _read_cut(ns)
+    # Passed to the seams only when set, so an ordinary run calls them exactly as before.
+    cut_kw: dict[str, Any] = {} if cut is None else {"cut": cut}
     # Bound under its production name so the curation lane is visibly reached from here.
     enqueue_curation = enqueue
 
@@ -946,8 +1005,12 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
 
             # The handle, not just its directory: the post-run step saves the run page through it.
             # The alert mapping is the run copy's, and the stamp records the export copied (O-B).
-            run = (materialize(alert, run=early, tenant=accepted, model=model,
-                               settings=copy.settings, knowledge=knowledge)
+            # A cut run's recorded start is its run clock's origin, never the wall time (O5);
+            # named only on a cut run, so a seam that predates the cut is called as before.
+            build = (materialize if cut is None
+                     else functools.partial(materialize, started_at=cut.as_of))
+            run = (build(alert, run=early, tenant=accepted, model=model,
+                         settings=copy.settings, knowledge=knowledge)
                    if world is None
                    else materialize(alert, run=early, tenant=accepted, model=model, world=world,
                                     settings=copy.settings, knowledge=knowledge))
@@ -979,6 +1042,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                         episode=episode,
                         systems=systems,
                         **seams,
+                        **cut_kw,
                     )
                 except (ServingAbort, BaseExceptionGroup) as escaped:
                     abort = _serving_abort(escaped)

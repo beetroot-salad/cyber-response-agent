@@ -9,7 +9,6 @@ import json
 import logging
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
-from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -32,6 +31,7 @@ from defender.systems.verbs import (
     DENIED,
     TABLE_POINTER,
     ModuleVerbRegistry,
+    ReadCut,
     VerbDecision,
 )
 
@@ -196,7 +196,7 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,  # 
                                      for (e, f), v in staged.facts.items()],
                               answer=None)
 
-    with registry._turn(_carrying(ctx, as_of=registry.as_of), pauses_clock=False):
+    with registry._turn(ctx, pauses_clock=False):
         registry.oracle.serve((system, verb, asked), base,
                               lambda: registry._real(system, base), commit, fixed=fixed,
                               live=live)
@@ -250,9 +250,9 @@ class WorldRegistry(ModuleVerbRegistry):
         `source_run_dir` is the source run's folder, as the opened source `Run` hands it out
         (#1105 PR 2: never the manifest's recorded path); its alert is the oracle's view of the
         case, and `None` serves none."""
-        super().__init__(roster, grant, grant_home=grant_home)
         # Validate the clock here, once: every query this world issues, the oracle's own
-        # included, carries it, so no oracle-side context is ever built without it (O-31).
+        # included, carries it — the base registry sets it on every call's context as the
+        # world's read cut — so no oracle-side read is ever served without it (O-31).
         #
         # `utcoffset() == timedelta(0)`, not `tzinfo is not None`: an aware non-UTC datetime
         # would format a trailing `Z` that is wrong by its offset.
@@ -266,6 +266,7 @@ class WorldRegistry(ModuleVerbRegistry):
                 f"as_of must be an aware UTC datetime, got {as_of!r} (offset "
                 f"{as_of.utcoffset()!r}) — a naive or offset moment formats a `Z` that lies by "
                 "that offset")
+        super().__init__(roster, grant, grant_home=grant_home, cut=ReadCut(as_of))
         self.as_of = as_of
         world_id = getattr(world, "world_id", None)
         if (fault := uuid_id_fault(world_id, "world")) is not None:
@@ -385,9 +386,8 @@ class WorldRegistry(ModuleVerbRegistry):
         @functools.wraps(fn)
         def served(ctx: Any, **params: Any) -> Any:
             _refuse_unstorable(system, verb, params)
-            # The clock is set on every call: every read this world makes, the oracle's own
-            # included, is bounded by the branch point (O6).
-            ctx = _carrying(ctx, as_of=self.as_of)
+            # `fn` is the base registry's, which sets the world's cut on every call: every read
+            # this world makes, the oracle's own included, is bounded by the branch point (O6).
             return serve_one(self, system, verb, fn, ctx, params)
 
         return served
@@ -478,9 +478,9 @@ class WorldRegistry(ModuleVerbRegistry):
                                         f"({unclosed!r}) while the turn was aborting")
 
     def _oracle_context(self) -> Any:
-        """The context an oracle-side query runs in: that of the call whose turn is held,
-        carrying the branch-point clock."""
-        return _carrying(self._turn_ctx, as_of=self.as_of)
+        """The context an oracle-side query runs in: that of the call whose turn is held. The
+        branch-point cut is set on it by the base registry's verbs the query runs through."""
+        return self._turn_ctx
 
     def _real(self, system: str, base: Any) -> RealData:
         """This world's real data as the host checks read it: the family recording, every base
@@ -652,21 +652,3 @@ def _ledger_write_failed(call: ServedCall, failed: OSError) -> CallRecordWriteFa
         TRUNCATED_BY_SERVED_LEDGER,
         f"the {call.source} row of {call.system}.{call.verb} "
         f"({call.call_id or 'no call id'}): {failed!r}")
-
-
-def _carrying(ctx: Any, **values: Any) -> Any:
-    """`ctx` with `values` set on the fields it declares, or `ctx` untouched.
-
-    The conditions for setting each field stay at the call sites; this holds only the guard.
-
-    A ctx that cannot carry a field (a test stub; the real seam builds `VerbContext`) is
-    returned untouched, because `replace` raising `TypeError` inside `served` would be filed as
-    an infra fault. `fields()` rather than `__dataclass_fields__`, which also holds `ClassVar`
-    and `InitVar` pseudo-fields; `f.init` excludes `init=False` fields, on which `replace`
-    raises `ValueError`.
-    """
-    if not is_dataclass(ctx) or isinstance(ctx, type):
-        return ctx
-    declared = {f.name for f in fields(ctx) if f.init}
-    settable = {name: value for name, value in values.items() if name in declared}
-    return replace(ctx, **settable) if settable else ctx

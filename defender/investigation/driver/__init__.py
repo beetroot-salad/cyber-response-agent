@@ -25,6 +25,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -509,7 +510,8 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
     except OSError as e:
         _logger.warning(f"run-end record write skipped: {e!r}")
     try:
-        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
+        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms,
+                            restamp=logger.restamp)
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
         _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
         try:
@@ -615,11 +617,13 @@ def _snapshot_writer(  # noqa: PLR0913 — the run's identity plus the caps its 
         base_request_limit=bounds.base_request_limit, extra_turns=bounds.extra_turns)
 
 
-def _write_trace_or_empty(run_dir: Path, store: Any, session_id: str, wall_ms: float) -> None:
+def _write_trace_or_empty(run_dir: Path, store: Any, session_id: str, wall_ms: float,
+                          restamp: observe.Restamp | None = None) -> None:
     """Write the run's tool trace, or an empty one when the store cannot produce it; never
     fails the run (the trace is observability)."""
     try:
-        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
+        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms,
+                            restamp=restamp)
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
         _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
         try:
@@ -657,6 +661,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     orient_shim: orient.ShimRunner | None = None,
     run_state: RunState | None = None,
     clock: ClockSource | None = None,
+    clock_origin: datetime | None = None,
 ) -> dict:
     # `tenant` is resolved once at the entry point (settings folder, permissions, item 3's
     # dispatch identity). Required: there is no process-level fallback.
@@ -670,8 +675,14 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # `clock` is the run clock's source (#1255 "Time"): a zero-argument callable returning an
     # aware UTC datetime, the single source every model-visible time of the run is read from
     # (`RunState.now`). Omitted, the host's own (wall time).
+    #
+    # `clock_origin` is the run clock's reading at the run's start when it is not the source's
+    # own (a run served as of another moment, `run.py --as-of`, #1347 O5): the clock starts
+    # there and advances by the source.
     run_dir, run_id = run.run_dir, str(run.id)
     state = _run_state_at_boundary(run_state, run_dir, run_id, clock)
+    if clock_origin is not None:
+        state.resume_clock(clock_origin, 0.0)
     _box_follows_run_clock(box, state)
     model_name = resolve_main_model(model_name)
     # Captured before the default is resolved below: with no injected `verbs=`, lead-0 must not
@@ -702,7 +713,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         else 0.0)
     # Under `wire_logs/`, not the run root, so it is outside the agents' one-segment run-dir
     # read shape.
-    logger = observe.RequestLogger.from_record(run.observability.wire_log)
+    # A run whose clock does not start at the wall (`clock_origin`) logs its messages' wall
+    # stamps on the run clock, so no wall time sits in its run dir beside the shifted clock.
+    logger = observe.RequestLogger.from_record(
+        run.observability.wire_log,
+        restamp=None if clock_origin is None else state.on_run_clock)
 
     # The wire log and the store are released by this block, on every exit however the run ends:
     # a path left in `observe._ACTIVE_PATHS` would refuse a later run on this run dir, and a
@@ -807,7 +822,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         wall_ms = (time.monotonic() - run_started) * 1000.0
 
         result = agent_run.result if agent_run is not None else None
-        _write_trace_or_empty(run_dir, store, session_id, wall_ms)
+        _write_trace_or_empty(run_dir, store, session_id, wall_ms, restamp=logger.restamp)
         output = result.output if result is not None else None
         return _run_summary(
             output=output, model_name=model_name, requests=logger.n_requests,

@@ -6,6 +6,8 @@ import hashlib
 import json
 import logging
 import os
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from defender._clock import now_iso
+from defender._clock import now_iso, parse_iso_utc
 from defender.configuration import env_int
 from defender._io import JSON_NESTING_LIMIT, guarded_mkdir, json_safe, open_guarded, write_guarded
 from defender.records import Run, RUN_LAYOUT, RunPaths
@@ -70,6 +72,36 @@ def _trim(obj: Any, cap: int) -> Any:
     return obj
 
 
+#: A wall-clock moment as the run clock reads it (`RunState.on_run_clock`): applied to the
+#: `timestamp` the model library stamps each message and part with from the wall, so a run whose
+#: clock does not read the wall (#1347 O5) writes no wall time into its run dir.
+Restamp = Callable[[datetime], datetime]
+
+
+def _restamped(message: Any, restamp: Restamp) -> Any:
+    """`message` (one dumped message) with its own `timestamp` and each part's restamped. Only
+    those: a tool result's content or a call's arguments are evidence, written as they were."""
+    if not isinstance(message, dict):
+        return message
+    out = dict(message)
+    moment = parse_iso_utc(out.get("timestamp"))
+    if moment is not None:
+        out["timestamp"] = _z(restamp(moment))
+    parts = out.get("parts")
+    if isinstance(parts, list):
+        out["parts"] = [_part_restamped(part, restamp) for part in parts]
+    return out
+
+
+def _part_restamped(part: Any, restamp: Restamp) -> Any:
+    moment = parse_iso_utc(part.get("timestamp")) if isinstance(part, dict) else None
+    return part if moment is None else {**part, "timestamp": _z(restamp(moment))}
+
+
+def _z(moment: datetime) -> str:
+    return moment.isoformat().replace("+00:00", "Z")
+
+
 def encode_wire_record(record: dict) -> str:
     return json.dumps(record, ensure_ascii=WIRE_LOG_ENSURE_ASCII)
 
@@ -81,6 +113,9 @@ _EVER_LOGGER_PATHS: set[str] = set()
 
 
 class RequestLogger:
+
+    #: Set by `from_record(restamp=…)`: the run clock's reading of a message's wall stamp.
+    restamp: Restamp | None = None
 
     def __init__(self, path: Path):
         self.path = path
@@ -105,11 +140,13 @@ class RequestLogger:
         self._denial_seq = 0
 
     @classmethod
-    def from_record(cls, record: Any, *, continuing: bool = False) -> RequestLogger:
+    def from_record(cls, record: Any, *, continuing: bool = False,
+                    restamp: Restamp | None = None) -> RequestLogger:
         """A logger writing to `record`. A stream is started empty the first time this process
         opens its path, unless `continuing`: then it is appended to, and its policy-denial
         numbering goes on from the denials it already holds (a branch arm's log, restored to
-        what its source held at the branch point, #1255 P2)."""
+        what its source held at the branch point, #1255 P2). `restamp` moves each logged
+        message's wall stamps onto the run clock (`Restamp`); `None` writes them as stamped."""
         path = record.path
         key = str(Path(path).resolve())
         if key in _ACTIVE_PATHS:
@@ -122,6 +159,7 @@ class RequestLogger:
         logger.path, logger._key = path, key
         logger._record, logger._fh, logger._closed = record, None, False
         logger._cap = _max_chars()
+        logger.restamp = restamp
         logger.messages = []
         logger._seq = {}
         logger.n_requests = logger._denial_seq = 0
@@ -139,6 +177,8 @@ class RequestLogger:
     ) -> None:
         seq = self._seq.get(agent_id, 0)
         self._seq[agent_id] = seq + 1
+        if self.restamp is not None:
+            message = _restamped(message, self.restamp)
         rec = {
             "event_type": "message",
             "agent_id": agent_id,
@@ -316,11 +356,13 @@ def _tool_args(value: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _iso(ts: Any) -> Any:
+def _iso(ts: Any, restamp: Restamp | None = None) -> Any:
+    if restamp is not None and isinstance(ts, datetime) and ts.utcoffset() is not None:
+        ts = restamp(ts)
     return ts.isoformat() if hasattr(ts, "isoformat") else ts
 
 
-def _assistant_event(message: ModelResponse, coord: str) -> dict:
+def _assistant_event(message: ModelResponse, coord: str, restamp: Restamp | None = None) -> dict:
     content: list[dict] = []
     for part in message.parts:
         if isinstance(part, TextPart):
@@ -342,11 +384,11 @@ def _assistant_event(message: ModelResponse, coord: str) -> dict:
         },
     }
     if getattr(message, "timestamp", None):
-        ev["timestamp"] = _iso(message.timestamp)
+        ev["timestamp"] = _iso(message.timestamp, restamp)
     return ev
 
 
-def _user_event(message: Any) -> dict | None:
+def _user_event(message: Any, restamp: Restamp | None = None) -> dict | None:
     returns = [p for p in getattr(message, "parts", []) if isinstance(p, ToolReturnPart)]
     if not returns:
         return None
@@ -357,12 +399,14 @@ def _user_event(message: Any) -> dict | None:
     }
     ts = next((getattr(p, "timestamp", None) for p in returns if getattr(p, "timestamp", None)), None)
     if ts:
-        ev["timestamp"] = _iso(ts)
+        ev["timestamp"] = _iso(ts, restamp)
     return ev
 
 
-def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -> None:
-    """`{run_dir}/tool_trace.jsonl`: the events this run produced, and its own cost.
+def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float,
+                restamp: Restamp | None = None) -> None:
+    """`{run_dir}/tool_trace.jsonl`: the events this run produced, and its own cost. `restamp`
+    moves each event's wall stamp onto the run clock (`Restamp`), as the wire log's.
 
     Sliced at the branch point: a resumed run hydrates the source run's prefix too, which
     would otherwise be reported (and billed, e.g. in `run_stats.py`) once per sibling.
@@ -382,9 +426,9 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -
     events: list[dict] = []
     for message, row in zip(messages, coords, strict=True):
         if isinstance(message, ModelResponse):
-            events.append(_assistant_event(message, row["coord"]))
+            events.append(_assistant_event(message, row["coord"], restamp))
         else:
-            user = _user_event(message)
+            user = _user_event(message, restamp)
             if user:
                 events.append(user)
 

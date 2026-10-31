@@ -25,6 +25,8 @@ touched it:
 
 `activate` is plan + apply in one call. `attacks/runner.py --chaos` calls
 them separately so nothing that can fail runs after the synthetic CR is posted.
+While a capture holds the lab-server lock (`chaos/lock.py`), `activate` and the
+runner both refuse unless handed the capture's `--lock-token`.
 
 `execer=`, `profiles_dir=`, `rules_dir=` and `ledger_dir=` are injectable so tests
 never need the live stack.
@@ -52,6 +54,7 @@ if str(HERE.parent) not in sys.path:
     sys.path.insert(0, str(HERE.parent))
 
 from chaos import ledger as ledger_mod  # noqa: E402
+from chaos import lock as lock_mod  # noqa: E402
 from chaos.audit import audit_payloads, scan_markers  # noqa: E402
 from chaos.guard import check_mutations, check_profile  # noqa: E402
 from chaos.mutations import TOMBSTONE, resolve_mutations  # noqa: E402
@@ -438,7 +441,13 @@ def activate(
     profiles_dir: Optional[Path] = None,
     rules_dir: Optional[Path] = None,
     ledger_dir: Optional[Path] = None,
+    lock_store: Any = None,
+    lock_token: Optional[str] = None,
 ) -> dict[str, Any]:
+    # While a capture holds the lab (#1347 O10), only the holder's token activates; checked
+    # before the first read of the stack. `None` store = no check (library callers, tests).
+    if lock_store is not None:
+        lock_mod.require(lock_store, lock_mod.CAPTURE, lock_token)
     execer = execer if execer is not None else DockerExecSeam()
     planned = plan(
         profile_id, seed=seed, execer=execer, profiles_dir=profiles_dir, rules_dir=rules_dir, ledger_dir=ledger_dir
@@ -799,7 +808,8 @@ def _cli_plan(args: argparse.Namespace) -> int:
 
 
 def _cli_activate(args: argparse.Namespace) -> int:
-    record = activate(args.profile, seed=args.seed)
+    record = activate(args.profile, seed=args.seed, lock_store=lock_mod.DockerLockStore(),
+                      lock_token=args.lock_token)
     print(json.dumps(record, indent=2, default=str))
     return 0
 
@@ -842,6 +852,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pact = sub.add_parser("activate", help="activate a chaos profile")
     pact.add_argument("profile")
     pact.add_argument("--seed", type=int, default=None)
+    pact.add_argument("--lock-token", default=None,
+                      help="the capture lock's token; a held lock refuses activate without it")
 
     prev = sub.add_parser("revert", help="revert an active chaos profile")
     which = prev.add_mutually_exclusive_group(required=True)
@@ -870,6 +882,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     except SeamError as exc:
         print(f"stack unreachable or refused the request: {exc}", file=sys.stderr)
         return 3
+    except lock_mod.LockError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 4
 
 
 if __name__ == "__main__":

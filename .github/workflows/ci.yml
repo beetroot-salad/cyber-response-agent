@@ -605,6 +605,14 @@ jobs:
       - name: Run eval tool tests
         run: defender/.venv/bin/python -m pytest evaluations/tests -q
 
+      # The lab's own tests (capture, launcher, locks, ps shim, stub clocks, chaos control,
+      # attack runner) live beside the lab code in playground-v2/*/tests, which no other step
+      # reaches (#1347). Every lab operation is faked; the defender venv carries their deps
+      # (pyyaml, fastapi + httpx from --extra api) and the product's cut builder they import.
+      # Same idiom as the steps above: the defender venv's pytest, from the repo root.
+      - name: Run lab tests
+        run: defender/.venv/bin/python -m pytest playground-v2/*/tests -q
+
   code-smells:
     runs-on: ubuntu-latest
     timeout-minutes: 10

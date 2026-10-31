@@ -686,6 +686,30 @@ cd /workspace/playground-v2
 - `audit` checks the sample against what the ledger says was written; harness-shaped words are advisories only. Its positive control is the fault's own observable effect, never something injected.
 - **The CMDB stub must carry `GET`/`PUT /admin/overlay/{name}`** (added with #401): `docker --context soc-playground compose up -d --build cmdb` before the first activation against a stack built earlier, or every activation fails at the snapshot with HTTP 405 (nothing pushed, no record written).
 - Unit suite: `chaos/tests/` — see its `conftest.py` for the `uv run` invocation (under the machine-wide pytest lock).
+- While a capture holds the lab (next section), `activate` and the runner refuse unless handed the capture's `--lock-token`.
+
+### Frozen held-out cases (issue #1347)
+
+A held-out case carries a **freeze**: `freeze.yaml` beside its `ground_truth.yaml` names the alert time, the freeze moment `as_of = alert + 1 h`, the guaranteed window `[max(history_start, alert − 31 d), as_of]`, Elasticsearch's own clock reading `captured_at` (the arrival cut), the log fingerprint (per backing index × hour: `COUNT(*)`, `SUM(_version)`), the chaos ledger ref, and each large part by sha256. The parts' bytes (host images, volume copies, stub dumps and images, captured process trees) live on the lab disk under `$V2_FROZEN_PARTS_DIR/<slug>/`, never in git. Run both scripts with the defender venv: they import the product's cut builder (`elastic_adapter.cut_clause`).
+
+```bash
+# Capture (one case at a time; takes the lab-server capture lock, holds the fault until as_of):
+defender/.venv/bin/python playground-v2/scripts/capture_case.py evaluations/fixtures/held_out/<slug> \
+    --scenario <id> [--chaos <profile>] [--seed 42] --history-start "$V2_HISTORY_START" --parts-dir "$V2_FROZEN_PARTS_DIR"
+# Label against a reference run (serves the freeze, writes no index row, prints the run id),
+# then fill `confirmed: {by, at, reference_run}` in freeze.yaml and commit it for review:
+defender/.venv/bin/python playground-v2/scripts/launch_frozen.py evaluations/fixtures/held_out/<slug> \
+    --tenant "$TENANT_ID" --parts-dir "$V2_FROZEN_PARTS_DIR" --reference
+# Every scored run (verifies parts, serves the freeze, re-fingerprints, appends the index row):
+defender/.venv/bin/python playground-v2/scripts/launch_frozen.py evaluations/fixtures/held_out/<slug> \
+    --tenant "$TENANT_ID" --parts-dir "$V2_FROZEN_PARTS_DIR" --index F [--knowledge-commit K]
+```
+
+- **Locks** (`chaos/lock.py`) are records inside the `elasticsearch` container (`/tmp/lab-locks/`), taken by an exclusive create over `docker --context soc-playground exec`, so they hold whichever machine fires. `capture` guards the runner and `chaos/ctl.py activate`; `frozen-engine` serialises launches. They never expire: `python3 chaos/lock.py status|clear <name>` is the operator's explicit clear of a dead holder. A capture whose revert failed keeps its lock on purpose — revert the fault (`chaos/ctl.py revert --all`), then clear it. A recreate of the `elasticsearch` container drops the records.
+- **The frozen engine** is a Docker-in-Docker container (`lab-engine`) on the VPS, reached through an ssh tunnel. It holds inert role hosts (committed images + copied `/var/log` and `/var/lib/elastic-agent`; no agent, baseline or shipping), the five stubs started from their dumps with `V2_STUB_AS_OF=<as_of>` and `STANDING_REFRESH_SECONDS=0`, and stand-ins named `elasticsearch` / `kibana` that forward to the live cluster. The run sees it through a copy of the operator's Docker config whose `soc-playground` context alone is repointed; `DOCKER_HOST` is left as it is.
+- **`ps` on a replica host** is `hosts/base/ps-shim` (baked dormant into every host image at `/opt/soc-playground/ps-shim`, linked in as `/usr/local/bin/ps` only on replicas): the proc-tree verb's argv prints the tree captured at `as_of`. container-inspect is a named gap.
+- **Stub clocks:** change-mgmt and ticket-server read `V2_STUB_AS_OF` at start and answer every "now" with it; change-mgmt's `STANDING_REFRESH_SECONDS=0` starts no refresh loop.
+- Unit suite: `scripts/tests/` (all lab operations faked; CI runs every `playground-v2/*/tests`).
 
 ### Shuffle SOAR (batch 12)
 

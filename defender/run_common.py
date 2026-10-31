@@ -42,6 +42,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     alert: Path, *, tenant: tenancy.Tenant, run: Run | None = None, model: str | None = None,
     world: ResumeWorld | None = None,
     settings: Path | None = None, knowledge: KnowledgeSource | None = None,
+    started_at: _dt.datetime | None = None,
 ) -> Run:
     """Build the run directory of a fresh run and return the tenant-bound handle the run's later
     records are saved through. No caller names the run's id (#1279 A3): `run` is the handle the
@@ -54,13 +55,16 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     `settings` is the settings half the run reads (its run copy's, #1108 P4: the alert mapping
     comes from it) and `knowledge` the source of the knowledge it reads, whose commit the stamp
     records (O-B: the export copied, never a clone's HEAD). Both default to what a caller that
-    names no run copy has: the tenant's own folder, and a stamp that says nothing of knowledge."""
+    names no run copy has: the tenant's own folder, and a stamp that says nothing of knowledge.
+
+    `started_at` is the start the stamp records when the run's clock does not start now (a run
+    served as of another moment, #1347 O5: its run clock's origin); `None` is the wall time."""
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     if world is not None and run is None:
         raise TypeError("materialize_run(world=…) needs the arm's handle (`run=`): an arm is made "
                         "only from its episode's roster")
-    started_at = _started_at()
+    started = _started_at() if started_at is None else _z_seconds(started_at)
     if settings is None:
         settings = tenancy.clone_halves(tenant)[1]
     front_door = _admit_input(alert, settings=settings, world=world)
@@ -92,14 +96,18 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     _stamp(
         run, knowledge=knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
-        started_at=started_at, alert_label=_alert_label(alert),
+        started_at=started, alert_label=_alert_label(alert),
     )
     return run
 
 
 def _started_at() -> str:
     """When run setup started this run, as ISO-8601 UTC text to the second (#1187 O7)."""
-    return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return _z_seconds(_dt.datetime.now(_dt.UTC))
+
+
+def _z_seconds(moment: _dt.datetime) -> str:
+    return moment.astimezone(_dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 @_dataclasses.dataclass(frozen=True)
