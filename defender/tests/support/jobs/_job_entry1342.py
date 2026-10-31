@@ -5,6 +5,8 @@ lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `
 
 - `replay` (O16): the real driver over a replay model that writes the golden investigation and
   closes with the golden's disposition.
+- `replay-fault-after-close`: the same, but the replay model's request after the close tool committed
+  raises (a provider fault), so the real driver raises after the close.
 - `hold` (death tie): the investigation blocks in the main thread; `hold-committed` is the same after
   closing the report on the facts holder it is handed (r5 C2). Marks: `pid`, `in-lifecycle`,
   `start-token` (the token the box start was handed), `interrupted` (the exception type that reached the investigation), `stop-box-started`, then
@@ -39,11 +41,26 @@ def _unboxed(*_a, start_token=None, **_k):
     return box_mod.unboxed_executor()
 
 
-def _replay_lifecycle():
+class _ProviderFault(RuntimeError):
+    """What the replay model raises on the request after the close."""
+
+
+class _FaultsAfterClose(RH.ReplayFn):
+    """The replay model whose request after the scripted turns (the close was the last) raises, as a provider fault would."""
+
+    __name__ = "FaultsAfterClose"
+
+    def __call__(self, messages, info):
+        if self.calls >= len(self._turns):
+            raise _ProviderFault("the provider failed on the request after the close")
+        return super().__call__(messages, info)
+
+
+def _replay_lifecycle(*, fault_after_close: bool = False):
     from defender.records.formats import parse_report_text
 
     disposition = parse_report_text((GOLDEN / "report.md").read_text(encoding="utf-8")).disposition
-    main = RH.ReplayFn([
+    main = (_FaultsAfterClose if fault_after_close else RH.ReplayFn)([
         RH.Turn(tool_calls=[("append_block", {"text": (GOLDEN / "investigation.md").read_text(encoding="utf-8")})]),
         RH.Turn(tool_calls=[("close_investigation", {"disposition": disposition})]),
         RH.Turn(text="Investigation complete."),
@@ -78,6 +95,7 @@ def _hold_lifecycle(*, closes: bool):
                              start_box=_unboxed, stop_box=stop_box, scrub=lambda *a, **k: None)
 
 
-lifecycle = _replay_lifecycle() if mode == "replay" else _hold_lifecycle(closes=mode == "hold-committed")
+lifecycle = (_replay_lifecycle(fault_after_close=mode == "replay-fault-after-close")
+             if mode.startswith("replay") else _hold_lifecycle(closes=mode == "hold-committed"))
 sys.exit(run_py.job_main(argv, lifecycle=lifecycle, preflight=lambda *a, **k: 0,
                          visualize=lambda *a, **k: None, publish=lambda *a, **k: f"fresh {commit}"))
