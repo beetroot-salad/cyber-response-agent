@@ -10,16 +10,13 @@ import pytest
 
 from defender.integrations import identity_adapter
 from defender.kit.faults import ConfigFault
-from defender.systems.verbs import VerbContext
+from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import (
     ACCESS_FILE,
-    PROXY_URL_ENV,
-    proxy,
 )
 from defender.tests.tenancy.tenant_1108_p4._support import (
-    DEFENDER,
     current_commit,
     export_dir,
     git,
@@ -161,15 +158,15 @@ def test_d3_a_declaration_reached_through_a_link_in_the_export_is_refused(
 ])
 def test_d4_a_system_name_outside_the_grammar_is_refused_without_reading_beyond_it(
         tmp_path, data_root, name):
-    """A name that is not a lowercase system name, even if the token grants it and a file
-    sits where it would resolve, is a `ConfigFault` and nothing is read or sent. O2, O7."""
+    """A request naming a system outside the grammar, with a file where it would resolve, is a
+    `ConfigFault` and nothing is read or sent; a valid system is granted. O2, O7."""
     with T.rig(tmp_path / "forge", data_root) as r:
         settings = export_dir(r.t.tenant, r.t.commit) / "settings"
         for where in (settings / "other", settings / "systems" / "other"):
             where.mkdir(exist_ok=True)
             (where / "access.yaml").write_text(
                 H.declaration(r.up.url + T.BASE_PATH), encoding="utf-8")
-        refused = r.ask(system=name, grant={(name, "r")})
+        refused = r.ask(system=name)
         r.store.sets[(r.t.tenant_id, "other")] = T.static_set()
         control = r.ask()
 
@@ -214,18 +211,17 @@ def test_d3_adapter_over_the_working_tree_reaches_nothing_the_merged_declaration
         (Path(r.t.clone) / ACCESS).write_text(
             H.declaration(wt_up.url + T.BASE_PATH), encoding="utf-8")
         working_tree = run_tenant_for(r.t.tenant, dispatches_lead_zero=False)
-        with H.serve_asgi(proxy().create_app(
-                T.deps({r.t.tenant_id: T.exports_of(r.t)}, r.store, verifier=r.verifier,
-                       audit=r.audit))) as proxy_url:
-            def ctx(record):
-                return VerbContext(defender_dir=DEFENDER, run_dir=tmp_path / "episode",
-                                   env={PROXY_URL_ENV: proxy_url}, tenant=record,
-                                   request_token=r.tok())
-
+        with A.proxy_for(r.t, r.store, verifier=r.verifier, audit=r.audit) as (proxy_url, tap):
+            tok = r.tok()
             with pytest.raises(ConfigFault):
-                identity_adapter.get_user(ctx(working_tree), user="dev.dana")
+                identity_adapter.get_user(
+                    A.ctx_for(tmp_path / "episode", working_tree, proxy_url, tok),
+                    user="dev.dana")
+            assert tap.tokens == [tok], "the refusal must be the proxy's: it was asked once"
             assert wt_up.seen == []
-            merged = identity_adapter.get_user(ctx(T.run_record(r.t)), user="dev.dana")
+            merged = identity_adapter.get_user(
+                A.ctx_for(tmp_path / "episode", T.run_record(r.t), proxy_url, tok),
+                user="dev.dana")
 
     assert merged["path"].endswith("/users/dev.dana")
     assert [s.path for s in r.up.seen] == [f"{T.BASE_PATH}/users/dev.dana"]

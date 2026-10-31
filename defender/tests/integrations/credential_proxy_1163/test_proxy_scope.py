@@ -3,11 +3,11 @@ bounds. A refused request is never sent and never reads the store."""
 from __future__ import annotations
 
 import base64
-import json
 from datetime import timedelta
 
 import pytest
 
+from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.tenancy.tenant_1108_p4._support import OTHER_TENANT_ID
@@ -155,7 +155,7 @@ def test_s2_the_query_string_reaches_the_upstream_with_the_path(tmp_path, data_r
 # --- O3 route scope (routes are relative to the base, A2) ------------------------------------
 
 READS = (("POST", "/search"),)
-WRITES = (("POST", "/tickets/*/comments"), ("PUT", "/tickets/*"))
+WRITES = (("POST", "/tickets/*/comments"), ("PUT", "/tickets/*"), ("DELETE", "/tickets/*"))
 RW = {("identity", "rw")}
 RD = {("identity", "r")}
 
@@ -167,7 +167,9 @@ RD = {("identity", "r")}
     pytest.param("POST", "/search", RD, None, id="listed-post-read"),
     pytest.param("PUT", "/search", RW, "ConfinementFault", id="listed-read-other-method"),
     pytest.param("POST", "/admin", RW, "ConfinementFault", id="unlisted-post"),
-    pytest.param("DELETE", "/users/x", RW, "ConfinementFault", id="delete"),
+    pytest.param("DELETE", "/users/x", RW, "ConfinementFault", id="undeclared-delete"),
+    pytest.param("DELETE", "/tickets/7", RD, "ConfinementFault", id="declared-delete-read-grant"),
+    pytest.param("DELETE", "/tickets/7", RW, None, id="declared-delete-granted"),
     pytest.param("POST", "/tickets/7/comments", RD, "ConfinementFault", id="write-with-read-grant"),
     pytest.param("PUT", "/tickets/7", RD, "ConfinementFault", id="put-write-with-read-grant"),
     pytest.param("POST", "/tickets/7/comments", {("identity", "r"), ("cmdb", "rw")},
@@ -207,19 +209,19 @@ def test_s3_a_listed_route_is_relative_to_the_base_not_the_origin(tmp_path, data
 # --- O8 token bounds -------------------------------------------------------------------------
 
 def test_s4_a_token_out_of_its_bounds_is_refused_before_any_store_read(tmp_path, data_root):
-    """Expired, unverified or ungranted tokens are refused unsent and unread, each after a
-    verify call; the token in bounds is sent on the same proxy. O8, O7."""
+    """Unverified, expired, ungranted and garbage tokens are refused unsent and unread, the
+    unverified one by a verify call; the token in bounds is sent. O8, O7."""
     with T.rig(tmp_path / "forge", data_root) as r:
         r.verifier = H.FakeVerifier(False)
         r.rebuild()
         bad_sig = r.ask(tok=T.token(r.t.tenant_id, RD, signer=r.signer))
+        assert len(r.verifier.calls) >= 1
         r.verifier.verdict = True
         expired = r.ask(tok=r.tok(expires_in=timedelta(minutes=-1)))
         ungranted = r.ask(grant={("cmdb", "r")})
         garbage = r.ask(tok="not-a-token")
         assert [a["fault"] for a in (bad_sig, expired, ungranted, garbage)] == ["ConfigFault"] * 4
         assert (r.store.reads, r.up.seen) == ([], [])
-        assert len(r.verifier.calls) >= 1
         control = r.ask()
 
     assert (control["fault"], control["status"], r.up.paths()) == (None, 200, ["/api/v2/users/x"])
@@ -257,6 +259,31 @@ def test_s4_a_token_edited_under_its_signature_is_refused(tmp_path, data_root):
     assert up.seen[0].header("Authorization") == f"Bearer {KEY_A}"
 
 
+def test_s4_a_token_naming_one_tenant_signed_with_the_others_key_is_refused(
+        tmp_path, data_root):
+    """A token naming A but signed with B's key is `ConfigFault`, unsent, no store read;
+    control: signed with A's key it is sent. O8, O1, A11."""
+    with H.upstream() as up, T.crm_pair(tmp_path, data_root, up.url + "/crm", up.url + "/crm") as (a, b):
+        store = H.FakeStore({(a.tenant_id, "crm"): T.static_set(KEY_A),
+                             (b.tenant_id, "crm"): T.static_set(KEY_B)})
+        signer_a, signer_b = H.FakeSigner("tenant-a"), H.FakeSigner("tenant-b")
+        verifier = H.KeyedVerifier({a.tenant_id: signer_a, b.tenant_id: signer_b})
+        client = T.client_of(T.deps(
+            {a.tenant_id: T.exports_of(a), b.tenant_id: T.exports_of(b)}, store,
+            verifier=verifier))
+        url = f"{up.url}/crm/accounts"
+        crossed = T.ask(client, T.token(a.tenant_id, {("crm", "r")}, signer=signer_b),
+                        "crm", "GET", url)
+        assert crossed["fault"] == "ConfigFault"
+        assert (up.seen, store.reads) == ([], [])
+        assert {tenant for *_, tenant in verifier.calls} == {a.tenant_id}
+        control = T.ask(client, T.token(a.tenant_id, {("crm", "r")}, signer=signer_a),
+                        "crm", "GET", url)
+
+    assert control["fault"] is None
+    assert [s.header("Authorization") for s in up.seen] == [f"Bearer {KEY_A}"]
+
+
 def test_s4_the_proxy_verifies_the_payload_and_signature_the_signer_produced(
         tmp_path, data_root):
     """The verifier is asked about exactly the (payload, signature) the launcher's signer
@@ -266,4 +293,5 @@ def test_s4_the_proxy_verifies_the_payload_and_signature_the_signer_produced(
         assert r.ask(tok=tok)["fault"] is None
 
     assert r.verifier.calls == [(r.signer.payloads[0], "vault:v1:fake-signature-1")]
-    assert json.loads(r.signer.payloads[0])  # the signed payload is the claims document
+    claims = A.claims_of_payload(r.signer.payloads[0])  # the signed payload is the claims
+    assert claims["investigation"] == T.RUN_ID

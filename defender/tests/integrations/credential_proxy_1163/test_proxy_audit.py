@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
-from defender.tests.integrations.credential_proxy_1163._target import AUDIT_KEYS
+from defender.tests.integrations.credential_proxy_1163._target import AUDIT_KEYS, proxy
 
 BASE = T.BASE_PATH
 
@@ -67,3 +69,46 @@ def test_a1_no_secret_value_is_in_the_audit(tmp_path, data_root):
     assert len(r.audit.records) == 3
     for secret in (H.CANARY_KEY, H.CANARY_SECRET, issued[0], tok, tok.rpartition(".")[2]):
         assert secret not in text
+
+
+def test_a2_the_file_sink_appends_one_json_object_per_line_and_never_truncates(tmp_path):
+    """The shipped file sink adds one JSON object per line after what the file already holds,
+    across sink instances, and creating one leaves the file as it was. A13, O9."""
+    path = tmp_path / "audit.log"
+    existing = '{"earlier": "line"}\nnot json but kept\n'
+    path.write_text(existing, encoding="utf-8")
+
+    proxy().FileAuditSink(path)
+    assert path.read_text(encoding="utf-8") == existing
+    first = {"tenant": "t1", "outcome": "sent 200", "path": "/a"}
+    second = {"tenant": "t2", "outcome": "ConfigFault", "path": "/b"}
+    proxy().FileAuditSink(path).record(first)
+    proxy().FileAuditSink(path).record(second)
+
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith(existing)
+    lines = text[len(existing):].splitlines()
+    assert [json.loads(line) for line in lines] == [first, second]
+    assert text.endswith("\n")
+
+
+@pytest.mark.parametrize("sink", ["working", "failing"])
+def test_a2_an_audit_that_cannot_be_written_withholds_the_upstreams_answer(
+        tmp_path, data_root, sink):
+    """When the audit record cannot be written the answer is `ConfigFault` and the upstream's
+    body is not returned; with a working sink the body is. A13, O9."""
+    body = b"UPSTREAM-BODY-1163"
+    audit = H.AuditRecorder() if sink == "working" else H.FailingAudit()
+    with T.rig(tmp_path / "forge", data_root, audit=audit) as r:
+        r.up.replies[f"{BASE}/users/x"] = (200, {"X-Up": "upstream-header-1163"}, body)
+        answer = r.ask()
+
+    if sink == "working":
+        assert answer["fault"] is None
+        assert "UPSTREAM-BODY-1163" in answer["body"]
+        assert len(audit.records) == 1
+    else:
+        assert answer["fault"] == "ConfigFault"
+        assert audit.attempts >= 1
+        assert "UPSTREAM-BODY-1163" not in json.dumps(answer)
+        assert "upstream-header-1163" not in json.dumps(answer)

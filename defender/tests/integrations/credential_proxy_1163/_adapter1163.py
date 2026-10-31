@@ -7,6 +7,10 @@ Names this module chooses (the contract's seams, listed in the contract map):
   carried on the call's context (A9: the address is operator configuration handed in by the run,
   never read by an adapter from the model-visible `ctx.env`).
 - `run.main(signer=, proxy_url=)`: the operator's seams at the run process.
+- `run.main(issuer_transport=)` and the learning launcher's `issuer_transport=` (the name
+  `publish_for_run` already uses): the `httpx` transport the in-process signer reaches OpenBao by
+  when no `signer=` is injected. The signer logs in with the tenant's own issuer client config
+  (its forge binding's `issuer_config`, A11) and signs through transit with that tenant's key.
 - The ticket writer's legs take `request_token=` and `proxy_url=` keywords.
 """
 from __future__ import annotations
@@ -16,9 +20,12 @@ import base64
 import contextlib
 import json
 import re
+from dataclasses import dataclass
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from defender.systems.verbs import VerbContext
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
@@ -90,6 +97,76 @@ class RaisingSigner(H.FakeSigner):
         raise self.error
 
 
+@dataclass(frozen=True)
+class Sign:
+    """One transit sign call the stand-in OpenBao answered."""
+
+    client_token: str
+    key: str
+    payload: bytes
+
+
+class OpenBaoStandIn(httpx.MockTransport):
+    """An OpenBao by transport: AppRole login for the registered `accounts` ({role_id:
+    secret_id}) and transit sign for any key of any mount, refusing a client token it did not
+    issue. Records every login and sign; the signature carries `SIGNATURE_CANARY`. Decides
+    nothing about which tenant's key a login may use: the test reads `signs`."""
+
+    def __init__(self, accounts: Mapping[str, str]) -> None:
+        super().__init__(self._handle)
+        self.accounts = dict(accounts)
+        self.logins: list[tuple[str, str]] = []
+        self.signs: list[Sign] = []
+        self.refused: list[str] = []
+        self._tokens: dict[str, str] = {}
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/v1/auth/approle/login":
+            body = json.loads(request.content)
+            self.logins.append((body["role_id"], body["secret_id"]))
+            if self.accounts.get(body["role_id"]) != body["secret_id"]:
+                self.refused.append(path)
+                return httpx.Response(403, json={"errors": ["invalid credentials"]})
+            token = f"client-token-{len(self._tokens) + 1}"
+            self._tokens[token] = body["role_id"]
+            return httpx.Response(200, json={"auth": {"client_token": token,
+                                                      "lease_duration": 600}})
+        match = re.fullmatch(r"/v1/[^/]+/sign/([^/]+)(?:/[^/]+)?", path)
+        if match:
+            token = request.headers.get("X-Vault-Token", "")
+            if token not in self._tokens:
+                self.refused.append(path)
+                return httpx.Response(403, json={"errors": ["permission denied"]})
+            payload = base64.b64decode(json.loads(request.content)["input"])
+            self.signs.append(Sign(token, match.group(1), payload))
+            return httpx.Response(200, json={"data": {
+                "signature": f"vault:v1:{SIGNATURE_CANARY}-{len(self.signs)}"}})
+        self.refused.append(path)
+        return httpx.Response(404, json={"errors": ["unsupported path"]})
+
+    def role_of(self, sign: Sign) -> str:
+        """The role whose login produced the client token `sign` used."""
+        return self._tokens[sign.client_token]
+
+
+def bind_issuer(data_root: Path, tenant_id: str, scratch: Path, *, role_id: str,
+                secret_id: str) -> Path:
+    """Give `tenant_id` an issuer client config file under `scratch` (the tenant's own login) and
+    a forge binding in its row naming it; returns the file. Plants data only."""
+    scratch.mkdir(parents=True, exist_ok=True)
+    config = scratch / f"issuer-{tenant_id}.json"
+    config.write_text(json.dumps({
+        "issuer": "https://openbao.test:8200", "ca_cert": str(scratch / "ca.pem"),
+        "role_id": role_id, "secret_id": secret_id}), encoding="utf-8")
+    row_path = Path(data_root) / tenant_id / "tenant.json"
+    row = json.loads(row_path.read_text(encoding="utf-8"))
+    row["forge"] = {"origin": "https://forge.test", "audience": "forgejo-1163",
+                    "issuer_role": f"tenant-{tenant_id}", "issuer_config": str(config.absolute())}
+    row_path.write_text(json.dumps(row, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return config
+
+
 def claims_of_payload(payload: bytes) -> dict[str, Any]:
     """The claims a signer was asked to sign: JSON, or base64url of JSON."""
     try:
@@ -134,39 +211,49 @@ def ctx_for(tmp_path: Path, record: Any, proxy_url: str | None, token: str | Non
                        tenant=record, proxy_url=proxy_url, request_token=token, **kw)
 
 
-def _docstring_ids(tree: ast.Module) -> set[int]:
-    """The `id` of every docstring constant in `tree`: module, function and class level."""
-    docstrings: set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            body = node.body
-            if body and isinstance(body[0], ast.Expr) and isinstance(
-                    getattr(body[0], "value", None), ast.Constant):
-                docstrings.add(id(body[0].value))
-    return docstrings
+#: Calls whose first string argument names a field: `d.get("f")`, `d.pop("f")`, `getattr(o, "f")`.
+_FIELD_ACCESSORS = {"get", "pop", "setdefault", "getattr", "hasattr", "setattr"}
+
+
+def _str_key(node: ast.AST | None) -> set[str]:
+    return {node.value} if isinstance(node, ast.Constant) and isinstance(node.value, str) else set()
+
+
+def _field_of(node: ast.AST) -> set[str]:
+    """The names one AST node uses as fields (see `field_names`)."""
+    if isinstance(node, ast.Name):
+        return {node.id}
+    if isinstance(node, ast.Attribute):
+        return {node.attr}
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return {node.name}
+    if isinstance(node, (ast.arg, ast.keyword)):
+        return {node.arg} if node.arg else set()
+    if isinstance(node, ast.alias):
+        return {node.name.rsplit(".", 1)[-1]}
+    if isinstance(node, ast.Dict):
+        return set().union(*(_str_key(k) for k in node.keys))
+    if isinstance(node, ast.Subscript):
+        return _str_key(node.slice)
+    if isinstance(node, ast.Call):
+        func = node.func
+        called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if called in _FIELD_ACCESSORS and node.args:
+            by_attr = called in ("getattr", "hasattr", "setattr") and len(node.args) > 1
+            return _str_key(node.args[1] if by_attr else node.args[0])
+    return set()
+
+
+def field_names(source: str) -> set[str]:
+    """Every name `source` uses as a field: identifiers, attributes, parameter and keyword names,
+    dict-literal keys, subscript keys and the key of a `.get(...)`-style access. A string that
+    is only a value (a message) is not one."""
+    return set().union(*(_field_of(n) for n in ast.walk(ast.parse(source))))
 
 
 def code_names(path: Path) -> set[str]:
-    """Every identifier, attribute and string constant in the module at `path`, docstrings
-    excluded: what the code can reach by name."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    docstrings = _docstring_ids(tree)
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name):
-            names.add(node.id)
-        elif isinstance(node, ast.Attribute):
-            names.add(node.attr)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
-        elif isinstance(node, ast.arg):
-            names.add(node.arg)
-        elif isinstance(node, ast.alias):
-            names.add(node.name.rsplit(".", 1)[-1])
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str) \
-                and id(node) not in docstrings:
-            names.add(node.value)
-    return names
+    """The field names (`field_names`) of the module at `path`."""
+    return field_names(path.read_text(encoding="utf-8"))
 
 
 #: What an adapter must not name: the declared credential field names and the accessors that

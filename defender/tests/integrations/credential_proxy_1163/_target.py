@@ -15,8 +15,15 @@ def proxy() -> Any:
     `create_app(ProxyDeps)` (Q1, S1-S6), `ProxyDeps(tenant_exports=, store=, verifier=, audit=[, max_response_bytes=])`
     (Q1; `max_response_bytes` is the response cap's seam, O7), `CredentialSet(kind=, fields=, version=)` (Q1; kind stored, r5 A4), `mint_request_token(signer, tenant_id=,
     investigation=, grant=, expires_at=)` (Q1, S6), `OpenBaoStore(addr=, token=, mount=)` (B2),
-    `TransitSigner/TransitVerifier(addr=, token=, mount=, key=)` (B3), `store_policies(kv_mount=,
-    transit_mount=, key=)` (B1)."""
+    `TransitSigner(addr=, token=, mount=, key=)` and `TransitVerifier(addr=, token=, mount=,
+    keys={tenant_id: key})` whose `verify(payload, signature, *, tenant_id)` uses the key of the
+    tenant the token names (B3, A11); `store_policies(kv_mount=, transit_mount=,
+    tenant_keys={tenant_id: key})` -> `{"writer", "proxy", "launcher-<tenant_id>"}` policy texts
+    (B1, A11); `transit_key_for(tenant_id) -> str`, the tenant's transit key name (the one
+    naming rule; tests call it, never recompute it); `FileAuditSink(path)` with `.record(entry)` (A13); and the shipped assembly
+    `create_app_from_config(config)`, `config` a mapping of the operator's settings:
+    `openbao_addr`, `openbao_token` (the proxy role's), `kv_mount`, `transit_mount`,
+    `tenant_keys`, `tenant_exports`, `audit_path` (A13)."""
     return importlib.import_module("defender.credential_proxy")
 
 
@@ -26,8 +33,6 @@ def secrets_writer() -> Any:
     return importlib.import_module("defender.credential_proxy")
 
 
-#: The run env key the http-proxy transport reads the proxy's address from (Q1).
-PROXY_URL_ENV = "DEFENDER_CREDENTIAL_PROXY_URL"
 #: The proxy's one endpoint for the http-proxy transport (S1): POST, `Authorization: Bearer
 #: <request token>`, JSON `{system, method, url, headers, body}`; answers 200 with JSON
 #: `{status, headers, body, fault, detail}`, `fault` one of None, "ConfigFault",

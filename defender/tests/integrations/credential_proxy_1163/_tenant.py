@@ -104,7 +104,7 @@ class Rig:
     t: PublishedTenant
     up: H.Upstream
     store: H.FakeStore
-    audit: H.AuditRecorder
+    audit: Any
     signer: H.FakeSigner
     verifier: Any
     client: Any
@@ -139,7 +139,7 @@ def client_of(d: Any) -> Any:
 @contextlib.contextmanager
 def rig(scratch: Path, root: Path, decl: Callable[[str], str] | None = None, *,
         creds: Any = "static", ghosts: Mapping[str, Path] | None = None,
-        **deps_kw: Any) -> Iterator[Rig]:
+        audit: Any = None, **deps_kw: Any) -> Iterator[Rig]:
     """A `Rig`. `decl(upstream_url)` is the merged declaration text (default: a bearer key on
     the upstream's `BASE_PATH`); `creds` is the credential set stored for `identity` (default a
     static key; None stores none); `ghosts` adds tenant ids with exports folders the tenant map
@@ -151,7 +151,7 @@ def rig(scratch: Path, root: Path, decl: Callable[[str], str] | None = None, *,
                                  else creds} if creds is not None else {})
             signer = H.FakeSigner()
             verifier = H.PairedVerifier(signer)
-            audit = H.AuditRecorder()
+            audit = audit if audit is not None else H.AuditRecorder()
             tenants = {t.tenant_id: exports_of(t), **(ghosts or {})}
             client = client_of(deps(tenants, store, verifier=verifier, audit=audit, **deps_kw))
             yield Rig(t, up, store, audit, signer, verifier, client, dict(ghosts or {}))

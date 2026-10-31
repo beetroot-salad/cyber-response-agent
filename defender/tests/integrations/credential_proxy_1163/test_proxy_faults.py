@@ -49,15 +49,20 @@ def test_f1_a_redirect_is_not_followed_and_the_credential_goes_nowhere_else(
 
 
 def test_f1_an_unreachable_upstream_is_a_transport_fault(tmp_path, data_root):
-    """Nothing listening at the declared base: `TransportFault`, with the control working on
-    a rig whose upstream answers. O7, A9."""
+    """Nothing listening at the declared base: `TransportFault`; after a merged change to the
+    live upstream the same token is sent. O7, A9."""
     port = H.free_port()
     with T.rig(tmp_path / "forge", data_root,
                lambda u: H.declaration(f"http://127.0.0.1:{port}{BASE}")) as r:
         answer = r.ask(url=f"http://127.0.0.1:{port}{PATH}")
+        assert (answer["fault"], r.up.seen) == ("TransportFault", [])
+        r.t.merge({"settings/systems/identity/access.yaml": H.declaration(r.up.url + BASE)},
+                  "point at the live upstream")
+        r.t.publish()
+        control = r.ask()
 
-    assert answer["fault"] == "TransportFault"
-    assert r.up.seen == []
+    assert control["fault"] is None
+    assert r.up.paths() == [PATH]
 
 
 @pytest.mark.parametrize(("size", "fault"), [(1024, None), (1025, "UpstreamFault")])
@@ -102,21 +107,49 @@ def test_f2_a_system_outside_the_token_grant_is_a_config_fault_unsent(tmp_path, 
     assert (refused["fault"], r.up.seen, r.store.reads) == ("ConfigFault", [], [])
 
 
-@pytest.mark.parametrize("status", [400, 401, 500])
-def test_f3_a_refused_oauth_exchange_is_a_config_fault_and_nothing_is_sent(
-        tmp_path, data_root, status):
-    """A token endpoint that refuses the exchange stops the request before it reaches the base,
-    after one exchange attempt. O7."""
+def _oauth_rig(tmp_path, data_root, token_url):
+    return T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+        u + BASE, scheme=H.oauth_scheme(token_url)), creds=T.oauth_set())
+
+
+@pytest.mark.parametrize(("status", "body", "fault"), [
+    pytest.param(400, b'{"error":"invalid_client"}', "ConfigFault", id="400"),
+    pytest.param(401, b'{"error":"invalid_client"}', "ConfigFault", id="401"),
+    pytest.param(500, b"{}", "TransportFault", id="500"),
+    pytest.param(503, b"{}", "TransportFault", id="503"),
+    pytest.param(200, b"{}", "ConfigFault", id="200-without-access-token"),
+    pytest.param(200, b'{"access_token": ""}', "ConfigFault", id="200-empty-access-token"),
+    pytest.param(200, b"not json", "ConfigFault", id="200-not-json"),
+])
+def test_f3_a_failed_oauth_exchange_is_classified_and_nothing_is_sent(
+        tmp_path, data_root, status, body, fault):
+    """A 4xx or an unusable 200 from the token endpoint is ConfigFault, a 5xx TransportFault;
+    one attempt, the API request never sent. O7, A12."""
     with H.upstream() as auth:
-        auth.replies["/token"] = (status, {}, b'{"error":"invalid_client"}')
-        with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
-                u + BASE, scheme=H.oauth_scheme(auth.url + "/token")),
-                creds=T.oauth_set()) as r:
+        auth.replies["/token"] = (status, {}, body)
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
             answer = r.ask()
 
-    assert answer["fault"] == "ConfigFault"
+    assert answer["fault"] == fault, answer
     assert (len(auth.seen), r.up.seen) == (1, [])
     assert H.CANARY_SECRET not in json.dumps(answer)
+
+
+def test_f3_an_unreachable_token_endpoint_is_a_transport_fault_and_nothing_is_sent(
+        tmp_path, data_root):
+    """A token URL nothing listens at is TransportFault, the API request never sent; control:
+    a working token endpoint on the same rig shape sends. O7, A12."""
+    issued: list[str] = []
+    with _oauth_rig(tmp_path, data_root, f"http://127.0.0.1:{H.free_port()}/token") as r:
+        answer = r.ask()
+    assert answer["fault"] == "TransportFault", answer
+    assert r.up.seen == []
+
+    with H.upstream() as auth:
+        auth.replies["/token"] = H.token_endpoint(issued)
+        with _oauth_rig(tmp_path / "ok", data_root, auth.url + "/token") as control:
+            assert control.ask()["fault"] is None
+    assert len(issued) == 1
 
 
 def test_f3_a_401_on_the_access_token_evicts_it_without_a_retry(tmp_path, data_root):

@@ -16,18 +16,29 @@ from defender.tests.integrations.credential_proxy_1163._target import proxy, sec
 
 pytestmark = pytest.mark.openbao
 
-KEY = "request-tokens"
 TENANT = "5c1b1163-7a2e-4d3f-9b8c-0e1f2a3b4c5d"
 OTHER = "9d4e1163-0f6a-4b7c-8e2d-1a3b5c7d9e0f"
 STATIC = "static"
+
+
+def _key(tenant: str = TENANT) -> str:
+    """The tenant's transit key name, as the proxy package names it (not computed here)."""
+    return proxy().transit_key_for(tenant)
+
+
 OAUTH = "oauth-client-credentials"
 
 
-def _tokens(bao, **policy_kw) -> dict[str, str]:
-    """One token per role, each holding only the product's policy for that role."""
+def _tokens(bao, tenant_keys=None) -> dict[str, str]:
+    """One token per role, each holding only the product's policy for that role. Each tenant has
+    its own launcher role, `launcher-<tenant_id>`; `launcher` is `TENANT`'s."""
+    keys = tenant_keys or {TENANT: _key(TENANT), OTHER: _key(OTHER)}
     policies = proxy().store_policies(kv_mount=bao.kv_mount, transit_mount=bao.transit_mount,
-                                      key=KEY, **policy_kw)
-    return {role: bao.token_for(bao.apply_policy(role, hcl)) for role, hcl in policies.items()}
+                                      tenant_keys=keys)
+    tokens = {role: bao.token_for(bao.apply_policy(role, hcl)) for role, hcl in policies.items()}
+    if f"launcher-{TENANT}" in tokens:
+        tokens["launcher"] = tokens[f"launcher-{TENANT}"]
+    return tokens
 
 
 def _writer(bao, token):
@@ -90,21 +101,6 @@ def test_b1_at_the_wire_the_writer_gets_metadata_and_never_the_value(openbao):
                             ).status_code == 403, verb
     assert openbao.call("DELETE", f"{kv}/metadata/{path}", token=tokens["writer"]
                         ).status_code == 403
-
-
-def test_b5_a_writer_scoped_to_one_tenant_is_refused_on_anothers_path(openbao):
-    """A writer policy made for tenant A sets and asks on A's path and is refused on B's, for the
-    write and the existence check alike. O5, O1."""
-    tokens = _tokens(openbao, tenant=TENANT)
-    writer = _writer(openbao, tokens["writer"])
-    _put(writer, TENANT, "identity", STATIC, {"api_key": H.CANARY_KEY})
-    assert asyncio.run(writer.has_credentials(TENANT, "identity")) is True
-
-    with pytest.raises(ConfigFault):
-        _put(writer, OTHER, "identity", STATIC, {"api_key": H.CANARY_KEY})
-    with pytest.raises(ConfigFault):  # refused, not "absent"
-        asyncio.run(writer.has_credentials(OTHER, "identity"))
-    assert openbao.call("GET", f"{openbao.kv_mount}/metadata/{OTHER}/identity").status_code == 404
 
 
 def test_b6_the_kind_is_stored_with_the_set_and_a_write_replaces_the_whole_set(openbao):
@@ -189,13 +185,22 @@ def test_b2_a_rotated_static_key_is_sent_from_the_next_request(tmp_path, data_ro
         "Bearer old-" + H.CANARY_KEY, "Bearer new-" + H.CANARY_KEY]
 
 
-def _transit(bao, tokens, key=KEY):
-    bao.ok("POST", f"{bao.transit_mount}/keys/{key}", json={"type": "ed25519"})
+def _transit(bao, tokens, *tenant_ids):
+    """The `_key(TENANT)` transit key, a signer holding the launcher's token for it, and a verifier
+    holding the proxy's that verifies each of `tenant_ids` (default `TENANT`) with it."""
+    bao.ok("POST", f"{bao.transit_mount}/keys/{_key(TENANT)}", json={"type": "ed25519"})
     signer = proxy().TransitSigner(addr=bao.addr, token=tokens["launcher"],
-                                   mount=bao.transit_mount, key=key)
+                                   mount=bao.transit_mount, key=_key(TENANT))
     verifier = proxy().TransitVerifier(addr=bao.addr, token=tokens["proxy"],
-                                       mount=bao.transit_mount, key=key)
+                                       mount=bao.transit_mount,
+                                       keys={t: _key(TENANT) for t in tenant_ids or (TENANT,)})
     return signer, verifier
+
+
+def _verifier(bao, tokens, *tenant_ids):
+    """The proxy's verifier over `_key(TENANT)` for each of `tenant_ids`."""
+    return proxy().TransitVerifier(addr=bao.addr, token=tokens["proxy"],
+                                   mount=bao.transit_mount, keys={t: _key(TENANT) for t in tenant_ids})
 
 
 def test_b3_a_launcher_signed_token_is_accepted_and_an_altered_one_refused(
@@ -203,9 +208,10 @@ def test_b3_a_launcher_signed_token_is_accepted_and_an_altered_one_refused(
     """The launcher signs, the proxy verifies: the token as signed is sent, the same token with
     one claim changed is refused unsent. O8, H11."""
     tokens = _tokens(openbao)
-    signer, verifier = _transit(openbao, tokens)
+    signer, _ = _transit(openbao, tokens)
     with H.upstream() as up, T.identity_via_proxy(
             tmp_path / "forge", data_root, H.declaration(up.url + T.BASE_PATH)) as t:
+        verifier = _verifier(openbao, tokens, t.tenant_id)
         store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
         client = T.client_of(T.deps({t.tenant_id: T.exports_of(t)}, store, verifier=verifier))
         tok = T.token(t.tenant_id, {("identity", "r")}, signer=signer)
@@ -228,12 +234,13 @@ def test_b3_a_token_signed_by_a_different_transit_key_is_refused(tmp_path, data_
     """A token signed under another key of the same transit mount is refused unsent; control:
     the key the proxy verifies with is accepted. O8, H11."""
     tokens = _tokens(openbao)
-    signer, verifier = _transit(openbao, tokens)
+    signer, _ = _transit(openbao, tokens)
     openbao.ok("POST", f"{openbao.transit_mount}/keys/other-key", json={"type": "ed25519"})
     stranger = proxy().TransitSigner(addr=openbao.addr, token=openbao.root_token,
                                      mount=openbao.transit_mount, key="other-key")
     with H.upstream() as up, T.identity_via_proxy(
             tmp_path / "forge", data_root, H.declaration(up.url + T.BASE_PATH)) as t:
+        verifier = _verifier(openbao, tokens, t.tenant_id)
         store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
         client = T.client_of(T.deps({t.tenant_id: T.exports_of(t)}, store, verifier=verifier))
         url = f"{up.url}{T.BASE_PATH}/users/x"
@@ -254,24 +261,24 @@ def test_b4_transit_policies_let_the_launcher_sign_only_and_the_proxy_verify_onl
     tokens = _tokens(openbao)
     _transit(openbao, tokens)
     m, payload = openbao.transit_mount, _b64(b"claims-1163")
-    signed = openbao.call("POST", f"{m}/sign/{KEY}", token=tokens["launcher"],
+    signed = openbao.call("POST", f"{m}/sign/{_key(TENANT)}", token=tokens["launcher"],
                           json={"input": payload})
     assert signed.status_code == 200
     signature = signed.json()["data"]["signature"]
 
     def verify(token, data=payload):
-        return openbao.call("POST", f"{m}/verify/{KEY}", token=token,
+        return openbao.call("POST", f"{m}/verify/{_key(TENANT)}", token=token,
                             json={"input": data, "signature": signature})
 
     assert verify(tokens["launcher"]).status_code == 403
     valid, altered = verify(tokens["proxy"]), verify(tokens["proxy"], _b64(b"claims-1164"))
     assert (valid.status_code, valid.json()["data"]["valid"]) == (200, True)
     assert (altered.status_code, altered.json()["data"]["valid"]) == (200, False)
-    assert openbao.call("POST", f"{m}/sign/{KEY}", token=tokens["proxy"],
+    assert openbao.call("POST", f"{m}/sign/{_key(TENANT)}", token=tokens["proxy"],
                         json={"input": payload}).status_code == 403
     for role in ("launcher", "proxy"):
-        assert openbao.call("GET", f"{m}/keys/{KEY}", token=tokens[role]).status_code == 403, role
-        assert openbao.call("GET", f"{m}/export/signing-key/{KEY}", token=tokens[role]
+        assert openbao.call("GET", f"{m}/keys/{_key(TENANT)}", token=tokens[role]).status_code == 403, role
+        assert openbao.call("GET", f"{m}/export/signing-key/{_key(TENANT)}", token=tokens[role]
                             ).status_code == 403, role
 
 
@@ -281,17 +288,17 @@ def test_b4_the_signer_and_verifier_classes_fail_loud_without_their_own_power(op
     tokens = _tokens(openbao)
     signer, verifier = _transit(openbao, tokens)
     signature = signer.sign(b"claims-1163")
-    assert verifier.verify(b"claims-1163", signature) is True
-    assert verifier.verify(b"claims-1164", signature) is False
+    assert verifier.verify(b"claims-1163", signature, tenant_id=TENANT) is True
+    assert verifier.verify(b"claims-1164", signature, tenant_id=TENANT) is False
 
     wrong_signer = proxy().TransitSigner(addr=openbao.addr, token=tokens["proxy"],
-                                         mount=openbao.transit_mount, key=KEY)
+                                         mount=openbao.transit_mount, key=_key(TENANT))
     wrong_verifier = proxy().TransitVerifier(addr=openbao.addr, token=tokens["launcher"],
-                                             mount=openbao.transit_mount, key=KEY)
+                                             mount=openbao.transit_mount, keys={TENANT: _key(TENANT)})
     with pytest.raises(ConfigFault):
         wrong_signer.sign(b"claims-1163")
     with pytest.raises(ConfigFault):
-        wrong_verifier.verify(b"claims-1163", signature)
+        wrong_verifier.verify(b"claims-1163", signature, tenant_id=TENANT)
 
 
 def test_b7_a_credential_write_is_in_openbaos_audit_and_its_value_is_not(
@@ -320,13 +327,15 @@ def test_b8_an_unreachable_store_or_verifier_answers_config_fault_and_sends_noth
     """With the store unreachable, or the verifier, the proxy answers ConfigFault and sends
     nothing; control: the reachable store sends. H11, O7."""
     tokens = _tokens(openbao)
-    signer, verifier = _transit(openbao, tokens)
+    signer, _ = _transit(openbao, tokens)
     dead = f"http://127.0.0.1:{H.free_port()}"
     dead_store = proxy().OpenBaoStore(addr=dead, token=tokens["proxy"], mount=openbao.kv_mount)
-    dead_verifier = proxy().TransitVerifier(addr=dead, token=tokens["proxy"],
-                                            mount=openbao.transit_mount, key=KEY)
     with H.upstream() as up, T.identity_via_proxy(
             tmp_path / "forge", data_root, H.declaration(up.url + T.BASE_PATH)) as t:
+        verifier = _verifier(openbao, tokens, t.tenant_id)
+        dead_verifier = proxy().TransitVerifier(addr=dead, token=tokens["proxy"],
+                                                mount=openbao.transit_mount,
+                                                keys={t.tenant_id: _key(TENANT)})
         _put(_writer(openbao, tokens["writer"]), t.tenant_id, "identity", STATIC,
              {"api_key": H.CANARY_KEY})
         tok = T.token(t.tenant_id, {("identity", "r")}, signer=signer)
@@ -347,6 +356,75 @@ def test_b8_an_unreachable_store_or_verifier_answers_config_fault_and_sends_noth
     assert len(up.seen) == 1
 
 
+def test_b8_a_signer_or_verifier_that_cannot_reach_openbao_raises_config_fault(openbao):
+    """The real signer and verifier against a dead address raise ConfigFault, not a raw
+    transport error; control: against the live server they work. O8, H11, O7."""
+    tokens = _tokens(openbao)
+    signer, verifier = _transit(openbao, tokens)
+    dead = f"http://127.0.0.1:{H.free_port()}"
+    dead_signer = proxy().TransitSigner(addr=dead, token=tokens["launcher"],
+                                        mount=openbao.transit_mount, key=_key(TENANT))
+    dead_verifier = proxy().TransitVerifier(addr=dead, token=tokens["proxy"],
+                                            mount=openbao.transit_mount, keys={TENANT: _key(TENANT)})
+    signature = signer.sign(b"claims-1163")
+    assert verifier.verify(b"claims-1163", signature, tenant_id=TENANT) is True
+
+    with pytest.raises(ConfigFault):
+        dead_signer.sign(b"claims-1163")
+    with pytest.raises(ConfigFault):
+        dead_verifier.verify(b"claims-1163", signature, tenant_id=TENANT)
+
+
+def test_b10_each_tenants_launcher_signs_only_with_its_own_key(openbao):
+    """A launcher policy per tenant: A's login signs with A's key and is refused B's, and B's
+    with A's, at the wire and through the signer class. O8, A11."""
+    tokens = _tokens(openbao)
+    for key in (_key(TENANT), _key(OTHER)):
+        openbao.ok("POST", f"{openbao.transit_mount}/keys/{key}", json={"type": "ed25519"})
+    a, b = tokens[f"launcher-{TENANT}"], tokens[f"launcher-{OTHER}"]
+    m, payload = openbao.transit_mount, _b64(b"claims-1163")
+
+    def sign(token, key):
+        return openbao.call("POST", f"{m}/sign/{key}", token=token, json={"input": payload})
+
+    assert (sign(a, _key(TENANT)).status_code, sign(b, _key(OTHER)).status_code) == (200, 200)
+    assert (sign(a, _key(OTHER)).status_code, sign(b, _key(TENANT)).status_code) == (403, 403)
+    for tenant_token, foreign in ((a, _key(OTHER)), (b, _key(TENANT))):
+        crossed = proxy().TransitSigner(addr=openbao.addr, token=tenant_token,
+                                        mount=openbao.transit_mount, key=foreign)
+        with pytest.raises(ConfigFault):
+            crossed.sign(b"claims-1163")
+
+
+def test_b10_the_proxy_verifies_with_the_key_of_the_tenant_the_token_names(
+        tmp_path, data_root, openbao):
+    """A token naming A signed with B's key is ConfigFault, unsent, no store read; control: A's
+    key is accepted. O8, O1, A11."""
+    with H.upstream() as up, T.identity_via_proxy(
+            tmp_path / "forge", data_root, H.declaration(up.url + T.BASE_PATH)) as t:
+        tokens = _tokens(openbao, {t.tenant_id: _key(t.tenant_id), OTHER: _key(OTHER)})
+        for key in (_key(TENANT), _key(OTHER)):
+            openbao.ok("POST", f"{openbao.transit_mount}/keys/{key}", json={"type": "ed25519"})
+        signer = {tenant: proxy().TransitSigner(
+            addr=openbao.addr, token=tokens[f"launcher-{tenant}"], mount=openbao.transit_mount,
+            key=key) for tenant, key in ((t.tenant_id, _key(t.tenant_id)), (OTHER, _key(OTHER)))}
+        verifier = proxy().TransitVerifier(
+            addr=openbao.addr, token=tokens["proxy"], mount=openbao.transit_mount,
+            keys={t.tenant_id: _key(t.tenant_id), OTHER: _key(OTHER)})
+        store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
+        client = T.client_of(T.deps({t.tenant_id: T.exports_of(t)}, store, verifier=verifier))
+        url, grant = f"{up.url}{T.BASE_PATH}/users/x", {("identity", "r")}
+
+        crossed = T.ask(client, T.token(t.tenant_id, grant, signer=signer[OTHER]),
+                        "identity", "GET", url)
+        assert (crossed["fault"], store.reads, up.seen) == ("ConfigFault", [], [])
+        own = T.ask(client, T.token(t.tenant_id, grant, signer=signer[t.tenant_id]),
+                    "identity", "GET", url)
+
+    assert own["fault"] is None
+    assert up.paths() == [f"{T.BASE_PATH}/users/x"]
+
+
 def test_b9_no_openbao_token_is_in_any_repr_of_the_store_signer_or_verifier(openbao):
     """No role's token, nor the root token, appears in the repr or str of the writer, store,
     signer or verifier; each still works. O10."""
@@ -355,7 +433,7 @@ def test_b9_no_openbao_token_is_in_any_repr_of_the_store_signer_or_verifier(open
     writer, store = _writer(openbao, tokens["writer"]), _store(openbao, tokens["proxy"])
     _put(writer, TENANT, "identity", STATIC, {"api_key": H.CANARY_KEY})
     assert store.read(TENANT, "identity").fields == {"api_key": H.CANARY_KEY}
-    assert verifier.verify(b"c", signer.sign(b"c")) is True
+    assert verifier.verify(b"c", signer.sign(b"c"), tenant_id=TENANT) is True
 
     for obj in (writer, store, signer, verifier):
         shown = repr(obj) + str(obj)

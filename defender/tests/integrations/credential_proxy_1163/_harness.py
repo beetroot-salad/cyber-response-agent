@@ -157,13 +157,14 @@ class FakeStore:
 class FakeSigner:
     """The launcher's transit-sign port: records each payload and answers a distinct signature."""
 
-    def __init__(self) -> None:
+    def __init__(self, label: str = "fake") -> None:
+        self.label = label
         self.payloads: list[bytes] = []
         self.signed: dict[str, bytes] = {}
 
     def sign(self, payload: bytes) -> str:
         self.payloads.append(payload)
-        signature = f"vault:v1:fake-signature-{len(self.payloads)}"
+        signature = f"vault:v1:{self.label}-signature-{len(self.payloads)}"
         self.signed[signature] = payload
         return signature
 
@@ -177,9 +178,24 @@ class PairedVerifier:
         self.signer = signer
         self.calls: list[tuple[bytes, str]] = []
 
-    def verify(self, payload: bytes, signature: str) -> bool:
+    def verify(self, payload: bytes, signature: str, *, tenant_id: str | None = None) -> bool:
         self.calls.append((payload, signature))
         return self.signer.signed.get(signature) == payload
+
+
+class KeyedVerifier:
+    """A stand-in for per-tenant transit verify (A11): a pair is valid only if the signer of the
+    tenant the token names (`signers[tenant_id]`) signed exactly that payload. Records each
+    (payload, signature, tenant_id) it is asked about."""
+
+    def __init__(self, signers: Mapping[str, FakeSigner]) -> None:
+        self.signers = dict(signers)
+        self.calls: list[tuple[bytes, str, str | None]] = []
+
+    def verify(self, payload: bytes, signature: str, *, tenant_id: str | None = None) -> bool:
+        self.calls.append((payload, signature, tenant_id))
+        signer = self.signers.get(tenant_id or "")
+        return signer is not None and signer.signed.get(signature) == payload
 
 
 class FakeVerifier:
@@ -190,7 +206,7 @@ class FakeVerifier:
         self.verdict = verdict
         self.calls: list[tuple[bytes, str]] = []
 
-    def verify(self, payload: bytes, signature: str) -> bool:
+    def verify(self, payload: bytes, signature: str, *, tenant_id: str | None = None) -> bool:
         self.calls.append((payload, signature))
         return self.verdict
 
@@ -203,6 +219,18 @@ class AuditRecorder:
 
     def record(self, entry: Mapping[str, Any]) -> None:
         self.records.append(dict(entry))
+
+
+class FailingAudit:
+    """An audit port whose sink cannot be written: every `record` raises `OSError`, and the
+    attempts are counted."""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    def record(self, entry: Mapping[str, Any]) -> None:
+        self.attempts += 1
+        raise OSError("audit sink is not writable")
 
 
 def claims_of(token: str) -> dict[str, Any]:

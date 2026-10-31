@@ -13,6 +13,7 @@ from defender.hooks.budget_enforcer import DEFAULT_LIMITS
 from defender.kit.faults import ConfigFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
+from defender.tests.integrations.credential_proxy_1163._target import proxy
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 TABLE = """\
@@ -25,9 +26,10 @@ dispositions:
     health-check: {roles: [gather]}
 """
 BUDGET = DEFAULT_LIMITS["wall_clock_timeout"] + DEFAULT_LIMITS["grace_seconds"]
-#: The contract's bound on the "fixed margin" (r5 A7 names none): a token outlives the budget by
-#: less than this. A design gap, reported with the map.
-MARGIN_CEILING = 3600
+#: The read token outlives the wall-clock budget plus grace by this fixed margin (r6 A15).
+MARGIN = 300
+#: The seconds between the test's clock and the run's stamp of its start.
+CLOCK_TOLERANCE = 60
 
 
 class TicketRecorder:
@@ -60,14 +62,17 @@ def _plant(data_root, *, proxy: tuple[str, ...]):
             (folder / rel).write_text(text, encoding="utf-8")
 
 
-def _drive(tmp_path, data_root, *, signer, ticket=True, **seams):
+def _drive(tmp_path, data_root, *, signer=None, ticket=True, **seams):
+    """Drive `run.main`; with no `signer` none is injected (the production signing path)."""
     rec, tickets = S.RunRecorder(tmp_path / "run"), TicketRecorder()
     alert = S.plant_alert(tmp_path / "in")
     started = time.time()
+    if signer is not None:
+        seams["signer"] = signer
     try:
         rc, refused = S.drive_run(
             S.run_argv(alert, data_root, update_ticket=ticket), rec, ticket_writer=tickets,
-            signer=signer, proxy_url="http://proxy.invalid", **seams)
+            proxy_url="http://proxy.invalid", **seams)
     except ConfigFault as fault:
         rc, refused = None, fault
     return rec, tickets, rc, refused, started
@@ -81,7 +86,7 @@ def _claims_of_token(signer: H.FakeSigner, token: str) -> dict[str, Any]:
 def test_r1_run_start_signs_a_read_token_and_a_write_back_token_per_leg(
         tmp_path, data_root, caplog):
     """Read grant names only http-proxy systems; `rw` on the ticket system only, minted at each
-    leg; expiry covers the budget; no token leaks. O8, O10, O4, A7."""
+    leg; expiry is budget + grace + 300 s; no token reaches disk or log. O8, O10, O4, A7, A15."""
     caplog.set_level(logging.DEBUG)
     _plant(data_root, proxy=("identity", "case-history"))
     signer = A.MarkedSigner()
@@ -98,7 +103,8 @@ def test_r1_run_start_signs_a_read_token_and_a_write_back_token_per_leg(
     assert [A.grant_of(c) for c in write_back] == [[("case-history", "rw")]] * 2
     for c in claims:
         assert (c["tenant"], c["investigation"]) == (S.PLAYGROUND_ID, run_id)
-    assert BUDGET <= read["exp"] - started <= BUDGET + MARGIN_CEILING, read["exp"] - started
+    lifetime = read["exp"] - started
+    assert BUDGET + MARGIN - 1 <= lifetime <= BUDGET + MARGIN + CLOCK_TOLERANCE, lifetime
     for c in write_back:
         assert c["exp"] > started
 
@@ -112,7 +118,9 @@ def test_r1_run_start_signs_a_read_token_and_a_write_back_token_per_leg(
     for held in (life["tenant"], life["run"], life["systems"]):
         assert A.SIGNATURE_CANARY not in repr(held), "a token shows in a repr (O10)"
     assert A.SIGNATURE_CANARY not in caplog.text
-    assert A.SIGNATURE_CANARY not in H.text_under(rec.run_dir_at.parent)
+    on_disk = A.text_of(data_root, tmp_path)
+    assert A.SIGNATURE_CANARY not in on_disk, "a token reached a file: run state, record or log"
+    assert S.PLAYGROUND_ID in on_disk, "positive control: the tenant's and run's files are read"
     assert "run_dir=" in caplog.text, "positive control: the log channel is read"
 
 
@@ -192,3 +200,42 @@ def test_r5_the_signing_login_is_never_taken_from_the_environment(
     assert not [k for k in env if k in ("VAULT_TOKEN", "BAO_TOKEN", "DEFENDER_BAO_TOKEN",
                                         "ROLE_ID", "SECRET_ID")]
     assert env["DEFENDER_RUN_DIR"], "positive control: the run env was built"
+
+
+ROLE, SECRET = "role-1163-own", "secret-1163-own"
+DECOY_ROLE, DECOY_SECRET = "role-1163-decoy", "secret-1163-decoy"
+
+
+def test_r6_run_start_signs_with_the_tenants_own_issuer_login_and_key(tmp_path, data_root):
+    """No injected signer: the read token is signed through OpenBao with the login of the
+    tenant's own issuer config and a transit key naming that tenant. A11, A1."""
+    _plant(data_root, proxy=("identity",))
+    A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE, secret_id=SECRET)
+    bao = A.OpenBaoStandIn({ROLE: SECRET, DECOY_ROLE: DECOY_SECRET})
+    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao)
+
+    assert refused is None, (rc, refused)
+    assert rc == 0, (rc, refused)
+    assert bao.logins == [(ROLE, SECRET)], "login with the tenant's own config alone"
+    (sign,) = bao.signs
+    assert bao.role_of(sign) == ROLE
+    assert sign.key == proxy().transit_key_for(S.PLAYGROUND_ID), "the tenant's own transit key (A11)"
+    claims = A.claims_of_payload(sign.payload)
+    assert (claims["tenant"], A.grant_of(claims)) == (S.PLAYGROUND_ID, [("identity", "r")])
+    assert bao.refused == []
+    assert rec.lifecycle_calls, "positive control: the run went on to its lifecycle"
+
+
+def test_r7_an_http_proxy_tenant_with_no_issuer_config_refuses_run_start(tmp_path, data_root):
+    """The tenant has an http-proxy system and no forge binding or issuer config: `ConfigFault`
+    before the lifecycle, and nothing is sent to OpenBao. The control is R6. A11."""
+    _plant(data_root, proxy=("identity",))
+    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, issuer_transport=bao)
+
+    assert rc is None
+    assert isinstance(refused, ConfigFault), refused
+    assert bao.logins == []
+    assert bao.signs == []
+    assert "lifecycle" not in rec.order
+    assert tickets.calls == []

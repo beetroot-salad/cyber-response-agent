@@ -113,7 +113,7 @@ def test_o4_no_canary_reaches_any_channel_of_a_real_run(tmp_path, data_root, mon
             + [m.text for script in router.by_lead.values() for m in script.seen]),
     }
     controls = {"files": f"{API}/users/dev.dana", "logs": "run_dir=", "box frames": ARGV_MARKER,
-                "box env": ENV_MARKER, "models saw": "census"}
+                "box env": ENV_MARKER, "models saw": f"{API}/users/dev.dana"}
     secrets = [H.CANARY_KEY, A.SIGNATURE_CANARY, *tap.tokens]
     for name, text in channels.items():
         assert controls[name] in text, f"positive control: the {name} channel is not read"
@@ -121,9 +121,9 @@ def test_o4_no_canary_reaches_any_channel_of_a_real_run(tmp_path, data_root, mon
             assert secret not in text, f"a canary reached the {name} channel"
 
 
-def test_o4_adapter_code_names_no_credential_field():
-    """No adapter module names a declared credential field or a credential accessor. O4, H6.
-    Regression guard: it passes on the code as it stands and fails if one is added."""
+def test_o4_adapter_code_names_no_credential_field(tmp_path):
+    """No adapter module uses a declared credential field or accessor as a name, attribute or key
+    (an error message may say "credential"). O4, H6."""
     import defender.integrations as integrations
 
     offenders = {}
@@ -132,7 +132,17 @@ def test_o4_adapter_code_names_no_credential_field():
         if hit:
             offenders[path.name] = hit
     assert offenders == {}
-    planted = Path(__file__).parent / "_planted_scan_probe.txt"
-    assert A.CREDENTIAL_NAME.search("client_secret"), (
-        "positive control: the scan's pattern matches a credential field name")
-    assert not planted.exists(), "the planted probe file was left behind"
+
+    planted = tmp_path / "planted_adapter.py"
+    planted.write_text(
+        "def verb(ctx, creds):\n"
+        "    return creds['client_secret'], ctx.api_key, {'access_token': 1}\n",
+        encoding="utf-8")
+    assert {n for n in A.code_names(planted) if A.CREDENTIAL_NAME.search(n)} == {
+        "client_secret", "api_key", "access_token"}, "positive control: the AST scan finds them"
+    message = tmp_path / "message_adapter.py"
+    message.write_text(
+        "def verb(ctx):\n    raise RuntimeError('credential proxy unreachable')\n",
+        encoding="utf-8")
+    assert not [n for n in A.code_names(message) if A.CREDENTIAL_NAME.search(n)], (
+        "a message string is not a field name")

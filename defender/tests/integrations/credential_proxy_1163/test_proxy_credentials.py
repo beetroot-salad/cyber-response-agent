@@ -48,6 +48,8 @@ def test_c1_an_adapter_supplied_credential_never_reaches_the_upstream(tmp_path, 
 
     # Strip-or-refuse is undecided (design gap): either is fine, forwarding is not.
     assert answer["fault"] in (None, "ConfigFault", "ConfinementFault"), answer
+    if answer["fault"] is None:
+        assert len(r.up.seen) == 1
     for seen in r.up.seen:
         assert adapter_value not in seen.blob()
         assert seen.header("Accept") == "application/json"  # control
