@@ -10,10 +10,20 @@ module attribute `LabOps`). Its methods are those the capture and launcher fakes
   exec`; the JSON request body rides in argv after `-d` (or on stdin as `input=`). The reply is
   the ES|QL JSON result, `-w "\\n%{http_code}"` style (body, newline, status); result columns are
   read by position: count, version sum, `_index`, hour (pinned because ES|QL fixes the output
-  order of STATS ... BY). The fingerprint must cover the whole window: ES|QL returns at most 1000
-  rows by default, so either one request with a LIMIT large enough or several (paged) requests
-  whose union covers it, and a reply that looks truncated (row count == the request's LIMIT, or
-  1000 when it has none) is refused with an exception (r6.1), never accepted.
+  order of STATS ... BY). Events are fingerprinted COUNT + SUM(_version); alerts may be
+  fingerprinted COUNT only (C25 is unprobed), so the fake answers per FROM pattern and shapes the
+  columns by what the query asks for: COUNT only -> [count, _index, hour]; COUNT + SUM -> [count,
+  sum, _index, hour]. Expected alert values therefore accept either `[count, sum]` or `[count]`
+  (keys are `<index>|<hour>` either way); event values are always `[count, sum]`.
+  The fingerprint covers exactly the window `[window[0], as_of]` (D1: older history is served by
+  Elasticsearch but not guaranteed, so it must not appear). ES|QL returns at most 1000 rows by
+  default, so either one request with a LIMIT large enough or several (paged) requests whose union
+  covers the window. The fake supports both: it cuts rows to the query's LIMIT and to the time
+  range named by the query's own ISO-seconds timestamps (`YYYY-MM-DDTHH:MM:SS`; the first and
+  last found are the bounds; a query naming fewer than two is unbounded), so time-chunked pages
+  must spell their bounds in the query, not elsewhere. The hour truncation may sit after BY or in
+  an EVAL whose alias is a BY key. A reply that looks truncated (row count == the request's LIMIT,
+  or 1000 when it has none) is refused with an exception (r6.1), never accepted.
 * `es_now() -> str` sends an ES|QL query to the same door and returns the instant in the first
   cell of the reply; it never reads the local clock.
 
@@ -51,42 +61,82 @@ def _limit(query: str) -> int:
     return int(found[-1]) if found else 1000  # ES|QL's default row cap
 
 
+def _hours(start, count):
+    return [(start + timedelta(hours=h)).strftime("%Y-%m-%dT%H:00:00.000Z") for h in range(count)]
+
+
 def _dataset(indexes=3):
-    """Every index x hour bucket of the 31-day window (745 hours): far more than 1000 rows."""
-    start = datetime(2026, 9, 19, 8, tzinfo=UTC)
-    return [[10, 10, f"evt-lab-system.auth-{i}", (start + timedelta(hours=h)).strftime(
-        "%Y-%m-%dT%H:00:00.000Z")] for i in range(indexes) for h in range(745)]
+    """Every events index x hour bucket of the 31-day window (745 hours): far more than 1000 rows."""
+    return [[10, 10, f"evt-lab-system.auth-{i}", hr] for i in range(indexes)
+            for hr in _hours(datetime(2026, 9, 19, 8, tzinfo=UTC), 745)]
+
+
+def _alert_dataset():
+    """Alert-index rows over the same window, as [count, sum, _index, hour] (sum != count)."""
+    return [[4, 9, "alr-lab-system", hr] for hr in _hours(datetime(2026, 9, 19, 8, tzinfo=UTC), 745)]
+
+
+def _before_window():
+    """Rows older than window[0] (D1: served, not guaranteed): the hour before and weeks earlier."""
+    old = _hours(datetime(2026, 9, 19, 7, tzinfo=UTC), 1) + _hours(datetime(2026, 8, 30, tzinfo=UTC), 48)
+    return ([[3, 3, f"evt-lab-system.auth-{i}", hr] for i in range(3) for hr in old],
+            [[2, 5, "alr-lab-system", hr] for hr in old])
+
+
+def _asks_sum(query):
+    return "SUM(_VERSION)" in re.sub(r"\s+", "", query.upper())
+
+
+def _check_fingerprint(got, events, alerts):
+    """Keys are exactly the expected buckets; events [count, sum]; alerts [count, sum] or [count]."""
+    key = lambda r: f"{r[2]}|{r[3][:13]}"  # noqa: E731
+    assert set(got) == {key(r) for r in events + alerts}
+    for r in events:
+        assert got[key(r)] == [r[0], r[1]], key(r)
+    for r in alerts:
+        assert got[key(r)] in ([r[0], r[1]], [r[0]]), key(r)
 
 
 class Docker:
     """Records every command and answers each `_query` with a canned ES|QL result.
 
-    `values` rows are served in full. `serve_rows` models Elasticsearch: rows inside the time
-    range named by the query's own timestamps (all rows if it names fewer than two), cut to the
-    query's LIMIT (default 1000). `endless` answers every query with exactly LIMIT rows.
+    Rows are answered per FROM pattern: an events query gets `values`/`serve_rows` (each
+    [count, sum, _index, hour]), an alerts query gets `alert_rows` (same shape) cut to the columns
+    the query asks for (no SUM(_version) -> [count, _index, hour]); a query naming neither gets
+    `values` as is (es_now). `values` rows are served in full. `serve_rows` models Elasticsearch:
+    rows inside the time range named by the query's own timestamps (all rows if it names fewer than
+    two; also applied to `alert_rows`), cut to the query's LIMIT (default 1000). `endless` answers
+    every query with exactly LIMIT rows.
     """
 
-    def __init__(self, values=None, serve_rows=None, endless=False):
+    def __init__(self, values=None, serve_rows=None, alert_rows=None, endless=False):
         self.values, self.serve_rows, self.endless, self.calls = values, serve_rows, endless, []
+        self.alert_rows = alert_rows or []
 
     def _rows(self, query):
+        wide = _asks_sum(query)
+        shape = (lambda r: r) if wide else (lambda r: [r[0], *r[2:]])
         if self.endless:
-            return [[1, 1, f"idx-{i}", f"2026-09-{1 + i // 24 % 28:02d}T{i % 24:02d}:00:00.000Z"]
+            return [shape([1, 1, f"idx-{i}", f"2026-09-{1 + i // 24 % 28:02d}T{i % 24:02d}:00:00.000Z"])
                     for i in range(_limit(query))]
-        if self.serve_rows is None:
-            return self.values
-        stamps = sorted(re.findall(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d", query))
-        rows = self.serve_rows
-        if len(stamps) >= 2:
-            rows = [r for r in rows if stamps[0] <= r[3][:19] <= stamps[-1]]
+        events = self.serve_rows if self.serve_rows is not None else self.values
+        rows = []
+        if EVENTS in query or ALERTS not in query:
+            rows += events
+        if ALERTS in query:
+            rows += [shape(r) for r in self.alert_rows]
+        if self.serve_rows is not None:
+            stamps = sorted(re.findall(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d", query))
+            if len(stamps) >= 2:
+                rows = [r for r in rows if stamps[0] <= r[-1][:19] <= stamps[-1]]
         return rows[:_limit(query)]
 
     def __call__(self, argv, **kw):
         self.calls.append((list(argv), kw))
         body = json.loads(argv[argv.index("-d") + 1]) if "-d" in argv else json.loads(kw["input"])
-        reply = {"columns": [{"name": "a", "type": "long"}, {"name": "b", "type": "long"},
-                             {"name": "c", "type": "keyword"}, {"name": "d", "type": "date"}],
-                 "values": self._rows(body["query"])}
+        rows = self._rows(body["query"])
+        reply = {"columns": [{"name": f"c{i}", "type": "keyword"} for i in range(len(rows[0]))] if rows
+                 else [], "values": rows}
 
         class Done:
             returncode, stderr = 0, ""
@@ -128,13 +178,16 @@ def test_fingerprint_sends_the_per_index_hour_esql_over_the_configured_patterns(
     for query in queries:
         upper = re.sub(r"\s*,\s*", ", ", query.upper())
         squeezed = upper.replace(" ", "")
-        assert "METADATA _INDEX, _VERSION" in upper and "COUNT(*)" in squeezed
+        assert "COUNT(*)" in squeezed and re.search(r"METADATA [^|]*\b_INDEX\b", upper)
         assert "logs-*" not in query
-        by = upper.split(" BY ", 1)[1]
+        head, by = upper.split(" BY ", 1)
         assert "_INDEX" in by
-        assert re.search(r"(DATE_TRUNC\(\s*1\s*HOURS?\s*,|BUCKET\([^,()]+,\s*1\s*HOURS?\s*\))", by), by
+        trunc = r"(?:DATE_TRUNC\(\s*1\s*HOURS?\s*,|BUCKET\([^,()]+,\s*1\s*HOURS?\s*\))"
+        aliases = re.findall(rf"(\w+)\s*=\s*{trunc}", head)  # EVAL h = DATE_TRUNC(...) ... BY h
+        assert re.search(trunc, by) or any(re.search(rf"\b{a}\b", by) for a in aliases), by
         if EVENTS in query:
-            assert "SUM(_VERSION)" in squeezed  # alerts are not pinned: C25 is unprobed
+            assert "SUM(_VERSION)" in squeezed and "_VERSION" in upper.split("METADATA", 1)[1]
+            # alerts may be COUNT only: C25 is unprobed
 
 
 @pytest.mark.parametrize(("as_of", "arrived_by"), [
@@ -148,11 +201,13 @@ def test_fingerprint_filter_is_the_shared_cut_clause(as_of, arrived_by):
 
 
 def test_fingerprint_covers_the_whole_window_even_when_it_exceeds_one_default_page():
-    """O1/D1: 2235 index x hour buckets come back whole (one big LIMIT, or paged requests)."""
-    data = _dataset()
-    docker = Docker(serve_rows=data)
+    """O1/D1: every in-window bucket (events and alerts) comes back whole, and none older than window[0]."""
+    data, alerts = _dataset(), _alert_dataset()
+    old_events, old_alerts = _before_window()
+    docker = Docker(serve_rows=old_events + data, alert_rows=old_alerts + alerts)
     got = _ops(docker).fingerprint(WINDOW, AS_OF, ARRIVED_BY)
-    assert got == {f"{r[2]}|{r[3][:13]}": [r[0], r[1]] for r in data}
+    _check_fingerprint(got, data, alerts)
+    assert not [k for k in got if k.split("|")[1] < WINDOW[0][:13]]
 
 
 def test_fingerprint_refuses_a_reply_that_looks_truncated():
@@ -169,9 +224,10 @@ def test_fingerprint_refuses_a_reply_that_looks_truncated():
 
 def test_fingerprint_answers_count_and_version_sum_keyed_by_index_and_hour():
     """Data model: the reply rows become {"<index>|<hour>": [count, sum]}."""
-    docker = Docker([[1200, 1250, INDEX, HOUR], [7, 7, INDEX, "2026-10-20T09:00:00.000Z"]])
-    got = _ops(docker).fingerprint(WINDOW, AS_OF, ARRIVED_BY)
-    assert got == {f"{INDEX}|2026-10-20T08": [1200, 1250], f"{INDEX}|2026-10-20T09": [7, 7]}
+    events = [[1200, 1250, INDEX, HOUR], [7, 7, INDEX, "2026-10-20T09:00:00.000Z"]]
+    alerts = [[5, 9, "alr-lab-system", HOUR]]
+    got = _ops(Docker(events, alert_rows=alerts)).fingerprint(WINDOW, AS_OF, ARRIVED_BY)
+    _check_fingerprint(got, events, alerts)
 
 
 def test_es_now_reads_the_elasticsearch_clock_not_the_local_one():

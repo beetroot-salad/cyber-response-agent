@@ -12,6 +12,8 @@ and sleep(seconds). The lock is taken through `chaos.lock` on `lock_store`; part
 Production ops (FR1): `playground-v2/scripts/lab_ops.py::LabOps` implements `es_now()` and
 `fingerprint(window, as_of, arrived_by)` (tested in test_1347_lab_ops.py) and is what
 `capture_case.py` binds as its default `ops` fingerprint/clock implementation (`capture_case.LabOps`).
+Nothing is injected for these: when the passed `ops` lacks `fingerprint` / `es_now`, the script
+builds its module-level `LabOps(...)` and uses that for those methods.
 
 O8 report: `capture` prints (stdout) and/or returns a report that names each fingerprinted index
 (the part of a fingerprint key before `|`) with its total document count, the window bounds, and

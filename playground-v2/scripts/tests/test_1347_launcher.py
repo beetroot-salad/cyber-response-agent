@@ -12,6 +12,8 @@ parsed freeze.yaml.
 
 Production ops (FR1): `playground-v2/scripts/lab_ops.py::LabOps` implements `fingerprint(window,
 as_of, arrived_by)` (tested in test_1347_lab_ops.py); `launch_frozen.py` binds it as `launch_frozen.LabOps`.
+Nothing is injected for it: when the passed `ops` lacks `fingerprint` (or `es_now`), the script
+builds its module-level `LabOps(...)` and uses that for the method.
 A run that crashes before printing `run_id=` gets no row (r6.1); reference mode works on a freeze
 whose `confirmed` is still empty. The launcher never sets or changes DOCKER_HOST / DOCKER_CONTEXT in
 the agent's environment (`run_fn`'s `env`; an inherited operator value is left alone) and adds
