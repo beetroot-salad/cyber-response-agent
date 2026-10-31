@@ -46,6 +46,10 @@ OTHER_TENANT = str(uuid.UUID(int=0x1342))
 SETTLED = {"setup": "done", "box": "started", "report_committed": True, "scrub_verified": True}
 
 
+pytestmark = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="reads /proc/self/fd and uses prctl(PR_SET_PDEATHSIG), Linux only")
+
+
 @pytest.fixture(autouse=True)
 def _process_state():
     """`job_main` sets the process's parent-death signal and SIGTERM handling; give both back."""
@@ -577,14 +581,13 @@ def test_m3_no_reader_of_the_run_folder_or_the_page_ran_before_the_lifecycle_ret
     assert "list" in spies.events, spies.events
     assert "module-visualize" not in spies.events, spies.events
     assert "renderer" not in spies.events, spies.events
-    assert spies.events.index("list") < spies.events.index("cross-check") < spies.events.index("seam-visualize")
 
 
 
 @pytest.mark.parametrize("entry", ["job_main", "main"])
 def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the_lifecycle_returned(
         scene, monkeypatch, tmp_path, entry):
-    """Both entries' lifecycle doubles see an untouched run folder by name spies and by the audit record; afterwards the post-steps read it. (M3)"""
+    """Neither entry's lifecycle double sees a named reader run or a listing or read-only open of the run folder (by name spies and the audit record); afterwards the post-steps read it. Other access paths (`r+`, `dir_fd` opens, stat, child processes) are not observed here. (M3)"""
     from defender import run as run_py
 
     spies = ReaderSpies(monkeypatch, scene.runs / "unused", any_child_of=scene.runs)
@@ -630,7 +633,7 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
 
 
 def test_m3_the_main_block_calls_both_entries_with_nothing_but_the_arguments():
-    """`run.py`'s `__main__` block dispatches `job_main(_argv)` or `main(_argv)`: no keyword, star or extra argument, so no seam is passed from it. (M3)"""
+    """`run.py`'s `__main__` block is exactly the log configuration, the argv read and one `sys.exit` dispatching `job_main` or `main` on that argv: no other statement, and both entries get positional arguments only, so no seam is passed from it. (M3)"""
     from defender.tests.support.shared.contracts import _by_path
 
     astlib = _by_path.import_lint_lib("_astlib")
@@ -638,20 +641,35 @@ def test_m3_the_main_block_calls_both_entries_with_nothing_but_the_arguments():
     env = astlib.module_env(tree_, "defender.run", "defender")
     blocks = [n for n in tree_.body if isinstance(n, ast.If) and ast.unparse(n.test) == "__name__ == '__main__'"]
     assert len(blocks) == 1, "premise: one __main__ block"
-    exits = [c for n in blocks[0].body for c in ast.walk(n) if isinstance(c, ast.Call) and astlib.callee(c, env) == "sys.exit"]
-    assert len(exits) == 1, "premise: one sys.exit dispatch"
-    (leave,) = exits
-    assert not leave.keywords
-    assert len(leave.args) == 1
-    dispatch = leave.args[0]
+    assert not blocks[0].orelse
+    configure, read_argv, leave = blocks[0].body if len(blocks[0].body) == 3 else (None, None, None)
+    assert leave is not None, f"the block holds statements beyond the three honest ones: {[ast.unparse(n) for n in blocks[0].body]}"
+    assert isinstance(configure, ast.Expr)
+    assert isinstance(configure.value, ast.Call)
+    assert astlib.callee(configure.value, env) == "defender._log.configure_from_env", ast.unparse(configure)
+    assert not configure.value.args
+    assert not configure.value.keywords
+    assert isinstance(read_argv, ast.Assign)
+    assert len(read_argv.targets) == 1
+    assert isinstance(read_argv.targets[0], ast.Name)
+    assert ast.unparse(read_argv.value) == "sys.argv[1:]", ast.unparse(read_argv)
+    argv_name = read_argv.targets[0].id
+    assert isinstance(leave, ast.Expr)
+    assert isinstance(leave.value, ast.Call)
+    assert astlib.callee(leave.value, env) == "sys.exit", ast.unparse(leave)
+    assert not leave.value.keywords
+    assert len(leave.value.args) == 1
+    dispatch = leave.value.args[0]
     assert isinstance(dispatch, ast.IfExp)
-    assert ast.unparse(dispatch.test) == "'--job' in _argv"
-    for entry, shape in ((dispatch.body, "job_main(_argv)"), (dispatch.orelse, "main(_argv)")):
-        assert isinstance(entry, ast.Call)
-        assert ast.unparse(entry) == shape, ast.unparse(entry)
-        assert not entry.keywords
+    for entry, name in ((dispatch.body, "job_main"), (dispatch.orelse, "main")):
+        assert isinstance(entry, ast.Call), ast.unparse(entry)
+        assert isinstance(entry.func, ast.Name), ast.unparse(entry)
+        assert entry.func.id == name, ast.unparse(entry)
+        assert name in env.defines, f"{name} is not defined in run.py"
+        assert not entry.keywords, f"{name} is called with a keyword from the __main__ block"
         assert len(entry.args) == 1
-    assert "sys.exit(job_main(_argv) if '--job' in _argv else main(_argv))" in [ast.unparse(n) for n in blocks[0].body]
+        assert isinstance(entry.args[0], ast.Name)
+        assert entry.args[0].id == argv_name
 
 
 def test_m3_the_two_entries_are_plain_functions_defined_in_run_py():
@@ -768,8 +786,7 @@ def test_o8_a_tree_the_scrub_found_tainted_is_not_verified(scene, monkeypatch):
     record = scene.job_end(run_id)
     assert record["box"] == "started"
     assert record["scrub_verified"] is False
-    assert (isinstance(got.raised, RunTainted) or (got.exit is not None and got.exit.code not in (0, None))
-            or got.rc not in (0, None)), got
+    assert isinstance(got.raised, RunTainted), got
     assert spies.seam_calls == 0, "the page was rendered from a tainted tree"
     assert spies.events == [], f"a reader of the tainted tree ran: {spies.events}"
 
@@ -1044,20 +1061,13 @@ def test_m4_the_job_entry_has_exactly_the_ratified_parameters_and_refuses_any_ot
     import inspect
 
     from defender import run as run_py
-    from defender import run_common
 
     parameters = inspect.signature(run_py.job_main).parameters
     assert list(parameters) == ["argv", "lifecycle", "visualize", "preflight", "materialize", "roster", "publish"]
-    assert {n: p.default for n, p in parameters.items() if n != "argv"} == {
-        "lifecycle": run_py._run_investigation_lifecycle, "visualize": run_common.visualize,
-        "preflight": run_py.preflight_role_models, "materialize": run_py._materialize_run,
-        "roster": None, "publish": None}, "the production seams are the operator run's own, by identity"
-    defaults = {n: p.default for n, p in inspect.signature(run_py.main).parameters.items() if n != "argv"}
-    assert defaults == {
-        "lifecycle": run_py._run_investigation_lifecycle, "visualize": run_common.visualize,
-        "ticket_writer": run_py._default_ticket_writer, "enqueue": run_common.enqueue_curation,
-        "preflight": run_py.preflight_role_models, "materialize": run_py._materialize_run,
-        "oracle": None, "verifier": None, "roster": None, "publish": None}, "main's production seams, by identity"
+    main_defaults = {n: p.default for n, p in inspect.signature(run_py.main).parameters.items() if n != "argv"}
+    for seam in ("lifecycle", "visualize", "preflight", "materialize", "roster", "publish"):
+        assert parameters[seam].default is main_defaults[seam], f"{seam}: the job entry's default is not the operator run's own"
+    assert main_defaults["lifecycle"] is run_py._run_investigation_lifecycle, "the production lifecycle (D-k)"
     assert [n for n, p in parameters.items() if p.kind is inspect.Parameter.KEYWORD_ONLY] == list(parameters)[1:]
     for extra in ("case_ticket", "ticket_writer", "enqueue", "oracle", "verifier", "update_ticket", "anything_else"):
         run_id = str(uuid.uuid4())

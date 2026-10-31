@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scrub-order fence (#540, re-sited by #1342): three rules over the entrypoint and the bash tool.
+"""Scrub-order fence (#540, re-sited by #1342): four rules over the entrypoint and the bash tool.
 
 * `run.py` has two compositions, the operator's `main` and the job entry's `job_main`. Each
   calls the box lifecycle (which scrubs the run folder) and then the shared `_post_steps`, in
@@ -20,13 +20,25 @@
 * The bash tool never calls `run_parsed` on the in-process executor `bash_exec`: a box failure
   has no in-process fallback.
 
-Not covered, by design (name-based evasions; the behaviour test in
-`tests/jobs/test_1342_job_entry.py`, which records every reader before and after the lifecycle
-double, is the enforcement): a reader named by a computed string (`"cross_" + "check_tables"`, a
-variable), reached from another module, through a function's `__defaults__`, or a read of the
-folder by a means the census does not name (`open`, `read_text`, `shutil`, a subprocess); the
-post-steps called from a helper before the lifecycle; a swallow by a helper context manager of
-one's own; a rebinding of a composition at run time (`globals()`, `setattr`, `exec`).
+False positives, accepted (the rule is a name census, not a flow analysis): any `glob`, `rglob`,
+`iglob`, `walk`, `listdir` or `scandir` name, and the exact string `"walk"`, `"glob"` or
+`"visualize"`, anywhere in `run.py` outside `_post_steps` is a finding, whatever it is used for;
+a local `main = 1` (or any other binding of a composition's name) in a helper counts as a second
+binding of that name.
+
+Not covered, by design (name-based evasions): a reader named by a computed string (`"cross_" +
+"check_tables"`, a variable), reached from another module, through a function's `__defaults__`,
+or a read of the folder by a means the census does not name (`open`, `read_text`, `shutil`, a
+subprocess); the post-steps called from a helper before the lifecycle; a swallow by a helper
+context manager of one's own; a rebinding of a composition at run time (`globals()`, `setattr`,
+`exec`).
+
+The behaviour test (`tests/jobs/test_1342_job_entry.py`,
+`test_m3_beneath_the_names_...`) backs this lint but does not replace it. It observes, in the
+test process, the named readers (by spy) and, through `sys.addaudithook`, listings and read-only
+`open` calls of the run folder made before the lifecycle double returns. It does not see: `r+`
+opens, `dir_fd`-relative opens, reads made later by another thread, `stat`/`exists`/`readlink`,
+child processes (in the m3 test), or a ticket POST made through a shell.
 
 Order is source position inside the one function; attribute calls read as their attribute
 name. A file or function that is missing, or a named call that is gone, is a finding (the rule
