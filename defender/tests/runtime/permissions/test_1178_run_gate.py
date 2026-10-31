@@ -251,7 +251,8 @@ def _lead_scene(tmp_path: Path, committed: dict[str, str] | None = None, *,
                    "skills/gather/queries/SCHEMA.md": "# template schema\n",
                    **{f"skills/{name}": text for name, text in (committed or {}).items()},
                    **(files or {})}
-    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files=agent_files, product=product)
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files=agent_files, product=product,
+                        tenant=_state1135.curation_tenant())
     location_path(lane.paths.state_root).mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return LeadScene(tmp=lane.tmp, lane=lane, run_dir=_run_dir(), head=lane.base)
 
@@ -483,7 +484,8 @@ def _pitfalls_scene(tmp_path: Path, monkeypatch, rows: list[dict], *,
     agent_files = {**seed_agent_files(markers=("elastic",), skills=("elastic",), catalog=(),
                                       non_systems=("gather",)),
                    REDUCER_REL.removeprefix("agent/"): reducer_surface_text(), **(files or {})}
-    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files=agent_files, product=product)
+    lane = C.draft_lane(tmp_path, lanes=C.LEAD_LANES, files=agent_files, product=product,
+                        tenant=_state1135.curation_tenant())
     persist.append_pitfalls(rows, state=_state1135.state_for_paths(lane.paths))
     return PitfallsScene(tmp=lane.tmp, lane=lane, head=lane.base)
 
@@ -943,11 +945,14 @@ def _request_dir(s: LeadScene, *below: str) -> Path:
 def _drain(s: LeadScene, lanes: Lanes, **kw: Any) -> Any:
     """`drains._drain_lead_author` over the scene's paths, on a learning-state handle over its
     root (as the lane's entry opens one), its two work steps `lanes`', serving the scene's batch.
-    The drain re-checks each claim's tenant: the directory holds every tenant the scene placed active."""
+    The scene's paths carry the accepted tenant the claims name (r10.1 C1: a drain serves only through its own
+    tenant), and the drain re-checks each claim's tenant: the directory holds every tenant the scene placed
+    active. As the lane's entry does, the tick claims when a request is queued as it begins."""
     lanes.lane = s.lane
+    state = _state1135.state_for_paths(s.paths)
     return drains._drain_lead_author(
-        s.paths, _state1135.state_for_paths(s.paths), lanes.run_lead, lanes.run_pitfalls,
-        directory=directory_for_root(), **kw)
+        s.paths, state, lanes.run_lead, lanes.run_pitfalls,
+        claims=state.has_requests(), directory=directory_for_root(), **kw)
 
 
 def _caught_drain(s: LeadScene, lanes: Lanes, **kw: Any) -> BaseException | None:
