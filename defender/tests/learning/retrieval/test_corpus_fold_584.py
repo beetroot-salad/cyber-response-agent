@@ -343,6 +343,9 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
 def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
     """The missing-dir guard keys on the resolved (injected) dir, not an import-time constant."""
     tl = load_trace_lesson("trace_lesson_584")
+    # The tenant is placed: the host acceptance (A1) runs the folder rules before the command's own guard,
+    # so the guard under test is reached only for an acceptable tenant.
+    _tenant_runs()
     missing = tmp_path / "no-such-corpus"
 
     assert trace_main(tl, ["--all", "--lessons-dir", str(missing), "--tenant", TID]) == 1
