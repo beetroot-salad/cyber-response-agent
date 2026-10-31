@@ -223,7 +223,8 @@ async def test_o7_a_deliberate_stop_sends_sigterm_to_every_child_and_writes_no_r
             _wait(lambda: len(list(seen.glob("*.json"))) == 2, timeout=60, what="both children")
             boxes = {i: containers / f"defender-run-{i}" for i in ids}
             for i, box in boxes.items():  # the stand-in is planted after `seen`: signal only once both exist
-                _wait(box.is_file, timeout=30, what="the child's box")
+                _wait(lambda b=box: b.is_file() and b.read_text(encoding="utf-8") != "", timeout=30,
+                      what="the child's box")
                 launch = json.loads((runs / f"{i}.launch.json").read_text(encoding="utf-8"))
                 assert box.read_text(encoding="utf-8") == launch["box_token"], "the box carries another claim's token"
             assert len({b.read_text(encoding="utf-8") for b in boxes.values()}) == 2

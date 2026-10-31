@@ -128,6 +128,7 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
             await make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers")).drain()
+            row = await store.get_investigation(t.tenant_id, inv.investigation_id)
 
         runs = root / t.tenant_id / "runs"
         end = json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8"))
@@ -135,3 +136,4 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
         assert (runs / inv.investigation_id / "report.md").is_file(), "premise: the report was committed before the fault"
         assert (end["setup"], end["box"]) == ("done", "started"), end
         assert end["report_committed"] is True, end
+        assert row.stage == "completed", "both facts held, so rule 4 reads the committed report (r5 C2, D-h superseded)"

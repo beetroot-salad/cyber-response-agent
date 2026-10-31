@@ -802,6 +802,7 @@ def _claim_token(world: dict, inv: str) -> str:
 async def test_o7_after_the_child_exits_the_backstop_reaps_under_the_claims_token_and_a_missing_box_is_normal(
         world, tmp_path, caplog):
     """`reap(name, token)` is asked with the token in the launch record, per claim: a box that start stamped is removed, an absent one reads `absent`, and the row is the rules' alone. (O7, r5 C1)"""
+    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
     containers = StandInContainers(tmp_path / "containers")
     owning = _child(world, files=_committed(), box_dir=containers.where)  # its start made and stamped the box
     bare = ScriptedChild(world["tmp"] / "child-bare", world["runs"], files=_committed())

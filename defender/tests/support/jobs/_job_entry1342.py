@@ -59,11 +59,13 @@ def _replay_lifecycle(*, fault_after_close: bool = False):
     from defender.records.formats import parse_report_text
 
     disposition = parse_report_text((GOLDEN / "report.md").read_text(encoding="utf-8")).disposition
-    main = (_FaultsAfterClose if fault_after_close else RH.ReplayFn)([
+    turns = [
         RH.Turn(tool_calls=[("append_block", {"text": (GOLDEN / "investigation.md").read_text(encoding="utf-8")})]),
         RH.Turn(tool_calls=[("close_investigation", {"disposition": disposition})]),
-        RH.Turn(text="Investigation complete."),
-    ])
+    ]
+    # The fault mode drops the closing text turn, so the request after the close is the one that raises.
+    main = (_FaultsAfterClose(turns) if fault_after_close
+            else RH.ReplayFn([*turns, RH.Turn(text="Investigation complete.")]))
     investigate = functools.partial(run_py._drive_investigation, investigate=RH.investigate_as_handed(main))
     return functools.partial(run_py._run_investigation_lifecycle, investigate=investigate, start_box=_unboxed)
 
