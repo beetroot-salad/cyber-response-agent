@@ -198,7 +198,10 @@ class _Proxy:
                 secrets += (access_token,)
                 headers["Authorization"] = f"Bearer {access_token}"
             else:
-                headers.update(static_headers(declaration.auth, creds, asked.system))
+                injected = static_headers(declaration.auth, creds, asked.system)
+                headers.update(injected)
+                # an upstream that echoes the header back must not hand over its encoded form
+                secrets += tuple(v for v in injected.values() if v not in secrets)
             answer = self._sent(client, asked, target, headers, secrets, trail)
         if answer["status"] == 401 and access_token is not None:
             self.access_tokens.evict(claims.tenant, asked.system, access_token)
