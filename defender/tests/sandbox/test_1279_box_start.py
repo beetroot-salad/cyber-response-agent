@@ -741,9 +741,16 @@ def test_a_box_request_without_a_tenant_is_a_construction_error(tmp_path, given)
         box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, **given)
 
 
-def test_the_run_box_start_refuses_a_missing_tenant_like_its_missing_defender_dir(tmp_path, monkeypatch):
-    """`start_box(run_dir, defender_dir, ...)` without `tenant_id` is a `TypeError` before any container is asked for; with
-    one the same call starts, labelled (r10.1 C8, O-B1)."""
+def test_a_box_request_names_its_tenant_without_judging_the_grammar(tmp_path):
+    """A `BoxRequest` naming any non-empty tenant id is made; the id's grammar is judged at acceptance only (r10.1 C8)."""
+    made = box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, tenant_id="not-a-uuid")
+    assert made.tenant_id == "not-a-uuid"
+
+
+@pytest.mark.parametrize("given", [{}, {"tenant_id": None}, {"tenant_id": ""}], ids=["omitted", "none", "empty"])
+def test_the_run_box_start_refuses_a_missing_tenant_like_its_missing_defender_dir(tmp_path, monkeypatch, given):
+    """`start_box(run_dir, defender_dir, ...)` with no tenant (omitted, None, empty) is a `TypeError` before any container
+    is asked for; with one the same call starts, labelled (r10.1 C8, O-B1)."""
     X.dev_root(monkeypatch, tmp_path / "elsewhere" / "published")
     lane = X.run_lane(tmp_path / "run")
     rec = RecordingDocker()
@@ -752,7 +759,7 @@ def test_the_run_box_start_refuses_a_missing_tenant_like_its_missing_defender_di
     bare = RecordingDocker()
     with pytest.raises(TypeError, match="tenant"):
         box_mod.start_box(lane.run_dir, lane.defender_dir, tenant_agent=lane.agent, staged_token=lane.token,
-                          docker=bare, spec=_PINNED)
+                          docker=bare, spec=_PINNED, **given)
     assert bare.create_argv is None, "a tenantless run box reached the container runtime"
 
 
