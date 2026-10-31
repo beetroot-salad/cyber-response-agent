@@ -163,7 +163,7 @@ class ReaderSpies:
     """Records, in order, every reader of the run folder and of the page that `run.py` could reach: listing
     the run folder, the table cross-check, the module-default page render and the renderer beneath it."""
 
-    def __init__(self, monkeypatch: Any, run_dir: Path) -> None:
+    def __init__(self, monkeypatch: Any, run_dir: Path, *, any_child_of: Path | None = None) -> None:
         from defender import run as run_py  # noqa: F401 — imported first: its seam defaults bind the real readers, never a spy
         from defender import run_common
         from defender.presentation import visualize_run
@@ -172,7 +172,7 @@ class ReaderSpies:
         real_iterdir, real_cross = Path.iterdir, run_common.cross_check_tables
 
         def iterdir(path: Path) -> Any:
-            if path == run_dir:
+            if path == run_dir or (any_child_of is not None and path.parent == any_child_of):
                 self.events.append("list")
             return real_iterdir(path)
 
@@ -193,6 +193,74 @@ class ReaderSpies:
         """The injected page seam."""
         self.seam_calls += 1
         self.events.append("seam-visualize")
+
+
+#: Audit events that list a folder; `args[0]` is the path, or a directory descriptor.
+_AUDIT_LISTINGS = frozenset({"os.listdir", "os.scandir", "os.walk", "os.fwalk"})
+_AUDIT_WATCH: list[tuple[str, str]] | None = None  # the process-wide hook records here while a test sets it
+_AUDIT_INSTALLED = False
+
+
+_AUDIT_SPAWNS: list[list[str]] | None = None  # argv of every process the interpreter launched, while a test sets it
+
+
+def _audit_hook(event: str, args: tuple[Any, ...]) -> None:
+    spawns = _AUDIT_SPAWNS
+    if spawns is not None and event in ("subprocess.Popen", "os.exec", "os.posix_spawn", "os.spawn", "os.system"):
+        launched = {"os.system": args[:1], "os.spawn": args[2]}.get(event, args[1] if len(args) > 1 else ())
+        with contextlib.suppress(TypeError):
+            spawns.append([os.fsdecode(part) for part in launched])
+    sink = _AUDIT_WATCH
+    if sink is None or not (event in _AUDIT_LISTINGS or event == "open"):
+        return
+    try:
+        target = args[0]
+        if event == "open" and (not isinstance(args[2], int) or args[2] & (os.O_WRONLY | os.O_RDWR | os.O_DIRECTORY)):
+            return  # a write, or a directory opened to be walked (the listing itself is its own event)
+        if isinstance(target, int):
+            target = os.readlink(f"/proc/self/fd/{target}")
+        sink.append((event, os.path.realpath(os.fsdecode(target))))
+    except (OSError, TypeError, ValueError, IndexError):
+        return
+
+
+class AuditWatch:
+    """Records listings and read-opens beneath the interpreter's names (`sys.addaudithook`), whichever function or alias reached them."""
+
+    def __init__(self) -> None:
+        global _AUDIT_INSTALLED, _AUDIT_WATCH
+        if not _AUDIT_INSTALLED:  # a hook cannot be removed: one for the process, gated by the module-level sink
+            sys.addaudithook(_audit_hook)
+            _AUDIT_INSTALLED = True
+        self.seen: list[tuple[str, str]] = []
+        _AUDIT_WATCH = self.seen
+
+    def stop(self) -> None:
+        global _AUDIT_WATCH
+        _AUDIT_WATCH = None
+
+    @staticmethod
+    def watch_spawns() -> list[list[str]]:
+        """Start recording the argv of every process launched; the returned list fills until `stop_spawns`."""
+        global _AUDIT_INSTALLED, _AUDIT_SPAWNS
+        if not _AUDIT_INSTALLED:
+            sys.addaudithook(_audit_hook)
+            _AUDIT_INSTALLED = True
+        _AUDIT_SPAWNS = []
+        return _AUDIT_SPAWNS
+
+    @staticmethod
+    def stop_spawns() -> None:
+        global _AUDIT_SPAWNS
+        _AUDIT_SPAWNS = None
+
+    def reads_of(self, run_dir: Path) -> list[tuple[str, str]]:
+        """Listings and read-opens at or below `run_dir`, less the entry's own setup (the alert input it writes, the provenance it announces)."""
+        root = os.path.realpath(run_dir)
+        own = (os.path.join(root, "alert_input"), os.path.join(root, "provenance.json"))
+        return [(event, path) for event, path in list(self.seen)
+                if (path == root or path.startswith(root + os.sep))
+                and not any(path == p or path.startswith(p + os.sep) for p in own)]
 
 
 # --- O6 / M1 / M5: setup in the job lane -----------------------------------------------------------
@@ -504,6 +572,70 @@ def test_m3_no_reader_of_the_run_folder_or_the_page_ran_before_the_lifecycle_ret
     assert spies.events.index("list") < spies.events.index("cross-check") < spies.events.index("seam-visualize")
 
 
+
+@pytest.mark.parametrize("entry", ["job_main", "main"])
+def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the_lifecycle_returned(
+        scene, monkeypatch, tmp_path, entry):
+    """Both entries' lifecycle doubles see an untouched run folder by name spies and by the audit record; afterwards the post-steps read it. (M3)"""
+    from defender import run as run_py
+
+    spies = ReaderSpies(monkeypatch, scene.runs / "unused", any_child_of=scene.runs)
+    watch = AuditWatch()
+    before: list[tuple[list[str], list[tuple[str, str]]]] = []
+    run_dirs: list[Path] = []
+
+    def lifecycle(**kw: Any) -> dict[str, Any]:
+        run_dirs.append(kw["run"].run_dir)
+        before.append((list(spies.events), watch.reads_of(kw["run"].run_dir)))
+        kw["run"].facts.scrub_verdict.write(json.dumps({"ran": True, "reason": "walk completed"}))
+        return summary()
+
+    class Writer:
+        def open_case_ticket(self, *_a: Any, **_k: Any) -> None: ...
+        def record_case_ticket(self, *_a: Any, **_k: Any) -> None: ...
+
+    try:
+        if entry == "job_main":
+            run_id = str(uuid.uuid4())
+            scene.plant(run_id)
+            got = run_job(scene, run_id, lifecycle=lifecycle, visualize=spies.seam)
+            assert got.raised is None, got
+            assert got.exit is None, got
+        else:
+            rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id,
+                              "--update-ticket"],
+                             lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=spies.seam,
+                             ticket_writer=Writer(), enqueue=lambda *a, **k: False,
+                             publish=lambda *a, **k: B.fresh(scene.t.commit))
+            assert rc == 0
+    finally:
+        watch.stop()
+
+    assert len(before) == 1, before
+    assert before[0][0] == [], f"a named reader ran before the lifecycle returned: {before[0][0]}"
+    assert before[0][1] == [], f"the run folder was listed or read before the lifecycle returned: {before[0][1]}"
+    after = watch.reads_of(run_dirs[0])
+    assert after, "premise: the post-steps read the run folder, and the record sees it"
+    assert spies.events.count("cross-check") == 1, spies.events
+    assert spies.events.count("seam-visualize") == 1, spies.events
+
+
+
+def test_m3_the_two_entries_are_plain_functions_defined_in_run_py():
+    """`main` and `job_main` are undecorated: no `__wrapped__`, a code object from `run.py`, and their own names. (M3)"""
+    import types
+
+    from defender import run as run_py
+
+    for name in ("main", "job_main"):
+        fn = getattr(run_py, name)
+        assert type(fn) is types.FunctionType, (name, type(fn))
+        assert not hasattr(fn, "__wrapped__"), f"{name} is a decorator's wrapper"
+        assert fn.__code__.co_filename == run_py.__file__, (name, fn.__code__)
+        assert fn.__code__.co_name == name, (name, fn.__code__)
+        assert (fn.__module__, fn.__name__, fn.__qualname__) == (run_py.__name__, name, name)
+
+
 # --- the job-end record's facts (O8 child side, M3) ------------------------------------------------------
 
 def _lifecycle(s: Scene, *, investigate: Any, start_box: Any = None, stop_box: Any = None, scrub: Any = None):
@@ -722,7 +854,54 @@ class _Tripwire:
         return refuse
 
 
-def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operator_path_does(scene, tmp_path, monkeypatch):
+def _operator_composition_still_opens_records_and_enqueues(scene: Scene, tmp_path: Path) -> None:
+    """Positive control: the operator composition, through its seams, still opens, records and enqueues."""
+    from defender import run as run_py
+
+    seen: list[str] = []
+
+    class Writer:
+        def open_case_ticket(self, *_a: Any, **_k: Any) -> None:
+            seen.append("open")
+
+        def record_case_ticket(self, *_a: Any, **_k: Any) -> None:
+            seen.append("record")
+
+    def enq(*_a: Any, **_k: Any) -> bool:
+        seen.append("enqueue")
+        return False
+
+    alert = B.plant_alert(tmp_path / "op-alert")
+    rc = run_py.main([str(alert), "--tenant", scene.t.tenant_id, "--update-ticket"],
+                     lifecycle=lambda **kw: summary(), preflight=lambda *a, **k: 0,
+                     visualize=lambda *a, **k: None, ticket_writer=Writer(), enqueue=enq,
+                     publish=lambda *a, **k: B.fresh(scene.t.commit))
+    assert rc == 0
+    assert seen == ["open", "record", "enqueue"], seen
+
+
+@pytest.fixture
+def docker_shim(tmp_path, monkeypatch):
+    """A `docker` first on PATH that logs and fails, and the audit record of launched processes; returns `docker_execs()`: the `exec` lines the shim logged and the `docker ... exec` argvs launched."""
+    shim_log = tmp_path / "docker-shim.log"
+    shim = tmp_path / "docker-shim" / "docker"
+    shim.parent.mkdir()
+    shim.write_text(f'#!/bin/sh\necho "$@" >> {shim_log}\nexit 1\n', encoding="utf-8")
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim.parent}{os.pathsep}{os.environ.get('PATH', '')}")
+    spawns = AuditWatch.watch_spawns()
+
+    def docker_execs() -> tuple[list[str], list[list[str]]]:
+        logged = shim_log.read_text(encoding="utf-8").splitlines() if shim_log.exists() else []
+        return ([line for line in logged if "exec" in line.split()],
+                [argv for argv in spawns if argv and Path(argv[0]).name == "docker" and "exec" in argv])
+
+    yield docker_execs
+    AuditWatch.stop_spawns()
+
+
+def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operator_path_does(
+        scene, tmp_path, monkeypatch, docker_shim):
     """The job entry takes no seam for either and calls neither; `run.main` still does, by default. (M4, O11)"""
     import inspect
 
@@ -763,6 +942,9 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
         return real_run(cmd, *a, **k)
 
     monkeypatch.setattr(subprocess, "run", run_unless_docker_exec)  # lint-monkeypatch: ok — a tripwire beneath the writer's transport; no seam exists by design
+    # a launch bound before any patch escapes that too: a `docker` first on PATH that logs and fails, and the
+    # interpreter's own process-launch audit record, both below every Python name
+    docker_execs = docker_shim
 
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
@@ -773,6 +955,7 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     assert got.calls["lifecycle"] == 1, got
     assert got.raised is None, got
     assert (tripped, wire.called, launched) == ([], [], [])
+    assert docker_execs() == ([], []), "a job-lane run launched a docker exec beneath the Python names"
     # control: the tripwire is live, so an alias of the real entry points would have been caught
     from types import SimpleNamespace
     probe = SimpleNamespace(run_dir=tmp_path / "probe")
@@ -790,32 +973,15 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
         subprocess.run(["docker", "--context", "c", "exec", "box", "curl"], check=False)
     assert launched, "the launch tripwire never saw the docker exec"
     launched.clear()
+    real_run(["docker", "--context", "c", "exec", "box", "curl"], check=False)  # control: below the patch, the shim and the audit see it
+    shim_seen, audit_seen = docker_execs()
+    assert (len(shim_seen), len(audit_seen)) == (1, 1), (shim_seen, audit_seen)
+    AuditWatch.stop_spawns()
     # a helper that captured `enqueue_curation` at definition time escapes the module patch: look at disk too
     made = [k for k in set(tree(scene.root)) - before if re.search(r"curat|queue|learn", k, re.IGNORECASE)]
     assert made == [], f"the job lane left curation state behind: {made}"
 
-    # positive control: the operator composition, through its seams, still opens, records and enqueues
-    seen: list[str] = []
-
-    class Writer:
-        def open_case_ticket(self, *_a: Any, **_k: Any) -> None:
-            seen.append("open")
-
-        def record_case_ticket(self, *_a: Any, **_k: Any) -> None:
-            seen.append("record")
-
-    def enq(*_a: Any, **_k: Any) -> bool:
-        seen.append("enqueue")
-        return False
-
-    alert = B.plant_alert(tmp_path / "op-alert")
-    rc = run_py.main([str(alert), "--tenant", scene.t.tenant_id, "--update-ticket"],
-                     lifecycle=lambda **kw: summary(), preflight=lambda *a, **k: 0,
-                     visualize=lambda *a, **k: None, ticket_writer=Writer(), enqueue=enq,
-                     publish=lambda *a, **k: B.fresh(scene.t.commit))
-    assert rc == 0
-    assert seen == ["open", "record", "enqueue"], seen
-
+    _operator_composition_still_opens_records_and_enqueues(scene, tmp_path)
 
 def test_m4_the_job_entry_has_no_open_seam_and_refuses_a_ticket_writer(scene):
     """`job_main` takes no `*args` or `**kwargs`, and a call handing it a `ticket_writer` or an `enqueue` is a `TypeError`. (M4, O11)"""
@@ -837,6 +1003,27 @@ def test_m4_the_job_entry_has_no_open_seam_and_refuses_a_ticket_writer(scene):
         with pytest.raises(TypeError):
             run_py.job_main(scene.argv(run_id), **seams)
         assert ran.calls["lifecycle"] == 0, f"a {seam} seam was accepted and the job ran"
+
+
+
+def test_m4_the_job_entry_has_exactly_the_ratified_parameters_and_refuses_any_other_keyword(scene):
+    """`job_main` is `argv` and the keyword-only seams `lifecycle`, `visualize`, `preflight`, `materialize`, `roster`, `publish`; any other keyword is a `TypeError`. (M4, O11)"""
+    import inspect
+
+    from defender import run as run_py
+
+    parameters = inspect.signature(run_py.job_main).parameters
+    assert list(parameters) == ["argv", "lifecycle", "visualize", "preflight", "materialize", "roster", "publish"]
+    assert [n for n, p in parameters.items() if p.kind is inspect.Parameter.KEYWORD_ONLY] == list(parameters)[1:]
+    for extra in ("case_ticket", "ticket_writer", "enqueue", "oracle", "verifier", "update_ticket", "anything_else"):
+        run_id = str(uuid.uuid4())
+        scene.plant(run_id)
+        ran = Ran()
+        with pytest.raises(TypeError):
+            run_py.job_main(scene.argv(run_id), lifecycle=verified_lifecycle(ran), preflight=lambda *a, **k: 0,
+                            visualize=lambda *a, **k: None, publish=lambda *a, **k: B.fresh(scene.t.commit),
+                            **{extra: _Tripwire()})
+        assert ran.calls["lifecycle"] == 0, f"a {extra} keyword was accepted and the job ran"
 
 
 def test_m4_run_py_binds_nothing_of_the_ticket_writer_or_its_transport_at_import():

@@ -249,17 +249,37 @@ _SECOND = {
     "import": "from elsewhere import other as {name}\n",
     "class": "class {name}:\n    pass\n",
     "for target": "for {name} in other:\n    pass\n",
+    "match capture": "match other:\n    case {name}:\n        pass\n",
+    "match star capture": "match other:\n    case [*{name}]:\n        pass\n",
+    "match mapping rest": "match other:\n    case {{**{name}}}:\n        pass\n",
+    "except as": "try:\n    pass\nexcept ValueError as {name}:\n    pass\n",
 }
 
 
 @pytest.mark.parametrize("name", ["main", "job_main", "_post_steps", "_run_investigation_lifecycle"])
 @pytest.mark.parametrize("form", sorted(_SECOND))
 def test_a_second_binding_of_a_composition_or_phase_name_is_a_finding(tmp_path, name, form):
-    """Each of the four functions is bound once in `run.py`; a later `def`, assignment, import or class shadows the one read. (M3)"""
+    """Each of the four functions is bound once in `run.py`; a later `def`, assignment, import, class, match capture or `except as` shadows the one read. (M3)"""
     assert _GATE.scan(_tree(tmp_path / "clean")) == [], "control: the unchanged tree is clean"
     run = _MAIN + _SECOND[form].format(name=name)
     found = _GATE.scan(_tree(tmp_path / "cut", run=run))
     assert any(f"`{name}` is bound 2 times" in f for f in found), found
+
+
+@pytest.mark.parametrize("name", ["main", "job_main", "_post_steps", "_run_investigation_lifecycle"])
+@pytest.mark.parametrize("decorator", ["wrap", "functools.wraps(other)", "wrap(1)"])
+def test_a_decorator_on_a_composition_or_phase_function_is_found(tmp_path, name, decorator):
+    """A decorator on any of the four wraps the function the rule reads, so it is a finding. (M3)"""
+    assert _GATE.scan(_tree(tmp_path / "clean")) == [], "control: the unchanged tree is clean"
+    assert f"def {name}(" in _MAIN, "premise: the fixture defines it"
+    run = _MAIN.replace(f"def {name}(", f"@{decorator}\ndef {name}(")
+    found = _GATE.scan(_tree(tmp_path / "cut", run=run))
+    assert any(f"`{name}` is decorated" in f for f in found), found
+
+
+def test_a_decorator_on_some_other_function_is_not_a_finding(tmp_path):
+    run = _MAIN + "@wrap\ndef helper():\n    pass\n"
+    assert _GATE.scan(_tree(tmp_path, run=run)) == []
 
 
 def _plant_handler(function: str, block: str) -> str:

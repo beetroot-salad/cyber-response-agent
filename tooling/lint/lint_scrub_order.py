@@ -11,8 +11,9 @@
   handed to `_post_steps`. The operator's own readers, the case ticket and the curation
   enqueue, come after its lifecycle.
 * `main`, `job_main`, `_post_steps` and `_run_investigation_lifecycle` are each bound exactly once
-  in `run.py` (a second `def`, assignment, import or class of the name would shadow the one this
-  rule reads).
+  in `run.py` (a second `def`, assignment, import, class, match capture or `except ... as` of the
+  name would shadow the one this rule reads), and none carries a decorator (which would wrap the
+  function this rule reads).
 * None of those four has an `except` that would swallow the taint signal: none names
   `RunTainted`, `Exception` or `BaseException`, and none is bare; none has a `with` that names one
   of those or `suppress` (which swallows without an `except`).
@@ -24,8 +25,8 @@ Not covered, by design (name-based evasions; the behaviour test in
 double, is the enforcement): a reader named by a computed string (`"cross_" + "check_tables"`, a
 variable), reached from another module, through a function's `__defaults__`, or a read of the
 folder by a means the census does not name (`open`, `read_text`, `shutil`, a subprocess); the
-post-steps called from a helper before the lifecycle; a swallow by a helper context manager or
-decorator of one's own; a rebinding of a composition at run time (`globals()`, `setattr`, `exec`).
+post-steps called from a helper before the lifecycle; a swallow by a helper context manager of
+one's own; a rebinding of a composition at run time (`globals()`, `setattr`, `exec`).
 
 Order is source position inside the one function; attribute calls read as their attribute
 name. A file or function that is missing, or a named call that is gone, is a finding (the rule
@@ -79,7 +80,7 @@ def _function(root: Path, rel: str, name: str, findings: list[str]) -> ast.AST |
 
 
 def _bindings(tree: ast.AST, name: str) -> list[int]:
-    """The lines at which `name` is bound in the module: a def, a class, a stored name, an import."""
+    """The lines at which `name` is bound in the module: a def, a class, a stored name, an import, a match capture, an `except ... as`."""
     lines = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
@@ -88,6 +89,12 @@ def _bindings(tree: ast.AST, name: str) -> list[int]:
             lines.append(node.lineno)
         elif isinstance(node, ast.alias) and (node.asname or node.name.split(".")[0]) == name:
             lines.append(getattr(node, "lineno", 0))
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == name:
+            lines.append(node.lineno)  # `case name`, `case [*name]`
+        elif isinstance(node, ast.MatchMapping) and node.rest == name:
+            lines.append(node.lineno)  # `case {**name}`
+        elif isinstance(node, ast.ExceptHandler) and node.name == name:
+            lines.append(node.lineno)  # `except ... as name`
     return sorted(lines)
 
 
@@ -242,6 +249,9 @@ def scan(root: Path) -> list[str]:
     for name, fn in functions.items():
         if fn is None:
             continue
+        for decorator in getattr(fn, "decorator_list", []):
+            findings.append(f"{_RUN}:{decorator.lineno}: `{name}` is decorated; a decorator wraps the "
+                            "function this rule reads")
         for lineno, caught in _caught(fn):
             if caught == "(bare except)" or caught in _SWALLOWERS:
                 findings.append(f"{_RUN}:{lineno}: `{name}` has an `except` naming {caught} "

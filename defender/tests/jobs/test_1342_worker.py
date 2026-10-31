@@ -260,6 +260,9 @@ async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(w
     admit(raw)  # premise: admission accepts these bytes
     assert (raw != raw.strip() or b"\r\n" in raw or raw.decode() != unicodedata.normalize("NFC", raw.decode())), (
         "premise: bytes a strip, a line-end or a normalization step would change")
+    if raw is AWKWARD_ALERT_BYTES:
+        assert b"\r\n" in raw
+        assert len(raw.decode()) < len(raw), "premise: multibyte text"
     child = _child(world)
     async with job_store(world["dsn"]) as store:
         alert = await an_alert(store, T1, raw=raw)
@@ -270,6 +273,61 @@ async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(w
     assert written == raw
     launch = json.loads((world["runs"] / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
     assert launch["digest"] == hashlib.sha256(raw).hexdigest()
+
+
+@pytest.mark.parametrize("present", [".launch.json", ".alert.json"])
+async def test_o6_launch_files_are_create_only_and_a_failed_write_is_a_worker_error(world, present):
+    """A launch file that already exists is not overwritten; no child; `failed`/`worker_error`. (O6)"""
+    import uuid
+
+    inv = str(uuid.uuid4())
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        alert = await an_alert(store, T1)
+        plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
+        (world["runs"] / f"{inv}{present}").write_text("planted", encoding="utf-8")
+        await make_worker(store, world["root"], child).drain()
+
+    stored = row(world["dsn"], inv)
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert stored["failure_message"]
+    assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
+    assert (world["runs"] / f"{inv}{present}").read_text(encoding="utf-8") == "planted"
+    assert child.seen() is None, "a child started although its launch files could not be written"
+
+
+@pytest.mark.parametrize("shape", ["tenant folder without runs", "no tenant folder on this host"])
+async def test_o6_a_tenant_with_no_runs_container_fails_as_a_worker_error_and_nothing_is_made(world, shape):
+    """No `<root>/<T>/runs` → `failed`/`worker_error`, no child, nothing created anywhere. (O6, R1)"""
+    import shutil
+
+    if shape == "no tenant folder on this host":
+        shutil.rmtree(world["root"] / T1)
+    else:
+        world["runs"].rmdir()
+    before = tree(world["root"])
+    child = _child(world, files=_committed())
+    inv, stored = await _run_one(world, child)
+
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert stored["failure_message"]
+    assert stored["finished_at"] == NOW
+    assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
+    assert child.seen() is None, "a child was started without a runs container"
+    assert tree(world["root"]) == before, f"the worker made something for {inv}"
+    assert not world["runs"].exists()
+
+
+async def test_o6_a_child_that_cannot_be_spawned_is_a_worker_error_and_the_worker_carries_on(world):
+    """An argv that cannot be executed ends the row `failed`/`worker_error`; `drain` returns. (O6)"""
+    missing = world["tmp"] / "no-such-program"
+    inv, stored = await _run_one(world, lambda launch: [str(missing), "--job", launch.investigation_id])
+
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert stored["failure_message"]
+    assert stored["finished_at"] == NOW
+    assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
+    assert inv
 
 
 # --- O8: the worker's rule, one case per branch ----------------------------------------------------
@@ -428,6 +486,17 @@ CASES = {
                                             scrub_verified=False)}, exit=1,
         expect=("failed", "no_report", None), says=("setup",), lacks=()),
 }
+
+_SPELLINGS = {"trailing space": lambda w: w + " ", "trailing newline": lambda w: w + "\n",
+              "trailing tab": lambda w: w + "\t", "trailing carriage return and newline": lambda w: w + "\r\n",
+              "full-width": lambda w: w.translate({ord(c): ord(c) + 0xFEE0 for c in w if c.isascii() and c.isalpha()})}
+for _key, _words in (("setup", ("refused", "crashed", "done")), ("box", ("not_started", "start_failed", "started"))):
+    for _word in _words:
+        for _how, _spell in _SPELLINGS.items():
+            CASES[f"1-job-end-{_key}-word-{_word}-{_how.replace(' ', '-')}"] = _spec(
+                files=_committed(**{"{id}.job-end.json": _job_end_with(**{_key: _spell(_word)})}), exit=EXIT,
+                expect=("failed", "no_report", None), code=EXIT)
+
 
 
 @pytest.mark.parametrize("case", list(CASES))
