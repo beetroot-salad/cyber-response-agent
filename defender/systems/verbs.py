@@ -591,6 +591,7 @@ class ModuleVerbRegistry(VerbRegistry):
         ordinary run) leaves each context as the caller built it."""
         super().__init__(grant)
         self.cut = cut
+        self._cut_verbs: dict[str, dict[str, Verb]] = {}
         # Takes the roster value `read_roster` produced at process start, never a directory:
         # an unreadable tree then fails there as `RegistryError`, not here as a grant mismatch.
         # All later questions are answered from the snapshot; the adapters tree is assumed not
@@ -638,7 +639,14 @@ class ModuleVerbRegistry(VerbRegistry):
         cut = self.cut
         if cut is None:
             return dict(verbs)
-        return {name: _cut_applied(cut, fn) for name, fn in verbs.items()}
+        # Wrapped once per system (the adapter module is loaded once per process), so every
+        # call of a verb reaches the same callable; `setdefault` keeps the first of two racing
+        # wraps.
+        wrapped = self._cut_verbs.get(system)
+        if wrapped is None:
+            wrapped = self._cut_verbs.setdefault(
+                system, {name: _cut_applied(cut, fn) for name, fn in verbs.items()})
+        return dict(wrapped)
 
 
 def _cut_applied(cut: ReadCut, fn: Verb) -> Verb:

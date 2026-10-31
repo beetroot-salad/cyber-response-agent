@@ -375,7 +375,8 @@ def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
     Returns a new value rather than editing `params`, so the caller's params stay as asked.
     """
     at = getattr(ctx, "as_of", None)
-    return end if _bound_set(end) or at is None else _clock.z_seconds(at)
+    # Spelled as the cut clause spells it (`_ms_z`), so the window ends where the cut does.
+    return end if _bound_set(end) or at is None else _ms_z(at)
 
 
 def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: str) -> dict:

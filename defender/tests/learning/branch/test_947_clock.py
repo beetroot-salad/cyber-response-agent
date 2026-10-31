@@ -42,6 +42,9 @@ from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
 
 T0 = dt.datetime(2026, 5, 25, 15, 30, 45, tzinfo=dt.UTC)
 T0_Z = "2026-05-25T15:30:45Z"
+#: The run's clock as the search window's closed end spells it: the cut clause's millisecond
+#: spelling (#1347), so the window ends exactly where the cut does.
+T0_MS_Z = "2026-05-25T15:30:45.000Z"
 
 REAL_ADAPTERS = PATHS.adapters_dir
 
@@ -542,7 +545,7 @@ def test_an_unbounded_search_is_closed_at_the_runs_clock(tmp_path, verb):
 
     getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login")
 
-    assert range_filter(search_body(tmp_path)) == {"lte": T0_Z}, (
+    assert range_filter(search_body(tmp_path)) == {"lte": T0_MS_Z}, (
         "the unbounded search did not close at the branch point's own moment")
 
 
@@ -553,12 +556,12 @@ def test_an_empty_string_end_is_closed_at_the_runs_clock(tmp_path, verb):
 
     getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login", end="")
 
-    assert range_filter(search_body(tmp_path)) == {"lte": T0_Z}
+    assert range_filter(search_body(tmp_path)) == {"lte": T0_MS_Z}
 
 
 @pytest.mark.parametrize(("start", "end", "expected"), [
     (None, "2026-06-01T00:00:00Z", {"lte": "2026-06-01T00:00:00Z"}),
-    ("2026-05-01T00:00:00Z", None, {"gte": "2026-05-01T00:00:00Z", "lte": T0_Z}),
+    ("2026-05-01T00:00:00Z", None, {"gte": "2026-05-01T00:00:00Z", "lte": T0_MS_Z}),
     ("2026-05-01T00:00:00Z", "2026-06-01T00:00:00Z",
      {"gte": "2026-05-01T00:00:00Z", "lte": "2026-06-01T00:00:00Z"}),
 ])
@@ -600,8 +603,8 @@ def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path):
     elastic_adapter.query(ctx, native_query="b", start="2026-05-01T00:00:00Z")
     second = range_filter(search_body(tmp_path))
 
-    assert first == {"lte": T0_Z}
-    assert second == {"gte": "2026-05-01T00:00:00Z", "lte": T0_Z}
+    assert first == {"lte": T0_MS_Z}
+    assert second == {"gte": "2026-05-01T00:00:00Z", "lte": T0_MS_Z}
 
 
 # the ES|QL half of the window: the same cut as the request's `filter`, the text never edited
@@ -657,7 +660,7 @@ def test_both_halves_of_the_window_include_the_branch_point_itself(tmp_path):
     for cut in (esql_cut, search_cut):
         assert clause_keeps(cut, stamped())
         assert not clause_keeps(cut, stamped(dt.timedelta(milliseconds=1)))
-    assert range_filter(search_body(tmp_path)) == {"lte": T0_Z}
+    assert range_filter(search_body(tmp_path)) == {"lte": T0_MS_Z}
 
 
 # 4. T0 itself: derived from the prefix, and pinned into the spec

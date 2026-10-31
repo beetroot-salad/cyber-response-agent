@@ -18,7 +18,7 @@ freeze.yaml beside ground_truth.yaml. `confirmed` is left empty: the operator fi
 labelling against a reference run (`launch_frozen.py --reference`).
 
     defender/.venv/bin/python playground-v2/scripts/capture_case.py \\
-        evaluations/fixtures/held_out/<slug> --scenario <id> [--chaos <profile>] [--seed 42] \\
+        evaluations/fixtures/held_out/<slug> --scenario <id> --rule <rule_id> [--chaos <profile>] [--seed 42] \\
         --history-start <iso> --parts-dir <lab disk path>
 
 `ops=`, `lock_store=` and `clock=` are injectable so tests never need the live stack.
@@ -90,7 +90,7 @@ def _report(slug: str, window: list[str], fingerprint: dict, parts: dict) -> str
     return "\n".join(lines)
 
 
-def capture(case_dir: Path, *, scenario: str, chaos: str, ops: Any, lock_store: Any,
+def capture(case_dir: Path, *, scenario: str, rule: str, chaos: str, ops: Any, lock_store: Any,
             parts_dir: Path, clock: Any, history_start: Any, seed: int = 42,
             settle_s: float = SETTLE_S) -> dict:
     """Capture `case_dir`'s freeze; returns {"freeze": ..., "report": ...}."""
@@ -110,7 +110,8 @@ def capture(case_dir: Path, *, scenario: str, chaos: str, ops: Any, lock_store: 
     try:
         fired = ops.fire(scenario, chaos, seed, token)
         ledger_ref = fired.get("ledger_ref")
-        alert = ops.wait_alert(fired)
+        # The case's alert is its rule's, never another alert on the same host.
+        alert = ops.wait_alert({**fired, "rule_id": rule})
         alert_at = _utc(alert["@timestamp"])
         as_of = alert_at + GRACE
         clock.sleep_until(as_of)
@@ -210,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Capture a held-out case's freeze")
     parser.add_argument("case_dir", type=Path, help="the held-out case dir (its name is the slug)")
     parser.add_argument("--scenario", required=True, help="attack scenario id (runner.py list)")
+    parser.add_argument("--rule", required=True,
+                        help="the detection rule_id whose alert is the case's (detection-rules/)")
     parser.add_argument("--chaos", default="none", help="chaos profile held until as_of")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--history-start", default=os.environ.get("V2_HISTORY_START"),
@@ -221,7 +224,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.history_start or not args.parts_dir:
         parser.error("--history-start and --parts-dir are required (or their V2_ settings)")
     try:
-        capture(args.case_dir, scenario=args.scenario, chaos=args.chaos, ops=LabOps(),
+        capture(args.case_dir, scenario=args.scenario, rule=args.rule, chaos=args.chaos,
+                ops=LabOps(),
                 lock_store=lock.DockerLockStore(), parts_dir=args.parts_dir, clock=WallClock(),
                 history_start=args.history_start, seed=args.seed, settle_s=args.settle_s)
     except lock.LockError as exc:

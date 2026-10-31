@@ -22,9 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shlex
 import shutil
-import socket
 import subprocess
 import sys
 import tarfile
@@ -33,6 +31,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -59,9 +58,18 @@ STUBS = ("cmdb", "identity", "threat-intel", "change-mgmt", "ticket-server")
 
 ENGINE_CONTAINER = "lab-engine"
 ENGINE_IMAGE = "docker:27-dind"
-ENGINE_PORT = 23750
+# The engine's daemon listens only on this socket, in a lab-server directory bind-mounted into
+# the engine; nothing listens on a network, so no container on Elasticsearch's network (a role
+# host, a compromised one included) can reach it. The launcher reaches it over ssh.
+ENGINE_SOCKET_DIR = "/run/soc-lab-engine"
+ENGINE_SOCKET = f"{ENGINE_SOCKET_DIR}/docker.sock"
 ENGINE_NETWORK = "lab"
-FORWARDER_IMAGE = "alpine:3.20"
+# The Elasticsearch and Kibana stand-ins' image: built and saved by capture as a freeze part, so
+# loading a frozen copy installs nothing and needs no outbound network.
+STAND_IN_IMAGE = "local/lab-stand-in:latest"
+STAND_IN_DOCKERFILE = HERE / "stand-in.Dockerfile"
+# How long a loaded frozen copy has to answer before the launch is refused.
+READY_TIMEOUT_S = 120.0
 
 
 class LabOpsError(RuntimeError):
@@ -104,12 +112,15 @@ class LabOps:
     def __init__(self, run: Any = subprocess.run, *, context: str = DOCKER_CONTEXT,
                  es_container: str = ES_CONTAINER, events_pattern: str = EVENTS_PATTERN,
                  alerts_pattern: str = ALERTS_PATTERN, popen: Any = subprocess.Popen,
-                 alert_timeout_s: float = 1800.0, poll_s: float = 30.0) -> None:
+                 alert_timeout_s: float = 1800.0, poll_s: float = 30.0,
+                 ready_timeout_s: float = READY_TIMEOUT_S) -> None:
         self._run, self._popen = run, popen
         self.context, self.es_container = context, es_container
         self.events_pattern, self.alerts_pattern = events_pattern, alerts_pattern
         self.alert_timeout_s, self.poll_s = alert_timeout_s, poll_s
+        self.ready_timeout_s = ready_timeout_s
         self._tunnel: Any = None
+        self._tunnel_dir: Optional[Path] = None
         self._engine_host: Optional[str] = None
 
     # -- transport ---------------------------------------------------------------------------
@@ -233,18 +244,21 @@ class LabOps:
                 "started_at": _stamp(started), "target_host": catalog[scenario]["target_host"]}
 
     def wait_alert(self, fired: dict) -> dict:
-        """The first alert at or after the scenario fired on its target host; polled, since
-        rules run every 5 minutes (C8)."""
+        """The first alert of the case's rule (`fired["rule_id"]`) at or after the scenario fired,
+        on its target host; polled, since rules run every 5 minutes (C8). Another rule's alert on
+        the same host (baseline, a neighbour rule) is never taken for the case's."""
         query = {"size": 1, "sort": [{"@timestamp": "asc"}], "query": {"bool": {"filter": [
             {"range": {"@timestamp": {"gte": fired["started_at"]}}},
-            {"term": {"host.name": fired["target_host"]}}]}}}
+            {"term": {"host.name": fired["target_host"]}},
+            {"term": {"kibana.alert.rule.rule_id": fired["rule_id"]}}]}}}
         deadline = time.monotonic() + self.alert_timeout_s
         while True:
             hits = self._es("POST", f"/{self.alerts_pattern}/_search", query)["hits"]["hits"]
             if hits:
                 return hits[0]["_source"]
             if time.monotonic() > deadline:
-                raise LabOpsError(f"no alert on {fired['target_host']} since {fired['started_at']}")
+                raise LabOpsError(f"no {fired['rule_id']} alert on {fired['target_host']} since "
+                                  f"{fired['started_at']}")
             time.sleep(self.poll_s)
 
     def hosts(self) -> list[str]:
@@ -263,7 +277,8 @@ class LabOps:
         return names
 
     def stub_dumps(self, dest: Path) -> list[str]:
-        """Each stub's state in the shape its own seed loader reads, plus the stub images."""
+        """Each stub's state in the shape its own seed loader reads, plus the stub images and
+        the stand-ins' image: everything the frozen engine runs besides the hosts."""
         dest.mkdir(parents=True, exist_ok=True)
         names = []
         changes = self._stub_get("change-mgmt", "/changes")["changes"]
@@ -281,6 +296,9 @@ class LabOps:
         names.append(_write(dest / "stub-cmdb-overlays.json", json.dumps(overlays, indent=1)))
         for stub in STUBS:
             names.append(self._save_image(self._image_of(stub), dest / f"image-{stub}.tar"))
+        with open(STAND_IN_DOCKERFILE, "rb") as fh:
+            self._docker("build", "-t", STAND_IN_IMAGE, "-", stdin=fh)
+        names.append(self._save_image(STAND_IN_IMAGE, dest / "image-stand-in.tar"))
         return names
 
     def commit_hosts(self, dest: Path, as_of: Any = None) -> list[str]:
@@ -345,7 +363,8 @@ class LabOps:
                 self._docker("load", host=host, stdin=fh)
         self._load_hosts(parts_dir, host)
         self._load_stubs(parts_dir, host, as_of_text)
-        self._start_stand_ins(host)
+        self._start_stand_ins(parts_dir, host)
+        self._wait_ready(host)
         return {"docker_host": host}
 
     def teardown(self) -> None:
@@ -355,6 +374,9 @@ class LabOps:
             if self._tunnel is not None:
                 self._tunnel.terminate()
                 self._tunnel = None
+            if self._tunnel_dir is not None:
+                shutil.rmtree(self._tunnel_dir, ignore_errors=True)
+                self._tunnel_dir = None
             self._engine_host = None
 
     def _start_engine(self) -> None:
@@ -366,19 +388,31 @@ class LabOps:
         network = self._docker("inspect", "--format",
                                "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}",
                                self.es_container, text=True).stdout.split()[0]
+        # `dockerd` named as the command: the image's entrypoint adds a `tcp://0.0.0.0:2375`
+        # listener whenever the command starts with a flag, and leaves an explicit one alone.
         self._docker("run", "-d", "--privileged", "--name", ENGINE_CONTAINER, "--network", network,
-                     "-e", "DOCKER_TLS_CERTDIR=", "-p", f"127.0.0.1:{ENGINE_PORT}:2375",
-                     ENGINE_IMAGE, "--host=tcp://0.0.0.0:2375", "--tls=false")
+                     "-v", f"{ENGINE_SOCKET_DIR}:{ENGINE_SOCKET_DIR}",
+                     ENGINE_IMAGE, "dockerd", f"--host=unix://{ENGINE_SOCKET}")
         endpoint = self._docker("context", "inspect", self.context, "--format",
                                 "{{.Endpoints.docker.Host}}", text=True).stdout.strip()
         if endpoint.startswith("ssh://"):
-            local = _free_port()
+            # ssh forwards a local socket to the engine's socket on the lab server.
+            url = urlsplit(endpoint)
+            # Under /tmp whatever TMPDIR says: a unix socket path is capped near 108 bytes.
+            self._tunnel_dir = Path(tempfile.mkdtemp(dir="/tmp"))
+            local = self._tunnel_dir / "docker.sock"
+            target = f"{url.username}@{url.hostname}" if url.username else str(url.hostname)
             self._tunnel = self._popen(
                 ["ssh", "-N", "-o", "ExitOnForwardFailure=yes",
-                 "-L", f"127.0.0.1:{local}:127.0.0.1:{ENGINE_PORT}", endpoint[len("ssh://"):]])
-            self._engine_host = f"tcp://127.0.0.1:{local}"
+                 *(["-p", str(url.port)] if url.port else []),
+                 "-L", f"{local}:{ENGINE_SOCKET}", target])
+            self._engine_host = f"unix://{local}"
+        elif endpoint.startswith("unix://"):
+            # On the lab server itself.
+            self._engine_host = f"unix://{ENGINE_SOCKET}"
         else:
-            self._engine_host = f"tcp://127.0.0.1:{ENGINE_PORT}"
+            raise LabOpsError(f"the frozen engine is reached over an ssh context or on the lab "
+                              f"server itself; context {self.context!r} is {endpoint!r}")
         deadline = time.monotonic() + 120
         while self._docker("version", host=self._engine_host, check=False).returncode != 0:
             if time.monotonic() > deadline:
@@ -400,7 +434,7 @@ class LabOps:
             # Inert (D2 i): the image's entrypoint (agent enrolment, baseline, shipping) never
             # runs; the container only holds the filesystem for the host-state verbs.
             self._docker("create", "--name", name, "--hostname", name, "--network", ENGINE_NETWORK,
-                         *mounts, "-e", f"PS_SHIM_TREE={TREE_IN_REPLICA}",
+                         *mounts, "-e", f"V2_PS_SHIM_TREE={TREE_IN_REPLICA}",
                          "--entrypoint", "/usr/bin/tini", image, "--", "sleep", "infinity",
                          host=host)
             self._docker("cp", str(parts_dir / f"proc-tree-{name}.txt"),
@@ -445,9 +479,11 @@ class LabOps:
         self._docker("exec", "-i", "cmdb", "python3", "-c", script, host=host,
                      input=json.dumps(overlays), text=True)
 
-    def _start_stand_ins(self, host: str) -> None:
+    def _start_stand_ins(self, parts_dir: Path, host: str) -> None:
         """Containers named like Elasticsearch and Kibana that carry sh, curl and the live
-        password, and forward their localhost port to the live service by address (D2 ii)."""
+        password, and forward their localhost port to the live service by address (D2 ii). Their
+        image is the one capture saved (`stub_dumps`), so nothing is installed here."""
+        image = _image_in_tar(parts_dir / "image-stand-in.tar")
         password = self._docker("exec", self.es_container, "printenv", "ELASTIC_PASSWORD",
                                 text=True).stdout.strip()
         for name, port in ((self.es_container, 9200), ("kibana", 5601)):
@@ -460,11 +496,35 @@ class LabOps:
                 env_file.flush()
                 self._docker(
                     "run", "-d", "--name", name, "--network", ENGINE_NETWORK,
-                    "--env-file", env_file.name, FORWARDER_IMAGE, "sh", "-c",
-                    "apk add --no-cache curl bash socat >/dev/null && "
-                    f"exec socat TCP-LISTEN:{port},fork,reuseaddr,bind=127.0.0.1 "
-                    f"TCP:{shlex.quote(address)}:{port}",
+                    "--env-file", env_file.name, image,
+                    "socat", f"TCP-LISTEN:{port},fork,reuseaddr,bind=127.0.0.1",
+                    f"TCP:{address}:{port}",
                     host=host)
+
+    def _wait_ready(self, host: str) -> None:
+        """Return once the frozen copy answers as a run will ask it: the Elasticsearch stand-in
+        reaches the live cluster with the password, the Kibana stand-in reaches Kibana, and every
+        stub serves. A copy that never does refuses the launch, so no run starts with a system
+        down."""
+        es = ('curl -s -k -o /dev/null -w "%{http_code}" '
+              '-K <(printf \'user = "elastic:%s"\\n\' "$ELASTIC_PASSWORD") https://localhost:9200')
+        kibana = 'curl -s -o /dev/null -w "%{http_code}" http://localhost:5601/api/status'
+        health = ("import urllib.request\n"
+                  "urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5).read()\n")
+        waiting = {self.es_container: (["bash", "-c", es], lambda out: out == "200"),
+                   "kibana": (["bash", "-c", kibana], lambda out: out not in ("", "000"))}
+        waiting.update({stub: (["python3", "-c", health], lambda out: True) for stub in STUBS})
+        deadline = time.monotonic() + self.ready_timeout_s
+        while True:
+            for name, (argv, answered) in list(waiting.items()):
+                proc = self._docker("exec", name, *argv, host=host, check=False, text=True)
+                if proc.returncode == 0 and answered((proc.stdout or "").strip()):
+                    del waiting[name]
+            if not waiting:
+                return
+            if time.monotonic() > deadline:
+                raise LabOpsError("the frozen copy did not answer: " + ", ".join(sorted(waiting)))
+            time.sleep(2)
 
 
 def _write(path: Path, text: str) -> str:
@@ -478,12 +538,6 @@ def _image_in_tar(path: Path) -> str:
         member = tar.extractfile("manifest.json")
         assert member is not None
         return json.load(member)[0]["RepoTags"][0]
-
-
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def _load_runner() -> Any:

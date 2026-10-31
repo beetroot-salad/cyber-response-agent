@@ -140,6 +140,7 @@ class FakeCaptureOps:
         return {"ledger_ref": self.ledger_ref}
 
     def wait_alert(self, fired: dict) -> dict:
+        self.waited_for = dict(fired)
         self._step("wait_alert")
         return {"@timestamp": ALERT_AT}
 

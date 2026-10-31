@@ -25,8 +25,9 @@ copied there and no run records a pointer back to its fixture. Two consequences:
 
 - **Scoring** (`evaluations/held_out.py`) walks THESE dirs and finds each fixture's
   run through the held-out index — a JSON Lines file you name, kept outside every
-  runs and episodes tree, one `{slug, run_id}` row per run — never by a run
-  folder's name, which is an opaque UUID (#1187). See §Running the set.
+  runs and episodes tree, one `{slug, run_id, freeze, verdict, reason, verified_at}` row
+  per run, written only by the held-out launcher (#1347) — never by a run folder's name,
+  which is an opaque UUID (#1187). See §Running the set.
 
 - **Contamination** is stopped at the two entrances to learning, and both checks
   are label-free:
@@ -90,8 +91,10 @@ disposition it correctly — or, for `inconclusive`, could not, because the evid
 settle it is genuinely unavailable rather than merely hard to find.
 
 An alert names its incident; the agent investigates it against the live stack. A fixture is
-therefore valid only while the telemetry and stub state it depends on are unchanged — capture
-the set and score its runs against the same frozen playground.
+therefore valid only while the telemetry and stub state it depends on are unchanged, so every
+case is frozen (#1347): its `freeze.yaml`, written by capture and confirmed after labelling,
+names the moment and the evidence every run of it is served (`playground-v2/docs/runbook.md`
+§Frozen held-out cases). A case without a confirmed freeze refuses the whole set.
 
 ## Schema
 
@@ -113,20 +116,20 @@ playground tenant; `$TENANT_ID` below is its UUID (one-time setup: the repo `REA
 scores are comparable (#1108 P4).
 
 ```bash
-# Investigate each held-out alert, appending its row to the index F yourself:
-for f in evaluations/fixtures/held_out/*/alert.json; do
-  slug=$(basename "$(dirname "$f")")
-  run_id=$(python3 defender/run.py "$f" --tenant "$TENANT_ID" --no-learn --knowledge-commit K \
-           | sed -n '1s/^run_id=//p')
-  [ -n "$run_id" ] && printf '{"slug": "%s", "run_id": "%s"}\n' "$slug" "$run_id" >> F
+# Launch each case against its freeze; the launcher appends the run's row to F:
+for case in evaluations/fixtures/held_out/*/; do
+  defender/.venv/bin/python playground-v2/scripts/launch_frozen.py "$case" \
+      --tenant "$TENANT_ID" --index F --parts-dir <lab disk path> --knowledge-commit K
 done
 
 # Score correctness against ground truth:
 python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```
 
-A run that crashes before announcing its id leaves no row, and the slug's older row (if any) is
-scored instead. `held_out.py` reports aggregate accuracy plus per-class recall and counts runs
+Only rows bound to a case's current freeze count. A case with no such row, whose newest row is
+stale, or whose newest run read Elasticsearch's own clock is listed with its reason and makes the
+set **incomplete** (non-zero exit); launch it again. A run that crashes before announcing its id leaves no row, and the slug's older row for the same
+freeze (if any) is scored instead. `held_out.py` reports aggregate accuracy plus per-class recall and counts runs
 that crashed or produced no parseable `report.md` as **wrong** against the ground-truth class
 (see the failure-accounting rule in §Metrics of the design doc). A confident close whose review
 cannot run is recorded `inconclusive`, so a dip in malicious recall can be the review gate rather

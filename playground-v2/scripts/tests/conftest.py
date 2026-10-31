@@ -1,10 +1,10 @@
 """Fixtures for the #1347 lab-side contract (capture, launcher, lock, ps shim).
 
 Nothing here touches docker or the live stack: every lab operation goes through an injected
-seam and is recorded in a shared journal. Not run by CI yet; the code stage adds the step.
+seam and is recorded in a shared journal. CI runs them with the defender's interpreter (the
+launcher imports the scorer's freeze digest, which needs the defender's dependencies):
 
-    flock /tmp/defender-pytest.lock uv run --no-project --python 3.12 \
-        --with pyyaml --with pytest -m pytest playground-v2/scripts/tests
+    flock /tmp/defender-pytest.lock defender/.venv/bin/python -m pytest playground-v2/scripts/tests
 """
 from __future__ import annotations
 

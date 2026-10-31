@@ -1,9 +1,9 @@
 #!/bin/sh
 # Answers the process-tree listing from a recorded tree (#1347 D6). Installed as `ps` only on
-# replica hosts, with PS_SHIM_TREE naming the recorded file; any other invocation, or no recorded
+# replica hosts, with V2_PS_SHIM_TREE naming the recorded file; any other invocation, or no recorded
 # file, falls through to the real ps.
-if [ "$*" = "-eo pid,ppid,user,stat,etime,cmd --forest" ] && [ -n "$PS_SHIM_TREE" ] \
-        && [ -r "$PS_SHIM_TREE" ]; then
-    exec cat "$PS_SHIM_TREE"
+if [ "$*" = "-eo pid,ppid,user,stat,etime,cmd --forest" ] && [ -n "$V2_PS_SHIM_TREE" ] \
+        && [ -r "$V2_PS_SHIM_TREE" ]; then
+    exec cat "$V2_PS_SHIM_TREE"
 fi
 exec /bin/ps "$@"

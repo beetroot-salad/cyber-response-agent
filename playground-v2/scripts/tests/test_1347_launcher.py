@@ -460,6 +460,20 @@ def test_the_row_digest_of_a_freeze_with_non_ascii_values_is_the_ascii_escaped_o
     assert rig.rows()[0]["freeze"] == expected
 
 
+
+def test_the_row_digest_is_the_scorers_own_function(monkeypatch):
+    """O9: the launcher's row digest is computed by the scorer's `freeze_digest`, so the two can
+    never drift apart; a value it cannot carry (TypeError or ValueError) refuses the launch."""
+    module = _module()
+    monkeypatch.setattr(module.held_out, "freeze_digest", lambda doc: "from-the-scorer")
+    assert module.freeze_digest(FREEZE) == "from-the-scorer"
+
+    def cannot(doc):
+        raise ValueError("circular reference")
+    monkeypatch.setattr(module.held_out, "freeze_digest", cannot)
+    with pytest.raises(module.LaunchRefused, match="canonical JSON"):
+        module.freeze_digest(FREEZE)
+
 # -- the command line -------------------------------------------------------------------------
 
 

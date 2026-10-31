@@ -337,11 +337,15 @@ def test_a_failing_scenario_reverts_the_fault_fire_activated(monkeypatch):
     assert calls["revert"] == ["chaos-9"]
 
 
-def test_wait_alert_ignores_alerts_older_than_the_scenario_start():
-    """O7: an alert from before `started_at` on the same host is not the capture's alert."""
-    early = {"@timestamp": "2026-10-20T07:00:00.000Z", "host": {"name": "web-1"}}
-    late = {"@timestamp": "2026-10-20T08:02:00.000Z", "host": {"name": "web-1"}}
-    other = {"@timestamp": "2026-10-20T08:01:00.000Z", "host": {"name": "db-1"}}
+def test_wait_alert_takes_only_the_rules_alert_on_the_host_since_the_scenario_start():
+    """O1/O7: an alert from before `started_at`, on another host, or of another rule on the same
+    host after the start is not the capture's alert."""
+    rule = {"kibana.alert.rule.rule_id": "v2-sshd-success-after-failures"}
+    early = {"@timestamp": "2026-10-20T07:00:00.000Z", "host": {"name": "web-1"}, **rule}
+    late = {"@timestamp": "2026-10-20T08:02:00.000Z", "host": {"name": "web-1"}, **rule}
+    other = {"@timestamp": "2026-10-20T08:01:00.000Z", "host": {"name": "db-1"}, **rule}
+    neighbour = {"@timestamp": "2026-10-20T08:00:30.000Z", "host": {"name": "web-1"},
+                 "kibana.alert.rule.rule_id": "v2-squid-egress-burst"}
 
     def run(argv, **kw):
         body = json.loads(kw["input"])
@@ -349,9 +353,12 @@ def test_wait_alert_ignores_alerts_older_than_the_scenario_start():
         for flt in body["query"]["bool"]["filter"]:
             if "range" in flt:
                 keep.append(lambda d, g=flt["range"]["@timestamp"]["gte"]: d["@timestamp"] >= g)
-            if "term" in flt:
+            if "term" in flt and "host.name" in flt["term"]:
                 keep.append(lambda d, h=flt["term"]["host.name"]: d["host"]["name"] == h)
-        hits = sorted((d for d in (early, other, late) if all(k(d) for k in keep)),
+            if "term" in flt and "kibana.alert.rule.rule_id" in flt["term"]:
+                keep.append(lambda d, r=flt["term"]["kibana.alert.rule.rule_id"]:
+                            d["kibana.alert.rule.rule_id"] == r)
+        hits = sorted((d for d in (early, other, neighbour, late) if all(k(d) for k in keep)),
                       key=lambda d: d["@timestamp"])[:body.get("size", 10)]
 
         class Done:
@@ -360,7 +367,8 @@ def test_wait_alert_ignores_alerts_older_than_the_scenario_start():
         return Done()
 
     ops = _load("lab_ops").LabOps(run=run, alert_timeout_s=1.0, poll_s=0.01)
-    got = ops.wait_alert({"started_at": "2026-10-20T08:00:00.000Z", "target_host": "web-1"})
+    got = ops.wait_alert({"started_at": "2026-10-20T08:00:00.000Z", "target_host": "web-1",
+                          "rule_id": "v2-sshd-success-after-failures"})
     assert got == late
 
 
@@ -404,3 +412,88 @@ def test_teardown_terminates_the_ssh_tunnel_the_engine_load_opened(tmp_path):
     assert len(tunnels) == 1 and tunnels[0].argv[0] == "ssh" and not tunnels[0].terminated
     ops.teardown()
     assert tunnels[0].terminated
+
+
+def test_the_frozen_engine_listens_on_no_network(tmp_path):
+    """D2: the engine's daemon is started as `dockerd` on a unix socket only (the image adds a
+    `tcp://0.0.0.0:2375` listener to a command that starts with a flag), publishes no port, and
+    the launcher reaches it through an ssh-forwarded socket."""
+    tunnels = []
+
+    class Tunnel:
+        def __init__(self, argv):
+            self.argv = argv
+            tunnels.append(self)
+
+        def terminate(self):
+            pass
+
+    lab = Lab()
+    ops = _load("lab_ops").LabOps(run=lab, popen=Tunnel)
+    ops.hosts = lambda: []
+    with pytest.raises(OSError):
+        ops.load_frozen(tmp_path, "2026-10-20T09:00:00Z")
+    engine = next(a for a in lab.argvs if "run" in a[:4] and "--privileged" in a)
+    command = engine[engine.index(_load("lab_ops").ENGINE_IMAGE) + 1:]
+    assert command[0] == "dockerd"
+    assert all(arg.startswith("--host=unix://") for arg in command[1:] if arg.startswith("--host"))
+    assert not any("tcp://" in arg for arg in engine) and "-p" not in engine
+    forward = tunnels[0].argv[tunnels[0].argv.index("-L") + 1]
+    assert forward.endswith(":" + _load("lab_ops").ENGINE_SOCKET) and "127.0.0.1" not in forward
+    assert ops._engine_host.startswith("unix://")
+    ops.teardown()
+
+
+def test_a_frozen_copy_that_never_answers_refuses_naming_what_is_down():
+    """D2/O6: the load waits until the Elasticsearch stand-in answers 200 with the password, the
+    Kibana stand-in answers, and every stub serves; one that never does refuses the launch."""
+    module = _load("lab_ops")
+
+    def run(argv, **kw):
+        class Done:
+            stderr = ""
+            returncode = 0
+            stdout = "000" if "bash" in argv else ""
+        return Done()
+
+    ops = module.LabOps(run=run, ready_timeout_s=0.0)
+    with pytest.raises(module.LabOpsError, match="elasticsearch, kibana"):
+        ops._wait_ready("unix:///engine.sock")
+
+
+def test_a_frozen_copy_that_answers_is_ready():
+    module = _load("lab_ops")
+
+    def run(argv, **kw):
+        class Done:
+            stderr = ""
+            returncode = 0
+            stdout = "200" if "bash" in argv else ""
+        return Done()
+
+    module.LabOps(run=run, ready_timeout_s=0.0)._wait_ready("unix:///engine.sock")
+
+
+def test_capture_saves_the_stand_ins_image_as_a_part(tmp_path):
+    """D2 ii: the stand-ins' image is built at capture and saved beside the stub images."""
+    lab = Lab()
+    ops = _load("lab_ops").LabOps(run=lab)
+    ops.hosts = lambda: []
+    ops._stub_get = lambda stub, path: {"changes": [], "tickets": [], "indicators": [],
+                                        "hosts": [], "overlay": None}
+    names = ops.stub_dumps(tmp_path)
+    assert "image-stand-in.tar" in names
+    assert any("build" in a[:4] for a in lab.argvs)
+
+
+def test_the_stand_ins_run_the_captured_image_and_install_nothing(tmp_path, monkeypatch):
+    """D2 ii: the load runs the forwarder from the captured image, with no install at launch."""
+    module = _load("lab_ops")
+    lab = Lab()
+    monkeypatch.setattr(module, "_image_in_tar", lambda path: "local/lab-stand-in:latest")
+    module.LabOps(run=lab)._start_stand_ins(tmp_path, "unix:///engine.sock")
+    runs = [a for a in lab.argvs if "run" in a[:4] and "-d" in a]
+    assert len(runs) == 2
+    for argv in runs:
+        assert "local/lab-stand-in:latest" in argv and "socat" in argv
+        assert not any("apk" in arg for arg in argv)

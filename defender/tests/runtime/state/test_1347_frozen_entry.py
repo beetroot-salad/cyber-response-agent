@@ -379,3 +379,15 @@ def test_a_cut_moment_outside_the_representable_years_is_refused_cleanly(
     other = ["--as-of", AS_OF_Z] if flag == "--arrived-by" else []
 
     refused_moment(tmp_path, capsys, [*other, flag, moment], flag)
+
+
+def test_a_direct_drive_with_a_cut_and_a_world_is_refused_before_anything_is_read(tmp_path):
+    """Refusal [r5], below the command line: the world arm never reads `cut`, so a direct
+    caller handing both is refused first rather than served the world with its cut dropped."""
+    from defender import run as run_module
+
+    with pytest.raises(TypeError, match="refused with world"):
+        run_module._drive_investigation(
+            alert_path=tmp_path / "alert.json", run=None, defender_dir=tmp_path,
+            model_name="m", model_override=None, box=None, tenant=None,
+            world=object(), cut=ReadCut(AS_OF))

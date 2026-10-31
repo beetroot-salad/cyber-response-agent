@@ -1,9 +1,9 @@
 """#1347 O1/O7/D9: capture is ordered, holds the fault until as_of, and is all-or-nothing.
 
 Entry point bound by this contract: `playground-v2/scripts/capture_case.py::capture(case_dir,
-*, scenario, chaos, ops, lock_store, parts_dir, clock, history_start, seed=42, settle_s=...)`.
+*, scenario, rule, chaos, ops, lock_store, parts_dir, clock, history_start, seed=42, settle_s=...)`.
 The lab operations are `ops` methods: fire(scenario, chaos, seed, lock_token) -> {"ledger_ref"};
-wait_alert(fired) -> alert doc; proc_tree(dest), stub_dumps(dest), commit_hosts(dest, as_of),
+wait_alert(fired + {"rule_id": rule}) -> alert doc; proc_tree(dest), stub_dumps(dest), commit_hosts(dest, as_of),
 copy_volumes(dest) each write part files under `dest` and return their names; revert(ledger_ref);
 es_now(); refresh(); fingerprint(window, as_of, arrived_by). `clock` offers sleep_until(moment)
 and sleep(seconds). The lock is taken through `chaos.lock` on `lock_store`; parts go under
@@ -33,6 +33,7 @@ from _lab_fakes import (ALERT_AT, ES_NOW, FINGERPRINT, PART_BYTES, FakeCaptureOp
 CAPTURE = Path(__file__).resolve().parents[1] / "capture_case.py"
 SLUG = "m05-lsass-access"
 HISTORY_START = "2026-08-01T00:00:00Z"
+RULE = "v2-lsass-access"
 STAGES = ["fire", "wait_alert", "wait_as_of", "proc_tree", "stub_dumps", "commit_hosts",
           "copy_volumes", "revert", "settle", "es_now", "refresh", "fingerprint"]
 
@@ -72,7 +73,7 @@ class Rig:
             self.held_at_revert.append("capture" in self.store.records)
 
     def run(self):
-        self.result = _module().capture(self.case_dir, scenario="ssh-brute-force-canary", chaos=self.chaos,
+        self.result = _module().capture(self.case_dir, scenario="ssh-brute-force-canary", rule=RULE, chaos=self.chaos,
                           ops=self.ops, lock_store=self.store, parts_dir=self.parts_dir,
                           clock=self.clock, history_start=self.history_start)
 
@@ -356,7 +357,7 @@ def test_without_an_injected_clock_and_fingerprint_capture_builds_the_production
     rig = Rig(tmp_path)
     module = _module()
     monkeypatch.setattr(module, "LabOps", SpyLabOps)
-    module.capture(rig.case_dir, scenario="ssh-brute-force-canary", chaos=rig.chaos,
+    module.capture(rig.case_dir, scenario="ssh-brute-force-canary", rule=RULE, chaos=rig.chaos,
                    ops=WithoutClockAndFingerprint(rig.ops), lock_store=rig.store,
                    parts_dir=rig.parts_dir, clock=rig.clock, history_start=rig.history_start)
     assert built
@@ -436,7 +437,7 @@ def _main(tmp_path, monkeypatch, *flags, hold=False):
     monkeypatch.setattr(module, "LabOps", lambda: rig.ops)
     monkeypatch.setattr(module, "WallClock", lambda: rig.clock)
     monkeypatch.setattr(module.lock, "DockerLockStore", lambda: rig.store)
-    rc = module.main([str(rig.case_dir), "--scenario", "ssh-brute-force-canary",
+    rc = module.main([str(rig.case_dir), "--scenario", "ssh-brute-force-canary", "--rule", RULE,
                       "--history-start", HISTORY_START, "--parts-dir", str(rig.parts_dir), *flags])
     return rig, rc
 
@@ -448,6 +449,14 @@ def test_the_command_line_forwards_chaos_seed_and_settle_to_capture(tmp_path, mo
     assert rig.ops.fire_kwargs["chaos"] == "stale-cmdb" and rig.ops.fire_kwargs["seed"] == 7
     assert rig.freeze["chaos"]["seed"] == 7
     assert [d for op, d in rig.journal if op == "clock.sleep"] == [5.0]
+
+
+def test_the_alert_capture_waits_for_is_the_named_rules(tmp_path, monkeypatch):
+    """O1: `--rule R` reaches the alert wait, so another rule's alert on the target host is
+    never frozen as the case's."""
+    rig, rc = _main(tmp_path, monkeypatch)
+    assert rc == 0
+    assert rig.ops.waited_for["rule_id"] == RULE
 
 
 def test_the_command_line_refuses_while_the_lock_is_held_exit_4_naming_it(tmp_path, monkeypatch, capsys):

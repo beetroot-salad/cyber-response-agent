@@ -362,6 +362,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     would route uncaptured keys to real adapters. The two registries are built in separate
     arms of one `if` so both can never exist.
     """
+    # First: the world arm below returns without reading `cut`, so a pair would drop it.
+    if cut is not None and world is not None:
+        raise TypeError("_drive_investigation(cut=…) is refused with world=…: a world's cut is "
+                        "its branch point")
     # The roster `main` judged, handed down to the registry and `run_investigation` with its
     # verdict; read here only for a direct caller, whose run the driver judges.
     roster = systems.roster if systems is not None else read_roster(adapters_under(defender_dir))
@@ -413,9 +417,6 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             )
         finally:
             verbs.close()
-    if cut is not None and world is not None:
-        raise TypeError("_drive_investigation(cut=…) is refused with world=…: a world's cut is "
-                        "its branch point")
     # Passed only when set, so an ordinary run calls its seams exactly as before the cut existed.
     cut_kw: dict[str, Any] = {} if cut is None else {"cut": cut}
     clock_kw: dict[str, Any] = {} if cut is None else {"clock_origin": cut.as_of}

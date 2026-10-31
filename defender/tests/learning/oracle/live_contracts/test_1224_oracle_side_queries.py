@@ -417,8 +417,9 @@ def _wire_window(tmp_path: Path) -> dict | None:
     return None
 
 
-#: The family's clock as the elastic adapter spells a filled window end (`_clock.z_seconds`).
-AS_OF_Z = S.AS_OF_DT.strftime("%Y-%m-%dT%H:%M:%SZ")
+#: The family's clock as the elastic adapter spells a filled window end: the cut clause's
+#: millisecond spelling (#1347), so the window ends where the cut does.
+AS_OF_Z = S.AS_OF_DT.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 class _Clock:

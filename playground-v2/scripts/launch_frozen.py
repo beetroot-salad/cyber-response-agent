@@ -23,7 +23,6 @@ appends no row and prints the run id, for labelling (O8); it works before `confi
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import secrets
@@ -35,14 +34,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 HERE = Path(__file__).resolve().parent
-for _path in (HERE, HERE.parent):
+REPO = HERE.parent.parent
+# The repo root too: the freeze digest and the YAML loader are the scorer's own.
+for _path in (HERE, HERE.parent, REPO):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
 from chaos import lock  # noqa: E402
+from evaluations import held_out  # noqa: E402
 from lab_ops import LabOps, sha256_file  # noqa: E402
 
-REPO = HERE.parent.parent
 PLAYGROUND_CONTEXT = "soc-playground"
 
 
@@ -61,13 +62,13 @@ class WallClock:
 
 
 def freeze_digest(parsed: Any) -> str:
-    """The freeze digest the scorer compares rows against. A value canonical JSON cannot carry
+    """The freeze digest the scorer compares rows against, computed by the scorer's own function
+    so a row's digest and the case's can never drift apart. A value canonical JSON cannot carry
     (an unquoted YAML timestamp, say) refuses."""
     try:
-        canonical = json.dumps(parsed, sort_keys=True, separators=(",", ":"))
-    except TypeError as exc:
+        return held_out.freeze_digest(parsed)
+    except (TypeError, ValueError) as exc:
         raise LaunchRefused(f"freeze.yaml holds a value canonical JSON cannot carry: {exc}") from exc
-    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _iso(dt: datetime) -> str:

@@ -441,3 +441,22 @@ def test_a_read_cut_refuses_a_naive_moment_rather_than_guess_its_zone(field):
 
     with pytest.raises(ValueError, match=field):
         ReadCut(**moments)
+
+
+def test_an_open_search_window_closes_where_the_cut_does_to_the_millisecond(tmp_path):
+    """O2: a search with no end is closed at the cut's own instant, so documents between the
+    whole second and the cut's milliseconds are neither dropped by the window nor counted by
+    the fingerprint alone."""
+    as_of = AS_OF + dt.timedelta(milliseconds=345)
+    ctx = cut_ctx(tmp_path, as_of=as_of, arrived_by=None)
+
+    elastic_adapter.query(ctx, native_query="event.action:ssh_login", start="2026-10-01T00:00:00Z")
+
+    assert range_filter(search_body(tmp_path))["lte"] == _ms(as_of) == "2026-10-20T09:00:00.345Z"
+
+
+def test_a_cut_registry_hands_out_the_same_verb_callable_on_every_lookup(tmp_path):
+    """Product-side cut: the cut is wrapped around a system's verbs once, not on every call."""
+    registry = _registry(tmp_path, ReadCut(AS_OF, ARRIVED_BY))
+
+    assert registry.verbs("cmdb")["get-host"] is registry.verbs("cmdb")["get-host"]
