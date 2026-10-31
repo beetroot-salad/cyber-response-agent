@@ -24,7 +24,7 @@ from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS, TRY_ONCE
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.curation._lead_author_1134 import repo_skills, skills_view
-from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of
+from defender.tests.support.learning.core._state1135 import curation_run_dir, curation_tenant, run_of
 from defender.tests.support.learning.core._state1135 import state_over, set_state_dir
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -44,17 +44,18 @@ def _product(tmp_path: Path, seeded: Path) -> Path:
     return product
 
 
-def _lane(tmp_path: Path, files: dict[str, str] | None = None) -> C.DraftLane:
+def _lane(tmp_path: Path, files: dict[str, str] | None = None, *, tenant=None) -> C.DraftLane:
     """The seeded skills tree (`seed_skills_repo`: an established and a draft `wazuh` template,
     `SCHEMA.md`, `elastic`'s SKILL.md with a pending `_draft/`) plus `files` (agent-relative) as
-    the tenant's `agent/skills`, in one export commit; then a batch with the lead lane `skills`."""
+    the tenant's `agent/skills`, in one export commit; then a batch with the lead lane `skills`. A drain
+    serves only through its own accepted tenant (r10.1 C1): `tenant` gives the lane that tenant's paths."""
     seeded = seed_skills_repo(tmp_path / "seed")
     agent = tmp_path / "agent-src"
     shutil.copytree(seeded / "defender" / "skills", agent / "skills")
     for rel, text in (files or {}).items():
         C.put(agent / rel, text)
     return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, agent=agent,
-                        product=_product(tmp_path, seeded))
+                        product=_product(tmp_path, seeded), tenant=tenant)
 
 
 def _deps(lane: C.DraftLane, **overrides):
@@ -448,7 +449,7 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
     from defender.tests.support.learning.core._state1135 import enqueue_run, state_for_paths
 
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
-    lane = _lane(tmp_path)
+    lane = _lane(tmp_path, tenant=curation_tenant())
     run_dir = curation_run_dir("lead-u10")
     state = state_for_paths(lane.paths)
     enqueue_run(state, run_dir)

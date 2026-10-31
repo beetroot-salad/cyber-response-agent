@@ -767,7 +767,7 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
     (area / "queues.html").write_text("STALE", encoding="utf-8")
     before = _in_tree_pages()
     try:
-        assert build.main(tenant) == 0
+        assert build.build(tenant) == 0  # the builder takes the accepted tenant (r10.1 C1); `main` accepts it
 
         assert sorted(p.name for p in area.iterdir()) == sorted(_PAGE_NAMES)
         queues = json.loads((area / "queues.json").read_text(encoding="utf-8"))
@@ -813,9 +813,18 @@ def _restore_in_tree_pages(before: dict[str, bytes | None]) -> None:
 
 
 def _build_cli(tenant_id: str, data_root: Path, **env: str):
-    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+    """`lessons_page.py --tenant T` as the operator's command line, through the test-side launcher (r10.1 C9: the
+    command admits its tenant only from a directory, and a subprocess has no database): the launcher's directory
+    holds the tenant active."""
+    import subprocess
 
-    return H.run_script(Path(build.__file__), "--tenant", tenant_id, root=data_root, **env)
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+    from defender.tests.support.tenancy import _launcher1214 as launcher
+
+    command = launcher.command("lessons_page", ["--tenant", tenant_id], seed=[tenant_id], data_root=Path(data_root))
+    return subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
+        command, env=launcher.environment(H.tenant_env(data_root, **env)), cwd=str(H.REPO_ROOT),
+        capture_output=True, text=True, timeout=180, check=False)
 
 
 @pytest.mark.parametrize("order", ["a-then-b", "b-then-a"])
