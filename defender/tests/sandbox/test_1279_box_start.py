@@ -747,20 +747,32 @@ def test_a_box_request_names_its_tenant_without_judging_the_grammar(tmp_path):
     assert made.tenant_id == "not-a-uuid"
 
 
-@pytest.mark.parametrize("given", [{}, {"tenant_id": None}, {"tenant_id": ""}], ids=["omitted", "none", "empty"])
-def test_the_run_box_start_refuses_a_missing_tenant_like_its_missing_defender_dir(tmp_path, monkeypatch, given):
-    """`start_box(run_dir, defender_dir, ...)` with no tenant (omitted, None, empty) is a `TypeError` before any container
-    is asked for; with one the same call starts, labelled (r10.1 C8, O-B1)."""
+@pytest.mark.parametrize(("given", "refusal"), [
+    ({}, TypeError), ({"tenant_id": None}, TypeError), ({"tenant_id": ""}, (TypeError, ValueError)),
+], ids=["omitted", "none", "empty"])
+def test_the_run_box_start_refuses_a_missing_tenant_like_its_missing_defender_dir(tmp_path, monkeypatch, given, refusal):
+    """`start_box(run_dir, defender_dir, ...)` with no tenant is a `TypeError` (omitted, None) or `TypeError`/`ValueError`
+    (empty), naming the tenant, before any container is asked for; with one the same call starts, labelled (r10.1 C8, O-B1)."""
     X.dev_root(monkeypatch, tmp_path / "elsewhere" / "published")
     lane = X.run_lane(tmp_path / "run")
     rec = RecordingDocker()
     lane.start(rec, spec=_PINNED)
     assert f"defender.tenant={lane.tenant_id}" in rec.create_argv, "control: the run box carries its tenant label"
     bare = RecordingDocker()
-    with pytest.raises(TypeError, match="tenant"):
+    with pytest.raises(refusal, match="tenant"):
         box_mod.start_box(lane.run_dir, lane.defender_dir, tenant_agent=lane.agent, staged_token=lane.token,
                           docker=bare, spec=_PINNED, **given)
     assert bare.create_argv is None, "a tenantless run box reached the container runtime"
+
+
+def test_the_run_box_start_judges_no_grammar_of_a_non_empty_tenant_id(tmp_path, monkeypatch):
+    """`start_box(run_dir, ...)` with a non-empty id that is not a tenant-id grammar starts and labels the box with it:
+    the grammar is judged at acceptance only (r10.1 C8)."""
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "published")
+    lane = replace(X.run_lane(tmp_path / "run"), tenant_id="not-a-uuid")
+    rec = RecordingDocker()
+    lane.start(rec, spec=_PINNED)
+    assert "defender.tenant=not-a-uuid" in rec.create_argv, rec.create_argv
 
 
 def _oracle_box_entries() -> dict:
@@ -796,3 +808,33 @@ def test_the_oracle_serving_requires_its_tenant():
     assert oracle_serving(oracle_settings_with(), tenant_id=TEST_TENANT).box is not None, "control: named, it is built"
     with pytest.raises(TypeError):
         oracle_serving(oracle_settings_with())
+
+
+@pytest.mark.parametrize("entry", ["start_oracle_box", "estate start_box", "start_process_oracle_box",
+                                   "start_process_box", "oracle_serving"])
+def test_every_oracle_box_entry_labels_a_non_empty_tenant_id_without_judging_its_grammar(tmp_path, monkeypatch, entry):
+    """Each oracle box entry starts a box for a non-empty id that is no tenant-id grammar, labelled with it; the grammar is
+    judged at acceptance only (r10.1 C8)."""
+    from defender.box import _oracle
+    from defender.learning.branch.estate import oracle as estate_oracle
+
+    bad = "not-a-uuid"
+    env = {"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
+    daemon = FakeDaemon(tmp_path / "daemon")
+    daemon.install(monkeypatch)
+    starts = {
+        "start_oracle_box": lambda: _oracle.start_oracle_box(env=env, tenant_id=bad),
+        "estate start_box": lambda: estate_oracle.start_box(env=env, tenant_id=bad),
+        "start_process_oracle_box": lambda: _oracle.start_process_oracle_box(bad),
+        "start_process_box": lambda: estate_oracle.start_process_box(bad),
+        "oracle_serving": lambda: _launcher_serving(bad).box(),
+    }
+    started = starts[entry]()
+    try:
+        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+        labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
+        assert f"defender.tenant={bad}" in labels, labels
+    finally:
+        _oracle.stop_oracle_box(started)
