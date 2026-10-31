@@ -29,7 +29,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.e2e]
 ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
 
 
-@pytest.mark.parametrize("line_ends", ["as stored", "CRLF", "padded", "decomposed", "zwnbsp"])
+@pytest.mark.parametrize("line_ends", ["as stored", "CRLF", "padded", "decomposed", "zwnbsp", "feff_rich"])
 async def test_o16_a_replay_through_the_worker_lane_completes_with_its_disposition(
         migrated_database, tmp_path, monkeypatch, line_ends):  # noqa: F811
     """queued → completed with the golden's disposition, cost read from its sessions, knowledge current at the published commit; the run holds the alert's exact bytes, CRLF, padding whitespace, decomposed text and a U+FEFF inside a value included. (O16)"""
@@ -59,6 +59,14 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         golden_bytes = (json.dumps(document, indent=2, ensure_ascii=False) + "\n").encode()
         assert b"\xef\xbb\xbf" in golden_bytes, "premise: a U+FEFF in the stored bytes"
         assert not golden_bytes.startswith(b"\xef\xbb\xbf"), "premise: not a leading byte-order mark"
+    elif line_ends == "feff_rich":
+        document = json.loads(golden_bytes)
+        document.update({"lead": "\ufeffx", "tail": "y\ufeff", "pair": "p\ufeff\ufeffq", "apart": "\ufeffm\ufeffn",
+                         "k\ufeffey": 1})
+        golden_bytes = (json.dumps(document, indent=2, ensure_ascii=False) + "\n").encode()
+        bom = b"\xef\xbb\xbf"
+        for shape in (b'"' + bom, bom + b'"', bom + bom, b"m" + bom + b"n", b'"k' + bom + b'ey":'):
+            assert shape in golden_bytes, ("premise", shape)
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)  # R1: a set-up tenant has runs/
