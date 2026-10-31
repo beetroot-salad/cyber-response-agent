@@ -120,7 +120,7 @@ def test_r1_run_start_signs_a_read_token_and_a_write_back_token_per_leg(
     assert A.SIGNATURE_CANARY not in caplog.text
     on_disk = A.text_of(data_root, tmp_path)
     assert A.SIGNATURE_CANARY not in on_disk, "a token reached a file: run state, record or log"
-    assert S.PLAYGROUND_ID in on_disk, "positive control: the tenant's and run's files are read"
+    assert run_id in on_disk, "positive control: the files the run wrote are read"
     assert "run_dir=" in caplog.text, "positive control: the log channel is read"
 
 
@@ -152,20 +152,31 @@ def test_r3_a_run_with_no_http_proxy_system_never_contacts_the_signer(tmp_path, 
     assert rec.lifecycle_calls, "positive control: the run reached its lifecycle"
 
 
-@pytest.mark.parametrize("ticket", [False, True])
-def test_r4_a_sealed_openbao_refuses_run_start_when_a_token_is_needed(
-        tmp_path, data_root, ticket):
-    """A signer that cannot sign refuses the start (`ConfigFault`) before the lifecycle runs.
-    The control is R3. A7."""
-    _plant(data_root, proxy=("identity",))
-    signer = A.RaisingSigner(ConfigFault("OpenBao is sealed"))
-    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, signer=signer, ticket=ticket)
+ROLE, SECRET = "role-1163-own", "secret-1163-own"
+DECOY_ROLE, DECOY_SECRET = "role-1163-decoy", "secret-1163-decoy"
+DECOY_TENANT = "t1163-decoy"
 
-    assert signer.asked >= 1, "positive control: a token was needed"
+
+SEALED = {"sealed on login": {"sealed": "login"}, "sealed on sign": {"sealed": "sign"},
+          "unreachable": {"unreachable": True}}
+
+
+@pytest.mark.parametrize("ticket", [False, True])
+@pytest.mark.parametrize("fault", list(SEALED))
+def test_r4_a_sealed_or_unreachable_openbao_refuses_run_start_when_a_token_is_needed(
+        tmp_path, data_root, ticket, fault):
+    """The production signing path against an OpenBao answering 503 sealed (on login or sign)
+    or not at all: `ConfigFault` before the lifecycle, nothing signed. The control is R3. A7."""
+    _plant(data_root, proxy=("identity",))
+    A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE, secret_id=SECRET)
+    bao = A.OpenBaoStandIn({ROLE: SECRET}, **SEALED[fault])
+    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=ticket, issuer_transport=bao)
+
+    assert bao.requests, "positive control: OpenBao was asked for a token"
     assert rc is None
-    assert refused is not None
-    assert isinstance(refused, (ConfigFault, SystemExit))
+    assert isinstance(refused, ConfigFault), refused
     assert "lifecycle" not in rec.order
+    assert bao.signs == []
     assert tickets.calls == []
 
 
@@ -202,15 +213,16 @@ def test_r5_the_signing_login_is_never_taken_from_the_environment(
     assert env["DEFENDER_RUN_DIR"], "positive control: the run env was built"
 
 
-ROLE, SECRET = "role-1163-own", "secret-1163-own"
-DECOY_ROLE, DECOY_SECRET = "role-1163-decoy", "secret-1163-decoy"
-
-
 def test_r6_run_start_signs_with_the_tenants_own_issuer_login_and_key(tmp_path, data_root):
     """No injected signer: the read token is signed through OpenBao with the login of the
-    tenant's own issuer config and a transit key naming that tenant. A11, A1."""
+    tenant's own issuer config and its own transit key, not another bound tenant's. A11, A1."""
     _plant(data_root, proxy=("identity",))
     A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE, secret_id=SECRET)
+    # A second tenant on the same data root, bound with its own issuer config: a run that read
+    # the wrong row's login, or the wrong key, would be caught.
+    S.plant(data_root, DECOY_TENANT)
+    A.bind_issuer(data_root, DECOY_TENANT, tmp_path / "operator", role_id=DECOY_ROLE,
+                  secret_id=DECOY_SECRET)
     bao = A.OpenBaoStandIn({ROLE: SECRET, DECOY_ROLE: DECOY_SECRET})
     rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao)
 
@@ -220,16 +232,29 @@ def test_r6_run_start_signs_with_the_tenants_own_issuer_login_and_key(tmp_path, 
     (sign,) = bao.signs
     assert bao.role_of(sign) == ROLE
     assert sign.key == proxy().transit_key_for(S.PLAYGROUND_ID), "the tenant's own transit key (A11)"
+    assert sign.key != proxy().transit_key_for(DECOY_TENANT)
     claims = A.claims_of_payload(sign.payload)
     assert (claims["tenant"], A.grant_of(claims)) == (S.PLAYGROUND_ID, [("identity", "r")])
-    assert bao.refused == []
     assert rec.lifecycle_calls, "positive control: the run went on to its lifecycle"
 
 
-def test_r7_an_http_proxy_tenant_with_no_issuer_config_refuses_run_start(tmp_path, data_root):
-    """The tenant has an http-proxy system and no forge binding or issuer config: `ConfigFault`
-    before the lifecycle, and nothing is sent to OpenBao. The control is R6. A11."""
+def _no_binding(data_root, tmp_path):
+    return None
+
+
+def _binding_with_file_absent(data_root, tmp_path):
+    A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE,
+                  secret_id=SECRET).unlink()
+
+
+@pytest.mark.parametrize("setup", [_no_binding, _binding_with_file_absent],
+                         ids=["no forge binding", "issuer config file absent"])
+def test_r7_an_http_proxy_tenant_with_no_usable_issuer_config_refuses_run_start(
+        tmp_path, data_root, setup):
+    """No forge binding, or a binding whose issuer config file is absent: `ConfigFault` before
+    the lifecycle and no login. The control is R6. A11."""
     _plant(data_root, proxy=("identity",))
+    setup(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET})
     rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, issuer_transport=bao)
 

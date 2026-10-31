@@ -185,33 +185,34 @@ def test_b2_a_rotated_static_key_is_sent_from_the_next_request(tmp_path, data_ro
         "Bearer old-" + H.CANARY_KEY, "Bearer new-" + H.CANARY_KEY]
 
 
-def _transit(bao, tokens, *tenant_ids):
-    """The `_key(TENANT)` transit key, a signer holding the launcher's token for it, and a verifier
-    holding the proxy's that verifies each of `tenant_ids` (default `TENANT`) with it."""
-    bao.ok("POST", f"{bao.transit_mount}/keys/{_key(TENANT)}", json={"type": "ed25519"})
-    signer = proxy().TransitSigner(addr=bao.addr, token=tokens["launcher"],
-                                   mount=bao.transit_mount, key=_key(TENANT))
-    verifier = proxy().TransitVerifier(addr=bao.addr, token=tokens["proxy"],
-                                       mount=bao.transit_mount,
-                                       keys={t: _key(TENANT) for t in tenant_ids or (TENANT,)})
-    return signer, verifier
+def _tokens_for(bao, tenant_id: str) -> dict[str, str]:
+    """Role tokens for exactly `tenant_id`: its transit key and its own launcher role."""
+    return _tokens(bao, {tenant_id: _key(tenant_id)})
 
 
-def _verifier(bao, tokens, *tenant_ids):
-    """The proxy's verifier over `_key(TENANT)` for each of `tenant_ids`."""
+def _transit(bao, tokens, tenant_id: str = TENANT):
+    """`tenant_id`'s transit key (`_key(tenant_id)`), a signer holding that tenant's launcher
+    token for it, and a verifier holding the proxy's token that verifies that tenant with it."""
+    bao.ok("POST", f"{bao.transit_mount}/keys/{_key(tenant_id)}", json={"type": "ed25519"})
+    signer = proxy().TransitSigner(addr=bao.addr, token=tokens[f"launcher-{tenant_id}"],
+                                   mount=bao.transit_mount, key=_key(tenant_id))
+    return signer, _verifier(bao, tokens, tenant_id)
+
+
+def _verifier(bao, tokens, tenant_id: str = TENANT):
+    """The proxy's verifier for `tenant_id`, over `_key(tenant_id)`."""
     return proxy().TransitVerifier(addr=bao.addr, token=tokens["proxy"],
-                                   mount=bao.transit_mount, keys={t: _key(TENANT) for t in tenant_ids})
+                                   mount=bao.transit_mount, keys={tenant_id: _key(tenant_id)})
 
 
 def test_b3_a_launcher_signed_token_is_accepted_and_an_altered_one_refused(
         tmp_path, data_root, openbao):
     """The launcher signs, the proxy verifies: the token as signed is sent, the same token with
     one claim changed is refused unsent. O8, H11."""
-    tokens = _tokens(openbao)
-    signer, _ = _transit(openbao, tokens)
     with H.upstream() as up, T.identity_via_proxy(
             tmp_path / "forge", data_root, H.declaration(up.url + T.BASE_PATH)) as t:
-        verifier = _verifier(openbao, tokens, t.tenant_id)
+        tokens = _tokens_for(openbao, t.tenant_id)
+        signer, verifier = _transit(openbao, tokens, t.tenant_id)
         store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
         client = T.client_of(T.deps({t.tenant_id: T.exports_of(t)}, store, verifier=verifier))
         tok = T.token(t.tenant_id, {("identity", "r")}, signer=signer)
@@ -233,14 +234,13 @@ def test_b3_a_launcher_signed_token_is_accepted_and_an_altered_one_refused(
 def test_b3_a_token_signed_by_a_different_transit_key_is_refused(tmp_path, data_root, openbao):
     """A token signed under another key of the same transit mount is refused unsent; control:
     the key the proxy verifies with is accepted. O8, H11."""
-    tokens = _tokens(openbao)
-    signer, _ = _transit(openbao, tokens)
     openbao.ok("POST", f"{openbao.transit_mount}/keys/other-key", json={"type": "ed25519"})
     stranger = proxy().TransitSigner(addr=openbao.addr, token=openbao.root_token,
                                      mount=openbao.transit_mount, key="other-key")
     with H.upstream() as up, T.identity_via_proxy(
             tmp_path / "forge", data_root, H.declaration(up.url + T.BASE_PATH)) as t:
-        verifier = _verifier(openbao, tokens, t.tenant_id)
+        tokens = _tokens_for(openbao, t.tenant_id)
+        signer, verifier = _transit(openbao, tokens, t.tenant_id)
         store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
         client = T.client_of(T.deps({t.tenant_id: T.exports_of(t)}, store, verifier=verifier))
         url = f"{up.url}{T.BASE_PATH}/users/x"
@@ -326,16 +326,16 @@ def test_b8_an_unreachable_store_or_verifier_answers_config_fault_and_sends_noth
         tmp_path, data_root, openbao):
     """With the store unreachable, or the verifier, the proxy answers ConfigFault and sends
     nothing; control: the reachable store sends. H11, O7."""
-    tokens = _tokens(openbao)
-    signer, _ = _transit(openbao, tokens)
     dead = f"http://127.0.0.1:{H.free_port()}"
-    dead_store = proxy().OpenBaoStore(addr=dead, token=tokens["proxy"], mount=openbao.kv_mount)
     with H.upstream() as up, T.identity_via_proxy(
             tmp_path / "forge", data_root, H.declaration(up.url + T.BASE_PATH)) as t:
-        verifier = _verifier(openbao, tokens, t.tenant_id)
+        tokens = _tokens_for(openbao, t.tenant_id)
+        signer, verifier = _transit(openbao, tokens, t.tenant_id)
+        dead_store = proxy().OpenBaoStore(addr=dead, token=tokens["proxy"],
+                                          mount=openbao.kv_mount)
         dead_verifier = proxy().TransitVerifier(addr=dead, token=tokens["proxy"],
                                                 mount=openbao.transit_mount,
-                                                keys={t.tenant_id: _key(TENANT)})
+                                                keys={t.tenant_id: _key(t.tenant_id)})
         _put(_writer(openbao, tokens["writer"]), t.tenant_id, "identity", STATIC,
              {"api_key": H.CANARY_KEY})
         tok = T.token(t.tenant_id, {("identity", "r")}, signer=signer)
@@ -403,7 +403,7 @@ def test_b10_the_proxy_verifies_with_the_key_of_the_tenant_the_token_names(
     with H.upstream() as up, T.identity_via_proxy(
             tmp_path / "forge", data_root, H.declaration(up.url + T.BASE_PATH)) as t:
         tokens = _tokens(openbao, {t.tenant_id: _key(t.tenant_id), OTHER: _key(OTHER)})
-        for key in (_key(TENANT), _key(OTHER)):
+        for key in (_key(t.tenant_id), _key(OTHER)):
             openbao.ok("POST", f"{openbao.transit_mount}/keys/{key}", json={"type": "ed25519"})
         signer = {tenant: proxy().TransitSigner(
             addr=openbao.addr, token=tokens[f"launcher-{tenant}"], mount=openbao.transit_mount,

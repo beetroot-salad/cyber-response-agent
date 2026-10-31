@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from defender.kit.faults import ConfigFault
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import AUDIT_KEYS, proxy
@@ -112,3 +113,28 @@ def test_a2_an_audit_that_cannot_be_written_withholds_the_upstreams_answer(
         assert audit.attempts >= 1
         assert "UPSTREAM-BODY-1163" not in json.dumps(answer)
         assert "upstream-header-1163" not in json.dumps(answer)
+
+
+def test_a2_the_real_file_sink_that_cannot_write_fails_the_request_closed(tmp_path, data_root):
+    """The shipped `FileAuditSink` on a path that cannot be opened for append fails loudly (at
+    construction or on `record`); an app built on it answers `ConfigFault` without the upstream body. A13, O9."""
+    unwritable = tmp_path / "audit-is-a-directory"
+    unwritable.mkdir()
+    try:
+        sink = proxy().FileAuditSink(unwritable)
+    except OSError:
+        return  # refused at construction: the proxy cannot start on it, which is closed too
+    try:
+        sink.record({"tenant": "t", "outcome": "sent 200"})
+    except (OSError, ConfigFault):
+        pass
+    else:
+        pytest.fail("the file sink swallowed a failed audit write (fails open)")
+    with T.rig(tmp_path / "forge", data_root, audit=sink) as r:
+        r.up.replies[f"{BASE}/users/x"] = (200, {"X-Up": "upstream-header-1163"},
+                                           b"UPSTREAM-BODY-1163")
+        answer = r.ask()
+
+    assert answer["fault"] == "ConfigFault"
+    assert "UPSTREAM-BODY-1163" not in json.dumps(answer)
+    assert "upstream-header-1163" not in json.dumps(answer)

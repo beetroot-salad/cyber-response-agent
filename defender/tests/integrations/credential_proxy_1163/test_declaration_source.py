@@ -3,7 +3,10 @@ working tree or an unmerged commit, read without following a link; a merged chan
 the next request."""
 from __future__ import annotations
 
+import base64
+import json
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -152,27 +155,54 @@ def test_d3_a_declaration_reached_through_a_link_in_the_export_is_refused(
     assert len(r.up.seen) == 1
 
 
-@pytest.mark.parametrize("name", [
+BAD_NAMES = [
     "../other", "identity/../other", "Identity", "id entity", "-identity", "identity\n",
     "x" * 65, "",
-])
+]
+
+
+def _forged(r, *, grant_system: str) -> str:
+    """A token whose hand-built claims grant `grant_system`, signed by the rig's signer, so the
+    mint's own check is bypassed and the grant holds whatever name is given."""
+    claims = {"tenant": r.t.tenant_id, "investigation": T.RUN_ID,
+              "grant": [[grant_system, "r"]], "exp": int(time.time()) + 3600}
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"{payload}.{r.signer.sign(payload.encode())}"
+
+
+@pytest.mark.parametrize("name", BAD_NAMES)
 def test_d4_a_system_name_outside_the_grammar_is_refused_without_reading_beyond_it(
         tmp_path, data_root, name):
-    """A request naming a system outside the grammar, with a file where it would resolve, is a
-    `ConfigFault` and nothing is read or sent; a valid system is granted. O2, O7."""
+    """A token granting a system name outside the grammar, with files where it would resolve,
+    is a `ConfigFault`, nothing is read or sent; a valid name is granted. O2, O7."""
     with T.rig(tmp_path / "forge", data_root) as r:
+        r.verifier = H.FakeVerifier(True)  # the forged payload's wire form is not under test
+        r.rebuild()
         settings = export_dir(r.t.tenant, r.t.commit) / "settings"
         for where in (settings / "other", settings / "systems" / "other"):
             where.mkdir(exist_ok=True)
             (where / "access.yaml").write_text(
                 H.declaration(r.up.url + T.BASE_PATH), encoding="utf-8")
-        refused = r.ask(system=name)
-        r.store.sets[(r.t.tenant_id, "other")] = T.static_set()
-        control = r.ask()
+        refused = r.ask(system=name, tok=_forged(r, grant_system=name))
+        reads_after, seen_after = list(r.store.reads), len(r.up.seen)
+        control = r.ask(tok=_forged(r, grant_system="identity"))
 
     assert refused["fault"] == "ConfigFault"
-    assert (r.store.reads, len(r.up.seen)) == ([(r.t.tenant_id, "identity")], 1)
+    assert (reads_after, seen_after) == ([], 0)
     assert control["fault"] is None
+    assert (r.store.reads, len(r.up.seen)) == ([(r.t.tenant_id, "identity")], 1)
+
+
+@pytest.mark.parametrize("name", BAD_NAMES)
+def test_d4_minting_a_token_that_grants_a_system_outside_the_grammar_is_refused(name):
+    """`mint_request_token` raises `ConfigFault` for a grant naming a bad system and signs
+    nothing; control: a valid name is signed. O2."""
+    signer = H.FakeSigner()
+    with pytest.raises(ConfigFault):
+        T.token(T.RUN_ID, {(name, "r")}, signer=signer)
+    assert signer.payloads == []
+    T.token(T.RUN_ID, {("identity", "r")}, signer=signer)
+    assert len(signer.payloads) == 1
 
 
 def _bad_declarations(up: str) -> dict[str, str]:

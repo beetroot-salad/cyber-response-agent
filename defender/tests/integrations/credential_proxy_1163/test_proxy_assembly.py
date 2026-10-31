@@ -79,4 +79,5 @@ def test_g1_the_assembled_proxy_reads_real_openbao_leaves_exports_alone_and_audi
     assert [(r["tenant"], r["system"], r["outcome"]) for r in records[:1]] == [
         (t.tenant_id, "identity", "sent 200")]
     assert len(records) == 2
+    assert records[1]["outcome"] == "ConfigFault", "the crossed-key refusal is audited as such"
     assert H.CANARY_KEY not in "\n".join(lines)

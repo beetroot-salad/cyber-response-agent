@@ -108,23 +108,56 @@ class Sign:
 
 class OpenBaoStandIn(httpx.MockTransport):
     """An OpenBao by transport: AppRole login for the registered `accounts` ({role_id:
-    secret_id}) and transit sign for any key of any mount, refusing a client token it did not
-    issue. Records every login and sign; the signature carries `SIGNATURE_CANARY`. Decides
-    nothing about which tenant's key a login may use: the test reads `signs`."""
+    secret_id}), transit sign for any key of any mount (refusing a client token it did not issue),
+    and the housekeeping a client may plausibly use: `sys/health`, `sys/seal-status`, token
+    `revoke-self`. Records every request path, login and sign; the signature carries
+    `SIGNATURE_CANARY`. Decides nothing about which tenant's key a login may use: the test reads
+    `logins` and `signs`.
 
-    def __init__(self, accounts: Mapping[str, str]) -> None:
+    `sealed` ("login" or "sign") answers 503 `Vault is sealed` on that call (and on health, which
+    reports sealed); `unreachable` raises a connection error on every request."""
+
+    def __init__(self, accounts: Mapping[str, str], *, sealed: str | None = None,
+                 unreachable: bool = False) -> None:
         super().__init__(self._handle)
         self.accounts = dict(accounts)
+        self.sealed = sealed
+        self.unreachable = unreachable
+        self.requests: list[str] = []
         self.logins: list[tuple[str, str]] = []
         self.signs: list[Sign] = []
         self.refused: list[str] = []
+        self.revoked: list[str] = []
         self._tokens: dict[str, str] = {}
+
+    def _sealed_answer(self) -> httpx.Response:
+        return httpx.Response(503, json={"errors": ["Vault is sealed"]})
+
+    def _housekeeping(self, request: httpx.Request) -> httpx.Response | None:
+        path = request.url.path
+        if path == "/v1/sys/health":
+            return httpx.Response(503 if self.sealed else 200, json={
+                "initialized": True, "sealed": bool(self.sealed), "standby": False})
+        if path == "/v1/sys/seal-status":
+            return httpx.Response(200, json={"initialized": True, "sealed": bool(self.sealed)})
+        if path == "/v1/auth/token/revoke-self":
+            self.revoked.append(request.headers.get("X-Vault-Token", ""))
+            return httpx.Response(204)
+        return None
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        self.requests.append(path)
+        if self.unreachable:
+            raise httpx.ConnectError("connection refused", request=request)
+        housekeeping = self._housekeeping(request)
+        if housekeeping is not None:
+            return housekeeping
         if path == "/v1/auth/approle/login":
             body = json.loads(request.content)
             self.logins.append((body["role_id"], body["secret_id"]))
+            if self.sealed == "login":
+                return self._sealed_answer()
             if self.accounts.get(body["role_id"]) != body["secret_id"]:
                 self.refused.append(path)
                 return httpx.Response(403, json={"errors": ["invalid credentials"]})
@@ -134,8 +167,10 @@ class OpenBaoStandIn(httpx.MockTransport):
                                                       "lease_duration": 600}})
         match = re.fullmatch(r"/v1/[^/]+/sign/([^/]+)(?:/[^/]+)?", path)
         if match:
+            if self.sealed == "sign":
+                return self._sealed_answer()
             token = request.headers.get("X-Vault-Token", "")
-            if token not in self._tokens:
+            if token not in self._tokens or token in self.revoked:
                 self.refused.append(path)
                 return httpx.Response(403, json={"errors": ["permission denied"]})
             payload = base64.b64decode(json.loads(request.content)["input"])
