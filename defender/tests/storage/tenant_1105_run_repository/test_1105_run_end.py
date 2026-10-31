@@ -183,3 +183,30 @@ def test_the_run_end_curation_request_uses_the_runs_tenant_with_no_second_read(t
     [(tenant, tail)] = tails
     [kw] = tail.enqueued
     assert str(kw[ENQUEUE_TENANT].id) == str(tenant.id), f"the enqueue seam was not handed the run's tenant: {kw}"
+
+
+def test_the_run_is_recorded_under_its_tenants_host_lock_for_as_long_as_it_runs(tmp_path, monkeypatch):
+    """The run is recorded mid-run (the lifecycle step, after acceptance) and leaves nothing recorded and no lock once
+    `main` returned (r10 O-A2, O-A6)."""
+    from defender.tests.support.tenancy import _host1214 as H
+    from defender.tests.support.tenancy._active1214 import active_directory
+
+    where: dict[str, Any] = {}
+
+    def directory(root: Any, tenant_id: str) -> Any:
+        where["at"] = (location_path(root), tenant_id)
+        return active_directory(location_path(root), tenant_id)
+
+    def during() -> None:
+        data_root, tenant_id = where["at"]
+        where["during"] = (H.recorded(data_root, tenant_id), H.exclusive_free(data_root, tenant_id))
+
+    _order, outcome, _queued = _drive(tmp_path / "recorded", monkeypatch, directory=directory, during=during)
+    assert outcome == 0, f"a completing run exits 0: {outcome!r}"
+    assert "during" in where, "control: the run reached its lifecycle"
+    recorded, free = where["during"]
+    assert recorded == H.this_process(), "the run was not recorded while it ran"
+    assert not free, "the run's tenant lock was free while it ran"
+    data_root, tenant_id = where["at"]
+    assert H.recorded(data_root, tenant_id) == []
+    assert H.exclusive_free(data_root, tenant_id)

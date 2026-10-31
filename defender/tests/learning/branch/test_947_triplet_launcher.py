@@ -79,12 +79,19 @@ def test_the_launcher_holds_its_tenants_host_lock_while_its_siblings_start(tmp_p
 
     from defender.tenancy import host_lock
 
+    from defender.tests.support.tenancy import _host1214 as H
+
     taken: list[bool] = []
+    recorded: list[bool] = []
+    tenants: list[str] = []
     inner = T.FakeSpawn()
 
     def spawn(argv, **kw):
         tenant = argv[argv.index("--tenant") + 1]
-        fd = host_lock.acquire(Path(os.environ["DEFENDER_DATA_ROOT"]), tenant, exclusive=True, timeout=0)
+        tenants.append(tenant)
+        root = Path(os.environ["DEFENDER_DATA_ROOT"])
+        recorded.append(H.recorded(root, tenant) == H.this_process())
+        fd = host_lock.acquire(root, tenant, exclusive=True, timeout=0)
         taken.append(fd is not None)
         if fd is not None:
             host_lock.release_lock(fd)
@@ -93,6 +100,10 @@ def test_the_launcher_holds_its_tenants_host_lock_while_its_siblings_start(tmp_p
     assert rc == 0, message
     assert taken, "control: the launcher started no sibling"
     assert not any(taken), "the tenant's lock was free while the launcher started a sibling"
+    assert all(recorded), "the launcher was not recorded while it started a sibling (O-A2)"
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    assert H.recorded(root, tenants[0]) == [], "the launcher stayed recorded after it returned"
+    assert H.exclusive_free(root, tenants[0])
 
 
 # preflight — what is checked before anything is spent

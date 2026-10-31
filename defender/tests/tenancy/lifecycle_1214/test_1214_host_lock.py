@@ -63,7 +63,7 @@ LAUNCHER = textwrap.dedent("""
         connect.main(["check", tenant], directory=Blocking())
     elif entry == "launcher":
         from defender.learning.branch import cli as branch_cli
-        branch_cli.main(["--tenant", tenant, "run-20261028T000000Z-0001", "1"], directory=Blocking(),
+        branch_cli.main(["--tenant", tenant, "9c2e4a17-3b58-4d06-b1f2-7e0a5c8d3f94", "1"], directory=Blocking(),
                         spawn=lambda *a, **k: 0, preflight=lambda *a, **k: 0, render_page=lambda *a, **k: None)
     else:  # a command of the design's table: its own `main(argv, directory=...)`
         from defender.tests.support.tenancy import _host1214 as H

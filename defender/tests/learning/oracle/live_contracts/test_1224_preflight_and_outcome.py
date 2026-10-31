@@ -233,6 +233,7 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
     seams.setdefault("live_tree", S.T.source_capture())
     seams.setdefault("roster", est.roster())
     seams.setdefault("judge", S.FakeJudge())
+    seams.setdefault("directory", S.T.launcher_directory(src.parent.parent.name))  # C9: one seeded active directory
     if oracle is not None:
         seams["oracle"] = oracle.model
     if verifier is not None:

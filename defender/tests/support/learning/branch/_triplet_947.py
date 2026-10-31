@@ -67,6 +67,14 @@ def no_preflight(_model: str | None = None, *, branching: bool = False) -> int:
     return 0
 
 
+def launcher_directory(tenant_id: str) -> Any:
+    """One seeded ACTIVE tenant directory over the fixture data root: what a launcher driver hands `cli.main` as
+    `directory=` (r10.1 C9; the launcher admits through the host acceptance, A1)."""
+    from defender.tests.support.tenancy._active1214 import active_directory
+
+    return active_directory(Path(os.environ["DEFENDER_DATA_ROOT"]), tenant_id)
+
+
 def fixture_world_id(label: str) -> str:
     """Explicit identity for fixed fixture worlds; launcher worlds are read from disk."""
     return fixture_uuid(f"world:{label}")

@@ -42,19 +42,9 @@ TEST_TENANT = "3d6f0b8e-2a41-4c97-9e15-7b2c8a4d6f01"
 #: C2: the functions of an entry module that may open a host acceptance (the command, not a helper).
 COMMAND_FUNCTIONS = frozenset({"main", "_launch"})
 
-#: The raw folder acceptance and every wrapper that reaches it (design: "The census test", first bullet).
-RAW_ACCEPTANCE = frozenset({
-    "accept_tenant", "requested_tenant", "accept_requested_tenant", "command_line_tenant", "command_line_paths",
-    "resolve_tenant", "open_command_line_run", "open_requested_run",
-})
-
-#: Where a wrapper itself is defined: its own body may reach the next wrapper down (module -> function names).
-WRAPPER_DEFINITIONS = {
-    "tenancy/_tenant.py": {"requested_tenant", "accept_requested_tenant"},
-    "tenancy/_command_line_run.py": {"open_command_line_run", "open_requested_run"},
-    "learning/core/cli.py": {"command_line_tenant", "command_line_paths"},
-    "systems/run_tenant.py": {"resolve_tenant"},
-}
+#: The raw folder acceptance's own module (it defines `accept_tenant`). The census derives every wrapper that reaches
+#: it by reachability; no list of wrapper names is kept.
+RAW_LAYER = "tenancy/_tenant.py"
 
 #: A3: the processes covered by their starter, which load the folder with the folder rules only. Exactly these.
 A3_SET = frozenset({
@@ -84,7 +74,8 @@ ENTRY_POINT_MODULES = (
 
 # --- the read-only and one-shot commands that take `directory=` (design: "Callers that move to it") -------------------
 
-RUN_ID = "run-20261028T000000Z-0001"
+#: A canonical lowercase uuid4, the only text `RunId` admits, so a command that passes acceptance can parse it.
+RUN_ID = "9c2e4a17-3b58-4d06-b1f2-7e0a5c8d3f94"
 EPISODE_ID = "5b1d9c3e-7a42-4f68-8e0b-2c6a9d4f1e73"
 
 #: name -> (module, argv for tenant `t`). Each command's `main(argv, *, directory=None)` is the in-process seam

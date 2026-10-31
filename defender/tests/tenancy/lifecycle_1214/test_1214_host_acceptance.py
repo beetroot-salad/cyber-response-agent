@@ -15,9 +15,16 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+from defender.tests.support.shared.contracts._repo import seed_repo
+from defender.tests.support.shared._postgres1339 import empty_database, migrated_database  # noqa: F401 — fixtures
 from defender.tests.support.tenancy import _host1214 as H
-from defender.tests.support.tenancy._active1214 import active_directory, database_env, insert_active_tenant
+from defender.tests.support.tenancy._active1214 import (
+    DSN_ENV,
+    active_directory,
+    active_repository,
+    database_env,
+    insert_active_tenant,
+)
 from defender.tests.support.tenancy._host1214 import exclusive_free, host_tenant, recorded, this_process
 
 TENANT = "7f3c1a52-9d4e-4b8a-a1c6-2e5d8b9f0c13"
@@ -196,6 +203,81 @@ def test_an_acceptance_blocked_on_the_host_lock_waits_and_says_so_once_on_stderr
     assert H.WAITING_WORDS[0] not in out, f"the waiting line went to stdout: {out}"
 
 
+# --- a refusal at the version check releases what was taken (O-A6) ---------------------------------------------
+
+@pytest.mark.postgres
+def test_a_database_behind_is_refused_at_the_version_check_and_the_hold_and_record_are_released(
+        placed, empty_database, monkeypatch):  # noqa: F811
+    """The check runs after the hold is taken: a database at another revision raises `TenantRefused` naming both
+    revisions and leaves neither record nor lock; at head the same call admits (r10 O-A6, A1 order)."""
+    from defender import tenancy
+    from defender.migrations import head, upgrade
+    from defender.tests.migrations.test_1214_migrations import BASELINE, _upgrade_to
+    from defender.records.formats import TenantRefused
+    from defender.systems.run_tenant import RecordsUnreachable
+
+    root = tenancy.resolve_data_root()
+    monkeypatch.setenv(DSN_ENV, empty_database)
+    _upgrade_to(empty_database, BASELINE)
+    with pytest.raises(TenantRefused) as refused:
+        host_tenant(root, TENANT)
+    assert not isinstance(refused.value, RecordsUnreachable), "a revision mismatch is not a transient outage"
+    assert BASELINE in str(refused.value), str(refused.value)
+    assert head() in str(refused.value), str(refused.value)
+    assert recorded(placed, TENANT) == [], "the refusal kept the record"
+    assert exclusive_free(placed, TENANT), "the refusal kept the lock"
+    upgrade(empty_database)
+    insert_active_tenant(empty_database, TENANT, data_root=placed)
+    with host_tenant(root, TENANT):
+        assert recorded(placed, TENANT) == this_process(), "control: at head the acceptance holds"
+    assert recorded(placed, TENANT) == []
+
+
+@pytest.mark.postgres
+def test_an_unreachable_database_is_refused_as_transient_and_the_hold_and_record_are_released(
+        placed, migrated_database, monkeypatch):  # noqa: F811
+    """A database nothing answers at raises `RecordsUnreachable` (a drain's transient case) and leaves neither record
+    nor lock; the reachable database admits the same call (r10 O-A6, the version check step)."""
+    from defender import tenancy
+    from defender.systems.run_tenant import RecordsUnreachable
+
+    root = tenancy.resolve_data_root()
+    insert_active_tenant(migrated_database, TENANT, data_root=placed)
+    monkeypatch.setenv(DSN_ENV, "postgresql://nobody:nothing@127.0.0.1:1/none?connect_timeout=3")
+    with pytest.raises(RecordsUnreachable):
+        host_tenant(root, TENANT)
+    assert recorded(placed, TENANT) == [], "the refusal kept the record"
+    assert exclusive_free(placed, TENANT), "the refusal kept the lock"
+    monkeypatch.setenv(DSN_ENV, migrated_database)
+    with host_tenant(root, TENANT):
+        assert recorded(placed, TENANT) == this_process(), "control: the reachable database admits"
+
+
+# --- one repository open per acceptance (Finding 9) ---------------------------------------------------------
+
+def test_an_acceptance_opens_one_repository_for_its_admission_read(placed):
+    """Each acceptance through a given directory opens the tenant repository once (state and wiring in one read); a
+    second acceptance opens one more (r10 Finding 9; the version check is not part of it)."""
+    from defender import tenancy
+    from defender.tenancy import TenantDirectory
+
+    root = tenancy.resolve_data_root()
+    twin = active_repository(placed, TENANT)
+    opened: list[int] = []
+
+    def repository() -> object:
+        opened.append(1)
+        return twin
+
+    directory = TenantDirectory(repository)
+    with host_tenant(root, TENANT, directory=directory):
+        pass
+    assert len(opened) == 1, f"an acceptance opened {len(opened)} repositories"
+    with host_tenant(root, TENANT, directory=directory):
+        pass
+    assert len(opened) == 2, f"the second acceptance opened {len(opened) - 1} repositories"
+
+
 # --- the lifecycle never admits (A4, C6) -----------------------------------------------------------------------
 
 def test_the_host_acceptance_refuses_in_a_process_marked_as_the_lifecycle(placed, monkeypatch):
@@ -280,15 +362,34 @@ def test_the_version_check_runs_once_per_process_across_acceptances(placed, migr
 
 # --- the starter-covered set needs no hold and no database (A3, O-A4) ------------------------------------------
 
+class _WiringReads:
+    """A directory that records the tenants whose forge wiring the publish child asked for."""
+
+    def __init__(self, inner: object) -> None:
+        self.inner, self.wiring_reads = inner, []
+
+    def forge_wiring(self, tenant_id: str) -> object:
+        self.wiring_reads.append(tenant_id)
+        return self.inner.forge_wiring(tenant_id)  # type: ignore[attr-defined]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.inner, name)
+
+
 def test_the_publish_child_works_under_an_exclusive_hold_where_the_host_acceptance_waits(placed):
-    """With T's lock held exclusive (prepare's), the publish child still finishes for a `creating` tenant, while the
-    host acceptance on the same lock blocks (r10 A3, O-A4; the control shows the hold bites)."""
+    """With T's lock held exclusive (prepare's), the publish child still gets past acceptance for a `creating` tenant
+    to its wiring read and reports what an `active` tenant's child reports, while the host acceptance on the same lock
+    blocks (r10 A3, O-A4; the control shows the hold bites)."""
     from defender import tenancy
     from defender.learning.author import version_control as vc
     from defender.tenancy import host_lock
 
     root = tenancy.resolve_data_root()
-    creating = active_directory(placed, TENANT, state="creating")
+    seed_repo(placed / TENANT / "knowledge")  # a real git repository, as a tenant's clone is
+    active = _WiringReads(active_directory(placed, TENANT))
+    control = vc.publish_for_run(TENANT, data_root=placed, directory=active, budget=5.0)
+    assert active.wiring_reads == [TENANT], f"control: the active tenant's child never read its wiring: {control}"
+    creating = _WiringReads(active_directory(placed, TENANT, state="creating"))
     fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
     assert fd is not None
     lines: list[str] = []
@@ -308,11 +409,14 @@ def test_the_publish_child_works_under_an_exclusive_hold_where_the_host_acceptan
         waiter.start()
         child.join(60)
         assert not child.is_alive(), "the publish child waited for the exclusive hold"
-        assert lines, "the publish child returned no report line"
-        assert isinstance(lines[0], str), lines
         assert waiter.is_alive(), "control: the host acceptance gave up on an exclusive hold"
         assert not gate.is_set(), "control: the host acceptance went past an exclusive hold"
     finally:
         host_lock.release_lock(fd)
     waiter.join(30)
     assert gate.is_set()
+    [line] = lines
+    assert creating.wiring_reads == [TENANT], f"the child of a creating tenant never reached its wiring read: {line}"
+    assert "was not accepted" not in line, line
+    assert not any(w in line.lower() for w in ("creating", "offboarding", "not active")), line
+    assert line == control, "a creating tenant's child reported differently from an active tenant's"

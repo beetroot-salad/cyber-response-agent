@@ -1538,6 +1538,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     # The episode lands under the launching tenant's own `<T>/episodes/`; the launcher mints
     # its id, so it is found as the ONE new folder there.
     tenant_id = src.parent.parent.name
+    seams.setdefault("directory", T.launcher_directory(tenant_id))  # C9: one seeded active directory
     root = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
     before = {p.name for p in root.iterdir()} if root.is_dir() else set()
     try:

@@ -325,6 +325,26 @@ def test_the_connect_command_has_only_update_propose_and_check(data_root, retire
     _has(text, "invalid choice", f"'{retired}'")
 
 
+def test_the_drain_is_recorded_while_its_stage_runs_and_nothing_stays_recorded(data_root, monkeypatch):
+    """The drain is recorded under its tenant's lock from a seam reached after acceptance (its stage) and leaves
+    nothing recorded once `main` returns (r10 O-A2: recorded for as long as the command runs)."""
+    from defender.learning.core import cli
+
+    during: list[tuple[list[Any], bool]] = []
+
+    def stage(*_a: Any, **_k: Any) -> int:
+        during.append((H.recorded(data_root, TENANT), H.exclusive_free(data_root, TENANT)))
+        return 0
+
+    monkeypatch.setattr(cli, "author_drain", stage)
+    assert cli.main(["loop.py", "--author-drain", "--tenant", TENANT], directory=active_directory(data_root, TENANT)) == 0
+    [(recorded, free)] = during
+    assert recorded == H.this_process(), "the drain was not recorded while its stage ran"
+    assert not free, "the drain's lock was free while its stage ran"
+    assert H.recorded(data_root, TENANT) == []
+    assert H.exclusive_free(data_root, TENANT)
+
+
 # --- every other host entry point (r10 A1): the read-only commands, the one-shot commands and the launcher ------
 
 class _Logged(logging.Handler):
@@ -336,8 +356,9 @@ class _Logged(logging.Handler):
         self.lines.append(record.getMessage())
 
 
-def _command(main: Any, argv: list[str], directory: Any, **seams: Any) -> tuple[Any, str]:
-    """`main(argv, directory=..., **seams)` -> (its exit status, both streams, any exit text and what it logged)."""
+def _command(main: Any, argv: list[str], directory: Any, *, refusal: bool = False, **seams: Any) -> tuple[Any, str]:
+    """`main(argv, directory=..., **seams)` -> (its exit status, both streams, any exit text and what it logged). With
+    `refusal=True` the command must refuse by exiting or returning a status: an exception that escapes fails the case."""
     out, err, logged = io.StringIO(), io.StringIO(), _Logged()
     logging.getLogger().addHandler(logged)
     try:
@@ -346,29 +367,61 @@ def _command(main: Any, argv: list[str], directory: Any, **seams: Any) -> tuple[
     except SystemExit as refused:
         code = refused.code
     except Exception as failed:  # noqa: BLE001 — past acceptance, the command's next real refusal
+        if refusal:
+            raise AssertionError(f"a refusal must exit or return a status, not raise {type(failed).__name__}: {failed}") from failed
         code = f"{type(failed).__name__}: {failed}"
+    else:
+        if refusal and not isinstance(code, int):
+            raise AssertionError(f"a refusal must exit or return an int status, returned {code!r}")
     finally:
         logging.getLogger().removeHandler(logged)
     return code, f"{code}\n{out.getvalue()}{err.getvalue()}" + "\n".join(logged.lines)
 
 
 def _no_state_refusal(text: str) -> bool:
-    return not any(w in text.lower() for w in NOT_A_REFUSAL_OF_STATE) and "TypeError" not in text
+    """True when the command got past acceptance: no state refusal, no harness fault and no run-id grammar refusal (the
+    fixture ids are canonical, so a `RunRefused` would mean the command judged the id before accepting the tenant)."""
+    return (not any(w in text.lower() for w in NOT_A_REFUSAL_OF_STATE)
+            and "TypeError" not in text and "RunRefused" not in text)
+
+
+def _tree(root: Path) -> dict[str, tuple[int, int, int]]:
+    """Every path below `root` with its mode, size and mtime: what a command left there."""
+    if not root.is_dir():
+        return {}
+    return {str(p.relative_to(root)): (p.lstat().st_mode, p.lstat().st_size, p.lstat().st_mtime_ns)
+            for p in sorted(root.rglob("*"))}
+
+
+def _launcher(directory: Any, calls: _Calls, **kw: Any) -> tuple[Any, str]:
+    """The episode launcher's `main` with stand-ins for its spawn, preflight and page (`calls` records them)."""
+    from defender.learning.branch import cli as branch_cli
+
+    return _command(branch_cli.main, ["--tenant", TENANT, H.RUN_ID, "1"], directory,
+                    spawn=calls.hook("spawn", 0), preflight=calls.hook("preflight", 0),
+                    render_page=calls.hook("render_page", None), **kw)
 
 
 @pytest.mark.parametrize("state", ["offboarding", "creating"])
 @pytest.mark.parametrize("name", list(H.COMMANDS))
 def test_a_host_command_refuses_a_tenant_that_is_not_active_before_its_folder_and_holds_nothing(data_root, name, state):
     """Each command of the design's table refuses a non-`active` tenant naming it and its state, before the folder
-    rules (`OTHER` has no folder), and leaves no hold; an active tenant passes the check (r10 O-A1, O-A6)."""
+    rules, holds nothing and writes nothing under the tenant's folder; an active tenant passes the check (r10 O-A1, O-A6)."""
     main, argv = H.command_main(name), H.COMMANDS[name][1]
     _, admitted = _command(main, argv(TENANT), active_directory(data_root, TENANT))
     assert _no_state_refusal(admitted), f"control: an active tenant was refused for its state: {admitted}"
-    code, refused = _command(main, argv(OTHER), active_directory(data_root, OTHER, state=state))
+    code, refused = _command(main, argv(OTHER), active_directory(data_root, OTHER, state=state), refusal=True)
     assert code not in (0, None), refused
     _has(refused, OTHER, state)
     assert H.recorded(data_root, OTHER) == [], "the refusal kept a record"
     assert H.exclusive_free(data_root, OTHER), "the refusal kept the lock"
+    assert not (data_root / OTHER).exists(), f"the refusal made the folderless tenant's folder: {_tree(data_root / OTHER)}"
+    before = _tree(data_root / TENANT)
+    assert before, "control: the placed tenant's folder has something to compare"
+    code, refused = _command(main, argv(TENANT), active_directory(data_root, TENANT, state=state), refusal=True)
+    assert code not in (0, None), refused
+    _has(refused, TENANT, state)
+    assert _tree(data_root / TENANT) == before, "the refusal wrote under the placed tenant's folder"
 
 
 def test_an_active_tenant_with_no_folder_is_refused_for_its_folder_not_its_state(data_root):
@@ -382,28 +435,33 @@ def test_an_active_tenant_with_no_folder_is_refused_for_its_folder_not_its_state
 
 def test_the_episode_launcher_refuses_an_offboarding_tenant_before_any_work(data_root):
     """The launcher refuses an `offboarding` tenant naming it and its state; preflight, spawn and the page are never
-    reached (r10 O-A1, Flows: "a launch started after offboarding began is refused at acceptance")."""
-    from defender.learning.branch import cli as branch_cli
-
+    reached, nothing is written under the tenant's folder (r10 O-A1, Flows: "a launch started after offboarding began
+    is refused at acceptance")."""
     calls = _Calls()
-
-    def launch(directory: Any) -> str:
-        try:
-            branch_cli.main(["--tenant", TENANT, "run-20261028T000000Z-0001", "1"], directory=directory,
-                            spawn=calls.hook("spawn", 0), preflight=calls.hook("preflight", 0),
-                            render_page=calls.hook("render_page", None))
-        except SystemExit as refused:
-            return str(refused.code)
-        return ""
-
-    admitted = launch(active_directory(data_root, TENANT))
+    _, admitted = _launcher(active_directory(data_root, TENANT), calls)
     assert _no_state_refusal(admitted), f"control: {admitted}"
     calls.reached.clear()
-    refused = launch(active_directory(data_root, TENANT, state="offboarding"))
+    before = _tree(data_root / TENANT)
+    code, refused = _launcher(active_directory(data_root, TENANT, state="offboarding"), calls, refusal=True)
+    assert code not in (0, None), refused
     _has(refused, TENANT, "offboarding")
     assert calls.reached == []
     assert H.recorded(data_root, TENANT) == []
     assert H.exclusive_free(data_root, TENANT)
+    assert _tree(data_root / TENANT) == before, "the refusal wrote under the tenant's folder"
+
+
+@pytest.mark.parametrize("state", ["offboarding", "creating"])
+def test_the_episode_launcher_refuses_a_folderless_tenant_for_its_state_and_makes_no_folder(data_root, state):
+    """A tenant that is not `active` and has no folder is refused for its state; no folder appears for it (r10 O-A1, A1 order)."""
+    from defender.learning.branch import cli as branch_cli
+
+    code, refused = _command(branch_cli.main, ["--tenant", OTHER, H.RUN_ID, "1"],
+                             active_directory(data_root, OTHER, state=state), refusal=True,
+                             spawn=lambda *a, **k: 0, preflight=lambda *a, **k: 0, render_page=lambda *a, **k: None)
+    assert code not in (0, None), refused
+    _has(refused, OTHER, state)
+    assert not (data_root / OTHER).exists(), "the refusal made the folderless tenant's folder"
 
 
 # --- each lead-drain claim -------------------------------------------------------------------------
@@ -549,64 +607,138 @@ def test_the_api_may_not_load_the_lifecycle_node():
 
 # --- the r10.1 census: one host acceptance (A1, A3, A4; C1, C2, C5) -------------------------------
 
-def _raw_name(node: ast.AST, env: Any, astlib: Any) -> str | None:
-    """The raw-acceptance name `node` refers to (resolved through imports; an unresolved receiver's attribute by name)."""
-    if not isinstance(node, ast.Name | ast.Attribute):
-        return None
-    origin = astlib.origin(node, env)
-    if origin is not None:
-        last = origin.rpartition(".")[2]
-        return last if last in H.RAW_ACCEPTANCE else None
-    return node.attr if isinstance(node, ast.Attribute) and node.attr in H.RAW_ACCEPTANCE else None
+def _units(rel: str, tree: ast.Module) -> list[tuple[str, bool, list[ast.AST]]]:
+    """`(name, is_method, nodes)` for each top-level function, each method and the module-level code of `rel`; a
+    nested function belongs to its outermost one."""
+    units: list[tuple[str, bool, list[ast.AST]]] = []
+    loose: list[ast.AST] = []
+
+    def method_units(cls: ast.ClassDef) -> None:
+        for stmt in cls.body:
+            if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+                units.append((stmt.name, True, list(ast.walk(stmt))))
+            elif isinstance(stmt, ast.ClassDef):
+                method_units(stmt)
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+            units.append((stmt.name, False, list(ast.walk(stmt))))
+        elif isinstance(stmt, ast.ClassDef):
+            method_units(stmt)
+        else:
+            loose.extend(ast.walk(stmt))
+    units.append(("<module>", False, loose))
+    return units
 
 
-def _raw_uses(rel: str, tree: ast.Module) -> list[tuple[int, str]]:
-    """`(line, name)` of each use of the raw acceptance or a wrapper in `rel`, outside a wrapper's own definition
-    (imports and re-exports are not uses). No exemption for a `with host_tenant` scope: nothing under one accepts again."""
+def _is_barrier(rel: str, name: str) -> bool:
+    """The functions that may accept a tenant raw: the host acceptance (and its private helpers) and the A3 set."""
+    return rel in H.A3_SET or (rel == H.HOST_MODULE_PATH and (name == H.HOST_ACCEPTANCE or name.startswith("_")))
+
+
+_Facts = dict[tuple[str, str], tuple[str, bool, list[tuple[str | None, str, bool]]]]
+
+
+def _facts(production: dict[str, ast.Module]) -> _Facts:
+    """Per function: its module, whether it is a method, and what its body refers to as `(resolved origin, last name,
+    is an attribute)`."""
     from defender.tests.support.shared.contracts._by_path import import_lint_lib
 
     astlib = import_lint_lib("_astlib")
-    env = astlib.module_env(tree, module=_dotted(rel))
-    found: list[tuple[int, str]] = []
-    wrappers = H.WRAPPER_DEFINITIONS.get(rel, set())
-
-    def visit(node: ast.AST, exempt: bool) -> None:
-        if isinstance(node, ast.Import | ast.ImportFrom):
-            return
-        exempt = exempt or (getattr(node, "name", None) in wrappers
-                            and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef))
-        name = _raw_name(node, env, astlib)
-        if name is not None and not exempt:
-            found.append((node.lineno, name))
-        for child in ast.iter_child_nodes(node):
-            visit(child, exempt)
-
-    visit(tree, False)
-    return found
+    facts: _Facts = {}
+    for rel, tree in production.items():
+        package = _dotted(rel) if rel.endswith("__init__.py") else None
+        env = astlib.module_env(tree, module=_dotted(rel), package=package)
+        for name, is_method, nodes in _units(rel, tree):
+            refs = []
+            for node in nodes:
+                if isinstance(node, ast.Name | ast.Attribute):
+                    found = astlib.origin(node, env)
+                    if found is None and isinstance(node, ast.Name):
+                        found = env.own_defs.get(node.id)
+                    refs.append((found, node.attr if isinstance(node, ast.Attribute) else node.id,
+                                 isinstance(node, ast.Attribute)))
+            facts[rel, name] = (_dotted(rel), is_method, refs)
+    return facts
 
 
-def test_the_raw_acceptance_is_used_only_by_the_host_acceptance_and_the_starter_covered_set():
-    """C2 (1): outside the host acceptance module and the wrappers' own bodies, the raw folder acceptance and its
-    wrappers are used by the A3 set exactly, and by nothing else."""
-    users = {rel for rel, tree in _production().items() if rel != H.HOST_MODULE_PATH and _raw_uses(rel, tree)}
-    assert users == set(H.A3_SET), {rel: _raw_uses(rel, _production()[rel]) for rel in users ^ set(H.A3_SET)}
+def _refers(facts: _Facts, unit: tuple[str, str], target: tuple[str, str]) -> bool:
+    t_module, t_method = facts[target][0], facts[target][1]
+    for found, last, attribute in facts[unit][2]:
+        if found is not None:
+            home, _, leaf = found.rpartition(".")
+            if leaf == target[1] and (t_module == home or t_module.startswith(home + ".")
+                                      or home.startswith(t_module + ".")):
+                return True
+        elif attribute and last == target[1] and t_method:
+            return True
+    return False
 
 
-def test_the_raw_census_sees_a_by_hand_use_a_use_under_a_scope_and_spares_a_wrappers_own_body():
-    """The detector can fail: a call, a bound method, an alias and a use under `with host_tenant` are seen; a wrapper's
-    own definition is not."""
-    seen = {
-        "a call": "from defender.tenancy import requested_tenant\ndef f(r, t):\n    return requested_tenant(r, t)\n",
-        "a bound method": "def f(t):\n    return t.accept_requested_tenant\n",
-        "an alias": "from defender.tenancy import accept_tenant as take\ndef f():\n    return take(1, 2)\n",
-        "a use under a scope": ("from defender.systems.run_tenant import host_tenant\nfrom defender import tenancy\n"
-                                "def main(argv):\n    with host_tenant(1, argv[0]):\n"
-                                "        return tenancy.open_command_line_run(argv[0], argv[1])\n"),
+def _reaching(production: dict[str, ast.Module]) -> set[tuple[str, str]]:
+    """`(module path, function name)` of each production function that reaches the raw acceptance `accept_tenant`:
+    a fixed point over function bodies, a function reaching when its body refers to `accept_tenant` or to a reaching
+    function (resolved through imports; a method by its name on an unresolved receiver). The host acceptance and the
+    A3 set are reached but do not pass it on to their callers: they are where acceptance is allowed."""
+    facts = _facts(production)
+    reaching = {unit for unit in facts if unit[1] == "accept_tenant" and unit[0] == H.RAW_LAYER}
+    passing = set(reaching)
+    grew = True
+    while grew:
+        grew = False
+        for unit in facts:
+            if unit not in reaching and any(_refers(facts, unit, target) for target in passing):
+                reaching.add(unit)
+                grew = True
+                if not _is_barrier(*unit):
+                    passing.add(unit)
+    return reaching
+
+
+def _offenders(reaching: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    return {(rel, name) for rel, name in reaching if rel != H.RAW_LAYER and not _is_barrier(rel, name)}
+
+
+def test_a_function_reaches_the_raw_acceptance_only_in_the_host_acceptance_and_the_starter_covered_set():
+    """C2 (1): derived by reachability, the production functions that reach `accept_tenant` are the host acceptance and
+    the A3 set (every other entry point and wrapper takes the accepted tenant it is handed)."""
+    reaching = _reaching(_production())
+    assert (H.HOST_MODULE_PATH, H.HOST_ACCEPTANCE) in reaching, "control: the host acceptance accepts the tenant"
+    assert {rel for rel, _ in reaching if rel in H.A3_SET} == set(H.A3_SET), "the A3 set is exactly these modules"
+    assert sorted(_offenders(reaching)) == []
+
+
+def test_the_reachability_census_sees_a_new_wrapper_under_a_fresh_name_and_spares_an_accepted_tenant():
+    """The detector can fail: a by-hand call, a wrapper under a name nobody listed, its caller, a bound method, an
+    alias and a use under a `with host_tenant` are offenders; a wrapper taking an accepted tenant, the host acceptance
+    and the A3 set are not."""
+    raw = ("def accept_tenant(root, raw):\n    return object()\n"
+           "def requested_tenant(root, raw):\n    return accept_tenant(root, raw)\n"
+           "class Tenant:\n    @staticmethod\n    def accept_requested_tenant(root, raw):\n"
+           "        return requested_tenant(root, raw)\n")
+    sources = {
+        "tenancy/_tenant.py": raw,
+        "cli/by_hand.py": "from defender.tenancy import requested_tenant\ndef main(r, t):\n    return requested_tenant(r, t)\n",
+        "cli/fresh.py": ("from defender.tenancy import accept_tenant\n"
+                         "def load_for_the_page(root, raw):\n    return accept_tenant(root, raw)\n"),
+        "cli/caller.py": ("from defender.cli.fresh import load_for_the_page\n"
+                          "def main(argv):\n    return load_for_the_page(1, argv[0])\n"),
+        "cli/bound.py": "def main(t):\n    return t.accept_requested_tenant(1, 2)\n",
+        "cli/alias.py": "from defender.tenancy import accept_tenant as take\ndef main():\n    return take(1, 2)\n",
+        "cli/scoped.py": ("from defender.systems.run_tenant import host_tenant\nfrom defender import tenancy\n"
+                          "def main(argv):\n    with host_tenant(1, argv[0]):\n        return tenancy.requested_tenant(1, argv[1])\n"),
+        "cli/accepted.py": "def open_command_line_run(tenant, run_id):\n    return (tenant, run_id)\n",
+        "cli/uses_accepted.py": ("from defender.cli.accepted import open_command_line_run\n"
+                                 "def main(tenant):\n    return open_command_line_run(tenant, 1)\n"),
+        H.HOST_MODULE_PATH: ("from defender.tenancy import accept_tenant\n"
+                             "def host_tenant(root, raw):\n    return accept_tenant(root, raw)\n"),
+        "cli/opens_scope.py": ("from defender.systems.run_tenant import host_tenant\n"
+                               "def main(argv):\n    return host_tenant(1, argv[0])\n"),
+        sorted(H.A3_SET)[0]: "from defender.tenancy import requested_tenant\ndef launch(r, t):\n    return requested_tenant(r, t)\n",
     }
-    for what, source in seen.items():
-        assert _raw_uses("cli/x.py", ast.parse(source)), f"the census missed {what}"
-    own = "def requested_tenant(root, raw):\n    return accept_tenant(root, raw)\n"
-    assert _raw_uses("tenancy/_tenant.py", ast.parse(own)) == []
+    offenders = _offenders(_reaching({rel: ast.parse(text) for rel, text in sources.items()}))
+    assert offenders == {("cli/by_hand.py", "main"), ("cli/fresh.py", "load_for_the_page"), ("cli/caller.py", "main"),
+                         ("cli/bound.py", "main"), ("cli/alias.py", "main"), ("cli/scoped.py", "main")}, offenders
 
 
 def _host_calls(rel: str, tree: ast.Module) -> list[tuple[int, tuple[str, ...]]]:

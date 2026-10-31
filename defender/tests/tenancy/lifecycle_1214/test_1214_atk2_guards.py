@@ -16,10 +16,19 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.tenancy import _host1214 as H  # noqa: E402
+from defender.tests.support.tenancy._active1214 import active_directory  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk2_fakes import DockerStub, GitStub, host_answering_accessor  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import REPO_ROOT, LifecycleWorld, lifecycle_config  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214.test_1214_host_entry import TENANT, _connect, _drain_start, _run_start  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214.test_1214_host_entry import (  # noqa: E402
+    TENANT,
+    _command,
+    _connect,
+    _drain_start,
+    _launcher,
+    _run_start,
+)
 from defender.tests.tenancy.tenant_1108_p4.test_r6_issuer import tls_issuer  # noqa: E402,F401 — fixture
 
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
@@ -58,6 +67,35 @@ def test_each_host_entry_point_refuses_a_data_root_inside_the_checkout_and_creat
             "connect command": lambda: _connect(["check", TENANT])}[entry]()
     assert text.strip() and "Traceback" not in text, "control: the entry point refused in words"
     assert not inside_the_checkout.exists(), f"{entry} created {inside_the_checkout}: {_files_below(inside_the_checkout)}"
+
+
+@pytest.mark.parametrize("entry", ["episode launcher", *H.COMMANDS])
+def test_the_episode_launcher_and_each_host_command_refuse_a_data_root_inside_the_checkout_and_create_nothing(
+        entry, inside_the_checkout, monkeypatch):
+    """The launcher and the commands of the design's table refuse a data root under `defender/` by exiting, and leave it
+    (and so any host-lock folder) uncreated (FR3-13; r10 A1 step 2, before the hold)."""
+    from defender.tests.tenancy.lifecycle_1214.test_1214_host_entry import _Calls
+
+    monkeypatch.setenv(DATA_ROOT_ENV, str(inside_the_checkout))
+    directory = active_directory(inside_the_checkout, TENANT)
+    if entry == "episode launcher":
+        code, text = _launcher(directory, _Calls(), refusal=True)
+    else:
+        code, text = _command(H.command_main(entry), H.COMMANDS[entry][1](TENANT), directory, refusal=True)
+    assert code not in (0, None) and text.strip() and "Traceback" not in text, f"{entry} did not refuse in words: {text}"
+    assert not inside_the_checkout.exists(), f"{entry} created {inside_the_checkout}: {_files_below(inside_the_checkout)}"
+
+
+def test_the_host_acceptance_refuses_a_data_root_inside_the_checkout_and_creates_nothing(inside_the_checkout):
+    """`host_tenant` raises `TenantRefused` for a data root under `defender/` and creates neither the root nor a lock
+    folder in it (FR3-13; r10 A1 step 2)."""
+    from defender.records.formats import TenantRefused
+    from defender.tenancy import data_root_from_path
+
+    root = data_root_from_path(inside_the_checkout)
+    with pytest.raises(TenantRefused):
+        H.host_tenant(root, TENANT, directory=active_directory(inside_the_checkout, TENANT))
+    assert not inside_the_checkout.exists(), f"created {inside_the_checkout}: {_files_below(inside_the_checkout)}"
 
 
 # --- DC-2: the secret file and its folder grant nothing to group or other ---------------------------
