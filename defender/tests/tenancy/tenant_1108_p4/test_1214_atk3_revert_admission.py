@@ -93,6 +93,28 @@ def test_the_by_hand_revert_reads_the_tenants_state_once_at_acceptance_and_not_a
         f"the delivery judged the tenant's state again, after the acceptance did: {directory.reads}")
 
 
+def test_the_by_hand_revert_builds_one_tenant_and_hands_its_delivery_that_very_tenant_and_directory(p4_tenant, caplog):
+    """One acceptance, one `Tenant` built for the whole revert, and the delivery opens on the tenant and the directory the
+    acceptance admitted, the same objects and not a copy built again or forged (r10.1 C1: the value is passed down)."""
+    from defender.learning.author import version_control as vc
+    from defender.tests.support.tenancy import _host1214 as H
+
+    t = p4_tenant
+    bind_forge(t)
+    merged_agent_lesson(t.p3, t.scratch, "seed-revert-identity", LESSON_PATH, b"agent-written lesson\n")
+    directory = _ReadsCounted(_directory_for(t, "active"))
+    with caplog.at_level(logging.INFO), H.acceptance_calls(delivery=vc.opened_delivery) as calls:
+        rc = _cli().main(["--tenant", t.tenant_id, LESSON], client=t.forge.client, identity=t.vault.identity(),
+                         directory=directory)
+    assert rc == 0 and len(t.forge.creates) == 1, f"control: the revert reached its delivery: {critical_text(caplog)}"
+    assert (calls["accepted"], calls["built"]) == (1, 1), calls.counts
+    [built] = calls.locals["built"]
+    assert calls.locals["delivery"], "control: the delivery was opened"
+    opened = calls.locals["delivery"][0]  # a generator: its resumptions are calls too
+    assert opened["tenant"] is built["self"], "the delivery was opened on a tenant other than the one acceptance built"
+    assert opened["directory"] is directory, "the delivery was opened on a directory other than the admitted one"
+
+
 def _functions_calling(tree: ast.Module, name: str, module: str) -> set[str]:
     """The functions of `module` with a call to `name`: a callee `_astlib` resolves to an origin ending in `.name`
     (an alias or the attribute form is the same function), or, where the receiver is a value it cannot resolve, a

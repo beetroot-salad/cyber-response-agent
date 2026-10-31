@@ -17,6 +17,7 @@ import pytest
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
+from defender.tests.support.tenancy import _host1214 as HH
 
 
 RID_R1 = fixture_uuid('pr2-dc8-r1')
@@ -369,8 +370,11 @@ def test_dc8_the_drain_rehydrates_the_row_in_its_own_tenant(tmp_path):
     P.queue_row(t_paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
     P.queue_row(u_paths, "case-u", {"case_id": "case-u", "tenant_id": H.U_ID, "run_id": RID_R1})
     t_lane, u_lane = P.Lane(), P.Lane()
-    P.drain(t_paths, t_lane)
-    P.drain(u_paths, u_lane)
+    with HH.acceptance_calls() as ticks:
+        P.drain(t_paths, t_lane)
+        P.drain(u_paths, u_lane)
+    assert (ticks["accepted"], ticks["built"]) == (0, 0), (
+        f"a drain tick accepted a tenant or built one, by whatever name it reached the acceptance: {ticks.counts}")
     assert t_lane.run_dirs == [Path(location_path(t.runs)) / RID_R1], f"T's drain served {t_lane.run_dirs}"
     assert u_lane.run_dirs == [Path(location_path(u.runs)) / RID_R1], f"U's drain served {u_lane.run_dirs}"
     assert P.dead_letter(t_paths, "case-t") is None
@@ -388,33 +392,64 @@ class _BoundedLane(P.Lane):
             raise _Enough
 
 
-def test_dc8_a_row_naming_another_tenants_run_is_served_as_neither_tenants_run(tmp_path):
-    """RID_R1 is a run both tenants hold. A row of U's queued in T's drain is crossed: the drain serves neither T's
-    RID_R1 nor U's RID_R1 for it. What becomes of the row (dead-letter or counted retry) is not pinned here."""
-    t, u, t_paths, _u_paths = _drain_scene(tmp_path)
-    P.queue_row(t_paths, "case-crossed", {"case_id": "case-crossed", "tenant_id": H.U_ID, "run_id": RID_R1})
-    crossed = _BoundedLane()
-    with contextlib.suppress(_Enough):
-        P.drain(t_paths, crossed)
-    assert crossed.run_dirs == [], f"T's drain served the crossed row as {crossed.run_dirs}"
+#: U's records, as the row of T's queue that names U finds them (T is active in each): every state a tenant can be in, a
+#: tenant that is placed on disk and one that is not, and no row at all.
+U_RECORDS = {
+    "active": ("active", True),
+    "active and unplaced": ("active", False),
+    "creating": ("creating", True),
+    "offboarding": ("offboarding", True),
+    "offboarded": ("offboarded", True),
+    "no row": (None, True),
+}
 
 
-def test_dc8_c10_a_row_naming_another_tenant_is_dead_lettered_on_the_first_tick(tmp_path):
+@pytest.mark.parametrize("u_records", list(U_RECORDS))
+def test_dc8_c10_a_row_naming_another_tenant_is_dead_lettered_on_the_first_tick(tmp_path, u_records):
     """C10: a row whose spec names a tenant other than the drain's is dead-lettered at once, with a reason naming both
-    tenants and no attempts counter, and is never served (not a transient retry)."""
+    tenants and no attempts counted, and is never served as either tenant's run, whatever the other tenant's state or
+    place; a row of the drain's own tenant beside it is served and the drain accepts nothing itself."""
+    state, placed = U_RECORDS[u_records]
     t, u, t_paths, _u_paths = _drain_scene(tmp_path)
+    if not placed:
+        shutil.rmtree(Path(location_path(u.runs)).parent)
+    root = location_path(P.data_root)()
+    directory = P.records_with(root, {H.T_ID: "active", **({H.U_ID: state} if state else {})})
     P.queue_row(t_paths, "case-crossed", {"case_id": "case-crossed", "tenant_id": H.U_ID, "run_id": RID_R1})
+    P.queue_row(t_paths, "case-own", {"case_id": "case-own", "tenant_id": H.T_ID, "run_id": RID_R1})
     lane = _BoundedLane()
-    with contextlib.suppress(_Enough):
-        P.drain(t_paths, lane)
-    assert lane.run_dirs == [], f"the crossed row was served as {lane.run_dirs}"
+    with contextlib.suppress(_Enough), HH.acceptance_calls() as ticks:
+        P.drain(t_paths, lane, directory=directory)
+    assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R1], (
+        f"control: only T's own row is served, and as T's run; the drain served {lane.run_dirs}")
+    assert (ticks["accepted"], ticks["built"]) == (0, 0), f"the drain accepted a tenant itself: {ticks.counts}"
     letter = P.dead_letter(t_paths, "case-crossed")
     assert letter is not None, "the crossed row was not dead-lettered on the first tick"
     reason = str(letter.get("failed", ""))
     assert H.T_ID in reason, f"the reason does not name the drain's tenant: {reason!r}"
     assert H.U_ID in reason, f"the reason does not name the row's tenant: {reason!r}"
-    assert "attempts" not in letter, f"the dead letter carries a retry counter: {letter!r}"
+    assert letter.get("attempts", 0) == 0, f"the dead letter carries counted attempts: {letter!r}"
     assert not P.still_queued(t_paths, "case-crossed"), "the crossed row is still queued"
+    assert P.dead_letter(t_paths, "case-own") is None
+
+
+def test_dc8_a_drain_without_an_accepted_tenant_serves_nothing_and_accepts_none(tmp_path):
+    """C1: a drain whose paths carry no accepted tenant serves no row, whichever tenant the row names, and does not accept
+    one itself (`paths.tenant` is the only tenant a drain serves through)."""
+    t, _u, t_paths, _u_paths = _drain_scene(tmp_path)
+    anonymous = P.loop_paths(tmp_path)
+    assert anonymous.tenant is None
+    P.queue_row(anonymous, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
+    lane = P.Lane()
+    with HH.acceptance_calls() as ticks:
+        P.drain(anonymous, lane)
+    assert lane.run_dirs == [], f"a drain with no accepted tenant served {lane.run_dirs}"
+    assert (ticks["accepted"], ticks["built"]) == (0, 0), f"the drain accepted a tenant itself: {ticks.counts}"
+    # Positive control: the same row, drained through the tenant's own paths, is served.
+    P.queue_row(t_paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
+    served = P.Lane()
+    P.drain(t_paths, served)
+    assert served.run_dirs == [Path(location_path(t.runs)) / RID_R1], f"control: {served.run_dirs}"
 
 
 def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch, capsys):
