@@ -135,8 +135,9 @@ class IdentityRepository(Protocol):
     async def touch_session(self, value: str, *, now: _dt.datetime) -> bool:
         """Move `last_seen_at` to `now` only when it is more than five minutes old."""
         ...
-    async def purge_expired_sessions(self, *, now: _dt.datetime) -> int:
-        """Delete every session with `expires_at <= now` (sign-in refuses those already); how many."""
+    async def purge_expired_sessions(self, *, now: _dt.datetime, idle_since: _dt.datetime) -> int:
+        """Delete every session sign-in refuses already: `expires_at <= now`, or last seen before
+        `idle_since`; how many."""
         ...
 
 

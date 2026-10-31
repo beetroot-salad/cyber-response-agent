@@ -541,19 +541,21 @@ async def admin_invite(deps: Deps, caller: Admin, body: InviteCreate,
     return _invitation(await deps.identity.admin_invite(caller, tenant_id, body.email))
 
 
-async def _send_then_close(identity: IdentityService, stop: asyncio.Event) -> None:
-    """The sender until `stop`, then the service's close: in one task, so nothing closes what the
-    sender uses while it runs, even when the lifespan waiting on it is itself cancelled."""
+async def _run_then_close(identity: IdentityService, stop: asyncio.Event) -> None:
+    """The background loop (sender and session purge) until `stop`, then the service's close: in one
+    task, so nothing closes what the loop uses while it runs, even when the lifespan waiting on it is
+    itself cancelled."""
     try:
-        await identity.run_sender(stop)
+        await identity.run_background(stop)
     finally:
         await identity.close()
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Apply the bootstrap before serving and run the sender as a task on this loop. On shutdown
-    the sender finishes the email it is on, then the service closes."""
+    """Apply the bootstrap before serving and run the background loop as a task on this loop. On
+    shutdown the loop finishes the email or session purge it is on (a purge is cut off at its
+    deadline), then the service closes."""
     identity: IdentityService = app.state.deps.identity
     try:
         await identity.start()
@@ -561,12 +563,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await identity.close()
         raise
     stop = asyncio.Event()
-    sender = asyncio.create_task(_send_then_close(identity, stop), name="identity-sender")
+    background = asyncio.create_task(_run_then_close(identity, stop), name="identity-background")
     try:
         yield
     finally:
         stop.set()
-        await asyncio.shield(sender)
+        await asyncio.shield(background)
 
 
 def create_app(deps: ApiDeps) -> FastAPI:

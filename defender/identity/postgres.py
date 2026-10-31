@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from typing import Any, cast
 
-from sqlalchemy import case, delete, exists, select, update
+from sqlalchemy import case, delete, exists, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
@@ -337,7 +337,8 @@ class PostgresIdentityRepository:
                 Session.token_hash == session_hash(value), now - Session.last_seen_at > TOUCH_AFTER)
             .values(last_seen_at=now).returning(Session.token_hash))
 
-    async def purge_expired_sessions(self, *, now: _dt.datetime) -> int:
+    async def purge_expired_sessions(self, *, now: _dt.datetime, idle_since: _dt.datetime) -> int:
         async with self._tx() as s:
-            deleted = await s.execute(delete(Session).where(Session.expires_at <= now))
+            deleted = await s.execute(delete(Session).where(
+                or_(Session.expires_at <= now, Session.last_seen_at < idle_since)))
             return cast(CursorResult[Any], deleted).rowcount  # a DML statement's result is a CursorResult

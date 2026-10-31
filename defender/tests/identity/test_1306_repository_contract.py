@@ -749,11 +749,23 @@ async def test_purging_removes_exactly_the_sessions_sign_in_would_refuse_as_expi
     user = await _user(seeded)
     for value, expires in (("past", NOW - HOUR), ("at-now", NOW), ("just-alive", NOW + dt.timedelta(microseconds=1))):
         await seeded.add_session(value, user.id, now=NOW - WEEK, expires_at=expires)
-    assert await seeded.purge_expired_sessions(now=NOW) == 2
+    assert await seeded.purge_expired_sessions(now=NOW, idle_since=NOW - 2 * WEEK) == 2
     assert await seeded.session_by_value("past") is None
     assert await seeded.session_by_value("at-now") is None
     assert (await seeded.session_by_value("just-alive")).user_id == user.id
-    assert await seeded.purge_expired_sessions(now=NOW) == 0
+    assert await seeded.purge_expired_sessions(now=NOW, idle_since=NOW - 2 * WEEK) == 0
+
+
+async def test_purging_also_removes_the_sessions_sign_in_would_refuse_as_idle(seeded):
+    """#1349: sign-in refuses a session last seen before `now - idle limit`; the purge removes
+    exactly those too, and keeps one last seen at that instant."""
+    user = await _user(seeded)
+    cutoff = NOW - 12 * HOUR
+    for value, seen in (("idle", cutoff - dt.timedelta(microseconds=1)), ("at-cutoff", cutoff)):
+        await seeded.add_session(value, user.id, now=seen, expires_at=NOW + WEEK)
+    assert await seeded.purge_expired_sessions(now=NOW, idle_since=cutoff) == 1
+    assert await seeded.session_by_value("idle") is None
+    assert (await seeded.session_by_value("at-cutoff")).user_id == user.id
 
 
 async def test_sign_out_deletes_that_session_only(seeded):

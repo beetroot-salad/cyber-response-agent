@@ -37,6 +37,10 @@ INVITATION_LIFETIME = _dt.timedelta(days=7)
 #: A session ends this long after sign-in however busy it is, or this long after last use.
 SESSION_LIFETIME = _dt.timedelta(days=7)
 SESSION_IDLE_LIMIT = _dt.timedelta(hours=12)
+#: How often the background loop removes expired sessions (#1349).
+PURGE_INTERVAL = _dt.timedelta(hours=1)
+#: A purge still running after this is cut off and logged, so it never holds up sends or shutdown.
+PURGE_DEADLINE = _dt.timedelta(seconds=60)
 #: A failed send is retried after 30 s, doubling, but never later than this.
 _RETRY_FIRST = _dt.timedelta(seconds=30)
 _RETRY_LAST = _dt.timedelta(hours=1)
@@ -123,6 +127,7 @@ class IdentityService:
         self.send_interval = send_interval
         self.send_deadline = send_deadline
         self._session_idle_limit = session_idle_limit
+        self.purge_deadline = PURGE_DEADLINE
         self._listed = frozenset(
             {*bootstrap.administrators, *(e for emails in bootstrap.tenants.values() for e in emails)})
 
@@ -215,16 +220,29 @@ class IdentityService:
                 await self._repo.request_notification(row.id, now=now)
             audit.emit("member.invite", actor=audit.SYSTEM, tenant_id=tenant, target=row.id)
 
-    # --- the sender --------------------------------------------------------------------------
-    async def run_sender(self, stop: asyncio.Event) -> None:
-        """Pass now and then every `send_interval` until `stop` is set. A stop never interrupts an
-        email: the sender ends before claiming the next one, or during its wait. A failing pass is
-        logged and never ends the loop by itself."""
+    # --- the background loop: the sender and the session purge -------------------------------
+    async def run_background(self, stop: asyncio.Event) -> None:
+        """Pass now and then every `send_interval` until `stop` is set: a sender pass, then the purge
+        of the sessions sign-in refuses (expired, or idle past the limit) when one is due: on the first
+        pass, then once per `PURGE_INTERVAL` on the clock. A stop never interrupts an email: the sender
+        ends before claiming the next one, or during its wait. A failing pass or purge, or a purge cut
+        off at `purge_deadline`, is logged, and ends neither the loop nor the other."""
+        next_purge: _dt.datetime | None = None
         while not stop.is_set():
             try:
                 await self.send_pending(stop)
             except Exception:
                 _logger.exception("a sender pass failed; the next pass tries again")
+            now = self._clock()
+            if not stop.is_set() and (next_purge is None or now >= next_purge):
+                next_purge = now + PURGE_INTERVAL
+                try:
+                    async with asyncio.timeout(self.purge_deadline.total_seconds()):
+                        purged = await self._repo.purge_expired_sessions(
+                            now=now, idle_since=now - self._session_idle_limit)
+                    _logger.info("purged %d sessions sign-in refuses (expired or idle)", purged)
+                except Exception:
+                    _logger.exception("a session purge failed; the next is due at %s", next_purge.isoformat())
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), self.send_interval.total_seconds())
 
