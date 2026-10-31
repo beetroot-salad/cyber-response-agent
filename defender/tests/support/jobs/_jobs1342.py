@@ -45,6 +45,9 @@ AWKWARD_ALERT_BYTES = '{"rule":\t"caf\u00e9 \u2713",\r\n "n": 1,\r\n\t"text": "l
 PADDED_ALERT_BYTES = b'\n\t {"rule": {"id": "r-1342"},  "n": 1}   \n'
 #: Exact bytes `admit()` accepts that a Unicode normalization would change: "e" + U+0301 (NFD).
 DECOMPOSED_ALERT_BYTES = '{"rule": {"id": "r-1342"}, "text": "cafe\u0301"}\n'.encode()
+#: Exact bytes `admit()` accepts that a strip of a leading byte-order mark would change: U+FEFF inside a
+#: JSON string value (not at the start).
+ZWNBSP_ALERT_BYTES = '{"rule": {"id": "r-1342"}, "text": "a\ufeffb"}\n'.encode()
 TITLE = "SSH success after failures"
 DESCRIPTION = "Three failures then a success from one source."
 

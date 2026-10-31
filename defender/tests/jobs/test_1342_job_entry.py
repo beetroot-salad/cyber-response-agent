@@ -32,6 +32,7 @@ from defender.tests.support.jobs._jobs1342 import (
     DECOMPOSED_ALERT_BYTES,
     DEFENDER,
     PADDED_ALERT_BYTES,
+    ZWNBSP_ALERT_BYTES,
     TITLE,
     WORKTREE,
     tree,
@@ -281,12 +282,13 @@ def test_o6_a_job_with_a_valid_launch_record_sets_up_and_runs_the_lifecycle(scen
     assert scene.job_end(run_id) == SETTLED
 
 
-@pytest.mark.parametrize("raw", [ALERT_BYTES, AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES],
+@pytest.mark.parametrize("raw", [ALERT_BYTES, AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES,
+                                 ZWNBSP_ALERT_BYTES],
                          ids=["as the fixture", "crlf tab multibyte", "leading whitespace and trailing spaces",
-                              "decomposed unicode"])
+                              "decomposed unicode", "zero-width no-break space in a string"])
 def test_o6_the_runs_input_alert_is_the_launch_files_exact_bytes_and_hashes_to_the_record(scene, raw):
     """The alert the run holds equals the alert file byte for byte (trailing newline, CRLF, padding whitespace and decomposed text too) and matches the launch digest. (O6, O2, M5)"""
-    from defender.records import RunPaths
+    from defender.records import RunPaths, formats
 
     run_id = str(uuid.uuid4())
     scene.plant(run_id, launch=scene.launch_doc(run_id, digest=hashlib.sha256(raw).hexdigest()), alert=raw)
@@ -299,6 +301,9 @@ def test_o6_the_runs_input_alert_is_the_launch_files_exact_bytes_and_hashes_to_t
     assert raw.endswith((b"\n", b"\r\n")), "premise: the fixture ends in a line end"
     assert held == (scene.runs / f"{run_id}.alert.json").read_bytes() == raw
     assert hashlib.sha256(held).hexdigest() == wanted
+    record = formats.parse_alert_record(RunPaths(scene.runs / run_id).alert_record.read_text(encoding="utf-8"))
+    assert record is not None, "the run holds an alert record"
+    assert record.digest == hashlib.sha256(held).hexdigest(), "the run's alert record digests the held alert"
 
 
 def test_m5_the_alert_file_is_read_once_and_the_digest_is_checked_on_those_bytes(scene, monkeypatch):
@@ -1011,9 +1016,20 @@ def test_m4_the_job_entry_has_exactly_the_ratified_parameters_and_refuses_any_ot
     import inspect
 
     from defender import run as run_py
+    from defender import run_common
 
     parameters = inspect.signature(run_py.job_main).parameters
     assert list(parameters) == ["argv", "lifecycle", "visualize", "preflight", "materialize", "roster", "publish"]
+    assert {n: p.default for n, p in parameters.items() if n != "argv"} == {
+        "lifecycle": run_py._run_investigation_lifecycle, "visualize": run_common.visualize,
+        "preflight": run_py.preflight_role_models, "materialize": run_py._materialize_run,
+        "roster": None, "publish": None}, "the production seams are the operator run's own, by identity"
+    defaults = {n: p.default for n, p in inspect.signature(run_py.main).parameters.items() if n != "argv"}
+    assert defaults == {
+        "lifecycle": run_py._run_investigation_lifecycle, "visualize": run_common.visualize,
+        "ticket_writer": run_py._default_ticket_writer, "enqueue": run_common.enqueue_curation,
+        "preflight": run_py.preflight_role_models, "materialize": run_py._materialize_run,
+        "oracle": None, "verifier": None, "roster": None, "publish": None}, "main's production seams, by identity"
     assert [n for n, p in parameters.items() if p.kind is inspect.Parameter.KEYWORD_ONLY] == list(parameters)[1:]
     for extra in ("case_ticket", "ticket_writer", "enqueue", "oracle", "verifier", "update_ticket", "anything_else"):
         run_id = str(uuid.uuid4())
