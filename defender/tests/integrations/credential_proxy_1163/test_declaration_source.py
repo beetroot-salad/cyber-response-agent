@@ -1,11 +1,12 @@
 """#1163 the proxy obeys only the declaration in the export `current` names: never the clone's
-working tree, and a merged, published change applies from the next request."""
+working tree or an unmerged commit, read without following a link; a merged change applies from
+the next request."""
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from defender.integrations import identity_adapter
 from defender.kit.faults import ConfigFault
@@ -17,70 +18,214 @@ from defender.tests.integrations.credential_proxy_1163._target import (
     PROXY_URL_ENV,
     proxy,
 )
-from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, current_commit
+from defender.tests.tenancy.tenant_1108_p4._support import (
+    DEFENDER,
+    current_commit,
+    export_dir,
+    git,
+)
 
-GRANT = {("identity", "r")}
 ACCESS = ACCESS_FILE.format(system="identity")
 
 
 def test_d1_a_merged_removal_applies_from_the_next_request(tmp_path, data_root):
-    """A base removed by a merged, published change is refused on the next request with the
-    same token, which names no commit. O2, P-2."""
-    with H.upstream() as up, T.identity_via_proxy(
-            tmp_path / "forge", data_root, H.declaration(up.url + "/")) as t:
-        store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
-        client = TestClient(proxy().create_app(T.deps({t.tenant_id: T.exports_of(t)}, store)))
-        tok = T.token(t.tenant_id, GRANT)
-        before = T.ask(client, tok, "identity", "GET", f"{up.url}/users/x")
-
-        merged = t.merge({ACCESS: H.declaration(f"http://127.0.0.1:{H.free_port()}/")},
-                         "remove the old base")
-        t.publish()
-        assert current_commit(t.tenant) == merged
-        after = T.ask(client, tok, "identity", "GET", f"{up.url}/users/x")
+    """A base replaced by a merged, published change refuses the old base on the next request
+    with the same, earlier-minted token. O2, P-2."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        tok = r.tok()
+        before = r.ask(tok=tok)
+        merged = r.t.merge({ACCESS: H.declaration(f"http://127.0.0.1:{H.free_port()}/")},
+                           "move the base")
+        r.t.publish()
+        assert current_commit(r.t.tenant) == merged
+        after = r.ask(tok=tok)
 
     assert (before["fault"], before["status"]) == (None, 200)
     assert after["fault"] == "ConfigFault"
-    assert up.paths() == ["/users/x"]
+    assert r.up.paths() == ["/api/v2/users/x"]
+
+
+def test_d1_a_merged_deletion_and_a_merged_addition_apply_from_the_next_request(
+        tmp_path, data_root):
+    """Deleting the declaration refuses the system; adding it back allows it, each with the
+    one token and without a restart. O2, P-2, O7."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        tok = r.tok()
+        assert r.ask(tok=tok)["fault"] is None
+        r.t.merge({ACCESS: None}, "retire the declaration")
+        r.t.publish()
+        gone = r.ask(tok=tok)
+        seen_when_gone = len(r.up.seen)
+        r.t.merge({ACCESS: H.declaration(r.up.url + T.BASE_PATH)}, "declare it again")
+        r.t.publish()
+        back = r.ask(tok=tok)
+
+    assert (gone["fault"], seen_when_gone) == ("ConfigFault", 1)
+    assert back["fault"] is None
+    assert len(r.up.seen) == 2
 
 
 def test_d2_a_working_tree_edit_has_no_effect(tmp_path, data_root):
-    """A base added only in the clone's working tree is refused; the merged base still works.
-    O2, C28."""
-    with H.upstream() as merged_up, H.upstream() as wt_up, T.identity_via_proxy(
-            tmp_path / "forge", data_root, H.declaration(merged_up.url + "/")) as t:
-        (Path(t.clone) / ACCESS).write_text(
-            H.declaration(wt_up.url + "/"),
-            encoding="utf-8")
-        store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
-        client = TestClient(proxy().create_app(T.deps({t.tenant_id: T.exports_of(t)}, store)))
-        tok = T.token(t.tenant_id, GRANT)
-        refused = T.ask(client, tok, "identity", "GET", f"{wt_up.url}/users/x")
-        control = T.ask(client, tok, "identity", "GET", f"{merged_up.url}/users/x")
+    """A base added only in the clone's working tree is refused unsent; the merged base still
+    works. O2, C28."""
+    with H.upstream() as wt_up, T.rig(tmp_path / "forge", data_root) as r:
+        (Path(r.t.clone) / ACCESS).write_text(
+            H.declaration(wt_up.url + T.BASE_PATH), encoding="utf-8")
+        refused = r.ask(url=f"{wt_up.url}{T.BASE_PATH}/users/x")
+        control = r.ask()
 
     assert refused["fault"] == "ConfigFault"
     assert wt_up.seen == []
-    assert (control["fault"], merged_up.paths()) == (None, ["/users/x"])
+    assert (control["fault"], r.up.paths()) == (None, ["/api/v2/users/x"])
 
 
-def test_d3_learning_preflight_over_the_working_tree_is_refused_not_widened(tmp_path, data_root):
-    """Preflight resolves its record over the working tree (C34); a base present only there
-    reaches nothing and is a `ConfigFault`, as for a run. O2."""
+def _unmerged_export(t, wt_up_url: str) -> str:
+    """Commit a declaration for `wt_up_url` on a side branch of the clone and materialise an
+    export of that commit (C33), leaving `main`, the working tree and `current` as they were."""
+    from defender.learning.author import version_control
+
+    git(t.clone, "checkout", "-q", "-b", "unmerged-proposal")
+    (Path(t.clone) / ACCESS).write_text(H.declaration(wt_up_url + T.BASE_PATH), encoding="utf-8")
+    git(t.clone, "commit", "-q", "-am", "unmerged declaration")
+    commit = git(t.clone, "rev-parse", "HEAD")
+    git(t.clone, "checkout", "-q", "main")
+    version_control.materialise_export(t.tenant, commit)
+    return commit
+
+
+def test_d2_a_declaration_only_in_an_unmerged_commits_export_has_no_effect(
+        tmp_path, data_root):
+    """An export of an unmerged commit holds a declaration for another base; `current` names
+    the merged one, so that base is refused and the merged one works. O2, C33."""
+    with H.upstream() as unmerged_up, T.rig(tmp_path / "forge", data_root) as r:
+        commit = _unmerged_export(r.t, unmerged_up.url)
+        assert export_dir(r.t.tenant, commit).is_dir()
+        assert current_commit(r.t.tenant) == r.t.commit
+        refused = r.ask(url=f"{unmerged_up.url}{T.BASE_PATH}/users/x")
+        control = r.ask()
+
+    assert refused["fault"] == "ConfigFault"
+    assert unmerged_up.seen == []
+    assert control["fault"] is None
+
+
+def test_d2_a_current_pointer_that_is_a_link_to_an_unmerged_export_is_not_followed(
+        tmp_path, data_root):
+    """`current` replaced by a symlink to the unmerged export is refused, not obeyed. O2, C26."""
+    with H.upstream() as unmerged_up, T.rig(tmp_path / "forge", data_root) as r:
+        commit = _unmerged_export(r.t, unmerged_up.url)
+        pointer = export_dir(r.t.tenant, commit).parent / "current"
+        pointer.unlink()
+        pointer.symlink_to(commit)
+        refused = r.ask(url=f"{unmerged_up.url}{T.BASE_PATH}/users/x")
+        merged_path = r.ask()
+
+    assert (refused["fault"], merged_path["fault"]) == ("ConfigFault", "ConfigFault")
+    assert (unmerged_up.seen, r.up.seen) == ([], [])
+
+
+@pytest.mark.parametrize("link", ["access-file", "system-folder", "settings-folder"])
+def test_d3_a_declaration_reached_through_a_link_in_the_export_is_refused(
+        tmp_path, data_root, link):
+    """A link at the access file, its system folder or `settings/` in the current export,
+    pointing at a declaration for another base, is not read. O2, C26."""
+    with H.upstream() as decoy, T.rig(tmp_path / "forge", data_root) as r:
+        base = export_dir(r.t.tenant, r.t.commit)
+        outside = tmp_path / "outside"
+        (outside / "systems" / "identity").mkdir(parents=True)
+        (outside / "systems" / "identity" / "access.yaml").write_text(
+            H.declaration(decoy.url + T.BASE_PATH), encoding="utf-8")
+        assert r.ask()["fault"] is None  # control: the real file works
+        if link == "access-file":
+            target = base / ACCESS
+            target.unlink()
+            target.symlink_to(outside / "systems" / "identity" / "access.yaml")
+        elif link == "system-folder":
+            shutil.rmtree(base / "settings" / "systems" / "identity")
+            (base / "settings" / "systems" / "identity").symlink_to(
+                outside / "systems" / "identity")
+        else:
+            shutil.rmtree(base / "settings")
+            (base / "settings").symlink_to(outside)
+        refused = r.ask(url=f"{decoy.url}{T.BASE_PATH}/users/x")
+        original = r.ask()
+
+    assert (refused["fault"], original["fault"]) == ("ConfigFault", "ConfigFault")
+    assert decoy.seen == []
+    assert len(r.up.seen) == 1
+
+
+@pytest.mark.parametrize("name", [
+    "../other", "identity/../other", "Identity", "id entity", "-identity", "identity\n",
+    "x" * 65, "",
+])
+def test_d4_a_system_name_outside_the_grammar_is_refused_without_reading_beyond_it(
+        tmp_path, data_root, name):
+    """A name that is not a lowercase system name, even if the token grants it and a file
+    sits where it would resolve, is a `ConfigFault` and nothing is read or sent. O2, O7."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        settings = export_dir(r.t.tenant, r.t.commit) / "settings"
+        for where in (settings / "other", settings / "systems" / "other"):
+            where.mkdir(exist_ok=True)
+            (where / "access.yaml").write_text(
+                H.declaration(r.up.url + T.BASE_PATH), encoding="utf-8")
+        refused = r.ask(system=name, grant={(name, "r")})
+        r.store.sets[(r.t.tenant_id, "other")] = T.static_set()
+        control = r.ask()
+
+    assert refused["fault"] == "ConfigFault"
+    assert (r.store.reads, len(r.up.seen)) == ([(r.t.tenant_id, "identity")], 1)
+    assert control["fault"] is None
+
+
+def _bad_declarations(up: str) -> dict[str, str]:
+    base = H.declaration(up + T.BASE_PATH)
+    return {
+        "duplicate-key": base.rstrip().rstrip("}") + f', "base": "{up}/other"}}\n',
+        "two-bases": base.replace(f'"{up}{T.BASE_PATH}"', f'["{up}{T.BASE_PATH}", "{up}/b"]'),
+        "no-base": base.replace('"base"', '"bse"'),
+        "not-http-proxy": base.replace('"http-proxy"', '"docker-exec"'),
+        "not-a-mapping": "- just\n- a list\n",
+        "empty": "",
+    }
+
+
+@pytest.mark.parametrize("kind", ["duplicate-key", "two-bases", "no-base", "not-http-proxy",
+                                  "not-a-mapping", "empty"])
+def test_d5_a_malformed_declaration_is_a_config_fault_unsent(tmp_path, data_root, kind):
+    """A merged but unusable declaration (duplicate key, two bases, no base, other access
+    method, not a mapping, empty) refuses the system. O2, A2, O7."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        r.t.merge({ACCESS: _bad_declarations(r.up.url)[kind]}, "bad declaration")
+        r.t.publish()
+        refused = r.ask()
+
+    assert refused["fault"] == "ConfigFault"
+    assert (r.up.seen, r.store.reads) == ([], [])
+
+
+def test_d3_adapter_over_the_working_tree_reaches_nothing_the_merged_declaration_forbids(
+        tmp_path, data_root):
+    """An adapter whose record is the working tree (preflight, C34) and whose base exists only
+    there is refused; the record over the export reaches the merged base. O2, A3."""
     from defender.systems.run_tenant import run_tenant_for
 
-    with H.upstream() as merged_up, H.upstream() as wt_up, T.identity_via_proxy(
-            tmp_path / "forge", data_root, H.declaration(merged_up.url + "/")) as t:
-        (Path(t.clone) / ACCESS).write_text(H.declaration(wt_up.url + "/"),
-                                            encoding="utf-8")
-        record = run_tenant_for(t.tenant, dispatches_lead_zero=False)  # the working tree (C34)
-        store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
-        app = proxy().create_app(T.deps({t.tenant_id: T.exports_of(t)}, store))
-        with H.serve_asgi(app) as proxy_url:
-            ctx = VerbContext(defender_dir=DEFENDER, run_dir=tmp_path / "episode",
-                              env={PROXY_URL_ENV: proxy_url}, tenant=record,
-                              request_token=T.token(t.tenant_id, GRANT))
-            with pytest.raises(ConfigFault):
-                identity_adapter.get_user(ctx, user="dev.dana")
+    with H.upstream() as wt_up, T.rig(tmp_path / "forge", data_root) as r:
+        (Path(r.t.clone) / ACCESS).write_text(
+            H.declaration(wt_up.url + T.BASE_PATH), encoding="utf-8")
+        working_tree = run_tenant_for(r.t.tenant, dispatches_lead_zero=False)
+        with H.serve_asgi(proxy().create_app(
+                T.deps({r.t.tenant_id: T.exports_of(r.t)}, r.store, verifier=r.verifier,
+                       audit=r.audit))) as proxy_url:
+            def ctx(record):
+                return VerbContext(defender_dir=DEFENDER, run_dir=tmp_path / "episode",
+                                   env={PROXY_URL_ENV: proxy_url}, tenant=record,
+                                   request_token=r.tok())
 
-    assert wt_up.seen == []
-    assert merged_up.seen == []
+            with pytest.raises(ConfigFault):
+                identity_adapter.get_user(ctx(working_tree), user="dev.dana")
+            assert wt_up.seen == []
+            merged = identity_adapter.get_user(ctx(T.run_record(r.t)), user="dev.dana")
+
+    assert merged["path"].endswith("/users/dev.dana")
+    assert [s.path for s in r.up.seen] == [f"{T.BASE_PATH}/users/dev.dana"]

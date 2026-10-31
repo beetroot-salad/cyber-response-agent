@@ -10,6 +10,12 @@ from pathlib import Path
 
 import pytest
 
+# Hooks (not fixtures): take the OpenBao test-server variables out of os.environ at configure.
+from defender.tests.support.shared._openbao1163 import (  # noqa: F401
+    pytest_configure,
+    pytest_configure_node,
+)
+
 
 #: What `-n auto` means off CI. xdist's one worker per core suits a runner that owns its box,
 #: not a developer machine several sessions share (each worker grows to hundreds of MB). A set

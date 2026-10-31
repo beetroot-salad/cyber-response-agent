@@ -76,3 +76,13 @@ def test_r6_the_issuer_secret_files_are_created_private():
     assert config.index('chmod 0600 "$config.tmp"') < config.index('mv "$config.tmp"'), (
         "the client config (secret_id) must be made private before it is moved into place")
     assert 'chmod 0400 "$STATE/seal/unseal"' in text
+
+
+def test_r6_provisioning_warns_when_the_bot_can_merge_main():
+    """#1163 N13: `check_main_protected` reads `user_can_merge` beside `user_can_push` and
+    warns on anything but `false` for either."""
+    body = _function(SCRIPT.read_text(encoding="utf-8"), "check_main_protected")
+    assert "user_can_push" in body  # positive control: the existing check is found
+    assert "user_can_merge" in body
+    warning = body[body.index("WARNING"):]
+    assert "merge" in warning.lower()

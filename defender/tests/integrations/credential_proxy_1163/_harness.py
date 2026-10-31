@@ -26,12 +26,30 @@ CLIENT_ID = "client-1163"
 HTTP_PROXY_IDENTITY_ENV = 'IDENTITY_TRANSPORT="http-proxy"\nIDENTITY_TIMEOUT_SEC="5"\n'
 
 
+def http_proxy_env(system: str) -> str:
+    """`system`'s config.env when it is reached through the proxy: access method and timeout."""
+    prefix = system.upper().replace("-", "_")
+    return f'{prefix}_TRANSPORT="http-proxy"\n{prefix}_TIMEOUT_SEC="5"\n'
+
+
 @dataclass(frozen=True)
 class Seen:
     method: str
     path: str
     headers: dict[str, str]
     body: str
+
+    def header(self, name: str) -> str | None:
+        """The request header named `name`, case-insensitively, or None."""
+        for key, value in self.headers.items():
+            if key.lower() == name.lower():
+                return value
+        return None
+
+    def blob(self) -> str:
+        """Everything the request carried (line, headers, body) as one string, for a census."""
+        heads = "\n".join(f"{k}: {v}" for k, v in self.headers.items())
+        return f"{self.method} {self.path}\n{heads}\n{self.body}"
 
 
 Reply = tuple[int, dict[str, str], bytes]
@@ -65,7 +83,8 @@ class Upstream:
                     self.send_header(key, value)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                if self.command != "HEAD":
+                    self.wfile.write(body)
 
             do_GET = do_POST = do_DELETE = do_PUT = do_HEAD = _serve  # noqa: N815 — http.server's dispatch names
 
@@ -140,10 +159,27 @@ class FakeSigner:
 
     def __init__(self) -> None:
         self.payloads: list[bytes] = []
+        self.signed: dict[str, bytes] = {}
 
     def sign(self, payload: bytes) -> str:
         self.payloads.append(payload)
-        return f"vault:v1:fake-signature-{len(self.payloads)}"
+        signature = f"vault:v1:fake-signature-{len(self.payloads)}"
+        self.signed[signature] = payload
+        return signature
+
+
+class PairedVerifier:
+    """A stand-in for transit verify: a (payload, signature) pair is valid only if `signer`
+    signed exactly that payload, so an edited payload under a kept signature is invalid. It
+    records each pair it is asked about. (The crypto is the fake; the proxy's checks are not.)"""
+
+    def __init__(self, signer: FakeSigner) -> None:
+        self.signer = signer
+        self.calls: list[tuple[bytes, str]] = []
+
+    def verify(self, payload: bytes, signature: str) -> bool:
+        self.calls.append((payload, signature))
+        return self.signer.signed.get(signature) == payload
 
 
 class FakeVerifier:
@@ -191,9 +227,45 @@ def declaration(base: str, *, scheme: Mapping[str, Any] | None = None,
     return json.dumps(doc, indent=2) + "\n"  # JSON is YAML; keeps the fixture free of a dumper
 
 
-def oauth_scheme(token_url: str) -> dict[str, Any]:
-    return {"scheme": "oauth-client-credentials", "token_url": token_url, "scopes": ["read"],
+def oauth_scheme(token_url: str, scopes: tuple[str, ...] = ("read",)) -> dict[str, Any]:
+    return {"scheme": "oauth-client-credentials", "token_url": token_url, "scopes": list(scopes),
             "client_id_field": "client_id", "client_secret_field": "client_secret"}
+
+
+def basic_scheme() -> dict[str, Any]:
+    """Fields `username` (not secret) and `password` (secret)."""
+    return {"scheme": "basic", "username_field": "username", "password_field": "password"}
+
+
+def header_scheme(name: str = "X-Api-Key") -> dict[str, Any]:
+    return {"scheme": "header", "header": name, "field": "api_key"}
+
+
+def echo_secret(of: Callable[[Seen], str]) -> Callable[[Seen], Reply]:
+    """An upstream reply that echoes `of(request)` literally, in the body and in a response
+    header, between non-secret text (`before-`/`-after`, `hdr-`/`-end`) that must survive."""
+    def reply(seen: Seen) -> Reply:
+        value = of(seen)
+        return (200, {"Content-Type": "text/plain", "X-Echo": f"hdr-{value}-end"},
+                f"before-{value}-after".encode())
+    return reply
+
+
+def basic_parts(seen: Seen) -> tuple[str, str]:
+    """(username, password) a request carried in its Basic `Authorization` header."""
+    encoded = (seen.header("Authorization") or "").removeprefix("Basic ")
+    user, _, password = base64.b64decode(encoded).decode().partition(":")
+    return user, password
+
+
+def carries(seen: Seen, value: str, *, client_id: str | None = None) -> bool:
+    """Does the request carry `value` literally, or (with `client_id`) as Basic credentials?"""
+    if value in seen.blob():
+        return True
+    if client_id is not None:
+        packed = base64.b64encode(f"{client_id}:{value}".encode()).decode()
+        return packed in seen.blob()
+    return False
 
 
 def access_files(system: str, text: str, *, env: str | None = None) -> dict[str, str]:

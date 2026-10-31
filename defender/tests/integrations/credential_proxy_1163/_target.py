@@ -12,8 +12,8 @@ from typing import Any
 
 def proxy() -> Any:
     """The proxy package (new top-level, place in ORDER undecided). Names used:
-    `create_app(ProxyDeps)` (Q1, S1-S6), `ProxyDeps(tenant_exports=, store=, verifier=, audit=)`
-    (Q1), `CredentialSet(kind=, fields=, version=)` (Q1; kind stored, r5 A4), `mint_request_token(signer, tenant_id=,
+    `create_app(ProxyDeps)` (Q1, S1-S6), `ProxyDeps(tenant_exports=, store=, verifier=, audit=[, max_response_bytes=])`
+    (Q1; `max_response_bytes` is the response cap's seam, O7), `CredentialSet(kind=, fields=, version=)` (Q1; kind stored, r5 A4), `mint_request_token(signer, tenant_id=,
     investigation=, grant=, expires_at=)` (Q1, S6), `OpenBaoStore(addr=, token=, mount=)` (B2),
     `TransitSigner/TransitVerifier(addr=, token=, mount=, key=)` (B3), `store_policies(kv_mount=,
     transit_mount=, key=)` (B1)."""
@@ -35,3 +35,6 @@ PROXY_URL_ENV = "DEFENDER_CREDENTIAL_PROXY_URL"
 PROXY_PATH = "/v1/request"
 #: The access declaration's place in the tenant's settings (design's example path).
 ACCESS_FILE = "settings/systems/{system}/access.yaml"
+#: The keys of a proxy audit record (r5 A4): `outcome` is `sent <status>` or the fault class;
+#: `path` is relative to the declared base; `commit` is the `current` commit applied.
+AUDIT_KEYS = ("tenant", "system", "investigation", "commit", "method", "path", "outcome")

@@ -18,11 +18,37 @@ import pytest
 
 ADDR_ENV = "DEFENDER_TEST_OPENBAO_ADDR"
 TOKEN_ENV = "DEFENDER_TEST_OPENBAO_TOKEN"
+#: Optional: the server's docker container name, for the audit-device case (it reads the audit
+#: file with `docker exec`). Unset: that case skips locally and fails in CI.
+CONTAINER_ENV = "DEFENDER_TEST_OPENBAO_CONTAINER"
+
+
+#: The two values, taken out of `os.environ` at configure time: the run process under test must
+#: hold no issuer-named variable (#1108 P4 O8), and CI sets these job-wide. `None` before configure.
+_CACHED: tuple[str | None, str | None, str | None] | None = None
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Read both variables once and remove them from this process's environment. An xdist worker
+    gets them from its controller (`pytest_configure_node`), which has already removed them."""
+    global _CACHED
+    handed = getattr(config, "workerinput", {}).get("openbao1163")
+    if handed is not None:
+        _CACHED = (handed[0], handed[1], handed[2])
+    else:
+        _CACHED = (os.environ.pop(ADDR_ENV, None), os.environ.pop(TOKEN_ENV, None),
+                   os.environ.pop(CONTAINER_ENV, None))
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_configure_node(node: Any) -> None:
+    node.workerinput["openbao1163"] = list(_CACHED or (None, None, None))
 
 
 def server() -> tuple[str, str]:
     """The test server's address and root token; skipped where none is set, but never in CI."""
-    addr, token = os.environ.get(ADDR_ENV), os.environ.get(TOKEN_ENV)
+    addr, token = _CACHED[:2] if _CACHED is not None else (
+        os.environ.get(ADDR_ENV), os.environ.get(TOKEN_ENV))
     if not addr or not token:
         if os.environ.get("CI"):
             pytest.fail(f"{ADDR_ENV}/{TOKEN_ENV} are not set in CI; the test job's OpenBao "
@@ -89,6 +115,54 @@ def isolated(addr: str, root_token: str) -> Iterator[Bao]:
         bao.call("DELETE", f"sys/mounts/{bao.kv_mount}")
         for name in bao.policies:
             bao.call("DELETE", f"sys/policies/acl/{name}")
+
+
+class AuditLog:
+    """A file audit device enabled on the test server for one test. `text()` is the file's whole
+    content, read with `docker exec` into the server's container."""
+
+    def __init__(self, bao: Bao, container: str) -> None:
+        self.bao, self.container = bao, container
+        self.device = f"audit-{bao.tag}"
+        self.path = f"/tmp/audit-{bao.tag}.log"
+
+    def text(self) -> str:
+        import subprocess
+
+        done = subprocess.run(["docker", "exec", self.container, "cat", self.path],
+                              capture_output=True, text=True, timeout=30, check=True)
+        return done.stdout
+
+    def hash_of(self, value: str) -> str:
+        """The audit device's own HMAC of `value` (what the log holds in its place)."""
+        body = self.bao.ok("POST", f"sys/audit-hash/{self.device}", json={"input": value})
+        return body["hash"]
+
+
+def audit_log(bao: Bao) -> Iterator[AuditLog]:
+    container = _CACHED[2] if _CACHED is not None else os.environ.get(CONTAINER_ENV)
+    if not container:
+        if os.environ.get("CI"):
+            pytest.fail(f"{CONTAINER_ENV} is not set in CI; the audit case reads the server's "
+                        "audit file through docker exec")
+        pytest.skip(f"{CONTAINER_ENV} is not set")
+    log = AuditLog(bao, container)
+    bao.ok("PUT", f"sys/audit/{log.device}", json={
+        "type": "file", "options": {"file_path": log.path}})
+    try:
+        yield log
+    finally:
+        bao.call("DELETE", f"sys/audit/{log.device}")
+        import subprocess
+
+        subprocess.run(["docker", "exec", container, "rm", "-f", log.path],
+                       capture_output=True, timeout=30, check=False)
+
+
+@pytest.fixture
+def openbao_audit(openbao: Bao) -> Iterator[AuditLog]:
+    """A file audit device on the test server, this test's own (marker `openbao`)."""
+    yield from audit_log(openbao)
 
 
 @pytest.fixture

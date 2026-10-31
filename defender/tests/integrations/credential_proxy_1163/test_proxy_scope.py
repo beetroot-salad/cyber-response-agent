@@ -2,149 +2,268 @@
 bounds. A refused request is never sent and never reads the store."""
 from __future__ import annotations
 
+import base64
+import json
 from datetime import timedelta
 
 import pytest
-from fastapi.testclient import TestClient
 
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
-from defender.tests.integrations.credential_proxy_1163._target import proxy
-from defender.tests.tenancy.tenant_1108_p4._support import OTHER_TENANT_ID, published_tenant
+from defender.tests.tenancy.tenant_1108_p4._support import OTHER_TENANT_ID
+
+KEY_A = "canary-tenant-a-key-1163-aaaa11"
+KEY_B = "canary-tenant-b-key-1163-bbbb22"
 
 
-def _client(deps) -> TestClient:
-    return TestClient(proxy().create_app(deps))
+# --- O1 tenant scope (r5 A10) ----------------------------------------------------------------
+
+def test_s1_a_token_delivers_only_its_own_tenants_credential(tmp_path, data_root):
+    """Both tenants declare `crm`; A's token sends only A's canary, reads only A's path and is
+    audited as A. Control: B's token sends B's. O1, A10."""
+    with H.upstream() as up, T.crm_pair(tmp_path, data_root, up.url + "/crm", up.url + "/crm") as (a, b):
+        store = H.FakeStore({(a.tenant_id, "crm"): T.static_set(KEY_A),
+                             (b.tenant_id, "crm"): T.static_set(KEY_B)})
+        audit = H.AuditRecorder()
+        client = T.client_of(T.deps({a.tenant_id: T.exports_of(a), b.tenant_id: T.exports_of(b)},
+                                    store, audit=audit))
+        from_a = T.ask(client, T.token(a.tenant_id, {("crm", "r")}), "crm", "GET",
+                       f"{up.url}/crm/accounts")
+        seen_after_a = list(up.seen)
+        reads_after_a = list(store.reads)
+        audit_after_a = list(audit.records)
+        from_b = T.ask(client, T.token(b.tenant_id, {("crm", "r")}), "crm", "GET",
+                       f"{up.url}/crm/accounts")
+
+    assert from_a["fault"] is None
+    assert [s.header("Authorization") for s in seen_after_a] == [f"Bearer {KEY_A}"]
+    assert not any(KEY_B in s.blob() for s in seen_after_a)
+    assert reads_after_a == [(a.tenant_id, "crm")]
+    assert [r["tenant"] for r in audit_after_a] == [a.tenant_id]
+    assert from_b["fault"] is None
+    assert up.seen[1].header("Authorization") == f"Bearer {KEY_B}"  # control
+    assert store.reads[1] == (b.tenant_id, "crm")
 
 
-def test_s1_another_tenants_system_is_refused_the_same_whether_or_not_it_exists(
-        tmp_path, data_root):
-    """A's token naming a system only B has is refused before any store read or send, with the
-    same answer as before B had that system and its credential. O1."""
-    with H.upstream() as up, \
-            published_tenant(tmp_path / "a", root=data_root, repo_name="a") as a, \
-            published_tenant(tmp_path / "b", root=data_root, tenant_id=OTHER_TENANT_ID,
-                             repo_name="b") as b:
-        store = H.FakeStore()
-        client = _client(T.deps({a.tenant_id: T.exports_of(a), b.tenant_id: T.exports_of(b)},
-                                store))
+def test_s1_a_tenants_token_cannot_reach_the_other_tenants_base(tmp_path, data_root):
+    """A's token to a URL under B's base is refused unsent and unread; A's own base works.
+    O1, O2."""
+    with H.upstream() as up, T.crm_pair(tmp_path, data_root, up.url + "/a", up.url + "/b") as (a, b):
+        store = H.FakeStore({(a.tenant_id, "crm"): T.static_set(KEY_A),
+                             (b.tenant_id, "crm"): T.static_set(KEY_B)})
+        client = T.client_of(T.deps({a.tenant_id: T.exports_of(a), b.tenant_id: T.exports_of(b)},
+                                    store))
         tok = T.token(a.tenant_id, {("crm", "r")})
-        without_b = T.ask(client, tok, "crm", "GET", f"{up.url}/accounts")
+        refused = T.ask(client, tok, "crm", "GET", f"{up.url}/b/accounts")
+        assert (refused["fault"], up.seen, store.reads) == ("ConfigFault", [], [])
+        control = T.ask(client, tok, "crm", "GET", f"{up.url}/a/accounts")
 
-        b.merge(H.access_files("crm", H.declaration(up.url + "/")), "B adds crm")
+    assert (control["fault"], up.paths()) == (None, ["/a/accounts"])
+
+
+def test_s1_a_system_a_lacks_is_refused_the_same_whether_or_not_b_declares_it(
+        tmp_path, data_root):
+    """A's token granting `billing`, which A does not declare, is refused identically before and
+    after B declares it, unsent and unread; B's own token then works. O1, A10."""
+    with H.upstream() as up, T.crm_pair(tmp_path, data_root, up.url + "/crm", up.url + "/crm") as (a, b):
+        store = H.FakeStore()
+        client = T.client_of(T.deps({a.tenant_id: T.exports_of(a), b.tenant_id: T.exports_of(b)},
+                                    store))
+        grant = {("billing", "r")}
+        tok = T.token(a.tenant_id, grant)
+        without_b = T.ask(client, tok, "billing", "GET", f"{up.url}/billing/invoices")
+
+        b.merge(H.access_files("billing", H.declaration(up.url + "/billing"),
+                               env=H.http_proxy_env("billing")), "B adds billing")
         b.publish()
-        store.sets[(b.tenant_id, "crm")] = T.static_set()
-        with_b = T.ask(client, tok, "crm", "GET", f"{up.url}/accounts")
+        store.sets[(b.tenant_id, "billing")] = T.static_set(KEY_B)
+        with_b = T.ask(client, tok, "billing", "GET", f"{up.url}/billing/invoices")
+        assert (with_b, store.reads, up.seen) == (without_b, [], [])
+        control = T.ask(client, T.token(b.tenant_id, grant), "billing", "GET",
+                        f"{up.url}/billing/invoices")
 
     assert with_b["fault"] == "ConfigFault"
-    assert with_b == without_b
-    assert store.reads == []
-    assert up.seen == []
+    assert control["fault"] is None
+    assert up.seen[0].header("Authorization") == f"Bearer {KEY_B}"
 
+
+@pytest.mark.parametrize("kind", ["unmapped-tenant", "exports-without-current"])
+def test_s1_a_token_whose_tenant_has_no_exports_is_refused(tmp_path, data_root, kind):
+    """A valid token for a tenant with no exports is refused, unsent and unread; the published
+    tenant's token works beside it. O1, O7."""
+    ghosts = {}
+    if kind == "exports-without-current":
+        (tmp_path / "ghost" / "exports").mkdir(parents=True)
+        ghosts = {OTHER_TENANT_ID: tmp_path / "ghost" / "exports"}
+    with T.rig(tmp_path / "forge", data_root, ghosts=ghosts) as r:
+        refused = r.ask(tok=T.token(OTHER_TENANT_ID, T.GRANT_R, signer=r.signer))
+        assert (refused["fault"], r.up.seen, r.store.reads) == ("ConfigFault", [], [])
+        control = r.ask()
+
+    assert (control["fault"], r.up.paths()) == (None, ["/api/v2/users/x"])
+
+
+# --- O2 destination scope: one base, non-root (A2, A9) ---------------------------------------
 
 @pytest.mark.parametrize(("url_of", "fault"), [
-    pytest.param(lambda up, other: f"{up}/api/users/x", None, id="under-base"),
-    pytest.param(lambda up, other: f"{up}/api/../admin", "ConfinementFault", id="dotdot"),
-    pytest.param(lambda up, other: f"{up}/api/%2e%2e/admin", "ConfinementFault",
+    pytest.param(lambda up, other: f"{up}/api/v2/users/x", None, id="under-base"),
+    pytest.param(lambda up, other: f"{up}/api/v2/users?limit=5", None, id="under-base-query"),
+    pytest.param(lambda up, other: f"{up}/api/v2x/users", "ConfigFault", id="sibling-prefix"),
+    pytest.param(lambda up, other: f"{up}/admin", "ConfigFault", id="same-origin-outside"),
+    pytest.param(lambda up, other: f"{up}/", "ConfigFault", id="origin-root"),
+    pytest.param(lambda up, other: f"{up}/api/v2/../admin", "ConfinementFault", id="dotdot"),
+    pytest.param(lambda up, other: f"{up}/api/v2/users/../../admin", "ConfinementFault",
+                 id="dotdot-twice"),
+    pytest.param(lambda up, other: f"{up}/api/v2/%2e%2e/admin", "ConfinementFault",
                  id="encoded-dotdot"),
-    pytest.param(lambda up, other: f"http://127.0.0.1:{other}/api/users/x", "ConfigFault",
+    pytest.param(lambda up, other: f"{up}/api/v2/%2E%2e/admin", "ConfinementFault",
+                 id="encoded-dotdot-mixed-case"),
+    pytest.param(lambda up, other: f"http://127.0.0.1:{other}/api/v2/users/x", "ConfigFault",
                  id="other-port"),
-    pytest.param(lambda up, other: up.replace("http://", "https://") + "/api/users/x",
+    pytest.param(lambda up, other: up.replace("http://", "https://") + "/api/v2/users/x",
                  "ConfigFault", id="other-scheme"),
-    pytest.param(lambda up, other: up.replace("127.0.0.1", "localhost") + "/api/users/x",
+    pytest.param(lambda up, other: up.replace("127.0.0.1", "localhost") + "/api/v2/users/x",
                  "ConfigFault", id="other-host"),
+    pytest.param(lambda up, other: f"{up}@localhost/api/v2/users/x", "ConfigFault",
+                 id="userinfo-disguise"),
 ])
-def test_s2_a_url_outside_the_declared_bases_is_refused_unsent(
+def test_s2_a_url_outside_the_declared_base_is_refused_unsent(
         tmp_path, data_root, url_of, fault):
-    """Only URLs under a declared base are sent; `..` is a confinement refusal, another scheme,
-    host or port a config refusal. O2, O7."""
-    with H.upstream() as up, T.identity_via_proxy(
-            tmp_path / "forge", data_root, H.declaration(up.url + "/api/")) as t:
-        store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
-        answer = T.ask(_client(T.deps({t.tenant_id: T.exports_of(t)}, store)),
-                       T.token(t.tenant_id, {("identity", "r")}), "identity", "GET",
-                       url_of(up.url, H.free_port()))
+    """Only URLs under the one non-root base are sent; `..` is a confinement refusal, another
+    scheme, host, port or path a config refusal. O2, O7, A2, A9."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        answer = r.ask(url=url_of(r.up.url, H.free_port()))
 
     assert answer["fault"] == fault, answer
     if fault is None:
-        assert (answer["status"], up.paths()) == (200, ["/api/users/x"])
+        assert (answer["status"], len(r.up.seen)) == (200, 1)
+        assert r.up.seen[0].path.startswith("/api/v2/users")
+        assert r.store.reads == [(r.t.tenant_id, "identity")]
     else:
-        assert up.seen == []
+        assert (r.up.seen, r.store.reads) == ([], [])
 
+
+def test_s2_the_query_string_reaches_the_upstream_with_the_path(tmp_path, data_root):
+    """A query under the base is forwarded intact next to the injected key. O2."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        answer = r.ask(path="/users?limit=5&name=dana")
+
+    assert answer["fault"] is None
+    assert [s.path for s in r.up.seen] == ["/api/v2/users?limit=5&name=dana"]
+
+
+# --- O3 route scope (routes are relative to the base, A2) ------------------------------------
 
 READS = (("POST", "/search"),)
-WRITES = (("POST", "/tickets/*/comments"),)
+WRITES = (("POST", "/tickets/*/comments"), ("PUT", "/tickets/*"))
+RW = {("identity", "rw")}
+RD = {("identity", "r")}
 
 
 @pytest.mark.parametrize(("method", "path", "grant", "fault"), [
-    pytest.param("GET", "/users/x", {("identity", "r")}, None, id="get-is-a-read"),
-    pytest.param("POST", "/search", {("identity", "r")}, None, id="listed-post-read"),
-    pytest.param("POST", "/admin", {("identity", "rw")}, "ConfinementFault", id="unlisted-post"),
-    pytest.param("DELETE", "/users/x", {("identity", "rw")}, "ConfinementFault", id="delete"),
-    pytest.param("POST", "/tickets/7/comments", {("identity", "r")}, "ConfinementFault",
-                 id="write-with-read-grant"),
+    pytest.param("GET", "/users/x", RD, None, id="get-is-a-read"),
+    pytest.param("HEAD", "/users/x", RD, None, id="head-is-a-read"),
+    pytest.param("GET", "/tickets/7/comments", RD, None, id="get-on-a-write-route-is-a-read"),
+    pytest.param("POST", "/search", RD, None, id="listed-post-read"),
+    pytest.param("PUT", "/search", RW, "ConfinementFault", id="listed-read-other-method"),
+    pytest.param("POST", "/admin", RW, "ConfinementFault", id="unlisted-post"),
+    pytest.param("DELETE", "/users/x", RW, "ConfinementFault", id="delete"),
+    pytest.param("POST", "/tickets/7/comments", RD, "ConfinementFault", id="write-with-read-grant"),
+    pytest.param("PUT", "/tickets/7", RD, "ConfinementFault", id="put-write-with-read-grant"),
     pytest.param("POST", "/tickets/7/comments", {("identity", "r"), ("cmdb", "rw")},
                  "ConfinementFault", id="write-grant-on-another-system"),
-    pytest.param("POST", "/tickets/7/comments", {("identity", "rw")}, None, id="write-granted"),
+    pytest.param("POST", "/tickets/7/comments", RW, None, id="write-granted"),
+    pytest.param("PUT", "/tickets/7", RW, None, id="put-write-granted"),
+    pytest.param("POST", "/tickets/7/delete", RW, "ConfinementFault", id="undeclared-under-rw"),
 ])
 def test_s3_only_declared_reads_and_granted_writes_are_sent(
         tmp_path, data_root, method, path, grant, fault):
-    """GET is a read; another method is a read only if listed; a declared write needs `rw` on
-    that system. O3, O7."""
-    with H.upstream() as up, T.identity_via_proxy(
-            tmp_path / "forge", data_root,
-            H.declaration(up.url + "/", reads=READS, writes=WRITES)) as t:
-        store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
-        answer = T.ask(_client(T.deps({t.tenant_id: T.exports_of(t)}, store)),
-                       T.token(t.tenant_id, grant), "identity", method, f"{up.url}{path}",
-                       body={"q": 1} if method == "POST" else None)
+    """GET and HEAD are reads; another method is a read only if listed; a declared write needs
+    `rw` on that system. Routes are relative to the base. O3, O7, A2."""
+    body = '{"q": 1}' if method in ("POST", "PUT") else None
+    with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+            u + T.BASE_PATH, reads=READS, writes=WRITES)) as r:
+        answer = r.ask(method, path, grant=grant, body=body)
 
     assert answer["fault"] == fault, answer
-    assert [(s.method, s.path) for s in up.seen] == ([] if fault else [(method, path)])
+    assert [(s.method, s.path, s.body) for s in r.up.seen] == (
+        [] if fault else [(method, f"/api/v2{path}", body or "")])
 
 
-@pytest.mark.parametrize(("verdict", "expires_in", "grant"), [
-    pytest.param(True, timedelta(minutes=-1), {("identity", "r")}, id="expired"),
-    pytest.param(False, timedelta(hours=1), {("identity", "r")}, id="bad-signature"),
-    pytest.param(True, timedelta(hours=1), {("cmdb", "r")}, id="system-not-granted"),
-])
-def test_s4_a_token_out_of_its_bounds_is_refused_unsent(
-        tmp_path, data_root, verdict, expires_in, grant):
-    """Expired, unverified, or not granting the system: `ConfigFault`, no store read, nothing
-    sent; the same token in bounds is sent. O8, O7."""
-    with H.upstream() as up, T.identity_via_proxy(
-            tmp_path / "forge", data_root, H.declaration(up.url + "/")) as t:
-        store = H.FakeStore({(t.tenant_id, "identity"): T.static_set()})
-        verifier = H.FakeVerifier(verdict)
-        client = _client(T.deps({t.tenant_id: T.exports_of(t)}, store, verifier=verifier))
-        answer = T.ask(client, T.token(t.tenant_id, grant, expires_in=expires_in),
-                       "identity", "GET", f"{up.url}/users/x")
-        assert (answer["fault"], store.reads, up.seen) == ("ConfigFault", [], [])
-        assert len(verifier.calls) == 1
+def test_s3_a_listed_route_is_relative_to_the_base_not_the_origin(tmp_path, data_root):
+    """A listed `/search` read is `<base>/search`: the origin's `/search` is outside the base,
+    and `<base>/api/v2/search` matches no route. O3, A2."""
+    with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+            u + T.BASE_PATH, reads=READS)) as r:
+        origin_level = r.ask("POST", "", url=f"{r.up.url}/search", grant=RD, body="{}")
+        doubled = r.ask("POST", "/api/v2/search", grant=RD, body="{}")
+        assert (origin_level["fault"], doubled["fault"]) == ("ConfigFault", "ConfinementFault")
+        assert (r.up.seen, r.store.reads) == ([], [])
+        control = r.ask("POST", "/search", grant=RD, body="{}")
 
-        verifier.verdict = True
-        control = T.ask(client, T.token(t.tenant_id, {("identity", "r")}),
-                        "identity", "GET", f"{up.url}/users/x")
-    assert (control["fault"], control["status"], up.paths()) == (None, 200, ["/users/x"])
+    assert (control["fault"], r.up.paths()) == (None, ["/api/v2/search"])
 
 
-def test_s5_a_401_on_a_freshly_issued_oauth_token_is_a_breaker_not_retried(tmp_path, data_root):
-    """Probe: the upstream refuses the access token just issued: `ConfigFault`, one exchange,
-    one send, no retry. O7."""
-    issued: list[str] = []
-    with H.upstream() as up:
-        up.replies["/oauth/token"] = H.token_endpoint(issued)
-        up.replies["/api/x"] = (401, {}, b'{"detail":"token rejected"}')
-        decl = H.declaration(up.url + "/api/",
-                             scheme=H.oauth_scheme(up.url + "/oauth/token"))
-        with T.identity_via_proxy(tmp_path / "forge", data_root, decl) as t:
-            store = H.FakeStore({(t.tenant_id, "identity"): proxy().CredentialSet(
-                kind="oauth-client-credentials",
-                fields={"client_id": H.CLIENT_ID, "client_secret": H.CANARY_SECRET}, version=1)})
-            answer = T.ask(_client(T.deps({t.tenant_id: T.exports_of(t)}, store)),
-                           T.token(t.tenant_id, {("identity", "r")}), "identity", "GET",
-                           f"{up.url}/api/x")
+# --- O8 token bounds -------------------------------------------------------------------------
 
-    assert answer["fault"] == "ConfigFault"
-    assert up.paths() == ["/oauth/token", "/api/x"]
-    assert up.seen[1].headers.get("Authorization") == f"Bearer {issued[0]}"
+def test_s4_a_token_out_of_its_bounds_is_refused_before_any_store_read(tmp_path, data_root):
+    """Expired, unverified or ungranted tokens are refused unsent and unread, each after a
+    verify call; the token in bounds is sent on the same proxy. O8, O7."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        r.verifier = H.FakeVerifier(False)
+        r.rebuild()
+        bad_sig = r.ask(tok=T.token(r.t.tenant_id, RD, signer=r.signer))
+        r.verifier.verdict = True
+        expired = r.ask(tok=r.tok(expires_in=timedelta(minutes=-1)))
+        ungranted = r.ask(grant={("cmdb", "r")})
+        garbage = r.ask(tok="not-a-token")
+        assert [a["fault"] for a in (bad_sig, expired, ungranted, garbage)] == ["ConfigFault"] * 4
+        assert (r.store.reads, r.up.seen) == ([], [])
+        assert len(r.verifier.calls) >= 1
+        control = r.ask()
+
+    assert (control["fault"], control["status"], r.up.paths()) == (None, 200, ["/api/v2/users/x"])
+
+
+def _edited(tok: str, edit) -> str:
+    payload, _, signature = tok.rpartition(".")
+    raw = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode()
+    changed = edit(raw)
+    assert changed != raw, "the edit changed nothing"
+    new = base64.urlsafe_b64encode(changed.encode()).decode().rstrip("=")
+    return f"{new}.{signature}"
+
+
+def test_s4_a_token_edited_under_its_signature_is_refused(tmp_path, data_root):
+    """Claims edited after signing (a write grant added, another tenant named) are refused
+    unsent; the unedited token is sent. O8, O1."""
+    with H.upstream() as up, T.crm_pair(tmp_path, data_root, up.url + "/crm", up.url + "/crm") as (a, b):
+        store = H.FakeStore({(a.tenant_id, "crm"): T.static_set(KEY_A),
+                             (b.tenant_id, "crm"): T.static_set(KEY_B)})
+        signer = H.FakeSigner()
+        client = T.client_of(T.deps(
+            {a.tenant_id: T.exports_of(a), b.tenant_id: T.exports_of(b)}, store,
+            verifier=H.PairedVerifier(signer)))
+        tok = T.token(a.tenant_id, {("crm", "r")}, signer=signer)
+        as_b = T.ask(client, _edited(tok, lambda s: s.replace(a.tenant_id, b.tenant_id)),
+                     "crm", "GET", f"{up.url}/crm/accounts")
+        escalated = T.ask(client, _edited(tok, lambda s: s.replace('"r"', '"rw"')),
+                          "crm", "GET", f"{up.url}/crm/accounts")
+        assert (as_b["fault"], escalated["fault"]) == ("ConfigFault", "ConfigFault")
+        assert (up.seen, store.reads) == ([], [])
+        control = T.ask(client, tok, "crm", "GET", f"{up.url}/crm/accounts")
+
+    assert control["fault"] is None
+    assert up.seen[0].header("Authorization") == f"Bearer {KEY_A}"
+
+
+def test_s4_the_proxy_verifies_the_payload_and_signature_the_signer_produced(
+        tmp_path, data_root):
+    """The verifier is asked about exactly the (payload, signature) the launcher's signer
+    produced for the token. O8."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        tok = r.tok()
+        assert r.ask(tok=tok)["fault"] is None
+
+    assert r.verifier.calls == [(r.signer.payloads[0], "vault:v1:fake-signature-1")]
+    assert json.loads(r.signer.payloads[0])  # the signed payload is the claims document
