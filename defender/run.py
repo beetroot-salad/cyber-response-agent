@@ -167,7 +167,10 @@ def _aware_moment(text: str) -> datetime:
     moment = _clock.parse_iso_utc(text)
     if moment is None:
         raise argparse.ArgumentTypeError(f"{text!r} is not an ISO-8601 time")
-    return moment.astimezone(UTC)
+    try:
+        return moment.astimezone(UTC)
+    except OverflowError:
+        raise argparse.ArgumentTypeError(f"{text!r} is outside the years a run can be served") from None
 
 
 def _read_cut(ns: argparse.Namespace) -> ReadCut | None:

@@ -48,18 +48,28 @@ def _module():
 class Rig:
     def __init__(self, tmp_path: Path, fail_at: str | None = None, chaos: str = "stale-cmdb",
                  history_start: str = HISTORY_START, alert_at_ledger: str | None = "chaos-abc123",
-                 fingerprint: dict | None = None):
+                 fingerprint: dict | None = None, exc: type[BaseException] = RuntimeError):
         self.journal = Journal()
         self.store = FakeLockStore(self.journal)
-        self.clock = FakeClock(self.journal, fail_at=fail_at if fail_at in ("wait_as_of", "settle") else None)
-        self.ops = FakeCaptureOps(self.journal, fail_at=fail_at, ledger_ref=alert_at_ledger if chaos != "none" else None,
-                                 fingerprint_result=fingerprint)
+        stages = (fail_at,) if isinstance(fail_at, str) else tuple(fail_at or ())
+        self.record_at_fire: str | None = None
+        self.held_at_revert: list[bool] = []
+        self.clock = FakeClock(self.journal, exc=exc,
+                               fail_at=next((s for s in stages if s in ("wait_as_of", "settle")), None))
+        self.ops = FakeCaptureOps(self.journal, fail_at=stages, ledger_ref=alert_at_ledger if chaos != "none" else None,
+                                 fingerprint_result=fingerprint, exc=exc, on_step=self._watch)
         self.case_dir = tmp_path / "held-out" / SLUG
         self.case_dir.mkdir(parents=True)
         self.parts_dir = tmp_path / "parts"
         (self.parts_dir / "other-case").mkdir(parents=True)
         (self.parts_dir / "other-case" / "keep.bin").write_bytes(b"keep")
         self.chaos, self.history_start = chaos, history_start
+
+    def _watch(self, step: str) -> None:
+        if step == "fire":
+            self.record_at_fire = self.store.records.get("capture")
+        if step == "revert":
+            self.held_at_revert.append("capture" in self.store.records)
 
     def run(self):
         self.result = _module().capture(self.case_dir, scenario="ssh-brute-force-canary", chaos=self.chaos,
@@ -100,7 +110,7 @@ def test_capture_waits_for_as_of_and_fires_under_the_lock_token(tmp_path):
     waited = [d for op, d in rig.journal if op == "clock.sleep_until"]
     assert [instant(w) for w in waited] == [instant(ALERT_AT) + timedelta(hours=1)]
     token = rig.ops.fire_kwargs["lock_token"]
-    assert token and token in rig.store.records["capture"]
+    assert token and rig.record_at_fire and token in rig.record_at_fire, "not fired under the lock"
     assert rig.ops.fire_kwargs["chaos"] == "stale-cmdb"
     assert "capture" not in rig.store.records, "the lock was not released"
 
@@ -179,6 +189,7 @@ def test_a_failure_at_any_stage_reverts_releases_and_writes_nothing(tmp_path, st
     assert not (rig.case_dir / "freeze.yaml").exists()
     mine = rig.parts_dir / SLUG
     assert not mine.exists() or not [p for p in mine.rglob("*") if p.is_file()]
+    assert [p.name for p in rig.parts_dir.iterdir() if p.name not in ("other-case", SLUG)] == []
     assert (rig.parts_dir / "other-case" / "keep.bin").read_bytes() == b"keep"
     if stage == "fire":
         assert "revert" not in rig.journal.ops()  # no ledger ref was ever returned
@@ -189,6 +200,104 @@ def test_a_failure_at_any_stage_reverts_releases_and_writes_nothing(tmp_path, st
         assert "capture" not in rig.store.records
     else:
         assert "capture" in rig.store.records, "a failed revert must keep the capture lock held"
+
+
+def _stored(rig: Rig, slug: str = SLUG) -> dict[str, bytes]:
+    mine = rig.parts_dir / slug
+    return {str(p.relative_to(mine)): p.read_bytes() for p in sorted(mine.rglob("*")) if p.is_file()}
+
+
+@pytest.mark.parametrize("stage", ["wait_alert", "wait_as_of", "copy_volumes"])
+def test_an_interrupt_at_any_stage_still_reverts_and_cleans_up(tmp_path, stage):
+    """O1: Ctrl-C (a BaseException) while the fault is live reverts it once, frees the lock and
+    leaves no part, staging directory or freeze.yaml."""
+    rig = Rig(tmp_path, fail_at=stage, exc=KeyboardInterrupt)
+    with pytest.raises(KeyboardInterrupt):
+        rig.run()
+    assert rig.ops.revert_refs == ["chaos-abc123"] and not rig.ops.fault_live
+    assert "capture" not in rig.store.records
+    assert not (rig.case_dir / "freeze.yaml").exists()
+    assert [p.name for p in rig.parts_dir.iterdir()] == ["other-case"]
+
+
+def test_a_failed_cleanup_revert_keeps_the_lock_held(tmp_path):
+    """O1/D9: when the stage failed and the cleanup revert fails too, the fault may be live: the
+    original error surfaces and the capture lock stays held."""
+    rig = Rig(tmp_path, fail_at=("copy_volumes", "revert"))
+    with pytest.raises(RuntimeError, match="copy_volumes failed"):
+        rig.run()
+    assert rig.ops.revert_refs == ["chaos-abc123"]
+    assert "capture" in rig.store.records, "the lock was released with the fault possibly live"
+    assert not (rig.case_dir / "freeze.yaml").exists()
+
+
+@pytest.mark.parametrize("stage", ["wait_alert", "copy_volumes", "fingerprint"])
+def test_the_lock_is_still_held_when_the_fault_is_reverted(tmp_path, stage):
+    """O1/D9: every revert call, including the cleanup one after a failure, happens under the lock."""
+    rig = Rig(tmp_path, fail_at=stage)
+    with pytest.raises(RuntimeError):
+        rig.run()
+    assert rig.held_at_revert == [True]
+
+
+@pytest.mark.parametrize("stage", ["proc_tree", "fingerprint", "revert"])
+def test_a_failed_recapture_leaves_the_earlier_capture_of_the_case_intact(tmp_path, stage):
+    """O1/D8: an earlier capture's parts and freeze.yaml survive a failed re-capture of the case."""
+    rig = Rig(tmp_path)
+    rig.run()
+    parts, freeze_text = _stored(rig), (rig.case_dir / "freeze.yaml").read_text()
+    assert parts
+    again = Rig(tmp_path / "again", fail_at=stage)
+    again.case_dir, again.parts_dir = rig.case_dir, rig.parts_dir
+    with pytest.raises(RuntimeError, match=f"{stage} failed"):
+        again.run()
+    assert _stored(rig) == parts
+    assert (rig.case_dir / "freeze.yaml").read_text() == freeze_text
+    assert [p.name for p in rig.parts_dir.iterdir() if p.name not in ("other-case", SLUG)] == []
+
+
+def test_a_freeze_yaml_that_cannot_be_written_leaves_the_earlier_parts_in_place(tmp_path):
+    """O1/D8: a failure writing freeze.yaml (a non-empty directory sits there) swaps no new parts
+    over the earlier ones and leaves no staging directory."""
+    rig = Rig(tmp_path)
+    mine = rig.parts_dir / SLUG
+    mine.mkdir()
+    (mine / "old.bin").write_bytes(b"earlier capture")
+    blocker = rig.case_dir / "freeze.yaml"
+    blocker.mkdir()
+    (blocker / "x").write_text("x")
+    with pytest.raises(OSError):
+        rig.run()
+    assert _stored(rig) == {"old.bin": b"earlier capture"}
+    assert [p.name for p in rig.parts_dir.iterdir() if p.name not in ("other-case", SLUG)] == []
+    assert not rig.ops.fault_live and "capture" not in rig.store.records
+
+
+def _retake_by_another_holder(rig: Rig) -> list[str]:
+    """After the fault is reverted, the operator clears the lock and another holder takes it."""
+    from chaos import lock
+    taken: list[str] = []
+    base = rig.ops.on_step
+
+    def watch(step: str) -> None:
+        base(step)
+        if step == "refresh":
+            lock.clear(rig.store, lock.CAPTURE)
+            taken.append(lock.take(rig.store, lock.CAPTURE))
+
+    rig.ops.on_step = watch
+    return taken
+
+
+def test_capture_releases_only_with_its_own_token(tmp_path):
+    """D14: if the lock was cleared and re-taken meanwhile, capture's release is refused with
+    WrongToken and the other holder's lock survives."""
+    from chaos import lock
+    rig = Rig(tmp_path)
+    taken = _retake_by_another_holder(rig)
+    with pytest.raises(lock.WrongToken):
+        rig.run()
+    assert taken and taken[0] in rig.store.records["capture"]
 
 
 def test_capture_refuses_while_another_holder_has_the_lock(tmp_path):

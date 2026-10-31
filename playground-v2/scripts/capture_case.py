@@ -180,21 +180,30 @@ def _commit(case_dir: Path, mine: Path, staging: Path, freeze: dict, alert: dict
     The freeze file is written to a temporary name first and renamed last."""
     tmp = case_dir / ".freeze.yaml.tmp"
     tmp.write_text(yaml.safe_dump(freeze, sort_keys=False))
+    old = None
+    swapped = False
     try:
-        old = None
         if mine.exists():
             old = mine.with_name(f".{mine.name}.old")
             shutil.rmtree(old, ignore_errors=True)
             mine.rename(old)
         staging.rename(mine)
-        if old is not None:
-            shutil.rmtree(old, ignore_errors=True)
+        swapped = True
         alert_file = case_dir / "alert.json"
         if not alert_file.exists():
             alert_file.write_text(json.dumps(alert, indent=2) + "\n")
         os.replace(tmp, case_dir / "freeze.yaml")
+    except BaseException:
+        # The earlier parts go back under the earlier freeze: never new parts under an old one.
+        if swapped:
+            shutil.rmtree(mine, ignore_errors=True)
+        if old is not None:
+            old.rename(mine)
+        raise
     finally:
         tmp.unlink(missing_ok=True)
+    if old is not None:
+        shutil.rmtree(old, ignore_errors=True)
 
 
 def main(argv: list[str] | None = None) -> int:

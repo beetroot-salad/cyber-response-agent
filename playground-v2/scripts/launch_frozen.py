@@ -34,8 +34,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import yaml
-
 HERE = Path(__file__).resolve().parent
 for _path in (HERE, HERE.parent):
     if str(_path) not in sys.path:
@@ -163,7 +161,9 @@ def launch(case_dir: Path, *, index: Path, parts_dir: Path, lock_store: Any, ops
 
     token = lock.take(lock_store, lock.FROZEN_ENGINE)
     try:
-        freeze = yaml.safe_load((case_dir / "freeze.yaml").read_text())
+        # The scorer's own loader, so a freeze.yaml one reads the other reads (no aliases).
+        from defender._yaml import safe_load
+        freeze = safe_load((case_dir / "freeze.yaml").read_text())
         digest = freeze_digest(freeze)
         if not reference and not freeze.get("confirmed"):
             raise LaunchRefused(f"{slug}: freeze.yaml is not confirmed yet; label it against a "

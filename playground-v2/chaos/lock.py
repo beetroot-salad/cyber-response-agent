@@ -52,14 +52,17 @@ class WrongToken(LockError):
     """A token was passed, but it is not the holder's."""
 
 
-def _token_of(record: Optional[str]) -> Optional[str]:
+_UNREADABLE = object()
+
+
+def _token_of(record: Optional[str]) -> Any:
     if record is None:
         return None
     try:
         return json.loads(record).get("token")
     except (ValueError, AttributeError):
-        # An unreadable record still holds the lock; no token can match it.
-        return ""
+        # An unreadable record still holds the lock; no token, not even "", can match it.
+        return _UNREADABLE
 
 
 def take(store: Any, name: str, *, clock: Callable[[], float] = time.time) -> str:

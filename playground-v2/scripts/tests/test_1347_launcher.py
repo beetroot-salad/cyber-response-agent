@@ -127,6 +127,8 @@ class Rig:
         self.lock_held_in_run = "frozen-engine" in self.store.records
         if self.fail_at == "run":
             raise RuntimeError("run died")
+        if self.fail_at == "interrupt":
+            raise KeyboardInterrupt()
         self.run_ended = self.clock.now()
         return self.rc, f"run_id={RUN_ID}\nwork...\n", ""
 
@@ -217,11 +219,12 @@ _BUCKET = "logs-system.auth-2026.10.20|2026-10-20T08"
 
 @pytest.mark.parametrize("fingerprint", [
     {_BUCKET: [1200, 1199]},
+    {_BUCKET: [1199, 1200]},
     {**FINGERPRINT, "logs-system.auth-2026.10.20|2026-10-20T09": [5, 5]},
     {},
-], ids=["changed-value", "added-bucket", "removed-bucket"])
+], ids=["changed-value", "changed-count", "added-bucket", "removed-bucket"])
 def test_a_differing_fingerprint_records_a_stale_verdict_with_a_reason(tmp_path, fingerprint):
-    """O6: a post-run fingerprint with a changed value, an added or a removed bucket is stale."""
+    """O6: a post-run fingerprint with a changed value or count, an added or a removed bucket is stale."""
     rig = Rig(tmp_path, fingerprint=fingerprint)
     rig.launch()
     (row,) = rig.rows()
@@ -265,13 +268,14 @@ def test_a_second_launch_is_refused_while_the_frozen_engine_lock_is_held(tmp_pat
 
 
 @pytest.mark.parametrize("damage", ["missing", "altered"])
-def test_a_missing_or_altered_part_refuses_the_run_and_names_it(tmp_path, damage):
-    """O6: no run, no row, no load; the lock is released and the part is named."""
+@pytest.mark.parametrize("name", sorted(PARTS))
+def test_a_missing_or_altered_part_refuses_the_run_and_names_it(tmp_path, damage, name):
+    """O6: whichever part is damaged: no run, no row, no load; the lock is released and the part is named."""
     rig = Rig(tmp_path)
-    part = rig.parts_dir / SLUG / "stubs.tar"
+    part = rig.parts_dir / SLUG / name
     part.unlink() if damage == "missing" else part.write_bytes(b"tampered")
     _module()  # a missing launch_frozen.py fails here, outside the refusal being tested
-    with pytest.raises(Exception, match="stubs.tar") as caught:
+    with pytest.raises(Exception, match=name) as caught:
         rig.launch()
     assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
     assert {"run", "load_frozen"}.isdisjoint(rig.journal.ops())
@@ -281,7 +285,7 @@ def test_a_missing_or_altered_part_refuses_the_run_and_names_it(tmp_path, damage
 @pytest.mark.parametrize("stage", ["load", "run", "fingerprint", "teardown"])
 def test_a_launch_that_dies_leaves_no_row_and_frees_the_engine(tmp_path, stage):
     """O9: failing at load, run, fingerprint or teardown appends nothing, tears down any loaded
-    copy and releases the lock; an older row for the same freeze is untouched."""
+    or half-loaded copy, removes the config copy and releases the lock; an older row for the same freeze is untouched."""
     rig = Rig(tmp_path, fail_at=stage)
     older = json.dumps({"slug": SLUG, "run_id": "x", "freeze": DIGEST, "verdict": "valid",
                         "reason": "", "verified_at": "2026-10-20T11:00:00Z"}) + "\n"
@@ -290,8 +294,8 @@ def test_a_launch_that_dies_leaves_no_row_and_frees_the_engine(tmp_path, stage):
         rig.launch()
     assert rig.index.read_text() == older
     assert "frozen-engine" not in rig.store.records
-    if stage != "load":
-        assert "teardown" in rig.journal.ops()
+    assert "teardown" in rig.journal.ops(), "a half-loaded copy was left running"
+    assert list(rig.work.iterdir()) == [], "the Docker config copy was left behind"
 
 
 def test_reference_mode_writes_no_row_prints_the_run_id_and_cleans_up(tmp_path, capsys):
@@ -378,3 +382,117 @@ def test_without_an_injected_fingerprint_the_launcher_builds_the_production_lab_
     rig.launch()
     assert built
     assert [r["verdict"] for r in rig.rows()] == ["stale"]  # the spy's fingerprint was compared
+
+
+def test_a_successful_launch_leaves_no_docker_config_copy_behind(tmp_path):
+    """D2: the private Docker config copy is removed once the run is over."""
+    rig = Rig(tmp_path)
+    rig.launch()
+    assert rig.config_seen and list(rig.work.iterdir()) == []
+
+
+def test_an_interrupt_during_the_run_still_tears_down_and_frees_the_engine(tmp_path):
+    """O9: Ctrl-C while the agent runs tears the copy down, removes the config copy, releases
+    the lock and writes no row."""
+    rig = Rig(tmp_path, fail_at="interrupt")
+    with pytest.raises(KeyboardInterrupt):
+        rig.launch()
+    assert "teardown" in rig.journal.ops() and "frozen-engine" not in rig.store.records
+    assert rig.rows() == [] and list(rig.work.iterdir()) == []
+
+
+def test_a_docker_config_without_the_playground_context_refuses_and_still_tears_down(tmp_path):
+    """D2/O9: the copy cannot be repointed, so nothing runs, no row, the loaded copy is torn
+    down, no config copy is left and the lock is released."""
+    rig = Rig(tmp_path)
+    meta = rig.operator_cfg / "contexts/meta/a1/meta.json"
+    meta.write_text(json.dumps({"Name": "renamed", "Endpoints": {"docker": {"Host": "ssh://vps"}}}))
+    _module()
+    with pytest.raises(Exception) as caught:
+        rig.launch()
+    assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
+    assert "run" not in rig.journal.ops() and rig.rows() == []
+    assert "teardown" in rig.journal.ops() and "frozen-engine" not in rig.store.records
+    assert list(rig.work.iterdir()) == []
+
+
+def test_a_non_reference_launch_of_an_unconfirmed_freeze_is_refused(tmp_path):
+    """O8/O9: a scored launch needs `confirmed`; nothing loads or runs, no row, lock released."""
+    rig = Rig(tmp_path, freeze={**FREEZE, "confirmed": {}})
+    _module()
+    with pytest.raises(Exception) as caught:
+        rig.launch()
+    assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
+    assert {"load_frozen", "run"}.isdisjoint(rig.journal.ops()) and rig.rows() == []
+    assert "frozen-engine" not in rig.store.records
+
+
+def test_the_launcher_releases_only_with_its_own_token(tmp_path):
+    """D14: if the lock was cleared and re-taken meanwhile, the launcher's release is refused
+    with WrongToken and the other holder's lock survives."""
+    from chaos import lock
+    rig = Rig(tmp_path)
+    taken: list[str] = []
+    base = rig.run_fn
+
+    def run_fn(argv, env):
+        lock.clear(rig.store, lock.FROZEN_ENGINE)
+        taken.append(lock.take(rig.store, lock.FROZEN_ENGINE))
+        return base(argv, env)
+
+    rig.run_fn = run_fn
+    with pytest.raises(lock.WrongToken):
+        rig.launch()
+    assert taken and taken[0] in rig.store.records["frozen-engine"]
+
+
+def test_the_row_digest_of_a_freeze_with_non_ascii_values_is_the_ascii_escaped_one(tmp_path):
+    """Freeze digest: values like `café ☃` hash in json.dumps' default (ASCII-escaped) form,
+    the same hex the scorer computes, however the YAML spells them."""
+    freeze = {**FREEZE, "chaos": {"profile": "café ☃", "seed": 42, "ledger_ref": "chaos-é"}}
+    expected = hashlib.sha256(json.dumps(freeze, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    rig = Rig(tmp_path, freeze=freeze)
+    (rig.case_dir / "freeze.yaml").write_text(
+        yaml.safe_dump(freeze, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    rig.launch()
+    assert rig.rows()[0]["freeze"] == expected
+
+
+# -- the command line -------------------------------------------------------------------------
+
+
+class _Proc:
+    returncode, stderr = 0, ""
+    stdout = f"run_id={RUN_ID}\n"
+
+
+def _main(tmp_path, monkeypatch, *flags):
+    """Drive `launch_frozen.main` with the lab seams (docker lock store, LabOps, the agent
+    subprocess) replaced; returns (rig, rc, agent argv list)."""
+    rig = Rig(tmp_path)
+    module = _module()
+    agent: list[list[str]] = []
+    monkeypatch.setattr(module, "LabOps", lambda: rig.ops)
+    monkeypatch.setattr(module.lock, "DockerLockStore", lambda: rig.store)
+    monkeypatch.setattr(module.subprocess, "run", lambda argv, **kw: agent.append(list(argv)) or _Proc())
+    monkeypatch.setenv("DOCKER_CONFIG", str(rig.operator_cfg))
+    rc = module.main([str(rig.case_dir), "--tenant", "tenant-1", "--parts-dir", str(rig.parts_dir),
+                      "--work-dir", str(rig.work), *flags])
+    return rig, rc, agent
+
+
+def test_the_command_line_appends_the_row_to_the_given_index_and_forwards_the_knowledge_commit(
+        tmp_path, monkeypatch):
+    """D10/O9: `--index F --knowledge-commit K` writes the row to F and starts the agent with K."""
+    rig, rc, agent = _main(tmp_path, monkeypatch, "--index", str(tmp_path / "idx" / "index.jsonl"),
+                           "--knowledge-commit", "abc1234")
+    assert rc == 0 and [r["run_id"] for r in rig.rows()] == [RUN_ID]
+    (argv,) = agent
+    assert _opt(argv, "--knowledge-commit") == "abc1234" and "--no-learn" in argv
+
+
+def test_the_command_line_reference_flag_writes_no_row(tmp_path, monkeypatch):
+    """O8/O9: `--reference` serves the freeze and appends nothing to the index."""
+    rig, rc, agent = _main(tmp_path, monkeypatch, "--reference",
+                           "--index", str(tmp_path / "idx" / "index.jsonl"))
+    assert rc == 0 and len(agent) == 1 and not rig.index.exists()
