@@ -48,6 +48,9 @@ DECOMPOSED_ALERT_BYTES = '{"rule": {"id": "r-1342"}, "text": "cafe\u0301"}\n'.en
 #: Exact bytes `admit()` accepts that a strip of a leading byte-order mark would change: U+FEFF inside a
 #: JSON string value (not at the start).
 ZWNBSP_ALERT_BYTES = '{"rule": {"id": "r-1342"}, "text": "a\ufeffb"}\n'.encode()
+#: U+FEFF at the start of a value, at the end of one, twice in a row, twice apart, and inside an object key.
+FEFF_RICH_ALERT_BYTES = ('{"rule": {"id": "r-1342"}, "lead": "\ufeffx", "tail": "y\ufeff", "pair": "p\ufeff\ufeffq", '
+                         '"apart": "\ufeffm\ufeffn", "k\ufeffey": 1}\n').encode()
 TITLE = "SSH success after failures"
 DESCRIPTION = "Three failures then a success from one source."
 

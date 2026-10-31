@@ -23,6 +23,7 @@ from defender.tests.support.jobs._jobs1342 import (
     ALERT_DIGEST,
     AWKWARD_ALERT_BYTES,
     DECOMPOSED_ALERT_BYTES,
+    FEFF_RICH_ALERT_BYTES,
     GOLDEN_REPORT,
     JOBS_AUDIT_LOGGER,
     MALICIOUS_REPORT,
@@ -250,9 +251,10 @@ async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_no
 
 
 
-@pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES, ZWNBSP_ALERT_BYTES],
+@pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES, ZWNBSP_ALERT_BYTES,
+                                 FEFF_RICH_ALERT_BYTES],
                          ids=["crlf tab multibyte", "leading whitespace and trailing spaces", "decomposed unicode",
-                              "zero-width no-break space in a string"])
+                              "zero-width no-break space in a string", "feff_rich"])
 async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(world, raw):
     """An alert that CRLF, tabs, multibyte text, padding whitespace or a decomposed sequence would change reaches `<id>.alert.json` byte for byte, and the launch digest is of those bytes. (O6, M5)"""
     import unicodedata
@@ -260,7 +262,12 @@ async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(w
     from defender.records.formats import admit
 
     admit(raw)  # premise: admission accepts these bytes
-    if raw is ZWNBSP_ALERT_BYTES:
+    if raw is FEFF_RICH_ALERT_BYTES:
+        bom = b"\xef\xbb\xbf"
+        for shape in (b'"' + bom, bom + b'"', bom + bom, b"m" + bom + b"n", b'"k' + bom + b'ey":'):
+            assert shape in raw, ("premise", shape)
+        assert not raw.startswith(bom)
+    elif raw is ZWNBSP_ALERT_BYTES:
         assert b"\xef\xbb\xbf" in raw, "premise: a U+FEFF in the bytes"
         assert not raw.startswith(b"\xef\xbb\xbf"), "premise: not a leading byte-order mark"
     else:
@@ -537,6 +544,60 @@ async def test_o8_the_stage_comes_from_the_job_end_record_and_the_report(world, 
     assert stored["started_at"] == NOW
     _no_run_text(stored)
     assert inv
+
+
+def _job_end_junk_characters() -> list[str]:
+    import unicodedata
+
+    kinds = {"Zs", "Zl", "Zp", "Cf"}
+    found = {chr(n) for n in range(0x110000) if unicodedata.category(chr(n)) in kinds}
+    return sorted(found | set("\x00\t\n\r\x0b\x0c\x85\x1c\x1d\x1e\x1f"))
+
+
+_JUNK = _job_end_junk_characters()
+_JUNK_SPELLINGS = {"leading": lambda w, c: c + w, "trailing": lambda w, c: w + c,
+                   "interior": lambda w, c: w[:len(w) // 2] + c + w[len(w) // 2:]}
+_JOB_END_WORDS = (("setup", "refused"), ("setup", "crashed"), ("setup", "done"),
+                  ("box", "not_started"), ("box", "start_failed"), ("box", "started"))
+_JUNK_VARIANTS = [(key, word, where) for key, word in _JOB_END_WORDS for where in _JUNK_SPELLINGS]
+
+
+@pytest.mark.parametrize("junk", _JUNK, ids=lambda c: f"U{ord(c):04X}")
+def test_o8_no_junk_character_leading_trailing_or_inside_a_job_end_word_makes_it_one(junk):
+    """Each of the six words with `junk` before, after or inside it is not a job-end record the job entry could write. (O8, M3)"""
+    from defender.records.job_lane import JobEnd
+
+    assert JobEnd.parse(job_end()) is not None, "premise: the honest record parses"
+    for key, word, where in _JUNK_VARIANTS:
+        text = _job_end_with(**{key: _JUNK_SPELLINGS[where](word, junk)})
+        assert JobEnd.parse(text) is None, (key, word, where, text)
+
+
+@pytest.mark.parametrize("junk", _JUNK, ids=lambda c: f"U{ord(c):04X}")
+async def test_o8_a_job_end_word_with_junk_anywhere_is_a_failed_run_with_the_exit_code(world, junk):
+    """Per junk character, one worker drain over leading, trailing and interior (the word rotating with the character): failed/no_report naming the exit code. (O8, M3)"""
+    base = _JUNK.index(junk)
+    variants = [(*_JOB_END_WORDS[(base + n) % len(_JOB_END_WORDS)], where) for n, where in enumerate(_JUNK_SPELLINGS)]
+    child = _child(world, exit=EXIT, printed=MARKER)
+    order: list[tuple[str, str, str]] = []
+
+    def argv(launch):
+        key, word, where = variants[len(order)]
+        order.append((key, word, where))
+        child.files = _committed(**{"{id}.job-end.json": _job_end_with(**{key: _JUNK_SPELLINGS[where](word, junk)})})
+        return child(launch)
+
+    async with job_store(world["dsn"]) as store:
+        ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(len(variants))]
+        await make_worker(store, world["root"], argv, slots=1).drain()
+
+    assert len(order) == len(ids), "premise: a launch for every queued run"
+    assert len(child.seen_all()) == len(ids), "premise: every child ran"
+    for inv in ids:
+        stored = row(world["dsn"], inv)
+        assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("failed", None, "no_report"), stored
+        assert _names_code(stored, inv, EXIT), ("exit code", stored["failure_message"])
+        _no_run_text(stored)
 
 
 # --- cost -------------------------------------------------------------------------------------------

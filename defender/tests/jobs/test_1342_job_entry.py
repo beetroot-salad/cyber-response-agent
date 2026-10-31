@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import ast
 import functools
 import hashlib
 import io
@@ -31,6 +32,7 @@ from defender.tests.support.jobs._jobs1342 import (
     AWKWARD_ALERT_BYTES,
     DECOMPOSED_ALERT_BYTES,
     DEFENDER,
+    FEFF_RICH_ALERT_BYTES,
     PADDED_ALERT_BYTES,
     ZWNBSP_ALERT_BYTES,
     TITLE,
@@ -283,9 +285,10 @@ def test_o6_a_job_with_a_valid_launch_record_sets_up_and_runs_the_lifecycle(scen
 
 
 @pytest.mark.parametrize("raw", [ALERT_BYTES, AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES,
-                                 ZWNBSP_ALERT_BYTES],
+                                 ZWNBSP_ALERT_BYTES, FEFF_RICH_ALERT_BYTES],
                          ids=["as the fixture", "crlf tab multibyte", "leading whitespace and trailing spaces",
-                              "decomposed unicode", "zero-width no-break space in a string"])
+                              "decomposed unicode", "zero-width no-break space in a string",
+                              "feff_rich"])
 def test_o6_the_runs_input_alert_is_the_launch_files_exact_bytes_and_hashes_to_the_record(scene, raw):
     """The alert the run holds equals the alert file byte for byte (trailing newline, CRLF, padding whitespace and decomposed text too) and matches the launch digest. (O6, O2, M5)"""
     from defender.records import RunPaths, formats
@@ -624,6 +627,21 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
     assert spies.events.count("cross-check") == 1, spies.events
     assert spies.events.count("seam-visualize") == 1, spies.events
 
+
+
+def test_m3_the_main_block_calls_both_entries_with_nothing_but_the_arguments():
+    """`run.py`'s `__main__` block dispatches `job_main(_argv)` or `main(_argv)`: no keyword, star or extra argument, so no seam is passed from it. (M3)"""
+    tree_ = ast.parse((DEFENDER / "run.py").read_text(encoding="utf-8"))
+    blocks = [n for n in tree_.body if isinstance(n, ast.If) and ast.unparse(n.test) == "__name__ == '__main__'"]
+    assert len(blocks) == 1, "premise: one __main__ block"
+    calls = [c for n in blocks[0].body for c in ast.walk(n) if isinstance(c, ast.Call)]
+    entries = [c for c in calls if isinstance(c.func, ast.Name) and c.func.id in ("job_main", "main")]
+    assert sorted(c.func.id for c in entries) == ["job_main", "main"]
+    for call in entries:
+        assert ast.unparse(call) == f"{call.func.id}(_argv)", ast.unparse(call)
+        assert not call.keywords
+        assert len(call.args) == 1
+    assert "sys.exit(job_main(_argv) if '--job' in _argv else main(_argv))" in [ast.unparse(n) for n in blocks[0].body]
 
 
 def test_m3_the_two_entries_are_plain_functions_defined_in_run_py():
