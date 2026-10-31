@@ -120,8 +120,9 @@ class Docker:
     [count, sum, _index, hour]), an alerts query gets `alert_rows` (same shape) cut to the columns
     the query asks for (no SUM(_version) -> [count, _index, hour]); a query naming neither gets
     `values` as is (es_now). `values` rows are served in full. `serve_rows` models Elasticsearch:
-    rows inside the time range named by the query's own timestamps (all rows if it names fewer than
-    two; also applied to `alert_rows`), cut to the query's LIMIT (default 1000). `endless` answers
+    rows that satisfy each of the query's own `>=`/`>`/`<=`/`<` comparisons against an ISO-seconds
+    stamp (comments and bare stamps ignored; also applied to `alert_rows`), cut to the query's
+    LIMIT (default 1000). `endless` answers
     every query with exactly LIMIT rows.
     """
 
@@ -179,9 +180,9 @@ def _ops(docker):
                                    events_pattern=EVENTS, alerts_pattern=ALERTS)
 
 
-def _fingerprint(as_of=AS_OF, arrived_by=ARRIVED_BY):
+def _fingerprint(as_of=AS_OF, arrived_by=ARRIVED_BY, window=WINDOW):
     docker = Docker([[1200, 1200, INDEX, HOUR]])
-    return docker, _ops(docker).fingerprint(WINDOW, as_of, arrived_by)
+    return docker, _ops(docker).fingerprint(window, as_of, arrived_by)
 
 
 def test_fingerprint_sends_the_per_index_hour_esql_over_the_configured_patterns():
@@ -204,12 +205,13 @@ def test_fingerprint_sends_the_per_index_hour_esql_over_the_configured_patterns(
             # alerts may be COUNT only: C25 is unprobed
 
 
-@pytest.mark.parametrize(("as_of", "arrived_by"), [
-    (AS_OF, ARRIVED_BY), ("2026-03-02T01:00:00Z", "2026-03-02T01:05:00Z")])
-def test_fingerprint_filter_is_the_shared_cut_clause(as_of, arrived_by):
+@pytest.mark.parametrize(("window", "as_of", "arrived_by"), [
+    (WINDOW, AS_OF, ARRIVED_BY),
+    (["2026-01-30T01:00:00Z", "2026-03-02T01:00:00Z"], "2026-03-02T01:00:00Z", "2026-03-02T01:05:00Z")])
+def test_fingerprint_filter_is_the_shared_cut_clause(window, as_of, arrived_by):
     """P5/D12: every request `filter` equals cut_clause(as_of, arrived_by), whatever the moments."""
     from defender.integrations.elastic_adapter import cut_clause
-    docker, _ = _fingerprint(as_of, arrived_by)
+    docker, _ = _fingerprint(as_of, arrived_by, window)
     want = cut_clause(instant(as_of), instant(arrived_by))
     assert all(body["filter"] == want for body in docker.requests())
 
