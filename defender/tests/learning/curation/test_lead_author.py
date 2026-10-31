@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
+from defender.tests.support.tenancy._active1214 import active_directory
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL

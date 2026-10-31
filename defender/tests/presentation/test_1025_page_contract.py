@@ -362,7 +362,7 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
 
 
 @pytest.mark.postgres
-def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_path, migrated_database):
+def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_path, migrated_database):  # noqa: F811
     ep = E.sample_episode(tmp_path)
     script = Path(visualize_episode().__file__)
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}

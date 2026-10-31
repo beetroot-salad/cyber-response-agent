@@ -93,6 +93,16 @@ def tenant_of(run_dir: Path):
     return requested_tenant(data_root_from_path(run_dir.parents[2]), run_dir.parent.parent.name)
 
 
+def drained_for(paths: LoopPaths, run_dir: Path) -> LoopPaths:
+    """The drain's paths as drain start's host acceptance leaves them for the tenant of the run at `run_dir`: the
+    tenant's own learning root, carrying the accepted tenant (r10.1 C1: the drain rehydrates each claim through
+    `paths.tenant`, so a drain that serves a claim is handed the tenant that claim names; scratch paths with no
+    tenant refuse every claim). Make it BEFORE opening the state: the queue lives under the tenant's learning root."""
+    paths = tenant_of(run_dir).learning_paths(LoopPaths, repo_root=paths.repo_root)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
+    return paths
+
+
 def curation_row(case_id: str, run_dir: Path) -> dict:
     """The row `run_common.enqueue_curation` files for the run at `run_dir`: its address, read
     off where the run lives (`<data root>/<T>/runs/<run_id>`)."""

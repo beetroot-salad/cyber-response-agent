@@ -222,7 +222,7 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
 
 @pytest.mark.parametrize("breakage", ["missing-pointer", "stale-store-path"])
 @pytest.mark.postgres
-def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, breakage, migrated_database):
+def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, breakage, migrated_database):  # noqa: F811
     """A visualizer that cannot resolve the store FAILS CLOSED: the re-render exits non-zero and the
     post-run step raises `VisualizeFailed`."""
     from defender import run_common
