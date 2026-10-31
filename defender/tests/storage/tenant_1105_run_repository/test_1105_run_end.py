@@ -47,6 +47,7 @@ class _Tail(SpecTail):
         super().__init__(paths)
         self.order = order
         self.fail = fail
+        self.enqueued: list[dict[str, Any]] = []
 
     def _note(self, name: str, run_dir: Any) -> None:
         super()._note(name, run_dir)
@@ -65,12 +66,14 @@ class _Tail(SpecTail):
     def enqueue(self, run: Any, alert: Any, **kw: Any) -> bool:
         # `run.main` hands its enqueue seam the run's `Run`, passed on unchanged.
         self.order.append(ENQUEUE)
+        self.enqueued.append(dict(kw))
         if self.fail == ENQUEUE:
             raise OSError(errno.ENOSPC, "spec 1105: the queue is full (RG-08-c)")
         return run_common.enqueue_curation(run, alert, **kw)
 
 
-def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
+def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: Any = None, during: Any = None,
+           tails: list[Any] | None = None):
     """The REAL `run.main` over one alert under `--update-ticket`, with the tail's seams
     injected and this arm's own learning state; returns (the order the steps ran in, main's
     return value or what it raised, the curation requests queued)."""
@@ -87,6 +90,13 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
     paths = dataclasses.replace(LoopPaths.for_tenant(tenant), repo_root=repo)
     order: list[str] = []
     tail = _Tail(paths, order, fail=fail)
+    if tails is not None:
+        tails.append((tenant, tail))
+
+    def lifecycle(*a: Any, **k: Any) -> Any:  # `during` runs mid-run, after acceptance
+        if during is not None:
+            during()
+        return tail.lifecycle(*a, **k)
     handler = _Order(order)
     logger = logging.getLogger(run_common.__name__)
     logger.addHandler(handler)
@@ -95,7 +105,8 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
         argv = [str(alert), "--tenant", str(tenant.id), "--update-ticket"]
         try:
             # Plus the in-process launch-time publish.
-            outcome: Any = run_py.main(argv, directory=directory_for_argv(argv), lifecycle=tail.lifecycle,
+            given = directory(root, str(tenant.id)) if directory is not None else directory_for_argv(argv)
+            outcome: Any = run_py.main(argv, directory=given, lifecycle=lifecycle,
                                        visualize=tail.visualize,
                                        ticket_writer=tail, enqueue=tail.enqueue,
                                        publish=in_process_publish())
@@ -133,3 +144,42 @@ def test_1105_run_end_keeps_todays_order_cross_check_ticket_curation_page(tmp_pa
     assert outcome == 0, f"a page that was not saved still exits 0: {outcome!r}"
     assert queued, "no curation request was queued before the page failed"
     assert order[-1] == PAGE, f"the page is still the last step: {order}"
+
+
+def test_the_run_end_curation_request_uses_the_runs_tenant_with_no_second_read(tmp_path, monkeypatch):
+    """Run end hands the curation request the run's accepted tenant and reads no tenant record again: a tenant
+    offboarded mid-run still gets the request, written under the run's held lock (r10 O-A5, Flows: run end)."""
+    from defender.tenancy import TenantDirectory
+    from defender.tests.support.tenancy._active1214 import CREATED, active_repository, run_sync
+    from defender.tests.support.tenancy._host1214 import ENQUEUE_TENANT
+
+    opened: list[str] = []
+    twins: list[Any] = []
+
+    def directory(root: Any, tenant_id: str) -> Any:
+        twin = active_repository(location_path(root), tenant_id)
+        twins.append((twin, tenant_id))
+
+        def repository() -> Any:
+            opened.append("read")
+            return twin
+        return TenantDirectory(repository)
+
+    at_flip: list[int] = []
+
+    def offboard() -> None:
+        twin, tenant_id = twins[-1]
+        at_flip.append(len(opened))
+        run_sync(twin.request_offboard(tenant_id, now=CREATED))
+
+    tails: list[Any] = []
+    order, outcome, queued = _drive(tmp_path / "offboarded-mid-run", monkeypatch, directory=directory,
+                                    during=offboard, tails=tails)
+    assert outcome == 0, f"a completing run exits 0: {outcome!r}"
+    assert at_flip, "control: the run reached its lifecycle"
+    assert at_flip[0] >= 1, "control: the run read its tenant record before the flip"
+    assert queued, "the request of a run whose tenant was offboarded mid-run was not written"
+    assert len(opened) == at_flip[0], f"run end read the tenant records again: {opened}"
+    [(tenant, tail)] = tails
+    [kw] = tail.enqueued
+    assert str(kw[ENQUEUE_TENANT].id) == str(tenant.id), f"the enqueue seam was not handed the run's tenant: {kw}"

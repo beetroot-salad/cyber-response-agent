@@ -31,6 +31,9 @@ LAUNCHER = textwrap.dedent("""
             time.sleep(600)
         def forge_wiring(self, tenant_id):
             time.sleep(600)
+        def admission(self, tenant_id):  # r10 Finding 9: state and wiring in one read
+            pathlib.Path(ready).write_text(str(os.getpid()))
+            time.sleep(600)
 
     from defender.cli import tenant as connect
     connect.main([verb, tenant, *([staged] if verb == "propose" else [])], directory=Blocking())

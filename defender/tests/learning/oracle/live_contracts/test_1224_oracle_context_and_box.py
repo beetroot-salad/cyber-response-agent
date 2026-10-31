@@ -21,6 +21,9 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.core import _state1135
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
+#: The tenant every oracle box here serves (r10 B1: a box cannot be made without one).
+ORACLE_TENANT = "3d6f0b8e-2a41-4c97-9e15-7b2c8a4d6f01"
+
 
 #: A frame-closing tag on a salt the host never minted: payload text that tries to end the
 #: frame it is carried in and speak as the host after it.
@@ -439,7 +442,7 @@ def _start_oracle_box_recorded(where: Path, run_dir: Path,
             box_mod.start_box(box_mod.BoxRequest(
                 name="defender-oracle-rec-1224",
                 mounts=(box_mod.Mount(source=probe, target=probe, writable=True),),
-                workdir=probe, env={},
+                workdir=probe, env={}, tenant_id=ORACLE_TENANT,
                 spec=box_mod.BoxSpec(runtime="runc", rootfs="defender-box:t1224")))
         runtime_creates = _creates(_docker_argvs(argv_log))
         assert runtime_creates, "the recorder never saw the runtime's own create"
@@ -453,7 +456,7 @@ def _start_oracle_box_recorded(where: Path, run_dir: Path,
         mp.chdir(run_dir)
         start_box = S.sym(S.ORACLE, "start_box")
         with pytest.raises((S.sandbox_error_cls(), box_fault)):
-            start_box(env=env)
+            start_box(env=env, tenant_id=ORACLE_TENANT)
     return start_box, _docker_argvs(argv_log)
 
 
@@ -907,7 +910,7 @@ def test_1224_oracle_python_tool_cannot_be_built_over_an_unsandboxed_executor(tm
     monkeypatch.setenv("PATH", str(nobin))
     start_box = S.sym(S.ORACLE, "start_box")
     with pytest.raises(S.sandbox_error_cls()):
-        start_box(env={S.UNSANDBOXED_ENV: "1", "PATH": str(nobin)})
+        start_box(env={S.UNSANDBOXED_ENV: "1", "PATH": str(nobin)}, tenant_id=ORACLE_TENANT)
 
 
 def test_python_box_cannot_be_started(tmp_path, monkeypatch):
@@ -1023,7 +1026,11 @@ def test_oracle_python_scratch_files_and_the_investigators_box(tmp_path, monkeyp
     assert sorted(str(p.relative_to(run_dir)) for p in run_dir.rglob("*")) == before, (
         "the oracle box start wrote into the sibling's run dir")
     params = list(inspect.signature(start_box).parameters)
-    assert params == ["env"], f"the oracle box factory takes more than its env: {params}"
+    # r10 B1: the tenant id is neither a path nor a container of the investigator's, so the pin keeps its purpose.
+    assert params == ["env", "tenant_id"], f"the oracle box factory takes more than its env and tenant: {params}"
+    for create in _creates(sent):
+        labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
+        assert f"defender.tenant={ORACLE_TENANT}" in labels, f"the oracle box is not labelled with its tenant: {create}"
 
     # World c serves first and freezes its own row.
     est.answer("idp", "query", Q_BOB, _answer(_row("e-200", user="bob")))

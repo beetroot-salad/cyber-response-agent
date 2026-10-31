@@ -728,3 +728,28 @@ def test_the_production_oracle_box_carries_its_tenant_label(tmp_path, monkeypatc
         from defender.box import _oracle
 
         _oracle.stop_oracle_box(started)
+
+
+@pytest.mark.parametrize("given", [{}, {"tenant_id": None}], ids=["omitted", "none"])
+def test_a_box_request_without_a_tenant_is_a_construction_error(tmp_path, given):
+    """Every box carries its tenant: a `BoxRequest` with no tenant is refused at construction; one naming a tenant is
+    made (r10 B1, O-B1)."""
+    tenant = fixture_uuid("box-label-tenant")
+    made = box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, tenant_id=tenant)
+    assert made.tenant_id == tenant, "control: a request naming its tenant is made"
+    with pytest.raises((TypeError, ValueError)):
+        box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, **given)
+
+
+def test_the_oracle_serving_requires_its_tenant():
+    """The launcher's oracle serving takes no default tenant, so its calibration call must name one (r10 B1,
+    `learning/branch/preflight.py:120`)."""
+    import inspect
+
+    from defender.learning.branch.estate.registry import oracle_serving
+    from defender.learning.core.config import oracle_settings_with
+
+    param = inspect.signature(oracle_serving).parameters["tenant_id"]
+    assert param.default is inspect.Parameter.empty, f"oracle_serving defaults its tenant to {param.default!r}"
+    with pytest.raises(TypeError):
+        oracle_serving(oracle_settings_with())

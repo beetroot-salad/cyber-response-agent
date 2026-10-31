@@ -87,15 +87,15 @@ def test_the_census_lists_every_credential_caller_and_every_admission_site():
                   "learning/core/drains.py": "opened_delivery", "cli/tenant.py": "opened_delivery"}
     for rel, call in credential.items():
         assert _calling(rel, call), f"{rel} no longer reaches the credential through {call}"
-    admitting = {"run.py": set(), "learning/core/cli.py": set(), "learning/core/drains.py": {"revert_delivery"},
-                 "cli/tenant.py": set()}
-    for rel, required in admitting.items():
-        found = _calling(rel, "admit_tenant")
-        assert found and required <= found, (rel, found)
+    # r10 A1 (conflict with r9's by-hand sites, updated): only the host acceptance step admits; run, the drain CLI,
+    # `revert_delivery` and the connect command no longer call `admit_tenant` themselves.
+    from defender.tests.support.tenancy._host1214 import HOST_ACCEPTANCE, HOST_MODULE_PATH
+
     others = [p.relative_to(DEFENDER).as_posix() for p in DEFENDER.rglob("*.py")
               if "tests" not in p.relative_to(DEFENDER).parts and ".venv" not in p.parts
-              and p.relative_to(DEFENDER).as_posix() not in admitting
+              and p.relative_to(DEFENDER).as_posix() != HOST_MODULE_PATH
               and _calling(p.relative_to(DEFENDER).as_posix(), "admit_tenant")]
-    assert others == [], "a new module admits a tenant: list it in this census"
-    # the by-hand revert reaches the delivery only through the admitting `revert_delivery`
+    assert others == [], "a module admits a tenant by hand, outside the host acceptance step"
+    # the by-hand revert admits through the host acceptance step and reaches the delivery through `revert_delivery`
+    assert _calling("cli/learning/revert_lesson.py", HOST_ACCEPTANCE)
     assert _calling("cli/learning/revert_lesson.py", "revert_delivery")
