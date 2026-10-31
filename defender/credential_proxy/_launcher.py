@@ -91,11 +91,22 @@ class TenantRequestSigner:
     def sign(self, payload: bytes) -> str:
         """The transit signature over `payload`; `ConfigFault` when OpenBao refuses, is sealed
         or cannot be reached."""
-        if self._client_token is None:
-            self._client_token = self._login()
+        for fresh in (self._client_token is None, True):
+            if fresh:
+                self._client_token = self._login()
+            response = self._post_sign(payload)
+            # an expired login (the AppRole token is short-lived) is refreshed once, not fatal
+            if response.status_code not in (401, 403) or fresh:
+                break
+        signature = _signature_of(response)
+        if signature is None:
+            raise ConfigFault(_refusal("signing", response))
+        return signature
+
+    def _post_sign(self, payload: bytes) -> httpx.Response:
         client = _issuer_client(self._config, self._transport, headers={"X-Vault-Token": self._client_token})
         try:
-            response = client.post(
+            return client.post(
                 f"{self._config.address}/v1/{TRANSIT_MOUNT}/sign/{self._key}",
                 json={"input": base64.b64encode(payload).decode("ascii")}, follow_redirects=False)
         except httpx.HTTPError as down:
@@ -103,10 +114,6 @@ class TenantRequestSigner:
                 f"OpenBao is unreachable for signing ({type(down).__name__})") from None
         finally:
             client.close()
-        signature = _signature_of(response)
-        if signature is None:
-            raise ConfigFault(_refusal("signing", response))
-        return signature
 
     def _login(self) -> str:
         client = _issuer_client(self._config, self._transport)

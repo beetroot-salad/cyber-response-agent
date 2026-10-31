@@ -86,8 +86,9 @@ def _via_proxy(ctx: VerbContext, method: str, url: str, body: dict | None,
         # A refused credential or declaration: the system is down for the run (O7), so the
         # record leg does not ask again.
         return None, f"{PROXY_REFUSED}: {answer.detail}"
-    if answer.fault is not None:
+    if answer.fault is not None and not answer.status:
         return None, f"transport error: the credential proxy answered {answer.fault}: {answer.detail}"
+    # The store's own refusal (409, 422, 5xx) keeps its status and body, as on the docker path.
     return str(answer.status), answer.body
 
 

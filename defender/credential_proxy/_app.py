@@ -154,6 +154,9 @@ class _Proxy:
             answer = _refused_answer(refused.fault, refused.detail)
         except ConfigFault as fault:
             answer = _refused_answer(CONFIG, fault.detail)
+        except Exception as e:  # noqa: BLE001 — A9: a request that cannot be processed is still classified and audited
+            _logger.error("a request could not be processed (%s)", type(e).__name__)
+            answer = _refused_answer(CONFIG, "the request could not be processed")
         try:
             self.deps.audit.record(trail.entry(answer["fault"]))
         except Exception as e:  # noqa: BLE001 — A13: any failure to audit fails the request closed
