@@ -378,10 +378,16 @@ def _command(main: Any, argv: list[str], directory: Any, *, refusal: bool = Fals
     return code, f"{code}\n{out.getvalue()}{err.getvalue()}" + "\n".join(logged.lines)
 
 
+#: The refusals about the tenant itself, which acceptance alone gives; the generic "not found" / "unknown" / "does not
+#: exist" are left out, as an absent run legitimately gets them after acceptance.
+TENANT_REFUSALS = ("no row", "not a tenant", "no forge wiring", "defender_database_dsn")
+
+
 def _no_state_refusal(text: str) -> bool:
-    """True when the command got past acceptance: no state refusal, no harness fault and no run-id grammar refusal (the
-    fixture ids are canonical, so a `RunRefused` would mean the command judged the id before accepting the tenant)."""
-    return (not any(w in text.lower() for w in NOT_A_REFUSAL_OF_STATE)
+    """True when the command got past acceptance: no state refusal, no tenant-specific refusal (no row, not a tenant, no
+    forge wiring, no database address), no harness fault and no run-id grammar refusal (the fixture ids are canonical,
+    so a `RunRefused` would mean the command judged the id before accepting the tenant)."""
+    return (not any(w in text.lower() for w in (*NOT_A_REFUSAL_OF_STATE, *TENANT_REFUSALS))
             and "TypeError" not in text and "RunRefused" not in text)
 
 
@@ -631,9 +637,23 @@ def _units(rel: str, tree: ast.Module) -> list[tuple[str, bool, list[ast.AST]]]:
     return units
 
 
+#: The A3 entry units: where a starter-covered process takes the folder raw. Their private helpers are not entries.
+A3_ENTRIES = frozenset({("learning/author/version_control/publish.py", "publish_for_run"),
+                        ("learning/author/version_control/publish.py", "publish_child_main"),
+                        ("investigation/publish_launch.py", "launch_publish"),
+                        ("skills/connect/validate_scaffold.py", "main")})
+
+
 def _is_barrier(rel: str, name: str) -> bool:
-    """The functions that may accept a tenant raw: the host acceptance (and its private helpers) and the A3 set."""
-    return rel in H.A3_SET or (rel == H.HOST_MODULE_PATH and (name == H.HOST_ACCEPTANCE or name.startswith("_")))
+    """The units that stop a reach from propagating to their callers: the host acceptance itself and the A3 entry units.
+    A public or private helper of the host module, or a private helper of an A3 module, that reaches the raw step still
+    marks whoever calls it from outside."""
+    return (rel == H.HOST_MODULE_PATH and name == H.HOST_ACCEPTANCE) or (rel, name) in A3_ENTRIES
+
+
+def _may_reach(rel: str) -> bool:
+    """The modules whose own functions are allowed to reach the raw step: the host module and the A3 set."""
+    return rel == H.HOST_MODULE_PATH or rel in H.A3_SET
 
 
 _Facts = dict[tuple[str, str], tuple[str, bool, list[tuple[str | None, str, bool]]]]
@@ -662,13 +682,14 @@ def _facts(production: dict[str, ast.Module]) -> _Facts:
     return facts
 
 
-def _refers(facts: _Facts, unit: tuple[str, str], target: tuple[str, str]) -> bool:
+def _refers(facts: _Facts, packages: set[str], unit: tuple[str, str], target: tuple[str, str]) -> bool:
+    """Whether `unit`'s body refers to `target`: the import's resolved module is the target's module, or a package whose
+    direct child module the target is (a re-export); a leaf name elsewhere in the package tree does not count."""
     t_module, t_method = facts[target][0], facts[target][1]
     for found, last, attribute in facts[unit][2]:
         if found is not None:
             home, _, leaf = found.rpartition(".")
-            if leaf == target[1] and (t_module == home or t_module.startswith(home + ".")
-                                      or home.startswith(t_module + ".")):
+            if leaf == target[1] and (t_module == home or (home in packages and t_module.rpartition(".")[0] == home)):
                 return True
         elif attribute and last == target[1] and t_method:
             return True
@@ -681,13 +702,14 @@ def _reaching(production: dict[str, ast.Module]) -> set[tuple[str, str]]:
     function (resolved through imports; a method by its name on an unresolved receiver). The host acceptance and the
     A3 set are reached but do not pass it on to their callers: they are where acceptance is allowed."""
     facts = _facts(production)
+    packages = {_dotted(rel) for rel, _ in facts if rel.endswith("__init__.py")}
     reaching = {unit for unit in facts if unit[1] == "accept_tenant" and unit[0] == H.RAW_LAYER}
     passing = set(reaching)
     grew = True
     while grew:
         grew = False
         for unit in facts:
-            if unit not in reaching and any(_refers(facts, unit, target) for target in passing):
+            if unit not in reaching and any(_refers(facts, packages, unit, target) for target in passing):
                 reaching.add(unit)
                 grew = True
                 if not _is_barrier(*unit):
@@ -696,7 +718,7 @@ def _reaching(production: dict[str, ast.Module]) -> set[tuple[str, str]]:
 
 
 def _offenders(reaching: set[tuple[str, str]]) -> set[tuple[str, str]]:
-    return {(rel, name) for rel, name in reaching if rel != H.RAW_LAYER and not _is_barrier(rel, name)}
+    return {(rel, name) for rel, name in reaching if rel != H.RAW_LAYER and not _may_reach(rel)}
 
 
 def test_a_function_reaches_the_raw_acceptance_only_in_the_host_acceptance_and_the_starter_covered_set():
@@ -717,6 +739,7 @@ def test_the_reachability_census_sees_a_new_wrapper_under_a_fresh_name_and_spare
            "class Tenant:\n    @staticmethod\n    def accept_requested_tenant(root, raw):\n"
            "        return requested_tenant(root, raw)\n")
     sources = {
+        "tenancy/__init__.py": "",
         "tenancy/_tenant.py": raw,
         "cli/by_hand.py": "from defender.tenancy import requested_tenant\ndef main(r, t):\n    return requested_tenant(r, t)\n",
         "cli/fresh.py": ("from defender.tenancy import accept_tenant\n"
@@ -739,6 +762,35 @@ def test_the_reachability_census_sees_a_new_wrapper_under_a_fresh_name_and_spare
     offenders = _offenders(_reaching({rel: ast.parse(text) for rel, text in sources.items()}))
     assert offenders == {("cli/by_hand.py", "main"), ("cli/fresh.py", "load_for_the_page"), ("cli/caller.py", "main"),
                          ("cli/bound.py", "main"), ("cli/alias.py", "main"), ("cli/scoped.py", "main")}, offenders
+
+
+def test_the_reachability_census_sees_through_the_host_modules_and_the_starter_set_helpers():
+    """The detector can fail where a barrier was too wide: a launcher reaching the raw step through the host module's
+    public resolver and its private loader, a command importing that private loader, and a command calling a private
+    acceptor of the scaffold validator are offenders; the host module's own functions and the validator's are not. A
+    parent package's same-named `main` does not stand in for a child package's."""
+    sources = {
+        "tenancy/__init__.py": "",
+        "tenancy/_tenant.py": "def accept_tenant(root, raw):\n    return object()\n",
+        H.HOST_MODULE_PATH: ("from defender.tenancy._tenant import accept_tenant\n"
+                             "def _load(root, raw):\n    return accept_tenant(root, raw)\n"
+                             "def host_tenant(root, raw):\n    return _load(root, raw)\n"
+                             "def resolve_tenant(root, raw):\n    return _load(root, raw)\n"),
+        "learning/branch/cli.py": ("from defender.systems.run_tenant import resolve_tenant\n"
+                                   "def _launch(argv):\n    return resolve_tenant(1, argv[0])\n"),
+        "cli/private.py": "from defender.systems.run_tenant import _load\ndef main(argv):\n    return _load(1, argv[0])\n",
+        "cli/a3.py": ("from defender.skills.connect.validate_scaffold import _accept\n"
+                      "def main(argv):\n    return _accept(1, argv[0])\n"),
+        "skills/connect/validate_scaffold.py": ("from defender.tenancy._tenant import accept_tenant\n"
+                                                "def _accept(r, t):\n    return accept_tenant(r, t)\n"
+                                                "def main():\n    return _accept(1, 2)\n"),
+        "cli/__init__.py": "",
+        "cli/sub/deep.py": "from defender.tenancy._tenant import accept_tenant\ndef go():\n    return accept_tenant(1, 2)\n",
+        "cli/other.py": "from defender.cli import go\ndef run():\n    return go()\n",
+    }
+    offenders = _offenders(_reaching({rel: ast.parse(text) for rel, text in sources.items()}))
+    assert offenders == {("learning/branch/cli.py", "_launch"), ("cli/private.py", "main"), ("cli/a3.py", "main"),
+                         ("cli/sub/deep.py", "go")}, offenders
 
 
 def _host_calls(rel: str, tree: ast.Module) -> list[tuple[int, tuple[str, ...]]]:

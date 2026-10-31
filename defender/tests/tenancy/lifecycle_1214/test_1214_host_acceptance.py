@@ -205,52 +205,62 @@ def test_an_acceptance_blocked_on_the_host_lock_waits_and_says_so_once_on_stderr
 
 # --- a refusal at the version check releases what was taken (O-A6) ---------------------------------------------
 
+def _accept_in_a_process(placed: Path, dsn: str) -> str:
+    """One `host_tenant` acceptance of T in a fresh process against `dsn`, printing what it raised or `ADMITTED` (the
+    version check runs once per process, so a refusal and its admitting control each need their own)."""
+    code = textwrap.dedent(f"""
+        from defender import tenancy
+        from defender.tests.support.tenancy._host1214 import host_tenant
+        from defender.systems.run_tenant import RecordsUnreachable
+        root = tenancy.resolve_data_root()
+        try:
+            with host_tenant(root, {TENANT!r}):
+                print("ADMITTED")
+        except Exception as failed:
+            print("RAISED", type(failed).__name__, isinstance(failed, RecordsUnreachable), failed)
+    """)
+    env = {k: v for k, v in os.environ.items() if k not in (H.LIFECYCLE_MARK, DSN_ENV)}
+    env |= {**database_env(dsn), "PYTHONPATH": str(REPO_ROOT), "DEFENDER_DATA_ROOT": str(placed)}
+    done = subprocess.run([sys.executable, "-c", code], env=env, cwd=REPO_ROOT, capture_output=True, text=True,  # noqa: S603
+                          timeout=120, check=False)
+    return done.stdout + done.stderr
+
+
 @pytest.mark.postgres
 def test_a_database_behind_is_refused_at_the_version_check_and_the_hold_and_record_are_released(
-        placed, empty_database, monkeypatch):  # noqa: F811
+        placed, empty_database):  # noqa: F811
     """The check runs after the hold is taken: a database at another revision raises `TenantRefused` naming both
-    revisions and leaves neither record nor lock; at head the same call admits (r10 O-A6, A1 order)."""
-    from defender import tenancy
+    revisions and leaves neither record nor lock; at head the same call admits (r10 O-A6, A1 order). Each acceptance is
+    its own process: the check runs once per process."""
     from defender.migrations import head, upgrade
     from defender.tests.migrations.test_1214_migrations import BASELINE, _upgrade_to
-    from defender.records.formats import TenantRefused
-    from defender.systems.run_tenant import RecordsUnreachable
 
-    root = tenancy.resolve_data_root()
-    monkeypatch.setenv(DSN_ENV, empty_database)
     _upgrade_to(empty_database, BASELINE)
-    with pytest.raises(TenantRefused) as refused:
-        host_tenant(root, TENANT)
-    assert not isinstance(refused.value, RecordsUnreachable), "a revision mismatch is not a transient outage"
-    assert BASELINE in str(refused.value), str(refused.value)
-    assert head() in str(refused.value), str(refused.value)
+    refused = _accept_in_a_process(placed, empty_database)
+    assert "RAISED TenantRefused False" in refused, f"a revision mismatch is a refusal, not a transient outage: {refused}"
+    assert BASELINE in refused, refused
+    assert head() in refused, refused
     assert recorded(placed, TENANT) == [], "the refusal kept the record"
     assert exclusive_free(placed, TENANT), "the refusal kept the lock"
     upgrade(empty_database)
     insert_active_tenant(empty_database, TENANT, data_root=placed)
-    with host_tenant(root, TENANT):
-        assert recorded(placed, TENANT) == this_process(), "control: at head the acceptance holds"
+    assert "ADMITTED" in _accept_in_a_process(placed, empty_database), "control: at head the acceptance holds"
     assert recorded(placed, TENANT) == []
 
 
 @pytest.mark.postgres
 def test_an_unreachable_database_is_refused_as_transient_and_the_hold_and_record_are_released(
-        placed, migrated_database, monkeypatch):  # noqa: F811
+        placed, migrated_database):  # noqa: F811
     """A database nothing answers at raises `RecordsUnreachable` (a drain's transient case) and leaves neither record
-    nor lock; the reachable database admits the same call (r10 O-A6, the version check step)."""
-    from defender import tenancy
-    from defender.systems.run_tenant import RecordsUnreachable
-
-    root = tenancy.resolve_data_root()
+    nor lock; the reachable database admits the same call (r10 O-A6, the version check step). Each acceptance is its own
+    process: the check runs once per process."""
     insert_active_tenant(migrated_database, TENANT, data_root=placed)
-    monkeypatch.setenv(DSN_ENV, "postgresql://nobody:nothing@127.0.0.1:1/none?connect_timeout=3")
-    with pytest.raises(RecordsUnreachable):
-        host_tenant(root, TENANT)
+    dead = "postgresql://nobody:nothing@127.0.0.1:1/none?connect_timeout=3"
+    refused = _accept_in_a_process(placed, dead)
+    assert "RAISED RecordsUnreachable True" in refused, refused
     assert recorded(placed, TENANT) == [], "the refusal kept the record"
     assert exclusive_free(placed, TENANT), "the refusal kept the lock"
-    monkeypatch.setenv(DSN_ENV, migrated_database)
-    with host_tenant(root, TENANT):
-        assert recorded(placed, TENANT) == this_process(), "control: the reachable database admits"
+    assert "ADMITTED" in _accept_in_a_process(placed, migrated_database), "control: the reachable database admits"
 
 
 # --- one repository open per acceptance (Finding 9) ---------------------------------------------------------
@@ -386,17 +396,20 @@ def test_the_publish_child_works_under_an_exclusive_hold_where_the_host_acceptan
 
     root = tenancy.resolve_data_root()
     seed_repo(placed / TENANT / "knowledge")  # a real git repository, as a tenant's clone is
-    active = _WiringReads(active_directory(placed, TENANT))
-    control = vc.publish_for_run(TENANT, data_root=placed, directory=active, budget=5.0)
+    # budget=None on both: the creating child runs in a thread, where the deadline's signal handler cannot be set, so a
+    # budget would put "signal only works in main thread" in its line alone. A closed port is the fast-failing origin.
+    origin = "http://127.0.0.1:1/x.git"
+    active = _WiringReads(active_directory(placed, TENANT, origin=origin))
+    control = vc.publish_for_run(TENANT, data_root=placed, directory=active, budget=None)
     assert active.wiring_reads == [TENANT], f"control: the active tenant's child never read its wiring: {control}"
-    creating = _WiringReads(active_directory(placed, TENANT, state="creating"))
+    creating = _WiringReads(active_directory(placed, TENANT, state="creating", origin=origin))
     fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
     assert fd is not None
     lines: list[str] = []
     gate = threading.Event()
 
     def publish() -> None:
-        lines.append(vc.publish_for_run(TENANT, data_root=placed, directory=creating, budget=5.0))
+        lines.append(vc.publish_for_run(TENANT, data_root=placed, directory=creating, budget=None))
 
     def accept() -> None:
         with host_tenant(root, TENANT, directory=active_directory(placed, TENANT)):
