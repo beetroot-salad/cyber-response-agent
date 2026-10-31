@@ -866,11 +866,13 @@ def test_two_tenants_held_at_once_are_each_recorded_and_locked_under_their_own_t
             for tenant in (TENANT, OTHER):
                 assert recorded(placed, tenant) == this_process(), f"{tenant} not recorded"
                 assert not exclusive_free(placed, tenant), f"{tenant} not locked"
-        assert recorded(placed, OTHER) == [] and exclusive_free(placed, OTHER), "the inner tenant's hold outlived its scope"
+        assert recorded(placed, OTHER) == [], "the inner tenant's hold outlived its scope"
+        assert exclusive_free(placed, OTHER), "the inner tenant's hold outlived its scope"
         assert recorded(placed, TENANT) == this_process(), "the inner exit removed the other tenant's record"
         assert not exclusive_free(placed, TENANT), "the inner exit released the other tenant's lock"
     for tenant in (TENANT, OTHER):
-        assert recorded(placed, tenant) == [] and exclusive_free(placed, tenant)
+        assert recorded(placed, tenant) == []
+        assert exclusive_free(placed, tenant)
 
 
 def test_two_tenants_held_by_the_outer_scope_leave_the_other_when_the_first_exits(placed):
@@ -891,13 +893,15 @@ def test_two_tenants_held_by_the_outer_scope_leave_the_other_when_the_first_exit
     try:
         with host_lock.hold_shared(placed, TENANT):
             assert recorded(placed, TENANT) == this_process()
-        assert recorded(placed, TENANT) == [] and exclusive_free(placed, TENANT)
+        assert recorded(placed, TENANT) == []
+        assert exclusive_free(placed, TENANT)
         assert recorded(placed, OTHER) == this_process(), "one tenant's exit removed the other tenant's record"
         assert not exclusive_free(placed, OTHER), "one tenant's exit released the other tenant's lock"
     finally:
         leave.set()
         thread.join(30)
-    assert recorded(placed, OTHER) == [] and exclusive_free(placed, OTHER)
+    assert recorded(placed, OTHER) == []
+    assert exclusive_free(placed, OTHER)
 
 
 def test_one_tenant_held_under_two_data_roots_has_a_hold_under_each(placed, tmp_path):
@@ -912,10 +916,12 @@ def test_one_tenant_held_under_two_data_roots_has_a_hold_under_each(placed, tmp_
             for root in (placed, second):
                 assert recorded(root, TENANT) == this_process(), f"not recorded under {root}"
                 assert not exclusive_free(root, TENANT), f"not locked under {root}"
-        assert recorded(second, TENANT) == [] and exclusive_free(second, TENANT), "the second root's hold outlived its scope"
+        assert recorded(second, TENANT) == [], "the second root's hold outlived its scope"
+        assert exclusive_free(second, TENANT), "the second root's hold outlived its scope"
         assert recorded(placed, TENANT) == this_process(), "the second root's exit removed the first root's record"
         assert not exclusive_free(placed, TENANT)
-    assert recorded(placed, TENANT) == [] and exclusive_free(placed, TENANT)
+    assert recorded(placed, TENANT) == []
+    assert exclusive_free(placed, TENANT)
 
 
 def test_an_exception_raised_in_a_direct_hold_releases_the_record_and_the_lock(placed):
@@ -923,9 +929,13 @@ def test_an_exception_raised_in_a_direct_hold_releases_the_record_and_the_lock(p
     releases whatever it took, however it ends)."""
     from defender.tenancy import host_lock
 
-    with pytest.raises(RuntimeError, match="boom"), host_lock.hold_shared(placed, TENANT):
-        assert recorded(placed, TENANT) == this_process(), "control: recorded inside the scope"
-        raise RuntimeError("boom")
+    def fail_inside() -> None:
+        with host_lock.hold_shared(placed, TENANT):
+            assert recorded(placed, TENANT) == this_process(), "control: recorded inside the scope"
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        fail_inside()
     assert recorded(placed, TENANT) == [], "the error left this process recorded"
     assert exclusive_free(placed, TENANT), "the error left the lock held"
 
