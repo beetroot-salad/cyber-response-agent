@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import time
+from urllib.parse import urlencode
 
 import pytest
 
@@ -22,6 +23,7 @@ from defender.tests.tenancy.tenant_1108_p4._support import (
 pytestmark = pytest.mark.e2e
 
 API = "/api"
+# bound pending design amendment (preflight token lifetime)
 #: Longest a preflight read token may live (one pass of live reads), and the clock slack.
 PREFLIGHT_LIFETIME = 3600
 CLOCK_TOLERANCE = 60
@@ -110,7 +112,8 @@ def test_p1_preflight_reads_idp_through_the_proxy_with_a_read_grant_on_http_prox
         tmp_path, monkeypatch, data_root, working_tree_edit=False)
     finished = time.time()
     assert run.rc == 0, run.message
-    assert [p.split("?")[0] for p in merged.paths()] == [f"{API}/events"]
+    idp_call = [c for c in S.default_calls() if c.system == "idp"][0]
+    assert merged.paths() == [f"{API}/events?{urlencode({'q': idp_call.params['q']})}"]
     assert merged.seen[0].headers.get("Authorization") == f"Bearer {H.CANARY_KEY}"
     assert bao.logins == [(ROLE, SECRET)], "the tenant's own issuer login"
     (sign,) = bao.signs

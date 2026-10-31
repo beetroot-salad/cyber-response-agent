@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import time
+from datetime import timedelta
 
 import pytest
 
@@ -75,30 +76,51 @@ def test_c3_two_systems_of_one_tenant_with_one_token_url_never_share_an_access_t
         ("/crm/items", f"Bearer {issued[0]}"), ("/billing/items", f"Bearer {issued[1]}")]
 
 
-def test_c3_an_access_token_is_exchanged_again_once_its_stated_life_less_the_margin_is_over(
-        tmp_path, data_root):
-    """With `expires_in` 32 s (2 s past the 30 s margin) the token is reused while fresh and
-    exchanged again after that. A8, O7."""
+def _asks_across_a_clock_jump(tmp_path, data_root, monkeypatch, jump: float):
+    """Two asks of one OAuth system whose token endpoint states a one-hour life, then the clocks
+    (`time.monotonic` and `time.time`, as the proxy and the signer read them) jump `jump` seconds
+    and a third ask is made with the same (long-lived) request token. No dependence on the proxy's
+    refresh margin: the jumps used are far from the one hour. Returns (issued, upstream seen)."""
     issued: list[str] = []
+    offset = [0.0]
+    real_monotonic, real_time = time.monotonic, time.time
+    monkeypatch.setattr(time, "monotonic", lambda: real_monotonic() + offset[0])  # lint-monkeypatch: ok — the proxy reads the clock directly; a seam is a production change the design does not ask for
+    monkeypatch.setattr(time, "time", lambda: real_time() + offset[0])  # lint-monkeypatch: ok — same clock, no seam
 
-    def short(seen):
+    def stated(seen):
         status, headers, body = H.token_endpoint(issued)(seen)
-        return status, headers, json.dumps({**json.loads(body), "expires_in": 32}).encode()
+        return status, headers, json.dumps({**json.loads(body), "expires_in": 3600}).encode()
 
     with H.upstream() as auth:
-        auth.replies["/token"] = short
+        auth.replies["/token"] = stated
         with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
                 u + BASE, scheme=H.oauth_scheme(auth.url + "/token")), creds=T.oauth_set()) as r:
-            tok = r.tok()
+            tok = r.tok(expires_in=timedelta(hours=12))  # outlives the jump
             r.ask(tok=tok)
             r.ask(tok=tok)
-            fresh_issued = list(issued)
-            time.sleep(2.3)
+            offset[0] = jump
             r.ask(tok=tok)
+    return issued, r.up.seen
 
-    assert fresh_issued == ["AT-1-canary-1163"], "control: reused while within its life"
-    assert issued == ["AT-1-canary-1163", "AT-2-canary-1163"]
-    assert [s.header("Authorization") for s in r.up.seen] == [
+
+def test_c3_an_access_token_is_reused_while_most_of_its_stated_life_remains(
+        tmp_path, data_root, monkeypatch):
+    """A token stated to live an hour is exchanged once and still reused when the clock has
+    moved a few minutes on. A8, O7."""
+    issued, seen = _asks_across_a_clock_jump(tmp_path, data_root, monkeypatch, 300)
+
+    assert issued == ["AT-1-canary-1163"], "exchanged again though most of its life remains"
+    assert [s.header("Authorization") for s in seen] == [f"Bearer {issued[0]}"] * 3
+
+
+def test_c3_an_access_token_whose_stated_life_is_over_is_exchanged_again(
+        tmp_path, data_root, monkeypatch):
+    """A token stated to live an hour is exchanged afresh by an ask made two hours later; the
+    old token is not sent again. A8, O7."""
+    issued, seen = _asks_across_a_clock_jump(tmp_path, data_root, monkeypatch, 7200)
+
+    assert issued == ["AT-1-canary-1163", "AT-2-canary-1163"], issued
+    assert [s.header("Authorization") for s in seen] == [
         f"Bearer {issued[0]}", f"Bearer {issued[0]}", f"Bearer {issued[1]}"]
 
 

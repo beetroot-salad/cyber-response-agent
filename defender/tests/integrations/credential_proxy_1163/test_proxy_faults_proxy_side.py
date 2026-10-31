@@ -129,8 +129,10 @@ def test_f4_a_lone_surrogate_in_a_request_is_classified_and_audited(
     assert answer["fault"] in ("ConfigFault", "ConfinementFault"), answer
     assert r.up.paths() == [PATH], "only the control request was sent"
     assert control["fault"] is None
-    refused = [rec for rec in r.audit.records if rec["fault"] is not None]
-    assert [rec["fault"] for rec in refused] == [answer["fault"]], "the refusal was audited once"
+    refused = [rec for rec in r.audit.records if not rec["outcome"].startswith("sent ")]
+    assert [rec["outcome"] for rec in refused] == [answer["fault"]], "the refusal was audited once"
+    sent = [rec for rec in r.audit.records if rec["outcome"].startswith("sent ")]
+    assert len(sent) == 1, "the control request was audited as sent"
 
 
 @pytest.mark.parametrize("shape", ["whole-request", "in-headers"])
@@ -150,4 +152,7 @@ def test_f4_deeply_nested_json_is_classified_and_audited(tmp_path, data_root, sh
     answer = response.json()
     assert answer["fault"] in ("ConfigFault", "ConfinementFault"), answer
     assert (control["fault"], r.up.paths()) == (None, [PATH])
-    assert [rec["fault"] for rec in r.audit.records] == [answer["fault"], None]
+    records = r.audit.records
+    assert len(records) == 2, records
+    assert records[0]["outcome"] == answer["fault"], records
+    assert records[1]["outcome"].startswith("sent "), records

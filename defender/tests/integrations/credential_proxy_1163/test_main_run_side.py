@@ -2,6 +2,7 @@
 against an operator config file takes its OpenBao token from files alone and never prints it."""
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import socket
@@ -14,6 +15,7 @@ import httpx
 
 from defender._git import REPO_ROOT
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
+from defender.tests.integrations.credential_proxy_1163 import _target as P
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -37,10 +39,10 @@ def _config(tmp_path: Path, bao_url: str, **token: str) -> Path:
 
 def _start(config: Path, port: int) -> subprocess.Popen[str]:
     env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT),
-           "DEFENDER_CREDENTIAL_PROXY_CONFIG": str(config),
-           "DEFENDER_CREDENTIAL_PROXY_PORT": str(port), "DEFENDER_LOG_LEVEL": "DEBUG",
+           P.PROXY_ENV_CONFIG: str(config),
+           P.PROXY_ENV_PORT: str(port), "DEFENDER_LOG_LEVEL": "DEBUG",
            "VAULT_TOKEN": ENV_TOKEN, "BAO_TOKEN": ENV_TOKEN, "VAULT_ADDR": "http://decoy.invalid"}
-    return subprocess.Popen([sys.executable, "-m", "defender.credential_proxy"], cwd=REPO_ROOT,
+    return subprocess.Popen([sys.executable, "-m", P.PROXY_PROGRAM_MODULE], cwd=REPO_ROOT,
                             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
 
@@ -70,7 +72,8 @@ def test_m1_the_served_proxy_uses_the_token_file_and_prints_no_token(tmp_path):
     with H.upstream() as bao:
         bao.replies[f"/v1/transit/verify/{KEY}"] = (
             200, {"Content-Type": "application/json"}, b'{"data": {"valid": true}}')
-        proc = _start(_config(tmp_path, bao.url, openbao_token_file=str(token_file)), port)
+        proc = _start(_config(tmp_path, bao.url, **{P.PROXY_CONFIG_TOKEN_FILE_KEY: str(token_file)}),
+                      port)
         try:
             deadline = time.monotonic() + START_SEC
             while not _listening(port) and proc.poll() is None and time.monotonic() < deadline:
@@ -98,15 +101,13 @@ def test_m2_a_config_naming_no_token_does_not_fall_back_to_the_environment(tmp_p
     port = H.free_port()
     with H.upstream() as bao:
         proc = _start(_config(tmp_path, bao.url), port)
-        try:
+        with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=REFUSE_SEC)
-        except subprocess.TimeoutExpired:
-            pass
         served = _listening(port)
         out = _stop(proc)
 
     assert not served, "the program is serving with a token from the environment"
-    assert proc.returncode == 2, (proc.returncode, out)
+    assert proc.returncode == P.PROXY_REFUSAL_EXIT, (proc.returncode, out)
     assert bao.seen == []
-    assert "credential proxy cannot start" in out, "positive control: the refusal is logged"
+    assert P.PROXY_REFUSAL_LOG in out, "positive control: the refusal is logged"
     assert ENV_TOKEN not in out

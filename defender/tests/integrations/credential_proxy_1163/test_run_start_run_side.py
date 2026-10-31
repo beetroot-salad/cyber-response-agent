@@ -2,28 +2,20 @@
 every repr, and the signing login taken from the issuer file alone. Driven through `run.main`."""
 from __future__ import annotations
 
-import time
-
-from defender.investigation.run_state import RunState
-from defender.kit.access import RequestAccess
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import test_run_start_tokens as R
+from defender.tests.integrations.credential_proxy_1163._target import (
+    RUN_STATE_ACCESS_ATTR, request_access_type)
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
-#: The longest a write-back token may outlive the leg that minted it (O10 #1163 hole 9), and the
-#: seconds of clock slack between this test and the run's stamp.
-LEG_LIFETIME = 3600
-CLOCK_SLACK = 60
 
-
-def test_w1_each_write_back_token_expires_within_the_hour_of_its_ticket_leg(
-        tmp_path, data_root):
-    """Both ticket legs' `rw` tokens expire after the run began and no later than an hour past
-    the end of the run. A7, O8."""
+def test_w1_each_write_back_token_expires_within_the_runs_own_ceiling(tmp_path, data_root):
+    """Both ticket legs' `rw` tokens expire after the run began and no later than the run's own
+    ceiling (budget + grace + margin + clock tolerance): a ticket leg cannot outlive its run.
+    A7, A15, O8."""
     R._plant(data_root, proxy=("identity", "case-history"))
     signer = A.MarkedSigner()
     rec, tickets, rc, refused, started = R._drive(tmp_path, data_root, signer=signer)
-    finished = time.time()
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
@@ -31,28 +23,35 @@ def test_w1_each_write_back_token_expires_within_the_hour_of_its_ticket_leg(
     write_back = [c for c in claims if A.grant_of(c) == [("case-history", "rw")]]
     assert len(write_back) == 2, "one write-back token per ticket leg"
     for c in write_back:
-        assert started < c["exp"] <= finished + LEG_LIFETIME + CLOCK_SLACK, c["exp"] - finished
+        assert started < c["exp"] <= started + R.BUDGET + R.MARGIN + R.CLOCK_TOLERANCE, (
+            c["exp"] - started)
     assert tickets.leg("open")["request_token"], "positive control: the legs were handed tokens"
 
 
 def test_w2_the_runs_request_access_shows_no_token_in_any_repr(tmp_path, data_root):
-    """The proxy address and read token the run hands its lifecycle show the address but not the
-    token in a repr, and neither does the run state holding it. O10, A7."""
+    """Through the real run, no repr or str of anything the run hands its lifecycle (the access,
+    the run state holding it, every argument) shows the request token; the address shows. O10, A7."""
     R._plant(data_root, proxy=("identity",))
     signer = A.MarkedSigner()
     rec, _tickets, rc, refused, _ = R._drive(tmp_path, data_root, signer=signer, ticket=False)
 
     assert refused is None, (rc, refused)
     (life,) = rec.lifecycle_calls
-    (access,) = [v for v in life.values() if isinstance(v, RequestAccess)]
+    access_type = request_access_type()
+    (access,) = [v for v in life.values() if isinstance(v, access_type)]
     assert A.SIGNATURE_CANARY in access.token, "positive control: the access holds the signed token"
-    state = RunState(tmp_path / "state", "w2")
-    state.access = access
-    assert state.access is access
-    for shown in (repr(access), str(access), repr([access]), repr(vars(state))):
-        assert A.SIGNATURE_CANARY not in shown, "the request token shows in a repr (O10)"
-    assert "proxy.invalid" in repr(access), "positive control: the repr shows the address"
-    assert "proxy.invalid" in repr(vars(state)), "positive control: the state's fields are read"
+
+    shown: list[str] = []
+    for held in life.values():
+        shown += [repr(held), str(held)]
+        if hasattr(held, "__dict__") and held is not access:  # the access holds the token itself
+            shown.append(repr(vars(held)))
+    run = life["run"]
+    snapshot = getattr(run, RUN_STATE_ACCESS_ATTR, None)
+    shown += [repr(snapshot), repr([snapshot])]
+    for text in shown:
+        assert A.SIGNATURE_CANARY not in text, "the request token shows in a repr (O10)"
+    assert any("proxy.invalid" in text for text in shown), "positive control: the address shows"
 
 
 ROLE, SECRET = "role-1163-file", "secret-1163-file"

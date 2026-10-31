@@ -18,7 +18,7 @@ from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163 import test_query_flow as Q
 from defender.tests.integrations.credential_proxy_1163 import test_ticket_flow as K
-from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH
+from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH, transport_uses_proxy
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 GRANT = {("identity", "r")}
@@ -121,8 +121,10 @@ def test_x3_the_ticket_writer_takes_the_proxy_address_from_the_run_not_the_envir
             control = K._legs(tmp_path, t, control_run, control_rec, url, tok)
 
     assert reached_by_env == [], "the writer reached the proxy through the environment's address"
-    assert env_only is not None and env_only["ok"] is False, env_only
-    assert control is not None and control["ok"] is True, control
+    assert env_only is not None, env_only
+    assert env_only["ok"] is False, env_only
+    assert control is not None, control
+    assert control["ok"] is True, control
     assert tap.tokens, "positive control: the proxy is reachable at that address"
     assert shim.calls() == []
 
@@ -132,19 +134,19 @@ def test_x4_an_http_proxy_system_with_no_token_is_refused_as_a_proxy_fault_and_n
     """No request token on the context: the query raises a fault naming the proxy, nothing is
     sent, and docker is never called. A6, A9."""
     shim = S.DockerShim(tmp_path / "shim")
-    with H.upstream() as up, Q._published(tmp_path, data_root, up) as t:
-        with A.proxy_for(t, Q._store(t)) as (url, tap):
-            record = T.run_record(t)
-            tokenless = A.ctx_for(tmp_path, record, url, None, env=shim.env({}))
-            with pytest.raises(AdapterFault) as raised:
-                identity_adapter.get_user(tokenless, user="dev.dana")
-            addressless = A.ctx_for(tmp_path, record, None, T.token(t.tenant_id, GRANT),
-                                    env=shim.env({}))
-            with pytest.raises(AdapterFault) as no_address:
-                identity_adapter.get_user(addressless, user="dev.dana")
-            control = A.ctx_for(tmp_path, record, url, T.token(t.tenant_id, GRANT),
+    with (H.upstream() as up, Q._published(tmp_path, data_root, up) as t,
+          A.proxy_for(t, Q._store(t)) as (url, tap)):
+        record = T.run_record(t)
+        tokenless = A.ctx_for(tmp_path, record, url, None, env=shim.env({}))
+        with pytest.raises(AdapterFault) as raised:
+            identity_adapter.get_user(tokenless, user="dev.dana")
+        addressless = A.ctx_for(tmp_path, record, None, T.token(t.tenant_id, GRANT),
                                 env=shim.env({}))
-            assert identity_adapter.get_user(control, user="dev.dana")["path"]
+        with pytest.raises(AdapterFault) as no_address:
+            identity_adapter.get_user(addressless, user="dev.dana")
+        control = A.ctx_for(tmp_path, record, url, T.token(t.tenant_id, GRANT),
+                            env=shim.env({}))
+        assert identity_adapter.get_user(control, user="dev.dana")["path"]
 
     for fault in (raised.value, no_address.value):
         assert "proxy" in str(fault).lower(), fault
@@ -159,4 +161,4 @@ def test_x5_the_docker_transport_refuses_an_http_proxy_system(tmp_path, data_roo
         record = T.run_record(t)
         with pytest.raises(ConfigFault):
             transport.record_access_context(record, "identity")
-        assert transport.uses_proxy(record, "identity"), "positive control: it is http-proxy"
+        assert transport_uses_proxy(record, "identity"), "positive control: it is http-proxy"

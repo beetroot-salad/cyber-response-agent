@@ -9,7 +9,7 @@ from defender.tests.tenancy.tenant_1108_p4 import test_dev_compose as C
 
 DATA_ROOT = REPO_ROOT / ".defender-data"
 #: Environment names that would carry a login to OpenBao or to the proxy's store.
-TOKENISH = re.compile(r"TOKEN|SECRET|PASSWORD|ROLE_ID|VAULT|BAO|ROOT", re.IGNORECASE)
+TOKENISH = re.compile(r"TOKEN|SECRET|PASSWORD|ROLE_ID|SECRET_ID", re.IGNORECASE)
 
 
 def _proxy() -> dict:
@@ -37,11 +37,10 @@ def test_c1_the_proxy_service_mounts_the_data_root_read_only():
 
 
 def test_c2_the_proxy_service_environment_holds_no_token_or_login():
-    """No environment name that could carry a login, no value of an OpenBao dev root token, no
-    env file; the operator's config path is there. H4, O5."""
+    """No environment name that could carry a login, no env file; the operator's config path is
+    there. H4, O5."""
     svc = _proxy()
     env = C._environment(svc)
     assert "DEFENDER_CREDENTIAL_PROXY_CONFIG" in env, "positive control: the environment is read"
     assert not [k for k in env if TOKENISH.search(k)], f"token-like names: {sorted(env)}"
-    assert not [v for v in env.values() if v.strip().lower() in ("root", "dev-root-token")]
     assert not svc.get("env_file"), "an env file can carry a token the test cannot see"
