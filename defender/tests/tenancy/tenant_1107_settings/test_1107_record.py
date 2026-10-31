@@ -1,4 +1,8 @@
-"""resolve_tenant / resolve_run_tenant: systems, ticket mapping, faults kept per system, fresh read per resolve, read-only parts."""
+"""resolve_tenant / resolve_run_tenant: systems, ticket mapping, faults kept per system, fresh read per resolve, read-only parts.
+
+Relies on `defender.systems.verbs.ReadCut(as_of, arrived_by=None).applied(ctx)` (a VerbContext copy
+carrying the cut) for the read-only-parts test.
+"""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root

@@ -256,7 +256,7 @@ def test_a_cut_run_writes_nothing_about_the_cut_beyond_the_clock_stamps(tmp_path
 
     wall_needles = {n for at in (began, dt.datetime.now(dt.UTC))
                     for n in (at.date().isoformat(), at.strftime("%Y%m%d"),
-                              str(int(at.timestamp()))[:6])}
+                              str(int(at.timestamp()))[:8])}
     wall_needles |= {dt.date.today().isoformat(), C.ARM_START.date().isoformat()}
     assert not wall_needles & {"2026-03-02", "2026-03-04", "20260302", "20260304"}, (
         "fixture dates collide with the wall clock")

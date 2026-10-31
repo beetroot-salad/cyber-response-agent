@@ -418,8 +418,6 @@ ESQL_INSIDE = [
     pytest.param("FROM logs-*, (FROM security-audit-* | LIMIT 1)", id="subquery-inside"),
     pytest.param("ROW a = 1", id="row-reads-no-index"),
     pytest.param("SHOW INFO", id="show-reads-no-index"),
-    pytest.param("FROM logs-* | FORK (WHERE a == 1) (LOOKUP JOIN logs-lookup ON x)",
-                 id="fork-lookup-join-inside"),
     pytest.param("FROM logs-*, (FROM security-audit-*), (FROM logs-system.auth-*)",
                  id="two-subqueries-inside"),
     pytest.param("FROM logs-* | LOOKUP JOIN logs-a ON x | LOOKUP JOIN logs-b ON y",

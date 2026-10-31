@@ -6,6 +6,7 @@ the lab operations is read from a single list of `(op, detail)` entries.
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 import time
 from datetime import datetime, timedelta, UTC
@@ -180,16 +181,39 @@ class FakeCaptureOps:
 
 
 class LocalContainer:
-    """Stands in for `docker --context C exec CONTAINER <argv>`: runs the argv on this machine
-    with absolute-path arguments re-rooted under `root`, so a shell script meant for the lab
-    container acts on a throwaway directory. It knows nothing about locks."""
+    """Stands in for `docker --context C exec [opts] CONTAINER <argv>`: runs the argv on this
+    machine with absolute paths re-rooted under `root`, so a script meant for the lab container
+    acts on a throwaway directory. It never touches a path outside `root` (an absolute path it
+    cannot re-root raises AssertionError). It knows nothing about locks."""
+
+    _PATH = re.compile(r"(?<![\w./~$-])/[A-Za-z0-9_.][^\s'\"`;|&<>()$\\]*")
 
     def __init__(self, root: Path) -> None:
         self.root, self.argvs = root, []
+
+    def _reroot(self, text: str) -> str:
+        root = str(self.root)
+
+        def sub(m: re.Match) -> str:
+            path = m.group(0)
+            if path == root or path.startswith(root + "/"):
+                return path
+            if path in ("/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr"):
+                return path
+            return root + path
+
+        return self._PATH.sub(sub, text)
 
     def __call__(self, argv: list[str], **kwargs: Any) -> Any:
         import subprocess
         self.argvs.append(list(argv))
         assert argv[:2] == ["docker", "--context"] and argv[3] == "exec", argv
-        inner = [str(self.root) + a if a.startswith("/") else a for a in argv[5:]]
-        return subprocess.run(inner, capture_output=True, text=True)
+        rest, i = list(argv[4:]), 0
+        while rest[i].startswith("-"):  # docker exec options: -i, -u X, -e K=V, -w D
+            i += 2 if rest[i] in ("-u", "-e", "-w", "--user", "--env", "--workdir") else 1
+        inner = [self._reroot(a) for a in rest[i + 1:]]  # rest[i] is the container
+        assert inner, argv
+        if inner[0] == "/" or any(a == "/" for a in inner):
+            raise AssertionError(f"bare root path in {argv}")
+        run_kwargs = {k: v for k, v in kwargs.items() if k in ("input", "stdin", "timeout")}
+        return subprocess.run(inner, capture_output=True, text=True, **run_kwargs)
