@@ -206,18 +206,24 @@ def test_an_acceptance_blocked_on_the_host_lock_waits_and_says_so_once_on_stderr
 # --- a refusal at the version check releases what was taken (O-A6) ---------------------------------------------
 
 def _accept_in_a_process(placed: Path, dsn: str) -> str:
-    """One `host_tenant` acceptance of T in a fresh process against `dsn`, printing what it raised or `ADMITTED` (the
-    version check runs once per process, so a refusal and its admitting control each need their own)."""
+    """One `host_tenant` acceptance of T in a fresh process against `dsn`, printing what it raised or `ADMITTED`, and the
+    hold as that process sees it before exiting (an exit drops any lock; the check runs once per process)."""
     code = textwrap.dedent(f"""
+        import os
+        from pathlib import Path
         from defender import tenancy
-        from defender.tests.support.tenancy._host1214 import host_tenant
+        from defender.records.formats import TenantRefused
+        from defender.tests.support.tenancy._host1214 import exclusive_free, host_tenant, recorded, this_process
         from defender.systems.run_tenant import RecordsUnreachable
+        placed = Path(os.environ["DEFENDER_DATA_ROOT"])
         root = tenancy.resolve_data_root()
         try:
             with host_tenant(root, {TENANT!r}):
-                print("ADMITTED")
+                print("ADMITTED HELD", recorded(placed, {TENANT!r}) == this_process())
         except Exception as failed:
-            print("RAISED", type(failed).__name__, isinstance(failed, RecordsUnreachable), failed)
+            print("RAISED refusal", isinstance(failed, TenantRefused), "transient",
+                  isinstance(failed, RecordsUnreachable), failed)
+            print("AFTER-REFUSAL recorded", recorded(placed, {TENANT!r}), "free", exclusive_free(placed, {TENANT!r}))
     """)
     env = {k: v for k, v in os.environ.items() if k not in (H.LIFECYCLE_MARK, DSN_ENV)}
     env |= {**database_env(dsn), "PYTHONPATH": str(REPO_ROOT), "DEFENDER_DATA_ROOT": str(placed)}
@@ -237,15 +243,15 @@ def test_a_database_behind_is_refused_at_the_version_check_and_the_hold_and_reco
 
     _upgrade_to(empty_database, BASELINE)
     refused = _accept_in_a_process(placed, empty_database)
-    assert "RAISED TenantRefused False" in refused, f"a revision mismatch is a refusal, not a transient outage: {refused}"
+    assert "RAISED refusal True transient False" in refused, (
+        f"a revision mismatch is a refusal, not a transient outage: {refused}")
     assert BASELINE in refused, refused
     assert head() in refused, refused
-    assert recorded(placed, TENANT) == [], "the refusal kept the record"
-    assert exclusive_free(placed, TENANT), "the refusal kept the lock"
+    assert "AFTER-REFUSAL recorded [] free True" in refused, f"the refusal kept the record or the lock: {refused}"
     upgrade(empty_database)
     insert_active_tenant(empty_database, TENANT, data_root=placed)
-    assert "ADMITTED" in _accept_in_a_process(placed, empty_database), "control: at head the acceptance holds"
-    assert recorded(placed, TENANT) == []
+    admitted = _accept_in_a_process(placed, empty_database)
+    assert "ADMITTED HELD True" in admitted, f"control: at head the acceptance holds: {admitted}"
 
 
 @pytest.mark.postgres
@@ -257,10 +263,10 @@ def test_an_unreachable_database_is_refused_as_transient_and_the_hold_and_record
     insert_active_tenant(migrated_database, TENANT, data_root=placed)
     dead = "postgresql://nobody:nothing@127.0.0.1:1/none?connect_timeout=3"
     refused = _accept_in_a_process(placed, dead)
-    assert "RAISED RecordsUnreachable True" in refused, refused
-    assert recorded(placed, TENANT) == [], "the refusal kept the record"
-    assert exclusive_free(placed, TENANT), "the refusal kept the lock"
-    assert "ADMITTED" in _accept_in_a_process(placed, migrated_database), "control: the reachable database admits"
+    assert "RAISED refusal True transient True" in refused, refused
+    assert "AFTER-REFUSAL recorded [] free True" in refused, f"the refusal kept the record or the lock: {refused}"
+    admitted = _accept_in_a_process(placed, migrated_database)
+    assert "ADMITTED HELD True" in admitted, f"control: the reachable database admits and holds: {admitted}"
 
 
 # --- one repository open per acceptance (Finding 9) ---------------------------------------------------------
