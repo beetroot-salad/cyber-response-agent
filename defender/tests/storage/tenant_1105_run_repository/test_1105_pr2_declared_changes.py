@@ -351,42 +351,53 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
 
 def _drain_scene(tmp_path: Path):
     """Two real tenants under the data root, each with a natural runs folder holding `RID_R1`, and
-    the drain's paths (a git work tree and a state root)."""
+    each one's drain paths (its learning root, `paths.tenant` its accepted tenant: r10.1 C1)."""
     root = location_path(P.data_root)()
     t = H.tenant(root, H.T_ID)
     u = H.tenant(root, H.U_ID)
     for tenant in (t, u):
         H.runs_folder(tenant)
         H.make_run(location_path(tenant.runs), RID_R1)
-    return t, u, P.loop_paths(tmp_path)
+    return t, u, P.tenant_loop_paths(t), P.tenant_loop_paths(u)
 
 
 def test_dc8_the_drain_rehydrates_the_row_in_its_own_tenant(tmp_path):
-    t, u, paths = _drain_scene(tmp_path)
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
-    P.queue_row(paths, "case-u", {"case_id": "case-u", "tenant_id": H.U_ID, "run_id": RID_R1})
-    lane = P.Lane()
-    P.drain(paths, lane)
-    assert sorted(lane.run_dirs) == sorted([Path(location_path(t.runs)) / RID_R1, Path(location_path(u.runs)) / RID_R1]), (
-        f"served {lane.run_dirs}")
-    assert P.dead_letter(paths, "case-t") is None
-    assert P.dead_letter(paths, "case-u") is None
+    """A drain serves the rows of the tenant it accepted, through that tenant's repository; it opens no other tenant's
+    (r10.1 C1: the drain's rehydration uses `paths.tenant`, nothing under the scope accepts again)."""
+    t, u, t_paths, u_paths = _drain_scene(tmp_path)
+    P.queue_row(t_paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
+    P.queue_row(u_paths, "case-u", {"case_id": "case-u", "tenant_id": H.U_ID, "run_id": RID_R1})
+    t_lane, u_lane = P.Lane(), P.Lane()
+    P.drain(t_paths, t_lane)
+    P.drain(u_paths, u_lane)
+    assert t_lane.run_dirs == [Path(location_path(t.runs)) / RID_R1], f"T's drain served {t_lane.run_dirs}"
+    assert u_lane.run_dirs == [Path(location_path(u.runs)) / RID_R1], f"U's drain served {u_lane.run_dirs}"
+    assert P.dead_letter(t_paths, "case-t") is None
+    assert P.dead_letter(u_paths, "case-u") is None
+    # A row naming the other tenant is never opened through this drain's tenant (this lane double never consumes what
+    # it is handed, so T's own row may be handed again: only a run under U's folder would be wrong).
+    P.queue_row(t_paths, "case-crossed", {"case_id": "case-crossed", "tenant_id": H.U_ID, "run_id": RID_R1})
+    crossed = P.Lane()
+    P.drain(t_paths, crossed)
+    assert Path(location_path(u.runs)) / RID_R1 not in crossed.run_dirs, "T's drain served a run of another tenant"
 
 
-def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch):
-    t, _u, paths = _drain_scene(tmp_path)
-    root = os.environ[P.DATA_ROOT_ENV]
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
+def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch, capsys):
+    """With no data root the drain command is refused at its host acceptance, before it claims anything: its rows stay
+    queued, uncounted and not dead-lettered (r10 A1: the data root is judged at acceptance, step 2)."""
+    from defender.learning.core import cli
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
+    _t, _u, t_paths, _u_paths = _drain_scene(tmp_path)
+    P.queue_row(t_paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
     monkeypatch.delenv(P.DATA_ROOT_ENV)
-    lane = P.Lane()
-    H.raised(P.drain, paths, lane)
-    assert lane.handed == [], "the drain served a row with no data root"
-    assert P.dead_letter(paths, "case-t") is None
-    assert P.still_queued(paths, "case-t")
-
-    monkeypatch.setenv(P.DATA_ROOT_ENV, root)
-    P.drain(paths, lane)
-    assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R1]
+    argv = ["loop.py", "--lead-author-drain", "--tenant", H.T_ID]
+    with pytest.raises(SystemExit) as refused:
+        cli.main(argv, directory=directory_for_argv(argv))
+    assert refused.value.code not in (0, None)
+    assert P.DATA_ROOT_ENV in capsys.readouterr().err, "the refusal does not name the data root"
+    assert P.dead_letter(t_paths, "case-t") is None
+    assert P.still_queued(t_paths, "case-t")
 
 
 def _lesson(lessons: Path, stem: str) -> None:

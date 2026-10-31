@@ -374,7 +374,7 @@ def test_947_the_lesson_tracer_counts_no_sibling_as_an_in_context_case(tmp_path,
     for w in T.WORLDS:
         T.lesson_row(_arm(ep, w))
     # The tracer walks the tenant's own runs, by id.
-    runs = trace.tenant_runs(base.parent.name)
+    runs = trace.tenant_runs(_tenant_paths())  # C1: the helper takes the accepted tenant
     assert [hit.case_id for hit in trace.in_context_cases("L1", None, runs)] == [T.SOURCE_RUN_ID]
 
 

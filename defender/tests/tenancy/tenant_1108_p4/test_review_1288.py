@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
 
@@ -253,7 +254,7 @@ def test_a_stage_fault_is_refused_even_with_the_unsandboxed_opt_out(tmp_path, mo
     verdicts: list[dict] = []
     with pytest.raises(BoxFault):
         _lifecycle._start_run_box(run_dir, tmp_path, BoxSpec(), _no_docker, agent, token,
-                                  verdicts.append)
+                                  verdicts.append, tenant_id=TEST_TENANT)
     assert verdicts, "the refusal wrote no did-not-run marker"
 
 
@@ -392,7 +393,7 @@ def test_a_run_box_over_a_bare_agent_folder_is_refused(tmp_path):
     agent.mkdir()
     with pytest.raises(TypeError, match="run copy"):
         _lifecycle._start_run_box(tmp_path / "run", tmp_path, BoxSpec(), _no_docker, agent,
-                                  None, None)
+                                  None, None, tenant_id=TEST_TENANT)
 
 
 # --- knowledge commits from host-held records --------------------------------------------------

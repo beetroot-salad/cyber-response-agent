@@ -1912,7 +1912,8 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
         try:
             rc = mod("cli.learning.branch").main(["--tenant", src.parent.parent.name, src.name,
                                 str(T.BRANCH_MESSAGE_ID)],
-                               spawn=spawn, **seams)
+                               spawn=spawn, directory=T.launcher_directory(src.parent.parent.name),
+                               **seams)
         except SystemExit as stop:
             rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
     # The launch itself makes the tenant's `episodes/`; a launch refused before that leaves

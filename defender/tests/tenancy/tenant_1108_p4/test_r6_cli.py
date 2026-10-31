@@ -31,7 +31,7 @@ def test_r6_the_workspace_map_of_a_run_reads_the_export_that_run_read(tmp_path, 
         assert second != first
         # The map must show neither the later export nor the clone.
         capsys.readouterr()
-        rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name])
+        rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name], directory=t.directory)
         text = capsys.readouterr().out
     assert rc == 0
     expected = export_dir(t.tenant, first) / "agent"
@@ -50,7 +50,7 @@ def test_r6_the_trace_and_frontend_defaults_read_currents_export_not_the_clone(p
     t = p4_tenant
     export_agent = export_dir(t.tenant, t.commit) / "agent"
     assert published_agent_root(t.tenant) == export_agent
-    assert published_lessons_dir(t.tenant_id) == export_agent / "lessons"
+    assert published_lessons_dir(t.tenant) == export_agent / "lessons"  # C1: takes the accepted tenant
     assert Path(t.clone) not in published_agent_root(t.tenant).parents
 
 

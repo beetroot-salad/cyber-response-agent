@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -803,9 +804,9 @@ def test_o8_d4_acceptance_adopts_an_all_down_tenant_whose_runs_are_refused(
     policy_run = tmp_path / "policy-run"
     (policy_run / "gather_raw").mkdir(parents=True)
     capsys.readouterr()
+    argv = ["show", "gather", "--run-dir", str(policy_run), "--tenant", tenant_id]
     try:
-        rc = policy_cli.main(["show", "gather", "--run-dir", str(policy_run),
-                              "--tenant", tenant_id])
+        rc = policy_cli.main(argv, directory=directory_for_argv(argv))
     except SystemExit as refused:
         pytest.fail(f"defender-policy refused a tenant whose systems are down: {refused.code!r}")
     shown = capsys.readouterr().out

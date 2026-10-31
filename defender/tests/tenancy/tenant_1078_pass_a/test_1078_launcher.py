@@ -1,6 +1,7 @@
 """Branch launcher keeps a fork's tenant: source opened through the tenant's runs repository, refusals write nothing, episodes-root placement refusals."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import location_path
 
 
@@ -49,7 +50,7 @@ def _launch_id(source_run_id: str):
     seams.setdefault("preflight", H.no_preflight)
     argv = ["--tenant", TID, source_run_id, str(T.BRANCH_MESSAGE_ID)]
     try:
-        result = H.branch_entry().main(argv, spawn=spawn, **seams)
+        result = H.branch_entry().main(argv, spawn=spawn, directory=directory_for_argv(argv), **seams)
     except SystemExit as refused:
         result = refused
     return result, spawn, seams["questioner"]

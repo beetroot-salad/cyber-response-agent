@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,6 @@ import pytest
 
 from defender.cli import retire_legacy_runs
 from defender.tests.storage.ids_1187 import _spec1187 as S
-from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as process
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 
@@ -577,8 +577,14 @@ def test_1187_n9_the_help_states_that_no_run_fork_or_drain_may_be_in_flight(data
 def test_1187_o6_the_path_the_refusal_names_runs_as_the_operators_command(data_root, tmp_path):
     sc = _scene(data_root, tmp_path)
     inodes_before = _inodes(sc)
-    script = H.WORKTREE / S.COMMAND
-    child = process.run_script(script, *_full(sc), root=data_root)
+    # The command admits its tenant through the tenant records (r10 A1/C9) and a subprocess has no database: it runs
+    # under the test launcher with the tenant seeded active; the path the refusal names must still be the command's file.
+    from defender.tests.support.tenancy import _launcher1214 as launcher
+
+    assert (H.WORKTREE / S.COMMAND).is_file(), "the path the refusal names is not the command"
+    child = subprocess.run(  # noqa: S603 — this interpreter, the test launcher, the scene's own arguments
+        launcher.command("retire_legacy_runs", _full(sc), seed=[T]), capture_output=True, text=True, check=False,
+        env=launcher.environment({"DEFENDER_DATA_ROOT": str(data_root)}), cwd=str(H.WORKTREE), timeout=180)
     assert child.returncode == 0, (child.stdout + child.stderr)[-1200:]
     assert _names(location_path(sc.runs_legacy)) == sc.old
     assert _names(location_path(sc.episodes_legacy)) == sc.old_episodes

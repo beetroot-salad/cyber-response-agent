@@ -2,6 +2,7 @@
 box or bash-executor environment carries it; only the publish child is handed it back."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.tenancy.tenant_1108_p4.test_publish_child import _RecordingSpawn
 
 DSN_ENV = "DEFENDER_DATABASE_DSN"
@@ -48,7 +49,7 @@ def test_the_bash_executor_host_fallback_has_no_database_address(monkeypatch, tm
     monkeypatch.setenv("O12_ORDINARY", "ordinary")
     code = tmp_path / "defender"
     code.mkdir()
-    env = _host_fallback_env(box_mod.BoxRequest(name="o12", workdir=tmp_path, defender_dir=code, env={}))
+    env = _host_fallback_env(box_mod.BoxRequest(name="o12", workdir=tmp_path, defender_dir=code, env={}, tenant_id=TEST_TENANT))
     assert env.get("O12_ORDINARY") == "ordinary"  # control: the host environment is read
     assert DSN_ENV not in env
     assert _carries(env) == []
@@ -64,7 +65,7 @@ def test_a_box_launched_from_the_run_environment_never_carries_the_address(monke
     run_dir = tmp_path / "runs" / "o12-box"
     run_dir.mkdir(parents=True)
     request = box_mod.BoxRequest(name="o12-box", workdir=tmp_path, defender_dir=tmp_path, spec=BoxSpec(rootfs="defender-box:o12"),
-                                 env=box_mod.run_env(tmp_path / "defender", run_dir))
+                                 env=box_mod.run_env(tmp_path / "defender", run_dir), tenant_id=TEST_TENANT)
     argv = _render_argv(request).argv
     assert "--env" in argv, "control: the launch renders environment variables"
     assert not [a for a in argv if "o12-planted" in a or DSN_ENV in a]

@@ -182,13 +182,13 @@ def _box_argv(tmp_path, **kw) -> list[str]:
 
 
 def test_a_box_of_a_tenant_is_labelled_with_the_tenant_so_teardown_can_stop_it(tmp_path):
-    """`BoxRequest.tenant_id` becomes `--label defender.tenant=<T>` on the container; a request without one carries none
-    (O4, Flow 2.3)."""
+    """`BoxRequest.tenant_id` becomes `--label defender.tenant=<T>` on the container. A request without a tenant is no
+    longer rendered unlabelled: it cannot be made (O4, Flow 2.3; r10 B1/C8 replace "carries none" with a construction error)."""
     labelled = _box_argv(tmp_path, tenant_id=TENANT)
     assert ["--label", f"defender.tenant={TENANT}"] in [labelled[i:i + 2] for i in range(len(labelled) - 1)]
-    plain = _box_argv(tmp_path)
-    assert "--label" in plain, "control: the start-token label is there on the same channel"
-    assert not [a for a in plain if a.startswith("defender.tenant=")]
+    assert "--label" in labelled, "control: the start-token label is there on the same channel"
+    with pytest.raises((TypeError, ValueError)):
+        _box_argv(tmp_path)
 
 
 def test_identity_has_no_all_tenants_listing_any_more():

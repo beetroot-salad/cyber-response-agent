@@ -222,11 +222,13 @@ def at_branch_launch(w: World) -> Verdict:
     # stamps that pinned export, not wherever `current` has moved since (another site of this
     # test may have republished the tenant): the fake live tree answers with the source's own.
     stamp = json.loads((w.source_run / "provenance.json").read_text(encoding="utf-8"))
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
     text = ""
+    argv = ["--tenant", w.planted.tenant_id, w.source_run.name, str(T.BRANCH_MESSAGE_ID)]
     try:
         S.mod("cli.learning.branch").main(
-            ["--tenant", w.planted.tenant_id, w.source_run.name,
-             str(T.BRANCH_MESSAGE_ID)],
+            argv, directory=directory_for_argv(argv),
             spawn=spawn, preflight=preflight,
             live_tree=T.source_capture(knowledge=stamp["knowledge"]))
     except SystemExit as stop:
@@ -262,11 +264,12 @@ def at_sibling_resume(w: World) -> Verdict:
 
 
 def at_policy_cli(w: World) -> Verdict:
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
     w.capsys.readouterr()
+    argv = ["show", "gather", "--run-dir", str(w.tmp / "policy-run"), "--tenant", w.planted.tenant_id]
     try:
-        rc = S.mod("cli.policy_cli").main(
-            ["show", "gather", "--run-dir", str(w.tmp / "policy-run"),
-             "--tenant", w.planted.tenant_id])
+        rc = S.mod("cli.policy_cli").main(argv, directory=directory_for_argv(argv))
     except SystemExit as stop:
         return Verdict("policy-cli", True, _exit_text(stop), False)
     out = w.capsys.readouterr().out

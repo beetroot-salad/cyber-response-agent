@@ -16,9 +16,19 @@ pytest.importorskip("httpx")
 
 from defender.tests.support.shared._postgres1339 import empty_database  # noqa: E402,F401 — fixture
 from defender.tests.support.tenancy._active1214 import DSN_ENV  # noqa: E402
+from defender.tests.support.tenancy._host1214 import LIFECYCLE_MARK  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config  # noqa: E402
 
 TENANT = "7f3c1a52-9d4e-4b8a-a1c6-2e5d8b9f0c13"
+
+
+@pytest.fixture(autouse=True)
+def _leave_the_lifecycle_mark_as_found(monkeypatch):
+    """These tests call the lifecycle's `main` in the pytest process, which marks the process (C6). The mark would
+    outlive the test and refuse every later host acceptance in the worker, children started with a copy of the
+    environment included. Recording the mark's absence now makes monkeypatch remove it at teardown (C6)."""
+    monkeypatch.setenv(LIFECYCLE_MARK, "")
+    monkeypatch.delenv(LIFECYCLE_MARK)
 
 
 @pytest.mark.postgres

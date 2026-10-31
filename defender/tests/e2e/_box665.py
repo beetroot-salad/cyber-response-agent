@@ -278,10 +278,10 @@ def run_cycle_mounts(run_dir: Path) -> tuple:
     )
 
 
-def BoxRequest(*, name: str, mounts, workdir: Path, env, spec=None, defender_dir=None):
-    """`box.BoxRequest`, the caller-owned geography box.py renders. `spec` and `defender_dir`
-    (the explicit code root) are passed only when given."""
-    kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env))
+def BoxRequest(*, name: str, mounts, workdir: Path, env, tenant_id, spec=None, defender_dir=None):
+    """`box.BoxRequest`, the caller-owned geography box.py renders. `tenant_id` is required: every box carries its tenant
+    (r10 B1/C8), so a call names it. `spec` and `defender_dir` (the explicit code root) are passed only when given."""
+    kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env), tenant_id=tenant_id)
     if spec is not None:
         kw["spec"] = spec
     if defender_dir is not None:
