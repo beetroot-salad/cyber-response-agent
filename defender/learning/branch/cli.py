@@ -51,7 +51,6 @@ _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 PageRenderer = Callable[["RunsRepository[Tenant]", str], Path]
 
 from defender.records import formats
-from defender.records.formats import DataRoot
 from defender.records.formats import Episode
 from defender.records.formats import pin_text
 from defender._io import (
@@ -240,29 +239,6 @@ def _prime_once(
         "than replayed")
 
 
-def _episode_tenant(tenant_id: TenantId, data_root: DataRoot) -> RunTenant:
-    """The episode's tenant: the request's (`--tenant`), accepted under `data_root` — or the
-    refusal, before anything is spent (S2: the tenant comes from the request, never from a
-    record or a stamp).
-
-    The same acceptance a sibling's run start uses, asked once up front so a tenant a sibling
-    would refuse is refused before any spend. Siblings dispatch no turn-0 lead."""
-    from defender.systems import run_tenant as run_tenant_mod
-
-    try:
-        # THE TREES A BOX MOUNTS, as the launcher knows them: acceptance already holds the
-        # tenant's own runs base (every run dir in it is a box's rw bind) against its settings;
-        # every sibling's arm container lies inside the tenant's episodes folder, which is the
-        # launcher's to add — no environment names it (S-acc). A settings half inside either
-        # would hand the model the tenant's endpoints, so it is refused here at launch exactly
-        # as a run refuses one inside its runs base (#1107 MF-13).
-        return run_tenant_mod.resolve_tenant(
-            data_root, tenant_id, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=False,
-            box_mounted=(tenancy.box_mounted_episodes(data_root, tenant_id),))
-    except run_tenant_mod.TenantRefused as refusal:
-        raise LauncherRefused(f"[branch] the episode's tenant: {refusal}") from refusal
-
-
 def _open_launch_source(runs: RunsRepository[Tenant], source_run_id: str) -> Run:
     """The source run, by id, in the request's tenant's natural container — or the refusal,
     before anything is spent. `runs.open` walks `<T>/runs` from the tenant's folder no-follow
@@ -379,7 +355,7 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
     from defender.learning.core.config import KNOB_RATE
 
     if tenant_id is None or not tenancy.is_valid_tenant_id(tenant_id):
-        # A ValueError, not `LauncherRefused`: `_episode_tenant` already resolved the tenant, so
+        # A ValueError, not `LauncherRefused`: `_launch`'s host acceptance already admitted the tenant, so
         # this is a caller bug and takes the episode's normal abort path.
         raise ValueError(
             f"episode {episode.dir} has no usable tenant ({tenant_id!r}) to run its siblings "
@@ -515,6 +491,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     oracle: Any = None,
     verifier: Any = None,
     roster: Any = None,
+    directory: Any = None,
 ) -> int:
     """Launch one episode, reporting a refusal as an operator exit rather than a traceback.
     `preflight` (the role-model check) and `render_page` (the episode page) are handed in by the
@@ -522,7 +499,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     try:
         return _launch(argv, spawn=spawn, questioner=questioner, preflight=preflight,
                        render_page=render_page, judge=judge, lessons_dir=lessons_dir, live_tree=live_tree,
-                       oracle=oracle, verifier=verifier, roster=roster)
+                       oracle=oracle, verifier=verifier, roster=roster, directory=directory)
     except (branch.BranchError, LedgerError, EstateError, FamilyError, GrantError,
             session_store.StoreError, sqlite3.Error) as refusal:
         raise LauncherRefused(f"[branch] {refusal}") from refusal
@@ -533,7 +510,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     preflight: Callable[..., int], render_page: PageRenderer, judge: Any = None,
     lessons_dir: Path | None = None,
     live_tree: Callable[[], formats.RunProvenance] | None = None,
-    oracle: Any = None, verifier: Any = None, roster: Any = None,
+    oracle: Any = None, verifier: Any = None, roster: Any = None, directory: Any = None,
 ) -> int:
     ns = parse_branch_args(argv)
     # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
@@ -545,15 +522,28 @@ def _launch(  # noqa: PLR0913 — see `main`
         data_root = tenancy.resolve_data_root()
     except TenantRefused as refusal:
         raise LauncherRefused(f"[branch] {refusal}") from refusal
-    # The tenant's host lock, held shared for the whole launch, this process recorded under it
-    # first (#1214 P3, Flow 4): prepare and teardown wait for the launch, and a teardown finds
-    # it to stop it (its siblings hold their own).
+    # The one host acceptance (r10 A1), held for the whole launch: this process recorded under
+    # the tenant's host lock (prepare and teardown wait for the launch, and a teardown finds it to
+    # stop it; its siblings hold their own), the tenant `active` with its forge wiring, its folder
+    # accepted. THE TREES A BOX MOUNTS, as the launcher knows them: acceptance already holds the
+    # tenant's own runs base against its settings; every sibling's arm container lies inside the
+    # tenant's episodes folder, which is the launcher's to add — no environment names it (S-acc).
+    # A settings half inside either would hand the model the tenant's endpoints, so it is
+    # refused here at launch exactly as a run refuses one inside its runs base (#1107 MF-13).
+    from defender.systems import run_tenant as run_tenant_mod
+
     try:
-        held = tenancy.hold_tenant(data_root, tenant_id)
+        admitted = run_tenant_mod.host_tenant(
+            data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
+            box_mounted=(tenancy.box_mounted_episodes(data_root, tenant_id),))
     except TenantRefused as refusal:
-        raise LauncherRefused(f"[branch] {refusal}") from refusal
-    with held:
-        tenant = _episode_tenant(tenant_id, data_root)
+        raise LauncherRefused(f"[branch] the episode's tenant: {refusal}") from refusal
+    with admitted:
+        # The tenant's readiness over its own folder; siblings dispatch no turn-0 lead.
+        try:
+            tenant = run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False)
+        except TenantRefused as refusal:
+            raise LauncherRefused(f"[branch] the episode's tenant: {refusal}") from refusal
         runs = tenant.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
         _source_stamp_agrees(source, tenant.tenant_id)

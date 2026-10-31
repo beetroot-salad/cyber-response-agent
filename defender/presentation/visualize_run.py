@@ -6,7 +6,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
@@ -578,15 +578,17 @@ def _parse_run_page_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(argv: list[str]) -> int:
-    """Re-render a finished run of the request's tenant (`--tenant`), opened by id through its
+def main(argv: list[str], *, directory: Any = None) -> int:
+    """Re-render a finished run of the request's tenant (`--tenant`), admitted through the one
+    host acceptance (r10 A1, held for the re-render) and its run opened by id through its
     repository (`open_command_line_run`: a natural run, or with `--episode` an arm of that
     episode), through the same step `run.py` takes, with every line stamped with the run and
-    the REQUEST's tenant (never the tenant a box-writable stamp names). Exits 1 when the run
-    cannot be opened (the refusal printed on stderr), when the record was not saved, or when a
-    `dev` copy failed — refreshing that copy is often why an operator re-renders."""
+    the REQUEST's tenant (never the tenant a box-writable stamp names). Exits 1 when the tenant
+    is refused or the run cannot be opened (the refusal printed on stderr), when the record was
+    not saved, or when a `dev` copy failed — refreshing that copy is often why an operator
+    re-renders. `directory` is the tenant records a test hands in; a production process reads
+    `DEFENDER_DATABASE_DSN`'s."""
     from defender import _log
-    from defender.tenancy import open_command_line_run
 
     try:
         ns = _parse_run_page_args(argv[1:])
@@ -594,18 +596,28 @@ def main(argv: list[str]) -> int:
         print("usage: visualize_run.py --tenant T [--episode EPISODE_ID] <run_id> "
               f"[--update-ticket] ({bad})", file=sys.stderr)
         return 64
-    opened = open_command_line_run(ns.tenant, ns.run_id, episode_id=ns.episode)
-    if isinstance(opened, str):
-        print(f"visualize_run: {opened}", file=sys.stderr)
+    from defender import tenancy
+    from defender.records.formats import TenantRefused
+    from defender.systems.run_tenant import host_tenant
+
+    try:
+        admitted = host_tenant(tenancy.resolve_data_root(), ns.tenant, directory=directory)
+    except TenantRefused as refused:
+        print(f"visualize_run: {refused}", file=sys.stderr)
         return 1
-    tenant, run = opened
-    with _log.run_context(ns.run_id, str(run.tenant_id), logger=_logger):
-        try:
-            copy = publish_page(run, tenant=tenant, update_ticket=ns.update_ticket)
-        except VisualizeFailed:
-            _logger.error("the re-render failed", exc_info=True)
+    with admitted:
+        tenant = admitted.tenant
+        run = tenancy.open_command_line_run(tenant, ns.run_id, episode_id=ns.episode)
+        if isinstance(run, str):
+            print(f"visualize_run: {run}", file=sys.stderr)
             return 1
-    return 1 if copy == "failed" else 0
+        with _log.run_context(ns.run_id, str(run.tenant_id), logger=_logger):
+            try:
+                copy = publish_page(run, tenant=tenant, update_ticket=ns.update_ticket)
+            except VisualizeFailed:
+                _logger.error("the re-render failed", exc_info=True)
+                return 1
+        return 1 if copy == "failed" else 0
 
 
 if __name__ == "__main__":

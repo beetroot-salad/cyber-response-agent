@@ -60,6 +60,7 @@ if TYPE_CHECKING:
 
     from defender.learning.author.version_control import Batch, TenantDelivery
     from defender.learning.author.version_control.auth import ForgeCredential
+    from defender.systems.run_tenant import Admitted
     from defender.tenancy import Tenant, TenantDirectory
 
 _logger = logging.getLogger(__name__)
@@ -392,23 +393,6 @@ class BatchDisposition:
         )
 
 
-def _tenant_acceptor(tenant: Tenant | None) -> Callable[[object], Tenant]:
-    """Fresh tenant acceptance for a tick with queued curation requests.
-
-    A selected tenant supplies the root through its owner. Scratch paths use the configured
-    root. A missing or bad setting is the stage's configuration refusal
-    (`FatalConfigError`, raised from `resolve_data_root`'s
-    `TenantRefused`): `_run_stage` logs it on one line and exits 2."""
-    from defender import tenancy
-
-    if tenant is not None:
-        return tenant.accept_requested_tenant
-    try:
-        return functools.partial(tenancy.requested_tenant, tenancy.resolve_data_root())
-    except TenantRefused as refused:
-        raise FatalConfigError(str(refused)) from refused
-
-
 def _retry_or_exhaust(
     state: LearningState, claim: Claimed, attempts: int, max_retries: int, cause: object,
 ) -> None:
@@ -450,7 +434,6 @@ def _drain_lead_author_markers(
     *,
     box: Any = None,
     batch: Batch | None = None,
-    accept_tenant: Callable[[object], Tenant],
     directory: TenantDirectory,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> list[ServedMarker]:
@@ -466,7 +449,6 @@ def _drain_lead_author_markers(
     from defender.records import RunAbsent
 
     max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
-    accepted: dict[str, Tenant | Exception] = {}
     # `case_id`: this queue's live writer (`enqueue_curation`) mints the filename from the
     # case, so that is what an unreadable row's dead letter is keyed on.
     claims = state.claim(
@@ -477,7 +459,7 @@ def _drain_lead_author_markers(
         spec = claim.spec
         if _set_aside(paths, state, claim, directory):
             continue
-        run = _rehydrate(claim, accept_tenant, accepted)
+        run = _rehydrate(claim, paths.tenant)
         if isinstance(run, RunAbsent):
             state.quarantine(claim, "artifact-missing")
             continue
@@ -528,28 +510,20 @@ def _drain_lead_author_markers(
     return served
 
 
-def _rehydrate(
-    claim: Claimed, accept_tenant: Callable[[object], Tenant],
-    accepted: dict[str, Tenant | Exception],
-) -> Run | Exception:
-    """The run `claim`'s address names: its tenant freshly accepted — as a natural
-    run's acceptance has it, with no box mount beside the runs base (`box_mounted=()`), once
-    per tenant per tick, a refusal included — then the run opened through that tenant's
-    repository, which never follows a link at its name. Else the refusal, logged: the
-    tenant's `TenantRefused`, or the open's `RunRefused` (`RunAbsent` when the run is gone)."""
+def _rehydrate(claim: Claimed, tenant: Tenant | None) -> Run | Exception:
+    """The run `claim`'s address names, opened through the drain's own accepted tenant (r10.1 C1:
+    the value of drain start's host acceptance, `paths.tenant`; nothing under that scope accepts
+    again) and its repository, which never follows a link at its name. Else the refusal, logged:
+    `TenantRefused` when the drain has no accepted tenant or the claim names another (fail closed;
+    `_set_aside` already quarantines a claim of another tenant), or the open's `RunRefused`
+    (`RunAbsent` when the run is gone)."""
     from defender.records import RunRefused
 
     address = claim.address
-    key = str(address.tenant_id)
-    if key not in accepted:
-        try:
-            accepted[key] = accept_tenant(address.tenant_id)
-        except TenantRefused as refused:
-            _logger.warning(f"{claim.identity}: its tenant cannot be accepted ({refused})")
-            accepted[key] = refused
-    tenant = accepted[key]
-    if isinstance(tenant, Exception):
-        return tenant
+    if tenant is None or str(tenant.id) != str(address.tenant_id):
+        refused = TenantRefused(f"tenant {address.tenant_id} is not the drain's accepted tenant")
+        _logger.warning(f"{claim.identity}: its tenant cannot be accepted ({refused})")
+        return refused
     try:
         return tenant.runs_repository().resolve(address)
     except RunRefused as refused:
@@ -630,22 +604,21 @@ def _drain_lead_author(  # noqa: PLR0913 — the tick's two steps and its batch,
     run_lead_author: Callable[..., None],
     run_pitfalls: Callable[..., int],
     *,
-    accept_tenant: Callable[[object], Tenant] | None,
+    claims: bool,
     directory: TenantDirectory,
     box: Any = None,
     batch: Batch | None = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> BatchDisposition:
-    """The tick's work: accept each curation request's tenant, then run the pitfalls
-    curation, every claim into `batch`. `accept_tenant` is `None` when no request was queued as
-    the tick started (`lead_author_drain`): the tick then claims none — a row that lands
-    mid-tick waits, queued, for the next tick — and only the pitfalls step runs."""
+    """The tick's work: serve each curation request's run through the drain's accepted tenant,
+    then run the pitfalls curation, every claim into `batch`. `claims` is False when no request
+    was queued as the tick started (`lead_author_drain`): the tick then claims none — a row that
+    lands mid-tick waits, queued, for the next tick — and only the pitfalls step runs."""
     # The batch's box is stopped between agent runs and runs only inside each spawn's
     # `box_for_run`, so no host step of the tick runs beside a process an agent left (#1195).
-    served = [] if accept_tenant is None else _drain_lead_author_markers(
-        paths, state, run_lead_author, box=box, batch=batch, accept_tenant=accept_tenant,
-        directory=directory, git_timeout=git_timeout)
+    served = [] if not claims else _drain_lead_author_markers(
+        paths, state, run_lead_author, box=box, batch=batch, directory=directory, git_timeout=git_timeout)
     pitfalls = _drain_pitfalls(
         paths, state, run_pitfalls, box=box, batch=batch, lock_wait_seconds=lock_wait_seconds,
     )
@@ -719,25 +692,20 @@ def _open_delivery(
         yield delivery
 
 
-def revert_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-process stand-ins
-    tenant: Tenant, *, directory: TenantDirectory | None = None, client: httpx.Client | None = None,
-    identity: ForgeCredential | None = None, credential_config: Any = None,
-    issuer_transport: httpx.BaseTransport | None = None,
+def revert_delivery(
+    admitted: Admitted, *, client: httpx.Client | None = None, identity: ForgeCredential | None = None,
+    credential_config: Any = None, issuer_transport: httpx.BaseTransport | None = None,
 ) -> contextlib.AbstractContextManager[TenantDelivery]:
     """The author lane's delivery for a by-hand lesson revert (`revert_lesson.py`, flow 5), which
-    runs under the author drain's lock: the tenant admitted as a drain admits it (its records,
-    else `DEFENDER_DATABASE_DSN`'s; `active`, its forge wiring recorded, #1214 Flow 4), then
-    `vc.opened_delivery` as `_open_delivery` opens it. A refusal is `TenantRefused`,
-    `DeliveryRefused` or `ForgejoAuthError`."""
-    from defender import tenancy
+    runs under the author drain's lock: `vc.opened_delivery` as `_open_delivery` opens it, for the
+    tenant the revert's host acceptance admitted (`admitted`, r10.1 C1: its tenant and the records
+    it was admitted through; the admission is a parameter, not a precondition). A refusal is
+    `TenantRefused`, `DeliveryRefused` or `ForgejoAuthError`."""
     from defender.learning.author import version_control as vc
-    from defender.systems.run_tenant import entry_directory
 
-    records = entry_directory(directory)
-    tenancy.admit_tenant(records, tenant.id)
     return vc.opened_delivery(
-        tenant, defender_dir=process_defender_dir(), directory=records, purpose="revert", client=client,
-        identity=identity, credential_config=credential_config, issuer_transport=issuer_transport)
+        admitted.tenant, defender_dir=process_defender_dir(), directory=admitted.directory, purpose="revert",
+        client=client, identity=identity, credential_config=credential_config, issuer_transport=issuer_transport)
 
 
 def _drain_directory(directory: TenantDirectory | None) -> TenantDirectory:
@@ -1044,18 +1012,17 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
             if not queue_locked:
                 _logger.warning("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
                 return 0
-            # Choose request acceptance before a batch or box exists. A selected tenant
-            # supplies it; scratch paths resolve the configured root here, so a bad setting
-            # refuses the tick with every row still queued. A tick with nothing queued reads
-            # no root and claims no row: one that lands mid-tick waits for the next tick.
-            accept_tenant = _tenant_acceptor(paths.tenant) if state.has_requests() else None
+            # Whether the tick claims, chosen before a batch or box exists. A queued request's run
+            # is opened through the drain's own accepted tenant (`paths.tenant`, r10.1 C1). A tick
+            # with nothing queued claims no row: one that lands mid-tick waits for the next tick.
+            claims = state.has_requests()
             return _refusing(lambda: _run_tenant_batch(
                 paths, state, label=LEAD_AUTHOR_DRAIN_LABEL,
                 has_work=_has_lead_author_work,
                 do_work=lambda work_paths, *, batch, box=None: _drain_lead_author(
                     work_paths, state, lead_step, pitfalls_step, box=box, batch=batch,
                     lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
-                    accept_tenant=accept_tenant, directory=records,
+                    claims=claims, directory=records,
                 ),
                 open_delivery=open_delivery, start_box=start_box, stop_box=stop_box,
             ))

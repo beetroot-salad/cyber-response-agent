@@ -37,6 +37,12 @@ class TenantDirectory:
             return await repository.forge_wiring(str(tenant_id))
         return self._call(read)
 
+    def admission(self, tenant_id: str) -> tuple[str | None, ForgeWiring | None]:
+        """The tenant's state and its recorded forge wiring in one repository call (r10 Finding 9)."""
+        async def read(repository: Any) -> tuple[str | None, ForgeWiring | None]:
+            return await repository.admission(str(tenant_id))
+        return self._call(read)
+
     def generations(self, tenant_id: str) -> list[Generation]:
         """The tenant's credential generations (the live one among them), [] when none: what the
         host's forge credential provider reads on every mint (P4)."""

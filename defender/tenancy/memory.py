@@ -127,6 +127,11 @@ class InMemoryTenantRepository:
         with self._mutex:
             return _detached(self._wiring.get(str(tenant_id)))
 
+    async def admission(self, tenant_id: str) -> tuple[str | None, ForgeWiring | None]:
+        with self._mutex:
+            row = self._tenants.get(str(tenant_id))
+            return (None if row is None else row.state), _detached(self._wiring.get(str(tenant_id)))
+
     async def publish_status(self, tenant_id: str) -> dict[str, str] | None:
         with self._mutex:
             row = self._publish.get(str(tenant_id))

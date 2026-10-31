@@ -2,20 +2,21 @@
 `TenantDirectory`, decides whether a host process may work for a tenant at all; the folder rules
 (`accept_tenant`) then judge the tenant's folder as before.
 
-Run start, drain start, each lead-drain claim and the connect command proceed only while the tenant
-is `active`, and only with its forge wiring recorded (the origin they deliver to and publish from).
+Every host entry point (through the host acceptance, `systems.run_tenant.host_tenant`, the one
+caller of `admit_tenant` and `host_directory` outside this package) and each lead-drain claim
+proceed only while the tenant is `active`, and only with its forge wiring recorded (the origin they
+deliver to and publish from).
 Production entry points build their directory from `DEFENDER_DATABASE_DSN`; with neither a directory
 nor that variable they refuse (principles §2). Imports no database code until a directory is built
 from the variable."""
 
 from __future__ import annotations
 
-import contextlib
 import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from defender.records.formats import DataRoot, TenantId, TenantRefused
+from defender.records.formats import TenantId, TenantRefused
 
 if TYPE_CHECKING:
     from defender.tenancy._directory import TenantDirectory
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 _DSN_ENV = "DEFENDER_DATABASE_DSN"
 #: The one state in which a tenant is worked for (P3).
 _ACTIVE = "active"
+#: The mark the lifecycle process sets on itself (r10.1 C6).
+_LIFECYCLE_MARK = "DEFENDER_LIFECYCLE_PROCESS"
 
 
 def database_address_variable() -> str:
@@ -55,27 +58,17 @@ def host_directory(
     return TenantDirectory(lambda: PostgresTenantRepository(dsn))
 
 
-def hold_tenant(data_root: DataRoot, raw_id: object) -> contextlib.ExitStack:
-    """`raw_id`'s host lock under `data_root`, entered SHARED with this process recorded under it
-    first (`host_lock.hold_shared`, P3/RC-5) and held until the returned stack closes: run start,
-    drain start and the connect command enter it before the state check (Flow 4: id, data root
-    placement, lock, then state) and hold it for as long as they work for the tenant, so prepare
-    and teardown wait for them and teardown can find them. `TenantRefused` (the id's grammar, a
-    data root that is relative or inside the checkout, or a lock this process cannot take or
-    record itself under) before anything is held or made: the lock creates folders under the
-    root, so the placement is judged first."""
-    from defender.tenancy import host_lock
-    from defender.tenancy._tenant import data_root_for_child, refuse_unplaceable_data_root, requested_tenant_id
+def mark_lifecycle_process() -> None:
+    """Mark this process as the lifecycle's (r10.1 C6): its `__main__` entry calls this first, and
+    the host acceptance refuses in a marked process. Prepare holds a tenant's host lock exclusive in
+    that process, so a shared hold taken there would wait on itself; the mark backs the static
+    census, which cannot follow a lazy string import."""
+    os.environ[_LIFECYCLE_MARK] = "1"
 
-    tenant_id = requested_tenant_id(raw_id)
-    refuse_unplaceable_data_root(data_root)
-    held = contextlib.ExitStack()
-    try:
-        held.enter_context(host_lock.hold_shared(data_root_for_child(data_root), tenant_id))
-    except OSError as unheld:
-        raise TenantRefused(f"tenant {tenant_id}'s host lock could not be taken: "
-                            f"{unheld.strerror or type(unheld).__name__}") from None
-    return held
+
+def in_lifecycle_process() -> bool:
+    """Whether this process carries the lifecycle's mark (`mark_lifecycle_process`)."""
+    return bool(os.environ.get(_LIFECYCLE_MARK))
 
 
 def admit_tenant(directory: TenantDirectory, raw_id: object) -> ForgeWiring:
@@ -84,13 +77,12 @@ def admit_tenant(directory: TenantDirectory, raw_id: object) -> ForgeWiring:
     its state when it has one). Reads the directory now, so a caller that admits per unit of work
     (each drain claim) sees an offboarding at once."""
     tenant_id = TenantId(raw_id)
-    state = directory.state(tenant_id)
+    state, wiring = directory.admission(tenant_id)
     if state is None:
         raise TenantRefused(f"tenant {tenant_id} is not a tenant of this deployment: the tenant records "
                             "hold no such tenant")
     if state != _ACTIVE:
         raise TenantRefused(f"tenant {tenant_id} is {state}, not active: nothing is done for it")
-    wiring = directory.forge_wiring(tenant_id)
     if wiring is None:
         raise TenantRefused(f"tenant {tenant_id} has no forge wiring recorded: its repository is not bound "
                             "to a forge")

@@ -217,8 +217,8 @@ class OracleServing:
     restart_after: int
 
 
-def oracle_serving(settings: OracleSettings, *, oracle: Any = None, verifier: Any = None,  # noqa: PLR0913 — the settings, the three seams, the tenant and the restart bound
-                   box: Callable[[], Any] | None = None, tenant_id: str | None = None,
+def oracle_serving(settings: OracleSettings, *, tenant_id: str, oracle: Any = None, verifier: Any = None,  # noqa: PLR0913 — the settings, the three seams, the tenant and the restart bound
+                   box: Callable[[], Any] | None = None,
                    restart_after: int = DEFAULT_RESTART_AFTER) -> OracleServing:
     """The world's oracle-side inputs with every seam left `None` filled by its production
     default: the role models built lazily from `settings` (a world that never takes a turn

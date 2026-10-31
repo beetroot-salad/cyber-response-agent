@@ -12,7 +12,7 @@ from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.records.formats import TenantRefused
 
 if TYPE_CHECKING:
-    from defender.tenancy import Tenant, TenantDirectory
+    from defender.tenancy import TenantDirectory
 
 _logger = logging.getLogger(__name__)
 
@@ -67,41 +67,6 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
         return 2
 
 
-def command_line_tenant(parser: argparse.ArgumentParser, raw_tenant: str) -> Tenant:
-    """Accept an explicitly selected tenant before a command touches state or outputs."""
-    from defender import tenancy
-
-    try:
-        return tenancy.requested_tenant(tenancy.resolve_data_root(), raw_tenant)
-    except TenantRefused as refused:
-        parser.error(str(refused))
-
-
-def command_line_paths(parser: argparse.ArgumentParser, raw_tenant: str) -> LoopPaths:
-    """The selected tenant's loop paths, its tenant accepted first."""
-    return LoopPaths.for_tenant(command_line_tenant(parser, raw_tenant))
-
-
-def admitted_directory(
-    parser: argparse.ArgumentParser, raw_tenant: str, directory: TenantDirectory | None,
-) -> TenantDirectory:
-    """Drain start's admission (#1214 Flow 4, P3): the tenant records (`directory`, else the
-    ones `DEFENDER_DATABASE_DSN` names, after the light version check), and the selected tenant
-    in them `active` with its forge wiring recorded — or the usage refusal naming why, before
-    the tenant's folder is accepted or any state is touched. The id's grammar is judged first:
-    a malformed id is refused as such, with or without a database."""
-    from defender import tenancy
-    from defender.systems.run_tenant import entry_directory
-
-    try:
-        tenancy.requested_tenant_id(raw_tenant)
-        records = entry_directory(directory)
-        tenancy.admit_tenant(records, raw_tenant)
-    except TenantRefused as refused:
-        parser.error(str(refused))
-    return records
-
-
 def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
     """The drain entry. `directory` is the tenant records a test or a launcher hands in; a
     production process passes none and reads them from `DEFENDER_DATABASE_DSN`."""
@@ -129,25 +94,23 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
     )
     parser.add_argument("--tenant", required=True, help="tenant whose learning queues are drained")
     ns = parser.parse_args(argv[1:])
-    # The tenant's host lock, held shared for the whole drain, this process recorded under it
-    # first (#1214 P3, Flow 4: lock, then state).
+    # The one host acceptance (r10 A1), held for the whole drain: this process recorded under the
+    # tenant's host lock, the tenant `active` with its forge wiring, its folder accepted.
     from defender import tenancy
+    from defender.systems.run_tenant import host_tenant
 
     try:
         tenancy.requested_tenant_id(ns.tenant)  # the id's grammar first, as every entry point judges it
-        held = tenancy.hold_tenant(tenancy.resolve_data_root(), ns.tenant)
+        admitted = host_tenant(tenancy.resolve_data_root(), ns.tenant, directory=directory)
     except TenantRefused as refused:
         parser.error(str(refused))
-    with held:
-        return _drain_admitted(parser, ns, directory)
+    with admitted:
+        return _drain_admitted(ns, admitted.directory, LoopPaths.for_tenant(admitted.tenant))
 
 
-def _drain_admitted(parser: argparse.ArgumentParser, ns: argparse.Namespace,
-                    directory: TenantDirectory | None) -> int:
-    """`main` under the tenant's host lock: admission, the tenant's paths, then the stage."""
-    records = admitted_directory(parser, ns.tenant, directory)
-    paths = command_line_paths(parser, ns.tenant)
-
+def _drain_admitted(ns: argparse.Namespace, records: TenantDirectory, paths: LoopPaths) -> int:
+    """`main` under the tenant's host acceptance: the stage, over the admitted tenant's records
+    and loop paths."""
     if ns.author_drain and ns.lead_author_drain:
         print("--author-drain and --lead-author-drain are mutually exclusive",
               file=sys.stderr)

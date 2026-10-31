@@ -18,6 +18,8 @@ import contextlib
 import fcntl
 import json
 import os
+import sys
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -92,26 +94,101 @@ def _write_record(path: Path, pid: int, start: str) -> None:
     _io.write_guarded(path, json.dumps({"pid": pid, "start": start}) + "\n")
 
 
+@dataclass
+class _Hold:
+    """One tenant's hold in this process: the scopes open on it, the descriptor holding the lock and
+    this process's record under the tenant's registry."""
+
+    scopes: int
+    fd: int
+    record: Path
+
+
+#: This process's open holds (r10 "Data model"), keyed by this process's pid and the tenant's
+#: resolved lock folder, so two spellings of one data root meet and a forked child inherits none.
+_HOLDS: dict[tuple[int, Path], _Hold] = {}
+#: Guards `_HOLDS` and `_GATES`; never held while waiting for a lock.
+_TABLE = threading.Lock()
+#: One gate per key, held while a first scope claims its entry and takes the tenant's lock (and while
+#: the last scope gives it back): a second thread waits on it, then reuses the hold.
+_GATES: dict[tuple[int, Path], threading.Lock] = {}
+
+
+def _waiting_line(tenant_id: str) -> str:
+    return f"waiting for tenant {tenant_id}'s host lock (prepare or teardown is running)\n"
+
+
 @contextlib.contextmanager
 def hold_shared(data_root: Path, tenant_id: str) -> Iterator[Holder]:
-    """Record this process, then hold the tenant's lock shared until the block ends (run start,
-    drain start, the connect command). Waits while prepare or teardown holds it exclusive; the
-    caller checks the tenant's state only once it holds the lock (Flow 4)."""
+    """Record this process, then hold the tenant's lock shared until the scope ends (run start,
+    drain start, the connect command and every other host entry point, through the host
+    acceptance). Waits, with no timeout, while prepare or teardown holds it exclusive, saying so
+    once on stderr (r10.1 C4: one try without waiting, the line, then the wait); the caller checks
+    the tenant's state only once it holds the lock (Flow 4).
+
+    A nested scope of the same tenant in this process, from any thread and under any spelling of
+    the data root, reuses the open hold: it neither records again nor releases early, and the
+    record and the lock go when the last scope ends (r10 A2, O-A3)."""
     pid = os.getpid()
     start = process_start(pid)
     if start is None:
         raise TenantRefused(f"process {pid} cannot read its own start time to record itself")
-    registry = lock_dir(data_root, tenant_id) / _REGISTRY
-    _io.guarded_mkdir(registry, base=Path(data_root))
-    record = registry / f"{pid}-{start}"
-    _write_record(record, pid, start)
-    fd = None
+    folder = lock_dir(data_root, tenant_id)
+    _io.guarded_mkdir(folder, base=Path(data_root))
+    key = (pid, folder.resolve())
+    hold = _enter(key, data_root, tenant_id, pid, start)
     try:
-        fd = acquire(data_root, tenant_id, exclusive=False, timeout=None)
         yield Holder(pid, start)
     finally:
-        release_lock(fd)
-        record.unlink(missing_ok=True)
+        _leave(key, hold)
+
+
+def _key_gate(key: tuple[int, Path]) -> threading.Lock:
+    with _TABLE:
+        return _GATES.setdefault(key, threading.Lock())
+
+
+def _enter(key: tuple[int, Path], data_root: Path, tenant_id: str, pid: int, start: str) -> _Hold:
+    """The open hold for `key`, one scope more; the first scope records this process, then takes
+    the lock shared (recorded first, so a holder is never invisible to teardown)."""
+    with _key_gate(key):
+        with _TABLE:
+            hold = _HOLDS.get(key)
+            if hold is not None:
+                hold.scopes += 1
+                return hold
+        registry = lock_dir(data_root, tenant_id) / _REGISTRY
+        _io.guarded_mkdir(registry, base=Path(data_root))
+        record = registry / f"{pid}-{start}"
+        _write_record(record, pid, start)
+        try:
+            fd = acquire(data_root, tenant_id, exclusive=False, timeout=0)
+            if fd is None:
+                sys.stderr.write(_waiting_line(tenant_id))
+                sys.stderr.flush()
+                fd = acquire(data_root, tenant_id, exclusive=False, timeout=None)
+        except BaseException:
+            record.unlink(missing_ok=True)
+            raise
+        assert fd is not None  # a wait with no timeout returns the descriptor or raises
+        hold = _Hold(scopes=1, fd=fd, record=record)
+        with _TABLE:
+            _HOLDS[key] = hold
+        return hold
+
+
+def _leave(key: tuple[int, Path], hold: _Hold) -> None:
+    """One scope fewer; the last gives the lock back and removes this process's record."""
+    with _key_gate(key):
+        with _TABLE:
+            hold.scopes -= 1
+            if hold.scopes:
+                return
+            del _HOLDS[key]
+        try:
+            release_lock(hold.fd)
+        finally:
+            hold.record.unlink(missing_ok=True)
 
 
 def holders(data_root: Path, tenant_id: str) -> list[Holder]:

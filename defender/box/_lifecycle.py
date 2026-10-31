@@ -747,6 +747,9 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
 ) -> BoxExecutor:
     if defender_dir is None:
         raise TypeError("start_box(run_dir, defender_dir, ...) needs defender_dir")
+    if tenant_id is None or not str(tenant_id):
+        # r10 B1, r10.1 C8: every box carries its tenant's label, so its teardown can find it.
+        raise TypeError("start_box(run_dir, defender_dir, ...) needs tenant_id: every box carries its tenant")
     # Default runtime is runsc; runc (weaker isolation) only when the operator sets
     # DEFENDER_BOX_RUNTIME=runc, never by fallback.
     if spec is None:

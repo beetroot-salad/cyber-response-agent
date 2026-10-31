@@ -93,6 +93,11 @@ async def _serve() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from defender.tenancy import mark_lifecycle_process
+
+    # r10.1 C6: first, so nothing this process runs can take a shared host hold (prepare holds the
+    # lock exclusive here; the host acceptance refuses in a marked process).
+    mark_lifecycle_process()
     parser = argparse.ArgumentParser(prog="python -m defender.lifecycle", description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("serve", help="run the management service and the host actor until stopped (dev)")

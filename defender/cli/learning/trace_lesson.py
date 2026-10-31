@@ -42,6 +42,7 @@ import sys
 from collections.abc import Iterable
 from datetime import date, datetime, UTC
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
@@ -59,17 +60,17 @@ from defender._text import one_line
 from defender.records import Run, RunPaths
 from defender.records.formats import TenantRefused
 
+if TYPE_CHECKING:
+    from defender.tenancy import Tenant, TenantDirectory
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def published_lessons_dir(raw_tenant: str) -> Path:
-    """The lessons of the export the tenant's `current` names (`<export>/agent/lessons`).
-    `TenantRefused` when the tenant cannot be accepted; `DeliveryRefused` when nothing is
-    published for it."""
-    from defender import tenancy
+def published_lessons_dir(tenant: Tenant) -> Path:
+    """The lessons of the export the accepted `tenant`'s `current` names
+    (`<export>/agent/lessons`). `DeliveryRefused` when nothing is published for it."""
     from defender.tenancy import current_export
 
-    tenant = tenancy.requested_tenant(tenancy.resolve_data_root(), raw_tenant)
     return KnowledgePaths(current_export(tenant).path / "agent").lessons_dir
 
 
@@ -122,15 +123,11 @@ def _report_disposition(run_dir: Path) -> str:
     return read.disposition_or_unknown
 
 
-def tenant_runs(raw_tenant: str) -> list[Run]:
-    """Every natural run of the tenant `raw_tenant` names (accepted under the configured data
-    root), in id order: `runs.all_runs()`, one hold of the runs folder whose listing rule
-    refuses an entry that is not a run (`RunRefused`, naming it). An absent runs folder holds
-    none. `TenantRefused` when the tenant cannot be accepted or its runs folder cannot be
+def tenant_runs(tenant: Tenant) -> list[Run]:
+    """Every natural run of the accepted `tenant`, in id order: `runs.all_runs()`, one hold of
+    the runs folder whose listing rule refuses an entry that is not a run (`RunRefused`, naming
+    it). An absent runs folder holds none. `TenantRefused` when its runs folder cannot be
     held."""
-    from defender import tenancy
-
-    tenant = tenancy.requested_tenant(tenancy.resolve_data_root(), raw_tenant)
     return tenant.runs_repository().all_runs()
 
 
@@ -183,13 +180,13 @@ def _print_index(lessons_dir: Path, runs: list[Run]) -> None:
               f"\t{_main_read_count(cases)}")
 
 
-def _scanned_runs(raw_tenant: str) -> list[Run] | None:
+def _scanned_runs(tenant: Tenant) -> list[Run] | None:
     """`tenant_runs`, or `None` with the refusal on stderr (one line, naming a stray entry
     or the refused tenant)."""
     from defender.records import RunRefused
 
     try:
-        runs = tenant_runs(raw_tenant)
+        runs = tenant_runs(tenant)
         unrecorded = [run for run in runs
                       if formats.read_record(RunPaths(run.run_dir).alert_record) is None]
         if unrecorded:
@@ -197,24 +194,30 @@ def _scanned_runs(raw_tenant: str) -> list[Run] | None:
                   f"{', '.join(one_line(str(run.id)) for run in unrecorded)}", file=sys.stderr)
         return [run for run in runs if run not in unrecorded]
     except (TenantRefused, RunRefused) as refused:
-        print(f"error: the runs of tenant {one_line(raw_tenant)} cannot be scanned: "
+        print(f"error: the runs of tenant {one_line(str(tenant.id))} cannot be scanned: "
               f"{one_line(str(refused))}", file=sys.stderr)
         return None
 
 
-def _published_or_none(raw_tenant: str) -> Path | None:
+def _published_or_none(tenant: Tenant) -> Path | None:
     """`published_lessons_dir`, or `None` with the refusal on stderr (one line)."""
     from defender.tenancy import DeliveryRefused
 
     try:
-        return published_lessons_dir(raw_tenant)
+        return published_lessons_dir(tenant)
     except (TenantRefused, DeliveryRefused) as refused:
-        print(f"error: the lessons of tenant {one_line(raw_tenant)} cannot be found: "
+        print(f"error: the lessons of tenant {one_line(str(tenant.id))} cannot be found: "
               f"{one_line(str(refused))}", file=sys.stderr)
         return None
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
+    """The tracer's command line: `--tenant T` through the one host acceptance (r10 A1), held
+    for the whole scan. `directory` is the tenant records a test hands in; a production process
+    reads `DEFENDER_DATABASE_DSN`'s. A refusal is one stderr line and exit 1."""
+    from defender import tenancy
+    from defender.systems.run_tenant import host_tenant
+
     use_utf8_stdio()
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -231,9 +234,21 @@ def main(argv: list[str]) -> int:
     if ns.all and ns.lesson_name:
         print("give a <lesson_name> or --all, not both", file=sys.stderr)
         return 1
+    try:
+        admitted = host_tenant(tenancy.resolve_data_root(), ns.tenant, directory=directory)
+    except TenantRefused as refused:
+        print(f"error: tenant {one_line(str(ns.tenant))} cannot be traced: {one_line(str(refused))}",
+              file=sys.stderr)
+        return 1
+    with admitted:
+        return _trace(ns, admitted.tenant)
+
+
+def _trace(ns: argparse.Namespace, tenant: Tenant) -> int:
+    """`main`'s work for the accepted `tenant`."""
     lessons_dir = ns.lessons_dir
     if lessons_dir is None:
-        lessons_dir = _published_or_none(ns.tenant)
+        lessons_dir = _published_or_none(tenant)
         if lessons_dir is None:
             return 1
 
@@ -241,7 +256,7 @@ def main(argv: list[str]) -> int:
         print(f"no lessons dir: {lessons_dir}", file=sys.stderr)
         return 1
 
-    runs = _scanned_runs(ns.tenant)
+    runs = _scanned_runs(tenant)
     if runs is None:
         return 1
 

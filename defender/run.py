@@ -25,7 +25,7 @@ takes precedence over the ambient value.
 
 from __future__ import annotations
 
-from defender.records.formats import DataRoot, RunsBase, EpisodesRoot
+from defender.records.formats import DataRoot, RunsBase
 
 import logging
 import json
@@ -45,7 +45,7 @@ import asyncio  # noqa: E402
 import contextlib  # noqa: E402
 import functools  # noqa: E402
 import inspect  # noqa: E402
-from collections.abc import Callable, Collection, Mapping  # noqa: E402
+from collections.abc import Callable, Collection, Iterator, Mapping  # noqa: E402
 from typing import Any, Protocol  # noqa: E402
 
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
@@ -765,56 +765,22 @@ def _request_data_root(ns: argparse.Namespace) -> DataRoot:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
-def _admit_request_tenant(ns: argparse.Namespace,
-                          directory: tenancy.TenantDirectory | None) -> tenancy.TenantDirectory:
-    """The tenant records (`directory`, else `DEFENDER_DATABASE_DSN`'s after the light version
-    check) and the request's tenant `active` in them with its forge wiring recorded (#1214 Flow
-    4, P3), or a `[run.py]` refusal naming the tenant and why, before its folder is accepted or
-    anything is spent."""
-    from defender.systems.run_tenant import entry_directory
-
-    try:
-        records = entry_directory(directory)
-        tenancy.admit_tenant(records, tenancy.requested_tenant_id(ns.tenant))
-    except TenantRefused as refused:
-        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
-    return records
-
-
-def _accept_request_tenant(
-    ns: argparse.Namespace, *, data_root: DataRoot, box_mounted: tuple[Path | RunsBase | EpisodesRoot, ...],
-) -> tenancy.Tenant:
-    """The request's tenant, accepted, or a `[run.py]` refusal before the preflight. Every run
-    names it with `--tenant`, a sibling included: it comes from the request (for a platform,
-    the acting user's authentication context), never from a record or a stamp, and there is no
-    default. It is accepted under `data_root` (`_request_data_root`) through
-    `tenancy.accept_tenant` — the one acceptance every entry point shares; a sibling's
-    episode is then looked up under that tenant's own folder (`_open_episode_runs`).
-    `box_mounted` is what the run's box mounts besides the checkout — a sibling's arm
-    container — and the tenant's settings must sit under none of it."""
-    try:
-        tenant_id = tenancy.requested_tenant_id(ns.tenant)
-        return tenancy.accept_tenant(
-            data_root, tenant_id, defender_dir=DEFENDER_DIR, box_mounted=box_mounted,
-            clone_tree=False)
-    except TenantRefused as refused:
-        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
-
-
-def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> tuple[RunsBase, ...]:
+def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> Iterator[RunsBase]:
     """What a sibling's box mounts besides the checkout — its arm container,
-    `<data root>/<T>/episodes/<episode id>/runs`, named before the tenant is accepted, so
-    acceptance holds the tenant's settings out of it — or nothing for an ordinary run. The
-    episode id is judged first (canonical UUID text, before any path is built); nothing is
-    read."""
+    `<data root>/<T>/episodes/<episode id>/runs` — or nothing for an ordinary run, named lazily:
+    acceptance's folder rules draw it, so the tenant's record is judged first (r10 A1 order) and
+    acceptance holds the tenant's settings out of it. The episode id is judged when it is drawn
+    (canonical UUID text, before any path is built), a refusal exiting with the hold released;
+    nothing is read."""
     if ns.episode is None:
-        return ()
+        return
     from defender.records.formats import EpisodeRefused
 
     try:
-        return (tenancy.box_mounted_arm_container(data_root, ns.tenant, ns.episode),)
+        mounted = tenancy.box_mounted_arm_container(data_root, ns.tenant, ns.episode)
     except (EpisodeRefused, TenantRefused) as refused:
         sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
+    yield mounted
 
 
 def _open_episode_runs(ns: argparse.Namespace, accepted: tenancy.Tenant) -> Any:
@@ -894,25 +860,23 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
     # The request's tenant id, then the data root, resolved once; nothing below resolves either
     # again.
     data_root = _request_data_root(ns)
-    # The tenant's host lock, held shared for the whole run, this process recorded under it
-    # first (#1214 P3, Flow 4: lock, then state): prepare and teardown wait for the run to end,
-    # and a teardown finds it to stop it.
+    # The one host acceptance (r10 A1), held for the whole run: this process recorded under the
+    # tenant's host lock (prepare and teardown wait for the run, and a teardown finds it to stop
+    # it), the tenant `active` with its forge wiring, its folder accepted. A sibling's arm
+    # container is mounted by its box, so the tenant's settings must not sit under it; its path
+    # is drawn by the folder rules, and nothing is opened by it.
+    from defender.systems.run_tenant import host_tenant
+
     try:
-        held = tenancy.hold_tenant(data_root, ns.tenant)
+        admitted = host_tenant(data_root, ns.tenant, directory=directory, defender_dir=DEFENDER_DIR,
+                               box_mounted=_sibling_box_mounted(ns, data_root), clone_tree=False)
     except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
-    with held:
+    with admitted:
         # Bound under its production name so the curation lane is visibly reached from here.
         enqueue_curation = enqueue
-
-        # The tenant records say whether this tenant is worked for at all (#1214 Flow 4): only an
-        # `active` tenant with its forge wiring gets past here, before its folder is looked at.
-        records = _admit_request_tenant(ns, directory)
-        # The tenant, from the request, accepted under the data root before anything is spent. A
-        # sibling's arm container is mounted by its box, so the tenant's settings must not sit
-        # under it; its path is named here, before acceptance, and nothing is opened by it.
-        accepted = _accept_request_tenant(
-            ns, data_root=data_root, box_mounted=_sibling_box_mounted(ns, data_root))
+        records = admitted.directory
+        accepted = admitted.tenant
         pin = _knowledge_pin(ns)
         # A sibling's door, right after acceptance: its episode walked from the tenant's own
         # folder and its roster publication checked before anything else of the episode is
@@ -1060,7 +1024,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                         _logger.info("--episode: a sibling world is not enqueued for curation")
                     elif ns.no_learn:
                         _logger.info("--no-learn set; not enqueuing for curation")
-                    elif enqueue_curation(run, alert, truncated_by=summary.get("truncated_by")):
+                    elif enqueue_curation(run, alert, tenant=accepted, truncated_by=summary.get("truncated_by")):
                         _logger.info("enqueued for catalog curation")
 
                     try:

@@ -347,14 +347,6 @@ class Tenant(RecordTenant):
         """Build learning configuration where the tenant's record root is owned."""
         return paths_type(repo_root=repo_root, state_dir=self.learning, tenant=self)
 
-    def accept_requested_tenant(self, raw_id: object) -> Tenant:
-        """Fresh acceptance of an addressed tenant under this identity's data root.
-
-        Queue ownership remains the caller's check; this keeps the root inside its owner
-        while preserving request-time validation rather than reusing an acceptance snapshot.
-        """
-        return requested_tenant(self.data_root, raw_id)
-
 
 def clone_halves(tenant: Tenant) -> tuple[Path, Path]:
     """`(agent/, settings/)` of `tenant`'s clone working tree. No run reads them (#1108 P4, O-B:
@@ -424,9 +416,10 @@ def box_mounted_arm_container(data_root: DataRoot, raw_id: object, episode_id: s
 
 def requested_tenant(data_root: DataRoot, raw: object) -> Tenant:
     """The tenant a request names — a command line's raw `--tenant` text, or the `TenantId` a
-    stored row carries — accepted under `data_root`: the ONE acceptance step every request
-    without a box of its own shares (the tracer, the pages, the `--tenant T <run_id>` opener,
-    the curation drain's rehydration). The id is held to `requested_tenant_id` (absent is
+    stored row carries — accepted under `data_root` with the folder rules only: the processes
+    their starter covers (r10 A3: the publish child and its in-process launcher), which hold no
+    database address. Every other host entry point gets its tenant from the host acceptance
+    (`systems.run_tenant.host_tenant`, r10 A1). The id is held to `requested_tenant_id` (absent is
     refused; no default tenant), then `accept_tenant` with the running process's `defender/`
     and no box mount beside the runs base — a process that mounts more (`run.py`, a sibling)
     accepts with its own mounts. `TenantRefused` at the first check that fails."""

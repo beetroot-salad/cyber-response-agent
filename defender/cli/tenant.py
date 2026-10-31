@@ -37,7 +37,6 @@ the checks that need no census still run. Every refusal is printed as `[tenant.p
 from __future__ import annotations
 
 import argparse
-import contextlib
 import os
 import subprocess
 import sys
@@ -105,50 +104,14 @@ def _settings_files_parse(settings: Path) -> None:
 
 
 # ==========================================================================================
-# admission (#1214 Flow 4)
-# ==========================================================================================
-
-def _admitted(tenant_id: str, directory: tenancy.TenantDirectory | None
-              ) -> tuple[tenancy.TenantDirectory, tenancy.Tenant]:
-    """The id's grammar and the data root (as run start judges them, before anything else), the
-    tenant records (`directory`, else `DEFENDER_DATABASE_DSN`'s after the light version check),
-    the tenant `active` in them with its forge wiring, and its folder accepted under
-    `$DEFENDER_DATA_ROOT` — or `TenantRefused` at the first that fails, before any work."""
-    tenancy.requested_tenant_id(tenant_id)
-    data_root = tenancy.resolve_data_root()
-    records = run_tenant.entry_directory(directory)
-    tenancy.admit_tenant(records, tenant_id)
-    tenant = tenancy.accept_tenant(data_root, tenant_id, defender_dir=_DEFENDER_DIR)
-    return records, tenant
-
-
-def _host_held(tenant_id: str) -> contextlib.AbstractContextManager[object]:
-    """The tenant's host lock under `$DEFENDER_DATA_ROOT`, held shared for as long as the command
-    works for the tenant (`tenancy.hold_tenant`, #1214 P3, Flow 4: lock, then state): the id's
-    grammar and the data root first, `TenantRefused` before anything is held."""
-    tenancy.requested_tenant_id(tenant_id)
-    return tenancy.hold_tenant(tenancy.resolve_data_root(), tenant_id)
-
-
-# ==========================================================================================
 # check
 # ==========================================================================================
 
-def check_tenant(tenant_id: str, *, directory: tenancy.TenantDirectory | None = None) -> int:
-    """`check <id>`: the tenant admitted and accepted (stopping at its first refusal), then every
-    finding about its settings, its repo and its last publish, all reported."""
-    try:
-        held = _host_held(tenant_id)
-    except TenantRefused as refused:
-        _say(refused)
-        return 1
-    with held:
-        try:
-            records, tenant = _admitted(tenant_id, directory)
-        except TenantRefused as refused:
-            _say(refused)
-            return 1
-        return _report([*_findings(tenant.knowledge), *_publish_findings(tenant, records)])
+def check_tenant(admitted: run_tenant.Admitted) -> int:
+    """`check <id>`, for the tenant `main`'s host acceptance admitted: every finding about its
+    settings, its repo and its last publish, all reported."""
+    tenant, records = admitted.tenant, admitted.directory
+    return _report([*_findings(tenant.knowledge), *_publish_findings(tenant, records)])
 
 
 def _publish_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:
@@ -230,41 +193,22 @@ def _publish(tenant: tenancy.Tenant, records: tenancy.TenantDirectory, *, by: st
     return 0
 
 
-def update(tenant_id: str, *, directory: tenancy.TenantDirectory | None = None, client=None,
-           identity=None, credential_config=None) -> int:
-    """`update <id>`: publish the tenant's merged `main` (flow 1). The keywords are in-process
-    stand-ins for the tenant records, the forge client, the credential and the host's issuer
+def update(admitted: run_tenant.Admitted, *, client=None, identity=None, credential_config=None) -> int:
+    """`update <id>`: publish the admitted tenant's merged `main` (flow 1). The keywords are
+    in-process stand-ins for the forge client, the credential and the host's issuer
     configuration. Refusals print `[tenant.py] ...`, exit 1, and are what `check` reports
     afterwards."""
-    try:
-        held = _host_held(tenant_id)
-    except TenantRefused as refused:
-        _say(refused)
-        return 1
-    with held:
-        try:
-            records, tenant = _admitted(tenant_id, directory)
-        except TenantRefused as refused:
-            _say(refused)
-            return 1
-        return _publish(tenant, records, by="tenant.py update", client=client, identity=identity,
-                        credential_config=credential_config)
+    return _publish(admitted.tenant, admitted.directory, by="tenant.py update", client=client,
+                    identity=identity, credential_config=credential_config)
 
 
-def propose(tenant_id: str, staged: Path, *, directory: tenancy.TenantDirectory | None = None,
-            client=None, identity=None, credential_config=None) -> int:
-    """`propose <id> <dir>` under the tenant's host lock (`_proposed`)."""
-    try:
-        held = _host_held(tenant_id)
-    except TenantRefused as refused:
-        _say(f"propose refused: {refused}")
-        return 1
-    with held:
-        return _proposed(tenant_id, staged, directory=directory, client=client, identity=identity,
-                         credential_config=credential_config)
+def propose(admitted: run_tenant.Admitted, staged: Path, *, client=None, identity=None,
+            credential_config=None) -> int:
+    """`propose <id> <dir>` for the admitted tenant (`_proposed`)."""
+    return _proposed(admitted, staged, client=client, identity=identity, credential_config=credential_config)
 
 
-def _proposed(tenant_id: str, staged: Path, *, directory: tenancy.TenantDirectory | None,
+def _proposed(admitted: run_tenant.Admitted, staged: Path, *,
               client: Any, identity: Any, credential_config: Any) -> int:
     """`propose <id> <dir>`: the staged directory (shaped like `agent/`) as one commit-maker
     commit on a branch off the origin's `main`, pushed to the tenant origin with one PR. Files
@@ -277,11 +221,7 @@ def _proposed(tenant_id: str, staged: Path, *, directory: tenancy.TenantDirector
     from defender.learning.author import version_control as vc
     from defender.tenancy import regular_files as _regular_files
 
-    try:
-        records, tenant = _admitted(tenant_id, directory)
-    except TenantRefused as refused:
-        _say(f"propose refused: {refused}")
-        return 1
+    records, tenant = admitted.directory, admitted.tenant
     batch = None
     try:
         try:
@@ -429,9 +369,19 @@ def _no_commits_yet(folder: Path, env: dict[str, str], bound: float) -> bool:
 # the command line
 # ==========================================================================================
 
-def main(argv: list[str], *, directory: tenancy.TenantDirectory | None = None) -> int:
+def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
+    argv: list[str], *, directory: tenancy.TenantDirectory | None = None, client=None, identity=None,
+    credential_config=None,
+) -> int:
     """The command line. `directory` is the tenant records a test or a launcher hands in; a
-    production process passes none and reads them from `DEFENDER_DATABASE_DSN`."""
+    production process passes none and reads them from `DEFENDER_DATABASE_DSN`. `client`,
+    `identity` and `credential_config` are in-process stand-ins for the forge client, the
+    tenant's credential and the host's issuer configuration (`update`, `propose`).
+
+    `check <id>`, `update` and `propose` work for the tenant through the one host acceptance
+    (r10 A1), held for the whole command: this process recorded under the tenant's host lock,
+    the tenant `active` with its forge wiring, its folder accepted — or `[tenant.py] ...`, exit
+    1, at the first refusal, before any work."""
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
@@ -445,15 +395,24 @@ def main(argv: list[str], *, directory: tenancy.TenantDirectory | None = None) -
     propose_p.add_argument("tenant_id")
     propose_p.add_argument("staged", type=Path)
     ns = p.parse_args(argv)
-    if ns.command == "update":
-        return update(ns.tenant_id, directory=directory)
-    if ns.command == "propose":
-        return propose(ns.tenant_id, ns.staged, directory=directory)
-    if (ns.tenant_id is None) == (ns.folder is None):
-        check_p.error("give exactly one of <tenant-id> and --folder")
-    if ns.folder is not None:
-        return check_folder(ns.folder)
-    return check_tenant(ns.tenant_id, directory=directory)
+    if ns.command == "check":
+        if (ns.tenant_id is None) == (ns.folder is None):
+            check_p.error("give exactly one of <tenant-id> and --folder")
+        if ns.folder is not None:
+            return check_folder(ns.folder)
+    try:
+        admitted = run_tenant.host_tenant(tenancy.resolve_data_root(), ns.tenant_id, directory=directory,
+                                          defender_dir=_DEFENDER_DIR)
+    except TenantRefused as refused:
+        _say(f"propose refused: {refused}" if ns.command == "propose" else refused)
+        return 1
+    with admitted:
+        if ns.command == "update":
+            return update(admitted, client=client, identity=identity, credential_config=credential_config)
+        if ns.command == "propose":
+            return propose(admitted, ns.staged, client=client, identity=identity,
+                           credential_config=credential_config)
+        return check_tenant(admitted)
 
 
 if __name__ == "__main__":

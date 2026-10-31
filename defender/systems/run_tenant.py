@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from defender.records.formats import DataRoot, RunsBase, EpisodesRoot
 
+import contextlib
 import dataclasses
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -34,6 +35,7 @@ from defender.kit.faults import ConfigFault
 if TYPE_CHECKING:
     from defender.systems.correlation import CorrelationDispatch
     from defender.tenancy import TenantDirectory
+    from defender.tenancy.models import ForgeWiring
 
 
 def table_pointer(tenant_id: str) -> str:
@@ -224,6 +226,86 @@ def resolve_run_tenant(
     return RunReadiness(grants=grants, correlation=correlation)
 
 
+#: The database addresses this process has checked the schema revision of (r10: the version check
+#: runs at the first acceptance in a process only; a failed check is not remembered).
+_VERSION_CHECKED: set[str] = set()
+
+
+def _check_version_once(dsn: str) -> None:
+    """The light version check, once per process per address (r10 Finding 9)."""
+    if dsn not in _VERSION_CHECKED:
+        _check_version(dsn)
+        _VERSION_CHECKED.add(dsn)
+
+
+class Admitted:
+    """The value of one host acceptance (r10.1 C3): the accepted `tenant`, the `directory` it was
+    admitted through (run, the drain's per-claim check and credential and revert's delivery read
+    it after) and the tenant's forge `wiring`. The acceptance already holds the tenant's host lock;
+    `with admitted:` releases it when the block ends. Only `host_tenant` makes one."""
+
+    __slots__ = ("_release", "directory", "tenant", "wiring")
+
+    def __init__(self, tenant: Tenant, directory: TenantDirectory, wiring: ForgeWiring,
+                 release: contextlib.ExitStack) -> None:
+        self.tenant, self.directory, self.wiring, self._release = tenant, directory, wiring, release
+
+    def __enter__(self) -> Admitted:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._release.close()
+
+
+def host_tenant(  # noqa: PLR0913 — the request (root, id), the records seam and the folder rules' inputs
+    data_root: DataRoot, raw_id: object, *, directory: TenantDirectory | None = None,
+    defender_dir: Path | None = None, box_mounted: Iterable[Path | RunsBase | EpisodesRoot] = (),
+    clone_tree: bool = True,
+) -> Admitted:
+    """The one host acceptance (r10 A1): the only way a host entry point gets its tenant.
+
+    Checked now, at the call, in this order: the id's grammar; the data root's placement; this
+    process recorded and the tenant's host lock held shared (`host_lock.hold_shared`: a nested
+    acceptance reuses the open hold; while prepare or teardown holds it exclusive it waits, with
+    no timeout, saying so once on stderr); the database's schema revision (the first acceptance
+    in the process only); the tenant's record, read once (`active`, its forge wiring recorded);
+    the folder rules (`accept_tenant`). A refusal at any step is `TenantRefused` (an unreachable
+    database its `RecordsUnreachable`) and releases what was taken (O-A6). The returned value
+    holds the lock until `with admitted:` ends (r10.1 C3).
+
+    `directory` is the tenant records a test or a launcher hands in; a production process passes
+    none and reads them from `DEFENDER_DATABASE_DSN`. Refused in the lifecycle's own process
+    (r10.1 C6, A4): prepare holds the lock exclusive there, so a shared hold would wait on itself."""
+    from defender import tenancy
+    from defender._paths import process_defender_dir
+    from defender.tenancy import host_lock
+
+    if tenancy.in_lifecycle_process():
+        raise TenantRefused("the host acceptance never runs in the lifecycle process: prepare holds the "
+                            "tenant's host lock exclusive there, and the lifecycle loads a tenant with the "
+                            "folder rules only")
+    tenant_id = tenancy.requested_tenant_id(raw_id)
+    tenancy.refuse_unplaceable_data_root(data_root)
+    held = contextlib.ExitStack()
+    try:
+        held.enter_context(host_lock.hold_shared(tenancy.data_root_for_child(data_root), tenant_id))
+    except OSError as unheld:
+        raise TenantRefused(f"tenant {tenant_id}'s host lock could not be taken: "
+                            f"{unheld.strerror or type(unheld).__name__}") from None
+    try:
+        # A1 order: the version check runs only now, with the hold taken (`host_directory` calls it
+        # when no directory is handed in).
+        records = tenancy.host_directory(directory, check_version=_check_version_once)
+        wiring = tenancy.admit_tenant(records, tenant_id)
+        tenant = accept_tenant(data_root, tenant_id,
+                               defender_dir=defender_dir if defender_dir is not None else process_defender_dir(),
+                               box_mounted=box_mounted, clone_tree=clone_tree)
+    except BaseException:
+        held.close()
+        raise
+    return Admitted(tenant, records, wiring, held)
+
+
 def entry_directory(given: TenantDirectory | None) -> TenantDirectory:
     """The `TenantDirectory` a host entry point admits its tenant through: `given`, else one over
     `DEFENDER_DATABASE_DSN` once the database is at this code's revision (#1339's light check,
@@ -280,7 +362,9 @@ __all__ = [
     "resolve_tenant",
     "catalog_templates",
     "correlation_dispatch",
+    "Admitted",
     "entry_directory",
+    "host_tenant",
     "refusals",
     "resolve_run_tenant",
     "resolve_run_tenant_or_refuse",

@@ -118,6 +118,18 @@ class PostgresTenantRepository:
         rows = await self._rows(select(_W).where(_W.c.tenant_id == str(tenant_id)))
         return ForgeWiring(**rows[0]._mapping) if rows else None
 
+    async def admission(self, tenant_id: str) -> tuple[str | None, ForgeWiring | None]:
+        if _cannot_exist(tenant_id):
+            return None, None
+        rows = await self._rows(
+            select(_T.c.state, _W.c.repo, _W.c.origin).select_from(
+                _T.outerjoin(_W, _W.c.tenant_id == _T.c.id)).where(_T.c.id == str(tenant_id)))
+        if not rows:
+            return None, None
+        row = rows[0]
+        wiring = None if row.repo is None else ForgeWiring(tenant_id=str(tenant_id), repo=row.repo, origin=row.origin)
+        return row.state, wiring
+
     async def publish_status(self, tenant_id: str) -> dict[str, str] | None:
         if _cannot_exist(tenant_id):
             return None
