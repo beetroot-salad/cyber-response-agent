@@ -286,14 +286,14 @@ def test_a_crashed_or_unparseable_run_with_clean_queries_still_scores_wrong(tmp_
 
 def _unscorable_after(tmp_path: Path, sequence: str) -> tuple[int, str]:
     """Score OTHER from rows `sequence`, oldest first: `d` a dropped row, `c` a clean row, `s` a
-    stale-verdict row (clean queries); an uppercase letter is the same row bound to another
+    stale-verdict row (clean queries), `x` a stale-verdict row whose run read `now`; an uppercase letter is the same row bound to another
     freeze. GOOD scores from one clean row."""
     fixtures, runs = _cases(tmp_path)
     rows: list[Any] = []
     for ch in sequence:
-        run = _dropped(runs) if ch.lower() == "d" else _ok(runs, "malicious")
+        run = _dropped(runs) if ch.lower() in "dx" else _ok(runs, "malicious")
         extra: dict[str, Any] = {"freeze": "f" * 64} if ch.isupper() else {}
-        if ch.lower() == "s":
+        if ch.lower() in "sx":
             extra["verdict"] = "stale"
         rows.append(_row(fixtures, OTHER, run, **extra))
     return _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), *rows)
@@ -310,7 +310,7 @@ def test_three_consecutive_dropped_rows_make_the_case_unscorable(tmp_path, seque
     assert (rc != 0, "incomplete" in said.lower()) == (True, True), said
 
 
-@pytest.mark.parametrize("sequence", ["dd", "ddcd", "dcdd", "dDd", "dDDd", "ddsd", "dsdd"])
+@pytest.mark.parametrize("sequence", ["dd", "ddcd", "dcdd", "dDd", "dDDd", "ddsd", "dsdd", "dxdd", "ddxd"])
 def test_fewer_than_three_consecutive_drops_stay_a_rerun(tmp_path, sequence):
     """D13: with other-freeze rows filtered out, a clean or stale current-freeze row breaks the
     run of drops; the newest row is a drop, so these stay at a re-run."""
@@ -511,3 +511,48 @@ def test_the_digest_of_a_freeze_with_non_ascii_values_is_pinned(tmp_path, unicod
                           (OTHER, _ok(runs, "malicious")))
 
     assert (rc, _verdicts(said)) == (0, {GOOD: "OK", OTHER: "OK"}), said
+
+
+def test_a_stale_row_lists_its_own_reason_text(tmp_path):
+    """Verdict/O11: the Stale listing prints the row's own `reason`, not a generic line, so the
+    operator sees what changed."""
+    fixtures, runs = _cases(tmp_path)
+    why = "fingerprint differs in logs-system.auth-2026.10.20"
+    stale = _row(fixtures, OTHER, _ok(runs, "malicious"), verdict="stale", reason=why)
+
+    _rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), stale)
+
+    assert why in _why(said, OTHER), said
+
+
+def test_an_uppercase_hex_freeze_digest_in_a_row_does_not_bind(tmp_path):
+    """Freeze digest/r6.1: the digest is bare lowercase hex; the same digest upper-cased is
+    another freeze, listed not run."""
+    fixtures, runs = _cases(tmp_path)
+    digest = freeze_digest(fixtures / GOOD)
+    assert digest != digest.upper()
+
+    _rc, said = _scored_rc(tmp_path, runs, fixtures,
+                           _row(fixtures, GOOD, _ok(runs), freeze=digest.upper()),
+                           (OTHER, _ok(runs, "malicious")))
+
+    assert _verdicts(said) == {OTHER: "OK"}, said
+    assert "not run" in _why(said, GOOD), said
+
+
+def test_a_queries_file_that_cannot_be_read_errs_wide_to_a_rerun(tmp_path):
+    """D4/O5 (errs wide): a run whose recorded queries are too large to read counts as having read
+    `now`: listed for re-run, not scored."""
+    from defender import _io
+    from defender.records import RunPaths
+
+    fixtures, runs = _cases(tmp_path)
+    unreadable = _run(runs, says="malicious", queries=CLEAN)
+    with RunPaths(unreadable).executed_queries.open("r+b") as f:
+        f.truncate(_io.READ_LIMIT + 1)  # sparse; reading it raises OSError
+
+    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, unreadable.name))
+
+    assert "re-run" in _why(said, OTHER), said
+    assert OTHER not in _verdicts(said), said
+    assert rc != 0, said

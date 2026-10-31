@@ -98,6 +98,40 @@ def _string_end(query: str, i: int) -> tuple[int, str]:
     raise EsqlUnclassifiable("an unterminated string")
 
 
+def _backtick_end(query: str, i: int) -> tuple[int, str]:
+    """`(index after, name)` of the quoted identifier opening at `i`: `"`, `//` and `/*` inside it
+    open nothing, and "``" is a literal backtick."""
+    j = i + 1
+    while True:
+        if j >= len(query):
+            raise EsqlUnclassifiable("an unterminated backtick identifier")
+        if query[j] == "`":
+            if not query.startswith("``", j):
+                return j + 1, query[i + 1:j].replace("``", "`")
+            j += 2
+        else:
+            j += 1
+
+
+def _comment_end(query: str, i: int) -> int:
+    """The index after the comment opening at `i`; a line comment ends at `\r` or `\n`."""
+    if query.startswith("/*", i):
+        end = query.find("*/", i + 2)
+        if end < 0:
+            raise EsqlUnclassifiable("an unterminated block comment")
+        return end + 2
+    end = next((k for k in range(i, len(query)) if query[k] in "\r\n"), -1)
+    return len(query) if end < 0 else end + 1
+
+
+def _word_end(query: str, i: int) -> int:
+    j = i
+    while (j < len(query) and not query[j].isspace() and query[j] not in '|,()"`'
+           and not query.startswith("//", j) and not query.startswith("/*", j)):
+        j += 1
+    return j
+
+
 def _tokens(query: str) -> list[_Token]:
     """The query's tokens with comments dropped: a comment is not a source (O2a)."""
     out: list[_Token] = []
@@ -106,39 +140,19 @@ def _tokens(query: str) -> list[_Token]:
         ch = query[i]
         if ch.isspace():
             i += 1
-        elif query.startswith("//", i):
-            end = next((k for k in range(i, len(query)) if query[k] in "\r\n"), -1)
-            i = len(query) if end < 0 else end + 1
-        elif query.startswith("/*", i):
-            end = query.find("*/", i + 2)
-            if end < 0:
-                raise EsqlUnclassifiable("an unterminated block comment")
-            i = end + 2
+        elif query.startswith(("//", "/*"), i):
+            i = _comment_end(query, i)
         elif ch == '"':
             i, value = _string_end(query, i)
             out.append(_Token("string", value))
         elif ch == "`":
-            # A quoted identifier: `"`, `//` and `/*` inside it open nothing; "``" is a literal backtick.
-            j = i + 1
-            while True:
-                if j >= len(query):
-                    raise EsqlUnclassifiable("an unterminated backtick identifier")
-                if query[j] == "`":
-                    if query.startswith("``", j):
-                        j += 2
-                        continue
-                    break
-                j += 1
-            out.append(_Token("string", query[i + 1:j].replace("``", "`")))
-            i = j + 1
+            i, value = _backtick_end(query, i)
+            out.append(_Token("string", value))
         elif ch in "|,()":
             out.append(_Token(ch, ch))
             i += 1
         else:
-            j = i
-            while (j < len(query) and not query[j].isspace() and query[j] not in '|,()"`'
-                   and not query.startswith("//", j) and not query.startswith("/*", j)):
-                j += 1
+            j = _word_end(query, i)
             out.append(_Token("word", query[i:j]))
             i = j
     return out

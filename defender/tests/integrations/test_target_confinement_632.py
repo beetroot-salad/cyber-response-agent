@@ -382,6 +382,22 @@ ESQL_OUTSIDE = [
     pytest.param("FROM logs-* | ENRICH some-policy ON host.name", id="enrich"),
     pytest.param("FROM logs-* | WHERE x == 1 // c\n| LOOKUP JOIN .security-7 ON y",
                  id="lookup-after-trailing-comment"),
+    pytest.param('FROM logs-*, "metadata", .security-7', id="quoted-metadata-is-a-source-not-the-keyword"),
+    pytest.param("FROM (ROW a=1 | LOOKUP JOIN .security-7 ON a)", id="subquery-lookup-join-outside"),
+    pytest.param("FROM (FROM logs-* | LOOKUP JOIN .security-7 ON a)", id="subquery-after-from-lookup-join-outside"),
+    pytest.param("FROM logs-*, (FROM logs-* | WHERE x == 1 | LOOKUP JOIN .security-7 ON a)",
+                 id="subquery-in-a-list-lookup-join-outside"),
+    pytest.param('FROM "logs-*,.security-7"', id="quoted-comma-list-names-outside"),
+    pytest.param("SHOW INFO | LOOKUP JOIN .security-7 ON a", id="show-does-not-exempt-later-sources"),
+    pytest.param("FROM logs-* /* a */ | LOOKUP JOIN .security-7 ON x /* b */",
+                 id="two-block-comments-do-not-swallow-the-join"),
+    pytest.param('FROM logs-* | EVAL `x"` = 1 | LOOKUP JOIN .security-7 ON y | EVAL `z"` = 2',
+                 id="backtick-name-with-a-quote-then-outside-join"),
+    pytest.param("FROM logs-* | EVAL `a//b` = 1 | LOOKUP JOIN .security-7 ON y",
+                 id="backtick-name-with-line-comment-opener-then-outside-join"),
+    pytest.param("FROM logs-* | EVAL `a/*b` = 1 | LOOKUP JOIN .security-7 ON y",
+                 id="backtick-name-with-block-comment-opener-then-outside-join"),
+    pytest.param("FROM logs-* // c\r| LOOKUP JOIN .security-7 ON a", id="lone-cr-ends-a-line-comment"),
 ]
 
 ESQL_UNCLASSIFIABLE = [
@@ -425,6 +441,14 @@ ESQL_INSIDE = [
     pytest.param("FROM .ds-logs-system.auth-* | LIMIT 1", id="backing-index-of-a-configured-stream"),
     pytest.param("FROM logs-* | WHERE a == 1 /* unterminated-looking: */ | LIMIT 1",
                  id="terminated-comment-is-fine"),
+    pytest.param('FROM logs-* | EVAL `x"` = 1 | LOOKUP JOIN logs-lookup ON y | EVAL `z"` = 2',
+                 id="backtick-name-with-a-quote"),
+    pytest.param("FROM logs-* | EVAL `a//b` = 1 | LOOKUP JOIN logs-lookup ON y | LIMIT 1",
+                 id="backtick-name-with-line-comment-opener"),
+    pytest.param("FROM logs-* | EVAL `a/*b` = 1 | LOOKUP JOIN logs-lookup ON y | LIMIT 1",
+                 id="backtick-name-with-block-comment-opener"),
+    pytest.param("FROM logs-* | EVAL `.security-7` = 1 | LIMIT 1", id="backtick-name-is-not-a-source"),
+    pytest.param("FROM logs-* // c\r| LOOKUP JOIN logs-lookup ON a", id="lone-cr-ends-a-comment-inside"),
 ]
 
 
@@ -484,3 +508,14 @@ def test_a_cut_run_confines_esql_exactly_as_an_ordinary_run_does(
         elastic_adapter.VERBS["esql"](ctx, query=query)
     with pytest.raises(TransportFault):
         elastic_adapter.VERBS["esql"](ctx, query="FROM logs-system.auth-* | LIMIT 1")
+
+
+@pytest.mark.parametrize("query", [
+    pytest.param('FROM "metadata", .security-7', id="quoted-metadata-first"),
+    pytest.param('FROM logs-*, "metadata", .security-7', id="quoted-metadata-in-the-middle"),
+    pytest.param('FROM logs-*, .security-7, "metadata"', id="quoted-metadata-last"),
+])
+def test_a_quoted_metadata_is_an_index_name_confined_like_any_other(tmp_path: Path, query: str):
+    """#1347 O2a: a quoted `"metadata"` does not end the source list; it is refused as an outside index, not as unreadable."""
+    with pytest.raises(ConfinementFault, match="falls outside the configured patterns"):
+        elastic_adapter.VERBS["esql"](_ctx(tmp_path), query=query)

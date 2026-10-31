@@ -22,7 +22,7 @@ the name of each stored part. The exact format is unpinned.
 from __future__ import annotations
 
 import importlib.util
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -362,3 +362,105 @@ def test_without_an_injected_clock_and_fingerprint_capture_builds_the_production
     assert built
     assert rig.freeze["fingerprint"] == fingerprint
     assert instant(rig.freeze["captured_at"]) == instant(ES_NOW)
+
+
+def test_a_first_capture_whose_freeze_cannot_be_written_leaves_no_parts(tmp_path):
+    """O1/D8: with no earlier capture, a failed freeze.yaml write leaves the case's parts absent or empty."""
+    rig = Rig(tmp_path)
+    blocker = rig.case_dir / "freeze.yaml"
+    blocker.mkdir()
+    (blocker / "x").write_text("x")
+    with pytest.raises(OSError):
+        rig.run()
+    mine = rig.parts_dir / SLUG
+    assert not mine.exists() or not [p for p in mine.rglob("*") if p.is_file()]
+    assert [p.name for p in rig.parts_dir.iterdir() if p.name not in ("other-case", SLUG)] == []
+
+
+def test_a_failed_commit_leaves_no_temporary_freeze_file_in_the_case_dir(tmp_path):
+    """O1/D8: a failed commit leaves nothing but the blocker (and alert.json) in the case dir."""
+    rig = Rig(tmp_path)
+    blocker = rig.case_dir / "freeze.yaml"
+    blocker.mkdir()
+    (blocker / "x").write_text("x")
+    with pytest.raises(OSError):
+        rig.run()
+    assert {p.name for p in rig.case_dir.iterdir()} <= {"freeze.yaml", "alert.json"}
+
+
+def test_a_successful_recapture_replaces_parts_and_freeze_and_leaves_no_old_copy(tmp_path):
+    """O1/D8: re-capturing a case swaps in the new parts and freeze.yaml; nothing earlier remains."""
+    rig = Rig(tmp_path)
+    mine = rig.parts_dir / SLUG
+    mine.mkdir()
+    (mine / "old.bin").write_bytes(b"earlier capture")
+    (rig.case_dir / "freeze.yaml").write_text("earlier: freeze\n")
+    rig.run()
+    assert _stored(rig) == PART_BYTES
+    assert rig.freeze.get("earlier") is None and set(rig.freeze["parts"]) == set(PART_BYTES)
+    assert sorted(p.name for p in rig.parts_dir.iterdir()) == sorted(["other-case", SLUG])
+    assert [p.name for p in rig.case_dir.iterdir() if p.name.startswith(".")] == []
+
+
+def test_a_failure_swapping_the_new_parts_in_restores_the_earlier_parts(tmp_path, monkeypatch):
+    """O1/D8: if moving the staged parts into place fails, the earlier parts are back and no freeze is written."""
+    rig = Rig(tmp_path)
+    mine = rig.parts_dir / SLUG
+    mine.mkdir()
+    (mine / "old.bin").write_bytes(b"earlier capture")
+    real = Path.rename
+
+    def rename(self, target):
+        if self.name.startswith(f".{SLUG}.") and self.name != f".{SLUG}.old" and Path(target) == mine:
+            raise OSError("injected: staging rename failed")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    with pytest.raises(OSError, match="injected"):
+        rig.run()
+    assert _stored(rig) == {"old.bin": b"earlier capture"}
+    assert not (rig.case_dir / "freeze.yaml").exists()
+    assert sorted(p.name for p in rig.parts_dir.iterdir()) == sorted(["other-case", SLUG])
+
+
+# -- the command line -------------------------------------------------------------------------
+
+
+def _main(tmp_path, monkeypatch, *flags, hold=False):
+    """Drive `capture_case.main` with the docker lock store, LabOps and wall clock replaced by the rig's fakes."""
+    from chaos import lock
+    rig = Rig(tmp_path)
+    module = _module()
+    if hold:
+        lock.take(rig.store, lock.CAPTURE)
+    monkeypatch.setattr(module, "LabOps", lambda: rig.ops)
+    monkeypatch.setattr(module, "WallClock", lambda: rig.clock)
+    monkeypatch.setattr(module.lock, "DockerLockStore", lambda: rig.store)
+    rc = module.main([str(rig.case_dir), "--scenario", "ssh-brute-force-canary",
+                      "--history-start", HISTORY_START, "--parts-dir", str(rig.parts_dir), *flags])
+    return rig, rc
+
+
+def test_the_command_line_forwards_chaos_seed_and_settle_to_capture(tmp_path, monkeypatch):
+    """O1/O7: `--chaos P --seed N --settle-s S` reach the fire call, the freeze and the settle sleep."""
+    rig, rc = _main(tmp_path, monkeypatch, "--chaos", "stale-cmdb", "--seed", "7", "--settle-s", "5")
+    assert rc == 0
+    assert rig.ops.fire_kwargs["chaos"] == "stale-cmdb" and rig.ops.fire_kwargs["seed"] == 7
+    assert rig.freeze["chaos"]["seed"] == 7
+    assert [d for op, d in rig.journal if op == "clock.sleep"] == [5.0]
+
+
+def test_the_command_line_refuses_while_the_lock_is_held_exit_4_naming_it(tmp_path, monkeypatch, capsys):
+    """O10: a held capture lock makes the command exit 4 and say which lock refused."""
+    rig, rc = _main(tmp_path, monkeypatch, hold=True)
+    err = capsys.readouterr().err
+    assert rc == 4 and "capture" in err and "held" in err
+    assert "fire" not in rig.journal.ops()
+
+
+def test_the_wall_clock_sleeps_until_the_instant():
+    """O7: WallClock.sleep_until returns only once the instant has passed."""
+    clock = _module().WallClock()
+    moment = datetime.now(UTC) + timedelta(seconds=0.3)
+    clock.sleep_until(moment)
+    assert datetime.now(UTC) >= moment

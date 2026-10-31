@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
-import re
 import threading
 from pathlib import Path
 
@@ -261,8 +260,8 @@ class Recorder:
         self.chaos.append("revert")
 
 
-def _run(runner, tmp_path, rec, store, token=None, chaos="none"):
-    return runner.run_scenario(SCENARIO, 42, {}, False, runs_dir=tmp_path / "runs",
+def _run(runner, tmp_path, rec, store, token=None, chaos="none", cr_mode="none"):
+    return runner.run_scenario(SCENARIO, 42, {}, False, cr_mode, runs_dir=tmp_path / "runs",
                                chaos=chaos, chaos_ctl=rec, exec_fn=rec.exec_fn,
                                post_cr=lambda body: (0, {}), lock_store=store, lock_token=token)
 
@@ -277,6 +276,17 @@ def test_the_runner_refuses_while_the_capture_lock_is_held(runner, lock, tmp_pat
     assert rec.execs == [] and rec.chaos == []
     assert not (tmp_path / "runs").exists() or not any((tmp_path / "runs").iterdir())
     assert lock.CAPTURE in store.records
+
+
+@pytest.mark.parametrize("cr_mode", ["valid", "stale", "scope-mismatch"])
+def test_the_runner_refuses_while_the_capture_lock_is_held_for_every_cr_mode(
+        runner, lock, tmp_path, cr_mode):
+    """O10: a held capture lock stops a run with a synthetic change request too; nothing fires."""
+    store, rec = FakeLockStore(), Recorder()
+    lock.take(store, lock.CAPTURE)
+    with pytest.raises(SystemExit):
+        _run(runner, tmp_path, rec, store, cr_mode=cr_mode)
+    assert rec.execs == [] and lock.CAPTURE in store.records
 
 
 def test_the_runner_refuses_a_wrong_token_and_fires_with_the_right_one(runner, lock, tmp_path):
@@ -410,3 +420,33 @@ def test_chaos_activate_cli_without_an_injected_store_checks_the_lab_server_lock
     assert ctl.main(["activate", "cmdb-stale-owner", "--lock-token", "T-9"]) == 0
     assert isinstance(seen.get("lock_store"), lock.DockerLockStore)
     assert seen["lock_token"] == "T-9"
+
+
+# -- the lock command line --------------------------------------------------------------------
+
+
+def _lock_main(lock, monkeypatch, store, *argv):
+    monkeypatch.setattr(lock, "DockerLockStore", lambda *a, **k: store)
+    return lock.main(list(argv))
+
+
+def test_status_says_free_for_a_free_lock_and_not_free_for_a_held_one(lock, monkeypatch, capsys):
+    """O10: `status <name>` reports that lock only: free when absent, a holder when held."""
+    store = FakeLockStore()
+    lock.take(store, lock.CAPTURE)
+    assert _lock_main(lock, monkeypatch, store, "status", lock.FROZEN_ENGINE) == 0
+    assert capsys.readouterr().out.strip() == "free"
+    assert _lock_main(lock, monkeypatch, store, "status", lock.CAPTURE) == 0
+    held = capsys.readouterr().out.strip()
+    assert held and "free" not in held.lower()
+
+
+@pytest.mark.parametrize("name", ["capture", "frozen-engine"])
+def test_clear_removes_the_named_lock_only(lock, monkeypatch, capsys, name):
+    """O10: `clear <name>` deletes that lock's record and leaves the other lock held."""
+    store = FakeLockStore()
+    for each in (lock.CAPTURE, lock.FROZEN_ENGINE):
+        lock.take(store, each)
+    other = ({lock.CAPTURE, lock.FROZEN_ENGINE} - {name}).pop()
+    assert _lock_main(lock, monkeypatch, store, "clear", name) == 0
+    assert name not in store.records and other in store.records
