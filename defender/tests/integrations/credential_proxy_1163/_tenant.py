@@ -151,10 +151,10 @@ def rig(scratch: Path, root: Path, decl: Callable[[str], str] | None = None, *,
                                  else creds} if creds is not None else {})
             signer = H.FakeSigner()
             verifier = H.PairedVerifier(signer)
-            audit = audit if audit is not None else H.AuditRecorder()
+            sink = H.AuditRecorder() if audit is None else audit
             tenants = {t.tenant_id: exports_of(t), **(ghosts or {})}
-            client = client_of(deps(tenants, store, verifier=verifier, audit=audit, **deps_kw))
-            yield Rig(t, up, store, audit, signer, verifier, client, dict(ghosts or {}))
+            client = client_of(deps(tenants, store, verifier=verifier, audit=sink, **deps_kw))
+            yield Rig(t, up, store, sink, signer, verifier, client, dict(ghosts or {}))
 
 
 def crm_files(base: str) -> dict[str, str]:

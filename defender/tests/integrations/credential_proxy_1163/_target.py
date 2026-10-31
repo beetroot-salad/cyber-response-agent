@@ -43,3 +43,33 @@ ACCESS_FILE = "settings/systems/{system}/access.yaml"
 #: The keys of a proxy audit record (r5 A4): `outcome` is `sent <status>` or the fault class;
 #: `path` is relative to the declared base; `commit` is the `current` commit applied.
 AUDIT_KEYS = ("tenant", "system", "investigation", "commit", "method", "path", "outcome")
+
+
+# --- Names the design does not settle (r6 repair 2, F3). Working choices, listed as gaps. ------
+
+def request_access_type() -> Any:
+    """`defender.kit.access.RequestAccess`: the run's handle on the proxy (address + request
+    token) handed to the lifecycle (O10, A7). Used by test_w2."""
+    return importlib.import_module("defender.kit.access").RequestAccess
+
+
+#: `RunState.access`: the attribute of `defender.investigation.run_state.RunState` that holds the
+#: run's `RequestAccess` (test_w2 reads it if present; never assigns it).
+RUN_STATE_ACCESS_ATTR = "access"
+
+
+def transport_uses_proxy(record: Any, system: str) -> bool:
+    """`defender.integrations._stub_transport.uses_proxy(record, system)`: whether the run
+    record declares `system` as `http-proxy` (A5, A6; test_x5)."""
+    return importlib.import_module("defender.integrations._stub_transport").uses_proxy(record, system)
+
+
+#: The shipped program `python -m defender.credential_proxy` (O5; test_m1, test_m2): the module
+#: run, the environment variables naming its operator config file and port, the config key naming
+#: an OpenBao token file, the text it logs when it refuses to start, and its refusal exit code.
+PROXY_PROGRAM_MODULE = "defender.credential_proxy"
+PROXY_ENV_CONFIG = "DEFENDER_CREDENTIAL_PROXY_CONFIG"
+PROXY_ENV_PORT = "DEFENDER_CREDENTIAL_PROXY_PORT"
+PROXY_CONFIG_TOKEN_FILE_KEY = "openbao_token_file"
+PROXY_REFUSAL_LOG = "credential proxy cannot start"
+PROXY_REFUSAL_EXIT = 2
