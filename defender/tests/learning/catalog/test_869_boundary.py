@@ -38,7 +38,7 @@ from defender.tests.support.learning.curation._lead_author_1134 import (
     lead_lane,
     run_pitfalls,
 )
-from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, run_of
+from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, curation_tenant, run_of
 
 
 def _run_dir() -> Path:
@@ -162,7 +162,7 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
     commits into the same batch. The residue never lands: the drain re-syncs the draft per claim."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     _product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic",),
-                               skills=("elastic",), catalog=("elastic",))
+                               skills=("elastic",), catalog=("elastic",), tenant=curation_tenant())
     paths = lane.paths
     state = open_state(paths)
     persist.append_pitfalls(
@@ -188,7 +188,7 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
 
     capsys.readouterr()
     drains._drain_lead_author(paths, state, lane1, lane2, batch=lane.batch,
-                              directory=directory_for_root())
+                              claims=state.has_requests(), directory=directory_for_root())
 
     # Both lanes actually ran, and lane 1 actually refused: without this the residue claim
     # would be green over a drain that never reached either lane.
