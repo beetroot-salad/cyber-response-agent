@@ -19,9 +19,10 @@ module attribute `LabOps`). Its methods are those the capture and launcher fakes
   Elasticsearch but not guaranteed, so it must not appear). ES|QL returns at most 1000 rows by
   default, so either one request with a LIMIT large enough or several (paged) requests whose union
   covers the window. The fake supports both: it cuts rows to the query's LIMIT and to the time
-  range named by the query's own ISO-seconds timestamps (`YYYY-MM-DDTHH:MM:SS`; the first and
-  last found are the bounds; a query naming fewer than two is unbounded), so time-chunked pages
-  must spell their bounds in the query, not elsewhere. The hour truncation may sit after BY or in
+  range the query's own comparisons name (`>=`/`>`/`<=`/`<` followed by an ISO-seconds stamp,
+  optionally inside `TO_DATETIME(...)`; each comparison applies on its own; comments and bare
+  stamps are ignored), so the window's lower bound — and any page bounds — must be real
+  comparisons in the query. The upper cut at `as_of` may ride only in the request filter. The hour truncation may sit after BY or in
   an EVAL whose alias is a BY key. A reply that looks truncated (row count == the request's LIMIT,
   or 1000 when it has none) is refused with an exception (r6.1), never accepted.
 * `es_now() -> str` sends an ES|QL query to the same door and returns the instant in the first
@@ -97,6 +98,21 @@ def _check_fingerprint(got, events, alerts):
         assert got[key(r)] in ([r[0], r[1]], [r[0]]), key(r)
 
 
+_COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
+_BOUND = re.compile(
+    r"(>=|<=|>|<)\s*(?:TO_DATETIME\s*\(\s*)?\"?(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)")
+
+
+def _compared(query: str) -> list[tuple[str, str]]:
+    """The (operator, stamp) comparisons the query filters on; comments and bare stamps aside."""
+    return _BOUND.findall(_COMMENT.sub("", query))
+
+
+def _within(bounds: list[tuple[str, str]], stamp: str) -> bool:
+    keep = {">=": stamp.__ge__, ">": stamp.__gt__, "<=": stamp.__le__, "<": stamp.__lt__}
+    return all(keep[op](at) for op, at in bounds)
+
+
 class Docker:
     """Records every command and answers each `_query` with a canned ES|QL result.
 
@@ -126,9 +142,7 @@ class Docker:
         if ALERTS in query:
             rows += [shape(r) for r in self.alert_rows]
         if self.serve_rows is not None:
-            stamps = sorted(re.findall(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d", query))
-            if len(stamps) >= 2:
-                rows = [r for r in rows if stamps[0] <= r[-1][:19] <= stamps[-1]]
+            rows = [r for r in rows if _within(_compared(query), r[-1][:19])]
         return rows[:_limit(query)]
 
     def __call__(self, argv, **kw):

@@ -1,6 +1,6 @@
 """#1347 O3 (FR4): the ticket stub's clock is pinned at as_of.
 
-Seam bound by this contract: env var `STUB_AS_OF` (ISO instant) read when `app.py` loads, like
+Seam bound by this contract: env var `V2_STUB_AS_OF` (ISO instant) read when `app.py` loads, like
 `TICKET_SEED_PATH`; `app._now()` then returns that instant, every time, and records stamped with
 it (created/updated) carry it.
 
@@ -29,7 +29,7 @@ AS_OF = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
 def load(monkeypatch):
     def _load(**env):
         monkeypatch.setenv("TICKET_SEED_PATH", str(APP.parent / "seed" / "tickets.json"))
-        monkeypatch.delenv("STUB_AS_OF", raising=False)
+        monkeypatch.delenv("V2_STUB_AS_OF", raising=False)
         for key, value in env.items():
             monkeypatch.setenv(key, value)
         spec = importlib.util.spec_from_file_location("ticket_server_1347", APP)
@@ -47,7 +47,7 @@ def _at(text: str) -> datetime:
 
 def test_now_returns_the_pinned_instant_every_time(load):
     """O3: `_now()` is as_of however long the stub has been up."""
-    app = load(STUB_AS_OF="2026-10-20T09:00:00Z")
+    app = load(V2_STUB_AS_OF="2026-10-20T09:00:00Z")
     first = _at(app._now())
     time.sleep(0.01)
     assert first == AS_OF and _at(app._now()) == AS_OF
@@ -55,7 +55,7 @@ def test_now_returns_the_pinned_instant_every_time(load):
 
 def test_a_new_ticket_is_stamped_with_the_pinned_instant(load):
     """O3: created/updated on a record written through the API carry as_of."""
-    app = load(STUB_AS_OF="2026-10-20T09:00:00Z")
+    app = load(V2_STUB_AS_OF="2026-10-20T09:00:00Z")
     with TestClient(app.app) as client:
         resp = client.post("/tickets", json={"key": "FRZ-1", "summary": "s"})
     assert resp.status_code in (200, 201)

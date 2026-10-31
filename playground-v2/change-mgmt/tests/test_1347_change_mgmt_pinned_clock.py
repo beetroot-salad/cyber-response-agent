@@ -4,7 +4,7 @@ and its wall-clock refresh off.
 Seams bound by this contract (within the app's conventions: env vars read when `app.py` loads,
 like `STANDING_REFRESH_SECONDS`):
 
-* `STUB_AS_OF` (ISO instant): the app's clock is that instant for every use of "now" - standing
+* `V2_STUB_AS_OF` (ISO instant): the app's clock is that instant for every use of "now" - standing
   CR materialization, `/changes/active` without `at`, and the `created`/`updated` stamps (`_now()`).
 * `STANDING_REFRESH_SECONDS=0`: no refresh loop is started (today 0 would spin).
 
@@ -36,7 +36,7 @@ def load(monkeypatch):
     def _load(**env):
         monkeypatch.setenv("CHANGE_SEED_PATH", str(SEED / "changes.yaml"))
         monkeypatch.setenv("CHANGE_STANDING_PATH", str(SEED / "standing.yaml"))
-        monkeypatch.delenv("STUB_AS_OF", raising=False)
+        monkeypatch.delenv("V2_STUB_AS_OF", raising=False)
         monkeypatch.delenv("STANDING_REFRESH_SECONDS", raising=False)
         for key, value in env.items():
             monkeypatch.setenv(key, value)
@@ -58,7 +58,7 @@ def _standing_days(client) -> set[datetime]:
 
 def test_standing_crs_are_materialized_around_the_pinned_clock(load):
     """O3: occurrences span as_of-7d..as_of+1d and none comes from the wall clock."""
-    app = load(STUB_AS_OF="2026-10-20T02:30:00Z", STANDING_REFRESH_SECONDS="0")
+    app = load(V2_STUB_AS_OF="2026-10-20T02:30:00Z", STANDING_REFRESH_SECONDS="0")
     with TestClient(app.app) as client:
         days = _standing_days(client)
         assert datetime(2026, 10, 20, tzinfo=UTC) in days
@@ -69,7 +69,7 @@ def test_standing_crs_are_materialized_around_the_pinned_clock(load):
 
 def test_active_changes_without_at_use_the_pinned_clock(load):
     """O3: `/changes/active?host=` with no `at` answers for as_of, not the wall clock."""
-    app = load(STUB_AS_OF="2026-10-20T02:30:00Z", STANDING_REFRESH_SECONDS="0")
+    app = load(V2_STUB_AS_OF="2026-10-20T02:30:00Z", STANDING_REFRESH_SECONDS="0")
     with TestClient(app.app) as client:
         got = client.get("/changes/active", params={"host": "web-1"}).json()
     assert "CHG-WEB-PATCH-20261020T0200Z" in [c["id"] for c in got]
@@ -77,7 +77,7 @@ def test_active_changes_without_at_use_the_pinned_clock(load):
 
 def test_writes_are_stamped_with_the_pinned_clock(load):
     """O3: `_now()` is as_of, so created/updated stamps are the pinned instant."""
-    app = load(STUB_AS_OF="2026-10-20T02:30:00Z", STANDING_REFRESH_SECONDS="0")
+    app = load(V2_STUB_AS_OF="2026-10-20T02:30:00Z", STANDING_REFRESH_SECONDS="0")
     assert datetime.fromisoformat(app._now().replace("Z", "+00:00")) == AS_OF
     time.sleep(0.01)
     assert datetime.fromisoformat(app._now().replace("Z", "+00:00")) == AS_OF
@@ -85,7 +85,7 @@ def test_writes_are_stamped_with_the_pinned_clock(load):
 
 def test_zero_refresh_seconds_starts_no_refresh_loop(load):
     """O3: a standing CR removed after startup is not re-added: no loop is running."""
-    app = load(STUB_AS_OF="2026-10-20T02:30:00Z", STANDING_REFRESH_SECONDS="0")
+    app = load(V2_STUB_AS_OF="2026-10-20T02:30:00Z", STANDING_REFRESH_SECONDS="0")
     with TestClient(app.app) as client:
         app.STORE.pop("CHG-WEB-PATCH-20261020T0200Z")
         time.sleep(0.3)
