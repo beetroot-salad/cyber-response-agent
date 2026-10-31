@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import hashlib
 import json
 import uuid
 import importlib
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -26,6 +28,18 @@ def _held_out():
     return importlib.import_module("evaluations.held_out")
 
 
+#: A confirmed freeze (#1347 O9): a held-out case without one refuses the whole set.
+_FREEZE = {
+    "alert_at": "2026-10-20T08:00:00Z", "as_of": "2026-10-20T09:00:00Z",
+    "window": ["2026-09-19T08:00:00Z", "2026-10-20T09:00:00Z"],
+    "captured_at": "2026-10-20T09:03:17Z",
+    "fingerprint": {"logs-system.auth-2026.10.20|2026-10-20T08": [1200, 1200]},
+    "parts": {}, "chaos": None,
+    "confirmed": {"by": "operator", "at": "2026-10-20T10:00:00Z",
+                  "reference_run": "11111111-1111-4111-8111-111111111111"},
+}
+
+
 def _fixtures(tmp_path: Path) -> Path:
     """One labeled held-out fixture (benign): `<fixtures>/<SLUG>/{alert.json, ground_truth.yaml}`."""
     fx = tmp_path / "fixtures" / SLUG
@@ -33,6 +47,7 @@ def _fixtures(tmp_path: Path) -> Path:
     (fx / "alert.json").write_text(json.dumps({"rule": {"id": SLUG}}), encoding="utf-8")
     (fx / "ground_truth.yaml").write_text("held_out: true\ndisposition: benign\n",
                                           encoding="utf-8")
+    (fx / "freeze.yaml").write_text(yaml.safe_dump(_FREEZE, sort_keys=False), encoding="utf-8")
     return fx.parent
 
 
@@ -48,7 +63,11 @@ def _held_out_index(tmp_path: Path, run_id: str) -> Path:
     """Write the operator's launch-index input independently of the production writer."""
     index = tmp_path / "ops" / "held-out-index.jsonl"
     index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text(json.dumps({"slug": SLUG, "run_id": run_id}) + "\n", encoding="utf-8")
+    digest = hashlib.sha256(
+        json.dumps(_FREEZE, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    index.write_text(json.dumps({
+        "slug": SLUG, "run_id": run_id, "freeze": digest, "verdict": "valid", "reason": "",
+        "verified_at": "2026-10-20T11:00:00Z"}) + "\n", encoding="utf-8")
     return index
 
 
