@@ -1,14 +1,18 @@
-"""#1214 r10: the names the design leaves to the implementer, spelled once (A1, A2, A3, O-A5). No test functions.
+"""#1214 r10.1: the names the design leaves to the implementer, spelled once (A1, A2, A3, C3, C6, C8). Test support only.
 
-The host acceptance step (A1): `host_tenant(data_root, raw_id, *, directory=None, defender_dir=..., box_mounted=(),
-clone_tree=True)`, a context manager whose value carries `.tenant` (the `Tenant`), `.directory` (the
-`TenantDirectory` it was admitted through) and `.wiring` (the forge wiring). It lives above `tenancy` and
-`migrations`, next to `systems/run_tenant.entry_directory` (design: "The host acceptance step"); the module and the
-name are this sketch's choice. Where the implementer spells them otherwise, only this module changes.
+The host acceptance step (A1, C3): `host_tenant(data_root, raw_id, *, directory=None, defender_dir=..., box_mounted=(),
+clone_tree=True)` checks eagerly (raising `TenantRefused` at the call) and returns the admitted value, which carries
+`.tenant` (the `Tenant`), `.directory` (the `TenantDirectory` it was admitted through) and `.wiring` (the forge
+wiring); `with admitted:` releases the hold. It lives above `tenancy` and `migrations`, next to
+`systems/run_tenant.entry_directory` (design: "The host acceptance step"); the module and the name are this
+contract's choice. Where the implementer spells them otherwise, only this module changes.
 """
 from __future__ import annotations
 
 import importlib
+import os
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 #: The module the host acceptance step lives in, and its name (A1). Chosen here; the design names neither.
@@ -27,6 +31,16 @@ WAITING_WORDS = ("waiting for tenant", "host lock")
 #: The run-end curation request's keyword for the run's accepted tenant (O-A5: "the `enqueue` seam `run.main`
 #: injects takes it"). Chosen here.
 ENQUEUE_TENANT = "tenant"
+
+#: C6: the environment variable the lifecycle process sets on itself (its `__main__` entry); the host acceptance
+#: refuses in a process that carries it. Chosen here; the design says only that the process "marks itself".
+LIFECYCLE_MARK = "DEFENDER_LIFECYCLE_PROCESS"
+
+#: C8: the one tenant every box test names (never a wrapper that supplies a tenant, which would hide B1).
+TEST_TENANT = "3d6f0b8e-2a41-4c97-9e15-7b2c8a4d6f01"
+
+#: C2: the functions of an entry module that may open a host acceptance (the command, not a helper).
+COMMAND_FUNCTIONS = frozenset({"main", "_launch"})
 
 #: The raw folder acceptance and every wrapper that reaches it (design: "The census test", first bullet).
 RAW_ACCEPTANCE = frozenset({
@@ -56,7 +70,6 @@ ENTRY_POINT_MODULES = (
     "cli/policy_cli.py",
     "cli/tenant.py",
     "learning/core/cli.py",
-    "learning/core/drains.py",
     "cli/learning/revert_lesson.py",
     "cli/learning/lessons_page.py",
     "learning/leads/lead_author/__init__.py",
@@ -67,6 +80,57 @@ ENTRY_POINT_MODULES = (
     "cli/learning/trace_lesson.py",
     "cli/retire_legacy_runs.py",
 )
+
+
+# --- the read-only and one-shot commands that take `directory=` (design: "Callers that move to it") -------------------
+
+RUN_ID = "run-20261028T000000Z-0001"
+EPISODE_ID = "5b1d9c3e-7a42-4f68-8e0b-2c6a9d4f1e73"
+
+#: name -> (module, argv for tenant `t`). Each command's `main(argv, *, directory=None)` is the in-process seam
+#: (design "Test fallout": the launcher, revert, policy view, lessons page and read-only commands gain it). The argv
+#: convention (with or without the program name) follows each command's present `main`; the lessons page is new.
+COMMANDS: dict[str, tuple[str, Callable[[str], list[str]]]] = {
+    "workspace_map": ("defender.cli.workspace_map", lambda t: ["workspace_map.py", "--tenant", t, RUN_ID]),
+    "run_page": ("defender.presentation.visualize_run", lambda t: ["visualize_run.py", "--tenant", t, RUN_ID]),
+    "episode_page": ("defender.presentation.visualize_episode", lambda t: ["--tenant", t, EPISODE_ID]),
+    "posture_contract": ("defender.learning.frontend.serialize", lambda t: ["serialize.py", "--tenant", t]),
+    "lesson_tracer": ("defender.cli.learning.trace_lesson", lambda t: ["--tenant", t, "--all"]),
+    "retirement": ("defender.cli.retire_legacy_runs", lambda t: ["--tenant", t]),
+    "lead_author_opener": ("defender.learning.leads.lead_author", lambda t: ["--tenant", t, RUN_ID]),
+    "lessons_page": ("defender.cli.learning.lessons_page", lambda t: ["--tenant", t]),
+    "revert": ("defender.cli.learning.revert_lesson", lambda t: ["--tenant", t, "some-lesson"]),
+    "policy_view": ("defender.cli.policy_cli",
+                    lambda t: ["show", "gather", "--run-dir", os.devnull, "--tenant", t]),
+}
+
+
+def command_main(name: str) -> Callable[..., Any]:
+    return importlib.import_module(COMMANDS[name][0]).main
+
+
+# --- the hold, observed (shared by the host-entry and host-lock cases) -----------------------------------------------
+
+def recorded(data_root: Path, tenant: str) -> list[tuple[int, Any]]:
+    """`(pid, start)` of each process recorded under `tenant`'s host lock."""
+    from defender.tenancy import host_lock
+
+    return [(h.pid, h.start) for h in host_lock.holders(data_root, tenant)]
+
+
+def this_process() -> list[tuple[int, Any]]:
+    from defender.tenancy._owner import process_start
+
+    return [(os.getpid(), process_start(os.getpid()))]
+
+
+def exclusive_free(data_root: Path, tenant: str) -> bool:
+    """True when nothing holds `tenant`'s host lock (an exclusive try, at once, is granted and given back)."""
+    from defender.tenancy import host_lock
+
+    fd = host_lock.acquire(data_root, tenant, exclusive=True, timeout=0)
+    host_lock.release_lock(fd)
+    return fd is not None
 
 
 def host_tenant(*args: Any, **kwargs: Any) -> Any:

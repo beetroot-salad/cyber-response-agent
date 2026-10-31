@@ -128,6 +128,7 @@ _ACCEPTANCE = frozenset({
     "accept_tenant", "requested_tenant", "requested_tenant_id", "accept_requested_tenant",
     "resolve_data_root", "command_line_paths",
     "open_requested_run", "open_command_line_run",
+    "host_tenant",  # r10.1 C1: the host acceptance is an entry point's own too, never a presentation helper's
 })
 
 
@@ -191,6 +192,7 @@ def test_1279_a4_the_census_sees_a_reacceptance_and_spares_an_entry_points_own_a
         "an inner main(tenant)": "def main(tenant):\n    return accept_tenant(1, 2)\n",
         "a run opener": "def f(raw):\n    return open_requested_run(raw)\n",
         "a command-line run opener": "def f(raw):\n    return open_command_line_run(raw)\n",
+        "a host acceptance in a helper": "def f(raw):\n    return host_tenant(root, raw)\n",
         "a non-main guard": "if __name__ == 'other':\n    accept_tenant(1, 2)\n",
         "a negated main guard": "if __name__ != '__main__':\n    accept_tenant(1, 2)\n",
         "the else of a main guard": "if __name__ == '__main__':\n    main()\nelse:\n    accept_tenant(1, 2)\n",
@@ -202,6 +204,7 @@ def test_1279_a4_the_census_sees_a_reacceptance_and_spares_an_entry_points_own_a
     own = {
         "main(argv)": "def main(argv):\n    return requested_tenant(resolve_data_root(), argv[0])\n",
         "main(argv) accepting": "def main(argv):\n    t = accept_tenant(1, argv)\n    return t\n",
+        "main(argv) host-accepting": "def main(argv, *, directory=None):\n    return host_tenant(root, argv[0], directory=directory)\n",
         "the main guard": "if __name__ == '__main__':\n    sys.exit(main(command_line_paths(p, 1)))\n",
     }
     for what, source in own.items():

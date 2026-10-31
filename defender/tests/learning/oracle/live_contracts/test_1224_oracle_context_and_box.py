@@ -19,10 +19,11 @@ import pytest
 
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.core import _state1135
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
-#: The tenant every oracle box here serves (r10 B1: a box cannot be made without one).
-ORACLE_TENANT = "3d6f0b8e-2a41-4c97-9e15-7b2c8a4d6f01"
+#: The tenant every oracle box here serves (r10.1 C8: a box cannot be made without one; one shared test tenant).
+ORACLE_TENANT = TEST_TENANT
 
 
 #: A frame-closing tag on a salt the host never minted: payload text that tries to end the

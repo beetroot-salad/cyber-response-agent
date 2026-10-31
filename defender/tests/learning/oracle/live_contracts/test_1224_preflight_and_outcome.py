@@ -423,6 +423,43 @@ def test_1224_two_preflight_failures_write_unusable_and_start_no_sibling(tmp_pat
             assert double.submissions() == len(_calls()), f"{w} did not replay every call"
 
 
+def test_the_launchers_preflight_builds_its_oracle_side_for_the_source_runs_tenant(tmp_path, monkeypatch):
+    """Every oracle side the launcher's preflight settles names the source run's tenant, and the box it starts carries
+    that tenant's label (r10.1 F6: `preflight.py:120` passes `source.tenant_id`; B1)."""
+    from defender.box import _oracle
+    from defender.learning.branch.estate import registry
+    from defender.tests.support.sandbox import _box1279 as X
+    from defender.tests.support.sandbox._box1195 import FakeDaemon
+
+    seen: list[tuple[Any, Any]] = []
+    real = registry.oracle_serving
+
+    def spy(*args: Any, **kw: Any) -> Any:
+        serving = real(*args, **kw)
+        seen.append((kw.get("tenant_id"), serving))
+        return serving
+
+    monkeypatch.setattr(registry, "oracle_serving", spy)
+    est = S.estate(tmp_path)
+    oracle = _by_world(_passing(), _passing())
+    _base, src = S.source_run(tmp_path, est, calls=_calls())
+    tenant = src.parent.parent.name
+    _main(src, est, oracle=oracle, verifier=S.passing_verifier())
+    assert seen, "the launcher never settled an oracle side through the registry"
+    assert {str(t) for t, _ in seen} == {tenant}, [t for t, _ in seen]
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
+    daemon = FakeDaemon(tmp_path / "daemon")
+    daemon.install(monkeypatch)
+    started = seen[0][1].box()
+    try:
+        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+        labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
+        assert f"defender.tenant={tenant}" in labels, labels
+    finally:
+        _oracle.stop_oracle_box(started)
+
+
 def test_1224_preflight_replays_every_original_call_through_each_worlds_oracle_before_any_sibling(
         tmp_path, episodes_root):
     """before the first sibling start, every original call has passed once through each fact-carrying world's oracle and verifier."""

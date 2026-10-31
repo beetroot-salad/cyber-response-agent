@@ -149,6 +149,34 @@ def test_791_finished_investigation_drives_catalog_curation(published, tmp_path,
     assert author_markers(state) == [], "the served request was left on the queue"
 
 
+def test_the_curation_request_of_another_tenant_than_the_runs_is_not_enqueued(tmp_path, state, caplog):
+    """Run end hands the curation request the run's accepted tenant; one whose id differs from the run's is refused
+    through the "NOT enqueuing" channel and nothing is queued, while the matching tenant queues (r10.1 C7, fail closed)."""
+    import logging
+
+    from defender.tests.support.tenancy._host1214 import ENQUEUE_TENANT
+
+    run_dir = _certified_run()
+    run = run_of(run_dir)
+    accepted = set_up_tenant(current_data_root())
+    assert str(accepted.id) == run.tenant_id, "control: the accepted tenant is the run's"
+    with caplog.at_level(logging.INFO):
+        assert run_common.enqueue_curation(run, run_dir / "alert.json", **{ENQUEUE_TENANT: accepted}) is True
+    assert len(author_markers(state)) == 1, "control: the matching tenant's request was queued"
+    for marker in (location_path(state.state_root) / "author-queue").glob("*.json"):
+        marker.unlink()
+    other = set_up_tenant(current_data_root(), fixture_uuid("curation-other-tenant"))
+    assert str(other.id) != run.tenant_id
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        queued = run_common.enqueue_curation(run, run_dir / "alert.json", **{ENQUEUE_TENANT: other})
+    assert queued is False
+    refusals = [r.getMessage() for r in caplog.records if "NOT enqueuing" in r.getMessage()]
+    assert refusals, "the mismatch was refused without the NOT-enqueuing line"
+    assert str(other.id) in " ".join(refusals) or run.tenant_id in " ".join(refusals), refusals
+    assert author_markers(state) == [], "a request for another tenant than the run's was queued"
+
+
 def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state):
     """The curation request names the CASE it speaks for and carries a resolvable
     investigation run directory."""

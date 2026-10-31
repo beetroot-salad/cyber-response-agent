@@ -11,6 +11,7 @@ import ast
 import asyncio
 import contextlib
 import io
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from defender.tests.support.tenancy._active1214 import (
     database_env,
     insert_active_tenant,
 )
+from defender.tests.support.tenancy import _host1214 as H
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
@@ -323,33 +325,59 @@ def test_the_connect_command_has_only_update_propose_and_check(data_root, retire
     _has(text, "invalid choice", f"'{retired}'")
 
 
-# --- read-only commands and the episode launcher (r10 A1) ------------------------------------------
+# --- every other host entry point (r10 A1): the read-only commands, the one-shot commands and the launcher ------
 
-def _command(main: Any, argv: list[str], directory: Any) -> tuple[Any, str]:
-    """`main(argv, directory=...)` -> (its exit status, both streams and any exit text)."""
-    out, err = io.StringIO(), io.StringIO()
+class _Logged(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.lines: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.lines.append(record.getMessage())
+
+
+def _command(main: Any, argv: list[str], directory: Any, **seams: Any) -> tuple[Any, str]:
+    """`main(argv, directory=..., **seams)` -> (its exit status, both streams, any exit text and what it logged)."""
+    out, err, logged = io.StringIO(), io.StringIO(), _Logged()
+    logging.getLogger().addHandler(logged)
     try:
         with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
-            code = main(argv, directory=directory)
+            code = main(argv, directory=directory, **seams)
     except SystemExit as refused:
         code = refused.code
-    return code, f"{code}\n{out.getvalue()}{err.getvalue()}"
+    except Exception as failed:  # noqa: BLE001 — past acceptance, the command's next real refusal
+        code = f"{type(failed).__name__}: {failed}"
+    finally:
+        logging.getLogger().removeHandler(logged)
+    return code, f"{code}\n{out.getvalue()}{err.getvalue()}" + "\n".join(logged.lines)
 
 
-def test_a_read_only_command_refuses_an_offboarding_tenant_before_its_folder(data_root):
-    """The workspace map refuses an `offboarding` tenant naming it and its state, before the folder rules run: `OTHER`
-    has no folder, and the refusal is about its state, not its folder (r10 O-A1, A1 order: record before folder)."""
-    from defender.cli import workspace_map
+def _no_state_refusal(text: str) -> bool:
+    return not any(w in text.lower() for w in NOT_A_REFUSAL_OF_STATE) and "TypeError" not in text
 
-    argv = ["workspace_map.py", "--tenant", OTHER, "run-20261028T000000Z-0001"]
-    _, folder_first = _command(workspace_map.main, argv, active_directory(data_root, OTHER))
-    assert OTHER in folder_first, folder_first
-    assert not any(w in folder_first.lower() for w in NOT_A_REFUSAL_OF_STATE), (
-        "control: an active tenant with no folder is refused for its folder, not its state")
-    code, refused = _command(workspace_map.main, argv, active_directory(data_root, OTHER, state="offboarding"))
+
+@pytest.mark.parametrize("state", ["offboarding", "creating"])
+@pytest.mark.parametrize("name", list(H.COMMANDS))
+def test_a_host_command_refuses_a_tenant_that_is_not_active_before_its_folder_and_holds_nothing(data_root, name, state):
+    """Each command of the design's table refuses a non-`active` tenant naming it and its state, before the folder
+    rules (`OTHER` has no folder), and leaves no hold; an active tenant passes the check (r10 O-A1, O-A6)."""
+    main, argv = H.command_main(name), H.COMMANDS[name][1]
+    _, admitted = _command(main, argv(TENANT), active_directory(data_root, TENANT))
+    assert _no_state_refusal(admitted), f"control: an active tenant was refused for its state: {admitted}"
+    code, refused = _command(main, argv(OTHER), active_directory(data_root, OTHER, state=state))
     assert code not in (0, None), refused
-    _has(refused, OTHER, "offboarding")
-    assert refused != folder_first
+    _has(refused, OTHER, state)
+    assert H.recorded(data_root, OTHER) == [], "the refusal kept a record"
+    assert H.exclusive_free(data_root, OTHER), "the refusal kept the lock"
+
+
+def test_an_active_tenant_with_no_folder_is_refused_for_its_folder_not_its_state(data_root):
+    """Control for the ordering above: the same command and tenant, active, fails on the folder and names no state
+    (r10 A1 order: record before folder)."""
+    argv = H.COMMANDS["workspace_map"][1](OTHER)
+    _, folder_first = _command(H.command_main("workspace_map"), argv, active_directory(data_root, OTHER))
+    assert OTHER in folder_first, folder_first
+    assert _no_state_refusal(folder_first), folder_first
 
 
 def test_the_episode_launcher_refuses_an_offboarding_tenant_before_any_work(data_root):
@@ -369,11 +397,13 @@ def test_the_episode_launcher_refuses_an_offboarding_tenant_before_any_work(data
         return ""
 
     admitted = launch(active_directory(data_root, TENANT))
-    assert not any(w in admitted.lower() for w in NOT_A_REFUSAL_OF_STATE), f"control: {admitted}"
+    assert _no_state_refusal(admitted), f"control: {admitted}"
     calls.reached.clear()
     refused = launch(active_directory(data_root, TENANT, state="offboarding"))
     _has(refused, TENANT, "offboarding")
     assert calls.reached == []
+    assert H.recorded(data_root, TENANT) == []
+    assert H.exclusive_free(data_root, TENANT)
 
 
 # --- each lead-drain claim -------------------------------------------------------------------------
@@ -517,49 +547,34 @@ def test_the_api_may_not_load_the_lifecycle_node():
         "defender.lifecycle", "defender.lifecycle.service"]
 
 
-# --- the r10 census: one host acceptance (A1, A3, A4) ---------------------------------------------
+# --- the r10.1 census: one host acceptance (A1, A3, A4; C1, C2, C5) -------------------------------
 
 def _raw_name(node: ast.AST, env: Any, astlib: Any) -> str | None:
     """The raw-acceptance name `node` refers to (resolved through imports; an unresolved receiver's attribute by name)."""
-    from defender.tests.support.tenancy._host1214 import RAW_ACCEPTANCE
-
     if not isinstance(node, ast.Name | ast.Attribute):
         return None
     origin = astlib.origin(node, env)
     if origin is not None:
         last = origin.rpartition(".")[2]
-        return last if last in RAW_ACCEPTANCE else None
-    return node.attr if isinstance(node, ast.Attribute) and node.attr in RAW_ACCEPTANCE else None
-
-
-def _opens_host(node: ast.AST, env: Any, astlib: Any) -> bool:
-    """`node` is a `with host_tenant(...)` block."""
-    from defender.tests.support.tenancy._host1214 import HOST_ACCEPTANCE
-
-    def is_host(call: ast.expr) -> bool:
-        if not isinstance(call, ast.Call):
-            return False
-        spelled = getattr(call.func, "id", getattr(call.func, "attr", None))
-        return (astlib.callee(call, env) or "").rpartition(".")[2] == HOST_ACCEPTANCE or spelled == HOST_ACCEPTANCE
-    return isinstance(node, ast.With | ast.AsyncWith) and any(is_host(i.context_expr) for i in node.items)
+        return last if last in H.RAW_ACCEPTANCE else None
+    return node.attr if isinstance(node, ast.Attribute) and node.attr in H.RAW_ACCEPTANCE else None
 
 
 def _raw_uses(rel: str, tree: ast.Module) -> list[tuple[int, str]]:
-    """`(line, name)` of each use of the raw acceptance or a wrapper in `rel` that is NOT inside the host acceptance
-    module, a wrapper's own definition, or a `with host_tenant(...)` block (imports and re-exports are not uses)."""
+    """`(line, name)` of each use of the raw acceptance or a wrapper in `rel`, outside a wrapper's own definition
+    (imports and re-exports are not uses). No exemption for a `with host_tenant` scope: nothing under one accepts again."""
     from defender.tests.support.shared.contracts._by_path import import_lint_lib
-    from defender.tests.support.tenancy import _host1214 as H
 
     astlib = import_lint_lib("_astlib")
-    env = astlib.module_env(tree, module="defender." + rel.removesuffix(".py").replace("/", "."))
+    env = astlib.module_env(tree, module=_dotted(rel))
     found: list[tuple[int, str]] = []
     wrappers = H.WRAPPER_DEFINITIONS.get(rel, set())
 
     def visit(node: ast.AST, exempt: bool) -> None:
         if isinstance(node, ast.Import | ast.ImportFrom):
             return
-        exempt = exempt or getattr(node, "name", None) in wrappers and isinstance(
-            node, ast.FunctionDef | ast.AsyncFunctionDef) or _opens_host(node, env, astlib)
+        exempt = exempt or (getattr(node, "name", None) in wrappers
+                            and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef))
         name = _raw_name(node, env, astlib)
         if name is not None and not exempt:
             found.append((node.lineno, name))
@@ -570,38 +585,114 @@ def _raw_uses(rel: str, tree: ast.Module) -> list[tuple[int, str]]:
     return found
 
 
-def test_the_raw_acceptance_is_used_only_under_the_host_acceptance_or_by_the_starter_covered_set():
-    """A1/A3 census: outside the host acceptance step and the wrappers' own bodies, the raw folder acceptance and its
-    wrappers are used only by the A3 set (exactly) or under an open `with host_tenant(...)` (r10 "The census test")."""
-    from defender.tests.support.tenancy import _host1214 as H
-
-    users = {rel for rel, tree in _production().items()
-             if rel != H.HOST_MODULE_PATH and _raw_uses(rel, tree)}
+def test_the_raw_acceptance_is_used_only_by_the_host_acceptance_and_the_starter_covered_set():
+    """C2 (1): outside the host acceptance module and the wrappers' own bodies, the raw folder acceptance and its
+    wrappers are used by the A3 set exactly, and by nothing else."""
+    users = {rel for rel, tree in _production().items() if rel != H.HOST_MODULE_PATH and _raw_uses(rel, tree)}
     assert users == set(H.A3_SET), {rel: _raw_uses(rel, _production()[rel]) for rel in users ^ set(H.A3_SET)}
 
 
-def test_the_raw_census_sees_a_by_hand_use_and_spares_one_under_the_host_acceptance():
-    """The detector can fail: a by-hand call, a bound method and an alias are seen; one under `with host_tenant` is not."""
+def test_the_raw_census_sees_a_by_hand_use_a_use_under_a_scope_and_spares_a_wrappers_own_body():
+    """The detector can fail: a call, a bound method, an alias and a use under `with host_tenant` are seen; a wrapper's
+    own definition is not."""
     seen = {
         "a call": "from defender.tenancy import requested_tenant\ndef f(r, t):\n    return requested_tenant(r, t)\n",
         "a bound method": "def f(t):\n    return t.accept_requested_tenant\n",
         "an alias": "from defender.tenancy import accept_tenant as take\ndef f():\n    return take(1, 2)\n",
+        "a use under a scope": ("from defender.systems.run_tenant import host_tenant\nfrom defender import tenancy\n"
+                                "def main(argv):\n    with host_tenant(1, argv[0]):\n"
+                                "        return tenancy.open_command_line_run(argv[0], argv[1])\n"),
     }
     for what, source in seen.items():
         assert _raw_uses("cli/x.py", ast.parse(source)), f"the census missed {what}"
-    spared = ("from defender.systems.run_tenant import host_tenant\nfrom defender import tenancy\n"
-              "def main(argv):\n    with host_tenant(1, argv[0]) as a:\n"
-              "        return tenancy.open_command_line_run(argv[0], argv[1])\n")
-    assert _raw_uses("cli/x.py", ast.parse(spared)) == []
+    own = "def requested_tenant(root, raw):\n    return accept_tenant(root, raw)\n"
+    assert _raw_uses("tenancy/_tenant.py", ast.parse(own)) == []
 
 
-def test_every_listed_entry_point_admits_through_the_host_acceptance():
-    """Positive half of the A1 census: each module in the design's "Callers that move to it" table references the
-    host acceptance step (r10 O-A1)."""
-    from defender.tests.support.tenancy import _host1214 as H
+def _host_calls(rel: str, tree: ast.Module) -> list[tuple[int, tuple[str, ...]]]:
+    """`(line, enclosing function names outermost first)` of each call to the host acceptance in `rel`, by its name,
+    its attribute spelling or an import alias."""
+    names = {H.HOST_ACCEPTANCE}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom | ast.Import):
+            names |= {a.asname for a in node.names if a.asname and a.name.rpartition(".")[2] == H.HOST_ACCEPTANCE}
+    found: list[tuple[int, tuple[str, ...]]] = []
 
+    def visit(node: ast.AST, chain: tuple[str, ...]) -> None:
+        if isinstance(node, ast.Call):
+            f = node.func
+            if (f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None) in names:
+                found.append((node.lineno, chain))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            chain = (*chain, node.name)
+        for child in ast.iter_child_nodes(node):
+            visit(child, chain)
+
+    visit(tree, ())
+    return found
+
+
+def _is_command_scope(chain: tuple[str, ...]) -> bool:
+    return len(chain) == 1 and chain[0] in H.COMMAND_FUNCTIONS
+
+
+def test_the_host_acceptance_is_opened_only_by_the_command_function_of_each_entry_module():
+    """C2 (2): the host acceptance is called from `main` (or the launcher's `_launch`) of exactly the design's entry
+    modules, as a module-level function, never from a helper whose return would close the scope early."""
+    calls = {rel: found for rel, tree in _production().items()
+             if rel != H.HOST_MODULE_PATH and (found := _host_calls(rel, tree))}
+    assert set(calls) == set(H.ENTRY_POINT_MODULES), set(calls) ^ set(H.ENTRY_POINT_MODULES)
+    stray = {rel: [(line, chain) for line, chain in found if not _is_command_scope(chain)]
+             for rel, found in calls.items()}
+    assert {rel: bad for rel, bad in stray.items() if bad} == {}
+
+
+def test_the_host_census_sees_a_helper_owned_scope_and_spares_a_commands_own():
+    """The detector can fail: a helper, a closure in `main`, module level, an attribute spelling and an alias are seen as
+    stray; `main` and `_launch` themselves are not (the policy view's helper-owned scope is the ruled-out case)."""
+    stray = {
+        "a helper": "def _definition(raw):\n    return host_tenant(root, raw)\ndef main(argv):\n    return _definition(1)\n",
+        "a closure in main": "def main(argv):\n    def go():\n        return host_tenant(1, 2)\n    return go()\n",
+        "module level": "admitted = host_tenant(1, 2)\n",
+        "an attribute": "def helper(t):\n    return run_tenant.host_tenant(1, t)\n",
+        "an alias": "from x import host_tenant as admit\ndef helper():\n    return admit(1, 2)\n",
+    }
+    for what, source in stray.items():
+        found = _host_calls("cli/x.py", ast.parse(source))
+        assert found, f"the census saw no call in {what}"
+        assert not all(_is_command_scope(chain) for _, chain in found), f"the census missed {what}"
+    for own in ("def main(argv):\n    return host_tenant(1, argv)\n", "def _launch(argv):\n    return host_tenant(1, argv)\n"):
+        assert all(_is_command_scope(chain) for _, chain in _host_calls("learning/branch/cli.py", ast.parse(own)))
+
+
+def test_the_starter_covered_set_never_calls_the_host_acceptance():
+    """A3: the publish child, its in-process launcher and the scaffold validator load the folder with the folder rules
+    only; none opens a host acceptance (they have no database address and run under prepare's exclusive hold)."""
     callers = _referencing(H.HOST_ACCEPTANCE)
-    assert [rel for rel in H.ENTRY_POINT_MODULES if rel not in callers] == []
+    assert callers, "control: the host acceptance is referenced"
+    assert sorted(callers & set(H.A3_SET)) == []
+
+
+def test_nothing_under_a_scope_accepts_again_the_drains_separate_acceptor_is_gone():
+    """C1: the drain's rehydration uses the drain's own accepted tenant (`paths.tenant`), so `_tenant_acceptor` has no
+    definition or caller left, and `drains.py` opens no acceptance of its own."""
+    assert _referencing("_tenant_acceptor") == set()
+    assert not any(isinstance(n, ast.FunctionDef) and n.name == "_tenant_acceptor"
+                   for n in ast.walk(_production()["learning/core/drains.py"]))
+    assert "learning/core/drains.py" not in _referencing(H.HOST_ACCEPTANCE)
+
+
+def test_the_hold_has_one_owner_and_the_admission_helpers_stay_with_the_host_module():
+    """C5: `hold_tenant` is gone; `admit_tenant` and `host_directory` are used outside `tenancy/` by the host module
+    alone; `still_active` stays for the drain's per-claim check."""
+    from defender import tenancy
+
+    assert _referencing("hold_tenant") == set()
+    assert not hasattr(tenancy, "hold_tenant")
+    outside = lambda name: {rel for rel in _referencing(name) if not rel.startswith("tenancy/")}  # noqa: E731
+    assert outside("admit_tenant") == {H.HOST_MODULE_PATH}
+    assert outside("host_directory") == {H.HOST_MODULE_PATH}
+    assert outside("still_active") == {"learning/core/drains.py"}
 
 
 def _dotted(rel: str) -> str:
@@ -653,8 +744,6 @@ def _lifecycle_closure() -> set[str]:
 def test_nothing_the_lifecycle_runs_calls_the_host_acceptance():
     """A4: no module reachable from `defender.lifecycle` references the host acceptance step (prepare holds the lock
     exclusive in that process; a shared hold there would block its own prepare)."""
-    from defender.tests.support.tenancy import _host1214 as H
-
     closure = _lifecycle_closure()
     assert "investigation/publish_launch.py" in closure, "control: prepare's in-process publish launcher is reached"
     callers = _referencing(H.HOST_ACCEPTANCE)

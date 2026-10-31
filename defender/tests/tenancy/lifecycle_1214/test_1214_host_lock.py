@@ -25,6 +25,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.tenancy import _host1214 as H  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld, lifecycle_config  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -57,12 +58,16 @@ LAUNCHER = textwrap.dedent("""
     elif entry == "drain":
         from defender.learning.core import cli
         cli.main(["loop.py", "--author-drain", "--tenant", tenant], directory=Blocking())
-    elif entry == "workspace_map":
-        from defender.cli import workspace_map
-        workspace_map.main(["workspace_map.py", "--tenant", tenant, "run-20261028T000000Z-0001"], directory=Blocking())
-    else:
+    elif entry == "connect":
         from defender.cli import tenant as connect
         connect.main(["check", tenant], directory=Blocking())
+    elif entry == "launcher":
+        from defender.learning.branch import cli as branch_cli
+        branch_cli.main(["--tenant", tenant, "run-20261028T000000Z-0001", "1"], directory=Blocking(),
+                        spawn=lambda *a, **k: 0, preflight=lambda *a, **k: 0, render_page=lambda *a, **k: None)
+    else:  # a command of the design's table: its own `main(argv, directory=...)`
+        from defender.tests.support.tenancy import _host1214 as H
+        H.command_main(entry)(H.COMMANDS[entry][1](tenant), directory=Blocking())
 """)
 
 
@@ -113,9 +118,9 @@ def holders(tmp_path):
         holder.kill()
 
 
-@pytest.mark.parametrize("entry", ["run", "drain", "connect", "workspace_map"])
+@pytest.mark.parametrize("entry", ["run", "drain", "connect", "launcher", *H.COMMANDS])
 def test_teardown_terminates_a_recorded_process_and_completes(world, holders, entry):
-    """Teardown SIGTERMs what run start / drain start / the connect command recorded, then removes the folder (P3, O4)."""
+    """Teardown SIGTERMs what each host entry point recorded, then removes the folder (P3, O4; r10 O-A2, A1 table)."""
     tenant = world.active_tenant()
     holder = holders(tenant, entry)
     assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
@@ -179,120 +184,3 @@ def test_install_runs_beside_a_shared_holder_and_prepare_waits_for_it(world, hol
     assert world.publish.calls == [(tenant, world.data_root)]
 
 
-# --- r10: the hold lasts for the command, nesting reuses it (A2) ---------------------------------
-
-TENANT = "7f3c1a52-9d4e-4b8a-a1c6-2e5d8b9f0c13"
-
-
-def _me() -> list:
-    from defender.tenancy._owner import process_start
-
-    return [(os.getpid(), process_start(os.getpid()))]
-
-
-def _recorded(data_root: Path) -> list:
-    from defender.tenancy import host_lock
-
-    return [(h.pid, h.start) for h in host_lock.holders(data_root, TENANT)]
-
-
-def _exclusive_free(data_root: Path) -> bool:
-    from defender.tenancy import host_lock
-
-    fd = host_lock.acquire(data_root, TENANT, exclusive=True, timeout=0)
-    host_lock.release_lock(fd)
-    return fd is not None
-
-
-def test_a_nested_hold_keeps_the_record_until_the_outer_scope_ends(data_root):
-    """Inner exit of a nested shared hold leaves this process recorded and the lock held; the outer exit releases both
-    (r10 O-A3, A2; R10-3 probed the inner exit deleting the outer record)."""
-    from defender.tenancy import host_lock
-
-    with host_lock.hold_shared(data_root, TENANT):
-        with host_lock.hold_shared(data_root, TENANT):
-            assert _recorded(data_root) == _me()
-        assert _recorded(data_root) == _me(), "the inner exit removed the outer scope's record"
-        assert not _exclusive_free(data_root), "the inner exit released the outer scope's lock"
-    assert _recorded(data_root) == []
-    assert _exclusive_free(data_root)
-
-
-@pytest.fixture
-def placed(data_root) -> Path:
-    from defender.tests.support.tenancy._tenants1106 import place_tenant
-
-    place_tenant(data_root, TENANT)
-    (data_root / TENANT / "learning").mkdir(exist_ok=True)
-    return data_root
-
-
-def test_the_host_acceptance_holds_for_its_scope_and_a_refusal_releases_what_it_took(placed):
-    """An admitted scope records this process and holds the lock until it ends; a refused acceptance (`offboarding`)
-    leaves neither record nor lock (r10 O-A2, O-A6)."""
-    from defender import tenancy
-    from defender.records.formats import TenantRefused
-    from defender.tests.support.tenancy._active1214 import active_directory
-    from defender.tests.support.tenancy._host1214 import ADMITTED_TENANT, host_tenant
-
-    root = tenancy.resolve_data_root()
-    with host_tenant(root, TENANT, directory=active_directory(placed, TENANT)) as admitted:
-        assert str(getattr(admitted, ADMITTED_TENANT).id) == TENANT
-        assert _recorded(placed) == _me(), "control: an admitted scope is recorded"
-        assert not _exclusive_free(placed), "control: an admitted scope holds the lock"
-    assert _recorded(placed) == []
-    assert _exclusive_free(placed)
-    refused = active_directory(placed, TENANT, state="offboarding")
-    with pytest.raises(TenantRefused, match="offboarding"), host_tenant(root, TENANT, directory=refused):
-        pytest.fail("an offboarding tenant was admitted")
-    assert _recorded(placed) == []
-    assert _exclusive_free(placed), "the refused acceptance kept the lock"
-
-
-def test_an_acceptance_blocked_on_the_host_lock_waits_and_says_so_once(placed, capfd):
-    """While prepare or teardown holds T's lock exclusive, acceptance waits (no timeout) and prints one line naming
-    that it waits for T's host lock; once released it proceeds. A free lock prints no such line (owner ruling, r10)."""
-    from defender import tenancy
-    from defender.tenancy import host_lock
-    from defender.tests.support.tenancy._active1214 import active_directory
-    from defender.tests.support.tenancy._host1214 import WAITING_WORDS, host_tenant
-
-    root = tenancy.resolve_data_root()
-    directory = active_directory(placed, TENANT)
-    with host_tenant(root, TENANT, directory=directory):
-        pass
-    free = capfd.readouterr()
-    assert not any(WAITING_WORDS[0] in s for s in (free.out, free.err)), "control: a free lock prints no waiting line"
-
-    entered = threading.Event()
-    failed: list[BaseException] = []
-
-    def accept() -> None:
-        try:
-            with host_tenant(root, TENANT, directory=directory):
-                entered.set()
-        except BaseException as e:  # noqa: BLE001 — reported on the main thread
-            failed.append(e)
-
-    fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
-    assert fd is not None
-    waiter = threading.Thread(target=accept, daemon=True)
-    text = ""
-    try:
-        waiter.start()
-        deadline = time.monotonic() + 20
-        while not all(w in text for w in WAITING_WORDS) and time.monotonic() < deadline and not failed:
-            got = capfd.readouterr()
-            text += got.out + got.err
-            time.sleep(0.05)
-        assert not entered.is_set(), "acceptance went past an exclusive hold"
-        assert waiter.is_alive(), f"acceptance gave up instead of waiting: {failed}"
-    finally:
-        host_lock.release_lock(fd)
-    waiter.join(timeout=20)
-    got = capfd.readouterr()
-    text += got.out + got.err
-    assert entered.is_set(), f"acceptance never proceeded once the lock was free: {failed}"
-    lines = [line for line in text.splitlines() if all(w in line for w in WAITING_WORDS)]
-    assert len(lines) == 1, text
-    assert TENANT in lines[0]

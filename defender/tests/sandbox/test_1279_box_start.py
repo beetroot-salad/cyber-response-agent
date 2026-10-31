@@ -23,6 +23,7 @@ from defender.tests.e2e._box665 import (
 from defender.tests.support.sandbox import _box1279 as X
 from defender.tests.support.sandbox._box1195 import FakeDaemon
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 _PINNED = box_mod.BoxSpec(runtime="runc", rootfs="defender-box:t1279")
@@ -730,26 +731,61 @@ def test_the_production_oracle_box_carries_its_tenant_label(tmp_path, monkeypatc
         _oracle.stop_oracle_box(started)
 
 
-@pytest.mark.parametrize("given", [{}, {"tenant_id": None}], ids=["omitted", "none"])
+@pytest.mark.parametrize("given", [{}, {"tenant_id": None}, {"tenant_id": ""}], ids=["omitted", "none", "empty"])
 def test_a_box_request_without_a_tenant_is_a_construction_error(tmp_path, given):
-    """Every box carries its tenant: a `BoxRequest` with no tenant is refused at construction; one naming a tenant is
-    made (r10 B1, O-B1)."""
-    tenant = fixture_uuid("box-label-tenant")
-    made = box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, tenant_id=tenant)
-    assert made.tenant_id == tenant, "control: a request naming its tenant is made"
+    """Every box carries its tenant: a `BoxRequest` with no tenant (omitted, None, empty) is refused at construction; one
+    naming a tenant is made (r10 B1, O-B1; r10.1 C8)."""
+    made = box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, tenant_id=TEST_TENANT)
+    assert made.tenant_id == TEST_TENANT, "control: a request naming its tenant is made"
     with pytest.raises((TypeError, ValueError)):
         box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, **given)
 
 
-def test_the_oracle_serving_requires_its_tenant():
-    """The launcher's oracle serving takes no default tenant, so its calibration call must name one (r10 B1,
-    `learning/branch/preflight.py:120`)."""
+def test_the_run_box_start_refuses_a_missing_tenant_like_its_missing_defender_dir(tmp_path, monkeypatch):
+    """`start_box(run_dir, defender_dir, ...)` without `tenant_id` is a `TypeError` before any container is asked for; with
+    one the same call starts, labelled (r10.1 C8, O-B1)."""
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "published")
+    lane = X.run_lane(tmp_path / "run")
+    rec = RecordingDocker()
+    lane.start(rec, spec=_PINNED)
+    assert f"defender.tenant={lane.tenant_id}" in rec.create_argv, "control: the run box carries its tenant label"
+    bare = RecordingDocker()
+    with pytest.raises(TypeError, match="tenant"):
+        box_mod.start_box(lane.run_dir, lane.defender_dir, tenant_agent=lane.agent, staged_token=lane.token,
+                          docker=bare, spec=_PINNED)
+    assert bare.create_argv is None, "a tenantless run box reached the container runtime"
+
+
+def _oracle_box_entries() -> dict:
+    import importlib
+
+    oracle = importlib.import_module("defender.box._oracle")
+    estate = importlib.import_module("defender.learning.branch.estate.oracle")
+    registry = importlib.import_module("defender.learning.branch.estate.registry")
+    return {
+        "oracle_box_request": oracle.oracle_box_request, "start_oracle_box": oracle.start_oracle_box,
+        "start_process_oracle_box": oracle.start_process_oracle_box, "estate start_box": estate.start_box,
+        "start_process_box": estate.start_process_box, "oracle_serving": registry.oracle_serving,
+    }
+
+
+@pytest.mark.parametrize("entry", ["oracle_box_request", "start_oracle_box", "start_process_oracle_box",
+                                   "estate start_box", "start_process_box", "oracle_serving"])
+def test_every_oracle_box_entry_requires_its_tenant(entry):
+    """No oracle box function defaults its tenant, so no caller can serve a world a tenantless box (r10 B1: the oracle's
+    box functions all require the tenant)."""
     import inspect
 
+    param = inspect.signature(_oracle_box_entries()[entry]).parameters["tenant_id"]
+    assert param.default is inspect.Parameter.empty, f"{entry} defaults its tenant to {param.default!r}"
+
+
+def test_the_oracle_serving_requires_its_tenant():
+    """The launcher's oracle serving takes no default tenant, so a call that names none is a `TypeError` (r10 B1,
+    `learning/branch/preflight.py:120`)."""
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.learning.core.config import oracle_settings_with
 
-    param = inspect.signature(oracle_serving).parameters["tenant_id"]
-    assert param.default is inspect.Parameter.empty, f"oracle_serving defaults its tenant to {param.default!r}"
+    assert oracle_serving(oracle_settings_with(), tenant_id=TEST_TENANT).box is not None, "control: named, it is built"
     with pytest.raises(TypeError):
         oracle_serving(oracle_settings_with())
