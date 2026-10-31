@@ -53,6 +53,46 @@ def test_the_by_hand_revert_proceeds_only_for_an_active_tenant(p4_tenant, caplog
     assert after == before and t.forge.creates == []
 
 
+class _ReadsCounted:
+    """A `TenantDirectory` over `inner` that lists every read the host makes of the tenant records (public methods only)."""
+
+    def __init__(self, inner: Any) -> None:
+        self.inner, self.reads = inner, []
+
+    def state(self, tenant_id: str) -> Any:
+        self.reads.append("state")
+        return self.inner.state(tenant_id)
+
+    def forge_wiring(self, tenant_id: str) -> Any:
+        self.reads.append("forge_wiring")
+        return self.inner.forge_wiring(tenant_id)
+
+    def admission(self, tenant_id: str) -> Any:
+        self.reads.append("admission")
+        return self.inner.admission(tenant_id)
+
+    def generations(self, tenant_id: str) -> Any:
+        self.reads.append("generations")
+        return self.inner.generations(tenant_id)
+
+
+def test_the_by_hand_revert_reads_the_tenants_state_once_at_acceptance_and_not_again_for_its_delivery(p4_tenant, caplog):
+    """The revert judges the tenant's state once, in its host acceptance; opening its delivery reads no state
+    again (r10.1 C1: the delivery takes the admitted value, not a second look)."""
+    t = p4_tenant
+    bind_forge(t)
+    merged_agent_lesson(t.p3, t.scratch, "seed-revert-reads", LESSON_PATH, b"agent-written lesson\n")
+    directory = _ReadsCounted(_directory_for(t, "active"))
+    with caplog.at_level(logging.INFO):
+        rc = _cli().main(["--tenant", t.tenant_id, LESSON], client=t.forge.client, identity=t.vault.identity(),
+                         directory=directory)
+    assert rc == 0, critical_text(caplog)
+    assert len(t.forge.creates) == 1, "control: the revert reached its delivery"
+    assert directory.reads.count("admission") == 1, directory.reads
+    assert "state" not in directory.reads, (
+        f"the delivery judged the tenant's state again, after the acceptance did: {directory.reads}")
+
+
 def _functions_calling(tree: ast.Module, name: str, module: str) -> set[str]:
     """The functions of `module` with a call to `name`: a callee `_astlib` resolves to an origin ending in `.name`
     (an alias or the attribute form is the same function), or, where the receiver is a value it cannot resolve, a

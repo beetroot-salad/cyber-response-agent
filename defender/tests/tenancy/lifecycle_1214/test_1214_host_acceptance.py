@@ -439,3 +439,342 @@ def test_the_publish_child_works_under_an_exclusive_hold_where_the_host_acceptan
     assert "was not accepted" not in line, line
     assert not any(w in line.lower() for w in ("creating", "offboarding", "not active")), line
     assert line == control, "a creating tenant's child reported differently from an active tenant's"
+
+
+# --- repair round 1: the order, the line, the mark and the record seen at their boundaries ----------------------
+
+def _blocked_accept(root: object, directory: object = None) -> tuple[threading.Thread, list[BaseException], threading.Event]:
+    """`host_tenant` for T in a thread: the thread, what it raised, and the event set once it is admitted."""
+    admitted, failed = threading.Event(), []  # type: tuple[threading.Event, list[BaseException]]
+
+    def accept() -> None:
+        try:
+            with host_tenant(root, TENANT, directory=directory):
+                admitted.set()
+        except BaseException as e:  # noqa: BLE001 — reported on the main thread
+            failed.append(e)
+
+    thread = threading.Thread(target=accept, daemon=True)
+    thread.start()
+    return thread, failed, admitted
+
+
+@pytest.mark.postgres
+def test_a_database_behind_is_refused_again_by_every_acceptance_in_the_process(placed, empty_database):  # noqa: F811
+    """A failed version check is not remembered: a second acceptance in the same process against a database still behind
+    checks again and is refused again (r10 Finding 9: the check is remembered once it passes)."""
+    from defender.tests.migrations.test_1214_migrations import BASELINE, _upgrade_to
+
+    _upgrade_to(empty_database, BASELINE)
+    code = textwrap.dedent(f"""
+        from defender import migrations, tenancy
+        from defender.records.formats import TenantRefused
+        counted = []
+        real = migrations.check_version
+        migrations.check_version = lambda dsn: (counted.append(dsn), real(dsn))[1]
+        from defender.tests.support.tenancy._host1214 import host_tenant
+        root = tenancy.resolve_data_root()
+        for attempt in range(2):
+            try:
+                with host_tenant(root, {TENANT!r}):
+                    print("ADMITTED", attempt)
+            except TenantRefused:
+                print("REFUSED", attempt)
+        print("CHECKS", len(counted))
+    """)
+    env = {**os.environ, **database_env(empty_database), "PYTHONPATH": str(REPO_ROOT), "DEFENDER_DATA_ROOT": str(placed)}
+    done = subprocess.run([sys.executable, "-c", code], env=env, cwd=REPO_ROOT, capture_output=True, text=True,  # noqa: S603
+                          timeout=120, check=False)
+    out = done.stdout + done.stderr
+    assert "REFUSED 0" in out, out
+    assert "REFUSED 1" in out, out
+    assert "ADMITTED" not in out, out
+    assert "CHECKS 2" in out, out
+
+
+def test_the_version_check_waits_for_the_hold_where_the_lock_is_exclusive(placed, monkeypatch):
+    """With T's lock held exclusive, an acceptance against an unreachable database waits for the lock and is recorded; only
+    once the lock is free does it reach the check and raise (r10 A1 order: hold, then version check)."""
+    from defender import tenancy
+    from defender.systems.run_tenant import RecordsUnreachable
+    from defender.tenancy import host_lock
+
+    monkeypatch.setenv(DSN_ENV, "postgresql://nobody:nothing@127.0.0.1:1/none?connect_timeout=3")
+    root = tenancy.resolve_data_root()
+    fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
+    assert fd is not None
+    try:
+        thread, failed, _ = _blocked_accept(root)
+        thread.join(1.5)
+        assert not failed, f"the version check ran before the hold was taken: {failed}"
+        assert thread.is_alive(), "the acceptance ended while the lock was held exclusive"
+        assert recorded(placed, TENANT) == this_process(), "the waiting acceptance is not recorded for teardown"
+    finally:
+        host_lock.release_lock(fd)
+    thread.join(30)
+    assert [type(e) for e in failed] == [RecordsUnreachable], failed
+
+
+def test_the_waiting_line_is_the_holds_own_one_line_on_stderr(placed, capfd):
+    """`hold_shared` itself prints one waiting line to stderr when the lock is held exclusive and none when it is free
+    (r10.1 C4: the hold prints it, a separate probe would race)."""
+    from defender.tenancy import host_lock
+
+    with host_lock.hold_shared(placed, TENANT):
+        pass
+    free = capfd.readouterr()
+    assert H.WAITING_WORDS[0] not in free.out + free.err, f"control: a free lock printed {free}"
+    admitted = threading.Event()
+
+    def enter() -> None:
+        with host_lock.hold_shared(placed, TENANT):
+            admitted.set()
+
+    fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
+    assert fd is not None
+    waiter = threading.Thread(target=enter, daemon=True)
+    try:
+        waiter.start()
+        time.sleep(1.0)
+        assert not admitted.is_set()
+    finally:
+        host_lock.release_lock(fd)
+    waiter.join(20)
+    assert admitted.is_set()
+    got = capfd.readouterr()
+    lines = [line for line in got.err.splitlines() if all(w in line for w in H.WAITING_WORDS)]
+    assert len(lines) == 1, got.err
+    assert TENANT in lines[0], got.err
+    assert got.out == ""
+
+
+def test_the_lifecycle_mark_is_judged_before_the_lock_is_waited_for(placed, monkeypatch):
+    """In a marked process the acceptance refuses at once even while the lock is held exclusive; it does not wait for
+    the lock it would deadlock on (r10.1 C6, A4)."""
+    from defender import tenancy
+    from defender.records.formats import TenantRefused
+    from defender.tenancy import host_lock
+
+    monkeypatch.setenv(H.LIFECYCLE_MARK, "1")
+    root = tenancy.resolve_data_root()
+    fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
+    assert fd is not None
+    try:
+        thread, failed, admitted = _blocked_accept(root, active_directory(placed, TENANT))
+        thread.join(5)
+        assert not thread.is_alive(), "a marked process waited for the lock instead of refusing"
+        assert not admitted.is_set()
+        assert [type(e) for e in failed] == [TenantRefused], failed
+        assert recorded(placed, TENANT) == []
+    finally:
+        host_lock.release_lock(fd)
+
+
+def test_a_forked_child_does_not_inherit_its_parents_hold(placed):
+    """A child forked inside an open scope that enters its own scope is recorded under its own pid: the hold table is
+    keyed by process (r10 O-A2; the child's record is what teardown signals)."""
+    from defender.tenancy import host_lock
+
+    read, write = os.pipe()
+    with host_lock.hold_shared(placed, TENANT):
+        child = os.fork()
+        if child == 0:  # pragma: no cover — runs in the forked child, which leaves through os._exit
+            status = 1
+            try:
+                os.close(read)
+                with host_lock.hold_shared(placed, TENANT):
+                    pids = sorted(h.pid for h in host_lock.holders(placed, TENANT))
+                os.write(write, (",".join(map(str, pids))).encode())
+                status = 0
+            finally:
+                os._exit(status)
+        os.close(write)
+        with os.fdopen(read) as reader:
+            seen = reader.read()
+        _, wait = os.waitpid(child, 0)
+    assert wait == 0, f"the forked child failed (status {wait})"
+    pids = [int(p) for p in seen.split(",") if p]
+    assert child in pids, f"the child entered a scope but was not recorded: {pids} (child {child})"
+    assert os.getpid() in pids
+
+
+def test_a_scope_entered_while_the_last_one_leaves_is_still_recorded(placed):
+    """A scope that enters while the last exit is giving the lock back waits for it and is recorded afterwards; the
+    exit's removal does not take the newcomer's record with it (r10 O-A3: the last exit is gated against entering)."""
+    from defender.tenancy import host_lock
+    from defender.tests.support.tenancy._calls1214 import watching
+
+    leaving, proceed, entered, quit_ = (threading.Event() for _ in range(4))
+    errors: list[BaseException] = []
+
+    def first() -> None:
+        try:
+            with host_lock.hold_shared(placed, TENANT):
+                pass  # the exit is watched below: it stops at the lock's release
+        except BaseException as e:  # noqa: BLE001 — reported on the main thread
+            errors.append(e)
+
+    def second() -> None:
+        try:
+            with host_lock.hold_shared(placed, TENANT):
+                entered.set()
+                quit_.wait(30)
+        except BaseException as e:  # noqa: BLE001 — reported on the main thread
+            errors.append(e)
+
+    def release_held(_args: dict) -> None:
+        if threading.current_thread().name == "first":
+            leaving.set()
+            proceed.wait(30)
+
+    with watching(host_lock.release_lock, release_held):
+        a = threading.Thread(target=first, name="first", daemon=True)
+        a.start()
+        assert leaving.wait(30), "the last exit never reached the lock's release"
+        b = threading.Thread(target=second, name="second", daemon=True)
+        b.start()
+        entered.wait(1.0)  # honest: still waiting on the exit; a racing entry gets in here
+        proceed.set()
+        a.join(30)
+        assert entered.wait(30), f"the second scope never entered: {errors}"
+        try:
+            assert recorded(placed, TENANT) == this_process(), "the last exit removed the newcomer's record"
+            assert not exclusive_free(placed, TENANT)
+        finally:
+            quit_.set()
+            b.join(30)
+    assert not errors, errors
+    assert recorded(placed, TENANT) == []
+    assert exclusive_free(placed, TENANT)
+
+
+@pytest.mark.parametrize("exit_", [SystemExit, KeyboardInterrupt], ids=["SystemExit", "KeyboardInterrupt"])
+def test_an_exit_from_the_admission_step_releases_the_hold_and_the_record(placed, exit_):
+    """`SystemExit` or `KeyboardInterrupt` out of the records read releases the hold and the record before the exception
+    is handled (r10 O-A6: a refused acceptance releases whatever it took)."""
+    from defender import tenancy
+    from defender.tenancy import TenantDirectory
+
+    class Leaving(TenantDirectory):
+        def __init__(self) -> None:
+            super().__init__(lambda: None)
+
+        def admission(self, tenant_id: str) -> object:
+            raise exit_()
+
+    root = tenancy.resolve_data_root()
+    with pytest.raises(exit_) as caught:  # kept: its traceback keeps the acceptance's frame alive, as a handler's would
+        host_tenant(root, TENANT, directory=Leaving())
+    assert recorded(placed, TENANT) == [], "the exit left this process recorded"
+    assert exclusive_free(placed, TENANT), "the exit left the lock held"
+    assert caught.value is not None
+
+
+def test_an_interrupt_while_waiting_for_the_lock_removes_the_record(placed):
+    """A `KeyboardInterrupt` that arrives while a scope waits for the lock leaves no record behind (r10 O-A6)."""
+    from defender.tenancy import host_lock
+
+    code = textwrap.dedent(f"""
+        import os, signal
+        from pathlib import Path
+        from defender.tenancy import host_lock
+        from defender.tests.support.tenancy._host1214 import recorded
+        placed = Path(os.environ["DEFENDER_DATA_ROOT"])
+        def interrupt(*_):
+            raise KeyboardInterrupt
+        signal.signal(signal.SIGALRM, interrupt)
+        signal.setitimer(signal.ITIMER_REAL, 1.0)
+        try:
+            with host_lock.hold_shared(placed, {TENANT!r}):
+                print("ENTERED")
+        except KeyboardInterrupt:
+            print("INTERRUPTED recorded", recorded(placed, {TENANT!r}))
+    """)
+    fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
+    assert fd is not None
+    try:
+        env = {**os.environ, "PYTHONPATH": str(REPO_ROOT), "DEFENDER_DATA_ROOT": str(placed)}
+        done = subprocess.run([sys.executable, "-c", code], env=env, cwd=REPO_ROOT, capture_output=True, text=True,  # noqa: S603
+                              timeout=60, check=False)
+    finally:
+        host_lock.release_lock(fd)
+    assert "INTERRUPTED recorded []" in done.stdout, done.stdout + done.stderr
+
+
+def test_a_waiter_is_recorded_while_the_lock_is_held_exclusive(placed):
+    """A scope blocked on an exclusive hold is already in the registry, so teardown (which holds the lock) can see and
+    signal it (r10 O-A2: a process records itself before it takes the lock)."""
+    from defender.tenancy import host_lock
+
+    admitted = threading.Event()
+
+    def enter() -> None:
+        with host_lock.hold_shared(placed, TENANT):
+            admitted.set()
+
+    fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
+    assert fd is not None
+    waiter = threading.Thread(target=enter, daemon=True)
+    try:
+        waiter.start()
+        deadline = time.monotonic() + 10
+        while recorded(placed, TENANT) != this_process() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert recorded(placed, TENANT) == this_process(), "a waiting scope was invisible to the holder of the lock"
+        assert not admitted.is_set()
+    finally:
+        host_lock.release_lock(fd)
+    waiter.join(20)
+    assert admitted.is_set()
+
+
+def test_the_wait_for_the_lock_has_no_timeout(placed):
+    """Once the first try fails, the hold waits for the lock with no timeout (r10.1 C4, owner-approved: it never gives up
+    on prepare or teardown). Observed on the timeouts `acquire` is called with."""
+    from defender.tenancy import host_lock
+    from defender.tests.support.tenancy._calls1214 import watching
+
+    timeouts: list[object] = []
+    admitted = threading.Event()
+
+    def enter() -> None:
+        with host_lock.hold_shared(placed, TENANT):
+            admitted.set()
+
+    fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
+    assert fd is not None
+    with watching(host_lock.acquire, lambda args: timeouts.append(args["timeout"])):
+        waiter = threading.Thread(target=enter, daemon=True)
+        try:
+            waiter.start()
+            time.sleep(1.0)
+        finally:
+            host_lock.release_lock(fd)
+        waiter.join(20)
+    assert admitted.is_set()
+    assert timeouts[-1] is None, f"the wait is bounded: {timeouts}"
+    assert all(t in (0, None) for t in timeouts), f"the wait is bounded: {timeouts}"
+
+
+@pytest.mark.postgres
+def test_a_wiring_less_tenant_in_the_database_is_refused_at_acceptance(placed, migrated_database):  # noqa: F811
+    """An active tenant whose forge wiring was never recorded is refused by the host acceptance over the real database,
+    naming the tenant; with wiring the same call admits (r10 A1 step 4: wiring is read, never invented)."""
+    from defender import tenancy
+    from defender.records.formats import TenantRefused
+    from defender.tests.support.tenancy._active1214 import postgres_directory
+
+    root = tenancy.resolve_data_root()
+    insert_active_tenant(migrated_database, TENANT, data_root=placed, wiring=False)
+    with pytest.raises(TenantRefused) as refused:
+        host_tenant(root, TENANT, directory=postgres_directory(migrated_database))
+    assert TENANT in str(refused.value), str(refused.value)
+    assert recorded(placed, TENANT) == []
+    assert exclusive_free(placed, TENANT)
+    from defender.tests.support.tenancy._tenants1106 import place_tenant
+
+    place_tenant(placed, OTHER)
+    (placed / OTHER / "learning").mkdir(exist_ok=True)
+    insert_active_tenant(migrated_database, OTHER, data_root=placed)
+    with host_tenant(root, OTHER, directory=postgres_directory(migrated_database)):
+        pass  # control: with wiring recorded the database admits

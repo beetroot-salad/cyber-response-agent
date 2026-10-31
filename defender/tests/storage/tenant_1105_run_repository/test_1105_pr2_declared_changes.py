@@ -7,6 +7,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import copy
 import json
+import contextlib
 import os
 import shutil
 from pathlib import Path
@@ -374,12 +375,46 @@ def test_dc8_the_drain_rehydrates_the_row_in_its_own_tenant(tmp_path):
     assert u_lane.run_dirs == [Path(location_path(u.runs)) / RID_R1], f"U's drain served {u_lane.run_dirs}"
     assert P.dead_letter(t_paths, "case-t") is None
     assert P.dead_letter(u_paths, "case-u") is None
-    # A row naming the other tenant is never opened through this drain's tenant (this lane double never consumes what
-    # it is handed, so T's own row may be handed again: only a run under U's folder would be wrong).
+
+
+class _Enough(BaseException):
+    """Ends a drain that keeps handing out a row it never consumes (this lane double leaves the row queued)."""
+
+
+class _BoundedLane(P.Lane):
+    def __call__(self, *args: object, **kw: object) -> None:
+        super().__call__(*args, **kw)
+        if len(self.handed) >= 3:
+            raise _Enough
+
+
+def test_dc8_a_row_naming_another_tenants_run_is_served_as_neither_tenants_run(tmp_path):
+    """RID_R1 is a run both tenants hold. A row of U's queued in T's drain is crossed: the drain serves neither T's
+    RID_R1 nor U's RID_R1 for it. What becomes of the row (dead-letter or counted retry) is not pinned here."""
+    t, u, t_paths, _u_paths = _drain_scene(tmp_path)
     P.queue_row(t_paths, "case-crossed", {"case_id": "case-crossed", "tenant_id": H.U_ID, "run_id": RID_R1})
-    crossed = P.Lane()
-    P.drain(t_paths, crossed)
-    assert Path(location_path(u.runs)) / RID_R1 not in crossed.run_dirs, "T's drain served a run of another tenant"
+    crossed = _BoundedLane()
+    with contextlib.suppress(_Enough):
+        P.drain(t_paths, crossed)
+    assert crossed.run_dirs == [], f"T's drain served the crossed row as {crossed.run_dirs}"
+
+
+def test_dc8_c10_a_row_naming_another_tenant_is_dead_lettered_on_the_first_tick(tmp_path):
+    """C10: a row whose spec names a tenant other than the drain's is dead-lettered at once, with a reason naming both
+    tenants and no attempts counter, and is never served (not a transient retry)."""
+    t, u, t_paths, _u_paths = _drain_scene(tmp_path)
+    P.queue_row(t_paths, "case-crossed", {"case_id": "case-crossed", "tenant_id": H.U_ID, "run_id": RID_R1})
+    lane = _BoundedLane()
+    with contextlib.suppress(_Enough):
+        P.drain(t_paths, lane)
+    assert lane.run_dirs == [], f"the crossed row was served as {lane.run_dirs}"
+    letter = P.dead_letter(t_paths, "case-crossed")
+    assert letter is not None, "the crossed row was not dead-lettered on the first tick"
+    reason = str(letter.get("failed", ""))
+    assert H.T_ID in reason, f"the reason does not name the drain's tenant: {reason!r}"
+    assert H.U_ID in reason, f"the reason does not name the row's tenant: {reason!r}"
+    assert "attempts" not in letter, f"the dead letter carries a retry counter: {letter!r}"
+    assert not P.still_queued(t_paths, "case-crossed"), "the crossed row is still queued"
 
 
 def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch, capsys):
@@ -388,8 +423,9 @@ def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypa
     from defender.learning.core import cli
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 
-    _t, _u, t_paths, _u_paths = _drain_scene(tmp_path)
+    t, _u, t_paths, _u_paths = _drain_scene(tmp_path)
     P.queue_row(t_paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
+    root = os.environ[P.DATA_ROOT_ENV]
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     argv = ["loop.py", "--lead-author-drain", "--tenant", H.T_ID]
     with pytest.raises(SystemExit) as refused:
@@ -398,6 +434,11 @@ def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypa
     assert P.DATA_ROOT_ENV in capsys.readouterr().err, "the refusal does not name the data root"
     assert P.dead_letter(t_paths, "case-t") is None
     assert P.still_queued(t_paths, "case-t")
+    # Positive control: the refusal was the missing root. With the root back, the same queue serves the row.
+    monkeypatch.setenv(P.DATA_ROOT_ENV, root)
+    lane = P.Lane()
+    P.drain(t_paths, lane)
+    assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R1], f"the restored root served {lane.run_dirs}"
 
 
 def _lesson(lessons: Path, stem: str) -> None:

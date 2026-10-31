@@ -513,3 +513,27 @@ async def test_the_twin_applies_racing_requests_once_too(twin_store):
     results = await asyncio.gather(twin_store.repo.request_rotate(T1), twin_store.repo.request_rotate(T1), return_exceptions=True)
     assert [type(r).__name__ for r in results if isinstance(r, BaseException)] == ["Conflict"]
     assert len([r for r in results if not isinstance(r, BaseException)]) == 1
+
+
+# --- r10 Finding 9: one read for admission ----------------------------------------------------------
+
+
+async def test_admission_is_none_none_for_an_absent_tenant(store):
+    """`admission` of a tenant with no row answers `(None, None)` (r10 A1 step 4: absent is not an error)."""
+    assert await store.repo.admission(ABSENT) == (None, None)
+
+
+@pytest.mark.parametrize("name", sorted(ALL_ROWS))
+async def test_admission_is_the_state_and_the_recorded_wiring_or_none(store, name):
+    """For a tenant in each state `admission` returns its state with the recorded repo and origin when wiring was
+    recorded, and with `None` when none was: wiring is never invented (r10 A1 step 4, Finding 9)."""
+    await store.seed(T1, ALL_ROWS[name])
+    await store.seed(T2, ALL_ROWS[name], repo="tenants/playground", origin=ORIGIN)
+    state, wiring = await store.repo.admission(T1)
+    assert (state, wiring) == (ALL_ROWS[name][0], None)
+    state, wiring = await store.repo.admission(T2)
+    assert state == ALL_ROWS[name][0]
+    recorded = await store.repo.forge_wiring(T2)
+    assert wiring is not None
+    assert (wiring.repo, wiring.origin) == ("tenants/playground", ORIGIN)
+    assert (wiring.repo, wiring.origin) == (recorded.repo, recorded.origin)

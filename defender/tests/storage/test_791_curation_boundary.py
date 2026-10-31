@@ -179,6 +179,7 @@ def test_the_curation_request_of_another_tenant_than_the_runs_is_not_enqueued(tm
         marker.unlink()
     other = set_up_tenant(current_data_root(), fixture_uuid("curation-other-tenant"))
     assert str(other.id) != run.tenant_id
+    location_path(other.learning).mkdir(exist_ok=True)  # the handed tenant's queue could be written, were it reached
     caplog.clear()
     with caplog.at_level(logging.INFO):
         queued = run_common.enqueue_curation(run, run_dir / "alert.json", **{ENQUEUE_TENANT: other})
@@ -187,6 +188,9 @@ def test_the_curation_request_of_another_tenant_than_the_runs_is_not_enqueued(tm
     assert refusals, "the mismatch was refused without the NOT-enqueuing line"
     assert str(other.id) in " ".join(refusals) or run.tenant_id in " ".join(refusals), refusals
     assert author_markers(state) == [], "a request for another tenant than the run's was queued"
+    from defender.learning.core.config import LoopPaths
+
+    assert author_markers(LoopPaths.for_tenant(other)) == [], "the refused request was written to the handed tenant's queue"
 
 
 def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state):

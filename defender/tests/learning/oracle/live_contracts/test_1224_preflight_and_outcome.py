@@ -449,6 +449,30 @@ def test_the_launchers_preflight_builds_its_oracle_side_for_the_source_runs_tena
         assert f"defender.tenant={tenant}" in labels, labels
 
 
+def test_the_launchers_calibration_serving_is_built_for_the_source_runs_tenant(tmp_path, monkeypatch):
+    """Every `oracle_serving` the launcher's preflight builds, the calibration one included (its box is never started),
+    is for the source run's tenant (r10.1 F6, C8: `preflight.py:120` passes `source.tenant_id`). Observed on the
+    arguments of the registry call, without patching it."""
+    from defender.learning.branch.estate.registry import oracle_serving
+    from defender.tests.support.sandbox import _box1279 as X
+    from defender.tests.support.sandbox._box1195 import FakeDaemon
+    from defender.tests.support.tenancy._calls1214 import watching
+
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
+    FakeDaemon(tmp_path / "daemon").install(monkeypatch)
+    est = S.estate(tmp_path)
+    oracle = _by_world(*[S.oracle(S.python("print('checked')"), then=S.submit(_BASE, S.EMPTY_CLAIM))
+                         for _ in range(2)])
+    _base, src = S.source_run(tmp_path, est, calls=_calls())
+    tenant = src.parent.parent.name
+    served: list[object] = []
+    with watching(oracle_serving, lambda args: served.append(args["tenant_id"])):
+        _main(src, est, oracle=oracle, verifier=S.passing_verifier())
+    assert served, "the launcher built no oracle serving"
+    assert set(map(str, served)) == {tenant}, f"an oracle serving was built for another tenant: {served}"
+
+
 def test_1224_preflight_replays_every_original_call_through_each_worlds_oracle_before_any_sibling(
         tmp_path, episodes_root):
     """before the first sibling start, every original call has passed once through each fact-carrying world's oracle and verifier."""

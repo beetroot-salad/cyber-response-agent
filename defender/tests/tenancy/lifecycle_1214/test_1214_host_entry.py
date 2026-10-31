@@ -474,7 +474,11 @@ def test_the_episode_launcher_refuses_a_folderless_tenant_for_its_state_and_make
 
 # --- each lead-drain claim -------------------------------------------------------------------------
 
-def _twin_directory(tenant: str, origin: str) -> tuple[Any, Any]:
+def _twin_directory(tenant: str, origin: str) -> tuple[Any, dict[str, Any]]:
+    """A directory over a one-tenant twin, and the ways to change that tenant's row afterwards, by the state it moves
+    to: `offboarding` (through the service), `creating`, `offboarded` (rows as written) and `removed` (no row)."""
+    import dataclasses
+
     from defender.tenancy import InMemoryTenantRepository, TenantDirectory
 
     twin: Any = InMemoryTenantRepository()
@@ -482,9 +486,20 @@ def _twin_directory(tenant: str, origin: str) -> tuple[Any, Any]:
                                 origin=origin))
     directory = TenantDirectory(lambda: twin)
 
-    def offboard() -> None:
-        asyncio.run(twin.request_offboard(tenant, now=CREATED))
-    return directory, offboard
+    def move(**changes: Any) -> Any:
+        def flip() -> None:  # the twin is a test double: its rows are rewritten as a database would be
+            twin._tenants[tenant] = dataclasses.replace(twin._tenants[tenant], **changes)
+        return flip
+
+    def remove() -> None:
+        del twin._tenants[tenant]
+    flips = {
+        "offboarding": lambda: asyncio.run(twin.request_offboard(tenant, now=CREATED)),
+        "creating": move(state="creating", pending_action="create", step="names", step_actor="service"),
+        "offboarded": move(state="offboarded", pending_action=None, step=None, step_actor=None),
+        "removed": remove,
+    }
+    return directory, flips
 
 
 class _FlipOnFirst:
@@ -500,10 +515,11 @@ class _FlipOnFirst:
         return self.inner(paths, state, run, **kw)
 
 
-@pytest.mark.parametrize("offboard_after_first", [False, True])
-def test_the_lead_drain_rechecks_the_tenant_state_at_each_claim(p4_tenant, tmp_path, monkeypatch, offboard_after_first):  # noqa: F811
-    """Two queued runs of one tenant: both are served while active; once the tenant is offboarded after the first
-    claim the second is not served and its row stays queued (Flow 4: re-checked per claim, not once per tick)."""
+@pytest.mark.parametrize("flip_to", [None, "offboarding", "creating", "offboarded", "removed"])
+def test_the_lead_drain_rechecks_the_tenant_state_at_each_claim(p4_tenant, tmp_path, monkeypatch, flip_to):  # noqa: F811
+    """Two queued runs of one tenant: both are served while active; once the tenant stops being active after the first
+    claim (any other state, or no row) the second is not served and its row stays as queued, uncounted, with no
+    failed letter, through a second tick (Flow 4: re-checked per claim; O-A5)."""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import (
         BoxSpy,
         LeadStep,
@@ -517,22 +533,31 @@ def test_the_lead_drain_rechecks_the_tenant_state_at_each_claim(p4_tenant, tmp_p
     t = p4_tenant
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
-    directory, offboard = _twin_directory(t.tenant_id, t.origin)  # the origin the tenant's forge fake serves
+    directory, flips = _twin_directory(t.tenant_id, t.origin)  # the origin the tenant's forge fake serves
     paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
     labels = ("claim-1", "claim-2")
     runs = {queued_run(t, paths, label).name: label for label in labels}
     inner = LeadStep(executed={r: [executed_lead("cmdb.owner-by-tag")] for r in runs}, edits={})
-    step = _FlipOnFirst(inner, offboard if offboard_after_first else None)
-    rc = lead_author_drain(t, paths, box=BoxSpy(), run_lead_author=step, run_pitfalls=lambda *_a, **_k: 0,
-                           directory=directory)
-    assert rc == 0
+    step = _FlipOnFirst(inner, flips[flip_to] if flip_to else None)
     queue = Path(location_path(paths.state_root)) / "author-queue"
-    if not offboard_after_first:
+    queued = {label: (queue / f"case-{label}.json").read_bytes() for label in labels}
+
+    def tick() -> int:
+        return lead_author_drain(t, paths, box=BoxSpy(), run_lead_author=step, run_pitfalls=lambda *_a, **_k: 0,
+                                 directory=directory)
+    assert tick() == 0
+    if flip_to is None:
         assert sorted(step.served) == sorted(runs)  # control: both claims are served while active
         return
     [served] = step.served
     unserved = next(label for run, label in runs.items() if run != served)
-    assert (queue / f"case-{unserved}.json").is_file(), "the claim of a tenant no longer active must stay queued"
+    for attempt in ("first tick", "second tick"):
+        assert (queue / f"case-{unserved}.json").read_bytes() == queued[unserved], (
+            f"{attempt}: the claim of a tenant no longer active must stay exactly as queued (no attempt counted)")
+        assert list((queue / "failed").glob("*")) == [], f"{attempt}: a failed letter was written"
+        assert not list((queue / "inflight").glob("*")), f"{attempt}: the claim was left in flight"
+        assert tick() == 0
+        assert step.served == [served], f"{attempt}: the unserved claim was served after the tenant stopped being active"
 
 
 # --- the census and layering (RC-9) ----------------------------------------------------------------

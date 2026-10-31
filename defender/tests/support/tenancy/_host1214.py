@@ -128,3 +128,57 @@ def host_tenant(*args: Any, **kwargs: Any) -> Any:
     """The real host acceptance step, imported at call time (a missing target is a red at the case, not at
     collection)."""
     return getattr(importlib.import_module(HOST_MODULE), HOST_ACCEPTANCE)(*args, **kwargs)
+
+
+# --- the tenant's folder, observed at the operating system's boundary (O-A1 order, O-A2) -----------------------------
+
+#: The audit events that touch a path; an audit hook cannot be removed, so one hook serves every test and a case turns it
+#: on for the length of a `with watch_folder(...)` block.
+_PATH_EVENTS = frozenset({"open", "os.listdir", "os.scandir"})
+_WATCH: dict[str, Any] = {"installed": False, "prefixes": None, "events": None, "sample": None, "busy": False}
+
+
+def _on_audit(event: str, args: tuple[Any, ...]) -> None:
+    if _WATCH["prefixes"] is None or _WATCH["busy"] or event not in _PATH_EVENTS or not args:
+        return
+    try:
+        path = os.fsdecode(args[0]) if not isinstance(args[0], int) else None
+    except (TypeError, ValueError):
+        return
+    if path is None or not path.startswith(_WATCH["prefixes"]):
+        return
+    _WATCH["busy"] = True
+    try:
+        sample = _WATCH["sample"]
+        _WATCH["events"].append((event, path, sample() if sample is not None else None))
+    finally:
+        _WATCH["busy"] = False
+
+
+class watch_folder:
+    """`with watch_folder(data_root, tenant) as touches:` -> every open or listing of a path under `<data root>/<tenant>`
+    while the block runs, as `(event, path, held)`. `held` is `(recorded as this process, lock not free)` as the touch
+    happened: what a command's own reads of the tenant's folder saw of its hold (r10 O-A1: none before the state is
+    judged; O-A2: held for as long as the command works)."""
+
+    def __init__(self, data_root: Path, tenant: str) -> None:
+        folder = Path(data_root) / tenant
+        self.prefixes = tuple({str(folder), str(folder.resolve())})
+        self.data_root, self.tenant = Path(data_root), tenant
+        self.touches: list[tuple[str, str, Any]] = []
+
+    def __enter__(self) -> list[tuple[str, str, Any]]:
+        import sys
+
+        if not _WATCH["installed"]:
+            sys.addaudithook(_on_audit)
+            _WATCH["installed"] = True
+        _WATCH.update(prefixes=self.prefixes, events=self.touches, sample=self._sample)
+        return self.touches
+
+    def _sample(self) -> tuple[bool, bool]:
+        return (recorded(self.data_root, self.tenant) == this_process(),
+                not exclusive_free(self.data_root, self.tenant))
+
+    def __exit__(self, *exc: object) -> None:
+        _WATCH.update(prefixes=None, events=None, sample=None)
