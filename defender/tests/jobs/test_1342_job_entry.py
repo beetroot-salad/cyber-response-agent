@@ -631,16 +631,26 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
 
 def test_m3_the_main_block_calls_both_entries_with_nothing_but_the_arguments():
     """`run.py`'s `__main__` block dispatches `job_main(_argv)` or `main(_argv)`: no keyword, star or extra argument, so no seam is passed from it. (M3)"""
+    from defender.tests.support.shared.contracts import _by_path
+
+    astlib = _by_path.import_lint_lib("_astlib")
     tree_ = ast.parse((DEFENDER / "run.py").read_text(encoding="utf-8"))
+    env = astlib.module_env(tree_, "defender.run", "defender")
     blocks = [n for n in tree_.body if isinstance(n, ast.If) and ast.unparse(n.test) == "__name__ == '__main__'"]
     assert len(blocks) == 1, "premise: one __main__ block"
-    calls = [c for n in blocks[0].body for c in ast.walk(n) if isinstance(c, ast.Call)]
-    entries = [c for c in calls if isinstance(c.func, ast.Name) and c.func.id in ("job_main", "main")]
-    assert sorted(c.func.id for c in entries) == ["job_main", "main"]
-    for call in entries:
-        assert ast.unparse(call) == f"{call.func.id}(_argv)", ast.unparse(call)
-        assert not call.keywords
-        assert len(call.args) == 1
+    exits = [c for n in blocks[0].body for c in ast.walk(n) if isinstance(c, ast.Call) and astlib.callee(c, env) == "sys.exit"]
+    assert len(exits) == 1, "premise: one sys.exit dispatch"
+    (leave,) = exits
+    assert not leave.keywords
+    assert len(leave.args) == 1
+    dispatch = leave.args[0]
+    assert isinstance(dispatch, ast.IfExp)
+    assert ast.unparse(dispatch.test) == "'--job' in _argv"
+    for entry, shape in ((dispatch.body, "job_main(_argv)"), (dispatch.orelse, "main(_argv)")):
+        assert isinstance(entry, ast.Call)
+        assert ast.unparse(entry) == shape, ast.unparse(entry)
+        assert not entry.keywords
+        assert len(entry.args) == 1
     assert "sys.exit(job_main(_argv) if '--job' in _argv else main(_argv))" in [ast.unparse(n) for n in blocks[0].body]
 
 
