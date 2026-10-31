@@ -399,6 +399,23 @@ def test_dc8_a_row_naming_another_tenants_run_is_served_as_neither_tenants_run(t
     assert crossed.run_dirs == [], f"T's drain served the crossed row as {crossed.run_dirs}"
 
 
+def test_dc8_c10_a_row_naming_another_tenant_is_dead_lettered_on_the_first_tick(tmp_path):
+    """C10: a row whose spec names a tenant other than the drain's is dead-lettered at once, with a reason naming both
+    tenants and no attempts counter, and is never served (not a transient retry)."""
+    t, u, t_paths, _u_paths = _drain_scene(tmp_path)
+    P.queue_row(t_paths, "case-crossed", {"case_id": "case-crossed", "tenant_id": H.U_ID, "run_id": RID_R1})
+    lane = _BoundedLane()
+    with contextlib.suppress(_Enough):
+        P.drain(t_paths, lane)
+    assert lane.run_dirs == [], f"the crossed row was served as {lane.run_dirs}"
+    letter = P.dead_letter(t_paths, "case-crossed")
+    assert letter is not None, "the crossed row was not dead-lettered on the first tick"
+    reason = str(letter.get("failed", ""))
+    assert H.T_ID in reason and H.U_ID in reason, f"the reason does not name both tenants: {reason!r}"
+    assert "attempts" not in letter, f"the dead letter carries a retry counter: {letter!r}"
+    assert not P.still_queued(t_paths, "case-crossed"), "the crossed row is still queued"
+
+
 def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch, capsys):
     """With no data root the drain command is refused at its host acceptance, before it claims anything: its rows stay
     queued, uncounted and not dead-lettered (r10 A1: the data root is judged at acceptance, step 2)."""

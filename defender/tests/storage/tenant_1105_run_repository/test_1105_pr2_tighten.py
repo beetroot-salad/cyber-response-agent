@@ -277,6 +277,10 @@ def _launched_process(kind: str, tenant_id: str, *argv: str) -> subprocess.Compl
         check=False, env=launcher.environment(), cwd=str(H.WORKTREE), timeout=300)
 
 
+def _script(*parts: str) -> str:
+    return str(H.WORKTREE.joinpath("defender", *parts))
+
+
 def _refused_naming(child: subprocess.CompletedProcess, what: str) -> None:
     said = child.stdout + child.stderr
     assert child.returncode != 0, f"exit 0: {said[-600:]!r}"
