@@ -3,7 +3,6 @@ a secret value."""
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -121,8 +120,11 @@ def _directory(tmp_path):
     return tmp_path / "audit-is-a-directory"
 
 
-def _full_device(_tmp_path):
-    return Path("/dev/full")  # opens for append; every write fails (ENOSPC), even as root
+def _full_device(tmp_path):
+    # A link to /dev/full: opens for append and every write fails (ENOSPC), even as root. The
+    # link keeps a sink that rewrites its file (temp + replace) off the real device.
+    (tmp_path / "audit.log").symlink_to("/dev/full")
+    return tmp_path / "audit.log"
 
 
 @pytest.mark.parametrize("unwritable", [_directory, _full_device],

@@ -184,8 +184,8 @@ def test_d4_a_system_name_outside_the_grammar_is_refused_without_reading_beyond_
         # check finds one and reads the store: traversal targets, and the name itself when it
         # is a legal path component.
         places = [settings / "other", settings / "systems" / "other"]
-        if name and "/" not in name:
-            places.append(settings / "systems" / name)
+        if "/" not in name:
+            places.append(settings / "systems" / name)  # "" resolves to systems/ itself
         for where in places:
             where.mkdir(exist_ok=True)
             (where / "access.yaml").write_text(
