@@ -266,3 +266,24 @@ def test_the_bind_mounted_folders_are_not_tracked_U2_U4(name):
     """Nothing under the bind-mounted state folders is tracked in the product repo."""
     tracked = _git.git(["ls-files", "--", name], cwd=REPO_ROOT)
     assert tracked == "", f"tracked under {name}/: {tracked.splitlines()[:5]}"
+
+
+def _credential_proxy_services() -> dict:
+    """Services whose command or entrypoint runs the #1163 credential proxy program."""
+    def runs_proxy(svc: dict) -> bool:
+        words = [str(svc.get(k, "")) for k in ("command", "entrypoint")]
+        return any("credential_proxy" in w for w in words)
+    return {name: svc for name, svc in _services().items() if runs_proxy(svc)}
+
+
+def test_the_credential_proxy_is_a_long_lived_compose_service_off_the_docker_socket_H4():
+    """#1163 H4: one compose service runs the proxy, on the compose network only, holding no
+    docker socket. Control: the devcontainer service does mount the socket (C11)."""
+    devcontainer = _services()["devcontainer"]
+    assert any("docker.sock" in str(v) for v in devcontainer.get("volumes", [])), "control"
+    proxies = _credential_proxy_services()
+    assert len(proxies) == 1, f"services running the credential proxy: {sorted(proxies)}"
+    (svc,) = proxies.values()
+    assert not any("docker.sock" in str(v) for v in svc.get("volumes", [])), svc.get("volumes")
+    assert not svc.get("ports"), f"the proxy publishes {svc.get('ports')!r} to the host"
+    assert svc.get("network_mode") != "host"
