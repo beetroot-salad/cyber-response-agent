@@ -4,6 +4,7 @@ degrades to drift `unknown` with nothing sent outside the merged declaration (A3
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -21,6 +22,9 @@ from defender.tests.tenancy.tenant_1108_p4._support import (
 pytestmark = pytest.mark.e2e
 
 API = "/api"
+#: Longest a preflight read token may live (one pass of live reads), and the clock slack.
+PREFLIGHT_LIFETIME = 3600
+CLOCK_TOLERANCE = 60
 ROLE, SECRET = "role-1163-learning", "secret-1163-learning"
 FIXTURE_SYSTEMS = ("identity", "ticket", "host-state", "threat-intel", "change-mgmt",
                    "elastic", "cmdb", "case-history")
@@ -65,14 +69,18 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool):
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     est = S.estate(tmp_path)
     (est.adapters / "idp_adapter.py").write_text(IDP_ADAPTER, encoding="utf-8")
-    calls = S.default_calls()
-    idp = [c for c in calls if c.system == "idp"][0]
+    idp = [c for c in S.default_calls() if c.system == "idp"][0]
+    # Every call answers with the idp rows, so the one scripted submission is true of all three
+    # (calibrating edr or siem-x against another system's rows would fail the family).
+    calls = [S.Call(c.system, c.verb, c.params, idp.payload) for c in S.default_calls()]
     with H.upstream() as merged, H.upstream() as wt:
         merged.replies[f"{API}/events"] = (200, {"Content-Type": "application/json"},
                                            json.dumps(idp.payload).encode())
         files = {"settings/verb-grants.yaml": est.table(),
                  **{f"settings/systems/{s}/config.env": None for s in FIXTURE_SYSTEMS},
-                 **A.system_files("idp", H.declaration(merged.url + API))}
+                 **A.system_files("idp", H.declaration(merged.url + API)),
+                 # Another http-proxy system the source run never called: the grant must not reach it.
+                 **A.system_files("crm", H.declaration(merged.url + "/crm"))}
         with published_tenant(tmp_path / "forge", root=data_root, tenant_id=S.FIXTURE_TENANT,
                               files=files) as t:
             if working_tree_edit:  # an unmerged edit in the clone's working tree (C28, C34)
@@ -100,8 +108,9 @@ def test_p1_preflight_reads_idp_through_the_proxy_with_a_read_grant_on_http_prox
     login and key; spawned children carry no token. H12, A7, A11, O10."""
     run, outcome, bao, tap, merged, wt = _preflight(
         tmp_path, monkeypatch, data_root, working_tree_edit=False)
+    finished = time.time()
     assert run.rc == 0, run.message
-    assert merged.paths() == [f"{API}/events"]
+    assert [p.split("?")[0] for p in merged.paths()] == [f"{API}/events"]
     assert merged.seen[0].headers.get("Authorization") == f"Bearer {H.CANARY_KEY}"
     assert bao.logins == [(ROLE, SECRET)], "the tenant's own issuer login"
     (sign,) = bao.signs
@@ -109,6 +118,10 @@ def test_p1_preflight_reads_idp_through_the_proxy_with_a_read_grant_on_http_prox
     assert sign.key == proxy().transit_key_for(S.FIXTURE_TENANT), "the tenant's own transit key (A11)"
     claims = A.claims_of_payload(sign.payload)
     assert (claims["tenant"], A.grant_of(claims)) == (S.FIXTURE_TENANT, [("idp", "r")])
+    (source_run,) = (p for p in (data_root / S.FIXTURE_TENANT / "runs").iterdir() if p.is_dir())
+    assert claims["investigation"] == source_run.name, "the token names the source run"
+    assert claims["exp"] <= finished + PREFLIGHT_LIFETIME + CLOCK_TOLERANCE, "an unbounded token"
+    assert claims["exp"] > finished, "positive control: the expiry is a time still to come"
     assert tap.tokens
     assert all(A.SIGNATURE_CANARY in tok for tok in tap.tokens)
     assert [d for d in outcome["drift"] if d["system"] == "idp"] == []

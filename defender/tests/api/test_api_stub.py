@@ -714,6 +714,11 @@ CREDENTIAL_SHAPES = [
     ("static", {"username": "u", "password": LONG}, True),
     ("static", {"username": "u", "password": "x"}, False),
     ("static", {"username": "u", "api_key": LONG, "other": "x"}, False),
+    ("static", {"api_key": LONG, "client_id": "c"}, False),
+    ("static", {"api_key": LONG, "key_id": "k"}, False),
+    ("static", {"api_key": LONG, "user": "u"}, False),
+    ("static", {"api_key": LONG, "account": "a"}, False),
+    ("static", {"api_key": LONG, "client_id": LONG}, True),
     ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG}, True),
     ("oauth-client-credentials", {"client_id": "c", "client_secret": "x"}, False),
 ]
