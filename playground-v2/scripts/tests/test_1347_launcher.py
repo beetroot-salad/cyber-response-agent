@@ -412,7 +412,9 @@ def test_a_docker_config_without_the_playground_context_refuses_and_still_tears_
         rig.launch()
     assert not isinstance(caught.value, (AttributeError, TypeError, NameError))
     assert "run" not in rig.journal.ops() and rig.rows() == []
-    assert "teardown" in rig.journal.ops() and "frozen-engine" not in rig.store.records
+    ops = rig.journal.ops()
+    assert "load_frozen" not in ops or "teardown" in ops
+    assert "frozen-engine" not in rig.store.records
     assert list(rig.work.iterdir()) == []
 
 

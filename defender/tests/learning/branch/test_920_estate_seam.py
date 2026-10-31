@@ -48,6 +48,7 @@ from defender.systems.verbs import (  # noqa: E402
     DENIED,
     GRANTED,
     ModuleVerbRegistry,
+    ReadCut,
     VerbContext,
     validate_params,
 )
@@ -261,6 +262,7 @@ def test_every_granted_verb_decides_granted_through_the_world_registry(tmp_path)
 def test_no_route_to_a_verb_hands_back_a_bare_adapter_body(tmp_path):
     reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
     plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
+    cut_only = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant(), cut=ReadCut(reg.as_of))
 
     def layers(fn):
         """`fn` and each layer it wraps, outermost first (the world's serving, the read cut, ...)."""
@@ -273,10 +275,15 @@ def test_no_route_to_a_verb_hands_back_a_bare_adapter_body(tmp_path):
     bare = []
     for system, verb, _ in _gather_grant().entries:
         real = plain.verbs(system)[verb]
+        base_cut = cut_only.verbs(system)[verb]
         for route, fn in (("verbs", reg.verbs(system)[verb]), ("decide", reg.decide(system, verb).fn)):
             # Served, not bare: the callable handed out is a wrapper, and the adapter's own body
             # sits somewhere beneath it (#1347 put the read cut between the two).
             if fn is real or real not in layers(fn):
+                bare.append((system, verb, route))
+            # ... and by the world, not just the base registry's read-cut wrapper: the world adds
+            # a layer beyond what the plain cut registry hands out for the same system and verb.
+            elif fn is base_cut or len(layers(fn)) <= len(layers(base_cut)):
                 bare.append((system, verb, route))
 
     assert bare == []

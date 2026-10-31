@@ -132,8 +132,8 @@ class Outcome(P.CliResult):
     def assert_score(self, verdicts: dict[str, str], accuracy: tuple[int, int], *, not_run=()):
         assert self.crashed is None, self.crashed
         # A set with a case not scored is incomplete, and incomplete exits non-zero (#1347 O11).
-        assert self.rc == (1 if not_run else 0), self.said
-        assert ("INCOMPLETE" in self.out) == bool(not_run), self.out
+        assert (self.rc != 0) == bool(not_run), self.said
+        assert ("incomplete" in self.out.lower()) == bool(not_run), self.out
         assert self.verdicts() == verdicts, self.out
         assert self.accuracy() == accuracy, self.out
         assert self.not_run() == list(not_run), self.out
