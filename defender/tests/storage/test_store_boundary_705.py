@@ -31,6 +31,7 @@ from defender.tests.support.storage._session_store_705 import (
 from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.records import SessionPaths
 from defender.tests.support.storage._store_owner import owned_store
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -139,7 +140,7 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
 
     from defender.tests.support.storage._alert_plant import plant_alert
     plant_alert(run_dir)
-    box = start_box(run_dir, DEFENDER)
+    box = start_box(run_dir, DEFENDER, tenant_id=TEST_TENANT)
     try:
         probe = run_dir / "_probe_store.py"
         probe.write_text(_READ_PATH, encoding="utf-8")

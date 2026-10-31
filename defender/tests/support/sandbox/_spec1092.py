@@ -25,6 +25,7 @@ from defender.tests.e2e._box665 import (  # noqa: F401 — re-exported for the t
 )
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.e2e._spec771 import requires_daemon, requires_real_box  # noqa: F401
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 #: The three files the image name is a function of, IN THE ORDER the resolver reads them —
 #: the order decides which file a "cannot read" fault names first.
@@ -433,7 +434,7 @@ def box_probe(box, run_dir: Path, name: str, source: str, *args: str) -> dict:
 def real_box(run_dir: Path):
     """A box over THIS checkout's defender dir through the real `start_box`; the daemon must
     hold `image_tag(DEFENDER)` (a missing image faults, never skips)."""
-    box = box_mod.start_box(run_dir, DEFENDER)
+    box = box_mod.start_box(run_dir, DEFENDER, tenant_id=TEST_TENANT)
     try:
         yield box
     finally:

@@ -35,14 +35,16 @@ def _cli() -> Any:
 
 def _update(p4: Any, capsys, *, identity: Any = None) -> tuple[int, list[str]]:
     capsys.readouterr()
-    rc = _cli().update(p4.tenant_id, client=p4.forge.client, directory=p4.directory,
-                       identity=identity if identity is not None else p4.identity)
+    with p4.admitted() as admitted:
+        rc = _cli().update(admitted, client=p4.forge.client,
+                           identity=identity if identity is not None else p4.identity)
     return rc, _said(capsys)
 
 
 def _check(p4: Any, capsys) -> list[str]:
     capsys.readouterr()
-    _cli().check_tenant(p4.tenant_id, directory=p4.directory)
+    with p4.admitted() as admitted:
+        _cli().check_tenant(admitted)
     return _said(capsys)
 
 

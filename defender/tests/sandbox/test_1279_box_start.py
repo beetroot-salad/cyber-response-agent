@@ -299,7 +299,7 @@ def _request_without_a_code_mount(req: X.RequestLane) -> box_mod.BoxRequest:
         box_mod.Mount(source=req.lane, target=req.lane, writable=True),
     )
     return box_mod.BoxRequest(name=X.REQUEST_NAME, mounts=mounts, workdir=DEFENDER.parent, env={},
-                              require_sandbox=False)
+                              require_sandbox=False, tenant_id=TEST_TENANT)
 
 
 def test_a8_a_request_with_no_code_mount_is_still_judged(tmp_path, monkeypatch):
@@ -592,7 +592,7 @@ def test_o3_the_oracle_box_refuses_a_mount_overlapping_the_publish_root(
     from defender.box import _oracle
 
     runner, scratch = oracle_tree
-    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"})
+    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
     clear = FakeDaemon(tmp_path / "clear")
     box_mod.start_box(request, docker=clear)
@@ -616,7 +616,7 @@ def test_o3_the_oracle_start_carries_the_refusal_as_the_cause_of_its_own(tmp_pat
     daemon = FakeDaemon(tmp_path)
     daemon.install(monkeypatch)
     with pytest.raises(_oracle.BoxStartRefused) as refused:
-        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"})
+        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     assert any(isinstance(e, X.conflict_type()) for e in _chain(refused.value)), (
         f"the refusal's text did not survive as the cause: {_chain(refused.value)}")
     assert daemon.created() == []
@@ -633,7 +633,7 @@ def test_o3_the_estate_oracle_start_turns_the_refusal_into_its_own_failure_keepi
     daemon = FakeDaemon(tmp_path)
     daemon.install(monkeypatch)
     with pytest.raises(estate_oracle.OracleSandboxError) as refused:
-        estate_oracle.start_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"})
+        estate_oracle.start_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     conflicts = [e for e in _chain(refused.value) if isinstance(e, X.conflict_type())]
     assert conflicts, f"the refusal did not survive the oracle's re-wrapping: {_chain(refused.value)}"
     assert str(conflicts[0]) in str(refused.value), (
@@ -646,7 +646,7 @@ def test_o6_the_oracle_request_name_refuses_a_finished_container(tmp_path, oracl
     from defender.box import _oracle
 
     runner, scratch = oracle_tree
-    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"})
+    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     daemon = FakeDaemon(tmp_path)
     daemon.hold(request.name, "exited")
     with pytest.raises(X.conflict_type()) as refused:
@@ -666,7 +666,7 @@ def test_o6_the_oracle_entry_refuses_a_held_same_name_container_and_leaves_it(
     env = {"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}
     free = FakeDaemon(tmp_path / "free")
     free.install(monkeypatch)
-    started = _oracle.start_oracle_box(env=env)
+    started = _oracle.start_oracle_box(env=env, tenant_id=TEST_TENANT)
     try:
         assert started.sandboxed, "control: the oracle did not start on a free name"
         assert len(free.created()) == 1
@@ -676,7 +676,7 @@ def test_o6_the_oracle_entry_refuses_a_held_same_name_container_and_leaves_it(
     X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
     log = X.hold_every_name(tmp_path / "holding", monkeypatch)
     with pytest.raises(_oracle.BoxStartRefused) as refused:
-        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"})
+        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     conflicts = [e for e in _chain(refused.value) if isinstance(e, X.conflict_type())]
     assert conflicts, f"the refusal did not survive as the cause: {_chain(refused.value)}"
     calls = X.logged_calls(log)
@@ -693,7 +693,7 @@ def test_o6_every_oracle_box_name_is_fresh(tmp_path, oracle_tree):
 
     runner, scratch = oracle_tree
     env = {"DEFENDER_BOX_RUNTIME": "runc"}
-    names = [_oracle.oracle_box_request(scratch, runner, env=env).name for _ in range(3)]
+    names = [_oracle.oracle_box_request(scratch, runner, env=env, tenant_id=TEST_TENANT).name for _ in range(3)]
     assert len(set(names)) == 3, f"an oracle name repeated: {names}"
 
 

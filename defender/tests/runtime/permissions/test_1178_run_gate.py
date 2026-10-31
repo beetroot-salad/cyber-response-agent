@@ -947,7 +947,7 @@ def _drain(s: LeadScene, lanes: Lanes, **kw: Any) -> Any:
     lanes.lane = s.lane
     return drains._drain_lead_author(
         s.paths, _state1135.state_for_paths(s.paths), lanes.run_lead, lanes.run_pitfalls,
-        accept_tenant=drains._tenant_acceptor(s.paths.tenant), directory=directory_for_root(), **kw)
+        directory=directory_for_root(), **kw)
 
 
 def _caught_drain(s: LeadScene, lanes: Lanes, **kw: Any) -> BaseException | None:

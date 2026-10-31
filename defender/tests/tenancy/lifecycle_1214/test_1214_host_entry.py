@@ -336,7 +336,9 @@ def test_the_drain_is_recorded_while_its_stage_runs_and_nothing_stays_recorded(d
         during.append((H.recorded(data_root, TENANT), H.exclusive_free(data_root, TENANT)))
         return 0
 
-    monkeypatch.setattr(cli, "author_drain", stage)
+    # The drain's stage is the only point after acceptance that a test can reach: `main` takes no stage seam, and an empty
+    # queue consults neither the tenant records nor the forge, so there is no injected collaborator to observe from.
+    monkeypatch.setattr(cli, "author_drain", stage)  # lint-monkeypatch: ok — `cli.main` has no stage seam (production is out of scope here)
     assert cli.main(["loop.py", "--author-drain", "--tenant", TENANT], directory=active_directory(data_root, TENANT)) == 0
     [(recorded, free)] = during
     assert recorded == H.this_process(), "the drain was not recorded while its stage ran"

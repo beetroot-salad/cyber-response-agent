@@ -426,12 +426,14 @@ def test_1110_o7_run_main_exits_0_when_the_renderer_cannot_be_imported(
 
 
 def _standalone(tenant: str, run_dir: Path, **env: str) -> subprocess.CompletedProcess:
-    """`python visualize_run.py --tenant T <run_id>` over a `_repository_run`, as a child process."""
-    script = run_common.DEFENDER_DIR / "presentation" / "visualize_run.py"
-    return subprocess.run(  # noqa: S603 — this interpreter, the renderer script, tenant, run id
-        [sys.executable, str(script), "--tenant", tenant, run_dir.name],
+    """`visualize_run.py --tenant T <run_id>` over a `_repository_run`, as a child process. The renderer admits its tenant
+    through the tenant records (r10 A1/C9), so the child runs under the test launcher with `T` seeded active."""
+    from defender.tests.support.tenancy import _launcher1214 as launcher
+
+    return subprocess.run(  # noqa: S603 — this interpreter, the test launcher, tenant, run id
+        launcher.command("visualize_run", ["--tenant", tenant, run_dir.name], seed=[tenant]),
         capture_output=True, text=True, encoding="utf-8", check=False,
-        env={**os.environ, **env})
+        env=launcher.environment(env))
 
 
 def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_record(

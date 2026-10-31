@@ -5,13 +5,15 @@ needs a working tenant runs this module instead of `python run.py` / the drain /
 the directory from what the TEST controls and calls the entry function with `directory=`. Nothing here is
 production code and the production entries are not wrapped: the same function runs, with the one seam used.
 
-    python -m defender.tests.support.tenancy._launcher1214 [options] run|drain|connect [--] <argv for the entry>
+    python -m defender.tests.support.tenancy._launcher1214 [options] run|drain|connect|visualize_run [--] <argv for the entry>
 
 Entries (argv exactly as the production command line takes it, exit status passed through):
 - `run`     -> `defender.run.main(argv, directory=...)`
 - `drain`   -> `defender.learning.core.cli.main(argv, directory=...)`
 - `connect` -> `defender.cli.tenant.main(argv, directory=...)`   (pinned by GAP-Rm-2: `cli.tenant.main(argv, *,
   directory=None)`)
+- `visualize_run` -> `defender.presentation.visualize_run.main(["visualize_run.py", *argv], directory=...)` after the
+  script's own `configure_from_env()` (its `main` takes `sys.argv`, program name first; r10 A1: it admits its tenant)
 
 Directory (give one; `--dsn` wins over `--seed` when both are given):
 - `--dsn DSN` (env `DEFENDER_TEST_DSN`): `_active1214.postgres_directory(DSN)`, over rows the test inserted with
@@ -65,6 +67,7 @@ ENTRIES: dict[str, tuple[str, str]] = {
     "run": ("defender.run", "main"),
     "drain": ("defender.learning.core.cli", "main"),
     "connect": ("defender.cli.tenant", "main"),
+    "visualize_run": ("defender.presentation.visualize_run", "main"),
 }
 SEED_ENV, DSN_ENV, ROOT_ENV = "DEFENDER_TEST_SEED", "DEFENDER_TEST_DSN", "DEFENDER_DATA_ROOT"
 _PRODUCTION_DSN_ENV = "DEFENDER_DATABASE_DSN"
@@ -146,6 +149,11 @@ def main(argv: Sequence[str] | None = None, *, entries: Mapping[str, Callable[..
     else:
         module, name = ENTRIES[ns.kind]
         entry = getattr(importlib.import_module(module), name)
+    if ns.kind == "visualize_run":  # the script's own `__main__`: its logging, then `main(sys.argv)`
+        from defender._log import configure_from_env
+
+        configure_from_env()
+        entry_argv = ["visualize_run.py", *entry_argv]
     return int(entry(list(entry_argv), directory=directory))
 
 

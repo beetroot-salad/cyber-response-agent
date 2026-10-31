@@ -1,6 +1,7 @@
 """The entry points take a tenant through `accept_tenant`, once."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
 
 from defender.records import session_store
@@ -105,10 +106,9 @@ def _launch(source: Path, spawn: Any, *, tenant_id: str | None = None,
     about the host's credentials)."""
     seams.setdefault("preflight", T.no_preflight)
     requested = source.parent.parent.name if tenant_id is None else tenant_id
+    argv = ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID)]
     try:
-        return branch_entry.main(
-            ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID)],
-            spawn=spawn, **seams)
+        return branch_entry.main(argv, spawn=spawn, directory=directory_for_argv(argv), **seams)
     except SystemExit as refused:
         return refused
 
@@ -249,7 +249,7 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
         if cell.defender_dir is not None:
             argv += ["--defender-dir", str(cell.defender_dir)]
         try:
-            rc = policy_cli.main(argv)
+            rc = policy_cli.main(argv, directory=directory_for_argv(argv))
         except SystemExit as refused:
             return True, H.exit_text(refused) + capsys.readouterr().err, False
         cap = capsys.readouterr()

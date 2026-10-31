@@ -1,6 +1,7 @@
 """resolve_tenant / resolve_run_tenant: systems, ticket mapping, faults kept per system, fresh read per resolve, read-only parts."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -368,9 +369,11 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     (run_dir / "gather_raw").mkdir(parents=True)
     base = ["show", "gather", "--run-dir", str(run_dir)]
 
-    assert policy_cli.main([*base, "--tenant", fixture_uuid("tenant:healthy")]) == 0
+    healthy = [*base, "--tenant", fixture_uuid("tenant:healthy")]
+    assert policy_cli.main(healthy, directory=directory_for_argv(healthy)) == 0
     healthy_out = capsys.readouterr().out
-    assert policy_cli.main([*base, "--tenant", fixture_uuid("tenant:broken")]) == 0  # resolves without raising
+    broken_argv = [*base, "--tenant", fixture_uuid("tenant:broken")]
+    assert policy_cli.main(broken_argv, directory=directory_for_argv(broken_argv)) == 0  # resolves without raising
     broken_out = capsys.readouterr().out
     assert "agent: gather" in broken_out, broken_out
     assert broken_out == healthy_out, "the grants answer moved with a system's config"

@@ -117,6 +117,13 @@ class PublishedTenant:
             object.__setattr__(self, "_dir", cached)
         return cached
 
+    def admitted(self) -> Any:
+        """The tenant's host acceptance over `directory` (r10.1 C3: checked at the call, released by `with`): the value
+        the connect command's verbs (`update`, `propose`, `check_tenant`) take (C1: a tenant is the scope's value)."""
+        from defender.systems.run_tenant import host_tenant
+
+        return host_tenant(self.data_root, self.tenant_id, directory=self.directory)
+
     @property
     def repository(self) -> Any:
         """The in-memory tenant repository behind `directory` (cached): a test reads back what a process recorded

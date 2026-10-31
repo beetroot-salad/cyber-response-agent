@@ -222,11 +222,13 @@ def at_branch_launch(w: World) -> Verdict:
     # stamps that pinned export, not wherever `current` has moved since (another site of this
     # test may have republished the tenant): the fake live tree answers with the source's own.
     stamp = json.loads((w.source_run / "provenance.json").read_text(encoding="utf-8"))
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
     text = ""
+    argv = ["--tenant", w.planted.tenant_id, w.source_run.name, str(T.BRANCH_MESSAGE_ID)]
     try:
         S.mod("cli.learning.branch").main(
-            ["--tenant", w.planted.tenant_id, w.source_run.name,
-             str(T.BRANCH_MESSAGE_ID)],
+            argv, directory=directory_for_argv(argv),
             spawn=spawn, preflight=preflight,
             live_tree=T.source_capture(knowledge=stamp["knowledge"]))
     except SystemExit as stop:

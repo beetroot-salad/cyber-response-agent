@@ -189,6 +189,9 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     seams.setdefault("roster", est.roster())
     seams.setdefault("oracle", S.oracle(then=S.submit(BASE_ANSWER, S.EMPTY_CLAIM)).model)
     seams.setdefault("verifier", S.passing_verifier().model)
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
+    seams.setdefault("directory", directory_for_argv(argv))  # r10 A1/C9: the launcher admits through the tenant records
     rc: int | None = None
     message = ""
     raised: BaseException | None = None
@@ -373,15 +376,34 @@ class CliResult:
         return f"{refusal_text(self.raised)}\n{self.err}"
 
 
-def drive_cli(main: Any, argv: list[str]) -> CliResult:
+def active_directory_for(main: Any, argv: list[str]) -> Any:
+    """The seeded ACTIVE tenant directory a host command's `main(argv, directory=)` is driven with (r10.1 C1/C9: every
+    host entry point admits through the host acceptance, whose records a test hands in): active for the tenant `--tenant`
+    names, over the data root the test set. None for a `main` with no `directory` seam or an argv naming no tenant."""
+    import inspect
+
+    if "directory" not in inspect.signature(main).parameters:
+        return None
+    tenant = next((argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "--tenant"), None)
+    tenant = tenant or next((a.split("=", 1)[1] for a in argv if a.startswith("--tenant=")), None)
+    if not tenant:
+        return None
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
+    return directory_for_argv(argv)
+
+
+def drive_cli(main: Any, argv: list[str], *, directory: Any = None) -> CliResult:
     """Call a CLI's `main(argv)`, capturing stdout and stderr; a `SystemExit` is handed back,
-    never raised."""
+    never raised. A host command is handed `directory` (default: active for its `--tenant`, see
+    `active_directory_for`), since it admits its tenant through the tenant records (r10 A1)."""
     out, err = io.StringIO(), io.StringIO()
     rc: int | None = None
     raised: BaseException | None = None
+    records = directory if directory is not None else active_directory_for(main, argv)
     try:
         with redirect_stdout(out), redirect_stderr(err):
-            rc = main(list(argv))
+            rc = main(list(argv)) if records is None else main(list(argv), directory=records)
     except SystemExit as stop:
         raised = stop
         rc = stop.code if isinstance(stop.code, int) else None
@@ -471,7 +493,7 @@ class Lane:
 
 
 def drain(paths: Any, lane: Lane, *, active: Any = ()) -> list[Any]:
-    """One lead-author tick's claim loop over `paths`, with its fresh tenant acceptor and the directory holding
+    """One lead-author tick's claim loop over `paths`, with the directory holding
     every tenant placed under the data root active, and every id in `active` whatever its folder (the drain
     re-checks the state per claim, Flow 4). Scratch paths require a configured data root before any claim is made."""
     from defender.learning.core import drains
@@ -479,7 +501,7 @@ def drain(paths: Any, lane: Lane, *, active: Any = ()) -> list[Any]:
 
     state = _state1135.state_for_paths(paths)
     return drains._drain_lead_author_markers(
-        paths, state, lane, accept_tenant=drains._tenant_acceptor(paths.tenant),
+        paths, state, lane,
         directory=directory_for_root(os.environ[DATA_ROOT_ENV], also=active) if os.environ.get(DATA_ROOT_ENV) else None)
 
 

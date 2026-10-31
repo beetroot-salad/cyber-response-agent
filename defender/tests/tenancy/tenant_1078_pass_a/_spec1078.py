@@ -1,6 +1,7 @@
 """Shared machinery for the #1078 pass (A) tenancy tests ("tenant 1 on the request")."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
 import json
@@ -426,7 +427,9 @@ def drive_launch(source: Path, *, spawn: Any = None, tenant_id: str | None = Non
     preflight neutralised (`no_preflight`) so a refusal is never the host's credentials.
     Returns the exit status, or the refusal it raised."""
     seams.setdefault("preflight", no_preflight)
+    argv = launch_argv(source, tenant_id=tenant_id)
+    seams.setdefault("directory", directory_for_argv(argv))  # r10 A1/C9: the launcher admits through the tenant records
     try:
-        return branch_entry().main(launch_argv(source, tenant_id=tenant_id), spawn=spawn, **seams)
+        return branch_entry().main(argv, spawn=spawn, **seams)
     except SystemExit as refused:
         return refused
