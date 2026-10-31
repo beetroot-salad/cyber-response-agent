@@ -244,7 +244,7 @@ def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_
     H.runs_folder(t)
     for run_id in (_F6_R1, _F6_R2):
         H.make_run(location_path(t.runs), run_id)
-    paths = P.loop_paths(tmp_path)
+    paths = P.tenant_loop_paths(t)  # the drain's accepted tenant (r10.1 C1)
     P.queue_row(paths, case_id, {"case_id": case_id, **body})
     P.queue_row(paths, "good", {"case_id": "good", "tenant_id": H.T_ID, "run_id": _F6_R1})
 
@@ -278,6 +278,16 @@ def _process(*command: str) -> subprocess.CompletedProcess:
         check=False, env=env, cwd=str(H.WORKTREE), timeout=300)
 
 
+def _launched_process(kind: str, tenant_id: str, *argv: str) -> subprocess.CompletedProcess:
+    """One host command as a real process under the test launcher, `tenant_id` seeded active: the command admits its
+    tenant through the tenant records and a subprocess has no database (r10 A1/C9)."""
+    from defender.tests.support.tenancy import _launcher1214 as launcher
+
+    return subprocess.run(  # noqa: S603 — this interpreter, the test launcher, ids
+        launcher.command(kind, list(argv), seed=[tenant_id]), capture_output=True, text=True, encoding="utf-8",
+        check=False, env=launcher.environment(), cwd=str(H.WORKTREE), timeout=300)
+
+
 def _refused_naming(child: subprocess.CompletedProcess, what: str) -> None:
     said = child.stdout + child.stderr
     assert child.returncode != 0, f"exit 0: {said[-600:]!r}"
@@ -300,11 +310,10 @@ def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     run = H.make_run(runs, str(uuid.uuid4()))
     expected = wm.workspace_map(
         run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
-    script = _script("cli", "workspace_map.py")
-    ok = _process(script, "--tenant", d9_tenant, run.name)
+    ok = _launched_process("workspace_map", d9_tenant, "--tenant", d9_tenant, run.name)
     assert ok.returncode == 0, ok.stderr[-600:]
     assert ok.stdout == expected
-    _refused_naming(_process(script, "--tenant", d9_tenant, _ABSENT), _ABSENT)
+    _refused_naming(_launched_process("workspace_map", d9_tenant, "--tenant", d9_tenant, _ABSENT), _ABSENT)
 
 
 def _done_run(tenant_id: str) -> Path:

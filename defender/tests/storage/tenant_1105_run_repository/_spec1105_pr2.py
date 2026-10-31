@@ -505,6 +505,15 @@ def drain(paths: Any, lane: Lane, *, active: Any = ()) -> list[Any]:
         directory=directory_for_root(os.environ[DATA_ROOT_ENV], also=active) if os.environ.get(DATA_ROOT_ENV) else None)
 
 
+def tenant_loop_paths(tenant: Any) -> Any:
+    """The drain's paths for the accepted `tenant`: its learning root (made if absent) and `paths.tenant` set. A drain
+    rehydrates a claim only through the tenant its start accepted (r10.1 C1), so a drain scene names its tenant."""
+    from defender.learning.core.config import LoopPaths
+
+    location_path(tenant.learning).mkdir(parents=True, exist_ok=True)
+    return LoopPaths.for_tenant(tenant)
+
+
 def loop_paths(tmp_path: Path) -> Any:
     from defender.learning.core.config import LoopPaths
 

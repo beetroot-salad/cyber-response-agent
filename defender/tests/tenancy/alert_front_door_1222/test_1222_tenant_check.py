@@ -264,11 +264,12 @@ def at_sibling_resume(w: World) -> Verdict:
 
 
 def at_policy_cli(w: World) -> Verdict:
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
     w.capsys.readouterr()
+    argv = ["show", "gather", "--run-dir", str(w.tmp / "policy-run"), "--tenant", w.planted.tenant_id]
     try:
-        rc = S.mod("cli.policy_cli").main(
-            ["show", "gather", "--run-dir", str(w.tmp / "policy-run"),
-             "--tenant", w.planted.tenant_id])
+        rc = S.mod("cli.policy_cli").main(argv, directory=directory_for_argv(argv))
     except SystemExit as stop:
         return Verdict("policy-cli", True, _exit_text(stop), False)
     out = w.capsys.readouterr().out

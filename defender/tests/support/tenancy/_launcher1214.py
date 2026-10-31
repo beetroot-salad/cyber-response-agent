@@ -5,7 +5,7 @@ needs a working tenant runs this module instead of `python run.py` / the drain /
 the directory from what the TEST controls and calls the entry function with `directory=`. Nothing here is
 production code and the production entries are not wrapped: the same function runs, with the one seam used.
 
-    python -m defender.tests.support.tenancy._launcher1214 [options] run|drain|connect|visualize_run [--] <argv for the entry>
+    python -m defender.tests.support.tenancy._launcher1214 [options] run|drain|connect|visualize_run|workspace_map|retire_legacy_runs [--] <argv for the entry>
 
 Entries (argv exactly as the production command line takes it, exit status passed through):
 - `run`     -> `defender.run.main(argv, directory=...)`
@@ -14,6 +14,8 @@ Entries (argv exactly as the production command line takes it, exit status passe
   directory=None)`)
 - `visualize_run` -> `defender.presentation.visualize_run.main(["visualize_run.py", *argv], directory=...)` after the
   script's own `configure_from_env()` (its `main` takes `sys.argv`, program name first; r10 A1: it admits its tenant)
+- `workspace_map` -> `defender.cli.workspace_map.main(["workspace_map.py", *argv], directory=...)` (program name first)
+- `retire_legacy_runs` -> `defender.cli.retire_legacy_runs.main(argv, directory=...)`
 
 Directory (give one; `--dsn` wins over `--seed` when both are given):
 - `--dsn DSN` (env `DEFENDER_TEST_DSN`): `_active1214.postgres_directory(DSN)`, over rows the test inserted with
@@ -68,7 +70,11 @@ ENTRIES: dict[str, tuple[str, str]] = {
     "drain": ("defender.learning.core.cli", "main"),
     "connect": ("defender.cli.tenant", "main"),
     "visualize_run": ("defender.presentation.visualize_run", "main"),
+    "workspace_map": ("defender.cli.workspace_map", "main"),
+    "retire_legacy_runs": ("defender.cli.retire_legacy_runs", "main"),
 }
+#: The entries whose `main` takes `sys.argv` (the program name first), by that name.
+PROGRAM_NAMES = {"visualize_run": "visualize_run.py", "workspace_map": "workspace_map.py"}
 SEED_ENV, DSN_ENV, ROOT_ENV = "DEFENDER_TEST_SEED", "DEFENDER_TEST_DSN", "DEFENDER_DATA_ROOT"
 _PRODUCTION_DSN_ENV = "DEFENDER_DATABASE_DSN"
 #: The checkout root holding `defender/` (this file is `defender/tests/support/tenancy/_launcher1214.py`).
@@ -153,7 +159,8 @@ def main(argv: Sequence[str] | None = None, *, entries: Mapping[str, Callable[..
         from defender._log import configure_from_env
 
         configure_from_env()
-        entry_argv = ["visualize_run.py", *entry_argv]
+    if ns.kind in PROGRAM_NAMES:
+        entry_argv = [PROGRAM_NAMES[ns.kind], *entry_argv]
     return int(entry(list(entry_argv), directory=directory))
 
 
