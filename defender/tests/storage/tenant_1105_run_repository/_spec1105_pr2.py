@@ -492,7 +492,24 @@ class Lane:
         return [Path(getattr(h, "run_dir", h)) for h in self.handed]
 
 
-def drain(paths: Any, lane: Lane, *, active: Any = ()) -> list[Any]:
+def records_with(root: Path | str, states: dict[str, str]) -> Any:
+    """A `TenantDirectory` holding each tenant of `states` in the state given, with forge wiring (a tenant not named has no
+    row)."""
+    import inspect
+
+    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+    from defender.tests.support.tenancy import _active1214
+
+    twin: Any = InMemoryTenantRepository()
+    for tenant, state in states.items():
+        added = twin.add_tenant(tenant, created_at=_active1214.CREATED, state=state, repo=f"tenants/{tenant}",
+                                origin=_active1214._origin_of(Path(root), tenant, None))
+        if inspect.isawaitable(added):
+            _active1214.run_sync(_active1214._await(added))
+    return TenantDirectory(lambda: twin)
+
+
+def drain(paths: Any, lane: Lane, *, active: Any = (), directory: Any = None) -> list[Any]:
     """One lead-author tick's claim loop over `paths`, with the directory holding
     every tenant placed under the data root active, and every id in `active` whatever its folder (the drain
     re-checks the state per claim, Flow 4). Scratch paths require a configured data root before any claim is made."""
@@ -502,7 +519,8 @@ def drain(paths: Any, lane: Lane, *, active: Any = ()) -> list[Any]:
     state = _state1135.state_for_paths(paths)
     return drains._drain_lead_author_markers(
         paths, state, lane,
-        directory=directory_for_root(os.environ[DATA_ROOT_ENV], also=active) if os.environ.get(DATA_ROOT_ENV) else None)
+        directory=(directory if directory is not None else directory_for_root(os.environ[DATA_ROOT_ENV], also=active)
+                   if os.environ.get(DATA_ROOT_ENV) else None))
 
 
 def tenant_loop_paths(tenant: Any) -> Any:

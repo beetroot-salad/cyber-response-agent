@@ -425,8 +425,8 @@ def test_1224_two_preflight_failures_write_unusable_and_start_no_sibling(tmp_pat
 
 
 def test_the_launchers_preflight_builds_its_oracle_side_for_the_source_runs_tenant(tmp_path, monkeypatch):
-    """Every oracle box the launcher's preflight starts carries the source run's tenant label (r10.1 F6:
-    `preflight.py:120` passes `source.tenant_id`; B1). Observed on the box each world's oracle starts when it takes
+    """Every oracle box the launcher's preflight starts carries the source run's tenant label (r10 B1, C8:
+    `preflight.py:120` passes `source.tenant_id`). Observed on the box each world's oracle starts when it takes
     a python turn, not on the registry call, so no collaborator is patched."""
     from defender.box import _oracle  # noqa: F401 — the box layer the oracle's python tool starts through
     from defender.tests.support.sandbox import _box1279 as X
@@ -451,8 +451,8 @@ def test_the_launchers_preflight_builds_its_oracle_side_for_the_source_runs_tena
 
 def test_the_launchers_calibration_serving_is_built_for_the_source_runs_tenant(tmp_path, monkeypatch):
     """Every `oracle_serving` the launcher's preflight builds, the calibration one included (its box is never started),
-    is for the source run's tenant (r10.1 F6, C8: `preflight.py:120` passes `source.tenant_id`). Observed on the
-    arguments of the registry call, without patching it."""
+    is for the source run's tenant (r10 B1, C8: `preflight.py:120` passes `source.tenant_id`). Observed on the
+    arguments of the registry call, without patching it; one serving per world plus the calibration one."""
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.tests.support.sandbox import _box1279 as X
     from defender.tests.support.sandbox._box1195 import FakeDaemon
@@ -462,14 +462,15 @@ def test_the_launchers_calibration_serving_is_built_for_the_source_runs_tenant(t
     monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
     FakeDaemon(tmp_path / "daemon").install(monkeypatch)
     est = S.estate(tmp_path)
-    oracle = _by_world(*[S.oracle(S.python("print('checked')"), then=S.submit(_BASE, S.EMPTY_CLAIM))
-                         for _ in range(2)])
+    worlds = [S.oracle(S.python("print('checked')"), then=S.submit(_BASE, S.EMPTY_CLAIM)) for _ in range(2)]
+    oracle = _by_world(*worlds)
     _base, src = S.source_run(tmp_path, est, calls=_calls())
     tenant = src.parent.parent.name
     served: list[object] = []
     with watching(oracle_serving, lambda args: served.append(args["tenant_id"])):
         _main(src, est, oracle=oracle, verifier=S.passing_verifier())
-    assert served, "the launcher built no oracle serving"
+    assert len(served) == len(worlds) + 1, (
+        f"expected one serving per world and the calibration one, got {len(served)}: {served}")
     assert set(map(str, served)) == {tenant}, f"an oracle serving was built for another tenant: {served}"
 
 

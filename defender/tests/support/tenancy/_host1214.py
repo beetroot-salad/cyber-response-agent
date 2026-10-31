@@ -9,9 +9,13 @@ contract's choice. Where the implementer spells them otherwise, only this module
 """
 from __future__ import annotations
 
+import contextlib
 import importlib
+import inspect
 import os
-from collections.abc import Callable
+import sys
+import threading
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -115,13 +119,30 @@ def this_process() -> list[tuple[int, Any]]:
     return [(os.getpid(), process_start(os.getpid()))]
 
 
-def exclusive_free(data_root: Path, tenant: str) -> bool:
-    """True when nothing holds `tenant`'s host lock (an exclusive try, at once, is granted and given back)."""
+def _lock_inode(data_root: Path, tenant: str) -> str | None:
+    """The `/proc/locks` spelling (`major:minor:inode`) of `tenant`'s lock file, or None when the file does not exist."""
     from defender.tenancy import host_lock
 
-    fd = host_lock.acquire(data_root, tenant, exclusive=True, timeout=0)
-    host_lock.release_lock(fd)
-    return fd is not None
+    try:
+        st = os.stat(host_lock.lock_dir(data_root, tenant) / "lock")
+    except FileNotFoundError:
+        return None
+    return f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}"
+
+
+def lock_held(data_root: Path, tenant: str) -> bool:
+    """True when any process holds `tenant`'s host lock, read from the kernel's lock table. Nothing is locked or created, so
+    the answer does not depend on which open file a lock belongs to (a sample taken inside a hold cannot disturb it)."""
+    inode = _lock_inode(data_root, tenant)
+    if inode is None:
+        return False
+    with open("/proc/locks", encoding="utf-8") as table:
+        return any(len(parts) > 5 and parts[1] == "FLOCK" and parts[5] == inode for parts in map(str.split, table))
+
+
+def exclusive_free(data_root: Path, tenant: str) -> bool:
+    """True when nothing holds `tenant`'s host lock."""
+    return not lock_held(data_root, tenant)
 
 
 def host_tenant(*args: Any, **kwargs: Any) -> Any:
@@ -132,40 +153,72 @@ def host_tenant(*args: Any, **kwargs: Any) -> Any:
 
 # --- the tenant's folder, observed at the operating system's boundary (O-A1 order, O-A2) -----------------------------
 
-#: The audit events that touch a path; an audit hook cannot be removed, so one hook serves every test and a case turns it
-#: on for the length of a `with watch_folder(...)` block.
-_PATH_EVENTS = frozenset({"open", "os.listdir", "os.scandir"})
-_WATCH: dict[str, Any] = {"installed": False, "prefixes": None, "events": None, "sample": None, "busy": False}
+#: The audit events that touch a path: reads, listings and every change of a name or mode. An audit hook cannot be
+#: removed, so one hook serves every test and a case turns it on for the length of a `with watch_folder(...)` block.
+_PATH_EVENTS = frozenset({
+    "open", "os.listdir", "os.scandir", "os.mkdir", "os.rename", "os.remove", "os.rmdir", "os.chmod", "os.chown",
+    "os.utime", "os.truncate", "os.symlink", "os.link", "shutil.rmtree",
+})
+#: The events whose first two arguments are both paths (a rename or a link names a source and a target).
+_TWO_PATHS = frozenset({"os.rename", "os.symlink", "os.link"})
+_WATCH: dict[str, Any] = {"installed": False, "folders": None, "events": None, "sample": None, "busy": False,
+                          "errors": None}
+
+
+def _spelling(arg: object) -> str | None:
+    """`arg` as a path string, or None when it is not one (a descriptor, None, an object with no path)."""
+    if isinstance(arg, int) or arg is None:
+        return None
+    try:
+        return os.fsdecode(arg)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_under(path: str, folders: tuple[str, ...]) -> bool:
+    """Exact match: the folder itself or a path below it (`folder + os.sep`), so a sibling that shares the prefix is no touch."""
+    return any(path == folder or path.startswith(folder + os.sep) for folder in folders)
 
 
 def _on_audit(event: str, args: tuple[Any, ...]) -> None:
-    if _WATCH["prefixes"] is None or _WATCH["busy"] or event not in _PATH_EVENTS or not args:
-        return
-    try:
-        path = os.fsdecode(args[0]) if not isinstance(args[0], int) else None
-    except (TypeError, ValueError):
-        return
-    if path is None or not path.startswith(_WATCH["prefixes"]):
+    if _WATCH["folders"] is None or _WATCH["busy"] or event not in _PATH_EVENTS:
         return
     _WATCH["busy"] = True
     try:
-        sample = _WATCH["sample"]
-        _WATCH["events"].append((event, path, sample() if sample is not None else None))
+        paths = [_spelling(a) for a in args[:2 if event in _TWO_PATHS else 1]]
+        for path in paths:
+            if path is None:
+                continue
+            # A relative path is a touch of unknown place (a descriptor-relative open names only its leaf), so it counts
+            # as one wherever it happens; an absolute path counts when it lies in the tenant's folder.
+            if os.path.isabs(path) and not _is_under(path, _WATCH["folders"]):
+                continue
+            sample = _WATCH["sample"]
+            _WATCH["events"].append((event, path, sample() if sample is not None else None))
+            break
+    except Exception as failed:  # noqa: BLE001 — an audit hook must not raise into the code it watches: the block's exit reports it
+        _WATCH["errors"].append(f"{event}: {type(failed).__name__}: {failed}")
     finally:
         _WATCH["busy"] = False
 
 
 class watch_folder:
-    """`with watch_folder(data_root, tenant) as touches:` -> every open or listing of a path under `<data root>/<tenant>`
-    while the block runs, as `(event, path, held)`. `held` is `(recorded as this process, lock not free)` as the touch
-    happened: what a command's own reads of the tenant's folder saw of its hold (r10 O-A1: none before the state is
-    judged; O-A2: held for as long as the command works)."""
+    """`with watch_folder(data_root, tenant) as touches:` -> every touch of the tenant's folder while the block runs, as
+    `(event, path, held)`: an open or listing, a make, rename, removal, mode or time change, of a path in `<data root>/
+    <tenant>` (exact match on the folder or `folder + os.sep`) or of any RELATIVE path (a descriptor-relative open names only
+    its leaf, so it cannot be told from a read of the folder). `held` is `(recorded as this process, lock held)` as the
+    touch happened, sampled without taking the lock: what a command's own reads saw of its hold (r10 O-A1: none before the
+    state is judged; O-A2: held for as long as the command works). A fault inside the hook is reported when the block ends.
+
+    What it cannot see: a `stat` (no audit event), so the behavioural matrix of `test_1214_entry_boundaries` is the other
+    observation of the order."""
 
     def __init__(self, data_root: Path, tenant: str) -> None:
         folder = Path(data_root) / tenant
-        self.prefixes = tuple({str(folder), str(folder.resolve())})
+        self.folders = tuple({str(folder), str(folder.resolve())})
         self.data_root, self.tenant = Path(data_root), tenant
         self.touches: list[tuple[str, str, Any]] = []
+        self.errors: list[str] = []
 
     def __enter__(self) -> list[tuple[str, str, Any]]:
         import sys
@@ -173,12 +226,65 @@ class watch_folder:
         if not _WATCH["installed"]:
             sys.addaudithook(_on_audit)
             _WATCH["installed"] = True
-        _WATCH.update(prefixes=self.prefixes, events=self.touches, sample=self._sample)
+        _WATCH.update(folders=self.folders, events=self.touches, sample=self._sample, errors=self.errors)
         return self.touches
 
     def _sample(self) -> tuple[bool, bool]:
-        return (recorded(self.data_root, self.tenant) == this_process(),
-                not exclusive_free(self.data_root, self.tenant))
+        return (recorded(self.data_root, self.tenant) == this_process(), lock_held(self.data_root, self.tenant))
 
     def __exit__(self, *exc: object) -> None:
-        _WATCH.update(prefixes=None, events=None, sample=None)
+        _WATCH.update(folders=None, events=None, sample=None, errors=None)
+        if self.errors and not any(exc):
+            raise AssertionError(f"the folder watch faulted: {self.errors[:3]}")
+
+
+# --- code objects watched, not names (the acceptance and the Tenant it builds) -------------------------------------------
+
+class Calls:
+    """How many times each watched function was called inside a `counting_calls` block, by the label given, and the arguments
+    of each call by name (`locals[label][n]`: the values themselves, so a test can ask whether a callee was handed the very
+    object another call built)."""
+
+    def __init__(self, labels: list[str]) -> None:
+        self.counts = dict.fromkeys(labels, 0)
+        self.locals: dict[str, list[dict[str, Any]]] = {label: [] for label in labels}
+
+    def __getitem__(self, label: str) -> int:
+        return self.counts[label]
+
+
+@contextlib.contextmanager
+def counting_calls(**functions: Callable[..., Any]) -> Iterator[Calls]:
+    """Count the calls of each function by its code object (`sys.setprofile`, and `threading.setprofile` for threads started
+    inside the block; a decorated function is watched by the code it wraps), whatever name or route reaches it: a runtime-built name, a `getattr`, an alias or a wrapper still
+    runs that code. Nothing is replaced. The previous profile hook comes back at exit."""
+    labels = {inspect.unwrap(fn).__code__: label for label, fn in functions.items()}
+    calls = Calls(list(functions))
+    active = True
+
+    def hook(frame: Any, event: str, _arg: object) -> None:
+        if active and event == "call" and frame.f_code in labels:
+            label = labels[frame.f_code]
+            calls.counts[label] += 1
+            calls.locals[label].append(dict(frame.f_locals))
+
+    previous = sys.getprofile()
+    threading.setprofile(hook)
+    sys.setprofile(hook)
+    try:
+        yield calls
+    finally:
+        active = False
+        sys.setprofile(previous)
+        threading.setprofile(None)
+
+
+def acceptance_calls(**more: Callable[..., Any]) -> contextlib.AbstractContextManager[Calls]:
+    """`counting_calls` over the raw folder acceptance (`accepted`), the construction of a `Tenant` (`built`: the only
+    constructor runs `__post_init__`; `locals["built"][n]["self"]` is the tenant it built) and the admission read of the
+    records (`admission`), plus any `more` the case watches."""
+    from defender.tenancy import TenantDirectory
+    from defender.tenancy import _tenant
+
+    return counting_calls(accepted=_tenant.accept_tenant, built=_tenant.Tenant.__post_init__,
+                          admission=TenantDirectory.admission, **more)

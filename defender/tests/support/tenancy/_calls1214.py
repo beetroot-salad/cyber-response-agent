@@ -17,10 +17,15 @@ from typing import Any
 
 @contextlib.contextmanager
 def watching(function: Callable[..., Any], on_call: Callable[[dict[str, Any]], None]) -> Iterator[None]:
+    """Watch `function` for the length of the block. The profile hooks that were installed before (a coverage tool's, an
+    outer `watching`) are put back at exit, and a thread started inside the block, which keeps its hook for its own life,
+    stops reporting once the block has ended."""
     code = function.__code__
+    active = True
+    prior_sys, prior_threads = sys.getprofile(), threading.getprofile()
 
     def hook(frame: FrameType, event: str, _arg: object) -> None:
-        if event == "call" and frame.f_code is code:
+        if active and event == "call" and frame.f_code is code:
             on_call(dict(frame.f_locals))
 
     threading.setprofile(hook)
@@ -28,5 +33,6 @@ def watching(function: Callable[..., Any], on_call: Callable[[dict[str, Any]], N
     try:
         yield
     finally:
-        sys.setprofile(None)
-        threading.setprofile(None)
+        active = False
+        sys.setprofile(prior_sys)
+        threading.setprofile(prior_threads)
