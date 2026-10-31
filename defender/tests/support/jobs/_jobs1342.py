@@ -180,6 +180,13 @@ CHILD_SCRIPT = textwrap.dedent("""
     event("start")
     if spec.get("print"):
         print(spec["print"]); print(spec["print"], file=sys.stderr)
+    box = spec.get("box")
+    if box:  # the box this child's start created: stamped with the token its launch record handed it, or another
+        launch_token = json.loads((runs / f"{run_id}.launch.json").read_text(encoding="utf-8")).get("box_token") or ""
+        stamp = {"launch": launch_token, "other": "f" * 32, "none": ""}[box["token"]]
+        planted = Path(box["dir"]) / f"defender-run-{run_id}"
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(f"{box['state']}\\n{stamp}" if box.get("state") else stamp, encoding="utf-8")
     release = spec.get("wait_for")
     deadline = time.monotonic() + 60
     while release and not Path(release).exists() and time.monotonic() < deadline:
@@ -239,6 +246,12 @@ class ScriptedChild:
     term_mark: str | None = None
     grandchild: bool = False
     printed: str | None = None
+    #: A box the child leaves behind, as a start would have made it: `box_dir` is where, `box_token`
+    #: whose (`launch`: the token its launch record carries; `other`: another claim's; `none`: no
+    #: token label), `box_state` the docker stand-in's state word (unset: a `StandInContainers` marker).
+    box_dir: Path | str | None = None
+    box_token: str = "launch"
+    box_state: str | None = None
 
     def __post_init__(self) -> None:
         self.where.mkdir(parents=True, exist_ok=True)
@@ -254,6 +267,8 @@ class ScriptedChild:
             "files": self.files, "binary": self.binary, "sparse": self.sparse, "padded": self.padded, "links": self.links,
             "dirs": self.dirs, "exit": self.exit, "term": self.term, "term_mark": self.term_mark,
             "grandchild": self.grandchild, "print": self.printed,
+            "box": None if self.box_dir is None else {"dir": str(self.box_dir), "token": self.box_token,
+                                                     "state": self.box_state},
             "wait_for": None if self.wait_for is None else str(self.wait_for),
         }
 
@@ -292,45 +307,43 @@ class ScriptedChild:
 
 
 class StandInContainers:
-    """The worker's `containers` seam over marker files: a container exists while its file does.
-    Records every call so a test can tell a look from a removal."""
+    """The worker's `containers` seam over marker files: a container exists while its file does, and
+    the file's text is the start token it carries (empty: no token label). `reap(name, token)` answers
+    `removed` (ours, now gone), `absent`, or `not_ours` (another or no token: left in place). Records
+    every call, with the token it was given."""
 
     def __init__(self, where: Path) -> None:
         self.where = where
         where.mkdir(parents=True, exist_ok=True)
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[tuple[str, str, str]] = []
 
-    def plant(self, name: str) -> None:
-        (self.where / name).touch()
+    def plant(self, name: str, token: str = "") -> None:
+        (self.where / name).write_text(token, encoding="utf-8")
 
-    def exists(self, name: str) -> bool:
-        self.calls.append(("exists", name))
+    def held(self, name: str) -> bool:
         return (self.where / name).exists()
 
-    def remove(self, name: str) -> None:
-        self.calls.append(("remove", name))
-        (self.where / name).unlink()
+    def reap(self, name: str, token: str) -> str:
+        self.calls.append(("reap", name, token))
+        path = self.where / name
+        if not path.exists():
+            return "absent"
+        if not token or path.read_text(encoding="utf-8") != token:
+            return "not_ours"
+        path.unlink()
+        return "removed"
+
+    def reaped(self, name: str) -> list[str]:
+        """The tokens `reap` was given for `name`, in call order."""
+        return [token for _kind, called, token in self.calls if called == name]
 
 
 class FaultyContainers(StandInContainers):
-    """The stand-in containers whose `exists` or `remove` (named by `fail`) raises: a daemon that
-    cannot be asked or will not remove."""
+    """The stand-in containers whose `reap` raises: a daemon that cannot be asked or will not remove."""
 
-    def __init__(self, where: Path, *, fail: str) -> None:
-        super().__init__(where)
-        self.fail = fail
-
-    def exists(self, name: str) -> bool:
-        if self.fail == "exists":
-            self.calls.append(("exists", name))
-            raise RuntimeError("the container daemon cannot be asked")
-        return super().exists(name)
-
-    def remove(self, name: str) -> None:
-        if self.fail == "remove":
-            self.calls.append(("remove", name))
-            raise RuntimeError("the container daemon will not remove it")
-        super().remove(name)
+    def reap(self, name: str, token: str) -> str:
+        self.calls.append(("reap", name, token))
+        raise RuntimeError("the container daemon cannot be asked")
 
 
 def fd_identity(fd: int) -> list[int]:
@@ -381,6 +394,13 @@ def tree(root: Path) -> dict[str, bytes | None]:
 
 
 # --- host records, in the shapes the runtime writes ----------------------------------------------
+
+def is_box_token(value: object) -> bool:
+    """32 lowercase hex characters, exactly (r5 C1): no other case, length, whitespace or type."""
+    import re
+
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value) is not None
+
 
 def job_end(*, setup: str = "done", box: str = "started", report_committed: bool = True,
             scrub_verified: bool = True) -> str:

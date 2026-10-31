@@ -69,10 +69,11 @@ class Scene:
     root: Path
     t: Any
     runs: Path
+    token: str = field(default_factory=lambda: uuid.uuid4().hex)  # the worker-minted box token (r5 C1)
 
     def launch_doc(self, run_id: str, **over: Any) -> dict[str, Any]:
         return {"investigation_id": run_id, "tenant_id": self.t.tenant_id, "alert_id": str(uuid.uuid4()),
-                "digest": hashlib.sha256(ALERT_BYTES).hexdigest(), "label": TITLE, **over}
+                "digest": hashlib.sha256(ALERT_BYTES).hexdigest(), "label": TITLE, "box_token": self.token, **over}
 
     def plant(self, run_id: str, *, launch: Any = "default", alert: bytes | None = ALERT_BYTES) -> None:
         """The worker's two files, create-only, beside the run folder (`<T>/runs/` already made: R1)."""
@@ -128,11 +129,27 @@ def summary(*, report_committed: bool = True) -> dict[str, Any]:
             "exit_reason": None, "report_committed": report_committed}
 
 
+def settle(kw: dict[str, Any], *, report_committed: bool = True, scrub_verified: bool = True) -> None:
+    """What a lifecycle that closed the report and verified the tree leaves on the facts holder the job
+    entry handed it (`job_facts`, r5 C2): the review state's close, and the scrub's fact. No holder (the
+    operator path): nothing to set."""
+    from defender.investigation.challenge_gate import ReviewState
+
+    facts = kw.get("job_facts")
+    if facts is None:
+        return
+    if report_committed:
+        facts.review_state["state"] = ReviewState(closed=True)
+    facts.scrub_verified = scrub_verified
+
+
 def verified_lifecycle(ran: Ran, *, report_committed: bool = True):
-    """A lifecycle seam that records the call and leaves the host scrub verdict a real scrub would."""
+    """A lifecycle seam that records the call, leaves the host scrub verdict a real scrub would, and sets
+    its facts on the holder (r5 C2); its summary's `report_committed` agrees, as the driver's does."""
     def lifecycle(**kw: Any) -> dict[str, Any]:
         ran.calls["lifecycle"] += 1
         kw["run"].facts.scrub_verdict.write(json.dumps({"ran": True, "reason": "walk completed"}))
+        settle(kw, report_committed=report_committed)
         return summary(report_committed=report_committed)
     return lifecycle
 
@@ -370,12 +387,19 @@ _REFUSALS = {
     "launch-empty": dict(launch=""),
     "launch-not-an-object": dict(launch="[]"),
     "launch-lacks-the-digest": dict(launch="nodigest"),
+    "launch-lacks-the-box-token": dict(launch="notoken"),
     "no-alert-file": dict(alert=None),
     "digest-mismatch-on-the-admitted-bytes": dict(alert=ALERT_BYTES.replace(b"1.50", b"1.51")),
     "launch-record-symlinked": dict(tamper="launch-link"),
     "launch-record-oversize": dict(tamper="launch-oversize"),
     "alert-file-symlinked": dict(tamper="alert-link"),
 }
+#: Box tokens that are not 32 lowercase hex characters: the launch check refuses each (r5 C1).
+_BAD_TOKENS = {"empty": "", "31-chars": "a" * 31, "33-chars": "a" * 33, "upper-case": "A" * 32,
+               "non-hex": "g" * 32, "trailing-newline": "a" * 32 + "\n", "leading-space": " " + "a" * 31,
+               "uuid-form": str(uuid.UUID(int=0x1342)), "integer": 12345678901234567890123456789012,
+               "null": None, "list": ["a" * 32], "full-width": "\uff41" * 32}
+_REFUSALS.update({f"launch-box-token-{name}": dict(launch=("token", value)) for name, value in _BAD_TOKENS.items()})
 OVER_THE_LIMIT = 70 * 1024 * 1024
 
 
@@ -400,7 +424,7 @@ def _tamper(scene: Scene, run_id: str, how: str) -> None:
 
 @pytest.mark.parametrize("kind", sorted(_REFUSALS))
 def test_o6_setup_refuses_an_id_without_a_launch_record_that_names_this_tenant_and_checks(scene, kind):
-    """No launch record, another tenant's, another id's, unparseable, symlinked or oversize, an alert file that is a symlink, or a digest the alert bytes miss: refused and recorded `setup: refused`; nothing spent, nothing made. (O6, M1, M5)"""
+    """No launch record, another tenant's, another id's, unparseable, symlinked or oversize, without a well-formed box token, an alert file that is a symlink, or a digest the alert bytes miss: refused and recorded `setup: refused`; nothing spent, nothing made. (O6, M1, M5, r5 C1)"""
     run_id = str(uuid.uuid4())
     spec = dict(_REFUSALS[kind])
     launch = spec.pop("launch", "default")
@@ -411,6 +435,10 @@ def test_o6_setup_refuses_an_id_without_a_launch_record_that_names_this_tenant_a
         launch = scene.launch_doc(run_id, investigation_id=str(uuid.uuid4()))
     elif launch == "nodigest":
         launch = {k: v for k, v in scene.launch_doc(run_id).items() if k != "digest"}
+    elif launch == "notoken":
+        launch = {k: v for k, v in scene.launch_doc(run_id).items() if k != "box_token"}
+    elif isinstance(launch, tuple):
+        launch = scene.launch_doc(run_id, box_token=launch[1])
     if tamper is None:
         scene.plant(run_id, launch=launch, **spec)
     else:
@@ -599,6 +627,7 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
         run_dirs.append(kw["run"].run_dir)
         before.append((list(spies.events), watch.reads_of(kw["run"].run_dir)))
         kw["run"].facts.scrub_verdict.write(json.dumps({"ran": True, "reason": "walk completed"}))
+        settle(kw)
         return summary()
 
     class Writer:
@@ -703,10 +732,23 @@ def _lifecycle(s: Scene, *, investigate: Any, start_box: Any = None, stop_box: A
         scrub=scrub if scrub is not None else verdict_scrub)
 
 
-def _investigate(ran: Ran, *, without: str | None = None, **summary_kw: Any):
-    def investigate(**_kw: Any) -> dict[str, Any]:
+def _closes(job_facts: Any) -> None:
+    """What the driver leaves on the review state when the report is committed (`ReviewState.closed`)."""
+    from defender.investigation.challenge_gate import ReviewState
+
+    assert job_facts is not None, "the investigation was not handed the job facts holder (r5 C2)"
+    job_facts.review_state["state"] = ReviewState(closed=True)
+
+
+def _investigate(ran: Ran, *, without: str | None = None, closes: bool = True, **summary_kw: Any):
+    """A fake investigation: with `closes` it commits the report on the holder it is handed (the
+    protocol's `job_facts` keyword, r5 C2), as the driver's review state does; the summary it returns
+    carries `report_committed` as the driver's would."""
+    def investigate(*, job_facts: Any = None, **_kw: Any) -> dict[str, Any]:
         ran.calls["lifecycle"] += 1
-        doc = summary(**summary_kw)
+        if closes and job_facts is not None:  # the operator path hands none
+            _closes(job_facts)
+        doc = summary(**{"report_committed": closes, **summary_kw})
         if without is not None:
             del doc[without]
         return doc
@@ -727,29 +769,35 @@ def _verdict_scrub(verdict: dict[str, Any] | None):
     (True, False, {**SETTLED, "scrub_verified": False}),
     (False, False, {**SETTLED, "report_committed": False, "scrub_verified": False}),
 ])
-def test_o8_report_committed_comes_from_the_drivers_summary(scene, committed, verified, want):
-    """The job-end record carries the driver summary's `report_committed`, and the scrub verdict's `ran`. (O8, M2)"""
+def test_o8_report_committed_is_the_review_states_close_and_scrub_verified_the_scrub_verdict(
+        scene, committed, verified, want):
+    """The job-end record carries whether the review state the driver used closed, and the scrub verdict's `ran`. (O8, M2, r5 C2)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     ran = Ran()
     scrub = _verdict_scrub({"ran": verified, "reason": "walk"})
 
     run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(
-        scene, investigate=_investigate(ran, report_committed=committed), scrub=scrub))
+        scene, investigate=_investigate(ran, closes=committed), scrub=scrub))
 
     assert scene.job_end(run_id) == want
 
 
-def test_m2_a_summary_without_the_report_committed_key_is_not_a_committed_report(scene):
-    """A driver summary that lacks `report_committed` records `report_committed: false`. (M2)"""
+@pytest.mark.parametrize(("closes", "claims", "want"), [
+    (True, None, True), (True, False, True), (False, True, False)],
+    ids=["summary-lacks-the-key", "summary-says-false-state-closed", "summary-says-true-state-empty"])
+def test_m2_the_record_reads_the_holders_review_state_not_the_summary(scene, closes, claims, want):
+    """A committed report is the holder's review state `closed`; the summary's `report_committed` (absent, false or true) does not decide it. (M2, r5 C2)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     ran = Ran()
+    extra = {} if claims is None else {"report_committed": claims}
 
     run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(
-        scene, investigate=_investigate(ran, without="report_committed")))
+        scene, investigate=_investigate(ran, closes=closes, without="report_committed" if claims is None else None,
+                                        **extra)))
 
-    assert scene.job_end(run_id) == {**SETTLED, "report_committed": False}
+    assert scene.job_end(run_id) == {**SETTLED, "report_committed": want}
 
 
 @pytest.mark.parametrize("verdict", [{"ran": False, "reason": "unreadable entry"}, {"reason": "no ran key"}, None],
@@ -791,6 +839,154 @@ def test_o8_a_tree_the_scrub_found_tainted_is_not_verified(scene, monkeypatch):
     assert spies.events == [], f"a reader of the tainted tree ran: {spies.events}"
 
 
+def test_c2_a_committed_report_survives_a_teardown_fault(scene):
+    """The report closed, then `stop_box` raised `BoxFault`: the record says `report_committed: true`, `scrub_verified: false`, the box started. (C2, O8)"""
+    from defender.box import BoxFault
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    ran = Ran()
+
+    def stop(*_a: Any, **_k: Any) -> None:
+        raise BoxFault("could not tear down the box")
+
+    got = run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), stop_box=stop))
+
+    assert isinstance(got.raised, BoxFault), got
+    assert scene.job_end(run_id) == {**SETTLED, "scrub_verified": False}
+
+
+def test_c2_a_committed_report_survives_a_tainted_tree(scene):
+    """The report closed, then the scrub wrote `ran: true` and raised `RunTainted`: `report_committed: true`, `scrub_verified: false`. (C2, O8)"""
+    from defender.box import RunTainted
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    ran = Ran()
+
+    def taint(tree: Path, *, write_verdict: Any) -> None:
+        write_verdict({"ran": True, "reason": "walk completed"})
+        raise RunTainted("a planted link")
+
+    got = run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), scrub=taint))
+
+    assert isinstance(got.raised, RunTainted), got
+    assert scene.job_end(run_id) == {**SETTLED, "scrub_verified": False}
+
+
+def test_c2_a_driver_raise_after_a_clean_close_and_a_clean_teardown_leaves_both_facts_true(scene):
+    """The investigation closed the report then raised; teardown and scrub were clean: the exception reaches the caller and the record has both facts true (D-h superseded). (C2)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    boom = RuntimeError("the driver failed after the close")
+
+    def investigate(*, job_facts: Any = None, **_kw: Any) -> dict[str, Any]:
+        _closes(job_facts)
+        raise boom
+
+    got = run_job(scene, run_id, lifecycle=_lifecycle(scene, investigate=investigate))
+
+    assert got.raised is boom, got
+    assert scene.job_end(run_id) == SETTLED
+
+
+@pytest.mark.parametrize("scrub_ends", ["returns", "raises"])
+def test_c2_the_lifecycle_sets_scrub_verified_only_when_stop_and_scrub_returns(scene, scrub_ends):
+    """On the holder the job entry handed it, `scrub_verified` is still false while the scrub runs, true after a clean return, and false after a raise even though the verdict says `ran: true`. (C2, O8)"""
+    from defender.box import RunTainted
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    ran = Ran()
+    held: dict[str, Any] = {}
+
+    def scrub(tree: Path, *, write_verdict: Any) -> None:
+        write_verdict({"ran": True, "reason": "walk completed"})
+        held["during"] = held["facts"].scrub_verified
+        if scrub_ends == "raises":
+            raise RunTainted("a planted link")
+
+    real = _lifecycle(scene, investigate=_investigate(ran), scrub=scrub)
+
+    def lifecycle(**kw: Any) -> dict[str, Any]:
+        held["facts"] = kw["job_facts"]
+        return real(**kw)
+
+    run_job(scene, run_id, ran=ran, lifecycle=lifecycle)
+
+    assert held["during"] is False
+    assert held["facts"].scrub_verified is (scrub_ends == "returns")
+    assert scene.job_end(run_id)["scrub_verified"] is (scrub_ends == "returns")
+
+
+def test_c2_the_holder_is_the_job_entrys_and_the_investigation_is_handed_it(scene):
+    """The one holder the job entry gives its lifecycle is the object the lifecycle gives the investigation; the operator path's lifecycle gets none. (C2)"""
+    from defender import run as run_py
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    ran = Ran()
+    given: dict[str, Any] = {}
+
+    def investigate(**kw: Any) -> dict[str, Any]:
+        given["investigation"] = kw.get("job_facts")
+        return summary()
+
+    real = _lifecycle(scene, investigate=investigate)
+
+    def lifecycle(**kw: Any) -> dict[str, Any]:
+        given["lifecycle"] = kw.get("job_facts")
+        return real(**kw)
+
+    run_job(scene, run_id, ran=ran, lifecycle=lifecycle)
+    assert given["lifecycle"] is not None, given
+    assert given["investigation"] is given["lifecycle"], given
+
+    operator: dict[str, Any] = {}
+
+    def operator_lifecycle(**kw: Any) -> dict[str, Any]:
+        operator.update(kw)
+        kw["run"].facts.scrub_verdict.write(json.dumps({"ran": True, "reason": "walk completed"}))
+        return summary()
+
+    rc = run_py.main([str(B.plant_alert(scene.root.parent / "op-alert")), "--tenant", scene.t.tenant_id],
+                     lifecycle=operator_lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
+                     enqueue=lambda *a, **k: False, publish=lambda *a, **k: B.fresh(scene.t.commit))
+    assert rc == 0
+    assert "job_facts" not in operator, "the operator path was handed a job facts holder"
+
+
+def test_c1_the_job_lanes_box_start_is_handed_the_launch_records_token_and_the_operators_is_not(scene):
+    """Each job's box start receives its own launch record's `box_token` as `start_token`; the operator path's start passes none (the box mints its own). (C1)"""
+    from defender import box as box_mod
+    from defender import run as run_py
+
+    def starts_into(seen: list[dict[str, Any]]) -> Any:
+        def start(*_a: Any, **k: Any) -> Any:
+            seen.append(k)
+            return box_mod.unboxed_executor()
+        return start
+
+    for token in (uuid.uuid4().hex, uuid.uuid4().hex):
+        run_id = str(uuid.uuid4())
+        scene.plant(run_id, launch=scene.launch_doc(run_id, box_token=token))
+        seen: list[dict[str, Any]] = []
+        ran = Ran()
+        run_job(scene, run_id, ran=ran,
+                lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=starts_into(seen)))
+        assert [k.get("start_token") for k in seen] == [token], seen
+
+    operator: list[dict[str, Any]] = []
+    ran = Ran()
+    rc = run_py.main([str(B.plant_alert(scene.root.parent / "op-alert")), "--tenant", scene.t.tenant_id],
+                     lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=starts_into(operator)),
+                     preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
+                     enqueue=lambda *a, **k: False, publish=lambda *a, **k: B.fresh(scene.t.commit))
+    assert rc == 0
+    assert len(operator) == 1, operator
+    assert not operator[0].get("start_token"), operator
+
+
 def test_m3_a_teardown_fault_is_told_from_a_start_fault(scene):
     """The box started and its stop faulted: `box: started`, `scrub_verified` false. (M3)"""
     from defender.box import BoxFault
@@ -827,7 +1023,7 @@ def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
 
 
 def test_o8_a_crash_in_the_lifecycle_records_no_report_and_reaches_the_caller(scene):
-    """The investigation raises: the same exception re-raised, `report_committed` false, setup done. (O8, M3)"""
+    """The investigation raises before any close: the same exception re-raised, `report_committed` false (nothing was committed), setup done. (O8, M3, r5 C2)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     boom = RuntimeError("investigation blew up")
@@ -1167,8 +1363,8 @@ def _gone(pid: int) -> bool:
         return True
 
 
-def _child_cmd(s: Scene, marks: Path, run_id: str, parent: int) -> list[str]:
-    return [sys.executable, str(ENTRY), "hold", s.t.commit, str(marks), *s.argv(run_id, parent)]
+def _child_cmd(s: Scene, marks: Path, run_id: str, parent: int, mode: str = "hold") -> list[str]:
+    return [sys.executable, str(ENTRY), mode, s.t.commit, str(marks), *s.argv(run_id, parent)]
 
 
 def _env(s: Scene) -> dict[str, str]:
@@ -1176,13 +1372,15 @@ def _env(s: Scene) -> dict[str, str]:
             "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
 
 
-def test_o7_a_sigterm_is_one_keyboard_interrupt_and_later_ones_do_not_interrupt_teardown(scene, tmp_path):
-    """First SIGTERM reaches the investigation as `KeyboardInterrupt` and the box teardown runs; a second during teardown is ignored. (O7)"""
+@pytest.mark.parametrize(("mode", "committed"), [("hold", False), ("hold-committed", True)])
+def test_o7_a_sigterm_is_one_keyboard_interrupt_and_later_ones_do_not_interrupt_teardown(
+        scene, tmp_path, mode, committed):
+    """First SIGTERM reaches the investigation as `KeyboardInterrupt` and the box teardown runs; a second during teardown is ignored; the box start was handed the launch token; a report closed before the signal is still recorded as committed. (O7, r5 C1, C2)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     marks = tmp_path / "marks"
     # the parent is this process: the child is spawned directly, and `--parent-pid` is our own pid
-    proc = subprocess.Popen(_child_cmd(scene, marks, run_id, os.getpid()), env=_env(scene),  # noqa: S603
+    proc = subprocess.Popen(_child_cmd(scene, marks, run_id, os.getpid(), mode), env=_env(scene),  # noqa: S603
                             cwd=str(WORKTREE), stderr=subprocess.PIPE)
     try:
         _wait(lambda: (marks / "in-lifecycle").exists() or proc.poll() is not None, timeout=120, what="the lifecycle")
@@ -1199,7 +1397,8 @@ def test_o7_a_sigterm_is_one_keyboard_interrupt_and_later_ones_do_not_interrupt_
         proc.wait(timeout=30)
     assert (marks / "interrupted").read_text(encoding="utf-8") == "KeyboardInterrupt"
     assert (marks / "stop-box-done").exists(), "a second SIGTERM interrupted the teardown"
-    assert scene.job_end(run_id) == {"setup": "done", "box": "started", "report_committed": False,
+    assert (marks / "start-token").read_text(encoding="utf-8") == scene.token, "the box start was not handed the launch token"
+    assert scene.job_end(run_id) == {"setup": "done", "box": "started", "report_committed": committed,
                                      "scrub_verified": False}, "an interrupted run still leaves its job-end record"
 
 

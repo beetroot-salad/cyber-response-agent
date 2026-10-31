@@ -5,8 +5,9 @@ lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `
 
 - `replay` (O16): the real driver over a replay model that writes the golden investigation and
   closes with the golden's disposition.
-- `hold` (death tie): the investigation blocks in the main thread. Marks: `pid`, `in-lifecycle`,
-  `interrupted` (the exception type that reached the investigation), `stop-box-started`, then
+- `hold` (death tie): the investigation blocks in the main thread; `hold-committed` is the same after
+  closing the report on the facts holder it is handed (r5 C2). Marks: `pid`, `in-lifecycle`,
+  `start-token` (the token the box start was handed), `interrupted` (the exception type that reached the investigation), `stop-box-started`, then
   `stop-box-done` once `go-on` exists (a later signal during teardown would stop the wait)."""
 from __future__ import annotations
 
@@ -31,7 +32,10 @@ marks.mkdir(parents=True, exist_ok=True)
 (marks / "pid").write_text(str(os.getpid()), encoding="utf-8")
 
 
-def _unboxed(*_a, **_k):
+def _unboxed(*_a, start_token=None, **_k):
+    """The box start of these children; the token the job entry handed it (r5 C1) goes in a mark."""
+    if start_token is not None:
+        (marks / "start-token").write_text(start_token, encoding="utf-8")
     return box_mod.unboxed_executor()
 
 
@@ -48,8 +52,13 @@ def _replay_lifecycle():
     return functools.partial(run_py._run_investigation_lifecycle, investigate=investigate, start_box=_unboxed)
 
 
-def _hold_lifecycle():
-    def investigate(**_kw):
+def _hold_lifecycle(*, closes: bool):
+    def investigate(*, job_facts=None, **_kw):
+        if closes:
+            from defender.investigation.challenge_gate import ReviewState
+
+            assert job_facts is not None, "the investigation was not handed the job facts holder"
+            job_facts.review_state["state"] = ReviewState(closed=True)
         (marks / "in-lifecycle").touch()
         try:
             while True:
@@ -69,6 +78,6 @@ def _hold_lifecycle():
                              start_box=_unboxed, stop_box=stop_box, scrub=lambda *a, **k: None)
 
 
-lifecycle = _replay_lifecycle() if mode == "replay" else _hold_lifecycle()
+lifecycle = _replay_lifecycle() if mode == "replay" else _hold_lifecycle(closes=mode == "hold-committed")
 sys.exit(run_py.job_main(argv, lifecycle=lifecycle, preflight=lambda *a, **k: 0,
                          visualize=lambda *a, **k: None, publish=lambda *a, **k: f"fresh {commit}"))

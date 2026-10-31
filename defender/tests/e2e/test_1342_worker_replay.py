@@ -17,6 +17,7 @@ from defender.tests.support.jobs._jobs1342 import (
     DEFENDER,
     StandInContainers,
     an_alert,
+    is_box_token,
     job_store,
     make_worker,
     register_tenant,
@@ -32,7 +33,7 @@ ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
 @pytest.mark.parametrize("line_ends", ["as stored", "CRLF", "padded", "decomposed", "zwnbsp", "feff_rich"])
 async def test_o16_a_replay_through_the_worker_lane_completes_with_its_disposition(
         migrated_database, tmp_path, monkeypatch, line_ends):  # noqa: F811
-    """queued → completed with the golden's disposition, cost read from its sessions, knowledge current at the published commit; the run holds the alert's exact bytes, CRLF, padding whitespace, decomposed text and a U+FEFF inside a value included. (O16)"""
+    """queued → completed with the golden's disposition, cost read from its sessions, knowledge current at the published commit; the run holds the alert's exact bytes, CRLF, padding whitespace, decomposed text and a U+FEFF inside a value included. (O16, r5 C1/C2: the real driver's review state is what the record's `report_committed` reads)"""
     from defender.records.formats import parse_report_text
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
@@ -99,3 +100,6 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         held = RunPaths(runs / inv.investigation_id).alert.read_bytes()
         assert held == (runs / f"{inv.investigation_id}.alert.json").read_bytes() == golden_bytes
         assert hashlib.sha256(held).hexdigest() == launch["digest"]
+        assert is_box_token(launch["box_token"]), launch
+        assert (tmp_path / "marks" / "start-token").read_text(encoding="utf-8") == launch["box_token"], \
+            "the child's box start was not handed the launch record's token (r5 C1)"

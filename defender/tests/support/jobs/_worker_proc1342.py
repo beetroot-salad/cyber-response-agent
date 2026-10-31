@@ -1,7 +1,7 @@
 """#1342 a worker in its own process: `python _worker_proc1342.py <config.json>`.
 
 The config names the DSN, the data root, the child (`scripted`: `ScriptedChild` with a spec; or
-`entry`: `_blocking_entry1342.py`; `options` are extra `ScriptedChild` fields such as `term`), the stand-in container folder and the stop grace. The worker
+`entry`: `_blocking_entry1342.py`, handed the stand-in container folder; `options` are extra `ScriptedChild` fields such as `term`), the stand-in container folder and the stop grace. The worker
 runs `serve()` until SIGTERM/SIGINT (its deliberate stop)."""
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def _child(config: dict):
                              wait_for=Path(config["wait_for"]) if config.get("wait_for") else None,
                              **config.get("options", {}))
     entry, marks = config["entry"], config["marks"]
-    return lambda launch: [sys.executable, entry, marks, config["commit"], "--job",
+    return lambda launch: [sys.executable, entry, marks, config["commit"], config["containers"], "--job",
                            launch.investigation_id, "--tenant", launch.tenant_id,
                            "--parent-pid", str(launch.parent_pid)]
 
