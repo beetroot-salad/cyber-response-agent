@@ -188,8 +188,8 @@ def test_an_entry_point_refuses_a_tenant_that_may_not_be_worked_for_before_touch
 
 @pytest.mark.parametrize("name", ENTRY_NAMES)
 def test_an_admitted_entry_point_accepts_its_tenant_once_builds_one_and_reads_its_record_once(data_root, tmp_path, name):
-    """One command, one acceptance of the folder, one `Tenant` built and one admission read of the tenant records, counted
-    by the code that runs whatever name reaches it: nothing under the scope accepts, or builds a tenant, again (r10.1 C1, A1)."""
+    """One command accepts the folder once, builds one `Tenant` and reads the record once, counted by code object, so no
+    spelling hides a second acceptance (r10.1 C1, A1)."""
     with H.acceptance_calls() as calls:
         outcome = _entries(tmp_path)[name](active_directory(data_root, TENANT))
     assert _no_state_refusal(outcome.everything), f"control: an active tenant was refused: {outcome.everything}"
@@ -211,9 +211,8 @@ def test_an_entry_point_stays_recorded_and_locked_for_every_read_of_the_tenants_
 
 
 def test_the_folder_watch_sees_every_kind_of_touch_by_path_or_by_descriptor_and_only_the_tenants_folder(data_root):
-    """The watch can fail: an open, a listing, a make, rename, mode, time and removal inside the folder, and a leaf opened
-    relative to a descriptor, are touches; a sibling whose name shares the folder's prefix, and the data root itself, are
-    not (exact path match)."""
+    """Self-test: every kind of touch in the folder, and a descriptor-relative leaf, is seen; a prefix-sharing sibling and
+    the data root are not (r10 A1 observation)."""
     folder = data_root / TENANT
     sibling = data_root / f"{TENANT}-sibling"
     (sibling / "inner").mkdir(parents=True)
@@ -285,9 +284,8 @@ def test_an_active_tenant_with_a_faulted_folder_is_refused_for_its_folder_not_it
 @pytest.mark.parametrize("name", ENTRY_NAMES)
 def test_a_tenant_that_may_not_be_worked_for_is_refused_for_its_state_whatever_is_wrong_with_its_folder(
         data_root, tmp_path, name, fault):
-    """Each non-active condition (a state, no row, no wiring) with each folder fault: the refusal names the tenant and the
-    state, never the folder, and nothing under the folder is opened or listed; the state is judged before the folder in
-    whatever way the folder is reached (r10 A1: records before folder rules, O-A1)."""
+    """Every non-active condition with every folder fault is refused naming the tenant and the state, never the folder, with
+    the folder untouched: records before folder rules, however the folder is reached (r10 A1, O-A1)."""
     entry = _entries(tmp_path)[name]
     assert _no_state_refusal(entry(active_directory(data_root, TENANT)).everything), "control: the folder is sound"
     for condition in CONDITIONS:

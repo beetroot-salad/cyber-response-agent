@@ -94,8 +94,8 @@ def test_the_by_hand_revert_reads_the_tenants_state_once_at_acceptance_and_not_a
 
 
 def test_the_by_hand_revert_builds_one_tenant_and_hands_its_delivery_that_very_tenant_and_directory(p4_tenant, caplog):
-    """One acceptance, one `Tenant` built for the whole revert, and the delivery opens on the tenant and the directory the
-    acceptance admitted, the same objects and not a copy built again or forged (r10.1 C1: the value is passed down)."""
+    """The revert builds one `Tenant` and opens its delivery on that very tenant and directory, not a copy (r10.1 C1: the
+    admitted value is passed down)."""
     from defender.learning.author import version_control as vc
     from defender.tests.support.tenancy import _host1214 as H
 

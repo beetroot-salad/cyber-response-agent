@@ -406,9 +406,8 @@ U_RECORDS = {
 
 @pytest.mark.parametrize("u_records", list(U_RECORDS))
 def test_dc8_c10_a_row_naming_another_tenant_is_dead_lettered_on_the_first_tick(tmp_path, u_records):
-    """C10: a row whose spec names a tenant other than the drain's is dead-lettered at once, with a reason naming both
-    tenants and no attempts counted, and is never served as either tenant's run, whatever the other tenant's state or
-    place; a row of the drain's own tenant beside it is served and the drain accepts nothing itself."""
+    """C10: a row naming another tenant is dead-lettered at once, naming both, uncounted and never served, whatever the
+    other tenant's state or place; the drain's own row beside it is served and the drain accepts nothing."""
     state, placed = U_RECORDS[u_records]
     t, u, t_paths, _u_paths = _drain_scene(tmp_path)
     if not placed:
