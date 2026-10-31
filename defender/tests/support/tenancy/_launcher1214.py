@@ -12,8 +12,9 @@ Entries (argv exactly as the production command line takes it, exit status passe
 - `drain`   -> `defender.learning.core.cli.main(argv, directory=...)`
 - `connect` -> `defender.cli.tenant.main(argv, directory=...)`   (pinned by GAP-Rm-2: `cli.tenant.main(argv, *,
   directory=None)`)
-- `visualize_run` -> `defender.presentation.visualize_run.main(["visualize_run.py", *argv], directory=...)` after the
-  script's own `configure_from_env()` (its `main` takes `sys.argv`, program name first; r10 A1: it admits its tenant)
+- `visualize_run` -> `defender.presentation.visualize_run.main(["visualize_run.py", *argv], directory=...)` (its `main`
+  takes `sys.argv`, program name first; r10 A1: it admits its tenant). The script's own `__main__` logging setup is NOT
+  run here: a test of what the script logs runs the real script under PostgreSQL instead
 - `workspace_map` -> `defender.cli.workspace_map.main(["workspace_map.py", *argv], directory=...)` (program name first)
 - `retire_legacy_runs` -> `defender.cli.retire_legacy_runs.main(argv, directory=...)`
 - `lessons_page` -> `defender.cli.learning.lessons_page.main(argv, directory=...)` (r10.1 A1/C1: the page builder admits
@@ -158,10 +159,6 @@ def main(argv: Sequence[str] | None = None, *, entries: Mapping[str, Callable[..
     else:
         module, name = ENTRIES[ns.kind]
         entry = getattr(importlib.import_module(module), name)
-    if ns.kind == "visualize_run":  # the script's own `__main__`: its logging, then `main(sys.argv)`
-        from defender._log import configure_from_env
-
-        configure_from_env()
     if ns.kind in PROGRAM_NAMES:
         entry_argv = [PROGRAM_NAMES[ns.kind], *entry_argv]
     return int(entry(list(entry_argv), directory=directory))

@@ -267,17 +267,6 @@ def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_
 _ABSENT = fixture_uuid("pr2-absent")
 
 
-def _process(*command: str) -> subprocess.CompletedProcess:
-    """One CLI as a real process of this interpreter, the checkout first on its path, under
-    this test's configured roots (the environment)."""
-    env = {**os.environ,
-           "PYTHONPATH": os.pathsep.join(filter(None, [str(H.WORKTREE),
-                                                       os.environ.get("PYTHONPATH")]))}
-    return subprocess.run(  # noqa: S603 — this interpreter, a checkout CLI, ids
-        [sys.executable, *command], capture_output=True, text=True, encoding="utf-8",
-        check=False, env=env, cwd=str(H.WORKTREE), timeout=300)
-
-
 def _launched_process(kind: str, tenant_id: str, *argv: str) -> subprocess.CompletedProcess:
     """One host command as a real process under the test launcher, `tenant_id` seeded active: the command admits its
     tenant through the tenant records and a subprocess has no database (r10 A1/C9)."""
@@ -293,10 +282,6 @@ def _refused_naming(child: subprocess.CompletedProcess, what: str) -> None:
     assert child.returncode != 0, f"exit 0: {said[-600:]!r}"
     assert what in said, f"the refusal does not name {what}: {said[-600:]!r}"
     assert "usage:" not in said, f"an argument error, not a refusal: {said[-600:]!r}"
-
-
-def _script(*parts: str) -> str:
-    return str(H.WORKTREE.joinpath("defender", *parts))
 
 
 def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
