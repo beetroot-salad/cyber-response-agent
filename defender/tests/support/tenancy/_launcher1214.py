@@ -16,6 +16,8 @@ Entries (argv exactly as the production command line takes it, exit status passe
   script's own `configure_from_env()` (its `main` takes `sys.argv`, program name first; r10 A1: it admits its tenant)
 - `workspace_map` -> `defender.cli.workspace_map.main(["workspace_map.py", *argv], directory=...)` (program name first)
 - `retire_legacy_runs` -> `defender.cli.retire_legacy_runs.main(argv, directory=...)`
+- `lessons_page` -> `defender.cli.learning.lessons_page.main(argv, directory=...)` (r10.1 A1/C1: the page builder admits
+  its tenant, then builds)
 
 Directory (give one; `--dsn` wins over `--seed` when both are given):
 - `--dsn DSN` (env `DEFENDER_TEST_DSN`): `_active1214.postgres_directory(DSN)`, over rows the test inserted with
@@ -72,6 +74,7 @@ ENTRIES: dict[str, tuple[str, str]] = {
     "visualize_run": ("defender.presentation.visualize_run", "main"),
     "workspace_map": ("defender.cli.workspace_map", "main"),
     "retire_legacy_runs": ("defender.cli.retire_legacy_runs", "main"),
+    "lessons_page": ("defender.cli.learning.lessons_page", "main"),
 }
 #: The entries whose `main` takes `sys.argv` (the program name first), by that name.
 PROGRAM_NAMES = {"visualize_run": "visualize_run.py", "workspace_map": "workspace_map.py"}
