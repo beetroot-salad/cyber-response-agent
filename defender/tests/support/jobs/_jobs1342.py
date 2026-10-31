@@ -343,9 +343,18 @@ def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], 
                 containers: Any = None, slots: int = 3, stop_grace: float | None = None) -> Any:
     from defender.worker import Worker
 
+    if containers is None:
+        # The default stand-in sits beside the data root, so it is only safe when that is a test's own
+        # temp directory; a made-up root must come with its own `containers=`.
+        import tempfile
+
+        beside = data_root.parent
+        if not beside.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()):
+            raise ValueError(f"make_worker: {data_root} is not under the temp directory; pass containers=StandInContainers(tmp_path / ...)")
+        containers = StandInContainers(beside / "containers")
     extra = {} if stop_grace is None else {"stop_grace": stop_grace}
     return Worker(store, data_root=data_root, child_argv=child,
-                  containers=containers if containers is not None else StandInContainers(data_root.parent / "containers"),
+                  containers=containers,
                   slots=slots, clock=fixed_clock, **extra)
 
 

@@ -260,17 +260,18 @@ async def test_o7_a_child_that_ignores_sigterm_is_group_killed_after_the_grace(m
     assert row(dsn, inv.investigation_id)["stage"] == "running"
 
 
-async def test_o7_serve_takes_sigterm_itself_and_returns(migrated_database):
+async def test_o7_serve_takes_sigterm_itself_and_returns(migrated_database, tmp_path):
     """`serve()` installs its own SIGTERM handling: the signal stops it (idle, no rows) instead of reaching the process's prior handler. (O7, M8)"""
     import asyncio
 
-    from defender.tests.support.jobs._jobs1342 import make_worker
+    from defender.tests.support.jobs._jobs1342 import StandInContainers, make_worker
 
     caught: list[int] = []
     previous = {s: signal.signal(s, lambda n, _f: caught.append(n)) for s in (signal.SIGTERM, signal.SIGINT)}
     try:
         async with job_store(migrated_database) as store:
-            worker = make_worker(store, Path("/nonexistent-root"), lambda launch: [sys.executable])
+            worker = make_worker(store, Path("/nonexistent-root"), lambda launch: [sys.executable],
+                                 containers=StandInContainers(tmp_path / "containers"))
             serving = asyncio.create_task(worker.serve())
             await asyncio.sleep(0.5)
             os.kill(os.getpid(), signal.SIGTERM)
