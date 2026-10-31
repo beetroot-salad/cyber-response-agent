@@ -103,3 +103,34 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         assert is_box_token(launch["box_token"]), launch
         assert (tmp_path / "marks" / "start-token").read_text(encoding="utf-8") == launch["box_token"], \
             "the child's box start was not handed the launch record's token (r5 C1)"
+
+
+async def test_o8_a_provider_fault_after_the_real_drivers_close_still_records_the_report_committed(
+        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+    """The replay model commits the golden's report and the next model request raises inside the real driver: the job-end record still says `report_committed: true`, because the driver's own review state (the holder's dict) closed. (O8, M2, r5 C2)"""
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    root = tmp_path / "data"
+    root.mkdir()
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
+    with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id)
+        (root / t.tenant_id / "runs").mkdir(exist_ok=True)
+
+        def child(launch) -> list[str]:
+            return [sys.executable, str(ENTRY), "replay-fault-after-close", t.commit, str(tmp_path / "marks"),
+                    "--job", launch.investigation_id, "--tenant", launch.tenant_id,
+                    "--parent-pid", str(launch.parent_pid)]
+
+        async with job_store(migrated_database) as store:
+            alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
+            inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
+            await make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers")).drain()
+
+        runs = root / t.tenant_id / "runs"
+        end = json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8"))
+        assert (runs / inv.investigation_id / "report.md").is_file(), "premise: the report was committed before the fault"
+        assert (end["setup"], end["box"]) == ("done", "started"), end
+        assert end["report_committed"] is True, end

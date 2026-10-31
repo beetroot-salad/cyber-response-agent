@@ -800,7 +800,7 @@ def _claim_token(world: dict, inv: str) -> str:
 
 
 async def test_o7_after_the_child_exits_the_backstop_reaps_under_the_claims_token_and_a_missing_box_is_normal(
-        world, tmp_path):
+        world, tmp_path, caplog):
     """`reap(name, token)` is asked with the token in the launch record, per claim: a box that start stamped is removed, an absent one reads `absent`, and the row is the rules' alone. (O7, r5 C1)"""
     containers = StandInContainers(tmp_path / "containers")
     owning = _child(world, files=_committed(), box_dir=containers.where)  # its start made and stamped the box
@@ -820,6 +820,7 @@ async def test_o7_after_the_child_exits_the_backstop_reaps_under_the_claims_toke
     assert not containers.held(f"defender-run-{left}")
     assert row(world["dsn"], clean)["stage"] == "completed"
     assert row(world["dsn"], left)["stage"] == "completed", "the backstop must not decide the row"
+    assert not _warned(caplog, clean), "an absent box is normal: nothing to warn about"
 
 
 async def test_o7_the_backstop_runs_for_a_run_that_failed_and_never_writes_the_row(world, tmp_path):
@@ -1083,6 +1084,22 @@ def test_o7_the_docker_seam_removes_an_owned_box_the_first_forced_removal_cannot
 
     assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "removed"
     assert daemon.names() == []
+
+
+def test_o7_a_box_that_survives_the_forced_removal_even_after_waiting_is_a_box_fault_and_stays_held(tmp_path):
+    """An owned box whose `rm -f`, `wait` and second `rm -f` all fail: `reap` raises `BoxFault`, never answers `removed`, and the box is still held. (O7, r5 C1, D-u)"""
+    from defender.box import BoxFault
+    from defender.worker import DockerContainers
+
+    daemon, docker = _docker_world(tmp_path)
+    daemon.hold("defender-run-here", "paused", TOKEN)
+    daemon.jam("defender-run-here")
+
+    with pytest.raises(BoxFault):
+        DockerContainers(docker=docker).reap("defender-run-here", TOKEN)
+
+    assert daemon.names() == ["defender-run-here"], daemon.calls
+    assert _removes(daemon.calls, "defender-run-here"), "the forced removal was never tried"
 
 
 def test_o7_the_docker_seam_reads_an_absent_box_as_absent_and_removes_nothing(tmp_path):

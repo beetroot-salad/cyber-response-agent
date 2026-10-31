@@ -732,23 +732,24 @@ def _lifecycle(s: Scene, *, investigate: Any, start_box: Any = None, stop_box: A
         scrub=scrub if scrub is not None else verdict_scrub)
 
 
-def _closes(job_facts: Any) -> None:
-    """What the driver leaves on the review state when the report is committed (`ReviewState.closed`)."""
+def _closes(job_facts: Any, *, closed: bool = True) -> None:
+    """What the driver leaves on the review state when the report is committed (`ReviewState.closed`);
+    `closed=False` is a review state that exists (a first review ran) but was never closed."""
     from defender.investigation.challenge_gate import ReviewState
 
     assert job_facts is not None, "the investigation was not handed the job facts holder (r5 C2)"
-    job_facts.review_state["state"] = ReviewState(closed=True)
+    job_facts.review_state["state"] = ReviewState(closed=closed)
 
 
-def _investigate(ran: Ran, *, without: str | None = None, closes: bool = True, **summary_kw: Any):
+def _investigate(ran: Ran, *, without: str | None = None, closes: bool | str = True, **summary_kw: Any):
     """A fake investigation: with `closes` it commits the report on the holder it is handed (the
     protocol's `job_facts` keyword, r5 C2), as the driver's review state does; the summary it returns
     carries `report_committed` as the driver's would."""
     def investigate(*, job_facts: Any = None, **_kw: Any) -> dict[str, Any]:
         ran.calls["lifecycle"] += 1
         if closes and job_facts is not None:  # the operator path hands none
-            _closes(job_facts)
-        doc = summary(**{"report_committed": closes, **summary_kw})
+            _closes(job_facts, closed=closes != "open")  # "open": a review state that never closed
+        doc = summary(**{"report_committed": closes is True, **summary_kw})
         if without is not None:
             del doc[without]
         return doc
@@ -784,10 +785,11 @@ def test_o8_report_committed_is_the_review_states_close_and_scrub_verified_the_s
 
 
 @pytest.mark.parametrize(("closes", "claims", "want"), [
-    (True, None, True), (True, False, True), (False, True, False)],
-    ids=["summary-lacks-the-key", "summary-says-false-state-closed", "summary-says-true-state-empty"])
+    (True, None, True), (True, False, True), (False, True, False), ("open", True, False)],
+    ids=["summary-lacks-the-key", "summary-says-false-state-closed", "summary-says-true-state-empty",
+         "summary-says-true-state-present-not-closed"])
 def test_m2_the_record_reads_the_holders_review_state_not_the_summary(scene, closes, claims, want):
-    """A committed report is the holder's review state `closed`; the summary's `report_committed` (absent, false or true) does not decide it. (M2, r5 C2)"""
+    """A committed report is the holder's review state `closed`; the summary's `report_committed` (absent, false or true) does not decide it, and a review state that exists but is not closed is not committed. (M2, r5 C2, D-s)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     ran = Ran()
@@ -953,7 +955,7 @@ def test_c2_the_holder_is_the_job_entrys_and_the_investigation_is_handed_it(scen
                      lifecycle=operator_lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
                      enqueue=lambda *a, **k: False, publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
-    assert "job_facts" not in operator, "the operator path was handed a job facts holder"
+    assert operator.get("job_facts") is None, "the operator path was handed a job facts holder"
 
 
 def test_c1_the_job_lanes_box_start_is_handed_the_launch_records_token_and_the_operators_is_not(scene):
