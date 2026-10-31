@@ -42,6 +42,7 @@ from defender.tests.support.jobs._jobs1342 import (
     VisibleAtEmit,
     an_alert,
     fd_identity,
+    is_box_token,
     job_end,
     job_store,
     knowledge_record,
@@ -230,7 +231,7 @@ async def test_o5_a_row_moved_while_its_child_runs_is_left_alone_and_logged(worl
 
 async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_nowhere_else(
         world, monkeypatch):
-    """Both files are written beside the run folder before the child starts; argv, data root and session as ratified; nothing else is made. (O6)"""
+    """Both files are written beside the run folder before the child starts; argv, data root and session as ratified; the record has a worker-minted box token; nothing else is made. (O6, r5 C1)"""
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(world["tmp"] / "somewhere-else"))
     before = tree(world["root"])
     other_before = tree(world["other_runs"])
@@ -246,8 +247,9 @@ async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_no
     assert (world["runs"] / f"{inv}.alert.json").read_bytes() == ALERT_BYTES
     launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
     alert_id = launch["alert_id"]
+    assert is_box_token(launch.get("box_token")), launch
     assert launch == {"investigation_id": inv, "tenant_id": T1, "alert_id": alert_id,
-                      "digest": ALERT_DIGEST, "label": TITLE}
+                      "digest": ALERT_DIGEST, "label": TITLE, "box_token": launch["box_token"]}
     assert alert_id
     created = {k for k in tree(world["root"]) if k not in before}
     assert created == {f"{T1}/runs/{inv}.launch.json", f"{T1}/runs/{inv}.alert.json"}
@@ -491,7 +493,13 @@ CASES = {
     "4-report-symlinked": _spec(
         files=_committed(**{"{id}/report.md": None, "{id}/notes.md": MARKER}),
         links={"{id}/report.md": str(GOLDEN_REPORT)}, expect=("unparseable", None, None)),
+    # rule 4 after an abnormal child end whose facts are both true (r5 C2: the driver raised after a clean close)
+    "4-completed-when-the-child-died-after-both-facts": _spec(files=_committed(), exit=1,
+                                                              expect=("completed", None, "inconclusive")),
     # rule 5: each failed fact, named
+    "5-committed-then-the-teardown-faulted": _spec(
+        files=_committed(**{"{id}.job-end.json": job_end(report_committed=True, scrub_verified=False)}), exit=1,
+        expect=("failed", "no_report", None), says=("scrub",), lacks=("setup",)),
     "5-box-planted-report-not-committed": _spec(
         files=_committed(**{"{id}.job-end.json": job_end(report_committed=False),
                             "{id}/report.md": MARKED_REPORT}),
@@ -786,52 +794,102 @@ async def test_o8_knowledge_is_null_when_there_is_no_run_folder(world, stray_rec
 
 # --- O7: the backstop, in-process ------------------------------------------------------------------
 
-async def test_o7_after_the_child_exits_the_backstop_removes_a_leftover_box_only_if_present(world, tmp_path):
-    """`defender-run-<id>` is removed when it exists; an absent one is looked at, never an error, and the row is the rules' alone. (O7)"""
+def _claim_token(world: dict, inv: str) -> str:
+    """The `box_token` the worker wrote into this row's launch record."""
+    return json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))["box_token"]
+
+
+async def test_o7_after_the_child_exits_the_backstop_reaps_under_the_claims_token_and_a_missing_box_is_normal(
+        world, tmp_path):
+    """`reap(name, token)` is asked with the token in the launch record, per claim: a box that start stamped is removed, an absent one reads `absent`, and the row is the rules' alone. (O7, r5 C1)"""
     containers = StandInContainers(tmp_path / "containers")
-    child = _child(world, files=_committed())
+    owning = _child(world, files=_committed(), box_dir=containers.where)  # its start made and stamped the box
+    bare = ScriptedChild(world["tmp"] / "child-bare", world["runs"], files=_committed())
     async with job_store(world["dsn"]) as store:
         left = await _queued(store, ticket="T-1", key="k1")
+        await make_worker(store, world["root"], owning, containers=containers).drain()
         clean = await _queued(store, ticket="T-2", key="k2")
-        containers.plant(f"defender-run-{left}")
-        await make_worker(store, world["root"], child, containers=containers).drain()
+        await make_worker(store, world["root"], bare, containers=containers).drain()
 
-    assert ("remove", f"defender-run-{left}") in containers.calls
-    assert ("exists", f"defender-run-{clean}") in containers.calls
-    assert ("remove", f"defender-run-{clean}") not in containers.calls
-    assert not (containers.where / f"defender-run-{left}").exists()
+    left_token, clean_token = _claim_token(world, left), _claim_token(world, clean)
+    assert is_box_token(left_token), left_token
+    assert is_box_token(clean_token), clean_token
+    assert left_token != clean_token, "one token per claim"
+    assert containers.reaped(f"defender-run-{left}") == [left_token]
+    assert containers.reaped(f"defender-run-{clean}") == [clean_token], "an absent box is still asked about"
+    assert not containers.held(f"defender-run-{left}")
     assert row(world["dsn"], clean)["stage"] == "completed"
     assert row(world["dsn"], left)["stage"] == "completed", "the backstop must not decide the row"
 
 
 async def test_o7_the_backstop_runs_for_a_run_that_failed_and_never_writes_the_row(world, tmp_path):
-    """A failed run's leftover box is removed; the row keeps the rules' verdict, not a backstop's. (O7, M8)"""
+    """A failed run's leftover box (this claim's token) is removed; the row keeps the rules' verdict, not a backstop's. (O7, M8, r5 C1)"""
     containers = StandInContainers(tmp_path / "containers")
-    child = _child(world, exit=EXIT)  # no job-end record: rule 1
-    async with job_store(world["dsn"]) as store:
-        inv = await _queued(store)
-        containers.plant(f"defender-run-{inv}")
-        await make_worker(store, world["root"], child, containers=containers).drain()
+    child = _child(world, exit=EXIT, box_dir=containers.where)  # no job-end record: rule 1
+    inv, stored = await _run_one(world, child, containers=containers)
 
-    assert ("remove", f"defender-run-{inv}") in containers.calls
-    stored = row(world["dsn"], inv)
+    assert containers.reaped(f"defender-run-{inv}") == [_claim_token(world, inv)]
+    assert not containers.held(f"defender-run-{inv}")
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
     assert _names_code(stored, inv, EXIT), stored["failure_message"]
 
 
-@pytest.mark.parametrize("fail", ["exists", "remove"])
-async def test_o7_a_backstop_that_cannot_ask_or_remove_leaves_the_row_to_the_rules_and_the_worker_goes_on(
-        world, tmp_path, fail):
-    """A containers seam whose `exists` or `remove` raises: both rows keep the stage the rules gave, the worker carries on. (O7)"""
-    containers = FaultyContainers(tmp_path / "containers", fail=fail)
+async def test_o7_the_backstop_runs_after_the_child_has_exited(world, tmp_path):
+    """The reap happens once the child is gone, never while it runs (its box may still be in use). (O7, r5 C1)"""
+    containers = StandInContainers(tmp_path / "containers")
+    child = _child(world, files=_committed(), box_dir=containers.where)
+    seen_at_reap: list[list[tuple[str, str]]] = []
+    real_reap = containers.reap
+
+    def reap(name: str, token: str) -> str:
+        seen_at_reap.append(child.events())
+        return real_reap(name, token)
+
+    containers.reap = reap  # a recording wrapper on the test's own stand-in, not a patch of production
+    inv, _ = await _run_one(world, child, containers=containers)
+
+    assert seen_at_reap == [[("start", inv), ("end", inv)]], seen_at_reap
+
+
+@pytest.mark.parametrize("stamp", ["other", "none"])
+async def test_o7_a_container_already_holding_the_name_that_is_not_the_claims_is_left_and_logged(
+        world, tmp_path, caplog, stamp):
+    """A same-name container with another token or none is left in place and logged at WARNING; the row is `failed`/`worker_error` (box start_failed), as before. (O7, r5 C1)"""
+    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
+    containers = StandInContainers(tmp_path / "containers")
+    refused = job_end(box="start_failed", report_committed=False, scrub_verified=False)
+    child = _child(world, files={"{id}.job-end.json": refused}, exit=1, box_dir=containers.where, box_token=stamp)
+    inv, stored = await _run_one(world, child, containers=containers)
+
+    name = f"defender-run-{inv}"
+    assert containers.held(name), "a container that is not this job's was removed"
+    assert (containers.where / name).read_text(encoding="utf-8") == {"other": "f" * 32, "none": ""}[stamp]
+    assert containers.reaped(name) == [_claim_token(world, inv)]
+    warned = [r.getMessage() for r in caplog.records
+              if r.name.startswith(WORKER_LOGGER) and r.levelno >= logging.WARNING]
+    assert any(name in m and "left in place" in m for m in warned), warned
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+
+
+async def test_o7_a_box_that_is_ours_is_removed_without_a_warning(world, tmp_path, caplog):
+    """Control for the foreign-container case: the claim's own leftover is removed and nothing is warned about. (O7, r5 C1)"""
+    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
+    containers = StandInContainers(tmp_path / "containers")
+    inv, _ = await _run_one(world, _child(world, files=_committed(), box_dir=containers.where), containers=containers)
+
+    assert not containers.held(f"defender-run-{inv}")
+    assert not _warned(caplog, inv), "an own leftover is routine"
+
+
+async def test_o7_a_backstop_that_cannot_ask_leaves_the_row_to_the_rules_and_the_worker_goes_on(world, tmp_path):
+    """A containers seam whose `reap` raises: both rows keep the stage the rules gave, the worker carries on. (O7, r5 C1)"""
+    containers = FaultyContainers(tmp_path / "containers")
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
         ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(2)]
-        for i in ids:
-            containers.plant(f"defender-run-{i}")
         await make_worker(store, world["root"], child, containers=containers).drain()
 
-    assert sorted(name for kind, name in containers.calls if kind == fail) == sorted(f"defender-run-{i}" for i in ids)
+    assert sorted(name for _kind, name, _token in containers.calls) == sorted(f"defender-run-{i}" for i in ids)
     for i in ids:
         stored = row(world["dsn"], i)
         assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("completed", "inconclusive", None)
@@ -856,7 +914,8 @@ args = args[1:] if args[:1] == ["container"] else args
 verb, rest = (args[0] if args else ""), args[1:]
 verb = {"remove": "rm", "ls": "ps", "list": "ps"}.get(verb, verb)
 held = lambda: sorted(p.name for p in (home / "held").iterdir())
-state_of = lambda n: (home / "held" / n).read_text(encoding="utf-8").strip() or "exited"  # exited, running or paused
+state_of = lambda n: (home / "held" / n).read_text(encoding="utf-8").split("\\n")[0].strip() or "exited"  # exited, running or paused
+token_of = lambda n: (home / "held" / n).read_text(encoding="utf-8").partition("\\n")[2].strip()  # the start-token label, "" for none
 operands, filters, fmt, skip = [], [], None, None
 for a in rest:
     if skip:
@@ -884,6 +943,9 @@ if verb == "inspect":
         print(json.dumps([{"Name": "/" + n, "State": states[n]} for n in operands]))
     else:
         for n in operands:
+            if "Config.Labels" in fmt:  # `{{index .Config.Labels "<key>"}}`: docker prints this text for a label the container lacks
+                print(token_of(n) or "<no value>")
+                continue
             fields = {"{{.State.Status}}": states[n]["Status"], "{{.State.Running}}": str(states[n]["Running"]).lower(),
                       "{{.State.Paused}}": str(states[n]["Paused"]).lower(), "{{json .State}}": json.dumps(states[n])}
             print(fields.get(fmt.strip()) or ("/" + n if "Name" in fmt else n if "Id" in fmt else states[n]["Status"]))
@@ -948,9 +1010,10 @@ class _DockerStandIn:
         return subprocess.run([sys.executable, str(self.script), str(self.home), *map(str, argv)],
                               capture_output=True, text=True, check=False)
 
-    def hold(self, name: str, state: str = "exited") -> None:
-        """The daemon holds `name` in `state`: `exited`, `running` or `paused`."""
-        (self.home / "held" / name).write_text(state, encoding="utf-8")
+    def hold(self, name: str, state: str = "exited", token: str | None = None) -> None:
+        """The daemon holds `name` in `state` (`exited`, `running` or `paused`), carrying `token` as its
+        `defender.start-token` label (`None`: no such label)."""
+        (self.home / "held" / name).write_text(state if token is None else f"{state}\n{token}", encoding="utf-8")
 
     def stick(self, name: str) -> None:
         """Every `rm` of `name` fails until a `docker wait` on it has returned (a paused box under runsc)."""
@@ -992,101 +1055,102 @@ def _removes(calls: list[list[str]], name: str) -> bool:
     return any(name in argv and ("rm" in argv or "remove" in argv) for argv in calls)
 
 
+TOKEN = "ab" * 16
+OTHER_TOKEN = "cd" * 16
+
+
 @pytest.mark.parametrize("state", ["exited", "running", "paused"])
-def test_o7_the_docker_seam_looks_first_and_removes_only_a_container_that_is_there(tmp_path, state):
-    """`DockerContainers(docker=fn)`: present in any state (running and paused included) → exists and removed; absent → looked at, nothing removed, no error. (O7, D-o)"""
+def test_o7_the_docker_seam_removes_a_box_carrying_the_claims_token_and_nothing_else(tmp_path, state):
+    """`DockerContainers(docker=fn).reap(name, token)`: a container with this token, in any state → `removed` and gone; another container is untouched. (O7, r5 C1)"""
     from defender.worker import DockerContainers
 
     daemon, docker = _docker_world(tmp_path)
-    containers = DockerContainers(docker=docker)
-    daemon.hold("defender-run-here", state)
-    daemon.hold("defender-run-other")
+    daemon.hold("defender-run-here", state, TOKEN)
+    daemon.hold("defender-run-other", "running", TOKEN)  # the same token on another name is not this job's box
 
-    assert containers.exists("defender-run-here") is True
-    containers.remove("defender-run-here")
+    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "removed"
     assert daemon.names() == ["defender-run-other"]
-    assert _removes(daemon.calls, "defender-run-here"), daemon.calls
-    verbs = [argv[1] for argv in daemon.calls if argv[1:2] and "defender-run-here" in argv]
-    assert "wait" not in verbs, ("a box the first forced removal takes is not waited on", verbs)
+    assert not _removes(daemon.calls, "defender-run-other")
 
-    before = len(daemon.calls)
-    assert containers.exists("defender-run-gone") is False
-    assert len(daemon.calls) > before, "an absent container was not even looked at"
-    assert not _removes(daemon.calls, "defender-run-gone")
+
+def test_o7_the_docker_seam_removes_an_owned_box_the_first_forced_removal_cannot(tmp_path):
+    """A paused own box that survives `rm -f` until it has exited (#1202) still reads `removed` and is gone. (O7, r5 C1, D5-3)"""
+    from defender.worker import DockerContainers
+
+    daemon, docker = _docker_world(tmp_path)
+    daemon.hold("defender-run-here", "paused", TOKEN)
+    daemon.stick("defender-run-here")
+
+    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "removed"
+    assert daemon.names() == []
+
+
+def test_o7_the_docker_seam_reads_an_absent_box_as_absent_and_removes_nothing(tmp_path):
+    """No such container → `absent`, looked at, no removal, other boxes untouched. (O7, r5 C1)"""
+    from defender.worker import DockerContainers
+
+    daemon, docker = _docker_world(tmp_path)
+    daemon.hold("defender-run-other", "running", TOKEN)
+
+    assert DockerContainers(docker=docker).reap("defender-run-gone", TOKEN) == "absent"
+    assert daemon.calls, "an absent container was not even looked at"
+    assert not any("rm" in argv or "remove" in argv for argv in daemon.calls), daemon.calls
     assert daemon.names() == ["defender-run-other"]
+
+
+@pytest.mark.parametrize("state", ["exited", "running", "paused"])
+@pytest.mark.parametrize("holds", ["another token", "no token"])
+def test_o7_the_docker_seam_leaves_a_box_that_is_not_the_claims_in_place(tmp_path, state, holds):
+    """A container with another start token, or none, → `not_ours`, still held, never removed. (O7, r5 C1)"""
+    from defender.worker import DockerContainers
+
+    daemon, docker = _docker_world(tmp_path)
+    daemon.hold("defender-run-here", state, OTHER_TOKEN if holds == "another token" else None)
+
+    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "not_ours"
+    assert daemon.names() == ["defender-run-here"]
+    assert not _removes(daemon.calls, "defender-run-here"), daemon.calls
 
 
 @pytest.mark.parametrize("held", [True, False])
-def test_o7_a_daemon_that_does_not_answer_leaves_existence_unanswered_not_absent(tmp_path, held):
-    """`DockerContainers.exists` when both `inspect` and `version` fail raises `ContainerUnanswered`, held or not; it never reads as absent. (O7, D-o)"""
+def test_o7_a_daemon_that_does_not_answer_is_a_box_fault_never_absent(tmp_path, held):
+    """With the daemon down the seam raises `BoxFault` (held or not) and removes nothing; it never reports `absent`. (O7, r5 C1)"""
+    from defender.box import BoxFault
     from defender.worker import DockerContainers
-    from defender.worker._containers import ContainerUnanswered
 
     daemon, docker = _docker_world(tmp_path)
     if held:
-        daemon.hold("defender-run-here", "running")
+        daemon.hold("defender-run-here", "running", TOKEN)
     daemon.go_down()
 
-    with pytest.raises(ContainerUnanswered):
-        DockerContainers(docker=docker).exists("defender-run-here")
-
-
-def test_o7_a_paused_box_that_survives_the_first_forced_removal_is_removed_after_waiting(tmp_path):
-    """`DockerContainers.remove` when `rm -f` fails on a paused box: it waits on the box and removes it again, so the box is gone and nothing is raised. (O7, D-o)"""
-    from defender.worker import DockerContainers
-
-    daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-here", "paused")
-    daemon.hold("defender-run-other", "running")
-    daemon.stick("defender-run-here")
-
-    DockerContainers(docker=docker).remove("defender-run-here")
-
-    assert daemon.names() == ["defender-run-other"], daemon.calls
-    verbs = [argv[1] for argv in daemon.calls if argv[1:2] and "defender-run-here" in argv]
-    assert verbs[-1] == "rm", verbs
-    assert verbs.index("wait") < len(verbs) - 1, verbs
-
-
-def test_o7_a_box_that_survives_the_forced_removal_even_after_waiting_is_reported_and_stays_held(tmp_path):
-    """`DockerContainers.remove` when `rm -f` fails before and after the wait: `ContainerUnanswered` is raised and the box is still held. (O7, D-o)"""
-    from defender.worker import DockerContainers
-    from defender.worker._containers import ContainerUnanswered
-
-    daemon, docker = _docker_world(tmp_path)
-    daemon.hold("defender-run-here", "paused")
-    daemon.jam("defender-run-here")
-
-    with pytest.raises(ContainerUnanswered):
-        DockerContainers(docker=docker).remove("defender-run-here")
-
-    assert daemon.names() == ["defender-run-here"], daemon.calls
+    with pytest.raises(BoxFault):
+        DockerContainers(docker=docker).reap("defender-run-here", TOKEN)
 
 
 @pytest.mark.parametrize("state", ["exited", "running"])
 async def test_o7_a_worker_given_no_containers_uses_docker_and_removes_only_its_own_leftover(
         world, monkeypatch, state):
-    """Omitting `containers` → the backstop is the docker one (a `docker` first on PATH): the row's leftover box goes, another run's stays, a clean run is no error. (O7, D-o)"""
-    import uuid
-
+    """Omitting `containers` → the backstop is the docker one (a `docker` first on PATH): the box this claim's start stamped goes, a same-name box with another token and another run's box stay. (O7, r5 C1)"""
     from defender.worker import Worker
     from defender.tests.support.jobs._jobs1342 import fixed_clock
 
     daemon, _docker = _docker_world(world["tmp"])
     daemon.install(monkeypatch)
-    left_id = str(uuid.uuid4())
-    child = _child(world, files=_committed())
+    held = daemon.home / "held"
+    daemon.hold("defender-run-someone-else", "running", OTHER_TOKEN)
+    own = _child(world, files=_committed(), box_dir=held, box_state=state)
+    foreign = ScriptedChild(world["tmp"] / "child-foreign", world["runs"], files=_committed(), box_dir=held,
+                            box_state=state, box_token="other")
+    bare = ScriptedChild(world["tmp"] / "child-bare", world["runs"], files=_committed())
     async with job_store(world["dsn"]) as store:
-        alert = await an_alert(store, T1, ticket="T-L")
-        plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=left_id)
-        clean = await _queued(store, ticket="T-2", key="k2")
-        daemon.hold(f"defender-run-{left_id}", state)
-        daemon.hold("defender-run-someone-else", "running")
-        await Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock).drain()
+        ids = {}
+        for n, (kind, child) in enumerate((("own", own), ("foreign", foreign), ("clean", bare))):
+            ids[kind] = await _queued(store, ticket=f"T-{n}", key=f"k{n}")
+            await Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock).drain()
 
-    assert daemon.names() == ["defender-run-someone-else"], daemon.names()
-    assert row(world["dsn"], left_id)["stage"] == "completed"
-    assert row(world["dsn"], clean)["stage"] == "completed", "an absent container broke the clean run"
+    assert daemon.names() == sorted(["defender-run-someone-else", f"defender-run-{ids['foreign']}"]), daemon.names()
+    for kind, inv in ids.items():
+        assert row(world["dsn"], inv)["stage"] == "completed", kind
 
 
 def test_d2_the_ratified_defaults_are_three_slots_and_a_thirty_second_grace():

@@ -152,10 +152,10 @@ async def test_o7_killing_the_worker_ends_the_child_through_its_unwind_but_leave
             alert = await an_alert(store, t.tenant_id)
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
         config = _blocking_config(dsn, root, tmp_path, t)
-        box = tmp_path / "containers" / f"defender-run-{inv.investigation_id}"
-        box.touch()
+        box = tmp_path / "containers" / f"defender-run-{inv.investigation_id}"  # the child's box start makes it
         with worker_process(tmp_path, config) as proc:
             child_pid = _blocked_child(tmp_path / "marks", proc)
+            assert box.is_file(), "premise: the child's box start left its stand-in container"
             proc.kill()
             proc.wait(timeout=60)
 
@@ -167,7 +167,7 @@ async def test_o7_killing_the_worker_ends_the_child_through_its_unwind_but_leave
 
 async def test_o7_stopping_the_worker_terminates_the_child_removes_the_box_and_leaves_the_row(
         migrated_database, tmp_path):
-    """SIGTERM to the worker: SIGTERM to the child, stop-box runs, the backstop removes the box, the row stays `running`. (O7, M8, D3)"""
+    """SIGTERM to the worker: SIGTERM to the child, stop-box runs, the backstop removes the box stamped with the claim's token, the row stays `running`. (O7, M8, D3, r5 C1)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     dsn, root = migrated_database, tmp_path / "data"
@@ -178,10 +178,13 @@ async def test_o7_stopping_the_worker_terminates_the_child_removes_the_box_and_l
             alert = await an_alert(store, t.tenant_id)
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
         config = _blocking_config(dsn, root, tmp_path, t)
-        box = tmp_path / "containers" / f"defender-run-{inv.investigation_id}"
-        box.touch()
+        box = tmp_path / "containers" / f"defender-run-{inv.investigation_id}"  # the child's box start makes it
         with worker_process(tmp_path, config) as proc:
             child_pid = _blocked_child(tmp_path / "marks", proc)
+            token = json.loads((root / t.tenant_id / "runs" / f"{inv.investigation_id}.launch.json").read_text(
+                encoding="utf-8"))["box_token"]
+            assert box.read_text(encoding="utf-8") == token == (tmp_path / "marks" / "start-token").read_text(
+                encoding="utf-8"), "premise: the child's box start was handed the launch record's token"
             proc.send_signal(signal.SIGTERM)
             proc.wait(timeout=60)
 
@@ -200,7 +203,7 @@ def _scripted_config(dsn: str, root: Path, runs: Path, tmp_path: Path, **options
 @pytest.mark.parametrize("stop", [signal.SIGTERM, signal.SIGINT])
 async def test_o7_a_deliberate_stop_sends_sigterm_to_every_child_and_writes_no_row(
         migrated_database, tmp_path, stop):
-    """SIGTERM or SIGINT to the worker: each of two children gets SIGTERM, backstops run, both rows stay `running`. (O7, D3)"""
+    """SIGTERM or SIGINT to the worker: each of two children gets SIGTERM, backstops run (each box carries its own claim's token), both rows stay `running`. (O7, D3, r5 C1)"""
     dsn, root = migrated_database, tmp_path / "data"
     register_tenant(dsn, T1)
     runs = root / T1 / "runs"
@@ -213,9 +216,8 @@ async def test_o7_a_deliberate_stop_sends_sigterm_to_every_child_and_writes_no_r
             alert = await an_alert(store, T1, ticket=f"T-{n}")
             inv, _ = await store.create_investigation(T1, alert.alert_id, f"k{n}", actor="u-1")
             ids.append(inv.investigation_id)
-            (containers / f"defender-run-{inv.investigation_id}").touch()
         config = _scripted_config(dsn, root, runs, tmp_path, term="mark",
-                                  term_mark=str(tmp_path / "termed-{id}"))
+                                  term_mark=str(tmp_path / "termed-{id}"), box_dir=str(containers))
         with worker_process(tmp_path, config) as proc:
             seen = tmp_path / "child" / "seen"
             _wait(lambda: len(list(seen.glob("*.json"))) == 2, timeout=60, what="both children")
@@ -238,15 +240,16 @@ async def test_o7_a_child_that_ignores_sigterm_is_group_killed_after_the_grace(m
     async with job_store(dsn) as store:
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
-    box = tmp_path / "containers" / f"defender-run-{inv.investigation_id}"
-    box.touch()
-    config = _scripted_config(dsn, root, runs, tmp_path, term="ignore", grandchild=True)
+    box = tmp_path / "containers" / f"defender-run-{inv.investigation_id}"  # the child's box start makes it
+    config = _scripted_config(dsn, root, runs, tmp_path, term="ignore", grandchild=True,
+                              box_dir=str(tmp_path / "containers"))
     with worker_process(tmp_path, config) as proc:
         seen = tmp_path / "child" / "seen"
         _wait(lambda: len(list(seen.glob("*.json"))) == 1, timeout=60, what="the child")
         record = json.loads(next(seen.glob("*.json")).read_text(encoding="utf-8"))
         child_pid, grandchild_pid = record["pid"], record["grandchild"]
         assert grandchild_pid
+        _wait(box.is_file, timeout=30, what="the child's box")
         started = time.monotonic()
         proc.send_signal(signal.SIGTERM)
         time.sleep(0.5)

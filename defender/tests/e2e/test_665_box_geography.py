@@ -290,6 +290,28 @@ def test_the_box_is_stamped_with_the_token_its_own_fault_arm_checks(tmp_path):
         "the token is not per-START — two starts stamped the same value"
 
 
+def test_a_start_given_a_token_stamps_that_token_and_an_operator_start_mints_its_own(tmp_path):
+    """`start_box(..., start_token=T)` stamps exactly T on the create argv (#1342 r5 C1); without one the box mints a fresh token. (#1342 r5 C1)"""
+    given = "ab" * 16
+    rec = RecordingDocker()
+    box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, start_token=given)
+    assert rec.create_label(box_mod.START_TOKEN_LABEL) == given
+    minted = RecordingDocker()
+    box_mod.start_box(make_run_dir(tmp_path / "second"), DEFENDER, docker=minted)
+    assert minted.create_label(box_mod.START_TOKEN_LABEL) not in (None, "", given)
+
+
+@pytest.mark.parametrize("holder", ["the given token", "another lane's token"])
+def test_a_create_fault_reaps_only_a_container_carrying_the_token_the_start_was_given(tmp_path, holder):
+    """The create-fault arm owns the token the caller handed in: a leftover with it is reaped, one with another token survives. (#1342 r5 C1)"""
+    given = "ab" * 16
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT),
+                          existing_token="self" if holder == "the given token" else "cd" * 16)
+    with pytest.raises(box_mod.BoxFault):
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, start_token=given)
+    assert reaped_after_create(rec.calls) is (holder == "the given token")
+
+
 def test_a_reap_that_cannot_reach_the_daemon_does_not_replace_the_create_fault(tmp_path):
     """The create-fault arm's reap is best-effort on BOTH halves, `docker inspect` included."""
     run_dir = make_run_dir(tmp_path)
