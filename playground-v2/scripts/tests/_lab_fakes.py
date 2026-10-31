@@ -57,8 +57,8 @@ class FakeClock:
     """`now()` advances one minute per call, so later reads are always later."""
 
     def __init__(self, journal: Journal, start: str = "2026-10-21T00:00:00+00:00",
-                 fail_at: str | None = None) -> None:
-        self.journal, self.fail_at = journal, fail_at
+                 fail_at: str | None = None, exc: type[BaseException] = RuntimeError) -> None:
+        self.journal, self.fail_at, self.exc = journal, fail_at, exc
         self._t = datetime.fromisoformat(start)
 
     def now(self) -> datetime:
@@ -68,12 +68,12 @@ class FakeClock:
     def sleep(self, seconds: float) -> None:
         self.journal.append(("clock.sleep", seconds))
         if self.fail_at == "settle":
-            raise RuntimeError("settle failed")
+            raise self.exc("settle failed")
 
     def sleep_until(self, moment: Any) -> None:
         self.journal.append(("clock.sleep_until", moment))
         if self.fail_at == "wait_as_of":
-            raise RuntimeError("wait_as_of failed")
+            raise self.exc("wait_as_of failed")
 
 
 def sha(data: bytes) -> str:
@@ -108,13 +108,17 @@ STEP_PARTS = {
 
 class FakeCaptureOps:
     """The lab operations capture drives. Each call is journaled with its arguments;
-    `fail_at` names the step that raises. Snapshot steps write their part files into `dest`."""
+    `fail_at` names the step (or steps) that raise `exc`; `on_step(name)` observes each step
+    as it starts. Snapshot steps write their part files into `dest`."""
 
-    def __init__(self, journal: Journal, fail_at: str | None = None,
+    def __init__(self, journal: Journal, fail_at: str | tuple[str, ...] | None = None,
                  ledger_ref: str | None = "chaos-abc123",
-                 fingerprint_result: dict | None = None) -> None:
+                 fingerprint_result: dict | None = None,
+                 exc: type[BaseException] = RuntimeError,
+                 on_step: Callable[[str], None] | None = None) -> None:
         self.fingerprint_result = fingerprint_result if fingerprint_result is not None else FINGERPRINT
-        self.journal, self.fail_at, self.ledger_ref = journal, fail_at, ledger_ref
+        self.journal, self.ledger_ref, self.exc, self.on_step = journal, ledger_ref, exc, on_step
+        self.fail_at = (fail_at,) if isinstance(fail_at, str) else tuple(fail_at or ())
         self.fault_live = False
         self.fire_kwargs: dict[str, Any] = {}
         self.fingerprint_kwargs: dict[str, Any] = {}
@@ -122,8 +126,10 @@ class FakeCaptureOps:
 
     def _step(self, name: str, detail: Any = None) -> None:
         self.journal.append((name, detail))
-        if name == self.fail_at:
-            raise RuntimeError(f"{name} failed")
+        if self.on_step is not None:
+            self.on_step(name)
+        if name in self.fail_at:
+            raise self.exc(f"{name} failed")
 
     def fire(self, scenario: str, chaos: str, seed: int, lock_token: str) -> dict:
         self.fire_kwargs = {"scenario": scenario, "chaos": chaos, "seed": seed,
@@ -171,3 +177,19 @@ class FakeCaptureOps:
         self.fingerprint_kwargs = {"window": window, "as_of": as_of, "arrived_by": arrived_by}
         self._step("fingerprint", dict(self.fingerprint_kwargs))
         return self.fingerprint_result
+
+
+class LocalContainer:
+    """Stands in for `docker --context C exec CONTAINER <argv>`: runs the argv on this machine
+    with absolute-path arguments re-rooted under `root`, so a shell script meant for the lab
+    container acts on a throwaway directory. It knows nothing about locks."""
+
+    def __init__(self, root: Path) -> None:
+        self.root, self.argvs = root, []
+
+    def __call__(self, argv: list[str], **kwargs: Any) -> Any:
+        import subprocess
+        self.argvs.append(list(argv))
+        assert argv[:2] == ["docker", "--context"] and argv[3] == "exec", argv
+        inner = [str(self.root) + a if a.startswith("/") else a for a in argv[5:]]
+        return subprocess.run(inner, capture_output=True, text=True)

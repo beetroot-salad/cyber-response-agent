@@ -420,3 +420,94 @@ def test_a_freeze_value_canonical_json_cannot_carry_refuses_the_whole_set(tmp_pa
     assert OTHER in said, said
     assert "refused" in said, said
     assert _verdicts(said) == {}, said
+
+
+def test_a_row_whose_freeze_differs_from_the_cases_only_in_its_tail_does_not_bind(tmp_path):
+    """Freeze digest: binding is whole-digest equality; a row sharing all but the last
+    character of the current digest is another freeze, listed not run."""
+    fixtures, runs = _cases(tmp_path)
+    digest = freeze_digest(fixtures / GOOD)
+    near = digest[:-1] + ("0" if digest[-1] != "0" else "1")
+
+    _rc, said = _scored_rc(tmp_path, runs, fixtures,
+                           _row(fixtures, GOOD, _ok(runs), freeze=near), (OTHER, _ok(runs, "malicious")))
+
+    assert _verdicts(said) == {OTHER: "OK"}, said
+    assert "not run" in _why(said, GOOD), said
+
+
+@pytest.mark.parametrize("position", [19, 20, 40], ids=["20th", "21st", "41st"])
+def test_a_now_read_late_in_the_recorded_queries_is_found(tmp_path, position):
+    """D4/O5: the whole recorded query list is scanned; `now()` in a late query still drops the
+    run, not scored, listed for re-run."""
+    fixtures, runs = _cases(tmp_path)
+    queries = [*CLEAN * position, *NOW_ESQL, *CLEAN * 3]
+    late = _run(runs, says="malicious", queries=queries).name
+
+    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, late))
+
+    assert _verdicts(said) == {GOOD: "OK"}, said
+    assert "re-run" in _why(said, OTHER), said
+    assert rc != 0, said
+
+
+@pytest.mark.parametrize("params", [
+    {"native_query": "user.name:root", "start": "now-1d"},
+    {"native_query": "user.name:root", "end": "now"},
+    {"native_query": "@timestamp:[now-1h TO *]"},
+], ids=["start", "end", "query-string"])
+def test_an_alerts_call_that_uses_now_date_math_is_dropped_like_a_search(tmp_path, params):
+    """D4/O5: every Elasticsearch verb is scanned; `now` date math in an `alerts` call's start,
+    end or query string drops the run, as it does for `query`."""
+    fixtures, runs = _cases(tmp_path)
+    alerts = {**_search(**params), "verb": "alerts", "query_id": "elastic.alerts"}
+    read = _run(runs, says="malicious", queries=[*CLEAN, alerts]).name
+
+    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, read))
+
+    assert _verdicts(said) == {GOOD: "OK"}, said
+    assert "re-run" in _why(said, OTHER), said
+    assert rc != 0, said
+
+
+def test_a_stale_row_whose_run_also_read_now_is_listed_stale_not_for_rerun(tmp_path):
+    """Verdict/D4: a stale newest row is listed stale before the run's queries are read; a
+    `now` in that run does not turn it into a re-run."""
+    fixtures, runs = _cases(tmp_path)
+    stale = _row(fixtures, OTHER, _dropped(runs), verdict="stale", reason="fingerprint differs")
+
+    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), stale)
+
+    assert "stale" in _why(said, OTHER), said
+    assert "re-run" not in _why(said, OTHER), said
+    assert (rc != 0, "incomplete" in said.lower()) == (True, True), said
+
+
+@pytest.mark.parametrize("freeze", [123, ["a"], {"a": 1}, True], ids=["number", "list", "object", "bool"])
+def test_an_index_row_whose_freeze_is_not_text_refuses_the_whole_index(tmp_path, freeze):
+    """FR8/r6.1: a row whose `freeze` is present but not a digest string is malformed: exit 2,
+    nothing scored, even beside a well-formed row."""
+    fixtures, runs = _cases(tmp_path)
+    bad = _row(fixtures, OTHER, _ok(runs, "malicious"), freeze=freeze)
+
+    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), bad)
+
+    assert rc == 2, said
+    assert _verdicts(said) == {}, said
+
+
+@pytest.mark.parametrize("unicode_text", [False, True], ids=["escaped", "raw-utf8"])
+def test_the_digest_of_a_freeze_with_non_ascii_values_is_pinned(tmp_path, unicode_text):
+    """Freeze digest: non-ASCII values are hashed in `json.dumps`' default ASCII-escaped form
+    (the launcher writes the same hex), however the YAML spells them; a pinned literal binds."""
+    pinned = "03b9c74afe23015cce54f7538261143997b27d5727eb103f5c171e218a3d8602"
+    fixtures, runs = _cases(tmp_path)
+    doc = freeze_doc(confirmed={"by": "opérateur ☃", "at": "2026-10-20T10:00:00Z",
+                                "reference_run": "11111111-1111-4111-8111-111111111111"})
+    (fixtures / GOOD / "freeze.yaml").write_text(
+        yaml.safe_dump(doc, sort_keys=False, allow_unicode=unicode_text), encoding="utf-8")
+
+    rc, said = _scored_rc(tmp_path, runs, fixtures, _row(fixtures, GOOD, _ok(runs), freeze=pinned),
+                          (OTHER, _ok(runs, "malicious")))
+
+    assert (rc, _verdicts(said)) == (0, {GOOD: "OK", OTHER: "OK"}), said

@@ -12,7 +12,9 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.integrations import elastic_adapter  # noqa: E402
-from defender.systems.verbs import VerbContext  # noqa: E402
+from defender._io import read_jsonl_rows  # noqa: E402
+from defender.systems.verb_grant import VerbGrant  # noqa: E402
+from defender.systems.verbs import ModuleVerbRegistry, ReadCut, VerbContext, read_roster  # noqa: E402
 from defender.tests.learning.branch.test_947_clock import (  # noqa: E402
     DOCKER_LOG,
     _fixture_tenant,
@@ -130,6 +132,23 @@ def test_both_cuts_are_inclusive_to_the_millisecond():
         "arrival one millisecond past arrived_by was served: the cut lost sub-second precision")
 
 
+def test_a_cut_finer_than_a_millisecond_is_never_rounded_up_past_the_instant():
+    """D12 (ms precision): a sub-millisecond cut truncates, so no document dated after the
+    instant is served; the next millisecond up is outside both cuts."""
+    as_of = dt.datetime(2026, 10, 20, 9, 0, 0, 250900, tzinfo=dt.UTC)
+    arrived_by = dt.datetime(2026, 10, 20, 9, 3, 17, 750900, tzinfo=dt.UTC)
+    clause = elastic_adapter.cut_clause(as_of, arrived_by)
+
+    def kept(ts: str, ingested: str) -> bool:
+        return clause_keeps(clause, {"@timestamp": ts, "event.ingested": ingested})
+
+    assert kept("2026-10-20T09:00:00.250Z", "2026-10-20T09:03:17.750Z")
+    assert not kept("2026-10-20T09:00:00.251Z", "2026-10-20T09:03:17.000Z"), (
+        "event time after as_of was served: the cut was rounded up to the next millisecond")
+    assert not kept("2026-10-20T09:00:00.000Z", "2026-10-20T09:03:17.751Z"), (
+        "arrival after arrived_by was served: the cut was rounded up to the next millisecond")
+
+
 def test_the_cut_clause_is_the_same_instant_whatever_offset_the_caller_spells_it_in():
     """D12 (UTC): an aware datetime in another zone cuts at the same instant."""
     east = dt.timezone(dt.timedelta(hours=2))
@@ -240,25 +259,103 @@ def test_the_row_backstop_still_drops_search_hits_dated_after_as_of(tmp_path):
     """O2: a hit the cluster let through past as_of is dropped client-side; in-window ones stay."""
     hits = [{"_source": {"@timestamp": "2026-10-20T08:59:59Z", "event.ingested": "2026-10-20T09:00:01Z",
                          "n": "kept"}},
+            {"_source": {"@timestamp": "2026-10-20T09:00:00Z", "n": "at-as-of"}},
             {"_source": {"@timestamp": "2026-10-20T09:00:01Z", "n": "past"}},
             {"_source": {"n": "undated"}}]
-    ctx = cut_ctx(tmp_path, canned={"hits": {"total": {"value": 3}, "hits": hits}})
+    ctx = cut_ctx(tmp_path, canned={"hits": {"total": {"value": 4}, "hits": hits}})
 
     out = elastic_adapter.query(ctx, native_query="*")
 
-    assert [h["n"] for h in out["hits"]] == ["kept", "undated"]
-    assert out["total"] == 2
+    assert [h["n"] for h in out["hits"]] == ["kept", "at-as-of", "undated"], (
+        "the backstop is inclusive: a hit dated exactly as_of is served")
+    assert out["total"] == 3
 
 
 def test_the_row_backstop_still_drops_esql_rows_dated_after_as_of(tmp_path):
     """O2: ES|QL rows past as_of are dropped from the payload; the rest are served as returned."""
     canned = {"columns": [{"name": "@timestamp", "type": "date"}, {"name": "n", "type": "keyword"}],
               "values": [["2026-10-20T08:59:59.000Z", "kept"],
+                         ["2026-10-20T09:00:00.000Z", "at-as-of"],
                          ["2026-10-20T09:00:01.000Z", "past"],
                          [None, "undated"]]}
     ctx = cut_ctx(tmp_path, canned=canned)
 
     payload = elastic_adapter.esql(ctx, query="FROM logs-zeek.ssh-*")
 
-    assert [row[1] for row in payload["values"]] == ["kept", "undated"]
-    assert payload["row_count"] == 2
+    assert [row[1] for row in payload["values"]] == ["kept", "at-as-of", "undated"], (
+        "the backstop is inclusive: a row dated exactly as_of is served")
+    assert payload["row_count"] == 3
+
+
+# the base registry sets the cut on every system's calls
+
+_RECORDING_ADAPTER = '''\
+"""Verb bodies that record the cut their ctx carried."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from defender.kit.verbs import VerbContext, verb
+
+
+def _record(ctx: VerbContext, name: str) -> dict:
+    row = {"verb": name,
+           "as_of": None if ctx.as_of is None else ctx.as_of.isoformat(),
+           "arrived_by": None if ctx.arrived_by is None else ctx.arrived_by.isoformat()}
+    with (Path(ctx.run_dir) / "seen.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\\n")
+    return {"ok": True}
+
+
+@verb()
+def get_host(ctx: VerbContext, *, host: str) -> dict:
+    return _record(ctx, "get-host")
+
+
+@verb()
+def health_check(ctx: VerbContext) -> dict:
+    return _record(ctx, "health-check")
+
+
+VERBS = {"get-host": get_host, "health-check": health_check}
+'''
+
+
+def _registry(tmp_path: Path, cut: ReadCut | None) -> ModuleVerbRegistry:
+    adapters = tmp_path / "adapters"
+    adapters.mkdir(parents=True, exist_ok=True)
+    for system in ("cmdb", "elastic"):
+        (adapters / f"{system}_adapter.py").write_text(_RECORDING_ADAPTER, encoding="utf-8")
+    grant = VerbGrant(role="gather", entries=(("cmdb", "get-host", "r"), ("elastic", "health-check", "r")))
+    return ModuleVerbRegistry(read_roster(adapters), grant, cut=cut)
+
+
+@pytest.mark.parametrize(("system", "verb", "params"), [
+    pytest.param("cmdb", "get-host", {"host": "web-1"}, id="a-system-of-record"),
+    pytest.param("elastic", "health-check", {}, id="elastic"),
+])
+@pytest.mark.parametrize("cut", [ReadCut(AS_OF, ARRIVED_BY), ReadCut(AS_OF)],
+                         ids=["as-of-and-arrived-by", "as-of-alone"])
+def test_every_system_body_is_handed_the_runs_cut_on_a_context_that_carried_none(
+    tmp_path, system, verb, params, cut,
+):
+    """Product-side cut: the base registry sets as_of and arrived_by on the ctx of every call,
+    whichever system it addresses, so no verb body reads uncut."""
+    ctx = cut_ctx(tmp_path, as_of=None, arrived_by=None)
+
+    _registry(tmp_path, cut).verbs(system)[verb](ctx, **params)
+
+    assert read_jsonl_rows(ctx.run_dir / "seen.jsonl") == [
+        {"verb": verb, "as_of": cut.as_of.isoformat(),
+         "arrived_by": None if cut.arrived_by is None else cut.arrived_by.isoformat()}]
+
+
+def test_a_registry_with_no_cut_hands_every_body_the_context_as_built(tmp_path):
+    """Product-side cut control: an ordinary run's calls reach the body with no cut on them."""
+    ctx = cut_ctx(tmp_path, as_of=None, arrived_by=None)
+
+    _registry(tmp_path, None).verbs("cmdb")["get-host"](ctx, host="web-1")
+
+    assert read_jsonl_rows(ctx.run_dir / "seen.jsonl") == [
+        {"verb": "get-host", "as_of": None, "arrived_by": None}]

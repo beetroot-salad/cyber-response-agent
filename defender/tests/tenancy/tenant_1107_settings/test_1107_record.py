@@ -437,10 +437,9 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
     root = tmp_path / "tenants"
     S.plant(root, marker="mf11")
     rec = _resolve(root)
-    registry = S.mod("learning.branch.estate.registry")
     ctx = _ctx(rec, tmp_path)
     moment = datetime(2026, 7, 28, 16, 18, 45, tzinfo=UTC)
-    carried = registry._carrying(ctx, as_of=moment)  # the world registry's VerbContext copy
+    carried = S.mod("systems.verbs").ReadCut(moment).applied(ctx)  # the read cut's VerbContext copy
     assert carried is not ctx
     assert carried.as_of == moment
 

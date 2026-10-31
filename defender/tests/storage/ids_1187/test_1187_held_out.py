@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 
+import hashlib
 import json
 import os
 from collections.abc import Sequence
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -26,14 +28,32 @@ INDEX_NAME = "held-out-index.jsonl"
 NO_RUN_RECORD = "launched, no run record"
 # Inputs on the real filesystem
 
+def _freeze_digest(member: Path) -> str:
+    """The #1347 r6.1 freeze digest: bare hex sha256 of the parsed freeze.yaml as sorted-key
+    compact JSON (the helper `evaluations/tests/test_held_out_scoring.py` uses)."""
+    doc = yaml.safe_load((member / "freeze.yaml").read_text(encoding="utf-8"))
+    return hashlib.sha256(
+        json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 def _fixtures(root: Path, truths: dict[str, str]) -> Path:
-    """A held-out fixture set: `<root>/<slug>/alert.json` plus a labelled `ground_truth.yaml` per slug, the shape `load_held_out_fixtures` admits."""
+    """A held-out fixture set: `<root>/<slug>/alert.json`, a labelled `ground_truth.yaml` and a
+    confirmed `freeze.yaml` per slug, the shape `load_held_out_fixtures` admits (#1347 O9)."""
     for slug, disposition in truths.items():
         member = root / slug
         member.mkdir(parents=True)
         (member / "alert.json").write_text('{"alert": "held-out"}\n', encoding="utf-8")
         (member / "ground_truth.yaml").write_text(
             f"held_out: true\ndisposition: {disposition}\n", encoding="utf-8")
+        (member / "freeze.yaml").write_text(yaml.safe_dump({
+            "alert_at": "2026-10-20T08:00:00Z", "as_of": "2026-10-20T09:00:00Z",
+            "window": ["2026-09-19T08:00:00Z", "2026-10-20T09:00:00Z"],
+            "captured_at": "2026-10-20T09:03:17Z",
+            "fingerprint": {"logs-system.auth-2026.10.20|2026-10-20T08": [1200, 1200]},
+            "parts": {}, "chaos": None,
+            "confirmed": {"by": "operator", "at": "2026-10-20T10:00:00Z",
+                          "reference_run": "11111111-1111-4111-8111-111111111111"},
+        }, sort_keys=False), encoding="utf-8")
     return root
 
 
@@ -51,11 +71,14 @@ def _run(runs: Path, run_id: str | None = None, *, says: str | None,
     return run_dir
 
 
-def _index(path: Path, *rows: tuple[str, str]) -> Path:
-    """The index holding `rows` (`(slug, run_id)`, oldest first) as JSON Lines."""
+def _index(path: Path, fixtures: Path, *rows: tuple[str, str]) -> Path:
+    """The index holding `rows` (`(slug, run_id)`, oldest first) as JSON Lines: each an r6 row
+    bound to its case's current freeze, verdict valid (#1347 O9)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(json.dumps({"slug": slug, "run_id": run_id}) + "\n"
-                            for slug, run_id in rows), encoding="utf-8")
+    path.write_text("".join(json.dumps({
+        "slug": slug, "run_id": run_id, "freeze": _freeze_digest(fixtures / slug),
+        "verdict": "valid", "reason": "", "verified_at": "2026-10-20T11:00:00Z"}) + "\n"
+        for slug, run_id in rows), encoding="utf-8")
     return path
 
 
@@ -95,7 +118,8 @@ class Outcome(P.CliResult):
         return out
 
     def not_run(self) -> list[str]:
-        return self.section("Not run")
+        """The slugs under `## Not run` (each line is `<slug>: <reason>`)."""
+        return [ln.partition(":")[0] for ln in self.section("Not run")]
 
     def accuracy(self) -> tuple[int, int] | None:
         for ln in self.out.splitlines():
@@ -107,7 +131,9 @@ class Outcome(P.CliResult):
 
     def assert_score(self, verdicts: dict[str, str], accuracy: tuple[int, int], *, not_run=()):
         assert self.crashed is None, self.crashed
-        assert self.rc == 0, self.said
+        # A set with a case not scored is incomplete, and incomplete exits non-zero (#1347 O11).
+        assert self.rc == (1 if not_run else 0), self.said
+        assert ("INCOMPLETE" in self.out) == bool(not_run), self.out
         assert self.verdicts() == verdicts, self.out
         assert self.accuracy() == accuracy, self.out
         assert self.not_run() == list(not_run), self.out
@@ -166,7 +192,7 @@ def test_scoring_uses_index_order_instead_of_folder_age(tmp_path, scoring, lates
     os.utime(wrong, (1_800_000_000, 1_800_000_000))
     os.utime(right, (1_800_000_600, 1_800_000_600))
     first, last = (right, wrong) if latest == "wrong" else (wrong, right)
-    _index(index, (SLUG, first.name), (SLUG, last.name))
+    _index(index, fixtures, (SLUG, first.name), (SLUG, last.name))
     res = _score(runs, index, fixtures)
     res.assert_score({SLUG: verdict}, accuracy)
     if latest == "wrong":
@@ -181,7 +207,7 @@ def test_a_row_naming_an_absent_or_recordless_run_scores_wrong_not_not_run(tmp_p
     recordless = _run(runs, says="benign", record=False)
     no_report = _run(runs, says=None)
     scored = _run(runs, says="benign")
-    _index(index, ("absent-case", S.new_id()), ("recordless-case", recordless.name),
+    _index(index, fixtures, ("absent-case", S.new_id()), ("recordless-case", recordless.name),
            ("no-report-case", no_report.name), ("scored-case", scored.name))
 
     res = _score(runs, index, fixtures)
@@ -202,7 +228,7 @@ def test_an_index_from_the_old_launcher_scores_past_its_knowledge_pin_line(tmp_p
     runs, index, _ = scoring
     fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "malicious"})
     run = _run(runs, says="malicious")
-    _index(index, (SLUG, run.name))
+    _index(index, fixtures, (SLUG, run.name))
     index.write_text(json.dumps({"knowledge_commit": "a" * 40}) + "\n"
                      + index.read_text(encoding="utf-8"), encoding="utf-8")
     _score(runs, index, fixtures).assert_score({SLUG: "OK"}, (1, 1))
@@ -217,7 +243,7 @@ def test_a_slug_with_no_row_is_not_run_whatever_folders_are_named_after_it(tmp_p
     decoy = _run(runs, OTHER, says="malicious")
     os.utime(indexed, (1_800_000_000, 1_800_000_000))
     os.utime(decoy, (1_800_000_600, 1_800_000_600))
-    _index(index, (OTHER, indexed.name))
+    _index(index, fixtures, (OTHER, indexed.name))
 
     res = _score(runs, index, fixtures)
     res.assert_score({OTHER: "OK"}, (1, 1), not_run=[SLUG])
@@ -232,7 +258,7 @@ def test_scoring_without_an_index_scores_no_folder_by_its_name(tmp_path, scoring
     assert res.verdicts() == {}, f"a folder was scored by its name with no index:\n{res.out}"
 
     indexed = _run(runs, says="benign")
-    _index(index, (SLUG, indexed.name))
+    _index(index, fixtures, (SLUG, indexed.name))
     res = _score(runs, index, fixtures)
     assert res.verdicts() == {SLUG: "OK"}, f"control: the indexed run was not scored:\n{res.out}"
 
@@ -258,7 +284,7 @@ def test_scoring_refuses_an_index_inside_its_runs_dir(tmp_path, scoring, place):
     elif place == "linked-runs-root":
         handed = tmp_path / "runs-link"
         handed.symlink_to(runs)
-    _index(index, (SLUG, good.name))
+    _index(index, fixtures, (SLUG, good.name))
     held = index.read_bytes()
 
     res = _score(handed, index, fixtures)
@@ -267,7 +293,7 @@ def test_scoring_refuses_an_index_inside_its_runs_dir(tmp_path, scoring, place):
     assert res.accuracy() is None, res.out
     assert index.read_bytes() == held
 
-    _index(ops_index, (SLUG, good.name))
+    _index(ops_index, fixtures, (SLUG, good.name))
     res = _score(runs, ops_index, fixtures)
     assert res.verdicts() == {SLUG: "OK"}, f"control: an index outside was not scored:\n{res.out}"
 
@@ -279,7 +305,7 @@ def test_scoring_depends_only_on_the_index_and_given_runs(tmp_path, scoring, mon
     runs, index, ops = scoring
     fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "benign"})
     good = _run(runs, says="benign")
-    _index(index, (SLUG, good.name))
+    _index(index, fixtures, (SLUG, good.name))
     if scope.startswith("root-"):
         if scope == "root-unset":
             monkeypatch.delenv(S.DATA_ROOT_ENV, raising=False)

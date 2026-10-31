@@ -130,8 +130,10 @@ def _check_outcome(check: Callable[..., Any], record: Any) -> BaseException | No
 
 
 def _plant(tmp_path: Path, marker: str) -> tuple[Path, Path]:
+    """A complete tenant whose events pattern is the `logs-*` that `_PARAM_VALUES["query"]` reads,
+    so an ES|QL verb is inside the configured patterns (#1347 O2a confines every source)."""
     root = tmp_path / "tenants"
-    return root, S.plant(root, marker=marker)
+    return root, S.plant(root, marker=marker, configs=S.config_texts(marker, events_index="logs-*"))
 
 
 def _ctx(record: Any, tmp_path: Path, shim: S.DockerShim) -> Any:

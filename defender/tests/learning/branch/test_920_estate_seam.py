@@ -262,11 +262,21 @@ def test_no_route_to_a_verb_hands_back_a_bare_adapter_body(tmp_path):
     reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
     plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
 
+    def layers(fn):
+        """`fn` and each layer it wraps, outermost first (the world's serving, the read cut, ...)."""
+        chain = []
+        while fn is not None:
+            chain.append(fn)
+            fn = getattr(fn, "__wrapped__", None)
+        return chain
+
     bare = []
     for system, verb, _ in _gather_grant().entries:
         real = plain.verbs(system)[verb]
         for route, fn in (("verbs", reg.verbs(system)[verb]), ("decide", reg.decide(system, verb).fn)):
-            if fn is real or getattr(fn, "__wrapped__", None) is not real:
+            # Served, not bare: the callable handed out is a wrapper, and the adapter's own body
+            # sits somewhere beneath it (#1347 put the read cut between the two).
+            if fn is real or real not in layers(fn):
                 bare.append((system, verb, route))
 
     assert bare == []
