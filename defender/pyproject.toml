@@ -138,6 +138,7 @@ tmp_path_retention_policy = "failed"
 markers = [
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
     "postgres: needs a PostgreSQL server at DEFENDER_TEST_POSTGRES_DSN (skips without one, fails without one in CI); CI's test job runs a PostgreSQL service for it",
+    "openbao: needs an OpenBao server at DEFENDER_TEST_OPENBAO_ADDR with a root token in DEFENDER_TEST_OPENBAO_TOKEN (skips without one, fails without one in CI); #1163's store, transit and rotation cases",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",
     "box: drives a REAL container to pin the #540 execution boundary (needs a native docker daemon + the gVisor runtime; self-skips under docker-outside-of-Docker)",
     # NOT a way to skip a check — a `gate`-marked test re-runs a repo-wide lint gate over
