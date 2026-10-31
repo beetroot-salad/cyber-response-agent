@@ -6,7 +6,6 @@ from __future__ import annotations
 import base64
 import json
 import shutil
-import time
 from pathlib import Path
 
 import pytest
@@ -162,12 +161,14 @@ BAD_NAMES = [
 
 
 def _forged(r, *, grant_system: str) -> str:
-    """A token whose hand-built claims grant `grant_system`, signed by the rig's signer, so the
-    mint's own check is bypassed and the grant holds whatever name is given."""
-    claims = {"tenant": r.t.tenant_id, "investigation": T.RUN_ID,
-              "grant": [[grant_system, "r"]], "exp": int(time.time()) + 3600}
-    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
-    return f"{payload}.{r.signer.sign(payload.encode())}"
+    """A real minted token with only its grant swapped for `grant_system`, re-signed by the rig's
+    signer: every other claim is the minter's own, and the mint's name check is bypassed."""
+    real = T.token(r.t.tenant_id, {("identity", "r")}, signer=r.signer)
+    payload = real.rpartition(".")[0]
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    claims["grant"] = [[grant_system, "r"]]
+    forged = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"{forged}.{r.signer.sign(forged.encode())}"
 
 
 @pytest.mark.parametrize("name", BAD_NAMES)
@@ -179,7 +180,13 @@ def test_d4_a_system_name_outside_the_grammar_is_refused_without_reading_beyond_
         r.verifier = H.FakeVerifier(True)  # the forged payload's wire form is not under test
         r.rebuild()
         settings = export_dir(r.t.tenant, r.t.commit) / "settings"
-        for where in (settings / "other", settings / "systems" / "other"):
+        # A declaration wherever the name would resolve, so a proxy that skips the grammar
+        # check finds one and reads the store: traversal targets, and the name itself when it
+        # is a legal path component.
+        places = [settings / "other", settings / "systems" / "other"]
+        if name and "/" not in name:
+            places.append(settings / "systems" / name)
+        for where in places:
             where.mkdir(exist_ok=True)
             (where / "access.yaml").write_text(
                 H.declaration(r.up.url + T.BASE_PATH), encoding="utf-8")

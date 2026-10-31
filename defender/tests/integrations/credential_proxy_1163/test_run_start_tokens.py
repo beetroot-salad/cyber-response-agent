@@ -11,6 +11,7 @@ import pytest
 
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS
 from defender.kit.faults import ConfigFault
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163._target import proxy
@@ -60,6 +61,15 @@ def _plant(data_root, *, proxy: tuple[str, ...]):
         for rel, text in H.access_files(system, H.declaration("http://x.invalid/api")).items():
             (folder / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / rel).write_text(text, encoding="utf-8")
+
+
+def _config_refusal(refused, *causes: str) -> bool:
+    """A run-start refusal for operator configuration: a `ConfigFault`, or run start's own
+    `sys.exit` with a message naming one of `causes` (the house refusal style, run.py)."""
+    if isinstance(refused, ConfigFault):
+        return True
+    text = str(getattr(refused, "code", "")).lower()
+    return isinstance(refused, SystemExit) and any(c in text for c in causes)
 
 
 def _drive(tmp_path, data_root, *, signer=None, ticket=True, **seams):
@@ -121,6 +131,7 @@ def test_r1_run_start_signs_a_read_token_and_a_write_back_token_per_leg(
     on_disk = A.text_of(data_root, tmp_path)
     assert A.SIGNATURE_CANARY not in on_disk, "a token reached a file: run state, record or log"
     assert run_id in on_disk, "positive control: the files the run wrote are read"
+    assert S.PLAYGROUND_ID in A.text_of(data_root), "positive control: the data root is read too"
     assert "run_dir=" in caplog.text, "positive control: the log channel is read"
 
 
@@ -154,7 +165,7 @@ def test_r3_a_run_with_no_http_proxy_system_never_contacts_the_signer(tmp_path, 
 
 ROLE, SECRET = "role-1163-own", "secret-1163-own"
 DECOY_ROLE, DECOY_SECRET = "role-1163-decoy", "secret-1163-decoy"
-DECOY_TENANT = "t1163-decoy"
+DECOY_TENANT = fixture_uuid("tenant:1163-decoy")
 
 
 SEALED = {"sealed on login": {"sealed": "login"}, "sealed on sign": {"sealed": "sign"},
@@ -166,7 +177,7 @@ SEALED = {"sealed on login": {"sealed": "login"}, "sealed on sign": {"sealed": "
 def test_r4_a_sealed_or_unreachable_openbao_refuses_run_start_when_a_token_is_needed(
         tmp_path, data_root, ticket, fault):
     """The production signing path against an OpenBao answering 503 sealed (on login or sign)
-    or not at all: `ConfigFault` before the lifecycle, nothing signed. The control is R3. A7."""
+    or not at all: a configuration refusal before the lifecycle, nothing signed (control: R3). A7."""
     _plant(data_root, proxy=("identity",))
     A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE, secret_id=SECRET)
     bao = A.OpenBaoStandIn({ROLE: SECRET}, **SEALED[fault])
@@ -174,7 +185,7 @@ def test_r4_a_sealed_or_unreachable_openbao_refuses_run_start_when_a_token_is_ne
 
     assert bao.requests, "positive control: OpenBao was asked for a token"
     assert rc is None
-    assert isinstance(refused, ConfigFault), refused
+    assert _config_refusal(refused, "openbao", "sealed", "unreachable", "issuer"), refused
     assert "lifecycle" not in rec.order
     assert bao.signs == []
     assert tickets.calls == []
@@ -251,15 +262,15 @@ def _binding_with_file_absent(data_root, tmp_path):
                          ids=["no forge binding", "issuer config file absent"])
 def test_r7_an_http_proxy_tenant_with_no_usable_issuer_config_refuses_run_start(
         tmp_path, data_root, setup):
-    """No forge binding, or a binding whose issuer config file is absent: `ConfigFault` before
-    the lifecycle and no login. The control is R6. A11."""
+    """No forge binding, or a binding whose issuer config file is absent: a configuration
+    refusal before the lifecycle and no login (control: R6). A11."""
     _plant(data_root, proxy=("identity",))
     setup(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET})
     rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, issuer_transport=bao)
 
     assert rc is None
-    assert isinstance(refused, ConfigFault), refused
+    assert _config_refusal(refused, "issuer"), refused
     assert bao.logins == []
     assert bao.signs == []
     assert "lifecycle" not in rec.order

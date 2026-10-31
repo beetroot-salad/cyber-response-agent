@@ -3,6 +3,7 @@ a secret value."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -115,14 +116,25 @@ def test_a2_an_audit_that_cannot_be_written_withholds_the_upstreams_answer(
         assert "upstream-header-1163" not in json.dumps(answer)
 
 
-def test_a2_the_real_file_sink_that_cannot_write_fails_the_request_closed(tmp_path, data_root):
-    """The shipped `FileAuditSink` on a path that cannot be opened for append fails loudly (at
-    construction or on `record`); an app built on it answers `ConfigFault` without the upstream body. A13, O9."""
-    unwritable = tmp_path / "audit-is-a-directory"
-    unwritable.mkdir()
+def _directory(tmp_path):
+    (tmp_path / "audit-is-a-directory").mkdir()
+    return tmp_path / "audit-is-a-directory"
+
+
+def _full_device(_tmp_path):
+    return Path("/dev/full")  # opens for append; every write fails (ENOSPC), even as root
+
+
+@pytest.mark.parametrize("unwritable", [_directory, _full_device],
+                         ids=["cannot open", "opens but cannot write"])
+def test_a2_the_real_file_sink_that_cannot_write_fails_the_request_closed(
+        tmp_path, data_root, unwritable):
+    """The shipped `FileAuditSink` that cannot write fails loudly (at construction or on
+    `record`); an app built on it answers `ConfigFault` without the upstream body. A13, O9."""
+    path = unwritable(tmp_path)
     try:
-        sink = proxy().FileAuditSink(unwritable)
-    except OSError:
+        sink = proxy().FileAuditSink(path)
+    except (OSError, ConfigFault):
         return  # refused at construction: the proxy cannot start on it, which is closed too
     try:
         sink.record({"tenant": "t", "outcome": "sent 200"})
