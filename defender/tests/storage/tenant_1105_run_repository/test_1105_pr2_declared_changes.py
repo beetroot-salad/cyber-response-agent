@@ -411,7 +411,8 @@ def test_dc8_c10_a_row_naming_another_tenant_is_dead_lettered_on_the_first_tick(
     letter = P.dead_letter(t_paths, "case-crossed")
     assert letter is not None, "the crossed row was not dead-lettered on the first tick"
     reason = str(letter.get("failed", ""))
-    assert H.T_ID in reason and H.U_ID in reason, f"the reason does not name both tenants: {reason!r}"
+    assert H.T_ID in reason, f"the reason does not name the drain's tenant: {reason!r}"
+    assert H.U_ID in reason, f"the reason does not name the row's tenant: {reason!r}"
     assert "attempts" not in letter, f"the dead letter carries a retry counter: {letter!r}"
     assert not P.still_queued(t_paths, "case-crossed"), "the crossed row is still queued"
 
