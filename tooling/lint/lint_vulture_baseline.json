@@ -87,6 +87,7 @@
     "defender/identity/models.py: unused variable 'set_password_requested_at' (60% confidence)": "a record column the repositories write and the rows carry for the data model's audit (set-password and notification times, activation, update): read by the contract tests and the PostgreSQL mapping (the model is the table), not by service code.",
     "defender/identity/models.py: unused variable 'updated_at' (60% confidence)": "a record column the repositories write and the rows carry for the data model's audit (set-password and notification times, activation, update): read by the contract tests and the PostgreSQL mapping (the model is the table), not by service code.",
     "defender/migrations/__init__.py: unused function 'check_version' (60% confidence)": "test-only until #1083: the API server calls it at startup before its event loop starts (design #1339 D8); tests/migrations/test_1339_migrations.py exercises it.",
-    "defender/migrations/versions/0001_baseline.py: unused variable 'down_revision' (60% confidence)": "read by Alembic when it loads the revision file, which vulture cannot see."
+    "defender/migrations/versions/0001_baseline.py: unused variable 'down_revision' (60% confidence)": "read by Alembic when it loads the revision file, which vulture cannot see.",
+    "defender/api/models.py: unused method '_secrets_are_long_enough' (60% confidence)": "false positive: a pydantic `model_validator(mode=\"after\")` on `CredentialsPut` — pydantic runs it on every construction, never by name (#1163 A4). It refuses a secret field shorter than the minimum for the set's kind; tests/api/test_api_stub.py::test_a_secret_field_below_the_minimum_length_is_refused_at_write_time drives it."
   }
 }

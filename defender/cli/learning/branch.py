@@ -49,6 +49,9 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     oracle: Any = None,
     verifier: Any = None,
     roster: Any = None,
+    signer: Any = None,
+    proxy_url: str | None = None,
+    issuer_transport: Any = None,
 ) -> int:
     """Launch one episode with the real role preflight unless one is injected."""
     from defender.run import preflight_role_models
@@ -57,7 +60,8 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
         argv, spawn=spawn, questioner=questioner,
         preflight=preflight_role_models if preflight is None else preflight,
         render_page=_render_episode_page, judge=judge, lessons_dir=lessons_dir,
-        live_tree=live_tree, oracle=oracle, verifier=verifier, roster=roster)
+        live_tree=live_tree, oracle=oracle, verifier=verifier, roster=roster,
+        signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
 
 
 if __name__ == "__main__":

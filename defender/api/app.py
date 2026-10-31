@@ -409,7 +409,8 @@ async def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: Crede
     async with _transaction(deps, caller) as tx:
         await tx.audit("system.credentials", system_id,
                  detail="fields: " + ", ".join(sorted(body.credentials)))
-        await deps.secrets.put_credentials(caller.tenant_id, system_id, body.credentials)
+        await deps.secrets.put_credentials(
+            caller.tenant_id, system_id, body.kind, body.credentials)
 
 
 @systems.post("/{system_id}/check", responses=responses(404))

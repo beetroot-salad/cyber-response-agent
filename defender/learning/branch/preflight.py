@@ -8,6 +8,7 @@ import contextvars
 
 
 import json
+import os
 
 
 
@@ -24,6 +25,11 @@ from pathlib import Path
 from contextlib import AbstractContextManager
 from typing import Any, NamedTuple
 
+from datetime import UTC, datetime, timedelta
+
+from defender.credential_proxy import mint_request_token, request_signer
+from defender.kit.access import PROXY_URL_ENV, AccessDeclaration, RequestAccess
+from defender.kit.faults import AdapterFault
 from defender.records import formats
 
 from defender.records.formats import Episode
@@ -253,11 +259,15 @@ def _not_admitted(reader: Any, call: _Original) -> str | None:
 
 
 
+#: Seconds a preflight read token lives: one pass of live reads.
+PREFLIGHT_TOKEN_SEC = 3600
+
 #: The checkout's `defender/`, from this file's own location (not `$DEFENDER_DIR`).
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 
 
-def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any) -> Any:
+def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any,
+                       access: Any = None) -> Any:
     """The host-side context pre-flight's reads run in: the episode's tenant record, the
     family's branch-point clock, and no capture (pre-flight is not a run and writes no query
     row). `DEFENDER_RUNS_BASE` is the source run's container — the tenant's natural runs folder
@@ -267,15 +277,36 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any) 
 
     env = run_env(_DEFENDER_DIR, Path(episode_dir))
     env["DEFENDER_RUNS_BASE"] = source.runs_base_export()
+    proxied = ({} if access is None
+               else {"proxy_url": access.proxy_url, "request_token": access.token})
     return VerbContext(defender_dir=_DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
-                       capture=None, tenant=tenant, as_of=as_of)
+                       capture=None, tenant=tenant, as_of=as_of, **proxied)
+
+
+def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any], *, signer: Any,
+                 proxy_url: str | None, issuer_transport: Any) -> RequestAccess | None:
+    """A read token over the `http-proxy` systems the source run's replayable calls reach (H12),
+    signed in this process as the run does (A11), with the source run as its investigation; `None`
+    when no replayed call reaches one. Curators and the author are handed none."""
+    proxied = sorted({call.system for call in replayable
+                      if isinstance(tenant.access.get(call.system), AccessDeclaration)})
+    if not proxied:
+        return None
+    if signer is None:
+        signer = request_signer(tenant.tenant, transport=issuer_transport)
+    token = mint_request_token(
+        signer, tenant_id=str(tenant.tenant_id), investigation=source.run_dir.name,
+        grant={(system, "r") for system in proxied},
+        expires_at=datetime.now(UTC) + timedelta(seconds=PREFLIGHT_TOKEN_SEC))
+    return RequestAccess(proxy_url or os.environ.get(PROXY_URL_ENV, ""), token)
 
 
 
 
-def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
+def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
     episode: Episode, *, source: Run, roster: Any, tenant: RunTenant, oracle: Any = None,
-    verifier: Any = None, **knobs: Any,
+    verifier: Any = None, signer: Any = None, proxy_url: str | None = None,
+    issuer_transport: Any = None, **knobs: Any,
 ) -> dict[str, Any]:
     """`Step.PREFLIGHT`: replay every original call through each fact world's oracle and
     verifier, and write the episode's write-once outcome record (`outcome.write_outcome`)."""
@@ -339,7 +370,13 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     restart_after = knobs.pop("restart_after", DEFAULT_RESTART_AFTER)
     settings = oracle_settings_with(**knobs)
     limiter = RateLimiter(settings.rate)
-    ctx = _preflight_context(episode.dir, source, tenant, family.as_of)
+    try:
+        access = _preflight_access(source, tenant, replayable, signer=signer, proxy_url=proxy_url,
+                              issuer_transport=issuer_transport)
+    except AdapterFault as unsigned:
+        return record(REFUSED, f"the read token for the credential proxy cannot be signed: "
+                               f"{unsigned.detail}")
+    ctx = _preflight_context(episode.dir, source, tenant, family.as_of, access)
     resumed = {w.label: formats.resume_world_from(family, w.label, episode.dir)
                for w in fact_worlds}
     recording = Ledger.for_world(episode, resumed[fact_worlds[0].label].world_id)

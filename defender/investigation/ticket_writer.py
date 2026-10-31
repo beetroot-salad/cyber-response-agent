@@ -16,8 +16,9 @@ from defender.records import run_end
 from defender.systems.run_tenant import RunTenant
 from defender.kit.settings import SETTINGS_POINTER
 from defender.systems.verbs import VerbContext, redact_settings_path
-from defender import integrations
-from defender.kit.faults import AdapterFault, TransportFault
+from defender import _proxy_client, integrations
+from defender.kit.access import HTTP_PROXY
+from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 
 _logger = logging.getLogger(__name__)
 
@@ -28,12 +29,16 @@ _CONFIG_FILE = f"{SETTINGS_POINTER}systems/{SYSTEM}/config.env"
 
 
 def _verb_context(tenant: RunTenant, defender_dir: Path, run_dir: Path,
-                  env: Mapping[str, str]) -> VerbContext:
+                  env: Mapping[str, str], request_token: str | None = None,
+                  proxy_url: str | None = None) -> VerbContext:
     """The transport's context, built wholly from what `run.py` handed this leg: the run's record
     (its settings and the case-history entry resolved from them when the run began), the code
     tree, the run dir and the run's environment. Nothing here finds its own location or reads the
-    process (#1107): the same record a lead-zero or query call reads is the one this writes by."""
-    return VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=env, tenant=tenant)
+    process (#1107): the same record a lead-zero or query call reads is the one this writes by.
+    `request_token` and `proxy_url` are the write-back grant and the proxy's address for a store
+    reached through the credential proxy (#1163), handed by run.py for this leg."""
+    return VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=env, tenant=tenant,
+                       request_token=request_token, proxy_url=proxy_url)
 
 
 def _request(
@@ -42,8 +47,10 @@ def _request(
 ) -> tuple[str | None, str]:
     """One call to the store, over the context the caller built from the run's record."""
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
-    bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
+    if _reached_by_proxy(ctx):
+        return _via_proxy(ctx, method, url, body, timeout)
+    bastion = config["BASTION_HOST"]
     try:
         rc, stdout, stderr = integrations.docker_exec_curl(
             ctx, bastion, url, method=method, body=body, timeout_sec=timeout, system=SYSTEM,
@@ -54,6 +61,34 @@ def _request(
     if not status:
         return None, f"no/malformed response (rc={rc}, stderr={stderr.strip()!r})"
     return status, body_text
+
+
+def _reached_by_proxy(ctx: VerbContext) -> bool:
+    """Does the run's record say the case-history store is reached through the proxy?"""
+    entry = ctx.tenant.systems.get(SYSTEM)
+    return (entry is not None and not isinstance(entry, ConfigFault)
+            and entry.get(f"{PREFIX}_TRANSPORT") == HTTP_PROXY)
+
+
+def _via_proxy(ctx: VerbContext, method: str, url: str, body: dict | None,
+                   timeout: int) -> tuple[str | None, str]:
+    """`_request` for a store reached through the credential proxy: the same transport as a
+    query; a refusal or a transport failure is text, never raised."""
+    try:
+        answer = _proxy_client.proxy_call(
+            ctx.proxy_url, ctx.request_token, system=SYSTEM, method=method, url=url,
+            headers={"Accept": "application/json"}
+            | ({"Content-Type": "application/json"} if body is not None else {}),
+            body=_proxy_client.request_body(body), timeout_sec=timeout)
+    except TransportFault as e:
+        return None, f"transport error: {e.detail}"
+    if answer.fault == "ConfigFault":
+        # A refused credential or declaration: the system is down for the run (O7), so the
+        # record leg does not ask again.
+        return None, f"{PROXY_REFUSED}: {answer.detail}"
+    if answer.fault is not None:
+        return None, f"transport error: the credential proxy answered {answer.fault}: {answer.detail}"
+    return str(answer.status), answer.body
 
 
 @model(frozen=True)
@@ -83,7 +118,8 @@ def _reason_of(fault: BaseException, tenant: RunTenant) -> str:
 
 def open_case_ticket(
     run: Run, deps: TicketWriterDeps = DEFAULT_DEPS, *, tenant: RunTenant,
-    defender_dir: Path, env: Mapping[str, str],
+    defender_dir: Path, env: Mapping[str, str], request_token: str | None = None,
+    proxy_url: str | None = None,
 ) -> None:
     """Open the case for this run. `tenant` is the run's record (#1107): the store's address
     (`case-history/config.env`) and the payload's shape (`mapping.yaml`) are both that tenant's,
@@ -92,7 +128,7 @@ def open_case_ticket(
     path: a store that cannot be reached is a warning here and an error receipt at the record."""
     run_dir = run.run_dir
     try:
-        ctx = _verb_context(tenant, defender_dir, run_dir, env)
+        ctx = _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url)
         try:
             config = _config_of(ctx)
         except AdapterFault as e:
@@ -113,6 +149,9 @@ def open_case_ticket(
         status, body = deps.request(config, "POST", "/tickets", payload, ctx=ctx)
         if status is None:
             _logger.warning(f"open {case_id}: {body}")
+            if body.startswith(PROXY_REFUSED):
+                _write_receipt(run, config, case_id, RECEIPT_ERROR,
+                               redact_settings_path(body, tenant.settings))
         elif status == "409":
             _logger.info(f"open {case_id}: already exists (409) — proceeding")
         elif status.startswith("2"):
@@ -127,6 +166,10 @@ def open_case_ticket(
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"open raised, ignored: {e!r}")
 
+
+#: What a failure text opens with when the credential proxy refused the call as a configuration
+#: fault (a missing or rejected credential, an undeclared destination): not retried by the record leg.
+PROXY_REFUSED = "the credential proxy refused the call (ConfigFault)"
 
 #: The receipt words: `commented` (the record) and `escalated` (the cut-short note) are the two
 #: comments the host can make; `error` is a failed call. There is no `closed`: the host never
@@ -162,6 +205,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     run: Run, deps: TicketWriterDeps = DEFAULT_DEPS, *, tenant: RunTenant,
     defender_dir: Path, env: Mapping[str, str],
     key: str | None = None, truncated_by: str | None = None, closed_before_cut: bool = False,
+    request_token: str | None = None, proxy_url: str | None = None,
 ) -> None:
     """Record the investigation into the case, never close it: at most one
     `POST /tickets/{key}/comments`, no transition. Closing is a person's act, which is what lets
@@ -176,7 +220,11 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
             clear_receipt(run)
             _logger.info(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
             return
-        ctx = _verb_context(tenant, defender_dir, run_dir, env)
+        ctx = _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url)
+        refused = _prior_open_refusal(run, PROXY_REFUSED)
+        if refused is not None:
+            _logger.warning(f"record {case_id}: {refused}; not recording")
+            return
         try:
             config = _config_of(ctx)
         except AdapterFault as e:
@@ -293,15 +341,16 @@ def _record_posted_comment(run: Run, case_id: str, payload: Mapping[str, object]
         _logger.warning(f"record {case_id}: the posted comment could not be recorded: {e}")
 
 
-def _prior_open_refusal(run: Run) -> str | None:
-    """The open leg's refusal text this attempt left in the receipt, or `None`."""
+def _prior_open_refusal(run: Run, opening: str = OPEN_REFUSED) -> str | None:
+    """The open leg's failure text this attempt left in the receipt that starts `opening`, or
+    `None`."""
     text = run.observability.ticket_write.read()
     try:
         prior = json.loads(text) if text is not None else None
     except ValueError:
         return None
     reason = prior.get("reason") if isinstance(prior, dict) else None
-    return reason if isinstance(reason, str) and reason.startswith(OPEN_REFUSED) else None
+    return reason if isinstance(reason, str) and reason.startswith(opening) else None
 
 
 def receipt_path(run_dir: Path) -> Path:

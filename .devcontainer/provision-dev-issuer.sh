@@ -291,10 +291,10 @@ check_main_protected() {  # check_main_protected token repo: the bot, through th
   jwt=$(bao "$token" read -field=token identity/oidc/token/"$ROLE")
   bao "$token" token revoke -self >/dev/null
   branch=$(fj sh -c "curl -s -H 'Authorization: Bearer $jwt' $FORGEJO/api/v1/repos/$repo/branches/main")
-  if [ "$(jq -r '.user_can_push' <<<"$branch")" != false ]; then
-    say "WARNING: the bot can push $repo main (protected=$(jq -r .protected <<<"$branch")): protect it before any drain runs"
+  if [ "$(jq -r '.user_can_push' <<<"$branch")" != false ] || [ "$(jq -r '.user_can_merge' <<<"$branch")" != false ]; then
+    say "WARNING: the bot can push or merge $repo main (protected=$(jq -r .protected <<<"$branch")): protect it, and keep merging a human act, before any drain runs"
   else
-    say "$repo main is protected against the bot"
+    say "$repo main is protected against the bot (it can neither push nor merge)"
   fi
 }
 

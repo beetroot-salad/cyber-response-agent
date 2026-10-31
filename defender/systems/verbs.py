@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import contextvars
+import dataclasses
 import importlib.util
 import inspect
 import os
@@ -127,6 +128,10 @@ class VerbContext:
     #: because systems format timestamps differently; not a callable because a function as a
     #: dataclass default would bind `ctx` as its first argument when called.
     as_of: datetime | None = None
+    #: The credential proxy's address and the request token this call presents to it (#1163),
+    #: handed in by whoever builds the context. The token is a bearer value: out of every repr.
+    proxy_url: str | None = None
+    request_token: str | None = dataclasses.field(default=None, repr=False)
 
     @field_validator("tenant")
     @classmethod

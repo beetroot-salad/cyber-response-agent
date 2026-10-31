@@ -163,6 +163,12 @@ def guard_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
     """Confine, then record — what every outbound HTTP path does before connecting. Both
     transports call this rather than restating the pair."""
     confine_read_endpoint(system, url, method=method, verb_class="r")
+    record_outbound(ctx, system, url, method=method)
+
+
+def record_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
+    """Record the request on the call's capture, if it has one. The whole guard for a system
+    reached through the credential proxy, whose route check is the proxy's (#1163 A6)."""
     capture = getattr(ctx, "capture", None)
     if capture is not None:
         capture.record(system=system, url=url, method=method)
@@ -217,4 +223,5 @@ __all__ = [
     "confine_read_endpoint",
     "guard_outbound",
     "normalize_endpoint",
+    "record_outbound",
 ]

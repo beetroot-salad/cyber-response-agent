@@ -15,6 +15,7 @@ from defender.records.formats import DataRoot, RunsBase, EpisodesRoot
 import dataclasses
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from defender.knowledge import QueryTemplate, iter_query_templates
@@ -24,9 +25,11 @@ from defender.records.formats import TenantId, TenantRefused
 from defender.tenancy import AGENT_HALF
 from defender.systems.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.systems.verb_grant import GrantError, VerbGrant
+from defender import tenancy
 from defender.tenancy import tenant_settings
 from defender.tenancy.case_ticket import CaseMapping, CaseTicketError, load_case_mapping
-from defender.kit.settings import SystemConfig
+from defender.kit.access import HTTP_PROXY, AccessDeclaration
+from defender.kit.settings import SystemConfig, system_prefix
 from defender.kit.faults import ConfigFault
 
 if TYPE_CHECKING:
@@ -76,6 +79,11 @@ class RunTenant:
     systems: Mapping[str, SystemConfig | ConfigFault]
     #: `systems/case-history/mapping.yaml`, loaded once; a bad file is kept as its error.
     ticket_mapping: CaseMapping | CaseTicketError
+    #: One entry per `http-proxy` system (its `config.env` says so), each `access.yaml` parsed
+    #: ONCE here: the `AccessDeclaration`, or the `ConfigFault` for why there is none (#1163).
+    #: Adapters, the ticket writer and the run-start settings check read this, never the file.
+    access: Mapping[str, AccessDeclaration | ConfigFault] = dataclasses.field(
+        default_factory=lambda: MappingProxyType({}))
     #: The run's knowledge, one export commit (#1108 P4, O-B): the agent root the run reads (its
     #: run copy's `stage/agent/`) and the settings it was resolved from (the copy's `settings/`).
     #: `None` only for a record resolved over the tenant's own folder (`clone_halves`).
@@ -238,7 +246,23 @@ def resolved_settings(tenant: Tenant, *, settings_root: Path | None = None) -> d
     return {
         "systems": systems,
         "ticket_mapping": ticket_mapping,
+        "access": _read_access(settings, systems),
     }
+
+
+def _read_access(
+    settings: Path, systems: Mapping[str, SystemConfig | ConfigFault],
+) -> Mapping[str, AccessDeclaration | ConfigFault]:
+    """The declaration of every system whose `config.env` names the `http-proxy` access method."""
+    out: dict[str, AccessDeclaration | ConfigFault] = {}
+    for name, entry in systems.items():
+        if isinstance(entry, ConfigFault) or entry.get(f"{system_prefix(name)}_TRANSPORT") != HTTP_PROXY:
+            continue
+        try:
+            out[name] = tenancy.read_access(settings, name)
+        except ConfigFault as fault:
+            out[name] = ConfigFault(str(fault))  # the text only, as the other parts do
+    return MappingProxyType(out)
 
 
 __all__ = [

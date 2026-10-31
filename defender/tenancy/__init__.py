@@ -6,6 +6,13 @@ from typing import TYPE_CHECKING
 from defender.lazy_door import lazy_door
 
 if TYPE_CHECKING:
+    from defender.tenancy._access import (
+        ACCESS_FILE as ACCESS_FILE,
+        access_pointer as access_pointer,
+        parse_access as parse_access,
+        read_access as read_access,
+        read_export_access as read_export_access,
+    )
     from defender.tenancy._command_line_run import (
         open_command_line_run as open_command_line_run,
     )
@@ -14,6 +21,7 @@ if TYPE_CHECKING:
         POINTER as POINTER,
         TenantExport as TenantExport,
         current_export as current_export,
+        current_export_at as current_export_at,
         knowledge_lock_holder as knowledge_lock_holder,
         lock_pid as lock_pid,
         read_export_text as read_export_text,
@@ -73,8 +81,9 @@ if TYPE_CHECKING:
 
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
+    **dict.fromkeys(("ACCESS_FILE", "access_pointer", "parse_access", "read_access", "read_export_access",), "_access"),
     **dict.fromkeys(("open_command_line_run",), "_command_line_run"),
-    **dict.fromkeys(("DeliveryRefused", "POINTER", "TenantExport", "current_export", "knowledge_lock_holder", "lock_pid", "read_export_text", "regular_files", "remove_entry",), "_exports"),
+    **dict.fromkeys(("DeliveryRefused", "POINTER", "TenantExport", "current_export", "current_export_at", "knowledge_lock_holder", "lock_pid", "read_export_text", "regular_files", "remove_entry",), "_exports"),
     **dict.fromkeys(("OWNER_FILE", "owner_alive", "process_start", "write_owner",), "_owner"),
     **dict.fromkeys(("FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT", "read_status", "record_published", "record_refusal", "record_report",), "_publish_status"),
     **dict.fromkeys(("ForgeBinding", "ISSUER_ROLE", "Tenant", "TenantId", "accept_placed_knowledge", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "clone_halves", "create_tenant", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "learning_root_for_setup", "parse_tenant_id_bytes", "read_forge_binding", "refuse_foreign_data_root", "requested_tenant", "requested_tenant_id", "resolve_data_root", "tenant_id_file_text",), "_tenant"),

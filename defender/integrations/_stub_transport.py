@@ -8,6 +8,8 @@ import subprocess
 import urllib.parse
 from typing import TYPE_CHECKING, Any
 
+from defender import _proxy_client
+from defender.kit.access import HTTP_PROXY, AccessDeclaration
 from defender.kit.settings import (
     DOCKER_EXEC,
     NOT_CONFIGURED,
@@ -17,7 +19,7 @@ from defender.kit.settings import (
     system_prefix,
 )
 from defender.kit.verbs import VerbContext
-from defender.integrations.confinement import guard_outbound
+from defender.integrations.confinement import ConfinementFault, guard_outbound, record_outbound
 from defender.kit.faults import USAGE_EXIT_CODE, ConfigFault, TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -40,11 +42,14 @@ __all__ = [
     "http_get_obj",
     "http_post",
     "load_config",
+    "raise_proxy_fault",
+    "record_access",
     "record_access_context",
     "record_config",
     "record_entry",
     "split_status",
     "system_entry",
+    "uses_proxy",
 ]
 
 
@@ -126,8 +131,14 @@ def record_config(
     tenant: TenantRecord, system: str, prefix: str,
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
 ) -> dict[str, str]:
-    """`system`'s settings from the run's record: its `config.env`, prefix stripped."""
+    """`system`'s settings from the run's record: its `config.env`, prefix stripped.
+
+    For an `http-proxy` system the declaration holds the only base (A2), so `URL_BASE` and
+    `BASTION_HOST` are not config keys: either one in `config.env` is a `ConfigFault`, and the
+    returned `URL_BASE` is the declaration's base."""
     entry = record_entry(tenant, system)
+    if entry.get(f"{prefix}_TRANSPORT") == HTTP_PROXY:
+        return _proxy_config(tenant, system, prefix, entry, required)
     cfg: dict[str, str] = {}
     for key in required:
         val = entry.get(f"{prefix}_{key}")
@@ -140,11 +151,57 @@ def record_config(
             f"missing required config keys in {config_pointer(system)}: "
             f"{', '.join(f'{prefix}_{k}' for k in missing)}"
         )
-    timeout = cfg.get("TIMEOUT_SEC")
+    _check_timeout(prefix, cfg.get("TIMEOUT_SEC"))
+    return cfg
+
+
+def _check_timeout(prefix: str, timeout: str | None) -> None:
     if timeout is not None and not (timeout.isascii() and timeout.isdigit() and len(timeout) <= 9 and int(timeout) > 0):
         raise ConfigFault(
             f"{prefix}_TIMEOUT_SEC must be a whole number of seconds above zero, got {timeout!r}")
+
+
+def _proxy_config(
+    tenant: TenantRecord, system: str, prefix: str, entry: SystemConfig,
+    required: tuple[str, ...],
+) -> dict[str, str]:
+    for key in ("URL_BASE", "BASTION_HOST"):
+        if f"{prefix}_{key}" in entry:
+            raise ConfigFault(
+                f"{prefix}_{key} is set in {config_pointer(system)}, but this system's access "
+                f"method is {HTTP_PROXY!r}: its base is declared in its access.yaml alone")
+    declaration = record_access(tenant, system)
+    cfg = {"URL_BASE": declaration.base}
+    for key in required:
+        if key in ("URL_BASE", "BASTION_HOST"):
+            continue
+        val = entry.get(f"{prefix}_{key}")
+        if val is not None and not is_blank(val):
+            cfg[key] = val
+    missing = [k for k in required if k not in cfg and k != "BASTION_HOST"]
+    if missing:
+        raise ConfigFault(
+            f"missing required config keys in {config_pointer(system)}: "
+            f"{', '.join(f'{prefix}_{k}' for k in missing)}")
+    _check_timeout(prefix, cfg.get("TIMEOUT_SEC"))
     return cfg
+
+
+def record_access(tenant: TenantRecord, system: str) -> AccessDeclaration:
+    """`system`'s parsed access declaration as the run's record holds it, or its `ConfigFault`."""
+    found = tenant.access.get(system)
+    if found is None:
+        raise ConfigFault(f"{system}: no access declaration on the run's record — {NOT_CONFIGURED}")
+    if isinstance(found, ConfigFault):
+        raise ConfigFault(str(found))
+    return found
+
+
+def uses_proxy(tenant: TenantRecord, system: str) -> bool:
+    """Is `system` reached through the credential proxy? Decided once, from the record."""
+    entry = tenant.systems.get(system)
+    return (entry is not None and not isinstance(entry, ConfigFault)
+            and entry.get(f"{system_prefix(system)}_TRANSPORT") == HTTP_PROXY)
 
 
 def check_docker_curl_settings(
@@ -157,7 +214,8 @@ def check_docker_curl_settings(
     the access method the transport checks on every docker call. None when the system is
     usable."""
     record_config(tenant, system, prefix, required)
-    record_access_context(tenant, system)
+    if not uses_proxy(tenant, system):
+        record_access_context(tenant, system)
 
 
 def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
@@ -328,6 +386,10 @@ def _request(
     ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
     body: dict | None = None,
 ) -> dict | list:
+    if uses_proxy(ctx.tenant, system):
+        # The proxy's route check is the only guard for this system (A6); the capture is kept.
+        record_outbound(ctx, system, url, method=method)
+        return _proxy_request(ctx, config, url, system=system, method=method, body=body)
     # Confinement before any transport; every HTTP stub funnels through here.
     guard_outbound(ctx, system, url, method=method)
 
@@ -347,6 +409,37 @@ def _request(
         return json.loads(body_text)
     except json.JSONDecodeError as e:
         raise TransportFault(f"non-JSON response from {url}: {e} (body: {body_text!r})") from e
+
+
+def raise_proxy_fault(fault: str, detail: str) -> None:
+    """Raise the fault class the proxy named, with its detail (A9)."""
+    classes = {"ConfigFault": ConfigFault, "ConfinementFault": ConfinementFault,
+               "TransportFault": TransportFault, "UpstreamFault": UpstreamFault}
+    raise classes.get(fault, TransportFault)(detail or fault)
+
+
+def _proxy_request(
+    ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
+    body: dict | None,
+) -> dict | list:
+    answer = _proxy_client.proxy_call(
+        ctx.proxy_url, ctx.request_token, system=system, method=method, url=url,
+        headers={"Accept": "application/json"}
+        | ({"Content-Type": "application/json"} if body is not None else {}),
+        body=_proxy_client.request_body(body), timeout_sec=int(config.get("TIMEOUT_SEC", "10")))
+    if answer.fault is not None:
+        raise_proxy_fault(answer.fault, answer.detail)
+    if answer.status >= 400:
+        raise UpstreamFault(f"HTTP {answer.status} from {system}")
+    if not answer.body:
+        return {}
+    try:
+        parsed = json.loads(answer.body)
+    except json.JSONDecodeError as e:
+        raise TransportFault(f"non-JSON response from {system}: {e}") from e
+    if not isinstance(parsed, dict | list):
+        raise TransportFault(f"non-object JSON response from {system}")
+    return parsed
 
 
 def health_check(ctx: VerbContext, config: dict[str, str], system_label: str) -> dict[str, Any]:

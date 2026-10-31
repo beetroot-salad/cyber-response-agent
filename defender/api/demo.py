@@ -211,4 +211,5 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now
         system_id="siem", kind="siem", display_name="Event search", enabled=True,
         settings={"base_url": f"https://siem.{tenant}.example"},
     ))
-    await secrets.put_credentials(tenant, "tickets", {"api_token": "demo-secret"})
+    await secrets.put_credentials(
+        tenant, "tickets", "static", {"api_token": "demo-secret-token-1163"})
