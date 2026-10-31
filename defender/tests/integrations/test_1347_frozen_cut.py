@@ -287,6 +287,34 @@ def test_the_row_backstop_still_drops_esql_rows_dated_after_as_of(tmp_path):
     assert payload["row_count"] == 3
 
 
+def test_the_row_backstop_reads_a_numeric_epoch_millisecond_timestamp(tmp_path):
+    """O2: hits whose @timestamp is epoch milliseconds are cut at as_of like ISO ones: after dropped, at/before kept."""
+    ms = int(AS_OF.timestamp() * 1000)
+    hits = [{"_source": {"@timestamp": ms - 1, "n": "before"}},
+            {"_source": {"@timestamp": ms, "n": "at-as-of"}},
+            {"_source": {"@timestamp": ms + 1, "n": "past"}},
+            {"_source": {"@timestamp": ms + 86_400_000, "n": "next-day"}}]
+    ctx = cut_ctx(tmp_path, canned={"hits": {"total": {"value": 4}, "hits": hits}})
+
+    out = elastic_adapter.query(ctx, native_query="*")
+
+    assert [h["n"] for h in out["hits"]] == ["before", "at-as-of"]
+
+
+def test_the_row_backstop_reads_a_numeric_epoch_timestamp_in_esql_rows(tmp_path):
+    """O2: ES|QL rows whose @timestamp is epoch milliseconds are cut at as_of; the first row is not exempt."""
+    ms = int(AS_OF.timestamp() * 1000)
+    canned = {"columns": [{"name": "@timestamp", "type": "date"}, {"name": "n", "type": "keyword"}],
+              "values": [[ms + 1, "past-first"], [ms - 1, "before"], [ms, "at-as-of"],
+                         [ms + 3_600_000, "past"]]}
+    ctx = cut_ctx(tmp_path, canned=canned)
+
+    payload = elastic_adapter.esql(ctx, query="FROM logs-zeek.ssh-*")
+
+    assert [row[1] for row in payload["values"]] == ["before", "at-as-of"]
+    assert payload["row_count"] == 2
+
+
 # the base registry sets the cut on every system's calls
 
 _RECORDING_ADAPTER = '''\
@@ -322,33 +350,67 @@ VERBS = {"get-host": get_host, "health-check": health_check}
 '''
 
 
-def _registry(tmp_path: Path, cut: ReadCut | None) -> ModuleVerbRegistry:
+#: Every system the product's roster ships an adapter for (hyphenated, as the registry names them).
+ALL_SYSTEMS = sorted(p.name[: -len("_adapter.py")].replace("_", "-")
+                     for p in Path(elastic_adapter.__file__).parent.glob("*_adapter.py"))
+
+
+def _registry(tmp_path: Path, cut: ReadCut | None, systems: tuple[str, ...] = ALL_SYSTEMS) -> ModuleVerbRegistry:
     adapters = tmp_path / "adapters"
     adapters.mkdir(parents=True, exist_ok=True)
-    for system in ("cmdb", "elastic"):
-        (adapters / f"{system}_adapter.py").write_text(_RECORDING_ADAPTER, encoding="utf-8")
-    grant = VerbGrant(role="gather", entries=(("cmdb", "get-host", "r"), ("elastic", "health-check", "r")))
+    for system in systems:
+        (adapters / f"{system.replace('-', '_')}_adapter.py").write_text(_RECORDING_ADAPTER, encoding="utf-8")
+    grant = VerbGrant(role="gather", entries=tuple((s, "get-host", "r") for s in systems))
     return ModuleVerbRegistry(read_roster(adapters), grant, cut=cut)
 
 
-@pytest.mark.parametrize(("system", "verb", "params"), [
-    pytest.param("cmdb", "get-host", {"host": "web-1"}, id="a-system-of-record"),
-    pytest.param("elastic", "health-check", {}, id="elastic"),
-])
+def test_the_roster_under_test_is_every_shipped_system():
+    """Positive control: the all-systems parametrization below sees the whole shipped roster."""
+    assert {"cmdb", "elastic", "host-state", "tacit-knowledge"} <= set(ALL_SYSTEMS)
+
+
+@pytest.mark.parametrize("system", ALL_SYSTEMS)
 @pytest.mark.parametrize("cut", [ReadCut(AS_OF, ARRIVED_BY), ReadCut(AS_OF)],
                          ids=["as-of-and-arrived-by", "as-of-alone"])
-def test_every_system_body_is_handed_the_runs_cut_on_a_context_that_carried_none(
-    tmp_path, system, verb, params, cut,
-):
+def test_every_system_body_is_handed_the_runs_cut_on_a_context_that_carried_none(tmp_path, system, cut):
     """Product-side cut: the base registry sets as_of and arrived_by on the ctx of every call,
-    whichever system it addresses, so no verb body reads uncut."""
+    whichever system of the roster it addresses, so no verb body reads uncut."""
     ctx = cut_ctx(tmp_path, as_of=None, arrived_by=None)
 
-    _registry(tmp_path, cut).verbs(system)[verb](ctx, **params)
+    _registry(tmp_path, cut).verbs(system)["get-host"](ctx, host="web-1")
 
     assert read_jsonl_rows(ctx.run_dir / "seen.jsonl") == [
-        {"verb": verb, "as_of": cut.as_of.isoformat(),
+        {"verb": "get-host", "as_of": cut.as_of.isoformat(),
          "arrived_by": None if cut.arrived_by is None else cut.arrived_by.isoformat()}]
+
+
+@pytest.mark.parametrize("preset", [
+    pytest.param(dict(as_of=AS_OF + dt.timedelta(days=1), arrived_by=ARRIVED_BY + dt.timedelta(days=1)),
+                 id="later-cuts"),
+    pytest.param(dict(as_of=AS_OF - dt.timedelta(days=1), arrived_by=None), id="earlier-as-of"),
+    pytest.param(dict(as_of=None, arrived_by=ARRIVED_BY + dt.timedelta(days=1)),
+                 id="stray-arrived-by"),
+])
+def test_the_registrys_cut_replaces_whatever_cut_the_context_already_carried(tmp_path, preset):
+    """Product-side cut: a ctx pre-carrying other as_of / arrived_by reaches the body with the
+    registry's values, never the caller's or a later/earlier of the two."""
+    ctx = cut_ctx(tmp_path, **preset)
+    cut = ReadCut(AS_OF, ARRIVED_BY)
+
+    _registry(tmp_path, cut).verbs("cmdb")["get-host"](ctx, host="web-1")
+
+    assert read_jsonl_rows(ctx.run_dir / "seen.jsonl") == [
+        {"verb": "get-host", "as_of": AS_OF.isoformat(), "arrived_by": ARRIVED_BY.isoformat()}]
+
+
+def test_a_registry_with_only_as_of_clears_an_arrived_by_the_context_carried(tmp_path):
+    """Product-side cut: an as-of-alone registry hands the body arrived_by None, not the ctx's."""
+    ctx = cut_ctx(tmp_path, as_of=None, arrived_by=ARRIVED_BY)
+
+    _registry(tmp_path, ReadCut(AS_OF)).verbs("cmdb")["get-host"](ctx, host="web-1")
+
+    assert read_jsonl_rows(ctx.run_dir / "seen.jsonl") == [
+        {"verb": "get-host", "as_of": AS_OF.isoformat(), "arrived_by": None}]
 
 
 def test_a_registry_with_no_cut_hands_every_body_the_context_as_built(tmp_path):
@@ -359,3 +421,23 @@ def test_a_registry_with_no_cut_hands_every_body_the_context_as_built(tmp_path):
 
     assert read_jsonl_rows(ctx.run_dir / "seen.jsonl") == [
         {"verb": "get-host", "as_of": None, "arrived_by": None}]
+
+
+# the cut value itself
+
+def test_a_read_cut_holds_both_moments_as_aware_utc():
+    """Product-side cut: a moment spelled with an offset is held as the same instant in UTC."""
+    plus2 = dt.timezone(dt.timedelta(hours=2))
+    cut = ReadCut(AS_OF.astimezone(plus2), ARRIVED_BY.astimezone(plus2))
+
+    assert (cut.as_of.isoformat(), cut.arrived_by.isoformat()) == (
+        "2026-10-20T09:00:00+00:00", "2026-10-20T09:03:17+00:00")
+
+
+@pytest.mark.parametrize("field", ["as_of", "arrived_by"])
+def test_a_read_cut_refuses_a_naive_moment_rather_than_guess_its_zone(field):
+    """Product-side cut: a naive as_of or arrived_by is refused, never read as local time."""
+    moments = {"as_of": AS_OF, "arrived_by": ARRIVED_BY, field: AS_OF.replace(tzinfo=None)}
+
+    with pytest.raises(ValueError, match=field):
+        ReadCut(**moments)

@@ -259,3 +259,148 @@ def test_capture_and_launcher_use_the_one_production_ops_class(script):
     """FR1: both lab scripts expose the same LabOps, so there is no second fingerprint."""
     assert _load(script).LabOps.__name__ == "LabOps"
     assert _load(script).LabOps.__module__.endswith("lab_ops")
+
+
+# -- the capture-side operations through the recorded `run=` seam ------------------------------
+
+
+class Lab:
+    """Records every docker command; answers `inspect` and `context inspect`, accepts the rest."""
+
+    def __init__(self, es_replies=None):
+        self.argvs, self.es_replies = [], list(es_replies or [])
+
+    def __call__(self, argv, **kw):
+        self.argvs.append(list(argv))
+        out = ""
+        if "context" in argv and "inspect" in argv:
+            out = "ssh://op@lab-server"
+        elif "inspect" in argv:
+            out = "net1 img:1"
+        elif self.es_replies:
+            out = self.es_replies.pop(0)
+
+        class Done:
+            returncode, stderr, stdout = 0, "", out
+        return Done()
+
+    def verbs(self, name):
+        return [a for a in self.argvs if name in a[:6]]
+
+
+def _fire_rig(monkeypatch, fail_run=False):
+    """LabOps.fire with the runner and chaos control replaced by recorders; returns (calls, ops)."""
+    calls = {"activate": [], "run": [], "revert": []}
+
+    class Ctl:
+        @staticmethod
+        def activate(profile, **kw):
+            calls["activate"].append(kw)
+            return {"ledger_ref": "chaos-9"}
+
+        @staticmethod
+        def revert(ref, **kw):
+            calls["revert"].append(ref)
+
+    class Runner:
+        @staticmethod
+        def load_catalog():
+            return {"scn": {"target_host": "web-1"}}
+
+        @staticmethod
+        def run_scenario(scenario, seed, overrides, dry_run, **kw):
+            calls["run"].append(kw)
+            if fail_run:
+                raise RuntimeError("scenario failed")
+            return "run-1", Path("."), []
+
+    ops_module = _load("lab_ops")
+    monkeypatch.setattr(ops_module, "_chaos_ctl", lambda: Ctl)
+    monkeypatch.setattr(ops_module, "_load_runner", lambda: Runner)
+    return calls, ops_module.LabOps(run=Lab())
+
+
+def test_fire_passes_the_capture_lock_token_to_the_activation_and_the_scenario(monkeypatch):
+    """O10/D14: the token capture holds reaches both ctl.activate and the scenario run."""
+    calls, ops = _fire_rig(monkeypatch)
+    fired = ops.fire("scn", "stale-cmdb", 7, "tok-123")
+    assert [c.get("lock_token") for c in calls["activate"]] == ["tok-123"]
+    assert [c.get("lock_token") for c in calls["run"]] == ["tok-123"]
+    assert fired["ledger_ref"] == "chaos-9" and calls["revert"] == []
+
+
+def test_a_failing_scenario_reverts_the_fault_fire_activated(monkeypatch):
+    """O1: if the scenario fails after the fault was activated, the fault is reverted and the error surfaces."""
+    calls, ops = _fire_rig(monkeypatch, fail_run=True)
+    with pytest.raises(RuntimeError, match="scenario failed"):
+        ops.fire("scn", "stale-cmdb", 7, "tok-123")
+    assert calls["revert"] == ["chaos-9"]
+
+
+def test_wait_alert_ignores_alerts_older_than_the_scenario_start():
+    """O7: an alert from before `started_at` on the same host is not the capture's alert."""
+    early = {"@timestamp": "2026-10-20T07:00:00.000Z", "host": {"name": "web-1"}}
+    late = {"@timestamp": "2026-10-20T08:02:00.000Z", "host": {"name": "web-1"}}
+    other = {"@timestamp": "2026-10-20T08:01:00.000Z", "host": {"name": "db-1"}}
+
+    def run(argv, **kw):
+        body = json.loads(kw["input"])
+        keep = []
+        for flt in body["query"]["bool"]["filter"]:
+            if "range" in flt:
+                keep.append(lambda d, g=flt["range"]["@timestamp"]["gte"]: d["@timestamp"] >= g)
+            if "term" in flt:
+                keep.append(lambda d, h=flt["term"]["host.name"]: d["host"]["name"] == h)
+        hits = sorted((d for d in (early, other, late) if all(k(d) for k in keep)),
+                      key=lambda d: d["@timestamp"])[:body.get("size", 10)]
+
+        class Done:
+            returncode, stderr = 0, ""
+            stdout = json.dumps({"hits": {"hits": [{"_source": d} for d in hits]}}) + "\n200"
+        return Done()
+
+    ops = _load("lab_ops").LabOps(run=run, alert_timeout_s=1.0, poll_s=0.01)
+    got = ops.wait_alert({"started_at": "2026-10-20T08:00:00.000Z", "target_host": "web-1"})
+    assert got == late
+
+
+def test_commit_hosts_removes_the_temporary_image_tag_of_each_host(tmp_path):
+    """O3: every tag `commit_hosts` creates is removed again after the image is saved."""
+    lab = Lab()
+    _load("lab_ops").LabOps(run=lab).commit_hosts(tmp_path)
+    tags = [a[a.index("commit") + 1:][-1] for a in lab.argvs if "commit" in a[:5]]
+    assert tags
+    for tag in tags:
+        assert any(a[3:5] == ["image", "rm"] and tag in a for a in lab.argvs), f"{tag} left behind"
+
+
+def test_volume_copies_mount_the_host_volumes_read_only(tmp_path):
+    """O4: the throwaway container reads each host's volumes with `--volumes-from <host>:ro`."""
+    lab = Lab()
+    _load("lab_ops").LabOps(run=lab).copy_volumes(tmp_path)
+    runs = [a for a in lab.argvs if "--volumes-from" in a]
+    assert runs
+    assert all(a[a.index("--volumes-from") + 1].endswith(":ro") for a in runs)
+
+
+def test_teardown_terminates_the_ssh_tunnel_the_engine_load_opened(tmp_path):
+    """D2: a load over an ssh context starts a tunnel; teardown terminates it."""
+    tunnels = []
+
+    class Tunnel:
+        terminated = False
+
+        def __init__(self, argv):
+            self.argv = argv
+            tunnels.append(self)
+
+        def terminate(self):
+            self.terminated = True
+
+    ops = _load("lab_ops").LabOps(run=Lab(), popen=Tunnel)
+    ops.hosts = lambda: []
+    with pytest.raises(OSError):  # no stub dumps in the empty parts dir: the load stops after the tunnel
+        ops.load_frozen(tmp_path, "2026-10-20T09:00:00Z")
+    assert len(tunnels) == 1 and tunnels[0].argv[0] == "ssh" and not tunnels[0].terminated
+    ops.teardown()
+    assert tunnels[0].terminated

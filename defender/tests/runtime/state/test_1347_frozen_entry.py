@@ -151,6 +151,8 @@ def test_as_of_alone_cuts_event_time_and_sends_no_arrival_cut(tmp_path):
     pytest.param("2026-10-20T11:00:00+02:00", "2026-10-20T11:03:17+02:00", id="colon-offset"),
     pytest.param("2026-10-20T11:00:00+0200", "2026-10-20T11:03:17+0200", id="compact-offset"),
     pytest.param("2026-10-20T04:00:00-05:00", "2026-10-20T04:03:17-0500", id="west-offsets"),
+    pytest.param("2026-10-20T14:30:00+05:30", "2026-10-20T14:33:17+0530", id="half-hour-east"),
+    pytest.param("2026-10-20T05:30:00-03:30", "2026-10-20T05:33:17-0330", id="half-hour-west"),
 ])
 def test_a_cut_spelled_with_an_offset_cuts_at_the_utc_instant(tmp_path, as_of, arrived_by):
     """O2 (UTC instant): the same instant spelled with an offset puts the same bounds on the wire
@@ -239,6 +241,10 @@ def run_files(run_dir: Path) -> dict[str, str]:
 CUT_WORDS = re.compile(r"as[_-]?of|arrived[_-]?by|frozen|freez|\bcut\b", re.IGNORECASE)
 
 
+#: Other ways a wall date is written (a log line's, a locale's): date part only, so any time of day after it matches.
+WALL_DATE_SPELLINGS = ("%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y", "%d-%m-%Y", "%Y/%m/%d", "%d %b %Y", "%b %d, %Y", "%a %b %d")
+
+
 @pytest.mark.parametrize("flags_dates", [
     pytest.param((["--as-of", "2026-03-02T09:00:00Z", "--arrived-by", "2026-03-04T14:41:53Z"],
                   ("2026-03-04", "14:41:53", "20260304")), id="as-of-and-arrived-by"),
@@ -256,7 +262,7 @@ def test_a_cut_run_writes_nothing_about_the_cut_beyond_the_clock_stamps(tmp_path
 
     wall_needles = {n for at in (began, dt.datetime.now(dt.UTC))
                     for n in (at.date().isoformat(), at.strftime("%Y%m%d"),
-                              str(int(at.timestamp()))[:8])}
+                              str(int(at.timestamp()))[:8], *(at.strftime(f) for f in WALL_DATE_SPELLINGS))}
     wall_needles |= {dt.date.today().isoformat(), C.ARM_START.date().isoformat()}
     assert not wall_needles & {"2026-03-02", "2026-03-04", "20260302", "20260304"}, (
         "fixture dates collide with the wall clock")

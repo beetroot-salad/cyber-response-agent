@@ -468,10 +468,12 @@ class _Proc:
     stdout = f"run_id={RUN_ID}\n"
 
 
-def _main(tmp_path, monkeypatch, *flags):
+def _main(tmp_path, monkeypatch, *flags, prep=None):
     """Drive `launch_frozen.main` with the lab seams (docker lock store, LabOps, the agent
     subprocess) replaced; returns (rig, rc, agent argv list)."""
     rig = Rig(tmp_path)
+    if prep is not None:
+        prep(rig)
     module = _module()
     agent: list[list[str]] = []
     monkeypatch.setattr(module, "LabOps", lambda: rig.ops)
@@ -498,3 +500,127 @@ def test_the_command_line_reference_flag_writes_no_row(tmp_path, monkeypatch):
     rig, rc, agent = _main(tmp_path, monkeypatch, "--reference",
                            "--index", str(tmp_path / "idx" / "index.jsonl"))
     assert rc == 0 and len(agent) == 1 and not rig.index.exists()
+
+
+def test_the_command_line_passes_its_tenant_to_the_agent(tmp_path, monkeypatch):
+    """D10: `--tenant T` is the tenant the agent is started with."""
+    rig, rc, agent = _main(tmp_path, monkeypatch, "--index", str(tmp_path / "idx" / "index.jsonl"))
+    assert rc == 0 and _opt(agent[0], "--tenant") == "tenant-1"
+
+
+def test_a_launch_without_a_knowledge_pin_adds_no_knowledge_flag_and_only_string_arguments(tmp_path):
+    """D10: with no pin the agent argv has no --knowledge-commit and every item is a string."""
+    rig = Rig(tmp_path)
+    rig.launch()
+    assert "--knowledge-commit" not in rig.argv and all(isinstance(a, str) for a in rig.argv)
+
+
+def test_the_docker_config_directory_name_shares_nothing_with_the_freeze(tmp_path):
+    """P4: the config dir name the run can see shares no 6-character run with digest, slug or dates."""
+    rig = Rig(tmp_path)
+    rig.launch()
+    name = Path(rig.env["DOCKER_CONFIG"]).name.lower()
+    known = " ".join([DIGEST, SLUG, *map(str, (FREEZE["as_of"], FREEZE["alert_at"], FREEZE["captured_at"]))]).lower()
+    shared = [name[i:i + 6] for i in range(len(name) - 5) if name[i:i + 6] in known]
+    assert name and not shared, f"{name} repeats {shared}"
+
+
+def test_a_reference_launch_is_refused_while_the_frozen_engine_lock_is_held(tmp_path):
+    """O10: --reference serves the same frozen engine, so a held lock refuses it before any load."""
+    from chaos import lock
+    rig = Rig(tmp_path)
+    lock.take(rig.store, lock.FROZEN_ENGINE)
+    with pytest.raises(lock.Held):
+        rig.launch(reference=True)
+    assert {"load_frozen", "run"}.isdisjoint(rig.journal.ops())
+
+
+def test_a_reference_launch_holds_the_frozen_engine_lock_during_the_run(tmp_path):
+    """O10: the lock is held while the reference run executes and free after it."""
+    rig = Rig(tmp_path)
+    rig.launch(reference=True)
+    assert rig.lock_held_in_run and "frozen-engine" not in rig.store.records
+
+
+def test_a_last_index_row_without_a_newline_does_not_swallow_the_new_row(tmp_path):
+    """O9: appending after an unterminated last row leaves two parseable rows, the first untouched."""
+    rig = Rig(tmp_path)
+    first = json.dumps({"slug": "earlier", "run_id": "r-0"}, sort_keys=True)
+    rig.index.write_bytes(first.encode())
+    rig.launch()
+    assert rig.index.read_bytes().startswith(first.encode())
+    rows = rig.rows()
+    assert len(rows) == 2 and rows[0]["slug"] == "earlier" and rows[1]["run_id"] == RUN_ID
+
+
+def test_parts_listed_by_bare_digest_are_accepted_like_prefixed_ones(tmp_path):
+    """O6: a part digest written without the `sha256:` prefix verifies the same way."""
+    bare = {**FREEZE, "parts": {n: sha(b) for n, b in PARTS.items()}}
+    rig = Rig(tmp_path, freeze=bare)
+    rig.launch()
+    assert [r["verdict"] for r in rig.rows()] == ["valid"]
+
+
+def test_the_default_agent_runner_hands_the_agent_the_repointed_docker_config(tmp_path, monkeypatch):
+    """P4/D2: the default run function passes DOCKER_CONFIG, repointed at the frozen engine, to the subprocess."""
+    rig = Rig(tmp_path)
+    module = rig.module = _module()
+    seen: dict = {}
+
+    def run(argv, **kw):
+        seen["env"] = kw.get("env")
+        seen["config"] = _tree(Path(kw["env"]["DOCKER_CONFIG"])) if kw.get("env") else None
+        return _Proc()
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    out = module.launch(rig.case_dir, index=rig.index, parts_dir=rig.parts_dir, lock_store=rig.store,
+                        ops=rig.ops, clock=rig.clock, work_dir=rig.work,
+                        operator_docker_config=rig.operator_cfg, tenant="tenant-1")
+    assert out == RUN_ID and seen["env"] is not None
+    assert Path(seen["env"]["DOCKER_CONFIG"]).parent == rig.work
+    metas = [json.loads(v) for k, v in seen["config"].items() if k.endswith("meta.json")]
+    assert FROZEN_HOST in [m["Endpoints"]["docker"]["Host"] for m in metas if m["Name"] == "soc-playground"]
+
+
+def test_the_default_agent_runner_starts_a_real_process_that_sees_the_repointed_config(
+        tmp_path, monkeypatch):
+    """P4/D2: a real subprocess started by the default run function reads the frozen DOCKER_CONFIG."""
+    rig = Rig(tmp_path)
+    module = rig.module = _module()
+    out_file = tmp_path / "agent-saw.txt"
+    agent = tmp_path / "fake-agent.sh"
+    agent.write_text(f'#!/bin/sh\necho "run_id={RUN_ID}"\nprintf %s "$DOCKER_CONFIG" > "{out_file}"\n')
+    agent.chmod(0o755)
+    monkeypatch.setattr(module, "_agent_python", lambda: str(agent))
+    module.launch(rig.case_dir, index=rig.index, parts_dir=rig.parts_dir, lock_store=rig.store,
+                  ops=rig.ops, clock=rig.clock, work_dir=rig.work,
+                  operator_docker_config=rig.operator_cfg, tenant="tenant-1")
+    seen = Path(out_file.read_text())
+    assert seen.parent == rig.work and seen != rig.operator_cfg
+
+
+def test_the_command_line_exits_4_and_names_a_damaged_part(tmp_path, monkeypatch, capsys):
+    """O6: a refused launch exits 4 and prints the refusal naming the part; no agent, no row."""
+    damage = lambda rig: (rig.parts_dir / SLUG / "stubs.tar").write_bytes(b"tampered")  # noqa: E731
+    rig, rc, agent = _main(tmp_path, monkeypatch, "--index", str(tmp_path / "idx" / "index.jsonl"),
+                           prep=damage)
+    assert rc == 4 and "stubs.tar" in capsys.readouterr().err
+    assert agent == [] and rig.rows() == []
+
+
+def test_the_command_line_exits_4_and_names_the_held_lock(tmp_path, monkeypatch, capsys):
+    """O10: a held frozen-engine lock exits 4 and the printed refusal names that lock."""
+    from chaos import lock
+    hold = lambda rig: lock.take(rig.store, lock.FROZEN_ENGINE)  # noqa: E731
+    rig, rc, agent = _main(tmp_path, monkeypatch, "--index", str(tmp_path / "idx" / "index.jsonl"),
+                           prep=hold)
+    assert rc == 4 and "frozen-engine" in capsys.readouterr().err and agent == []
+
+
+def test_a_run_id_line_that_is_not_the_first_output_line_binds_no_row(tmp_path):
+    """O9/r6.1: only stdout line 1 announces the run id; a later `run_id=` line gets no row."""
+    rig = Rig(tmp_path)
+    rig.run_fn = lambda argv, env: (0, f"warming up\nrun_id={RUN_ID}\n", "")
+    with pytest.raises(Exception):  # noqa: B017 - the refusal's type is the implementation's choice
+        rig.launch()
+    assert rig.rows() == [] and "teardown" in rig.journal.ops()

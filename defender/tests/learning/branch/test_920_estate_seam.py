@@ -626,3 +626,88 @@ def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
         system="cmdb", verb="get-host", params={"host": "canary-1"},
         payload_text="{}", source=PASSTHROUGH, world_id="a")
     assert call.key == call.correlation_key
+
+
+# 6. #1347: a world's reads carry the branch-point cut and no arrival cut
+
+_CUT_ADAPTER = '''\
+"""A verb body that records the cut its ctx carried."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from defender.kit.verbs import VerbContext, verb
+
+
+def check_settings(*_a, **_k):
+    return None
+
+
+@verb()
+def get_host(ctx: VerbContext, *, host: str) -> dict:
+    row = {"as_of": None if ctx.as_of is None else ctx.as_of.isoformat(),
+           "arrived_by": None if ctx.arrived_by is None else ctx.arrived_by.isoformat()}
+    with (Path(ctx.run_dir) / "cut-seen.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\\n")
+    return {"host": host}
+
+
+VERBS = {"get-host": get_host}
+'''
+
+
+CUT_GRANT = VerbGrant(role="gather", entries=(("cmdb", "get-host", "r"),))
+
+
+def _cut_seen(ctx: VerbContext) -> list[dict]:
+    return read_jsonl_rows(Path(ctx.run_dir) / "cut-seen.jsonl")
+
+
+def _cut_estate(tmp_path: Path) -> Path:
+    adapters = tmp_path / "adapters"
+    adapters.mkdir(parents=True, exist_ok=True)
+    (adapters / "cmdb_adapter.py").write_text(_CUT_ADAPTER, encoding="utf-8")
+    return adapters
+
+
+def test_a_world_registry_call_reaches_the_body_cut_at_as_of_with_no_arrival_cut(tmp_path):
+    """#1347 C05/D2: a branched world's read carries as_of and arrived_by None into the verb body."""
+    ctx = run_ctx(tmp_path)
+    reg = world_registry(
+        _cut_estate(tmp_path), CUT_GRANT, tmp_path / SERVED_FILE, world=World("w1"),
+        **control_oracle({"host": "canary-1"}))
+
+    reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
+
+    assert _cut_seen(ctx) == [{"as_of": AS_OF.isoformat(), "arrived_by": None}]
+
+
+def test_a_world_registry_call_overrides_a_context_that_arrived_with_another_cut(tmp_path):
+    """#1347 C03/C04/C14: a ctx pre-carrying a later as_of and an arrived_by reaches the body with the world's."""
+    from dataclasses import replace
+    ctx = replace(run_ctx(tmp_path), as_of=AS_OF.replace(year=2027), arrived_by=AS_OF.replace(year=2027))
+    reg = world_registry(
+        _cut_estate(tmp_path), CUT_GRANT, tmp_path / SERVED_FILE, world=World("w1"),
+        **control_oracle({"host": "canary-1"}))
+
+    reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
+
+    assert _cut_seen(ctx) == [{"as_of": AS_OF.isoformat(), "arrived_by": None}]
+
+
+def test_the_oracles_own_real_read_reaches_the_body_cut_at_as_of_with_no_arrival_cut(tmp_path):
+    """#1347 D2: a read the oracle runs through its door reaches the verb body cut like a served one."""
+    ctx = run_ctx(tmp_path)
+    base = {"host": "canary-1"}
+    oracle = S24.oracle(S24.run_query("cmdb", "get-host", {"host": "canary-1"}),
+                        then=S24.submit(dict(base), S24.EMPTY_CLAIM))
+    reg = world_registry(
+        _cut_estate(tmp_path), CUT_GRANT, tmp_path / SERVED_FILE, world=World("w1"),
+        oracle=oracle.model, verifier=S24.passing_verifier().model, box=S24.sandboxed_box()[0])
+
+    reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
+
+    seen = _cut_seen(ctx)
+    assert len(seen) == 2, f"the base read and the oracle's own read should both reach the body: {seen}"
+    assert seen == [{"as_of": AS_OF.isoformat(), "arrived_by": None}] * 2
