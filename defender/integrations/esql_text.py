@@ -107,7 +107,7 @@ def _tokens(query: str) -> list[_Token]:
         if ch.isspace():
             i += 1
         elif query.startswith("//", i):
-            end = query.find("\n", i)
+            end = next((k for k in range(i, len(query)) if query[k] in "\r\n"), -1)
             i = len(query) if end < 0 else end + 1
         elif query.startswith("/*", i):
             end = query.find("*/", i + 2)
@@ -117,12 +117,26 @@ def _tokens(query: str) -> list[_Token]:
         elif ch == '"':
             i, value = _string_end(query, i)
             out.append(_Token("string", value))
+        elif ch == "`":
+            # A quoted identifier: `"`, `//` and `/*` inside it open nothing; "``" is a literal backtick.
+            j = i + 1
+            while True:
+                if j >= len(query):
+                    raise EsqlUnclassifiable("an unterminated backtick identifier")
+                if query[j] == "`":
+                    if query.startswith("``", j):
+                        j += 2
+                        continue
+                    break
+                j += 1
+            out.append(_Token("string", query[i + 1:j].replace("``", "`")))
+            i = j + 1
         elif ch in "|,()":
             out.append(_Token(ch, ch))
             i += 1
         else:
             j = i
-            while (j < len(query) and not query[j].isspace() and query[j] not in '|,()"'
+            while (j < len(query) and not query[j].isspace() and query[j] not in '|,()"`'
                    and not query.startswith("//", j) and not query.startswith("/*", j)):
                 j += 1
             out.append(_Token("word", query[i:j]))
