@@ -16,6 +16,10 @@ import sys
 import time
 from pathlib import Path
 
+# The child is a bare script: put the checkout root (the parent of `defender/`) on the path from
+# this file's own location, so it never relies on the parent's PYTHONPATH or an installed package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+
 from defender import box as box_mod
 from defender import run as run_py
 from defender.tests.e2e import _replay_harness as RH
