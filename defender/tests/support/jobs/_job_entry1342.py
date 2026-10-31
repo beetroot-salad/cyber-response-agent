@@ -6,7 +6,8 @@ lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `
 - `replay` (O16): the real driver over a replay model that writes the golden investigation and
   closes with the golden's disposition.
 - `replay-fault-after-close`: the same, but the replay model's request after the close tool committed
-  raises (a provider fault), so the real driver raises after the close.
+  raises `KeyboardInterrupt` (the one exception every broad handler passes through), so the real
+  driver raises after the close; it marks `fault-raised` first.
 - `hold` (death tie): the investigation blocks in the main thread; `hold-committed` is the same after
   closing the report on the facts holder it is handed (r5 C2). Marks: `pid`, `in-lifecycle`,
   `start-token` (the token the box start was handed), `interrupted` (the exception type that reached the investigation), `stop-box-started`, then
@@ -41,18 +42,16 @@ def _unboxed(*_a, start_token=None, **_k):
     return box_mod.unboxed_executor()
 
 
-class _ProviderFault(RuntimeError):
-    """What the replay model raises on the request after the close."""
-
-
 class _FaultsAfterClose(RH.ReplayFn):
-    """The replay model whose request after the scripted turns (the close was the last) raises, as a provider fault would."""
+    """The replay model whose request after the scripted turns (the close was the last) raises
+    `KeyboardInterrupt`, which no broad handler in the driver swallows, after marking it."""
 
     __name__ = "FaultsAfterClose"
 
     def __call__(self, messages, info):
         if self.calls >= len(self._turns):
-            raise _ProviderFault("the provider failed on the request after the close")
+            (marks / "fault-raised").touch()
+            raise KeyboardInterrupt
         return super().__call__(messages, info)
 
 
