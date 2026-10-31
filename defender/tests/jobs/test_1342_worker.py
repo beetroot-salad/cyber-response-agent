@@ -28,6 +28,7 @@ from defender.tests.support.jobs._jobs1342 import (
     MALICIOUS_REPORT,
     NOW,
     PADDED_ALERT_BYTES,
+    ZWNBSP_ALERT_BYTES,
     T1,
     T2,
     TITLE,
@@ -249,8 +250,9 @@ async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_no
 
 
 
-@pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES],
-                         ids=["crlf tab multibyte", "leading whitespace and trailing spaces", "decomposed unicode"])
+@pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES, ZWNBSP_ALERT_BYTES],
+                         ids=["crlf tab multibyte", "leading whitespace and trailing spaces", "decomposed unicode",
+                              "zero-width no-break space in a string"])
 async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(world, raw):
     """An alert that CRLF, tabs, multibyte text, padding whitespace or a decomposed sequence would change reaches `<id>.alert.json` byte for byte, and the launch digest is of those bytes. (O6, M5)"""
     import unicodedata
@@ -258,8 +260,12 @@ async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(w
     from defender.records.formats import admit
 
     admit(raw)  # premise: admission accepts these bytes
-    assert (raw != raw.strip() or b"\r\n" in raw or raw.decode() != unicodedata.normalize("NFC", raw.decode())), (
-        "premise: bytes a strip, a line-end or a normalization step would change")
+    if raw is ZWNBSP_ALERT_BYTES:
+        assert b"\xef\xbb\xbf" in raw, "premise: a U+FEFF in the bytes"
+        assert not raw.startswith(b"\xef\xbb\xbf"), "premise: not a leading byte-order mark"
+    else:
+        assert (raw != raw.strip() or b"\r\n" in raw or raw.decode() != unicodedata.normalize("NFC", raw.decode())), (
+            "premise: bytes a strip, a line-end or a normalization step would change")
     if raw is AWKWARD_ALERT_BYTES:
         assert b"\r\n" in raw
         assert len(raw.decode()) < len(raw), "premise: multibyte text"
@@ -489,7 +495,12 @@ CASES = {
 
 _SPELLINGS = {"trailing space": lambda w: w + " ", "trailing newline": lambda w: w + "\n",
               "trailing tab": lambda w: w + "\t", "trailing carriage return and newline": lambda w: w + "\r\n",
-              "full-width": lambda w: w.translate({ord(c): ord(c) + 0xFEE0 for c in w if c.isascii() and c.isalpha()})}
+              "full-width": lambda w: w.translate({ord(c): ord(c) + 0xFEE0 for c in w if c.isascii() and c.isalpha()}),
+              "leading newline": lambda w: "\n" + w, "leading tab": lambda w: "\t" + w,
+              "leading carriage return and newline": lambda w: "\r\n" + w, "leading nul": lambda w: "\x00" + w,
+              "leading space": lambda w: " " + w, "leading zero-width space": lambda w: "\u200b" + w,
+              "leading byte-order mark": lambda w: "\ufeff" + w,
+              "zero-width space inside": lambda w: w[:2] + "\u200b" + w[2:]}
 for _key, _words in (("setup", ("refused", "crashed", "done")), ("box", ("not_started", "start_failed", "started"))):
     for _word in _words:
         for _how, _spell in _SPELLINGS.items():
