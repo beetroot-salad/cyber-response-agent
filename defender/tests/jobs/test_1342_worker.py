@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,7 @@ from defender.tests.support.jobs._jobs1342 import (
 from defender.tests.support.shared._postgres1339 import execute
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
+_LINUX_ONLY = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc/<pid>")
 
 COMMIT = "c" * 40
 OTHER_COMMIT = "d" * 40
@@ -135,6 +137,7 @@ def test_o12_the_worker_entry_points_are_coroutines():
 
 # --- O4: slots -------------------------------------------------------------------------------------
 
+@_LINUX_ONLY
 async def test_o4_three_children_run_at_once_and_a_fourth_waits_for_a_free_slot(world):
     """Four queued rows, three slots: three live children together, never four; the fourth runs once one ends. (O4, D2)"""
     release = world["tmp"] / "release"
@@ -200,6 +203,8 @@ async def test_o5_a_row_moved_while_its_child_runs_is_left_alone_and_logged(worl
         execute(world["dsn"], f"UPDATE jobs.investigations SET {sql} WHERE id = %s",  # noqa: S608
                 (fenced,) if moved == "queued" else (NOW, fenced))
         snapshot = row(world["dsn"], fenced)
+        if moved in ("failed", "cancelled"):
+            assert snapshot["disposition"] is None, "premise: the moved row carries no disposition"
         release.touch()
         await asyncio.wait_for(drained, timeout=60)
 
@@ -1134,6 +1139,7 @@ async def test_o4_serve_also_holds_three_children_and_never_a_fourth(world):
                 await asyncio.sleep(0.02)
         finally:
             release.touch()
+            assert not serving.done(), "premise: serve() is still running, so the SIGTERM below is its to handle"
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
 
