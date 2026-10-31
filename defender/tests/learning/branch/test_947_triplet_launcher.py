@@ -128,7 +128,8 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
     with pytest.raises(SystemExit):
         _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                     spawn=T.FakeSpawn(), questioner=agent,
-                    preflight=S.no_preflight, live_tree=T.source_capture())
+                    preflight=S.no_preflight, live_tree=T.source_capture(),
+                    directory=T.launcher_directory(src.parent.parent.name))
     assert agent.calls == 0
 
 
@@ -154,7 +155,8 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
         with pytest.raises(SystemExit):
             _entry().main(["--tenant", src.parent.parent.name, src.name, *argv_extra],
                         spawn=T.FakeSpawn(), questioner=agent,
-                        preflight=S.no_preflight, live_tree=T.source_capture())
+                        preflight=S.no_preflight, live_tree=T.source_capture(),
+                        directory=T.launcher_directory(src.parent.parent.name))
         assert agent.calls == 0, "the questioner was paid for before the preflight refused"
 
     for out_of_range in ("-1", str(10 ** 9)):
@@ -174,7 +176,8 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     with pytest.raises(T.refusals()) as refusal:
         _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                     spawn=T.FakeSpawn(), questioner=agent,
-                    preflight=S.no_preflight, live_tree=T.source_capture())
+                    preflight=S.no_preflight, live_tree=T.source_capture(),
+                    directory=T.launcher_directory(src.parent.parent.name))
     assert "alert" in str(refusal.value)
     assert agent.prompts == [], "the planted link reached the questioner's prompt"
     assert "ROOT-PRIVATE-KEY" not in str(refusal.value)

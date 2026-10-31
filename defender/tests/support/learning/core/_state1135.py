@@ -84,6 +84,15 @@ def run_of(run_dir: Path):
     return Run.under(fixture_runs_base(run_dir.parent), run_dir.name, tenant_id=run_dir.parent.parent.name)
 
 
+def tenant_of(run_dir: Path):
+    """The accepted `Tenant` run end hands `enqueue_curation(..., tenant=)` for the run at `run_dir`: the value of
+    run start's host acceptance (r10 O-A5, C7), here accepted raw over the test's data root."""
+    from defender.tenancy._tenant import data_root_from_path, requested_tenant
+
+    run_dir = Path(run_dir)
+    return requested_tenant(data_root_from_path(run_dir.parents[2]), run_dir.parent.parent.name)
+
+
 def curation_row(case_id: str, run_dir: Path) -> dict:
     """The row `run_common.enqueue_curation` files for the run at `run_dir`: its address, read
     off where the run lives (`<data root>/<T>/runs/<run_id>`)."""

@@ -15,6 +15,8 @@ from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.presentation import test_1025_stage_timing as ST
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+from defender.tests.support.tenancy._active1214 import database_env, insert_active_tenant
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -359,13 +361,17 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
     assert not (launched / E.PAGE_NAME).exists()
 
 
-def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_path):
+@pytest.mark.postgres
+def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_path, migrated_database):
     ep = E.sample_episode(tmp_path)
     script = Path(visualize_episode().__file__)
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     # `--tenant T <episode id>` finds the episode under the tenant's own `<T>/episodes/`, so
     # the child is handed no episodes base.
     env.pop(T.EPISODES_BASE_ENV, None)
+    # r10.1 A1: the script admits its tenant from the tenant records; the child is handed a database holding it active.
+    insert_active_tenant(migrated_database, J.episode_tenant_of(ep.dir))
+    env.update(database_env(migrated_database))
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     proc = subprocess.run([sys.executable, str(script), *E.cli_argv(ep.dir)], env=env,

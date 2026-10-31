@@ -291,7 +291,9 @@ def test_1186_lead_author_cli_takes_the_runs_tenant_queue_lock(
     root = learning if held_root == "tenant" else tmp_path / "legacy-state"
     with (state_over(root) as holder, holder.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held):
         assert held
-        rc = lead_author.main(["--tenant", run_dir.parent.parent.name, run_dir.name])
+        # r10.1 C1/C9: the command admits through the host acceptance; a test hands it one seeded active directory.
+        rc = lead_author.main(["--tenant", run_dir.parent.parent.name, run_dir.name],
+                              directory=active_directory(run_dir.parents[2], run_dir.parent.parent.name))
     assert rc == (lead_author.QUEUE_LOCK_SKIP_RC if held_root == "tenant" else 0)
     if held_root == "tenant":
         assert not (run_dir / "lead_author" / "pitfalls_collected").exists()
@@ -470,7 +472,7 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
         lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps, box=box, on_done=on_done)
 
     drains._drain_lead_author_markers(lane.paths, state, serve,
-                                      accept_tenant=drains._tenant_acceptor(None), directory=directory_for_root())
+                                      directory=directory_for_root())
 
     name = run_dir.name
     assert lane.landed() == []

@@ -425,40 +425,28 @@ def test_1224_two_preflight_failures_write_unusable_and_start_no_sibling(tmp_pat
 
 
 def test_the_launchers_preflight_builds_its_oracle_side_for_the_source_runs_tenant(tmp_path, monkeypatch):
-    """Every oracle side the launcher's preflight settles names the source run's tenant, and the box it starts carries
-    that tenant's label (r10.1 F6: `preflight.py:120` passes `source.tenant_id`; B1)."""
-    from defender.box import _oracle
-    from defender.learning.branch.estate import registry
+    """Every oracle box the launcher's preflight starts carries the source run's tenant label (r10.1 F6:
+    `preflight.py:120` passes `source.tenant_id`; B1). Observed on the box each world's oracle starts when it takes
+    a python turn, not on the registry call, so no collaborator is patched."""
+    from defender.box import _oracle  # noqa: F401 — the box layer the oracle's python tool starts through
     from defender.tests.support.sandbox import _box1279 as X
     from defender.tests.support.sandbox._box1195 import FakeDaemon
 
-    seen: list[tuple[Any, Any]] = []
-    real = registry.oracle_serving
-
-    def spy(*args: Any, **kw: Any) -> Any:
-        serving = real(*args, **kw)
-        seen.append((kw.get("tenant_id"), serving))
-        return serving
-
-    monkeypatch.setattr(registry, "oracle_serving", spy)
-    est = S.estate(tmp_path)
-    oracle = _by_world(_passing(), _passing())
-    _base, src = S.source_run(tmp_path, est, calls=_calls())
-    tenant = src.parent.parent.name
-    _main(src, est, oracle=oracle, verifier=S.passing_verifier())
-    assert seen, "the launcher never settled an oracle side through the registry"
-    assert {str(t) for t, _ in seen} == {tenant}, [t for t, _ in seen]
     X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
     monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
     daemon = FakeDaemon(tmp_path / "daemon")
     daemon.install(monkeypatch)
-    started = seen[0][1].box()
-    try:
-        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+    est = S.estate(tmp_path)
+    oracle = _by_world(*[S.oracle(S.python("print('checked')"), then=S.submit(_BASE, S.EMPTY_CLAIM))
+                         for _ in range(2)])
+    _base, src = S.source_run(tmp_path, est, calls=_calls())
+    tenant = src.parent.parent.name
+    _main(src, est, oracle=oracle, verifier=S.passing_verifier())
+    creates = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+    assert creates, "no oracle box was started: the preflight's python turns never reached the box layer"
+    for create in creates:
         labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
         assert f"defender.tenant={tenant}" in labels, labels
-    finally:
-        _oracle.stop_oracle_box(started)
 
 
 def test_1224_preflight_replays_every_original_call_through_each_worlds_oracle_before_any_sibling(

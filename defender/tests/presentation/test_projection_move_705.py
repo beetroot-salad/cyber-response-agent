@@ -5,12 +5,15 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run as _vi
 
 import html
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+from defender.tests.support.tenancy._active1214 import active_directory, database_env, insert_active_tenant
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
 import pytest
@@ -196,7 +199,9 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
     page = run_dir / "runtime.html"
 
     # driver A — the standalone re-render, in-process
-    assert visualize_run.main(["visualize_run.py", "--tenant", tenant, run_dir.name]) == 0, (
+    # r10.1 C1/C9: the command admits through the host acceptance; a test hands it one seeded active directory.
+    assert visualize_run.main(["visualize_run.py", "--tenant", tenant, run_dir.name],
+                              directory=active_directory(run_dir.parents[2], tenant)) == 0, (
         capsys.readouterr().err)
     after_a = page.read_text()
     assert marker in after_a, "positive control: runtime.html does not carry the run's final turn"
@@ -216,7 +221,8 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
 
 
 @pytest.mark.parametrize("breakage", ["missing-pointer", "stale-store-path"])
-def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, breakage):
+@pytest.mark.postgres
+def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, breakage, migrated_database):
     """A visualizer that cannot resolve the store FAILS CLOSED: the re-render exits non-zero and the
     post-run step raises `VisualizeFailed`."""
     from defender import run_common
@@ -228,12 +234,16 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     from defender.presentation import visualize_run
 
     script = Path(visualize_run.__file__)
+    # r10.1 A1: the standalone script admits its tenant from the tenant records, so the child is handed a database
+    # that holds the tenant active; the negative below then fails for the store, not for a refused tenant.
+    insert_active_tenant(migrated_database, tenant)
+    env = {**os.environ, **database_env(migrated_database)}
 
     # positive control — intact, the standalone re-render exits 0 on the same argv, and the
     # post-run step renders the page and does not raise
     healthy = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run id
         [sys.executable, str(script), "--tenant", tenant, run_dir.name],
-        capture_output=True, text=True, encoding="utf-8", check=False)
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env)
     assert healthy.returncode == 0, (
         f"control: the re-render of the intact run exited {healthy.returncode}: "
         f"{healthy.stderr!r}")
@@ -257,7 +267,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     script = run_common.DEFENDER_DIR / "presentation" / "visualize_run.py"
     child = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run id
         [sys.executable, str(script), "--tenant", tenant, run_dir.name],
-        capture_output=True, text=True, encoding="utf-8", check=False)
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env)
     assert child.returncode != 0, (
         f"the visualizer exited 0 with an unresolvable store ({breakage}); its stdout was "
         f"{child.stdout!r}")

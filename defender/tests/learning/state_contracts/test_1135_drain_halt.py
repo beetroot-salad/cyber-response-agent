@@ -556,7 +556,7 @@ def cell(name, root):
             os.environ["DEFENDER_DATA_ROOT"] = str(data_root)
             tenant = requested_tenant(data_root_from_path(data_root), run_dir.parent.parent.name)
             run = tenant.runs_repository().open(RunId.parse(run_dir.name))
-            out["answer"] = run_common.enqueue_curation(run, run_common.RunPaths(run_dir).alert)
+            out["answer"] = run_common.enqueue_curation(run, run_common.RunPaths(run_dir).alert, tenant=tenant)
             return out
         state = S.LearningState.open(paths)
         if name == "append":
