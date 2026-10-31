@@ -554,7 +554,8 @@ async def _run_then_close(identity: IdentityService, stop: asyncio.Event) -> Non
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Apply the bootstrap before serving and run the background loop as a task on this loop. On
-    shutdown the sender finishes the email it is on, then the service closes."""
+    shutdown the loop finishes the email or session purge it is on (a purge is cut off at its
+    deadline), then the service closes."""
     identity: IdentityService = app.state.deps.identity
     try:
         await identity.start()
@@ -562,12 +563,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await identity.close()
         raise
     stop = asyncio.Event()
-    sender = asyncio.create_task(_run_then_close(identity, stop), name="identity-background")
+    background = asyncio.create_task(_run_then_close(identity, stop), name="identity-background")
     try:
         yield
     finally:
         stop.set()
-        await asyncio.shield(sender)
+        await asyncio.shield(background)
 
 
 def create_app(deps: ApiDeps) -> FastAPI:
