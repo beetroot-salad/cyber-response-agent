@@ -663,10 +663,11 @@ def test_an_exit_from_the_admission_step_releases_the_hold_and_the_record(placed
             raise exit_()
 
     root = tenancy.resolve_data_root()
-    with pytest.raises(exit_):
+    with pytest.raises(exit_) as caught:  # kept: its traceback keeps the acceptance's frame alive, as a handler's would
         host_tenant(root, TENANT, directory=Leaving())
     assert recorded(placed, TENANT) == [], "the exit left this process recorded"
     assert exclusive_free(placed, TENANT), "the exit left the lock held"
+    assert caught.value is not None
 
 
 def test_an_interrupt_while_waiting_for_the_lock_removes_the_record(placed):
