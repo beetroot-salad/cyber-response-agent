@@ -190,6 +190,33 @@ async def test_the_seeder_refuses_a_duplicate_email_in_any_case(seeded):
         await _user(seeded, "Ann@X.org")
 
 
+@pytest.mark.parametrize("email", [
+    "a\x00b@x.org",    # NUL: PostgreSQL text cannot hold it
+    "a\ud800b@x.org",  # a lone surrogate: not UTF-8 at all
+    "",
+    " \t\u00a0",       # nothing left once trimmed
+])
+async def test_an_email_the_database_cannot_store_or_that_is_blank_is_refused_and_nothing_is_written(seeded, email):
+    """#1349 B1.2: both repositories refuse it alike, rather than one failing in the database."""
+    with pytest.raises(DataRuleViolation):
+        await seeded.ensure_user(email, now=NOW)
+    with pytest.raises(DataRuleViolation):
+        await _user(seeded, email)
+    with pytest.raises(DataRuleViolation):
+        await seeded.user_by_email(email)
+    assert await seeded.user_by_email("ann@x.org") is None
+    plain = await seeded.ensure_user(" \tAnn@X.org\r\n", now=NOW)  # positive control: whitespace is trimmed
+    assert plain.email == "ann@x.org"
+
+
+@pytest.mark.parametrize("email", ["ann@x.org\u00a0", "\u3000Ann@X.org", "\u2028ann@x.org\u2009",
+                                   "ann@x.org\n\u00a0", "\u00a0\nann@x.org"])  # in any order
+async def test_unicode_whitespace_around_an_email_is_trimmed(seeded, email):
+    """#1349: a non-breaking or other Unicode space pasted around an address is not part of it."""
+    assert (await seeded.ensure_user(email, now=NOW)).email == "ann@x.org"
+    assert (await seeded.user_by_email("ann@x.org")) is not None
+
+
 async def test_a_signin_account_is_recorded_once(seeded):
     """signin_account_id is unique and recorded once (data model)."""
     a, b = await _user(seeded, "a@x.org"), await _user(seeded, "b@x.org")
@@ -714,6 +741,19 @@ async def test_a_session_needs_an_existing_user(seeded):
     """sessions.user_id references users."""
     with pytest.raises(DataRuleViolation):
         await seeded.add_session("v", "no-such-user", now=NOW, expires_at=NOW + WEEK)
+
+
+async def test_purging_removes_exactly_the_sessions_sign_in_would_refuse_as_expired(seeded):
+    """#1349 B2: a session is gone once `now >= expires_at` (the same boundary `authenticate`
+    refuses at) and kept a moment before; the count says how many went; a second purge is a no-op."""
+    user = await _user(seeded)
+    for value, expires in (("past", NOW - HOUR), ("at-now", NOW), ("just-alive", NOW + dt.timedelta(microseconds=1))):
+        await seeded.add_session(value, user.id, now=NOW - WEEK, expires_at=expires)
+    assert await seeded.purge_expired_sessions(now=NOW) == 2
+    assert await seeded.session_by_value("past") is None
+    assert await seeded.session_by_value("at-now") is None
+    assert (await seeded.session_by_value("just-alive")).user_id == user.id
+    assert await seeded.purge_expired_sessions(now=NOW) == 0
 
 
 async def test_sign_out_deletes_that_session_only(seeded):

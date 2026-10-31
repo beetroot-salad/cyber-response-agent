@@ -13,10 +13,11 @@ from __future__ import annotations
 import datetime as _dt
 from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import case, delete, exists, select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -335,3 +336,8 @@ class PostgresIdentityRepository:
             update(Session).where(
                 Session.token_hash == session_hash(value), now - Session.last_seen_at > TOUCH_AFTER)
             .values(last_seen_at=now).returning(Session.token_hash))
+
+    async def purge_expired_sessions(self, *, now: _dt.datetime) -> int:
+        async with self._tx() as s:
+            deleted = await s.execute(delete(Session).where(Session.expires_at <= now))
+            return cast(CursorResult[Any], deleted).rowcount  # a DML statement's result is a CursorResult

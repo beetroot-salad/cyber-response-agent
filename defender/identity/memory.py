@@ -355,3 +355,9 @@ class InMemoryIdentityRepository:
             return False
         self._sessions[key] = dataclasses.replace(row, last_seen_at=now)
         return True
+
+    async def purge_expired_sessions(self, *, now: _dt.datetime) -> int:
+        expired = [key for key, row in self._sessions.items() if row.expires_at <= now]
+        for key in expired:
+            del self._sessions[key]
+        return len(expired)

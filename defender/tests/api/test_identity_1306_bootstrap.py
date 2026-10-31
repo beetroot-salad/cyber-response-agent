@@ -267,3 +267,19 @@ def test_entering_the_apps_lifespan_runs_start_and_the_senders_first_pass() -> N
             time.sleep(0.02)
         assert (world.signin.sends_to(OPS), world.signin.sends_to(ME)) == (1, 1)
         assert tenants_of(world.sign_in(ME)) == {LAB}
+
+
+@pytest.mark.parametrize("email", ["a\x00b@x.example", " ", ""])
+def test_a_bootstrap_file_naming_an_unstorable_or_blank_email_is_refused_at_load(email: str) -> None:
+    """#1349 B1.3: refused as the file is read, not when the database or the mail sender meets it."""
+    from pydantic import ValidationError
+
+    from defender.identity import Bootstrap
+
+    with pytest.raises(ValidationError):
+        Bootstrap(administrators=(email,), tenants={})
+    with pytest.raises(ValidationError):
+        Bootstrap(administrators=(), tenants={LAB: (email,)})
+    assert Bootstrap(administrators=(" Ops@X.example ",), tenants={}).administrators == ("ops@x.example",)
+    # a non-breaking space copied from a web page is trimmed, so the administrator stays the same person
+    assert Bootstrap(administrators=("ops@x.example\u00a0",), tenants={}).administrators == ("ops@x.example",)
