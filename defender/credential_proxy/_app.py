@@ -404,13 +404,19 @@ def create_app_from_config(config: Mapping[str, Any]) -> FastAPI:
                           "no transit key")
     addr, token = config["openbao_addr"], config["openbao_token"]
     extra = {k: config[k] for k in OPTIONAL_CONFIG_KEYS if k in config}
-    return create_app(ProxyDeps(
-        tenant_exports={str(t): Path(p) for t, p in tenant_exports.items()},
-        store=OpenBaoStore(addr=addr, token=token, mount=config["kv_mount"]),
-        verifier=TransitVerifier(addr=addr, token=token, mount=config["transit_mount"],
-                                 keys=dict(tenant_keys)),
-        audit=FileAuditSink(config["audit_path"]),
-        **extra))
+    try:
+        deps = ProxyDeps(
+            tenant_exports={str(t): Path(p) for t, p in tenant_exports.items()},
+            store=OpenBaoStore(addr=addr, token=token, mount=config["kv_mount"]),
+            verifier=TransitVerifier(addr=addr, token=token, mount=config["transit_mount"],
+                                     keys=dict(tenant_keys)),
+            audit=FileAuditSink(config["audit_path"]),
+            **extra)
+    except (TypeError, ValueError) as e:
+        # a value of the wrong type (a quoted number, a path that is not text) or shape
+        raise ConfigFault(f"credential proxy configuration: a value is not usable "
+                          f"({type(e).__name__})") from None
+    return create_app(deps)
 
 
 __all__ = ["CONFIG_KEYS", "DEFAULT_MAX_RESPONSE_BYTES", "OPTIONAL_CONFIG_KEYS", "PROXY_PATH",

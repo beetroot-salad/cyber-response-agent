@@ -67,10 +67,11 @@ def main() -> int:
         return 2
     try:
         port = int(os.environ.get(PORT_ENV, str(DEFAULT_PORT)))
-        app = create_app_from_config(operator_config(Path(where)))
     except ValueError:
         _logger.error("%s must be a port number", PORT_ENV)
         return 2
+    try:
+        app = create_app_from_config(operator_config(Path(where)))
     except ConfigFault as fault:
         _logger.error("the credential proxy cannot start: %s", fault.detail)
         return 2
