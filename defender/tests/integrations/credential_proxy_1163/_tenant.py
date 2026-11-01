@@ -117,7 +117,7 @@ class Rig:
         return token(self.t.tenant_id, GRANT_R if grant is None else grant,
                      signer=self.signer, **kw)
 
-    def ask(self, method: str = "GET", path: str = "/users/x", *, system: str = "identity",
+    def ask(self, method: str = "GET", path: str = "/users/x", *, system: str = "identity",  # noqa: PLR0913 — one request's parts
             grant: set[tuple[str, str]] | None = None, tok: str | None = None,
             url: str | None = None, body: str | None = None,
             headers: Mapping[str, str] | None = None,
