@@ -158,9 +158,11 @@ its cache at the end of the design doc. Every entry is one line naming the rule 
 context it assumes, so one grep finds every application of a rule, or everything that assumed a
 given model family. Humans maintain the skills' caches. The project cache is kept by one independent
 agent running the `maintain-cache` skill, dispatched at the end of write-tests' and write-code-from-tests' review steps: it adds facts the run had to
-work out, removes entries the run contradicted, and consolidates similar entries across the file,
-so the cache stays a short list of general facts instead of a log of instances. It is the file's
-only writer, and its changes reach the human with the PR.
+work out and removes entries the run contradicted. It also reads the whole file for entries that
+exist for the same reason, and proposes, as an issue, the rule that would remove that cause: a
+project principle, a lint, or a change to a skill. A pile of related entries is a symptom; the cache
+is where root causes become visible, not where they are fixed. It is the file's only writer, and
+its changes reach the human with the PR.
 
 A list written as the rule invites work that handles exactly the list: an implementation that
 handles the listed members, a test per listed value, an attacker who finds the next member. A
