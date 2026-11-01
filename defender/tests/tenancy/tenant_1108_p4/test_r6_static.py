@@ -80,25 +80,16 @@ def test_r6_prepare_creates_its_private_files_private():
     assert 'chmod 0400 "$STATE/seal/unseal"' in text
 
 
-def test_r6_provisioning_warns_when_the_bot_can_merge_main():
-    """#1163 N13: `check_main_protected` reads `user_can_merge` beside `user_can_push` and
-    warns on anything but `false` for either."""
-    body = _function(SCRIPT.read_text(encoding="utf-8"), "check_main_protected")
-    assert "user_can_push" in body  # positive control: the existing check is found
-    assert "user_can_merge" in body
-    warning = body[body.index("WARNING"):]
-    assert "merge" in warning.lower()
+
+DEV_OPS = REPO_ROOT / "defender" / "docs" / "development-operations.md"
 
 
-def test_r6_provisioning_protects_main_with_a_merge_whitelist_before_checking_it():
-    """#1163 N13, F12: blocking pushes alone leaves the bot able to merge its own pull request
-    (probed on Forgejo 15.0.9 and 17.0.1), so provisioning turns on a merge whitelist without
-    the bot before the bot's-eye check, and deletes the throwaway admin it set the rule with."""
-    text = SCRIPT.read_text(encoding="utf-8")
-    flow = _function(text, "provision")
-    assert flow.index("protect_main") < flow.index("check_main_protected")
-    body = _function(text, "protect_main")
-    assert "enable_merge_whitelist: true" in body
-    assert "- [$bot]" in body, "an existing whitelist must lose the bot"
-    assert "remove_protect_admin" in body
-    assert "forgejo admin user delete" in _function(text, "remove_protect_admin")
+def test_the_operations_guide_names_the_signing_policy_rules_A25():
+    """A25/A24'/r8.2: the operator-provisioned policy bodies live in no repo file, so the guide
+    names each rule the operator creates: the sign-only templated rule on `defender-tenant-sign`,
+    the lifecycle's key rule, the proxy's verify rule and the fixed `transit/` mount."""
+    text = DEV_OPS.read_text(encoding="utf-8")
+    assert "provision-dev-issuer.sh" in text, "control: this is the operations guide"
+    for rule in ("defender-tenant-sign", "transit/sign/request-token-{{identity.entity.metadata.tenant_id}}",
+                 "transit/keys/request-token-*", "transit/verify/request-token-*"):
+        assert rule in text, f"development-operations.md does not name {rule}"

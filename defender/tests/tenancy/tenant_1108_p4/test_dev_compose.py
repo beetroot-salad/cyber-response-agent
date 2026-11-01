@@ -287,3 +287,14 @@ def test_the_credential_proxy_is_a_long_lived_compose_service_off_the_docker_soc
     assert not any("docker.sock" in str(v) for v in svc.get("volumes", [])), svc.get("volumes")
     assert not svc.get("ports"), f"the proxy publishes {svc.get('ports')!r} to the host"
     assert svc.get("network_mode") != "host"
+
+
+def test_the_credential_proxy_mounts_the_whole_data_root_and_no_tenant_folder_A26():
+    """A26: the proxy keeps no tenant list, so compose gives it the data root itself, once,
+    and no per-tenant folder under it. Control: the mount is found."""
+    data_root = REPO_ROOT / ".defender-data"
+    (svc,) = _credential_proxy_services().values()
+    hosts = [_host_path(source) for _kind, source, _target in _mounts(svc)]
+    mounted = [h for h in hosts if _under(h, data_root)]
+    assert data_root in mounted, "control: the data root is mounted whole"
+    assert mounted == [data_root], f"mounts below the data root: {mounted}"

@@ -14,11 +14,7 @@ from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE, proxy
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
-from defender.tests.tenancy.tenant_1108_p4._support import (
-    bind_forge,
-    default_issuer_config,
-    published_tenant,
-)
+from defender.tests.tenancy.tenant_1108_p4._support import default_secrets_dir, published_tenant
 
 pytestmark = pytest.mark.e2e
 
@@ -28,6 +24,7 @@ API = "/api"
 PREFLIGHT_LIFETIME = 3600
 CLOCK_TOLERANCE = 60
 ROLE, SECRET = "role-1163-learning", "secret-1163-learning"
+DELIVERY_ROLE, DELIVERY_SECRET = "role-1163-delivery", "secret-1163-delivery"
 FIXTURE_SYSTEMS = ("identity", "ticket", "host-state", "threat-intel", "change-mgmt",
                    "elastic", "cmdb", "case-history")
 #: `idp` is a tenant-only name: no product allowlist knows it (A6). Its `query` goes through the
@@ -88,26 +85,30 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool):
             if working_tree_edit:  # an unmerged edit in the clone's working tree (C28, C34)
                 (t.clone / ACCESS_FILE.format(system="idp")).write_text(
                     H.declaration(wt.url + API), encoding="utf-8")
-            # The launcher signs in-process with the tenant's own issuer config (A11): no signer
-            # is injected, the OpenBao stand-in is the transport.
-            bind_forge(t)
-            A.bind_issuer(data_root, S.FIXTURE_TENANT, default_issuer_config(t).parent,
-                          role_id=ROLE, secret_id=SECRET)
-            bao, tap_holder = A.OpenBaoStandIn({ROLE: SECRET}), {}
+            # The launcher signs in-process with the live generation's sign login, read from the
+            # episode's records it passes in as `directory=` (A24); the delivery file is absent
+            # (the signer never reads it). No signer is injected, the OpenBao stand-in is the transport.
+            fields = A.generation(S.FIXTURE_TENANT, default_secrets_dir(t), sign_role_id=ROLE,
+                                  sign_secret=SECRET, role_id=DELIVERY_ROLE,
+                                  delivery_secret=DELIVERY_SECRET, delivery_file=False)
+            records = t.directory_with(generations=[fields])
+            bao, tap_holder = A.OpenBaoStandIn({ROLE: SECRET, DELIVERY_ROLE: DELIVERY_SECRET}), {}
             store = H.FakeStore({(S.FIXTURE_TENANT, "idp"): T.static_set()})
             with A.proxy_for(t, store) as (url, tap):
                 tap_holder["tap"] = tap
                 run = S.launch(tmp_path, est, calls=calls, oracle=S.oracle(
                     then=S.submit(idp.payload, S.EMPTY_CLAIM)),
-                    verifier=S.passing_verifier(), issuer_transport=bao, proxy_url=url)
+                    verifier=S.passing_verifier(), issuer_transport=bao, proxy_url=url,
+                    directory=records)
         outcome = S.read_outcome(run.ep)
     return run, outcome, bao, tap_holder["tap"], merged, wt
 
 
 def test_p1_preflight_reads_idp_through_the_proxy_with_a_read_grant_on_http_proxy_systems(
         tmp_path, monkeypatch, data_root):
-    """Control: served by the merged base, read grant on idp alone, signed with the tenant's own
-    login and key; spawned children carry no token. H12, A7, A11, O10."""
+    """Control: served by the merged base, read grant on idp alone, signed with the live
+    generation's sign login (from the episode's records) and the tenant's key; no token in
+    children. H12, A7, A11, A24, O10."""
     run, outcome, bao, tap, merged, wt = _preflight(
         tmp_path, monkeypatch, data_root, working_tree_edit=False)
     finished = time.time()
@@ -115,7 +116,7 @@ def test_p1_preflight_reads_idp_through_the_proxy_with_a_read_grant_on_http_prox
     idp_call = [c for c in S.default_calls() if c.system == "idp"][0]
     assert merged.paths() == [f"{API}/events?{urlencode({'q': idp_call.params['q']})}"]
     assert merged.seen[0].headers.get("Authorization") == f"Bearer {H.CANARY_KEY}"
-    assert bao.logins == [(ROLE, SECRET)], "the tenant's own issuer login"
+    assert bao.logins == [(ROLE, SECRET)], "the live generation's sign login, not its delivery login"
     (sign,) = bao.signs
     assert bao.role_of(sign) == ROLE
     assert sign.key == proxy().transit_key_for(S.FIXTURE_TENANT), "the tenant's own transit key (A11)"

@@ -9,8 +9,10 @@ Names this module chooses (the contract's seams, listed in the contract map):
 - `run.main(signer=, proxy_url=)`: the operator's seams at the run process.
 - `run.main(issuer_transport=)` and the learning launcher's `issuer_transport=` (the name
   `publish_for_run` already uses): the `httpx` transport the in-process signer reaches OpenBao by
-  when no `signer=` is injected. The signer logs in with the tenant's own issuer client config
-  (its forge binding's `issuer_config`, A11) and signs through transit with that tenant's key.
+  when no `signer=` is injected. The signer logs in as the live generation's sign-only AppRole
+  (`sign_role_id` and the host file `sign_secret_file`, read from the tenant records the run or the
+  launcher holds, A24') at the deployment's OpenBao address, and signs through transit with that
+  tenant's key (A11). Tenant records come in as `directory=` (`Records`, `generation`).
 - The ticket writer's legs take `request_token=` and `proxy_url=` keywords.
 """
 from __future__ import annotations
@@ -21,7 +23,7 @@ import contextlib
 import json
 import re
 from dataclasses import dataclass
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -115,14 +117,18 @@ class OpenBaoStandIn(httpx.MockTransport):
     `logins` and `signs`.
 
     `sealed` ("login" or "sign") answers 503 `Vault is sealed` on that call (and on health, which
-    reports sealed); `unreachable` raises a connection error on every request."""
+    reports sealed); `unreachable` raises a connection error on every request; `login_status` and
+    `sign_status` answer that status (an error body) on the login or the sign call."""
 
     def __init__(self, accounts: Mapping[str, str], *, sealed: str | None = None,
-                 unreachable: bool = False) -> None:
+                 unreachable: bool = False, login_status: int | None = None,
+                 sign_status: int | None = None) -> None:
         super().__init__(self._handle)
         self.accounts = dict(accounts)
         self.sealed = sealed
         self.unreachable = unreachable
+        self.login_status = login_status
+        self.sign_status = sign_status
         self.requests: list[str] = []
         self.logins: list[tuple[str, str]] = []
         self.signs: list[Sign] = []
@@ -132,6 +138,14 @@ class OpenBaoStandIn(httpx.MockTransport):
 
     def _sealed_answer(self) -> httpx.Response:
         return httpx.Response(503, json={"errors": ["Vault is sealed"]})
+
+    def _forced(self, call: str, status: int | None) -> httpx.Response | None:
+        """The fault this stand-in is set to answer `call` with, if any."""
+        if self.sealed == call:
+            return self._sealed_answer()
+        if status is not None:
+            return httpx.Response(status, json={"errors": [f"{call} failed"]})
+        return None
 
     def _housekeeping(self, request: httpx.Request) -> httpx.Response | None:
         path = request.url.path
@@ -156,8 +170,9 @@ class OpenBaoStandIn(httpx.MockTransport):
         if path == "/v1/auth/approle/login":
             body = json.loads(request.content)
             self.logins.append((body["role_id"], body["secret_id"]))
-            if self.sealed == "login":
-                return self._sealed_answer()
+            forced = self._forced("login", self.login_status)
+            if forced is not None:
+                return forced
             if self.accounts.get(body["role_id"]) != body["secret_id"]:
                 self.refused.append(path)
                 return httpx.Response(403, json={"errors": ["invalid credentials"]})
@@ -167,8 +182,9 @@ class OpenBaoStandIn(httpx.MockTransport):
                                                       "lease_duration": 600}})
         match = re.fullmatch(r"/v1/[^/]+/sign/([^/]+)(?:/[^/]+)?", path)
         if match:
-            if self.sealed == "sign":
-                return self._sealed_answer()
+            forced = self._forced("sign", self.sign_status)
+            if forced is not None:
+                return forced
             token = request.headers.get("X-Vault-Token", "")
             if token not in self._tokens or token in self.revoked:
                 self.refused.append(path)
@@ -185,21 +201,67 @@ class OpenBaoStandIn(httpx.MockTransport):
         return self._tokens[sign.client_token]
 
 
-def bind_issuer(data_root: Path, tenant_id: str, scratch: Path, *, role_id: str,
-                secret_id: str) -> Path:
-    """Give `tenant_id` an issuer client config file under `scratch` (the tenant's own login) and
-    a forge binding in its row naming it; returns the file. Plants data only."""
+def generation(  # noqa: PLR0913 — one keyword per field a test varies
+        tenant_id: str, scratch: Path, *, sign_role_id: str, sign_secret: str,
+               role_id: str = "delivery-role-1163", delivery_secret: str = "delivery-secret-1163",
+               salt: str = "g1", status: str = "live", sign_file: bool = True,
+               delivery_file: bool = True) -> dict[str, Any]:
+    """The fields of one credential generation of `tenant_id` (#1214's names, plus A24's sign
+    login) with its two host secret files written under `scratch` as the host writes them (the
+    secret id and a newline). `sign_file=False` / `delivery_file=False` leave that file unwritten.
+    Plants data only."""
     scratch.mkdir(parents=True, exist_ok=True)
-    config = scratch / f"issuer-{tenant_id}.json"
-    config.write_text(json.dumps({
-        "issuer": "https://openbao.test:8200", "ca_cert": str(scratch / "ca.pem"),
-        "role_id": role_id, "secret_id": secret_id}), encoding="utf-8")
-    row_path = Path(data_root) / tenant_id / "tenant.json"
-    row = json.loads(row_path.read_text(encoding="utf-8"))
-    row["forge"] = {"origin": "https://forge.test", "audience": "forgejo-1163",
-                    "issuer_role": f"tenant-{tenant_id}", "issuer_config": str(config.absolute())}
-    row_path.write_text(json.dumps(row, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return config
+    delivery, sign = scratch / f"{tenant_id}-{salt}", scratch / f"{tenant_id}-{salt}-sign"
+    for path, secret, written in ((delivery, delivery_secret, delivery_file),
+                                  (sign, sign_secret, sign_file)):
+        if written:
+            path.write_text(secret + "\n", encoding="utf-8")
+            path.chmod(0o600)
+    return {"salt": salt, "status": status, "bot_login": f"bot-{tenant_id}-{salt}",
+            "oidc_role": f"oidc-{tenant_id}-{salt}", "approle": f"approle-{tenant_id}-{salt}",
+            "role_id": role_id, "entity": f"entity-{tenant_id}-{salt}",
+            "audience": f"audience-{tenant_id}-{salt}", "host_secret_file": delivery.absolute(),
+            "secret_accessor": f"accessor-{tenant_id}-{salt}",
+            "sign_approle": f"sign-{tenant_id}-{salt}", "sign_entity": f"tenant-{tenant_id}-{salt}-sign",
+            "sign_role_id": sign_role_id, "sign_secret_file": sign.absolute(),
+            "sign_secret_accessor": f"sign-accessor-{tenant_id}-{salt}"}
+
+
+class Records:
+    """Tenant records (#1214's `TenantDirectory` over an `InMemoryTenantRepository`, as its own
+    tests build them) holding each of `tenants` ACTIVE with its forge wiring and generations.
+    `directory` is what a run or a launcher takes as `directory=`. Build it after the tenant's
+    folder is planted (the wiring's origin is read from the folder's clone). The mutators change
+    the live generation as the lifecycle would (a rotation, an offboarding) while a run is on."""
+
+    def __init__(self, data_root: Path, tenants: Mapping[str, Sequence[Mapping[str, Any]]]) -> None:
+        from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+        from defender.tests.support.tenancy import _active1214 as active
+
+        self.twin: Any = InMemoryTenantRepository()
+        self._active = active
+        for tenant, generations in tenants.items():
+            active.run_sync(self.twin.add_tenant(
+                tenant, created_at=active.CREATED, state="active", repo=f"tenants/{tenant}",
+                origin=active._origin_of(Path(data_root), tenant, None)))  # noqa: SLF001
+            for fields in generations:
+                active.run_sync(self.twin.add_generation(tenant, **fields))
+        self.directory = TenantDirectory(lambda: self.twin)
+
+    def rotate(self, tenant: str, fields: Mapping[str, Any]) -> None:
+        """`fields` becomes the tenant's live generation; the one before it is `retiring`."""
+        self._set_status(tenant, "live", "retiring")
+        self._active.run_sync(self.twin.add_generation(tenant, **fields))
+
+    def offboard(self, tenant: str) -> None:
+        """Every generation of the tenant is `destroyed`: it has no live generation."""
+        for status in ("live", "retiring", "pending"):
+            self._set_status(tenant, status, "destroyed")
+
+    def _set_status(self, tenant: str, before: str, after: str) -> None:
+        for (owner, _salt), row in self.twin._generations.items():  # noqa: SLF001 — the in-memory twin's rows
+            if owner == tenant and row.status == before:
+                row.status = after
 
 
 def claims_of_payload(payload: bytes) -> dict[str, Any]:
