@@ -13,6 +13,7 @@ import pytest
 
 from defender.kit.faults import ConfigFault, TransportFault
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.shared._opened_paths import opened, opened_paths
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163._target import proxy, request_signer
@@ -243,12 +244,13 @@ def test_r4b_a_login_openbao_refuses_is_a_config_fault_at_the_mint(tmp_path, dat
     assert len(bao.signs) == 1, "positive control: the right secret signs"
 
 
-@pytest.mark.parametrize(("status", "logins"), [(400, 1), (403, 2)], ids=["bad request", "forbidden"])
-def test_r4e_a_sign_openbao_refuses_with_a_4xx_is_a_config_fault_after_one_relogin_on_403(
+@pytest.mark.parametrize(("status", "logins"), [(400, 1), (401, 2), (403, 2)],
+                         ids=["bad request", "unauthorized", "forbidden"])
+def test_r4e_a_sign_openbao_refuses_with_a_4xx_is_a_config_fault_after_one_relogin_on_401_or_403(
         tmp_path, data_root, status, logins):
-    """A sign call answered 4xx (400: a key not yet made; 403: a refused client token) is
-    `ConfigFault`; a 403 is retried after exactly one fresh login, a 400 not. Control: a sign
-    that is not refused signs. A24, A18."""
+    """A sign call answered 4xx (400: a key not yet made; 401/403: a refused client token) is
+    `ConfigFault`; a 401 or 403 is retried after exactly one fresh login, a 400 not. Control: a
+    sign that is not refused signs. A24 detail (login again once on 401/403), A18."""
     _plant(data_root, proxy=("identity",))
     records, _ = _records(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET}, sign_status=status)
@@ -263,6 +265,113 @@ def test_r4e_a_sign_openbao_refuses_with_a_4xx_is_a_config_fault_after_one_relog
     bao.sign_status = None
     read_access(rec).token()
     assert len(bao.signs) == 1, "positive control: the same run signs once OpenBao accepts"
+
+
+def _make_absent(path: Path) -> None:
+    path.unlink()
+
+
+def _make_unreadable(path: Path) -> None:
+    path.unlink()
+    path.mkdir()  # a read of a folder fails whoever the user is
+
+
+def _make_empty(path: Path) -> None:
+    path.write_text("", encoding="utf-8")
+
+
+def _make_two_lines(path: Path) -> None:
+    path.write_text(f"{SECRET}\n{SECRET}\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("status", [500, 502])
+def test_r4g_a_sign_answered_5xx_is_a_transport_fault_after_exactly_one_login(tmp_path, data_root, status):
+    """A 5xx sign is retryable (`TransportFault`) and is not a refused client token: no second
+    login. A18, A24 detail (re-login only on 401/403)."""
+    _plant(data_root, proxy=("identity",))
+    records, _ = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: SECRET}, sign_status=status)
+    signer = request_signer(S.PLAYGROUND_ID, directory=records.directory, transport=bao)
+    with pytest.raises(TransportFault):
+        signer.sign(b"payload-1163")
+    assert bao.logins == [(ROLE, SECRET)], "a 5xx sign logged in again"
+    assert bao.signs == []
+
+
+@pytest.mark.parametrize("malformed", ["login", "sign"])
+def test_r4h_a_2xx_without_a_client_token_or_a_signature_is_a_config_fault(tmp_path, data_root, malformed):
+    """A login 200 with no `auth.client_token`, and a sign 200 with no `data.signature`, are
+    `ConfigFault`, not a fault a retry clears. A18 ("a malformed 2xx -> ConfigFault"), A24."""
+    _plant(data_root, proxy=("identity",))
+    records, _ = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: SECRET}, malformed=malformed)
+    signer = request_signer(S.PLAYGROUND_ID, directory=records.directory, transport=bao)
+    with pytest.raises(ConfigFault):
+        signer.sign(b"payload-1163")
+    assert bao.signs == []
+    assert bao.logins, "positive control: the malformed answer was reached"
+
+
+def test_r4i_a_signer_holds_its_client_token_across_signs(tmp_path, data_root):
+    """Two signs by one signer make one login and both use its client token. A24 detail (the
+    signer holds its OpenBao client token)."""
+    _plant(data_root, proxy=("identity",))
+    records, _ = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    signer = request_signer(S.PLAYGROUND_ID, directory=records.directory, transport=bao)
+    signer.sign(b"payload-1")
+    signer.sign(b"payload-2")
+    assert bao.logins == [(ROLE, SECRET)], "the second sign logged in again"
+    first, second = bao.signs
+    assert first.client_token == second.client_token
+
+
+@pytest.mark.parametrize("spoil", [_make_absent, _make_unreadable], ids=["absent", "unreadable"])
+def test_r4j_the_request_signer_opens_only_the_sign_secret_file(tmp_path, data_root, spoil):
+    """With the delivery secret file absent or unreadable the signer still signs, and it never opens
+    that file (a read whose error is swallowed is still a read). A24' (never reads the delivery file)."""
+    _plant(data_root, proxy=("identity",))
+    records, fields = _records(data_root, tmp_path)
+    spoil(fields["host_secret_file"])
+    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    signer = request_signer(S.PLAYGROUND_ID, directory=records.directory, transport=bao)
+    with opened_paths() as seen:
+        signer.sign(b"payload-1163")
+    assert bao.logins == [(ROLE, SECRET)], "positive control: signed with the sign pair"
+    assert opened(seen, fields["sign_secret_file"]), "positive control: the sign file was read"
+    assert not opened(seen, fields["host_secret_file"]), "the signer opened the delivery secret file"
+
+
+class _CountingDirectory:
+    """Tenant records that count every use made of them."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.uses: list[str] = []
+
+    def __getattr__(self, name: str) -> Any:
+        self.uses.append(name)
+        return getattr(self._inner, name)
+
+
+def test_r4k_building_a_request_signer_reads_no_records_and_no_file(tmp_path, data_root):
+    """Built over records that count their use and secret paths that do not exist, the signer reads
+    no record, opens no file and sends nothing; its first sign then reads both. A24' signer handle
+    (r8.5: building reads and sends nothing)."""
+    _plant(data_root, proxy=("identity",))
+    records, fields = _records(data_root, tmp_path, sign_file=False, delivery_file=False)
+    counted = _CountingDirectory(records.directory)
+    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    with opened_paths() as seen:
+        signer = request_signer(S.PLAYGROUND_ID, directory=counted, transport=bao)
+    assert counted.uses == [], "building the signer read the tenant records"
+    assert not opened(seen, fields["sign_secret_file"]), "building the signer opened the sign file"
+    assert not opened(seen, fields["host_secret_file"]), "building the signer opened the delivery file"
+    assert bao.requests == []
+    fields["sign_secret_file"].write_text(SECRET + "\n", encoding="utf-8")
+    signer.sign(b"payload-1163")
+    assert counted.uses, "positive control: the sign read the records"
+    assert bao.logins == [(ROLE, SECRET)], "positive control: the file written after the build is the one used"
 
 
 def test_r4f_a_request_signer_shows_neither_the_client_token_nor_the_sign_secret(tmp_path, data_root):
@@ -284,23 +393,6 @@ def test_r4f_a_request_signer_shows_neither_the_client_token_nor_the_sign_secret
     for text in (repr(signer), str(signer)):
         assert client_token not in text, "the signer shows the client token"
         assert SECRET not in text, "the signer shows the sign secret"
-
-
-def _make_absent(path: Path) -> None:
-    path.unlink()
-
-
-def _make_unreadable(path: Path) -> None:
-    path.unlink()
-    path.mkdir()  # a read of a folder fails whoever the user is
-
-
-def _make_empty(path: Path) -> None:
-    path.write_text("", encoding="utf-8")
-
-
-def _make_two_lines(path: Path) -> None:
-    path.write_text(f"{SECRET}\n{SECRET}\n", encoding="utf-8")
 
 
 @pytest.mark.parametrize("spoil", [_make_absent, _make_unreadable, _make_empty, _make_two_lines],
@@ -368,6 +460,27 @@ def test_r5_the_signing_login_is_never_taken_from_the_environment(
     assert not [k for k in env if k in ("VAULT_TOKEN", "BAO_TOKEN", "DEFENDER_BAO_TOKEN",
                                         "ROLE_ID", "SECRET_ID")]
     assert env["DEFENDER_RUN_DIR"], "positive control: the run env was built"
+
+
+def test_r5b_a_run_with_no_injected_signer_signs_through_the_sign_login_whatever_the_environment_holds(
+        tmp_path, data_root, monkeypatch):
+    """With operator OpenBao/Vault tokens and addresses in the environment, the run still signs with
+    the live generation's sign login through its issuer transport; the environment's address sees
+    nothing. A1/A24 (the signing login is never taken from the environment), A24' signer handle."""
+    _plant(data_root, proxy=("identity",))
+    records, _ = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    with H.upstream() as canary:
+        for name, value in (("VAULT_ADDR", canary.url), ("BAO_ADDR", canary.url),
+                            ("VAULT_TOKEN", "env-token-1163"), ("BAO_TOKEN", "env-token-1163")):
+            monkeypatch.setenv(name, value)
+        rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
+                                               directory=records.directory)
+        assert (rc, refused) == (0, None)
+        token = read_access(rec).token()
+    assert canary.seen == [], "the environment's address was used"
+    assert bao.logins == [(ROLE, SECRET)]
+    assert A.SIGNATURE_CANARY in token, "the token carries the stand-in's signature"
 
 
 def test_r6_run_start_signs_with_the_tenants_own_sign_login_and_key(tmp_path, data_root):
