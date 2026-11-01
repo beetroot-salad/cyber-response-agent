@@ -22,10 +22,11 @@ map of what to attack."""
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender._paths import PATHS
 from defender.tenancy import add_tenant_arguments
@@ -40,6 +41,9 @@ from defender.investigation.agent_definition import (
 from defender._agent_role import AgentRole
 from defender.investigation.permission import AgentPolicy
 from defender.investigation.permission.grant import OPENS_NOTHING, PROGRAMS, Grant
+
+if TYPE_CHECKING:
+    from defender.systems.run_tenant import Admitted
 
 _ROLES = {r.name.lower(): r for r in AgentRole}
 
@@ -74,22 +78,19 @@ def _policy(
     )
 
 
-def _definition(role: AgentRole, defender_dir: Path, tenant: str | None) -> AgentDefinition:
-    """The role's definition as a run would bind it. Gather's grant is the named tenant's,
-    accepted and resolved the way a run does (and refused, like a run, when gather could query
-    nothing); other roles carry their own grant."""
+def _definition(role: AgentRole, admitted: Admitted | None) -> AgentDefinition:
+    """The role's definition as a run would bind it. Gather's grant is the tenant `main`'s host
+    acceptance admitted, resolved the way a run resolves it (and refused, like a run, when gather
+    could query nothing); other roles carry their own grant and name no tenant."""
     defn = AGENTS[role]
     if role is not AgentRole.GATHER:
         return defn
-    from defender import tenancy
     from defender.systems import run_tenant as run_tenant_mod
     from defender.investigation.driver import gather_def_for
 
+    assert admitted is not None  # `main` admits gather's tenant before it asks
     try:
-        requested = tenancy.requested_tenant_id(tenant)
-        run = run_tenant_mod.resolve_tenant(
-            tenancy.resolve_data_root(), requested, defender_dir=defender_dir,
-            dispatches_lead_zero=False)
+        run = run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False)
     except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"defender-policy: {refusal}")
     return gather_def_for(run.grants.gather)
@@ -193,7 +194,7 @@ def _explain(  # noqa: PLR0913 — the gate's own call shape, plus the output-fo
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, directory: Any = None) -> int:
     ap = argparse.ArgumentParser(prog="defender-policy", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("show", "explain"):
@@ -212,14 +213,27 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     role = _role_for(args.agent)
-    defn = _definition(role, args.defender_dir, args.tenant)
-    policy = _policy(defn, args.run_dir, args.defender_dir, args.corpus_name, agent=args.agent)
-    if args.cmd == "show":
-        return _show(policy, args.agent, args.run_dir, args.defender_dir)
-    anchor = args.defender_dir.parent if defn.anchors_on_tree else args.run_dir
-    return _explain(
-        policy, args.command, args.run_dir, args.defender_dir, args.as_json, cwd_anchor=anchor,
-    )
+    # Gather's grant is one tenant's: that tenant through the one host acceptance (r10 A1), held
+    # for the whole command — `active` with its forge wiring, its folder accepted as a run's is.
+    admitted = None
+    if role is AgentRole.GATHER:
+        from defender import tenancy
+        from defender.systems.run_tenant import TenantRefused, host_tenant
+
+        try:
+            admitted = host_tenant(tenancy.resolve_data_root(), args.tenant, directory=directory,
+                                   defender_dir=args.defender_dir)
+        except TenantRefused as refusal:
+            sys.exit(f"defender-policy: {refusal}")
+    with admitted if admitted is not None else contextlib.nullcontext():
+        defn = _definition(role, admitted)
+        policy = _policy(defn, args.run_dir, args.defender_dir, args.corpus_name, agent=args.agent)
+        if args.cmd == "show":
+            return _show(policy, args.agent, args.run_dir, args.defender_dir)
+        anchor = args.defender_dir.parent if defn.anchors_on_tree else args.run_dir
+        return _explain(
+            policy, args.command, args.run_dir, args.defender_dir, args.as_json, cwd_anchor=anchor,
+        )
 
 
 if __name__ == "__main__":

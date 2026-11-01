@@ -63,8 +63,8 @@ logs in to OpenBao itself with AppRole). Human decisions U1–U8 are in r3; U9�
   even with a snapshot).
 - **OD3** (superseded by U12) ticket got the value in-process; the keyword seam is withdrawn and the
   ticket reads the host record.
-- **OD4** One login symbol: `version_control.issuer_login(tenant, *, issuer_config=None, transport=None)
-  -> ForgejoIdentity`; drains, the publish child and `tenant.py update` use it.
+- **OD4** One login symbol: `version_control.forge_credential(tenant_id, purpose, *, directory, config, transport=None)
+  -> TenantForgeCredential` (reads the live generation's host secret file); drains, the publish child and `tenant.py update` use it.
 - **OD5** `_spec1224.launch`/`Estate.place` build through the real publish helper and stamp the real commit.
 - **OD6** Corpus paths are `agent/<corpus>`; `KnowledgePaths(agent_root)` takes no `agent_rel`;
   `of_defender_dir` survives only in the judge's pre-move branch; commit/ChangeSet/handoff paths are
@@ -126,7 +126,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
   three keys (never `reason`); `as_json()` without it omits the key (repair r4, F1).
 
 **Delivery API** (`defender.learning.author.version_control`)
-- `issuer_login(tenant, *, issuer_config=None, transport=None) -> ForgejoIdentity`: logs in with the config the tenant's forge binding names; `issuer_config` is an in-process stand-in for that path.
+- `forge_credential(tenant_id, purpose, *, directory, config, transport=None) -> TenantForgeCredential`: logs in with the live generation's host secret file (`config` is an in-process issuer stand-in).
 - Issuer client config: JSON `{"issuer", "ca_cert" (PEM path), "role_id", "secret_id"}`, one file per tenant, `<repo>/playground-issuer/client/<tenant id>/issuer.json` in dev; identity endpoint `<issuer>/v1/identity/oidc`. No default path and no CLI flag (PR #1288 review).
 - Tenant row forge binding: `<T>/tenant.json` `forge: {origin, audience, issuer_role, issuer_config}` (`issuer_config` an absolute path); origin required even with an injected identity.
 - `materialise_export(tenant, commit) -> TenantExport`: no identity/client/origin; refusals `DeliveryRefused`, lock still busy after a bounded retry (assumed ≤60 s) `LockBusy`.

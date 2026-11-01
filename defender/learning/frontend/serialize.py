@@ -5,7 +5,7 @@ import datetime as _dt
 import json
 import sys
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
@@ -165,7 +165,11 @@ def dump_contract(view: dict) -> str:
     return json.dumps(view, indent=2, ensure_ascii=False) + "\n"
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, directory: Any = None) -> int:
+    """The posture page's contract on stdout, for `--agent-root` (no tenant) or `--tenant T`: T
+    through the one host acceptance (r10 A1), held while its published knowledge is read.
+    `directory` is the tenant records a test hands in; a production process reads
+    `DEFENDER_DATABASE_DSN`'s. A refusal is a usage error (exit 2)."""
     import argparse
 
     use_utf8_stdio()
@@ -178,17 +182,22 @@ def main(argv: list[str]) -> int:
     where.add_argument("--agent-root", type=Path, help="show the knowledge at this agent root")
     args = parser.parse_args(argv[1:])
     if args.agent_root is not None:
-        agent_root = args.agent_root
-    else:
-        from defender import tenancy
-        from defender.tenancy import DeliveryRefused
+        sys.stdout.write(dump_contract(stamped_view(args.agent_root)))
+        return 0
+    from defender import tenancy
+    from defender.systems.run_tenant import host_tenant
+    from defender.tenancy import DeliveryRefused
 
+    try:
+        admitted = host_tenant(tenancy.resolve_data_root(), args.tenant, directory=directory)
+    except TenantRefused as refused:
+        parser.error(str(refused))
+    with admitted:
         try:
-            tenant = tenancy.requested_tenant(tenancy.resolve_data_root(), args.tenant)
-            agent_root = published_agent_root(tenant)
-        except (TenantRefused, DeliveryRefused) as refused:
+            agent_root = published_agent_root(admitted.tenant)
+        except DeliveryRefused as refused:
             parser.error(str(refused))
-    sys.stdout.write(dump_contract(stamped_view(agent_root)))
+        sys.stdout.write(dump_contract(stamped_view(agent_root)))
     return 0
 
 

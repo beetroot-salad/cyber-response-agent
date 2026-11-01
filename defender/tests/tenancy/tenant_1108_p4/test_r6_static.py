@@ -61,42 +61,35 @@ def _function(text: str, name: str) -> str:
     return text[start:text.index("\n}\n", start)]
 
 
-def test_r6_provisioning_revokes_the_root_token_last():
-    body = _function(SCRIPT.read_text(encoding="utf-8"), "provision")
-    revokes = [m.start() for m in re.finditer(r'bao "\$t" token revoke -self', body)]
-    assert revokes, "provisioning no longer revokes the root token"
-    assert all(body.index(step) < revokes[-1] for step in
-               ("write_client_config", "bind_forge", "check_main_protected"))
+def test_r6_the_script_makes_files_only_and_holds_no_tenant_credential_step():
+    """The `provision` subcommand is retired (#1214: the lifecycle service creates a tenant's
+    credentials). It must not come back half-way: no subcommand, no OpenBao root token, no
+    AppRole secret_id, no tenant.json binding, no `bao` call from this script."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    for retired in ("provision()", "bind_forge", "tenant.json", "root_token", "secret-id", "operator init",
+                    "write_client_config", "ensure_integration"):
+        assert retired not in text, f"the script still holds retired provisioning: {retired}"
+    usage = re.search(r'die "usage: [^"]*"', text)
+    assert usage, "control: the script prints its usage"
+    assert "provision <" not in usage.group(0), usage.group(0)
 
 
-def test_r6_the_issuer_secret_files_are_created_private():
+def test_r6_prepare_creates_its_private_files_private():
     text = SCRIPT.read_text(encoding="utf-8")
     assert "umask 077" in _function(text, "prepare")
-    config = _function(text, "write_client_config")
-    assert config.index('chmod 0600 "$config.tmp"') < config.index('mv "$config.tmp"'), (
-        "the client config (secret_id) must be made private before it is moved into place")
     assert 'chmod 0400 "$STATE/seal/unseal"' in text
 
 
-def test_r6_provisioning_warns_when_the_bot_can_merge_main():
-    """#1163 N13: `check_main_protected` reads `user_can_merge` beside `user_can_push` and
-    warns on anything but `false` for either."""
-    body = _function(SCRIPT.read_text(encoding="utf-8"), "check_main_protected")
-    assert "user_can_push" in body  # positive control: the existing check is found
-    assert "user_can_merge" in body
-    warning = body[body.index("WARNING"):]
-    assert "merge" in warning.lower()
+
+DEV_OPS = REPO_ROOT / "defender" / "docs" / "development-operations.md"
 
 
-def test_r6_provisioning_protects_main_with_a_merge_whitelist_before_checking_it():
-    """#1163 N13, F12: blocking pushes alone leaves the bot able to merge its own pull request
-    (probed on Forgejo 15.0.9 and 17.0.1), so provisioning turns on a merge whitelist without
-    the bot before the bot's-eye check, and deletes the throwaway admin it set the rule with."""
-    text = SCRIPT.read_text(encoding="utf-8")
-    flow = _function(text, "provision")
-    assert flow.index("protect_main") < flow.index("check_main_protected")
-    body = _function(text, "protect_main")
-    assert "enable_merge_whitelist: true" in body
-    assert "- [$bot]" in body, "an existing whitelist must lose the bot"
-    assert "remove_protect_admin" in body
-    assert "forgejo admin user delete" in _function(text, "remove_protect_admin")
+def test_the_operations_guide_names_the_signing_policy_rules_A25():
+    """A25/A24'/r8.2: the operator-provisioned policy bodies live in no repo file, so the guide
+    names each rule the operator creates: the sign-only templated rule on `defender-tenant-sign`,
+    the lifecycle's key rule, the proxy's verify rule and the fixed `transit/` mount."""
+    text = DEV_OPS.read_text(encoding="utf-8")
+    assert "provision-dev-issuer.sh" in text, "control: this is the operations guide"
+    for rule in ("defender-tenant-sign", "transit/sign/request-token-{{identity.entity.metadata.tenant_id}}",
+                 "transit/keys/request-token-*", "transit/verify/request-token-*"):
+        assert rule in text, f"development-operations.md does not name {rule}"

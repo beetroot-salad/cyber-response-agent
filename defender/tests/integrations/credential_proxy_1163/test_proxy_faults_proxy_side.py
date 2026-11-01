@@ -7,13 +7,21 @@ import gzip
 import http.server
 import json
 import threading
+import uuid
 
+import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.kit.faults import ConfigFault
-from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH, proxy
+from defender.configuration.issuer import DEPLOYMENT_ISSUER
+from defender.tests.integrations.credential_proxy_1163._target import (
+    PROXY_PATH,
+    REMOVED_CONFIG_KEYS,
+    app_from_config,
+)
 
 BASE = T.BASE_PATH
 PATH = f"{BASE}/users/x"
@@ -179,14 +187,186 @@ def test_f5_a_request_the_proxy_cannot_process_is_a_transport_fault_and_audited(
     assert [rec["outcome"] for rec in r.audit.records] == ["TransportFault"]
 
 
+def _config(tmp_path, **over):
+    """The operator config of A13/A26: a token, the KV mount, the data root, the audit file."""
+    return {"openbao_token": "t", "kv_mount": "kv", "data_root": str(tmp_path),
+            "audit_path": str(tmp_path / "audit.jsonl")} | over
+
+
+def test_f6_the_remaining_config_builds_the_proxy(tmp_path):
+    """Control for the config cases: exactly the keys A26 leaves build an app. A13, A26."""
+    assert app_from_config(_config(tmp_path)) is not None
+
+
 @pytest.mark.parametrize("bad", [{"upstream_timeout_sec": "30"}, {"audit_path": 5},
-                                 {"audit_path": "audit\0.jsonl"}, {"max_response_bytes": None}],
-                         ids=["quoted-number", "path-not-text", "nul-in-path", "null-cap"])
+                                 {"audit_path": "audit\0.jsonl"}, {"max_response_bytes": None},
+                                 {"data_root": 5}, {"data_root": "root\0dir"}],
+                         ids=["quoted-number", "path-not-text", "nul-in-path", "null-cap",
+                              "root-not-text", "nul-in-root"])
 def test_f6_an_operator_config_value_of_the_wrong_type_is_a_config_fault(tmp_path, bad):
     """A configuration value of the wrong type or shape stops the proxy with `ConfigFault`
     naming the configuration, never a raw `TypeError` or `ValueError` (review of #1355)."""
-    config = {"openbao_addr": "http://127.0.0.1:1", "openbao_token": "t", "kv_mount": "kv",
-              "transit_mount": "transit", "tenant_keys": {}, "tenant_exports": {},
-              "audit_path": str(tmp_path / "audit.jsonl")} | bad
     with pytest.raises(ConfigFault):
-        proxy().create_app_from_config(config)
+        app_from_config(_config(tmp_path, **bad))
+
+
+@pytest.mark.parametrize("key", [*REMOVED_CONFIG_KEYS, "bogus_key"])
+def test_a26_a_removed_or_unknown_config_key_is_a_config_fault(tmp_path, key):
+    """`tenant_keys`, `tenant_exports`, `transit_mount` and `openbao_addr` are unknown keys: an
+    old config refuses to start, as any unknown key does. A26, r8.2."""
+    value = {} if key.startswith("tenant_") else "x"
+    with pytest.raises(ConfigFault):
+        app_from_config(_config(tmp_path, **{key: value}))
+
+
+def test_a26_a_config_without_a_data_root_is_a_config_fault(tmp_path):
+    """The one new key is required. A26."""
+    config = _config(tmp_path)
+    del config["data_root"]
+    with pytest.raises(ConfigFault):
+        app_from_config(config)
+
+
+# --- A26 the proxy keeps no tenant list -------------------------------------------------------
+
+DEPLOYMENT_OPENBAO = DEPLOYMENT_ISSUER.openbao_url
+
+
+def test_a26_the_proxy_calls_the_deployments_openbao_over_https_on_the_fixed_transit_mount(
+        tmp_path, data_root):
+    """With no address in its config, verify goes to the deployment's https OpenBao at
+    `/v1/transit/verify/request-token-<tenant>` carrying the configured token, then the credential
+    read follows an accepted signature. A26, A25, A11."""
+    tid, calls = str(uuid.uuid4()), []
+    signer = H.FakeSigner()
+    good = {}
+
+    def openbao(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if "/transit/verify/" in request.url.path:
+            valid = json.loads(request.content)["signature"] in good
+            return httpx.Response(200, json={"data": {"valid": valid}})
+        return httpx.Response(404, json={"errors": []})
+
+    with H.upstream() as up, T.identity_via_proxy(
+            tmp_path / "forge", data_root, H.declaration(up.url + BASE), tenant_id=tid):
+        client = TestClient(app_from_config(
+            _config(tmp_path, data_root=str(data_root)), transport=httpx.MockTransport(openbao)))
+        url, grant = f"{up.url}{BASE}/users/x", {("identity", "r")}
+        refused = T.ask(client, T.token(tid, grant, signer=signer), "identity", "GET", url)
+        verify = calls[0]
+        tok = T.token(tid, grant, signer=signer)
+        good[tok.rpartition(".")[2]] = True
+        accepted = T.ask(client, tok, "identity", "GET", url)
+
+    assert refused["fault"] == "ConfigFault"
+    assert (verify.method, str(verify.url)) == (
+        "POST", f"{DEPLOYMENT_OPENBAO}/v1/transit/verify/request-token-{tid}")
+    assert DEPLOYMENT_OPENBAO.startswith("https://")
+    assert {c.headers["X-Vault-Token"] for c in calls} == {"t"}
+    assert any(c.url.path == f"/v1/kv/data/{tid}/identity" for c in calls), (
+        "positive control: an accepted signature leads to the credential read")
+    assert accepted["fault"] == "ConfigFault", "no credential stored: nothing is sent"
+    assert up.seen == []
+
+
+class _AnyStore(H.FakeStore):
+    """A store holding a static key for every tenant it is asked about."""
+
+    def read(self, tenant_id: str, system: str):
+        super().read(tenant_id, system)
+        return T.static_set()
+
+
+def test_a26_a_tenant_published_after_the_proxy_started_is_served_without_config(
+        tmp_path, data_root):
+    """A tenant the proxy was never told about, whose exports appear under the data root later, is
+    served with its own declaration and key; the first tenant still is. A26."""
+    other = str(uuid.uuid4())
+    with T.rig(tmp_path / "forge", data_root, store=_AnyStore()) as r:
+        first = r.ask()
+        with T.identity_via_proxy(tmp_path / "other", data_root, H.declaration(
+                r.up.url + "/other"), tenant_id=other, repo_name="other"):
+            later = T.ask(r.client, T.token(other, T.GRANT_R, signer=r.signer), "identity",
+                          "GET", f"{r.up.url}/other/users/x")
+
+    assert (first["fault"], later["fault"]) == (None, None)
+    assert r.up.paths() == [f"{BASE}/users/x", "/other/users/x"]
+
+
+@pytest.mark.parametrize("bad", [
+    pytest.param(lambda root, other: f"../{root.name}/{other}", id="traversal"),
+    pytest.param(lambda root, other: str(root / other), id="absolute"),
+    pytest.param(lambda root, other: f"{other}/.", id="dot-segment"),
+    pytest.param(lambda root, other: f"{other}/../{other}", id="dotdot-segment"),
+    pytest.param(lambda root, other: "", id="empty"),
+])
+def test_a26_a_token_naming_no_valid_tenant_id_is_refused_whatever_the_verifier_says(
+        tmp_path, data_root, bad):
+    """With a verifier that accepts every signature, a token whose tenant claim is not a tenant
+    UUID but spells a path to another tenant's real exports is a ConfigFault, unsent and with no
+    credential read; control: that tenant's own token is served. A26."""
+    other = str(uuid.uuid4())
+    with T.rig(tmp_path / "forge", data_root, store=_AnyStore()) as r:
+        r.verifier = H.FakeVerifier()
+        r.rebuild()
+        with T.identity_via_proxy(tmp_path / "other", data_root, H.declaration(
+                r.up.url + "/other"), tenant_id=other, repo_name="other"):
+            url = f"{r.up.url}/other/users/x"
+            control = T.ask(r.client, T.token(other, T.GRANT_R, signer=r.signer), "identity",
+                            "GET", url)
+            reads, seen = list(r.store.reads), r.up.paths()
+            forged = T.forged_token(r.signer, r.tok(), bad(data_root, other))
+            refused = T.ask(r.client, forged, "identity", "GET", url)
+
+    assert (control["fault"], len(seen)) == (None, 1)
+    assert refused["fault"] == "ConfigFault"
+    assert (list(r.store.reads), r.up.paths()) == (reads, seen)
+
+
+def test_a26_a_bad_tenant_id_is_refused_before_any_openbao_path_is_built(tmp_path, data_root):
+    """With the real verifier over a recording transport, a token whose tenant claim is not a
+    tenant UUID is a ConfigFault with zero OpenBao requests; control: a real tenant's token makes
+    the verify call. A26, A11."""
+    tid, calls = str(uuid.uuid4()), []
+
+    def openbao(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"data": {"valid": True}})
+
+    signer = H.FakeSigner()
+    with H.upstream() as up, T.identity_via_proxy(
+            tmp_path / "forge", data_root, H.declaration(up.url + BASE), tenant_id=tid):
+        client = TestClient(app_from_config(
+            _config(tmp_path, data_root=str(data_root)), transport=httpx.MockTransport(openbao)))
+        url, grant = f"{up.url}{BASE}/users/x", {("identity", "r")}
+        good = T.token(tid, grant, signer=signer)
+        T.ask(client, good, "identity", "GET", url)
+        control = list(calls)
+        calls.clear()
+        refused = [
+            T.ask(client, T.forged_token(signer, good, bad), "identity", "GET", url)
+            for bad in (f"{tid}/../x", "../x", f"{tid}/.", "", "a/b")]
+
+    assert any(f"request-token-{tid}" in c.url.path for c in control), (
+        "positive control: a real tenant's token reaches the verify call")
+    assert [r["fault"] for r in refused] == ["ConfigFault"] * 5
+    assert calls == [], [str(c.url) for c in calls]
+
+
+def test_a26_a_forged_token_naming_a_real_other_tenant_reaches_tenant_resolution(
+        tmp_path, data_root):
+    """Positive control for the forging cases: the same forging with the other tenant's valid
+    UUID, under a verifier accepting every signature, is served, so the refusals above are the
+    id check's. A26."""
+    other = str(uuid.uuid4())
+    with T.rig(tmp_path / "forge", data_root, store=_AnyStore()) as r:
+        r.verifier = H.FakeVerifier()
+        r.rebuild()
+        with T.identity_via_proxy(tmp_path / "other", data_root, H.declaration(
+                r.up.url + "/other"), tenant_id=other, repo_name="other"):
+            served = T.ask(r.client, T.forged_token(r.signer, r.tok(), other), "identity",
+                           "GET", f"{r.up.url}/other/users/x")
+
+    assert served["fault"] is None, served
+    assert r.up.paths() == ["/other/users/x"]

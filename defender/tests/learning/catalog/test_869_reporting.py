@@ -4,6 +4,7 @@ The mixed pitfalls tick runs over a batch draft (`_curator1134.draft_lane`) with
 product checkout; what landed is read from the batch branch (`agent/...`)."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared._locations_1210 import location_path
 
 import json
@@ -26,7 +27,7 @@ from defender.tests.support.runtime.engine._declared869 import (
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.curation._lead_author_1134 import run_pitfalls
-from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir
+from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, drained_for
 from defender.learning.core.state import PITFALLS
 
 
@@ -94,10 +95,10 @@ def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatc
 def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_path, capsys):
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",), skills=("elastic",),
                      catalog=())
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    state = open_state(paths)
     # A run folder the drain rehydrates the row from: the row is its address.
     run_dir = curation_run_dir("run-x")
+    paths = drained_for(LoopPaths(repo_root=repo, state_dir=tmp_path / "state"), run_dir)  # r10.1 C1: paths.tenant
+    state = open_state(paths)
     (run_dir / "gather_raw").mkdir()
     write(location_path(paths.state_root) / "author-queue" / "case-1.json",
           json.dumps(curation_row("case-1", run_dir)) + "\n")
@@ -112,7 +113,7 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
     capsys.readouterr()
     for _tick in range(5):
         drains._drain_lead_author_markers(paths, state, refusing_lane,
-                                          accept_tenant=drains._tenant_acceptor(paths.tenant))
+                                          directory=directory_for_root())
 
     assert len(calls) == 1, f"the refusal was retried: {len(calls)} invocations"
     assert not (location_path(paths.state_root) / "author-queue" / "case-1.json").exists()

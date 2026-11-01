@@ -1,6 +1,7 @@
 """A branched sibling runs on its episode's tenant, handed the data root by env; no stamped tenant refuses."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -134,8 +135,9 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
     try:
         # The request names the tenant whose `<root>/<T>/runs/<run id>` the source sits at,
         # and the source by its id.
+        argv = ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID)]
         outcome = T.mod("cli.learning.branch").main(
-            ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID)],
+            argv, directory=directory_for_argv(argv),
             spawn=spawn, questioner=O.questioner_for() if questioner is None else questioner,
             preflight=O.no_preflight,
             live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
@@ -291,9 +293,10 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
     base, src = location_path(P.runs_base)(tmp_path, tenant_id=fixture_uuid("tenant:acme"))
     P.source_stamp(src, tenant_id=fixture_uuid("tenant:acme"))
     spawn = SpawnRecorder()
+    argv = ["--tenant", fixture_uuid("tenant:acme"), src.name, str(P.BRANCH_MESSAGE_ID)]
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
         T.mod("cli.learning.branch").main(
-            ["--tenant", fixture_uuid("tenant:acme"), src.name, str(P.BRANCH_MESSAGE_ID)],
+            argv, directory=directory_for_argv(argv),
             spawn=spawn, questioner=questioner,
             preflight=O.no_preflight, live_tree=P.source_capture(tenant_id=fixture_uuid("tenant:acme")))
     text = f"{refused.value} {capsys.readouterr().err}"

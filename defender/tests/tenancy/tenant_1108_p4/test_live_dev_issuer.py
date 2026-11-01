@@ -13,8 +13,8 @@ Inputs (test-only environment; P-4 bars environment for the product, not for a t
 
     DEFENDER_LIVE_DATA_ROOT        the host's real data root holding the lab tenant (the suite's
                                    conftest replaces DEFENDER_DATA_ROOT with a tmp root per test)
-    DEFENDER_LIVE_TENANT           the lab tenant id (its row's forge binding names its issuer
-                                   client config, <repo>/playground-issuer/client/<id>/issuer.json)
+    DEFENDER_LIVE_TENANT           the lab tenant id (its forge wiring and live generation come from
+                                   the tenant directory at DEFENDER_DATABASE_DSN)
     DEFENDER_LIVE_ALLOW_RESTART=1  allow `docker restart` of the openbao container
     DEFENDER_LIVE_ALLOW_LAB_PR=1   allow opening (then closing) one PR on the lab repo and an
                                    attempted push to its `main`
@@ -25,7 +25,7 @@ Inputs (test-only environment; P-4 bars environment for the product, not for a t
     PYTHONPATH="$PWD" flock /tmp/defender-pytest.lock defender/.venv/bin/python -m pytest \\
         -m live defender/tests/tenancy/tenant_1108_p4/test_live_dev_issuer.py
 
-Logins go through `version_control.issuer_login(tenant)`, as every delivery process's do.
+Logins go through `version_control.forge_credential` over the live generation's host secret file.
 `survives docker compose down -v` (O13) cannot run from inside the dev container `down` stops:
 run `docker compose down -v && docker compose up -d` by hand, then this file;
 `test_forgejo_data_is_the_playground_knowledge_bind_mount_O13` and the O13 history test are the
@@ -69,15 +69,8 @@ _DEPLOYMENT_FACT = re.compile(
 class Lab:
     tenant: object
     tenant_id: str
-    issuer_config: Path
+    directory: object
     forge: dict
-
-
-def _main_checkout() -> Path:
-    """The checkout `docker compose up` ran from (`..` of `.devcontainer/`): the main checkout,
-    also from a worktree."""
-    common = _git.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=REPO_ROOT)
-    return Path(common).parent
 
 
 def _lab() -> Lab:
@@ -85,30 +78,48 @@ def _lab() -> Lab:
     tenant_id = os.environ.get("DEFENDER_LIVE_TENANT")
     if not (data_root and tenant_id):
         pytest.skip("set DEFENDER_LIVE_DATA_ROOT and DEFENDER_LIVE_TENANT")
+    from defender import migrations
+    from defender.tenancy._admission import host_directory
     from defender.tenancy._tenant import data_root_from_path, requested_tenant
 
-    row = json.loads((Path(data_root) / tenant_id / "tenant.json").read_text(encoding="utf-8"))
-    assert "forge" in row, f"the lab tenant row has no forge binding: {sorted(row)}"
-    config = row["forge"].get("issuer_config")
-    if not (isinstance(config, str) and Path(config).is_file()):
-        pytest.skip(f"no issuer client config at {config!r}: the dev issuer is not provisioned")
+    if not os.environ.get("DEFENDER_DATABASE_DSN"):
+        pytest.skip("set DEFENDER_DATABASE_DSN: the lab's forge wiring and generation live there")
+    directory = host_directory(None, check_version=migrations.check_version)
+    wiring = directory.forge_wiring(tenant_id)
+    live = [g for g in directory.generations(tenant_id) if g.status == "live"]
+    if wiring is None or not live:
+        pytest.skip(f"tenant {tenant_id} has no forge wiring or no live generation: not provisioned")
     tenant = requested_tenant(data_root_from_path(Path(data_root)), tenant_id)
-    return Lab(tenant=tenant, tenant_id=tenant_id, issuer_config=Path(config), forge=row["forge"])
+    return Lab(tenant=tenant, tenant_id=tenant_id, directory=directory,
+               forge={"origin": wiring.origin, "audience": live[0].audience})
 
 
 def _login(lab: Lab):
-    """AppRole login exactly as a delivery process does it."""
+    """AppRole login exactly as a delivery process does it: the credential reads the live
+    generation's host secret file; the first `token()` logs in."""
     vc = importlib.import_module("defender.learning.author.version_control")
-    return vc.issuer_login(lab.tenant)
+    credential = vc.forge_credential(lab.tenant_id, "drain", directory=lab.directory, config=None)
+    credential.token()
+    return credential
 
 
-def _issuer_base(identity) -> str:
-    """`https://host:port` of the issuer whose identity endpoint is `identity.issuer`."""
-    return identity.issuer.split("/v1/", 1)[0]
+def _issuer_base(identity=None) -> str:
+    """`https://host:port` of the deployment's issuer."""
+    return _issuer().issuer_url.split("/v1/", 1)[0]
+
+
+def _issuer():
+    from defender.configuration.issuer import DEPLOYMENT_ISSUER
+
+    return DEPLOYMENT_ISSUER
 
 
 def _seal_status(identity) -> dict:
-    response = identity.client.get(_issuer_base(identity) + "/v1/sys/seal-status", timeout=10)
+    import httpx
+
+    ca = _issuer().ca_cert
+    response = httpx.get(_issuer_base() + "/v1/sys/seal-status", timeout=10,
+                         verify=str(ca) if ca else True)
     response.raise_for_status()
     return response.json()
 
@@ -213,7 +224,7 @@ def test_issuer_is_unsealed_and_a_delivery_process_logs_in_O12_C14_C15():
     Forgejo (17+) accepts that token for the lab repository."""
     lab = _lab()
     identity = _login(lab)
-    assert identity.issuer.startswith("https://"), identity.issuer
+    assert _issuer().issuer_url.startswith("https://"), _issuer().issuer_url
     status = _seal_status(identity)
     assert status["initialized"] is True, status
     assert status["sealed"] is False, status
@@ -366,24 +377,22 @@ def test_one_lesson_pr_is_delivered_end_to_end_through_the_dev_issuer_O12():
 # ---------------------------------------------------------------------------------------------
 
 def test_deployment_facts_are_file_only_and_never_in_the_tenant_repo_P4_U4():
-    """The issuer client config lies under `<repo>/playground-issuer/client/`; the forge binding
-    is exactly `{origin, audience, issuer_role, issuer_config}` (the config's path, never its
-    content); no issuer/forge fact is in this process's environment; and no blob of the lab
+    """The live generation's host secret file lies outside the tenant's folder and repo; no
+    issuer/forge fact is in this process's environment; and no blob of the lab
     repo's `main` carries the issuer URL, the audience, a certificate or a private key. Control:
     the blob scan finds the tenant id in `agent/.tenant-id`."""
     lab = _lab()
-    client_dir = _main_checkout() / "playground-issuer" / "client"
-    assert client_dir in lab.issuer_config.resolve().parents, (
-        f"the issuer client config {lab.issuer_config} is not under {client_dir}")
-    assert set(lab.forge) == {"origin", "audience", "issuer_role", "issuer_config"}, sorted(lab.forge)
+    live = [g for g in lab.directory.generations(lab.tenant_id) if g.status == "live"][0]
+    secret_file = Path(live.host_secret_file).resolve()
+    assert lab.tenant.tenant_root.resolve() not in secret_file.parents, (
+        f"the host secret file {secret_file} is inside the tenant's folder")
     leaked = sorted(k for k in os.environ
                     if _DEPLOYMENT_FACT.search(k) and not k.startswith(_TEST_ONLY_ENV))
     assert not leaked, f"deployment facts in the environment: {leaked}"
-    identity = _login(lab)
     clone = lab.tenant.knowledge
     blobs = committed_blobs(clone, "refs/remotes/origin/main", ".")
     assert lab.tenant_id.encode() in blobs.get("agent/.tenant-id", b""), "control: blobs are read"
-    needles = [identity.issuer.encode(), _issuer_base(identity).encode(),
+    needles = [_issuer().issuer_url.encode(), _issuer_base().encode(),
                lab.forge["audience"].encode(), b"BEGIN CERTIFICATE", b"PRIVATE KEY"]
     hits = sorted({(path, n.decode()) for path, data in blobs.items() for n in needles if n in data})
     assert not hits, f"deployment facts in the tenant repo: {hits}"

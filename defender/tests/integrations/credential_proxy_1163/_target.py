@@ -12,19 +12,52 @@ from typing import Any
 
 def proxy() -> Any:
     """The proxy package (new top-level, place in ORDER undecided). Names used:
-    `create_app(ProxyDeps)` (Q1, S1-S6), `ProxyDeps(tenant_exports=, store=, verifier=, audit=[, max_response_bytes=])`
-    (Q1; `max_response_bytes` is the response cap's seam, O7), `CredentialSet(kind=, fields=, version=)` (Q1; kind stored, r5 A4), `mint_request_token(signer, tenant_id=,
+    `create_app(ProxyDeps)` (Q1, S1-S6), `ProxyDeps(data_root=, store=, verifier=, audit=[, max_response_bytes=])`
+    (A26: the proxy keeps no tenant list; a tenant's exports are `<data_root>/<id>/exports/`;
+    `max_response_bytes` is the response cap's seam, O7), `CredentialSet(kind=, fields=, version=)` (Q1; kind stored, r5 A4), `mint_request_token(signer, tenant_id=,
     investigation=, grant=, expires_at=)` (Q1, S6), `OpenBaoStore(addr=, token=, mount=)` (B2),
-    `TransitSigner(addr=, token=, mount=, key=)` and `TransitVerifier(addr=, token=, mount=,
-    keys={tenant_id: key})` whose `verify(payload, signature, *, tenant_id)` uses the key of the
-    tenant the token names (B3, A11); `store_policies(kv_mount=, transit_mount=,
-    tenant_keys={tenant_id: key})` -> `{"writer", "proxy", "launcher-<tenant_id>"}` policy texts
-    (B1, A11); `transit_key_for(tenant_id) -> str`, the tenant's transit key name (the one
+    `TransitVerifier(addr=, token=)` whose `verify(payload, signature, *, tenant_id)` uses the key
+    `transit_key_for(tenant_id)` on the fixed `transit/` mount (B3, A11, A25, A26);
+    `store_policies(kv_mount=)` -> `{"writer", "proxy"}` policy texts (B1, A25: no per-tenant
+    signing policy; the proxy's is KV read plus `transit/verify/request-token-*`);
+    `transit_key_for(tenant_id) -> str`, the tenant's transit key name (the one
     naming rule; tests call it, never recompute it); `FileAuditSink(path)` with `.record(entry)` (A13); and the shipped assembly
-    `create_app_from_config(config)`, `config` a mapping of the operator's settings:
-    `openbao_addr`, `openbao_token` (the proxy role's), `kv_mount`, `transit_mount`,
-    `tenant_keys`, `tenant_exports`, `audit_path` (A13)."""
+    `create_app_from_config(config, **seam)`, `config` a mapping of the operator's settings:
+    `openbao_token` (the proxy role's), `kv_mount`, `data_root`, `audit_path` (A13, A26). The
+    OpenBao address is the deployment's (https) and is not configuration; `seam` is the test
+    seam of r8.3 (`SEAM_ADDR`, `SEAM_TRANSPORT` below)."""
     return importlib.import_module("defender.credential_proxy")
+
+
+def request_signer(tenant_id: str, *, directory: Any, transport: Any = None) -> Any:
+    """`defender.credential_proxy.request_signer(tenant_id, *, directory, transport=None)` (r8.5 A24'): the one public
+    builder of the request signer, an object with `sign(payload: bytes) -> str`; building it sends nothing."""
+    return proxy().request_signer(tenant_id, directory=directory, transport=transport)
+
+
+#: The keyword names of `create_app_from_config`'s test seam (r8.3 names a seam taking an address
+#: and a transport, not its spelling): a WORKING CHOICE, a gap in the contract map.
+SEAM_ADDR = "openbao_addr"
+SEAM_TRANSPORT = "transport"
+#: The config keys r8.2 A26 removes: unknown keys now.
+REMOVED_CONFIG_KEYS = ("tenant_keys", "tenant_exports", "transit_mount", "openbao_addr")
+
+
+def app_from_config(config: Any, *, addr: str | None = None, transport: Any = None) -> Any:
+    """`create_app_from_config(config)` with the test seam set: OpenBao at `addr` (a test's server)
+    and/or over `transport` (an `httpx` transport); neither: the deployment's own address."""
+    seam: dict[str, Any] = {}
+    if addr is not None:
+        seam[SEAM_ADDR] = addr
+    if transport is not None:
+        seam[SEAM_TRANSPORT] = transport
+    return proxy().create_app_from_config(config, **seam)
+
+
+def transit_verifier(addr: str, token: str) -> Any:
+    """The proxy's verifier over the fixed `transit/` mount at `addr` (WORKING CHOICE: the
+    constructor takes no mount and no key map, A25/A26)."""
+    return proxy().TransitVerifier(addr=addr, token=token)
 
 
 def secrets_writer() -> Any:

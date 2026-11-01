@@ -49,3 +49,26 @@ def test_the_probe_sees_a_runtime_load():
     assert "defender.investigation.run_state" in api_forbidden(_loaded("defender.investigation.run_state"))
     # runtime code placed outside `investigation` counts too
     assert "defender.systems.verbs" in api_forbidden(_loaded("defender.systems.verbs"))
+
+
+#: #1214 r9: what the API's import of `defender.api.app` may not load beyond #1339's allowance (identity's models
+#: and SQLAlchemy ORM): the lifecycle node, the database repositories of identity and tenancy, the driver.
+_NOT_BY_THE_API = ("defender.lifecycle", "defender.tenancy.postgres", "defender.identity.postgres", "psycopg")
+
+
+def _found(modules: list[str], name: str) -> list[str]:
+    return [m for m in modules if m == name or m.startswith(name + ".")]
+
+
+@pytest.mark.parametrize("module", API_MODULES)
+def test_an_api_module_loads_no_lifecycle_and_no_database_repository_or_driver(module):
+    """The API reaches tenancy only through its in-memory twin or an injected repository; `lifecycle` is never loaded (#1214 r9, DC-6)."""
+    modules = _loaded(module)
+    found = [m for name in _NOT_BY_THE_API for m in _found(modules, name)]
+    assert not found, f"{module} loads {found}"
+
+
+def test_the_not_loaded_probe_sees_a_load():
+    """Positive control: the identity database repository and the lifecycle node are reported when imported."""
+    assert _found(_loaded("defender.identity.postgres"), "defender.identity.postgres")
+    assert _found(_loaded("defender.lifecycle"), "defender.lifecycle")

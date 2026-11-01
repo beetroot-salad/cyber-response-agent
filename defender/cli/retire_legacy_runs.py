@@ -34,15 +34,24 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.tenancy import requested_tenant, resolve_data_root
-from defender.records.formats import TenantRefused
+from defender.tenancy import resolve_data_root  # noqa: E402
+from defender.records.formats import TenantRefused  # noqa: E402
+
+if TYPE_CHECKING:
+    from defender.tenancy import Tenant, TenantDirectory
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
+    """The command line: `--tenant T` through the one host acceptance (r10 A1), held while the
+    entries move. `directory` is the tenant records a test hands in; a production process reads
+    `DEFENDER_DATABASE_DSN`'s."""
+    from defender.systems.run_tenant import host_tenant
+
     p = argparse.ArgumentParser(prog="retire_legacy_runs.py", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--tenant", required=True,
@@ -52,8 +61,18 @@ def main(argv: list[str]) -> int:
                         "<T>/episodes-legacy/ (absent: nothing to move)")
     ns = p.parse_args(argv)
     try:
-        tenant = requested_tenant(resolve_data_root(), ns.tenant)
-        plan = tenant.runs_repository().retire_plan(ns.old_episodes_root)
+        admitted = host_tenant(resolve_data_root(), ns.tenant, directory=directory)
+    except TenantRefused as refused:
+        print(f"retire_legacy_runs: refused, nothing moved: {refused}", file=sys.stderr)
+        return 1
+    with admitted:
+        return _retire(admitted.tenant, ns.old_episodes_root)
+
+
+def _retire(tenant: Tenant, old_episodes_root: Path | None) -> int:
+    """`main`'s work for the accepted `tenant`: the plan, refused whole or acted on."""
+    try:
+        plan = tenant.runs_repository().retire_plan(old_episodes_root)
     except TenantRefused as refused:
         print(f"retire_legacy_runs: refused, nothing moved: {refused}", file=sys.stderr)
         return 1

@@ -16,13 +16,15 @@ from pathlib import Path
 import pytest
 
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
+from defender.tests.support.tenancy._active1214 import active_directory
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared.contracts._repo import query_template, seed_skills_repo
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS, TRY_ONCE
 from defender.tests.support.learning.curation import _curator1134 as C
 from defender.tests.support.learning.curation._curator1134 import open_state
 from defender.tests.support.learning.curation._lead_author_1134 import repo_skills, skills_view
-from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of
+from defender.tests.support.learning.core._state1135 import curation_run_dir, curation_tenant, run_of
 from defender.tests.support.learning.core._state1135 import state_over, set_state_dir
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -42,17 +44,18 @@ def _product(tmp_path: Path, seeded: Path) -> Path:
     return product
 
 
-def _lane(tmp_path: Path, files: dict[str, str] | None = None) -> C.DraftLane:
+def _lane(tmp_path: Path, files: dict[str, str] | None = None, *, tenant=None) -> C.DraftLane:
     """The seeded skills tree (`seed_skills_repo`: an established and a draft `wazuh` template,
     `SCHEMA.md`, `elastic`'s SKILL.md with a pending `_draft/`) plus `files` (agent-relative) as
-    the tenant's `agent/skills`, in one export commit; then a batch with the lead lane `skills`."""
+    the tenant's `agent/skills`, in one export commit; then a batch with the lead lane `skills`. A drain
+    serves only through its own accepted tenant (r10.1 C1): `tenant` gives the lane that tenant's paths."""
     seeded = seed_skills_repo(tmp_path / "seed")
     agent = tmp_path / "agent-src"
     shutil.copytree(seeded / "defender" / "skills", agent / "skills")
     for rel, text in (files or {}).items():
         C.put(agent / rel, text)
     return C.draft_lane(tmp_path, lanes=C.LEAD_LANES, agent=agent,
-                        product=_product(tmp_path, seeded))
+                        product=_product(tmp_path, seeded), tenant=tenant)
 
 
 def _deps(lane: C.DraftLane, **overrides):
@@ -290,7 +293,9 @@ def test_1186_lead_author_cli_takes_the_runs_tenant_queue_lock(
     root = learning if held_root == "tenant" else tmp_path / "legacy-state"
     with (state_over(root) as holder, holder.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held):
         assert held
-        rc = lead_author.main(["--tenant", run_dir.parent.parent.name, run_dir.name])
+        # r10.1 C1/C9: the command admits through the host acceptance; a test hands it one seeded active directory.
+        rc = lead_author.main(["--tenant", run_dir.parent.parent.name, run_dir.name],
+                              directory=active_directory(run_dir.parents[2], run_dir.parent.parent.name))
     assert rc == (lead_author.QUEUE_LOCK_SKIP_RC if held_root == "tenant" else 0)
     if held_root == "tenant":
         assert not (run_dir / "lead_author" / "pitfalls_collected").exists()
@@ -444,7 +449,7 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
     from defender.tests.support.learning.core._state1135 import enqueue_run, state_for_paths
 
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
-    lane = _lane(tmp_path)
+    lane = _lane(tmp_path, tenant=curation_tenant())
     run_dir = curation_run_dir("lead-u10")
     state = state_for_paths(lane.paths)
     enqueue_run(state, run_dir)
@@ -469,7 +474,7 @@ def test_the_drain_routes_a_refused_claim_to_a_counted_retry_not_a_dead_letter(
         lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps, box=box, on_done=on_done)
 
     drains._drain_lead_author_markers(lane.paths, state, serve,
-                                      accept_tenant=drains._tenant_acceptor(None))
+                                      directory=directory_for_root())
 
     name = run_dir.name
     assert lane.landed() == []

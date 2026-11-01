@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -14,7 +15,7 @@ from defender.kit.faults import ConfigFault, TransportFault
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
-from defender.tests.integrations.credential_proxy_1163._target import proxy
+from defender.tests.integrations.credential_proxy_1163._target import proxy, request_signer
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 TABLE = """\
@@ -188,22 +189,34 @@ def test_r3_a_run_with_no_http_proxy_system_never_contacts_the_signer(tmp_path, 
 ROLE, SECRET = "role-1163-own", "secret-1163-own"
 DECOY_ROLE, DECOY_SECRET = "role-1163-decoy", "secret-1163-decoy"
 DECOY_TENANT = fixture_uuid("tenant:1163-decoy")
+#: The delivery login of the same generations: the signer must never use it (A24').
+DELIVERY_ROLE, DELIVERY_SECRET = "role-1163-delivery", "secret-1163-delivery"
+
+
+def _records(data_root, tmp_path, **kw):
+    """The playground tenant's records with one live generation holding the sign login (ROLE,
+    SECRET) in a host file, beside a delivery login the signer must not use."""
+    fields = A.generation(S.PLAYGROUND_ID, tmp_path / "secrets", sign_role_id=ROLE, sign_secret=SECRET,
+                          role_id=DELIVERY_ROLE, delivery_secret=DELIVERY_SECRET, **kw)
+    return A.Records(data_root, {S.PLAYGROUND_ID: [fields]}), fields
 
 
 SEALED = {"sealed on login": {"sealed": "login"}, "sealed on sign": {"sealed": "sign"},
-          "unreachable": {"unreachable": True}}
+          "unreachable": {"unreachable": True}, "login answers 500": {"login_status": 500},
+          "sign answers 502": {"sign_status": 502}}
 
 
 @pytest.mark.parametrize("fault", list(SEALED))
 def test_r4_a_sealed_or_unreachable_openbao_does_not_stop_run_start_and_is_retryable(
         tmp_path, data_root, fault):
-    """Run start contacts no OpenBao, so one answering 503 sealed (on login or sign) or not at
-    all does not stop it; the read token asked of it then is `TransportFault`, a fault a later
-    call may not meet (the system is not marked down), and nothing is signed. r7 A20, A18."""
+    """Run start contacts no OpenBao, so one answering 5xx (sealed on login or sign, or any 5xx)
+    or not at all does not stop it; the read token asked of it then is `TransportFault`, a fault
+    a later call may not meet, and nothing is signed. r7 A20, A18, A24."""
     _plant(data_root, proxy=("identity",))
-    A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE, secret_id=SECRET)
+    records, _ = _records(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET}, **SEALED[fault])
-    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao)
+    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
+                                          directory=records.directory)
 
     assert (rc, refused) == (0, None)
     assert bao.requests == [], "run start contacted OpenBao"
@@ -213,11 +226,122 @@ def test_r4_a_sealed_or_unreachable_openbao_does_not_stop_run_start_and_is_retry
     assert bao.signs == []
 
 
+def test_r4b_a_login_openbao_refuses_is_a_config_fault_at_the_mint(tmp_path, data_root):
+    """OpenBao refusing the sign login (4xx: a wrong secret) is `ConfigFault`, not a fault a
+    retry may clear; the same login with the right secret signs. A24, A18."""
+    _plant(data_root, proxy=("identity",))
+    records, _ = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: "another-secret"})
+    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
+                                           directory=records.directory)
+    assert (rc, refused) == (0, None)
+    with pytest.raises(ConfigFault):
+        read_access(rec).token()
+    assert (bao.logins, bao.signs) == ([(ROLE, SECRET)], [])
+    bao.accounts[ROLE] = SECRET
+    read_access(rec).token()
+    assert len(bao.signs) == 1, "positive control: the right secret signs"
+
+
+@pytest.mark.parametrize(("status", "logins"), [(400, 1), (403, 2)], ids=["bad request", "forbidden"])
+def test_r4e_a_sign_openbao_refuses_with_a_4xx_is_a_config_fault_after_one_relogin_on_403(
+        tmp_path, data_root, status, logins):
+    """A sign call answered 4xx (400: a key not yet made; 403: a refused client token) is
+    `ConfigFault`; a 403 is retried after exactly one fresh login, a 400 not. Control: a sign
+    that is not refused signs. A24, A18."""
+    _plant(data_root, proxy=("identity",))
+    records, _ = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: SECRET}, sign_status=status)
+    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
+                                           directory=records.directory)
+    assert (rc, refused) == (0, None)
+    with pytest.raises(ConfigFault) as failed:
+        read_access(rec).token()
+    assert len(bao.logins) == logins, bao.logins
+    assert bao.signs == []
+    assert SECRET not in str(failed.value)
+    bao.sign_status = None
+    read_access(rec).token()
+    assert len(bao.signs) == 1, "positive control: the same run signs once OpenBao accepts"
+
+
+def test_r4f_a_request_signer_shows_neither_the_client_token_nor_the_sign_secret(tmp_path, data_root):
+    """`request_signer(tenant, directory=, transport=)` sends nothing when built; after one sign neither its repr nor its
+    str shows the client token the login issued or the sign secret. O10, A24' signer handle (r8.5)."""
+    _plant(data_root, proxy=("identity",))
+    records, _ = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    signer = request_signer(S.PLAYGROUND_ID, directory=records.directory, transport=bao)
+    assert bao.requests == [], "building the signer sent a request"
+
+    signature = signer.sign(b"payload-1163")
+    assert bao.logins == [(ROLE, SECRET)], "positive control: the sign went through the login"
+    assert len(bao.signs) == 1, "positive control: one sign"
+    assert A.SIGNATURE_CANARY in signature, "positive control: the stand-in's signature came back"
+    client_token = bao.signs[0].client_token
+    assert client_token, "positive control: the stand-in issued a token"
+    assert bao.role_of(bao.signs[0]) == ROLE, "positive control: the token is the sign login's"
+    for text in (repr(signer), str(signer)):
+        assert client_token not in text, "the signer shows the client token"
+        assert SECRET not in text, "the signer shows the sign secret"
+
+
+def _make_absent(path: Path) -> None:
+    path.unlink()
+
+
+def _make_unreadable(path: Path) -> None:
+    path.unlink()
+    path.mkdir()  # a read of a folder fails whoever the user is
+
+
+def _make_empty(path: Path) -> None:
+    path.write_text("", encoding="utf-8")
+
+
+def _make_two_lines(path: Path) -> None:
+    path.write_text(f"{SECRET}\n{SECRET}\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("spoil", [_make_absent, _make_unreadable, _make_empty, _make_two_lines],
+                         ids=["absent", "unreadable", "empty", "two secrets"])
+def test_r4c_a_sign_secret_file_that_fails_at_the_mint_is_a_config_fault(tmp_path, data_root, spoil):
+    """The sign secret file spoiled after run start (absent, unreadable, malformed): the mint is
+    `ConfigFault`, no login is sent, and the secret is not in the error. A24."""
+    _plant(data_root, proxy=("identity",))
+    records, fields = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
+                                           directory=records.directory)
+    assert (rc, refused) == (0, None)
+    spoil(fields["sign_secret_file"])
+    with pytest.raises(ConfigFault) as failed:
+        read_access(rec).token()
+    assert (bao.logins, bao.signs) == ([], [])
+    assert SECRET not in str(failed.value)
+
+
+def test_r4d_a_tenant_offboarded_since_run_start_cannot_mint(tmp_path, data_root):
+    """No live generation at the mint (offboarded since run start): `ConfigFault`, no login.
+    A24 (control: R6)."""
+    _plant(data_root, proxy=("identity",))
+    records, _ = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
+                                           directory=records.directory)
+    assert (rc, refused) == (0, None)
+    access = read_access(rec)
+    records.offboard(S.PLAYGROUND_ID)
+    with pytest.raises(ConfigFault):
+        access.token()
+    assert (bao.logins, bao.signs) == ([], [])
+
+
 def test_r5_the_signing_login_is_never_taken_from_the_environment(
         tmp_path, data_root, monkeypatch):
-    """With login material only in the process environment and no signer or issuer config
-    file, run start refuses and nothing is sent to the address the environment names; a run's
-    children still get no login variable. A1."""
+    """With login material only in the process environment and no signer or live generation,
+    run start refuses and nothing is sent to the address the environment names; a run's
+    children still get no login variable. A1, A24."""
     from defender.box import run_env
     from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 
@@ -237,8 +361,8 @@ def test_r5_the_signing_login_is_never_taken_from_the_environment(
             rc, refused = None, fault
         env = run_env(DEFENDER, tmp_path / "run")
 
-    assert rc is None, "run start proceeded without an issuer config"
-    assert refused is not None, "run start proceeded without an issuer config"
+    assert rc is None, "run start proceeded without a sign login"
+    assert refused is not None, "run start proceeded without a sign login"
     assert vault.seen == [], "the environment's address was used"
     assert "materialize" not in rec.order, "the run folder was made before the refusal"
     assert not [k for k in env if k in ("VAULT_TOKEN", "BAO_TOKEN", "DEFENDER_BAO_TOKEN",
@@ -246,25 +370,29 @@ def test_r5_the_signing_login_is_never_taken_from_the_environment(
     assert env["DEFENDER_RUN_DIR"], "positive control: the run env was built"
 
 
-def test_r6_run_start_signs_with_the_tenants_own_issuer_login_and_key(tmp_path, data_root):
-    """No injected signer: the read token, when asked, is signed through OpenBao with the login
-    of the tenant's own issuer config and its own transit key, not another bound tenant's.
-    A11, A1, r7 A20."""
+def test_r6_run_start_signs_with_the_tenants_own_sign_login_and_key(tmp_path, data_root):
+    """No injected signer: the read token, when asked, is signed through OpenBao with the live
+    generation's sign login (never its delivery login) and the tenant's own transit key, not
+    another tenant's. A24', A11, A1, r7 A20."""
     _plant(data_root, proxy=("identity",))
-    A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE, secret_id=SECRET)
-    # A second tenant on the same data root, bound with its own issuer config: a run that read
-    # the wrong row's login, or the wrong key, would be caught.
+    # A second tenant on the same data root, with its own generation: a run that read the wrong
+    # tenant's login, or the wrong key, would be caught.
     S.plant(data_root, DECOY_TENANT)
-    A.bind_issuer(data_root, DECOY_TENANT, tmp_path / "operator", role_id=DECOY_ROLE,
-                  secret_id=DECOY_SECRET)
-    bao = A.OpenBaoStandIn({ROLE: SECRET, DECOY_ROLE: DECOY_SECRET})
-    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao)
+    own = A.generation(S.PLAYGROUND_ID, tmp_path / "secrets", sign_role_id=ROLE, sign_secret=SECRET,
+                       role_id=DELIVERY_ROLE, delivery_secret=DELIVERY_SECRET)
+    decoy = A.generation(DECOY_TENANT, tmp_path / "secrets", sign_role_id=DECOY_ROLE,
+                         sign_secret=DECOY_SECRET)
+    records = A.Records(data_root, {S.PLAYGROUND_ID: [own], DECOY_TENANT: [decoy]})
+    bao = A.OpenBaoStandIn({ROLE: SECRET, DECOY_ROLE: DECOY_SECRET,
+                            DELIVERY_ROLE: DELIVERY_SECRET})
+    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
+                                          directory=records.directory)
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
     assert (bao.logins, bao.signs) == ([], []), "run start signed nothing (r7 A20)"
     read_access(rec).token()
-    assert bao.logins == [(ROLE, SECRET)], "login with the tenant's own config alone"
+    assert bao.logins == [(ROLE, SECRET)], "login with the tenant's own sign pair alone"
     (sign,) = bao.signs
     assert bao.role_of(sign) == ROLE
     assert sign.key == proxy().transit_key_for(S.PLAYGROUND_ID), "the tenant's own transit key (A11)"
@@ -274,29 +402,58 @@ def test_r6_run_start_signs_with_the_tenants_own_issuer_login_and_key(tmp_path, 
     assert rec.lifecycle_calls, "positive control: the run went on to its lifecycle"
 
 
-def _no_binding(data_root, tmp_path):
-    return None
+def _no_generation(data_root, tmp_path):
+    return A.Records(data_root, {S.PLAYGROUND_ID: []})
 
 
-def _binding_with_file_absent(data_root, tmp_path):
-    A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE,
-                  secret_id=SECRET).unlink()
+def _only_destroyed(data_root, tmp_path):
+    fields = A.generation(S.PLAYGROUND_ID, tmp_path / "secrets", sign_role_id=ROLE, sign_secret=SECRET,
+                          status="destroyed")
+    return A.Records(data_root, {S.PLAYGROUND_ID: [fields]})
 
 
-@pytest.mark.parametrize("setup", [_no_binding, _binding_with_file_absent],
-                         ids=["no forge binding", "issuer config file absent"])
-def test_r7_an_http_proxy_tenant_with_no_usable_issuer_config_refuses_run_start(
+def _only_retiring(data_root, tmp_path):
+    fields = A.generation(S.PLAYGROUND_ID, tmp_path / "secrets", sign_role_id=ROLE, sign_secret=SECRET,
+                          status="retiring")
+    return A.Records(data_root, {S.PLAYGROUND_ID: [fields]})
+
+
+def _without(field, value):
+    def build(data_root, tmp_path):
+        fields = A.generation(S.PLAYGROUND_ID, tmp_path / "secrets", sign_role_id=ROLE, sign_secret=SECRET)
+        fields[field] = value
+        return A.Records(data_root, {S.PLAYGROUND_ID: [fields]})
+    return build
+
+
+@pytest.mark.parametrize("setup", [
+    _no_generation, _only_destroyed, _only_retiring, _without("sign_role_id", None),
+    _without("sign_secret_file", None), _without("sign_secret_file", Path("relative/sign-secret"))],
+    ids=["no generation", "only destroyed", "only retiring", "no sign role", "no sign file",
+         "relative sign file"])
+def test_r7_an_http_proxy_tenant_with_no_usable_sign_login_refuses_run_start(
         tmp_path, data_root, setup):
-    """No forge binding, or a binding whose issuer config file is absent: a configuration
-    refusal before the run folder is made, and no login (control: R6). A11, r7 A20."""
+    """No live generation, or a live one with no sign role or no absolute sign secret file: a
+    configuration refusal before the run folder is made, and no OpenBao contact (control: R6).
+    A24, A24', r7 A20."""
     _plant(data_root, proxy=("identity",))
-    setup(data_root, tmp_path)
+    records = setup(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET})
-    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, issuer_transport=bao)
+    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, issuer_transport=bao,
+                                          directory=records.directory)
 
     assert rc is None
-    assert _config_refusal(refused, "issuer"), refused
-    assert bao.logins == []
-    assert bao.signs == []
+    assert _config_refusal(refused, "sign", "generation", "login"), refused
+    assert bao.requests == []
     assert "materialize" not in rec.order, "the run folder was made before the refusal"
     assert tickets.calls == []
+
+
+def test_r7b_a_tenant_with_no_http_proxy_system_needs_no_sign_login(tmp_path, data_root):
+    """Control for R7: the same records without a generation do not stop a run whose systems are
+    none `http-proxy`. A20, A24."""
+    _plant(data_root, proxy=())
+    records = _no_generation(data_root, tmp_path)
+    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, directory=records.directory)
+    assert (rc, refused) == (0, None)
+    assert rec.lifecycle_calls

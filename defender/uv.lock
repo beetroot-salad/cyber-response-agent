@@ -540,6 +540,11 @@ box = [
     { name = "libfaketime" },
     { name = "pytz" },
 ]
+database = [
+    { name = "alembic" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+]
 dev = [
     { name = "coverage" },
     { name = "httpx" },
@@ -553,17 +558,22 @@ dev = [
     { name = "vulture" },
 ]
 runtime = [
+    { name = "alembic" },
     { name = "duckdb" },
     { name = "httpx" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-ai-slim", extra = ["anthropic", "mcp", "openai"] },
     { name = "pytz" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "toons" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", marker = "extra == 'api'", specifier = ">=1.13" },
+    { name = "alembic", marker = "extra == 'database'", specifier = ">=1.13" },
     { name = "coverage", marker = "extra == 'dev'" },
+    { name = "defender", extras = ["database"], marker = "extra == 'api'" },
+    { name = "defender", extras = ["database"], marker = "extra == 'runtime'" },
     { name = "duckdb", marker = "extra == 'box'", specifier = ">=1.5,<2" },
     { name = "duckdb", marker = "extra == 'runtime'", specifier = ">=1.5,<2" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
@@ -573,7 +583,7 @@ requires-dist = [
     { name = "libfaketime", marker = "extra == 'box'", specifier = "==3.0.1" },
     { name = "markdown-it-py", marker = "extra == 'dev'" },
     { name = "mypy", marker = "extra == 'dev'" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'api'", specifier = ">=3.2" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'database'", specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "mcp", "openai"], marker = "extra == 'runtime'", specifier = ">=2.43" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'api'" },
@@ -585,13 +595,13 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "radon", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
-    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'api'", specifier = ">=2.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'database'", specifier = ">=2.0" },
     { name = "toons", marker = "extra == 'runtime'", specifier = ">=0.7,<0.8" },
     { name = "typing-extensions", specifier = ">=4.12" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.30" },
     { name = "vulture", marker = "extra == 'dev'" },
 ]
-provides-extras = ["runtime", "box", "api", "dev"]
+provides-extras = ["runtime", "box", "api", "database", "dev"]
 
 [[package]]
 name = "dnspython"

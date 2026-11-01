@@ -29,38 +29,33 @@ docker run --rm -v "<HOST_REPO_PATH>/knowledge":/workspace/knowledge:ro \
     defender-runtime defender/.venv/bin/python -m pytest defender -m e2e
 ```
 
-Every run names its tenant, and there is no default (#1078). On the host, clone the tenant's
-repo into the data root, then set the tenant up once:
+Every run names its tenant, and there is no default (#1078). A tenant is created through the
+lifecycle service's admin API (`python -m defender.lifecycle serve`; see "Creating a tenant" in
+`defender/docs/development-operations.md`): the service makes the tenant's repository, bot and
+credentials and records the tenant in PostgreSQL, and a run works only for an `active` tenant. The
+runtime container needs `DEFENDER_DATABASE_DSN` and the same `DEFENDER_DATA_ROOT` mount the
+lifecycle's host side prepares; nothing is cloned or set up by hand. A tenant from before #1214 is
+moved once by hand (see "Upgrade from before #1214" in `defender/CLAUDE.md`).
 
 ```bash
-git clone <tenant repo> "<HOST_DATA_ROOT>/playground/knowledge"
-docker run --rm --env-file .env -e DEFENDER_DATA_ROOT=/data -v "<HOST_DATA_ROOT>":/data \
-    defender-runtime python3 defender/cli/tenant.py setup playground
-```
-
-Clone on the HOST with a credential helper or an ssh agent (never a credential in the URL);
-the container never fetches. Run setup once the clone has exited 0 — setup adopts the placed
-folder as it is (it copies nothing and runs no git), checks it, and writes the row last.
-
-A data root made before #1120 (`<id>/tenant.json`, `runs/` and `sessions/`, no `knowledge/`) has
-no tenant repo to clone: on the host, build its knowledge folder once from this checkout's git
-history (a full clone, not a shallow one) with
-`python3 defender/cli/tenant.py migrate playground "<HOST_DATA_ROOT>/playground/knowledge"`
-(one-off), then run the setup step above.
-
-Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
-default data root) to a MOUNTED host folder — the row it writes is what every later run is
-checked against, so a data root inside the throwaway container is gone when setup exits — and
-no run, fork or drain in flight on any checkout of the host, as the same user that runs
-defender; a destination already occupied makes setup refuse, naming it in the message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
-setup run as root — that adoption case only.)
-
-```bash
-# live investigation — needs the LLM key and the same data root (the tenant's knowledge is in it)
+# live investigation — needs the LLM key, the same data root (the tenant's knowledge is in it),
+# the compose network (the tenant records are in the `postgres` service, and the token issuer is the
+# `openbao` service) and the dev issuer's CA, which `SSL_CERT_DIR` must name (a folder `prepare`
+# has run `openssl rehash` on, mounted read-only like the dev container's)
 docker run --rm --env-file .env \
+    --network cyber-response-agent_devcontainer_default \
     -e DEFENDER_DATA_ROOT=/data -v "<HOST_DATA_ROOT>":/data \
-    defender-runtime python3 defender/run.py <alert.json> --tenant playground
+    -e DEFENDER_DATABASE_DSN=postgresql://defender:dev-only-change-me@postgres:5432/defender \
+    -e SSL_CERT_DIR=/etc/ssl/certs:/etc/ssl/dev-issuer-ca \
+    -v "<HOST_REPO_PATH>/playground-issuer/trust":/etc/ssl/dev-issuer-ca:ro \
+    defender-runtime python3 defender/run.py <alert.json> --tenant <tenant-uuid>
 ```
+
+`<tenant-uuid>` is the id the lifecycle's `POST /admin/tenants` answered, an `active` tenant (a
+tenant id is an opaque UUID, not a name like `playground`). The network is the compose project's
+default one: `name:` in `docker-compose.yml` plus `_default` (`docker network ls` shows it). The DSN
+and the trust folder are the dev stack's (`defender/docs/development-operations.md`, "Host process
+settings" and "The dev issuer"); the trust folder is a HOST path, as below.
 
 **Tenant knowledge is mounted, never baked (#1106, #1120).** A tenant's knowledge folder holds
 its settings (endpoints, later credentials) and its model-facing knowledge — deployment data,

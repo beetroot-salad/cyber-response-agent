@@ -41,7 +41,7 @@ PAST_THE_CHECK = 97
 #: How long a site may sit on the FIFO before the watcher stands in for a writer.
 FIFO_GRACE_S = 10.0
 
-SITES = ("acceptance", "setup", "check-folder", "run-start", "branch-launch", "sibling-resume",
+SITES = ("acceptance", "check-folder", "run-start", "branch-launch", "sibling-resume",
          "policy-cli")
 
 #: The alert mapping's fault shapes, `unreadable` only where the kernel can say so (non-root).
@@ -185,17 +185,15 @@ def at_acceptance(w: World) -> Verdict:
     return Verdict("acceptance", False, "", True)
 
 
-def tenant_py(capsys: Any, *argv: str) -> tuple[int, str]:
-    """`cli/tenant.py`'s `main(argv)` in this process: its exit code and what it printed
-    on stderr (its refusals and findings, `[tenant.py] <message>` each)."""
+def tenant_py(capsys: Any, *argv: str, directory: Any = None) -> tuple[int, str]:
+    """`cli/tenant.py`'s `main(argv, directory=)` in this process: its exit code and what it printed
+    on stderr (its refusals and findings, `[tenant.py] <message>` each). `directory` defaults to
+    one that knows no tenant (`check --folder` names none; Flow 4 fails closed otherwise)."""
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
     capsys.readouterr()
-    rc = S.mod("cli.tenant").main(list(argv))
+    rc = S.mod("cli.tenant").main(list(argv), directory=directory if directory is not None else directory_for_argv(()))
     return rc, capsys.readouterr().err
-
-
-def at_setup(w: World) -> Verdict:
-    rc, err = tenant_py(w.capsys, "setup", w.planted.tenant_id)
-    return Verdict("setup", rc != 0, err, rc == 0)
 
 
 def check_folder_verdict(capsys: Any, folder: Path) -> Verdict:
@@ -224,11 +222,13 @@ def at_branch_launch(w: World) -> Verdict:
     # stamps that pinned export, not wherever `current` has moved since (another site of this
     # test may have republished the tenant): the fake live tree answers with the source's own.
     stamp = json.loads((w.source_run / "provenance.json").read_text(encoding="utf-8"))
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
     text = ""
+    argv = ["--tenant", w.planted.tenant_id, w.source_run.name, str(T.BRANCH_MESSAGE_ID)]
     try:
         S.mod("cli.learning.branch").main(
-            ["--tenant", w.planted.tenant_id, w.source_run.name,
-             str(T.BRANCH_MESSAGE_ID)],
+            argv, directory=directory_for_argv(argv),
             spawn=spawn, preflight=preflight,
             live_tree=T.source_capture(knowledge=stamp["knowledge"]))
     except SystemExit as stop:
@@ -254,8 +254,8 @@ def at_sibling_resume(w: World) -> Verdict:
         S.mod("run").main(
             ["--episode", w.episode.name, "--world", "b",
              "--tenant", w.planted.tenant_id],
-            lifecycle=lifecycle, visualize=lambda *_a, **_k: None, preflight=preflight,
-            publish=in_process_publish())
+            directory=w.planted.directory, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
+            preflight=preflight, publish=in_process_publish())
     except SystemExit as stop:
         text = _exit_text(stop)
     passed = bool(preflight.calls)
@@ -264,11 +264,12 @@ def at_sibling_resume(w: World) -> Verdict:
 
 
 def at_policy_cli(w: World) -> Verdict:
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
     w.capsys.readouterr()
+    argv = ["show", "gather", "--run-dir", str(w.tmp / "policy-run"), "--tenant", w.planted.tenant_id]
     try:
-        rc = S.mod("cli.policy_cli").main(
-            ["show", "gather", "--run-dir", str(w.tmp / "policy-run"),
-             "--tenant", w.planted.tenant_id])
+        rc = S.mod("cli.policy_cli").main(argv, directory=directory_for_argv(argv))
     except SystemExit as stop:
         return Verdict("policy-cli", True, _exit_text(stop), False)
     out = w.capsys.readouterr().out
@@ -277,7 +278,6 @@ def at_policy_cli(w: World) -> Verdict:
 
 DRIVERS: dict[str, Callable[[World], Verdict]] = {
     "acceptance": at_acceptance,
-    "setup": at_setup,
     "check-folder": at_check_folder,
     "run-start": at_run_start,
     "branch-launch": at_branch_launch,

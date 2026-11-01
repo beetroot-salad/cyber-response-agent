@@ -49,18 +49,20 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     oracle: Any = None,
     verifier: Any = None,
     roster: Any = None,
+    directory: Any = None,
     signer: Any = None,
     proxy_url: str | None = None,
     issuer_transport: Any = None,
 ) -> int:
-    """Launch one episode with the real role preflight unless one is injected."""
+    """Launch one episode with the real role preflight unless one is injected. `directory` is the
+    tenant records a test hands in; a production launch reads `DEFENDER_DATABASE_DSN`'s."""
     from defender.run import preflight_role_models
 
     return launcher.main(
         argv, spawn=spawn, questioner=questioner,
         preflight=preflight_role_models if preflight is None else preflight,
         render_page=_render_episode_page, judge=judge, lessons_dir=lessons_dir,
-        live_tree=live_tree, oracle=oracle, verifier=verifier, roster=roster,
+        live_tree=live_tree, oracle=oracle, verifier=verifier, roster=roster, directory=directory,
         signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
 
 

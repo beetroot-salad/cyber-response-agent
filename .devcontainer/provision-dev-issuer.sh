@@ -1,27 +1,12 @@
 #!/usr/bin/env bash
-# Dev issuer provisioning (#1108 P4, U1/U4, O12/O13). Run from the dev container, at the repo
-# root's .devcontainer/ or anywhere: it finds the repo from its own path. Idempotent: every step
-# checks before it acts, so a re-run repairs a half-provisioned issuer and changes nothing on a
-# provisioned one (except minting a fresh AppRole secret_id when asked with --rotate-secret).
+# Dev issuer files (#1108 P4, U1/U4, O12/O13). Run from the dev container, at the repo root's
+# .devcontainer/ or anywhere: it finds the repo from its own path. Idempotent: every step checks
+# before it acts, so a re-run changes nothing on a prepared issuer.
 #
 #   provision-dev-issuer.sh prepare
 #       Make <repo>/playground-issuer/: the dev CA, the openbao TLS certificate, the 32-byte
 #       static-seal key and the storage folder, owned by the openbao user (uid 100). Then
 #       restart the `openbao` service so it starts on them.
-#
-#   provision-dev-issuer.sh provision <tenant-id> --bot <login> --repo <owner/name> [--rotate-secret]
-#       prepare, then: initialise OpenBao (recovery keys to playground-issuer/recovery/, never
-#       printed), the identity-token signing key, the tenant's OIDC role (TTL 600 s, `tenant_id`
-#       from entity metadata), an AppRole whose policy reads only that role's token, the entity
-#       binding the AppRole to the tenant; the bot's Generic JWT Authorized Integration in
-#       Forgejo (issuer https://openbao:8200/v1/identity/oidc, claim `tenant_id` = the tenant,
-#       restricted to the repo, write:repository + write:issue); the role's client_id set to the
-#       integration's audience; the tenant's AppRole client config at
-#       playground-issuer/client/<tenant-id>/issuer.json; the tenant row's forge binding, which
-#       names that file. It protects `main` so the bot can neither push nor merge it (a merge
-#       whitelist of the repository's owner(s); an existing rule keeps its settings and gains the
-#       whitelist), checks that through the bot's own eyes, and revokes the root token it used. A later run regenerates a root token from the recovery keys inside the
-#       issuer container.
 #
 #   provision-dev-issuer.sh migrate-forgejo-data
 #       Once, before the first `up` with the bind mount: copy the old `forgejo-data` named volume
@@ -29,8 +14,11 @@
 #       `forgejo` service first. Forgejo 15 -> 17 is not an automatic upgrade: back up and follow
 #       Forgejo's upgrade notes (see defender/docs/development-operations.md).
 #
-# Deployment facts stay in files (P-4): nothing here reads or exports them through the
-# environment, and nothing is printed that is secret (root token, recovery keys, secret_id).
+# This script makes files and nothing else. A tenant's credentials (its OpenBao role, AppRole and
+# entity, its Forgejo bot and integration, its secret file) come from the lifecycle service
+# (`python -m defender.lifecycle serve`, #1214), not from here; the old `provision` subcommand is
+# gone. Nothing here reads or exports deployment facts through the environment, and nothing is
+# printed that is secret (P-4).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,12 +28,8 @@ BAO_CONTAINER=response-openbao
 FORGEJO_CONTAINER=response-forgejo
 DEVCONTAINER=response-devcontainer
 OLD_VOLUME=cyber-response-agent_devcontainer_forgejo-data
-ISSUER=https://openbao:8200
-IDENTITY="$ISSUER/v1/identity/oidc"
-FORGEJO=http://127.0.0.1:3000   # inside the forgejo container
 BAO_UID=100
 BAO_GID=1000
-SIGNING_KEY=tenants
 
 say() { printf '[provision-dev-issuer] %s\n' "$*" >&2; }
 die() { say "$*"; exit 1; }
@@ -73,6 +57,9 @@ prepare() {
       2>/dev/null
   fi
   install -m 0644 "$STATE/ca/ca.pem" "$STATE/trust/dev-issuer-ca.pem"
+  # `SSL_CERT_DIR` names this folder: Go reads every file in it, but OpenSSL (Python's TLS client,
+  # so every host process minting a tenant token) finds a CA only under its hash name.
+  openssl rehash "$STATE/trust" >/dev/null
   if [ ! -s "$STATE/tls/server.pem" ]; then
     say "making the openbao TLS certificate"
     local ext
@@ -103,283 +90,6 @@ prepare() {
   fi
 }
 
-# --- OpenBao, through its own CLI inside the issuer container --------------------------------
-
-bao() {  # bao [token] args...: the CLI inside the issuer container
-  local token=$1; shift
-  docker exec -i -e BAO_ADDR=https://127.0.0.1:8200 -e BAO_CACERT=/openbao/tls/ca.pem \
-    ${token:+-e BAO_TOKEN="$token"} "$BAO_CONTAINER" bao "$@"
-}
-
-wait_for_bao() {  # until the issuer answers at all (sealed or not, initialised or not)
-  local i
-  for i in $(seq 1 60); do
-    if bao "" status -format=json 2>/dev/null | jq -e 'has("initialized")' >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 2
-  done
-  die "openbao did not answer within 120 s (docker logs $BAO_CONTAINER)"
-}
-
-initialise() {
-  local status
-  status=$(bao "" status -format=json || true)
-  if [ "$(jq -r .initialized <<<"$status")" != true ]; then
-    say "initialising openbao (recovery keys -> $STATE/recovery/keys.json)"
-    bao "" operator init -format=json -recovery-shares=1 -recovery-threshold=1 \
-      > "$STATE/recovery/keys.json"
-    chmod 0600 "$STATE/recovery/keys.json"
-    sleep 2
-  fi
-  status=$(bao "" status -format=json || true)
-  [ "$(jq -r .sealed <<<"$status")" = false ] || die "openbao is sealed after init: check the static seal key"
-}
-
-root_token() {  # a root token for this run: the init's (first run) or one regenerated from recovery
-  local keys="$STATE/recovery/keys.json" token otp nonce encoded
-  token=$(jq -r '.root_token // empty' "$keys")
-  if [ -n "$token" ] && bao "$token" token lookup >/dev/null 2>&1; then
-    printf '%s' "$token"; return
-  fi
-  bao "" operator generate-root -cancel >/dev/null 2>&1 || true
-  otp=$(bao "" operator generate-root -generate-otp)
-  nonce=$(bao "" operator generate-root -init -otp="$otp" -format=json | jq -r .nonce)
-  encoded=$(jq -r '.recovery_keys_b64[0]' "$keys" \
-    | bao "" operator generate-root -nonce="$nonce" -format=json - | jq -r .encoded_token)
-  bao "" operator generate-root -decode="$encoded" -otp="$otp"
-}
-
-configure_bao() {  # configure_bao token tenant -> sets ROLE, APPROLE, ROLE_ID
-  local t=$1 tenant=$2 accessor entity
-  ROLE="tenant-$tenant"
-  APPROLE="delivery-$tenant"
-  bao "$t" read identity/oidc/key/"$SIGNING_KEY" >/dev/null 2>&1 \
-    || bao "$t" write identity/oidc/key/"$SIGNING_KEY" algorithm=RS256 allowed_client_ids='*' \
-         rotation_period=24h verification_ttl=2h >/dev/null
-  # The role first, so the issuer's JWKS is non-empty before Forgejo first fetches it (Forgejo
-  # caches that fetch: an integration created against an empty JWKS keeps failing until restart).
-  if ! bao "$t" read identity/oidc/role/"$ROLE" >/dev/null 2>&1; then
-    bao "$t" write identity/oidc/role/"$ROLE" key="$SIGNING_KEY" ttl=600 \
-      template='{"tenant_id": {{identity.entity.metadata.tenant_id}}}' >/dev/null
-  fi
-  bao "$t" auth list -format=json | jq -e '."approle/"' >/dev/null \
-    || bao "$t" auth enable approle >/dev/null
-  printf 'path "identity/oidc/token/%s" {\n  capabilities = ["read"]\n}\n' "$ROLE" \
-    | bao "$t" policy write "$ROLE" - >/dev/null
-  bao "$t" write auth/approle/role/"$APPROLE" token_policies="$ROLE" token_ttl=10m \
-    token_max_ttl=30m secret_id_ttl=0 >/dev/null
-  ROLE_ID=$(bao "$t" read -field=role_id auth/approle/role/"$APPROLE"/role-id)
-  accessor=$(bao "$t" auth list -format=json | jq -r '."approle/".accessor')
-  entity=$(bao "$t" write -format=json identity/entity name="$ROLE" metadata=tenant_id="$tenant" \
-    | jq -r '.data.id // empty')
-  [ -n "$entity" ] || entity=$(bao "$t" read -format=json identity/entity/name/"$ROLE" | jq -r .data.id)
-  bao "$t" write identity/entity/id/"$entity" metadata=tenant_id="$tenant" >/dev/null
-  bao "$t" write identity/lookup/entity -format=json alias_name="$ROLE_ID" \
-      alias_mount_accessor="$accessor" 2>/dev/null | jq -e '.data.id' >/dev/null \
-    || bao "$t" write identity/entity-alias name="$ROLE_ID" canonical_id="$entity" \
-         mount_accessor="$accessor" >/dev/null
-}
-
-# --- Forgejo: the bot's Authorized Integration (web form; Forgejo 17 has no API for it) -------
-
-fj() { docker exec -i "$FORGEJO_CONTAINER" "$@"; }
-
-bot_login() {  # bot_login bot: a session cookie jar inside the forgejo container
-  local bot=$1 password csrf
-  # The bot authenticates with issuer JWTs only, so its password is unused: reset it to a
-  # throwaway for this one web session.
-  password="dev-$(head -c 18 /dev/urandom | base64 | tr -d '/+=')"
-  docker exec -u git "$FORGEJO_CONTAINER" forgejo admin user change-password --username "$bot" \
-    --password "$password" --must-change-password=false >/dev/null
-  fj sh -c "rm -f /tmp/provision.jar"
-  csrf=$(fj sh -c "curl -s -c /tmp/provision.jar -b /tmp/provision.jar $FORGEJO/user/login" \
-    | grep -o 'name="_csrf" value="[^"]*"' | head -1 | sed 's/.*value="//;s/"$//')
-  fj sh -c "curl -s -o /dev/null -c /tmp/provision.jar -b /tmp/provision.jar -X POST $FORGEJO/user/login \
-    --data-urlencode _csrf='$csrf' --data-urlencode user_name='$bot' --data-urlencode password='$password'"
-}
-
-integration_audience() {  # integration_audience name -> audience of the bot's integration `name`, or ""
-  local name=$1 id
-  for id in $(fj sh -c "curl -s -b /tmp/provision.jar $FORGEJO/user/settings/authorized-integrations" \
-      | grep -o 'authorized-integrations/generic/[0-9]*' | sed 's#.*/##' | sort -u); do
-    page=$(fj sh -c "curl -s -b /tmp/provision.jar $FORGEJO/user/settings/authorized-integrations/generic/$id")
-    if grep -q "id=\"name\" name=\"name\" value=\"$name\"" <<<"$page"; then
-      grep -o 'id="audience" name="audience" value="[^"]*"' <<<"$page" | sed 's/.*value="//;s/"$//'
-      return
-    fi
-  done
-}
-
-ensure_integration() {  # ensure_integration bot tenant repo -> sets AUDIENCE
-  local bot=$1 tenant=$2 repo=$3 name="defender-$2" csrf rules
-  bot_login "$bot"
-  AUDIENCE=$(integration_audience "$name")
-  if [ -z "$AUDIENCE" ]; then
-    say "creating the Authorized Integration $name for $bot on $repo"
-    rules=$(printf '{"rules":[{"claim":"tenant_id","compare":"eq","value":"%s"}]}' "$tenant")
-    csrf=$(fj sh -c "curl -s -b /tmp/provision.jar $FORGEJO/user/settings/authorized-integrations/generic/new" \
-      | grep -o 'name="_csrf" value="[^"]*"' | head -1 | sed 's/.*value="//;s/"$//')
-    fj sh -c "curl -s -o /dev/null -b /tmp/provision.jar -X POST $FORGEJO/user/settings/authorized-integrations/generic/new \
-      --data-urlencode _csrf='$csrf' --data-urlencode name='$name' --data-urlencode issuer='$IDENTITY' \
-      --data-urlencode claim_rules='$rules' --data-urlencode resource=repo-specific \
-      --data-urlencode selected_repo='$repo' \
-      --data-urlencode scope=write:repository --data-urlencode scope=write:issue"
-    AUDIENCE=$(integration_audience "$name")
-  fi
-  fj sh -c "rm -f /tmp/provision.jar"
-  [ -n "$AUDIENCE" ] || die "Forgejo did not create the integration $name (is ALLOWED_DOMAINS=openbao, and the issuer's JWKS non-empty?)"
-}
-
-# --- the client config, the row's forge binding, and the protection check ---------------------
-
-client_config() {  # client_config tenant -> the tenant's own AppRole client config path
-  printf '%s/client/%s/issuer.json' "$STATE" "$1"
-}
-
-write_client_config() {  # write_client_config token tenant rotate: one file per tenant
-  local t=$1 tenant=$2 rotate=$3 config secret minted keep
-  config=$(client_config "$tenant")
-  mkdir -p "$(dirname "$config")"
-  chmod 0700 "$(dirname "$config")"
-  if [ "$rotate" = yes ] || [ ! -s "$config" ] || [ "$(jq -r .role_id "$config")" != "$ROLE_ID" ]; then
-    minted=$(bao "$t" write -f -format=json auth/approle/role/"$APPROLE"/secret-id)
-    secret=$(jq -r .data.secret_id <<<"$minted")
-    keep=$(jq -r .data.secret_id_accessor <<<"$minted")
-    jq -n --arg issuer "$IDENTITY" --arg ca "$STATE/trust/dev-issuer-ca.pem" \
-      --arg role_id "$ROLE_ID" --arg secret_id "$secret" \
-      '{issuer: $issuer, ca_cert: $ca, role_id: $role_id, secret_id: $secret_id}' > "$config.tmp"
-    chmod 0600 "$config.tmp"
-    mv "$config.tmp" "$config"
-    # The tenant's role keeps exactly the secret just written: every earlier one (secret_ids
-    # never expire here) is destroyed, so a rotation retires a leaked config.
-    revoke_other_secrets "$t" "$keep"
-    say "wrote the AppRole client config $config"
-  fi
-}
-
-revoke_other_secrets() {  # revoke_other_secrets token keep: destroy every role secret but keep
-  local t=$1 keep=$2 accessor
-  for accessor in $(bao "$t" list -format=json auth/approle/role/"$APPROLE"/secret-id 2>/dev/null                     | jq -r '.[]'); do
-    [ "$accessor" = "$keep" ] && continue
-    bao "$t" write auth/approle/role/"$APPROLE"/secret-id-accessor/destroy \
-      secret_id_accessor="$accessor" >/dev/null
-  done
-}
-
-bind_forge() {  # bind_forge tenant repo: the row's forge: {origin, audience, issuer_role, issuer_config}
-  local tenant=$1 repo=$2 row
-  row="${DEFENDER_DATA_ROOT:?the dev container sets DEFENDER_DATA_ROOT}/$tenant/tenant.json"
-  [ -s "$row" ] || die "no tenant row at $row: run \`python3 defender/cli/tenant.py setup $tenant\` first"
-  jq --arg origin "http://forgejo:3000/$repo.git" --arg audience "$AUDIENCE" --arg role "$ROLE" \
-    --arg config "$(client_config "$tenant")" \
-    '.forge = {origin: $origin, audience: $audience, issuer_role: $role, issuer_config: $config}' \
-    "$row" > "$row.tmp"
-  mv "$row.tmp" "$row"
-}
-
-as_admin() {  # as_admin method path [json]: one API call as the throwaway admin (credentials on stdin)
-  local method=$1 path=$2 body=${3:-}
-  printf 'user = "%s:%s"\n' "$PROTECT_ADMIN" "$PROTECT_PASSWORD" | fj curl -s -K - -X "$method" \
-    -H 'Content-Type: application/json' ${body:+--data "$body"} "$FORGEJO/api/v1/$path"
-}
-
-remove_protect_admin() {
-  docker exec -u git "$FORGEJO_CONTAINER" forgejo admin user delete --username "$PROTECT_ADMIN" \
-    >/dev/null 2>&1 || say "WARNING: could not delete the throwaway admin $PROTECT_ADMIN (Forgejo keeps its last admin: make your own admin first), then delete it by hand"
-}
-
-protect_main() {  # protect_main bot repo: main refuses the bot's pushes and its merges (#1163 N13)
-  local bot=$1 repo=$2 owner=${2%%/*} rule body mergers
-  # Forgejo lets any writer merge unless a merge whitelist is on (probed on 15.0.9 and 17.0.1):
-  # blocking pushes alone leaves the bot able to merge its own pull request. The rule is set by a
-  # throwaway admin made for this step and deleted after it, so no standing credential is made
-  # and no person's password or token is touched.
-  PROTECT_ADMIN="provision-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-  PROTECT_PASSWORD="dev-$(head -c 18 /dev/urandom | base64 | tr -d '/+=')"
-  docker exec -u git "$FORGEJO_CONTAINER" forgejo admin user create --admin \
-    --username "$PROTECT_ADMIN" --password "$PROTECT_PASSWORD" \
-    --email "$PROTECT_ADMIN@provision.invalid" --must-change-password=false >/dev/null
-  trap remove_protect_admin EXIT
-  # Who may merge when nobody is named yet: an organisation's Owners team, or the user who owns
-  # the repository.
-  if [ "$(as_admin GET "orgs/$owner" | jq -r '.username // empty')" = "$owner" ]; then
-    mergers='{"merge_whitelist_usernames": [], "merge_whitelist_teams": ["Owners"]}'
-  else
-    mergers=$(jq -nc --arg owner "$owner" '{merge_whitelist_usernames: [$owner], merge_whitelist_teams: []}')
-  fi
-  rule=$(as_admin GET "repos/$repo/branch_protections/main")
-  if jq -e '.rule_name == "main"' <<<"$rule" >/dev/null 2>&1; then
-    # An operator's rule is kept; its merge whitelist is turned on (or kept) without the bot.
-    body=$(jq -c --arg bot "$bot" --argjson mergers "$mergers" '
-      (if .enable_merge_whitelist then
-         {merge_whitelist_usernames: ((.merge_whitelist_usernames // []) - [$bot]),
-          merge_whitelist_teams: (.merge_whitelist_teams // [])}
-       else {merge_whitelist_usernames: [], merge_whitelist_teams: []} end) as $kept
-      | {enable_merge_whitelist: true}
-        + (if ($kept.merge_whitelist_usernames + $kept.merge_whitelist_teams) == [] then $mergers
-           else $kept end)' <<<"$rule")
-    as_admin PATCH "repos/$repo/branch_protections/main" "$body" >/dev/null
-  else
-    say "protecting $repo main: no direct pushes, merges by the repository's owner(s) only"
-    body=$(jq -c '{rule_name: "main", enable_push: false, enable_merge_whitelist: true} + .' \
-      <<<"$mergers")
-    as_admin POST "repos/$repo/branch_protections" "$body" >/dev/null
-  fi
-  trap - EXIT
-  remove_protect_admin
-}
-
-check_main_protected() {  # check_main_protected token repo: the bot, through the issuer, cannot push main
-  local t=$1 repo=$2 jwt branch
-  # A token for the role as the AppRole would get it: the root token has no entity, so log in.
-  # Its own short-lived secret_id, destroyed after the one login (secret_ids do not expire).
-  local minted secret accessor token
-  minted=$(bao "$t" write -f -format=json auth/approle/role/"$APPROLE"/secret-id)
-  secret=$(jq -r .data.secret_id <<<"$minted")
-  accessor=$(jq -r .data.secret_id_accessor <<<"$minted")
-  token=$(bao "" write -field=token auth/approle/login role_id="$ROLE_ID" secret_id="$secret")
-  bao "$t" write auth/approle/role/"$APPROLE"/secret-id-accessor/destroy \
-    secret_id_accessor="$accessor" >/dev/null
-  jwt=$(bao "$token" read -field=token identity/oidc/token/"$ROLE")
-  bao "$token" token revoke -self >/dev/null
-  branch=$(fj sh -c "curl -s -H 'Authorization: Bearer $jwt' $FORGEJO/api/v1/repos/$repo/branches/main")
-  if [ "$(jq -r '.user_can_push' <<<"$branch")" != false ] || [ "$(jq -r '.user_can_merge' <<<"$branch")" != false ]; then
-    say "WARNING: the bot can push or merge $repo main (protected=$(jq -r .protected <<<"$branch")): protect it, and keep merging a human act, before any drain runs"
-  else
-    say "$repo main is protected against the bot (it can neither push nor merge)"
-  fi
-}
-
-provision() {
-  local tenant="" bot="" repo="" rotate=no t
-  tenant=${1:-}; shift || true
-  while [ $# -gt 0 ]; do
-    case $1 in
-      --bot) bot=$2; shift 2 ;;
-      --repo) repo=$2; shift 2 ;;
-      --rotate-secret) rotate=yes; shift ;;
-      *) die "unknown argument $1" ;;
-    esac
-  done
-  [ -n "$tenant" ] && [ -n "$bot" ] && [ -n "$repo" ] \
-    || die "usage: provision <tenant-id> --bot <login> --repo <owner/name> [--rotate-secret]"
-  prepare
-  wait_for_bao
-  initialise
-  t=$(root_token)
-  configure_bao "$t" "$tenant"
-  ensure_integration "$bot" "$tenant" "$repo"
-  bao "$t" write identity/oidc/role/"$ROLE" key="$SIGNING_KEY" ttl=600 client_id="$AUDIENCE" \
-    template='{"tenant_id": {{identity.entity.metadata.tenant_id}}}' >/dev/null
-  write_client_config "$t" "$tenant" "$rotate"
-  bind_forge "$tenant" "$repo"
-  protect_main "$bot" "$repo"
-  check_main_protected "$t" "$repo"
-  bao "$t" token revoke -self >/dev/null
-  say "done: issuer $IDENTITY, role $ROLE, audience $AUDIENCE"
-}
-
 migrate_forgejo_data() {
   docker volume inspect "$OLD_VOLUME" >/dev/null 2>&1 || die "no old volume $OLD_VOLUME"
   if [ -n "$(ls -A "$KNOWLEDGE_DATA" 2>/dev/null)" ]; then
@@ -397,8 +107,7 @@ migrate_forgejo_data() {
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   case ${1:-} in
     prepare) prepare ;;
-    provision) shift; provision "$@" ;;
     migrate-forgejo-data) migrate_forgejo_data ;;
-    *) die "usage: $0 prepare | provision <tenant-id> --bot <login> --repo <owner/name> | migrate-forgejo-data" ;;
+    *) die "usage: $0 prepare | migrate-forgejo-data" ;;
   esac
 fi

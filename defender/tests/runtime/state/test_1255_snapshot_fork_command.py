@@ -35,7 +35,8 @@ def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anyt
         got: object = branch_entry.main(
             ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
             spawn=spawn, questioner=questioner, preflight=recording_preflight,
-            live_tree=T.source_capture())
+            live_tree=T.source_capture(),
+            directory=T.launcher_directory(src.parent.parent.name))  # C9: the launcher admits through the records
     except (SystemExit, AssertionError, *T.refusals()) as refused:
         got = refused
     text = f"{got} {capsys.readouterr().err}"

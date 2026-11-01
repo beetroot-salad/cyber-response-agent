@@ -17,6 +17,7 @@ from defender.box import (
     start_box,
 )
 from defender.execution.box_codec import BoxFault
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 
 @pytest.fixture(autouse=True)
@@ -121,6 +122,7 @@ def test_render_argv_translates_request_mounts_too():
         ),
         workdir=Path("/workspace"),
         spec=PINNED,
+        tenant_id=TEST_TENANT,
     )
     joined = " ".join(_render_argv(request, MOUNTS).argv)
     assert (
@@ -140,6 +142,7 @@ def test_render_argv_refuses_an_uncovered_request_mount():
         name="defender-runcycle-r1",
         mounts=(Mount(source=Path("/srv/elsewhere"), target=Path("/srv/elsewhere"), kind="data"),),
         workdir=Path("/workspace"),
+        tenant_id=TEST_TENANT,
     )
     with pytest.raises(BoxFault) as e:
         _render_argv(request, MOUNTS)
@@ -174,6 +177,7 @@ def test_render_argv_refuses_a_traversal_mount_source():
         name="defender-runcycle-r1",
         mounts=(Mount(source=Path("/workspace/../etc"), target=Path("/etc"), kind="data"),),
         workdir=Path("/workspace"),
+        tenant_id=TEST_TENANT,
     )
     with pytest.raises(BoxFault) as e:
         _render_argv(request, MOUNTS)
@@ -275,7 +279,7 @@ def _runtime_of(monkeypatch, value: str | None) -> str:
         monkeypatch.setenv(BoxSpec.ENV_VAR, value)
     rec = _CapturingDocker()
     with pytest.raises(BoxFault):
-        start_box(Path("/tmp/defender-runs/r1"), REPO_ROOT / "defender", docker=rec)
+        start_box(Path("/tmp/defender-runs/r1"), REPO_ROOT / "defender", docker=rec, tenant_id=TEST_TENANT)
     assert rec.create_argv is not None
     return rec.create_argv[rec.create_argv.index("--runtime") + 1]
 
@@ -294,7 +298,7 @@ def test_runtime_lever_rejects_an_unknown_runtime(monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.setenv(BoxSpec.ENV_VAR, "gvisor")
     with pytest.raises(ValueError, match="not a known box runtime"):
-        start_box(Path("/tmp/defender-runs/r1"), Path("/srv/defender"), docker=_CapturingDocker())
+        start_box(Path("/tmp/defender-runs/r1"), Path("/srv/defender"), docker=_CapturingDocker(), tenant_id=TEST_TENANT)
 
 
 def test_a_typoed_lever_does_not_break_the_request_path_that_ignores_it(monkeypatch):
@@ -303,7 +307,7 @@ def test_a_typoed_lever_does_not_break_the_request_path_that_ignores_it(monkeypa
 
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     # The request's own spec factory is under test; its rootfs resolves from `workdir / "defender"`.
-    request = BoxRequest(name="defender-runcycle-r1", workdir=REPO_ROOT)
+    request = BoxRequest(name="defender-runcycle-r1", workdir=REPO_ROOT, tenant_id=TEST_TENANT)
     monkeypatch.setenv(BoxSpec.ENV_VAR, "gvisor")  # AFTER the request is built
     with pytest.raises(BoxFault):  # the create fault, not a ValueError
         start_box(request, docker=_CapturingDocker())
@@ -343,6 +347,7 @@ def test_the_discovered_table_reaches_the_request_render_argv():
                       target=Path("/workspace/defender/lessons"), kind="data"),),
         workdir=Path("/workspace"),
         spec=PINNED,
+        tenant_id=TEST_TENANT,
     )
     with pytest.raises(BoxFault):
         box_mod._start_boxed_request(request, rec, lambda _docker: MOUNTS)

@@ -122,10 +122,13 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
 
     run_dir = curation_run_dir("r-real", tenant_id=d9_tenant)
     run_id = run_dir.name  # the uuid4 its label names (`fixture_uuid`)
-    opened = open_command_line_run(d9_tenant, run_id)
-    assert not isinstance(opened, str), opened
-    tenant, run = opened
-    assert isinstance(run, Run), opened
+    # r10.1 C1: the opener takes the tenant its command's host acceptance admitted; it never accepts one itself.
+    from defender._paths import process_defender_dir
+
+    tenant = _tenant.accept_tenant(fixture_data_root(_tenant.resolve_data_root()), d9_tenant,
+                                   defender_dir=process_defender_dir())
+    run = open_command_line_run(tenant, run_id)
+    assert isinstance(run, Run), run
     assert str(tenant.id) == d9_tenant
     assert Path(run.run_dir) == run_dir
 
@@ -136,9 +139,8 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
                           R1._workspace_map_main(), 2),
     }[cli]
     monkeypatch.delenv(P.DATA_ROOT_ENV)
-    refused = open_command_line_run(d9_tenant, run_id)
-    assert isinstance(refused, str), refused
-    assert P.DATA_ROOT_ENV in refused, refused
+    # With no data root there is nothing to accept: the refusal is the command's own acceptance (the opener is only
+    # reached with an accepted tenant, C1), asserted through each command below.
     with R1._no_logging():
         got = P.drive_cli(main, argv)
     assert got.rc == status, f"{cli}: {got.rc} {got.err!r}"

@@ -15,7 +15,7 @@ from defender.tests.support.learning.curation._curator1134 import author_trees
 from defender.tests.support.shared.contracts._locale import C_LOCALE_ENV
 from defender.tests.learning.retrieval.test_trace_lesson import _mk_run  # noqa: E402
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
-from defender.tests.support.learning.retrieval._lessons_corpus import _tenant_runs
+from defender.tests.support.learning.retrieval._lessons_corpus import _tenant_runs, trace_main
 from defender.tests.support.learning.curation._curator1134 import open_state
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
@@ -157,6 +157,6 @@ def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
     _mk_run(runs, "case-new", disposition="malicious",
             loads=[{"lesson_name": "rewritten", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
+    assert trace_main(tl, ["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
 
     assert capsys.readouterr().out.splitlines() == ["rewritten\td\t1\t0"]

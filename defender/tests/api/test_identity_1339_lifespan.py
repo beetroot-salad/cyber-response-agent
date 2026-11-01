@@ -26,6 +26,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
     BOB,
     NEW,
+    OPS,
     T1,
     T2,
     FakeSignIn,
@@ -324,8 +325,8 @@ def test_the_background_sender_enforces_each_emails_deadline() -> None:
 
 
 def test_the_bootstrap_finishes_before_the_lifespan_start_up_returns_and_before_any_send() -> None:
-    """Entering the lifespan awaits the bootstrap: when it returns the file is applied, and no port was called yet (O5, DC-4)."""
-    world = World(tenants={T1: [ANN]}, start=False, send_interval=HOUR, failing_writes=True)
+    """Entering the lifespan awaits the bootstrap: when it returns the administrator flag is applied, and no port was called yet (O5, DC-4; r9 Q3: the file's last write is the flag)."""
+    world = World(administrators=[OPS], start=False, send_interval=HOUR, failing_writes=True)
     finished: list[bool] = []
     ports_seen: list[list[str]] = []
 
@@ -334,8 +335,8 @@ def test_the_bootstrap_finishes_before_the_lifespan_start_up_returns_and_before_
         await asyncio.sleep(0.3)
         finished.append(True)
 
-    world.repo.after["register_tenant"] = slow_bootstrap_step
+    world.repo.after["set_platform_admin"] = slow_bootstrap_step
     with world.lifespan_client():
         assert finished == [True], "the lifespan started serving while the bootstrap was still running"
-        assert world.call(world.repo.user_by_email, ANN) is not None
+        assert world.call(world.repo.user_by_email, OPS) is not None
     assert ports_seen == [[]]

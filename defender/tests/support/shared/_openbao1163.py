@@ -1,9 +1,11 @@
-"""#1163 OpenBao test server: one isolated set of mounts and policies per test.
+"""#1163 OpenBao test server: one isolated slice per test.
 
 Mirrors `_postgres1339`: skipped where `DEFENDER_TEST_OPENBAO_ADDR` is unset locally, failed where
 it is unset in CI (the test job runs `openbao/openbao:2.4.1 server -dev` for it). Each test gets
-a KV v2 mount and a transit mount named by a fresh uuid, and every policy and token it makes is
-named under that uuid; all are removed when the test ends. This module applies policy text it is
+a KV v2 mount named by a fresh uuid, and every policy and token it makes is named under that uuid;
+all are removed when the test ends. Transit is the deployment's one fixed `transit/` mount (r8.2
+A25), mounted once and never removed; a test isolates by tenant (a fresh tenant uuid names a fresh
+key) and the keys it made are destroyed when it ends. This module applies policy text it is
 handed and never writes a policy of its own.
 """
 from __future__ import annotations
@@ -16,6 +18,8 @@ from typing import Any
 
 import pytest
 
+#: The deployment's one transit mount (A25); a deployment constant in production, spelled here.
+TRANSIT_MOUNT = "transit"
 ADDR_ENV = "DEFENDER_TEST_OPENBAO_ADDR"
 TOKEN_ENV = "DEFENDER_TEST_OPENBAO_TOKEN"
 #: Optional: the server's docker container name, for the audit-device case (it reads the audit
@@ -65,6 +69,9 @@ class Bao:
     root_token: str
     tag: str
     policies: list[str] = field(default_factory=list)
+    tenants: list[str] = field(default_factory=list)
+    auth_mounts: list[str] = field(default_factory=list)
+    entities: list[str] = field(default_factory=list)
 
     @property
     def kv_mount(self) -> str:
@@ -72,7 +79,54 @@ class Bao:
 
     @property
     def transit_mount(self) -> str:
-        return f"transit-{self.tag}"
+        """The deployment's fixed transit path (A25): the same for every test."""
+        return TRANSIT_MOUNT
+
+    def tenant(self, *, key: bool = True) -> str:
+        """A fresh tenant uuid and, unless `key` is false, its signing key `request-token-<uuid>`
+        (ed25519); the key is destroyed when the test ends."""
+        tenant_id = str(uuid.uuid4())
+        self.tenants.append(tenant_id)
+        if key:
+            self.make_key(tenant_id)
+        return tenant_id
+
+    def key_name(self, tenant_id: str) -> str:
+        """A11's naming rule, spelled in the design; production's own function is checked
+        against this wherever a test calls it."""
+        return f"request-token-{tenant_id}"
+
+    def make_key(self, tenant_id: str) -> None:
+        self.ok("POST", f"{TRANSIT_MOUNT}/keys/{self.key_name(tenant_id)}", json={"type": "ed25519"})
+
+    def destroy_key(self, tenant_id: str) -> None:
+        """What offboarding does to the key (A25): make it deletable, delete it."""
+        key = f"{TRANSIT_MOUNT}/keys/{self.key_name(tenant_id)}"
+        self.ok("POST", f"{key}/config", json={"deletion_allowed": True})
+        self.ok("DELETE", key)
+
+    def signer(self, tenant_id: str, *, token: str | None = None) -> RawSigner:
+        """A signer over `tenant_id`'s key, logged in as `token` (default root): the test's own
+        stand-in for the launcher's signer, whose production form is #1163 A24'."""
+        return RawSigner(self, token or self.root_token, self.key_name(tenant_id))
+
+    def sign_login(self, policy: str, tenant_id: str) -> str:
+        """A client token from a real AppRole login whose entity carries `tenant_id` metadata and
+        which holds `policy`, as a tenant generation's sign login does (A24'): the templated policy
+        reads that metadata."""
+        mount = f"approle-{self.tag}"
+        self.ok("POST", f"sys/auth/{mount}", json={"type": "approle"})
+        self.auth_mounts.append(mount)
+        role = f"sign-{uuid.uuid4().hex[:8]}"
+        self.ok("POST", f"auth/{mount}/role/{role}", json={"token_policies": [policy],
+                                                              "token_no_default_policy": True})
+        role_id = self.ok("GET", f"auth/{mount}/role/{role}/role-id")["data"]["role_id"]
+        secret = self.ok("POST", f"auth/{mount}/role/{role}/secret-id")["data"]["secret_id"]
+        login = {"role_id": role_id, "secret_id": secret}
+        entity = self.ok("POST", f"auth/{mount}/login", json=login)["auth"]["entity_id"]
+        self.ok("POST", f"identity/entity/id/{entity}", json={"metadata": {"tenant_id": tenant_id}})
+        self.entities.append(entity)
+        return self.ok("POST", f"auth/{mount}/login", json=login)["auth"]["client_token"]
 
     def call(self, method: str, path: str, *, token: str | None = None,
              json: Any = None) -> Any:
@@ -102,17 +156,43 @@ class Bao:
         return body["auth"]["client_token"]
 
 
+class RawSigner:
+    """`sign(payload) -> signature` over one transit key, by a plain API call as `token`; it
+    implements no policy and no token format."""
+
+    def __init__(self, bao: Bao, token: str, key: str) -> None:
+        self.bao, self.token, self.key = bao, token, key
+
+    def sign(self, payload: bytes) -> str:
+        import base64
+
+        body = self.bao.ok("POST", f"{TRANSIT_MOUNT}/sign/{self.key}", token=self.token, json={
+            "input": base64.b64encode(payload).decode("ascii")})
+        return body["data"]["signature"]
+
+
+def _mount_transit(bao: Bao) -> None:
+    """Mount `transit/` unless a test (or another xdist worker) already has."""
+    reply = bao.call("POST", f"sys/mounts/{TRANSIT_MOUNT}", json={"type": "transit"})
+    assert reply.status_code < 300 or "already in use" in reply.text, (reply.status_code, reply.text)
+
+
 def isolated(addr: str, root_token: str) -> Iterator[Bao]:
     bao = Bao(addr, root_token, uuid.uuid4().hex[:12])
     bao.ok("POST", f"sys/mounts/{bao.kv_mount}", json={"type": "kv", "options": {"version": "2"}})
     try:
-        bao.ok("POST", f"sys/mounts/{bao.transit_mount}", json={"type": "transit"})
-        try:
-            yield bao
-        finally:
-            bao.call("DELETE", f"sys/mounts/{bao.transit_mount}")
+        _mount_transit(bao)
+        yield bao
     finally:
         bao.call("DELETE", f"sys/mounts/{bao.kv_mount}")
+        for tenant_id in bao.tenants:
+            key = f"{TRANSIT_MOUNT}/keys/{bao.key_name(tenant_id)}"
+            bao.call("POST", f"{key}/config", json={"deletion_allowed": True})
+            bao.call("DELETE", key)
+        for mount in bao.auth_mounts:
+            bao.call("DELETE", f"sys/auth/{mount}")
+        for entity in bao.entities:
+            bao.call("DELETE", f"identity/entity/id/{entity}")
         for name in bao.policies:
             bao.call("DELETE", f"sys/policies/acl/{name}")
 

@@ -1,6 +1,10 @@
 """#1163 run side, run start: the write-back token's lifetime, the request token's absence from
-every repr, and the signing login taken from the issuer file alone. Driven through `run.main`."""
+every repr, and the signing login taken from the tenant's sign generation alone. Driven through `run.main`."""
 from __future__ import annotations
+
+from urllib.parse import urlsplit
+
+import httpx
 
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import test_run_start_tokens as R
@@ -53,10 +57,10 @@ def test_w2_the_runs_request_access_shows_no_token_in_any_repr(tmp_path, data_ro
     assert any("proxy.invalid" in text for text in shown), "positive control: the address shows"
 
 
-ROLE, SECRET = "role-1163-file", "secret-1163-file"
+ROLE, SECRET = "role-1163-sign", "secret-1163-sign"
+DELIVERY_ROLE, DELIVERY_SECRET = "role-1163-delivery", "secret-1163-delivery"
 DECOY_ROLE, DECOY_SECRET = "role-1163-env", "secret-1163-env"
 DECOY_ADDRESS = "https://decoy-vault.invalid:8200"
-FILE_HOST = "openbao.test"  # the host `A.bind_issuer` writes into the issuer client config
 
 
 class HostRecordingBao(A.OpenBaoStandIn):
@@ -65,29 +69,40 @@ class HostRecordingBao(A.OpenBaoStandIn):
     def __init__(self, *args, **kw) -> None:
         super().__init__(*args, **kw)
         self.hosts: list[str] = []
+        self.origins: list[tuple[str, str, int | None]] = []
 
     def _handle(self, request):
         self.hosts.append(request.url.host)
+        self.origins.append((request.url.scheme, request.url.host, request.url.port))
         return super()._handle(request)
 
 
-def test_w3_the_signing_login_and_address_come_from_the_issuer_file_not_the_environment(
+def test_w3_the_signing_login_comes_from_the_sign_generation_not_the_environment_or_delivery(
         tmp_path, data_root, monkeypatch):
-    """With the issuer config file valid and decoy login variables set, the login and sign go
-    to the file's address with the file's pair. A1, P-4."""
+    """With decoy login variables set and the delivery secret file unreadable, the login and
+    sign go to the deployment's address with the sign pair alone. A24, A24', A1."""
+    from defender.configuration.issuer import DEPLOYMENT_ISSUER
+
     R._plant(data_root, proxy=("identity",))
-    A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE,
-                  secret_id=SECRET)
+    fields = A.generation(S.PLAYGROUND_ID, tmp_path / "secrets", sign_role_id=ROLE,
+                          sign_secret=SECRET, role_id=DELIVERY_ROLE, delivery_secret=DELIVERY_SECRET,
+                          delivery_file=False)
+    fields["host_secret_file"].mkdir()  # the delivery file cannot be read; the signer never reads it
+    records = A.Records(data_root, {S.PLAYGROUND_ID: [fields]})
     for name, value in (("VAULT_ADDR", DECOY_ADDRESS), ("BAO_ADDR", DECOY_ADDRESS),
                         ("ROLE_ID", DECOY_ROLE), ("SECRET_ID", DECOY_SECRET)):
         monkeypatch.setenv(name, value)
-    bao = HostRecordingBao({ROLE: SECRET, DECOY_ROLE: DECOY_SECRET})
+    bao = HostRecordingBao({ROLE: SECRET, DECOY_ROLE: DECOY_SECRET, DELIVERY_ROLE: DELIVERY_SECRET})
     rec, _tickets, rc, refused, _ = R._drive(tmp_path, data_root, ticket=False,
-                                             issuer_transport=bao)
+                                             issuer_transport=bao, directory=records.directory)
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
     R.read_access(rec).token()
-    assert bao.logins == [(ROLE, SECRET)], "login with the file's pair alone"
+    assert bao.logins == [(ROLE, SECRET)], "login with the sign pair alone"
     assert len(bao.signs) == 1, "positive control: the read token was signed"
-    assert set(bao.hosts) == {FILE_HOST}, bao.hosts
+    assert set(bao.hosts) == {urlsplit(DEPLOYMENT_ISSUER.openbao_url).hostname}, bao.hosts
+    deployment = httpx.URL(DEPLOYMENT_ISSUER.openbao_url)
+    assert set(bao.origins) == {(deployment.scheme, deployment.host, deployment.port)}, bao.origins
+    assert deployment.scheme == "https", "positive control: the deployment's address is https"
+    assert {s.mount for s in bao.signs} == {"transit"}, "the fixed transit mount (A25)"
