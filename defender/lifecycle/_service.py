@@ -84,10 +84,11 @@ class ManagementService(Actor):
             wiring = ForgeWiring(tenant_id=tenant, repo=repo, origin=f"{self._config.forge_url.rstrip('/')}/{repo}.git")
         salt = secrets.token_hex(4)
         bot = f"bot-{tenant[:8]}-{salt}"
+        sign = _sign_names(tenant, salt)
         generation = Generation(
             tenant_id=tenant, salt=salt, status="pending", bot_login=bot,
             oidc_role=f"tenant-{tenant}-{salt}", approle=f"delivery-{tenant}-{salt}", entity=f"tenant-{tenant}-{salt}",
-            **_sign_names(tenant, salt),
+            sign_approle=sign["sign_approle"], sign_entity=sign["sign_entity"],
             integration_args=["--username", bot, "--name", f"defender-{salt}", "--issuer", self._config.issuer_url,
                               "--claim-eq", f"tenant_id={tenant}", "--scope", "write:repository",
                               "--repo", wiring.repo])

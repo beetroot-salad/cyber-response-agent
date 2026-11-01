@@ -14,6 +14,8 @@ from alembic import op
 
 revision = "0003_sign_login"
 down_revision = "0002_tenancy"
+#: What Alembic reads off this module (named here so a dead-code check sees the revision link used).
+__all__ = ["down_revision", "revision", "upgrade"]
 
 SCHEMA = "tenancy"
 COLUMNS = ("sign_approle", "sign_entity", "sign_role_id", "sign_secret_file", "sign_wrapped_secret",

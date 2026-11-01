@@ -177,6 +177,19 @@ credential rotated (see "Creating a tenant"). The lifecycle logs in to OpenBao w
 login file its settings name, so OpenBao must be initialised and that login provisioned beforehand;
 this script does neither.
 
+The policies are operator-provisioned too; no file in the repository holds them (#1163). Transit is
+mounted at `transit/`. The management login's policy, besides what it needs for roles, AppRoles and
+entities, has create, read, update and delete on `transit/keys/request-token-*`: the lifecycle
+creates each tenant's ed25519 request-token key `request-token-<T>` when the tenant is created or
+rotated (an existing key is kept), and makes it deletable and deletes it at offboarding. Each
+credential generation has two AppRoles, each with its own entity carrying the tenant's
+`tenant_id` metadata: the delivery AppRole on `defender-tenant-token` (`LifecycleConfig.token_policy`),
+which mints the bot's forge token, and a sign-only AppRole on `defender-tenant-sign`
+(`LifecycleConfig.sign_policy`), whose one rule is `update` on
+`transit/sign/request-token-{{identity.entity.metadata.tenant_id}}`, so a tenant's sign login signs
+only with its own key. The credential proxy's policy is KV read plus `update` on
+`transit/verify/request-token-*`.
+
 Moving an existing Forgejo off the old `forgejo-data` named volume, once: stop `forgejo`, run
 `.devcontainer/provision-dev-issuer.sh migrate-forgejo-data` (it copies the volume into
 `playground-knowledge/` and keeps the volume), then `docker compose up -d`. A 15.x installation
