@@ -119,12 +119,14 @@ class OpenBaoStandIn(httpx.MockTransport):
 
     `sealed` ("login" or "sign") answers 503 `Vault is sealed` on that call (and on health, which
     reports sealed); `unreachable` raises a connection error on every request; `login_status` and
-    `sign_status` answer that status (an error body) on the login or the sign call."""
+    `sign_status` answer that status (an error body) on the login or the sign call; `malformed`
+    ("login" or "sign") answers that call 200 with a body lacking `auth.client_token` / `data.signature`."""
 
     def __init__(self, accounts: Mapping[str, str], *, sealed: str | None = None,
                  unreachable: bool = False, login_status: int | None = None,
-                 sign_status: int | None = None) -> None:
+                 sign_status: int | None = None, malformed: str | None = None) -> None:
         super().__init__(self._handle)
+        self.malformed = malformed
         self.accounts = dict(accounts)
         self.sealed = sealed
         self.unreachable = unreachable
@@ -146,6 +148,8 @@ class OpenBaoStandIn(httpx.MockTransport):
             return self._sealed_answer()
         if status is not None:
             return httpx.Response(status, json={"errors": [f"{call} failed"]})
+        if self.malformed == call:
+            return httpx.Response(200, json={"auth": {"lease_duration": 600}} if call == "login" else {"data": {}})
         return None
 
     def _housekeeping(self, request: httpx.Request) -> httpx.Response | None:

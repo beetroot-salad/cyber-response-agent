@@ -23,6 +23,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+from defender.tests.support.shared._opened_paths import opened, opened_paths  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
 
 LOGIN = "/v1/auth/approle/login"
@@ -355,5 +356,8 @@ def test_the_forge_credential_never_reads_the_sign_secret_file(scene):
     tenant, gen = _active(scene)
     _make_a_folder(gen.sign_secret_file)
     credential = scene.make(tenant)
-    assert scene.role_of(credential.token()) == gen.oidc_role
+    with opened_paths() as seen:
+        token = credential.token()
+    assert scene.role_of(token) == gen.oidc_role
+    assert not opened(seen, gen.sign_secret_file), "the credential opened the sign secret file"
     assert scene.logins()[-1]["role_id"] == gen.role_id

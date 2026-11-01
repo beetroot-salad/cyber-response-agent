@@ -64,8 +64,12 @@ VERBS = {"query": query, "lookup": lookup, "health-check": health_check, "isolat
 '''
 
 
-def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool):
+def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env_url: str | None = None):
     S.T.isolate_learning_state(tmp_path, monkeypatch)
+    if env_url is not None:  # operator OpenBao/Vault login material in the launcher's environment
+        for name, value in (("VAULT_ADDR", env_url), ("BAO_ADDR", env_url),
+                            ("VAULT_TOKEN", "env-token-1163"), ("BAO_TOKEN", "env-token-1163")):
+            monkeypatch.setenv(name, value)
     est = S.estate(tmp_path)
     (est.adapters / "idp_adapter.py").write_text(IDP_ADAPTER, encoding="utf-8")
     idp = [c for c in S.default_calls() if c.system == "idp"][0]
@@ -140,6 +144,22 @@ def test_p1_preflight_reads_idp_through_the_proxy_with_a_read_grant_on_http_prox
         assert A.SIGNATURE_CANARY not in " ".join(launch["argv"])
         assert A.SIGNATURE_CANARY not in "\n".join(f"{k}={v}" for k, v in launch["env"].items())
         assert not [t for t in tap.tokens if t in " ".join(launch["argv"]) + str(launch["env"])]
+
+
+def test_p1b_preflight_signs_with_the_sign_login_whatever_the_environment_holds(
+        tmp_path, monkeypatch, data_root):
+    """Operator OpenBao/Vault tokens and addresses in the environment: pre-flight still signs its read
+    token with the live generation's sign login through its issuer transport; the environment's
+    address sees nothing. A1/A24 (the signing login is never taken from the environment)."""
+    with H.upstream() as canary:
+        run, _outcome, bao, tap, _merged, _wt = _preflight(
+            tmp_path, monkeypatch, data_root, working_tree_edit=False, env_url=canary.url)
+    assert run.rc == 0, run.message
+    assert canary.seen == [], "the environment's address was used"
+    assert bao.logins == [(ROLE, SECRET)]
+    assert len(bao.signs) == 1
+    assert tap.tokens
+    assert all(A.SIGNATURE_CANARY in tok for tok in tap.tokens)
 
 
 def test_p2_a_working_tree_base_that_differs_from_current_is_drift_unknown_and_sent_nowhere(
