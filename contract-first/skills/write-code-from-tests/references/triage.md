@@ -18,7 +18,7 @@ Group the surviving findings by **the design choice that let them exist**, not b
 
 ## 3. Give each family one verdict
 
-- **Dissolve.** A design change makes the whole family impossible: one owner, one location, one shape. Usually this restates a rule the design wrote as its cases, as its goal and principle instead, with the cases moved to the design's cache of applications. This is an amendment; describe the change, the findings it removes, and its cost. The human rules on it.
+- **Dissolve.** A design change makes the whole family impossible: one owner, one location, one shape. Usually this restates a rule the design wrote as a list of cases as its goal and principle instead. This is an amendment; describe the change, the findings it removes, and its cost. The human rules on it.
 - **Accept.** The family is a deliberate trade-off: real, but not worth closing here. Say what it would cost to close and why it isn't worth it. Once the human agrees, it is recorded in the design's **accepted trade-offs**, and attackers may not cite it again.
 - **Close.** The design is right and the suite misses the family. Name the **one** test that closes the whole family: one whose input is the whole class, generated or defined only by membership. Never a list of the members the attackers found.
 - **Code bug.** The exploit fails on the honest code too, or the honest code itself violates the design. It goes to the implementer.

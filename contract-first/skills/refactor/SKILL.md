@@ -24,14 +24,8 @@ Run the tests that cover the changed code, the relevant e2e replay, and CI's lin
 
 ## Keep the pattern from coming back
 
-When the refactor removes something a later change could reintroduce, add a rule to the project's lints. Follow the existing lint conventions; its test shows it fires on the old pattern and stays quiet on the new code. Skip it when nothing plausible would reintroduce the pattern, and say why.
+When the refactor removes something a later change could reintroduce, add a rule to the project's lints. Examples: a second owner of one value, a banned import, a duplicated helper, a path read the wrong way. Follow the existing lint conventions: a new rule starts with an empty baseline, and its test shows it fires on the old pattern and stays quiet on the new code. Skip it when nothing plausible would reintroduce the pattern, and say why.
 
 ## Report
 
 What moved and why; tests touched (mechanical only) and any moved to a new seam; the before and after test results; the lint added, or why none; thin coverage you noticed.
-
-## Cache
-
-One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <application>`. Each applies a rule above to the context its tags name. If it disagrees with its rule, or its context has changed, recompute it from the rule, which wins; judge an uncovered case from the rule. Project-specific entries use the same format in the project's `.claude/contract-first-cache.md`: grep it for this skill's name.
-
-- refactor §keep-the-pattern lint-worthy-patterns | ctx: past-runs | a second owner of one value, a banned import, a duplicated helper, a path read the wrong way.

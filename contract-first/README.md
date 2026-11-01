@@ -102,13 +102,13 @@ repo already keeps for any agent:
   (for Python's Pyright, `extraPaths` under `[tool.pyright]`), so `symbol-refs` gets real answers.
 - **The project cache** (`.claude/contract-first-cache.md`) — how the skills' rules apply to this
   project in particular (ownership markers, threat-model examples, lint conventions), one grep-able
-  line per entry. Each skill file ends with its own cache of applications that hold for any
-  project; the project file holds the rest. Skills grep it for their own name. One skill, `maintain-cache`, is
+  line per entry. write-tests and write-code-from-tests, and their reference files, end with
+  their own cache of applications that hold for any project; the project file holds the rest. Skills grep it for their own name. One skill, `maintain-cache`, is
   its only writer, run in a fresh agent: write-tests and write-code-from-tests dispatch it at the end of their review
   steps, and it adds what the run had to work out, removes what it contradicted, and
   writes project rules for causes several entries share. The changes ride in the run's PR.
 - **The project rules** (`.claude/contract-first-rules.md`) — rules agents wrote for this project,
-  each removing a cause several cache entries shared. Every stage reads them beside the principles
+  each removing a cause several cache entries shared. Both stages read them beside the principles
   document, which wins on conflict. Agents revise only their own rules; a line a human edited is theirs.
 - **The attack deck** (`.claude/contract-first-attacks.md`) — the project's own record of exploit
   shapes that carried real bugs past its suites. `finalize` creates it on the first such escape and

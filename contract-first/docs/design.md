@@ -149,12 +149,11 @@ inspectable by a person, and runnable headless as one command per stage.
 
 ## Rules state goals; applications are a cache
 
-Every rule, in a skill or in a design, states its goal and the principle behind it, never the list
-of cases it covers. How a rule applies to one context is recorded separately, as a cache. For a
-design, the context is an input, surface or deployment. For a skill, it is the harness, the model
-generation, the project's toolchain, or what past runs found. Each skill file ends with a `Cache`
-section, and a project keeps its own entries in `.claude/contract-first-cache.md`; a design keeps
-its cache at the end of the design doc. Every entry is one line naming the rule it applies and the
+For now this applies to write-tests and write-code-from-tests and their reference files. Each rule
+states its goal and the principle behind it, never the list of cases it covers. How a rule applies to
+one context (the harness, the model generation, the project's toolchain, or what past runs found) is
+recorded separately, as a cache. Each of those files ends with a `Cache` section, and a project keeps
+its own entries in `.claude/contract-first-cache.md`. Every entry is one line naming the rule it applies and the
 context it assumes, so one grep finds every application of a rule, or everything that assumed a
 given model family. Humans maintain the skills' caches. The project cache is kept by one independent
 agent running the `maintain-cache` skill, dispatched at the end of write-tests' and write-code-from-tests' review steps: it adds facts the run had to

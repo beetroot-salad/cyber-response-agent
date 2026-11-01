@@ -39,7 +39,7 @@ Then read the whole file, not only this skill's entries. Entries arrive one run 
 
 ### The project rules file
 
-`.claude/contract-first-rules.md` holds rules agents wrote for this project. Every contract-first stage reads it alongside the project's principles document. If it doesn't exist, create it with a `# contract-first rules` heading and one line saying what it holds. One rule per line:
+`.claude/contract-first-rules.md` holds rules agents wrote for this project. write-tests and write-code-from-tests read it alongside the project's principles document. If it doesn't exist, create it with a `# contract-first rules` heading and one line saying what it holds. One rule per line:
 
 `- R<n> | <rule: goal and principle> | why: <the cause it removes> | src: #<issue>`
 

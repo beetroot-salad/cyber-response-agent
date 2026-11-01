@@ -11,7 +11,7 @@ Own the **design**: what the feature adds, its boundaries, its data models and f
 
 ## 1. Open with the problem, not the solution
 
-Load the issue and all its comments, or use the supplied conversation, path, or text. Keep this initial read bounded to understanding the problem; full grounding and design work come later. Read relevant code only as needed to avoid misrepresenting it. Distinguish settled decisions from proposals; an issue's suggested fix is a candidate, while the human's explicit requirements and chosen constraints remain binding.
+Load the issue and comments (`gh issue view <n> --comments`; retry an empty read with `--json title,body,comments`), or use the supplied conversation, path, or text. Keep this initial read bounded to understanding the problem; full grounding and design work come later. Read relevant code only as needed to avoid misrepresenting it. Distinguish settled decisions from proposals; an issue's suggested fix is a candidate, while the human's explicit requirements and chosen constraints remain binding.
 
 **The first message to the human contains only:**
 
@@ -24,7 +24,7 @@ On a returned design defect, open with the bug and what remains unsettled; do no
 
 ## 2. Ground and draft
 
-Read the project's principles document (CLAUDE.md usually points to it) and the agent-written project rules (`.claude/contract-first-rules.md`, when present), relevant code and tests, and neighboring issues or PRs the design depends on. Verify assumptions that could change the design: current behavior, ownership, data boundaries, callers and execution contexts, dependency behavior, and constraints. Explore outwards from the affected flow; do not turn this into a repository-wide audit.
+Read the project's principles document (CLAUDE.md usually points to it), relevant code and tests, and neighboring issues or PRs the design depends on. Verify assumptions that could change the design: current behavior, ownership, data boundaries, callers and execution contexts, dependency behavior, and constraints. Explore outwards from the affected flow; do not turn this into a repository-wide audit.
 
 Use executed probes for behavior claims, reads for structure, and reproducible searches for a claimed census. A failed or unavailable probe leaves uncertainty, not a confirmed claim. Record grounding evidence with the revision it describes, separately from the human-facing design; **references/design-doc.md** defines the inherited `claims:` format and the **code map** that records where the relevant code lives, so later stages do not each re-read it. Correct the model of the problem plainly, without turning the discussion into a list of inaccuracies in the issue.
 
@@ -42,7 +42,7 @@ Cut along obligations and ownership so each piece leaves the system working and 
 
 For a design introducing or changing behavior, a data model, a flow, or architecture, obtain an **independent subagent review before presenting the proposed design for decision**. Give the reviewer the problem statement, current candidate design, grounding evidence, relevant constraints and repo access, but not the discussion transcript or the author's defence. The reviewer may read the design's rationale, but must check its premises and consider alternatives independently. It must not edit artifacts or post externally. A narrow explanation, already-resolved issue, or mechanical correction with no design choice can skip this; record the reason in the handoff.
 
-Start with one reviewer. Add a targeted lens only when an identified uncertainty or coupling warrants it. Split independent regions when useful. Do not require a fixed panel, invent concerns to fill lenses, or dispatch trivial mechanical checks solely to create more agents.
+Start with one reviewer. Add a targeted lens only when an identified uncertainty or coupling warrants it: data lifecycle/recovery, trust boundaries, compatibility, performance, or another relevant concern. Split independent regions when useful. Do not require a fixed panel, invent concerns to fill lenses, or dispatch trivial mechanical checks solely to create more agents.
 
 The review checks:
 
@@ -80,10 +80,3 @@ Won't-fix and already-resolved outcomes need a short disposition, not a manufact
 For a defect returned from tests or code, first check whether the approved design already determines the fix. If the implementation violates an adequate design, hand back the implementation defect and preserve the design. Amend only when its commitments or mechanisms actually change; revise the existing design rather than create a competing one. State what changed, why, which decisions remain valid, and which downstream contracts or flows need rechecking. Mark the previous revision superseded and make the latest version easy to find. Preserve grounded facts still valid at the recorded base; update affected evidence and review material consequences.
 
 The handoff names the current design revision, settled decisions, any unresolved or deferred verification, and the next action. Readiness means **ready to attempt the executable contract**, not a claim that later test construction or code review cannot discover a design hole.
-
-## Cache
-
-One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <application>`. Each applies a rule above to the context its tags name. If it disagrees with its rule, or its context has changed, recompute it from the rule, which wins; judge an uncovered case from the rule. Project-specific entries use the same format in the project's `.claude/contract-first-cache.md`: grep it for this skill's name.
-
-- discuss-issue §1 load-the-issue | ctx: github | `gh issue view <n> --comments`; retry an empty read with `--json title,body,comments`.
-- discuss-issue §3 review-lenses | ctx: past-runs | data lifecycle and recovery, trust boundaries, compatibility, performance.
