@@ -96,6 +96,9 @@ class _OpenBao:
         self.addr = addr.rstrip("/")
         self.mount = _check_name(mount, "the mount")
         self._token = token
+        #: One pooled connection for this login's calls, not a new one per call.
+        self._client = httpx.Client(timeout=OPENBAO_TIMEOUT_SEC, trust_env=False,
+                                    follow_redirects=False)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(addr={self.addr!r}, mount={self.mount!r})"
@@ -110,10 +113,8 @@ class _OpenBao:
 
     def _call(self, method: str, rest: str, what: str, json: Any = None) -> httpx.Response:
         try:
-            with httpx.Client(timeout=OPENBAO_TIMEOUT_SEC, trust_env=False,
-                              follow_redirects=False) as client:
-                return client.request(method, self._url(rest), json=json,
-                                      headers=self._headers())
+            return self._client.request(method, self._url(rest), json=json,
+                                        headers=self._headers())
         except httpx.HTTPError as e:
             raise TransportFault(f"OpenBao at {self.addr} is unreachable for {what} "
                                  f"({type(e).__name__})") from None

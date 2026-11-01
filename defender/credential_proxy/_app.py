@@ -21,12 +21,13 @@ For each request (design "Proxy", in order, nothing sent or read before its chec
 8. audit, before answering: if the record cannot be written the answer is withheld (A13)."""
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -144,11 +145,14 @@ def _refused_answer(fault: str, detail: str) -> dict[str, Any]:
 
 
 class _Proxy:
-    """The request pipeline over one `ProxyDeps`; holds the OAuth access tokens it obtains."""
+    """The request pipeline over one `ProxyDeps`; holds the OAuth access tokens it obtains and
+    one pooled client for every upstream and token URL (each call sets its own timeout)."""
 
     def __init__(self, deps: ProxyDeps) -> None:
         self.deps = deps
         self.access_tokens = AccessTokens()
+        self.upstream = httpx.Client(follow_redirects=False, trust_env=False,
+                                     timeout=deps.upstream_timeout_sec)
 
     def handle(self, authorization: str | None, raw: bytes | None) -> dict[str, Any]:
         """The answer to one request, audited before it is returned (A13)."""
@@ -200,22 +204,22 @@ class _Proxy:
         if creds is None:
             raise Refused(CONFIG, f"no credential set is stored for {asked.system}")
         check_fit(declaration.auth, creds, asked.system)
-        with httpx.Client(follow_redirects=False, trust_env=False, timeout=budget) as client:
-            secrets = secret_values(creds)
-            access_token = None
-            if declaration.auth.scheme == OAUTH_CLIENT_CREDENTIALS:
-                access_token = self.access_tokens.token(client, claims.tenant, asked.system,
-                                                        declaration.auth, creds, deadline)
-                secrets += (access_token,)
-                headers["Authorization"] = f"Bearer {access_token}"
-            else:
-                injected = static_headers(declaration.auth, creds, asked.system)
-                headers.update(injected)
-                # an upstream that echoes a Basic header back must not hand over its encoded form
-                secrets += tuple(v.removeprefix("Basic ") for v in injected.values()
-                                 if v.startswith("Basic "))
-            answer = self._sent(client, asked, target, headers, secrets, trail,
-                                min(budget, deadline.left(f"calling {asked.system}")), deadline)
+        client = self.upstream
+        secrets = secret_values(creds)
+        access_token = None
+        if declaration.auth.scheme == OAUTH_CLIENT_CREDENTIALS:
+            access_token = self.access_tokens.token(client, claims.tenant, asked.system,
+                                                    declaration.auth, creds, deadline)
+            secrets += (access_token,)
+            headers["Authorization"] = f"Bearer {access_token}"
+        else:
+            injected = static_headers(declaration.auth, creds, asked.system)
+            headers.update(injected)
+            # an upstream that echoes a Basic header back must not hand over its encoded form
+            secrets += tuple(v.removeprefix("Basic ") for v in injected.values()
+                             if v.startswith("Basic "))
+        answer = self._sent(client, asked, target, headers, secrets, trail,
+                            min(budget, deadline.left(f"calling {asked.system}")), deadline)
         if answer["status"] == 401 and access_token is not None:
             self.access_tokens.evict(claims.tenant, asked.system, access_token)
         return answer
@@ -365,8 +369,14 @@ async def _body_of(request: Request) -> bytes | None:
 def create_app(deps: ProxyDeps) -> FastAPI:  # lint-dup: ok — the proxy's own ASGI app; api/app.py's `create_app` builds the unrelated platform API
     """The proxy as an ASGI app over `deps`."""
     proxy = _Proxy(deps)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        yield
+        proxy.upstream.close()
+
     app = FastAPI(title="defender credential proxy", docs_url=None, redoc_url=None,
-                  openapi_url=None)
+                  openapi_url=None, lifespan=lifespan)
 
     async def proxy_request(request: Request) -> JSONResponse:
         raw = await _body_of(request)
