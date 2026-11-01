@@ -190,7 +190,7 @@ class _Proxy:
         check_fit(declaration.auth, creds, asked.system)
         with httpx.Client(follow_redirects=False, trust_env=False,
                           timeout=self.deps.upstream_timeout_sec) as client:
-            secrets = secret_values(declaration.auth, creds)
+            secrets = secret_values(creds)
             access_token = None
             if declaration.auth.scheme == OAUTH_CLIENT_CREDENTIALS:
                 access_token = self.access_tokens.token(client, claims.tenant, asked.system,

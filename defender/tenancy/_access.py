@@ -18,6 +18,7 @@ from defender.kit.access import (
     HEADER,
     HTTP_PROXY,
     OAUTH_CLIENT_CREDENTIALS,
+    PUBLIC_FIELD,
     AccessDeclaration,
     Auth,
     Route,
@@ -35,8 +36,8 @@ _HEADER_NAME = re.compile(r"[A-Za-z0-9-]{1,64}")
 _SCHEME_FIELDS: Mapping[str, tuple[str, ...]] = {
     BEARER: ("field",),
     HEADER: ("header", "field"),
-    BASIC: ("username_field", "password_field"),
-    OAUTH_CLIENT_CREDENTIALS: ("token_url", "scopes", "client_id_field", "client_secret_field"),
+    BASIC: (),
+    OAUTH_CLIENT_CREDENTIALS: ("token_url", "scopes"),
 }
 
 
@@ -112,6 +113,9 @@ def _base(shown: str, value: object, key: str) -> str:
 def _field(shown: str, value: object, key: str) -> str:
     if not isinstance(value, str) or not _FIELD.fullmatch(value):
         raise ConfigFault(f"{shown}: `auth.{key}` must name a credential field")
+    if value in PUBLIC_FIELD.values():
+        # r7 A19: the secret a scheme sends may not be a field that is public by name
+        raise ConfigFault(f"{shown}: `auth.{key}` may not name the public field {value!r}")
     return value
 
 
@@ -133,16 +137,13 @@ def _auth(shown: str, value: object) -> Auth:
     if scheme == BEARER:
         return Auth(scheme, field=_field(shown, value["field"], "field"))
     if scheme == BASIC:
-        return Auth(scheme, username_field=_field(shown, value["username_field"], "username_field"),
-                    password_field=_field(shown, value["password_field"], "password_field"))
+        return Auth(scheme)
     scopes = value["scopes"]
     if not isinstance(scopes, list) or not all(isinstance(s, str) and s for s in scopes):
         raise ConfigFault(f"{shown}: `auth.scopes` must be a list of scope strings")
     return Auth(
         scheme, token_url=_base(shown, value["token_url"], "auth.token_url"),
-        scopes=tuple(scopes),
-        client_id_field=_field(shown, value["client_id_field"], "client_id_field"),
-        client_secret_field=_field(shown, value["client_secret_field"], "client_secret_field"))
+        scopes=tuple(scopes))
 
 
 def _routes(shown: str, value: object, key: str) -> tuple[Route, ...]:

@@ -1,9 +1,10 @@
 """Applying a credential set by its declared scheme (#1163 A4, A8, A12, O4, O6).
 
 A set's kind must fit the scheme (`bearer`/`basic`/`header` need `static`, OAuth needs
-`oauth-client-credentials`) and every field the scheme names must be present, or nothing is
-sent. `secret_values` names the values the answer is scrubbed of (every static field but a
-basic-auth username, the OAuth client secret; the pipeline adds the access token). OAuth access tokens live only in this process, keyed by (tenant, system, set version,
+`oauth-client-credentials`) and every field the scheme reads must be present, or nothing is
+sent. `secret_values` names the values the answer is scrubbed of (every field but the kind's
+public one, r7 A19; the pipeline adds the access token). OAuth access tokens live only in this
+process, keyed by (tenant, system, set version,
 digest of the auth block); a token is reused only while it is unexpired by a margin."""
 from __future__ import annotations
 
@@ -21,10 +22,14 @@ import httpx
 from defender.kit.access import (
     BASIC,
     BEARER,
+    CLIENT_ID,
+    CLIENT_SECRET,
     CREDENTIAL_KINDS,
     HEADER,
-    OAUTH_CLIENT_CREDENTIALS,
+    PASSWORD,
+    USERNAME,
     Auth,
+    secret_fields,
 )
 from defender.kit.faults import ConfigFault
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, Refused
@@ -67,12 +72,9 @@ def _needed(creds: CredentialSet, name: str | None, system: str) -> str:
     return value
 
 
-def secret_values(auth: Auth, creds: CredentialSet) -> tuple[str, ...]:
-    """The secret values of `creds` under `auth` (A4): every field but a basic-auth username
-    and an OAuth client id."""
-    public = {auth.username_field} if auth.scheme == BASIC else (
-        {auth.client_id_field} if auth.scheme == OAUTH_CLIENT_CREDENTIALS else set())
-    return tuple(v for k, v in creds.fields.items() if k not in public and v)
+def secret_values(creds: CredentialSet) -> tuple[str, ...]:
+    """The secret values of `creds`, by the rule the write API checks too (r7 A19)."""
+    return tuple(v for k in secret_fields(creds.kind, creds.fields) if (v := creds.fields[k]))
 
 
 def check_fit(auth: Auth, creds: CredentialSet, system: str) -> None:
@@ -89,10 +91,10 @@ def static_headers(auth: Auth, creds: CredentialSet, system: str) -> dict[str, s
     if auth.scheme == HEADER:
         return {str(auth.header): _needed(creds, auth.field, system)}
     if auth.scheme == BASIC:
-        user = _needed(creds, auth.username_field, system)
+        user = _needed(creds, USERNAME, system)
         if ":" in user:
             raise Refused(CONFIG, f"the basic-auth username of {system} holds a `:`")
-        packed = f"{user}:{_needed(creds, auth.password_field, system)}".encode()
+        packed = f"{user}:{_needed(creds, PASSWORD, system)}".encode()
         return {"Authorization": f"Basic {base64.b64encode(packed).decode('ascii')}"}
     raise AssertionError(f"not a static scheme: {auth.scheme}")
 
@@ -121,7 +123,7 @@ class _Held:
 
 
 def _auth_digest(auth: Auth) -> str:
-    block = [auth.token_url, list(auth.scopes), auth.client_id_field, auth.client_secret_field]
+    block = [auth.token_url, list(auth.scopes)]
     return hashlib.sha256(json.dumps(block).encode("utf-8")).hexdigest()
 
 
@@ -174,8 +176,8 @@ def _token_exchange(client: httpx.Client, auth: Auth, creds: CredentialSet,
     """One client-credentials exchange at the declared token URL (A12): the access token and
     its stated lifetime in seconds (None: not stated, so it is not reused). The client secret
     goes in Basic auth (RFC 6749 2.3.1) and only here."""
-    client_id = _needed(creds, auth.client_id_field, system)
-    secret = _needed(creds, auth.client_secret_field, system)
+    client_id = _needed(creds, CLIENT_ID, system)
+    secret = _needed(creds, CLIENT_SECRET, system)
     packed = f"{quote_plus(client_id)}:{quote_plus(secret)}".encode()
     form = {"grant_type": "client_credentials"}
     if auth.scopes:

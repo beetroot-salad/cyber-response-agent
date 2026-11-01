@@ -3,6 +3,7 @@ it is applied, and which requests are reads or writes. Values only: it holds no 
 parser that reads it from a tenant's settings stays in `tenancy`."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 #: The operator's variable naming the credential proxy's address. Read by the launching process
@@ -22,21 +23,30 @@ SCHEMES = (BEARER, BASIC, HEADER, OAUTH_CLIENT_CREDENTIALS)
 STATIC = "static"
 CREDENTIAL_KINDS = (STATIC, OAUTH_CLIENT_CREDENTIALS)
 
+#: The fixed field names a scheme reads from its set (r7 A19): a declaration does not rename them.
+USERNAME, PASSWORD = "username", "password"
+CLIENT_ID, CLIENT_SECRET = "client_id", "client_secret"
+#: The one field of each kind that is not secret; every other field of a set is.
+PUBLIC_FIELD = {STATIC: USERNAME, OAUTH_CLIENT_CREDENTIALS: CLIENT_ID}
+
+
+def secret_fields(kind: str, names: Iterable[str]) -> tuple[str, ...]:
+    """Which of a `kind` set's field `names` are secret (r7 A19): all but the kind's public
+    field. The write API's minimum length and the proxy's scrub both ask this, so they agree."""
+    return tuple(n for n in names if n != PUBLIC_FIELD.get(kind))
+
 
 @dataclass(frozen=True)
 class Auth:
-    """The declared scheme and the credential-set fields it names. Only the parts the scheme
-    uses are set."""
+    """The declared scheme and how it is applied. Only the parts the scheme uses are set; a
+    `basic` or OAuth scheme reads its set's fixed field names (r7 A19), a `bearer` or `header`
+    scheme the one `field` it names."""
 
     scheme: str
     field: str | None = None
     header: str | None = None
-    username_field: str | None = None
-    password_field: str | None = None
     token_url: str | None = None
     scopes: tuple[str, ...] = ()
-    client_id_field: str | None = None
-    client_secret_field: str | None = None
 
     @property
     def kind(self) -> str:
@@ -73,6 +83,7 @@ class AccessDeclaration:
 
 
 __all__ = [
-    "BASIC", "BEARER", "CREDENTIAL_KINDS", "HEADER", "HTTP_PROXY", "OAUTH_CLIENT_CREDENTIALS",
-    "PROXY_URL_ENV", "SCHEMES", "STATIC", "AccessDeclaration", "Auth", "RequestAccess", "Route",
+    "BASIC", "BEARER", "CLIENT_ID", "CLIENT_SECRET", "CREDENTIAL_KINDS", "HEADER", "HTTP_PROXY",
+    "OAUTH_CLIENT_CREDENTIALS", "PASSWORD", "PROXY_URL_ENV", "PUBLIC_FIELD", "SCHEMES", "STATIC",
+    "USERNAME", "AccessDeclaration", "Auth", "RequestAccess", "Route", "secret_fields",
 ]

@@ -10,7 +10,7 @@ from pydantic import (
 )
 
 from defender._clock import as_utc
-from defender.kit.access import OAUTH_CLIENT_CREDENTIALS
+from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
 
@@ -191,24 +191,19 @@ class SystemPut(_Request):
 #: The shortest a secret credential value may be (#1163 A4): a typed-in placeholder is refused
 #: at write time, not found out at the first call.
 SECRET_MIN_LENGTH = 16
-#: The fields of a `static` set that are not secret (a basic-auth login name).
-_PUBLIC_STATIC = frozenset({"username"})
 
 
 class CredentialsPut(_Request):
     """The whole credential set, replaced; no field has a default. `kind` says which fields are
-    secret: a `static` set's are all but a basic-auth `username`; an
-    `oauth-client-credentials` set's is its `client_secret` alone (`client_id` is not)."""
+    secret, by the rule the credential proxy scrubs by (r7 A19): all but `username` in a
+    `static` set, all but `client_id` in an `oauth-client-credentials` set."""
 
     kind: Literal["static", "oauth-client-credentials"]
     credentials: dict[CredentialKey, str] = Field(min_length=1)
 
     @model_validator(mode="after")
     def _secrets_are_long_enough(self) -> CredentialsPut:
-        if self.kind == OAUTH_CLIENT_CREDENTIALS:
-            secret = [k for k in self.credentials if k == "client_secret"]
-        else:
-            secret = [k for k in self.credentials if k not in _PUBLIC_STATIC]
+        secret = secret_fields(self.kind, self.credentials)
         short = sorted(k for k in secret if len(self.credentials[k]) < SECRET_MIN_LENGTH)
         if short:
             raise ValueError(
