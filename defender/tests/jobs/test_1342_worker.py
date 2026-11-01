@@ -1205,7 +1205,6 @@ def test_o7_a_box_whose_token_is_the_claims_with_something_added_is_not_the_clai
     assert not _removes(daemon.calls, "defender-run-here"), daemon.calls
 
 
-@pytest.mark.xfail(strict=True, reason="possible real bug (#1342 candidate 22): `reap_if_owned` compares the label after `.strip()`ing the daemon's answer, so a label that is the claim's token with leading or trailing whitespace reads as the claim's own and the box is removed")
 @pytest.mark.parametrize("padding", ["{} ", " {}", "{}\t", "\t{}"])
 def test_o7_a_box_whose_token_is_the_claims_padded_with_whitespace_is_not_the_claims(tmp_path, padding):
     """The claim's token with whitespace before or after it is another token: `not_ours`, never removed. (O7, r5 C1)"""
