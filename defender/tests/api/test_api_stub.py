@@ -706,8 +706,8 @@ def test_credentials_for_an_unknown_system_are_refused_before_the_secret_store()
                             json={"kind": "static", "credentials": {}}).status_code == 422
 
 
-#: (kind, credentials, accepted): secret fields per kind, #1163 A4. Static: every field except a
-#: basic-auth `username`; oauth: `client_secret` only (`client_id` is not secret).
+#: (kind, credentials, accepted): secret fields per kind, #1163 r7 A19. Static: every field
+#: except `username`; oauth: every field except `client_id`.
 CREDENTIAL_SHAPES = [
     ("static", {"api_key": LONG}, True),
     ("static", {"api_key": "x"}, False),
@@ -721,6 +721,8 @@ CREDENTIAL_SHAPES = [
     ("static", {"api_key": LONG, "client_id": LONG}, True),
     ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG}, True),
     ("oauth-client-credentials", {"client_id": "c", "client_secret": "x"}, False),
+    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG, "audience": "x"}, False),
+    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG, "audience": LONG}, True),
 ]
 
 
