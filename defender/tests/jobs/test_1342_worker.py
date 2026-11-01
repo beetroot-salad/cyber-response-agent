@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import sys
+import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -921,7 +922,7 @@ verb, rest = (args[0] if args else ""), args[1:]
 verb = {"remove": "rm", "ls": "ps", "list": "ps"}.get(verb, verb)
 held = lambda: sorted(p.name for p in (home / "held").iterdir())
 state_of = lambda n: (home / "held" / n).read_text(encoding="utf-8").split("\\n")[0].strip() or "exited"  # exited, running or paused
-token_of = lambda n: (home / "held" / n).read_text(encoding="utf-8").partition("\\n")[2].strip()  # the start-token label, "" for none
+token_of = lambda n: (home / "held" / n).read_text(encoding="utf-8").partition("\\n")[2]  # the start-token label exactly as stored, "" for none
 operands, filters, fmt, skip = [], [], None, None
 for a in rest:
     if skip:
@@ -1155,6 +1156,66 @@ NEAR_MISS_TOKENS = {
     "it with a suffix": TOKEN + "0",
     "it with a prefix": "0" + TOKEN,
 }
+
+
+def _one_character_changed(token: str, at: int) -> str:
+    """`token` with the character at `at` replaced by the next hex digit, so it is still a well-formed token."""
+    digits = "0123456789abcdef"
+    return token[:at] + digits[(digits.index(token[at]) + 1) % 16] + token[at + 1:]
+
+
+#: Tokens that are the claim's token with something added: no non-alphanumeric is ignored, nothing is trimmed.
+DECORATED_TOKENS = {
+    "a hyphen after it": TOKEN + "-",
+    "an underscore after it": TOKEN + "_",
+    "an exclamation mark after it": TOKEN + "!",
+    "a hyphen before it": "-" + TOKEN,
+    "an underscore before it": "_" + TOKEN,
+    "a hyphen inside it": TOKEN[:16] + "-" + TOKEN[16:],
+    "an underscore inside it": TOKEN[:16] + "_" + TOKEN[16:],
+    "a space inside it": TOKEN[:16] + " " + TOKEN[16:],
+    "a tab inside it": TOKEN[:16] + "\t" + TOKEN[16:],
+}
+
+
+@pytest.mark.parametrize("state", ["exited", "running", "paused"])
+def test_o7_a_box_whose_token_differs_in_any_one_character_is_not_the_claims_wherever_it_differs(tmp_path, state):
+    """For every position of the token, a container whose token differs from the claim's in that one character alone → `not_ours`, still held, never removed (no position is skipped). (O7, r5 C1)"""
+    from defender.worker import DockerContainers
+
+    daemon, docker = _docker_world(tmp_path)
+    for at in range(len(TOKEN)):
+        daemon.hold("defender-run-here", state, _one_character_changed(TOKEN, at))
+        assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "not_ours", f"position {at}"
+        assert daemon.names() == ["defender-run-here"], f"position {at}"
+    assert not _removes(daemon.calls, "defender-run-here"), daemon.calls
+
+
+@pytest.mark.parametrize("state", ["exited", "running", "paused"])
+@pytest.mark.parametrize("holds", list(DECORATED_TOKENS))
+def test_o7_a_box_whose_token_is_the_claims_with_something_added_is_not_the_claims(tmp_path, state, holds):
+    """The claim's token with a hyphen, underscore, mark or whitespace added before, inside or after it is another token: `not_ours`, never removed. (O7, r5 C1)"""
+    from defender.worker import DockerContainers
+
+    daemon, docker = _docker_world(tmp_path)
+    daemon.hold("defender-run-here", state, DECORATED_TOKENS[holds])
+
+    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "not_ours"
+    assert daemon.names() == ["defender-run-here"]
+    assert not _removes(daemon.calls, "defender-run-here"), daemon.calls
+
+
+@pytest.mark.xfail(strict=True, reason="possible real bug (#1342 candidate 22): `reap_if_owned` compares the label after `.strip()`ing the daemon's answer, so a label that is the claim's token with leading or trailing whitespace reads as the claim's own and the box is removed")
+@pytest.mark.parametrize("padding", ["{} ", " {}", "{}\t", "\t{}"])
+def test_o7_a_box_whose_token_is_the_claims_padded_with_whitespace_is_not_the_claims(tmp_path, padding):
+    """The claim's token with whitespace before or after it is another token: `not_ours`, never removed. (O7, r5 C1)"""
+    from defender.worker import DockerContainers
+
+    daemon, docker = _docker_world(tmp_path)
+    daemon.hold("defender-run-here", "running", padding.format(TOKEN))
+
+    assert DockerContainers(docker=docker).reap("defender-run-here", TOKEN) == "not_ours"
+    assert daemon.names() == ["defender-run-here"]
 
 
 @pytest.mark.parametrize("state", ["exited", "running", "paused"])
@@ -1505,6 +1566,14 @@ async def _until(condition, what: str, *, timeout: float = 30.0) -> None:
 
 def _gone(pid: int) -> bool:
     """Dead: no such process, or one that has exited and only awaits its parent's wait (a killed grandchild is reparented, and may stay a zombie)."""
+    if not Path("/proc/self/status").exists():  # no /proc here: signal 0 says whether the pid is still there
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        return False
     try:
         status = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -1656,7 +1725,7 @@ async def test_o4_serve_waits_out_consecutive_claim_faults_of_any_kind_and_still
         failing = _StoreWhoseClaimFails(store, faults=dict(enumerate(CLAIM_FAULTS, start=1)))
         serving = asyncio.create_task(make_worker(failing, world["root"], _child(world, files=_committed())).serve())
         try:
-            for _ in range(1500):
+            for _ in range(6000):  # up to 120 s: the faults are waited out at the poll interval
                 if row(world["dsn"], inv)["stage"] == "completed" or serving.done():
                     break
                 await asyncio.sleep(0.02)
@@ -1669,55 +1738,165 @@ async def test_o4_serve_waits_out_consecutive_claim_faults_of_any_kind_and_still
             await asyncio.wait_for(asyncio.gather(serving, return_exceptions=True), timeout=60)
 
 
+class _StoreWhoseClaimAlwaysFails:
+    """The real store, except that every claim raises (after yielding once, as a real round trip does) and is counted."""
+
+    def __init__(self, store, fault: Exception) -> None:
+        self._store, self._fault, self.calls = store, fault, 0
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def claim(self):
+        self.calls += 1
+        await asyncio.sleep(0)
+        raise self._fault
+
+
+async def test_o4_serve_over_a_persistent_claim_fault_polls_at_an_interval_not_in_a_hot_loop(world, caplog):
+    """A store whose claim always raises while serving for 1.5 s: the claim is retried on the poll wait (D-p, M10), not again at once, so it is asked a handful of times, nowhere near as often as a loop with no wait would. (O4, D-p, D-w)"""
+    import signal
+
+    caplog.set_level(logging.CRITICAL, logger=WORKER_LOGGER)  # the retry's own log lines are not under test
+    async with job_store(world["dsn"]) as store:
+        failing = _StoreWhoseClaimAlwaysFails(store, _NobodyPlannedThis("the store is down"))
+        serving = asyncio.create_task(make_worker(failing, world["root"], _child(world, files=_committed())).serve())
+        try:
+            await asyncio.sleep(1.5)
+            asked = failing.calls
+            assert not serving.done(), f"serve() ended on a claim fault: {serving}"
+        finally:
+            if not serving.done():
+                os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(asyncio.gather(serving, return_exceptions=True), timeout=60)
+
+    assert 1 <= asked <= 100, f"the claim was asked {asked} times in 1.5 s: a fault is waited out at the poll interval"
+
+
+async def test_o4_a_drain_whose_first_claim_faults_raises_it_though_no_child_runs(world):
+    """`drain()` over a store whose first claim raises, with no child running: it raises that fault (D-w), it does not read it as an empty queue; the queued row is left queued. (O4, D-w)"""
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        failing = _StoreWhoseClaimFails(store, faults={1: _NobodyPlannedThis("the store fell over")})
+        with pytest.raises(_NobodyPlannedThis):
+            await asyncio.wait_for(make_worker(failing, world["root"], _child(world, files=_committed())).drain(), timeout=30)
+
+    assert row(world["dsn"], inv)["stage"] == "queued"
+
+
+async def test_d3_a_child_that_ignores_sigterm_is_group_killed_after_the_stop_grace_not_a_longer_time(world):
+    """A cancelled drain over a child that ignores SIGTERM with a 0.2 s `stop_grace`: the child's group is dead well before 2 s after the cancel (the grace is not stretched). (D3, M8)"""
+    containers = StandInContainers(world["tmp"] / "containers")
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), box_dir=containers.where, wait_for=release, term="ignore", grandchild=True)
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        name = f"defender-run-{inv}"
+        draining = asyncio.create_task(make_worker(store, world["root"], child, containers=containers, stop_grace=0.2).drain())
+        try:
+            await _until(lambda: containers.held(name) and (child.seen(inv) or {}).get("grandchild"), "the child and its grandchild")
+            started = time.monotonic()
+            draining.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(draining, timeout=30)
+            took = time.monotonic() - started
+            seen = child.seen(inv)
+            gone = _gone(seen["pid"]) and _gone(seen["grandchild"])
+        finally:
+            release.touch()
+
+    assert gone, "the child's group was left running"
+    assert took < 1.5, f"a 0.2 s stop_grace took {took:.2f} s to end a child that ignores SIGTERM"
+
+
+def _still_running(seen: dict | None, *, grandchild: bool) -> list[str]:
+    """Which of the child and (when asked) its grandchild are alive, from what the child wrote about itself."""
+    if seen is None:
+        return []
+    alive = []
+    if not _gone(seen["pid"]):
+        alive.append("the child")
+    if grandchild and seen.get("grandchild") and not _gone(seen["grandchild"]):
+        alive.append("the child's grandchild")
+    return alive
+
+
+def _kill_whatever_remains(seen: dict | None) -> None:
+    """Whatever the worker did, nothing outlives the test."""
+    import signal
+
+    for pid in (seen or {}).get("pid"), (seen or {}).get("grandchild"):
+        if pid and not _gone(pid):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(pid, signal.SIGKILL)
+
+
 async def _serve_with_a_stop_landing_while_the_child_is_spawned(world, monkeypatch, child, *, stop_grace=None):
     """Serves one queued row with SIGTERM sent to this process just before the real spawn is awaited,
     and the spawn handed back to the worker only once the child is up (it has written what it saw, so
     its SIGTERM disposition is set) and the loop has had time to act on the stop: the stop is under
-    way, and has not met the child, when the worker takes hold of it. Returns the row's id."""
+    way, and has not met the child, when the worker takes hold of it.
+
+    A worker that stops by cancelling the row's task has the cancel land in the wrapper's wait. As
+    asyncio's own spawn does once the child exists, the wrapper then keeps waiting for the child to
+    be up, re-raises the cancel at the worker's next await (`current_task().cancel()`) and hands the
+    child back, so the worker holds a child it must end itself; the wrapper kills nothing. A cancel
+    that lands inside the real spawn propagates as it would from asyncio's. Returns the row's id and
+    stage, whether the cancel landed inside the spawn, and what was still running when serve() returned."""
     import signal
 
     real_spawn = asyncio.create_subprocess_exec
+    landed_in_spawn = False
 
     async def spawn_while_stopping(*argv, **kw):
+        nonlocal landed_in_spawn
         os.kill(os.getpid(), signal.SIGTERM)
+        landed_in_spawn = True  # until the real spawn has returned
         proc = await real_spawn(*argv, **kw)
+        landed_in_spawn = False
         arrived = child.seen_dir / f"{argv[argv.index('--job') + 1]}.json"
-        try:
-            await _until(arrived.exists, "the spawned child to be up")
-            await asyncio.sleep(0.05)  # the loop acts on the stop meanwhile: its snapshot of children cannot include this one
-        except asyncio.CancelledError:  # a worker that stops by cancelling the row's task: as asyncio's own spawn does when cancelled, nothing is left running
-            os.killpg(proc.pid, signal.SIGKILL)
-            raise
+        cancelled = False
+        while True:
+            try:
+                await _until(arrived.exists, "the spawned child to be up")
+                await asyncio.sleep(0.05)  # the loop acts on the stop meanwhile: its snapshot of children cannot include this one
+                break
+            except asyncio.CancelledError:  # the worker stops by cancelling the row's task: the child exists, so wait for it, then hand the cancel on
+                cancelled = True
+        if cancelled:
+            asyncio.current_task().cancel()
         return proc
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_while_stopping)  # lint-monkeypatch: ok — the only point where a stop can land between a child's spawn and the worker holding it; the real spawn runs
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         serving = asyncio.create_task(make_worker(store, world["root"], child, stop_grace=stop_grace).serve())
+        left_running: list[str] = []
         try:
             await asyncio.wait_for(asyncio.shield(serving), timeout=20)
+            left_running = _still_running(child.seen(inv), grandchild=not landed_in_spawn)  # at the moment serve() returned, before the child is released
         finally:
             (world["tmp"] / "release").touch()
             await asyncio.wait_for(asyncio.gather(serving, return_exceptions=True), timeout=60)
-        return inv, row(world["dsn"], inv)["stage"]
+            _kill_whatever_remains(child.seen(inv))
+        return SimpleNamespace(inv=inv, stage=row(world["dsn"], inv)["stage"], in_spawn=landed_in_spawn,
+                               left_running=left_running)
 
 
 async def test_d3_a_child_spawned_while_the_stop_is_under_way_is_ended_not_left_running(world, monkeypatch):
     """A SIGTERM that lands while a row's child is being spawned: the child is ended with the rest, not left running for its own length (however the worker stops its rows). (D3, r5 one loop owns every child)"""
     child = _child(world, files=_committed(), wait_for=world["tmp"] / "release")
-    inv, stage = await _serve_with_a_stop_landing_while_the_child_is_spawned(world, monkeypatch, child)
+    done = await _serve_with_a_stop_landing_while_the_child_is_spawned(world, monkeypatch, child)
 
-    assert _gone(child.seen(inv)["pid"]), "the child ran on after the stop"
-    assert ("end", inv) not in child.events(), "the child ran to its end after the stop"
-    assert stage == "running", "a stopping worker wrote the row"
+    assert not done.left_running, "the child ran on after the stop"
+    assert ("end", done.inv) not in child.events(), "the child ran to its end after the stop"
+    assert done.stage == "running", "a stopping worker wrote the row"
 
 
 async def test_d3_a_child_spawned_while_the_stop_is_under_way_that_ignores_sigterm_is_group_killed(world, monkeypatch):
     """Same stop, but the child (and a grandchild in its group) ignore SIGTERM: after the short `stop_grace` the whole group is killed. (D3, M8)"""
     child = _child(world, files=_committed(), wait_for=world["tmp"] / "release", term="ignore", grandchild=True)
-    inv, stage = await _serve_with_a_stop_landing_while_the_child_is_spawned(world, monkeypatch, child, stop_grace=0.5)
+    done = await _serve_with_a_stop_landing_while_the_child_is_spawned(world, monkeypatch, child, stop_grace=0.5)
 
-    seen = child.seen(inv)
-    assert _gone(seen["pid"]), "a child that ignores SIGTERM was left running after the stop"
-    assert _gone(seen["grandchild"]), "the child's group was not killed with it"
-    assert stage == "running", "a stopping worker wrote the row"
+    assert not done.left_running, f"after the stop, {' and '.join(done.left_running)} still ran"
+    assert done.stage == "running", "a stopping worker wrote the row"

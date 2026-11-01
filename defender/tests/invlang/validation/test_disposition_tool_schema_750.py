@@ -216,17 +216,45 @@ def _warned_about_turn_1(caplog) -> list[str]:
             if r.levelno >= logging.WARNING and re.search(r"turn\W*1\b", r.getMessage(), re.IGNORECASE)]
 
 
+REASON = "frontmatter: key 'x' is missing\nbody: section 'Why' is empty\nbody: section 'Evidence' is empty"
+
+
 def test_a_schema_refused_report_is_the_closes_refusal_whatever_the_record_write_did(tmp_path):
-    """The validator refuses the body and the review record cannot be written either: the model is told exactly the validator's reason (`ModelRetry`), nothing of the record's fault. (M2)"""
+    """The validator refuses the body and the review record cannot be written either: the model is told the validator's whole (multi-line) reason, the very message a close with a healthy record gives, and nothing of the record's fault. (M2)"""
+    def refusing(*_a):
+        return REASON
+
+    healthy_deps, _ = _deps(tmp_path / "healthy")
+    with pytest.raises(ModelRetry) as healthy:
+        close_investigation(healthy_deps, "inconclusive", stages=_stages(), validator=refusing)
+
+    deps, run_dir = _deps(tmp_path / "faulty")
+    record = _a_directory_where_the_review_record_goes(run_dir)
+    with pytest.raises(ModelRetry) as excinfo:
+        close_investigation(deps, "inconclusive", stages=_stages(), validator=refusing)
+
+    message = str(excinfo.value)
+    assert REASON in message, f"the model was not given the validator's whole reason: {message!r}"
+    assert message == str(healthy.value), f"the record's fault changed what the model was told: {message!r}"
+    assert record.name not in message
+    assert not (run_dir / "report.md").exists()
+
+
+def test_a_report_the_close_wrote_stays_final_when_the_record_write_failed(tmp_path):
+    """The report commits and the review record cannot be written: the close stands, so a second close is refused as already closed and neither the report nor the record is touched. (M2: terminality follows the report alone)"""
     deps, run_dir = _deps(tmp_path)
     record = _a_directory_where_the_review_record_goes(run_dir)
+    close_investigation(deps, "inconclusive", stages=_stages())
+    report = (run_dir / "report.md").read_bytes()
+    assert b"disposition: inconclusive" in report
 
     with pytest.raises(ModelRetry) as excinfo:
-        close_investigation(deps, "inconclusive", stages=_stages(), validator=lambda *_a: "schema says no")
+        close_investigation(deps, "benign", stages=_stages())
 
-    assert str(excinfo.value) == "schema says no", f"the model was told more than the validator's reason: {excinfo.value!s}"
-    assert record.name not in str(excinfo.value)
-    assert not (run_dir / "report.md").exists()
+    assert "already closed" in str(excinfo.value), f"a second close was not refused as a closed one: {excinfo.value!s}"
+    assert (run_dir / "report.md").read_bytes() == report, "the second close overwrote the committed report"
+    assert record.is_dir(), "the second close replaced the directory in the record's place"
+    assert not any(record.iterdir()), "the second close wrote the review record"
 
 
 def test_a_report_that_cannot_be_written_is_the_error_raised_not_the_records(tmp_path, caplog):
@@ -262,8 +290,8 @@ def test_a_review_record_that_cannot_be_written_is_logged_at_warning_or_above_na
         f"nothing at WARNING or above names the turn whose record was lost: {[r.getMessage() for r in caplog.records]}"
 
 
-def test_a_review_record_that_is_written_logs_nothing_at_warning_or_above(tmp_path, caplog):
-    """Control for the record-fault log: a close whose record lands raises and logs nothing at WARNING or above. (M2, D-x)"""
+def test_a_review_record_that_is_written_logs_no_record_fault_warning(tmp_path, caplog):
+    """Control for the record-fault log: a close whose record lands logs no record-fault warning (nothing at WARNING or above naming the turn). (M2, D-x)"""
     import logging
 
     deps, run_dir = _deps(tmp_path)
@@ -272,4 +300,4 @@ def test_a_review_record_that_is_written_logs_nothing_at_warning_or_above(tmp_pa
         close_investigation(deps, "inconclusive", stages=_stages())
 
     assert (run_dir / "report.md").is_file()
-    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == []
+    assert _warned_about_turn_1(caplog) == []
