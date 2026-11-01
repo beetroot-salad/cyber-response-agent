@@ -9,12 +9,11 @@ from dataclasses import dataclass
 
 import httpx
 
+from defender.kit.access import CALLER_GRACE_SEC, PROXY_OVERHEAD_SEC
 from defender.kit.faults import TransportFault
 
 #: The proxy's one endpoint.
 PROXY_PATH = "/v1/request"
-#: Seconds added to the system's own timeout: the proxy's upstream call runs inside this one.
-PROXY_MARGIN_SEC = 35
 
 
 @dataclass(frozen=True)
@@ -33,16 +32,18 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
     proxy_url: str | None, token: str | None, *, system: str, method: str, url: str,
     headers: Mapping[str, str] | None = None, body: str | None = None, timeout_sec: int = 10,
 ) -> ProxyAnswer:
-    """POST the request to the proxy with `token`. `TransportFault` when no address or token was
-    handed to the caller, the proxy cannot be reached, or its answer is not the proxy's."""
+    """POST the request to the proxy with `token` and the system's `timeout_sec`, which the proxy
+    runs the request inside (r7 A21); this call waits past the proxy's whole deadline.
+    `TransportFault` when no address or token was handed to the caller, the proxy cannot be
+    reached, or its answer is not the proxy's."""
     if not proxy_url or not token:
         raise TransportFault("no credential proxy address or request token was handed to this call")
     try:
         response = httpx.post(
             proxy_url.rstrip("/") + PROXY_PATH, headers={"Authorization": f"Bearer {token}"},
             json={"system": system, "method": method, "url": url,
-                  "headers": dict(headers or {}), "body": body},
-            timeout=timeout_sec + PROXY_MARGIN_SEC)
+                  "headers": dict(headers or {}), "body": body, "timeout_sec": timeout_sec},
+            timeout=timeout_sec + PROXY_OVERHEAD_SEC + CALLER_GRACE_SEC)
     except httpx.HTTPError as e:
         raise TransportFault(f"credential proxy unreachable: {type(e).__name__}") from None
     try:

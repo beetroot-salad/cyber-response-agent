@@ -10,6 +10,12 @@ from dataclasses import dataclass, field
 #: alone: the address reaches a verb call on its context, never through a run's environment.
 PROXY_URL_ENV = "DEFENDER_CREDENTIAL_PROXY_URL"
 
+#: Seconds the credential proxy allows for its own calls (token check, credential read) on top of
+#: a request's timeout, and the seconds a caller waits past that whole deadline (r7 A21): the
+#: proxy has given up before its caller does.
+PROXY_OVERHEAD_SEC = 20
+CALLER_GRACE_SEC = 5
+
 #: The access method (D2) of a system reached through the credential proxy.
 HTTP_PROXY = "http-proxy"
 
@@ -83,7 +89,7 @@ class AccessDeclaration:
 
 
 __all__ = [
-    "BASIC", "BEARER", "CLIENT_ID", "CLIENT_SECRET", "CREDENTIAL_KINDS", "HEADER", "HTTP_PROXY",
-    "OAUTH_CLIENT_CREDENTIALS", "PASSWORD", "PROXY_URL_ENV", "PUBLIC_FIELD", "SCHEMES", "STATIC",
+    "BASIC", "BEARER", "CALLER_GRACE_SEC", "CLIENT_ID", "CLIENT_SECRET", "CREDENTIAL_KINDS", "HEADER", "HTTP_PROXY",
+    "OAUTH_CLIENT_CREDENTIALS", "PASSWORD", "PROXY_OVERHEAD_SEC", "PROXY_URL_ENV", "PUBLIC_FIELD", "SCHEMES", "STATIC",
     "USERNAME", "AccessDeclaration", "Auth", "RequestAccess", "Route", "secret_fields",
 ]

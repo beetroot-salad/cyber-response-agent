@@ -32,6 +32,7 @@ from defender.kit.access import (
     secret_fields,
 )
 from defender.kit.faults import ConfigFault
+from defender.credential_proxy._deadline import Deadline
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, Refused
 
 #: What replaces a secret value the upstream echoed (N6: literal echoes only).
@@ -144,8 +145,8 @@ class AccessTokens:
         with self._lock:
             return self._gates.setdefault(key, threading.Lock())
 
-    def token(self, client: httpx.Client, tenant_id: str, system: str, auth: Auth,
-              creds: CredentialSet) -> str:
+    def token(self, client: httpx.Client, tenant_id: str, system: str, auth: Auth,  # noqa: PLR0913 — one exchange's inputs
+              creds: CredentialSet, deadline: Deadline) -> str:
         """An access token for `creds` under `auth`: the held one if still good, else a new
         exchange (whose failure is `Refused`, never retried)."""
         key, digest = (tenant_id, system), _auth_digest(auth)
@@ -156,7 +157,7 @@ class AccessTokens:
                 return held.token
             self._held.pop(key, None)
             asked_at = time.monotonic()
-            token, lifetime = _token_exchange(client, auth, creds, system)
+            token, lifetime = _token_exchange(client, auth, creds, system, deadline)
             if lifetime is not None and lifetime > REFRESH_MARGIN_SEC:
                 self._held[key] = _Held(creds.version, digest, token,
                                         asked_at + lifetime - REFRESH_MARGIN_SEC)
@@ -172,7 +173,7 @@ class AccessTokens:
 
 
 def _token_exchange(client: httpx.Client, auth: Auth, creds: CredentialSet,
-                    system: str) -> tuple[str, int | None]:
+                    system: str, deadline: Deadline) -> tuple[str, int | None]:
     """One client-credentials exchange at the declared token URL (A12): the access token and
     its stated lifetime in seconds (None: not stated, so it is not reused). The client secret
     goes in Basic auth (RFC 6749 2.3.1) and only here."""
@@ -184,11 +185,14 @@ def _token_exchange(client: httpx.Client, auth: Auth, creds: CredentialSet,
         form["scope"] = " ".join(auth.scopes)
     headers = {"Authorization": f"Basic {base64.b64encode(packed).decode('ascii')}",
                "Accept": "application/json"}
+    what = f"the token exchange of {system}"
     try:
-        with client.stream("POST", str(auth.token_url), data=form, headers=headers) as reply:
+        with client.stream("POST", str(auth.token_url), data=form, headers=headers,
+                           timeout=deadline.left(what)) as reply:
             status = reply.status_code
-            body = b""
+            body = bytearray()
             for chunk in reply.iter_bytes():
+                deadline.left(what)
                 body += chunk
                 if len(body) > TOKEN_REPLY_CAP:
                     raise Refused(CONFIG, f"the token endpoint of {system} answered more than "
@@ -203,7 +207,7 @@ def _token_exchange(client: httpx.Client, auth: Auth, creds: CredentialSet,
         raise Refused(TRANSPORT, f"the token endpoint of {system} answered {status}")
     if status != 200:
         raise Refused(CONFIG, f"the token endpoint of {system} refused the exchange ({status})")
-    return _issued(body, system)
+    return _issued(bytes(body), system)
 
 
 def _issued(body: bytes, system: str) -> tuple[str, int | None]:

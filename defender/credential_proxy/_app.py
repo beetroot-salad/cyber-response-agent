@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from collections.abc import Mapping
@@ -36,7 +37,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from defender import _clock, tenancy
-from defender.kit.access import HEADER, OAUTH_CLIENT_CREDENTIALS, Auth
+from defender.kit.access import HEADER, OAUTH_CLIENT_CREDENTIALS, PROXY_OVERHEAD_SEC, Auth
 from defender.kit.faults import ConfigFault, TransportFault
 from defender.kit.verbs import is_system_name
 from defender.credential_proxy._audit import AUDIT_KEYS, AuditSink, FileAuditSink
@@ -49,6 +50,7 @@ from defender.credential_proxy._credentials import (
     secret_values,
     static_headers,
 )
+from defender.credential_proxy._deadline import Deadline
 from defender.credential_proxy._openbao import OpenBaoStore, TransitVerifier
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, UPSTREAM, Refused
 from defender.credential_proxy._scope import Target, check_route, locate
@@ -60,11 +62,12 @@ _logger = logging.getLogger(__name__)
 PROXY_PATH = "/v1/request"
 #: The default cap on an upstream response body (decoded), in bytes; over it is `UpstreamFault`.
 DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
-#: The default time an upstream call may take, in seconds; over it is `TransportFault`.
+#: The most time, in seconds, a request may ask for its upstream call (r7 A21), and what it gets
+#: when it asks none; over it is `TransportFault`.
 DEFAULT_UPSTREAM_TIMEOUT_SEC = 30.0
 #: The most a request to the proxy may hold, in bytes.
 MAX_REQUEST_BYTES = 16 * 1024 * 1024
-_REQUEST_KEYS = frozenset({"system", "method", "url", "headers", "body"})
+_REQUEST_KEYS = frozenset({"system", "method", "url", "headers", "body", "timeout_sec"})
 #: Request headers that describe the hop, not the request: never forwarded (httpx sets its own).
 _HOP_HEADERS = frozenset({"host", "content-length", "connection", "keep-alive",
                           "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade",
@@ -114,6 +117,8 @@ class _Asked:
     url: str
     headers: Mapping[str, str]
     body: str | None = field(repr=False)
+    #: The system's own timeout (r7 A21); None when the caller sent none.
+    timeout_sec: float | None = None
 
 
 @dataclass
@@ -171,8 +176,12 @@ class _Proxy:
 
     def _proxied(self, authorization: str | None, raw: bytes | None,
                  trail: _Trail) -> dict[str, Any]:
+        began = time.monotonic()
         asked = _parse_request(raw)
         trail.system, trail.method = asked.system[:80], asked.method[:20]
+        cap = self.deps.upstream_timeout_sec
+        budget = cap if asked.timeout_sec is None else min(asked.timeout_sec, cap)
+        deadline = Deadline(began + budget + PROXY_OVERHEAD_SEC)
         claims = self._verified(authorization)
         trail.tenant, trail.investigation = claims.tenant, claims.investigation
         if not is_system_name(asked.system):
@@ -191,13 +200,12 @@ class _Proxy:
         if creds is None:
             raise Refused(CONFIG, f"no credential set is stored for {asked.system}")
         check_fit(declaration.auth, creds, asked.system)
-        with httpx.Client(follow_redirects=False, trust_env=False,
-                          timeout=self.deps.upstream_timeout_sec) as client:
+        with httpx.Client(follow_redirects=False, trust_env=False, timeout=budget) as client:
             secrets = secret_values(creds)
             access_token = None
             if declaration.auth.scheme == OAUTH_CLIENT_CREDENTIALS:
                 access_token = self.access_tokens.token(client, claims.tenant, asked.system,
-                                                        declaration.auth, creds)
+                                                        declaration.auth, creds, deadline)
                 secrets += (access_token,)
                 headers["Authorization"] = f"Bearer {access_token}"
             else:
@@ -206,7 +214,8 @@ class _Proxy:
                 # an upstream that echoes a Basic header back must not hand over its encoded form
                 secrets += tuple(v.removeprefix("Basic ") for v in injected.values()
                                  if v.startswith("Basic "))
-            answer = self._sent(client, asked, target, headers, secrets, trail)
+            answer = self._sent(client, asked, target, headers, secrets, trail,
+                                min(budget, deadline.left(f"calling {asked.system}")), deadline)
         if answer["status"] == 401 and access_token is not None:
             self.access_tokens.evict(claims.tenant, asked.system, access_token)
         return answer
@@ -233,19 +242,20 @@ class _Proxy:
             _logger.warning("tenant %s: %s", tenant_id, refused)
             raise Refused(CONFIG, f"tenant {tenant_id} has no published export to apply") from None
 
-    def _sent(self, client: httpx.Client, asked: _Asked, target: Target,
+    def _sent(self, client: httpx.Client, asked: _Asked, target: Target,  # noqa: PLR0913 — one call's state
               headers: dict[str, str], secrets: tuple[str, ...],
-              trail: _Trail) -> dict[str, Any]:
+              trail: _Trail, timeout: float, deadline: Deadline) -> dict[str, Any]:
         cap = self.deps.max_response_bytes
         content = asked.body.encode("utf-8") if asked.body is not None else None
         try:
             with client.stream(asked.method, target.url, headers=headers,
-                               content=content) as reply:
+                               content=content, timeout=timeout) as reply:
                 status = reply.status_code
                 trail.outcome = f"sent {status}"
                 reply_headers = reply.headers.multi_items()
-                data, over = b"", False
+                data, over = bytearray(), False
                 for chunk in reply.iter_bytes():
+                    deadline.left(f"{asked.system} finished answering")
                     data += chunk
                     if len(data) > cap:
                         over = True
@@ -267,7 +277,7 @@ class _Proxy:
             name, value = scrub_secrets(name, secrets), scrub_secrets(value, secrets)
             shown[name] = f"{shown[name]}, {value}" if name in shown else value
         return {"status": status, "headers": shown,
-                "body": scrub_secret_bytes(data, secrets).decode("utf-8", "replace"),
+                "body": scrub_secret_bytes(bytes(data), secrets).decode("utf-8", "replace"),
                 "fault": fault,
                 "detail": None if fault is None else f"{asked.system} answered {status}"}
 
@@ -306,10 +316,15 @@ def _parse_request(raw: bytes | None) -> _Asked:  # noqa: C901 — one flat shap
             raise Refused(CONFIG, f"the request header {name[:80]!r} is not a header")
     if body is not None and not isinstance(body, str):
         raise Refused(CONFIG, "the request's body must be text or null")
+    timeout = doc.get("timeout_sec")
+    if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, int | float)
+                                or not math.isfinite(timeout) or timeout <= 0):
+        raise Refused(CONFIG, "the request's timeout_sec must be a positive number")
     if not _encodable(system, method, url, body, *headers.values()):
         # a lone surrogate: a malformed request, not one a retry could send (r7 A18)
         raise Refused(CONFIG, "the request holds text that is not valid Unicode")
-    return _Asked(system=system, method=method, url=url, headers=headers, body=body)
+    return _Asked(system=system, method=method, url=url, headers=headers, body=body,
+                  timeout_sec=timeout)
 
 
 def _encodable(*texts: str | None) -> bool:
