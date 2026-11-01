@@ -50,7 +50,7 @@
     "last_seen": "2026-04-24T00:00:00Z"
   },
   {
-    "value": "evil-c2.example",
+    "value": "static-cdn-sync.example",
     "type": "domain",
     "verdict": "malicious",
     "score": 95,
@@ -90,7 +90,7 @@
     "last_seen": "2026-04-24T00:00:00Z"
   },
   {
-    "value": "http://evil-c2.example/beacon",
+    "value": "http://static-cdn-sync.example/api/v2/telemetry",
     "type": "url",
     "verdict": "malicious",
     "score": 94,
@@ -100,7 +100,7 @@
     "last_seen": "2026-04-19T00:00:00Z"
   },
   {
-    "value": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
+    "value": "9103329dd7f00d0657c82642607fcc555062d3c87058701d34f3dcbc20aade87",
     "type": "sha256",
     "verdict": "malicious",
     "score": 90,
@@ -110,7 +110,7 @@
     "last_seen": "2026-04-15T00:00:00Z"
   },
   {
-    "value": "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100",
+    "value": "21ebf117b9a2726787ff3f8978e056409fc244cc0b1fd3972da5198c9074dced",
     "type": "sha256",
     "verdict": "suspicious",
     "score": 55,
@@ -120,7 +120,7 @@
     "last_seen": "2026-04-22T00:00:00Z"
   },
   {
-    "value": "0123456789abcdef0123456789abcdef",
+    "value": "88db1bd03dcd71f8e07b0f340a7aa788",
     "type": "md5",
     "verdict": "malicious",
     "score": 87,

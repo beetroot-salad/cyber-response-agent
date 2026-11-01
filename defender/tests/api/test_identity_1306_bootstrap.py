@@ -215,3 +215,15 @@ def test_entering_the_apps_lifespan_runs_start_and_the_senders_first_pass() -> N
             time.sleep(0.02)
         assert world.signin.sends_to(OPS) == 1
         assert me(world.sign_in_admin())["administrator"] is True
+
+
+@pytest.mark.parametrize("email", ["a\x00b@x.example", " ", ""])
+def test_a_bootstrap_file_naming_an_unstorable_or_blank_email_is_refused_at_load(email: str) -> None:
+    """#1349 B1.3: refused as the file is read, not when the database or the mail sender meets it."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Bootstrap(administrators=(email,))
+    assert Bootstrap(administrators=(" Ops@X.example ",)).administrators == ("ops@x.example",)
+    # a non-breaking space copied from a web page is trimmed, so the administrator stays the same person
+    assert Bootstrap(administrators=("ops@x.example\u00a0",)).administrators == ("ops@x.example",)

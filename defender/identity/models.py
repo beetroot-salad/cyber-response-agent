@@ -7,6 +7,7 @@ Tenants are tenancy's (#1214): a membership refers to `tenancy.tenants`."""
 from __future__ import annotations
 
 import datetime as _dt
+import unicodedata
 import uuid
 from typing import Annotated, Literal, get_args
 
@@ -26,8 +27,15 @@ SCHEMA = "identity"
 
 
 def normalize_email(raw: str) -> str:
-    """The one form an email is stored and compared in."""
-    return raw.strip().lower()
+    """The one form an email is stored and compared in: trimmed of any whitespace, lower-cased.
+    Refused when blank, or holding what PostgreSQL text cannot (NUL, or a lone surrogate, which is
+    not valid text), so both repositories refuse alike rather than one failing in the database (#1349)."""
+    email = raw.strip().lower()
+    if not email:
+        raise DataRuleViolation("an email address cannot be blank")
+    if any(c == "\x00" or unicodedata.category(c) == "Cs" for c in email):
+        raise DataRuleViolation(f"{raw!r} is not an email address: it has a NUL or an invalid character")
+    return email
 
 
 #: An email field normalized as it is built, so nothing after the boundary normalizes again.

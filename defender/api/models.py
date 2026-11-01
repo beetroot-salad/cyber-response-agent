@@ -8,6 +8,7 @@ from pydantic import AfterValidator, AwareDatetime, BaseModel, BeforeValidator, 
 
 from defender._clock import as_utc
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
+from defender.identity.models import Email
 
 InvestigationStatus = Literal["queued", "running", "completed", "unparseable", "failed", "aborted"]
 
@@ -215,7 +216,9 @@ class Problem(BaseModel):
 
 # --- people, memberships and sign-in (#1306) ---------------------------------------------------
 
-#: An email as typed: the shape is checked, deliverability is not. Stored lower-cased.
+#: An email as typed: the shape is checked, deliverability is not. The identity rule then normalizes
+#: it, and its refusal is a 422 like the pattern's; the pattern stays plain because the OpenAPI schema
+#: hands it to clients' own regex engines.
 EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+$"
 
 
@@ -224,7 +227,7 @@ class InviteCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    email: str = Field(pattern=EMAIL_PATTERN, max_length=254)
+    email: Email = Field(pattern=EMAIL_PATTERN, max_length=254)
 
 
 class Invitation(BaseModel):
