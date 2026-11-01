@@ -3,9 +3,10 @@
 A host process that delivers to or publishes from a tenant's repository (the publish child, the
 drains, the connect command) mints the tenant's short-lived forge token through this provider,
 which replaces the row's forge binding and its per-tenant issuer config file. On every mint it
-reads the tenant's LIVE credential generation from the tenant records (`TenantDirectory`) and the
-AppRole secret from the host secret file that generation records, logs in to OpenBao with the
-generation's `role_id` and that secret, and asks for a token of the generation's OIDC role for its
+logs in to OpenBao as the delivery AppRole of the tenant's LIVE credential generation, read from the
+tenant records (`TenantDirectory`) with its secret from the host secret file that generation records
+(`tenancy.approle_login`, the one owner of that login, shared with #1163's request signer; the
+generation's sign secret file is never read here), and asks for a token of the generation's OIDC role for its
 audience. Nothing is cached across mints but the token itself while it is valid, so a credential
 made before a rotation mints for the new generation once the old token has run out, and one made
 before an offboarding mints nothing after it.
@@ -23,13 +24,12 @@ import ssl
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import httpx
 
-from defender import _io
+from defender import tenancy
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
 
 from .auth import CLOCK_SKEW, CredentialMisconfigured, ForgejoAuthError, ForgejoIdentity
@@ -37,8 +37,6 @@ from .auth import CLOCK_SKEW, CredentialMisconfigured, ForgejoAuthError, Forgejo
 if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
 
-#: OpenBao's AppRole login below its address.
-LOGIN_PATH = "/v1/auth/approle/login"
 #: Each issuer request's own bound.
 ISSUER_TIMEOUT = 30.0
 
@@ -66,9 +64,8 @@ class TenantForgeCredential:
             current = held._current  # noqa: SLF001 — the identity's own cache, read to keep it across mints
             if current is not None and current.expires_at > self.clock() + min_validity:
                 return current.value
-        live = self._live()
         self.close()
-        identity = self._login(live)
+        identity = self._login()
         self._identity = identity
         return identity.token(min_validity=min_validity)
 
@@ -78,64 +75,31 @@ class TenantForgeCredential:
             self._identity.client.close()
             self._identity = None
 
-    def _live(self) -> Any:
-        live = [g for g in self.directory.generations(self.tenant_id) if g.status == "live"]
-        if not live:
-            raise ForgejoAuthError(
-                f"tenant {self.tenant_id} has no live credential generation: no {self.purpose} credential "
-                "can be minted for it (it is being created, or was offboarded)")
-        return live[0]
-
-    def _secret(self, live: Any) -> str:
-        path = Path(live.host_secret_file or "")
-        if not live.host_secret_file or not path.is_absolute():
-            raise CredentialMisconfigured(
-                f"tenant {self.tenant_id}'s live credential generation records no host secret file")
-        try:
-            data = _io.read_plain_bytes(path)
-        except OSError as unreadable:
-            raise CredentialMisconfigured(
-                f"tenant {self.tenant_id}'s host secret file {path} could not be read: "
-                f"{unreadable.strerror or type(unreadable).__name__}") from None
-        # The file holds the secret id and one newline (r9); bounded and no-follow by `read_plain_bytes`.
-        secret = data.decode("utf-8", "replace").strip()
-        if not secret or "\n" in secret:
-            raise CredentialMisconfigured(f"tenant {self.tenant_id}'s host secret file {path} does not hold one "
-                                   "secret id")
-        return secret
-
-    def _login(self, live: Any) -> ForgejoIdentity:
-        address = str(self.config.openbao_url).rstrip("/")
-        # Before the secret is read, let alone sent: a cleartext issuer (either address) gets nothing.
-        for name, url in (("OpenBao address", address), ("issuer URL", str(self.config.issuer_url))):
-            if urlsplit(url).scheme != "https":
-                raise ForgejoAuthError(f"the {name} must be an HTTPS URL: the AppRole secret is never sent in cleartext")
-        secret = self._secret(live)
+    def _login(self) -> ForgejoIdentity:
+        # Before the secret is read, let alone sent: a cleartext issuer URL gets nothing (the shared
+        # login checks the OpenBao address itself, also before the read).
+        if urlsplit(str(self.config.issuer_url)).scheme != "https":
+            raise ForgejoAuthError("the issuer URL must be an HTTPS URL: the AppRole secret is never sent in cleartext")
         login = self._client()
         try:
-            response = login.post(f"{address}{LOGIN_PATH}", json={"role_id": live.role_id, "secret_id": secret},
-                                  follow_redirects=False)
-        except httpx.HTTPError as down:
-            # Never the request (its body holds the secret).
-            raise ForgejoAuthError(f"the issuer AppRole login request failed: {type(down).__name__}") from down
+            made = tenancy.approle_login(self.directory, self.tenant_id, pair=tenancy.DELIVERY_LOGIN,
+                                         address=str(self.config.openbao_url), client=login)
+        except (tenancy.LoginUnrecorded, tenancy.SecretFileUnusable) as unusable:
+            raise CredentialMisconfigured(str(unusable)) from None
+        except tenancy.NoLiveGeneration:
+            raise ForgejoAuthError(
+                f"tenant {self.tenant_id} has no live credential generation: no {self.purpose} credential "
+                "can be minted for it (it is being created, or was offboarded)") from None
+        except tenancy.AppRoleLoginError as failed:
+            # The chain keeps the `httpx` error or the `HTTPStatusError` publish status sorts by.
+            raise ForgejoAuthError(f"the issuer AppRole login failed: {failed}") from failed
         finally:
             login.close()
-        if response.status_code != 200:
-            raise ForgejoAuthError(
-                f"the issuer refused tenant {self.tenant_id}'s AppRole login (HTTP {response.status_code})"
-            ) from httpx.HTTPStatusError("login refused", request=response.request, response=response)
-        try:
-            body = response.json()
-        except ValueError:
-            body = None
-        auth = body.get("auth") if isinstance(body, dict) else None
-        token = auth.get("client_token") if isinstance(auth, dict) else None
-        if not isinstance(token, str) or not token:
-            raise ForgejoAuthError("the issuer's AppRole login returned no client token")
-        client = self._client(headers={"X-Vault-Token": token})
+        client = self._client(headers={"X-Vault-Token": made.client_token})
         try:
             return ForgejoIdentity(tenant_id=self.tenant_id, issuer=str(self.config.issuer_url).rstrip("/"),
-                                   role=live.oidc_role, audience=live.audience, client=client, clock=self.clock)
+                                   role=made.generation.oidc_role, audience=made.generation.audience,
+                                   client=client, clock=self.clock)
         except BaseException:
             client.close()
             raise

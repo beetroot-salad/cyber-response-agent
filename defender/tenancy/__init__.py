@@ -16,6 +16,23 @@ if TYPE_CHECKING:
         read_access as read_access,
         read_export_access as read_export_access,
     )
+    from defender.tenancy._approle_login import (
+        DELIVERY_LOGIN as DELIVERY_LOGIN,
+        LOGIN_PATH as LOGIN_PATH,
+        SIGN_LOGIN as SIGN_LOGIN,
+        AppRoleLogin as AppRoleLogin,
+        AppRoleLoginError as AppRoleLoginError,
+        CleartextAddress as CleartextAddress,
+        LoginPair as LoginPair,
+        LoginRefused as LoginRefused,
+        LoginUnreachable as LoginUnreachable,
+        LoginUnrecorded as LoginUnrecorded,
+        NoLiveGeneration as NoLiveGeneration,
+        SecretFileUnusable as SecretFileUnusable,
+        approle_login as approle_login,
+        live_generation as live_generation,
+        recorded_login as recorded_login,
+    )
     from defender.tenancy._admission import (
         admit_tenant as admit_tenant,
         database_address_variable as database_address_variable,
@@ -109,6 +126,7 @@ if TYPE_CHECKING:
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("ACCESS_FILE", "access_pointer", "parse_access", "read_access", "read_export_access",), "_access"),
+    **dict.fromkeys(("DELIVERY_LOGIN", "LOGIN_PATH", "SIGN_LOGIN", "AppRoleLogin", "AppRoleLoginError", "CleartextAddress", "LoginPair", "LoginRefused", "LoginUnreachable", "LoginUnrecorded", "NoLiveGeneration", "SecretFileUnusable", "approle_login", "live_generation", "recorded_login",), "_approle_login"),
     **dict.fromkeys(("admit_tenant", "database_address_variable", "host_directory", "in_lifecycle_process", "mark_lifecycle_process", "still_active",), "_admission"),
     **dict.fromkeys(("open_command_line_run",), "_command_line_run"),
     **dict.fromkeys(("RecordsUnreachable", "TenantDirectory",), "_directory"),
