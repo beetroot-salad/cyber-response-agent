@@ -96,8 +96,9 @@ def test_a2_the_file_sink_appends_one_json_object_per_line_and_never_truncates(t
 @pytest.mark.parametrize("sink", ["working", "failing"])
 def test_a2_an_audit_that_cannot_be_written_withholds_the_upstreams_answer(
         tmp_path, data_root, sink):
-    """When the audit record cannot be written the answer is `ConfigFault` and the upstream's
-    body is not returned; with a working sink the body is. A13, O9."""
+    """When the audit record cannot be written the answer is `TransportFault` (r7 A18: the
+    operator's disk, not the tenant's setup) and the upstream's body is not returned; with a
+    working sink the body is. A13, O9."""
     body = b"UPSTREAM-BODY-1163"
     audit = H.AuditRecorder() if sink == "working" else H.FailingAudit()
     with T.rig(tmp_path / "forge", data_root, audit=audit) as r:
@@ -109,7 +110,7 @@ def test_a2_an_audit_that_cannot_be_written_withholds_the_upstreams_answer(
         assert "UPSTREAM-BODY-1163" in answer["body"]
         assert len(audit.records) == 1
     else:
-        assert answer["fault"] == "ConfigFault"
+        assert answer["fault"] == "TransportFault"
         assert audit.attempts >= 1
         assert "UPSTREAM-BODY-1163" not in json.dumps(answer)
         assert "upstream-header-1163" not in json.dumps(answer)
@@ -132,7 +133,8 @@ def _full_device(tmp_path):
 def test_a2_the_real_file_sink_that_cannot_write_fails_the_request_closed(
         tmp_path, data_root, unwritable):
     """The shipped `FileAuditSink` that cannot write fails loudly (at construction or on
-    `record`); an app built on it answers `ConfigFault` without the upstream body. A13, O9."""
+    `record`); an app built on it answers `TransportFault` without the upstream body. A13, O9,
+    r7 A18."""
     path = unwritable(tmp_path)
     try:
         sink = proxy().FileAuditSink(path)
@@ -149,6 +151,6 @@ def test_a2_the_real_file_sink_that_cannot_write_fails_the_request_closed(
                                            b"UPSTREAM-BODY-1163")
         answer = r.ask()
 
-    assert answer["fault"] == "ConfigFault"
+    assert answer["fault"] == "TransportFault"
     assert "UPSTREAM-BODY-1163" not in json.dumps(answer)
     assert "upstream-header-1163" not in json.dumps(answer)
