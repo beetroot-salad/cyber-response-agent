@@ -23,7 +23,7 @@ from defender import _io
 from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.credential_proxy import transit_key_for
 from defender.identity import audit
-from defender.lifecycle._bot import Minted, approle_login, mint
+from defender.lifecycle._bot import Minted, log_in, mint
 from defender.lifecycle._job import SERVICE, Actor, Step, StepFailed, answered, field_of, next_step, only
 from defender.lifecycle.config import LifecycleConfig
 from defender.tenancy import ALL, ForgeWiring, Generation, HeldTenant, TenantId, TenantRepository, tenant_id_file_text
@@ -304,7 +304,7 @@ class ManagementService(Actor):
         """The bot's JWT, through a short-lived secret id of the recorded AppRole (swept at `sweep`, P1)."""
         made = answered(await self._bao.post(f"/v1/auth/approle/role/{gen.approle}/secret-id"))
         secret = self.secret(str(field_of(made, "data", "secret_id")))
-        token = self.secret(await approle_login(self._bao, str(gen.role_id), secret))
+        token = self.secret(await log_in(self._bao, str(gen.role_id), secret))
         return self.secret(await mint(self._bao, gen.oidc_role, token))
 
     def _push_template(self, tenant: str, origin: str, credential: Minted) -> None:

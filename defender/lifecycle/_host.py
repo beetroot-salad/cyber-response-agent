@@ -27,7 +27,7 @@ from defender import _io
 from defender.configuration import publish_root
 from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.credential_proxy import transit_key_for
-from defender.lifecycle._bot import Minted, approle_login, mint
+from defender.lifecycle._bot import Minted, log_in, mint
 from defender.lifecycle._job import (
     HOST,
     SERVICE,
@@ -94,7 +94,7 @@ class HostActor(Actor):
             host_lock.release_lock(fd)
 
     async def _bot_jwt(self, gen: Generation, secret_id: str) -> str:
-        token = self.secret(await approle_login(self._bao, str(gen.role_id), secret_id))
+        token = self.secret(await log_in(self._bao, str(gen.role_id), secret_id))
         return self.secret(await mint(self._bao, gen.oidc_role, token))
 
     # --- install ----------------------------------------------------------------------------------
@@ -160,7 +160,7 @@ class HostActor(Actor):
     async def _prove_sign(self, tenant: str, gen: Generation, sign_secret_id: str) -> None:
         """The installed sign pair works (A24', r8.4): logged in as the generation's sign login, one fixed
         probe is signed with the tenant's key, and the answer carries a signature."""
-        token = self.secret(await approle_login(self._bao, str(gen.sign_role_id), sign_secret_id))
+        token = self.secret(await log_in(self._bao, str(gen.sign_role_id), sign_secret_id))
         signed = answered(await self._bao.post(f"/v1/{TRANSIT_MOUNT}/sign/{transit_key_for(tenant)}",
                                                json={"input": _PROBE}, headers={"X-Vault-Token": token}))
         signature = field_of(signed, "data", "signature")
