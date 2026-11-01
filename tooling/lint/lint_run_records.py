@@ -249,10 +249,9 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("exports_root", _EXPORT_READER): frozenset({"current_export"}),
     ("knowledge_lock", _EXPORT_READER): frozenset({"knowledge_lock_holder"}),
     ("commit_record", _RECORD_OWNER): frozenset({"_record_made", "_Record.read"}),
-    # #1214: the lifecycle's own setting, read once each where it makes, removes or retires a tenant's folder.
+    # #1214: the lifecycle's own setting, read once each where it makes or removes a tenant's folder.
     ("data_root", "lifecycle/config.py"): frozenset({"LifecycleConfig.__post_init__"}),
     ("data_root", "lifecycle/_host.py"): frozenset({"HostActor.__init__"}),
-    ("data_root", "lifecycle/_adopt.py"): frozenset({"_retire"}),
 }
 _ATTRIBUTE_ROLES = {
     "exports": "exports_root", "drafts": "drafts_root", "knowledge_lock": "knowledge_lock",
