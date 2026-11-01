@@ -20,7 +20,7 @@ Before reusing anything, compare its recorded identities with the current inputs
 
 ## Commit
 
-The deliverable is the executable suite with its test-only fixtures and helpers, plus any changes the maintain-cache run made to the project cache. Never commit production code, stubs, scratch state, or a helper that substitutes for the policy under test.
+The deliverable is the executable suite with its test-only fixtures and helpers, plus any changes the maintain-cache run made to the project cache and rules files. Never commit production code, stubs, scratch state, or a helper that substitutes for the policy under test.
 
 Commit it on its own before any implementation, and record the base and the immutable ref in the hand-off. The implementer starts from that ref, and any later repair is measured against it.
 

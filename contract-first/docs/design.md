@@ -159,9 +159,11 @@ context it assumes, so one grep finds every application of a rule, or everything
 given model family. Humans maintain the skills' caches. The project cache is kept by one independent
 agent running the `maintain-cache` skill, dispatched at the end of write-tests' and write-code-from-tests' review steps: it adds facts the run had to
 work out and removes entries the run contradicted. It also reads the whole file for entries that
-exist for the same reason, and proposes, as an issue, the rule that would remove that cause: a
-project principle, a lint, or a change to a skill. A pile of related entries is a symptom; the cache
-is where root causes become visible, not where they are fixed. It is the file's only writer, and
+exist for the same reason, and writes the rule that would remove that cause to the project's rules
+file, with a lint when a machine can find the shape. A cause in the pipeline itself becomes an issue
+proposing a skill change, since the skills are the human's. A pile of related entries is a symptom;
+the cache is where root causes become visible, and the rules file is where they get fixed.
+Agent-written rules rank below the project's principles and every human decision. It is the file's only writer, and
 its changes reach the human with the PR.
 
 A list written as the rule invites work that handles exactly the list: an implementation that

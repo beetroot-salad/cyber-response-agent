@@ -29,7 +29,7 @@ Start from the current discuss-issue design, its decisions, grounding claims and
 
 Extend the code map with what tests need and grounding did not cover: harness entry points, shared fixtures, and the interface of any shared test machinery once written. If there is no map, build it now, before any author starts. Brief workers with the current design only; fold any still-applicable part of a superseded design into it rather than send workers through the history. Grep the project cache (`.claude/contract-first-cache.md`) for this skill's entries and pass the relevant ones into each brief, as you do the code map.
 
-Work in a dedicated worktree on a recorded base, with imports resolving into it. The contract is tests and test machinery only, plus the project cache file: **never write or commit production code, skeletons, or a helper that implements the policy under test**, because the code stage must earn green on its own. If implementation already exists, this is contract repair; record it as such. Keep working state under `.contract-first/`, outside the diff, following **references/contract.md**.
+Work in a dedicated worktree on a recorded base, with imports resolving into it. The contract is tests and test machinery only, plus the project cache and rules files: **never write or commit production code, skeletons, or a helper that implements the policy under test**, because the code stage must earn green on its own. If implementation already exists, this is contract repair; record it as such. Keep working state under `.contract-first/`, outside the diff, following **references/contract.md**.
 
 ## 2. Sketch, spike and check the design
 
@@ -97,7 +97,7 @@ Never turn a known blocker into an implementer note and call the contract ready.
 
 ## 7. Commit and hand off
 
-Before committing, dispatch one fresh agent to run `/contract-first:maintain-cache <issue>`, with this run's record. Commit its cache changes, unchanged, with the contract. Then commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.
+Before committing, dispatch one fresh agent to run `/contract-first:maintain-cache <issue>`, with this run's record. Commit its cache and rules changes, unchanged, with the contract. Then commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.
 
 ## Cache
 
