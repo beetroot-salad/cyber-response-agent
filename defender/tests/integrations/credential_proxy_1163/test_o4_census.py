@@ -20,7 +20,7 @@ from defender.tests.integrations.credential_proxy_1163 import _harness as H  # n
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T  # noqa: E402
 from defender.tests.integrations.credential_proxy_1163._target import proxy  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T6  # noqa: E402
-from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish  # noqa: E402
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish  # noqa: E402
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -89,8 +89,9 @@ def test_o4_no_canary_reaches_any_channel_of_a_real_run(tmp_path, data_root, mon
         alert.write_bytes(S.alert_bytes({"rule": {"id": "R-1", "description": "census"},
                                          "timestamp": "2026-09-28T00:00:00Z"}))
         with H.serve_asgi(tap) as proxy_url:
+            argv = [str(alert), "--tenant", TENANT, "--no-learn"]
             rc = run_py.main(
-                [str(alert), "--tenant", TENANT, "--no-learn"], lifecycle=lifecycle,
+                argv, lifecycle=lifecycle, directory=directory_for_argv(argv),  # #1214 Flow 4: the tenant records admit the run
                 preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
                 ticket_writer=S.NoTicket(), enqueue=lambda *_a, **_k: False,
                 roster=read_roster(adapters_under(S.DEFENDER)), publish=in_process_publish(),

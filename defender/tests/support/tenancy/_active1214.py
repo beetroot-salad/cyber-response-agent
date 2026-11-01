@@ -56,6 +56,8 @@ import pytest
 if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
 
+#: `LifecycleConfig.token_policy`'s default: the delivery AppRole's templated policy.
+TOKEN_POLICY = "defender-tenant-token"
 CREATED = _dt.datetime(2026, 10, 26, 9, 0, tzinfo=_dt.UTC)
 #: The `defender.tenancy` env var the host reads the database address from (DC-9).
 DSN_ENV = "DEFENDER_DATABASE_DSN"
@@ -220,7 +222,9 @@ def provision_generation(openbao: Any, tenant: str, secrets_dir: Path, *, salt: 
     call("POST", f"identity/oidc/role/{fields['oidc_role']}", {
         "key": "default", "client_id": fields["audience"], "ttl": "10m",
         "template": '{"tenant_id": {{identity.entity.metadata.tenant_id}}}'})
-    call("POST", f"auth/approle/role/{fields['approle']}", {"secret_id_num_uses": 0})
+    # The lifecycle's provider makes the delivery AppRole on the deployment's templated `token_policy`
+    # (default below, #1214 Flow 1 / r8.4 `LifecycleConfig.token_policy`); that policy grants the OIDC read.
+    call("POST", f"auth/approle/role/{fields['approle']}", {"secret_id_num_uses": 0, "token_policies": [TOKEN_POLICY]})
     fields["role_id"] = call("GET", f"auth/approle/role/{fields['approle']}/role-id")["role_id"]
     entity = call("POST", f"identity/entity/name/{fields['entity']}", {
         "name": fields["entity"], "metadata": {"oidc_role": fields["oidc_role"], "tenant_id": tenant}})
