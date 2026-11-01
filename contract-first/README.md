@@ -102,9 +102,10 @@ repo already keeps for any agent:
 - **The project cache** (`.claude/contract-first-cache.md`) — how the skills' rules apply to this
   project in particular (ownership markers, threat-model examples, lint conventions), one grep-able
   line per entry. Each skill file ends with its own cache of applications that hold for any
-  project; the project file holds the rest. Skills grep it for their own name. write-tests and
-  write-code-from-tests each end their review step with a cache keeper that adds what the run
-  had to work out and removes what it contradicted; the changes ride in the run's PR.
+  project; the project file holds the rest. Skills grep it for their own name. One plugin agent, `cache-keeper`, is
+  its only writer: write-tests and write-code-from-tests dispatch it at the end of their review
+  steps, and it adds what the run had to work out, removes what it contradicted, and consolidates
+  similar entries. The changes ride in the run's PR.
 - **The attack deck** (`.claude/contract-first-attacks.md`) — the project's own record of exploit
   shapes that carried real bugs past its suites. `finalize` creates it on the first such escape and
   appends to it after that; the attackers replay it on every new contract. A project without one

@@ -62,7 +62,7 @@ Route the verdicts:
 - **Accept:** once the human agrees, record the family in the design's **accepted trade-offs** (discuss-issue's design-doc format) with what closing it would cost. Attackers and finalize then treat it as decided.
 - **Factual question:** probe it. The human doesn't decide what existing code does.
 
-**Keep the cache.** Once every family has a verdict, dispatch one fresh cache keeper on **write-tests/references/cache-keeper.md** with the triage verdicts, the stale-test batch, deferred-verification results and the check failures so far. Commit its cache changes, unchanged, with the code. CI failures after shipping go to the same keeper before the PR is marked ready.
+**Keep the cache.** Once every family has a verdict, dispatch the plugin's **cache-keeper** agent with the issue number and this run's record. Commit its cache changes, unchanged, with the code.
 
 **When to stop.** A recheck that finds only new instances of decided families is done: those instances are not holes. Run another attack-and-triage round only when a recheck finds a new family. When the same family comes back after a *close* verdict, the single test missed the class; revisit the verdict rather than add a member. Stop and report the concrete next action when the budget runs out with blockers. A draft PR may show blocked work, but an undecided family never accompanies a success verdict.
 
@@ -91,7 +91,6 @@ One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <applic
 - write-code-from-tests §3 attacker-lenses | ctx: past-runs | lifecycle and recovery, input boundaries, compatibility, cross-surface effects.
 - write-code-from-tests §3 running-beats-reading | ctx: past-runs | suites a reading review had cleared still passed 5–19 wrong implementations.
 - write-code-from-tests §4 triage-reader | ctx: models=claude-5 | Opus at high effort.
-- write-code-from-tests §4 cache-keeper | ctx: models=claude-5 | Sonnet at medium effort.
 - write-code-from-tests §4 too-thin-for-families | ctx: past-runs | one or two findings.
 - write-code-from-tests §5 watch-ci | ctx: github | `gh pr checks --watch`; on red, `gh run view <run-id> --log-failed`.
 - write-code-from-tests §5 fix-rounds-without-progress | ctx: past-runs | two CI fix rounds without progress.
