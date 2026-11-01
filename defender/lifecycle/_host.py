@@ -127,6 +127,8 @@ class HostActor(Actor):
                 raise StepFailed(f"the bot could push to main of {wiring.repo} (protected={branch.get('protected')!r}, "
                                  f"user_can_push={branch.get('user_can_push')!r})")
             await self._commit_next_install(held, gen, accessor, path)
+        except FenceMissed:  # the commit may have landed with its answer lost: the file stays (a stray one is
+            raise            # dropped by prepare and remove_old_file, and teardown removes the secrets directory)
         except BaseException:
             path.unlink(missing_ok=True)
             raise

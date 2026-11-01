@@ -1,9 +1,10 @@
 # ruff: noqa: F811, PT018
 """#1214 attack-1 on the execution host: teardown fails loudly when the lock cannot be freed (H-5), install and old-file
 removal wait for the exclusive host lock (H-10), only the tenant's boxes are stopped (H-12), the secret file and its
-directory are private (H-13) (DC-2, P3, RC-5, F-11)."""
+directory are private (H-13), a landed install whose answer is lost keeps its secret file (DC-2, P3, RC-1, RC-5, F-11)."""
 from __future__ import annotations
 
+import contextlib
 import os
 import stat
 import threading
@@ -211,3 +212,57 @@ def test_the_host_secret_file_is_private_to_the_host_user(world):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert stat.S_IMODE(path.parent.stat().st_mode) & 0o077 == 0
     assert path.read_text(encoding="utf-8").endswith("\n") and path.read_text(encoding="utf-8").count("\n") == 1
+
+
+def test_an_install_that_fails_after_writing_its_secret_file_removes_it(world):
+    """The AppRole login fails after the unwrap wrote the file: nothing records it, so install removes it (DC-2, DC-4)."""
+    from defender.tests.tenancy.lifecycle_1214._job_cases import host_openbao_failing
+
+    tenant = _at_install(world)
+    host_openbao_failing(world, lambda r: r.url.path.endswith("/approle/login"))
+    world.host_pass()
+    assert "install" in (world.item(tenant)["failure"] or ""), world.item(tenant)
+    assert len(world.openbao.made("POST", UNWRAP)) == 1, "control: the secret was unwrapped and written"
+    assert not [p for p in world.config.secrets_dir.rglob("*") if p.is_file()], "a failed install left its secret file"
+
+class _AnswerLost:
+    """A hold whose first commit with generation changes lands and then raises `FenceMissed`, as when the lock
+    connection fails after the server committed; everything else is the real hold's."""
+
+    def __init__(self, held: Any, landed: list[Any]) -> None:
+        self._held, self._landed = held, landed
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._held, name)
+
+    async def commit(self, **kwargs: Any) -> Any:
+        from defender.tenancy import FenceMissed
+
+        done = await self._held.commit(**kwargs)
+        if not self._landed and kwargs.get("update_generations"):
+            self._landed.append(done)
+            raise FenceMissed("the commit landed, but its answer was lost with the lock connection")
+        return done
+
+
+def test_an_install_whose_commit_landed_but_whose_answer_was_lost_keeps_the_recorded_secret_file(world):
+    """Install's commit lands, then the hold reports `FenceMissed` (the answer was lost): the file the generation now
+    records stays on disk, and the job goes on to use it at prepare and finishes (DC-2, RC-1)."""
+    tenant = _at_install(world)
+    real, landed = world.tenants.lock, []
+
+    @contextlib.asynccontextmanager
+    async def lock(tenant_id: str) -> Any:
+        async with real(tenant_id) as held:
+            yield None if held is None else _AnswerLost(held, landed)
+    world.tenants.lock = lock
+    world.host_pass()
+    world.tenants.lock = real
+    assert landed, "control: install committed its generation"
+    [recorded] = [g.host_secret_file for g in world.generations(tenant) if g.host_secret_file]
+    assert recorded.is_file(), "the secret file the landed install recorded was removed"
+    world.drive()
+    item = world.item(tenant)
+    assert (item["state"], item["failure"]) == ("active", None), item
+    assert world.live(tenant).host_secret_file == recorded and recorded.is_file()
+
