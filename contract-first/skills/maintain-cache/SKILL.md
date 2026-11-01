@@ -1,6 +1,6 @@
 ---
 name: maintain-cache
-description: "Maintain the project's contract-first cache (.claude/contract-first-cache.md): add repo facts a run had to work out, remove entries the run contradicted, and find the root cause behind related entries: writes a project rule that removes it, or proposes a plugin change. write-tests and write-code-from-tests run it in a fresh agent at the end of their review steps; with no issue argument it only looks for root causes. The cache's only writer."
+description: "Maintain the project's contract-first cache (.claude/contract-first-cache.md): add repo facts a run had to work out, remove entries the run contradicted, and find the root cause behind related entries: writes a project rule that removes it, or proposes a plugin change. write-tests, write-code-from-tests and finalize run it in a fresh agent at the end of their review steps; with no issue argument it only looks for root causes. The cache's only writer."
 argument-hint: "[issue # and the skill it serves, or nothing to only look for root causes]"
 model: sonnet
 effort: medium
@@ -10,7 +10,7 @@ effort: medium
 
 You keep the project cache, `.claude/contract-first-cache.md`, so the next run doesn't rediscover what this one had to work out. Run in a session that did not write this run's tests or code; if this one did, stop and say so, because the stage must hand the work to a fresh agent. Don't read the authors' reasoning: read what the run produced and record the facts in it. Run with no issue, skip straight to Find the root cause.
 
-You receive the skill you serve (`write-tests` or `write-code-from-tests`), the issue number, that skill's rules, the current cache lines for it, and the run's record. For write-tests, that record is the spike's friction log, the design check and fidelity findings with their dispositions, and the repairs. For write-code-from-tests, it is the triage verdicts, the stale-test batch, the deferred-verification results, and the local check and CI failures. You are the only writer of the cache: the stage that dispatched you commits your changes unchanged. Edit only the cache file, the project rules file and, on a code-stage run, a lint that enforces a rule you wrote, in the worktree you are given, and commit nothing.
+You receive the stage that dispatched you (`write-tests`, `write-code-from-tests` or `finalize`), the issue number, the current cache lines, and the run's record. For write-tests, that record is the spike's friction log, the design check and fidelity findings with their dispositions, and the repairs. For write-code-from-tests, it is the triage verdicts, the stale-test batch, the deferred-verification results, and the local check and CI failures. For finalize, it is the review findings and fixes, the tracer's verdicts, and the CI failures after its pushes; finalize has no cache of its own, so file each fact under the write-tests or write-code-from-tests rule that would have needed it. You are the only writer of the cache: the stage that dispatched you commits your changes unchanged. Edit only the cache file, the project rules file and, on a write-code-from-tests or finalize run, a lint that enforces a rule you wrote, in the worktree you are given, and commit nothing.
 
 ## What an entry is
 
@@ -43,7 +43,7 @@ Then read the whole file, not only this skill's entries. Entries arrive one run 
 
 `- R<n> | <rule: goal and principle> | why: <the cause it removes> | src: #<issue>`
 
-A rule may also be a check: when a machine can find the shape, the rule names the lint that enforces it. A lint is code, so write it only on a write-code-from-tests run, in that PR; on a write-tests run, write the rule and leave its lint to the next code-stage run.
+A rule may also be a check: when a machine can find the shape, the rule names the lint that enforces it. A lint is code, so write it only on a write-code-from-tests or finalize run, in that PR; on a write-tests run, write the rule and leave its lint to the next of those runs.
 
 Limits on what you write here:
 

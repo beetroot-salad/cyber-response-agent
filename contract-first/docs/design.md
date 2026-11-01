@@ -156,7 +156,7 @@ recorded separately, as a cache. Each of those files ends with a `Cache` section
 its own entries in `.claude/contract-first-cache.md`. Every entry is one line naming the rule it applies and the
 context it assumes, so one grep finds every application of a rule, or everything that assumed a
 given model family. Humans maintain the skills' caches. The project cache is kept by one independent
-agent running the `maintain-cache` skill, dispatched at the end of write-tests' and write-code-from-tests' review steps: it adds facts the run had to
+agent running the `maintain-cache` skill, dispatched at the end of write-tests', write-code-from-tests' and finalize's review steps: it adds facts the run had to
 work out and removes entries the run contradicted. It also reads the whole file for entries that
 exist for the same reason, and writes the rule that would remove that cause to the project's rules
 file, with a lint when a machine can find the shape. A cause in the pipeline itself becomes an issue
