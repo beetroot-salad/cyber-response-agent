@@ -26,18 +26,20 @@ Never edit an existing test to make the fix pass. If one contradicts the fix, st
 
 ## 3. Mutate the deciding lines
 
-From `git diff -U0`, take the lines that decide something: conditions, boundaries, returned values. Hand-write up to five mutants across them: flip a comparison, negate a condition, delete a guard, move a boundary, return the other branch. Run only the tests that reach each line. A surviving mutant names a line nothing pins: add the test if it's cheap, otherwise report it.
+From the fix's diff, take the lines that decide something. Hand-write a few mutants across them, each the smallest change that would make the line decide differently. Run only the tests that reach each line. A surviving mutant names a line nothing pins: add the test if it's cheap, otherwise report it.
 
-Then read each added or edited test for shapes that pass without checking anything. Each of these has shipped green here:
-
-- `parametrize` over an empty collection (reported as skipped, reads as coverage);
-- an assertion whose search surface excludes its own subject;
-- a disjunction the common case satisfies (`result is None or …`);
-- one sentinel meaning two things;
-- a structural claim checked by substring search, which a comment can satisfy.
+Then read each added or edited test for a way it could pass without checking anything: an assertion that would hold whatever the code did, or a case that never reaches what it claims to test.
 
 If you notice another place that decides the same rule, report it. Don't fix it here: collapsing a duplicate is design work.
 
 ## Report
 
 The step-1 failure, quoted; surviving mutants or `none survived over N mutants on M lines`; any can't-fail shape; any second copy noticed; check results.
+
+## Cache
+
+One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <application>`. Each applies a rule above to the context its tags name. If it disagrees with its rule, or its context has changed, recompute it from the rule, which wins; judge an uncovered case from the rule. Project-specific entries use the same format in the project's `.claude/contract-first-cache.md`: grep it for this skill's name.
+
+- proven-fix §3 deciding-lines | ctx: git | from `git diff -U0`: conditions, boundaries, returned values.
+- proven-fix §3 mutants | ctx: past-runs | up to five: flip a comparison, negate a condition, delete a guard, move a boundary, return the other branch.
+- proven-fix §3 tests-that-check-nothing | ctx: python past-runs | `parametrize` over an empty collection (reported as skipped, reads as coverage); an assertion whose search surface excludes its own subject; a disjunction the common case satisfies (`result is None or …`); one sentinel meaning two things; a structural claim checked by substring search, which a comment can satisfy.

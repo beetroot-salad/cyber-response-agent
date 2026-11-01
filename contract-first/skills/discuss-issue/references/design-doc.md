@@ -11,10 +11,13 @@ Include these elements where relevant:
 - **Problem and intended change.** Who experiences the problem, what the feature adds or fixes, and representative before/after behavior. Distinguish existing behavior from proposed behavior.
 - **Scope and intent.** Observable obligations, who relies on each, and what would reveal a violation. Give obligations stable names or IDs for downstream traceability. State deliberate non-obligations and relevant boundaries; do not enumerate every conceivable exclusion. Keep broad promises broad: listing known surfaces does not silently restrict them.
 - **Principles and design properties.** Cite the project's principles document and state additions or overrides. Give each new property its rationale, consequences, and relevant limits. Mark proposed properties until adopted. Properties should guide unlisted cases, not merely praise simplicity or reliability. If principles are absent, clarify the consequential preferences with the human; do not invent project policy.
+
+  **Rules state goals; applications are a cache.** A property or decision states its goal and the principle behind it, never a list of the cases it covers. How it applies to a specific context (an input, a surface, a failure, a deployment) is recorded separately, in a **`## Cache`** section at the end of the design doc, one entry per line: `- <rule ID> | ctx: <kind>=<name> | <application>`, where kind is `input`, `surface`, `failure` or `deployment`. The fixed line shape lets any stage find a rule's applications with one grep. The cache is derived, never authored on its own. When an entry disagrees with its rule, or its context changes, recompute it from the rule; the rule wins. Tests, attackers and triage may read the cache to save work, but judge a case the cache doesn't cover from the rule, never by analogy to the nearest entry. A rule that can only be stated as its cases is a missing decision; bring it back to the design.
 - **Data model and ownership.** Entities and identity, relationships, authoritative owners, stored versus derived facts, important invariants, lifecycle, and migration/compatibility where affected. Include enough to decide the model without prescribing incidental field or helper names.
 - **Flows.** How a request or event moves through the system, its boundaries and state transitions, where outcomes become observable, and credible partial-failure/recovery behavior. Discuss retry, cancellation, concurrency, or ordering when they affect a promised property or interact with shared state.
 - **Architecture and decisions.** Chosen mechanisms, the obligations they discharge, and the significant alternatives and trade-offs. Explain why a choice fits this scope and the design properties. Remove a mechanism with no justified purpose or expose the missing requirement. Carry user choices and reasoning accurately; separate adopted decisions from agent recommendations.
 - **Representative scenarios and boundaries.** Use a few cases to demonstrate how the model and properties determine outcomes. An edge case should reveal or test a rule, not become an isolated requirement by default. Name consequential uncertainty and deferred verification explicitly.
+- **Accepted trade-offs.** Families of failure the human chose not to close: the family in one sentence, why it is acceptable, what closing it would cost, and who decided. These usually arrive from the code stage's triage. They are design decisions, so attackers don't attack them and the final reviewer doesn't re-raise them. An entry is reopened only by new evidence that the family arises in deployment or costs more than recorded.
 
 Use diagrams when they clarify a model or flow. Do not replace the design with an implementation checklist, test catalog, or reviewer transcript.
 
@@ -63,7 +66,7 @@ Name the design revision (commit, document revision, or issue-comment permalink)
 An amendment records:
 
 - The defect or new evidence and the affected design property.
-- The chosen patch or dissolving change, trade-offs, and who decided it.
+- The chosen patch or dissolving change, trade-offs, and who decided it. A family accepted rather than fixed goes to **Accepted trade-offs**.
 - Changes to obligations, models, flows, architecture, or scope; unchanged commitments remain in force.
 - Which grounding, tests, and implementation regions must be rechecked.
 

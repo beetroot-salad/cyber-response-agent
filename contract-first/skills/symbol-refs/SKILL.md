@@ -17,12 +17,20 @@ grep is the **lexical floor**: every real reference contains the name, so grep n
 
 ## Run it
 
-1. **The floor.** `grep -rlw <symbol>` over the source tree, excluding vendored and generated directories. Note the file count.
-2. **The resolved set.** Use Claude Code's `LSP` tool at a line where the symbol appears: find references, or go to definition. It needs the language's code-intelligence plugin (for example `pyright-lsp` or `typescript-lsp`) and its language server installed. Without one, say so and fall back to the floor, reading each hit to separate real references from comments and homonyms.
-3. **Compare.** Resolved fewer than grep means grep had false positives the server dropped, which is the point. **Resolved collapsing to one file while grep found the name in many** is the language server failing to resolve imports, not a true empty: a project layout it doesn't understand, usually a missing import root in its config. Fix the config or fall back to reading the grep hits; never report a collapsed result as "no references".
+1. **The floor.** A whole-word search for the name over the source tree, excluding vendored and generated directories. Note the file count.
+2. **The resolved set.** Ask the language server, at a line where the symbol appears, for references or the definition. Without a working language server, say so and fall back to the floor, reading each hit to separate real references from comments and homonyms.
+3. **Compare.** Resolved fewer than grep means grep had false positives the server dropped, which is the point. A resolved set far smaller than real cross-file use could explain is the server failing to resolve, not a true empty, until shown otherwise. Fix its configuration or fall back to reading the grep hits; never report a failed resolution as "no references".
 
 Record the search with its scope and both counts, so the census is reproducible.
 
 ## What it does not resolve
 
 Static symbol and call edges only. A language server doesn't see runtime dispatch (a registry called by data, a subprocess re-exec, reflection) or reachability matched on a string (a regex over a filename). Read those dispatch sites yourself. This sharpens the code-symbol slice of a census; it is not a reachability oracle.
+
+## Cache
+
+One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <application>`. Each applies a rule above to the context its tags name. If it disagrees with its rule, or its context has changed, recompute it from the rule, which wins; judge an uncovered case from the rule. Project-specific entries use the same format in the project's `.claude/contract-first-cache.md`: grep it for this skill's name.
+
+- symbol-refs §run-it the-floor | ctx: shell | `grep -rlw <symbol>`.
+- symbol-refs §run-it the-resolved-set | ctx: harness=claude-code | the `LSP` tool's find references or go to definition; needs the language's code-intelligence plugin (`pyright-lsp`, `typescript-lsp`) and its server installed.
+- symbol-refs §run-it resolution-failure | ctx: pyright past-runs | resolved collapsing to one file while grep found the name in many; usually a missing import root (`extraPaths` under `[tool.pyright]`).

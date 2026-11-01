@@ -99,6 +99,10 @@ repo already keeps for any agent:
   believe CI and fix CLAUDE.md.
 - **Language-server config** — whatever the project's language server needs to resolve imports
   (for Python's Pyright, `extraPaths` under `[tool.pyright]`), so `symbol-refs` gets real answers.
+- **The project cache** (`.claude/contract-first-cache.md`) — how the skills' rules apply to this
+  project in particular (ownership markers, threat-model examples, lint conventions), one grep-able
+  line per entry. Each skill file ends with its own cache of applications that hold for any
+  project; the project file holds the rest. Skills grep it for their own name.
 - **The attack deck** (`.claude/contract-first-attacks.md`) — the project's own record of exploit
   shapes that carried real bugs past its suites. `finalize` creates it on the first such escape and
   appends to it after that; the attackers replay it on every new contract. A project without one

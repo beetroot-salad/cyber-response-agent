@@ -17,9 +17,11 @@ The flow is **sketch and spike → design check → author thoroughly → review
 Almost all of this skill's cost is agents re-sending what they have already read: every step carries the whole context, and context grows with each file read. So spend on fewer steps over smaller histories.
 
 - **Share facts, not judgments.** Facts about the code (where entry points, seams, fixtures and owners are) are gathered once and shared through the code map. Each worker still derives from the design, on its own, what must hold. Workers open raw files to check a map entry they rely on or to read what they change, and report wrong entries so they are fixed once.
-- **Read narrowly.** Read the design once, whole: it is the shared language. For tests and source, outline first (the `LSP` tool's document symbols, or a grep for definitions where no language server is installed) and read only the line ranges needed. Check an edit through its diff.
-- **Dispatch fresh workers with a short brief** rather than resuming an idle one, whose cached history has expired and must be paid for again. Give each worker one slice and one return; one that has grown large (roughly a hundred tool calls) records its progress and hands back.
-- **Set the model on every dispatch**, as named per role below. Workers never inherit the orchestrator's model. Deterministic checks (collection, targeted test runs, lint, `spec-graph calls` and `spec-graph nullstub` for Python suites) need no agent; run them directly and read the results, not just the exit codes.
+- **Read narrowly.** Read the design once, whole: it is the shared language. For tests and source, outline first and read only the line ranges needed. Check an edit through its diff.
+- **Dispatch fresh workers with a short brief** rather than resuming an idle one, whose cached history has expired and must be paid for again. Give each worker one slice and one return; one whose history has grown large records its progress and hands back.
+- **Set the model on every dispatch**, matched to how much the role must interpret: reading the design and judging fidelity need the strongest model, expanding a settled design needs less. Workers never inherit the orchestrator's model. Deterministic checks (collection, targeted test runs, lint, the suite checks) need no agent; run them directly and read the results, not just the exit codes.
+
+The sections state goals and rules. Model picks, commands, counts and examples that apply them to today's harness and toolchain are in the **Cache** at the end.
 
 ## 1. Establish the candidate
 
@@ -33,11 +35,11 @@ Work in a dedicated worktree on a recorded base, with imports resolving into it.
 
 Settle the design before the tests that enforce it are written in depth.
 
-**Sketch** — one author, **Opus at medium effort**, writes one representative case per important promise and main flow through real entry points. Its job is to force every load-bearing choice into concrete setup and expected results, where gaps show; variants and edge cases wait.
+**Sketch** — one author writes one representative case per important promise and main flow through real entry points. Its job is to force every load-bearing choice into concrete setup and expected results, where gaps show; variants and edge cases wait.
 
-**Spike** — one implementer, **Sonnet at medium effort**, writes a throwaway implementation of the core flows in a detached worktree, runs the sketch against it, and logs every guess, workaround and departure from the design's mechanism. Its code is never committed or shown to any later worker; only its findings travel. This catches what past runs found only at code review: two owners of one fact, mechanisms that collide with existing constraints, shortcuts the design invites.
+**Spike** — one implementer writes a throwaway implementation of the core flows in a detached worktree, runs the sketch against it, and logs every guess, workaround and departure from the design's mechanism. Its code is never committed or shown to any later worker; only its findings travel. It catches where the design doesn't fit the code it lands in, which otherwise surfaces only at code review.
 
-**Design check** — one fresh reader, **Opus at high effort**, reads the design, sketch, spike diff and log, without the author's or implementer's reasoning, and asks: is this the right behavior, and where is the design unsettled, contradictory, or a poor fit for the code it lands in? A spike finding counts only when it names the design choice it conflicts with.
+**Design check** — one fresh reader reads the design, sketch, spike diff and log, without the author's or implementer's reasoning, and asks: is this the right behavior, and where is the design unsettled, contradictory, or a poor fit for the code it lands in? A spike finding counts only when it names the design choice it conflicts with.
 
 Resolve what it finds (§5) before thorough authoring. Mechanism changes it accepts are written into the design so the implementer does not rediscover them. Sketch cases carry forward where their design survived.
 
@@ -47,7 +49,7 @@ Detailed charges: **references/authoring.md** (Sketch, Spike) and **references/r
 
 ## 3. Author the contract thoroughly
 
-Authors run on **Sonnet at medium effort**, including slices and later repairs: the design is settled by now, so this pass expands and corrects rather than interprets. The orchestrator may author or integrate, but never also supplies the review. Follow **references/authoring.md**; for work too large for one context, **references/decomposition.md**.
+The design is settled by now, so this pass expands and corrects rather than interprets, and authors, including slices and later repairs, run on a model sized for that. The orchestrator may author or integrate, but never also supplies the review. Follow **references/authoring.md**; for work too large for one context, **references/decomposition.md**.
 
 Decide the cases from the design first, then survey the existing suite, fold the cases into it, and write last (**references/authoring.md**). New behavior belongs in the suite that already tests its neighbours, not in a parallel file per issue. Build toward what makes the contract trustworthy: real observations at real boundaries, variants and interactions where the design's properties call for them, positive controls beside negatives. Depth follows interpretive uncertainty, coupling and consequence of failure, not file counts. The case table becomes the compact **contract map**, from design obligations to the tests that enforce them; a map entry or a probe is not coverage. Docstrings state the promised outcome and its obligation in at most two lines.
 
@@ -55,7 +57,7 @@ Report design gaps as they appear rather than at the end, and don't build assert
 
 ## 4. Review the contract
 
-Commit the candidate suite as a **candidate ref**. One fresh whole-contract reviewer, **Opus at high effort** (**references/review.md**), owns **fidelity**: does the suite demand the right behavior, nothing invented, nothing narrowed? It sees neither the author's reasoning nor the code map, so one reading of the code is free of the map's blind spots. Mandatory even for a small contract.
+Commit the candidate suite as a **candidate ref**. One fresh whole-contract reviewer (**references/review.md**) owns **fidelity**: does the suite demand the right behavior, nothing invented, nothing narrowed? It sees neither the author's reasoning nor the code map, so one reading of the code is free of the map's blind spots. Mandatory even for a small contract.
 
 **Discrimination**, whether the suite rejects wrong code, is shown by running, not reading, and is tested in write-code-from-tests §3. There, lensed attackers start from the honest implementation and try to keep the suite green with deliberately wrong variants. Attacking here would mean each attacker first building working code that the code stage builds anyway. The holes they find come back to §5 as contract repairs.
 
@@ -64,11 +66,11 @@ Commit the candidate suite as a **candidate ref**. One fresh whole-contract revi
 Group findings by cause before acting; one cause usually explains several. Then route by what kind of problem it is:
 
 - **A factual question:** probe it. The human does not choose what the code does.
-- **A contract defect** (tests omit, misstate or fail to enforce settled behavior): a fresh author repairs it, preserving intent. Recheck with fresh workers: the fidelity reviewer reads changed assertions. On a repair from the code stage, the repaired test must also fail against the exploit that exposed it, and the affected attacker rechecks.
+- **A contract defect** (tests omit, misstate or fail to enforce settled behavior): a fresh author repairs it, preserving intent. Recheck with fresh workers: the fidelity reviewer reads changed assertions. On a repair from the code stage, the brief names a family and its triage verdict (write-code-from-tests §4): write the one test that covers the family, not one per exploit. It must fail against every exploit in the family, and the affected attacker rechecks. These repairs follow the code stage's stopping rule, not §6's round limit.
 - **A design defect or open choice:** propose the change that dissolves the whole family, through discuss-issue's amendment protocol. A proposal is not adopted until the human rules on it.
 - **An implementation defect, on a repair run:** return it to the code stage; don't bend the design around it.
 
-**Stale existing tests (only when the code stage returns them).** The fold reaches existing tests near the new cases. A test elsewhere that pins behavior the design replaced shows up only when real code makes it fail, and letting it fail is the reliable census: reading cannot prove which tests encoded the old behavior. The code stage returns these reds in one batch, each with its quoted failure. A fresh author, **Sonnet at medium effort**, decides each from the design and the test, not from the implementation:
+**Stale existing tests (only when the code stage returns them).** The fold reaches existing tests near the new cases. A test elsewhere that pins behavior the design replaced shows up only when real code makes it fail, and letting it fail is the reliable census: reading cannot prove which tests encoded the old behavior. The code stage returns these reds in one batch, each with its quoted failure. A fresh author decides each from the design and the test, not from the implementation:
 
 - **update**: the test pins behavior the design changes. Rewrite its expectation to the new behavior and cite the design element;
 - **retire**: the test pins only behavior the design removes. Delete it and cite the design element; move any assertion that still guards surviving behavior to a test that stays;
@@ -81,7 +83,7 @@ Test mechanics and local technical choices stay with agents when settled intent 
 
 ## 6. Readiness
 
-**Two repair rounds after §4 is a hard limit.** If blockers remain, stop and report them as blocked with the next action; only the human extends the budget. Within the limit, spend in proportion to the named risks. A design amendment found after thorough authoring means the design check missed something: record what, so the earlier steps improve. The same class of finding recurring means the test approach, not the tests, needs revisiting.
+**Repair rounds after §4 have a hard budget.** When it runs out with blockers remaining, stop and report them as blocked with the next action; only the human extends the budget. Within the limit, spend in proportion to the named risks. A design amendment found after thorough authoring means the design check missed something: record what, so the earlier steps improve. The same class of finding recurring means the test approach, not the tests, needs revisiting.
 
 The contract is ready when:
 
@@ -96,3 +98,19 @@ Never turn a known blocker into an implementer note and call the contract ready.
 ## 7. Commit and hand off
 
 Commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.
+
+## Cache
+
+One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <application>`. Each applies a rule above to the context its tags name. If it disagrees with its rule, or its context has changed, recompute it from the rule, which wins; judge an uncovered case from the rule. Project-specific entries use the same format in the project's `.claude/contract-first-cache.md`: grep it for this skill's name.
+
+- write-tests §keep-agent-work-cheap outline-first | ctx: harness=claude-code | the `LSP` tool's document symbols; a grep for definitions where no language server is installed.
+- write-tests §keep-agent-work-cheap hand-back-when-large | ctx: past-runs | roughly a hundred tool calls.
+- write-tests §keep-agent-work-cheap suite-checks | ctx: python | `spec-graph calls` and `spec-graph nullstub`.
+- write-tests §2 sketch-author | ctx: models=claude-5 | Opus at medium effort.
+- write-tests §2 spike-implementer | ctx: models=claude-5 | Sonnet at medium effort.
+- write-tests §2 what-the-spike-catches | ctx: past-runs | two owners of one fact, mechanisms that collide with existing constraints, shortcuts the design invites.
+- write-tests §2 design-check | ctx: models=claude-5 | Opus at high effort.
+- write-tests §3,5 authors | ctx: models=claude-5 | Sonnet at medium effort.
+- write-tests §4 fidelity-reviewer | ctx: models=claude-5 | Opus at high effort.
+- write-tests §5 stale-test-author | ctx: models=claude-5 | Sonnet at medium effort.
+- write-tests §6 repair-budget | ctx: past-runs | two rounds after §4.
