@@ -106,6 +106,24 @@ def test_a_rotation_heals_a_pre_r8_rule_and_the_new_bot_passes_install(world):
     assert (view["user_can_push"], view["user_can_merge"]) == (False, False)
 
 
+def test_a_rotation_disables_push_on_a_rule_that_otherwise_holds_the_invariant(world):
+    """A rule with push enabled but the merge whitelist on, Owners named and no bot is PATCHed to push off by rotation's
+    `protect`, and the rotation completes only with the stored rule holding (A23, r8.4 push disabled)."""
+    tenant = world.active_tenant()
+    full = f"{ORG}/{tenant}"
+    world.forge.put_rule(full, rule_name="main", branch_name="main", enable_push=True, enable_push_whitelist=False,
+                         enable_merge_whitelist=True, merge_whitelist_teams=["Owners"], merge_whitelist_usernames=[])
+    mark = len(world.forge.calls)
+    _rotate(world, tenant)
+    world.drive()
+    assert world.item(tenant)["state"] == "active" and world.item(tenant)["failure"] is None
+    [patch] = _writes(world, tenant, mark)
+    assert (patch.method, patch.body["enable_push"]) == ("PATCH", False)
+    rule = world.forge.rule(full)
+    assert (rule["enable_push"], rule["enable_merge_whitelist"], rule["merge_whitelist_teams"]) == (False, True, ["Owners"])
+    assert _bot_view(world, world.live(tenant), tenant)["user_can_push"] is False
+
+
 def test_a_rotation_makes_a_rule_that_is_missing(world):
     """A rule deleted by hand is made again by rotation's `protect` step with the invariant (POST) (A23, r8.3)."""
     tenant = world.active_tenant()
