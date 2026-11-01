@@ -1,5 +1,5 @@
-"""What the job store refuses. The API's ports have errors of the same names; this package sits
-below the API and cannot import them, so the adapter (#1083) maps one onto the other."""
+"""What the job store refuses. The API's ports re-export these classes as their own refusals
+(`defender.api.ports`), so a store's raise is the API's answer with nothing mapped between."""
 
 from __future__ import annotations
 

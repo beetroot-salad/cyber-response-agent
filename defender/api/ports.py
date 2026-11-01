@@ -9,6 +9,9 @@ from typing import Literal, Protocol
 
 from defender._model import model
 from defender.identity import IdentityService
+# The store's refusals are the API's: one class each, so the store's raise is the API's answer
+# with no mapping between them (#1342).
+from defender.jobs.errors import Conflict, NotFound, UnknownReference  # noqa: F401 — re-exported: the API's refusals
 from defender.records.formats import TenantId
 
 from .models import (
@@ -38,18 +41,6 @@ class Principal:
 
     tenant_id: TenantId
     user_id: str
-
-
-class NotFound(Exception):
-    """The addressed record does not exist for this tenant."""
-
-
-class Conflict(Exception):
-    """The record exists but its state refuses the request."""
-
-
-class UnknownReference(Exception):
-    """A request body names a record that does not exist for this tenant."""
 
 
 class StoreBrokePromise(Exception):
