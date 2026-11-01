@@ -71,9 +71,19 @@ def _config_refusal(refused, *causes: str) -> bool:
     return isinstance(refused, SystemExit) and any(c in text for c in causes)
 
 
+class RunAtHandedRecorder(S.RunRecorder):
+    """`S.RunRecorder` whose run folder is the run `run.main` handed `materialize`, as in
+    production: the request tokens are signed for that run before it is materialised (r7 A20),
+    so the folder must be the same run for a token's investigation to name it."""
+
+    def materialize(self, alert, **kw):
+        self.run_dir_at = kw["run"].run_dir
+        return super().materialize(alert, **kw)
+
+
 def _drive(tmp_path, data_root, *, signer=None, ticket=True, **seams):
     """Drive `run.main`; with no `signer` none is injected (the production signing path)."""
-    rec, tickets = S.RunRecorder(tmp_path / "run"), TicketRecorder()
+    rec, tickets = RunAtHandedRecorder(tmp_path / "run"), TicketRecorder()
     alert = S.plant_alert(tmp_path / "in")
     started = time.time()
     if signer is not None:
