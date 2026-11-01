@@ -301,14 +301,26 @@ def test_a_start_given_a_token_stamps_that_token_and_an_operator_start_mints_its
     assert minted.create_label(box_mod.START_TOKEN_LABEL) not in (None, "", given)
 
 
-@pytest.mark.parametrize("holder", ["the given token", "another lane's token"])
+#: What a container holding the name carries when a create faults: the given token, or a token that is
+#: not it (another's; a near miss in the last character, case, length or containment) or none at all.
+_GIVEN = "ab" * 16
+_HOLDERS = {
+    "the given token": "self",
+    "another lane's token": "cd" * 16,
+    "last character differs": _GIVEN[:-1] + "c",
+    "case changed": _GIVEN[:-1] + _GIVEN[-1].upper(),
+    "a prefix of it": _GIVEN[:-1],
+    "it with a suffix": _GIVEN + "0",
+    "no token label": "<no value>",
+}
+
+
+@pytest.mark.parametrize("holder", list(_HOLDERS))
 def test_a_create_fault_reaps_only_a_container_carrying_the_token_the_start_was_given(tmp_path, holder):
-    """The create-fault arm owns the token the caller handed in: a leftover with it is reaped, one with another token survives. (#1342 r5 C1)"""
-    given = "ab" * 16
-    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT),
-                          existing_token="self" if holder == "the given token" else "cd" * 16)
+    """The create-fault arm owns the token the caller handed in: a leftover with exactly it is reaped; one with another, a near-miss or no token survives. (#1342 r5 C1)"""
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token=_HOLDERS[holder])
     with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, start_token=given)
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, start_token=_GIVEN)
     assert reaped_after_create(rec.calls) is (holder == "the given token")
 
 

@@ -1491,8 +1491,9 @@ def test_o7_a_child_whose_given_parent_is_not_its_parent_exits_at_once(scene, tm
 
 # --- one real `run.py --job` on a setup refusal (no model) -------------------------------------------------------
 
-def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path):
-    """`run.py --job <id>` with no launch record: exit 1 naming it, nothing made, the job-end record says what failed. (O6)"""
+@pytest.mark.parametrize("spelling", ["two-words", "equals"])
+def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path, spelling):
+    """`run.py --job <id>` and `--job=<id>` with no launch record: exit 1 naming it, nothing made, the job-end record says what failed. (O6)"""
     root = tmp_path / "data"
     root.mkdir()
     run_id = str(uuid.uuid4())
@@ -1500,8 +1501,8 @@ def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path):
         runs = root / t.tenant_id / "runs"
         runs.mkdir(exist_ok=True)
         proc = subprocess.run(  # noqa: S603 — the real run entry
-            [sys.executable, str(DEFENDER / "run.py"), "--job", run_id, "--tenant", t.tenant_id,
-             "--parent-pid", str(os.getpid())],
+            [sys.executable, str(DEFENDER / "run.py"), *(["--job", run_id] if spelling == "two-words" else [f"--job={run_id}"]),
+             "--tenant", t.tenant_id, "--parent-pid", str(os.getpid())],
             env={**os.environ, "DEFENDER_DATA_ROOT": str(root),
                  "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"},
             cwd=str(WORKTREE), capture_output=True, text=True, timeout=180, check=False)
