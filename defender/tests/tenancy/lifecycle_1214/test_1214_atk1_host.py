@@ -1,9 +1,11 @@
 # ruff: noqa: F811, PT018
 """#1214 attack-1 on the execution host: teardown fails loudly when the lock cannot be freed (H-5), install and old-file
 removal wait for the exclusive host lock (H-10), only the tenant's boxes are stopped (H-12), the secret file and its
-directory are private (H-13) (DC-2, P3, RC-5, F-11)."""
+directory are private (H-13), a landed install whose answer is lost keeps its secret file, a box started after teardown's first removal is removed
+once the lock is held (DC-2, P3, RC-1, RC-5, F-11)."""
 from __future__ import annotations
 
+import contextlib
 import os
 import stat
 import threading
@@ -211,3 +213,115 @@ def test_the_host_secret_file_is_private_to_the_host_user(world):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert stat.S_IMODE(path.parent.stat().st_mode) & 0o077 == 0
     assert path.read_text(encoding="utf-8").endswith("\n") and path.read_text(encoding="utf-8").count("\n") == 1
+
+
+def test_an_install_that_fails_after_writing_its_secret_file_removes_it(world):
+    """The AppRole login fails after the unwrap wrote the file: nothing records it, so install removes it (DC-2, DC-4)."""
+    from defender.tests.tenancy.lifecycle_1214._job_cases import host_openbao_failing
+
+    tenant = _at_install(world)
+    host_openbao_failing(world, lambda r: r.url.path.endswith("/approle/login"))
+    world.host_pass()
+    assert "install" in (world.item(tenant)["failure"] or ""), world.item(tenant)
+    assert len(world.openbao.made("POST", UNWRAP)) == 1, "control: the secret was unwrapped and written"
+    assert not [p for p in world.config.secrets_dir.rglob("*") if p.is_file()], "a failed install left its secret file"
+
+class _AnswerLost:
+    """A hold whose first commit with generation changes lands and then raises `FenceMissed`, as when the lock
+    connection fails after the server committed; everything else is the real hold's."""
+
+    def __init__(self, held: Any, landed: list[Any]) -> None:
+        self._held, self._landed = held, landed
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._held, name)
+
+    async def commit(self, **kwargs: Any) -> Any:
+        from defender.tenancy import FenceMissed
+
+        done = await self._held.commit(**kwargs)
+        if not self._landed and kwargs.get("update_generations"):
+            self._landed.append(done)
+            raise FenceMissed("the commit landed, but its answer was lost with the lock connection")
+        return done
+
+
+def test_an_install_whose_commit_landed_but_whose_answer_was_lost_keeps_the_recorded_secret_file(world):
+    """Install's commit lands, then the hold reports `FenceMissed` (the answer was lost): the file the generation now
+    records stays on disk, and the job goes on to use it at prepare and finishes (DC-2, RC-1)."""
+    tenant = _at_install(world)
+    real, landed = world.tenants.lock, []
+
+    @contextlib.asynccontextmanager
+    async def lock(tenant_id: str) -> Any:
+        async with real(tenant_id) as held:
+            yield None if held is None else _AnswerLost(held, landed)
+    world.tenants.lock = lock
+    world.host_pass()
+    world.tenants.lock = real
+    assert landed, "control: install committed its generation"
+    [recorded] = [g.host_secret_file for g in world.generations(tenant) if g.host_secret_file]
+    assert recorded.is_file(), "the secret file the landed install recorded was removed"
+    world.drive()
+    item = world.item(tenant)
+    assert (item["state"], item["failure"]) == ("active", None), item
+    assert world.live(tenant).host_secret_file == recorded and recorded.is_file()
+
+
+class _Boxes:
+    """The containers seam over a set of running boxes: each call removes every one there is, and records which."""
+
+    def __init__(self, *running: str, fail_on: int = 0) -> None:
+        self.running, self.removals, self._fail_on = set(running), [], fail_on
+
+    def __call__(self, _tenant: str) -> None:
+        if len(self.removals) + 1 == self._fail_on:
+            self.removals.append(set())
+            raise RuntimeError("docker could not remove the containers")
+        self.removals.append(set(self.running))
+        self.running.clear()
+
+
+def _starts_a_box_then_lets_go(world: Any, tenant: str, boxes: _Boxes) -> threading.Thread:
+    """A shared holder of T's lock that is inside `docker run` when teardown begins: its box appears after teardown's
+    first removal, then it lets go of the lock."""
+    fd = _hold(world, tenant, exclusive=False)
+
+    def run() -> None:
+        time.sleep(0.5)
+        boxes.running.add("box-late")
+        host_lock.release_lock(fd)
+    holder = threading.Thread(target=run, daemon=True)
+    holder.start()
+    return holder
+
+
+def test_a_box_started_after_teardowns_first_removal_is_removed_once_the_lock_is_held(world):
+    """The holder's box comes up after the first listing; once teardown holds the exclusive lock it removes the tenant's
+    boxes again, so no box is left running with the folder it mounts about to go (P3, Flow 2.3)."""
+    from defender.lifecycle._teardown import take_exclusive
+
+    tenant = str(world.create())
+    boxes = _Boxes("box-early")
+    holder = _starts_a_box_then_lets_go(world, tenant, boxes)
+    fd = take_exclusive(world.data_root, tenant, wait=10.0, containers=boxes)
+    try:
+        holder.join(timeout=10)
+        assert boxes.removals[0] == {"box-early"}, boxes.removals
+        assert boxes.running == set(), f"a box started during teardown is still running: {boxes.running}"
+    finally:
+        host_lock.release_lock(fd)
+
+
+def test_a_teardown_whose_removal_under_the_lock_fails_gives_the_host_lock_back(world):
+    """The removal made once the exclusive lock is held fails: teardown fails naming why and releases the lock."""
+    from defender.lifecycle._teardown import take_exclusive
+
+    tenant = str(world.create())
+    boxes = _Boxes(fail_on=2)
+    with pytest.raises(RuntimeError, match="docker could not remove"):
+        take_exclusive(world.data_root, tenant, wait=10.0, containers=boxes)
+    assert len(boxes.removals) == 2, "control: the second removal was made"
+    fd = host_lock.acquire(world.data_root, tenant, exclusive=True, timeout=0)
+    assert fd is not None, "the failed teardown kept T's host lock"
+    host_lock.release_lock(fd)

@@ -44,7 +44,8 @@ def take_exclusive(data_root: Path, tenant_id: str, *, wait: float,
                    containers: Containers) -> int:
     """The tenant's host lock, exclusive, once nothing works for the tenant: the recorded processes
     get SIGTERM and the tenant's containers are removed; after `wait` seconds without the lock the
-    processes still recorded get SIGKILL; still held after another `wait`, the step fails loudly.
+    processes still recorded get SIGKILL; still held after another `wait`, the step fails loudly. Once
+    the lock is held the containers are removed again: a box started after the first listing goes too.
     Returns the lock's descriptor (`host_lock.release_lock` it)."""
     fd = host_lock.acquire(data_root, tenant_id, exclusive=True, timeout=0)
     try:
@@ -64,4 +65,9 @@ def take_exclusive(data_root: Path, tenant_id: str, *, wait: float,
     if fd is None:
         still = [h.pid for h in host_lock.holders(data_root, tenant_id)]
         raise StepFailed(f"the tenant's host lock is still held after SIGKILL (recorded processes: {still or 'none'})")
+    try:
+        containers(tenant_id)  # a holder inside `docker run` when signalled may have started a box after the first listing
+    except BaseException:
+        host_lock.release_lock(fd)
+        raise
     return fd

@@ -13,8 +13,10 @@ Everything the worker reads and writes for the tenant goes over that connection.
 statement: a fenced `UPDATE` of the tenant row as a CTE, with the generation, wiring and publish
 status changes as further CTEs that act only on the fenced row, so they land together or not at
 all. The fence (RC-1): the pending action, step and actor as read at the step's start, the
-expected failure (none), and this session still holding the lock (`pg_locks`). A miss or any error
-on that connection spends the hold: the connection is closed, never reused or reconnected."""
+expected failure (none), and this session still holding the lock (`pg_locks`). A miss or a failure
+of that connection spends the hold: the connection is closed, never reused or reconnected. A write
+the database refuses for its content (bad data, a broken constraint) is rolled back and raised as
+`ValueError`; the session and its lock stay, so the worker records the step's failure."""
 
 from __future__ import annotations
 
@@ -27,7 +29,7 @@ from typing import Any, Literal
 
 from sqlalchemy import ARRAY, ColumnElement, Text, Table, bindparam, select, text, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -236,19 +238,34 @@ class _Held:
         self.spent = False
 
     async def _run(self, statement: Any) -> list[Any]:
-        """One statement and its commit on the lock connection; any error spends the hold."""
+        """One statement and its commit on the lock connection. A failure of the connection spends the
+        hold; a statement the database refuses (bad data, a broken constraint) is rolled back and raised
+        as `ValueError`, the hold still good for the step's `fail`."""
         if self.spent:
             raise FenceMissed(f"the hold on tenant {self.tenant_id} is spent")
         try:
             rows = list(await self._conn.execute(statement))
             await self._conn.commit()
         except DBAPIError as e:
-            self.spent = True
             why = str(e.orig).splitlines()[0] if e.orig is not None else type(e).__name__
+            if not (e.connection_invalidated or isinstance(e, (OperationalError, InterfaceError))):
+                await self._rollback(e)
+                raise ValueError(f"the database refused the write for tenant {self.tenant_id} "
+                                 f"({type(e.orig).__name__}: {why})") from e
+            self.spent = True
             _logger.warning("tenant %s: the lock connection failed (%s: %s); the step stops",
                             self.tenant_id, type(e.orig).__name__, why)
             raise FenceMissed(f"the lock connection of tenant {self.tenant_id} failed") from e
         return rows
+
+    async def _rollback(self, refused: DBAPIError) -> None:
+        """End the refused statement's transaction; the session's advisory lock outlives it. A rollback
+        that fails is the connection failing: the hold is spent."""
+        try:
+            await self._conn.rollback()
+        except DBAPIError:
+            self.spent = True
+            raise FenceMissed(f"the lock connection of tenant {self.tenant_id} failed") from refused
 
     async def generations(self) -> list[Generation]:
         rows = await self._run(select(_G).where(_G.c.tenant_id == self.tenant_id).order_by(_G.c.salt))
