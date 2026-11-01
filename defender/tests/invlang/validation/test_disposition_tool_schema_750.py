@@ -194,3 +194,68 @@ def test_the_refusal_escapes_an_invisible_character_rather_than_echoing_it(tmp_p
         f"to a valid one: {seen!r}"
     )
     assert not (tool_run_dir / "report.md").exists()
+
+
+# The close's two writes (review record, report) are both attempted; only the report's fault is the close's (#1342 r4 M2, r5).
+
+
+def _a_directory_where_the_review_record_goes(run_dir: Path) -> Path:
+    from defender.records import RunPaths
+
+    planted = RunPaths(run_dir).review_record(1)
+    planted.mkdir(parents=True)
+    return planted
+
+
+def test_a_schema_refused_report_is_the_closes_refusal_whatever_the_record_write_did(tmp_path):
+    """The validator refuses the body and the review record cannot be written either: the model is told the validator's reason (`ModelRetry`), not the record's fault. (M2)"""
+    deps, run_dir = _deps(tmp_path)
+    _a_directory_where_the_review_record_goes(run_dir)
+
+    with pytest.raises(ModelRetry, match="schema says no"):
+        close_investigation(deps, "inconclusive", stages=_stages(), validator=lambda *_a: "schema says no")
+
+    assert not (run_dir / "report.md").exists()
+
+
+def test_a_report_that_cannot_be_written_is_the_error_raised_not_the_records(tmp_path):
+    """Both writes fail: the error raised is the report's (it names `report.md`), not the review record's. (M2)"""
+    deps, run_dir = _deps(tmp_path)
+    record = _a_directory_where_the_review_record_goes(run_dir)
+    (run_dir / "report.md").mkdir()
+
+    with pytest.raises(OSError) as excinfo:  # noqa: PT011 — the platform's own error for a directory in the way
+        close_investigation(deps, "inconclusive", stages=_stages())
+
+    assert "report.md" in str(excinfo.value), f"not the report's fault: {excinfo.value!r}"
+    assert record.name not in str(excinfo.value), f"the record's fault was raised: {excinfo.value!r}"
+
+
+def test_a_review_record_that_cannot_be_written_is_logged_as_an_error_naming_its_turn_and_the_close_stands(
+        tmp_path, caplog):
+    """The report commits but the review record cannot be written: no raise, the close stands, and an ERROR names the turn whose record was lost. (M2)"""
+    import logging
+
+    deps, run_dir = _deps(tmp_path)
+    _a_directory_where_the_review_record_goes(run_dir)
+
+    with caplog.at_level(logging.INFO):
+        result = close_investigation(deps, "inconclusive", stages=_stages())
+
+    assert (run_dir / "report.md").is_file()
+    assert result.record_path is None
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert any("turn 1" in m for m in errors), f"no ERROR names the turn whose record was lost: {errors}"
+
+
+def test_a_review_record_that_is_written_logs_no_error(tmp_path, caplog):
+    """Control for the record-fault log: a close whose record lands raises and logs nothing at ERROR. (M2)"""
+    import logging
+
+    deps, run_dir = _deps(tmp_path)
+
+    with caplog.at_level(logging.INFO):
+        close_investigation(deps, "inconclusive", stages=_stages())
+
+    assert (run_dir / "report.md").is_file()
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR] == []

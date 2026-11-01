@@ -51,6 +51,7 @@ from defender.api.ports import (  # noqa: E402
     Principal,
     UnknownReference,
 )
+from defender.jobs import errors as store_errors  # noqa: E402
 from defender.identity import (  # noqa: E402
     Bootstrap,
     IdentityService,
@@ -584,6 +585,13 @@ def test_a_read_the_store_answers_none_is_a_404(path: str, port: str) -> None:
      "create_learning_job", UnknownReference("x"), 422),
     ("POST", f"{T}/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r"},
      "create_learning_job", Conflict("x"), 409),
+    # the job store's own refusals, as the store raises them (#1342): nothing maps them to the API's
+    ("POST", f"{T}/investigations/inv-1/cancel", None, "cancel_investigation", store_errors.NotFound("x"), 404),
+    ("POST", f"{T}/investigations/inv-1/cancel", None, "cancel_investigation", store_errors.Conflict("x"), 409),
+    ("DELETE", f"{T}/investigations/inv-1", None, "delete_investigation", store_errors.NotFound("x"), 404),
+    ("DELETE", f"{T}/investigations/inv-1", None, "delete_investigation", store_errors.Conflict("x"), 409),
+    ("POST", f"{T}/investigations", {"alert_id": "al-1", "client_request_id": "r"},
+     "create_investigation", store_errors.UnknownReference("x"), 422),
 ])
 def test_a_store_refusal_maps_to_its_status_and_audits_nothing(
     method: str, path: str, body: dict[str, str] | None, port: str, error: Exception, code: int,
