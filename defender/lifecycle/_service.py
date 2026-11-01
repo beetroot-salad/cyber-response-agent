@@ -112,19 +112,30 @@ class ManagementService(Actor):
 
         A pending generation recorded before the sign login existed gets its sign names recorded
         first, before anything is made (r8.5, P1)."""
-        gen = await self._building(held)
-        if gen.sign_approle is None or gen.sign_entity is None:
-            await held.commit(step=held.record.step, actor=SERVICE,
-                              update_generations={gen.salt: _sign_names(held.tenant_id, gen.salt)})
-            gen = await self._building(held)
+        gen = await self._with_sign_names(held, await self._building(held))
         await self._write_role(gen, client_id=None)
         accessor = await self._approle_accessor()
         role_id = await self._approle(gen.approle, self._config.token_policy)
         await self._entity(gen.entity, {"oidc_role": gen.oidc_role, "tenant_id": held.tenant_id}, role_id, accessor)
+        sign_role_id = await self._sign_chain(held, gen, accessor)
+        await self._commit_next(held, update_generations={gen.salt: {"role_id": role_id, "sign_role_id": sign_role_id}})
+
+    async def _with_sign_names(self, held: HeldTenant, gen: Generation) -> Generation:
+        """`gen`, its sign names recorded first if it was recorded before the sign login existed
+        (r8.5, P1): committed before anything is made."""
+        if gen.sign_approle is not None and gen.sign_entity is not None:
+            return gen
+        await held.commit(step=held.record.step, actor=SERVICE,
+                          update_generations={gen.salt: _sign_names(held.tenant_id, gen.salt)})
+        return await self._building(held)
+
+    async def _sign_chain(self, held: HeldTenant, gen: Generation, accessor: str) -> str:
+        """The sign-only AppRole on the sign policy, its own entity carrying the tenant, and the
+        tenant's signing key (A24', A25); the sign role id. Reuses what exists."""
         sign_role_id = await self._approle(str(gen.sign_approle), self._config.sign_policy)
         await self._entity(str(gen.sign_entity), {"tenant_id": held.tenant_id}, sign_role_id, accessor)
         await self._ensure_key(held.tenant_id)
-        await self._commit_next(held, update_generations={gen.salt: {"role_id": role_id, "sign_role_id": sign_role_id}})
+        return sign_role_id
 
     async def _approle_accessor(self) -> str:
         mounts = field_of(answered(await self._bao.get("/v1/sys/auth")), "data")
@@ -330,8 +341,15 @@ class ManagementService(Actor):
         """A fresh single-use wrapped secret id for the host of each AppRole, delivery and sign (Flow
         1.7, DC-12, A24')."""
         gen = await self._building(held)
-        if gen.sign_approle is None:
-            raise StepFailed("the generation records no sign login")
+        if gen.sign_role_id is None:
+            # A generation recorded before the sign login existed whose job was already past
+            # `provider` at the upgrade: its sign chain is made here, as `provider` would have
+            # (r8.5: an in-flight job finishes normally).
+            gen = await self._with_sign_names(held, gen)
+            sign_role_id = await self._sign_chain(held, gen, await self._approle_accessor())
+            await held.commit(step=held.record.step, actor=SERVICE,
+                              update_generations={gen.salt: {"sign_role_id": sign_role_id}})
+            gen = await self._building(held)
         wrapped = [self.secret(str(field_of(answered(await self._bao.post(
             f"/v1/auth/approle/role/{approle}/secret-id", headers={"X-Vault-Wrap-TTL": WRAP_TTL})), "wrap_info", "token")))
             for approle in (gen.approle, gen.sign_approle)]
