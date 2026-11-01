@@ -207,33 +207,47 @@ def _a_directory_where_the_review_record_goes(run_dir: Path) -> Path:
     return planted
 
 
-def test_a_schema_refused_report_is_the_closes_refusal_whatever_the_record_write_did(tmp_path):
-    """The validator refuses the body and the review record cannot be written either: the model is told the validator's reason (`ModelRetry`), not the record's fault. (M2)"""
-    deps, run_dir = _deps(tmp_path)
-    _a_directory_where_the_review_record_goes(run_dir)
+def _warned_about_turn_1(caplog) -> list[str]:
+    """Log records at WARNING or above whose message names turn 1 (D-x: the wording is free, the level and the turn are not)."""
+    import logging
+    import re
 
-    with pytest.raises(ModelRetry, match="schema says no"):
+    return [r.getMessage() for r in caplog.records
+            if r.levelno >= logging.WARNING and re.search(r"turn\W*1\b", r.getMessage(), re.IGNORECASE)]
+
+
+def test_a_schema_refused_report_is_the_closes_refusal_whatever_the_record_write_did(tmp_path):
+    """The validator refuses the body and the review record cannot be written either: the model is told exactly the validator's reason (`ModelRetry`), nothing of the record's fault. (M2)"""
+    deps, run_dir = _deps(tmp_path)
+    record = _a_directory_where_the_review_record_goes(run_dir)
+
+    with pytest.raises(ModelRetry) as excinfo:
         close_investigation(deps, "inconclusive", stages=_stages(), validator=lambda *_a: "schema says no")
 
+    assert str(excinfo.value) == "schema says no", f"the model was told more than the validator's reason: {excinfo.value!s}"
+    assert record.name not in str(excinfo.value)
     assert not (run_dir / "report.md").exists()
 
 
-def test_a_report_that_cannot_be_written_is_the_error_raised_not_the_records(tmp_path):
-    """Both writes fail: the error raised is the report's (it names `report.md`), not the review record's. (M2)"""
+def test_a_report_that_cannot_be_written_is_the_error_raised_not_the_records(tmp_path, caplog):
+    """Both writes fail: the error raised is the report's (it names `report.md`), not the review record's, and the lost record is still logged at WARNING or above naming its turn. (M2, D-x)"""
+    import logging
+
     deps, run_dir = _deps(tmp_path)
     record = _a_directory_where_the_review_record_goes(run_dir)
     (run_dir / "report.md").mkdir()
 
-    with pytest.raises(OSError) as excinfo:  # noqa: PT011 — the platform's own error for a directory in the way
+    with caplog.at_level(logging.INFO), pytest.raises(OSError) as excinfo:  # noqa: PT011 — the platform's own error for a directory in the way
         close_investigation(deps, "inconclusive", stages=_stages())
 
     assert "report.md" in str(excinfo.value), f"not the report's fault: {excinfo.value!r}"
     assert record.name not in str(excinfo.value), f"the record's fault was raised: {excinfo.value!r}"
+    assert _warned_about_turn_1(caplog), "the lost review record was not logged (WARNING or above, naming turn 1) when the report failed too"
 
 
-def test_a_review_record_that_cannot_be_written_is_logged_as_an_error_naming_its_turn_and_the_close_stands(
+def test_a_review_record_that_cannot_be_written_is_logged_at_warning_or_above_naming_its_turn_and_the_close_stands(
         tmp_path, caplog):
-    """The report commits but the review record cannot be written: no raise, the close stands, and an ERROR names the turn whose record was lost. (M2)"""
+    """The report commits but the review record cannot be written: no raise, the close stands, and a record at WARNING or above names the turn whose record was lost. (M2, D-x)"""
     import logging
 
     deps, run_dir = _deps(tmp_path)
@@ -244,12 +258,12 @@ def test_a_review_record_that_cannot_be_written_is_logged_as_an_error_naming_its
 
     assert (run_dir / "report.md").is_file()
     assert result.record_path is None
-    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
-    assert any("turn 1" in m for m in errors), f"no ERROR names the turn whose record was lost: {errors}"
+    assert _warned_about_turn_1(caplog), \
+        f"nothing at WARNING or above names the turn whose record was lost: {[r.getMessage() for r in caplog.records]}"
 
 
-def test_a_review_record_that_is_written_logs_no_error(tmp_path, caplog):
-    """Control for the record-fault log: a close whose record lands raises and logs nothing at ERROR. (M2)"""
+def test_a_review_record_that_is_written_logs_nothing_at_warning_or_above(tmp_path, caplog):
+    """Control for the record-fault log: a close whose record lands raises and logs nothing at WARNING or above. (M2, D-x)"""
     import logging
 
     deps, run_dir = _deps(tmp_path)
@@ -258,4 +272,4 @@ def test_a_review_record_that_is_written_logs_no_error(tmp_path, caplog):
         close_investigation(deps, "inconclusive", stages=_stages())
 
     assert (run_dir / "report.md").is_file()
-    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR] == []
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == []
