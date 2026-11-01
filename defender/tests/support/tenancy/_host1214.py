@@ -130,6 +130,10 @@ def _lock_inode(data_root: Path, tenant: str) -> str | None:
     return f"{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}"
 
 
+#: The kinds of lock `/proc/locks` lists: `flock(2)` locks, POSIX record locks and open-file-description locks.
+_LOCK_KINDS = frozenset({"FLOCK", "POSIX", "OFDLCK"})
+
+
 def lock_held(data_root: Path, tenant: str) -> bool:
     """True when any process holds `tenant`'s host lock, read from the kernel's lock table. Nothing is locked or created, so
     the answer does not depend on which open file a lock belongs to (a sample taken inside a hold cannot disturb it)."""
@@ -137,7 +141,7 @@ def lock_held(data_root: Path, tenant: str) -> bool:
     if inode is None:
         return False
     with open("/proc/locks", encoding="utf-8") as table:
-        return any(len(parts) > 5 and parts[1] == "FLOCK" and parts[5] == inode for parts in map(str.split, table))
+        return any(len(parts) > 5 and parts[1] in _LOCK_KINDS and parts[5] == inode for parts in map(str.split, table))
 
 
 def exclusive_free(data_root: Path, tenant: str) -> bool:
@@ -257,7 +261,7 @@ class Calls:
 def counting_calls(**functions: Callable[..., Any]) -> Iterator[Calls]:
     """Count the calls of each function by its code object (`sys.setprofile`, and `threading.setprofile` for threads started
     inside the block; a decorated function is watched by the code it wraps), whatever name or route reaches it: a runtime-built name, a `getattr`, an alias or a wrapper still
-    runs that code. Nothing is replaced. The previous profile hook comes back at exit."""
+    runs that code. Nothing is replaced. The previous profile hooks (the process's and the one new threads get) come back at exit."""
     labels = {inspect.unwrap(fn).__code__: label for label, fn in functions.items()}
     calls = Calls(list(functions))
     active = True
@@ -268,7 +272,7 @@ def counting_calls(**functions: Callable[..., Any]) -> Iterator[Calls]:
             calls.counts[label] += 1
             calls.locals[label].append(dict(frame.f_locals))
 
-    previous = sys.getprofile()
+    previous, previous_threads = sys.getprofile(), threading.getprofile()
     threading.setprofile(hook)
     sys.setprofile(hook)
     try:
@@ -276,7 +280,7 @@ def counting_calls(**functions: Callable[..., Any]) -> Iterator[Calls]:
     finally:
         active = False
         sys.setprofile(previous)
-        threading.setprofile(None)
+        threading.setprofile(previous_threads)
 
 
 def acceptance_calls(**more: Callable[..., Any]) -> contextlib.AbstractContextManager[Calls]:

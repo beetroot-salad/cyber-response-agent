@@ -810,9 +810,10 @@ def test_the_oracle_serving_requires_its_tenant():
         oracle_serving(oracle_settings_with())
 
 
-@pytest.mark.parametrize("entry", ["start_oracle_box", "estate start_box", "start_process_oracle_box",
-                                   "start_process_box", "oracle_serving"])
-def test_every_oracle_box_entry_labels_a_non_empty_tenant_id_without_judging_its_grammar(tmp_path, monkeypatch, entry):
+@pytest.mark.parametrize("entry", ["oracle_box_request", "start_oracle_box", "estate start_box",
+                                   "start_process_oracle_box", "start_process_box", "oracle_serving"])
+def test_every_oracle_box_entry_labels_a_non_empty_tenant_id_without_judging_its_grammar(
+        tmp_path, monkeypatch, entry, oracle_tree):
     """Each oracle box entry starts a box for a non-empty id that is no tenant-id grammar, labelled with it; the grammar is
     judged at acceptance only (r10.1 C8)."""
     from defender.box import _oracle
@@ -824,11 +825,18 @@ def test_every_oracle_box_entry_labels_a_non_empty_tenant_id_without_judging_its
     monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
     daemon = FakeDaemon(tmp_path / "daemon")
     daemon.install(monkeypatch)
+    if entry == "oracle_box_request":  # builds the request only: the label is read off the box that request starts
+        runner, scratch = oracle_tree
+        box_mod.start_box(_oracle.oracle_box_request(scratch, runner, env=env, tenant_id=bad), docker=daemon)
+        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+        labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
+        assert f"defender.tenant={bad}" in labels, labels
+        return
     starts = {
         "start_oracle_box": lambda: _oracle.start_oracle_box(env=env, tenant_id=bad),
         "estate start_box": lambda: estate_oracle.start_box(env=env, tenant_id=bad),
-        "start_process_oracle_box": lambda: _oracle.start_process_oracle_box(bad),
-        "start_process_box": lambda: estate_oracle.start_process_box(bad),
+        "start_process_oracle_box": lambda: _oracle.start_process_oracle_box(tenant_id=bad),
+        "start_process_box": lambda: estate_oracle.start_process_box(tenant_id=bad),
         "oracle_serving": lambda: _launcher_serving(bad).box(),
     }
     started = starts[entry]()

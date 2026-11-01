@@ -317,6 +317,7 @@ _NAMES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "accept_requested_tenant": (_TENANCY_RAW, _HOST | H.A3_SET),
     "admit_tenant": (frozenset({"tenancy/_admission.py", "tenancy/__init__.py"}), _HOST),
     "host_tenant": (frozenset(), _HOST | _ENTRIES),
+    "host_directory": (frozenset({"tenancy/_admission.py", "tenancy/__init__.py"}), _HOST),
     "_ACCEPTED": (frozenset({"tenancy/_tenant.py"}), frozenset()),
     # the wrappers that survive (or may return) around the acceptance, and the opener of a run by its accepted tenant
     "resolve_tenant": (frozenset(), _HOST | _ENTRIES),
@@ -358,13 +359,15 @@ def test_the_mention_census_sees_a_lazy_import_and_a_getattr_constant():
 def test_the_acceptance_names_are_spelled_only_where_the_design_puts_them():
     """C1/C2: the raw acceptance, its wrappers and its token are spelled in production only by the modules that define or
     re-export them and by the host module and the starter-covered set; the host acceptance only in the host module and the
-    entry modules. Any spelling counts, so a lazy import or a `getattr` constant cannot hide a second acceptance."""
+    entry modules. Any spelling counts, so a lazy import or a `getattr` constant cannot hide a second acceptance. The names
+    of wrappers that may no longer exist (`resolve_tenant`, ...) are a tripwire only; the reachability census below is the
+    real C2(1) guard for wrappers."""
     where: dict[str, set[str]] = {name: set() for name in ACCEPTANCE_NAMES}
     production = _production()
     for rel, tree in production.items():
         for name in _mentions(tree):
             where[name].add(rel)
-    for name in ("host_tenant", "accept_tenant", "requested_tenant", "_ACCEPTED", "resolve_tenant"):
+    for name in ("host_tenant", "accept_tenant", "requested_tenant", "_ACCEPTED", "host_directory"):
         assert where[name], f"control: {name} is spelled somewhere"
     stray = {name: sorted(where[name] - homes - users) for name, (homes, users) in _NAMES.items()}
     assert {name: rels for name, rels in stray.items() if rels} == {}

@@ -21,6 +21,7 @@ from defender.tests.support.tenancy import _host1214 as HH
 
 
 RID_R1 = fixture_uuid('pr2-dc8-r1')
+RID_R2 = fixture_uuid('pr2-dc8-r2')  # a run only T holds
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
@@ -412,15 +413,16 @@ def test_dc8_c10_a_row_naming_another_tenant_is_dead_lettered_on_the_first_tick(
     t, u, t_paths, _u_paths = _drain_scene(tmp_path)
     if not placed:
         shutil.rmtree(Path(location_path(u.runs)).parent)
+    H.make_run(location_path(t.runs), RID_R2)
     root = location_path(P.data_root)()
     directory = P.records_with(root, {H.T_ID: "active", **({H.U_ID: state} if state else {})})
     P.queue_row(t_paths, "case-crossed", {"case_id": "case-crossed", "tenant_id": H.U_ID, "run_id": RID_R1})
-    P.queue_row(t_paths, "case-own", {"case_id": "case-own", "tenant_id": H.T_ID, "run_id": RID_R1})
+    P.queue_row(t_paths, "case-own", {"case_id": "case-own", "tenant_id": H.T_ID, "run_id": RID_R2})
     lane = _BoundedLane()
     with contextlib.suppress(_Enough), HH.acceptance_calls() as ticks:
         P.drain(t_paths, lane, directory=directory)
-    assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R1], (
-        f"control: only T's own row is served, and as T's run; the drain served {lane.run_dirs}")
+    assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R2], (
+        f"control: only T's own row is served (its run RID_R2, which only T holds); the drain served {lane.run_dirs}")
     assert (ticks["accepted"], ticks["built"]) == (0, 0), f"the drain accepted a tenant itself: {ticks.counts}"
     letter = P.dead_letter(t_paths, "case-crossed")
     assert letter is not None, "the crossed row was not dead-lettered on the first tick"

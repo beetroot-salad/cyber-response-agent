@@ -12,6 +12,7 @@ import textwrap
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -25,7 +26,7 @@ from defender.tests.support.tenancy._active1214 import (
     database_env,
     insert_active_tenant,
 )
-from defender.tests.support.tenancy._host1214 import exclusive_free, host_tenant, recorded, this_process
+from defender.tests.support.tenancy._host1214 import exclusive_free, host_tenant, lock_held, recorded, this_process
 
 TENANT = "7f3c1a52-9d4e-4b8a-a1c6-2e5d8b9f0c13"
 OTHER = "0b9e6d2a-41c8-4f57-8e3b-6a7d1c5f9e24"
@@ -800,6 +801,8 @@ def test_the_wait_for_the_lock_outlasts_any_clock_jump(placed):
             readings.append(1)
             return begun + 86400.0 * len(readings)
         time.monotonic = leaping
+        control = host_lock.acquire(placed, {TENANT!r}, exclusive=False, timeout=1.0)
+        print("CONTROL-GAVE-UP-AT-ONCE", control is None, "READINGS", len(readings) >= 1)
         got = []
         waiter = threading.Thread(target=lambda: got.append(host_lock.acquire(placed, {TENANT!r}, exclusive=False,
                                                                               timeout=None)), daemon=True)
@@ -815,6 +818,8 @@ def test_the_wait_for_the_lock_outlasts_any_clock_jump(placed):
     done = subprocess.run([sys.executable, "-c", code], env=env, cwd=REPO_ROOT, capture_output=True, text=True,  # noqa: S603
                           timeout=60, check=False)
     out = done.stdout + done.stderr
+    assert "CONTROL-GAVE-UP-AT-ONCE True READINGS True" in out, (
+        "control: a one-second wait must give up at once under the leaping clock, else the clock is not what acquire reads: " + out)
     assert "STILL-WAITING True GAVE-UP []" in out, out
     assert "TOOK-IT True" in out, out
 
@@ -925,8 +930,8 @@ def test_one_tenant_held_under_two_data_roots_has_a_hold_under_each(placed, tmp_
 
 
 def test_an_exception_raised_in_a_direct_hold_releases_the_record_and_the_lock(placed):
-    """An error raised inside `with hold_shared(...)` leaves no record and no lock behind (r10 O-A6: the scope's end
-    releases whatever it took, however it ends)."""
+    """An error raised inside `with hold_shared(...)` leaves no record and no lock behind (r10 A2: the lock is released when
+    the scope ends, however it ends)."""
     from defender.tenancy import host_lock
 
     def fail_inside() -> None:
@@ -968,7 +973,10 @@ def test_an_exit_from_the_folder_rules_step_releases_the_hold_and_the_record(pla
     the record, the exception kept alive (r10 O-A6)."""
     from defender import tenancy
 
+    inside: list[tuple[list[tuple[int, Any]], bool]] = []
+
     def mounts():
+        inside.append((recorded(placed, TENANT), lock_held(placed, TENANT)))
         raise exit_()
         yield  # pragma: no cover — makes this a generator, raising when the folder rules iterate it
 
@@ -977,6 +985,8 @@ def test_an_exit_from_the_folder_rules_step_releases_the_hold_and_the_record(pla
         pass  # control: the same call with nothing to iterate admits
     with pytest.raises(exit_) as caught:
         host_tenant(root, TENANT, directory=active_directory(placed, TENANT), box_mounted=mounts())
+    assert inside == [(this_process(), True)], (
+        f"the folder rules did not run with this process recorded and the lock held: {inside}")
     assert recorded(placed, TENANT) == [], "the exit left this process recorded"
     assert exclusive_free(placed, TENANT), "the exit left the lock held"
     assert caught.value is not None
@@ -990,11 +1000,13 @@ def test_an_exit_from_the_version_check_step_releases_the_hold_and_the_record(pl
         import os
         from pathlib import Path
         from defender import migrations, tenancy
-        from defender.tests.support.tenancy._host1214 import exclusive_free, host_tenant, recorded
+        from defender.tests.support.tenancy._host1214 import (
+            exclusive_free, host_tenant, lock_held, recorded, this_process)
+        placed = Path(os.environ["DEFENDER_DATA_ROOT"])
         def check(dsn):
+            print("INSIDE recorded", recorded(placed, {TENANT!r}) == this_process(), "held", lock_held(placed, {TENANT!r}))
             raise {exit_}()
         migrations.check_version = check
-        placed = Path(os.environ["DEFENDER_DATA_ROOT"])
         root = tenancy.resolve_data_root()
         try:
             host_tenant(root, {TENANT!r})
@@ -1005,6 +1017,7 @@ def test_an_exit_from_the_version_check_step_releases_the_hold_and_the_record(pl
            "DEFENDER_DATA_ROOT": str(placed)}
     done = subprocess.run([sys.executable, "-c", code], env=env, cwd=REPO_ROOT, capture_output=True, text=True,  # noqa: S603
                           timeout=120, check=False)
+    assert "INSIDE recorded True held True" in done.stdout, "the check did not run with the record and the hold: " + done.stdout + done.stderr
     assert "EXIT recorded [] free True" in done.stdout, done.stdout + done.stderr
 
 
@@ -1071,3 +1084,42 @@ def test_watching_puts_back_the_earlier_profile_hooks_and_a_thread_started_insid
     assert done.wait(30)
     thread.join(30)
     assert sorted(seen) == [1, 3], seen
+
+
+def test_counting_calls_puts_back_the_earlier_profile_hooks_and_a_thread_started_inside_stops_counting():
+    """After a `counting_calls` block the profile hooks (the process's and the one new threads get) are the ones in place
+    before it, and a thread started inside, which keeps its hook, counts nothing of a call made after the block (test
+    support: a counter leaves no trace)."""
+    def target(value: int) -> int:
+        return value
+
+    def outer(_frame: object, _event: str, _arg: object) -> None:
+        return None
+
+    started, go, done = threading.Event(), threading.Event(), threading.Event()
+
+    def worker() -> None:
+        target(1)  # inside the block: counted
+        started.set()
+        go.wait(30)
+        target(2)  # after the block: not counted
+        done.set()
+
+    before = (sys.getprofile(), threading.getprofile())
+    threading.setprofile(outer)
+    try:
+        expected = (sys.getprofile(), threading.getprofile())
+        assert expected[1] is outer, "control: the earlier thread hook is in place"
+        with H.counting_calls(hit=target) as calls:
+            thread = threading.Thread(target=worker, daemon=True)
+            thread.start()
+            assert started.wait(30)
+            target(3)
+        assert (sys.getprofile(), threading.getprofile()) == expected, "the earlier profile hooks were not put back"
+        go.set()
+        assert done.wait(30)
+        thread.join(30)
+        assert calls["hit"] == 2, calls.counts
+    finally:
+        threading.setprofile(before[1])
+        sys.setprofile(before[0])

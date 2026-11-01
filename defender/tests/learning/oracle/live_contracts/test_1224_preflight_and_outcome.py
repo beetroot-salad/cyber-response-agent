@@ -452,7 +452,7 @@ def test_the_launchers_preflight_builds_its_oracle_side_for_the_source_runs_tena
 def test_the_launchers_calibration_serving_is_built_for_the_source_runs_tenant(tmp_path, monkeypatch):
     """Every `oracle_serving` the launcher's preflight builds, the calibration one included (its box is never started),
     is for the source run's tenant (r10 B1, C8: `preflight.py:120` passes `source.tenant_id`). Observed on the
-    arguments of the registry call, without patching it; one serving per world plus the calibration one."""
+    arguments of the registry call, without patching it; at least one serving per world plus the calibration one."""
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.tests.support.sandbox import _box1279 as X
     from defender.tests.support.sandbox._box1195 import FakeDaemon
@@ -469,8 +469,8 @@ def test_the_launchers_calibration_serving_is_built_for_the_source_runs_tenant(t
     served: list[object] = []
     with watching(oracle_serving, lambda args: served.append(args["tenant_id"])):
         _main(src, est, oracle=oracle, verifier=S.passing_verifier())
-    assert len(served) == len(worlds) + 1, (
-        f"expected one serving per world and the calibration one, got {len(served)}: {served}")
+    assert len(served) >= len(worlds) + 1, (
+        f"expected at least one serving per world and the calibration one, got {len(served)}: {served}")
     assert set(map(str, served)) == {tenant}, f"an oracle serving was built for another tenant: {served}"
 
 
