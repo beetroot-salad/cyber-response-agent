@@ -13,69 +13,30 @@ from pathlib import Path
 
 import httpx
 
-import ssl
-from dataclasses import dataclass, field
-
-from defender import _io
 from defender.credential_proxy._openbao import openbao_fault, transit_key_for
 from defender.kit.faults import ConfigFault, TransportFault
 from defender.records.formats import TenantRefused
-from defender.tenancy import ForgeBinding, Tenant, read_forge_binding
-
-LOGIN_PATH = "/v1/auth/approle/login"
-IDENTITY_PATH = "/v1/identity/oidc"
-ISSUER_TIMEOUT = 30.0
+from defender.tenancy import (
+    LOGIN_PATH,
+    DeliveryRefused,
+    ForgeBinding,
+    IssuerConfig,
+    Tenant,
+    issuer_client,
+    read_forge_binding,
+    read_issuer_config,
+)
 
 #: The transit engine's mount in the issuer.
 TRANSIT_MOUNT = "transit"
 
 
-@dataclass(frozen=True)
-class IssuerConfig:
-    """The tenant's issuer client config file (the one its forge binding names): OpenBao's
-    address, the CA it is trusted by and the AppRole pair. The pair is never shown."""
-
-    address: str
-    ca_cert: Path
-    role_id: str = field(repr=False)
-    secret_id: str = field(repr=False)
-
-
-def read_signing_config(path: Path) -> IssuerConfig:
-    """The config at `path`, or `ConfigFault` naming what is wrong (never a value read from
-    it). Decided locally; nothing is sent. The file is the operator's, JSON
-    `{"issuer", "ca_cert", "role_id", "secret_id"}` (P-4: file-only, never environment). The run
-    process must not import tenant delivery (#1108 P4 P-3), so it reads the file itself."""
-    path = Path(path)
-    try:
-        text = _io.read_text_utf8(path)
-    except OSError as unreadable:
-        raise ConfigFault(
-            f"the issuer client config {path} could not be read: "
-            f"{unreadable.strerror or type(unreadable).__name__}") from None
-    obj, bad_json = _io.load_json_artifact(text)
-    if bad_json is not None or not isinstance(obj, dict):
-        raise ConfigFault(f"the issuer client config {path} is not a JSON object")
-    keys = ("issuer", "ca_cert", "role_id", "secret_id")
-    missing = [k for k in keys if not isinstance(obj.get(k), str) or not obj[k]]
-    if missing:
-        raise ConfigFault(f"the issuer client config {path} lacks {', '.join(missing)}")
-    address = obj["issuer"].rstrip("/").removesuffix(IDENTITY_PATH)
-    if not address.lower().startswith("https://"):
-        raise ConfigFault(f"the issuer client config {path} names a non-https issuer address")
-    return IssuerConfig(address, Path(obj["ca_cert"]), obj["role_id"], obj["secret_id"])
-
-
 def _issuer_client(config: IssuerConfig, transport: httpx.BaseTransport | None,
-            **kw: object) -> httpx.Client:
-    if transport is not None:
-        return httpx.Client(transport=transport, timeout=ISSUER_TIMEOUT, **kw)  # type: ignore[arg-type]
+                   **kw: object) -> httpx.Client:
     try:
-        verify = ssl.create_default_context(cafile=str(config.ca_cert))
-    except (OSError, ssl.SSLError) as bad:
-        raise ConfigFault(f"the issuer client config's CA certificate {config.ca_cert} is "
-                          f"unusable: {type(bad).__name__}") from None
-    return httpx.Client(verify=verify, timeout=ISSUER_TIMEOUT, trust_env=False, **kw)  # type: ignore[arg-type]
+        return issuer_client(config, transport, **kw)
+    except DeliveryRefused as unusable:
+        raise ConfigFault(str(unusable)) from None
 
 
 class TenantRequestSigner:
@@ -162,8 +123,8 @@ def request_signer(
     try:
         if binding is None:
             binding = read_forge_binding(tenant)
-        config = read_signing_config(Path(issuer_config) if issuer_config else binding.issuer_config)
-    except TenantRefused as unusable:
+        config = read_issuer_config(Path(issuer_config) if issuer_config else binding.issuer_config)
+    except (TenantRefused, DeliveryRefused) as unusable:
         raise ConfigFault(f"no usable issuer client config to sign request tokens: {unusable}"
                           ) from None
     return TenantRequestSigner(tenant, config, transport)
