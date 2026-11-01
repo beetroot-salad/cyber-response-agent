@@ -162,3 +162,35 @@ def test_x5_the_docker_transport_refuses_an_http_proxy_system(tmp_path, data_roo
         with pytest.raises(ConfigFault):
             transport.record_access_context(record, "identity")
         assert transport_uses_proxy(record, "identity"), "positive control: it is http-proxy"
+
+
+class _BlipThenToken:
+    """A run's read-token source whose OpenBao is down for the first ask (r7 A20, A18)."""
+
+    def __init__(self, token: str) -> None:
+        self.token, self.asked = token, 0
+
+    def __call__(self) -> str:
+        self.asked += 1
+        if self.asked == 1:
+            raise TransportFault("OpenBao is unreachable for signing (ConnectError)")
+        return self.token
+
+
+def test_x9_a_read_token_that_cannot_be_minted_is_the_calls_transport_fault(
+        tmp_path, data_root):
+    """The read token is minted inside the adapter's call (r7 A20): OpenBao down at that moment
+    is the call's `TransportFault` (the system is not marked down) and nothing reaches the
+    proxy; the next call mints and is served."""
+    with H.upstream() as up, Q._published(tmp_path, data_root, up) as t:
+        source = _BlipThenToken(T.token(t.tenant_id, GRANT))
+        with A.proxy_for(t, Q._store(t)) as (url, tap):
+            ctx = A.ctx_for(tmp_path, T.run_record(t), url, None, token_source=source)
+            with pytest.raises(TransportFault):
+                identity_adapter.get_user(ctx, user="dev.dana")
+            assert tap.tokens == [], "a call without a token reached the proxy"
+            served = identity_adapter.get_user(ctx, user="dev.dana")
+
+    assert source.asked == 2
+    assert served["path"].endswith("/users/dev.dana")
+    assert len(up.seen) == 1
