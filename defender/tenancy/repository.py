@@ -28,9 +28,11 @@ server-side TCP keepalives), released when the context ends or the connection di
 (`claimable_now`) before it starts: the listing may be stale by then. Every write of `HeldTenant`
 (`commit`, `fail`) is ONE statement on that connection, fenced on the pending action, step and actor as read when the step started, on
 `failure IS NULL`, and on the lock still being held. A commit moves the fence to what it wrote, so
-a worker may run its next step under the same lock. A fence that misses, or any error on the
+a worker may run its next step under the same lock. A fence that misses, or a failure of the
 lock's connection, raises `FenceMissed`: the connection is closed, nothing more is written through
-this hold (no failure either), and the worker stops working on the tenant. Any other exception
+this hold (no failure either), and the worker stops working on the tenant. A write the store
+refuses for its content (a value it cannot hold, a broken constraint) raises `ValueError` and
+leaves the hold good, so the step's failure is recorded. Any other exception
 of a step is the worker's to record with `fail` (its text names the step and the external answer,
 never a secret). `PostgresTenantRepository(dsn, lock_keepalive=)` takes the keepalive bound in
 seconds (`LifecycleConfig.lock_keepalive`).
