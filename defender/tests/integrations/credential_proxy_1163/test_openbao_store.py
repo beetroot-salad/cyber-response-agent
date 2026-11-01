@@ -9,7 +9,7 @@ import uuid
 
 import pytest
 
-from defender.kit.faults import ConfigFault
+from defender.kit.faults import ConfigFault, TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import proxy, secrets_writer
@@ -322,10 +322,11 @@ def test_b7_a_credential_write_is_in_openbaos_audit_and_its_value_is_not(
     assert canary not in text
 
 
-def test_b8_an_unreachable_store_or_verifier_answers_config_fault_and_sends_nothing(
+def test_b8_an_unreachable_store_or_verifier_answers_transport_fault_and_sends_nothing(
         tmp_path, data_root, openbao):
-    """With the store unreachable, or the verifier, the proxy answers ConfigFault and sends
-    nothing; control: the reachable store sends. H11, O7."""
+    """With the store unreachable, or the verifier, the proxy answers TransportFault (a retry
+    may succeed; the system is not marked down) and sends nothing; control: the reachable store
+    sends. H11, O7, r7 A18."""
     dead = f"http://127.0.0.1:{H.free_port()}"
     with H.upstream() as up, T.identity_via_proxy(
             tmp_path / "forge", data_root, H.declaration(up.url + T.BASE_PATH)) as t:
@@ -351,14 +352,14 @@ def test_b8_an_unreachable_store_or_verifier_answers_config_fault_and_sends_noth
         assert up.seen == []
         control = answer(_store(openbao, tokens["proxy"]), verifier)
 
-    assert (no_store["fault"], no_verifier["fault"]) == ("ConfigFault", "ConfigFault")
+    assert (no_store["fault"], no_verifier["fault"]) == ("TransportFault", "TransportFault")
     assert control["fault"] is None
     assert len(up.seen) == 1
 
 
-def test_b8_a_signer_or_verifier_that_cannot_reach_openbao_raises_config_fault(openbao):
-    """The real signer and verifier against a dead address raise ConfigFault, not a raw
-    transport error; control: against the live server they work. O8, H11, O7."""
+def test_b8_a_signer_or_verifier_that_cannot_reach_openbao_raises_transport_fault(openbao):
+    """The real signer and verifier against a dead address raise TransportFault, not a raw
+    transport error; control: against the live server they work. O8, H11, O7, r7 A18."""
     tokens = _tokens(openbao)
     signer, verifier = _transit(openbao, tokens)
     dead = f"http://127.0.0.1:{H.free_port()}"
@@ -369,10 +370,42 @@ def test_b8_a_signer_or_verifier_that_cannot_reach_openbao_raises_config_fault(o
     signature = signer.sign(b"claims-1163")
     assert verifier.verify(b"claims-1163", signature, tenant_id=TENANT) is True
 
-    with pytest.raises(ConfigFault):
+    with pytest.raises(TransportFault):
         dead_signer.sign(b"claims-1163")
-    with pytest.raises(ConfigFault):
+    with pytest.raises(TransportFault):
         dead_verifier.verify(b"claims-1163", signature, tenant_id=TENANT)
+
+
+class _Always(dict):
+    """A fake OpenBao's replies: the same answer to every path."""
+
+    def __init__(self, reply: H.Reply) -> None:
+        super().__init__()
+        self.reply = reply
+
+    def get(self, _path, _default=None):
+        return self.reply
+
+
+@pytest.mark.parametrize(("status", "fault"), [
+    (503, TransportFault), (500, TransportFault), (403, ConfigFault), (404, ConfigFault)])
+def test_b9_openbao_5xx_is_retryable_and_4xx_is_the_operators_to_fix(status, fault):
+    """An OpenBao that answers 5xx (sealed, standby, failing) is `TransportFault` for the store,
+    the verifier and the signer alike; a 4xx (policy refusal, missing key) is `ConfigFault`.
+    r7 A18."""
+    with H.upstream() as bao:
+        bao.replies = _Always((status, {"Content-Type": "application/json"},
+                               json.dumps({"errors": ["no"]}).encode()))
+        store = proxy().OpenBaoStore(addr=bao.url, token="t", mount="kv")
+        verifier = proxy().TransitVerifier(addr=bao.url, token="t", mount="transit",
+                                           keys={TENANT: _key(TENANT)})
+        signer = proxy().TransitSigner(addr=bao.url, token="t", mount="transit", key=_key(TENANT))
+        with pytest.raises(fault):
+            store.read(TENANT, "identity")
+        with pytest.raises(fault):
+            verifier.verify(b"claims-1163", "vault:v1:x", tenant_id=TENANT)
+        with pytest.raises(fault):
+            signer.sign(b"claims-1163")
 
 
 def test_b10_each_tenants_launcher_signs_only_with_its_own_key(openbao):

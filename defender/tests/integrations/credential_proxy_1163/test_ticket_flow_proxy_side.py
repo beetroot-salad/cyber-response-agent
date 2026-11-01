@@ -9,6 +9,7 @@ import pytest
 
 from defender.box import run_env
 from defender.investigation import ticket_writer
+from defender.kit.faults import TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
@@ -82,3 +83,34 @@ def test_t4_a_store_refusing_the_record_comment_is_reported_with_its_status_and_
     assert receipt["ok"] is False
     assert f"HTTP {status}" in receipt["reason"], receipt
     assert REASON in receipt["reason"], receipt
+
+
+class _DownOnce(H.FakeStore):
+    """A store that is unreachable for its first read (an OpenBao blip), then answers."""
+
+    def read(self, tenant_id: str, system: str):
+        first = not self.reads
+        found = super().read(tenant_id, system)
+        if first:
+            raise TransportFault("OpenBao is unreachable for the credential read")
+        return found
+
+
+def test_t5_an_open_leg_lost_to_a_proxy_blip_does_not_stop_the_record_leg(
+        tmp_path, data_root, caplog):
+    """The proxy's store is down for the open leg only: that leg fails as a transport error,
+    and the record leg still posts its comment (r7 A18: only the operator's refusal stops it)."""
+    caplog.set_level(logging.INFO)
+    with H.upstream() as up, A.published(tmp_path / "forge", data_root, {SYSTEM: _decl(up)}) as t:
+        rec, run = _run(tmp_path)
+        comments = f"{STORE}/tickets/{rec.run_dir_at.name}/comments"
+        store = _DownOnce({(t.tenant_id, SYSTEM): T.static_set()})
+        kw = dict(tenant=T.run_record(t), defender_dir=DEFENDER,
+                  env=run_env(DEFENDER, rec.run_dir_at),
+                  request_token=T.token(t.tenant_id, {(SYSTEM, "rw")}))
+        with A.proxy_for(t, store) as (url, _tap):
+            ticket_writer.open_case_ticket(run, proxy_url=url, **kw)
+            assert up.paths() == [], "the open leg was lost to the blip"
+            S.ticket_writer().record_case_ticket(run, proxy_url=url, **kw)
+
+    assert [s.path for s in up.seen] == [comments]

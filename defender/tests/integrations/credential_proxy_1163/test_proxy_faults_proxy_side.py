@@ -156,3 +156,23 @@ def test_f4_deeply_nested_json_is_classified_and_audited(tmp_path, data_root, sh
     assert len(records) == 2, records
     assert records[0]["outcome"] == answer["fault"], records
     assert records[1]["outcome"].startswith("sent "), records
+
+
+class _BrokenStore(H.FakeStore):
+    """A store port that fails in a way nobody foresaw."""
+
+    def read(self, tenant_id: str, system: str):
+        super().read(tenant_id, system)
+        raise RuntimeError("unforeseen")
+
+
+def test_f5_a_request_the_proxy_cannot_process_is_a_transport_fault_and_audited(
+        tmp_path, data_root):
+    """An unforeseen failure inside the proxy is `TransportFault` (r7 A18: a retry may
+    succeed, the system is not marked down), audited, and sends nothing. A9, A13."""
+    with T.rig(tmp_path / "forge", data_root, store=_BrokenStore()) as r:
+        answer = r.ask()
+
+    assert answer["fault"] == "TransportFault"
+    assert r.up.seen == []
+    assert [rec["outcome"] for rec in r.audit.records] == ["TransportFault"]

@@ -139,16 +139,17 @@ def client_of(d: Any) -> Any:
 @contextlib.contextmanager
 def rig(scratch: Path, root: Path, decl: Callable[[str], str] | None = None, *,
         creds: Any = "static", ghosts: Mapping[str, Path] | None = None,
-        audit: Any = None, **deps_kw: Any) -> Iterator[Rig]:
+        audit: Any = None, store: Any = None, **deps_kw: Any) -> Iterator[Rig]:
     """A `Rig`. `decl(upstream_url)` is the merged declaration text (default: a bearer key on
     the upstream's `BASE_PATH`); `creds` is the credential set stored for `identity` (default a
     static key; None stores none); `ghosts` adds tenant ids with exports folders the tenant map
-    carries."""
+    carries; `store` replaces the store port outright."""
     with H.upstream() as up:
         text = decl(up.url) if decl is not None else H.declaration(up.url + BASE_PATH)
         with identity_via_proxy(scratch, root, text) as t:
-            store = H.FakeStore({(t.tenant_id, "identity"): static_set() if creds == "static"
-                                 else creds} if creds is not None else {})
+            if store is None:
+                store = H.FakeStore({(t.tenant_id, "identity"): static_set() if creds == "static"
+                                     else creds} if creds is not None else {})
             signer = H.FakeSigner()
             verifier = H.PairedVerifier(signer)
             sink = H.AuditRecorder() if audit is None else audit
