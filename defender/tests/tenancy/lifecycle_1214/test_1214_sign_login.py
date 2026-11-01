@@ -364,7 +364,10 @@ def test_a_pending_generation_recorded_before_r8_fails_its_next_step_naming_the_
     failure that names the sign login; the operator can offboard it (r8.4 upgrade)."""
     tenant = world.active_tenant()
     assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
-    world.drive(stop=lambda: world.item(tenant)["step"] == "provider")
+    flaky = openbao_failing(world, lambda _r: True)
+    world.drive()
+    assert flaky.hit and world.item(tenant)["step"] == "provider", "control: the rotation stopped at its provider"
+    world.service_actor = world.new_service(world.tenants, identity=world.service)
     pending = _row(world, tenant, "pending")
     assert pending.sign_approle, "control: the names step recorded the sign names"
     for name in SIGN_FIELDS:

@@ -4,8 +4,10 @@ leg when the ticket system is `http-proxy`. Run start checks configuration only 
 OpenBao. Driven through `run.main` and its injection seams."""
 from __future__ import annotations
 
+import functools
 import logging
 import time
+import types
 from pathlib import Path
 from typing import Any
 
@@ -265,35 +267,73 @@ def test_r4e_a_sign_openbao_refuses_with_a_4xx_is_a_config_fault_after_one_relog
     assert len(bao.signs) == 1, "positive control: the same run signs once OpenBao accepts"
 
 
-def _reachable(root: object, limit: int = 400) -> list[object]:
-    """Every object reachable from `root` through instance attributes, slots and containers
-    (strings, classes, functions and modules left out): what a run holds, found without naming
-    its parts."""
+def _children(obj: object) -> list[object]:
+    """What `obj` holds directly: instance attributes, slots, container items, and, for a callable,
+    the object it is bound to, the function under it, its closure cells, defaults, a `partial`'s
+    parts and a wrapped function."""
+    if isinstance(obj, dict):
+        return [*obj.keys(), *obj.values()]
+    if isinstance(obj, (list, tuple, set, frozenset)):
+        return list(obj)
+    kids: list[object] = []
+    if isinstance(obj, types.MethodType):
+        kids += [obj.__self__, obj.__func__]
+    if isinstance(obj, functools.partial):
+        kids += [obj.func, *obj.args, *obj.keywords.values()]
+    if isinstance(obj, types.FunctionType):
+        kids += [cell.cell_contents for cell in obj.__closure__ or () if _filled(cell)]
+        kids += [*(obj.__defaults__ or ()), *(obj.__kwdefaults__ or {}).values()]
+    if hasattr(obj, "__wrapped__"):
+        kids.append(obj.__wrapped__)
+    kids += list(getattr(obj, "__dict__", {}).values()) if not isinstance(obj, types.MethodType) else []
+    for cls in type(obj).__mro__:
+        kids += [getattr(obj, n) for n in getattr(cls, "__slots__", ()) if hasattr(obj, n)]
+    return kids
+
+
+def _filled(cell: Any) -> bool:
+    try:
+        cell.cell_contents  # noqa: B018
+    except ValueError:
+        return False
+    return True
+
+
+def _reachable(root: object, *, barrier: object = None, limit: int = 3000) -> list[object]:
+    """Every object reachable from `root` through attributes, slots, containers and the wiring of
+    callables (bound methods, partials, closures, wrapped functions); strings, numbers, classes and
+    modules left out, and `barrier` (the test's own stand-in) kept but not entered: what a run
+    holds, found without naming its parts."""
     seen: dict[int, object] = {}
     todo = [root]
     while todo and len(seen) < limit:
         obj = todo.pop()
-        if id(obj) in seen or isinstance(obj, (str, bytes, int, float, type, bool, type(None))):
-            continue
-        if callable(obj) and not hasattr(obj, "__dict__"):
+        if id(obj) in seen or isinstance(obj, (str, bytes, int, float, bool, type, types.ModuleType, type(None))):
             continue
         seen[id(obj)] = obj
-        if isinstance(obj, dict):
-            todo += [*obj.keys(), *obj.values()]
-        elif isinstance(obj, (list, tuple, set, frozenset)):
-            todo += list(obj)
-        else:
-            todo += list(getattr(obj, "__dict__", {}).values())
-            for cls in type(obj).__mro__:
-                todo += [getattr(obj, n) for n in getattr(cls, "__slots__", ()) if hasattr(obj, n)]
+        if obj is not barrier:
+            todo += _children(obj)
     return list(seen.values())
+
+
+def _holds(obj: object, text: str) -> bool:
+    """Whether `text` is a raw value held directly by `obj` (an attribute, slot, item or closure cell)."""
+    return any(kid == text or (isinstance(kid, bytes) and kid.decode("utf-8", "replace") == text)
+               for kid in _children(obj))
+
+
+def _defender_owned(obj: object, stand_in: object) -> bool:
+    """A defender object other than the test's own stand-in: the part of what the run holds whose
+    repr is the run's to keep clean (O10), not a third party's internals."""
+    module = type(obj).__module__ or ""
+    return module.startswith("defender.") and not module.startswith("defender.tests.") and obj is not stand_in
 
 
 def test_r4f_nothing_the_run_holds_shows_an_openbao_client_token_or_the_sign_secret(
         tmp_path, data_root):
-    """After a mint with no signer injected, no repr or str of any object reachable from what
-    the run hands its lifecycle (the signer it builds among them) shows the client token the
-    login issued or the sign secret; the access holds the request token itself. O10, A24."""
+    """After a mint with no signer injected, no repr or str of any defender object reachable from what
+    the run hands its lifecycle (the signer it builds among them, however it is wired) shows the
+    client token the login issued or the sign secret; the access holds the request token. O10, A24."""
     _plant(data_root, proxy=("identity",))
     records, _ = _records(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET})
@@ -307,9 +347,11 @@ def test_r4f_nothing_the_run_holds_shows_an_openbao_client_token_or_the_sign_sec
     client_token = bao.signs[0].client_token
 
     (life,) = rec.lifecycle_calls
-    held = _reachable(life)
-    assert len(held) > len(life), "positive control: the walk went past the run's arguments"
-    for obj in held:
+    held = _reachable(life, barrier=bao)
+    assert any(_holds(obj, client_token) for obj in held), "positive control: the walk reaches the client token"
+    owned = [obj for obj in held if _defender_owned(obj, bao)]
+    assert owned, "positive control: the walk reaches defender objects"
+    for obj in owned:
         for text in (repr(obj), str(obj)):
             assert client_token not in text, f"{type(obj).__name__} shows the client token"
             assert SECRET not in text, f"{type(obj).__name__} shows the sign secret"

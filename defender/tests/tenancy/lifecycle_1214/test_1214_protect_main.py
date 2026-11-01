@@ -159,7 +159,7 @@ def test_rotation_removes_the_login_of_every_generation_from_the_whitelist_and_k
     def hold_every_generation() -> None:
         if not seen:
             seen.append(None)
-            bots = [u for u in world.forge.users if u.startswith("bot-")]
+            bots = [u for u in world.forge.users if u.startswith("bot-") and u != "bot-ops"]
             rule = world.forge.rule(full)
             world.forge.put_rule(full, **{**rule, "merge_whitelist_usernames": ["carol", "bot-ops", *bots],
                                           "merge_whitelist_teams": ["Reviewers", "Owners"]})
