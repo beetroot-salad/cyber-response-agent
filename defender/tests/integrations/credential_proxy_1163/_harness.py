@@ -256,13 +256,13 @@ def declaration(base: str, *, scheme: Mapping[str, Any] | None = None,
 
 
 def oauth_scheme(token_url: str, scopes: tuple[str, ...] = ("read",)) -> dict[str, Any]:
-    return {"scheme": "oauth-client-credentials", "token_url": token_url, "scopes": list(scopes),
-            "client_id_field": "client_id", "client_secret_field": "client_secret"}
+    """Fields `client_id` (not secret) and `client_secret` (secret), fixed by the kind (r7 A19)."""
+    return {"scheme": "oauth-client-credentials", "token_url": token_url, "scopes": list(scopes)}
 
 
 def basic_scheme() -> dict[str, Any]:
-    """Fields `username` (not secret) and `password` (secret)."""
-    return {"scheme": "basic", "username_field": "username", "password_field": "password"}
+    """Fields `username` (not secret) and `password` (secret), fixed by the kind (r7 A19)."""
+    return {"scheme": "basic"}
 
 
 def header_scheme(name: str = "X-Api-Key") -> dict[str, Any]:

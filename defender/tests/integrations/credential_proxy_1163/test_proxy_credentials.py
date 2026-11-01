@@ -139,6 +139,20 @@ def test_c2_the_basic_username_is_not_a_secret_and_survives_the_scrub(tmp_path, 
     assert H.CANARY_KEY not in json.dumps(answer)
 
 
+def test_c2_a_static_sets_username_is_public_under_every_scheme(tmp_path, data_root):
+    """The scrub and the write API share one rule of what is secret (r7 A19): a static set's
+    `username` is not, whatever the declared scheme; its other fields are."""
+    with T.rig(tmp_path / "forge", data_root, _decl({"scheme": "bearer", "field": "api_key"}),
+               creds=T.custom_set({"api_key": H.CANARY_KEY, "username": "svc-reader"})) as r:
+        r.up.replies[f"{BASE}/users/x"] = H.echo_secret(
+            lambda s: "svc-reader-and-" + s.header("Authorization").removeprefix("Bearer "))
+        answer = r.ask()
+
+    assert answer["fault"] is None
+    assert "svc-reader-and-" in answer["body"]
+    assert H.CANARY_KEY not in json.dumps(answer)
+
+
 def test_c2_an_error_reply_does_not_carry_the_credential_either(tmp_path, data_root):
     """A 403 whose body and header echo the key yields a fault answer without it anywhere.
     O4, O7."""

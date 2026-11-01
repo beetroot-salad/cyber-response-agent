@@ -221,14 +221,26 @@ def _bad_declarations(up: str) -> dict[str, str]:
         "not-http-proxy": base.replace('"http-proxy"', '"docker-exec"'),
         "not-a-mapping": "- just\n- a list\n",
         "empty": "",
+        # r7 A19: a declaration no longer renames the stored fields
+        "renamed-basic-field": H.declaration(up + T.BASE_PATH, scheme={
+            "scheme": "basic", "username_field": "login", "password_field": "password"}),
+        "renamed-oauth-field": H.declaration(up + T.BASE_PATH, scheme={
+            **H.oauth_scheme(up + "/token"), "client_secret_field": "secret"}),
+        "bearer-field-is-a-public-name": H.declaration(up + T.BASE_PATH, scheme={
+            "scheme": "bearer", "field": "username"}),
+        "header-field-is-a-public-name": H.declaration(up + T.BASE_PATH, scheme={
+            "scheme": "header", "header": "X-Api-Key", "field": "client_id"}),
     }
 
 
 @pytest.mark.parametrize("kind", ["duplicate-key", "two-bases", "no-base", "not-http-proxy",
-                                  "not-a-mapping", "empty"])
+                                  "not-a-mapping", "empty", "renamed-basic-field",
+                                  "renamed-oauth-field", "bearer-field-is-a-public-name",
+                                  "header-field-is-a-public-name"])
 def test_d5_a_malformed_declaration_is_a_config_fault_unsent(tmp_path, data_root, kind):
     """A merged but unusable declaration (duplicate key, two bases, no base, other access
-    method, not a mapping, empty) refuses the system. O2, A2, O7."""
+    method, not a mapping, empty, a renamed credential field, a secret field named by a public
+    name) refuses the system. O2, A2, O7, r7 A19."""
     with T.rig(tmp_path / "forge", data_root) as r:
         r.t.merge({ACCESS: _bad_declarations(r.up.url)[kind]}, "bad declaration")
         r.t.publish()
