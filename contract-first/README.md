@@ -72,6 +72,7 @@ with diagrams, see [docs/design.md](docs/design.md).
 | `/contract-first:refactor` | Restructures without behavior change; tests change only mechanically, and a lint is added when a removed pattern could return. |
 | `/contract-first:ship` | Branch, commit, push, open a PR. Used by the stages above; useful on its own. |
 | `/contract-first:guide` | Answers which lane fits a change, where a run stands and what comes next, and why the pipeline works as it does. Runs only when you type it. |
+| `/contract-first:maintain-cache` | Keeps the project cache: adds repo facts a run had to work out, removes entries the run contradicted, and consolidates similar entries. The pipeline stages run it in a fresh agent; run it yourself with no argument to consolidate only. |
 | `/contract-first:handoff` | Writes the terse note that lets a cold session resume the work. |
 | `/contract-first:symbol-refs` | Resolves a symbol's cross-file references or definitions through Claude Code's `LSP` tool, checked against grep, where grep alone would also match comments and unrelated same-name symbols. |
 
@@ -102,8 +103,8 @@ repo already keeps for any agent:
 - **The project cache** (`.claude/contract-first-cache.md`) — how the skills' rules apply to this
   project in particular (ownership markers, threat-model examples, lint conventions), one grep-able
   line per entry. Each skill file ends with its own cache of applications that hold for any
-  project; the project file holds the rest. Skills grep it for their own name. One plugin agent, `cache-keeper`, is
-  its only writer: write-tests and write-code-from-tests dispatch it at the end of their review
+  project; the project file holds the rest. Skills grep it for their own name. One skill, `maintain-cache`, is
+  its only writer, run in a fresh agent: write-tests and write-code-from-tests dispatch it at the end of their review
   steps, and it adds what the run had to work out, removes what it contradicted, and consolidates
   similar entries. The changes ride in the run's PR.
 - **The attack deck** (`.claude/contract-first-attacks.md`) — the project's own record of exploit

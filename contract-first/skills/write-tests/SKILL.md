@@ -97,7 +97,7 @@ Never turn a known blocker into an implementer note and call the contract ready.
 
 ## 7. Commit and hand off
 
-Before committing, dispatch the plugin's **cache-keeper** agent with the issue number and this run's record. Commit its cache changes, unchanged, with the contract. Then commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.
+Before committing, dispatch one fresh agent to run `/contract-first:maintain-cache <issue>`, with this run's record. Commit its cache changes, unchanged, with the contract. Then commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.
 
 ## Cache
 

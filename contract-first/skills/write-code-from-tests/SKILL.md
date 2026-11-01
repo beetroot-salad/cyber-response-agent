@@ -62,7 +62,7 @@ Route the verdicts:
 - **Accept:** once the human agrees, record the family in the design's **accepted trade-offs** (discuss-issue's design-doc format) with what closing it would cost. Attackers and finalize then treat it as decided.
 - **Factual question:** probe it. The human doesn't decide what existing code does.
 
-**Keep the cache.** Once every family has a verdict, dispatch the plugin's **cache-keeper** agent with the issue number and this run's record. Commit its cache changes, unchanged, with the code.
+**Keep the cache.** Once every family has a verdict, dispatch one fresh agent to run `/contract-first:maintain-cache <issue>`, with this run's record. Commit its cache changes, unchanged, with the code.
 
 **When to stop.** A recheck that finds only new instances of decided families is done: those instances are not holes. Run another attack-and-triage round only when a recheck finds a new family. When the same family comes back after a *close* verdict, the single test missed the class; revisit the verdict rather than add a member. Stop and report the concrete next action when the budget runs out with blockers. A draft PR may show blocked work, but an undecided family never accompanies a success verdict.
 

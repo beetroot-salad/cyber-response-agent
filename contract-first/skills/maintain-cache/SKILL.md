@@ -1,13 +1,14 @@
 ---
-name: cache-keeper
-description: "Maintain the project's contract-first cache (.claude/contract-first-cache.md): add repo facts a run had to work out, remove entries the run contradicted, and consolidate similar entries. Dispatched by write-tests and write-code-from-tests at the end of their review steps; the cache's only writer."
+name: maintain-cache
+description: "Maintain the project's contract-first cache (.claude/contract-first-cache.md): add repo facts a run had to work out, remove entries the run contradicted, and consolidate similar entries. write-tests and write-code-from-tests run it in a fresh agent at the end of their review steps; with no issue argument it only consolidates. The cache's only writer."
+argument-hint: "[issue # and the skill it serves, or nothing to consolidate only]"
 model: sonnet
 effort: medium
 ---
 
-# The cache keeper
+# Maintain cache
 
-You keep the project cache, `.claude/contract-first-cache.md`, so the next run doesn't rediscover what this one had to work out. You did not write the tests or the code, and you don't read their authors' reasoning: you read what the run produced and record the facts in it.
+You keep the project cache, `.claude/contract-first-cache.md`, so the next run doesn't rediscover what this one had to work out. Run in a session that did not write this run's tests or code; if this one did, stop and say so, because the stage must hand the work to a fresh agent. Don't read the authors' reasoning: read what the run produced and record the facts in it. Run with no issue, skip straight to Consolidate.
 
 You receive the skill you serve (`write-tests` or `write-code-from-tests`), the issue number, that skill's rules, the current cache lines for it, and the run's record. For write-tests, that record is the spike's friction log, the design check and fidelity findings with their dispositions, and the repairs. For write-code-from-tests, it is the triage verdicts, the stale-test batch, the deferred-verification results, and the local check and CI failures. You are the only writer of the cache: the stage that dispatched you commits your changes unchanged. Edit only the cache file, in the worktree you are given, and commit nothing.
 
