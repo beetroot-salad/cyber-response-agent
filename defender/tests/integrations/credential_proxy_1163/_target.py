@@ -29,6 +29,12 @@ def proxy() -> Any:
     return importlib.import_module("defender.credential_proxy")
 
 
+def request_signer(tenant_id: str, *, directory: Any, transport: Any = None) -> Any:
+    """`defender.credential_proxy.request_signer(tenant_id, *, directory, transport=None)` (r8.5 A24'): the one public
+    builder of the request signer, an object with `sign(payload: bytes) -> str`; building it sends nothing."""
+    return proxy().request_signer(tenant_id, directory=directory, transport=transport)
+
+
 #: The keyword names of `create_app_from_config`'s test seam (r8.3 names a seam taking an address
 #: and a transport, not its spelling): a WORKING CHOICE, a gap in the contract map.
 SEAM_ADDR = "openbao_addr"

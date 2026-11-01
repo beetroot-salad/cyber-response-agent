@@ -4,10 +4,8 @@ leg when the ticket system is `http-proxy`. Run start checks configuration only 
 OpenBao. Driven through `run.main` and its injection seams."""
 from __future__ import annotations
 
-import functools
 import logging
 import time
-import types
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +15,7 @@ from defender.kit.faults import ConfigFault, TransportFault
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
-from defender.tests.integrations.credential_proxy_1163._target import proxy
+from defender.tests.integrations.credential_proxy_1163._target import proxy, request_signer
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 TABLE = """\
@@ -267,94 +265,25 @@ def test_r4e_a_sign_openbao_refuses_with_a_4xx_is_a_config_fault_after_one_relog
     assert len(bao.signs) == 1, "positive control: the same run signs once OpenBao accepts"
 
 
-def _children(obj: object) -> list[object]:
-    """What `obj` holds directly: instance attributes, slots, container items, and, for a callable,
-    the object it is bound to, the function under it, its closure cells, defaults, a `partial`'s
-    parts and a wrapped function."""
-    if isinstance(obj, dict):
-        return [*obj.keys(), *obj.values()]
-    if isinstance(obj, (list, tuple, set, frozenset)):
-        return list(obj)
-    kids: list[object] = []
-    if isinstance(obj, types.MethodType):
-        kids += [obj.__self__, obj.__func__]
-    if isinstance(obj, functools.partial):
-        kids += [obj.func, *obj.args, *obj.keywords.values()]
-    if isinstance(obj, types.FunctionType):
-        kids += [cell.cell_contents for cell in obj.__closure__ or () if _filled(cell)]
-        kids += [*(obj.__defaults__ or ()), *(obj.__kwdefaults__ or {}).values()]
-    if hasattr(obj, "__wrapped__"):
-        kids.append(obj.__wrapped__)
-    kids += list(getattr(obj, "__dict__", {}).values()) if not isinstance(obj, types.MethodType) else []
-    for cls in type(obj).__mro__:
-        kids += [getattr(obj, n) for n in getattr(cls, "__slots__", ()) if hasattr(obj, n)]
-    return kids
-
-
-def _filled(cell: Any) -> bool:
-    try:
-        cell.cell_contents  # noqa: B018
-    except ValueError:
-        return False
-    return True
-
-
-def _reachable(root: object, *, barrier: object = None, limit: int = 3000) -> list[object]:
-    """Every object reachable from `root` through attributes, slots, containers and the wiring of
-    callables (bound methods, partials, closures, wrapped functions); strings, numbers, classes and
-    modules left out, and `barrier` (the test's own stand-in) kept but not entered: what a run
-    holds, found without naming its parts."""
-    seen: dict[int, object] = {}
-    todo = [root]
-    while todo and len(seen) < limit:
-        obj = todo.pop()
-        if id(obj) in seen or isinstance(obj, (str, bytes, int, float, bool, type, types.ModuleType, type(None))):
-            continue
-        seen[id(obj)] = obj
-        if obj is not barrier:
-            todo += _children(obj)
-    return list(seen.values())
-
-
-def _holds(obj: object, text: str) -> bool:
-    """Whether `text` is a raw value held directly by `obj` (an attribute, slot, item or closure cell)."""
-    return any(kid == text or (isinstance(kid, bytes) and kid.decode("utf-8", "replace") == text)
-               for kid in _children(obj))
-
-
-def _defender_owned(obj: object, stand_in: object) -> bool:
-    """A defender object other than the test's own stand-in: the part of what the run holds whose
-    repr is the run's to keep clean (O10), not a third party's internals."""
-    module = type(obj).__module__ or ""
-    return module.startswith("defender.") and not module.startswith("defender.tests.") and obj is not stand_in
-
-
-def test_r4f_nothing_the_run_holds_shows_an_openbao_client_token_or_the_sign_secret(
-        tmp_path, data_root):
-    """After a mint with no signer injected, no repr or str of any defender object reachable from what
-    the run hands its lifecycle (the signer it builds among them, however it is wired) shows the
-    client token the login issued or the sign secret; the access holds the request token. O10, A24."""
+def test_r4f_a_request_signer_shows_neither_the_client_token_nor_the_sign_secret(tmp_path, data_root):
+    """`request_signer(tenant, directory=, transport=)` sends nothing when built; after one sign neither its repr nor its
+    str shows the client token the login issued or the sign secret. O10, A24' signer handle (r8.5)."""
     _plant(data_root, proxy=("identity",))
     records, _ = _records(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET})
-    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
-                                           directory=records.directory)
-    assert (rc, refused) == (0, None)
-    access = read_access(rec)
-    access.token()
-    assert bao.logins == [(ROLE, SECRET)], "positive control: a mint ran"
-    assert len(bao.signs) == 1
-    client_token = bao.signs[0].client_token
+    signer = request_signer(S.PLAYGROUND_ID, directory=records.directory, transport=bao)
+    assert bao.requests == [], "building the signer sent a request"
 
-    (life,) = rec.lifecycle_calls
-    held = _reachable(life, barrier=bao)
-    assert any(_holds(obj, client_token) for obj in held), "positive control: the walk reaches the client token"
-    owned = [obj for obj in held if _defender_owned(obj, bao)]
-    assert owned, "positive control: the walk reaches defender objects"
-    for obj in owned:
-        for text in (repr(obj), str(obj)):
-            assert client_token not in text, f"{type(obj).__name__} shows the client token"
-            assert SECRET not in text, f"{type(obj).__name__} shows the sign secret"
+    signature = signer.sign(b"payload-1163")
+    assert bao.logins == [(ROLE, SECRET)], "positive control: the sign went through the login"
+    assert len(bao.signs) == 1, "positive control: one sign"
+    assert A.SIGNATURE_CANARY in signature, "positive control: the stand-in's signature came back"
+    client_token = bao.signs[0].client_token
+    assert client_token, "positive control: the stand-in issued a token"
+    assert bao.role_of(bao.signs[0]) == ROLE, "positive control: the token is the sign login's"
+    for text in (repr(signer), str(signer)):
+        assert client_token not in text, "the signer shows the client token"
+        assert SECRET not in text, "the signer shows the sign secret"
 
 
 def _make_absent(path: Path) -> None:

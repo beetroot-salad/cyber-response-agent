@@ -359,24 +359,85 @@ def test_offboarding_a_tenant_recorded_before_r8_sends_nothing_for_a_missing_sig
     assert world.live(other).sign_approle in world.openbao.approles and _key(other) in world.openbao.transit_keys
 
 
-def test_a_pending_generation_recorded_before_r8_fails_its_next_step_naming_the_sign_login_and_can_be_offboarded(world):
-    """A rotation in flight across the upgrade (pending generation with no sign names) fails at its next step with a
-    failure that names the sign login; the operator can offboard it (r8.4 upgrade)."""
-    tenant = world.active_tenant()
-    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
-    flaky = openbao_failing(world, lambda _r: True)
-    world.drive()
-    assert flaky.hit and world.item(tenant)["step"] == "provider", "control: the rotation stopped at its provider"
-    world.service_actor = world.new_service(world.tenants, identity=world.service)
+def _seed_pending_before_r8(world, kind: str) -> tuple[str, Any]:
+    """A `kind` job (create or rotate) whose next step is `provider`, with a pending generation as an older deployment
+    recorded it: the real `names` step run alone (no failure injected, no partial drive), then the sign names removed
+    from the row. Returns the tenant and the pending generation as seeded."""
+    if kind == "create":
+        tenant = world.create()
+    else:
+        tenant = world.active_tenant()
+        assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+
+    async def names_only() -> None:
+        async with world.tenants.lock(tenant) as held:
+            assert held is not None
+            await world.service_actor.steps()["names"](held)
+    world.call(names_only)
     pending = _row(world, tenant, "pending")
-    assert pending.sign_approle, "control: the names step recorded the sign names"
     for name in SIGN_FIELDS:
         setattr(pending, name, None)
-    world.drive()
     item = world.item(tenant)
-    assert item["failure"] and "sign" in item["failure"].lower(), item
-    assert (item["step"], item["step_actor"]) == ("provider", "service")
-    assert world.live(tenant).sign_approle, "the live generation was not disturbed"
-    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    assert (item["step"], item["step_actor"], item["failure"]) == ("provider", "service", None), item
+    return tenant, _only_pending(world, tenant)
+
+
+def _only_pending(world, tenant: str) -> Any:
+    [pending] = [g for g in world.generations(tenant) if g.status == "pending"]
+    return pending
+
+
+class _LogsCommits:
+    """A hold that logs, for each commit recording sign names, how many OpenBao requests had been made by then."""
+
+    def __init__(self, held: Any, world: Any, log: list[tuple[int, dict[str, Any]]]) -> None:
+        self._held, self._world, self._log = held, world, log
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._held, name)
+
+    async def commit(self, **kwargs: Any) -> Any:
+        for fields in (kwargs.get("update_generations") or {}).values():
+            if any(name in fields for name in ("sign_approle", "sign_entity")):
+                self._log.append((len(self._world.openbao.calls), dict(fields)))
+        return await self._held.commit(**kwargs)
+
+
+@pytest.mark.parametrize("kind", ["create", "rotate"])
+def test_a_pending_generation_recorded_before_r8_completes_with_its_sign_login(world, kind):
+    """A create or rotate job about to run `provider` over a pending generation with no sign names records them before any
+    request makes the sign AppRole or entity, then completes with a working sign login and no failure (r8.5 A24', P1)."""
+    tenant, seeded = _seed_pending_before_r8(world, kind)
+    assert (seeded.sign_approle, seeded.sign_entity, seeded.sign_role_id) == (None, None, None), "control: seeded without sign names"
+    bao = world.openbao
+    sign_approle, sign_entity = f"sign-{tenant}-{seeded.salt}", f"tenant-{tenant}-{seeded.salt}-sign"
+    assert sign_approle not in bao.approles and sign_entity not in bao.entities, "control: no sign chain of this generation exists yet"
+    mark, log, real = len(bao.calls), [], world.tenants.lock
+
+    @contextlib.asynccontextmanager
+    async def lock(tenant_id: str) -> Any:
+        async with real(tenant_id) as held:
+            yield None if held is None else _LogsCommits(held, world, log)
+    world.tenants.lock = lock
     world.drive()
-    assert world.record(tenant).state == "offboarded"
+    world.tenants.lock = real
+
+    [(recorded_after, fields)] = log
+    assert (fields["sign_approle"], fields["sign_entity"]) == (sign_approle, sign_entity)
+    made = [i for i, c in enumerate(bao.calls) if c.method in ("POST", "PUT")
+            and c.path in (f"/v1/auth/approle/role/{sign_approle}", f"/v1/identity/entity/name/{sign_entity}")]
+    assert made, "control: the provider made the sign AppRole and entity"
+    assert recorded_after <= min(made) and recorded_after >= mark, "a sign AppRole or entity was requested before its names were recorded"
+
+    item = world.item(tenant)
+    assert (item["state"], item["pending_action"], item["failure"]) == ("active", None, None), item
+    assert world.record(tenant).failure is None
+    gen = world.live(tenant)
+    assert gen.salt == seeded.salt and (gen.sign_approle, gen.sign_entity) == (sign_approle, sign_entity)
+    assert all(getattr(gen, name) for name in SIGN_FIELDS if name != "sign_wrapped_secret")
+    assert bao.approle_policies[gen.sign_approle] == [SIGN_POLICY] and sign_entity in bao.entities
+    assert gen.sign_role_id in {a["name"] for a in bao.aliases}
+    assert bao.transit_keys[_key(tenant)]["type"] == "ed25519"
+    assert gen.sign_secret_file.read_text(encoding="utf-8") == bao.approles[gen.sign_approle][gen.sign_secret_accessor] + "\n"
+    _delivery, sign = _pair(world, gen)
+    assert _sign(world, sign, tenant) == 200
