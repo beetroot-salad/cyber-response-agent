@@ -106,7 +106,11 @@ class Generation(Base, kw_only=True):
     """One credential chain of a tenant, sharing one salt: the bot, its integration, the OIDC role,
     the AppRole and its entity, and the host's secret file. The names are recorded before anything
     is created (P1); the rest as each step learns it. `wrapped_secret` is the single-use wrapping
-    token handed to the host, cleared by install."""
+    token handed to the host, cleared by install.
+
+    The `sign_*` fields mirror the delivery chain's for the generation's sign-only AppRole (#1163
+    A24'): its own entity, role id, wrapped and installed secret, and the host file beside the
+    delivery one. A generation recorded before them reads back with them None."""
 
     __tablename__ = "generations"
     __table_args__ = (
@@ -128,6 +132,12 @@ class Generation(Base, kw_only=True):
     host_secret_file: Mapped[Path | None] = mapped_column(_PathText, default=None)
     wrapped_secret: Mapped[str | None] = mapped_column(Text, default=None)
     secret_accessor: Mapped[str | None] = mapped_column(Text, default=None)
+    sign_approle: Mapped[str | None] = mapped_column(Text, default=None)
+    sign_entity: Mapped[str | None] = mapped_column(Text, default=None)
+    sign_role_id: Mapped[str | None] = mapped_column(Text, default=None)
+    sign_secret_file: Mapped[Path | None] = mapped_column(_PathText, default=None)
+    sign_wrapped_secret: Mapped[str | None] = mapped_column(Text, default=None)
+    sign_secret_accessor: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class PublishStatus(Base, kw_only=True):
