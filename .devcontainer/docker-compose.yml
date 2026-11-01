@@ -152,9 +152,12 @@ services:
   # (OpenBao KV) and the only one that adds them to a request. A run presents a signed request
   # token; the proxy applies the declaration in each tenant's published `current` export (the
   # data root is mounted read-only) and appends every use to its audit file. Reachable on the
-  # compose network only (no published port, no docker socket). Its config file (the operator's:
-  # OpenBao address, the proxy role's token file, mounts, tenant keys) lives under
-  # <repo>/playground-issuer/credential-proxy/ (gitignored); see `defender/credential_proxy/__main__.py`.
+  # compose network only (no published port, no docker socket). It keeps no tenant list (#1163
+  # A26): a token's tenant id gives its exports, `/data/<tenant id>/exports/`, and its transit key;
+  # OpenBao is the deployment's fixed `https://openbao:8200` and `transit/` mount. Its config file
+  # (the operator's: the proxy role's token file, the KV mount, `"data_root": "/data"` and the
+  # audit file) lives under <repo>/playground-issuer/credential-proxy/ (gitignored); see
+  # `defender/credential_proxy/__main__.py`.
   credential-proxy:
     build:
       context: ../

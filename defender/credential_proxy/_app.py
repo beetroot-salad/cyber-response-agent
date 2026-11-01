@@ -9,10 +9,12 @@ the fault class the adapter raises (`ConfigFault`, `ConfinementFault`, `Upstream
 `TransportFault`); `detail` says why and never holds a secret value.
 
 For each request (design "Proxy", in order, nothing sent or read before its check passes):
-1. verify the token with the key of the tenant it names, and its expiry (O1, O8, A11);
+1. verify the token with the key of the tenant it names, and its expiry (O1, O8, A11); a tenant
+   id that is not a canonical tenant UUID is refused before any OpenBao or exports path is built;
 2. the system must be a system name and in the token's grant;
-3. read the system's declaration from the export the tenant's `current` names, no link
-   followed: never the clone's working tree, never another export (O2, P-2, H10);
+3. read the system's declaration from the export the tenant's `current` names, under
+   `<data root>/<tenant id>/exports/` (A26), no link followed: never the clone's working tree,
+   never another export (O2, P-2, H10);
 4. the URL must be under the one declared base, the route a read or a granted write (O2, O3);
 5. read the credential set; it must fit the declared scheme (A4); exchange an OAuth token if
    none is held (A8, A12);
@@ -37,7 +39,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from defender import _clock, tenancy
+from defender import _clock, _io, tenancy
+from defender.configuration.issuer import DEPLOYMENT_ISSUER
 from defender.kit.access import HEADER, OAUTH_CLIENT_CREDENTIALS, PROXY_OVERHEAD_SEC, Auth
 from defender.kit.faults import ConfigFault, TransportFault
 from defender.kit.verbs import is_system_name
@@ -91,10 +94,11 @@ class CredentialStore(Protocol):
 
 @dataclass(frozen=True)
 class ProxyDeps:
-    """What the proxy runs over: each tenant's `exports/` folder (read only), the credential
-    store, the token verifier, the audit sink, and the response cap and upstream timeout."""
+    """What the proxy runs over: the data root whose `<tenant id>/exports/` folders it reads (read
+    only; it keeps no tenant list, A26), the credential store, the token verifier, the audit
+    sink, and the response cap and upstream timeout."""
 
-    tenant_exports: Mapping[str, Path]
+    data_root: Path
     store: CredentialStore
     verifier: TokenVerifier
     audit: AuditSink
@@ -237,11 +241,16 @@ class _Proxy:
         return claims
 
     def _current_export(self, tenant_id: str) -> tenancy.TenantExport:
-        exports = self.deps.tenant_exports.get(tenant_id)
-        if exports is None:
-            raise Refused(CONFIG, f"the proxy serves no exports for tenant {tenant_id}")
+        # The id is checked here too, not only by the verifier: no path is built from a claim
+        # that is not a canonical tenant UUID (A26).
+        if not tenancy.is_valid_tenant_id(tenant_id):
+            raise Refused(CONFIG, "the request token names no tenant id")
+        exports = Path(self.deps.data_root) / tenant_id / "exports"
+        if not exports.is_dir() or exports.is_symlink():
+            raise Refused(CONFIG, f"tenant {tenant_id} has no exports folder under the proxy's data "
+                                  "root")
         try:
-            return tenancy.current_export_at(Path(exports), tenant_id)
+            return tenancy.current_export_at(exports, tenant_id)
         except tenancy.DeliveryRefused as refused:
             _logger.warning("tenant %s: %s", tenant_id, refused)
             raise Refused(CONFIG, f"tenant {tenant_id} has no published export to apply") from None
@@ -388,38 +397,54 @@ def create_app(deps: ProxyDeps) -> FastAPI:  # lint-dup: ok — the proxy's own 
     return app
 
 
-#: The operator configuration `create_app_from_config` takes (A13); the last two are optional.
-CONFIG_KEYS = ("openbao_addr", "openbao_token", "kv_mount", "transit_mount", "tenant_keys",
-               "tenant_exports", "audit_path")
+#: The operator configuration `create_app_from_config` takes (A13, A26): exactly one of
+#: `openbao_token` and `openbao_token_file`, and every key of `CONFIG_KEYS`; the others optional.
+CONFIG_KEYS = ("kv_mount", "data_root", "audit_path")
+TOKEN_KEYS = ("openbao_token", "openbao_token_file")
 OPTIONAL_CONFIG_KEYS = ("max_response_bytes", "upstream_timeout_sec")
 
 
-def create_app_from_config(config: Mapping[str, Any]) -> FastAPI:
+def _openbao_token(config: Mapping[str, Any]) -> str:
+    """The proxy role's OpenBao token: given in the config, or read from the file it names (the
+    file's trailing newline dropped). Never from the environment."""
+    given = [k for k in TOKEN_KEYS if k in config]
+    if len(given) != 1:
+        raise ConfigFault("credential proxy configuration: give one of openbao_token or "
+                          "openbao_token_file")
+    if given == ["openbao_token"]:
+        return config["openbao_token"]
+    where = config["openbao_token_file"]
+    try:
+        return _io.read_text_utf8(Path(where)).strip()
+    except (OSError, TypeError, ValueError) as e:
+        raise ConfigFault(f"credential proxy configuration: the OpenBao token file cannot be read "
+                          f"({type(e).__name__})") from None
+
+
+def create_app_from_config(config: Mapping[str, Any], *, openbao_addr: str | None = None,
+                           transport: httpx.BaseTransport | None = None) -> FastAPI:
     """The shipped proxy from the operator's settings: the OpenBao store and transit verifier
-    (`openbao_addr`, `openbao_token` of the proxy role, `kv_mount`, `transit_mount`,
-    `tenant_keys` {tenant id: transit key}), each tenant's `exports/` folder (`tenant_exports`
-    {tenant id: path}, read only) and the append-only audit file (`audit_path`). A missing or
-    unknown key, or a tenant with exports and no transit key, is `ConfigFault`."""
+    (the proxy role's token, `kv_mount`), the data root whose tenants' `exports/` folders it reads
+    (`data_root`, read only) and the append-only audit file (`audit_path`). OpenBao is the
+    deployment's (`DEPLOYMENT_ISSUER`, https) on the fixed transit mount; `openbao_addr` and
+    `transport` are a test's seam, never configuration. A missing or unknown key (the retired
+    `tenant_keys`, `tenant_exports`, `transit_mount` and `openbao_addr` included) or a value of
+    the wrong type is `ConfigFault`."""
     missing = [k for k in CONFIG_KEYS if k not in config]
-    unknown = sorted(set(config) - set(CONFIG_KEYS) - set(OPTIONAL_CONFIG_KEYS))
+    unknown = sorted(set(config) - set(CONFIG_KEYS) - set(TOKEN_KEYS) - set(OPTIONAL_CONFIG_KEYS))
     if missing or unknown:
         raise ConfigFault(f"credential proxy configuration: missing {missing}, unknown {unknown}")
-    tenant_keys, tenant_exports = config["tenant_keys"], config["tenant_exports"]
-    if not isinstance(tenant_keys, Mapping) or not isinstance(tenant_exports, Mapping):
-        raise ConfigFault("credential proxy configuration: tenant_keys and tenant_exports must "
-                          "map tenant ids")
-    keyless = sorted(set(tenant_exports) - set(tenant_keys))
-    if keyless:
-        raise ConfigFault(f"credential proxy configuration: tenants {keyless} have exports and "
-                          "no transit key")
-    addr, token = config["openbao_addr"], config["openbao_token"]
+    token = _openbao_token(config)
+    addr = DEPLOYMENT_ISSUER.openbao_url if openbao_addr is None else openbao_addr
     extra = {k: config[k] for k in OPTIONAL_CONFIG_KEYS if k in config}
     try:
+        data_root = config["data_root"]
+        if not isinstance(data_root, str) or "\0" in data_root:
+            raise TypeError("data_root")
         deps = ProxyDeps(
-            tenant_exports={str(t): Path(p) for t, p in tenant_exports.items()},
-            store=OpenBaoStore(addr=addr, token=token, mount=config["kv_mount"]),
-            verifier=TransitVerifier(addr=addr, token=token, mount=config["transit_mount"],
-                                     keys=dict(tenant_keys)),
+            data_root=Path(data_root),
+            store=OpenBaoStore(addr=addr, token=token, mount=config["kv_mount"], transport=transport),
+            verifier=TransitVerifier(addr=addr, token=token, transport=transport),
             audit=FileAuditSink(config["audit_path"]),
             **extra)
     except (TypeError, ValueError) as e:
@@ -429,5 +454,5 @@ def create_app_from_config(config: Mapping[str, Any]) -> FastAPI:
     return create_app(deps)
 
 
-__all__ = ["CONFIG_KEYS", "DEFAULT_MAX_RESPONSE_BYTES", "OPTIONAL_CONFIG_KEYS", "PROXY_PATH",
+__all__ = ["CONFIG_KEYS", "DEFAULT_MAX_RESPONSE_BYTES", "OPTIONAL_CONFIG_KEYS", "PROXY_PATH", "TOKEN_KEYS",
            "CredentialStore", "ProxyDeps", "create_app", "create_app_from_config"]

@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 
 from defender.credential_proxy import mint_request_token, request_signer
 from defender.kit.access import PROXY_URL_ENV, AccessDeclaration, RequestAccess
-from defender.kit.faults import AdapterFault
+from defender.kit.faults import AdapterFault, ConfigFault
 from defender.records import formats
 
 from defender.records.formats import Episode
@@ -283,17 +283,22 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any,
                        capture=None, tenant=tenant, as_of=as_of, **proxied)
 
 
-def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any], *, signer: Any,
-                 proxy_url: str | None, issuer_transport: Any) -> RequestAccess | None:
+def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any], *, signer: Any,  # noqa: PLR0913 — the pass's identity plus the operator's seams
+                      proxy_url: str | None, issuer_transport: Any,
+                      directory: Any) -> RequestAccess | None:
     """A read token over the `http-proxy` systems the source run's replayable calls reach (H12),
-    signed in this process as the run does (A11), with the source run as its investigation; `None`
-    when no replayed call reaches one. Curators and the author are handed none."""
+    signed in this process as the run does (A11, A24'), with the source run as its investigation;
+    `None` when no replayed call reaches one. With no `signer` injected, the tenant's own
+    (`request_signer`) over the episode's tenant records `directory`, the launcher's (no second
+    records read here). Curators and the author are handed none."""
     proxied = sorted({call.system for call in replayable
                       if isinstance(tenant.access.get(call.system), AccessDeclaration)})
     if not proxied:
         return None
     if signer is None:
-        signer = request_signer(tenant.tenant, transport=issuer_transport)
+        if directory is None:
+            raise ConfigFault("no tenant records were handed to pre-flight to sign its read token with")
+        signer = request_signer(str(tenant.tenant_id), directory=directory, transport=issuer_transport)
     token = mint_request_token(
         signer, tenant_id=str(tenant.tenant_id), investigation=source.run_dir.name,
         grant={(system, "r") for system in proxied},
@@ -307,7 +312,7 @@ def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any],
 def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
     episode: Episode, *, source: Run, roster: Any, tenant: RunTenant, oracle: Any = None,
     verifier: Any = None, signer: Any = None, proxy_url: str | None = None,
-    issuer_transport: Any = None, **knobs: Any,
+    issuer_transport: Any = None, directory: Any = None, **knobs: Any,
 ) -> dict[str, Any]:
     """`Step.PREFLIGHT`: replay every original call through each fact world's oracle and
     verifier, and write the episode's write-once outcome record (`outcome.write_outcome`)."""
@@ -373,7 +378,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     limiter = RateLimiter(settings.rate)
     try:
         access = _preflight_access(source, tenant, replayable, signer=signer, proxy_url=proxy_url,
-                              issuer_transport=issuer_transport)
+                                   issuer_transport=issuer_transport, directory=directory)
     except AdapterFault as unsigned:
         return record(REFUSED, f"the read token for the credential proxy cannot be signed: "
                                f"{unsigned.detail}")

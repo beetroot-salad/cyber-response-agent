@@ -3,7 +3,7 @@
 Adapters reach an `http-proxy` system by posting to the proxy with a request token; the proxy
 checks the token, the tenant's merged access declaration and the route, applies the stored
 credential, sends, scrubs and audits. The OpenBao store and transit signer/verifier, the token
-mint and the audit sink live here too. Run it with `python -m defender.credential_proxy`."""
+mint, the request signer (`request_signer`) and the audit sink live here too. Run it with `python -m defender.credential_proxy`."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from defender.credential_proxy._openbao import (
         OpenBaoSecrets as OpenBaoSecrets,
         OpenBaoStore as OpenBaoStore,
-        TransitSigner as TransitSigner,
         TransitVerifier as TransitVerifier,
         store_policies as store_policies,
         transit_key_for as transit_key_for,
@@ -46,7 +45,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("AUDIT_KEYS", "FileAuditSink",), "_audit"),
     **dict.fromkeys(("CredentialSet",), "_credentials"),
     **dict.fromkeys(("TenantRequestSigner", "request_signer",), "_launcher"),
-    **dict.fromkeys(("OpenBaoSecrets", "OpenBaoStore", "TransitSigner", "TransitVerifier", "store_policies", "transit_key_for",), "_openbao"),
+    **dict.fromkeys(("OpenBaoSecrets", "OpenBaoStore", "TransitVerifier", "store_policies", "transit_key_for",), "_openbao"),
     **dict.fromkeys(("mint_request_token",), "_tokens"),
 }
 

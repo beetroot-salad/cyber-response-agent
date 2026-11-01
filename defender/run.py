@@ -70,7 +70,6 @@ from defender.systems import system_status  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import RunTenant  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
-import threading  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
 from defender.credential_proxy import mint_request_token, request_signer  # noqa: E402
@@ -513,9 +512,11 @@ class _TokenMint:
                 records: tenancy.TenantDirectory, signer: Any, proxy_url: str | None,
                 issuer_transport: Any) -> _TokenMint:
         """The mint for a run, or a mint that signs nothing when no `http-proxy` system is in
-        reach. A configuration that cannot sign (no proxy address, no usable issuer config file)
-        refuses run start, naming the cause; called before the run folder is made, so the
-        refusal leaves none behind (r7 A20)."""
+        reach. A configuration that cannot sign (no proxy address; with no `signer` injected, a
+        tenant whose live generation in `records` records no sign login, A24') refuses run start,
+        naming the cause, and contacts no OpenBao; called before the run folder is made, so the
+        refusal leaves none behind (r7 A20). The signer is the tenant's own
+        (`credential_proxy.request_signer`, r8.5) unless one is injected."""
         proxied = {name for name, found in tenant.access.items()
                    if isinstance(found, AccessDeclaration) and name not in systems.down}
         reads = () if world is not None else tuple(sorted(
@@ -529,15 +530,19 @@ class _TokenMint:
         if not address:
             sys.exit(f"run start refused: a system is reached through the credential proxy, but "
                      f"its address is not configured ({PROXY_URL_ENV})")
-        try:
-            if signer is None:
-                signer = request_signer(accepted.tenant_id, directory=records,
-                                        transport=issuer_transport)
-            return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
-                       reads=reads, ticket_system=ticket_system)
-        except AdapterFault as refused:
-            sys.exit(f"run start refused: the request tokens for the credential proxy cannot be "
-                     f"signed: {refused.detail}")
+        if signer is None:
+            tenant_id = str(accepted.id)
+            # Run start's own read of the records it already holds: the sign login is recorded.
+            # No file is read and nothing is sent (A24' run start).
+            try:
+                tenancy.recorded_login(tenancy.live_generation(records, tenant_id),
+                                       tenancy.SIGN_LOGIN, tenant_id)
+            except (tenancy.AppRoleLoginError, tenancy.RecordsUnreachable) as refused:
+                sys.exit(f"run start refused: the request tokens for the credential proxy cannot be "
+                         f"signed: {refused}")
+            signer = request_signer(tenant_id, directory=records, transport=issuer_transport)
+        return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
+                   reads=reads, ticket_system=ticket_system)
 
     def _mint(self, grant: set[tuple[str, str]], expires_at: float) -> str:
         return mint_request_token(

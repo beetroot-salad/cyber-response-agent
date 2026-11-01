@@ -605,7 +605,8 @@ def _launch(  # noqa: PLR0913 — see `main`
                     tenant=tenant, runs=runs, served=served, oracle=oracle,
                     verifier=verifier, roster=roster, started=started,
                     knowledge_commit=pinned.commit, render_page=render_page,
-                    signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
+                    signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
+                    directory=admitted.directory)
             except SystemExit:
                 raise
             except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
@@ -622,7 +623,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     tenant: RunTenant, runs: RunsRepository[Tenant], served: Sequence[str], oracle: Any,
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer,
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
-    issuer_transport: Any = None,
+    issuer_transport: Any = None, directory: Any = None,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
 
@@ -652,7 +653,8 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     with clock.step(Step.PREFLIGHT):
         record = preflight_replay(episode, source=source, roster=roster, tenant=tenant,
                                   oracle=oracle, verifier=verifier, signer=signer,
-                                  proxy_url=proxy_url, issuer_transport=issuer_transport)
+                                  proxy_url=proxy_url, issuer_transport=issuer_transport,
+                                  directory=directory)
     if record["outcome"] != ACCEPTED:
         _logger.info(f"episode {episode_id}: {record['outcome']} before any sibling started "
                      f"({record['reason']})")

@@ -95,10 +95,13 @@ class TenantForgeCredential:
             raise ForgejoAuthError(f"the issuer AppRole login failed: {failed}") from failed
         finally:
             login.close()
+        audience = made.generation.audience
+        if not audience:
+            raise ForgejoAuthError(f"tenant {self.tenant_id}'s live credential generation records no audience")
         client = self._client(headers={"X-Vault-Token": made.client_token})
         try:
             return ForgejoIdentity(tenant_id=self.tenant_id, issuer=str(self.config.issuer_url).rstrip("/"),
-                                   role=made.generation.oidc_role, audience=made.generation.audience,
+                                   role=made.generation.oidc_role, audience=audience,
                                    client=client, clock=self.clock)
         except BaseException:
             client.close()

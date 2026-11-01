@@ -1,15 +1,18 @@
-"""OpenBao as the credential store and the token signer (#1163 H11, O5, A4, A11).
+"""OpenBao as the credential store and the token verifier (#1163 H11, O5, A4, A11, A25).
 
 - Store: KV v2, one secret per (tenant, system) at `<kv mount>/data/<tenant>/<system>`, holding
   `{"kind": ..., "fields": {...}}`; a write replaces the whole set and moves the version on.
   The writer (`OpenBaoSecrets`, the API's port) may create, update and read metadata only; the
   proxy (`OpenBaoStore`) may read data only (`store_policies`).
-- Tokens: transit, one key per tenant (`transit_key_for`). Each tenant's launcher login may sign
-  with its own key only; the proxy may verify with every tenant's key and sign with none.
+- Tokens: transit on the deployment's fixed mount (`configuration.issuer.TRANSIT_MOUNT`), one key
+  per tenant (`transit_key_for`). The proxy may verify with any tenant's key and sign with none
+  (`TransitVerifier`); each tenant's sign login signs with its own key only, under the deployment's
+  templated `defender-tenant-sign` policy (operator-provisioned, A24'), and its signer is
+  `credential_proxy.request_signer`.
 
-Every refusal, an unreachable or sealed server included, is `ConfigFault`, and no message holds
-a token or a credential value. The server's own audit device records each credential write
-(A4)."""
+A server that cannot be reached or answers 5xx is `TransportFault`; any other refusal is
+`ConfigFault` (r7 A18). No message or repr holds a token or a credential value. The server's own
+audit device records each credential write (A4)."""
 from __future__ import annotations
 
 import base64
@@ -20,6 +23,7 @@ from typing import Any
 import httpx
 
 from defender import tenancy
+from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.kit.access import CREDENTIAL_KINDS
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.kit.verbs import is_system_name
@@ -27,14 +31,17 @@ from defender.credential_proxy._credentials import CredentialSet
 
 #: How long one call to OpenBao may take, in seconds.
 OPENBAO_TIMEOUT_SEC = 10.0
-#: A mount path or transit key name: what may stand inside a policy's path string.
+#: A mount path: what may stand inside a policy's path string.
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}(?:/[A-Za-z0-9][A-Za-z0-9_.-]{0,127})*")
+#: Every tenant's transit key name starts so; the tenant id follows.
+_KEY_PREFIX = "request-token-"
 
 
 def transit_key_for(tenant_id: str) -> str:
-    """The name of `tenant_id`'s transit key (A11): the one naming rule."""
+    """The name of `tenant_id`'s transit key (A11): the one naming rule. A tenant id that is not a
+    canonical tenant UUID is `ConfigFault`, so no key path is built from it (A26)."""
     _check_tenant(tenant_id)
-    return f"request-token-{tenant_id}"
+    return f"{_KEY_PREFIX}{tenant_id}"
 
 
 def _check_tenant(tenant_id: object) -> str:
@@ -56,25 +63,17 @@ def _secret_path(tenant_id: object, system: object) -> str:
     return f"{tenant_id}/{system}"
 
 
-def store_policies(*, kv_mount: str, transit_mount: str,
-                   tenant_keys: Mapping[str, str]) -> dict[str, str]:
-    """The policy text for each role: `writer` (set a whole credential set, read metadata),
-    `proxy` (read credential sets, verify with each tenant's key) and `launcher-<tenant_id>` per
-    tenant (sign with that tenant's key only). Nothing grants list, delete, key read or
-    export."""
-    kv, transit = _check_name(kv_mount, "the KV mount"), _check_name(transit_mount,
-                                                                      "the transit mount")
-    keys = {_check_tenant(t): _check_name(k, "the transit key") for t, k in tenant_keys.items()}
+def store_policies(*, kv_mount: str) -> dict[str, str]:
+    """The policy text for each of the product's two roles: `writer` (set a whole credential set,
+    read metadata) and `proxy` (read credential sets, verify with any tenant's key on the transit
+    mount). Nothing grants list, delete, sign, key read or export; signing is the tenant sign
+    login's templated policy (A25)."""
+    kv = _check_name(kv_mount, "the KV mount")
     writer = (f'path "{kv}/data/*" {{\n  capabilities = ["create", "update"]\n}}\n'
               f'path "{kv}/metadata/*" {{\n  capabilities = ["read"]\n}}\n')
-    proxy = f'path "{kv}/data/*" {{\n  capabilities = ["read"]\n}}\n' + "".join(
-        f'path "{transit}/verify/{key}" {{\n  capabilities = ["update"]\n}}\n'
-        for key in sorted(keys.values()))
-    policies = {"writer": writer, "proxy": proxy}
-    for tenant_id, key in sorted(keys.items()):
-        policies[f"launcher-{tenant_id}"] = (
-            f'path "{transit}/sign/{key}" {{\n  capabilities = ["update"]\n}}\n')
-    return policies
+    proxy = (f'path "{kv}/data/*" {{\n  capabilities = ["read"]\n}}\n'
+             f'path "{TRANSIT_MOUNT}/verify/{_KEY_PREFIX}*" {{\n  capabilities = ["update"]\n}}\n')
+    return {"writer": writer, "proxy": proxy}
 
 
 def openbao_fault(status: int, detail: str) -> AdapterFault:
@@ -86,9 +85,11 @@ def openbao_fault(status: int, detail: str) -> AdapterFault:
 
 
 class _OpenBao:
-    """One login's calls to one OpenBao server. The token is never shown."""
+    """One login's calls to one OpenBao server. The token is never shown. `transport` is a test's
+    `httpx` transport for the synchronous calls (none: the network)."""
 
-    def __init__(self, *, addr: str, token: str, mount: str) -> None:
+    def __init__(self, *, addr: str, token: str, mount: str,
+                 transport: httpx.BaseTransport | None = None) -> None:
         if not isinstance(addr, str) or not addr.startswith(("http://", "https://")):
             raise ConfigFault("the OpenBao address must be an http(s) URL")
         if not isinstance(token, str) or not token or not token.isprintable():
@@ -97,8 +98,8 @@ class _OpenBao:
         self.mount = _check_name(mount, "the mount")
         self._token = token
         #: One pooled connection for this login's calls, not a new one per call.
-        self._client = httpx.Client(timeout=OPENBAO_TIMEOUT_SEC, trust_env=False,
-                                    follow_redirects=False)
+        self._client = httpx.Client(transport=transport, timeout=OPENBAO_TIMEOUT_SEC,
+                                    trust_env=False, follow_redirects=False)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(addr={self.addr!r}, mount={self.mount!r})"
@@ -206,48 +207,17 @@ class OpenBaoSecrets(_OpenBao):
                 and not version.get("deletion_time") and not version.get("destroyed"))
 
 
-class TransitSigner(_OpenBao):
-    """The launcher's signer: signs with one tenant's transit `key`."""
-
-    def __init__(self, *, addr: str, token: str, mount: str, key: str) -> None:
-        super().__init__(addr=addr, token=token, mount=mount)
-        self.key = _check_name(key, "the transit key")
-
-    def __repr__(self) -> str:
-        return (f"{type(self).__name__}(addr={self.addr!r}, mount={self.mount!r}, "
-                f"key={self.key!r})")
-
-    __str__ = __repr__
-
-    def sign(self, payload: bytes) -> str:
-        what = f"signing with {self.key}"
-        reply = self._call("POST", f"sign/{self.key}", what,
-                           json={"input": base64.b64encode(payload).decode("ascii")})
-        if reply.status_code != 200:
-            raise self._refused(reply, what)
-        signature = _data_of(reply).get("signature")
-        if not isinstance(signature, str) or not signature:
-            raise ConfigFault(f"OpenBao answered {what} without a signature")
-        return signature
-
-
 class TransitVerifier(_OpenBao):
-    """The proxy's verifier: checks a token with the key of the tenant it names (A11)."""
+    """The proxy's verifier: checks a token with the key of the tenant it names (A11), on the
+    deployment's transit mount. It keeps no tenant list (A26): a tenant whose key is missing or
+    destroyed (offboarded) is refused by OpenBao, `ConfigFault`."""
 
-    def __init__(self, *, addr: str, token: str, mount: str, keys: Mapping[str, str]) -> None:
-        super().__init__(addr=addr, token=token, mount=mount)
-        self.keys = {_check_tenant(t): _check_name(k, "the transit key") for t, k in keys.items()}
-
-    def __repr__(self) -> str:
-        return (f"{type(self).__name__}(addr={self.addr!r}, mount={self.mount!r}, "
-                f"tenants={len(self.keys)})")
-
-    __str__ = __repr__
+    def __init__(self, *, addr: str, token: str,
+                 transport: httpx.BaseTransport | None = None) -> None:
+        super().__init__(addr=addr, token=token, mount=TRANSIT_MOUNT, transport=transport)
 
     def verify(self, payload: bytes, signature: str, *, tenant_id: str) -> bool:
-        key = self.keys.get(tenant_id)
-        if key is None:
-            raise ConfigFault(f"no transit key is configured for tenant {tenant_id}")
+        key = transit_key_for(tenant_id)
         what = f"verifying with {key}"
         reply = self._call("POST", f"verify/{key}", what, json={
             "input": base64.b64encode(payload).decode("ascii"), "signature": signature})
@@ -259,5 +229,5 @@ class TransitVerifier(_OpenBao):
         return valid
 
 
-__all__ = ["OpenBaoSecrets", "openbao_fault", "OpenBaoStore", "TransitSigner", "TransitVerifier",
+__all__ = ["OpenBaoSecrets", "openbao_fault", "OpenBaoStore", "TransitVerifier",
            "store_policies", "transit_key_for"]

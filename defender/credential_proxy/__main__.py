@@ -5,12 +5,14 @@ production, H1).
 
 Operator configuration, all read at start:
 - `DEFENDER_CREDENTIAL_PROXY_CONFIG` (required): the path of a JSON file holding the mapping
-  `create_app_from_config` takes: `openbao_addr`, `openbao_token` (the proxy role's login),
-  `kv_mount`, `transit_mount`, `tenant_keys` ({tenant id: transit key}), `tenant_exports`
-  ({tenant id: that tenant's `exports/` folder, mounted read-only}), `audit_path` (the
-  append-only audit file), and optionally `max_response_bytes` and `upstream_timeout_sec`.
-  Instead of `openbao_token` the file may name `openbao_token_file`, a file holding the token.
-  The token is read from files only, never from the environment.
+  `create_app_from_config` takes: `openbao_token` (the proxy role's login) or
+  `openbao_token_file` (a file holding it), `kv_mount`, `data_root` (the data root, mounted
+  read-only: each tenant's exports are `<data_root>/<tenant id>/exports/`, so the proxy keeps no
+  tenant list), `audit_path` (the append-only audit file), and optionally `max_response_bytes`
+  and `upstream_timeout_sec`. OpenBao is the deployment's fixed address and transit mount, not
+  configuration; a config still naming `openbao_addr`, `transit_mount`, `tenant_keys` or
+  `tenant_exports` refuses to start (#1163 A26). The token is read from files only, never from
+  the environment.
 - `DEFENDER_CREDENTIAL_PROXY_HOST` (default `127.0.0.1`; a compose service sets `0.0.0.0` to
   listen on the compose network) and `DEFENDER_CREDENTIAL_PROXY_PORT` (default `8411`).
 - Logging: as every defender program (`defender._log.configure_from_env`).
@@ -40,23 +42,13 @@ _logger = logging.getLogger(__name__)
 
 
 def operator_config(path: Path) -> dict:
-    """The configuration mapping in the JSON file at `path`, with `openbao_token_file` read
-    into `openbao_token`; `ConfigFault` naming what is wrong (never the token)."""
+    """The configuration mapping in the JSON file at `path`; `ConfigFault` naming what is wrong."""
     try:
         config = json.loads(_io.read_text_utf8(path))
     except (OSError, ValueError) as e:
         raise ConfigFault(f"{path}: not a readable JSON configuration ({type(e).__name__})") from None
     if not isinstance(config, dict):
         raise ConfigFault(f"{path}: the configuration must be a JSON object")
-    token_file = config.pop("openbao_token_file", None)
-    if token_file is not None:
-        if "openbao_token" in config:
-            raise ConfigFault(f"{path}: give openbao_token or openbao_token_file, not both")
-        try:
-            config["openbao_token"] = _io.read_text_utf8(Path(token_file)).strip()
-        except (OSError, ValueError) as e:
-            raise ConfigFault(f"{token_file}: the OpenBao token file cannot be read "
-                              f"({type(e).__name__})") from None
     return config
 
 
