@@ -281,6 +281,31 @@ def test_b4_the_proxy_verifies_any_tenants_key_and_does_nothing_else_with_transi
         openbao.call("DELETE", outside)
 
 
+def test_a25_the_proxy_policy_grants_exactly_kv_read_and_transit_verify(openbao):
+    """With the proxy policy's token: KV read and transit verify are served; list or read of `transit/keys`, sign, KV write
+    and KV list are refused 403 (A25: 'reads the credential KV and may `update` `transit/verify/request-token-*`')."""
+    tokens = _tokens(openbao)
+    proxy_token = tokens["proxy"]
+    tenant = openbao.tenant()
+    m, kv, key = openbao.transit_mount, openbao.kv_mount, _key(tenant)
+    _put(_writer(openbao, tokens["writer"]), tenant, "identity", STATIC, {"api_key": H.CANARY_KEY})
+    signature = openbao.signer(tenant).sign(b"claims-1163")
+
+    def refused(method, path, body=None):
+        return openbao.call(method, path, token=proxy_token, json=body).status_code
+
+    assert _store(openbao, proxy_token).read(tenant, "identity") is not None, "control: the proxy reads the KV"
+    assert _verifier(openbao, tokens).verify(b"claims-1163", signature, tenant_id=tenant) is True, "control: it verifies"
+    assert [refused("LIST", f"{m}/keys"), refused("LIST", f"{m}/keys/"), refused("GET", f"{m}/keys?list=true"),
+            refused("GET", f"{m}/keys/{key}"), refused("GET", f"{m}/keys/{key}/"),
+            refused("POST", f"{m}/sign/{key}", {"input": _b64(b"x")}),
+            refused("POST", f"{kv}/data/probe-{openbao.tag}", {"data": {"api_key": "x"}}),
+            refused("PUT", f"{kv}/data/{tenant}/identity", {"data": {"api_key": "x"}}),
+            refused("DELETE", f"{kv}/data/{tenant}/identity"),
+            refused("LIST", f"{kv}/metadata"), refused("LIST", f"{kv}/metadata/"), refused("LIST", f"{kv}/metadata/{tenant}"),
+            refused("GET", f"{kv}/metadata/{tenant}/identity")] == [403] * 13
+
+
 def test_a25_a_sign_login_signs_with_its_own_tenants_key_only(openbao):
     """Under the templated sign policy, a login whose entity carries tenant A signs with A's key,
     is refused B's, and cannot verify or read the key; the proxy verifies A's signature. A25, A24'."""
@@ -452,6 +477,24 @@ def test_a26_an_offboarded_tenants_token_is_refused_once_its_key_is_destroyed(
     assert (before["fault"], len(reads), len(seen)) == (None, 1, 1)
     assert after["fault"] == "ConfigFault"
     assert (store.reads, up.paths()) == (reads, seen)
+
+
+def test_a26_the_verifier_refuses_a_signature_it_accepted_once_the_key_is_destroyed(openbao):
+    """One verifier instance answers True for a signature while the tenant's key exists and raises ConfigFault for the
+    same payload and signature after the key is destroyed; another tenant's key is unaffected. A26, A25."""
+    tokens = _tokens(openbao)
+    tenant, other = openbao.tenant(), openbao.tenant()
+    verifier = _verifier(openbao, tokens)
+    signature, other_signature = openbao.signer(tenant).sign(b"claims-1163"), openbao.signer(other).sign(b"claims-1163")
+    assert verifier.verify(b"claims-1163", signature, tenant_id=tenant) is True
+    assert verifier.verify(b"claims-1163", signature, tenant_id=tenant) is True
+
+    openbao.destroy_key(tenant)
+    with pytest.raises(ConfigFault):
+        verifier.verify(b"claims-1163", signature, tenant_id=tenant)
+    with pytest.raises(ConfigFault):
+        _verifier(openbao, tokens).verify(b"claims-1163", signature, tenant_id=tenant)
+    assert verifier.verify(b"claims-1163", other_signature, tenant_id=other) is True, "control: another tenant's key stands"
 
 
 def test_a26_a_missing_key_and_a_missing_exports_folder_are_distinct_config_faults(

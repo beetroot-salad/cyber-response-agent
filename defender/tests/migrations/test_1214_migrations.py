@@ -15,6 +15,8 @@ from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.tenancy.lifecycle_1214.test_1214_repository_contract import fill_row
 
 BASELINE = "0001_baseline"
+TENANCY = "0002_tenancy"
+SIGN_COLUMNS = {"sign_approle", "sign_entity", "sign_role_id", "sign_secret_file", "sign_wrapped_secret", "sign_secret_accessor"}
 LAB = "37963319-1bcf-49a6-9644-6a0699bfe9a3"
 OTHER = "5c1f2a52-0a47-4c0c-8a7e-6f3a0a7f4a11"
 THIRD = "c8a3d1e0-2b0f-4f4e-9c61-1f7a9a0f9b22"
@@ -80,6 +82,7 @@ def test_the_history_is_the_baseline_and_two_revisions_on_it_in_a_line():
     assert len(chain) == 3
     [(head_revision, middle), (middle_revision, down), (base, base_down)] = chain
     assert (middle, down, base, base_down) == (middle_revision, BASELINE, BASELINE, None)
+    assert middle_revision == TENANCY, "#1214's revision keeps its id"
     assert len({head_revision, middle_revision, BASELINE}) == 3
     assert script.get_heads() == [head_revision], "the history branches"
 
@@ -182,6 +185,57 @@ def test_tenants_columns_are_the_data_models_and_only_the_identity_ones_are_requ
     assert [r for r in rows if r[2] is not None] == []
     with pytest.raises(psycopg.errors.NotNullViolation):  # no default left to supply a state
         execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at) VALUES ('x', now())")
+
+
+# --- #1163's revision: the six sign columns (A24/r8.4) ------------------------------------------------------
+
+
+def _sign_values(tag: str) -> dict[str, str]:
+    """Six values each longer than 40 characters; the secret file path is longer than 100."""
+    return {name: f"{name}-{tag}-" + "x" * 40 for name in SIGN_COLUMNS} | {"sign_secret_file": "/srv/secrets/" + "d" * 120 + f"/{tag}"}
+
+
+@pytest.mark.postgres
+def test_the_third_revision_adds_exactly_the_six_sign_columns_as_nullable_text_with_no_default(empty_database):
+    """Upgrading #1214's database to head changes its catalog by exactly six `generations` columns: text, nullable, no server
+    default, and nothing else (A24/r8.4 'the generation record gains six fields (a migration)')."""
+    from defender.migrations import upgrade
+
+    _upgrade_to(empty_database, TENANCY)
+    before = catalog(empty_database)
+    upgrade(empty_database)
+    after = catalog(empty_database)
+    added = [c for c in after["columns"] if c not in before["columns"]]
+    assert [c for c in before["columns"] if c not in after["columns"]] == []
+    assert sorted(added) == sorted(("tenancy", "generations", name, "text", False, None) for name in SIGN_COLUMNS)
+    assert {k: v for k, v in after.items() if k != "columns"} == {k: v for k, v in before.items() if k != "columns"}
+
+
+@pytest.mark.postgres
+def test_a_generation_recorded_at_the_tenancy_revision_reads_back_with_the_six_null_after_the_upgrade(empty_database):
+    """A row seeded at `0002_tenancy` keeps its other values through the upgrade and reads the six sign columns NULL, which
+    is how a pre-r8 generation reads (A24/r8.4, r8.5 upgrade)."""
+    from defender.migrations import upgrade
+
+    _upgrade_to(empty_database, TENANCY)
+    fill_row(empty_database, "tenants", id=OTHER, state="active")
+    fill_row(empty_database, "generations", tenant_id=OTHER, salt="old", status="live", bot_login="bot-old")
+    upgrade(empty_database)
+    cols = ", ".join(sorted(SIGN_COLUMNS))
+    rows = execute(empty_database, f"SELECT bot_login, {cols} FROM tenancy.generations WHERE tenant_id = %s", (OTHER,))  # noqa: S608
+    assert rows == [("bot-old", *([None] * 6))]
+
+
+@pytest.mark.postgres
+def test_long_sign_values_round_trip_through_the_columns(migrated_database):
+    """Six values over 40 characters, a secret file path over 100 among them, are stored and read back unchanged (A24/r8.4:
+    text columns, no length limit)."""
+    fill_row(migrated_database, "tenants", id=THIRD, state="active")
+    values = _sign_values("long")
+    fill_row(migrated_database, "generations", tenant_id=THIRD, salt="s", status="live", bot_login="bot-s", **values)
+    names = sorted(values)
+    [row] = execute(migrated_database, f"SELECT {', '.join(names)} FROM tenancy.generations WHERE tenant_id = %s", (THIRD,))  # noqa: S608
+    assert dict(zip(names, row, strict=True)) == values
 
 
 # --- the data model's constraints -------------------------------------------------------------------

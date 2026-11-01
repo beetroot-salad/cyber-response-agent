@@ -95,10 +95,15 @@ def test_m1_the_served_proxy_started_from_a_token_file_prints_no_token(tmp_path)
 
 def test_m1_openbao_calls_carry_the_token_file_content_not_the_environments(
         tmp_path, data_root, monkeypatch):
-    """Built in-process from a config naming a token file, with `VAULT_TOKEN` as a decoy: every
-    OpenBao request carries the file's token (trailing newline stripped). O5, A13."""
+    """Built in-process from a config naming a token file, with `VAULT_TOKEN` and OpenBao-address variables as decoys:
+    every OpenBao request carries the file's token (trailing newline stripped) and goes to the deployment's address,
+    not an address from the environment. O5, A13, A26 (r8.3: the proxy uses the deployment's address)."""
     from fastapi.testclient import TestClient
 
+    from defender.configuration.issuer import DEPLOYMENT_ISSUER
+
+    for name in ("DEFENDER_OPENBAO_ADDR", "VAULT_ADDR", "BAO_ADDR"):
+        monkeypatch.setenv(name, "https://decoy-bao.invalid:8200")
     monkeypatch.setenv("VAULT_TOKEN", ENV_TOKEN)
     monkeypatch.setenv("BAO_TOKEN", ENV_TOKEN)
     token_file = tmp_path / "bao-token"
@@ -120,6 +125,8 @@ def test_m1_openbao_calls_carry_the_token_file_content_not_the_environments(
 
     assert calls, "positive control: the proxy called OpenBao"
     assert {c.headers.get("X-Vault-Token") for c in calls} == {FILE_TOKEN}
+    deployment = httpx.URL(DEPLOYMENT_ISSUER.openbao_url)
+    assert {(c.url.scheme, c.url.host, c.url.port) for c in calls} == {(deployment.scheme, deployment.host, deployment.port)}
 
 
 def test_m2_a_config_naming_no_token_does_not_fall_back_to_the_environment(tmp_path):
