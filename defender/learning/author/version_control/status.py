@@ -29,6 +29,7 @@ from defender.tenancy import (
     STALE_OPERATOR,
     STALE_TRANSIENT,
     TRANSIENT,
+    RecordsUnreachable,
     read_status,
     record_published,
     record_refusal,
@@ -87,7 +88,7 @@ def _fault_kind(error: BaseException) -> str:
     if isinstance(error, LockBusy):
         return TRANSIENT
     for fault in _chain(error):
-        if isinstance(fault, (httpx.TransportError, subprocess.TimeoutExpired)):
+        if isinstance(fault, (httpx.TransportError, subprocess.TimeoutExpired, RecordsUnreachable)):
             return TRANSIENT
         if isinstance(fault, httpx.HTTPStatusError):
             status = fault.response.status_code if fault.response is not None else 0

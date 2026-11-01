@@ -413,7 +413,8 @@ def _retry_or_exhaust(
 def _set_aside(paths: LoopPaths, state: LearningState, claim: Any, directory: TenantDirectory) -> bool:
     """Is `claim` not to be served this tick? A claim of a tenant other than the selected one is
     quarantined; one whose tenant is no longer `active` (read afresh now, #1214 Flow 4) is handed
-    back to the queue unserved and uncounted."""
+    back to the queue unserved and uncounted. Records that cannot be read raise
+    `RecordsUnreachable` (`_servable` hands the claim back and takes no more)."""
     from defender import tenancy
 
     owner = claim.spec.get("tenant_id")
@@ -425,6 +426,27 @@ def _set_aside(paths: LoopPaths, state: LearningState, claim: Any, directory: Te
         _requeue_or_drop(state, claim, note=f"{claim.identity} not served: {inactive}")
         return True
     return False
+
+
+def _servable(
+    paths: LoopPaths, state: LearningState, claims: Iterator[Claimed], directory: TenantDirectory,
+) -> Iterator[Claimed]:
+    """Each claim of `claims` to serve now, the others set aside (`_set_aside`). When the tenant
+    records cannot be read (an outage, `RecordsUnreachable`), that claim is handed back to the
+    queue unserved and uncounted, and no more are taken this tick: the claims not yet taken stay
+    queued, so an outage never counts an attempt against a row."""
+    from defender.tenancy import RecordsUnreachable
+
+    for claim in claims:
+        try:
+            if _set_aside(paths, state, claim, directory):
+                continue
+        except RecordsUnreachable as down:
+            _requeue_or_drop(state, claim, note=f"{claim.identity} not served: {one_line(str(down))}")
+            _logger.warning(f"lead_author_drain: the tenant records could not be read ({one_line(str(down))}) "  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+                            "— an outage; no more claims are served this tick")
+            return
+        yield claim
 
 
 def _drain_lead_author_markers(
@@ -441,7 +463,8 @@ def _drain_lead_author_markers(
     one claim of `batch` (the draft re-synced after it, OD15). Before each claim is served its
     tenant's state is read afresh from `directory` (#1214 Flow 4, P3): a claim of a tenant no
     longer `active` (offboarded since the tick began) is handed back to the queue unserved and
-    uncounted. A claim the commit-maker refuses
+    uncounted; when the records cannot be read (an outage), that claim is handed back the same way
+    and the tick serves no more (the claims not yet taken stay queued). A claim the commit-maker refuses
     (P3's `DeliveryRefused`: a link, a FIFO, an out-of-lane path...) is U10's refused claim:
     its draft is reset, it counts its attempt and its row is re-queued until the ceiling
     quarantines it; the other claims go ahead."""
@@ -455,10 +478,8 @@ def _drain_lead_author_markers(
         "case_id", label=LEAD_AUTHOR_DRAIN_LABEL, noun="lead-author",
     )
     served: list[ServedMarker] = []
-    for claim in claims:
+    for claim in _servable(paths, state, claims, directory):
         spec = claim.spec
-        if _set_aside(paths, state, claim, directory):
-            continue
         run = _rehydrate(claim, paths.tenant)
         if isinstance(run, RunAbsent):
             state.quarantine(claim, "artifact-missing")
@@ -671,6 +692,7 @@ def _open_delivery(
     recorded origin), its own clients closed on exit. Missing wiring or issuer configuration is
     decided locally, before any request (O9); every refusal is `_Refused`, naming why."""
     from defender.learning.author import version_control as vc
+    from defender.tenancy import RecordsUnreachable
 
     tenant = paths.tenant
     if tenant is None:
@@ -683,6 +705,8 @@ def _open_delivery(
                 tenant, defender_dir=process_defender_dir(), directory=directory, purpose="drain",
                 client=client, identity=identity, credential_config=credential_config,
                 issuer_transport=issuer_transport))
+        except RecordsUnreachable as down:
+            raise _Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
         except TenantRefused as unbound:
             raise _Refused(
                 f"the tenant {tenant.id} has no usable forge wiring: {unbound}") from None

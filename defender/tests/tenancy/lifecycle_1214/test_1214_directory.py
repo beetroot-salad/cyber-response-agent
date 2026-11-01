@@ -107,6 +107,43 @@ def test_a_failing_read_still_closes_the_repository_and_reaches_the_caller(call)
     assert _directory(probe).state(T1) == "active"
 
 
+def _connection_errors() -> list[Exception]:
+    import sqlalchemy.exc
+
+    return [sqlalchemy.exc.OperationalError("SELECT", {}, Exception("connection failed: refused")),
+            sqlalchemy.exc.InterfaceError("SELECT", {}, Exception("connection already closed"))]
+
+
+@pytest.mark.parametrize("call", ["state", "forge_wiring"])
+@pytest.mark.parametrize("which", [0, 1], ids=["OperationalError", "InterfaceError"])
+def test_a_database_that_cannot_be_reached_is_records_unreachable(call, which):
+    """A read the database cannot answer (the driver's connection-class error) reaches the caller as
+    `RecordsUnreachable`, a `TenantRefused` (the transient refusal every host consumer handles), naming the driver's
+    first line; the repository is still closed (#1214 Flow 4; PR #1350 review: a blip after process start)."""
+    from defender.records.formats import TenantRefused
+    from defender.systems.run_tenant import RecordsUnreachable
+
+    probe = Probe(fail=_connection_errors()[which])
+    with pytest.raises(RecordsUnreachable) as down:
+        getattr(_directory(probe), call)(T1)
+    assert isinstance(down.value, TenantRefused)
+    assert "could not be reached" in str(down.value), str(down.value)
+    assert down.value.__cause__ is probe.fail, "the driver's error is not kept as the cause"
+    assert probe.opened == probe.closed == 1
+
+
+def test_a_database_error_that_is_not_about_the_connection_reaches_the_caller_as_raised():
+    """Control: only connection-class errors are translated; a statement the database refuses is not an outage."""
+    import sqlalchemy.exc
+
+    from defender.systems.run_tenant import RecordsUnreachable
+
+    refused = sqlalchemy.exc.IntegrityError("INSERT", {}, Exception("duplicate key"))
+    with pytest.raises(sqlalchemy.exc.IntegrityError) as raised:
+        _directory(Probe(fail=refused)).state(T1)
+    assert not isinstance(raised.value, RecordsUnreachable)
+
+
 def test_state_answers_the_repositorys_state_or_none_for_an_unknown_tenant():
     """`state` is the tenant's state string, None when absent (Flow 4)."""
     assert _directory(Probe(state="offboarding")).state(T1) == "offboarding"

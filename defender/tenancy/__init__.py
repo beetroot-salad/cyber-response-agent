@@ -20,7 +20,10 @@ if TYPE_CHECKING:
     from defender.tenancy._command_line_run import (
         open_command_line_run as open_command_line_run,
     )
-    from defender.tenancy._directory import TenantDirectory as TenantDirectory
+    from defender.tenancy._directory import (
+        RecordsUnreachable as RecordsUnreachable,
+        TenantDirectory as TenantDirectory,
+    )
     from defender.tenancy._exports import (
         DeliveryRefused as DeliveryRefused,
         POINTER as POINTER,
@@ -99,7 +102,7 @@ if TYPE_CHECKING:
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("admit_tenant", "database_address_variable", "host_directory", "in_lifecycle_process", "mark_lifecycle_process", "still_active",), "_admission"),
     **dict.fromkeys(("open_command_line_run",), "_command_line_run"),
-    **dict.fromkeys(("TenantDirectory",), "_directory"),
+    **dict.fromkeys(("RecordsUnreachable", "TenantDirectory",), "_directory"),
     **dict.fromkeys(("DeliveryRefused", "POINTER", "TenantExport", "current_export", "knowledge_lock_holder", "lock_pid", "read_export_text", "regular_files", "remove_entry",), "_exports"),
     **dict.fromkeys(("OWNER_FILE", "owner_alive", "process_start", "write_owner",), "_owner"),
     **dict.fromkeys(("FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT", "read_status", "record_published", "record_refusal", "record_report",), "_publish_status"),
