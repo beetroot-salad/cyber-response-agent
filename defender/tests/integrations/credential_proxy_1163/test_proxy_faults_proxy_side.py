@@ -12,7 +12,8 @@ import pytest
 
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
-from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH
+from defender.kit.faults import ConfigFault
+from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH, proxy
 
 BASE = T.BASE_PATH
 PATH = f"{BASE}/users/x"
@@ -176,3 +177,16 @@ def test_f5_a_request_the_proxy_cannot_process_is_a_transport_fault_and_audited(
     assert answer["fault"] == "TransportFault"
     assert r.up.seen == []
     assert [rec["outcome"] for rec in r.audit.records] == ["TransportFault"]
+
+
+@pytest.mark.parametrize("bad", [{"upstream_timeout_sec": "30"}, {"audit_path": 5},
+                                 {"audit_path": "audit\0.jsonl"}, {"max_response_bytes": None}],
+                         ids=["quoted-number", "path-not-text", "nul-in-path", "null-cap"])
+def test_f6_an_operator_config_value_of_the_wrong_type_is_a_config_fault(tmp_path, bad):
+    """A configuration value of the wrong type or shape stops the proxy with `ConfigFault`
+    naming the configuration, never a raw `TypeError` or `ValueError` (review of #1355)."""
+    config = {"openbao_addr": "http://127.0.0.1:1", "openbao_token": "t", "kv_mount": "kv",
+              "transit_mount": "transit", "tenant_keys": {}, "tenant_exports": {},
+              "audit_path": str(tmp_path / "audit.jsonl")} | bad
+    with pytest.raises(ConfigFault):
+        proxy().create_app_from_config(config)
