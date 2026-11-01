@@ -17,8 +17,8 @@ import ssl
 from dataclasses import dataclass, field
 
 from defender import _io
-from defender.credential_proxy._openbao import transit_key_for
-from defender.kit.faults import ConfigFault
+from defender.credential_proxy._openbao import openbao_fault, transit_key_for
+from defender.kit.faults import ConfigFault, TransportFault
 from defender.records.formats import TenantRefused
 from defender.tenancy import ForgeBinding, Tenant, read_forge_binding
 
@@ -89,8 +89,8 @@ class TenantRequestSigner:
         self._client_token: str | None = None
 
     def sign(self, payload: bytes) -> str:
-        """The transit signature over `payload`; `ConfigFault` when OpenBao refuses, is sealed
-        or cannot be reached."""
+        """The transit signature over `payload`; `TransportFault` when OpenBao cannot be reached
+        or answers 5xx (sealed included), `ConfigFault` when it refuses (r7 A18)."""
         for fresh in (self._client_token is None, True):
             if fresh:
                 self._client_token = self._login()
@@ -100,7 +100,7 @@ class TenantRequestSigner:
                 break
         signature = _signature_of(response)
         if signature is None:
-            raise ConfigFault(_refusal("signing", response))
+            raise openbao_fault(response.status_code, _refusal("signing", response))
         return signature
 
     def _post_sign(self, payload: bytes) -> httpx.Response:
@@ -110,7 +110,7 @@ class TenantRequestSigner:
                 f"{self._config.address}/v1/{TRANSIT_MOUNT}/sign/{self._key}",
                 json={"input": base64.b64encode(payload).decode("ascii")}, follow_redirects=False)
         except httpx.HTTPError as down:
-            raise ConfigFault(
+            raise TransportFault(
                 f"OpenBao is unreachable for signing ({type(down).__name__})") from None
         finally:
             client.close()
@@ -123,7 +123,7 @@ class TenantRequestSigner:
                 json={"role_id": self._config.role_id, "secret_id": self._config.secret_id},
                 follow_redirects=False)
         except httpx.HTTPError as down:
-            raise ConfigFault(
+            raise TransportFault(
                 f"OpenBao is unreachable for the issuer login ({type(down).__name__})") from None
         finally:
             client.close()
@@ -134,7 +134,7 @@ class TenantRequestSigner:
             except (ValueError, KeyError, TypeError):
                 token = None
         if not isinstance(token, str) or not token:
-            raise ConfigFault(_refusal("the issuer login", response))
+            raise openbao_fault(response.status_code, _refusal("the issuer login", response))
         return token
 
 

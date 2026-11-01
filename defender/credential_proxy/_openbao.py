@@ -21,7 +21,7 @@ import httpx
 
 from defender import tenancy
 from defender.kit.access import CREDENTIAL_KINDS
-from defender.kit.faults import ConfigFault
+from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.kit.verbs import is_system_name
 from defender.credential_proxy._credentials import CredentialSet
 
@@ -77,6 +77,14 @@ def store_policies(*, kv_mount: str, transit_mount: str,
     return policies
 
 
+def openbao_fault(status: int, detail: str) -> AdapterFault:
+    """The fault for an OpenBao answer that is not the one asked for (r7 A18): a 5xx (sealed,
+    standby, failing) may pass, so it is `TransportFault`; anything else is the operator's to
+    fix, `ConfigFault`."""
+    fault = TransportFault if status >= 500 else ConfigFault
+    return fault(detail)
+
+
 class _OpenBao:
     """One login's calls to one OpenBao server. The token is never shown."""
 
@@ -107,8 +115,8 @@ class _OpenBao:
                 return client.request(method, self._url(rest), json=json,
                                       headers=self._headers())
         except httpx.HTTPError as e:
-            raise ConfigFault(f"OpenBao at {self.addr} is unreachable for {what} "
-                              f"({type(e).__name__})") from None
+            raise TransportFault(f"OpenBao at {self.addr} is unreachable for {what} "
+                                 f"({type(e).__name__})") from None
 
     async def _acall(self, method: str, rest: str, what: str,
                      json: Any = None) -> httpx.Response:
@@ -118,11 +126,12 @@ class _OpenBao:
                 return await client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
         except httpx.HTTPError as e:
-            raise ConfigFault(f"OpenBao at {self.addr} is unreachable for {what} "
-                              f"({type(e).__name__})") from None
+            raise TransportFault(f"OpenBao at {self.addr} is unreachable for {what} "
+                                 f"({type(e).__name__})") from None
 
-    def _refused(self, reply: httpx.Response, what: str) -> ConfigFault:
-        return ConfigFault(f"OpenBao at {self.addr} refused {what} ({reply.status_code})")
+    def _refused(self, reply: httpx.Response, what: str) -> AdapterFault:
+        return openbao_fault(reply.status_code,
+                             f"OpenBao at {self.addr} refused {what} ({reply.status_code})")
 
 
 def _data_of(reply: httpx.Response) -> Mapping[str, Any]:
@@ -249,5 +258,5 @@ class TransitVerifier(_OpenBao):
         return valid
 
 
-__all__ = ["OpenBaoSecrets", "OpenBaoStore", "TransitSigner", "TransitVerifier",
+__all__ = ["OpenBaoSecrets", "openbao_fault", "OpenBaoStore", "TransitSigner", "TransitVerifier",
            "store_policies", "transit_key_for"]

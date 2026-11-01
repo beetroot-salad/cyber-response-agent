@@ -37,7 +37,7 @@ from starlette.concurrency import run_in_threadpool
 
 from defender import _clock, tenancy
 from defender.kit.access import HEADER, OAUTH_CLIENT_CREDENTIALS, Auth
-from defender.kit.faults import ConfigFault
+from defender.kit.faults import ConfigFault, TransportFault
 from defender.kit.verbs import is_system_name
 from defender.credential_proxy._audit import AUDIT_KEYS, AuditSink, FileAuditSink
 from defender.credential_proxy._credentials import (
@@ -80,7 +80,7 @@ _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}")
 
 class CredentialStore(Protocol):
     """The proxy's read of a (tenant, system)'s credential set; None when there is none. A store
-    it cannot reach is `ConfigFault`."""
+    it cannot reach is `TransportFault`; one that refuses is `ConfigFault` (r7 A18)."""
 
     def read(self, tenant_id: str, system: str) -> CredentialSet | None: ...
 
@@ -154,16 +154,19 @@ class _Proxy:
             answer = _refused_answer(refused.fault, refused.detail)
         except ConfigFault as fault:
             answer = _refused_answer(CONFIG, fault.detail)
+        except TransportFault as fault:
+            answer = _refused_answer(TRANSPORT, fault.detail)
         except Exception as e:  # noqa: BLE001 — A9: a request that cannot be processed is still classified and audited
+            # r7 A18: nobody foresaw it, so nobody can say a retry fails too
             _logger.error("a request could not be processed (%s)", type(e).__name__)
-            answer = _refused_answer(CONFIG, "the request could not be processed")
+            answer = _refused_answer(TRANSPORT, "the request could not be processed")
         try:
             self.deps.audit.record(trail.entry(answer["fault"]))
         except Exception as e:  # noqa: BLE001 — A13: any failure to audit fails the request closed
             _logger.error("the audit record could not be written (%s: %s); the answer is "
                           "withheld", type(e).__name__, e)
-            return _refused_answer(CONFIG, "the proxy's audit could not be written; the answer is "
-                                    "withheld")
+            return _refused_answer(TRANSPORT, "the proxy's audit could not be written; the "
+                                              "answer is withheld")
         return answer
 
     def _proxied(self, authorization: str | None, raw: bytes | None,
@@ -286,8 +289,8 @@ def _parse_request(raw: bytes | None) -> _Asked:  # noqa: C901 — one flat shap
         raise Refused(CONFIG, f"the request is over {MAX_REQUEST_BYTES} bytes")
     try:
         doc = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        raise Refused(CONFIG, "the request body is not JSON") from None
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise Refused(CONFIG, "the request body is not JSON within the parser's depth") from None
     if not isinstance(doc, dict) or not set(doc) <= _REQUEST_KEYS or not {
             "system", "method", "url"} <= set(doc):
         raise Refused(CONFIG, f"the request must be an object of {sorted(_REQUEST_KEYS)}")
@@ -303,7 +306,20 @@ def _parse_request(raw: bytes | None) -> _Asked:  # noqa: C901 — one flat shap
             raise Refused(CONFIG, f"the request header {name[:80]!r} is not a header")
     if body is not None and not isinstance(body, str):
         raise Refused(CONFIG, "the request's body must be text or null")
+    if not _encodable(system, method, url, body, *headers.values()):
+        # a lone surrogate: a malformed request, not one a retry could send (r7 A18)
+        raise Refused(CONFIG, "the request holds text that is not valid Unicode")
     return _Asked(system=system, method=method, url=url, headers=headers, body=body)
+
+
+def _encodable(*texts: str | None) -> bool:
+    try:
+        for text in texts:
+            if text is not None:
+                text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _forwarded(headers: Mapping[str, str], auth: Auth) -> dict[str, str]:
