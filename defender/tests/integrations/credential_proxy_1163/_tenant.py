@@ -79,14 +79,17 @@ def token(tenant_id: str, grant: set[tuple[str, str]], *, signer: Any = None,
 
 
 def ask(client: Any, tok: str, system: str, method: str, url: str,
-        body: Any = None, headers: Mapping[str, str] | None = None) -> dict[str, Any]:
+        body: Any = None, headers: Mapping[str, str] | None = None,
+        timeout_sec: float | None = None) -> dict[str, Any]:
     """One request to the proxy as the http-proxy transport makes it; the proxy's JSON answer.
-    `body` is the request body text (or None)."""
+    `body` is the request body text (or None); `timeout_sec` the system's own timeout (r7 A21),
+    left out when None."""
     from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH
 
     response = client.post(PROXY_PATH, headers={"Authorization": f"Bearer {tok}"},
                            json={"system": system, "method": method, "url": url,
-                                 "headers": dict(headers or {}), "body": body})
+                                 "headers": dict(headers or {}), "body": body}
+                           | ({} if timeout_sec is None else {"timeout_sec": timeout_sec}))
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -117,11 +120,13 @@ class Rig:
     def ask(self, method: str = "GET", path: str = "/users/x", *, system: str = "identity",
             grant: set[tuple[str, str]] | None = None, tok: str | None = None,
             url: str | None = None, body: str | None = None,
-            headers: Mapping[str, str] | None = None) -> dict[str, Any]:
+            headers: Mapping[str, str] | None = None,
+            timeout_sec: float | None = None) -> dict[str, Any]:
         """`method` on `path` relative to the declared base (or the absolute `url`), with a
         token granting `grant` (read on identity unless given) unless `tok` is given."""
         return ask(self.client, self.tok(grant) if tok is None else tok, system, method,
-                   url if url is not None else f"{self.up.url}{BASE_PATH}{path}", body, headers)
+                   url if url is not None else f"{self.up.url}{BASE_PATH}{path}", body, headers,
+                   timeout_sec)
 
     def rebuild(self, **deps_kw: Any) -> None:
         """A new proxy app over the same fakes with other `ProxyDeps` options."""
