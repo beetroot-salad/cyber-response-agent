@@ -90,3 +90,71 @@ def test_a_directory_that_fails_at_the_second_claim_does_not_serve_it(p4_tenant,
     unserved = next(label for run, label in runs.items() if run != served[0])
     root = Path(location_path(paths.state_root)) / "author-queue"
     assert list(root.rglob(f"case-{unserved}.json")), "the unserved claim vanished"
+
+
+class _Blip:
+    """The tenant's repository, until `down` is set: then every read fails as a database that went away after the
+    drain started does (the driver's connection-class error)."""
+
+    def __init__(self, twin: Any) -> None:
+        self.twin, self.down = twin, False
+        self.failed: list[str] = []
+
+    def __getattr__(self, name: str) -> Any:
+        if not self.down or name == "close":
+            return getattr(self.twin, name)
+
+        async def unreachable(*_a: Any, **_k: Any) -> Any:
+            self.failed.append(name)
+            import sqlalchemy.exc
+
+            raise sqlalchemy.exc.OperationalError("SELECT", {}, Exception("connection failed: server closed the "
+                                                                          "connection unexpectedly"))
+        return unreachable
+
+
+def test_a_database_blip_mid_tick_leaves_the_claim_queued_uncounted_and_the_tick_ends_cleanly(p4_tenant, tmp_path, monkeypatch):  # noqa: F811
+    """The tenant records' database goes away after the first claim is served: the next claim is handed back exactly
+    as queued (no attempt counted, no failed letter) and no more are taken, the tick ends without a fault, and the
+    ticks that meet the outage at their delivery skip; once it is back the claims are served (PR #1350 review: repeated
+    blips must not walk a valid row into the "served N times" quarantine)."""
+    from defender.tenancy import TenantDirectory
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+        BoxSpy,
+        LeadStep,
+        drain_paths,
+        executed_lead,
+        lead_author_drain,
+        product_repo,
+        queued_run,
+    )
+
+    t = p4_tenant
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
+    blip = _Blip(_twin_directory(t.tenant_id, t.origin)[0]._open())  # noqa: SLF001 — the twin behind the directory
+    directory = TenantDirectory(lambda: blip)
+    paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+    labels = ("claim-1", "claim-2", "claim-3")
+    runs = {queued_run(t, paths, label).name: label for label in labels}
+    inner = LeadStep(executed={r: [executed_lead("cmdb.owner-by-tag")] for r in runs}, edits={})
+    step = _FlipOnFirst(inner, lambda: setattr(blip, "down", True))
+    queue = Path(location_path(paths.state_root)) / "author-queue"
+    queued = {label: (queue / f"case-{label}.json").read_bytes() for label in labels}
+
+    def tick() -> int:
+        return lead_author_drain(t, paths, box=BoxSpy(), run_lead_author=step, run_pitfalls=lambda *_a, **_k: 0,
+                                 directory=directory)
+    for attempt in ("the tick the blip begins in", "a tick during the outage", "another tick during the outage"):
+        assert tick() == 0, f"{attempt}: the tick ended in a fault"
+        [served] = step.served
+        for unserved in (label for run, label in runs.items() if run != served):
+            assert (queue / f"case-{unserved}.json").read_bytes() == queued[unserved], (
+                f"{attempt}: a claim the outage met must stay exactly as queued (no attempt counted)")
+        if attempt == "the tick the blip begins in":
+            assert blip.failed.count("tenant") == 1, f"the tick kept taking claims after the outage: {blip.failed}"
+        assert list((queue / "failed").glob("*")) == [], f"{attempt}: a failed letter was written"
+        assert not list((queue / "inflight").glob("*")), f"{attempt}: a claim was left in flight"
+    blip.down = False
+    assert tick() == 0
+    assert sorted(step.served) == sorted(runs), "the claim the outage met was not served once the database was back"

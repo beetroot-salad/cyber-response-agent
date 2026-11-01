@@ -111,6 +111,45 @@ def test_o_stale_an_unreachable_issuer_is_transient(tenant):
     _unchanged(tenant)
 
 
+class _DownAt:
+    """The tenant's repository with one read failing as a database that went away after the process started does
+    (the driver's connection-class error); every other call is the twin's."""
+
+    def __init__(self, twin, method: str) -> None:
+        self._twin, self._method = twin, method
+
+    def __getattr__(self, name: str):
+        if name != self._method:
+            return getattr(self._twin, name)
+
+        async def down(*_a, **_k):
+            import sqlalchemy.exc
+
+            raise sqlalchemy.exc.OperationalError("SELECT", {}, Exception("connection failed: server closed the "
+                                                                          "connection unexpectedly"))
+        return down
+
+
+@pytest.mark.parametrize("read", ["forge_wiring", "generations"])
+def test_o_stale_a_database_blip_after_start_is_transient_and_recorded(tenant, read):
+    """The tenant records' database answers the child's acceptance, then goes away at its wiring read or its mint:
+    `stale:transient` (the next launch may find it up), not a crashed child read as `stale:operator`; recorded so
+    (PR #1350 review)."""
+    from defender.tenancy import TenantDirectory
+
+    tenant.merge(B.MERGE_FILES)
+    twin = tenant.repository
+    line = B.run_child(tenant, mint=True, directory=TenantDirectory(lambda: _DownAt(twin, read)))
+    _stale(line, "transient")
+    assert "could not be reached" in line, line
+    _unchanged(tenant)
+    import asyncio
+
+    recorded = asyncio.run(twin.publish_status(tenant.tenant_id))
+    assert recorded, recorded
+    assert recorded.get("kind") == "transient", recorded
+
+
 def test_o_stale_an_unreachable_forge_is_transient(tenant):
     tenant.merge(B.MERGE_FILES)
 

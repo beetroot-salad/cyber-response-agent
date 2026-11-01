@@ -131,10 +131,6 @@ def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outc
     locked_hook: Callable[[], None] | None,
     budget: float | None,
 ) -> str:
-    wiring = directory.forge_wiring(str(tenant.id))
-    if wiring is None:
-        return report(MISCONFIGURED, f"tenant {tenant.id} has no forge wiring recorded: its repository is "
-                                     "not bound to a forge")
     # Reads and sends nothing until its first token: a host secret file it cannot use is refused
     # in the network phase below, as `misconfigured`.
     credential = identity if identity is not None else forge_credential(
@@ -144,6 +140,11 @@ def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outc
     repository: GitRepository | None = None
     try:
         with contextlib.ExitStack() as owned, _refusals():
+            # Inside the refusals: records that cannot be read are an outage, classified below.
+            wiring = directory.forge_wiring(str(tenant.id))
+            if wiring is None:
+                return report(MISCONFIGURED, f"tenant {tenant.id} has no forge wiring recorded: its repository "
+                                             "is not bound to a forge")
             with _deadline(budget):
                 if identity is None:
                     # made here (not the caller's): its OpenBao client closes with the publish

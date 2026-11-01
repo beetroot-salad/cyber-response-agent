@@ -945,6 +945,28 @@ def test_an_exception_raised_in_a_direct_hold_releases_the_record_and_the_lock(p
     assert exclusive_free(placed, TENANT), "the error left the lock held"
 
 
+def test_listing_the_holders_leaves_a_record_still_being_written_and_removes_stale_records(placed):
+    """`holders` judges only the entries named as records (`<pid>-<start>`): a record another process is still writing
+    (its staged file beside it, renamed into place next) is left alone, so the writer's rename still finds it; a stale
+    record, and an unreadable one, are removed (#1214 RC-5; the teardown-vs-writer race of PR #1350's review)."""
+    from defender.tenancy import host_lock
+
+    with host_lock.hold_shared(placed, TENANT):
+        registry = host_lock.lock_dir(placed, TENANT) / "processes"
+        (pid, start), = this_process()
+        staged = registry / f"{pid}-{start}.staged-0123456789abcdef"
+        staged.write_text("")  # mid-write: created, nothing in it yet
+        stale = registry / "999999999-1"
+        stale.write_text('{"pid": 999999999, "start": "1"}\n')
+        unreadable = registry / "999999998-2"
+        unreadable.write_text("not json")
+        assert recorded(placed, TENANT) == this_process()
+        assert staged.exists(), "listing the holders removed a record still being written"
+        assert not stale.exists(), "a stale record was kept"
+        assert not unreadable.exists(), "an unreadable record was kept"
+        staged.unlink()
+
+
 @pytest.mark.parametrize("step", ["record: offboarding", "folder rules"])
 def test_a_refused_acceptance_inside_an_open_hold_leaves_the_outer_scope_to_release_everything(placed, step):
     """A refused acceptance nested in an open hold of the same tenant takes nothing it keeps: after the outer scope ends the

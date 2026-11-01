@@ -18,6 +18,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -36,6 +37,9 @@ _LOCK_FILE = "lock"
 _REGISTRY = "processes"
 #: How often a waiting acquirer tries again.
 _POLL = 0.05
+#: A record's name, `<pid>-<start>`: anything else in the registry (a record still being written,
+#: staged beside its name) is not one, and is never judged or removed.
+_RECORD_NAME = re.compile(r"[0-9]+-[0-9]+")
 
 
 def lock_dir(data_root: Path, tenant_id: str) -> Path:
@@ -193,7 +197,7 @@ def _leave(key: tuple[int, Path], hold: _Hold) -> None:
 
 def holders(data_root: Path, tenant_id: str) -> list[Holder]:
     """The recorded processes of the tenant that still run; a stale or unreadable record is
-    removed."""
+    removed. Only entries named as records are read: a writer's staged file is left alone."""
     registry = lock_dir(data_root, tenant_id) / _REGISTRY
     try:
         entries = sorted(registry.iterdir())
@@ -201,6 +205,8 @@ def holders(data_root: Path, tenant_id: str) -> list[Holder]:
         return []
     found = []
     for entry in entries:
+        if not _RECORD_NAME.fullmatch(entry.name):
+            continue
         holder = _read_record(entry)
         if holder is None or process_start(holder.pid) != holder.start:
             entry.unlink(missing_ok=True)

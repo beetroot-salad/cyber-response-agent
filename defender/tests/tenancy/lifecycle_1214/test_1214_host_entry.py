@@ -202,6 +202,35 @@ def test_run_start_with_an_unreachable_database_refuses_naming_it(tmp_path, data
     assert calls.reached == []
 
 
+def test_run_start_whose_database_goes_away_after_the_version_check_refuses_on_one_line(tmp_path, data_root):
+    """The database answered the version check, then is gone at the admission read: run start refuses on one line
+    saying the records could not be reached, with no traceback, before any work, and leaves no record or lock (PR #1350
+    review: a blip after process start)."""
+    from defender.tenancy import TenantDirectory
+
+    twin = active_directory(data_root, TENANT)._open()  # noqa: SLF001 — the twin behind the directory
+
+    class Gone:
+        def __getattr__(self, name: str) -> Any:
+            if name == "close":
+                return twin.close
+
+            async def unreachable(*_a: Any, **_k: Any) -> Any:
+                import sqlalchemy.exc
+
+                raise sqlalchemy.exc.OperationalError("SELECT", {}, Exception("connection failed: no route to host"))
+            return unreachable
+
+    calls = _Calls()
+    refused = _run_start(TENANT, tmp_path, TenantDirectory(lambda: Gone()), calls)
+    _has(refused, "[run.py]", "could not be reached", "no route to host")
+    assert "OperationalError" not in refused, refused
+    assert "Traceback" not in refused, refused
+    assert calls.reached == []
+    assert H.recorded(data_root, TENANT) == []
+    assert H.exclusive_free(data_root, TENANT)
+
+
 def test_the_publish_child_reports_an_unreachable_database_as_transient(data_root, monkeypatch):
     """The publish child with an unreachable database: `stale:transient` (the next run may find it up), not
     `misconfigured`, which asks a human to fix the deployment (O-SEE)."""

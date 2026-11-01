@@ -45,6 +45,8 @@ import asyncio  # noqa: E402
 import contextlib  # noqa: E402
 import functools  # noqa: E402
 import inspect  # noqa: E402
+import signal  # noqa: E402
+import threading  # noqa: E402
 from collections.abc import Callable, Collection, Iterator, Mapping  # noqa: E402
 from typing import Any, Protocol  # noqa: E402
 
@@ -531,13 +533,34 @@ def _publish_report(
     fresh, recorded by the same recorder the launcher uses."""
     try:
         launch = publish if publish is not None else _default_publish(records)
-        line = launch(str(tenant.id), data_root=tenancy.data_root_for_child(data_root))
+        with _stopped_by_sigterm():
+            line = launch(str(tenant.id), data_root=tenancy.data_root_for_child(data_root))
     except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
         from defender.tenancy import record_report
 
         line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
         record_report(records, tenant.id, line, by="launch-time publish")
     return run_knowledge.read_publish_report(line)
+
+
+@contextlib.contextmanager
+def _stopped_by_sigterm() -> Iterator[None]:
+    """While the launch-time publish runs, a SIGTERM (teardown stopping this run) unwinds this
+    process as `SystemExit(128 + SIGTERM)`, so the launcher's `finally` kills the publish child's
+    process group (its own session, which no signal to this process reaches) before the run ends;
+    the handler found is put back after. Only in the main thread, the one a handler runs in."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def stop(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
 
 
 def _default_publish(records: tenancy.TenantDirectory) -> Callable[..., object]:

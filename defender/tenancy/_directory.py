@@ -6,18 +6,44 @@ Each call is one `asyncio.run`: it opens a repository, reads, and closes the rep
 loop (#1339's engine rule), so no engine outlives its loop; a connection per call is fine at
 per-drain-claim rates. Called inside a running loop it refuses (RuntimeError) before opening
 anything. Its public methods only read; the one write host processes make, the publish outcome
-(P2), goes through `_call` from `tenancy._publish_status`. Imports no database code: the repository comes from the factory it is given."""
+(P2), goes through `_call` from `tenancy._publish_status`. Imports no database code: the repository comes from the factory it is given.
+
+A call the database cannot answer (the driver's connection-class error: refused, dropped, timed
+out, the login refused) is `RecordsUnreachable`, a `TenantRefused` every host caller may treat as
+transient; any other error reaches the caller as raised."""
 
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, TypeVar
+
+from defender.records.formats import TenantRefused
 
 if TYPE_CHECKING:
     from defender.tenancy.models import ForgeWiring, Generation
 
 _R = TypeVar("_R")
+
+
+class RecordsUnreachable(TenantRefused):
+    """The tenant records' database could not be reached: the next attempt may find it up."""
+
+
+def _connection_lost(error: BaseException) -> bool:
+    """Is `error` the driver's connection-class error (SQLAlchemy's `OperationalError` or
+    `InterfaceError`)? Read off the loaded module, never imported: a process that raised one has it
+    loaded, and one that has not loaded it raised none."""
+    exc = sys.modules.get("sqlalchemy.exc")
+    return exc is not None and isinstance(error, (exc.OperationalError, exc.InterfaceError))
+
+
+def _why(error: BaseException) -> str:
+    """The driver's first line (it names the host and port, never the password)."""
+    cause = getattr(error, "orig", None)
+    lines = str(cause if cause is not None else error).splitlines()
+    return lines[0] if lines else type(error).__name__
 
 
 class TenantDirectory:
@@ -64,4 +90,9 @@ class TenantDirectory:
                 return await read(repository)
             finally:
                 await repository.close()
-        return asyncio.run(once())
+        try:
+            return asyncio.run(once())
+        except Exception as error:
+            if not _connection_lost(error):
+                raise
+            raise RecordsUnreachable(f"the database could not be reached: {_why(error)}") from error

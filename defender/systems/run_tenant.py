@@ -25,6 +25,7 @@ from defender.knowledge import KnowledgePaths
 from defender.tenancy import Tenant, accept_tenant, clone_halves
 from defender.records.formats import TenantId, TenantRefused
 from defender.tenancy import AGENT_HALF
+from defender.tenancy import RecordsUnreachable
 from defender.systems.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.systems.verb_grant import GrantError, VerbGrant
 from defender.tenancy import tenant_settings
@@ -315,10 +316,6 @@ def entry_directory(given: TenantDirectory | None) -> TenantDirectory:
     from defender import tenancy
 
     return tenancy.host_directory(given, check_version=_check_version)
-
-
-class RecordsUnreachable(TenantRefused):
-    """The tenant records' database could not be reached: the next attempt may find it up."""
 
 
 def _check_version(dsn: str) -> None:
