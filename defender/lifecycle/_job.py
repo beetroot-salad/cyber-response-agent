@@ -33,8 +33,8 @@ NEXT: Mapping[str, Mapping[str, tuple[str | None, str | None]]] = {
         "wrap": ("install", HOST), "install": ("sweep", SERVICE), "sweep": ("prepare", HOST),
         "prepare": ("activate", SERVICE), "activate": (None, None)},
     "rotate": {
-        "names": ("provider", SERVICE), "provider": ("bot", SERVICE), "bot": ("integration", SERVICE),
-        "integration": ("wrap", SERVICE), "wrap": ("install", HOST), "install": ("sweep", SERVICE),
+        "names": ("provider", SERVICE), "provider": ("bot", SERVICE), "bot": ("protect", SERVICE),
+        "protect": ("integration", SERVICE), "integration": ("wrap", SERVICE), "wrap": ("install", HOST), "install": ("sweep", SERVICE),
         "sweep": ("retire", SERVICE), "retire": ("remove_old_file", HOST), "remove_old_file": (None, None)},
     "offboard": {"offboard": ("teardown", HOST), "teardown": ("finish", SERVICE), "finish": ("delete_repo", SERVICE)},
     "delete_repo": {"delete_repo": (None, None)},
