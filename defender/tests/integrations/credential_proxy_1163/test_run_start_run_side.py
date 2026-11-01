@@ -10,9 +10,8 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 
 def test_w1_each_write_back_token_expires_within_the_runs_own_ceiling(tmp_path, data_root):
-    """Both ticket legs' `rw` tokens expire after the run began and no later than the run's own
-    ceiling (budget + grace + margin + clock tolerance): a ticket leg cannot outlive its run.
-    A7, A15, O8."""
+    """Both ticket legs' `rw` tokens expire after the run began and within a token's lifetime
+    (plus clock tolerance). A7, O8, r7 A20."""
     R._plant(data_root, proxy=("identity", "case-history"))
     signer = A.MarkedSigner()
     rec, tickets, rc, refused, started = R._drive(tmp_path, data_root, signer=signer)
@@ -23,7 +22,7 @@ def test_w1_each_write_back_token_expires_within_the_runs_own_ceiling(tmp_path, 
     write_back = [c for c in claims if A.grant_of(c) == [("case-history", "rw")]]
     assert len(write_back) == 2, "one write-back token per ticket leg"
     for c in write_back:
-        assert started < c["exp"] <= started + R.BUDGET + R.MARGIN + R.CLOCK_TOLERANCE, (
+        assert started < c["exp"] <= started + R.TOKEN_SEC + R.CLOCK_TOLERANCE, (
             c["exp"] - started)
     assert tickets.leg("open")["request_token"], "positive control: the legs were handed tokens"
 
@@ -39,7 +38,7 @@ def test_w2_the_runs_request_access_shows_no_token_in_any_repr(tmp_path, data_ro
     (life,) = rec.lifecycle_calls
     access_type = request_access_type()
     (access,) = [v for v in life.values() if isinstance(v, access_type)]
-    assert A.SIGNATURE_CANARY in access.token, "positive control: the access holds the signed token"
+    assert A.SIGNATURE_CANARY in access.token(), "positive control: the access signs the token"
 
     shown: list[str] = []
     for held in life.values():
@@ -88,6 +87,7 @@ def test_w3_the_signing_login_and_address_come_from_the_issuer_file_not_the_envi
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
+    R.read_access(rec).token()
     assert bao.logins == [(ROLE, SECRET)], "login with the file's pair alone"
     assert len(bao.signs) == 1, "positive control: the read token was signed"
     assert set(bao.hosts) == {FILE_HOST}, bao.hosts

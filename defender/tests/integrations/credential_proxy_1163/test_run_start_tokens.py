@@ -1,6 +1,7 @@
-"""#1163 run start signs the run's request tokens in the run process: a read token over the
-granted `http-proxy` systems, and a write-back token at each ticket leg when the ticket system is
-`http-proxy`. Driven through `run.main` and its injection seams."""
+"""#1163 the run signs its request tokens in the run process: a read token over the granted
+`http-proxy` systems when a call first needs one (r7 A20), and a write-back token at each ticket
+leg when the ticket system is `http-proxy`. Run start checks configuration only and contacts no
+OpenBao. Driven through `run.main` and its injection seams."""
 from __future__ import annotations
 
 import logging
@@ -9,8 +10,7 @@ from typing import Any
 
 import pytest
 
-from defender.hooks.budget_enforcer import DEFAULT_LIMITS
-from defender.kit.faults import ConfigFault
+from defender.kit.faults import ConfigFault, TransportFault
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
@@ -26,9 +26,8 @@ dispositions:
     get-user: {roles: [gather]}
     health-check: {roles: [gather]}
 """
-BUDGET = DEFAULT_LIMITS["wall_clock_timeout"] + DEFAULT_LIMITS["grace_seconds"]
-#: The read token outlives the wall-clock budget plus grace by this fixed margin (r6 A15).
-MARGIN = 300
+#: A request token's lifetime, read and write-back alike (r7 A20).
+TOKEN_SEC = 600
 #: The seconds between the test's clock and the run's stamp of its start.
 CLOCK_TOLERANCE = 60
 
@@ -88,15 +87,23 @@ def _drive(tmp_path, data_root, *, signer=None, ticket=True, **seams):
     return rec, tickets, rc, refused, started
 
 
+def read_access(rec) -> Any:
+    """The `RequestAccess` the run handed its lifecycle."""
+    (life,) = rec.lifecycle_calls
+    return life["access"]
+
+
 def _claims_of_token(signer: H.FakeSigner, token: str) -> dict[str, Any]:
     (n,) = [i for i in range(1, len(signer.payloads) + 1) if f"{A.SIGNATURE_CANARY}-{i}" in token]
     return A.claims_of_payload(signer.payloads[n - 1])
 
 
-def test_r1_run_start_signs_a_read_token_and_a_write_back_token_per_leg(
+def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_per_leg(
         tmp_path, data_root, caplog):
-    """Read grant names only http-proxy systems; `rw` on the ticket system only, minted at each
-    leg; expiry is budget + grace + 300 s; no token reaches disk or log. O8, O10, O4, A7, A15."""
+    """Run start signs no read token; the ticket legs each sign `rw` on the ticket system only.
+    The read token, asked of the run's access, is signed then, grants only http-proxy systems,
+    lives 600 s and is reused while it has life left; no token reaches disk or log.
+    O8, O10, O4, A7, r7 A20."""
     caplog.set_level(logging.DEBUG)
     _plant(data_root, proxy=("identity", "case-history"))
     signer = A.MarkedSigner()
@@ -105,18 +112,21 @@ def test_r1_run_start_signs_a_read_token_and_a_write_back_token_per_leg(
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
     run_id = rec.run_dir_at.name
-    claims = [A.claims_of_payload(p) for p in signer.payloads]
-    assert len(claims) == 3, "one read token, one write-back token per ticket leg"
-    by_grant = sorted(claims, key=lambda c: A.grant_of(c))
-    write_back, read = by_grant[:2], by_grant[2]
+    write_back = [A.claims_of_payload(p) for p in signer.payloads]
+    assert [A.grant_of(c) for c in write_back] == [[("case-history", "rw")]] * 2, (
+        "nothing but the two ticket legs was signed during the run")
+    access = read_access(rec)
+    asked = time.time()
+    first = access.token()
+    assert access.token() == first, "a token with life left is reused"
+    assert len(signer.payloads) == 3
+    read = A.claims_of_payload(signer.payloads[2])
     assert A.grant_of(read) == [("identity", "r")], "the cmdb (docker-exec) system is not granted"
-    assert [A.grant_of(c) for c in write_back] == [[("case-history", "rw")]] * 2
-    for c in claims:
+    for c in [*write_back, read]:
         assert (c["tenant"], c["investigation"]) == (S.PLAYGROUND_ID, run_id)
-    lifetime = read["exp"] - started
-    assert BUDGET + MARGIN - 1 <= lifetime <= BUDGET + MARGIN + CLOCK_TOLERANCE, lifetime
+    assert TOKEN_SEC - 1 <= read["exp"] - asked <= TOKEN_SEC + CLOCK_TOLERANCE, read["exp"] - asked
     for c in write_back:
-        assert c["exp"] > started
+        assert started < c["exp"] <= started + TOKEN_SEC + CLOCK_TOLERANCE
 
     open_tok, record_tok = tickets.leg("open")["request_token"], tickets.leg(
         "record")["request_token"]
@@ -136,14 +146,16 @@ def test_r1_run_start_signs_a_read_token_and_a_write_back_token_per_leg(
 
 
 def test_r2_a_docker_exec_ticket_system_gets_no_write_back_token(tmp_path, data_root):
-    """Only the identity system is `http-proxy`: one read token, and neither ticket leg is
-    handed a token. A7."""
+    """Only the identity system is `http-proxy`: neither ticket leg is handed a token, and the
+    one token signed is the read token, when asked. A7, r7 A20."""
     _plant(data_root, proxy=("identity",))
     signer = A.MarkedSigner()
     rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, signer=signer)
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
+    assert signer.payloads == []
+    read_access(rec).token()
     assert [A.grant_of(A.claims_of_payload(p)) for p in signer.payloads] == [[("identity", "r")]]
     assert tickets.leg("open").get("request_token") is None
     assert tickets.leg("record").get("request_token") is None
@@ -172,23 +184,23 @@ SEALED = {"sealed on login": {"sealed": "login"}, "sealed on sign": {"sealed": "
           "unreachable": {"unreachable": True}}
 
 
-@pytest.mark.parametrize("ticket", [False, True])
 @pytest.mark.parametrize("fault", list(SEALED))
-def test_r4_a_sealed_or_unreachable_openbao_refuses_run_start_when_a_token_is_needed(
-        tmp_path, data_root, ticket, fault):
-    """The production signing path against an OpenBao answering 503 sealed (on login or sign)
-    or not at all: a configuration refusal before the lifecycle, nothing signed (control: R3). A7."""
+def test_r4_a_sealed_or_unreachable_openbao_does_not_stop_run_start_and_is_retryable(
+        tmp_path, data_root, fault):
+    """Run start contacts no OpenBao, so one answering 503 sealed (on login or sign) or not at
+    all does not stop it; the read token asked of it then is `TransportFault`, a fault a later
+    call may not meet (the system is not marked down), and nothing is signed. r7 A20, A18."""
     _plant(data_root, proxy=("identity",))
     A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE, secret_id=SECRET)
     bao = A.OpenBaoStandIn({ROLE: SECRET}, **SEALED[fault])
-    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=ticket, issuer_transport=bao)
+    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao)
 
-    assert bao.requests, "positive control: OpenBao was asked for a token"
-    assert rc is None
-    assert _config_refusal(refused, "openbao", "sealed", "unreachable", "issuer"), refused
-    assert "lifecycle" not in rec.order
+    assert (rc, refused) == (0, None)
+    assert bao.requests == [], "run start contacted OpenBao"
+    with pytest.raises(TransportFault):
+        read_access(rec).token()
+    assert bao.requests, "positive control: OpenBao was asked for the token"
     assert bao.signs == []
-    assert tickets.calls == []
 
 
 def test_r5_the_signing_login_is_never_taken_from_the_environment(
@@ -218,15 +230,16 @@ def test_r5_the_signing_login_is_never_taken_from_the_environment(
     assert rc is None, "run start proceeded without an issuer config"
     assert refused is not None, "run start proceeded without an issuer config"
     assert vault.seen == [], "the environment's address was used"
-    assert "lifecycle" not in rec.order
+    assert "materialize" not in rec.order, "the run folder was made before the refusal"
     assert not [k for k in env if k in ("VAULT_TOKEN", "BAO_TOKEN", "DEFENDER_BAO_TOKEN",
                                         "ROLE_ID", "SECRET_ID")]
     assert env["DEFENDER_RUN_DIR"], "positive control: the run env was built"
 
 
 def test_r6_run_start_signs_with_the_tenants_own_issuer_login_and_key(tmp_path, data_root):
-    """No injected signer: the read token is signed through OpenBao with the login of the
-    tenant's own issuer config and its own transit key, not another bound tenant's. A11, A1."""
+    """No injected signer: the read token, when asked, is signed through OpenBao with the login
+    of the tenant's own issuer config and its own transit key, not another bound tenant's.
+    A11, A1, r7 A20."""
     _plant(data_root, proxy=("identity",))
     A.bind_issuer(data_root, S.PLAYGROUND_ID, tmp_path / "operator", role_id=ROLE, secret_id=SECRET)
     # A second tenant on the same data root, bound with its own issuer config: a run that read
@@ -239,6 +252,8 @@ def test_r6_run_start_signs_with_the_tenants_own_issuer_login_and_key(tmp_path, 
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
+    assert (bao.logins, bao.signs) == ([], []), "run start signed nothing (r7 A20)"
+    read_access(rec).token()
     assert bao.logins == [(ROLE, SECRET)], "login with the tenant's own config alone"
     (sign,) = bao.signs
     assert bao.role_of(sign) == ROLE
@@ -263,7 +278,7 @@ def _binding_with_file_absent(data_root, tmp_path):
 def test_r7_an_http_proxy_tenant_with_no_usable_issuer_config_refuses_run_start(
         tmp_path, data_root, setup):
     """No forge binding, or a binding whose issuer config file is absent: a configuration
-    refusal before the lifecycle and no login (control: R6). A11."""
+    refusal before the run folder is made, and no login (control: R6). A11, r7 A20."""
     _plant(data_root, proxy=("identity",))
     setup(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET})
@@ -273,5 +288,5 @@ def test_r7_an_http_proxy_tenant_with_no_usable_issuer_config_refuses_run_start(
     assert _config_refusal(refused, "issuer"), refused
     assert bao.logins == []
     assert bao.signs == []
-    assert "lifecycle" not in rec.order
+    assert "materialize" not in rec.order, "the run folder was made before the refusal"
     assert tickets.calls == []

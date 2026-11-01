@@ -32,8 +32,8 @@ class _Tickets:
 
 
 def test_r8_the_signer_logs_in_again_when_its_login_token_has_expired(tmp_path, data_root):
-    """The login token that signed the read token expires before the record leg; that leg's
-    write-back token is still signed, with a second login. A1, A7."""
+    """The login token that signed the open leg's write-back token expires before the record
+    leg; that leg's write-back token is still signed, with a second login. A1, A7, r7 A20."""
     configs = dict(S.config_texts("t1163"))
     configs["identity"] = A.env_text("identity")
     configs["case-history"] = A.env_text("case-history")
@@ -57,8 +57,8 @@ def test_r8_the_signer_logs_in_again_when_its_login_token_has_expired(tmp_path, 
 
     assert (rc, refused) == (0, None)
     assert len(bao.logins) >= 2, "the expired login was replaced by another login"
-    assert len(bao.signs) == 3, "read token, open write-back, record write-back"
-    assert bao.signs[2].client_token != bao.signs[0].client_token
-    assert bao.signs[2].key == proxy().transit_key_for(S.PLAYGROUND_ID)
+    assert len(bao.signs) == 2, "open write-back, record write-back (no read token was asked)"
+    assert bao.signs[1].client_token != bao.signs[0].client_token
+    assert bao.signs[1].key == proxy().transit_key_for(S.PLAYGROUND_ID)
     assert tickets.legs["record"]["request_token"], "the record leg got its write-back token"
-    assert A.grant_of(A.claims_of_payload(bao.signs[2].payload)) == [("case-history", "rw")]
+    assert A.grant_of(A.claims_of_payload(bao.signs[1].payload)) == [("case-history", "rw")]
