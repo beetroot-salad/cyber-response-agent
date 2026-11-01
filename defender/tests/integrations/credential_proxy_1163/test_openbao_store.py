@@ -388,10 +388,10 @@ class _Always(dict):
 
 
 @pytest.mark.parametrize(("status", "fault"), [
-    (503, TransportFault), (500, TransportFault), (403, ConfigFault), (404, ConfigFault)])
+    (503, TransportFault), (500, TransportFault), (403, ConfigFault), (400, ConfigFault)])
 def test_b9_openbao_5xx_is_retryable_and_4xx_is_the_operators_to_fix(status, fault):
     """An OpenBao that answers 5xx (sealed, standby, failing) is `TransportFault` for the store,
-    the verifier and the signer alike; a 4xx (policy refusal, missing key) is `ConfigFault`.
+    the verifier and the signer alike; a 4xx (policy refusal, bad request) is `ConfigFault`.
     r7 A18."""
     with H.upstream() as bao:
         bao.replies = _Always((status, {"Content-Type": "application/json"},
