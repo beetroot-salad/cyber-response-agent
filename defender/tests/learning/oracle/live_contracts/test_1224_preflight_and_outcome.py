@@ -233,6 +233,7 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
     seams.setdefault("live_tree", S.T.source_capture())
     seams.setdefault("roster", est.roster())
     seams.setdefault("judge", S.FakeJudge())
+    seams.setdefault("directory", S.T.launcher_directory(src.parent.parent.name))  # C9: one seeded active directory
     if oracle is not None:
         seams["oracle"] = oracle.model
     if verifier is not None:
@@ -421,6 +422,56 @@ def test_1224_two_preflight_failures_write_unusable_and_start_no_sibling(tmp_pat
             assert double.requests > 0, "pre-flight must have replayed through the oracle"
         else:
             assert double.submissions() == len(_calls()), f"{w} did not replay every call"
+
+
+def test_the_launchers_preflight_builds_its_oracle_side_for_the_source_runs_tenant(tmp_path, monkeypatch):
+    """Every oracle box the launcher's preflight starts carries the source run's tenant label (r10 B1, C8:
+    `preflight.py:120` passes `source.tenant_id`). Observed on the box each world's oracle starts when it takes
+    a python turn, not on the registry call, so no collaborator is patched."""
+    from defender.box import _oracle  # noqa: F401 — the box layer the oracle's python tool starts through
+    from defender.tests.support.sandbox import _box1279 as X
+    from defender.tests.support.sandbox._box1195 import FakeDaemon
+
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
+    daemon = FakeDaemon(tmp_path / "daemon")
+    daemon.install(monkeypatch)
+    est = S.estate(tmp_path)
+    oracle = _by_world(*[S.oracle(S.python("print('checked')"), then=S.submit(_BASE, S.EMPTY_CLAIM))
+                         for _ in range(2)])
+    _base, src = S.source_run(tmp_path, est, calls=_calls())
+    tenant = src.parent.parent.name
+    _main(src, est, oracle=oracle, verifier=S.passing_verifier())
+    creates = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+    assert creates, "no oracle box was started: the preflight's python turns never reached the box layer"
+    for create in creates:
+        labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
+        assert f"defender.tenant={tenant}" in labels, labels
+
+
+def test_the_launchers_calibration_serving_is_built_for_the_source_runs_tenant(tmp_path, monkeypatch):
+    """Every `oracle_serving` the launcher's preflight builds, the calibration one included (its box is never started),
+    is for the source run's tenant (r10 B1, C8: `preflight.py:120` passes `source.tenant_id`). Observed on the
+    arguments of the registry call, without patching it; at least one serving per world plus the calibration one."""
+    from defender.learning.branch.estate.registry import oracle_serving
+    from defender.tests.support.sandbox import _box1279 as X
+    from defender.tests.support.sandbox._box1195 import FakeDaemon
+    from defender.tests.support.tenancy._calls1214 import watching
+
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
+    FakeDaemon(tmp_path / "daemon").install(monkeypatch)
+    est = S.estate(tmp_path)
+    worlds = [S.oracle(S.python("print('checked')"), then=S.submit(_BASE, S.EMPTY_CLAIM)) for _ in range(2)]
+    oracle = _by_world(*worlds)
+    _base, src = S.source_run(tmp_path, est, calls=_calls())
+    tenant = src.parent.parent.name
+    served: list[object] = []
+    with watching(oracle_serving, lambda args: served.append(args["tenant_id"])):
+        _main(src, est, oracle=oracle, verifier=S.passing_verifier())
+    assert len(served) >= len(worlds) + 1, (
+        f"expected at least one serving per world and the calibration one, got {len(served)}: {served}")
+    assert set(map(str, served)) == {tenant}, f"an oracle serving was built for another tenant: {served}"
 
 
 def test_1224_preflight_replays_every_original_call_through_each_worlds_oracle_before_any_sibling(

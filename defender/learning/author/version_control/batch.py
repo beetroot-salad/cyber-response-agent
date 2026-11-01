@@ -73,6 +73,7 @@ class Batch:
             env={"DEFENDER_AGENT_DIR": view.to_model(agent)},
             view=view,
             path_operands=path_operands,
+            tenant_id=str(self.tenant.id),
         )
 
     def change_set(self) -> ChangeSet:

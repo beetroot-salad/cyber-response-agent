@@ -166,43 +166,15 @@ def child_entry() -> Callable[..., str]:
     return vc.publish_for_run
 
 
-def run_child(t: Any, issuer_config: Path, *, identity: Any = None, login: Any = None,
-              **kw: Any) -> str:
-    """The real child, in-process, against P3's fakes and the forge client. With `login` (an
-    `AppRoleVault`) the child really logs in from `issuer_config` through `login.transport`;
-    otherwise it is handed `identity` (default: a fresh one over `t.vault`, so a fault set there
-    is seen)."""
-    seams: dict[str, Any] = {"client": t.forge.client}
-    if login is not None:
-        seams["issuer_transport"] = login.transport
-    else:
+def run_child(t: Any, *, identity: Any = None, mint: bool = False, **kw: Any) -> str:
+    """The real child, in-process, against P3's fakes and the forge client. It is handed `identity` (default: a
+    fresh one over `t.vault`, so a fault set there is seen), or with `mint=True` nothing, so it mints from the
+    live generation `bind_forge` recorded (#1214: no issuer config file). `directory=` is `t.directory`
+    (Flow 4) unless the case passes one in `kw`."""
+    seams: dict[str, Any] = {"client": t.forge.client, "directory": t.directory}
+    if not mint:
         seams["identity"] = identity if identity is not None else t.vault.identity()
-    return child_entry()(t.tenant_id, data_root=t.data_root, issuer_config=issuer_config,
-                         **seams, **kw)
-
-
-@contextlib.contextmanager
-def real_login(t: Any, where: Path) -> Iterator[tuple[Any, Path, tuple[str, ...]]]:
-    """The AppRole issuer fake for `t` (its origin then accepts only what that issuer mints), the
-    config file it expects under `<where>/playground-issuer/client/`, and the secret values that
-    must never leave the child: role and secret ids, the issuer client token, the minted forge
-    token and the config path."""
-    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
-        CLIENT_TOKEN,
-        ROLE_ID,
-        SECRET_ID,
-        AppRoleVault,
-        write_issuer_config,
-    )
-
-    vault = AppRoleVault(t.tenant_id)
-    accepted = t.server.token
-    t.server.token = vault.minted()
-    config = write_issuer_config(Path(where) / "playground-issuer" / "client")
-    try:
-        yield vault, config, (ROLE_ID, SECRET_ID, CLIENT_TOKEN, vault.minted(), str(config))
-    finally:
-        t.server.token = accepted
+    return child_entry()(t.tenant_id, data_root=t.data_root, **{**seams, **kw})
 
 
 def leaks(secrets: tuple[str, ...], **channels: Any) -> list[tuple[str, str]]:
@@ -274,7 +246,8 @@ def launch(t: Any, tmp_path: Path, *, publish: Callable[..., Any] | None,
            **seams: Any) -> Launch:
     """`run.main` for `t` with the REAL `materialize` (run start: resolve the export, copy,
     stamp) and a recording lifecycle that snapshots the run's tenant and copy while live.
-    `publish=None` passes no publish seam (a pinned launch must not need one)."""
+    `publish=None` passes no publish seam (a pinned launch must not need one). `directory=` is `t.directory`
+    (#1214 Flow 4) unless the case passes one in `seams`."""
     from defender import run as run_py
 
     out = Launch()
@@ -305,7 +278,7 @@ def launch(t: Any, tmp_path: Path, *, publish: Callable[..., Any] | None,
     alert = (alert_dir / "alert.json") if alert_dir is not None else plant_alert(tmp_path / "alert")
     argv = [str(alert), "--tenant", t.tenant_id, "--no-learn", *argv_extra]
     kwargs: dict[str, Any] = {
-        "lifecycle": recording_lifecycle, "preflight": lambda *a, **k: 0,
+        "directory": t.directory, "lifecycle": recording_lifecycle, "preflight": lambda *a, **k: 0,
         "visualize": lambda *a, **k: None, "enqueue": lambda *a, **k: False, **seams}
     if publish is not None:
         kwargs["publish"] = recording_publish
@@ -480,8 +453,12 @@ if spec.get("forge_error_body"):
         return forge.reply(request)
 
     client = httpx.Client(transport=httpx.MockTransport(reply))
+from defender.tests.support.tenancy._active1214 import active_directory
+
+# #1214 Flow 4: the child admits the tenant from a directory; this process builds its own over the same facts.
+directory = active_directory(Path(spec["data_root"]), spec["tenant_id"], origin=spec["origin"], wiring=spec["wiring"])
 rc = vc.publish_child_main(
-    sys.argv[2:], issuer_config=Path(spec["issuer_config"]), client=client,
+    sys.argv[2:], directory=directory, client=client,
     identity=VaultHTTP(spec["tenant_id"]).identity(), network_timeout=spec["network_timeout"],
     locked_hook=locked_hook if spec["locked_sleep"] else None)
 (marks / "rc").write_text(repr(rc), encoding="utf-8")
@@ -489,7 +466,7 @@ sys.exit(rc)
 '''
 
 
-def child_command(t: Any, tmp_path: Path, issuer_config: Path, *, network_timeout: float,
+def child_command(t: Any, tmp_path: Path, *, network_timeout: float,
                   locked_sleep: float, forge_error_body: str | None = None,
                   ) -> tuple[list[str], Path, Path]:
     """`(command, spec path, marks dir)` for a real child process. The child writes its exit
@@ -501,8 +478,9 @@ def child_command(t: Any, tmp_path: Path, issuer_config: Path, *, network_timeou
     wrapper.write_text(CHILD_WRAPPER, encoding="utf-8")
     spec = tmp_path / "publish_child_spec.json"
     spec.write_text(json.dumps({
-        "tenant_id": t.tenant_id, "remote": str(t.remote), "origin": t.origin,
-        "issuer_config": str(issuer_config), "marks": str(marks),
+        "tenant_id": t.tenant_id, "remote": str(t.remote), "origin": t.origin, "data_root": str(t.data_root),
+        "wiring": (t.__dict__.get("_bound") or {}).get("wiring", True),  # `unbind_forge` leaves the tenant unwired
+        "marks": str(marks),
         "network_timeout": network_timeout, "locked_sleep": locked_sleep,
         "forge_error_body": forge_error_body}), encoding="utf-8")
     return [sys.executable, str(wrapper), str(spec)], spec, marks

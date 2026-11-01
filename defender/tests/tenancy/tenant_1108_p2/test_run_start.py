@@ -11,6 +11,7 @@ from defender import box as box_mod
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.support.sandbox._spec1092 import STOCK_ROOTFS, make_run_dir, plant_tree
 from defender.tests.tenancy.tenant_1108_p2._support import MountedReadDocker
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 pytestmark = pytest.mark.e2e
 
@@ -91,8 +92,8 @@ def test_box_request_and_oracle_lanes_do_not_require_a_run_tenant(tmp_path):
         requests = [box_mod.BoxRequest(
             name='defender-drain-p2', workdir=root, env={},
             mounts=(box_mod.Mount(source=root, target=root, kind='code'),),
-            spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS)),
-            oracle_box_request(scratch, runner, env={})]
+            spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS), tenant_id=TEST_TENANT),
+            oracle_box_request(scratch, runner, env={}, tenant_id=TEST_TENANT)]
         # Pin a stock image at the existing BoxRequest seam; no real Docker/image is needed.
         from dataclasses import replace
         for request in requests:

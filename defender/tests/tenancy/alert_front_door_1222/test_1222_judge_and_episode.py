@@ -259,13 +259,13 @@ class _Lifecycle:
 def _resume_sibling(ep: Path) -> Path:
     """World `b`'s sibling through the REAL `run.main --resume`; returns its run folder. The
     episode is found under `--tenant`'s own `<T>/episodes/`."""
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 
     life = _Lifecycle()
     # Plus the in-process launch-time publish.
+    argv = ["--episode", ep.name, "--world", "b", "--tenant", TENANT, "--no-learn"]
     rc = S.sym(RUN, "main")(
-        ["--episode", ep.name, "--world", "b", "--tenant", TENANT, "--no-learn"],
-        lifecycle=life, visualize=lambda *_a, **_k: None, preflight=lambda *_a, **_k: 0,
+        argv, directory=directory_for_argv(argv), lifecycle=life, visualize=lambda *_a, **_k: None, preflight=lambda *_a, **_k: 0,
         ticket_writer=S.NoTicket(), publish=in_process_publish())
     assert life.run_dir is not None, f"the sibling never reached its run (rc={rc!r})"
     return life.run_dir

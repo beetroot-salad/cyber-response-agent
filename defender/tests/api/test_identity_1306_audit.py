@@ -132,17 +132,17 @@ def test_removing_and_revoking_log_who_did_it_to_what(audit: AuditLog) -> None:
     assert audit.since(mark) == [Event("member.remove", user_id(bob), T2, user_id(bob))]
 
 
-def test_the_bootstrap_logs_as_system_and_sign_in_logs_the_accept(audit: AuditLog) -> None:
-    """The file's invitation and flag are `system` events; the later accept names the same invitation (K11, O8)."""
+def test_the_bootstrap_logs_the_flag_as_system_and_sign_in_logs_the_accept(audit: AuditLog) -> None:
+    """The file's flag is a `system` event and it logs no invitation (Q3, r9 Identity seam); the later accept is the member's."""
     world = lab()
     events = audit.events()
-    [invited] = [e for e in events if e.action == "member.invite"]
     [flagged] = [e for e in events if e.action == "admin.flag.set"]
-    assert (invited.actor, invited.tenant_id) == ("system", LAB)
     assert (flagged.actor, flagged.tenant_id) == ("system", None)
+    assert [e for e in events if e.action == "member.invite"] == []  # the file has no tenants section any more
     mark = audit.mark()
     me_session = world.sign_in(ME)
-    assert audit.since(mark) == [Event("invitation.accept", user_id(me_session), LAB, invited.target)]
+    [accepted] = audit.since(mark)
+    assert (accepted.action, accepted.actor, accepted.tenant_id) == ("invitation.accept", user_id(me_session), LAB)
     assert flagged.target == user_id(world.sign_in_admin())
 
 
@@ -161,7 +161,7 @@ def test_administrator_actions_log_platform_events_and_an_invite_also_logs_the_t
     assert sorted(audit.since(mark), key=lambda e: e.action) == [
         Event("admin.invite", ops_id, None, EMPTY), Event("member.invite", ops_id, EMPTY, row)]
     mark = audit.mark()
-    world.restart(administrators=[], tenants={LAB: [ME]})
+    world.restart(administrators=[])
     assert audit.since(mark) == [Event("admin.flag.clear", "system", None, ops_id)]
 
 
@@ -170,17 +170,17 @@ def test_flag_events_follow_real_flag_changes_only(audit: AuditLog) -> None:
     world = World(administrators=[OPS], tenants={LAB: [ME]}, failing_writes=True)
     ops_id = world.call(world.repo.user_by_email, OPS).id
     mark = audit.mark()
-    world.restart(administrators=[OPS], tenants={LAB: [ME]})
+    world.restart(administrators=[OPS])
     assert audit.since(mark) == []
     world.repo.failing.add("set_platform_admin")
     for administrators in ([OPS, NINA], []):  # a new flag to set; a flag to clear
         mark = audit.mark()
         with contextlib.suppress(InjectedFailure):
-            world.restart(administrators=administrators, tenants={LAB: [ME]})
+            world.restart(administrators=administrators)
         assert [e for e in audit.since(mark) if e.action.startswith("admin.flag.")] == [], administrators
     world.repo.failing.clear()  # control: the same changes, written, are logged
     mark = audit.mark()
-    world.restart(administrators=[NINA], tenants={LAB: [ME]})
+    world.restart(administrators=[NINA])
     nina_id = world.call(world.repo.user_by_email, NINA).id
     flags = [e for e in audit.since(mark) if e.action.startswith("admin.flag.")]
     assert sorted(flags, key=lambda e: e.action) == [

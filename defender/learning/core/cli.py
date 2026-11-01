@@ -12,7 +12,7 @@ from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.records.formats import TenantRefused
 
 if TYPE_CHECKING:
-    from defender.tenancy import Tenant
+    from defender.tenancy import TenantDirectory
 
 _logger = logging.getLogger(__name__)
 
@@ -67,22 +67,9 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
         return 2
 
 
-def command_line_tenant(parser: argparse.ArgumentParser, raw_tenant: str) -> Tenant:
-    """Accept an explicitly selected tenant before a command touches state or outputs."""
-    from defender import tenancy
-
-    try:
-        return tenancy.requested_tenant(tenancy.resolve_data_root(), raw_tenant)
-    except TenantRefused as refused:
-        parser.error(str(refused))
-
-
-def command_line_paths(parser: argparse.ArgumentParser, raw_tenant: str) -> LoopPaths:
-    """The selected tenant's loop paths, its tenant accepted first."""
-    return LoopPaths.for_tenant(command_line_tenant(parser, raw_tenant))
-
-
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
+    """The drain entry. `directory` is the tenant records a test or a launcher hands in; a
+    production process passes none and reads them from `DEFENDER_DATABASE_DSN`."""
     parser = argparse.ArgumentParser(
         prog="defender/learning/loop.py",
         description=(
@@ -107,18 +94,33 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--tenant", required=True, help="tenant whose learning queues are drained")
     ns = parser.parse_args(argv[1:])
-    paths = command_line_paths(parser, ns.tenant)
+    # The one host acceptance (r10 A1), held for the whole drain: this process recorded under the
+    # tenant's host lock, the tenant `active` with its forge wiring, its folder accepted.
+    from defender import tenancy
+    from defender.systems.run_tenant import host_tenant
 
+    try:
+        tenancy.requested_tenant_id(ns.tenant)  # the id's grammar first, as every entry point judges it
+        admitted = host_tenant(tenancy.resolve_data_root(), ns.tenant, directory=directory)
+    except TenantRefused as refused:
+        parser.error(str(refused))
+    with admitted:
+        return _drain_admitted(ns, admitted.directory, LoopPaths.for_tenant(admitted.tenant))
+
+
+def _drain_admitted(ns: argparse.Namespace, records: TenantDirectory, paths: LoopPaths) -> int:
+    """`main` under the tenant's host acceptance: the stage, over the admitted tenant's records
+    and loop paths."""
     if ns.author_drain and ns.lead_author_drain:
         print("--author-drain and --lead-author-drain are mutually exclusive",
               file=sys.stderr)
         return 1
 
     if ns.author_drain:
-        return _run_stage(lambda: author_drain(paths))
+        return _run_stage(lambda: author_drain(paths, directory=records))
 
     if ns.lead_author_drain:
-        return _run_stage(lambda: lead_author_drain(paths))
+        return _run_stage(lambda: lead_author_drain(paths, directory=records))
 
     # A bare invocation is a usage error.
     print("one of --author-drain / --lead-author-drain is required", file=sys.stderr)

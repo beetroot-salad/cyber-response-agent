@@ -166,7 +166,8 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
             T.mod("cli.learning.branch").main(
                 ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                 spawn=spawn, preflight=_no_preflight,
-                questioner=questioner, live_tree=T.source_capture())
+                questioner=questioner, live_tree=T.source_capture(),
+                directory=T.launcher_directory(src.parent.parent.name))
         assert questioner.calls > 0, "the launch was refused before the identity gate ran"
         assert "family could not be used" in str(refused.value), (
             f"refused by something other than the identity gate: {refused.value}")

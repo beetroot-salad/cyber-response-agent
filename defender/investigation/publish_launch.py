@@ -3,8 +3,10 @@
 Before a run starts, its launcher spawns the publish child (a separate short-lived process: the
 run process never imports tenant delivery, P-3) and waits for its one-line report. It hands the
 child identifiers and a number only — the tenant id, the data root and the child's own budget,
-as argv — and the host children's scrubbed environment (`provider_scrubbed_environ`): the child
-reads its login material from the config file its tenant row names (O8, P-4).
+as argv — and the host children's scrubbed environment (`provider_scrubbed_environ`) with the
+database address added back (`DEFENDER_DATABASE_DSN`, #1214 DC-9: the child is a host process
+that reads its tenant's records and mints its own credential through the tenant's live
+generation; no login material passes, O8).
 
 The child holds its own deadline over its network phase, a little inside the launcher's
 `budget`, and reports (and records) running out of it itself. The launcher's wait is the
@@ -18,7 +20,8 @@ one report line of the child's vocabulary:
 - `stale:operator publish child failed: <summary>` for a child that could not be started,
   crashed, exited non-zero, or printed nothing valid (U11) — never fresh.
 
-Those last two the child never got to record, so the launcher records them (O-SEE).
+Those last two the child never got to record, so the launcher records them (O-SEE) in the tenant
+records it is handed (`directory`).
 """
 from __future__ import annotations
 
@@ -28,15 +31,18 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender.execution import kill_group
 from defender.box import provider_scrubbed_environ
 from defender.tenancy import run_knowledge
 from defender.tenancy import knowledge_lock_holder
 from defender.tenancy import STALE_TRANSIENT, record_report
-from defender.tenancy import Tenant, data_root_from_path, requested_tenant
+from defender.tenancy import Tenant, data_root_from_path, database_address_variable, requested_tenant
 from defender.records.formats import TenantRefused
+
+if TYPE_CHECKING:
+    from defender.tenancy import TenantDirectory
 
 #: The real child's process entry, named (never imported: P-3).
 CHILD_MODULE = "defender.learning.author.version_control.publish_child"
@@ -60,13 +66,24 @@ def _tenant(tenant_id: str, data_root: Path) -> Tenant | None:
         return None
 
 
-def _recorded(tenant_id: str, data_root: Path, line: str) -> str:
+def _recorded(directory: TenantDirectory | None, tenant_id: str, line: str) -> str:
     """`line`, an outcome the child never recorded, recorded for `tenant.py check` by the
-    child's own recorder (`record_report`), so it reads as the child's would."""
-    tenant = _tenant(tenant_id, data_root)
-    if tenant is not None:
-        record_report(tenant, line, by=_TRIGGER)
+    child's own recorder (`record_report`) in the tenant records, so it reads as the child's
+    would. With no records handed in nothing is recorded."""
+    record_report(directory, tenant_id, line, by=_TRIGGER)
     return line
+
+
+def child_environ() -> dict[str, str]:
+    """The publish child's environment: the one base scrub (no provider key, no issuer or forge
+    login variable, no database address), with the database address added back when this
+    process has one (#1214 DC-9: the child reads its tenant's records itself)."""
+    env = provider_scrubbed_environ()
+    name = database_address_variable()
+    dsn = os.environ.get(name)
+    if dsn:
+        env[name] = dsn
+    return env
 
 
 def child_budget(budget: float) -> float:
@@ -81,10 +98,12 @@ def launch_publish(
     budget: float = 60.0,
     command: Sequence[str] | None = None,
     spawn: Spawn | None = None,
+    directory: TenantDirectory | None = None,
 ) -> str:
     """Run the publish child for `tenant_id` under `data_root` and return its report line (module
     doc). `command` replaces the child's argv prefix (the launcher appends `<tenant id>
-    --data-root <root> --budget <seconds>`); `spawn` is `subprocess.Popen`'s stand-in.
+    --data-root <root> --budget <seconds>`); `spawn` is `subprocess.Popen`'s stand-in;
+    `directory` the tenant records the launcher records the outcomes only it sees in.
 
     The child's own report, whenever it printed one, is the outcome, however the wait ended
     (the child recorded it). Only a child with no valid report gets the launcher's line, which
@@ -92,15 +111,15 @@ def launch_publish(
     not positive among them) is U11's failed line, recorded, never a run start's to catch."""
     try:
         return _launch_child(tenant_id, data_root=data_root, budget=budget, command=command,
-                       spawn=spawn)
+                             spawn=spawn, directory=directory)
     except Exception as failed:  # noqa: BLE001 — U11: whatever fails here is a failed publish child, recorded
-        return _recorded(tenant_id, data_root, run_knowledge.failed_line(
+        return _recorded(directory, tenant_id, run_knowledge.failed_line(
             f"the launcher failed: {type(failed).__name__}: {failed}"))
 
 
 def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
     tenant_id: str, *, data_root: Path, budget: float, command: Sequence[str] | None,
-    spawn: Spawn | None,
+    spawn: Spawn | None, directory: TenantDirectory | None,
 ) -> str:
     if not budget > 0:
         raise ValueError(f"the launch-time publish budget must be positive, not {budget!r}")
@@ -111,9 +130,9 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
     try:
         proc = start(
             argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            env=provider_scrubbed_environ(), cwd=str(_REPO_ROOT), start_new_session=True)
+            env=child_environ(), cwd=str(_REPO_ROOT), start_new_session=True)
     except (OSError, ValueError) as unstarted:
-        return _recorded(tenant_id, data_root, run_knowledge.failed_line(
+        return _recorded(directory, tenant_id, run_knowledge.failed_line(
             f"it could not be started: {type(unstarted).__name__}: "
             f"{getattr(unstarted, 'strerror', None) or unstarted}"))
     late = False
@@ -134,7 +153,7 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
         # Stopped in its network phase with nothing to say (a stopped child prints nothing).
         line = (f"{STALE_TRANSIENT} the launch-time publish did not finish its network phase "
                 f"within the {budget:g}s budget")
-    return _recorded(tenant_id, data_root, line)
+    return _recorded(directory, tenant_id, line)
 
 
 def _holds_lock(proc: Any, tenant_id: str, data_root: Path) -> bool:

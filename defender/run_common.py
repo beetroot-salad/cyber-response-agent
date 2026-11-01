@@ -312,14 +312,23 @@ def enqueue_curation(
     run: Run,
     alert: Path | None = None,
     *,
+    tenant: tenancy.Tenant,
     truncated_by: str | None = None,
     fixtures_dir: Path = HELD_OUT_FIXTURES,
 ) -> bool:
     """Enqueue catalog curation for a run, through `learning_refusal_gate` — this hands
     attacker-influenced content (goal text, bound params, rendered queries) to the curator. The
     request is keyed on the run's recorded digest; `alert`, the operator's input path, is only
-    the held-out gate's path arm."""
+    the held-out gate's path arm.
+
+    `tenant` is the run's accepted tenant, the value of run start's host acceptance (r10 O-A5): the
+    request is written under it with no second read of the tenant. A tenant whose id is not the
+    run's is refused here, on the same NOT-enqueuing channel (r10.1 C7, fail closed)."""
     run_dir = run.run_dir
+    if str(tenant.id) != str(run.tenant_id):
+        _logger.error(f"NOT enqueuing for curation: the request names tenant {tenant.id}, but the run "
+                      f"is tenant {run.tenant_id}'s")
+        return False
     reason = learning_refusal_gate(
         run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=truncated_by
     )
@@ -338,8 +347,7 @@ def enqueue_curation(
         if record is None:
             raise OSError("the run's record vanished")
         case_id = case_ref_of_digest(record.digest)
-        with LearningState.open(LoopPaths.for_tenant(
-                tenancy.requested_tenant(tenancy.resolve_data_root(), run.tenant_id))) as state:
+        with LearningState.open(LoopPaths.for_tenant(tenant)) as state:
             state.enqueue_curation(
                 case_id, {"case_id": case_id, "tenant_id": str(address.tenant_id),
                           "run_id": str(address.run_id)})

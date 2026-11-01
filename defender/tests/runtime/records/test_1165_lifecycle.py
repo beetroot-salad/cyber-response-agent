@@ -16,6 +16,7 @@ from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.e2e._replay_harness import DEFENDER
 from defender.tests.e2e.test_540_scrub_lifecycle import FakeDocker
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 
 def callbacks(run):
@@ -131,7 +132,7 @@ def test_real_box_startup_refusals_use_the_handed_verdict_backend(tmp_path, monk
 
     docker = FakeDocker(reply, existing="unknown-state" if phase == "existing" else None)
     with pytest.raises(box.BoxFault):
-        box.start_box(run.run_dir, DEFENDER, docker=docker, write_verdict=write)
+        box.start_box(run.run_dir, DEFENDER, docker=docker, write_verdict=write, tenant_id=TEST_TENANT)
     assert record.path.name in io.names("rooted_write")
     if fault:
         assert not record.path.exists(), "startup bypassed its refused record backend"

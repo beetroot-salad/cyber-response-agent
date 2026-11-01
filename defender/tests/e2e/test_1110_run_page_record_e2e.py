@@ -27,6 +27,8 @@ from defender.tests.support.shared.contracts._spec1077 import bound_arguments
 from defender.tests.e2e._replay_harness import GOLDEN, drive
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, golden_replay, tenant_run
 from defender.tests.e2e.test_1084_mirror_e2e import _assert_record_written, tenant_of
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+from defender.tests.support.tenancy._active1214 import insert_active_tenant
 
 pytestmark = pytest.mark.e2e
 
@@ -260,8 +262,8 @@ def _main(**seams: Callable[..., Any]) -> int:
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
     # Plus the in-process launch-time publish.
-    return run_py.main([str(GOLDEN / "alert.json"), "--tenant", D9_TENANT_ID, "--no-learn"],
-                       preflight=lambda _model: 0, **with_publish(dict(seams)))
+    argv = [str(GOLDEN / "alert.json"), "--tenant", D9_TENANT_ID, "--no-learn"]
+    return run_py.main(argv, preflight=lambda _model: 0, **with_publish(dict(seams), argv))
 
 
 def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
@@ -426,24 +428,42 @@ def test_1110_o7_run_main_exits_0_when_the_renderer_cannot_be_imported(
 
 
 def _standalone(tenant: str, run_dir: Path, **env: str) -> subprocess.CompletedProcess:
-    """`python visualize_run.py --tenant T <run_id>` over a `_repository_run`, as a child process."""
-    script = run_common.DEFENDER_DIR / "presentation" / "visualize_run.py"
-    return subprocess.run(  # noqa: S603 — this interpreter, the renderer script, tenant, run id
-        [sys.executable, str(script), "--tenant", tenant, run_dir.name],
+    """`visualize_run.py --tenant T <run_id>` over a `_repository_run`, as a child process. The renderer admits its tenant
+    through the tenant records (r10 A1/C9), so the child runs under the test launcher with `T` seeded active."""
+    from defender.tests.support.tenancy import _launcher1214 as launcher
+
+    return subprocess.run(  # noqa: S603 — this interpreter, the test launcher, tenant, run id
+        launcher.command("visualize_run", ["--tenant", tenant, run_dir.name], seed=[tenant]),
         capture_output=True, text=True, encoding="utf-8", check=False,
-        env={**os.environ, **env})
+        env=launcher.environment(env))
 
 
+def _standalone_script(tenant: str, run_dir: Path, dsn: str, **env: str) -> subprocess.CompletedProcess:
+    """`python defender/presentation/visualize_run.py --tenant T <run_id>`: the real script path, its own `__main__`
+    (logging setup included), admitting `T` from a database that holds it active."""
+    from defender.presentation import visualize_run
+    from defender.tests.support.tenancy._active1214 import database_env
+
+    return subprocess.run(  # noqa: S603 — this interpreter, the renderer script, tenant, run id
+        [sys.executable, visualize_run.__file__, "--tenant", tenant, run_dir.name],
+        capture_output=True, text=True, encoding="utf-8", check=False,
+        env={**os.environ, **database_env(dsn), **env,
+             "PYTHONPATH": os.pathsep.join(filter(None, [str(Path(__file__).resolve().parents[3]),
+                                                         os.environ.get("PYTHONPATH")]))})
+
+
+@pytest.mark.postgres
 def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_record(
-        tmp_path, run_visualizations_dir):
+        tmp_path, run_visualizations_dir, migrated_database):  # noqa: F811
     """The child exits 1 and logs the refusal as a run-bound JSON line; with the link gone it renders."""
     tenant, run_dir = _repository_run()
+    insert_active_tenant(migrated_database, tenant)
     record = RunPaths(run_dir).runtime_html
     outside = tmp_path / "outside.html"
     outside.write_bytes(b"OUTSIDE\n")
     os.symlink(outside, record)
 
-    child = _standalone(tenant, run_dir, DEFENDER_LOG_FORMAT="json")
+    child = _standalone_script(tenant, run_dir, migrated_database, DEFENDER_LOG_FORMAT="json")
 
     assert child.returncode == 1, (
         f"the re-render did not answer a refused record with exit 1 (got {child.returncode}): "
@@ -459,7 +479,7 @@ def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_recor
     assert os.readlink(record) == str(outside), "the planted link was re-aimed"
 
     record.unlink()
-    child = _standalone(tenant, run_dir)
+    child = _standalone_script(tenant, run_dir, migrated_database)
     assert child.returncode == 0, f"the re-render failed: {child.stderr}"
     assert MARKER in record.read_text(encoding="utf-8")
 
@@ -494,7 +514,7 @@ def test_1279_a_and_b_run_the_same_fixture_get_two_minted_ids_and_two_pages_in_t
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
     from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 
     monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
     b_id = fixture_uuid("tenant:second-run-1279")
@@ -502,7 +522,8 @@ def test_1279_a_and_b_run_the_same_fixture_get_two_minted_ids_and_two_pages_in_t
     ran: dict[str, _ReplayLifecycle] = {}
     for tenant_id in (D9_TENANT_ID, b_id):
         ran[tenant_id] = _ReplayLifecycle()
-        rc = run_py.main([str(GOLDEN / "alert.json"), "--tenant", tenant_id, "--no-learn"],
+        argv = [str(GOLDEN / "alert.json"), "--tenant", tenant_id, "--no-learn"]
+        rc = run_py.main(argv, directory=directory_for_argv(argv),
                          preflight=lambda _model: 0, lifecycle=ran[tenant_id],
                          publish=in_process_publish())
         assert rc == 0

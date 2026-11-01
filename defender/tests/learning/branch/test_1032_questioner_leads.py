@@ -318,6 +318,7 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
         verifier=S.passing_verifier().model, roster=est.roster(),
         judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(bucket="none", systems=[]))),
         preflight=S.no_preflight, live_tree=T.source_capture(),
+        directory=T.launcher_directory(src.parent.parent.name),
     )
     assert rc == 0, "the episode did not complete cleanly"
     assert questioner.prompts, "the questioner was never called"

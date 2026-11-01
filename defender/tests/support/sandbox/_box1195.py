@@ -24,6 +24,7 @@ from defender.box import (
     _DockerTransport,
 )
 from defender.tests.support.shared.contracts import _daemon1195 as daemon_mod
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 DEFENDER = Path(__file__).resolve().parents[3]
 
@@ -127,7 +128,7 @@ def request(name: str = "defender-drain-t1195", *, writable: Path | None = None,
         mounts = (Mount(source=writable, target=writable, writable=True),)
         workdir = writable
     return BoxRequest(name=name, mounts=mounts, workdir=workdir, env={},
-                      spec=BoxSpec(runtime="runc", rootfs=rootfs))
+                      spec=BoxSpec(runtime="runc", rootfs=rootfs), tenant_id=TEST_TENANT)
 
 
 def sandboxed(name: str, docker: Any = None) -> BoxExecutor:

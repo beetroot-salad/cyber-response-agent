@@ -84,6 +84,36 @@ def run_of(run_dir: Path):
     return Run.under(fixture_runs_base(run_dir.parent), run_dir.name, tenant_id=run_dir.parent.parent.name)
 
 
+def curation_tenant(tenant_id: str | None = None):
+    """The accepted `Tenant` whose runs `curation_run_dir` plants (D9's unless named), set up in the test's data
+    root: the value a drain's host acceptance hands the drain, for a scene whose claims name that tenant."""
+    from defender.tenancy._tenant import data_root_from_path, requested_tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID, current_data_root, ensure_d9_tenant
+
+    tenant_id = tenant_id or D9_TENANT_ID
+    ensure_d9_tenant(tenant_id)
+    return requested_tenant(data_root_from_path(current_data_root()), tenant_id)
+
+
+def tenant_of(run_dir: Path):
+    """The accepted `Tenant` run end hands `enqueue_curation(..., tenant=)` for the run at `run_dir`: the value of
+    run start's host acceptance (r10 O-A5, C7), here accepted raw over the test's data root."""
+    from defender.tenancy._tenant import data_root_from_path, requested_tenant
+
+    run_dir = Path(run_dir)
+    return requested_tenant(data_root_from_path(run_dir.parents[2]), run_dir.parent.parent.name)
+
+
+def drained_for(paths: LoopPaths, run_dir: Path) -> LoopPaths:
+    """The drain's paths as drain start's host acceptance leaves them for the tenant of the run at `run_dir`: the
+    tenant's own learning root, carrying the accepted tenant (r10.1 C1: the drain rehydrates each claim through
+    `paths.tenant`, so a drain that serves a claim is handed the tenant that claim names; scratch paths with no
+    tenant refuse every claim). Make it BEFORE opening the state: the queue lives under the tenant's learning root."""
+    paths = tenant_of(run_dir).learning_paths(LoopPaths, repo_root=paths.repo_root)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
+    return paths
+
+
 def curation_row(case_id: str, run_dir: Path) -> dict:
     """The row `run_common.enqueue_curation` files for the run at `run_dir`: its address, read
     off where the run lives (`<data root>/<T>/runs/<run_id>`)."""
