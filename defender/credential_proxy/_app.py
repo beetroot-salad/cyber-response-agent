@@ -44,6 +44,7 @@ from defender.configuration.issuer import DEPLOYMENT_ISSUER
 from defender.kit.access import HEADER, OAUTH_CLIENT_CREDENTIALS, PROXY_OVERHEAD_SEC, Auth
 from defender.kit.faults import ConfigFault, TransportFault
 from defender.kit.verbs import is_system_name
+from defender.records.formats import TenantRefused
 from defender.credential_proxy._audit import AUDIT_KEYS, AuditSink, FileAuditSink
 from defender.credential_proxy._credentials import (
     AccessTokens,
@@ -154,6 +155,9 @@ class _Proxy:
 
     def __init__(self, deps: ProxyDeps) -> None:
         self.deps = deps
+        # The one conversion of the data root this proxy is handed (A26); a tenant's exports are
+        # joined under it by tenancy, never spelled here.
+        self._root = tenancy.data_root_from_path(deps.data_root)
         self.access_tokens = AccessTokens()
         self.upstream = httpx.Client(follow_redirects=False, trust_env=False,
                                      timeout=deps.upstream_timeout_sec)
@@ -245,7 +249,10 @@ class _Proxy:
         # that is not a canonical tenant UUID (A26).
         if not tenancy.is_valid_tenant_id(tenant_id):
             raise Refused(CONFIG, "the request token names no tenant id")
-        exports = Path(self.deps.data_root) / tenant_id / "exports"
+        try:
+            exports = tenancy.tenant_exports(self._root, tenant_id)
+        except TenantRefused as refused:
+            raise Refused(CONFIG, f"tenant {tenant_id}: {refused}") from None
         if not exports.is_dir() or exports.is_symlink():
             raise Refused(CONFIG, f"tenant {tenant_id} has no exports folder under the proxy's data "
                                   "root")

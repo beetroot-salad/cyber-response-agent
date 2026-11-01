@@ -252,6 +252,8 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     # #1214: the lifecycle's own setting, read once each where it makes or removes a tenant's folder.
     ("data_root", "lifecycle/config.py"): frozenset({"LifecycleConfig.__post_init__"}),
     ("data_root", "lifecycle/_host.py"): frozenset({"HostActor.__init__"}),
+    # #1163 A26: the credential proxy's one setting, converted once when its pipeline is built.
+    ("data_root", "credential_proxy/_app.py"): frozenset({"_Proxy.__init__"}),
 }
 _ATTRIBUTE_ROLES = {
     "exports": "exports_root", "drafts": "drafts_root", "knowledge_lock": "knowledge_lock",
