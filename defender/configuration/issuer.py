@@ -30,3 +30,8 @@ class DeploymentIssuer:
 
 #: The deployment's issuer.
 DEPLOYMENT_ISSUER = DeploymentIssuer()
+
+#: Where OpenBao's transit engine is mounted (#1163 A25): each tenant's request-token signing key
+#: lives under it. The lifecycle creates and destroys the keys, the run signs and the proxy
+#: verifies with them; one fixed path, like the addresses above.
+TRANSIT_MOUNT = "transit"
