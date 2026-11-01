@@ -38,7 +38,7 @@ def _cli() -> Any:
 
 def _revert(t: Any, name: str) -> int:
     return _cli().main(["--tenant", t.tenant_id, name], client=t.forge.client,
-                       identity=t.vault.identity())
+                       identity=t.vault.identity(), directory=t.directory)
 
 
 def _product_refs(repo: Path = REPO_ROOT) -> str:

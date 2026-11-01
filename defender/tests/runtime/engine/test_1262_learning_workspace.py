@@ -17,6 +17,7 @@ from defender._agent_role import AgentRole
 from defender._model_view import ModelView
 from defender.investigation.tools import AgentDeps, _tool_bash, _tool_edit_file, _tool_read_file, _tool_write_file
 from defender.tests.support.runtime.engine._engine_helpers import fake_model, replay_once
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 
 def _curator(base: Path):
@@ -191,6 +192,7 @@ def test_draft_request_keeps_host_image_inputs_and_model_execution_paths(tmp_pat
                 Mount(draft / "agent/lessons", Path("/draft/agent/lessons"), writable=True)),
         env={"DEFENDER_AGENT_DIR": "/draft/agent"},
         spec=BoxSpec(rootfs="defender-box:test1262"), require_sandbox=True,
+        tenant_id=TEST_TENANT,
     )
     argv = _render_argv(request).argv
     assert argv[argv.index("--workdir") + 1] == "/draft/agent"

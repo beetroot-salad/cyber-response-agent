@@ -79,7 +79,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
     """Everything that can refuse before the questioner is paid for, in one block, so an
     operator with several problems hears about them all before spending anything."""
     source_run_dir = source.run_dir
-    _check_oracle_side(oracle=oracle, verifier=verifier)
+    _check_oracle_side(oracle=oracle, verifier=verifier, tenant_id=str(source.tenant_id))
     _check_branch_point(source, branch_message_id)
     # The live tree is judged as a one-member family by `verify_family`'s own rules, before the
     # paid role preflight.
@@ -106,7 +106,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
 
 
 
-def _check_oracle_side(*, oracle: Any, verifier: Any) -> None:
+def _check_oracle_side(*, oracle: Any, verifier: Any, tenant_id: str) -> None:
     """Refuse a launch whose oracle `preflight_replay` could not configure: a bad oracle knob
     (`FatalConfigError`) or a role with no pricing row (`OraclePricingError`). The same
     functions pre-flight's `oracle_settings_with` and each world's `Oracle` call, so the rule
@@ -117,7 +117,7 @@ def _check_oracle_side(*, oracle: Any, verifier: Any) -> None:
     from defender.learning.core.config import oracle_settings_with
 
     try:
-        serving = oracle_serving(oracle_settings_with(), oracle=oracle, verifier=verifier)
+        serving = oracle_serving(oracle_settings_with(), oracle=oracle, verifier=verifier, tenant_id=tenant_id)
         price_row("oracle", serving.oracle)
         price_row("verifier", serving.verifier)
     except (FatalConfigError, OraclePricingError) as bad:
@@ -406,7 +406,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
         # event loop, so the production models — each with its provider and HTTP client — are
         # never shared across loops. Only the limiter is the pass's one (S18).
         serving = oracle_serving(settings, oracle=oracle, verifier=verifier, box=box,
-                                 restart_after=restart_after)
+                                 tenant_id=str(tenant.tenant_id), restart_after=restart_after)
         registry = WorldRegistry(
             roster, tenant.grants.gather, world=world, ledger=ledger, as_of=family.as_of,
             serving=serving, oracle_dir=default_oracle_dir(world, ledger), limiter=limiter,

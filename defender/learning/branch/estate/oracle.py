@@ -125,19 +125,20 @@ ORACLE_CHECK_DEF = AgentDefinition(
 # The oracle's box (M18).
 # --------------------------------------------------------------------------------------------
 
-def start_box(*, env: Mapping[str, str]) -> Any:  # lint-dup: ok — the spec's coined name for the oracle's sandboxed box; box/_lifecycle.start_box starts the investigator's run box, a different box
+def start_box(*, env: Mapping[str, str], tenant_id: str) -> Any:  # lint-dup: ok — the spec's coined name for the oracle's sandboxed box; box/_lifecycle.start_box starts the investigator's run box, a different box
     """The production oracle box (`box.start_oracle_box`): sandboxed or refused with
     `OracleSandboxError`, never an unsandboxed executor (M18)."""
     try:
-        return start_oracle_box(env=env)
+        return start_oracle_box(env=env, tenant_id=tenant_id)
     except BoxStartRefused as exc:
         raise OracleSandboxError(str(exc)) from exc
 
 
-def start_process_box() -> Any:
-    """`start_box` over this process's environment: the registry's default box factory."""
+def start_process_box(tenant_id: str) -> Any:
+    """`start_box` over this process's environment, labelled with the tenant the world is served
+    for (#1214 O4): the registry's default box factory."""
     try:
-        return start_process_oracle_box()
+        return start_process_oracle_box(tenant_id)
     except BoxStartRefused as exc:
         raise OracleSandboxError(str(exc)) from exc
 

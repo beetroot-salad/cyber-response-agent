@@ -100,18 +100,30 @@ attackers, each focused on one risk area, try to keep the suite green with wrong
 code. Starting from working code is cheaper than each attacker building its own, and each exploit
 becomes a patch that the repaired test must be shown to catch.
 
+Exploits aren't repaired one by one. An attacker can always find one more spelling, encoding or
+exception type, and a test per instance invites the next one: past runs went to seven repair rounds
+that way. So a fresh triage reader first drops findings that can't arise in deployment or that no
+honest implementer would write, then groups the rest by the design choice that made them possible.
+Each family gets one verdict: dissolve it with a design change, accept it as a recorded trade-off,
+close it with one test over the whole class, or fix the code. Another round runs only when a
+recheck finds a new family.
+
 ```mermaid
 flowchart TD
-    H[Honest code passes the contract] --> A[Attacker writes a wrong variant]
+    H[Honest code passes the contract] --> A[Attackers write wrong variants]
     A --> Q{Suite still green?}
     Q -->|no| N[Suite caught it]
-    Q -->|yes| X[Exploit found]
-    X --> W[write-tests repairs the test]
-    W --> E{Repaired test fails<br/>on the exploit?}
-    E -->|no| W
-    E -->|yes| G{Passes on the<br/>honest code?}
-    G -->|yes| A
-    G -->|no| B[The code had a real bug:<br/>fix the code]
+    Q -->|yes| X[Exploits found]
+    X --> T[Triage: drop irrelevant,<br/>group into families]
+    T --> D[Dissolve:<br/>design amendment]
+    T --> K[Accept:<br/>recorded trade-off]
+    T --> C[Close: one test<br/>over the family]
+    T --> B[Code bug:<br/>fix the code]
+    C --> E{Test fails on every<br/>exploit in the family,<br/>passes on honest code?}
+    E -->|no| C
+    E -->|yes| R{Recheck finds<br/>a new family?}
+    R -->|yes| T
+    R -->|no| S[Done]
 ```
 
 ## Where findings go
@@ -134,6 +146,31 @@ Human attention goes to consequential design choices, never to one question per 
 Every stage runs as a fresh session that never saw the previous one. GitHub is the only channel:
 the issue, its comments, the branch and the PR. That makes any stage resumable after a crash,
 inspectable by a person, and runnable headless as one command per stage.
+
+## Rules state goals; applications are a cache
+
+For now this applies to write-tests and write-code-from-tests and their reference files. Each rule
+states its goal and the principle behind it, never the list of cases it covers. How a rule applies to
+one context (the harness, the model generation, the project's toolchain, or what past runs found) is
+recorded separately, as a cache. Each of those files ends with a `Cache` section, and a project keeps
+its own entries in `.claude/contract-first-cache.md`. Every entry is one line naming the rule it applies and the
+context it assumes, so one grep finds every application of a rule, or everything that assumed a
+given model family. Humans maintain the skills' caches. The project cache is kept by one independent
+agent running the `maintain-cache` skill, dispatched at the end of write-tests', write-code-from-tests' and finalize's review steps: it adds facts the run had to
+work out and removes entries the run contradicted. It also reads the whole file for entries that
+exist for the same reason, and writes the rule that would remove that cause to the project's rules
+file, with a lint when a machine can find the shape. A cause in the pipeline itself becomes an issue
+proposing a skill change, since the skills are the human's. A pile of related entries is a symptom;
+the cache is where root causes become visible, and the rules file is where they get fixed.
+Agent-written rules rank below the project's principles and every human decision. It is the file's only writer, and
+its changes reach the human with the PR.
+
+A list written as the rule invites work that handles exactly the list: an implementation that
+handles the listed members, a test per listed value, an attacker who finds the next member. A
+rule stated as its goal decides cases nobody listed. The cache keeps the concrete detail cheap to
+reach, and it is easy to recompute when its context changes, for example when a new model family
+changes which model suits a role. When an entry and its rule disagree, the rule wins. The attack
+deck is the same idea at project scope: a cache of exploit shapes that have worked here.
 
 ## Why finalize reads cold
 

@@ -547,7 +547,9 @@ def _record_names() -> dict[str, str]:
     }
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, directory: Any = None) -> int:
+    """`lead_author --tenant T <run_id>`. `directory` is the tenant records a test hands in; a
+    production process passes none and reads them from `DEFENDER_DATABASE_DSN`."""
     names = _record_names()
     p = argparse.ArgumentParser(
         prog="lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
@@ -562,19 +564,26 @@ def main(argv: list[str]) -> int:
                    help=f"the defender run, by its id — its folder holds "
                         f"{names['EXECUTED_QUERIES']} + {names['RAW_MARKER']}/")
     args = p.parse_args(argv)
-    from defender.tenancy import open_command_line_run
+    from defender import tenancy
+    from defender.records.formats import TenantRefused
+    from defender.systems.run_tenant import host_tenant
 
-    # The request's tenant, accepted under the configured data root, and its run opened by id
-    # through that tenant's repository (a link at the run's name is never followed). A refusal
-    # is printed, not logged: a log level must never hide it.
-    opened = open_command_line_run(args.tenant, args.run_id)
-    if isinstance(opened, str):
-        print(f"lead_author: {opened}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+    # The request's tenant through the one host acceptance (r10 A1), held while the run is
+    # served, and its run opened by id through that tenant's repository (a link at the run's name
+    # is never followed). A refusal is printed, not logged: a log level must never hide it.
+    try:
+        admitted = host_tenant(tenancy.resolve_data_root(), args.tenant, directory=directory)
+    except TenantRefused as refused:
+        print(f"lead_author: {refused}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         return 2
-    # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.
-    tenant, run_ = opened
-    return run(run_, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL,
-               paths=_loop_config.LoopPaths.for_tenant(tenant))
+    with admitted:
+        opened = tenancy.open_command_line_run(admitted.tenant, args.run_id)
+        if isinstance(opened, str):
+            print(f"lead_author: {opened}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+            return 2
+        # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.
+        return run(opened, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL,
+                   paths=_loop_config.LoopPaths.for_tenant(admitted.tenant))
 
 
 #: Re-exports: callers import these names from here; their real homes are the source

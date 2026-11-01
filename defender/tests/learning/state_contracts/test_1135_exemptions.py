@@ -125,7 +125,7 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     caplog.set_level(logging.INFO)
     answered: list[bool] = []
     escaped = S.caught(lambda: answered.append(
-        run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json")))
+        run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json", tenant=S.tenant_of(run_dir))))
     assert escaped is None, f"the refused curation request raised {escaped!r} into the investigation"
     assert answered == [False], f"a refused curation request answered {answered!r}, not False"
     logged = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
@@ -150,7 +150,7 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     os.unlink(planted)
     answered.clear()
     assert S.caught(lambda: answered.append(
-        run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json"))) is None, \
+        run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json", tenant=S.tenant_of(run_dir)))) is None, \
         "the unplanted enqueue raised"
     assert answered == [True], f"the unplanted enqueue answered {answered!r}"
     assert S.entry_kind(location_path(paths.state_root) / "author-queue" / f"{case_id}.json") == "file", \

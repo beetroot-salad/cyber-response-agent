@@ -171,11 +171,13 @@ class BoxSpy:
         self.stopped += 1
 
 
-def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, **seams: Any) -> int:
+def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, mint: bool = False, **seams: Any) -> int:
     """`author_drain` through the stage runner, the tenant's forge fake as its forge client and
-    a fresh identity over its issuer fake (login skipped) unless the case passes others."""
+    a fresh identity over its issuer fake (login skipped) unless the case passes others; `directory=`
+    is `t.directory` (#1214 Flow 4: the tenant is admitted from the directory) unless the case passes one."""
     seams.setdefault("client", t.forge.client)
-    if "issuer_config" not in seams:
+    seams.setdefault("directory", t.directory)
+    if not mint:  # with `mint=True` the drain mints from the live generation's host secret file
         seams.setdefault("identity", t.vault.identity())
     return run_stage(lambda: drains().author_drain(
         paths, trigger_author=trigger, start_box=box.start, stop_box=box.stop, **seams))
@@ -184,12 +186,13 @@ def author_drain(t: Any, paths: Any, *, trigger: Any, box: BoxSpy, **seams: Any)
 LEAD_PREFIX = "lead-author/"
 
 
-def lead_author_drain(t: Any, paths: Any, *, box: BoxSpy, **seams: Any) -> int:
+def lead_author_drain(t: Any, paths: Any, *, box: BoxSpy, mint: bool = False, **seams: Any) -> int:
     """`lead_author_drain` through the stage runner, as `author_drain` above: the tenant's
     forge fake and a fresh issuer-fake identity unless the case passes others; the lane's work
-    steps (`run_lead_author=`, `run_pitfalls=`) as the case gives them (else the defaults)."""
+    steps (`run_lead_author=`, `run_pitfalls=`) as the case gives them (else the defaults); `directory=` as above."""
     seams.setdefault("client", t.forge.client)
-    if "issuer_config" not in seams:
+    seams.setdefault("directory", t.directory)
+    if not mint:  # with `mint=True` the drain mints from the live generation's host secret file
         seams.setdefault("identity", t.vault.identity())
     return run_stage(lambda: drains().lead_author_drain(
         paths, start_box=box.start, stop_box=box.stop, **seams))

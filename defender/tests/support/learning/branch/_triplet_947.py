@@ -67,6 +67,14 @@ def no_preflight(_model: str | None = None, *, branching: bool = False) -> int:
     return 0
 
 
+def launcher_directory(tenant_id: str) -> Any:
+    """One seeded ACTIVE tenant directory over the fixture data root: what a launcher driver hands `cli.main` as
+    `directory=` (r10.1 C9; the launcher admits through the host acceptance, A1)."""
+    from defender.tests.support.tenancy._active1214 import active_directory
+
+    return active_directory(Path(os.environ["DEFENDER_DATA_ROOT"]), tenant_id)
+
+
 def fixture_world_id(label: str) -> str:
     """Explicit identity for fixed fixture worlds; launcher worlds are read from disk."""
     return fixture_uuid(f"world:{label}")
@@ -416,7 +424,7 @@ def current_tenant() -> Any:
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     existing = sorted(p.name for p in root.iterdir()
-                      if (p / "tenant.json").is_file()) if root.is_dir() else []
+                      if (p / "knowledge").is_dir()) if root.is_dir() else []
     return set_up_tenant(root, existing[0] if existing else SOURCE_TENANT)
 
 
@@ -443,7 +451,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     if tenant_id is None:
         existing = sorted(p.name for p in root.iterdir()
-                          if (p / "tenant.json").is_file()) if root.is_dir() else []
+                          if (p / "knowledge").is_dir()) if root.is_dir() else []
         tenant_id = existing[0] if existing else SOURCE_TENANT
     tenant = set_up_tenant(root, tenant_id, published=published)
     location_path(tenant.learning).mkdir(exist_ok=True)  # setup provisions the real launcher queue root

@@ -63,9 +63,62 @@ def in_process_publish() -> Callable[..., str]:
     return publish
 
 
-def with_publish(seams: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
-    """`seams` with the in-process publish added, unless the caller already passes its own."""
+def empty_directory() -> Any:
+    """A `TenantDirectory` that knows no tenant: the unknown-tenant side of a refusal (pass it as `directory=`)."""
+    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+
+    twin = InMemoryTenantRepository()
+    return TenantDirectory(lambda: twin)
+
+
+def directory_for_argv(argv: Any, root: Path | str | None = None, **keywords: Any) -> Any:
+    """The `TenantDirectory` a run's `--tenant T` is admitted from (#1214 Flow 4): `T` ACTIVE with its forge wiring
+    whatever the folder state, so a missing or broken folder is refused by `accept_tenant`'s own folder check, never
+    by this helper. With no `--tenant` nothing is active; a test whose subject is an unknown tenant passes
+    `empty_directory()` itself. `root` defaults to this test's data root (none in this process: a nonexistent one, so
+    the data-root fault refuses); `keywords` are `active_directory`'s (`state=`, `wiring=`, ...)."""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, tenant_directory
+
+    words = [str(a) for a in argv or ()]
+    if root is None:
+        try:
+            root = current_data_root()
+        except AssertionError:  # no data root in this process: the tenant is active, the data-root fault refuses
+            root = Path("/nonexistent-data-root")
+    tenant = words[words.index("--tenant") + 1] if "--tenant" in words[:-1] else None
+    if tenant is None:
+        return empty_directory()
+    return tenant_directory(Path(root), tenant, **keywords)
+
+
+def directory_for_root(root: Path | str | None = None, *, also: Any = ()) -> Any:
+    """The `TenantDirectory` a drain over several tenants is served from (#1214 Flow 4: it re-checks the state per
+    claim): every tenant placed under `root` (default: this test's data root; `<root>/<T>/knowledge` is a
+    directory) active with its forge wiring, and so is every id in `also` (active whatever its folder: acceptance
+    refuses it); any other tenant is unknown to it."""
+    import inspect
+
+    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
+    from defender.tests.support.tenancy import _active1214
+
+    root = Path(root) if root is not None else current_data_root()
+    twin: Any = InMemoryTenantRepository()
+    placed = sorted(p.name for p in root.iterdir() if (p / "knowledge").is_dir()) if root.is_dir() else []
+    for tenant in dict.fromkeys([*placed, *map(str, also)]):
+        added = twin.add_tenant(tenant, created_at=_active1214.CREATED, state="active", repo=f"tenants/{tenant}",
+                                origin=_active1214._origin_of(root, tenant, None))
+        if inspect.isawaitable(added):
+            _active1214.run_sync(_active1214._await(added))
+    return TenantDirectory(lambda: twin)
+
+
+def with_publish(seams: MutableMapping[str, Any], argv: Any = None) -> MutableMapping[str, Any]:
+    """`seams` with the in-process publish added, unless the caller already passes its own; given the run's `argv`,
+    also `directory=` (`directory_for_argv`) unless the caller passes one."""
     seams.setdefault(PUBLISH_SEAM, in_process_publish())
+    if argv is not None:
+        seams.setdefault("directory", directory_for_argv(argv))
     return seams
 
 
@@ -81,4 +134,4 @@ class RunWithPublish:
         return getattr(self._module, name)
 
     def main(self, argv: Any = None, **seams: Any) -> Any:
-        return self._module.main(argv, **with_publish(seams))
+        return self._module.main(argv, **with_publish(seams, argv))

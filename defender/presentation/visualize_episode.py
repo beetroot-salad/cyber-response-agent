@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.tenancy import requested_tenant, resolve_data_root
+from defender.tenancy import resolve_data_root
 from defender.records.formats import TenantRefused
 from defender.records.formats import Episode, EpisodeRefused
 from defender._io import Bound
@@ -802,15 +802,31 @@ def _parse_page_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, directory: Any = None) -> int:
+    """`visualize_episode.py --tenant T <episode_id>`: the tenant through the one host acceptance
+    (r10 A1), held while the page is written, then its episode opened through its repository.
+    `directory` is the tenant records a test hands in; a production process reads
+    `DEFENDER_DATABASE_DSN`'s. Every refusal is one stderr line and exit 1."""
+    from defender.systems.run_tenant import host_tenant
+
     try:
         ns = _parse_page_args(argv)
     except UsageRefused as bad:
         print(f"usage: visualize_episode.py --tenant T <episode_id> ({bad})", file=sys.stderr)
         return 1
     try:
-        tenant = requested_tenant(resolve_data_root(), ns.tenant)
-        view = open_episode_view(tenant.runs_repository(), ns.episode_id)
+        admitted = host_tenant(resolve_data_root(), ns.tenant, directory=directory)
+    except TenantRefused as bad:
+        print(" ".join(str(bad).split()), file=sys.stderr)
+        return 1
+    with admitted:
+        return _render_episode(admitted.tenant, ns.episode_id)
+
+
+def _render_episode(tenant: Any, episode_id: str) -> int:
+    """`main`'s work for the accepted `tenant`: its episode's page written, its path printed."""
+    try:
+        view = open_episode_view(tenant.runs_repository(), episode_id)
     except (TenantRefused, JudgeRefused) as bad:
         # One line: the refusal may wrap a multi-line YAML parser error.
         print(" ".join(str(bad).split()), file=sys.stderr)

@@ -194,14 +194,10 @@ estimate invites the point estimate to be read.
 3. **Capture the alert and investigate it.**
 
    Every run names its tenant, and there is no default (#1078):
-   set `TENANT_ID` to the UUID committed in the tenant repository (new tenants mint one
-   with `python3 defender/cli/tenant.py new-id` before scaffolding), and clone the tenant repo into `$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge` on the host, then,
-   once the clone exits 0, run
-   `python3 defender/cli/tenant.py setup "$TENANT_ID"` once, from the main checkout, with
-   `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as
-   the same user that runs defender; a destination already occupied makes setup refuse, naming
-   it in the message. (Adopting an existing (B)/(C) installation whose old entries are
-   root-owned may need setup run as root — that adoption case only.)
+   set `TENANT_ID` to an `active` tenant's UUID. A tenant is created through the platform API
+   (`POST /admin/tenants`) and `python -m defender.lifecycle serve`, which places its knowledge
+   repo under `$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge` (see
+   `defender/docs/development-operations.md`); nothing is cloned or set up by hand.
 
    ```bash
    experiments/oracle-telemetry-fidelity/extract_alert.py <rule_id> <since-iso> <out.json>

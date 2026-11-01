@@ -10,6 +10,7 @@ import pytest
 from defender import box as box_mod
 from defender.box import BoxExecutor, BoxFault, BoxSpec, unboxed_executor
 from defender.tests.support.sandbox import _box1195 as X
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 NAME = "defender-drain-u1195"
 
@@ -463,7 +464,7 @@ def test_start_box_stamps_the_docker_it_created_the_box_with(tmp_path: Path, mon
     plant_alert(run_dir)
     (tmp_path / "defender").mkdir()
     by_run_dir = box_mod.start_box(run_dir, tmp_path / "defender", docker=daemon,
-                                   spec=BoxSpec(runtime="runc", rootfs="defender-box:t1195"))
+                                   spec=BoxSpec(runtime="runc", rootfs="defender-box:t1195"), tenant_id=TEST_TENANT)
     assert by_run_dir.sandboxed, by_run_dir
     assert by_run_dir.docker is daemon, "the run-dir path did not stamp its docker"
     assert len(daemon.created()) == 2

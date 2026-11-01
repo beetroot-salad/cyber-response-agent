@@ -1,7 +1,6 @@
-"""The create lane (`create_tenant`'s tenant row, `_io.write_guarded(mode="create")`): complete or absent under racing readers and crashes, and its fallback where no unnamed file can be made."""
+"""The create lane (`_io.write_guarded(mode='create')`): its fallback where no unnamed file can be made; a linked tenant folder is refused."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root
 
 import errno
 import json
@@ -25,6 +24,11 @@ from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 T_ID = H.VALID_ID
 
 
+#: Why the create lane's mode is pinned at all: a staged-name sketch (`tempfile.mkstemp`)
+#: regressed it to 0600 whatever the umask.
+_WHY_0644 = "C-R6 found the naive staged shape regressing to 0600"
+
+
 def _race(n: int, fn) -> tuple[list, list]:
     """Release `n` callers of `fn` together behind one Barrier. Returns (results, exceptions)."""
     gate = threading.Barrier(n)
@@ -36,7 +40,7 @@ def _race(n: int, fn) -> tuple[list, list]:
         gate.wait(timeout=30)
         try:
             got = fn()
-        except BaseException as e:  # noqa: BLE001 — classified by the caller
+        except BaseException as e:  # noqa: BLE001 - classified by the caller
             with lock:
                 errors.append(e)
             return
@@ -51,16 +55,24 @@ def _race(n: int, fn) -> tuple[list, list]:
     return results, errors
 
 
-class _Bystander:
-    """A reader polling one path while writers race to create it. It judges only what it SEES:
-    absent, or a single-named regular file whose body is a complete JSON object carrying
-    `fields`. Anything else — an empty file, a partial body, a second name — is a violation."""
+_FIELDS = ("tenant_id", "created_at")
+_BODY = json.dumps({"tenant_id": T_ID, "created_at": "2026-01-01T00:00:00Z", "pad": "x" * 4096}) + "\n"
 
-    def __init__(self, path: Path, fields: tuple[str, ...]) -> None:
+
+def _complete(path: Path) -> bool:
+    try:
+        return _complete_bytes(path.read_bytes())
+    except OSError:
+        return False
+
+
+class _Bystander:
+    """A reader polling one path while writers race to create it; it judges only what it sees:
+    absent, or a single-named regular file with a complete JSON body. Anything else is a violation."""
+
+    def __init__(self, path: Path) -> None:
         self.path = path
-        self.fields = fields
         self.violations: list[str] = []
-        self.saw_complete = 0
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run)
 
@@ -81,16 +93,8 @@ class _Bystander:
             return
         if not data:
             self.violations.append("an EMPTY file at the name")
-            return
-        try:
-            doc = json.loads(data)
-        except ValueError:
-            self.violations.append(f"a PARTIAL body at the name: {data[:60]!r}")
-            return
-        if not isinstance(doc, dict) or any(f not in doc for f in self.fields):
-            self.violations.append(f"an incomplete document at the name: {doc!r}")
-            return
-        self.saw_complete += 1
+        elif not _complete_bytes(data):
+            self.violations.append(f"a partial or incomplete body at the name: {data[:60]!r}")
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -106,107 +110,82 @@ class _Bystander:
         self._look()
 
 
-#: Why the create lane's mode is pinned at all: a staged-name sketch (`tempfile.mkstemp`)
-#: regressed it to 0600 whatever the umask.
-_WHY_0644 = "C-R6 found the naive staged shape regressing to 0600"
+def _complete_bytes(data: bytes) -> bool:
+    try:
+        doc = json.loads(data)
+    except ValueError:
+        return False
+    return isinstance(doc, dict) and all(f in doc for f in _FIELDS)
 
 
-#: The crash child: it loops over ONE real create lane in fresh directories until it is
-#: killed. `create_tenant`'s own listing and mkdir dominate its loop, so a kill seldom lands
-#: inside the row's write (0/40 measured): this is mostly a stray-entry check.
-_CRASH_CHILD = {
-    "row": r"""
+#: The crash child loops over the real create lane in fresh directories until it is killed.
+_CRASH_CHILD = r"""
 import sys
 from pathlib import Path
-from defender.tenancy import _tenant
+from defender import _io
 root = Path(sys.argv[1])
+body = sys.argv[2]
 print("ready", flush=True)
 i = 0
 while True:
-    _tenant.create_tenant(_tenant.data_root_from_path(root / f"d{i}"), sys.argv[2])
+    d = root / f"d{i}"
+    d.mkdir()
+    _io.write_guarded(d / "x.json", body, mode="create")
     i += 1
-""",
-}
+"""
 
-
-def _complete(path: Path, fields: tuple[str, ...]) -> bool:
-    try:
-        doc = json.loads(path.read_bytes())
-    except (OSError, ValueError):
-        return False
-    return isinstance(doc, dict) and all(f in doc for f in fields)
-
-
-def _crash_leftovers(root: Path) -> list[str]:
-    """Every directory the killed child touched: absent-or-complete, and nothing else."""
-    bad: list[str] = []
-    for d in sorted(root.iterdir()):
-        names = sorted(os.listdir(d))
-        if names not in ([], [T_ID]):
-            bad.append(f"{d.name}: stray entries {names}")
-            continue
-        inner = sorted(os.listdir(d / T_ID)) if names else []
-        if inner not in ([], [H.ROW_NAME]):
-            bad.append(f"{d.name}/{T_ID}: stray entries {inner}")
-        elif inner and not _complete(d / T_ID / H.ROW_NAME, ("tenant_id", "created_at")):
-            bad.append(f"{d.name}: a torn row {(d / T_ID / H.ROW_NAME).read_bytes()[:40]!r}")
-    return bad
-
-
-# ======================================================================================
-# The create lane. (The retired runs-base record's cases live in
-# `storage/ids_1187/test_1187_layout_isolation.py`.)
-# ======================================================================================
 
 def test_s7_j16_create_lane_complete_or_absent(tmp_path):
-    """A reader racing `create_tenant`'s row write sees the name absent or the file complete,
-    never empty or partial, with one name throughout (no two-named alias window); the row is
-    mode 0644 under umask 022; a crash mid-write leaves no stray entry."""
+    """Racing `write_guarded(mode="create")` writers: one winner, a polling reader never sees an empty or partial
+    file or a second name, mode 0644 under umask 022, and a killed writer leaves no stray entry."""
+    io_mod = H.mod("_io")
     with umask(0o022):
-        # Six writers race one row under a polling reader.
-        row_fields = ("tenant_id", "created_at")
         for trial in range(20):
-            root = tmp_path / "rows" / f"d{trial}"
-            root.parent.mkdir(parents=True, exist_ok=True)
-            with _Bystander(root / T_ID / H.ROW_NAME, row_fields) as reader:
-                results, errors = _race(6, lambda r=root: H.create_tenant(fixture_data_root(r), T_ID))
-            assert len(results) == 1, f"trial {trial}: {len(results)} creates of one row succeeded"
-            assert all(isinstance(e, H.tenant().TenantRefused) for e in errors), (
+            root = tmp_path / "race" / f"d{trial}"
+            root.mkdir(parents=True)
+            target = root / "x.json"
+            with _Bystander(target) as reader:
+                results, errors = _race(6, lambda t=target: io_mod.write_guarded(t, _BODY, mode="create"))
+            assert len(results) == 1, f"trial {trial}: {len(results)} creates of one name succeeded"
+            assert len(errors) == 5
+            assert all(isinstance(e, FileExistsError) for e in errors), (
                 f"trial {trial}: a losing create escaped with {[type(e).__name__ for e in errors]}")
             assert reader.violations == [], f"trial {trial}: the bystander saw {reader.violations}"
-            assert os.listdir(root) == [T_ID], f"trial {trial}: stray entries in the root"
-            assert os.listdir(root / T_ID) == [H.ROW_NAME], f"trial {trial}: stray beside the row"
-            assert_single_plain(root / T_ID / H.ROW_NAME, 0o644, why=_WHY_0644)
+            assert os.listdir(root) == ["x.json"], f"trial {trial}: stray entries beside the file"
+            assert target.read_text(encoding="utf-8") == _BODY
+            assert_single_plain(target, 0o644, why=_WHY_0644)
 
-    # A crash mid-write.
-    crash_root = tmp_path / "crash"
-    env = H.setup_env(None)
-    def crash_one(lane: str, kill: int) -> list[str]:
-        root = crash_root / f"{lane}-{kill}"
+    env = dict(os.environ)
+    env["PYTHONPATH"] = f"{H.REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}".rstrip(os.pathsep)
+
+    def crash_one(kill: int) -> list[str]:
+        root = tmp_path / "crash" / f"k{kill}"
         root.mkdir(parents=True)
-        child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
-            [sys.executable, "-c", _CRASH_CHILD[lane], str(root), T_ID], env=env,
+        child = subprocess.Popen(  # noqa: S603 - fixed argv, the test's own interpreter
+            [sys.executable, "-c", _CRASH_CHILD, str(root), _BODY], env=env,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
-            ready = child.stdout.readline().strip()
-            if ready != "ready":
-                return [f"{lane} kill {kill}: child did not say ready: {child.stderr.read()}"]
+            if child.stdout.readline().strip() != "ready":
+                return [f"kill {kill}: child did not say ready: {child.stderr.read()}"]
             time.sleep(random.uniform(0.02, 0.25))
             if child.poll() is not None:
-                return [f"{lane} kill {kill}: the create-lane child died on its own: "
-                        f"{child.stderr.read()}"]
+                return [f"kill {kill}: the child died on its own: {child.stderr.read()}"]
             child.send_signal(signal.SIGKILL)
         finally:
             child.wait(timeout=30)
             child.stdout.close()
             child.stderr.close()
-        return [f"{lane} kill {kill}: {b}" for b in _crash_leftovers(root)]
+        bad = []
+        for d in sorted(root.iterdir()):
+            names = sorted(os.listdir(d))
+            if names not in ([], ["x.json"]):
+                bad.append(f"kill {kill} {d.name}: stray entries {names}")
+            elif names and not _complete(d / "x.json"):
+                bad.append(f"kill {kill} {d.name}: a torn file {(d / 'x.json').read_bytes()[:40]!r}")
+        return bad
 
-    # The kills are independent (own dir, own child), so they run a few at a time: each is
-    # mostly interpreter start-up and a sleep.
-    jobs = [(lane, kill) for lane, kills in (("row", 8),) for kill in range(kills)]
     with ThreadPoolExecutor(max_workers=4) as pool:
-        torn = [entry for found in pool.map(lambda j: crash_one(*j), jobs) for entry in found]
+        torn = [entry for found in pool.map(crash_one, range(8)) for entry in found]
     assert torn == [], "a crash left a torn or stray entry:\n" + "\n".join(torn)
 
 
@@ -239,14 +218,17 @@ def test_create_does_not_swallow_an_unrelated_failure(tmp_path):
 
 def test_tenant_folder_symlink_swapped_between_o11as_construction_time_check_and_first_write(
         tmp_path):
-    victim = tmp_path / "victim"
-    victim.mkdir()
+    """A linked `<root>/T` is refused by acceptance and the link's target is left as it was (#1214 O6: nothing is
+    created, so no create to write through the link)."""
+    elsewhere = tmp_path / "elsewhere"
+    H.place_knowledge(elsewhere, T_ID)
     root = tmp_path / "data"
     root.mkdir()
-    (root / T_ID).symlink_to(victim, target_is_directory=True)
-    H.owner_refusal(H.create_tenant, root, T_ID)
-    assert os.listdir(victim) == [], "create_tenant wrote through a symlinked tenant folder"
-    assert os.readlink(root / T_ID) == str(victim), "the planted link was replaced"
+    (root / T_ID).symlink_to(elsewhere / T_ID, target_is_directory=True)
+    before = H.census(elsewhere)
+    H.owner_refusal(H.accept, root, T_ID)
+    assert H.census(elsewhere) == before, "acceptance wrote through a symlinked tenant folder"
+    assert os.readlink(root / T_ID) == str(elsewhere / T_ID), "the planted link was replaced"
     fresh = tmp_path / "fresh"
-    H.create_tenant(fixture_data_root(fresh), T_ID)
-    assert (fresh / T_ID / H.ROW_NAME).is_file()
+    H.place_knowledge(fresh, T_ID)
+    assert H.accept(fresh, T_ID).id == T_ID

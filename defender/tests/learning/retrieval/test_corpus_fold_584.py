@@ -22,7 +22,7 @@ from defender.tests.support.shared.contracts._locale import C_LOCALE_ENV  # noqa
 from defender.tests.learning.curation.test_curator_manifest import _findings_lesson  # noqa: E402
 from defender.tests.learning.retrieval.test_trace_lesson import _mk_run  # noqa: E402
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
-from defender.tests.support.learning.retrieval._lessons_corpus import _tenant_runs
+from defender.tests.support.learning.retrieval._lessons_corpus import _tenant_runs, trace_main
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 
@@ -325,7 +325,7 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
     (corpus / "unfenced.md").write_text("no fence at all\n")
     _undecodable(corpus)
 
-    rc = tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID])
+    rc = trace_main(tl, ["--all", "--lessons-dir", str(corpus), "--tenant", TID])
     captured = capsys.readouterr()
     assert rc == 0, captured.err
 
@@ -343,9 +343,12 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
 def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
     """The missing-dir guard keys on the resolved (injected) dir, not an import-time constant."""
     tl = load_trace_lesson("trace_lesson_584")
+    # The tenant is placed: the host acceptance (A1) runs the folder rules before the command's own guard,
+    # so the guard under test is reached only for an acceptable tenant.
+    _tenant_runs()
     missing = tmp_path / "no-such-corpus"
 
-    assert tl.main(["--all", "--lessons-dir", str(missing), "--tenant", TID]) == 1
+    assert trace_main(tl, ["--all", "--lessons-dir", str(missing), "--tenant", TID]) == 1
     err = capsys.readouterr().err
     # The guard names the injected dir and no other.
     named = [ln for ln in err.splitlines() if "no lessons dir:" in ln]
@@ -362,7 +365,7 @@ def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
     oracle = record_lesson_load.lesson_name(str(lesson_path), agent_root=tmp_path / "agent")
     assert oracle == "foo-bar"
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
+    assert trace_main(tl, ["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
     first_column = capsys.readouterr().out.splitlines()[0].split("\t")[0]
     assert first_column == oracle
 
@@ -379,7 +382,7 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
     _mk_run(runs, "case-a", disposition="malicious",
             loads=[{"lesson_name": "foo-bar", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
+    assert trace_main(tl, ["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
     assert capsys.readouterr().out.splitlines() == ["foo-bar\td\t1\t0"]
 
 
@@ -392,14 +395,14 @@ def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, capsys):
     _undecodable(corpus, "corrupt.md")
     base = ["--lessons-dir", str(corpus), "--tenant", TID]
 
-    assert tl.main(["nope", *base]) == 1
+    assert trace_main(tl, ["nope", *base]) == 1
     assert f"no such lesson: {corpus / 'nope.md'}" in capsys.readouterr().err
 
-    assert tl.main(["corrupt", *base]) == 1
+    assert trace_main(tl, ["corrupt", *base]) == 1
     err = capsys.readouterr().err
     assert "corrupt.md" in err
     assert "Traceback" not in err
     assert len([ln for ln in err.splitlines() if ln.strip()]) == 1
 
-    assert tl.main(["good", *base]) == 0
+    assert trace_main(tl, ["good", *base]) == 0
     assert capsys.readouterr().out.startswith("# good")

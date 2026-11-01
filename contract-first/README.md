@@ -72,6 +72,7 @@ with diagrams, see [docs/design.md](docs/design.md).
 | `/contract-first:refactor` | Restructures without behavior change; tests change only mechanically, and a lint is added when a removed pattern could return. |
 | `/contract-first:ship` | Branch, commit, push, open a PR. Used by the stages above; useful on its own. |
 | `/contract-first:guide` | Answers which lane fits a change, where a run stands and what comes next, and why the pipeline works as it does. Runs only when you type it. |
+| `/contract-first:maintain-cache` | Keeps the project cache: adds repo facts a run had to work out, removes entries the run contradicted, and, when several entries share a cause, writes a project rule that removes it (or proposes a plugin change as an issue). write-tests, write-code-from-tests and finalize run it in a fresh agent; run it yourself with no argument to look for root causes only. |
 | `/contract-first:handoff` | Writes the terse note that lets a cold session resume the work. |
 | `/contract-first:symbol-refs` | Resolves a symbol's cross-file references or definitions through Claude Code's `LSP` tool, checked against grep, where grep alone would also match comments and unrelated same-name symbols. |
 
@@ -99,6 +100,16 @@ repo already keeps for any agent:
   believe CI and fix CLAUDE.md.
 - **Language-server config** — whatever the project's language server needs to resolve imports
   (for Python's Pyright, `extraPaths` under `[tool.pyright]`), so `symbol-refs` gets real answers.
+- **The project cache** (`.claude/contract-first-cache.md`) — how the skills' rules apply to this
+  project in particular (ownership markers, threat-model examples, lint conventions), one grep-able
+  line per entry. write-tests and write-code-from-tests, and their reference files, end with
+  their own cache of applications that hold for any project; the project file holds the rest. Skills grep it for their own name. One skill, `maintain-cache`, is
+  its only writer, run in a fresh agent: write-tests, write-code-from-tests and finalize dispatch it at the end of their
+  review steps, and it adds what the run had to work out, removes what it contradicted, and
+  writes project rules for causes several entries share. The changes ride in the run's PR.
+- **The project rules** (`.claude/contract-first-rules.md`) — rules agents wrote for this project,
+  each removing a cause several cache entries shared. Both stages read them beside the principles
+  document, which wins on conflict. Agents revise only their own rules; a line a human edited is theirs.
 - **The attack deck** (`.claude/contract-first-attacks.md`) — the project's own record of exploit
   shapes that carried real bugs past its suites. `finalize` creates it on the first such escape and
   appends to it after that; the attackers replay it on every new contract. A project without one

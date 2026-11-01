@@ -132,9 +132,11 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
                    doc={**T.family_doc(), "episode_id": episode_id})
     with Episode.open(ep) as held:
         T.episode_view(held).close()
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
+    argv = ["--episode", episode_id, "--world", "b", "--tenant", ep.parent.parent.name, "--update-ticket"]
     with pytest.raises(SystemExit) as refusal:
-        run_py.main(["--episode", episode_id, "--world", "b",
-                     "--tenant", ep.parent.parent.name, "--update-ticket"])
+        run_py.main(argv, directory=directory_for_argv(argv))
     assert "--update-ticket" in str(refusal.value), "the resume path accepted the ticket flag"
 
 
