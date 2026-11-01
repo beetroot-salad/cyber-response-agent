@@ -101,7 +101,9 @@ For each tenant:
    is not enough: without a merge whitelist Forgejo lets any writer merge, so the bot could
    merge its own pull request, and publish refuses such a repository (#1163). A required
    approval does block the merge, but Forgejo still reports the bot as able to merge, so it
-   does not satisfy the check either.
+   does not satisfy the check either. The lifecycle service sets this rule itself when it creates a tenant or
+   rotates its forge credential: pushes off, and a merge whitelist of the organisation's
+   `Owners` team with no bot in it.
 2. Create a Generic JWT Authorized Integration for that bot. Bind its issuer to Vault's
    HTTPS identity issuer, require `tenant_id=<tenant>`, restrict it to the exact repository,
    and grant `write:repository` and `write:issue`. Record the generated audience (not secret).
