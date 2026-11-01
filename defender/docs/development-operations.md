@@ -62,9 +62,21 @@ infrastructure routes the name (DNS, the compose network) and makes OpenBao's ce
 where the process's TLS client looks (`SSL_CERT_FILE`/`SSL_CERT_DIR`, as the compose file does for
 the dev container and Forgejo with the dev CA). There is no CA setting of any process's own: the
 lifecycle, the publish child and the drains all trust what that default trusts. A folder named in
-`SSL_CERT_DIR` needs OpenSSL's hash names for Python to find a CA in it (provisioning runs
-`openssl rehash` on the dev one; a dev stack provisioned before that needs `openssl rehash
+`SSL_CERT_DIR` needs OpenSSL's hash names for Python to find a CA in it (`provision-dev-issuer.sh
+prepare` runs `openssl rehash` on the dev one; a dev stack prepared before that needs `openssl rehash
 playground-issuer/trust` once).
+
+An existing dev stack also needs two things the compose file gained. Recreate the devcontainer
+(the editor's rebuild-container command, or `docker compose up -d --force-recreate devcontainer`
+from `.devcontainer/` on the host) so it picks up the `SSL_CERT_DIR` value and the
+`playground-issuer/trust` mount at `/etc/ssl/dev-issuer-ca`: an environment variable and a mount
+are fixed when a container is created, and the running one has neither. And set
+`DEFENDER_DATABASE_DSN` yourself: the compose file does not set it. In the dev stack it is the
+`defender` database of the `postgres` service,
+`postgresql://defender:dev-only-change-me@postgres:5432/defender`
+(`.devcontainer/postgres/create-application-database.sql`; the same credentials as
+`POSTGRES_USER`/`POSTGRES_PASSWORD` in `docker-compose.yml`); apply the schema once with
+`python -m defender.migrations upgrade`. A database made elsewhere (CI, a hosted unit) has its own DSN.
 
 ## Tenant version control credentials (PR #1253)
 
@@ -131,33 +143,32 @@ No production migration or deployment is implied by the image bump.
 
 The devcontainer compose file runs OpenBao 2.4.1 as the `openbao` service: file storage, a
 static seal from a 32-byte key file and a TLS listener signed by a dev CA, reachable only on the
-compose network at `https://openbao:8200` (no host port). Its storage, seal key, CA, recovery
-keys and the AppRole client config live under `<repo>/playground-issuer/` (gitignored and
-excluded from docker build contexts). This is a dev posture: the seal key sits beside the data
-it seals, and any same-uid process in the dev container can read the client config. Forgejo's
+compose network at `https://openbao:8200` (no host port). Its storage, seal key, CA and TLS
+material live under `<repo>/playground-issuer/` (gitignored and excluded from docker build
+contexts). This is a dev posture: the seal key sits beside the data it seals. Forgejo's
 `/data` is the host folder `<repo>/playground-knowledge/`, so `docker compose down -v` keeps it;
 Forgejo allows only `openbao` as an integration issuer and trusts the dev CA through
 `SSL_CERT_DIR`.
 
-Provision from the dev container, after the stack is up, with the lab tenant's id, its bot and
-its repository:
+Prepare the issuer's files from the dev container, once, before the stack's first `up` (or any time
+after; it is idempotent):
 
 ```bash
-.devcontainer/provision-dev-issuer.sh provision <tenant-id> --bot <bot login> --repo <owner/name>
+.devcontainer/provision-dev-issuer.sh prepare
 ```
 
-It is idempotent. It prepares `playground-issuer/` (and restarts `openbao` on it), initialises
-OpenBao, creates the signing key, the tenant's OIDC role (TTL 600 s, `tenant_id` from entity
-metadata), an AppRole whose policy reads only that role's token and the entity binding them,
-creates the bot's Generic JWT Authorized Integration in Forgejo (the issuer, `tenant_id` equal to
-the tenant, restricted to the repository, `write:repository` and `write:issue`) and sets the
-role's `client_id` to the audience Forgejo generated, writes `client/<tenant-id>/issuer.json` and
-the tenant row's forge binding naming it, warns if the bot can push `main`, and revokes the root token it used (a
-later run regenerates one from the recovery keys inside the issuer container). Forgejo 17 has no
-API for Authorized Integrations: the script fills the web form as the bot, after resetting the
-bot's unused password. The signing role is created before the integration because Forgejo caches
-the issuer's JWKS: an integration attempted against an empty JWKS keeps failing until Forgejo
-restarts. Pass `--rotate-secret` to mint a new AppRole `secret_id`.
+It makes the dev CA, the `openbao` TLS certificate, the 32-byte static-seal key and the storage
+folder under `playground-issuer/`, copies the CA certificate into `playground-issuer/trust/` and runs
+`openssl rehash` on it (a CA in a folder named by `SSL_CERT_DIR` is found by hash name), then
+restarts `openbao` on them. It changes nothing on an issuer it already prepared. That is all the
+script does for the issuer: it creates no tenant, no OpenBao role, AppRole or entity, no bot and no
+Forgejo integration, and it writes no client config. The `provision <tenant-id> --bot --repo`
+subcommand it used to have is removed (#1214): a tenant's credentials, the AppRole secret in the
+host secret file under the lifecycle's secrets directory, the bot and its repository-restricted
+Authorized Integration come from the lifecycle service when the tenant is created or its forge
+credential rotated (see "Creating a tenant"). The lifecycle logs in to OpenBao with the management
+login file its settings name, so OpenBao must be initialised and that login provisioned beforehand;
+this script does neither.
 
 Moving an existing Forgejo off the old `forgejo-data` named volume, once: stop `forgejo`, run
 `.devcontainer/provision-dev-issuer.sh migrate-forgejo-data` (it copies the volume into

@@ -149,16 +149,18 @@ async def test_a_membership_for_an_unknown_user_is_refused(seeded):
         await seeded.ensure_invitation("no-such-user", T1, invited_by="system", now=NOW)
 
 
-async def test_ever_had_a_membership_survives_revoke_and_end(seeded):
-    """O8: 'ever had a membership row' is false only for a tenant with none, even after revoke/end."""
-    assert await seeded.tenant_has_ever_had_membership(T1) is False
-    assert await seeded.tenant_has_ever_had_membership(T2) is False
+async def test_a_membership_row_outlives_revoke_and_end(seeded):
+    """O8: a tenant's membership rows are kept after revoke/end, so 'has any row' (the seeder's
+    once-only guard) stays true. The port's `tenant_has_ever_had_membership` was removed with its
+    last production caller (#1214); this asserts the same fact through `memberships_of_tenant`."""
+    assert await seeded.memberships_of_tenant(T1) == []
+    assert await seeded.memberships_of_tenant(T2) == []
     u = await _user(seeded)
     row = await _invited(seeded, u)
-    assert await seeded.tenant_has_ever_had_membership(T1) is True
-    assert await seeded.tenant_has_ever_had_membership(T2) is False
+    assert [m.id for m in await seeded.memberships_of_tenant(T1)] == [row.id]
+    assert await seeded.memberships_of_tenant(T2) == []
     assert await seeded.revoke_invitation(row.id) is True
-    assert await seeded.tenant_has_ever_had_membership(T1) is True
+    assert [(m.id, m.status) for m in await seeded.memberships_of_tenant(T1)] == [(row.id, "revoked")]
 
 
 async def test_active_members_counts_only_active_rows(seeded):

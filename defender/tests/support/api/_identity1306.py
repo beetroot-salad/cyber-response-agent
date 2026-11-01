@@ -650,7 +650,7 @@ class World:
 
     async def _seed_first_members(self, tenant: str, emails: Sequence[str]) -> None:
         repo, now = self.raw_repo, self.clock()
-        if await repo.tenant_has_ever_had_membership(tenant):
+        if await repo.memberships_of_tenant(tenant):  # any row, whatever its status: seed once
             return
         for email in dict.fromkeys(emails):
             user = await repo.ensure_user(email, now=now)
