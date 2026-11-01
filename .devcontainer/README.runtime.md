@@ -38,11 +38,24 @@ lifecycle's host side prepares; nothing is cloned or set up by hand. A tenant fr
 moved once by hand (see "Upgrade from before #1214" in `defender/CLAUDE.md`).
 
 ```bash
-# live investigation — needs the LLM key and the same data root (the tenant's knowledge is in it)
+# live investigation — needs the LLM key, the same data root (the tenant's knowledge is in it),
+# the compose network (the tenant records are in the `postgres` service, and the token issuer is the
+# `openbao` service) and the dev issuer's CA, which `SSL_CERT_DIR` must name (a folder `prepare`
+# has run `openssl rehash` on, mounted read-only like the dev container's)
 docker run --rm --env-file .env \
+    --network cyber-response-agent_devcontainer_default \
     -e DEFENDER_DATA_ROOT=/data -v "<HOST_DATA_ROOT>":/data \
-    defender-runtime python3 defender/run.py <alert.json> --tenant playground
+    -e DEFENDER_DATABASE_DSN=postgresql://defender:dev-only-change-me@postgres:5432/defender \
+    -e SSL_CERT_DIR=/etc/ssl/certs:/etc/ssl/dev-issuer-ca \
+    -v "<HOST_REPO_PATH>/playground-issuer/trust":/etc/ssl/dev-issuer-ca:ro \
+    defender-runtime python3 defender/run.py <alert.json> --tenant <tenant-uuid>
 ```
+
+`<tenant-uuid>` is the id the lifecycle's `POST /admin/tenants` answered, an `active` tenant (a
+tenant id is an opaque UUID, not a name like `playground`). The network is the compose project's
+default one: `name:` in `docker-compose.yml` plus `_default` (`docker network ls` shows it). The DSN
+and the trust folder are the dev stack's (`defender/docs/development-operations.md`, "Host process
+settings" and "The dev issuer"); the trust folder is a HOST path, as below.
 
 **Tenant knowledge is mounted, never baked (#1106, #1120).** A tenant's knowledge folder holds
 its settings (endpoints, later credentials) and its model-facing knowledge — deployment data,
