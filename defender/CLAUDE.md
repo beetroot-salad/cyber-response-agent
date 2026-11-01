@@ -40,7 +40,8 @@ Runs reach `http-proxy` systems through the credential proxy with a request toke
 as the tenant's own sign-only AppRole, and publish now also refuses a repository whose bot can
 **merge** `main`. On a #1214 deployment, once:
 
-1. Mount transit at `transit/`.
+1. Run migrations (revision `0003_sign_login` adds the generation's sign-login columns; every
+   entry point refuses a database still at `0002_tenancy`). Mount transit at `transit/`.
 2. Extend the lifecycle's management policy with create, read, update and delete on
    `transit/keys/request-token-*`.
 3. Create the policy `defender-tenant-sign`: `update` on
