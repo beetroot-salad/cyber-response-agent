@@ -97,7 +97,7 @@ Never turn a known blocker into an implementer note and call the contract ready.
 
 ## 7. Commit and hand off
 
-Before committing, dispatch one fresh cache keeper on **references/cache-keeper.md** with this run's friction log, findings and dispositions, and repairs. Commit its cache changes with the contract. Then commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.
+Before committing, dispatch one fresh cache keeper on **references/cache-keeper.md** with this run's friction log, findings and dispositions, and repairs. Commit its cache changes, unchanged, with the contract. Then commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.
 
 ## Cache
 
