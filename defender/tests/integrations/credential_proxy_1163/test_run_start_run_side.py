@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
+import httpx
+
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import test_run_start_tokens as R
 from defender.tests.integrations.credential_proxy_1163._target import (
@@ -67,9 +69,11 @@ class HostRecordingBao(A.OpenBaoStandIn):
     def __init__(self, *args, **kw) -> None:
         super().__init__(*args, **kw)
         self.hosts: list[str] = []
+        self.origins: list[tuple[str, str, int | None]] = []
 
     def _handle(self, request):
         self.hosts.append(request.url.host)
+        self.origins.append((request.url.scheme, request.url.host, request.url.port))
         return super()._handle(request)
 
 
@@ -98,3 +102,7 @@ def test_w3_the_signing_login_comes_from_the_sign_generation_not_the_environment
     assert bao.logins == [(ROLE, SECRET)], "login with the sign pair alone"
     assert len(bao.signs) == 1, "positive control: the read token was signed"
     assert set(bao.hosts) == {urlsplit(DEPLOYMENT_ISSUER.openbao_url).hostname}, bao.hosts
+    deployment = httpx.URL(DEPLOYMENT_ISSUER.openbao_url)
+    assert set(bao.origins) == {(deployment.scheme, deployment.host, deployment.port)}, bao.origins
+    assert deployment.scheme == "https", "positive control: the deployment's address is https"
+    assert {s.mount for s in bao.signs} == {"transit"}, "the fixed transit mount (A25)"

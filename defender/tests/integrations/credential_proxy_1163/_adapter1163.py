@@ -106,11 +106,12 @@ class Sign:
     client_token: str
     key: str
     payload: bytes
+    mount: str = ""
 
 
 class OpenBaoStandIn(httpx.MockTransport):
     """An OpenBao by transport: AppRole login for the registered `accounts` ({role_id:
-    secret_id}), transit sign for any key of any mount (refusing a client token it did not issue),
+    secret_id}), transit sign for any key of any mount (recording the mount) (refusing a client token it did not issue),
     and the housekeeping a client may plausibly use: `sys/health`, `sys/seal-status`, token
     `revoke-self`. Records every request path, login and sign; the signature carries
     `SIGNATURE_CANARY`. Decides nothing about which tenant's key a login may use: the test reads
@@ -180,7 +181,7 @@ class OpenBaoStandIn(httpx.MockTransport):
             self._tokens[token] = body["role_id"]
             return httpx.Response(200, json={"auth": {"client_token": token,
                                                       "lease_duration": 600}})
-        match = re.fullmatch(r"/v1/[^/]+/sign/([^/]+)(?:/[^/]+)?", path)
+        match = re.fullmatch(r"/v1/([^/]+)/sign/([^/]+)(?:/[^/]+)?", path)
         if match:
             forced = self._forced("sign", self.sign_status)
             if forced is not None:
@@ -190,7 +191,7 @@ class OpenBaoStandIn(httpx.MockTransport):
                 self.refused.append(path)
                 return httpx.Response(403, json={"errors": ["permission denied"]})
             payload = base64.b64decode(json.loads(request.content)["input"])
-            self.signs.append(Sign(token, match.group(1), payload))
+            self.signs.append(Sign(token, match.group(2), payload, match.group(1)))
             return httpx.Response(200, json={"data": {
                 "signature": f"vault:v1:{SIGNATURE_CANARY}-{len(self.signs)}"}})
         self.refused.append(path)

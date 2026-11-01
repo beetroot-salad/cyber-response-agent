@@ -6,12 +6,14 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
+import httpx
+
 import pytest
 
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
-from defender.tests.tenancy.lifecycle_1214._fakes import SIGN_POLICY, TOKEN_POLICY  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import ORG, SIGN_POLICY, TOKEN_POLICY  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import openbao_failing  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld, lifecycle_config  # noqa: E402
 
@@ -120,43 +122,47 @@ def test_the_sign_policy_is_the_configured_name(tmp_path, data_root):
 
 
 class _DropsTheProviderCommit:
-    """A hold whose first commit recording a role id is lost before it lands, as when the lock connection fails mid-step."""
+    """A hold whose first commit recording `field` is lost before it lands, as when the lock connection fails mid-step."""
 
-    def __init__(self, held: Any, dropped: list[int]) -> None:
-        self._held, self._dropped = held, dropped
+    def __init__(self, held: Any, dropped: list[int], field: str) -> None:
+        self._held, self._dropped, self._field = held, dropped, field
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._held, name)
 
     async def commit(self, **kwargs: Any) -> Any:
         updates = (kwargs.get("update_generations") or {}).values()
-        if not self._dropped and any("role_id" in fields or "sign_role_id" in fields for fields in updates):
+        if not self._dropped and any(self._field in fields for fields in updates):
             self._dropped.append(1)
             raise ConnectionError("the lock connection dropped before the commit")
         return await self._held.commit(**kwargs)
 
 
-def test_a_provider_that_died_before_committing_is_run_again_reusing_its_entities_and_aliases(world):
-    """The provider made both chains, then its commit was lost: the re-run finds the entity and alias of each recorded name
-    and reuses them (OpenBao refuses a second alias), so the job finishes with one alias per entity (r8.4, P-c)."""
+@pytest.mark.parametrize(("field", "chain"), [("role_id", "delivery"), ("sign_role_id", "sign")])
+def test_a_provider_that_died_before_committing_is_run_again_reusing_its_entities_and_aliases(world, field, chain):
+    """The commit recording `field` is lost after the {chain} chain was made: the re-run reuses that chain's entity and
+    alias (OpenBao refuses a second alias) and ends with one alias per entity (r8.4, P-c)."""
     real, dropped = world.tenants.lock, []
 
     @contextlib.asynccontextmanager
     async def lock(tenant_id: str) -> Any:
         async with real(tenant_id) as held:
-            yield None if held is None else _DropsTheProviderCommit(held, dropped)
+            yield None if held is None else _DropsTheProviderCommit(held, dropped, field)
     world.tenants.lock = lock
     tenant = world.create()
     world.drive()
     world.tenants.lock = real
     item = world.item(tenant)
     assert dropped and (item["step"], item["step_actor"]) == ("provider", "service") and item["failure"], item
-    assert world.openbao.aliases and world.openbao.approles, "control: the provider had made things before its commit was lost"
+    [pending] = world.generations(tenant)
+    bao = world.openbao
+    entity = pending.entity if chain == "delivery" else pending.sign_entity
+    assert entity in bao.entities and bao.entities[entity]["id"] in {a["canonical_id"] for a in bao.aliases}, \
+        f"control: the {chain} chain's alias existed before its commit was lost"
     assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active", world.item(tenant)
     gen = world.live(tenant)
-    bao = world.openbao
     assert {a["name"] for a in bao.aliases} == {gen.role_id, gen.sign_role_id} and len(bao.aliases) == 2
     assert (set(bao.approles), set(bao.entities)) == ({gen.approle, gen.sign_approle}, {gen.entity, gen.sign_entity})
 
@@ -197,6 +203,28 @@ def test_a_sign_proof_that_fails_fails_install_and_restarts_at_wrap_with_no_file
     world.drive()
     assert world.item(tenant)["state"] == "active"
     assert [role for _key_, role, _input in world.openbao.signs] == [world.live(tenant).sign_approle]
+
+
+@pytest.mark.parametrize("answer", [{"data": {"key_version": 1}}, {"data": {"signature": ""}}], ids=["no signature", "empty signature"])
+def test_a_sign_that_answers_200_without_a_signature_is_not_a_proof(world, answer):
+    """Install's sign answers 200 carrying no signature: install fails and restarts at `wrap` with no secret file; with
+    a forge of real signatures again (control), resume finishes (A24' install, r8.4)."""
+    def unsigned(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/v1/transit/sign/"):
+            return httpx.Response(200, json=answer)
+        return world.openbao.handle(request)
+    real_host = world.host_actor
+    world.host_actor = world.new_host(world.tenants, openbao_login=httpx.AsyncClient(
+        transport=httpx.MockTransport(unsigned), base_url=str(world.openbao.client(None).base_url)))
+    tenant = world.create()
+    world.drive()
+    item = world.item(tenant)
+    assert (item["step"], item["step_actor"]) == ("wrap", "service") and "install" in (item["failure"] or ""), item
+    assert not [p for p in world.config.secrets_dir.rglob("*") if p.is_file()], "a failed install left a secret file"
+    world.host_actor = real_host  # control: the same job with a sign that returns a signature
+    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    world.drive()
+    assert world.item(tenant)["state"] == "active"
 
 
 # --- rotation (A25 key kept and ensured, A24' retire) ------------------------------------------------------
@@ -262,3 +290,90 @@ def test_the_final_sweep_of_offboarding_destroys_a_key_a_late_effect_left(world)
     world.drive()
     assert world.record(tenant).state == "offboarded"
     assert world.openbao.transit_keys == {}
+
+
+# --- upgrade: generations recorded before the sign login existed (r8.2 upgrade, r8.4) -----------------------
+
+SIGN_FIELDS = ("sign_approle", "sign_entity", "sign_role_id", "sign_secret_file", "sign_wrapped_secret", "sign_secret_accessor")
+
+
+def _row(world, tenant: str, status: str) -> Any:
+    [row] = [r for (owner, _s), r in world.tenants._generations.items() if owner == tenant and r.status == status]  # noqa: SLF001
+    return row
+
+
+def _as_recorded_before_r8(world, tenant: str):
+    """Make the tenant's live generation the shape an older deployment recorded: no sign names, and no sign AppRole,
+    entity, alias, secret file or signing key anywhere (the in-memory twin's rows). Returns the generation as it was."""
+    gen = world.live(tenant)
+    bao = world.openbao
+    bao.approles.pop(gen.sign_approle)
+    bao.approle_policies.pop(gen.sign_approle, None)
+    bao.aliases[:] = [a for a in bao.aliases if a["name"] != gen.sign_role_id]
+    bao.entities.pop(gen.sign_entity)
+    bao.transit_keys.pop(_key(tenant))
+    gen.sign_secret_file.unlink()
+    row = _row(world, tenant, "live")
+    for name in SIGN_FIELDS:
+        setattr(row, name, None)
+    assert world.live(tenant).sign_approle is None, "control: the record reads as an older one"
+    return gen
+
+
+def test_a_rotation_gives_a_tenant_recorded_before_r8_its_sign_login_key_and_rule_and_retires_the_old_generation(world):
+    """Rotating a tenant whose live generation has no sign names (and a pre-r8 rule) retires it without any request naming
+    a missing record, and the new generation holds the sign login, the key and the merge whitelist (r8.3 heals all three)."""
+    tenant = world.active_tenant()
+    old = _as_recorded_before_r8(world, tenant)
+    full = f"{ORG}/{tenant}"
+    world.forge.put_rule(full, rule_name="main", branch_name="main", enable_push=True, enable_push_whitelist=False,
+                         enable_merge_whitelist=False)
+    mark = len(world.openbao.calls)
+    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    world.drive()
+    item = world.item(tenant)
+    assert (item["state"], item["pending_action"], item["failure"]) == ("active", None, None), item
+    new, bao = world.live(tenant), world.openbao
+    assert new.salt != old.salt and {g.status for g in world.generations(tenant)} == {"destroyed", "live"}
+    assert all(getattr(new, name) for name in SIGN_FIELDS if name != "sign_wrapped_secret")
+    assert bao.approle_policies[new.sign_approle] == [SIGN_POLICY] and bao.transit_keys[_key(tenant)]["type"] == "ed25519"
+    assert new.sign_secret_file.is_file() and not old.host_secret_file.exists()
+    rule = world.forge.rule(full)
+    assert (rule["enable_push"], rule["enable_merge_whitelist"], rule["merge_whitelist_teams"]) == (False, True, ["Owners"])
+    assert [c.path for c in bao.calls[mark:] if "None" in c.path] == []
+
+
+def test_offboarding_a_tenant_recorded_before_r8_sends_nothing_for_a_missing_sign_record(world):
+    """Offboarding a tenant whose live generation has no sign names finishes, leaves nothing behind and sends no request
+    naming a missing record (`None`) (r8.2 upgrade, A24')."""
+    tenant, other = world.active_tenant(), world.active_tenant()
+    _as_recorded_before_r8(world, tenant)
+    mark = len(world.openbao.calls)
+    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    world.drive()
+    record = world.record(tenant)
+    assert (record.state, record.failure) == ("offboarded", None)
+    assert {g.status for g in world.generations(tenant)} == {"destroyed"}
+    assert [c.path for c in world.openbao.calls[mark:] if "None" in c.path] == []
+    assert world.openbao.made("DELETE", f"/v1/auth/approle/role/{world.live(other).approle}") == [], "control: the other tenant is untouched"
+    assert world.live(other).sign_approle in world.openbao.approles and _key(other) in world.openbao.transit_keys
+
+
+def test_a_pending_generation_recorded_before_r8_fails_its_next_step_naming_the_sign_login_and_can_be_offboarded(world):
+    """A rotation in flight across the upgrade (pending generation with no sign names) fails at its next step with a
+    failure that names the sign login; the operator can offboard it (r8.4 upgrade)."""
+    tenant = world.active_tenant()
+    assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+    world.drive(stop=lambda: world.item(tenant)["step"] == "provider")
+    pending = _row(world, tenant, "pending")
+    assert pending.sign_approle, "control: the names step recorded the sign names"
+    for name in SIGN_FIELDS:
+        setattr(pending, name, None)
+    world.drive()
+    item = world.item(tenant)
+    assert item["failure"] and "sign" in item["failure"].lower(), item
+    assert (item["step"], item["step_actor"]) == ("provider", "service")
+    assert world.live(tenant).sign_approle, "the live generation was not disturbed"
+    assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
+    world.drive()
+    assert world.record(tenant).state == "offboarded"

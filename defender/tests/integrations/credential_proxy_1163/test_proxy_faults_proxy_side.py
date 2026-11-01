@@ -322,3 +322,51 @@ def test_a26_a_token_naming_no_valid_tenant_id_is_refused_whatever_the_verifier_
     assert (control["fault"], len(seen)) == (None, 1)
     assert refused["fault"] == "ConfigFault"
     assert (list(r.store.reads), r.up.paths()) == (reads, seen)
+
+
+def test_a26_a_bad_tenant_id_is_refused_before_any_openbao_path_is_built(tmp_path, data_root):
+    """With the real verifier over a recording transport, a token whose tenant claim is not a
+    tenant UUID is a ConfigFault with zero OpenBao requests; control: a real tenant's token makes
+    the verify call. A26, A11."""
+    tid, calls = str(uuid.uuid4()), []
+
+    def openbao(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"data": {"valid": True}})
+
+    signer = H.FakeSigner()
+    with H.upstream() as up, T.identity_via_proxy(
+            tmp_path / "forge", data_root, H.declaration(up.url + BASE), tenant_id=tid):
+        client = TestClient(app_from_config(
+            _config(tmp_path, data_root=str(data_root)), transport=httpx.MockTransport(openbao)))
+        url, grant = f"{up.url}{BASE}/users/x", {("identity", "r")}
+        good = T.token(tid, grant, signer=signer)
+        T.ask(client, good, "identity", "GET", url)
+        control = list(calls)
+        calls.clear()
+        refused = [
+            T.ask(client, T.forged_token(signer, good, bad), "identity", "GET", url)
+            for bad in (f"{tid}/../x", "../x", f"{tid}/.", "", "a/b")]
+
+    assert any(f"request-token-{tid}" in c.url.path for c in control), (
+        "positive control: a real tenant's token reaches the verify call")
+    assert [r["fault"] for r in refused] == ["ConfigFault"] * 5
+    assert calls == [], [str(c.url) for c in calls]
+
+
+def test_a26_a_forged_token_naming_a_real_other_tenant_reaches_tenant_resolution(
+        tmp_path, data_root):
+    """Positive control for the forging cases: the same forging with the other tenant's valid
+    UUID, under a verifier accepting every signature, is served, so the refusals above are the
+    id check's. A26."""
+    other = str(uuid.uuid4())
+    with T.rig(tmp_path / "forge", data_root, store=_AnyStore()) as r:
+        r.verifier = H.FakeVerifier()
+        r.rebuild()
+        with T.identity_via_proxy(tmp_path / "other", data_root, H.declaration(
+                r.up.url + "/other"), tenant_id=other, repo_name="other"):
+            served = T.ask(r.client, T.forged_token(r.signer, r.tok(), other), "identity",
+                           "GET", f"{r.up.url}/other/users/x")
+
+    assert served["fault"] is None, served
+    assert r.up.paths() == ["/other/users/x"]

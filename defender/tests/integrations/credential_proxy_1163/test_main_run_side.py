@@ -93,6 +93,35 @@ def test_m1_the_served_proxy_started_from_a_token_file_prints_no_token(tmp_path)
         assert secret not in out, "an OpenBao token reached the program's output"
 
 
+def test_m1_openbao_calls_carry_the_token_file_content_not_the_environments(
+        tmp_path, data_root, monkeypatch):
+    """Built in-process from a config naming a token file, with `VAULT_TOKEN` as a decoy: every
+    OpenBao request carries the file's token (trailing newline stripped). O5, A13."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("VAULT_TOKEN", ENV_TOKEN)
+    monkeypatch.setenv("BAO_TOKEN", ENV_TOKEN)
+    token_file = tmp_path / "bao-token"
+    token_file.write_text(FILE_TOKEN + "\n", encoding="utf-8")
+    tid, calls = fixture_uuid("tenant:1163-main-file"), []
+
+    def openbao(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"data": {"valid": True}})
+
+    config = {"kv_mount": "kv", "data_root": str(data_root),
+              "audit_path": str(tmp_path / "audit.jsonl"),
+              P.PROXY_CONFIG_TOKEN_FILE_KEY: str(token_file)}
+    with H.upstream() as up, T.identity_via_proxy(
+            tmp_path / "forge", data_root, H.declaration(up.url + T.BASE_PATH), tenant_id=tid):
+        client = TestClient(P.app_from_config(config, transport=httpx.MockTransport(openbao)))
+        T.ask(client, T.token(tid, {("identity", "r")}, signer=H.FakeSigner()), "identity",
+              "GET", f"{up.url}{T.BASE_PATH}/users/x")
+
+    assert calls, "positive control: the proxy called OpenBao"
+    assert {c.headers.get("X-Vault-Token") for c in calls} == {FILE_TOKEN}
+
+
 def test_m2_a_config_naming_no_token_does_not_fall_back_to_the_environment(tmp_path):
     """No `openbao_token` or token file, a token in `VAULT_TOKEN` and a server in `VAULT_ADDR`:
     the program refuses to start (exit 2), calls that server never and prints no token. O5."""

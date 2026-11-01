@@ -243,6 +243,78 @@ def test_r4b_a_login_openbao_refuses_is_a_config_fault_at_the_mint(tmp_path, dat
     assert len(bao.signs) == 1, "positive control: the right secret signs"
 
 
+@pytest.mark.parametrize(("status", "logins"), [(400, 1), (403, 2)], ids=["bad request", "forbidden"])
+def test_r4e_a_sign_openbao_refuses_with_a_4xx_is_a_config_fault_after_one_relogin_on_403(
+        tmp_path, data_root, status, logins):
+    """A sign call answered 4xx (400: a key not yet made; 403: a refused client token) is
+    `ConfigFault`; a 403 is retried after exactly one fresh login, a 400 not. Control: a sign
+    that is not refused signs. A24, A18."""
+    _plant(data_root, proxy=("identity",))
+    records, _ = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: SECRET}, sign_status=status)
+    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
+                                           directory=records.directory)
+    assert (rc, refused) == (0, None)
+    with pytest.raises(ConfigFault) as failed:
+        read_access(rec).token()
+    assert len(bao.logins) == logins, bao.logins
+    assert bao.signs == []
+    assert SECRET not in str(failed.value)
+    bao.sign_status = None
+    read_access(rec).token()
+    assert len(bao.signs) == 1, "positive control: the same run signs once OpenBao accepts"
+
+
+def _reachable(root: object, limit: int = 400) -> list[object]:
+    """Every object reachable from `root` through instance attributes, slots and containers
+    (strings, classes, functions and modules left out): what a run holds, found without naming
+    its parts."""
+    seen: dict[int, object] = {}
+    todo = [root]
+    while todo and len(seen) < limit:
+        obj = todo.pop()
+        if id(obj) in seen or isinstance(obj, (str, bytes, int, float, type, bool, type(None))):
+            continue
+        if callable(obj) and not hasattr(obj, "__dict__"):
+            continue
+        seen[id(obj)] = obj
+        if isinstance(obj, dict):
+            todo += [*obj.keys(), *obj.values()]
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            todo += list(obj)
+        else:
+            todo += list(getattr(obj, "__dict__", {}).values())
+            for cls in type(obj).__mro__:
+                todo += [getattr(obj, n) for n in getattr(cls, "__slots__", ()) if hasattr(obj, n)]
+    return list(seen.values())
+
+
+def test_r4f_nothing_the_run_holds_shows_an_openbao_client_token_or_the_sign_secret(
+        tmp_path, data_root):
+    """After a mint with no signer injected, no repr or str of any object reachable from what
+    the run hands its lifecycle (the signer it builds among them) shows the client token the
+    login issued or the sign secret; the access holds the request token itself. O10, A24."""
+    _plant(data_root, proxy=("identity",))
+    records, _ = _records(data_root, tmp_path)
+    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, ticket=False, issuer_transport=bao,
+                                           directory=records.directory)
+    assert (rc, refused) == (0, None)
+    access = read_access(rec)
+    access.token()
+    assert bao.logins == [(ROLE, SECRET)], "positive control: a mint ran"
+    assert len(bao.signs) == 1
+    client_token = bao.signs[0].client_token
+
+    (life,) = rec.lifecycle_calls
+    held = _reachable(life)
+    assert len(held) > len(life), "positive control: the walk went past the run's arguments"
+    for obj in held:
+        for text in (repr(obj), str(obj)):
+            assert client_token not in text, f"{type(obj).__name__} shows the client token"
+            assert SECRET not in text, f"{type(obj).__name__} shows the sign secret"
+
+
 def _make_absent(path: Path) -> None:
     path.unlink()
 

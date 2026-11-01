@@ -51,16 +51,17 @@ def test_creation_stores_the_rule_for_the_owners_team_only_and_the_bot_cannot_me
     assert (view["protected"], view["user_can_push"], view["user_can_merge"]) == (True, False, False)
 
 
-def test_a_forge_that_stores_no_owners_team_fails_the_template_step_though_it_answered_201(world):
-    """The forge accepts the rule but the stored read-back lacks the Owners team (here the organisation has none): the
-    step fails and the job stops before wrapping anything (A23 read-back, P-a)."""
+def test_a_rule_the_forge_refuses_fails_the_template_step_and_resumes_once_it_accepts(world):
+    """The forge answers 422 to a whitelist naming a team the organisation lacks (here Owners): the step fails, no rule
+    is stored and the job stops before wrapping anything; with the team back, resume finishes (A23, P-a)."""
     world.forge.orgs[ORG].discard("Owners")
     tenant = world.create()
     world.drive()
     item = world.item(tenant)
     assert (item["state"], item["step"], item["step_actor"]) == ("creating", "template", "service")
     assert item["failure"] and "template" in item["failure"]
-    assert world.forge.made("POST", _rules(world, tenant)), "control: the forge was sent the rule and answered it"
+    assert world.forge.made("POST", _rules(world, tenant)), "control: the forge was sent the rule and refused it"
+    assert world.forge.rule(f"{ORG}/{tenant}") is None
     assert world.openbao.wrapped == {}
     world.forge.orgs[ORG].add("Owners")  # control: the same channel with the team present
     assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
@@ -119,12 +120,36 @@ def test_a_rotation_makes_a_rule_that_is_missing(world):
     assert (rule["enable_push"], rule["enable_merge_whitelist"], rule["merge_whitelist_teams"]) == (False, True, ["Owners"])
 
 
+def test_a_rotation_whose_rule_the_forge_refuses_fails_at_protect_and_resumes_once_it_accepts(world):
+    """A rule deleted by hand and an organisation that lost Owners: the forge refuses the rule at rotation (422), the
+    rotation fails at `protect` with no new generation live; with the team back, resume completes (A23, r8.3)."""
+    tenant = world.active_tenant()
+    full = f"{ORG}/{tenant}"
+    old = world.live(tenant)
+    del world.forge.repos[full]["protections"]["main"]
+    world.forge.orgs[ORG].discard("Owners")
+    _rotate(world, tenant)
+    world.drive()
+    item = world.item(tenant)
+    assert item["state"] == "active" and item["pending_action"] is not None and item["step"] == "protect", item
+    assert item["failure"] and "protect" in item["failure"]
+    assert world.forge.made("POST", _rules(world, tenant)), "control: the forge was sent the rule and refused it"
+    assert world.live(tenant).salt == old.salt
+    world.forge.orgs[ORG].add("Owners")  # control: the same channel with the team present
+    assert world.ops.post(f"/admin/tenants/{tenant}/resume").status_code == 202
+    world.drive()
+    assert world.item(tenant)["state"] == "active" and world.item(tenant)["pending_action"] is None
+    assert world.forge.rule(full)["merge_whitelist_teams"] == ["Owners"]
+
+
 def test_rotation_removes_the_login_of_every_generation_from_the_whitelist_and_keeps_the_others(world):
-    """On the second rotation the whitelist names a destroyed generation's bot, the live one and the pending one, a human and a
-    team: it ends with the human, the team and Owners, and the PATCH sent that full list (A23, r8.1/r8.2)."""
+    """On the second rotation the whitelist names a destroyed generation's bot, the live one and the pending one, a human, a bot-like
+    login of no generation and a team: it ends with the human, that login, the team and Owners, and the PATCH sent that full list (A23, r8.1/r8.2)."""
     tenant = world.active_tenant()
     full = f"{ORG}/{tenant}"
     world.forge.team_members[(ORG, "Reviewers")] = {"carol"}
+    world.forge.users.update({"carol", "bot-ops"})
+    world.forge.repos[full]["collaborators"]["bot-ops"] = "write"  # control: a bot-like login that is not a generation's
     _rotate(world, tenant)
     world.drive()
     [destroyed] = [g for g in world.generations(tenant) if g.status == "destroyed"]
@@ -136,7 +161,7 @@ def test_rotation_removes_the_login_of_every_generation_from_the_whitelist_and_k
             seen.append(None)
             bots = [u for u in world.forge.users if u.startswith("bot-")]
             rule = world.forge.rule(full)
-            world.forge.put_rule(full, **{**rule, "merge_whitelist_usernames": ["carol", *bots],
+            world.forge.put_rule(full, **{**rule, "merge_whitelist_usernames": ["carol", "bot-ops", *bots],
                                           "merge_whitelist_teams": ["Reviewers", "Owners"]})
             rule = world.forge.rule(full)
             rule["merge_whitelist_usernames"] = [*rule["merge_whitelist_usernames"], first]  # the purged bot's stale name
@@ -148,10 +173,10 @@ def test_rotation_removes_the_login_of_every_generation_from_the_whitelist_and_k
     world.drive()
     assert seen and world.item(tenant)["state"] == "active"
     rule = world.forge.rule(full)
-    assert rule["merge_whitelist_usernames"] == ["carol"]
+    assert sorted(rule["merge_whitelist_usernames"]) == ["bot-ops", "carol"]
     assert sorted(rule["merge_whitelist_teams"]) == ["Owners", "Reviewers"]
     [patch] = _writes(world, tenant, mark)
-    assert patch.body["merge_whitelist_usernames"] == ["carol"]
+    assert sorted(patch.body["merge_whitelist_usernames"]) == ["bot-ops", "carol"]
     assert sorted(patch.body["merge_whitelist_teams"]) == ["Owners", "Reviewers"]
     assert patch.body["enable_merge_whitelist"] is True
 

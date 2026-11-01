@@ -94,6 +94,10 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool):
             records = t.directory_with(generations=[fields])
             bao, tap_holder = A.OpenBaoStandIn({ROLE: SECRET, DELIVERY_ROLE: DELIVERY_SECRET}), {}
             store = H.FakeStore({(S.FIXTURE_TENANT, "idp"): T.static_set()})
+            # No second records read inside learning (A24): one through the environment's
+            # database would meet an unreachable server, not a records source.
+            monkeypatch.setenv("DEFENDER_DATABASE_DSN",
+                               "postgresql://poison:poison@127.0.0.1:1/poisoned1163")
             with A.proxy_for(t, store) as (url, tap):
                 tap_holder["tap"] = tap
                 run = S.launch(tmp_path, est, calls=calls, oracle=S.oracle(

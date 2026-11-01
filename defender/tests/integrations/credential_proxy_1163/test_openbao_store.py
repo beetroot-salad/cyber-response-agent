@@ -401,21 +401,35 @@ class _Always(dict):
 TENANT_FOR_STATUS = "5c1b1163-7a2e-4d3f-9b8c-0e1f2a3b4c5d"
 
 
+def _always(status):
+    return _Always((status, {"Content-Type": "application/json"},
+                    json.dumps({"errors": ["no"]}).encode()))
+
+
 @pytest.mark.parametrize(("status", "fault"), [
-    (503, TransportFault), (500, TransportFault), (403, ConfigFault), (400, ConfigFault),
-    (404, ConfigFault)])
+    (503, TransportFault), (500, TransportFault), (403, ConfigFault), (400, ConfigFault)])
 def test_b9_openbao_5xx_is_retryable_and_4xx_is_the_operators_to_fix(status, fault):
     """An OpenBao that answers 5xx (sealed, standby, failing) is `TransportFault` for the store
-    and the verifier; a 4xx (policy refusal, bad request, a destroyed key) is `ConfigFault`.
-    r7 A18, A26."""
+    and the verifier; a 4xx (policy refusal, bad request) is `ConfigFault`. r7 A18, A26."""
     with H.upstream() as bao:
-        bao.replies = _Always((status, {"Content-Type": "application/json"},
-                               json.dumps({"errors": ["no"]}).encode()))
+        bao.replies = _always(status)
         store = proxy().OpenBaoStore(addr=bao.url, token="t", mount="kv")
         verifier = transit_verifier(bao.url, "t")
         with pytest.raises(fault):
             store.read(TENANT_FOR_STATUS, "identity")
         with pytest.raises(fault):
+            verifier.verify(b"claims-1163", "vault:v1:x", tenant_id=TENANT_FOR_STATUS)
+
+
+def test_b9_a_404_is_no_credential_for_the_store_and_a_destroyed_key_for_the_verifier():
+    """A 404 on a credential read is "no credential set" (None, not a refusal); the verifier's
+    404 (a destroyed key) is a ConfigFault. r7 A18, A26."""
+    with H.upstream() as bao:
+        bao.replies = _always(404)
+        store = proxy().OpenBaoStore(addr=bao.url, token="t", mount="kv")
+        verifier = transit_verifier(bao.url, "t")
+        assert store.read(TENANT_FOR_STATUS, "identity") is None
+        with pytest.raises(ConfigFault):
             verifier.verify(b"claims-1163", "vault:v1:x", tenant_id=TENANT_FOR_STATUS)
 
 

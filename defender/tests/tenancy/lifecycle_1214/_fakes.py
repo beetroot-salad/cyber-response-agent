@@ -55,7 +55,7 @@ Fidelity review 1 additions (F-1, F-6):
 r8 additions (slice S1, probes P-a/P-b/P-c of design r8.2/r8.3):
 - Forge branch protection (P-a, Forgejo 17.0.1): a rule stores its lists as Forgejo does -- a whitelisted user
   without access to the repository is silently dropped, `merge_whitelist_teams` on a user-owned repository answers
-  201/200 and is stored empty, a team the organisation lacks is dropped, a PATCH that omits a list leaves it
+  201/200 and is stored empty, a team of the organisation or a user that does not exist is refused 422 (a user-owned repository's teams are not checked), a PATCH that omits a list leaves it
   unchanged, a POST of an existing rule answers 403. `GET branches/main` as the bot adds `user_can_merge`: true for
   a writer unless an enabled merge whitelist excludes it (an enabled whitelist stored empty excludes everybody).
   Organisations are `FakeForge.orgs` (name -> team names); `add_user_repo` makes a repository owned by a user.
@@ -208,7 +208,7 @@ class FakeForge(_Recorder):
 
     def _stored_rule(self, full: str, body: dict[str, Any], old: dict[str, Any] | None) -> dict[str, Any]:
         """What Forgejo stores for `body` over `old` (P-a): an omitted list keeps its old value; users without access
-        to the repository, and every team of a user-owned repository or unknown to the organisation, are dropped."""
+        to the repository, and every team of a user-owned repository, are dropped (unknown names never reach here: 422)."""
         owner = full.split("/", 1)[0]
         merged = {**(old or {}), **body}
         has_access = set(self.repos[full]["collaborators"]) | {owner}
@@ -227,6 +227,16 @@ class FakeForge(_Recorder):
             merged.setdefault(key, False)
         merged["rule_name"] = merged.get("rule_name") or merged.get("branch_name")
         return merged
+
+    def _unknown_names(self, full: str, body: dict[str, Any]) -> list[str]:
+        """Names in `body`'s whitelists that Forgejo 17 refuses with 422: a user that does not exist, and a team the owning
+        organisation lacks (a user-owned repository's teams are accepted and stored empty)."""
+        owner = full.split("/", 1)[0]
+        users = [u for key in ("push_whitelist_usernames", "merge_whitelist_usernames", "approvals_whitelist_username")
+                 for u in (body.get(key) or []) if u not in self.users]
+        teams = [t for key in ("push_whitelist_teams", "merge_whitelist_teams", "approvals_whitelist_teams")
+                 for t in (body.get(key) or []) if owner in self.orgs and t not in self.orgs[owner]]
+        return [*users, *teams]
 
     def _can_merge(self, bot: str, full: str, rule: dict[str, Any] | None) -> bool:
         """P-a: a writer merges unless an enabled merge whitelist lacks it (as a user or through a team)."""
@@ -318,6 +328,8 @@ class FakeForge(_Recorder):
                 rule = body.get("rule_name") or body.get("branch_name")
                 if rule in self.repos[f"{owner}/{name}"]["protections"]:
                     return httpx.Response(403, json={"message": "Branch protection already exist"})
+                if unknown := self._unknown_names(f"{owner}/{name}", body):
+                    return httpx.Response(422, json={"message": f"unknown whitelist name {unknown[0]}"})
                 stored = self._stored_rule(f"{owner}/{name}", body, None)
                 self.repos[f"{owner}/{name}"]["protections"][rule] = stored
                 return httpx.Response(201, json=stored)
@@ -325,6 +337,8 @@ class FakeForge(_Recorder):
                 protections = self.repos[f"{owner}/{name}"]["protections"]
                 if rule not in protections:
                     return httpx.Response(404, json={"message": "branch protection does not exist"})
+                if unknown := self._unknown_names(f"{owner}/{name}", body):
+                    return httpx.Response(422, json={"message": f"unknown whitelist name {unknown[0]}"})
                 protections[rule] = self._stored_rule(f"{owner}/{name}", body, protections[rule])
                 return httpx.Response(200, json=protections[rule])
             case ("GET", ["repos", owner, name, "branch_protections"]):
@@ -607,6 +621,8 @@ class FakeOpenBao(_Recorder):
                 if client not in self.tokens or role not in self.oidc_roles:
                     return httpx.Response(403, json={"errors": ["permission denied"]})
                 entity = self.token_entity.get(client)
+                if TOKEN_POLICY not in self.approle_policies.get(self.tokens[client], []):  # the policy grants the read, as in _sign
+                    return httpx.Response(403, json={"errors": ["permission denied"]})
                 # the one templated policy: read identity/oidc/token/{{identity.entity.metadata.oidc_role}}
                 if entity not in self.entities or (self.entities[entity].get("metadata") or {}).get("oidc_role") != role:
                     return httpx.Response(403, json={"errors": ["permission denied"]})

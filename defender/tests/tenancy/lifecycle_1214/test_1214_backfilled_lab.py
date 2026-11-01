@@ -169,19 +169,21 @@ def test_a_lab_without_a_rule_gets_main_protected_for_its_own_organisations_owne
 
 
 def test_a_hand_made_rule_is_patched_keeping_its_other_settings_users_and_teams_and_dropping_every_bot(world):
-    """The lab's existing rule is PATCHed, not recreated: push off, whitelist on with the full lists sent (the human user
-    and team kept, Owners added, the pending bot removed), every other setting as it was (A23, r8.1/r8.2)."""
+    """The lab's existing rule is PATCHed, not recreated: push off, whitelist on with the full lists sent (the human user, a
+    bot-like login of no generation and the team kept, Owners added, the pending bot removed), every other setting as it was (A23, r8.1/r8.2)."""
     world.forge.team_members[(LABS, "Reviewers")] = {"carol"}
     world.forge.orgs.setdefault(LABS, {"Owners"}).add("Reviewers")
+    world.forge.users.update({"carol", "bot-ops"})
     base = f"/api/v1/repos/{LABS}/playground/branch_protections"
     seen: list[None] = []
 
     def whitelist_the_pending_bot() -> None:  # an administrator's earlier mistake, at the moment the step reads the rule
         if not seen:
             seen.append(None)
-            bot = next(u for u in world.forge.users if u.startswith("bot-"))
+            bot = next(u for u in world.forge.users if u.startswith("bot-") and u != "bot-ops")
+            world.forge.repos[f"{LABS}/playground"]["collaborators"]["bot-ops"] = "write"  # bot-like, no generation's
             world.forge.put_rule(f"{LABS}/playground", **{**HAND_RULE, "enable_merge_whitelist": True,
-                                 "merge_whitelist_usernames": ["carol", bot], "merge_whitelist_teams": ["Reviewers"]})
+                                 "merge_whitelist_usernames": ["carol", "bot-ops", bot], "merge_whitelist_teams": ["Reviewers"]})
     lab = Lab(world, owner=LABS, rule=HAND_RULE)
     world.forge.during[("GET", f"{base}/main")] = whitelist_the_pending_bot
     world.forge.during[("GET", base)] = whitelist_the_pending_bot
@@ -191,12 +193,12 @@ def test_a_hand_made_rule_is_patched_keeping_its_other_settings_users_and_teams_
     assert seen, "control: the rule held the pending bot when the step read it"
     rule = world.forge.rule(lab.repo)
     assert rule["enable_push"] is False and rule["enable_merge_whitelist"] is True
-    assert rule["merge_whitelist_usernames"] == ["carol"]
+    assert sorted(rule["merge_whitelist_usernames"]) == ["bot-ops", "carol"]
     assert sorted(rule["merge_whitelist_teams"]) == ["Owners", "Reviewers"]
     assert (rule["required_approvals"], rule["status_check_contexts"], rule["block_on_rejected_reviews"]) == (2, ["ci"], True)
     assert world.forge.made("POST", base) == [], "an existing rule was created again"
     [patch] = world.forge.made("PATCH", f"{base}/main")
-    assert patch.body["merge_whitelist_usernames"] == ["carol"]
+    assert sorted(patch.body["merge_whitelist_usernames"]) == ["bot-ops", "carol"]
     assert sorted(patch.body["merge_whitelist_teams"]) == ["Owners", "Reviewers"]
     assert (patch.body["enable_merge_whitelist"], patch.body["enable_push"]) == (True, False)
     assert _bot_view(world, lab.repo)["user_can_merge"] is False
