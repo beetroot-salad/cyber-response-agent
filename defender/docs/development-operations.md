@@ -66,7 +66,12 @@ and [Vault Identity tokens](https://developer.hashicorp.com/vault/api-docs/secre
 For each tenant:
 
 1. Create a dedicated non-admin bot with write access only to that tenant's knowledge
-   repository. Protect `main` against bot pushes; humans merge the bot's pull requests.
+   repository. Protect `main` against bot pushes **and turn on its merge whitelist, naming
+   only the humans (or team) who merge**; humans merge the bot's pull requests. Blocking pushes
+   is not enough: without a merge whitelist Forgejo lets any writer merge, so the bot could
+   merge its own pull request, and publish refuses such a repository (#1163). A required
+   approval does block the merge, but Forgejo still reports the bot as able to merge, so it
+   does not satisfy the check either.
 2. Create a Generic JWT Authorized Integration for that bot. Bind its issuer to Vault's
    HTTPS identity issuer, require `tenant_id=<tenant>`, restrict it to the exact repository,
    and grant `write:repository` and `write:issue`. Record the generated audience (not secret).
@@ -134,10 +139,14 @@ metadata), an AppRole whose policy reads only that role's token and the entity b
 creates the bot's Generic JWT Authorized Integration in Forgejo (the issuer, `tenant_id` equal to
 the tenant, restricted to the repository, `write:repository` and `write:issue`) and sets the
 role's `client_id` to the audience Forgejo generated, writes `client/<tenant-id>/issuer.json` and
-the tenant row's forge binding naming it, warns if the bot can push `main`, and revokes the root token it used (a
+the tenant row's forge binding naming it, protects `main` (no direct pushes and a merge
+whitelist of the repository's owner, or its `Owners` team for an organisation; an existing
+rule keeps its settings and only gains the whitelist, without the bot), checks through the
+bot's own token that it can neither push nor merge `main`, and revokes the root token it used (a
 later run regenerates one from the recovery keys inside the issuer container). Forgejo 17 has no
 API for Authorized Integrations: the script fills the web form as the bot, after resetting the
-bot's unused password. The signing role is created before the integration because Forgejo caches
+bot's unused password. It sets the branch rule as a throwaway admin it creates and deletes in
+the same step; Forgejo will not delete its last admin, so make your own admin first. The signing role is created before the integration because Forgejo caches
 the issuer's JWKS: an integration attempted against an empty JWKS keeps failing until Forgejo
 restarts. Pass `--rotate-secret` to mint a new AppRole `secret_id`.
 

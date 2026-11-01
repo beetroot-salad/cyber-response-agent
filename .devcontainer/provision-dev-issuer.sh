@@ -18,8 +18,9 @@
 #       restricted to the repo, write:repository + write:issue); the role's client_id set to the
 #       integration's audience; the tenant's AppRole client config at
 #       playground-issuer/client/<tenant-id>/issuer.json; the tenant row's forge binding, which
-#       names that file. It checks the bot cannot push `main`, and revokes the root
-#       token it used. A later run regenerates a root token from the recovery keys inside the
+#       names that file. It protects `main` so the bot can neither push nor merge it (a merge
+#       whitelist of the repository's owner(s); an existing rule keeps its settings and gains the
+#       whitelist), checks that through the bot's own eyes, and revokes the root token it used. A later run regenerates a root token from the recovery keys inside the
 #       issuer container.
 #
 #   provision-dev-issuer.sh migrate-forgejo-data
@@ -277,6 +278,58 @@ bind_forge() {  # bind_forge tenant repo: the row's forge: {origin, audience, is
   mv "$row.tmp" "$row"
 }
 
+as_admin() {  # as_admin method path [json]: one API call as the throwaway admin (credentials on stdin)
+  local method=$1 path=$2 body=${3:-}
+  printf 'user = "%s:%s"\n' "$PROTECT_ADMIN" "$PROTECT_PASSWORD" | fj curl -s -K - -X "$method" \
+    -H 'Content-Type: application/json' ${body:+--data "$body"} "$FORGEJO/api/v1/$path"
+}
+
+remove_protect_admin() {
+  docker exec -u git "$FORGEJO_CONTAINER" forgejo admin user delete --username "$PROTECT_ADMIN" \
+    >/dev/null 2>&1 || say "WARNING: could not delete the throwaway admin $PROTECT_ADMIN (Forgejo keeps its last admin: make your own admin first), then delete it by hand"
+}
+
+protect_main() {  # protect_main bot repo: main refuses the bot's pushes and its merges (#1163 N13)
+  local bot=$1 repo=$2 owner=${2%%/*} rule body mergers
+  # Forgejo lets any writer merge unless a merge whitelist is on (probed on 15.0.9 and 17.0.1):
+  # blocking pushes alone leaves the bot able to merge its own pull request. The rule is set by a
+  # throwaway admin made for this step and deleted after it, so no standing credential is made
+  # and no person's password or token is touched.
+  PROTECT_ADMIN="provision-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  PROTECT_PASSWORD="dev-$(head -c 18 /dev/urandom | base64 | tr -d '/+=')"
+  docker exec -u git "$FORGEJO_CONTAINER" forgejo admin user create --admin \
+    --username "$PROTECT_ADMIN" --password "$PROTECT_PASSWORD" \
+    --email "$PROTECT_ADMIN@provision.invalid" --must-change-password=false >/dev/null
+  trap remove_protect_admin EXIT
+  # Who may merge when nobody is named yet: an organisation's Owners team, or the user who owns
+  # the repository.
+  if [ "$(as_admin GET "orgs/$owner" | jq -r '.username // empty')" = "$owner" ]; then
+    mergers='{"merge_whitelist_usernames": [], "merge_whitelist_teams": ["Owners"]}'
+  else
+    mergers=$(jq -nc --arg owner "$owner" '{merge_whitelist_usernames: [$owner], merge_whitelist_teams: []}')
+  fi
+  rule=$(as_admin GET "repos/$repo/branch_protections/main")
+  if jq -e '.rule_name == "main"' <<<"$rule" >/dev/null 2>&1; then
+    # An operator's rule is kept; its merge whitelist is turned on (or kept) without the bot.
+    body=$(jq -c --arg bot "$bot" --argjson mergers "$mergers" '
+      (if .enable_merge_whitelist then
+         {merge_whitelist_usernames: ((.merge_whitelist_usernames // []) - [$bot]),
+          merge_whitelist_teams: (.merge_whitelist_teams // [])}
+       else {merge_whitelist_usernames: [], merge_whitelist_teams: []} end) as $kept
+      | {enable_merge_whitelist: true}
+        + (if ($kept.merge_whitelist_usernames + $kept.merge_whitelist_teams) == [] then $mergers
+           else $kept end)' <<<"$rule")
+    as_admin PATCH "repos/$repo/branch_protections/main" "$body" >/dev/null
+  else
+    say "protecting $repo main: no direct pushes, merges by the repository's owner(s) only"
+    body=$(jq -c '{rule_name: "main", enable_push: false, enable_merge_whitelist: true} + .' \
+      <<<"$mergers")
+    as_admin POST "repos/$repo/branch_protections" "$body" >/dev/null
+  fi
+  trap - EXIT
+  remove_protect_admin
+}
+
 check_main_protected() {  # check_main_protected token repo: the bot, through the issuer, cannot push main
   local t=$1 repo=$2 jwt branch
   # A token for the role as the AppRole would get it: the root token has no entity, so log in.
@@ -321,6 +374,7 @@ provision() {
     template='{"tenant_id": {{identity.entity.metadata.tenant_id}}}' >/dev/null
   write_client_config "$t" "$tenant" "$rotate"
   bind_forge "$tenant" "$repo"
+  protect_main "$bot" "$repo"
   check_main_protected "$t" "$repo"
   bao "$t" token revoke -self >/dev/null
   say "done: issuer $IDENTITY, role $ROLE, audience $AUDIENCE"

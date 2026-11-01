@@ -34,6 +34,15 @@ Experimental alert-triage product: an in-process PydanticAI investigation runtim
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1163
+
+Publish now also refuses a tenant repository whose bot can **merge** `main`, not only push it.
+Forgejo lets any writer merge unless the branch rule has a merge whitelist, so before upgrading,
+for every tenant repository: in the `main` branch rule, enable the merge whitelist and name only
+the humans (or team) who merge, never the bot. In dev, rerunning
+`.devcontainer/provision-dev-issuer.sh provision ...` does this. A required approval alone is not
+enough: Forgejo still reports the bot as able to merge.
+
 ## Upgrade from before #1279
 
 `run.py --run-id` is gone: the system mints every run id, announced as the first stdout line
