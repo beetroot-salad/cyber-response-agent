@@ -181,11 +181,12 @@ def _call(docker: DockerFn, argv: list[str]) -> subprocess.CompletedProcess:
 
 def _inspect_field(docker: DockerFn, name: str, fmt: str) -> str | None:
     """One `-f` field off `docker inspect`, or `None` when the daemon answered non-zero.
-    Callers decide what `None` means."""
+    Callers decide what `None` means. Only the newline docker ends its answer with is dropped:
+    a label padded with whitespace is not the token it pads (#1342 r5 C1)."""
     proc = _call(docker, ["docker", "inspect", "-f", fmt, name])
     if proc.returncode != 0:
         return None
-    return (proc.stdout or "").strip()
+    return (proc.stdout or "").removesuffix("\n")
 
 
 def _container_status(docker: DockerFn, name: str) -> str | None:
