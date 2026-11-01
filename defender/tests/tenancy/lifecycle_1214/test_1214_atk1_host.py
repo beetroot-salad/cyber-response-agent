@@ -1,7 +1,8 @@
 # ruff: noqa: F811, PT018
 """#1214 attack-1 on the execution host: teardown fails loudly when the lock cannot be freed (H-5), install and old-file
 removal wait for the exclusive host lock (H-10), only the tenant's boxes are stopped (H-12), the secret file and its
-directory are private (H-13), a landed install whose answer is lost keeps its secret file (DC-2, P3, RC-1, RC-5, F-11)."""
+directory are private (H-13), a landed install whose answer is lost keeps its secret file, a box started after teardown's first removal is removed
+once the lock is held (DC-2, P3, RC-1, RC-5, F-11)."""
 from __future__ import annotations
 
 import contextlib
@@ -266,3 +267,61 @@ def test_an_install_whose_commit_landed_but_whose_answer_was_lost_keeps_the_reco
     assert (item["state"], item["failure"]) == ("active", None), item
     assert world.live(tenant).host_secret_file == recorded and recorded.is_file()
 
+
+class _Boxes:
+    """The containers seam over a set of running boxes: each call removes every one there is, and records which."""
+
+    def __init__(self, *running: str, fail_on: int = 0) -> None:
+        self.running, self.removals, self._fail_on = set(running), [], fail_on
+
+    def __call__(self, _tenant: str) -> None:
+        if len(self.removals) + 1 == self._fail_on:
+            self.removals.append(set())
+            raise RuntimeError("docker could not remove the containers")
+        self.removals.append(set(self.running))
+        self.running.clear()
+
+
+def _starts_a_box_then_lets_go(world: Any, tenant: str, boxes: _Boxes) -> threading.Thread:
+    """A shared holder of T's lock that is inside `docker run` when teardown begins: its box appears after teardown's
+    first removal, then it lets go of the lock."""
+    fd = _hold(world, tenant, exclusive=False)
+
+    def run() -> None:
+        time.sleep(0.5)
+        boxes.running.add("box-late")
+        host_lock.release_lock(fd)
+    holder = threading.Thread(target=run, daemon=True)
+    holder.start()
+    return holder
+
+
+def test_a_box_started_after_teardowns_first_removal_is_removed_once_the_lock_is_held(world):
+    """The holder's box comes up after the first listing; once teardown holds the exclusive lock it removes the tenant's
+    boxes again, so no box is left running with the folder it mounts about to go (P3, Flow 2.3)."""
+    from defender.lifecycle._teardown import take_exclusive
+
+    tenant = str(world.create())
+    boxes = _Boxes("box-early")
+    holder = _starts_a_box_then_lets_go(world, tenant, boxes)
+    fd = take_exclusive(world.data_root, tenant, wait=10.0, containers=boxes)
+    try:
+        holder.join(timeout=10)
+        assert boxes.removals[0] == {"box-early"}, boxes.removals
+        assert boxes.running == set(), f"a box started during teardown is still running: {boxes.running}"
+    finally:
+        host_lock.release_lock(fd)
+
+
+def test_a_teardown_whose_removal_under_the_lock_fails_gives_the_host_lock_back(world):
+    """The removal made once the exclusive lock is held fails: teardown fails naming why and releases the lock."""
+    from defender.lifecycle._teardown import take_exclusive
+
+    tenant = str(world.create())
+    boxes = _Boxes(fail_on=2)
+    with pytest.raises(RuntimeError, match="docker could not remove"):
+        take_exclusive(world.data_root, tenant, wait=10.0, containers=boxes)
+    assert len(boxes.removals) == 2, "control: the second removal was made"
+    fd = host_lock.acquire(world.data_root, tenant, exclusive=True, timeout=0)
+    assert fd is not None, "the failed teardown kept T's host lock"
+    host_lock.release_lock(fd)
