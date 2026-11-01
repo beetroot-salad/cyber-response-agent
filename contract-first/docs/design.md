@@ -156,7 +156,9 @@ generation, the project's toolchain, or what past runs found. Each skill file en
 section, and a project keeps its own entries in `.claude/contract-first-cache.md`; a design keeps
 its cache at the end of the design doc. Every entry is one line naming the rule it applies and the
 context it assumes, so one grep finds every application of a rule, or everything that assumed a
-given model family.
+given model family. Humans maintain the skills' caches. The project cache is kept by an independent
+agent at the end of write-tests' and write-code-from-tests' review steps: it adds facts the run had to
+work out and removes entries the run contradicted, and the changes reach the human with the PR.
 
 A list written as the rule invites work that handles exactly the list: an implementation that
 handles the listed members, a test per listed value, an attacker who finds the next member. A

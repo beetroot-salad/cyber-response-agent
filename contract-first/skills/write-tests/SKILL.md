@@ -27,9 +27,9 @@ The sections state goals and rules. Model picks, commands, counts and examples t
 
 Start from the current discuss-issue design, its decisions, grounding claims and code map, and the project's CLAUDE.md files and CI config. If there is only a bare report, the design work has not happened: use discuss-issue rather than invent intended behavior. Missing formatting is not a reason to restart; a missing fact that could change the contract is a reason to settle it or block that part.
 
-Extend the code map with what tests need and grounding did not cover: harness entry points, shared fixtures, and the interface of any shared test machinery once written. If there is no map, build it now, before any author starts. Brief workers with the current design only; fold any still-applicable part of a superseded design into it rather than send workers through the history.
+Extend the code map with what tests need and grounding did not cover: harness entry points, shared fixtures, and the interface of any shared test machinery once written. If there is no map, build it now, before any author starts. Brief workers with the current design only; fold any still-applicable part of a superseded design into it rather than send workers through the history. Grep the project cache (`.claude/contract-first-cache.md`) for this skill's entries and pass the relevant ones into each brief, as you do the code map.
 
-Work in a dedicated worktree on a recorded base, with imports resolving into it. The contract is tests and test machinery only: **never write or commit production code, skeletons, or a helper that implements the policy under test**, because the code stage must earn green on its own. If implementation already exists, this is contract repair; record it as such. Keep working state under `.contract-first/`, outside the diff, following **references/contract.md**.
+Work in a dedicated worktree on a recorded base, with imports resolving into it. The contract is tests and test machinery only, plus the project cache file: **never write or commit production code, skeletons, or a helper that implements the policy under test**, because the code stage must earn green on its own. If implementation already exists, this is contract repair; record it as such. Keep working state under `.contract-first/`, outside the diff, following **references/contract.md**.
 
 ## 2. Sketch, spike and check the design
 
@@ -97,7 +97,7 @@ Never turn a known blocker into an implementer note and call the contract ready.
 
 ## 7. Commit and hand off
 
-Commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.
+Before committing, dispatch one fresh cache keeper on **references/cache-keeper.md** with this run's friction log, findings and dispositions, and repairs. Commit its cache changes with the contract. Then commit the contract on its own, before any implementation, as an immutable ref (**references/contract.md**). Hand `write-code-from-tests` that ref, the coverage and review record, the code map, the current design revision, and the checks it owes. Requirements live in the design and the tests, not in a parallel spec. Do not start coding or open a PR from this skill.
 
 ## Cache
 
@@ -114,3 +114,4 @@ One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <applic
 - write-tests §4 fidelity-reviewer | ctx: models=claude-5 | Opus at high effort.
 - write-tests §5 stale-test-author | ctx: models=claude-5 | Sonnet at medium effort.
 - write-tests §6 repair-budget | ctx: past-runs | two rounds after §4.
+- write-tests §7 cache-keeper | ctx: models=claude-5 | Sonnet at medium effort.
