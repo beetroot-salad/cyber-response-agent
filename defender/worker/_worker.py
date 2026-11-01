@@ -1,11 +1,13 @@
 """The worker (#1342): claims queued investigations up to its slots, runs each as a child
 process through the job lane, and records the one terminal stage the child's host records say.
 
-Per claimed row, as a task: the launch record and alert file are written beside the run folder
-(the tenant's runs container must exist; the worker never makes it), the child is spawned from
-the event loop's thread in a session of its own with its output inherited, its exit awaited, a
-leftover box removed (the backstop), and the job-end record read for the stage. A deliberate
-stop ends the children and writes no row (D3): such rows stay `running` until #1343."""
+Per claimed row, as a task: a box token is minted for the claim, the launch record (carrying it)
+and alert file are written beside the run folder (the tenant's runs container must exist; the
+worker never makes it), the child is spawned from the event loop's thread in a session of its own
+with its output inherited, its exit awaited, a leftover box carrying the claim's token removed
+(the backstop), and the job-end record read for the stage. The task owns its child: cancelled, it
+ends the child and runs the backstop. A deliberate stop ends the children and writes no row (D3):
+such rows stay `running` until #1343."""
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +18,7 @@ import os
 import signal
 import subprocess
 import sys
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +32,9 @@ from defender.records.formats import DataRoot, digest_of
 from defender.tenancy import data_root_for_child, data_root_from_path
 
 from ._containers import Containers, DockerContainers
+
+#: The backstop's answers (`Containers.reap`).
+_REMOVED, _ABSENT, _NOT_OURS = "removed", "absent", "not_ours"
 
 _logger = logging.getLogger(__name__)
 
@@ -128,55 +134,79 @@ class Worker:
     # -- entry points -----------------------------------------------------------------------------
 
     async def drain(self) -> None:
-        """Claim while a slot is free until nothing is queued, then wait for every task.
-        Cancelled, it stops its children as a deliberate stop does."""
-        try:
-            while True:
-                while len(self._tasks) < self._slots:
-                    if not await self._claim_one():
-                        if self._tasks:
-                            await asyncio.wait(set(self._tasks))
-                        return
-                await asyncio.wait(set(self._tasks), return_when=asyncio.FIRST_COMPLETED)
-        except asyncio.CancelledError:
-            await self._stop()
-            raise
+        """Claim while a slot is free until nothing is queued, then wait for every task. A store
+        fault ends it (raised) and, like a cancellation, leaves no child behind (`_claim_loop`)."""
+        await self._claim_loop(stop=None)
 
     async def serve(self) -> None:
         """Poll for queued rows at a fixed interval until SIGTERM or SIGINT, then stop: each child
         gets SIGTERM, a child still alive after `stop_grace` has its group killed, the backstop
-        runs, and no row is written (D3). Installs its own handlers and removes them on return."""
+        runs, and no row is written (D3). A store fault is logged and the claim retried. Installs
+        its own handlers and removes them on return."""
         loop = asyncio.get_running_loop()
         stop = asyncio.Event()
-        wake = asyncio.Event()
         signals = (signal.SIGTERM, signal.SIGINT)
         previous = {s: signal.getsignal(s) for s in signals}
         for s in signals:
             loop.add_signal_handler(s, stop.set)
         try:
-            while not stop.is_set():
-                claimed = False
-                if len(self._tasks) < self._slots:
-                    try:
-                        claimed = await self._claim_one(on_done=wake.set)
-                    except Exception:  # noqa: BLE001 — a store fault is waited out, never ends serving
-                        _logger.exception("the worker could not claim an investigation; retrying")
-                if claimed:
-                    continue
-                wake.clear()
-                waits = [asyncio.ensure_future(stop.wait()), asyncio.ensure_future(wake.wait())]
-                try:
-                    await asyncio.wait(waits, timeout=POLL_INTERVAL, return_when=asyncio.FIRST_COMPLETED)
-                finally:
-                    for w in waits:
-                        w.cancel()
-            _logger.info("the worker was asked to stop; ending %d run(s)", len(self._children))
-            await self._stop()
+            await self._claim_loop(stop=stop)
         finally:
             for s in signals:
                 loop.remove_signal_handler(s)
                 if previous[s] is not None:
                     signal.signal(s, previous[s])
+
+    async def _claim_loop(self, *, stop: asyncio.Event | None) -> None:
+        """The one claim loop of `drain` and `serve`: claim while a slot is free, else wait for a
+        slot to free (or, serving, for the poll interval or the stop).
+
+        Draining (`stop` is None), the loop ends once a claim finds nothing queued, then waits
+        for every task; a store fault is raised. Serving, a store fault is logged and retried,
+        and the stop is the deliberate one (`_stop`). However the loop leaves by an exception
+        (a store fault, a cancellation), no row's task is abandoned: each is cancelled, which
+        ends its child and runs its backstop, and none writes its row."""
+        wake = asyncio.Event()
+        try:
+            while stop is None or not stop.is_set():
+                wake.clear()  # before the claim: a slot freed while it runs wakes the wait below
+                if len(self._tasks) < self._slots:
+                    if await self._claim_or_retry(on_done=wake.set, retry=stop is not None):
+                        continue
+                    if stop is None:
+                        break  # drained: nothing is queued
+                await self._wait(wake, stop)
+            if stop is None:
+                if self._tasks:
+                    await asyncio.wait(set(self._tasks))
+            else:
+                _logger.info("the worker was asked to stop; ending %d run(s)", len(self._children))
+                await self._stop()
+        except BaseException:
+            await self._abandon()
+            raise
+
+    async def _claim_or_retry(self, *, on_done: Callable[[], None], retry: bool) -> bool:
+        """`_claim_one`; with `retry`, a store fault is logged and read as nothing claimed."""
+        if not retry:
+            return await self._claim_one(on_done=on_done)
+        try:
+            return await self._claim_one(on_done=on_done)
+        except Exception:  # noqa: BLE001 — a store fault is waited out, never ends serving
+            _logger.exception("the worker could not claim an investigation; retrying")
+            return False
+
+    @staticmethod
+    async def _wait(wake: asyncio.Event, stop: asyncio.Event | None) -> None:
+        """Until a task ends (`wake`), the stop, or the poll interval, whichever is first."""
+        waits = [asyncio.ensure_future(wake.wait())]
+        if stop is not None:
+            waits.append(asyncio.ensure_future(stop.wait()))
+        try:
+            await asyncio.wait(waits, timeout=POLL_INTERVAL, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for w in waits:
+                w.cancel()
 
     # -- slots ------------------------------------------------------------------------------------
 
@@ -204,6 +234,17 @@ class Worker:
         await asyncio.gather(*(self._end_child(p) for p in list(self._children.values())))
         if self._tasks:
             await asyncio.wait(set(self._tasks))
+
+    async def _abandon(self) -> None:
+        """The loop is leaving by an exception: no more claims and no row written (as for a
+        deliberate stop), and each task cancelled, which ends its child and runs its backstop
+        (`_run_claimed`); then wait for the tasks."""
+        self._stopping = True
+        tasks = set(self._tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.wait(tasks)
 
     async def _end_child(self, proc: asyncio.subprocess.Process) -> None:
         """SIGTERM, then after `stop_grace` SIGKILL to the child's whole group (its own session,
@@ -237,8 +278,11 @@ class Worker:
     async def _run_claimed(self, record: Any) -> None:
         inv, tenant = record.investigation_id, record.tenant_id
         started = self._clock()
+        # This claim's box token (#1342 r5 C1): the child's box is stamped with it, and the
+        # backstop removes only a container that carries it.
+        token = uuid.uuid4().hex
         try:
-            await self._write_launch(record)
+            await self._write_launch(record, token)
         except _WorkerFault as fault:
             _logger.error("investigation %s: %s", inv, fault)
             await self._finish(record, _Ending(_FAILED, failure_reason=_WORKER_ERROR,
@@ -262,24 +306,33 @@ class Worker:
             if self._stopping:  # spawned while the stop was ending the others
                 await self._end_child(proc)
             returncode = await proc.wait()
+        except asyncio.CancelledError:
+            # The task owns its child: cancelled (the claim loop left by a fault, or was itself
+            # cancelled), it ends the child and runs the backstop, and writes no row.
+            _logger.warning("investigation %s: the worker is leaving; ending child %d", inv, proc.pid)
+            await self._end_child(proc)
+            await self._backstop(inv, token)
+            raise
         finally:
             self._children.pop(inv, None)
         _logger.info("investigation %s: child %d %s after %s", inv, proc.pid,
                      _exit_words(returncode), self._clock() - started)
-        await self._backstop(inv)
+        await self._backstop(inv, token)
         if self._stopping:  # D3: a deliberate stop writes no row
             return
         ending, cost, knowledge = await asyncio.to_thread(self._read_ending, record, returncode)
         await self._finish(record, ending, cost=cost, knowledge=knowledge)
 
-    async def _write_launch(self, record: Any) -> None:
-        """The launch record and the alert file, create-only, in the tenant's runs container."""
+    async def _write_launch(self, record: Any, token: str) -> None:
+        """The launch record (carrying this claim's box token) and the alert file, create-only,
+        in the tenant's runs container."""
         alert = await self._store.get_alert(record.tenant_id, record.alert_id)
         if alert is None:
             raise _WorkerFault("the job's alert is not in the store")
         launch = job_lane.LaunchRecord(
             investigation_id=record.investigation_id, tenant_id=record.tenant_id,
-            alert_id=record.alert_id, digest=digest_of(alert.raw), label=alert.title)
+            alert_id=record.alert_id, digest=digest_of(alert.raw), label=alert.title,
+            box_token=token)
         await asyncio.to_thread(self._write_launch_files, launch, alert.raw)
 
     def _write_launch_files(self, launch: job_lane.LaunchRecord, raw: bytes) -> None:
@@ -297,15 +350,23 @@ class Worker:
                 _logger.error("investigation %s: writing the launch files: %s", launch.investigation_id, fault)
                 raise _WorkerFault("the worker could not write the job's launch files") from None
 
-    async def _backstop(self, inv: str) -> None:
-        """Remove the run's box if it is still there; never an error, never the row's business."""
+    async def _backstop(self, inv: str, token: str) -> None:
+        """Remove the run's box if it is still there and carries this claim's token; a container
+        under the name that is not this job's is left in place and logged. Never an error, never
+        the row's business."""
         name = container_name(inv)
         try:
-            if await asyncio.to_thread(self._containers.exists, name):
-                _logger.warning("investigation %s: its box %s outlived the child; removing it", inv, name)
-                await asyncio.to_thread(self._containers.remove, name)
+            reaped = await asyncio.to_thread(self._containers.reap, name, token)
         except Exception:  # noqa: BLE001 — the backstop is best effort
             _logger.exception("investigation %s: the backstop could not remove %s", inv, name)
+            return
+        if reaped == _REMOVED:
+            _logger.info("investigation %s: its box %s outlived the child and was removed", inv, name)
+        elif reaped == _NOT_OURS:
+            _logger.warning("investigation %s: a container named %s is not this job's; left in place",
+                            inv, name)
+        elif reaped != _ABSENT:
+            _logger.error("investigation %s: the backstop's answer for %s was %r", inv, name, reaped)
 
     def _read_ending(self, record: Any, returncode: int) -> tuple[_Ending, float | None, dict | None]:
         """The stage, cost and knowledge from the host records, through the job lane (in a thread)."""

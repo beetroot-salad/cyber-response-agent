@@ -463,6 +463,7 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
     shared_mounts: SharedMountsFn = _shared_mounts, tenant_agent: Path | None = None,
     write_verdict: Callable[[dict], None] | None = None,
     staged_token: Path | None = None,
+    start_token: str | None = None,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
@@ -474,7 +475,9 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
         # container already holding the name.
         write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
         raise
-    start_token = uuid.uuid4().hex
+    # The caller's token when it handed one (a job's worker minted it, #1342 r5 C1, and reaps by
+    # it), else one minted for this start: per start, never per run id.
+    start_token = start_token or uuid.uuid4().hex
     create = _create_argv(
         name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
         lane=lane,
@@ -694,13 +697,16 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     spec: BoxSpec | None = None, docker: DockerFn = run_docker, tenant_agent: Path | None = None,
     write_verdict: Callable[[dict], None] | None = None,
     tenant_id: TenantId | None = None, staged_token: Path | None = None,
-    require_sandbox: bool = False,
+    require_sandbox: bool = False, start_token: str | None = None,
 ) -> BoxExecutor:
     """Start the run's box. `require_sandbox` refuses the unsandboxed opt-out whatever the
     environment says (#1342 R2: a job-lane run never degrades to host execution).
     `tenant_agent` is the run's agent half (its run copy's `stage/agent/`, #1108 P4), bound
     read-only at the model view's `/agent`; `staged_token` is the startup token beside it in the
-    copy's `stage/`, read back through the box before the executor is returned (O-A). `tenant_id` is accepted for callers that still pass it and is
+    copy's `stage/`, read back through the box before the executor is returned (O-A).
+    `start_token` is the start-token label the box is stamped with, which its create-fault arm
+    reaps by: a job's worker mints it and reaps the job's leftover by it (#1342 r5 C1); without
+    one the box mints its own. `tenant_id` is accepted for callers that still pass it and is
     not read: P2's in-box `.tenant-id` check is retired (identity is checked at publish). The
     tenant arguments are illegal with a `BoxRequest`, which carries its own mounts."""
     if isinstance(run_dir_or_request, BoxRequest):
@@ -717,6 +723,9 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
                 "start_box(request, tenant_agent=…) is ambiguous — a BoxRequest carries its "
                 "own mounts; put the tenant's agent half in them instead of the call"
             )
+        if start_token is not None:
+            raise TypeError("start_box(request, start_token=…) is not served: a request's box "
+                            "mints its own start token")
         if defender_dir is not None:
             raise TypeError(
                 "start_box(request, defender_dir) is ambiguous — a BoxRequest carries its own "
@@ -734,13 +743,15 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
 
     del tenant_id
     return _start_run_box(run_dir_or_request, defender_dir, spec, docker, tenant_agent,
-                          staged_token, write_verdict, require_sandbox=require_sandbox)
+                          staged_token, write_verdict, require_sandbox=require_sandbox,
+                          start_token=start_token)
 
 
 def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged token
     run_dir: Path, defender_dir: Path | None, spec: BoxSpec | None, docker: DockerFn,
     tenant_agent: Path | None, staged_token: Path | None,
     write_verdict: Callable[[dict], None] | None, *, require_sandbox: bool = False,
+    start_token: str | None = None,
 ) -> BoxExecutor:
     if defender_dir is None:
         raise TypeError("start_box(run_dir, defender_dir, ...) needs defender_dir")
@@ -761,7 +772,7 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
     try:
         return _start_boxed(run_dir, defender_dir, spec, docker,
                             tenant_agent=tenant_agent, staged_token=staged_token,
-                            write_verdict=write_verdict)
+                            write_verdict=write_verdict, start_token=start_token)
     except BoxFault as e:
         _opt_out_or_raise(e, require_sandbox=require_sandbox)
     # The host runs the bash lane in the model view too (#1255 "Every mode"): over a per-run

@@ -41,6 +41,8 @@ _SETUPS = frozenset({SETUP_REFUSED, SETUP_CRASHED, SETUP_DONE})
 _BOXES = frozenset({BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED})
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
+#: The box token's form (#1342 r5 C1): the box's own start-token form, 32 lowercase hex.
+_BOX_TOKEN = re.compile(r"[0-9a-f]{32}")
 
 
 class JobLaneRefused(Exception):
@@ -56,13 +58,16 @@ class CostUnreadable(Exception):
 
 @dataclass(frozen=True)
 class LaunchRecord:
-    """The worker's launch record (`<runs>/<id>.launch.json`): what the child runs."""
+    """The worker's launch record (`<runs>/<id>.launch.json`): what the child runs, and the
+    box token the worker minted for this claim (#1342 r5 C1): the child's box is stamped with
+    it, and the worker's backstop removes only a container carrying it."""
 
     investigation_id: str
     tenant_id: str
     alert_id: str
     digest: str
     label: str
+    box_token: str
 
     def text(self) -> str:
         return json.dumps(asdict(self))
@@ -185,8 +190,8 @@ class JobLane:
 
     def check_launch(self, run_id: object) -> Launched:
         """The launch record of `run_id`, checked: present and a plain file, a JSON object of
-        the five fields, naming this id and this tenant, with a digest, and its alert file
-        beside it. Anything else is `JobLaneRefused` naming the launch record. The digest is
+        the six fields, naming this id and this tenant, with a digest and a box token of the
+        box's form, and its alert file beside it. Anything else is `JobLaneRefused` naming the launch record. The digest is
         compared on the bytes run setup admits, not here."""
         run_id = _run_id(run_id)
         paths = self._paths(run_id)
@@ -199,7 +204,7 @@ class JobLane:
         obj, unreadable = _io.load_json_artifact(read.text)
         if unreadable is not None or not isinstance(obj, dict):
             raise JobLaneRefused(f"job {run_id}: its launch record {where} is not a JSON object")
-        fields = ("investigation_id", "tenant_id", "alert_id", "digest", "label")
+        fields = ("investigation_id", "tenant_id", "alert_id", "digest", "label", "box_token")
         if any(not isinstance(obj.get(k), str) for k in fields):
             raise JobLaneRefused(f"job {run_id}: its launch record {where} lacks one of "
                                  f"{', '.join(fields)}")
@@ -210,6 +215,9 @@ class JobLane:
             raise JobLaneRefused(f"job {run_id}: its launch record {where} names another tenant")
         if not _DIGEST.fullmatch(record.digest):
             raise JobLaneRefused(f"job {run_id}: its launch record {where} carries no alert digest")
+        if not _BOX_TOKEN.fullmatch(record.box_token):
+            raise JobLaneRefused(f"job {run_id}: its launch record {where} carries no box token "
+                                 "of the form its worker mints (32 lowercase hex)")
         alert = paths.launch_alert()
         if not self._plain_file(alert.name):
             raise JobLaneRefused(f"job {run_id}: the alert file {alert} beside its launch record "

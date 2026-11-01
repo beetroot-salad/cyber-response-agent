@@ -256,6 +256,26 @@ def preflight_role_models(  # noqa: C901 — one fail-fast check per role, plus 
     return 0
 
 
+@dataclasses.dataclass
+class _JobEndFacts:
+    """The two job-end facts a job's run sets as each becomes true (#1342 r5 C2), on an object
+    the job entry holds, so a raise out of the run cannot discard one already set.
+
+    `review_state` is the run's review-state dict, which the driver uses as
+    `AgentDeps.review_state` (`{"state": ReviewState}` once the close gate first runs): the
+    report is committed once that state is closed. `scrub_verified` is set by the lifecycle,
+    only once `stop_and_scrub` has returned, to whether the scrub walked the tree."""
+
+    review_state: dict[str, Any] = dataclasses.field(default_factory=dict)
+    scrub_verified: bool = False
+
+    @property
+    def report_committed(self) -> bool:
+        """The close tool's `ReviewState.closed`: false while the dict is empty or the state
+        never closed."""
+        return getattr(self.review_state.get("state"), "closed", False) is True
+
+
 class _Investigate(Protocol):
     """The investigation seam's exact shape, so both the call site and `_drive_investigation`
     stay type-checked (tests inject the seam, so only a real run would catch a renamed keyword).
@@ -264,13 +284,16 @@ class _Investigate(Protocol):
     made at run start (`system_status.RunSystems`: the roster the run reads and each system down
     at its start) into whichever seam it drives (`_judged`), which hands it to
     `_drive_investigation(systems=…)`.
+
+    `job_facts` is a job's facts holder (#1342 r5 C2), handed on the job lane only: the driver
+    keeps its review state in the holder's dict.
     """
 
     def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
         self, *, alert_path: Path, run: Run, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
-        source: Run | None = None,
+        source: Run | None = None, job_facts: _JobEndFacts | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -309,6 +332,9 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     #: judged once. `None` (a direct caller with no `main` before it): the roster is
     #: `defender_dir`'s, read here, and the driver judges it.
     systems: RunSystems | None = None,
+    #: A job's facts holder (#1342 r5 C2): the driver keeps its review state in the holder's
+    #: dict, so the job entry reads the close however the run ends. `None` off the job lane.
+    job_facts: _JobEndFacts | None = None,
 ) -> dict[str, Any]:
     """The production investigation call, as a synchronous callable (injected by the
     lifecycle so tests can pass a plain function).
@@ -324,6 +350,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     # The roster `main` judged, handed down to the registry and `run_investigation` with its
     # verdict; read here only for a direct caller, whose run the driver judges.
     roster = systems.roster if systems is not None else read_roster(adapters_under(defender_dir))
+    held: dict[str, Any] = {} if job_facts is None else {"review_state": job_facts.review_state}
     if world is not None:
         if episode is None:
             # The world's ledger is written through the episode `main` holds; there is no path
@@ -368,7 +395,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
                 alert_path=alert_path, run=run,
                 defender_dir=defender_dir, model_name=model_name,
                 model_override=model_override, box=box, verbs=verbs, roster=roster,
-                systems=systems, resume=resume, tenant=tenant, source_run=source,
+                systems=systems, resume=resume, tenant=tenant, source_run=source, **held,
             )
         finally:
             verbs.close()
@@ -376,7 +403,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     return investigate(
         alert_path=alert_path, run=run, defender_dir=defender_dir,
         model_name=model_name, model_override=model_override, box=box, verbs=verbs,
-        roster=roster, systems=systems, tenant=tenant,
+        roster=roster, systems=systems, tenant=tenant, **held,
     )
 
 
@@ -424,6 +451,12 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: A job-lane run (#1342): its box start never degrades to host execution (R2), and a start
     #: fault leaves as `BoxStartFault` (M3), told from a teardown fault by its type.
     job_lane: bool = False,
+    #: The box's start token, when the caller minted it (#1342 r5 C1: a job's launch record
+    #: carries its worker's); `None`, the box mints its own.
+    start_token: str | None = None,
+    #: A job's facts holder (#1342 r5 C2), handed to the investigation, and its
+    #: `scrub_verified` set here once the teardown and scrub returned. `None` off the job lane.
+    job_facts: _JobEndFacts | None = None,
 ) -> dict[str, Any]:
     """Start the box, run the investigation inside it, and reap both on every exit
     (`box_mod.stop_and_scrub` owns the stop/scrub ordering and rules).
@@ -441,7 +474,9 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     # over its run copy carries it, and `start_box` checks the stage and reads it back. A run box
     # is never started over a tenant with no run copy (`start_box` refuses one).
     token = getattr(tenant, "stage_token", None)
-    staged = {} if token is None else {"staged_token": token}
+    staged: dict[str, Any] = {} if token is None else {"staged_token": token}
+    if start_token is not None:
+        staged["start_token"] = start_token
     if not job_lane:
         box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent,
                         tenant_id=tenant.tenant_id, write_verdict=write_verdict, **staged)
@@ -453,6 +488,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
         except box_mod.BoxFault as fault:
             raise box_mod.BoxStartFault(f"the run's box did not start: {fault}") from fault
     drive = _judged(investigate, systems)
+    facts: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
     investigation_ok = False
     try:
         summary = drive(
@@ -467,6 +503,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             episode=episode,
             serving=serving,
             source=source,
+            **facts,
         )
         investigation_ok = True
     finally:
@@ -475,6 +512,10 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             read_verdict=verdict.read, write_verdict=write_verdict,
             in_flight=not investigation_ok,
         )
+        # Reached only when the teardown and scrub returned: a tainted tree or a teardown fault
+        # raised out of them, so the verdict's `ran: true` alone never makes a tree verified.
+        if job_facts is not None:
+            job_facts.scrub_verified = box_mod.tree_verified(run_dir)
     return summary
 
 
@@ -1194,24 +1235,18 @@ class _JobFacts:
     """The job-end record's facts (#1342 O8), each set as it becomes true, and the record
     written create-only when the block exits, however it exits (`__exit__` records and swallows
     nothing). Before setup completes, a `SystemExit` or the preflight's refusal is `refused`,
-    anything else `crashed`."""
+    anything else `crashed`. The run's two facts are set on `held`, the holder the lifecycle is
+    handed (r5 C2), so a raise after either became true does not lose it."""
 
     def __init__(self, lane: job_lane.JobLane, job: str) -> None:
         self._lane = lane
         self._job = job
         self.setup: str | None = None
         self.box = job_facts.BOX_NOT_STARTED
-        self.report_committed = False
-        self.scrub_verified = False
+        self.held = _JobEndFacts()
 
     def __enter__(self) -> _JobFacts:
         return self
-
-    def ended(self, summary: dict[str, Any], run: Run) -> None:
-        """The lifecycle returned: whether the host committed a report (the driver's summary),
-        and whether the host scrub walked the tree (its verdict beside the folder)."""
-        self.report_committed = summary.get("report_committed") is True
-        self.scrub_verified = box_mod.tree_verified(run.run_dir)
 
     def __exit__(self, kind: type[BaseException] | None, exc: BaseException | None,
                  _tb: Any) -> Literal[False]:
@@ -1219,8 +1254,8 @@ class _JobFacts:
             refused = isinstance(exc, (SystemExit, _PreflightRefused))
             self.setup = job_facts.SETUP_REFUSED if refused else job_facts.SETUP_CRASHED
         end = job_lane.JobEnd(setup=self.setup, box=self.box,
-                             report_committed=self.report_committed,
-                             scrub_verified=self.scrub_verified)
+                             report_committed=self.held.report_committed,
+                             scrub_verified=self.held.scrub_verified)
         try:
             self._lane.write_job_end(self._job, end)
         except FileExistsError:
@@ -1276,11 +1311,12 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
                     _announce_provenance(run.run_dir)
                     facts.box = job_facts.BOX_STARTED
                     try:
-                        summary = lifecycle(**started.lifecycle_kwargs(ns), job_lane=True)
+                        summary = lifecycle(**started.lifecycle_kwargs(ns), job_lane=True,
+                                            start_token=launch.record.box_token,
+                                            job_facts=facts.held)
                     except box_mod.BoxStartFault:
                         facts.box = job_facts.BOX_START_FAILED
                         raise
-                    facts.ended(summary, run)
                     _post_steps(started, summary, visualize=visualize, update_ticket=False)
                     return _exit_code(summary)
     except _PreflightRefused as refused:
@@ -1335,4 +1371,4 @@ def _record_unservable_world(episode: Episode, world: Any, abort: ServingAbort) 
 if __name__ == "__main__":
     _log.configure_from_env()
     _argv = sys.argv[1:]
-    sys.exit(job_main(_argv) if "--job" in _argv else main(_argv))
+    sys.exit(job_main(_argv) if any(a == "--job" or a.startswith("--job=") for a in _argv) else main(_argv))

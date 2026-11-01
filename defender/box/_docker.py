@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
+from enum import StrEnum
 from pathlib import Path
 from typing import NamedTuple
 
@@ -270,6 +271,41 @@ def _refuse_an_existing_container(docker: DockerFn, name: str) -> None:
         "nothing, because every box name is fresh and this one may belong to another run still "
         f"writing its artifacts. If it is a leak, `docker rm -f {name}` clears it."
     )
+
+
+class Reaped(StrEnum):
+    """What `reap_if_owned` did with a name: removed the container that carried the token,
+    found no container, or found one that is not the token's and left it."""
+
+    REMOVED = "removed"
+    ABSENT = "absent"
+    NOT_OURS = "not_ours"
+
+
+def reap_if_owned(docker: DockerFn, name: str, token: str) -> Reaped:
+    """Remove the container `name` only if its start-token label is `token` (#1342 r5 C1): a
+    caller outside the box that handed a start its token can clean up after it without ever
+    removing a container another start made under the same name (#1279 O6).
+
+    Absent is `ABSENT`; another token, or none, is `NOT_OURS` and is left in place. The removal
+    is `_remove_container`'s, the one every site uses. A daemon that cannot answer, or an owned
+    container that survives the forced removal even after waiting, is a `BoxFault`: never
+    `ABSENT`, never `REMOVED`."""
+    if _container_status(docker, name) is None:
+        return Reaped.ABSENT
+    held = _inspect_field(docker, name, f'{{{{index .Config.Labels "{START_TOKEN_LABEL}"}}}}')
+    if held is None:
+        # The name answered a moment ago: gone since, or the daemon stopped answering.
+        if _container_status(docker, name) is None:
+            return Reaped.ABSENT
+        raise BoxFault(f"docker could not say which start made the container {name}")
+    if not token or held != token:
+        return Reaped.NOT_OURS
+    reason = _remove_container(docker, name)
+    if reason is not None:
+        raise BoxFault(f"could not remove the container {name}, which carries this start's "
+                       f"token: {reason}")
+    return Reaped.REMOVED
 
 
 def _reap_on_fault(docker: DockerFn, name: str, *, owned_token: str | None = None) -> None:
