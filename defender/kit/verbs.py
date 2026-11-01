@@ -101,6 +101,11 @@ class VerbContext(Protocol):
         """The request token this call presents to the proxy; never shown in a repr."""
         ...
 
+    @property
+    def token_source(self) -> Callable[[], str] | None:
+        """Where the call gets its request token when it holds none (r7 A20)."""
+        ...
+
 
 Verb = Callable[..., Any]
 

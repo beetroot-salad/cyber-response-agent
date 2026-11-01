@@ -3,7 +3,7 @@ it is applied, and which requests are reads or writes. Values only: it holds no 
 parser that reads it from a tenant's settings stays in `tenancy`."""
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 #: The operator's variable naming the credential proxy's address. Read by the launching process
@@ -62,11 +62,12 @@ class Auth:
 
 @dataclass(frozen=True)
 class RequestAccess:
-    """What a run's callers present to the credential proxy: its address and the read token the
-    run signed at its start. The token is a bearer value, out of every repr."""
+    """What a run's callers present to the credential proxy: its address and where to get the
+    run's read token, signed when a call first needs it (r7 A20). The token is a bearer value,
+    out of every repr."""
 
     proxy_url: str
-    token: str = field(repr=False)
+    token: Callable[[], str] = field(repr=False)
 
 
 @dataclass(frozen=True)

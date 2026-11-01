@@ -10,7 +10,7 @@ import os
 import threading
 import types
 import typing
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from defender._model import model
 from datetime import datetime
 from pathlib import Path
@@ -132,6 +132,9 @@ class VerbContext:
     #: handed in by whoever builds the context. The token is a bearer value: out of every repr.
     proxy_url: str | None = None
     request_token: str | None = dataclasses.field(default=None, repr=False)
+    #: Or where to get it: the run's read token is asked of this inside the verb's own call, so
+    #: a mint that fails is that call's fault (r7 A20). `request_token` wins when both are set.
+    token_source: Callable[[], str] | None = dataclasses.field(default=None, repr=False)
 
     @field_validator("tenant")
     @classmethod

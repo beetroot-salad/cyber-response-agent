@@ -278,7 +278,7 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any,
     env = run_env(_DEFENDER_DIR, Path(episode_dir))
     env["DEFENDER_RUNS_BASE"] = source.runs_base_export()
     proxied = ({} if access is None
-               else {"proxy_url": access.proxy_url, "request_token": access.token})
+               else {"proxy_url": access.proxy_url, "request_token": access.token()})
     return VerbContext(defender_dir=_DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
                        capture=None, tenant=tenant, as_of=as_of, **proxied)
 
@@ -298,7 +298,8 @@ def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any],
         signer, tenant_id=str(tenant.tenant_id), investigation=source.run_dir.name,
         grant={(system, "r") for system in proxied},
         expires_at=datetime.now(UTC) + timedelta(seconds=PREFLIGHT_TOKEN_SEC))
-    return RequestAccess(proxy_url or os.environ.get(PROXY_URL_ENV, ""), token)
+    # Pre-flight is one short pass: its one token is signed here, not on demand (r7 A20).
+    return RequestAccess(proxy_url or os.environ.get(PROXY_URL_ENV, ""), lambda: token)
 
 
 

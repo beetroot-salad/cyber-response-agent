@@ -68,10 +68,10 @@ from defender.systems import system_status  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import RunTenant  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
+import threading  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
 from defender.credential_proxy import mint_request_token, request_signer  # noqa: E402
-from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.kit.access import PROXY_URL_ENV, AccessDeclaration, RequestAccess  # noqa: E402
 from defender.kit.faults import AdapterFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
@@ -480,17 +480,18 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     return summary
 
 
-#: Seconds a read token outlives the run's wall-clock budget plus its grace (A15), and a
-#: write-back token lives from the leg that asks for it.
-READ_TOKEN_MARGIN_SEC = 300
-WRITE_BACK_TOKEN_SEC = 600
+#: Seconds a request token lives from when it is signed, read or write-back (r7 A20), and the
+#: life a held read token must have left to be handed out again.
+TOKEN_SEC = 600
+TOKEN_REUSE_MARGIN_SEC = 60
 
 
 class _TokenMint:
-    """Signs this run's request tokens in the run process (#1163 A1): one read token over the
-    granted `http-proxy` systems at run start, and a write-back token (`rw` on the ticket
-    system only) at each ticket leg. A run with no `http-proxy` system to reach signs nothing and
-    never contacts OpenBao (A7)."""
+    """Signs this run's request tokens in the run process (#1163 A1): a read token over the
+    granted `http-proxy` systems when a call first needs one, reused while it has life left (r7
+    A20), and a write-back token (`rw` on the ticket system only) at each ticket leg. Building
+    one checks configuration only; nothing contacts OpenBao until a token is asked for, and a
+    run with no `http-proxy` system to reach never does (A7)."""
 
     def __init__(self, signer: Any, proxy_url: str | None, *, tenant_id: str, run_id: str,
                  reads: tuple[str, ...], ticket_system: str | None) -> None:
@@ -498,11 +499,10 @@ class _TokenMint:
         self._proxy_url = proxy_url
         self._tenant_id = tenant_id
         self._run_id = run_id
+        self._reads = reads
         self._ticket_system = ticket_system
-        self._access: RequestAccess | None = None
-        if reads:
-            self._access = RequestAccess(self._proxy_url or "", self._mint(
-                {(s, "r") for s in reads}, _read_expiry()))
+        self._held: tuple[str, float] | None = None
+        self._holding = threading.Lock()
 
     @classmethod
     def for_run(  # noqa: PLR0913 — the run's identity plus the operator's three seams
@@ -510,7 +510,9 @@ class _TokenMint:
                 world: Any, run_id: str, accepted: tenancy.Tenant, signer: Any,
                 proxy_url: str | None, issuer_transport: Any) -> _TokenMint:
         """The mint for a run, or a mint that signs nothing when no `http-proxy` system is in
-        reach. A configuration that cannot sign refuses run start, naming the cause."""
+        reach. A configuration that cannot sign (no proxy address, no usable issuer config file)
+        refuses run start, naming the cause; called before the run folder is made, so the
+        refusal leaves none behind (r7 A20)."""
         proxied = {name for name, found in tenant.access.items()
                    if isinstance(found, AccessDeclaration) and name not in systems.down}
         reads = () if world is not None else tuple(sorted(
@@ -538,8 +540,19 @@ class _TokenMint:
             self._signer, tenant_id=self._tenant_id, investigation=self._run_id, grant=grant,
             expires_at=datetime.fromtimestamp(expires_at, UTC))
 
+    def _read_token(self) -> str:
+        """The run's read token: the held one while it has life left, else a new one. A mint
+        that fails raises its fault to the call that asked (r7 A20, A18)."""
+        with self._holding:
+            now = time.time()
+            if self._held is None or self._held[1] - TOKEN_REUSE_MARGIN_SEC <= now:
+                expires_at = now + TOKEN_SEC
+                self._held = (self._mint({(s, "r") for s in self._reads}, expires_at), expires_at)
+            return self._held[0]
+
     def access_kwargs(self) -> dict[str, RequestAccess]:
-        return _access_kwargs(self._access)
+        return _access_kwargs(RequestAccess(self._proxy_url or "", self._read_token)
+                              if self._reads else None)
 
     def write_back(self) -> dict[str, str]:
         """The ticket leg's keywords: a fresh write-back token and the proxy's address, when the
@@ -548,17 +561,11 @@ class _TokenMint:
         if self._ticket_system is None:
             return {}
         try:
-            token = self._mint({(self._ticket_system, "rw")}, time.time() + WRITE_BACK_TOKEN_SEC)
+            token = self._mint({(self._ticket_system, "rw")}, time.time() + TOKEN_SEC)
         except AdapterFault as refused:
             _logger.warning(f"no write-back token for the ticket leg: {refused.detail}")
             return {}
         return {"request_token": token, "proxy_url": self._proxy_url or ""}
-
-
-def _read_expiry() -> float:
-    """The read token's expiry: the run's wall-clock budget, its grace and a fixed margin."""
-    limits = DEFAULT_LIMITS
-    return time.time() + limits["wall_clock_timeout"] + limits["grace_seconds"] + READ_TOKEN_MARGIN_SEC
 
 
 def _resolve_run_tenant(
@@ -1036,6 +1043,13 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                 tenant, defender_dir=DEFENDER_DIR,
                 roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
                 known_ids=known_ids)
+            # The request tokens' signer, over the systems just judged: a configuration that
+            # cannot sign them refuses here, before the run folder is made; nothing is signed
+            # until a call or a ticket leg asks (r7 A20).
+            minting = _TokenMint.for_run(
+                tenant, systems, ns=ns, world=world, run_id=early.run_dir.name,
+                accepted=accepted, signer=signer, proxy_url=proxy_url,
+                issuer_transport=issuer_transport)
 
             model = driver.resolve_main_model(ns.model)
             # Runs in siblings too: models are resolved per process, so each sibling must check (and
@@ -1062,12 +1076,6 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
             # or the box exists.
             print(f"run_id={run_dir.name}", flush=True)
             _write_knowledge_record(run_dir, knowledge)
-            # The request tokens name the run as materialised; a configuration that cannot sign
-            # them refuses here, before the ticket is opened or the box started.
-            minting = _TokenMint.for_run(
-                tenant, systems, ns=ns, world=world, run_id=run_dir.name,
-                accepted=accepted, signer=signer, proxy_url=proxy_url,
-                issuer_transport=issuer_transport)
 
             # Every log line from here on, the crash included, names this run and the tenant this
             # process resolved once above and hands inward as one value.

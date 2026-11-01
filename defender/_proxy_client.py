@@ -11,6 +11,7 @@ import httpx
 
 from defender.kit.access import CALLER_GRACE_SEC, PROXY_OVERHEAD_SEC
 from defender.kit.faults import TransportFault
+from defender.kit.verbs import VerbContext
 
 #: The proxy's one endpoint.
 PROXY_PATH = "/v1/request"
@@ -61,9 +62,18 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
     return answer
 
 
+def token_of(ctx: VerbContext) -> str | None:
+    """The request token `ctx` presents: its own, or one asked of its source now, inside the
+    verb's call (r7 A20). A source that cannot mint raises its fault here."""
+    if ctx.request_token is not None:
+        return ctx.request_token
+    source = ctx.token_source
+    return None if source is None else source()
+
+
 def request_body(body: object) -> str | None:
     """A JSON request body as the text the proxy forwards."""
     return None if body is None else json.dumps(body)
 
 
-__all__ = ["PROXY_PATH", "ProxyAnswer", "proxy_call", "request_body"]
+__all__ = ["PROXY_PATH", "ProxyAnswer", "proxy_call", "request_body", "token_of"]

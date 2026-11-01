@@ -423,7 +423,7 @@ def _proxy_request(
     body: dict | None,
 ) -> dict | list:
     answer = _proxy_client.proxy_call(
-        ctx.proxy_url, ctx.request_token, system=system, method=method, url=url,
+        ctx.proxy_url, _proxy_client.token_of(ctx), system=system, method=method, url=url,
         headers={"Accept": "application/json"}
         | ({"Content-Type": "application/json"} if body is not None else {}),
         body=_proxy_client.request_body(body), timeout_sec=int(config.get("TIMEOUT_SEC", "10")))
