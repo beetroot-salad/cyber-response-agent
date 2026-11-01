@@ -149,7 +149,6 @@ def test_rotation_removes_the_login_of_every_generation_from_the_whitelist_and_k
     full = f"{ORG}/{tenant}"
     world.forge.team_members[(ORG, "Reviewers")] = {"carol"}
     world.forge.users.update({"carol", "bot-ops"})
-    world.forge.repos[full]["collaborators"]["bot-ops"] = "write"  # control: a bot-like login that is not a generation's
     _rotate(world, tenant)
     world.drive()
     [destroyed] = [g for g in world.generations(tenant) if g.status == "destroyed"]
@@ -159,6 +158,9 @@ def test_rotation_removes_the_login_of_every_generation_from_the_whitelist_and_k
     def hold_every_generation() -> None:
         if not seen:
             seen.append(None)
+            # Added here, after rotation's `bot` step (which leaves only the new bot collaborating, Flow 1.5): a
+            # bot-like login that is not a generation's, with access, so "keeps the others" is really tested.
+            world.forge.repos[full]["collaborators"]["bot-ops"] = "write"
             bots = [u for u in world.forge.users if u.startswith("bot-") and u != "bot-ops"]
             rule = world.forge.rule(full)
             world.forge.put_rule(full, **{**rule, "merge_whitelist_usernames": ["carol", "bot-ops", *bots],

@@ -68,18 +68,20 @@ def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
 # --- one revision, the version check ----------------------------------------------------------------
 
 
-def test_the_history_is_the_baseline_and_exactly_one_revision_on_it():
-    """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11)."""
+def test_the_history_is_the_baseline_and_two_revisions_on_it_in_a_line():
+    """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11); #1163 adds one more, the six
+    sign columns of the generation record (A24/r8.4): a single line baseline -> #1214's -> #1163's, no branch."""
     from alembic.script import ScriptDirectory
 
     from defender.migrations import _config
 
-    chain = [(r.revision, r.down_revision) for r in ScriptDirectory.from_config(_config()).walk_revisions()]
-    assert len(chain) == 2
-    [(head_revision, down), (base, base_down)] = chain
-    assert (down, base, base_down) == (BASELINE, BASELINE, None)
-    assert head_revision != BASELINE
-
+    script = ScriptDirectory.from_config(_config())
+    chain = [(r.revision, r.down_revision) for r in script.walk_revisions()]  # newest first
+    assert len(chain) == 3
+    [(head_revision, middle), (middle_revision, down), (base, base_down)] = chain
+    assert (middle, down, base, base_down) == (middle_revision, BASELINE, BASELINE, None)
+    assert len({head_revision, middle_revision, BASELINE}) == 3
+    assert script.get_heads() == [head_revision], "the history branches"
 
 @pytest.mark.postgres
 def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_database):
