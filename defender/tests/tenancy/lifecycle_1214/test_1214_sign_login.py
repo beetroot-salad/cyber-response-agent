@@ -422,7 +422,8 @@ def test_a_pending_generation_recorded_before_r8_completes_with_its_sign_login(w
     world.drive()
     world.tenants.lock = real
 
-    [(recorded_after, fields)] = log
+    assert log, "the provider recorded the sign names"
+    recorded_after, fields = log[0]  # the first such commit; a later one may repeat the names (r8.5 allows it)
     assert (fields["sign_approle"], fields["sign_entity"]) == (sign_approle, sign_entity)
     made = [i for i, c in enumerate(bao.calls) if c.method in ("POST", "PUT")
             and c.path in (f"/v1/auth/approle/role/{sign_approle}", f"/v1/identity/entity/name/{sign_entity}")]
