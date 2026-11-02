@@ -16,7 +16,7 @@ from defender.records import run_end
 from defender.systems.run_tenant import RunTenant
 from defender.kit.settings import SETTINGS_POINTER
 from defender.systems.verbs import VerbContext, redact_settings_path
-from defender import integrations
+from defender import _proxy_client, integrations
 from defender.kit.faults import AdapterFault, TransportFault
 
 _logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def _request(
     """One call to the store, over the context the caller built from the run's record."""
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
     timeout = int(config.get("TIMEOUT_SEC", "10"))
-    if integrations.uses_proxy(ctx.tenant, SYSTEM):
+    if _proxy_client.uses_proxy(ctx.tenant, SYSTEM):
         return _via_proxy(ctx, method, url, body, timeout)
     bastion = config["BASTION_HOST"]
     try:
@@ -67,8 +67,8 @@ def _via_proxy(ctx: VerbContext, method: str, url: str, body: dict | None,
     """`_request` for a store reached through the credential proxy: the same transport as a
     query; a refusal or a transport failure is text, never raised."""
     try:
-        answer = integrations.proxy_exchange(ctx, system=SYSTEM, method=method, url=url,
-                                             body=body, timeout_sec=timeout)
+        answer = _proxy_client.proxy_exchange(ctx, system=SYSTEM, method=method, url=url,
+                                              body=body, timeout_sec=timeout)
     except TransportFault as e:
         return None, f"transport error: {e.detail}"
     if answer.fault in _REFUSALS:

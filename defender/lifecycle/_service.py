@@ -365,7 +365,7 @@ class ManagementService(Actor):
         gen = await self._building(held)
         if not gen.secret_accessor:
             raise StepFailed("the host recorded no installed secret")
-        if not gen.sign_secret_accessor:
+        if not gen.sign_approle or not gen.sign_secret_accessor:
             # Installed before the sign login existed (a job in flight across the upgrade, r8.5): back
             # to `wrap`, which makes the sign chain and wraps both secrets for a fresh install.
             await held.commit(step="wrap", actor=SERVICE)

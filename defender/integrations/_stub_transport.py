@@ -8,7 +8,7 @@ import subprocess
 import urllib.parse
 from typing import TYPE_CHECKING, Any
 
-from defender import _proxy_client
+from defender._proxy_client import proxy_exchange, uses_proxy
 from defender.kit.access import HTTP_PROXY, AccessDeclaration
 from defender.kit.settings import (
     DOCKER_EXEC,
@@ -195,13 +195,6 @@ def record_access(tenant: TenantRecord, system: str) -> AccessDeclaration:
     if isinstance(found, ConfigFault):
         raise ConfigFault(str(found))
     return found
-
-
-def uses_proxy(tenant: TenantRecord, system: str) -> bool:
-    """Is `system` reached through the credential proxy? Decided once, from the record."""
-    entry = tenant.systems.get(system)
-    return (entry is not None and not isinstance(entry, ConfigFault)
-            and entry.get(f"{system_prefix(system)}_TRANSPORT") == HTTP_PROXY)
 
 
 def check_docker_curl_settings(
@@ -416,18 +409,6 @@ def raise_proxy_fault(fault: str, detail: str) -> None:
     classes = {"ConfigFault": ConfigFault, "ConfinementFault": ConfinementFault,
                "TransportFault": TransportFault, "UpstreamFault": UpstreamFault}
     raise classes.get(fault, TransportFault)(detail or fault)
-
-
-def proxy_exchange(
-    ctx: VerbContext, *, system: str, method: str, url: str, body: dict | None, timeout_sec: int,
-) -> _proxy_client.ProxyAnswer:
-    """One JSON request to `system` through the credential proxy, with the token `ctx` presents;
-    the proxy's answer as it came. `TransportFault` when the proxy is not reached."""
-    return _proxy_client.proxy_call(
-        ctx.proxy_url, _proxy_client.token_of(ctx), system=system, method=method, url=url,
-        headers={"Accept": "application/json"}
-        | ({"Content-Type": "application/json"} if body is not None else {}),
-        body=_proxy_client.request_body(body), timeout_sec=timeout_sec)
 
 
 def _proxy_request(

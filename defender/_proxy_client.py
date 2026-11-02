@@ -7,13 +7,18 @@ import functools
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 
 from defender._internal_http import internal_client
-from defender.kit.access import caller_wait_sec
-from defender.kit.faults import TransportFault
+from defender.kit.access import HTTP_PROXY, caller_wait_sec
+from defender.kit.faults import ConfigFault, TransportFault
+from defender.kit.settings import system_prefix
 from defender.kit.verbs import VerbContext
+
+if TYPE_CHECKING:
+    from defender.kit.verbs import TenantRecord
 
 #: The proxy's one endpoint.
 PROXY_PATH = "/v1/request"
@@ -84,4 +89,23 @@ def request_body(body: object) -> str | None:
     return None if body is None else json.dumps(body)
 
 
-__all__ = ["PROXY_PATH", "ProxyAnswer", "proxy_call", "request_body", "token_of"]
+def uses_proxy(tenant: TenantRecord, system: str) -> bool:
+    """Is `system` reached through the credential proxy? Decided once, from the record."""
+    entry = tenant.systems.get(system)
+    return (entry is not None and not isinstance(entry, ConfigFault)
+            and entry.get(f"{system_prefix(system)}_TRANSPORT") == HTTP_PROXY)
+
+
+def proxy_exchange(
+    ctx: VerbContext, *, system: str, method: str, url: str, body: dict | None, timeout_sec: int,
+) -> ProxyAnswer:
+    """One JSON request to `system` through the credential proxy, with the token `ctx` presents;
+    the proxy's answer as it came. `TransportFault` when the proxy is not reached."""
+    return proxy_call(
+        ctx.proxy_url, token_of(ctx), system=system, method=method, url=url,
+        headers={"Accept": "application/json"}
+        | ({"Content-Type": "application/json"} if body is not None else {}),
+        body=request_body(body), timeout_sec=timeout_sec)
+
+
+__all__ = ["PROXY_PATH", "ProxyAnswer", "proxy_call", "proxy_exchange", "request_body", "token_of", "uses_proxy"]
