@@ -54,6 +54,7 @@ from defender.tests.support.jobs._jobs1342 import (
     knowledge_record,
     knowledge_record_of,
     make_worker,
+    move_tenant,
     plant_fork,
     plant_queued_investigation,
     plant_sessions,
@@ -1955,11 +1956,13 @@ class _ProbingDirectory:
     """The worker's records seam that, inside each `state()` call, tries the tenant's host lock exclusive (once) and lists its holders."""
 
     def __init__(self, inner, root: Path) -> None:
-        self.inner, self.root, self.probes = inner, root, []
+        self.inner, self.root, self.probes, self.runs_listings = inner, root, [], []
 
     def state(self, tenant_id: str):
         probe = probe_host_lock(self.root, tenant_id)
         self.probes.append(probe)
+        runs = self.root / tenant_id / "runs"
+        self.runs_listings.append(sorted(p.name for p in runs.iterdir()) if runs.is_dir() else None)
         return self.inner.state(tenant_id)
 
     def __getattr__(self, name: str):
@@ -2014,5 +2017,171 @@ async def test_r6_5_a_worker_with_no_directory_and_no_database_address_refuses_t
             await asyncio.wait_for(getattr(worker, entry)(), timeout=30)
 
     assert row(world["dsn"], inv)["stage"] == "queued", "a worker that could not read tenant records claimed a row"
+    assert child.seen() is None
+    assert sorted(p.name for p in world["runs"].iterdir()) == []
+
+
+@pytest.mark.parametrize("state", ["active", "offboarding"])
+async def test_r6_4_the_tenants_state_is_read_before_any_launch_file_exists(world, state):
+    """At the moment the worker reads the tenant's state, the runs container holds nothing of this job: a refusal has nothing to clean up, and teardown never finds a file the worker has not yet been cleared to write. (R6-4)"""
+    restate_tenant(world["dsn"], T1, state=state)
+    child = _child(world, files=_committed())
+    directory = _ProbingDirectory(world["directory"], world["root"])
+    async with job_store(world["dsn"]) as store:
+        await _queued(store)
+        await _worker(world, store, child, directory=directory).drain()
+
+    assert directory.runs_listings, "premise: the worker read the tenant's state through its directory"
+    assert directory.runs_listings == [[]] * len(directory.runs_listings), \
+        f"launch files existed when the state was read: {directory.runs_listings}"
+
+
+async def test_r6_4_no_tenant_lock_is_held_or_a_holder_while_the_launch_files_are_written(world, monkeypatch):
+    """Inside the launch-file write itself, an exclusive try-once on the tenant's host lock succeeds and the worker's pid is no holder; a lock folder that already exists is no excuse and none is left changed. (R6-4)"""
+    from defender.records import job_lane
+
+    lock_folder = world["root"] / ".host-locks" / T1
+    lock_folder.mkdir(parents=True)  # exists before the claim, so only a probe inside the write can see a taken lock
+    probes: list[SimpleNamespace] = []
+    real_write = job_lane.JobLane.write_launch
+
+    def probing_write(self, *args, **kwargs):
+        probes.append(probe_host_lock(world["root"], T1))
+        return real_write(self, *args, **kwargs)
+    monkeypatch.setattr(job_lane.JobLane, "write_launch", probing_write)  # lint-monkeypatch: ok — the lane is built inside the Worker and no seam injects a lane stand-in; this observes the lock state at the write and runs the real write
+
+    child = _child(world, files=_committed())
+    inv, stored = await _run_one(world, child)
+
+    assert probes, "premise: the worker wrote the launch files through the job lane"
+    for probe in probes:
+        assert probe.free, "the worker held the tenant's host lock while it wrote the launch files"
+        assert os.getpid() not in probe.holders, "the worker is on the tenant's holder list during the write"
+    assert stored["stage"] == "completed"
+
+
+async def test_r6_4_a_tenant_restated_between_two_claims_fails_the_second_row(world):
+    """Two rows of one tenant, one slot: the tenant goes `offboarding` after the first child has finished; the first row completes and the second is a worker error with no launch files and no child. The state is read at every claim. (R6-4)"""
+    calls: list[str] = []
+
+    class RestatedBetweenClaims:
+        def state(self, tenant_id: str):
+            calls.append(tenant_id)
+            if len(calls) == 2:
+                move_tenant(world["dsn"], T1, state="offboarding")
+            return world["directory"].state(tenant_id)
+
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        first = await _queued(store, ticket="T-1", key="k1")
+        second = await _queued(store, ticket="T-2", key="k2")
+        await _worker(world, store, child, slots=1, directory=RestatedBetweenClaims()).drain()
+
+    stages = {i: row(world["dsn"], i) for i in (first, second)}
+    done = [i for i, r in stages.items() if r["stage"] == "completed"]
+    refused = [i for i, r in stages.items() if (r["stage"], r["failure_reason"]) == ("failed", "worker_error")]
+    assert (len(done), len(refused)) == (1, 1), {i: (r["stage"], r["failure_reason"]) for i, r in stages.items()}
+    assert len(calls) == 2, "the tenant's state was not read at each claim"
+    assert "offboarding" in stages[refused[0]]["failure_message"]
+    assert child.events() == [("start", done[0]), ("end", done[0])], "a child started for the second row"
+    assert sorted(p.name for p in world["runs"].iterdir() if p.name.startswith(refused[0])) == [], \
+        "launch files were written for the refused row"
+
+
+async def test_r6_4_a_records_read_that_never_answers_fails_the_row_not_the_worker(world, monkeypatch):
+    """A tenant's state read that does not return within the worker's records timeout ends that row `failed`/`worker_error` saying the records did not answer; nothing is written, no child. (R6-4)"""
+    import threading
+
+    from defender.worker import _worker as worker_module
+
+    monkeypatch.setattr(worker_module, "RECORDS_TIMEOUT", 0.3)  # lint-monkeypatch: ok — the module constant is the timeout and no seam injects it; shortened so the case need not wait out the real one
+    unblock = threading.Event()
+
+    class NeverAnswers:
+        def state(self, tenant_id: str):
+            unblock.wait(timeout=30)
+            return "active"
+
+    child = _child(world, files=_committed())
+    try:
+        async with job_store(world["dsn"]) as store:
+            inv = await _queued(store)
+            await asyncio.wait_for(_worker(world, store, child, directory=NeverAnswers()).drain(), timeout=15)
+    finally:
+        unblock.set()
+
+    _nothing_left_for_a_refused_claim(world, child, inv)
+    assert "records" in row(world["dsn"], inv)["failure_message"].lower()
+
+
+class _AlertlessStore:
+    """The real store, except that every alert reads as missing."""
+
+    def __init__(self, store) -> None:
+        self._store = store
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def get_alert(self, tenant_id, alert_id):
+        return None
+
+
+async def test_r6_4_the_alert_is_read_before_the_tenants_state(world):
+    """A missing alert for a tenant that is also offboarding: the row says the alert is missing (the order in R6-4 is get_alert, then the state check). (R6-4)"""
+    restate_tenant(world["dsn"], T1, state="offboarding")
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        await _worker(world, _AlertlessStore(store), child).drain()
+
+    stored = row(world["dsn"], inv)
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert "alert" in stored["failure_message"].lower()
+    assert "offboarding" not in stored["failure_message"]
+
+
+@pytest.mark.parametrize("entry", ["drain", "serve"])
+async def test_r6_5_a_database_that_cannot_be_reached_at_start_refuses_the_worker_and_claims_nothing(
+        world, monkeypatch, entry):
+    """No `directory=`, `DEFENDER_DATABASE_DSN` naming a server that is not there: `drain()`/`serve()` raise `RecordsUnreachable` (a `TenantRefused`) promptly, without retrying; the queued row stays queued. (R6-5, D-aa)"""
+    from defender.records.formats import TenantRefused
+    from defender.systems.run_tenant import RecordsUnreachable
+    from defender.worker import Worker
+
+    assert issubclass(RecordsUnreachable, TenantRefused)
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", "postgresql://nobody@127.0.0.1:1/none?connect_timeout=2")
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        worker = Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock,
+                        containers=StandInContainers(world["tmp"] / "containers"))
+        started = time.monotonic()
+        with pytest.raises(RecordsUnreachable):
+            await asyncio.wait_for(getattr(worker, entry)(), timeout=20)
+        assert time.monotonic() - started < 10, "the worker kept trying to reach the records"
+
+    assert row(world["dsn"], inv)["stage"] == "queued", "a worker that could not reach tenant records claimed a row"
+    assert child.seen() is None
+    assert sorted(p.name for p in world["runs"].iterdir()) == []
+
+
+@pytest.mark.parametrize("entry", ["drain", "serve"])
+async def test_r6_5_a_database_at_another_schema_revision_refuses_the_worker_and_claims_nothing(
+        world, empty_database, monkeypatch, entry):
+    """No `directory=`, `DEFENDER_DATABASE_DSN` naming a database that is not at this code's revision: `drain()`/`serve()` raise `TenantRefused` and the queued row stays queued. (R6-5)"""
+    from defender.records.formats import TenantRefused
+    from defender.worker import Worker
+
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", empty_database)
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        worker = Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock,
+                        containers=StandInContainers(world["tmp"] / "containers"))
+        with pytest.raises(TenantRefused):
+            await asyncio.wait_for(getattr(worker, entry)(), timeout=30)
+
+    assert row(world["dsn"], inv)["stage"] == "queued", "a worker whose records were at another revision claimed a row"
     assert child.seen() is None
     assert sorted(p.name for p in world["runs"].iterdir()) == []
