@@ -2,11 +2,7 @@
 their caps, and the ticket egress."""
 from __future__ import annotations
 
-from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
-
-
 from defender.records._artifact_schema import REPORT_FRONTMATTER_MAX, validate_artifact
-from defender.tenancy import case_ticket
 from defender.investigation.close_tool import (
     CAUSE_REVIEW_INCOMPLETE,
     FAILURE_KINDS,
@@ -289,25 +285,29 @@ def test_reviewed_inconclusive_ceiling_note_overflow_is_refused(tmp_path):
 
 def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_path, monkeypatch):
     """The ticket comment for a ceiling-held `inconclusive` carries the seventh cause verbatim; a
-    machinery-failed one renders as the `unresolved` it committed, never as the ceiling claim."""
-    from defender.tests.support.runtime.engine._spec767 import use_mapping
+    machinery-failed one renders as the `unresolved` it committed, never as the ceiling claim.
+    (#1359: read at the wire, the comment the record leg posts to the alert's ticket.)"""
+    from defender.tests.support.runtime.engine import _spec767 as S767
+    from defender.tests.support.storage._alert_plant import plant_alert
 
-    mapping = case_ticket.load_case_mapping(use_mapping(monkeypatch, tmp_path / "dfn"))
+    S767.use_case_record(monkeypatch, tmp_path / "dfn")
+
+    def posted(run_dir, n):
+        plant_alert(run_dir, S767.ALERT, mapping=S767.ALERT_MAPPING)
+        store = S767.FakeStore(tmp_path / f"store-{n}")
+        S767.record(run_dir, store)
+        return store.comment_body()
+
     deps, run_dir = deps_over(tmp_path / "held", ceiling_companion())
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
     fm = frontmatter(run_dir)
     assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CEILING_EXAMINED)
-    rec = case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=mapping)
-    assert rec.disposition == GAP
-    assert rec.cause == CEILING_EXAMINED
-    comment = case_ticket.case_record_to_comment(rec, mapping=mapping)
-    assert comment["body"].startswith(f"{GAP} — {CEILING_EXAMINED}")
+    assert posted(run_dir, 0).startswith(f"{GAP} — {CEILING_EXAMINED}")
 
     deps, run_dir = deps_over(tmp_path / "broken", ceiling_companion())
     broken = close_with(deps, GAP, recording(faults={"composer": raises(RuntimeError("down"))}))
     assert broken.outcome == "forced-inconclusive"
     assert broken.failure_kind is not None
-    rec = case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=mapping)
-    assert rec.disposition == UNRESOLVED
-    assert rec.cause == CAUSE_REVIEW_INCOMPLETE
-    assert CEILING_EXAMINED not in case_ticket.case_record_to_comment(rec, mapping=mapping)["body"]
+    body = posted(run_dir, 1)
+    assert body.startswith(f"{UNRESOLVED} — {CAUSE_REVIEW_INCOMPLETE}"), body
+    assert CEILING_EXAMINED not in body

@@ -469,7 +469,7 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
     marker = "CLOSING-NOTE-1255: alice's db-1 logon was the TGT abuse; account disabled"
     source_dir = S767.make_run(tmp_path / "runs", name=S24.SOURCE_RUN_ID,
                                disposition="malicious", body=marker)
-    store = S767.FakeStore()
+    store = S767.FakeStore(tmp_path / "store")
     S767.record(source_dir, store)
     posted = store.wire_body()
     tag = case_ticket.agent_comment_tag(S24.SOURCE_RUN_ID)
@@ -505,7 +505,7 @@ def test_1255_a_worlds_oracle_is_not_told_a_closing_comment_the_source_never_pos
     assert marker in (source_dir / "report.md").read_text(encoding="utf-8"), (
         "fixture: the source's report does not carry the narrative marker")
     if post == "post-failed":
-        store = S767.FakeStore(status_by_suffix={S767.COMMENTS_SUFFIX: "500"})
+        store = S767.FakeStore(tmp_path / "store", status="500")
         S767.record(source_dir, store)
         assert len(store.comment_payloads) == 1, "fixture: the source never attempted its comment"
         assert S767.receipt(source_dir).get("ok") is False, (

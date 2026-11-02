@@ -148,15 +148,11 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
     assert rc == 0, (rc, refused and H.refusal_text(refused))
 
     S.set_key(folder, "cmdb", "CMDB_URL_BASE", edited)
-    S.mapping_path(folder).write_text(T1106.mapping_text(reporter="resolved"),
-                                      encoding="utf-8")
     fresh = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                       dispatches_lead_zero=False)
 
     def edit_within(_run_dir: Path) -> None:
         S.set_key(folder, "cmdb", "CMDB_URL_BASE", later)
-        S.mapping_path(folder).write_text(T1106.mapping_text(reporter="archived"),
-                                          encoding="utf-8")
 
     episode = _sibling_episode(tmp_path, T.family_doc(source_run_dir=str(source),
                                                       worlds=_identity_worlds()),
@@ -170,17 +166,14 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
     before = first.lifecycle_calls[0]["tenant"]
     after = sibling.lifecycle_calls[0]["tenant"]
     assert before.systems["cmdb"]["CMDB_URL_BASE"] == original, before.systems["cmdb"]
-    assert S.open_reporter(before.ticket_mapping) == "defender"
     assert after.systems["cmdb"]["CMDB_URL_BASE"] == edited, (
         "the resumed sibling did not re-resolve at its own start")
     assert after.systems["cmdb"] == fresh.systems["cmdb"]
-    assert S.open_reporter(after.ticket_mapping) == "resolved"
 
     # Within the resumed run: the files moved on again, and the record did not.
     assert f'CMDB_URL_BASE="{later}"' in S.config_path(folder, "cmdb").read_text(encoding="utf-8")
     ctx = S.verb_context(after, sibling.run_dir_at, {"PATH": ""})
     assert _stub_transport.load_config(ctx, "cmdb", "CMDB")["URL_BASE"] == edited
-    assert S.open_reporter(after.ticket_mapping) == "resolved"
     # Nothing copied the resolved values into the run or the episode.
     for where in (sibling.run_dir_at, episode):
         assert S.holders(where, edited) == [], (where, S.holders(where, edited))
