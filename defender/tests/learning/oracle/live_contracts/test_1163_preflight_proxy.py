@@ -158,6 +158,7 @@ def test_p1b_preflight_signs_with_the_sign_login_whatever_the_environment_holds(
     assert canary.seen == [], "the environment's address was used"
     assert bao.logins == [(ROLE, SECRET)]
     assert len(bao.signs) == 1
+    assert set(bao.origins) == {A.deployment_origin()}, "the sign login and sign went to the deployment's address (A1)"
     assert tap.tokens
     assert all(A.SIGNATURE_CANARY in tok for tok in tap.tokens)
 

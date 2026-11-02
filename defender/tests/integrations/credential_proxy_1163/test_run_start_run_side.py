@@ -2,10 +2,6 @@
 every repr, and the signing login taken from the tenant's sign generation alone. Driven through `run.main`."""
 from __future__ import annotations
 
-from urllib.parse import urlsplit
-
-import httpx
-
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import test_run_start_tokens as R
 from defender.tests.integrations.credential_proxy_1163._target import (
@@ -63,26 +59,10 @@ DECOY_ROLE, DECOY_SECRET = "role-1163-env", "secret-1163-env"
 DECOY_ADDRESS = "https://decoy-vault.invalid:8200"
 
 
-class HostRecordingBao(A.OpenBaoStandIn):
-    """The OpenBao stand-in that also records the host of each request."""
-
-    def __init__(self, *args, **kw) -> None:
-        super().__init__(*args, **kw)
-        self.hosts: list[str] = []
-        self.origins: list[tuple[str, str, int | None]] = []
-
-    def _handle(self, request):
-        self.hosts.append(request.url.host)
-        self.origins.append((request.url.scheme, request.url.host, request.url.port))
-        return super()._handle(request)
-
-
 def test_w3_the_signing_login_comes_from_the_sign_generation_not_the_environment_or_delivery(
         tmp_path, data_root, monkeypatch):
     """With decoy login variables set and the delivery secret file unreadable, the login and
     sign go to the deployment's address with the sign pair alone. A24, A24', A1."""
-    from defender.configuration.issuer import DEPLOYMENT_ISSUER
-
     R._plant(data_root, proxy=("identity",))
     fields = A.generation(S.PLAYGROUND_ID, tmp_path / "secrets", sign_role_id=ROLE,
                           sign_secret=SECRET, role_id=DELIVERY_ROLE, delivery_secret=DELIVERY_SECRET,
@@ -92,7 +72,7 @@ def test_w3_the_signing_login_comes_from_the_sign_generation_not_the_environment
     for name, value in (("VAULT_ADDR", DECOY_ADDRESS), ("BAO_ADDR", DECOY_ADDRESS),
                         ("ROLE_ID", DECOY_ROLE), ("SECRET_ID", DECOY_SECRET)):
         monkeypatch.setenv(name, value)
-    bao = HostRecordingBao({ROLE: SECRET, DECOY_ROLE: DECOY_SECRET, DELIVERY_ROLE: DELIVERY_SECRET})
+    bao = A.OpenBaoStandIn({ROLE: SECRET, DECOY_ROLE: DECOY_SECRET, DELIVERY_ROLE: DELIVERY_SECRET})
     rec, _tickets, rc, refused, _ = R._drive(tmp_path, data_root, ticket=False,
                                              issuer_transport=bao, directory=records.directory)
 
@@ -101,8 +81,7 @@ def test_w3_the_signing_login_comes_from_the_sign_generation_not_the_environment
     R.read_access(rec).token()
     assert bao.logins == [(ROLE, SECRET)], "login with the sign pair alone"
     assert len(bao.signs) == 1, "positive control: the read token was signed"
-    assert set(bao.hosts) == {urlsplit(DEPLOYMENT_ISSUER.openbao_url).hostname}, bao.hosts
-    deployment = httpx.URL(DEPLOYMENT_ISSUER.openbao_url)
-    assert set(bao.origins) == {(deployment.scheme, deployment.host, deployment.port)}, bao.origins
-    assert deployment.scheme == "https", "positive control: the deployment's address is https"
+    assert bao.requests, "positive control: OpenBao was reached"
+    assert set(bao.origins) == {A.deployment_origin()}, bao.origins
+    assert A.deployment_origin()[0] == "https", "positive control: the deployment's address is https"
     assert {s.mount for s in bao.signs} == {"transit"}, "the fixed transit mount (A25)"
