@@ -1054,6 +1054,28 @@ async def test_d_ag_every_job_audit_event_formats_with_its_tenant_when_the_calle
     assert not _log.current_context().get("tenant_id"), "announcing left a tenant bound"
 
 
+def test_d_ag_an_event_announced_inside_another_tenants_scope_carries_its_own_tenant_and_leaves_the_callers_bindings(caplog):
+    """`announce` called inside `log_context(run_id=R, tenant_id=OTHER)`: the formatted line carries the event's tenant (not OTHER), and afterwards the caller's `run_id` and `tenant_id` bindings are as they were. (D-ag: the tenant is bound while the event is written)"""
+    from defender import _log
+    from defender.jobs import audit
+
+    JobsAudit(caplog)
+    lines = _FormattedLines()
+    logging.getLogger(JOBS_AUDIT).addHandler(lines)
+    run = "11111111-2222-4333-8444-555555555555"
+    try:
+        with _log.log_context(run_id=run, tenant_id=T2):
+            audit.announce("investigation.claim", actor=audit.SYSTEM, tenant_id=T1, target=run)
+            after = dict(_log.current_context())
+    finally:
+        logging.getLogger(JOBS_AUDIT).removeHandler(lines)
+
+    [line] = lines.lines
+    assert line["action"] == "investigation.claim"
+    assert line["tenant_id"] == T1, "the line carries the caller's tenant, not the event's"
+    assert (after.get("run_id"), after.get("tenant_id")) == (run, T2), f"announcing changed the caller's bindings: {after}"
+
+
 async def test_o13_a_claim_is_audited_only_after_its_commit(dsn, caplog):
     """The claim event is emitted when `running` is already visible on another connection. (O13)"""
     audit = JobsAudit(caplog)
