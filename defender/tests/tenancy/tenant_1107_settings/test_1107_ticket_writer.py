@@ -203,13 +203,12 @@ def test_o6_case_record_fault_receipt(tmp_path, monkeypatch, caplog):
         got = S.receipt(run_dir)
         assert got is not None, f"{arm}: no ticket_write.json"
         assert (got.get("status"), got.get("ok"), got.get("url")) == ("error", False, None), got
-        if arm != "system-not-on-roster":  # which file names a roster miss is not settled (report)
-            assert CASE_RECORD in (got.get("reason") or ""), f"{arm}: the reason does not name the file: {got}"
+        assert CASE_RECORD in (got.get("reason") or ""), f"{arm}: the reason does not name the file: {got}"
         assert _warnings(caplog), f"{arm}: no warning logged"
 
 
 #: Case-record files that cannot stand, as bytes: unparsable, not a mapping, a missing or wrong
-#: member, a system the roster lacks, non-UTF-8.
+#: member, a system the roster lacks, a roster system with no `add_case_comment` (D-7), non-UTF-8.
 CASE_RECORD_FAULTS: dict[str, bytes] = {
     "unparsable": b"system: [unclosed\ncomment: {\n",
     "not-a-mapping": b"- system\n- ticket\n",
@@ -217,6 +216,7 @@ CASE_RECORD_FAULTS: dict[str, bytes] = {
     "no-system": b'comment:\n  body: "{narrative}"\n',
     "system-not-text": b'system: [ticket]\ncomment:\n  body: "{narrative}"\n',
     "system-not-on-roster": b'system: "no-such-system"\ncomment:\n  body: "{narrative}"\n',
+    "system-without-the-comment-action": b'system: "cmdb"\ncomment:\n  body: "{narrative}"\n',
     "no-body": b'system: "ticket"\n',
     "body-not-text": b'system: "ticket"\ncomment:\n  body: 7\n',
     "non-utf8": b'system: "ticket"\ncomment:\n  body: "\xff\xfe"\n',
@@ -261,6 +261,7 @@ def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     assert got is not None, "no ticket_write.json for a transport fault"
     assert got.get("ok") is False, got
     assert got.get("status") == "error", got
+    assert got.get("url") is None, got
     reason = got.get("reason") or ""
     assert reason.strip(), f"no reason on the transport-fault receipt: {got}"
     # The reason is the failing check's own text: docker's 'context not found', or the
@@ -379,6 +380,7 @@ def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch,
         got = S.receipt(run_dir)
         assert got is not None, f"HTTP {status}: {got}"
         assert (got.get("key"), got.get("status"), got.get("ok")) == (KEY, "error", False), got
+        assert got.get("url") is None, f"HTTP {status}: an error receipt carries a link: {got}"
         reason = (got.get("reason") or "")
         assert all(w in reason.lower() for w in words), f"HTTP {status}: reason {reason!r}"
         assert _warnings(caplog), f"HTTP {status}: no warning logged"

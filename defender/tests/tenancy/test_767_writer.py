@@ -14,6 +14,7 @@ from defender.tests.support.runtime.engine._spec767 import (
     CASE_KEY,
     CASE_RECORD_RELPATH,
     COMMENTS_SUFFIX,
+    CONFIG,
     ELLIPSIS,
     HOST_CAUSE,
     NO_NOTES,
@@ -36,6 +37,7 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 STANDALONE_FENCE = re.compile(r"(?m)^---\s*$")
 WARNING = "WARNING defender.investigation.ticket_writer"
 COMMENT_PATH = f"{TICKETS_PATH}/{CASE_KEY}{COMMENTS_SUFFIX}"
+M_URL_BASE = CONFIG["URL_BASE"]
 
 
 def _store(tmp_path, **kw) -> FakeStore:
@@ -147,7 +149,7 @@ def test_767_no_host_payload_sets_a_verdict_or_opens_a_case(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("key", [
-    None, "", ".", "..", "...", "a/b", "a\\b", "a b", "a\tb", "a\nb", "a\x0bb", "é-1",
+    None, "", ".", "..", "...", "a/b", "a\\b", "a;b", "a b", "a\tb", "a\nb", "a\x0bb", "é-1",
     "a\x00b", "K" * 129])
 def test_767_a_key_the_alert_cannot_name_makes_no_call_and_says_so(tmp_path, monkeypatch, key):
     """An absent, empty, dot-only, separator-, whitespace-, control-, non-ASCII- or over-long key
@@ -345,7 +347,6 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
     ("no parseable response at all", S.answer("", None, rc=1, stderr="docker: unavailable")),
     ("a key the store does not hold (404)", S.answer('{"detail": "no such ticket"}', "404")),
     ("a 5xx", S.answer('{"detail": "down"}', "503")),
-    ("a 2xx whose body is not JSON", S.answer("<html>not json", "201")),
 ])
 def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch, capsys,
                                                           arm, answer):
@@ -358,6 +359,7 @@ def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch,
     assert len(store.writes()) == 1, f"{arm}: the leg retried its one POST"
     assert capsys.readouterr().err.count(WARNING) <= 1, f"{arm}: warned twice"
     assert receipt_path(run_dir).is_file(), f"{arm}: no receipt was written"
+    assert receipt(run_dir)["url"] is None, f"{arm}: an error receipt carries a link (D-10)"
 
 
 def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatch):
@@ -401,6 +403,19 @@ def test_767_receipt_io_failure_warns_and_keeps_the_exit_code(tmp_path, monkeypa
     assert record(run_dir, store) is None, "a receipt IO failure escaped into the run"
     assert store.comment_payloads, "the comment was skipped because of the receipt"
     assert WARNING in capsys.readouterr().err, "the IO failure was silent"
+
+
+@pytest.mark.parametrize("answer", ['{"id": 1}', "", "created", "<html>not json", "[]"])
+def test_767_any_2xx_is_success_whatever_its_body(tmp_path, monkeypatch, answer):
+    """A 2xx answer whose body is not a JSON object is still a posted comment: a `commented`
+    receipt with the ticket's link. O3, O5, D-8."""
+    _setup(monkeypatch, tmp_path)
+    run_dir = make_run(tmp_path)
+    store = _store(tmp_path, answers=[S.answer(answer, "201")])
+    record(run_dir, store)
+    got = receipt(run_dir)
+    assert (got["key"], got["status"], got["ok"]) == (CASE_KEY, "commented", True), got
+    assert got["url"] == f"{M_URL_BASE}/tickets/{CASE_KEY}", got
 
 
 @pytest.mark.parametrize(("why", "body", "kw"), [

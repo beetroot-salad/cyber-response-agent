@@ -158,7 +158,7 @@ def test_run_start_mints_no_write_back_token_for_a_tenant_with_no_case_file(tmp_
 def test_r4_no_signing_access_mints_nothing_the_run_goes_on_and_the_leg_says_so(
         tmp_path, data_root, arm):
     """The write-back token cannot be minted: nothing is minted, the run investigates as normal
-    (not refused), and the receipt says the token could not be minted; no store is reached. R4."""
+    (not refused), and the receipt says the write-back token could not be minted; no store is reached. R4, D-11."""
     _case_tenant(data_root, C.CASE_SYSTEM_TICKET)
     seams: dict[str, Any] = {}
     if arm != "no sign login":
@@ -172,7 +172,8 @@ def test_r4_no_signing_access_mints_nothing_the_run_goes_on_and_the_leg_says_so(
     got = S.receipt(rec.run_dir_at)
     assert got is not None, "no receipt"
     assert (got["key"], got["status"], got["ok"]) == (C.TICKET_KEY, C.ERROR, False), got
-    assert "minted" in got["reason"], got
+    assert got["url"] is None, got
+    assert "write-back token" in got["reason"], got
     assert up.seen == []
 
 
@@ -196,5 +197,6 @@ def test_run_start_judges_the_case_settings_before_the_mint(tmp_path, data_root,
     got = S.receipt(rec.run_dir_at)
     assert got is not None, "no receipt"
     assert named in got["reason"], got
-    assert "minted" not in got["reason"], got
+    assert got["url"] is None, got
+    assert "write-back token" not in got["reason"], got
     assert "proxy refused" not in got["reason"], got

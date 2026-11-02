@@ -340,7 +340,6 @@
  "tests/runtime/engine/test_budget_enforcement_631.py": 0.9,
  "tests/runtime/engine/test_budget_enforcer.py": 0.0,
  "tests/runtime/engine/test_budget_seams_631.py": 0.7,
- "tests/runtime/engine/test_case_ticket.py": 0.2,
  "tests/runtime/engine/test_circuit_breaker.py": 0.1,
  "tests/runtime/engine/test_compaction.py": 0.0,
  "tests/runtime/engine/test_compaction_driver.py": 0.0,
@@ -645,6 +644,5 @@
  "tests/tooling/layout_contracts/test_1080_run_page_e2e.py": 4.3,
  "tests/tooling/layout_contracts/test_1080_sql_engine.py": 6.8,
  "tests/tooling/layout_contracts/test_1080_venv.py": 15.2,
- "tests/tooling/layout_contracts/test_1080_writeback_tenants_and_views.py": 0.6,
- "tests/tooling/layout_contracts/test_1190_case_mapping_home.py": 4.8
+ "tests/tooling/layout_contracts/test_1080_writeback_tenants_and_views.py": 0.6
 }

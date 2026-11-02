@@ -16,8 +16,9 @@ CASE_KEY = "case_key"
 MAPPING = {**S.DEFAULT_MAPPING_GENERIC, CASE_KEY: "ticket.key"}
 MAPPING_TEXT = "signature: rule.id\ncase_key: ticket.key\n"
 MAX_LEN = 128
-#: r4 Data: printable ASCII (33..126) without `/` and `\`; whitespace and controls are outside it.
-SEGMENT_SAFE = {chr(c) for c in range(33, 127)} - {"/", "\\"}
+#: r4 Data + D-1: printable ASCII (33..126) without `/`, `\` and `;` (the credential proxy refuses
+#: any `;` in a decoded path, so such a key could never be sent); whitespace and controls are outside it.
+SEGMENT_SAFE = {chr(c) for c in range(33, 127)} - {"/", "\\", ";"}
 #: Characters outside ASCII that a lenient implementation might let through.
 NON_ASCII = ("é", " ", " ", "​", "／")
 
@@ -62,7 +63,7 @@ def test_case_key_is_never_taken_from_an_unmapped_field(tmp_path):
 
 @pytest.mark.parametrize("code", range(128))
 def test_case_key_admits_exactly_the_segment_safe_ascii(code):
-    """Every ASCII character, embedded in a key, is kept iff it is printable and not `/`, `\\` or space. Fact case_key."""
+    """Every ASCII character, embedded in a key, is kept iff it is printable and not `/`, `\\`, `;` or space. Fact case_key (D-1)."""
     key = f"K{chr(code)}K"
     want = key if chr(code) in SEGMENT_SAFE else "<absent>"
     assert _recorded(key) == want
@@ -86,9 +87,18 @@ def test_case_key_length_bound_and_dot_only_refusal(key, kept):
 
 
 @pytest.mark.parametrize("value", [True, False, None, 1.5, [], ["SOC-1"], {}, {"k": "SOC-1"}])
-def test_case_key_refuses_a_value_that_is_not_text(value):
-    """A mapped value that is not text records no key. Fact case_key."""
+def test_case_key_refuses_a_value_that_is_not_text_or_an_integer(value):
+    """A mapped boolean, float, null, list or object records no key. Fact case_key (D-3)."""
     assert _recorded(value) == "<absent>"
+
+
+@pytest.mark.parametrize(("value", "text"), [(4471, "4471"), (0, "0"), (-5, "-5"),
+                                             (10 ** 127, "1" + "0" * 127)])
+def test_case_key_records_an_integer_as_its_decimal_text(value, text):
+    """Alert ids are often numeric: an integer value is recorded as its decimal text, and held to
+    the same shape rules (an integer too long to be a key records none). Fact case_key (D-3)."""
+    assert _recorded(value) == text
+    assert _recorded(10 ** 128) == "<absent>"
 
 
 def test_older_records_carry_no_case_key_and_still_read():

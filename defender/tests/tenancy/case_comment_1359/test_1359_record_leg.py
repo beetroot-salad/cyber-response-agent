@@ -69,6 +69,7 @@ def test_o1_a_store_that_does_not_know_the_key_leaves_a_not_found_receipt(tmp_pa
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     assert (got["key"], got["status"], got["ok"]) == (C.TICKET_KEY, C.ERROR, False), got
+    assert got["url"] is None, f"an error receipt after a call carries a link (D-10): {got}"
     assert C.REASON_NOT_FOUND in (got.get("reason") or "").lower(), got
 
 
