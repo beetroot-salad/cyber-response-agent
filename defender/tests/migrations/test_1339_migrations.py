@@ -321,22 +321,23 @@ def test_the_dev_command_without_a_database_refuses_loudly():
     assert "DEFENDER_DATABASE_DSN" in done.stderr
 
 
-# --- #1342 the jobs schema: revision 0002 on the baseline, the lean constraints and nothing more -------------
+# --- #1342 the jobs schema: revision 0003 on #1214's 0002_tenancy, the lean constraints and nothing more -------------
 
 
-def test_the_jobs_revision_sits_directly_on_the_baseline():
-    """The history is `0001_baseline` then one revision that is the head (#1342 O1: one revision on #1339's history)."""
+def test_the_jobs_revision_sits_directly_on_the_tenancy_revision():
+    """The history is the baseline, `0002_tenancy`, then `0003_jobs` as head (#1342 O1; r6: tenants are #1214's records, so jobs sits on `0002_tenancy`)."""
     from defender.migrations import _scripts, head
 
     scripts = _scripts()
-    assert head() != "0001_baseline"
-    assert scripts.get_revision(head()).down_revision == "0001_baseline"
-    assert [r.revision for r in scripts.walk_revisions()] == [head(), "0001_baseline"]
+    assert head() == "0003_jobs"
+    assert scripts.get_revision(head()).down_revision == "0002_tenancy"
+    assert scripts.get_revision("0002_tenancy").down_revision == "0001_baseline"
+    assert [r.revision for r in scripts.walk_revisions()] == ["0003_jobs", "0002_tenancy", "0001_baseline"]
 
 
 @pytest.mark.postgres
-def test_upgrading_a_database_at_the_baseline_adds_jobs_and_keeps_identity(empty_database):
-    """From `0001_baseline` with a tenant row, `upgrade` adds the jobs tables, records head and keeps the row (#1342 O1)."""
+def test_upgrading_a_database_at_the_baseline_adds_jobs_and_keeps_the_tenant_in_tenancy(empty_database):
+    """From `0001_baseline` with a tenant row, `upgrade` moves it to `tenancy`, adds the jobs tables and records head (#1342 O1, r6)."""
     from alembic import command
 
     from defender.migrations import _config, head, upgrade
@@ -350,7 +351,7 @@ def test_upgrading_a_database_at_the_baseline_adds_jobs_and_keeps_identity(empty
     upgrade(empty_database)
     assert _recorded_revision(empty_database) == [head()]
     assert _tables(empty_database, "jobs") == JOBS_TABLES
-    assert execute(empty_database, "SELECT id FROM identity.tenants") == [("t-1",)]
+    assert execute(empty_database, "SELECT id FROM tenancy.tenants") == [("t-1",)]
 
 
 def _jobs_columns(dsn: str, table: str) -> dict[str, tuple[str, bool, Any]]:
@@ -402,7 +403,7 @@ def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
     assert [(kind, cols) for kind, cols, _ in alerts] == sorted([
         ("f", ("tenant_id",)), ("p", ("id",)), ("u", ("id", "tenant_id")),
         ("u", ("tenant_id", "vendor", "vendor_ticket_id"))])
-    assert next(d for k, _, d in alerts if k == "f") == "FOREIGN KEY (tenant_id) REFERENCES identity.tenants(id)", \
+    assert next(d for k, _, d in alerts if k == "f") == "FOREIGN KEY (tenant_id) REFERENCES tenancy.tenants(id)", \
         "no ON DELETE / ON UPDATE action: the default restricts (M10)"
 
     investigations = _jobs_constraints(migrated_database, "investigations")

@@ -47,6 +47,7 @@ from defender.tests.support.jobs._jobs1342 import (
     VisibleAtEmit,
     an_alert,
     fd_identity,
+    fixed_clock,
     is_box_token,
     job_end,
     job_store,
@@ -57,9 +58,11 @@ from defender.tests.support.jobs._jobs1342 import (
     plant_queued_investigation,
     plant_sessions,
     register_tenant,
+    restate_tenant,
     row,
     session_db,
     session_pointer,
+    tenant_directory,
     tree,
 )
 from defender.tests.support.shared._postgres1339 import execute
@@ -85,9 +88,14 @@ def world(migrated_database: str, tmp_path: Path) -> dict:
     for tenant in (T1, T2):
         (root / tenant / "runs").mkdir(parents=True)
         (root / tenant / "sessions").mkdir()
-        (root / tenant / "tenant.json").write_text("{}", encoding="utf-8")
     return {"dsn": migrated_database, "root": root, "runs": root / T1 / "runs",
-            "other_runs": root / T2 / "runs", "tmp": tmp_path}
+            "other_runs": root / T2 / "runs", "tmp": tmp_path,
+            "directory": tenant_directory(migrated_database)}  # r6: the worker's records seam, over the rows above
+
+
+def _worker(world: dict, store, child, **kw):
+    """`make_worker` with the world's directory (agreeing with the registered rows), unless a case passes its own."""
+    return make_worker(store, world["root"], child, **{"directory": world["directory"], **kw})
 
 
 async def _queued(store, ticket: str = "T-1", key: str = "k1") -> str:
@@ -99,7 +107,7 @@ async def _queued(store, ticket: str = "T-1", key: str = "k1") -> str:
 async def _run_one(world: dict, child: ScriptedChild, **kw) -> tuple[str, dict]:
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
-        await make_worker(store, world["root"], child, **kw).drain()
+        await _worker(world, store, child, **kw).drain()
     return inv, row(world["dsn"], inv)
 
 
@@ -150,7 +158,7 @@ async def test_o4_three_children_run_at_once_and_a_fourth_waits_for_a_free_slot(
     child = _child(world, files=_committed(), wait_for=release)
     async with job_store(world["dsn"]) as store:
         ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(4)]
-        drained = asyncio.create_task(make_worker(store, world["root"], child, slots=3).drain())
+        drained = asyncio.create_task(_worker(world, store, child, slots=3).drain())
         for _ in range(1500):
             if len(child.seen_all()) == 3:
                 break
@@ -176,8 +184,8 @@ async def test_o4_two_workers_never_run_one_row_twice(world):
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as one, job_store(world["dsn"]) as two:
         ids = [await _queued(one, ticket=f"T-{n}", key=f"k{n}") for n in range(4)]
-        await asyncio.gather(make_worker(one, world["root"], child, slots=2).drain(),
-                             make_worker(two, world["root"], child, slots=2).drain())
+        await asyncio.gather(_worker(world, one, child, slots=2).drain(),
+                             _worker(world, two, child, slots=2).drain())
 
     starts = [run for kind, run in child.events() if kind == "start"]
     assert sorted(starts) == sorted(ids)
@@ -200,7 +208,7 @@ async def test_o5_a_row_moved_while_its_child_runs_is_left_alone_and_logged(worl
     async with job_store(world["dsn"]) as store:
         fenced = await _queued(store, ticket="T-1", key="k1")
         other = await _queued(store, ticket="T-2", key="k2")
-        drained = asyncio.create_task(make_worker(store, world["root"], child).drain())
+        drained = asyncio.create_task(_worker(world, store, child).drain())
         for _ in range(1500):
             if len(child.seen_all()) == 2:
                 break
@@ -292,7 +300,7 @@ async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(w
     async with job_store(world["dsn"]) as store:
         alert = await an_alert(store, T1, raw=raw)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
-        await make_worker(store, world["root"], child).drain()
+        await _worker(world, store, child).drain()
 
     written = (world["runs"] / f"{inv.investigation_id}.alert.json").read_bytes()
     assert written == raw
@@ -311,7 +319,7 @@ async def test_o6_launch_files_are_create_only_and_a_failed_write_is_a_worker_er
         alert = await an_alert(store, T1)
         plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
         (world["runs"] / f"{inv}{present}").write_text("planted", encoding="utf-8")
-        await make_worker(store, world["root"], child).drain()
+        await _worker(world, store, child).drain()
 
     stored = row(world["dsn"], inv)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
@@ -607,7 +615,7 @@ async def test_o8_a_job_end_word_with_junk_anywhere_is_a_failed_run_with_the_exi
 
     async with job_store(world["dsn"]) as store:
         ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(len(variants))]
-        await make_worker(store, world["root"], argv, slots=1).drain()
+        await _worker(world, store, argv, slots=1).drain()
 
     assert len(order) == len(ids), "premise: a launch for every queued run"
     assert len(child.seen_all()) == len(ids), "premise: every child ran"
@@ -813,9 +821,9 @@ async def test_o7_after_the_child_exits_the_backstop_reaps_under_the_claims_toke
     bare = ScriptedChild(world["tmp"] / "child-bare", world["runs"], files=_committed())
     async with job_store(world["dsn"]) as store:
         left = await _queued(store, ticket="T-1", key="k1")
-        await make_worker(store, world["root"], owning, containers=containers).drain()
+        await _worker(world, store, owning, containers=containers).drain()
         clean = await _queued(store, ticket="T-2", key="k2")
-        await make_worker(store, world["root"], bare, containers=containers).drain()
+        await _worker(world, store, bare, containers=containers).drain()
 
     left_token, clean_token = _claim_token(world, left), _claim_token(world, clean)
     assert is_box_token(left_token), left_token
@@ -894,7 +902,7 @@ async def test_o7_a_backstop_that_cannot_ask_leaves_the_row_to_the_rules_and_the
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
         ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(2)]
-        await make_worker(store, world["root"], child, containers=containers).drain()
+        await _worker(world, store, child, containers=containers).drain()
 
     assert sorted(name for _kind, name, _token in containers.calls) == sorted(f"defender-run-{i}" for i in ids)
     for i in ids:
@@ -1296,7 +1304,8 @@ async def test_o7_a_worker_given_no_containers_uses_docker_and_removes_only_its_
         ids = {}
         for n, (kind, child) in enumerate((("own", own), ("foreign", foreign), ("clean", bare))):
             ids[kind] = await _queued(store, ticket=f"T-{n}", key=f"k{n}")
-            await Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock).drain()
+            await Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock,
+                        directory=world["directory"]).drain()
 
     assert daemon.names() == sorted(["defender-run-someone-else", f"defender-run-{ids['foreign']}"]), daemon.names()
     for kind, inv in ids.items():
@@ -1320,7 +1329,7 @@ async def test_o8_the_childs_output_is_inherited_not_piped(world, capfd):
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         with anyio.fail_after(60):  # a worker that pipes the output and copies it later hangs here
-            await make_worker(store, world["root"], child).drain()
+            await _worker(world, store, child).drain()
     stored = row(world["dsn"], inv)
     out, err = capfd.readouterr()
 
@@ -1337,7 +1346,7 @@ async def test_o4_serve_also_holds_three_children_and_never_a_fourth(world):
     child = _child(world, files=_committed(), wait_for=release)
     async with job_store(world["dsn"]) as store:
         ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(4)]
-        serving = asyncio.create_task(make_worker(store, world["root"], child, slots=3).serve())
+        serving = asyncio.create_task(_worker(world, store, child, slots=3).serve())
         try:
             for _ in range(1500):
                 if len(child.seen_all()) >= 3:
@@ -1411,7 +1420,7 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
                     raise fault
                 return original(self, run_id)
             monkeypatch.setattr(job_lane.JobLane, method, failing)  # lint-monkeypatch: ok — the lane is built inside the Worker and no seam injects a lane stand-in; this fails exactly one run's read
-        await make_worker(used, world["root"], argv).drain()
+        await _worker(world, used, argv).drain()
 
     stored = row(world["dsn"], bad)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
@@ -1497,7 +1506,7 @@ async def test_m1_a_symlink_where_a_launch_file_goes_is_not_written_through(worl
     async with job_store(world["dsn"]) as store:
         alert = await an_alert(store, T1)
         plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
-        await make_worker(store, world["root"], child).drain()
+        await _worker(world, store, child).drain()
 
     stored = row(world["dsn"], inv)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
@@ -1586,7 +1595,7 @@ async def test_o7_the_same_id_claimed_twice_by_one_worker_gets_two_different_tok
     tokens: list[str] = []
     async with job_store(world["dsn"]) as store:
         alert = await an_alert(store, T1)
-        worker = make_worker(store, world["root"], ScriptedChild(world["tmp"] / "child", world["runs"], files=_committed()))
+        worker = _worker(world, store, ScriptedChild(world["tmp"] / "child", world["runs"], files=_committed()))
         for _ in range(3):
             plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
             await worker.drain()
@@ -1608,7 +1617,7 @@ async def test_o7_one_worker_claiming_two_ids_gets_two_different_tokens(world):
     """Two rows claimed by one worker carry two different tokens (a token per worker would pass the per-id test and fail here). (O7, r5 C1)"""
     async with job_store(world["dsn"]) as store:
         ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(3)]
-        await make_worker(store, world["root"], _child(world, files=_committed())).drain()
+        await _worker(world, store, _child(world, files=_committed())).drain()
 
     tokens = [_claim_token(world, i) for i in ids]
     assert all(is_box_token(t) for t in tokens), tokens
@@ -1643,7 +1652,7 @@ async def _a_drain_that_lost_its_store_with_children_running(world, *, children:
         names = [f"defender-run-{i}" for i in ids]
         failing = _StoreWhoseClaimFails(store, faults={children + 1: _NobodyPlannedThis("the store fell over")},
                                         until=lambda: all(containers.held(n) for n in names))
-        worker = make_worker(failing, world["root"], child, containers=containers)
+        worker = _worker(world, failing, child, containers=containers)
         try:
             with pytest.raises(_NobodyPlannedThis):
                 await asyncio.wait_for(worker.drain(), timeout=30)
@@ -1670,7 +1679,7 @@ async def test_o7_a_drain_cancelled_while_two_children_run_ends_both_and_reaps_b
     async with job_store(world["dsn"]) as store:
         ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(2)]
         names = [f"defender-run-{i}" for i in ids]
-        draining = asyncio.create_task(make_worker(store, world["root"], child, containers=containers).drain())
+        draining = asyncio.create_task(_worker(world, store, child, containers=containers).drain())
         try:
             await _until(lambda: all(containers.held(n) for n in names), "both children's boxes")
             draining.cancel()
@@ -1694,7 +1703,7 @@ async def test_o7_a_drain_cancelled_while_a_child_that_ignores_sigterm_runs_stil
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         name = f"defender-run-{inv}"
-        worker = make_worker(store, world["root"], child, containers=containers, stop_grace=0.5)
+        worker = _worker(world, store, child, containers=containers, stop_grace=0.5)
         draining = asyncio.create_task(worker.drain())
         try:
             await _until(lambda: containers.held(name), "the child's box")
@@ -1722,7 +1731,7 @@ async def test_o4_serve_waits_out_consecutive_claim_faults_of_any_kind_and_still
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         failing = _StoreWhoseClaimFails(store, faults=dict(enumerate(CLAIM_FAULTS, start=1)))
-        serving = asyncio.create_task(make_worker(failing, world["root"], _child(world, files=_committed())).serve())
+        serving = asyncio.create_task(_worker(world, failing, _child(world, files=_committed())).serve())
         try:
             for _ in range(6000):  # up to 120 s: the faults are waited out at the poll interval
                 if row(world["dsn"], inv)["stage"] == "completed" or serving.done():
@@ -1759,7 +1768,7 @@ async def test_o4_serve_over_a_persistent_claim_fault_polls_at_an_interval_not_i
     caplog.set_level(logging.CRITICAL, logger=WORKER_LOGGER)  # the retry's own log lines are not under test
     async with job_store(world["dsn"]) as store:
         failing = _StoreWhoseClaimAlwaysFails(store, _NobodyPlannedThis("the store is down"))
-        serving = asyncio.create_task(make_worker(failing, world["root"], _child(world, files=_committed())).serve())
+        serving = asyncio.create_task(_worker(world, failing, _child(world, files=_committed())).serve())
         try:
             await asyncio.sleep(1.5)
             asked = failing.calls
@@ -1778,7 +1787,7 @@ async def test_o4_a_drain_whose_first_claim_faults_raises_it_though_no_child_run
         inv = await _queued(store)
         failing = _StoreWhoseClaimFails(store, faults={1: _NobodyPlannedThis("the store fell over")})
         with pytest.raises(_NobodyPlannedThis):
-            await asyncio.wait_for(make_worker(failing, world["root"], _child(world, files=_committed())).drain(), timeout=30)
+            await asyncio.wait_for(_worker(world, failing, _child(world, files=_committed())).drain(), timeout=30)
 
     assert row(world["dsn"], inv)["stage"] == "queued"
 
@@ -1791,7 +1800,7 @@ async def test_d3_a_child_that_ignores_sigterm_is_group_killed_after_the_stop_gr
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
         name = f"defender-run-{inv}"
-        draining = asyncio.create_task(make_worker(store, world["root"], child, containers=containers, stop_grace=0.2).drain())
+        draining = asyncio.create_task(_worker(world, store, child, containers=containers, stop_grace=0.2).drain())
         try:
             await _until(lambda: containers.held(name) and (child.seen(inv) or {}).get("grandchild"), "the child and its grandchild")
             started = time.monotonic()
@@ -1869,7 +1878,7 @@ async def _serve_with_a_stop_landing_while_the_child_is_spawned(world, monkeypat
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_while_stopping)  # lint-monkeypatch: ok — the only point where a stop can land between a child's spawn and the worker holding it; the real spawn runs
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
-        serving = asyncio.create_task(make_worker(store, world["root"], child, stop_grace=stop_grace).serve())
+        serving = asyncio.create_task(_worker(world, store, child, stop_grace=stop_grace).serve())
         left_running: list[str] = []
         try:
             await asyncio.wait_for(asyncio.shield(serving), timeout=20)
@@ -1899,3 +1908,111 @@ async def test_d3_a_child_spawned_while_the_stop_is_under_way_that_ignores_sigte
 
     assert not done.left_running, f"after the stop, {' and '.join(done.left_running)} still ran"
     assert done.stage == "running", "a stopping worker wrote the row"
+
+
+# --- r6: tenants are database records (R6-4, R6-5) ---------------------------------------------------
+
+def _nothing_left_for_a_refused_claim(world: dict, child: ScriptedChild, inv: str) -> None:
+    """The row ended `failed`/`worker_error` naming a cause; no launch file, no child, no lock folder."""
+    stored = row(world["dsn"], inv)
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error"), stored
+    assert stored["failure_message"]
+    assert stored["finished_at"] == NOW
+    assert sorted(p.name for p in world["runs"].iterdir()) == [], "a launch file was written for a refused claim"
+    assert child.seen() is None, "a child started for a refused claim"
+    assert child.events() == []
+    assert not (world["root"] / ".host-locks").exists(), "the worker took a tenant lock"
+
+
+@pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
+async def test_r6_4_a_tenant_that_is_not_active_fails_the_row_as_a_worker_error_before_any_file_or_child(world, state):
+    """A claim for a tenant whose record is not `active` ends `failed`/`worker_error` naming the state; no launch file, no child, no lock. (R6-4)"""
+    restate_tenant(world["dsn"], T1, state=state)
+    child = _child(world, files=_committed())
+    inv, stored = await _run_one(world, child)
+
+    _nothing_left_for_a_refused_claim(world, child, inv)
+    assert state in stored["failure_message"]
+
+
+@pytest.mark.parametrize("records", ["unknown tenant", "records unreachable"])
+async def test_r6_4_an_unknown_tenant_or_unreachable_records_fail_the_row_as_a_worker_error_before_any_file_or_child(
+        world, records):
+    """The directory has no such tenant, or cannot be reached: `failed`/`worker_error`, no launch file, no child, no lock. (R6-4)"""
+    from defender.tests.support.tenancy._active1214 import active_directory, postgres_directory
+
+    directory = (active_directory(world["root"], "someone-else") if records == "unknown tenant"
+                 else postgres_directory("postgresql://nobody@127.0.0.1:1/none?connect_timeout=2"))
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        await _worker(world, store, child, directory=directory).drain()
+
+    _nothing_left_for_a_refused_claim(world, child, inv)
+
+
+class _ProbingDirectory:
+    """The worker's records seam that, inside each `state()` call, tries the tenant's host lock exclusive (once) and lists its holders."""
+
+    def __init__(self, inner, root: Path) -> None:
+        self.inner, self.root, self.probes = inner, root, []
+
+    def state(self, tenant_id: str):
+        probe = probe_host_lock(self.root, tenant_id)
+        self.probes.append(probe)
+        return self.inner.state(tenant_id)
+
+    def __getattr__(self, name: str):
+        return getattr(self.inner, name)
+
+
+def probe_host_lock(root: Path, tenant_id: str) -> SimpleNamespace:
+    """Whether an exclusive try-once on the tenant's host lock succeeds now (given back at once), and the pids it lists as holders."""
+    from defender.tenancy import host_lock
+
+    fd = host_lock.acquire(root, tenant_id, exclusive=True, timeout=0)
+    host_lock.release_lock(fd)
+    return SimpleNamespace(free=fd is not None, holders=[h.pid for h in host_lock.holders(root, tenant_id)])
+
+
+async def test_r6_4_the_worker_holds_no_tenant_lock_and_is_no_holder_during_a_claim_or_a_run(world):
+    """Inside the records read and while the child runs, an exclusive try-once on the tenant's host lock succeeds and the worker's pid is no holder (teardown signals every holder). (R6-4)"""
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release)
+    directory = _ProbingDirectory(world["directory"], world["root"])
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        draining = asyncio.create_task(_worker(world, store, child, directory=directory).drain())
+        try:
+            await _until(lambda: child.seen(inv) is not None, "the child to start")
+            while_running = probe_host_lock(world["root"], T1)
+        finally:
+            release.touch()
+            await asyncio.wait_for(draining, timeout=60)
+
+    assert directory.probes, "premise: the worker read the tenant's state through its directory"
+    for probe in [*directory.probes, while_running]:
+        assert probe.free, "the worker held the tenant's host lock"
+        assert os.getpid() not in probe.holders, "the worker is on the tenant's holder list"
+    assert row(world["dsn"], inv)["stage"] == "completed"
+
+
+@pytest.mark.parametrize("entry", ["drain", "serve"])
+async def test_r6_5_a_worker_with_no_directory_and_no_database_address_refuses_to_start_and_claims_nothing(
+        world, monkeypatch, entry):
+    """No `directory=` and no `DEFENDER_DATABASE_DSN`: `drain()`/`serve()` fail at start with the host's refusal; the queued row stays queued and no child starts. (R6-5)"""
+    from defender.records.formats import TenantRefused
+    from defender.worker import Worker
+
+    monkeypatch.delenv("DEFENDER_DATABASE_DSN", raising=False)
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        worker = Worker(store, data_root=world["root"], child_argv=child, slots=3, clock=fixed_clock,
+                        containers=StandInContainers(world["tmp"] / "containers"))
+        with pytest.raises(TenantRefused):
+            await asyncio.wait_for(getattr(worker, entry)(), timeout=30)
+
+    assert row(world["dsn"], inv)["stage"] == "queued", "a worker that could not read tenant records claimed a row"
+    assert child.seen() is None
+    assert sorted(p.name for p in world["runs"].iterdir()) == []

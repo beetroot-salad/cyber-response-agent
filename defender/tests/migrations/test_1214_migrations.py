@@ -69,16 +69,16 @@ def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
 
 
 def test_the_history_is_the_baseline_and_exactly_one_revision_on_it():
-    """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11)."""
+    """#1214's one revision sits on the baseline, which is as it was (O11); #1342 r6 puts `0003_jobs` on it, so the history has three."""
     from alembic.script import ScriptDirectory
 
     from defender.migrations import _config
 
     chain = [(r.revision, r.down_revision) for r in ScriptDirectory.from_config(_config()).walk_revisions()]
-    assert len(chain) == 2
-    [(head_revision, down), (base, base_down)] = chain
-    assert (down, base, base_down) == (BASELINE, BASELINE, None)
-    assert head_revision != BASELINE
+    assert len(chain) == 3
+    [(head_revision, jobs_down), (tenancy, tenancy_down), (base, base_down)] = chain
+    assert (jobs_down, tenancy_down, base, base_down) == (tenancy, BASELINE, BASELINE, None)
+    assert head_revision not in (BASELINE, tenancy)
 
 
 @pytest.mark.postgres
