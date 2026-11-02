@@ -116,8 +116,10 @@ class ProxyDeps:
             raise ConfigFault("max_response_bytes must be a positive whole number")
         if not self.upstream_timeout_sec > 0:
             raise ConfigFault("upstream_timeout_sec must be positive")
-        if not self.proxy_overhead_sec > 0:
-            raise ConfigFault("proxy_overhead_sec must be positive")
+        if not 0 < self.proxy_overhead_sec <= PROXY_OVERHEAD_SEC:
+            # the caller's wait assumes at most the shipped allowance (`caller_wait_sec`)
+            raise ConfigFault(f"proxy_overhead_sec must be positive and at most "
+                              f"{PROXY_OVERHEAD_SEC}")
 
 
 @dataclass(frozen=True)
@@ -166,11 +168,14 @@ class _Proxy:
         self._root = tenancy.data_root_from_path(deps.data_root)
         self.access_tokens = AccessTokens()
 
-    def handle(self, authorization: str | None, raw: bytes | None) -> dict[str, Any]:
-        """The answer to one request, audited before it is returned (A13)."""
+    def handle(self, authorization: str | None, raw: bytes | None,
+               arrived: float | None = None) -> dict[str, Any]:
+        """The answer to one request, audited before it is returned (A13). `arrived` is when it
+        reached the proxy (monotonic), where its deadline starts (#1364); default now."""
         trail = _Trail()
         try:
-            answer = self._proxied(authorization, raw, trail)
+            answer = self._proxied(authorization, raw, trail,
+                                   time.monotonic() if arrived is None else arrived)
         except Refused as refused:
             answer = _refused_answer(refused.fault, refused.detail)
         except ConfigFault as fault:
@@ -191,8 +196,7 @@ class _Proxy:
         return answer
 
     def _proxied(self, authorization: str | None, raw: bytes | None,
-                 trail: _Trail) -> dict[str, Any]:
-        began = time.monotonic()
+                 trail: _Trail, began: float) -> dict[str, Any]:
         asked = _parse_request(raw)
         trail.system, trail.method = asked.system[:80], asked.method[:20]
         cap = self.deps.upstream_timeout_sec
@@ -401,9 +405,12 @@ def create_app(deps: ProxyDeps) -> FastAPI:  # lint-dup: ok — the proxy's own 
                   openapi_url=None)
 
     async def proxy_request(request: Request) -> JSONResponse:
+        # The deadline runs from here: reading the body and waiting for a worker thread count
+        # against it, as they count against the caller's wait (#1364).
+        arrived = time.monotonic()
         raw = await _body_of(request)
         answer = await run_in_threadpool(proxy.handle, request.headers.get("authorization"),
-                                         raw)
+                                         raw, arrived)
         return JSONResponse(answer)
 
     app.add_api_route(PROXY_PATH, proxy_request, methods=["POST"])

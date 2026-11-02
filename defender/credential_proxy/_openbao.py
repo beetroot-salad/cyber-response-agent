@@ -88,7 +88,8 @@ def openbao_fault(status: int, detail: str) -> AdapterFault:
 
 class _OpenBao:
     """One login's calls to one OpenBao server. The token is never shown. `transport` is a test's
-    `httpx` transport for the synchronous calls (none: the network)."""
+    `httpx` transport (none: the network); inside a proxied request the call is made
+    asynchronously, so a test's transport must serve both (`httpx.MockTransport` does)."""
 
     def __init__(self, *, addr: str, token: str, mount: str,
                  transport: httpx.BaseTransport | None = None) -> None:
@@ -100,7 +101,7 @@ class _OpenBao:
         self.mount = _check_name(mount, "the mount")
         self._token = token
         self._transport = transport
-        #: One pooled connection for this login's calls, not a new one per call.
+        #: One pooled connection for this login's calls made outside a proxied request.
         self._client = internal_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert, transport=transport,
                                        timeout=OPENBAO_TIMEOUT_SEC)
 
@@ -123,27 +124,21 @@ class _OpenBao:
             if deadline is None:
                 return self._client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
-            timeout = min(OPENBAO_TIMEOUT_SEC, deadline.wait(what))
-
-            async def leg() -> httpx.Response:
-                async with internal_async_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert,
-                                                 transport=self._transport,  # type: ignore[arg-type]  # a test's MockTransport serves both
-                                                 timeout=timeout) as client:
-                    reply = await client.request(method, self._url(rest), json=json,
-                                                 headers=self._headers())
-                    await reply.aread()
-                    return reply
-
-            return deadline.run(what, leg)
+            # The proxy's own allowance covers OpenBao, not the upstream system's timeout.
+            timeout = min(OPENBAO_TIMEOUT_SEC, deadline.left(what))
+            return deadline.run(what, lambda: self._acall(
+                method, rest, what, json, timeout=timeout,
+                transport=self._transport))  # type: ignore[arg-type]  # a test's MockTransport serves both
         except httpx.HTTPError as e:
             raise TransportFault(f"OpenBao at {self.addr} is unreachable for {what} "
                                  f"({type(e).__name__})") from None
 
-    async def _acall(self, method: str, rest: str, what: str,
-                     json: Any = None) -> httpx.Response:
+    async def _acall(self, method: str, rest: str, what: str,  # noqa: PLR0913 — one call's parts
+                     json: Any = None, *, timeout: float = OPENBAO_TIMEOUT_SEC,
+                     transport: httpx.AsyncBaseTransport | None = None) -> httpx.Response:
         try:
             async with internal_async_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert,
-                                             timeout=OPENBAO_TIMEOUT_SEC) as client:
+                                             transport=transport, timeout=timeout) as client:
                 return await client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
         except httpx.HTTPError as e:

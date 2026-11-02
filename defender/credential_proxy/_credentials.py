@@ -4,8 +4,8 @@ A set's kind must fit the scheme (`bearer`/`basic`/`header` need `static`, OAuth
 `oauth-client-credentials`) and every field the scheme reads must be present, or nothing is
 sent. `secret_values` names the values the answer is scrubbed of (every field but the kind's
 public one, r7 A19; the pipeline adds the access token). OAuth access tokens live only in this
-process, keyed by (tenant, system, set version,
-digest of the auth block); a token is reused only while it is unexpired by a margin."""
+process, keyed by (tenant, system, set version, digest of the whole declaration, #1364 O2); a
+token is reused only while it is unexpired by a margin."""
 from __future__ import annotations
 
 import base64

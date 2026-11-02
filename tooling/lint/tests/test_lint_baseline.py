@@ -4,6 +4,8 @@ never rewritten. A missing baseline is still an empty one."""
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -71,3 +73,16 @@ def test_the_import_order_lint_refuses_a_duplicate_baseline(tmp_path, capsys):
     assert lint.main(["--root", str(root), "--baseline", str(path)]) == 2
     said = capsys.readouterr()
     assert path.name in said.out + said.err
+
+
+def test_the_ratchet_loads_as_part_of_the_package():
+    """#1364 review: a lint imported as `tooling.lint.<name>` (as defender's tests load some)
+    reaches the ratchet as `tooling.lint._baseline`; the ratchet's own import of the scan-blind
+    error must work that way too, in an interpreter where `tooling/lint` is not on the path."""
+    repo = Path(__file__).resolve().parents[3]
+    code = ("import sys; sys.path[:0] = [sys.argv[1]]; "
+            "import tooling.lint._baseline as b, tooling.lint._astlib as a; "
+            "assert b.ScanBlind is a.ScanBlind; import tooling.lint.lint_unnarrowed_parse")
+    done = subprocess.run([sys.executable, "-I", "-c", code, str(repo)],
+                          capture_output=True, text=True, check=False, cwd=repo)
+    assert done.returncode == 0, done.stderr

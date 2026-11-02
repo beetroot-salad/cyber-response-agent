@@ -274,3 +274,65 @@ def test_o1_the_caller_waits_out_the_deadline_plus_a_grace_and_no_more():
     assert len(graces) == 1, f"the wait past the deadline grows with the timeout: {graces}"
     grace = graces.pop()
     assert SLACK_SEC < grace <= 10, grace
+
+
+def test_o1_openbao_gets_the_proxys_own_allowance_not_the_systems_timeout(tmp_path, data_root):
+    """#1364 review: the proxy's OpenBao calls are bounded by the request's deadline, which
+    carries the proxy's own allowance; the upstream system's short timeout does not cap them.
+    An OpenBao answering in 1.5 s serves a request whose system timeout is 1 s."""
+    def slow_kv(_seen):
+        time.sleep(1.5)
+        return 200, {"Content-Type": "application/json"}, _KV_REPLY
+
+    with H.upstream() as openbao, T.rig(tmp_path / "forge", data_root) as r:
+        openbao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity"] = slow_kv
+        store = proxy().OpenBaoStore(addr=openbao.url, token="t", mount="secret")
+        client = T.client_of(T.deps(r.data_root, store, verifier=r.verifier, audit=r.audit))
+        answer = T.ask(client, r.tok(), "identity", "GET", f"{r.up.url}{API}/users/x",
+                       None, None, 1)
+
+    assert answer["fault"] is None, answer
+    assert len(openbao.seen) == 1
+    assert r.up.paths() == [f"{API}/users/x"]
+
+
+def test_o1_the_deadline_runs_from_when_the_request_arrives(tmp_path, data_root):
+    """#1364 review: the proxy's deadline starts when the request reaches it, not when a worker
+    thread picks it up after the body is in, so time spent before the proxy starts working
+    (queued for a thread, or here a body that arrives late) counts against the proxy's deadline
+    as it counts against the caller's wait. A request whose body arrives after the deadline is
+    answered as out of time, unsent."""
+    with T.rig(tmp_path / "forge", data_root) as r, \
+            A.proxy_for(r.t, r.store, proxy_overhead_sec=OVERHEAD_SEC) as (url, _tap):
+        body = json.dumps({"system": "identity", "method": "GET",
+                           "url": f"{r.up.url}{API}/users/x", "headers": {}, "body": None,
+                           "timeout_sec": 1}).encode()
+        host, port = url.removeprefix("http://").split(":")
+        with socket.create_connection((host, int(port)), timeout=10) as conn:
+            conn.sendall(b"POST %s HTTP/1.1\r\nHost: proxy\r\nAuthorization: Bearer %s\r\n"
+                         b"Content-Type: application/json\r\nContent-Length: %d\r\n"
+                         b"Connection: close\r\n\r\n"
+                         % (PROXY_PATH.encode(), r.tok().encode(), len(body)))
+            time.sleep(1 + OVERHEAD_SEC + 0.3)
+            conn.sendall(body)
+            raw = b""
+            while chunk := conn.recv(65536):
+                raw += chunk
+        answer = json.loads(raw.split(b"\r\n\r\n", 1)[1])
+
+    assert answer["fault"] == "TransportFault", answer
+    assert "ran out of time" in (answer["detail"] or ""), answer
+    assert r.up.seen == []
+
+
+@pytest.mark.parametrize("overhead", [0, -1, 20.5, 60])
+def test_o1_the_proxys_allowance_cannot_exceed_what_the_caller_waits_for(tmp_path, overhead):
+    """#1364 review: the caller's wait assumes the shipped allowance, so a proxy built with more
+    (or with none) is refused at construction, not discovered as a caller timing out first."""
+    from defender.kit import access
+    from defender.kit.faults import ConfigFault
+
+    assert access.PROXY_OVERHEAD_SEC == 20, "the cases above straddle the shipped allowance"
+    with pytest.raises(ConfigFault):
+        T.deps(tmp_path, H.FakeStore(), proxy_overhead_sec=overhead)
+    T.deps(tmp_path, H.FakeStore(), proxy_overhead_sec=access.PROXY_OVERHEAD_SEC)

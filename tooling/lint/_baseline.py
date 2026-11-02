@@ -34,7 +34,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from _astlib import ScanBlind
+try:  # bare-name import, as every gate reaches its siblings
+    from _astlib import ScanBlind
+except ImportError:  # imported as part of a package (a test loading `tooling.lint`)
+    from ._astlib import ScanBlind  # type: ignore[no-redef]
 
 
 @dataclass(frozen=True)
