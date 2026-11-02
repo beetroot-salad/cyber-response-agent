@@ -1516,8 +1516,8 @@ async def test_m1_a_symlink_where_the_launch_record_goes_is_not_written_through(
 
 
 @pytest.mark.parametrize("target_exists", [False, True], ids=["target-absent", "target-present"])
-async def test_m1_a_symlink_where_the_alert_file_goes_is_replaced_not_written_through(world, target_exists):
-    """A symlink at `<id>.alert.json` is replaced (D-af: the entry under the name is replaced, never written through): its target is neither created nor changed, the name ends a regular file holding the stored alert bytes, and the row launches and completes. (M1, O6, D-af)"""
+async def test_m1_a_symlink_where_the_alert_file_goes_is_refused_not_written_through(world, target_exists):
+    """A symlink at `<id>.alert.json` is a non-plain entry and is refused (D-af, M1): the row ends `failed`/`worker_error`, no child starts, the link is still a link, and its target is neither created nor changed. (M1, O6, D-af)"""
     inv = str(uuid.uuid4())
     target = world["tmp"] / "elsewhere" / "target"
     target.parent.mkdir()
@@ -1531,10 +1531,11 @@ async def test_m1_a_symlink_where_the_alert_file_goes_is_replaced_not_written_th
         plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
         await _worker(world, store, child).drain()
 
-    assert row(world["dsn"], inv)["stage"] == "completed"
-    assert child.seen(inv) is not None
-    assert not link.is_symlink(), "the alert file is still a link"
-    assert link.read_bytes() == ALERT_BYTES
+    stored = row(world["dsn"], inv)
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert child.seen() is None, "a child started although the alert file could not be written"
+    assert link.is_symlink(), "the link was replaced"
+    assert link.readlink() == target, "the link was changed"
     if target_exists:
         assert target.read_bytes() == b"not ours", "the worker wrote through the alert-file link"
     else:
