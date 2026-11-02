@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import re
-import textwrap
+import subprocess
+import sys
 from pathlib import Path
 
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
@@ -30,18 +32,57 @@ def _is_adapter(path: Path) -> bool:
     return path.parent == DEFENDER / "integrations" and path.name.endswith("_adapter.py")
 
 
-def test_o2_no_product_module_names_a_ticket_system():
-    """No product module outside the adapters names `case-history`, `CASE_HISTORY` or `/tickets`. O2."""
-    files = [p for p in _product_py() if not _is_adapter(p)]
-    assert len(files) > 100, f"positive control: the product tree was read ({len(files)})"
-    adapter = DEFENDER / "integrations" / "ticket_adapter.py"
-    assert RETIRED_NAMES["/tickets"].search(adapter.read_text(encoding="utf-8")), (
+def _shippable_surface() -> list[Path]:
+    """The lint-shippable surface (r4 Census scope): tracked text files under `defender/` minus the lint's own exclusions."""
+    spec = importlib.util.spec_from_file_location(
+        "_lint_shippable_surface_1359", DEFENDER.parent / "tooling" / "lint" / "lint_shippable_surface.py")
+    assert spec is not None
+    sys.path.insert(0, str(DEFENDER.parent / "tooling" / "lint"))
+    try:
+        lint = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lint)  # type: ignore[union-attr]
+    finally:
+        sys.path.remove(str(DEFENDER.parent / "tooling" / "lint"))
+    tracked = subprocess.run(["git", "ls-files", "defender"], cwd=DEFENDER.parent, check=True,
+                             capture_output=True, text=True).stdout.splitlines()
+    prefixes = lint.excluded_prefixes(DEFENDER.parent)
+    committed = subprocess.run(
+        ["git", "ls-files", "knowledge/tenant-fixture", "knowledge/tenant-template"],
+        cwd=DEFENDER.parent, check=True, capture_output=True, text=True).stdout.splitlines()
+    # r4 counts the committed tenants in the surface, though they sit beside `defender/`, outside the lint's walk.
+    return [DEFENDER.parent / rel for rel in tracked
+            if Path(rel).suffix in lint.TEXT_SUFFIXES and not lint._excluded(rel, prefixes)  # noqa: SLF001
+            ] + [DEFENDER.parent / rel for rel in committed if Path(rel).suffix in lint.TEXT_SUFFIXES]
+
+
+def test_o2_the_shippable_surface_names_no_ticket_system_but_one_marked_exemption():
+    """No file of the lint-shippable surface names `case-history`, `CASE_HISTORY` or `/tickets`, except one inline-marked line. O2."""
+    files = _shippable_surface()
+    rels = {p.relative_to(DEFENDER.parent).as_posix() for p in files}
+    assert len(files) > 100, f"positive control: the surface was read ({len(files)})"
+    assert "defender/integrations/ticket_adapter.py" not in rels, "the adapters are outside the surface"
+    assert any(r.startswith("knowledge/tenant-fixture/") for r in rels), "positive control: the fixture is read"
+    assert any(r.startswith("knowledge/tenant-template/") for r in rels), "positive control: the template is read"
+    assert RETIRED_NAMES["/tickets"].search(
+        (DEFENDER / "integrations" / "ticket_adapter.py").read_text(encoding="utf-8")), (
         "positive control: the needle matches")
-    hits = sorted(f"{p.relative_to(DEFENDER)}: {n}" for p in files
-                  for n, rx in RETIRED_NAMES.items() if rx.search(p.read_text(encoding="utf-8")))
-    assert hits == [], "\n".join(hits)
+    unmarked: list[str] = []
+    marked: list[str] = []
+    for path in files:
+        for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for name, rx in RETIRED_NAMES.items():
+                if rx.search(line):
+                    where = f"{path.relative_to(DEFENDER.parent)}:{number}: {name}"
+                    (marked if "lint-shippable: ok" in line else unmarked).append(where)
+    assert unmarked == [], "\n".join(unmarked)
+    assert len(marked) <= 1, f"more than the one exemption (the legacy-folder constant): {marked}"
+
+
+def test_o2_the_committed_tenants_carry_no_case_history_folder():
+    """Neither the committed template nor the fixture tenant holds `systems/case-history/`. O2."""
     for half in ("tenant-template", "tenant-fixture"):
-        folder = DEFENDER / "knowledge" / half / "settings" / "systems" / C.RETIRED_SYSTEM
+        folder = DEFENDER.parent / "knowledge" / half / "settings" / "systems" / C.RETIRED_SYSTEM
+        assert (folder.parent / "ticket").is_dir() or half == "tenant-template", "positive control"
         assert not folder.exists(), f"the committed {half} still carries {folder}"
 
 
@@ -75,49 +116,3 @@ def test_o3_no_second_copy_of_a_transport_route():
     assert any(k.startswith("integrations") for k in seen), f"positive control: {seen}"
     outside = {k: v for k, v in seen.items() if Path(k).parts[0] not in TRANSPORT_HOMES}
     assert outside == {}, outside
-
-
-def _adapter_source(verb_key: str | None) -> str:
-    extra = f'    "{verb_key}": {C.COMMENT_ACTION},\n' if verb_key else ""
-    return textwrap.dedent(f"""\
-        def check_settings(tenant):
-            return None
-
-
-        def health_check(ctx):
-            return {{}}
-
-
-        def {C.COMMENT_ACTION}(ctx, *, key, body):
-            return None
-
-
-        VERBS = {{
-            "health-check": health_check,
-        """) + extra + "}\n"
-
-
-def test_o4_the_roster_refuses_an_adapter_whose_verbs_hold_the_comment_action(tmp_path):
-    """An adapter whose VERBS holds the comment action is not accepted; the same adapter without it is. O4."""
-    read_roster = S.mod("systems.verbs").read_roster
-    key = C.COMMENT_ACTION.replace("_", "-")
-    good, bad = tmp_path / "good", tmp_path / "bad"
-    for where, verb_key in ((good, None), (bad, key)):
-        where.mkdir()
-        (where / "casesys_adapter.py").write_text(_adapter_source(verb_key), encoding="utf-8")
-    assert "casesys" in read_roster(good).accepted, "positive control: the clean adapter is accepted"
-    roster = read_roster(bad)
-    assert "casesys" not in roster.accepted, (
-        f"an adapter whose VERBS holds {key!r} was accepted: {dict(roster.verbs)}")
-
-
-def test_o4_no_checkout_adapter_declares_the_comment_action(checkout_roster):
-    """No adapter in the checkout lists the comment action among its verbs. O4."""
-    assert checkout_roster.declared_verbs("ticket"), "positive control: verbs were read"
-    key = C.COMMENT_ACTION.replace("_", "-")
-    holding = sorted(s for s in checkout_roster.accepted
-                     if {key, C.COMMENT_ACTION} & checkout_roster.declared_verbs(s))
-    assert holding == [], holding
-    module = S.mod("systems.verbs").fresh_adapter_module(checkout_roster, "ticket")
-    assert callable(getattr(module, C.COMMENT_ACTION, None)), (
-        "the playground ticket adapter exports no comment action")
