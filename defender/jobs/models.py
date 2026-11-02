@@ -4,6 +4,7 @@ design; the migration (`0004_jobs`) is their one creation."""
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as _dt
 from typing import Any
 
@@ -116,7 +117,7 @@ class InvestigationRecord:
     failure_message: str | None
 
 
-@model(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class Claim:
     """A claimed investigation and its tenant's state, read in the claim's own transaction
     (#1342 r7 R7-1): the worker starts a job only for an `active` tenant."""
