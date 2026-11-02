@@ -51,6 +51,19 @@ Fidelity review 1 additions (F-1, F-6):
   a minted JWT carries `iss`, `aud` (the role's client id), `role` and the entity's `metadata.tenant_id`
   (`claims(jwt)`, `mint_entity(jwt)`).
 - `Fakes(tmp_path)` bundles forge, integration, openbao, git, publish and wires JWT resolution.
+
+r8 additions (slice S1, probes P-a/P-b/P-c of design r8.2/r8.3):
+- Forge branch protection (P-a, Forgejo 17.0.1): a rule stores its lists as Forgejo does -- a whitelisted user
+  without access to the repository is silently dropped, `merge_whitelist_teams` on a user-owned repository answers
+  201/200 and is stored empty, a team of the organisation or a user that does not exist is refused 422 (a user-owned repository's teams are not checked), a PATCH that omits a list leaves it
+  unchanged, a POST of an existing rule answers 403. `GET branches/main` as the bot adds `user_can_merge`: true for
+  a writer unless an enabled merge whitelist excludes it (an enabled whitelist stored empty excludes everybody).
+  Organisations are `FakeForge.orgs` (name -> team names); `add_user_repo` makes a repository owned by a user.
+- OpenBao transit (P-b): keys by name (`create` is a no-op on an existing key, `deletion_allowed` via `/config`,
+  a delete is refused until it is allowed, a missing key answers 400 on delete as OpenBao does), `transit/sign` for a
+  client token only when the AppRole carries `sign_policy` and the key is `request-token-<entity tenant_id>`.
+  A second alias for one entity on one mount answers 400 (P-c); a POST of an existing entity answers 204; reading an
+  entity lists its aliases; deleting an entity deletes its aliases. An AppRole records the policies it was made with.
 """
 from __future__ import annotations
 
@@ -75,6 +88,9 @@ ORG = "tenants"
 #: refuses any other (Forgejo fetches `<issuer>/.well-known/openid-configuration`, G6).
 ISSUER_URL = "https://openbao.test:8200/v1/identity/oidc"
 ADMIN_TOKEN = "forge-admin-token"
+#: The deployment's two templated policies (`LifecycleConfig.token_policy` / `sign_policy` defaults).
+TOKEN_POLICY = "defender-tenant-token"
+SIGN_POLICY = "defender-tenant-sign"
 
 
 @dataclasses.dataclass
@@ -140,6 +156,10 @@ class FakeForge(_Recorder):
         self.integrations: dict[str, list[str]] = {}
         #: audience -> {"user", "issuer", "claims_eq", "scopes", "repos"} as the integration command recorded it.
         self.integration_rules: dict[str, dict[str, Any]] = {}
+        #: organisation -> its team names (P-a: a repository whose owner is not here is user-owned).
+        self.orgs: dict[str, set[str]] = {ORG: {"Owners", "Reviewers"}}
+        #: (organisation, team) -> member logins.
+        self.team_members: dict[tuple[str, str], set[str]] = {}
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -169,6 +189,64 @@ class FakeForge(_Recorder):
 
     def bare(self, full_name: str) -> Path:
         return self.root / f"{full_name}.git"
+
+    def add_user_repo(self, owner: str, name: str) -> str:
+        """A private repository owned by the user `owner` (not an organisation), empty; returns its full name."""
+        full = f"{owner}/{name}"
+        self.bare(full).parent.mkdir(parents=True, exist_ok=True)
+        _git("init", "--bare", "-q", "-b", "main", str(self.bare(full)))
+        self.repos[full] = {"private": True, "archived": False, "collaborators": {}, "protections": {}}
+        return full
+
+    def rule(self, full_name: str, name: str = "main") -> dict[str, Any] | None:
+        """The protection rule as the forge stores it now (None when there is none)."""
+        return self.repos[full_name]["protections"].get(name)
+
+    def put_rule(self, full_name: str, **fields: Any) -> None:
+        """Store a rule as the forge would after a POST by an administrator (a hand-made rule of an older tenant)."""
+        self.repos[full_name]["protections"][fields.get("rule_name", "main")] = self._stored_rule(full_name, fields, None)
+
+    def _stored_rule(self, full: str, body: dict[str, Any], old: dict[str, Any] | None) -> dict[str, Any]:
+        """What Forgejo stores for `body` over `old` (P-a): an omitted list keeps its old value; users without access
+        to the repository, and every team of a user-owned repository, are dropped (unknown names never reach here: 422)."""
+        owner = full.split("/", 1)[0]
+        merged = {**(old or {}), **body}
+        has_access = set(self.repos[full]["collaborators"]) | {owner}
+        for team in self.orgs.get(owner, set()):  # a member of the organisation's teams reaches its repositories
+            has_access |= self.team_members.get((owner, team), set())
+        for key in ("push_whitelist_usernames", "merge_whitelist_usernames", "approvals_whitelist_username"):
+            if key in body:
+                merged[key] = [u for u in (body[key] or []) if u in has_access]
+        for key in ("push_whitelist_teams", "merge_whitelist_teams", "approvals_whitelist_teams"):
+            if key in body:
+                merged[key] = [t for t in (body[key] or []) if t in self.orgs.get(owner, set())]
+        for key in ("merge_whitelist_usernames", "merge_whitelist_teams", "push_whitelist_usernames",
+                    "push_whitelist_teams"):
+            merged.setdefault(key, [])
+        for key in ("enable_push", "enable_push_whitelist", "enable_merge_whitelist"):
+            merged.setdefault(key, False)
+        merged["rule_name"] = merged.get("rule_name") or merged.get("branch_name")
+        return merged
+
+    def _unknown_names(self, full: str, body: dict[str, Any]) -> list[str]:
+        """Names in `body`'s whitelists that Forgejo 17 refuses with 422: a user that does not exist, and a team the owning
+        organisation lacks (a user-owned repository's teams are accepted and stored empty)."""
+        owner = full.split("/", 1)[0]
+        users = [u for key in ("push_whitelist_usernames", "merge_whitelist_usernames", "approvals_whitelist_username")
+                 for u in (body.get(key) or []) if u not in self.users]
+        teams = [t for key in ("push_whitelist_teams", "merge_whitelist_teams", "approvals_whitelist_teams")
+                 for t in (body.get(key) or []) if owner in self.orgs and t not in self.orgs[owner]]
+        return [*users, *teams]
+
+    def _can_merge(self, bot: str, full: str, rule: dict[str, Any] | None) -> bool:
+        """P-a: a writer merges unless an enabled merge whitelist lacks it (as a user or through a team)."""
+        if self.repos[full]["collaborators"].get(bot) not in ("write", "admin"):
+            return False
+        if rule is None or not rule.get("enable_merge_whitelist"):
+            return True
+        owner = full.split("/", 1)[0]
+        return bot in rule["merge_whitelist_usernames"] or any(
+            bot in self.team_members.get((owner, team), set()) for team in rule["merge_whitelist_teams"])
 
     def has_commits(self, full_name: str) -> bool:
         return _git("rev-parse", "--verify", "-q", "refs/heads/main", cwd=self.bare(full_name)).returncode == 0
@@ -248,8 +326,21 @@ class FakeForge(_Recorder):
                 return httpx.Response(200, json={"permission": perm}) if perm else httpx.Response(404)
             case ("POST", ["repos", owner, name, "branch_protections"]):
                 rule = body.get("rule_name") or body.get("branch_name")
-                self.repos[f"{owner}/{name}"]["protections"][rule] = body
-                return httpx.Response(201, json=body)
+                if rule in self.repos[f"{owner}/{name}"]["protections"]:
+                    return httpx.Response(403, json={"message": "Branch protection already exist"})
+                if unknown := self._unknown_names(f"{owner}/{name}", body):
+                    return httpx.Response(422, json={"message": f"unknown whitelist name {unknown[0]}"})
+                stored = self._stored_rule(f"{owner}/{name}", body, None)
+                self.repos[f"{owner}/{name}"]["protections"][rule] = stored
+                return httpx.Response(201, json=stored)
+            case ("PATCH", ["repos", owner, name, "branch_protections", rule]):
+                protections = self.repos[f"{owner}/{name}"]["protections"]
+                if rule not in protections:
+                    return httpx.Response(404, json={"message": "branch protection does not exist"})
+                if unknown := self._unknown_names(f"{owner}/{name}", body):
+                    return httpx.Response(422, json={"message": f"unknown whitelist name {unknown[0]}"})
+                protections[rule] = self._stored_rule(f"{owner}/{name}", body, protections[rule])
+                return httpx.Response(200, json=protections[rule])
             case ("GET", ["repos", owner, name, "branch_protections"]):
                 return httpx.Response(200, json=list(self.repos[f"{owner}/{name}"]["protections"].values()))
             case ("GET", ["repos", owner, name, "branch_protections", rule]):
@@ -300,7 +391,8 @@ class FakeForge(_Recorder):
                     whitelist = rule_.get("push_whitelist_usernames") or []
                     push = can_write and bool(rule_.get("enable_push")) and (not whitelist or bot in whitelist)
                 return httpx.Response(200, json={"name": branch, "protected": rule_ is not None,
-                                                 "user_can_push": push})
+                                                 "user_can_push": push,
+                                                 "user_can_merge": self._can_merge(bot, full, rule_)})
             case ("GET", ["repos", _, _, "branch_protections", *_]):
                 return httpx.Response(403, json={"message": "bot may not read protections"})
         return httpx.Response(404, json={"message": "not found"})
@@ -380,9 +472,17 @@ class FakeOpenBao(_Recorder):
     """OpenBao's HTTP API for the paths #1214 names. `X-Vault-Wrap-TTL` wraps a secret id; an
     unwrap spends the wrapper. Login needs a live AppRole and secret id; minting needs a live role."""
 
-    def __init__(self, issuer: str = ISSUER_URL) -> None:
+    def __init__(self, issuer: str = ISSUER_URL, *, sign_policy: str = SIGN_POLICY) -> None:
         super().__init__()
         self.issuer = issuer
+        #: The templated policy that lets a login sign with its own tenant's key (r8.2 A24').
+        self.sign_policy = sign_policy
+        #: transit key name -> {"type", "deletion_allowed"} (P-b).
+        self.transit_keys: dict[str, dict[str, Any]] = {}
+        #: every accepted transit sign: (key, the signing login's AppRole, the base64 input).
+        self.signs: list[tuple[str, str, str]] = []
+        #: AppRole name -> the `token_policies` it was made with.
+        self.approle_policies: dict[str, list[str]] = {}
         self.oidc_roles: dict[str, dict[str, Any]] = {}
         self.approles: dict[str, dict[str, str]] = {}  # name -> {accessor: secret_id}
         self.entities: dict[str, dict[str, Any]] = {}
@@ -436,7 +536,21 @@ class FakeOpenBao(_Recorder):
     def secret_accessors(self, approle: str) -> set[str]:
         return set(self.approles.get(approle, {}))
 
-    def handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0911, PLR0912 — one arm per endpoint
+    def _sign(self, call: Call, key: str, body: dict[str, Any]) -> httpx.Response:
+        """`transit/sign/<key>` as the sign policy allows it: a client token of an AppRole made with `sign_policy`,
+        whose entity's `tenant_id` names this key. The management token and a delivery login are refused (403)."""
+        client = call.headers.get("x-vault-token")
+        role = self.tokens.get(client)
+        entity = self.token_entity.get(client)
+        tenant = (self.entities.get(entity or "", {}).get("metadata") or {}).get("tenant_id")
+        if role is None or self.sign_policy not in self.approle_policies.get(role, []) or key != f"request-token-{tenant}":
+            return httpx.Response(403, json={"errors": ["permission denied"]})
+        if key not in self.transit_keys:
+            return httpx.Response(400, json={"errors": ["signing key not found"]})
+        self.signs.append((key, role, str(body.get("input"))))
+        return httpx.Response(200, json={"data": {"signature": f"vault:v1:{key}:{body.get('input')}", "key_version": 1}})
+
+    def handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0911, PLR0912, PLR0915 — one arm per endpoint
         call, injected = self._record(request)
         if injected is not None:
             return injected
@@ -444,7 +558,7 @@ class FakeOpenBao(_Recorder):
         parts = call.path.removeprefix("/v1/").split("/")
         body = call.body or {}
         unauthenticated = parts[:2] == ["sys", "wrapping"] or parts[:3] == ["auth", "approle", "login"] \
-            or parts[:3] == ["identity", "oidc", "token"]
+            or parts[:3] == ["identity", "oidc", "token"] or parts[:2] == ["transit", "sign"]
         if not unauthenticated and call.headers.get("x-vault-token") != self.management_token:
             return httpx.Response(403, json={"errors": ["permission denied"]})
         match (method, parts):
@@ -459,9 +573,11 @@ class FakeOpenBao(_Recorder):
                 return httpx.Response(204)
             case ("POST" | "PUT", ["auth", "approle", "role", name]):
                 self.approles.setdefault(name, {})
+                self.approle_policies[name] = list(body.get("token_policies") or [])
                 return httpx.Response(204)
             case ("DELETE", ["auth", "approle", "role", name]):
                 self.approles.pop(name, None)  # G24: OpenBao answers 204 for a missing one too
+                self.approle_policies.pop(name, None)
                 return httpx.Response(204)
             case ("GET", ["auth", "approle", "role", name, "role-id"]):
                 if name not in self.approles:
@@ -505,6 +621,8 @@ class FakeOpenBao(_Recorder):
                 if client not in self.tokens or role not in self.oidc_roles:
                     return httpx.Response(403, json={"errors": ["permission denied"]})
                 entity = self.token_entity.get(client)
+                if TOKEN_POLICY not in self.approle_policies.get(self.tokens[client], []):  # the policy grants the read, as in _sign
+                    return httpx.Response(403, json={"errors": ["permission denied"]})
                 # the one templated policy: read identity/oidc/token/{{identity.entity.metadata.oidc_role}}
                 if entity not in self.entities or (self.entities[entity].get("metadata") or {}).get("oidc_role") != role:
                     return httpx.Response(403, json={"errors": ["permission denied"]})
@@ -515,14 +633,63 @@ class FakeOpenBao(_Recorder):
                                            "tenant_id": (self.entities[entity].get("metadata") or {}).get("tenant_id")})
                 return httpx.Response(200, json={"data": {"token": jwt, "client_id": self.oidc_roles[role].get("client_id")}})
             case ("POST" | "PUT", ["identity", "entity", "name", name]):
-                self.entities[name] = {"id": f"entity-{name}", **body}
+                existing = self.entities.get(name)
+                self.entities[name] = {"id": f"entity-{name}", **(existing or {}), **body}
+                if existing is not None:  # OpenBao answers an update with no body
+                    return httpx.Response(204)
                 return httpx.Response(200, json={"data": {"id": f"entity-{name}", "name": name}})
+            case ("GET", ["identity", "entity", "name", name]):
+                if name not in self.entities:
+                    return httpx.Response(404, json={"errors": []})
+                entity = self.entities[name]
+                aliases = [a for a in self.aliases if a.get("canonical_id") in (entity["id"], name)]
+                return httpx.Response(200, json={"data": {**entity, "name": name, "aliases": aliases}})
             case ("DELETE", ["identity", "entity", "name", name]):
-                self.entities.pop(name, None)  # G24: OpenBao answers 204 for a missing one too
+                gone = self.entities.pop(name, None)  # G24: OpenBao answers 204 for a missing one too
+                if gone is not None:
+                    self.aliases = [a for a in self.aliases if a.get("canonical_id") not in (gone["id"], name)]
                 return httpx.Response(204)
             case ("POST" | "PUT", ["identity", "entity-alias"]):
-                self.aliases.append(body)
-                return httpx.Response(200, json={"data": {"id": f"alias-{len(self.aliases)}"}})
+                # P-c: one alias per entity per auth mount
+                if any(a.get("canonical_id") == body.get("canonical_id")
+                       and a.get("mount_accessor") == body.get("mount_accessor") for a in self.aliases):
+                    return httpx.Response(400, json={"errors": ["Alias already exists for requested entity and mount accessor"]})
+                alias = {"id": f"alias-{next(self._n)}", **body}
+                self.aliases.append(alias)
+                return httpx.Response(200, json={"data": {"id": alias["id"], "canonical_id": body.get("canonical_id")}})
+            case ("LIST", ["identity", "entity-alias", "id"]):
+                if not self.aliases:
+                    return httpx.Response(404, json={"errors": []})
+                return httpx.Response(200, json={"data": {"keys": [a["id"] for a in self.aliases]}})
+            case ("GET", ["identity", "entity-alias", "id", alias_id]):
+                found = next((a for a in self.aliases if a["id"] == alias_id), None)
+                return httpx.Response(200, json={"data": found}) if found else httpx.Response(404, json={"errors": []})
+            case ("DELETE", ["identity", "entity-alias", "id", alias_id]):
+                self.aliases = [a for a in self.aliases if a["id"] != alias_id]
+                return httpx.Response(204)
+            case ("GET", ["transit", "keys", name]):
+                if name not in self.transit_keys:
+                    return httpx.Response(404, json={"errors": []})
+                return httpx.Response(200, json={"data": {"name": name, **self.transit_keys[name]}})
+            case ("POST" | "PUT", ["transit", "keys", name]):
+                # P-b: creating an existing key changes nothing
+                self.transit_keys.setdefault(name, {"type": body.get("type", "aes256-gcm96"), "deletion_allowed": False})
+                return httpx.Response(204)
+            case ("POST" | "PUT", ["transit", "keys", name, "config"]):
+                if name not in self.transit_keys:
+                    return httpx.Response(400, json={"errors": ["no existing key named " + name + " could be found"]})
+                if "deletion_allowed" in body:
+                    self.transit_keys[name]["deletion_allowed"] = bool(body["deletion_allowed"])
+                return httpx.Response(200, json={"data": {"name": name, **self.transit_keys[name]}})
+            case ("DELETE", ["transit", "keys", name]):
+                if name not in self.transit_keys:
+                    return httpx.Response(400, json={"errors": ["could not delete policy; not found"]})
+                if not self.transit_keys[name]["deletion_allowed"]:
+                    return httpx.Response(400, json={"errors": ["deletion is not allowed for this key"]})
+                del self.transit_keys[name]
+                return httpx.Response(204)
+            case ("POST" | "PUT", ["transit", "sign", name, *_hash]):
+                return self._sign(call, name, body)
             case ("GET", ["sys", "auth"]):
                 return httpx.Response(200, json={"data": {"approle/": {"type": "approle", "accessor": "auth_approle_1"}}})
         return httpx.Response(404, json={"errors": [f"fake openbao: no route {method} {call.path}"]})
@@ -596,10 +763,10 @@ class Fakes:
     """Every boundary fake of the lifecycle, wired: the forge resolves a bot's JWT through OpenBao's mints.
     `Fakes(tmp_path)` then `.forge .integration .openbao .git .publish`."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, *, sign_policy: str = SIGN_POLICY) -> None:
         self.forge = FakeForge(tmp_path / "forge")
         self.integration = FakeIntegrationCommand(self.forge)
-        self.openbao = FakeOpenBao()
+        self.openbao = FakeOpenBao(sign_policy=sign_policy)
         self.git = RoutedGit(self.forge)
         self.publish = RecordingPublish()
         self.forge.jwt_claims = self.openbao.claims

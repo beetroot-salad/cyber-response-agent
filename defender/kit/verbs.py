@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from defender.kit.access import AccessDeclaration
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import SystemConfig
 
@@ -46,6 +47,12 @@ class TenantRecord(Protocol):
     @property
     def systems(self) -> Mapping[str, SystemConfig | ConfigFault]:
         """Each configured system's parsed `config.env`, or the fault for why there is none."""
+        ...
+
+    @property
+    def access(self) -> Mapping[str, AccessDeclaration | ConfigFault]:
+        """Each `http-proxy` system's parsed access declaration, or the fault for why there is
+        none (#1163)."""
         ...
 
     @property
@@ -83,6 +90,21 @@ class VerbContext(Protocol):
 
     @property
     def as_of(self) -> datetime | None: ...
+
+    @property
+    def proxy_url(self) -> str | None:
+        """The credential proxy's address, handed in by the run (never read from `env`)."""
+        ...
+
+    @property
+    def request_token(self) -> str | None:
+        """The request token this call presents to the proxy; never shown in a repr."""
+        ...
+
+    @property
+    def token_source(self) -> Callable[[], str] | None:
+        """Where the call gets its request token when it holds none (r7 A20)."""
+        ...
 
 
 Verb = Callable[..., Any]

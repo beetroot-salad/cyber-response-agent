@@ -13,7 +13,7 @@ ImportError (the expected red before implementation). Pinned shapes (amendment r
 - `LifecycleConfig(...)`: NOT pinned field by field (GAP-0-2). Built in ONE place, `lifecycle_config`, with the
   DC-13 items under the keyword names used there; if the implementer names them differently, fix that one function.
 - Step names (DC-3): create `names provider repo bot integration template wrap install sweep prepare activate`;
-  rotate `names provider bot integration wrap install sweep retire remove_old_file`; offboard `offboard teardown
+  rotate `names provider bot protect integration wrap install sweep retire remove_old_file` (r8.3); offboard `offboard teardown
   finish`; `delete_repo`.
 
 Interface for the cases (all on `LifecycleWorld(tmp_path, data_root)`):

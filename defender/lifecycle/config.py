@@ -44,8 +44,9 @@ class LifecycleConfig:
     `secrets_dir` holds one folder per tenant with one file per installed secret, outside every
     tenant's folder. `poll_interval` is the wait between passes (seconds), `lock_keepalive` the bound
     after which the database drops a dead worker's tenant lock (seconds, RC-2), `teardown_wait` how
-    long teardown waits for the host lock after SIGTERM before SIGKILL (seconds). `oidc_key` and
-    `token_policy` are the deployment's signing key and its one templated policy."""
+    long teardown waits for the host lock after SIGTERM before SIGKILL (seconds). `oidc_key` is the
+    deployment's OIDC signing key; `token_policy` and `sign_policy` are its two templated policies,
+    of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24')."""
 
     issuer_url: str = ISSUER_URL
     forge_url: str
@@ -61,6 +62,7 @@ class LifecycleConfig:
     teardown_wait: float = 10.0
     oidc_key: str = "default"
     token_policy: str = "defender-tenant-token"
+    sign_policy: str = "defender-tenant-sign"
 
     def __post_init__(self) -> None:
         for name in ("template_dir", "secrets_dir", "data_root"):

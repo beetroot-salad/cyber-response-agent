@@ -106,6 +106,20 @@ def test_protection_read_failure_or_unknown_push_permission_refuses(response):
     assert any(call.url.path.endswith("/branches/main") for call in calls)
 
 
+@pytest.mark.parametrize("protection", [
+    {"name": "main", "protected": True, "user_can_push": False, "user_can_merge": True},
+    {"name": "main", "protected": True, "user_can_push": False},
+    {"name": "main", "protected": True, "user_can_push": False, "user_can_merge": "false"},
+    {"name": "main", "protected": True, "user_can_push": False, "user_can_merge": None}])
+def test_protection_refuses_a_bot_that_can_merge_or_whose_merge_right_is_unknown(protection):
+    """#1163 N13: the bot may neither push nor merge to `main`; an unknown merge right refuses."""
+    http = ForgeHTTP()
+    http.protection = protection
+    with pytest.raises(forgejo.ForgeError, match="merge|protect|main"):
+        forge(http).verify_main_protection()
+    forge(ForgeHTTP()).verify_main_protection()  # positive control: the default passes
+
+
 def test_protection_verification_reads_branch_but_never_changes_rules():
     http = ForgeHTTP()
     forge(http).verify_main_protection()

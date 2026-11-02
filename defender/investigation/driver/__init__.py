@@ -66,6 +66,7 @@ from ..permission.policies import _common
 from defender.providers import BuiltModel
 from ..run_clock import ClockSource
 from ..run_state import RunState, run_state_of
+from defender.kit.access import RequestAccess
 from ..tools import (
     AgentDeps,
     GatherDeps,
@@ -657,6 +658,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     orient_shim: orient.ShimRunner | None = None,
     run_state: RunState | None = None,
     clock: ClockSource | None = None,
+    #: The credential proxy's address and the run's read token (#1163); `None` when the run has
+    #: no `http-proxy` system.
+    access: RequestAccess | None = None,
 ) -> dict:
     # `tenant` is resolved once at the entry point (settings folder, permissions, item 3's
     # dispatch identity). Required: there is no process-level fallback.
@@ -672,6 +676,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # (`RunState.now`). Omitted, the host's own (wall time).
     run_dir, run_id = run.run_dir, str(run.id)
     state = _run_state_at_boundary(run_state, run_dir, run_id, clock)
+    state.access = access
     _box_follows_run_clock(box, state)
     model_name = resolve_main_model(model_name)
     # Captured before the default is resolved below: with no injected `verbs=`, lead-0 must not

@@ -76,6 +76,7 @@ def test_the_job_leaves_an_active_tenant_with_repo_bot_credential_folder_and_no_
     assert world.forge.integrations[gen.bot_login] == [gen.audience]
     assert world.openbao.oidc_roles[gen.oidc_role]["client_id"] == gen.audience
     assert world.openbao.secret_accessors(gen.approle) == {gen.secret_accessor}
+    assert world.openbao.secret_accessors(gen.sign_approle) == {gen.sign_secret_accessor}
     folder = world.data_root / tenant
     assert folder.is_dir() and not folder.is_symlink()
     assert (folder / "learning").is_dir() and not (folder / "learning").is_symlink()
@@ -191,8 +192,8 @@ def test_the_jwt_is_never_in_git_argv_environment_or_a_file(world):
 
 
 def test_the_host_never_holds_the_management_token_or_the_forge_admin_token(world):
-    """The host actor's OpenBao calls carry no management token and only unwrap, approle login and token reads;
-    its forge calls are the bot's Bearer calls (DC-12, SK-5, P5)."""
+    """The host actor's OpenBao calls carry no management token and only unwrap, approle login, token reads and the one
+    sign proof with the tenant's own sign login; its forge calls are the bot's Bearer calls (DC-12, SK-5, P5, A24')."""
     tenant = world.create()
     calls = split_drive(world)
     assert world.item(tenant)["state"] == "active"
@@ -202,8 +203,15 @@ def test_the_host_never_holds_the_management_token_or_the_forge_admin_token(worl
     assert host, "control: the host called OpenBao"
     assert world.openbao.management_token not in {c.headers.get("x-vault-token") for c in host}
     allowed = (("sys", "wrapping", "unwrap"), ("auth", "approle", "login"), ("identity", "oidc", "token"))
+    gen = world.live(tenant)
+    signs = [c for c in host if c.path.startswith("/v1/transit/")]
+    assert [(c.method, c.path) for c in signs] == [("POST", f"/v1/transit/sign/request-token-{tenant}")], \
+        "the host's one new power is a single sign with the tenant's own key"
+    assert {world.openbao.tokens[c.headers["x-vault-token"]] for c in signs} == {gen.sign_approle}, \
+        "the sign proof was not made as the tenant's sign login"
     for call in host:
-        assert tuple(call.path.removeprefix("/v1/").split("/")[:3]) in allowed, f"host called {call.method} {call.path}"
+        assert call in signs or tuple(call.path.removeprefix("/v1/").split("/")[:3]) in allowed, \
+            f"host called {call.method} {call.path}"
     host_forge = calls["host"]["forge"]
     assert host_forge, "control: the host reached the forge (install's bot calls)"
     assert [c for c in host_forge if FakeForge.credential_of(c) == "bearer"], "control: the host made bot Bearer calls"

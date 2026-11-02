@@ -706,6 +706,7 @@ def register_query_tool(agent, registry) -> None:
         vctx = VerbContext(
             defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
             tenant=deps.tenant, run_state=deps.run_state,
+            **_proxy_access(deps.run_state),
         )
         delivery = CallDelivery()
         token = CALL_DELIVERY.set(delivery)
@@ -717,6 +718,16 @@ def register_query_tool(agent, registry) -> None:
             raise
         finally:
             CALL_DELIVERY.reset(token)
+
+
+def _proxy_access(run_state: Any) -> dict[str, Any]:
+    """The proxy address and read-token source the run holds (#1163), as the context's keywords;
+    none when the run has no `http-proxy` system. The token is asked for inside the verb's call
+    (r7 A20)."""
+    access = getattr(run_state, "access", None)
+    if access is None:
+        return {}
+    return {"proxy_url": access.proxy_url, "token_source": access.token}
 
 
 def _raw_args(args: Any) -> dict:

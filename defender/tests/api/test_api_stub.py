@@ -102,6 +102,8 @@ LESSON = Lesson(lesson_id="le-1", title="t", description="d", status="live")
 SETTINGS = SystemSettings(system_id="tix", kind="ticketing", display_name="T", enabled=True,
                           settings={"queue": "sec"})
 SIGNED = "https://blobs.invalid/signed?sig=1"
+#: A credential value long enough for any kind's secret-field minimum (#1163 A4).
+LONG = "v" * 40
 
 #: #1131's "API" section as (method, path), under `/tenants/{tenant_id}`.
 EXISTING_ROUTES = {
@@ -172,7 +174,7 @@ HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] 
      {"kind": "ticketing", "display_name": "T", "enabled": True, "settings": {}},
      {"put_system": (SETTINGS, True), "has_credentials": False}),
     (("PUT", "/tenants/{tenant_id}/systems/{system_id}/credentials"), f"{T}/systems/tix/credentials",
-     {"credentials": {"api_token": "x"}},
+     {"kind": "static", "credentials": {"api_token": LONG}},
      {"get_system": SETTINGS, "has_credentials": False, "put_credentials": None}),
     (("POST", "/tenants/{tenant_id}/systems/{system_id}/check"), f"{T}/systems/tix/check", None,
      {"get_system": SETTINGS, "has_credentials": True,
@@ -663,12 +665,12 @@ def test_has_credentials_is_the_secret_stores_answer(has: bool) -> None:
 
 
 def test_credentials_are_written_through_and_never_echoed_or_audited() -> None:
-    secret = "s3cr3t-value-never-echoed"
+    secret = "s3cr3t-value-never-echoed-" + LONG  # conflict updated: #1163 A4 (kind, minimum length)
     api = Api(get_system=SETTINGS, has_credentials=False, put_credentials=None)
     response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                              json={"credentials": {"api_token": secret}})
+                              json={"kind": "static", "credentials": {"api_token": secret}})
     assert (response.status_code, response.content) == (204, b"")
-    assert api.ports.called("put_credentials") == [((A, "tix", {"api_token": secret}), {})]
+    assert api.ports.called("put_credentials") == [((A, "tix", "static", {"api_token": secret}), {})]
     assert api.ports.called("has_credentials") == [], "an existence check, not a read"
     assert api.audited() == [("system.credentials", "tix", "fields: api_token")]
     assert secret not in repr(api.ports.audits)
@@ -677,7 +679,7 @@ def test_credentials_are_written_through_and_never_echoed_or_audited() -> None:
 def test_credentials_are_not_written_when_their_audit_write_fails() -> None:
     api = Api(get_system=SETTINGS, put_credentials=None, audit=RuntimeError("audit down"))
     response = api.lenient().put(f"{T}/systems/tix/credentials", headers=AUTH,
-                                 json={"credentials": {"api_token": "x"}})
+                                 json={"kind": "static", "credentials": {"api_token": LONG}})
     assert response.status_code == 500
     assert api.ports.called("put_credentials") == []
 
@@ -685,7 +687,7 @@ def test_credentials_are_not_written_when_their_audit_write_fails() -> None:
 def test_a_failed_credentials_write_commits_no_audit() -> None:
     api = Api(get_system=SETTINGS, put_credentials=RuntimeError("vault down"))
     response = api.lenient().put(f"{T}/systems/tix/credentials", headers=AUTH,
-                                 json={"credentials": {"api_token": "x"}})
+                                 json={"kind": "static", "credentials": {"api_token": LONG}})
     assert response.status_code == 500
     assert api.ports.audits == []
 
@@ -696,18 +698,72 @@ def test_a_credential_field_name_outside_the_grammar_is_refused(key: str) -> Non
     """A field name reaches the audit detail, so one the audit store would refuse never gets in."""
     api = Api()
     response = api.client.put(f"{T}/systems/tix/credentials", headers={**AUTH, "Content-Type": "application/json"},
-                              content=('{"credentials": {"' + key + '": "v"}}').encode())
+                              content=('{"kind": "static", "credentials": {"' + key + '": "' + LONG + '"}}').encode())
     assert response.status_code == 422
     assert api.ports.calls == []
 
 
 def test_credentials_for_an_unknown_system_are_refused_before_the_secret_store() -> None:
     api = Api(get_system=None)
-    response = api.client.put(f"{T}/systems/nope/credentials", headers=AUTH, json={"credentials": {"k": "v"}})
+    response = api.client.put(f"{T}/systems/nope/credentials", headers=AUTH, json={"kind": "static", "credentials": {"k": LONG}})
     assert response.status_code == 404
     assert api.ports.called("put_credentials") == []
     assert Api().client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                            json={"credentials": {}}).status_code == 422
+                            json={"kind": "static", "credentials": {}}).status_code == 422
+
+
+#: (kind, credentials, accepted): secret fields per kind, #1163 r7 A19. Static: every field
+#: except `username`; oauth: every field except `client_id`.
+CREDENTIAL_SHAPES = [
+    ("static", {"api_key": LONG}, True),
+    ("static", {"api_key": "x"}, False),
+    ("static", {"username": "u", "password": LONG}, True),
+    ("static", {"username": "u", "password": "x"}, False),
+    ("static", {"username": "u", "api_key": LONG, "other": "x"}, False),
+    ("static", {"api_key": LONG, "client_id": "c"}, False),
+    ("static", {"api_key": LONG, "key_id": "k"}, False),
+    ("static", {"api_key": LONG, "user": "u"}, False),
+    ("static", {"api_key": LONG, "account": "a"}, False),
+    ("static", {"api_key": LONG, "client_id": LONG}, True),
+    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG}, True),
+    ("oauth-client-credentials", {"client_id": "c", "client_secret": "x"}, False),
+    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG, "audience": "x"}, False),
+    ("oauth-client-credentials", {"client_id": "c", "client_secret": LONG, "audience": LONG}, True),
+]
+
+
+@pytest.mark.parametrize(("kind", "credentials", "accepted"), CREDENTIAL_SHAPES)
+def test_a_secret_field_below_the_minimum_length_is_refused_at_write_time(
+        kind: str, credentials: dict[str, str], accepted: bool) -> None:
+    """A set is written whole with its kind; a too-short secret field of that kind is a 422 and
+    reaches no store, a short non-secret field passes. #1163 O5, A4."""
+    api = Api(get_system=SETTINGS, put_credentials=None)
+    response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
+                              json={"kind": kind, "credentials": credentials})
+    assert response.status_code == (204 if accepted else 422), response.text
+    assert api.ports.called("put_credentials") == (
+        [((A, "tix", kind, credentials), {})] if accepted else [])
+
+
+@pytest.mark.parametrize("kind", [None, "", "oauth", "other"])
+def test_a_credential_write_without_a_known_kind_is_refused(kind: str | None) -> None:
+    """The write API takes the kind; none, or one that is not static or
+    oauth-client-credentials, is a 422 reaching no store. #1163 A4."""
+    api = Api(get_system=SETTINGS, put_credentials=None)
+    body = {"credentials": {"api_key": LONG}} | ({} if kind is None else {"kind": kind})
+    assert api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
+                          json=body).status_code == 422
+    assert api.ports.called("put_credentials") == []
+
+
+@pytest.mark.parametrize("method", ["GET", "POST", "DELETE", "PATCH"])
+def test_no_route_reads_a_credential_back(method: str) -> None:
+    """Only PUT exists on a system's credentials path; every other method is refused
+    unrouted. #1163 O5."""
+    api = Api(get_system=SETTINGS, has_credentials=True)
+    response = api.client.request(method, f"{T}/systems/tix/credentials", headers=AUTH)
+    assert response.status_code == 405
+    assert api.ports.called("put_credentials") == []
 
 
 # --- errors: one shape, RFC 9457 ----------------------------------------------------------
@@ -750,7 +806,7 @@ def test_a_validation_problem_lists_what_failed_and_never_echoes_the_value() -> 
     secret = 87654321987654321
     api = Api()
     response = api.client.put(f"{T}/systems/tix/credentials", headers=AUTH,
-                              json={"credentials": {"api_token": secret}})
+                              json={"kind": "static", "credentials": {"api_token": secret}})
     assert response.status_code == 422
     problem = response.json()
     assert problem["errors"] == [{"loc": ["body", "credentials", "api_token"],

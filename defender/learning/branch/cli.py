@@ -492,6 +492,9 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     verifier: Any = None,
     roster: Any = None,
     directory: Any = None,
+    signer: Any = None,
+    proxy_url: str | None = None,
+    issuer_transport: Any = None,
 ) -> int:
     """Launch one episode, reporting a refusal as an operator exit rather than a traceback.
     `preflight` (the role-model check) and `render_page` (the episode page) are handed in by the
@@ -499,7 +502,8 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     try:
         return _launch(argv, spawn=spawn, questioner=questioner, preflight=preflight,
                        render_page=render_page, judge=judge, lessons_dir=lessons_dir, live_tree=live_tree,
-                       oracle=oracle, verifier=verifier, roster=roster, directory=directory)
+                       oracle=oracle, verifier=verifier, roster=roster, directory=directory,
+                       signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
     except (branch.BranchError, LedgerError, EstateError, FamilyError, GrantError,
             session_store.StoreError, sqlite3.Error) as refusal:
         raise LauncherRefused(f"[branch] {refusal}") from refusal
@@ -511,6 +515,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     lessons_dir: Path | None = None,
     live_tree: Callable[[], formats.RunProvenance] | None = None,
     oracle: Any = None, verifier: Any = None, roster: Any = None, directory: Any = None,
+    signer: Any = None, proxy_url: str | None = None, issuer_transport: Any = None,
 ) -> int:
     ns = parse_branch_args(argv)
     # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
@@ -599,7 +604,9 @@ def _launch(  # noqa: PLR0913 — see `main`
                     questioner=author, spawn=spawn, judge=judge, lessons_dir=questioner_lessons_dir,
                     tenant=tenant, runs=runs, served=served, oracle=oracle,
                     verifier=verifier, roster=roster, started=started,
-                    knowledge_commit=pinned.commit, render_page=render_page)
+                    knowledge_commit=pinned.commit, render_page=render_page,
+                    signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
+                    directory=admitted.directory)
             except SystemExit:
                 raise
             except BaseException as failed:  # noqa: BLE001 — one abort rule, see `main`'s docstring
@@ -615,7 +622,8 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     view: EpisodeRuns, questioner: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
     tenant: RunTenant, runs: RunsRepository[Tenant], served: Sequence[str], oracle: Any,
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer,
-    knowledge_commit: str | None = None,
+    knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
+    issuer_transport: Any = None, directory: Any = None,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
 
@@ -644,7 +652,9 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
                 f"used ({unparsed}); recorded as refused in {episode.outcome.path}") from unparsed
     with clock.step(Step.PREFLIGHT):
         record = preflight_replay(episode, source=source, roster=roster, tenant=tenant,
-                                  oracle=oracle, verifier=verifier)
+                                  oracle=oracle, verifier=verifier, signer=signer,
+                                  proxy_url=proxy_url, issuer_transport=issuer_transport,
+                                  directory=directory)
     if record["outcome"] != ACCEPTED:
         _logger.info(f"episode {episode_id}: {record['outcome']} before any sibling started "
                      f"({record['reason']})")

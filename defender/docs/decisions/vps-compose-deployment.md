@@ -44,8 +44,11 @@ Inherit the [engineering principles](../../../docs/principles.md),
 [credential-free executor model](runtime-isolation-executor-model.md).
 
 Model output and writable run files are untrusted. Arbitrary model-written code
-runs only in an executor; trusted orchestration and adapters hold the credentials
-needed for their specific work. Separate logical roles do not imply a security
+runs only in an executor. Trusted orchestration holds the model-provider key; **no run
+process, adapters included, holds a customer system credential** (#1163): those live in
+OpenBao and only the credential proxy reads them. A run reaches a credentialed system through
+the proxy with a signed request token, and the proxy obeys only the access declaration merged
+to the tenant repository's protected `main`. Separate logical roles do not imply a security
 boundary unless their credentials, processes, network access, and filesystem
 access are actually restricted.
 
@@ -384,7 +387,10 @@ approved replacement defines its compatibility and migration contract.
 
 ### 7. Machine identity and trust
 
-OpenBao is the proposed Vault-compatible issuer in development and production.
+OpenBao is the proposed Vault-compatible issuer in development and production. It is also the
+store of customer system credentials (KV v2, written whole through a write-only role and read
+only by the credential proxy) and the signer of request tokens (transit, one key per tenant;
+the launcher may only sign and the proxy may only verify) (#1163).
 The development issuer belongs in the existing devcontainer Compose environment;
 if OpenBao is selected, use it there as well. Its immediate justification is the
 existing authenticated Forgejo identity-issuance contract; broader secret-store

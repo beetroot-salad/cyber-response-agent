@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import (
+    AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator,
+    model_validator,
+)
 
 from defender._clock import as_utc
+from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
 
@@ -184,10 +188,29 @@ class SystemPut(_Request):
     settings: dict[str, SettingValue]
 
 
-class CredentialsPut(_Request):
-    """The whole credential set, replaced; no field has a default."""
+#: The shortest a secret credential value may be (#1163 A4): a typed-in placeholder is refused
+#: at write time, not found out at the first call.
+SECRET_MIN_LENGTH = 16
 
+
+class CredentialsPut(_Request):
+    """The whole credential set, replaced; no field has a default. `kind` says which fields are
+    secret, by the rule the credential proxy scrubs by (r7 A19): all but `username` in a
+    `static` set, all but `client_id` in an `oauth-client-credentials` set."""
+
+    kind: Literal["static", "oauth-client-credentials"]
     credentials: dict[CredentialKey, str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _secrets_are_long_enough(self) -> CredentialsPut:
+        secret = secret_fields(self.kind, self.credentials)
+        short = sorted(k for k in secret if len(self.credentials[k]) < SECRET_MIN_LENGTH)
+        if short:
+            raise ValueError(
+                f"secret field(s) {short} are shorter than {SECRET_MIN_LENGTH} characters")
+        return self
+
+
 
 
 class SystemCheck(BaseModel):

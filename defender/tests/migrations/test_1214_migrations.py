@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import itertools
+import json
 
 import pytest
 
@@ -15,6 +16,8 @@ from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.tenancy.lifecycle_1214.test_1214_repository_contract import fill_row
 
 BASELINE = "0001_baseline"
+TENANCY = "0002_tenancy"
+SIGN_COLUMNS = {"sign_approle", "sign_entity", "sign_role_id", "sign_secret_file", "sign_wrapped_secret", "sign_secret_accessor"}
 LAB = "37963319-1bcf-49a6-9644-6a0699bfe9a3"
 OTHER = "5c1f2a52-0a47-4c0c-8a7e-6f3a0a7f4a11"
 THIRD = "c8a3d1e0-2b0f-4f4e-9c61-1f7a9a0f9b22"
@@ -68,18 +71,21 @@ def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
 # --- one revision, the version check ----------------------------------------------------------------
 
 
-def test_the_history_is_the_baseline_and_exactly_one_revision_on_it():
-    """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11)."""
+def test_the_history_is_the_baseline_and_two_revisions_on_it_in_a_line():
+    """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11); #1163 adds one more, the six
+    sign columns of the generation record (A24/r8.4): a single line baseline -> #1214's -> #1163's, no branch."""
     from alembic.script import ScriptDirectory
 
     from defender.migrations import _config
 
-    chain = [(r.revision, r.down_revision) for r in ScriptDirectory.from_config(_config()).walk_revisions()]
-    assert len(chain) == 2
-    [(head_revision, down), (base, base_down)] = chain
-    assert (down, base, base_down) == (BASELINE, BASELINE, None)
-    assert head_revision != BASELINE
-
+    script = ScriptDirectory.from_config(_config())
+    chain = [(r.revision, r.down_revision) for r in script.walk_revisions()]  # newest first
+    assert len(chain) == 3
+    [(head_revision, middle), (middle_revision, down), (base, base_down)] = chain
+    assert (middle, down, base, base_down) == (middle_revision, BASELINE, BASELINE, None)
+    assert middle_revision == TENANCY, "#1214's revision keeps its id"
+    assert len({head_revision, middle_revision, BASELINE}) == 3
+    assert script.get_heads() == [head_revision], "the history branches"
 
 @pytest.mark.postgres
 def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_database):
@@ -180,6 +186,94 @@ def test_tenants_columns_are_the_data_models_and_only_the_identity_ones_are_requ
     assert [r for r in rows if r[2] is not None] == []
     with pytest.raises(psycopg.errors.NotNullViolation):  # no default left to supply a state
         execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at) VALUES ('x', now())")
+
+
+# --- #1163's revision: the six sign columns (A24/r8.4) ------------------------------------------------------
+
+
+def _sign_values(tag: str) -> dict[str, str]:
+    """Six values each longer than 40 characters; the secret file path is longer than 100."""
+    return {name: f"{name}-{tag}-" + "x" * 40 for name in SIGN_COLUMNS} | {"sign_secret_file": "/srv/secrets/" + "d" * 120 + f"/{tag}"}
+
+
+@pytest.mark.postgres
+def test_the_third_revision_adds_exactly_the_six_sign_columns_as_nullable_text_with_no_default(empty_database):
+    """Upgrading #1214's database to head changes its catalog by exactly six `generations` columns: text, nullable, no server
+    default, and nothing else (A24/r8.4 'the generation record gains six fields (a migration)')."""
+    from defender.migrations import upgrade
+
+    _upgrade_to(empty_database, TENANCY)
+    before = catalog(empty_database)
+    upgrade(empty_database)
+    after = catalog(empty_database)
+    added = [c for c in after["columns"] if c not in before["columns"]]
+    assert [c for c in before["columns"] if c not in after["columns"]] == []
+    assert sorted(added) == sorted(("tenancy", "generations", name, "text", False, None) for name in SIGN_COLUMNS)
+    assert {k: v for k, v in after.items() if k != "columns"} == {k: v for k, v in before.items() if k != "columns"}
+
+
+@pytest.mark.postgres
+def test_a_generation_recorded_at_the_tenancy_revision_reads_back_with_the_six_null_after_the_upgrade(empty_database):
+    """A row seeded at `0002_tenancy` keeps its other values through the upgrade and reads the six sign columns NULL, which
+    is how a pre-r8 generation reads (A24/r8.4, r8.5 upgrade)."""
+    from defender.migrations import upgrade
+
+    _upgrade_to(empty_database, TENANCY)
+    fill_row(empty_database, "tenants", id=OTHER, state="active")
+    fill_row(empty_database, "generations", tenant_id=OTHER, salt="old", status="live", bot_login="bot-old")
+    upgrade(empty_database)
+    cols = ", ".join(sorted(SIGN_COLUMNS))
+    rows = execute(empty_database, f"SELECT bot_login, {cols} FROM tenancy.generations WHERE tenant_id = %s", (OTHER,))  # noqa: S608
+    assert rows == [("bot-old", *([None] * 6))]
+
+
+@pytest.mark.postgres
+def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_six_null_columns(empty_database):
+    """Live, pending, retiring and destroyed generations (two tenants' rows) and the neighbouring tenancy tables' rows at
+    `0002_tenancy` are all there after the upgrade, every old column unchanged, the six new ones NULL (A24/r8.4: the
+    migration adds columns and removes nothing; r8.5: a pending generation survives to be completed)."""
+    from defender.migrations import upgrade
+
+    _upgrade_to(empty_database, TENANCY)
+    for tenant in (OTHER, THIRD):
+        fill_row(empty_database, "tenants", id=tenant, state="active")
+        fill_row(empty_database, "forge_wiring", tenant_id=tenant)
+        fill_row(empty_database, "publish_status", tenant_id=tenant)
+    for tenant, statuses in ((OTHER, ("live", "pending", "retiring", "destroyed")), (THIRD, ("live", "pending"))):
+        for status in statuses:
+            fill_row(empty_database, "generations", tenant_id=tenant, salt=f"{status}-1", status=status,
+                     bot_login=f"bot-{tenant}-{status}", role_id=f"role-{status}")
+
+    def rows() -> dict[str, list[dict[str, object]]]:
+        tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version"})
+        return {t: sorted((r[0] for r in execute(empty_database, f"SELECT to_jsonb(x) FROM tenancy.{t} x")),  # noqa: S608
+                          key=lambda row: json.dumps(row, sort_keys=True)) for t in tables}
+    before = rows()
+    assert {len(before[t]) for t in ("tenants", "forge_wiring", "publish_status")} == {2}, "control: the rows were seeded"
+    assert len(before["generations"]) == 6, "control: live and pending generations were seeded"
+    upgrade(empty_database)
+    after = rows()
+
+    assert after.keys() == before.keys()
+    for table, old in before.items():
+        new = after[table]
+        assert len(new) == len(old), f"{table}: rows lost by the upgrade"
+        if table == "generations":
+            assert all({k: row[k] for k in SIGN_COLUMNS} == dict.fromkeys(SIGN_COLUMNS) for row in new)
+            new = [{k: v for k, v in row.items() if k not in SIGN_COLUMNS} for row in new]
+        assert new == old, f"{table}: a row changed"
+
+
+@pytest.mark.postgres
+def test_long_sign_values_round_trip_through_the_columns(migrated_database):
+    """Six values over 40 characters, a secret file path over 100 among them, are stored and read back unchanged (A24/r8.4:
+    text columns, no length limit)."""
+    fill_row(migrated_database, "tenants", id=THIRD, state="active")
+    values = _sign_values("long")
+    fill_row(migrated_database, "generations", tenant_id=THIRD, salt="s", status="live", bot_login="bot-s", **values)
+    names = sorted(values)
+    [row] = execute(migrated_database, f"SELECT {', '.join(names)} FROM tenancy.generations WHERE tenant_id = %s", (THIRD,))  # noqa: S608
+    assert dict(zip(names, row, strict=True)) == values
 
 
 # --- the data model's constraints -------------------------------------------------------------------
