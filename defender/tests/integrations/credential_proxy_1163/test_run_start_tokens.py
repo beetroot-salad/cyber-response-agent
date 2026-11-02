@@ -90,6 +90,8 @@ def _drive(tmp_path, data_root, *, signer=None, ticket=True, **seams):
     started = time.time()
     if signer is not None:
         seams["signer"] = signer
+        if "directory" not in seams:  # r8.6 A24: run start checks the sign login even with an injected signer
+            seams["directory"] = _records(data_root, tmp_path)[0].directory
     try:
         rc, refused = S.drive_run(
             S.run_argv(alert, data_root, update_ticket=ticket), rec, ticket_writer=tickets,
@@ -298,10 +300,10 @@ def test_r4g_a_sign_answered_5xx_is_a_transport_fault_after_exactly_one_login(tm
     assert bao.signs == []
 
 
-@pytest.mark.parametrize("malformed", ["login", "sign"])
+@pytest.mark.parametrize("malformed", ["login", "sign", "sign-nonjson", "sign-empty", "sign-nonstring"])
 def test_r4h_a_2xx_without_a_client_token_or_a_signature_is_a_config_fault(tmp_path, data_root, malformed):
-    """A login 200 with no `auth.client_token`, and a sign 200 with no `data.signature`, are
-    `ConfigFault`, not a fault a retry clears. A18 ("a malformed 2xx -> ConfigFault"), A24."""
+    """A login 200 with no `auth.client_token`, and a sign 200 that is not JSON or has a `data.signature` that is absent,
+    empty or not a string, are `ConfigFault`, not a fault a retry clears. A18 ("a malformed 2xx -> ConfigFault"), A24."""
     _plant(data_root, proxy=("identity",))
     records, _ = _records(data_root, tmp_path)
     bao = A.OpenBaoStandIn({ROLE: SECRET}, malformed=malformed)
@@ -374,25 +376,38 @@ def test_r4k_building_a_request_signer_reads_no_records_and_no_file(tmp_path, da
     assert bao.logins == [(ROLE, SECRET)], "positive control: the file written after the build is the one used"
 
 
-def test_r4f_a_request_signer_shows_neither_the_client_token_nor_the_sign_secret(tmp_path, data_root):
-    """`request_signer(tenant, directory=, transport=)` sends nothing when built; after one sign neither its repr nor its
-    str shows the client token the login issued or the sign secret. O10, A24' signer handle (r8.5)."""
+def _parts_of(secret: str, size: int = 6) -> list[str]:
+    """Every run of `size` characters of `secret` (the whole of it when shorter)."""
+    return [secret[i:i + size] for i in range(max(1, len(secret) - size + 1))]
+
+
+def test_r4f_a_request_signer_shows_no_part_of_the_client_token_or_the_sign_secret(tmp_path, data_root):
+    """`request_signer(tenant, directory=, transport=)` sends nothing when built; before and after one sign neither its repr
+    nor its str shows the client token the login issued or the sign secret, nor any run of 6 characters of either.
+    O10, A24' signer handle (r8.5), r8.6 (A24' repr)."""
+    import secrets as _secrets
+
     _plant(data_root, proxy=("identity",))
-    records, _ = _records(data_root, tmp_path)
-    bao = A.OpenBaoStandIn({ROLE: SECRET})
+    secret = _secrets.token_urlsafe(24)  # random, so a shared run of 6 characters cannot be a coincidence of the fixture
+    fields = A.generation(S.PLAYGROUND_ID, tmp_path / "secrets", sign_role_id=ROLE, sign_secret=secret)
+    records = A.Records(data_root, {S.PLAYGROUND_ID: [fields]})
+    bao = A.OpenBaoStandIn({ROLE: secret})
     signer = request_signer(S.PLAYGROUND_ID, directory=records.directory, transport=bao)
     assert bao.requests == [], "building the signer sent a request"
+    before = [repr(signer), str(signer)]
 
     signature = signer.sign(b"payload-1163")
-    assert bao.logins == [(ROLE, SECRET)], "positive control: the sign went through the login"
+    assert bao.logins == [(ROLE, secret)], "positive control: the sign went through the login"
     assert len(bao.signs) == 1, "positive control: one sign"
     assert A.SIGNATURE_CANARY in signature, "positive control: the stand-in's signature came back"
     client_token = bao.signs[0].client_token
-    assert client_token, "positive control: the stand-in issued a token"
+    assert len(client_token) >= 24, "positive control: the stand-in issued a token"
     assert bao.role_of(bao.signs[0]) == ROLE, "positive control: the token is the sign login's"
-    for text in (repr(signer), str(signer)):
-        assert client_token not in text, "the signer shows the client token"
-        assert SECRET not in text, "the signer shows the sign secret"
+    assert "Signer" in before[0], "positive control: the repr is read"
+    for text in (*before, repr(signer), str(signer)):
+        for hidden, what in ((client_token, "client token"), (secret, "sign secret")):
+            shown = [part for part in _parts_of(hidden) if part in text]
+            assert not shown, f"the signer shows part of the {what}: {shown[:3]}"
 
 
 @pytest.mark.parametrize("spoil", [_make_absent, _make_unreadable, _make_empty, _make_two_lines],
@@ -480,6 +495,8 @@ def test_r5b_a_run_with_no_injected_signer_signs_through_the_sign_login_whatever
         token = read_access(rec).token()
     assert canary.seen == [], "the environment's address was used"
     assert bao.logins == [(ROLE, SECRET)]
+    assert len(bao.signs) == 1, "positive control: the token was signed"
+    assert set(bao.origins) == {A.deployment_origin()}, "the sign login and sign went to the deployment's address (A1)"
     assert A.SIGNATURE_CANARY in token, "the token carries the stand-in's signature"
 
 
@@ -570,3 +587,23 @@ def test_r7b_a_tenant_with_no_http_proxy_system_needs_no_sign_login(tmp_path, da
     rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, directory=records.directory)
     assert (rc, refused) == (0, None)
     assert rec.lifecycle_calls
+
+
+@pytest.mark.parametrize("setup", [_no_generation, _without("sign_role_id", None),
+                                   _without("sign_secret_file", None)],
+                         ids=["no generation", "no sign role", "no sign file"])
+def test_r7c_an_injected_signer_does_not_excuse_a_missing_sign_login(tmp_path, data_root, setup):
+    """With a `signer=` injected, an http-proxy tenant whose records hold no usable sign login is
+    still refused before the run folder is made, and nothing is signed. r8.6 (A24 run-start check
+    is unconditional)."""
+    _plant(data_root, proxy=("identity",))
+    records = setup(data_root, tmp_path)
+    signer = A.MarkedSigner()
+    rec, tickets, rc, refused, _ = _drive(tmp_path, data_root, signer=signer,
+                                          directory=records.directory)
+
+    assert rc is None
+    assert _config_refusal(refused, "sign", "generation", "login"), refused
+    assert signer.payloads == []
+    assert "materialize" not in rec.order, "the run folder was made before the refusal"
+    assert tickets.calls == []

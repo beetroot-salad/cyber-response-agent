@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import uuid
 
 import pytest
@@ -304,6 +305,33 @@ def test_a25_the_proxy_policy_grants_exactly_kv_read_and_transit_verify(openbao)
             refused("DELETE", f"{kv}/data/{tenant}/identity"),
             refused("LIST", f"{kv}/metadata"), refused("LIST", f"{kv}/metadata/"), refused("LIST", f"{kv}/metadata/{tenant}"),
             refused("GET", f"{kv}/metadata/{tenant}/identity")] == [403] * 13
+
+
+_RULE = re.compile(r'path\s+"([^"]+)"\s*\{\s*capabilities\s*=\s*\[([^\]]*)\]\s*\}')
+
+
+def _rules_of(hcl: str) -> dict[str, list[str]]:
+    """{path: sorted capabilities} of a policy made only of `path "..." { capabilities = [...] }` rules; anything else in
+    the text (another stanza, a parameter constraint) fails."""
+    rules = {m[1]: sorted(c.strip().strip('"') for c in m[2].split(",") if c.strip()) for m in _RULE.finditer(hcl)}
+    assert _RULE.sub("", hcl).strip() == "", f"the policy holds more than path rules: {hcl!r}"
+    return rules
+
+
+def test_a25_the_proxy_policy_is_exactly_kv_read_and_transit_verify_update(openbao):
+    """The proxy policy, as the product writes it and as OpenBao stores and reads it back, is exactly: `read` on the
+    credential KV's data and `update` on `transit/verify/request-token-*`, nothing else (no delete, destroy, list, export,
+    sign, metadata or key rule). A25 ('reads the credential KV and may `update` `transit/verify/request-token-*`')."""
+    kv, m = openbao.kv_mount, openbao.transit_mount
+    expected = {f"{kv}/data/*": ["read"], f"{m}/verify/request-token-*": ["update"]}
+    made = proxy().store_policies(kv_mount=kv)["proxy"]
+    stored = openbao.ok("GET", f"sys/policies/acl/{openbao.apply_policy('proxy', made)}")["data"]["policy"]
+    assert _rules_of(made) == expected
+    assert _rules_of(stored) == expected, "what OpenBao stored is not the exact policy"
+    assert _rules_of("path \"x/*\" {\n  capabilities = [\"read\", \"update\"]\n}\n") == {"x/*": ["read", "update"]}, (
+        "positive control: the reader sees capabilities")
+    with pytest.raises(AssertionError):
+        _rules_of('path "x/*" {\n  capabilities = ["read"]\n  allowed_parameters = {}\n}\n')
 
 
 def test_a25_a_sign_login_signs_with_its_own_tenants_key_only(openbao):

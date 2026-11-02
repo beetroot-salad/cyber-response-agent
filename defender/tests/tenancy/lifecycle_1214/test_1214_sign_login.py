@@ -14,7 +14,7 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG, SIGN_POLICY, TOKEN_POLICY  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._job_cases import openbao_failing  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot, jwts, openbao_failing  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld, lifecycle_config  # noqa: E402
 
 PROBE = "cHJvYmU="
@@ -382,7 +382,8 @@ def test_offboarding_a_tenant_recorded_before_r8_sends_nothing_for_a_missing_sig
 
 def _seed_pending_before_r8(world, kind: str, past: tuple[str, ...] = ()) -> tuple[str, Any]:
     """A `kind` job (create or rotate) with a pending generation as an older deployment recorded it: the real `names` step
-    and then the `past` steps run alone (no failure injected), then the sign names removed from the row and the sign
+    and then the `past` steps run alone (no failure injected), then, past `template` or in a rotation, `main`'s rule as
+    `main`'s `template` made it (merge whitelist off, no Owners team; pre-r8 rotation had no `protect`), then the sign names removed from the row and the sign
     chain (AppRole, entity, alias, key) from the twin, as the older code never made them. The job's next step is the one
     after the last of `past` (`provider` when none). Returns the tenant and the pending generation as seeded."""
     if kind == "create":
@@ -397,6 +398,9 @@ def _seed_pending_before_r8(world, kind: str, past: tuple[str, ...] = ()) -> tup
             for step in steps:
                 await world.service_actor.steps()[step](held)
     world.call(run, ("names", *past))
+    if kind == "rotate" or "template" in past:  # r8.6 A23: main's pre-r8 rule, which a pre-r8 job past `template` left
+        world.forge.put_rule(f"{ORG}/{tenant}", rule_name="main", branch_name="main", enable_push=False,
+                             enable_push_whitelist=False, enable_merge_whitelist=False, enable_force_push=False)
     pending = _row(world, tenant, "pending")
     bao = world.openbao
     if pending.sign_approle is not None:
@@ -441,11 +445,12 @@ class _LogsCommits:
 
 @pytest.mark.parametrize(("kind", "past"), [
     ("create", ()), ("create", ("provider", "repo")), ("create", ("provider", "repo", "bot", "integration", "template")),
-    ("rotate", ()), ("rotate", ("provider", "bot")), ("rotate", ("provider", "bot", "protect", "integration"))])
+    ("rotate", ()), ("rotate", ("provider", "bot", "protect")), ("rotate", ("provider", "bot", "protect", "integration"))])
 def test_a_pending_generation_recorded_before_r8_completes_with_its_sign_login(world, kind, past):
-    """A create or rotate job parked at any step from `provider` through `wrap` over a pending generation with no sign names
-    records them before any request makes the sign AppRole or entity, then completes with a working sign login and no failure
-    (r8.5 A24', P1: an in-flight job finishes normally)."""
+    """A create or rotate job parked at any step from `provider` through `wrap` (rotations at `provider`, `integration` and
+    `wrap`; the rule main's pre-r8 `template` made) over a pending generation with no sign names records them before any
+    request makes the sign AppRole or entity, then completes with a working sign login, a rule holding the invariant, a bot
+    that cannot merge and no failure (r8.5 A24', P1: an in-flight job finishes normally; r8.6 A23: the rule is healed before install)."""
     tenant, seeded = _seed_pending_before_r8(world, kind, past)
     assert (seeded.sign_approle, seeded.sign_entity, seeded.sign_role_id) == (None, None, None), "control: seeded without sign names"
     bao = world.openbao
@@ -481,3 +486,8 @@ def test_a_pending_generation_recorded_before_r8_completes_with_its_sign_login(w
     assert gen.sign_secret_file.read_text(encoding="utf-8") == bao.approles[gen.sign_approle][gen.sign_secret_accessor] + "\n"
     _delivery, sign = _pair(world, gen)
     assert _sign(world, sign, tenant) == 200
+    rule = world.forge.rule(f"{ORG}/{tenant}")
+    assert (rule["enable_push"], rule["enable_merge_whitelist"]) == (False, True), "the pre-r8 rule was healed before install"
+    assert "Owners" in rule["merge_whitelist_teams"] and not rule["merge_whitelist_usernames"]
+    view = as_bot(world, jwts(world, gen)[-1], f"repos/{ORG}/{tenant}/branches/main").json()
+    assert (view["user_can_push"], view["user_can_merge"]) == (False, False)

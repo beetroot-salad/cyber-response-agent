@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import itertools
+import json
 
 import pytest
 
@@ -224,6 +225,43 @@ def test_a_generation_recorded_at_the_tenancy_revision_reads_back_with_the_six_n
     cols = ", ".join(sorted(SIGN_COLUMNS))
     rows = execute(empty_database, f"SELECT bot_login, {cols} FROM tenancy.generations WHERE tenant_id = %s", (OTHER,))  # noqa: S608
     assert rows == [("bot-old", *([None] * 6))]
+
+
+@pytest.mark.postgres
+def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_six_null_columns(empty_database):
+    """Live, pending, retiring and destroyed generations (two tenants' rows) and the neighbouring tenancy tables' rows at
+    `0002_tenancy` are all there after the upgrade, every old column unchanged, the six new ones NULL (A24/r8.4: the
+    migration adds columns and removes nothing; r8.5: a pending generation survives to be completed)."""
+    from defender.migrations import upgrade
+
+    _upgrade_to(empty_database, TENANCY)
+    for tenant in (OTHER, THIRD):
+        fill_row(empty_database, "tenants", id=tenant, state="active")
+        fill_row(empty_database, "forge_wiring", tenant_id=tenant)
+        fill_row(empty_database, "publish_status", tenant_id=tenant)
+    for tenant, statuses in ((OTHER, ("live", "pending", "retiring", "destroyed")), (THIRD, ("live", "pending"))):
+        for status in statuses:
+            fill_row(empty_database, "generations", tenant_id=tenant, salt=f"{status}-1", status=status,
+                     bot_login=f"bot-{tenant}-{status}", role_id=f"role-{status}")
+
+    def rows() -> dict[str, list[dict[str, object]]]:
+        tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version"})
+        return {t: sorted((r[0] for r in execute(empty_database, f"SELECT to_jsonb(x) FROM tenancy.{t} x")),  # noqa: S608
+                          key=lambda row: json.dumps(row, sort_keys=True)) for t in tables}
+    before = rows()
+    assert {len(before[t]) for t in ("tenants", "forge_wiring", "publish_status")} == {2}, "control: the rows were seeded"
+    assert len(before["generations"]) == 6, "control: live and pending generations were seeded"
+    upgrade(empty_database)
+    after = rows()
+
+    assert after.keys() == before.keys()
+    for table, old in before.items():
+        new = after[table]
+        assert len(new) == len(old), f"{table}: rows lost by the upgrade"
+        if table == "generations":
+            assert all({k: row[k] for k in SIGN_COLUMNS} == dict.fromkeys(SIGN_COLUMNS) for row in new)
+            new = [{k: v for k, v in row.items() if k not in SIGN_COLUMNS} for row in new]
+        assert new == old, f"{table}: a row changed"
 
 
 @pytest.mark.postgres

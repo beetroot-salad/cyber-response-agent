@@ -22,6 +22,7 @@ import base64
 import contextlib
 import json
 import re
+import secrets
 from dataclasses import dataclass
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
@@ -115,12 +116,15 @@ class OpenBaoStandIn(httpx.MockTransport):
     and the housekeeping a client may plausibly use: `sys/health`, `sys/seal-status`, token
     `revoke-self`. Records every request path, login and sign; the signature carries
     `SIGNATURE_CANARY`. Decides nothing about which tenant's key a login may use: the test reads
-    `logins` and `signs`.
+    `logins` and `signs`. `origins` records each request's (scheme, host, port) beside `requests`' paths, so a test can hold
+    the address a client chose to the deployment's (`deployment_origin`); client tokens are random and share no prefix.
 
     `sealed` ("login" or "sign") answers 503 `Vault is sealed` on that call (and on health, which
     reports sealed); `unreachable` raises a connection error on every request; `login_status` and
     `sign_status` answer that status (an error body) on the login or the sign call; `malformed`
-    ("login" or "sign") answers that call 200 with a body lacking `auth.client_token` / `data.signature`."""
+    ("login" or "sign") answers that call 200 with a body lacking `auth.client_token` / `data.signature`; the sign call
+    may instead be `"sign-nonjson"` (a 200 whose body is not JSON), `"sign-empty"` (`data.signature` is "") or
+    `"sign-nonstring"` (`data.signature` is a number)."""
 
     def __init__(self, accounts: Mapping[str, str], *, sealed: str | None = None,
                  unreachable: bool = False, login_status: int | None = None,
@@ -133,6 +137,7 @@ class OpenBaoStandIn(httpx.MockTransport):
         self.login_status = login_status
         self.sign_status = sign_status
         self.requests: list[str] = []
+        self.origins: list[tuple[str, str, int | None]] = []
         self.logins: list[tuple[str, str]] = []
         self.signs: list[Sign] = []
         self.refused: list[str] = []
@@ -150,6 +155,12 @@ class OpenBaoStandIn(httpx.MockTransport):
             return httpx.Response(status, json={"errors": [f"{call} failed"]})
         if self.malformed == call:
             return httpx.Response(200, json={"auth": {"lease_duration": 600}} if call == "login" else {"data": {}})
+        if self.malformed == f"{call}-nonjson":
+            return httpx.Response(200, content=b"<html>not json</html>", headers={"Content-Type": "text/html"})
+        if self.malformed == f"{call}-empty":
+            return httpx.Response(200, json={"data": {"signature": ""}})
+        if self.malformed == f"{call}-nonstring":
+            return httpx.Response(200, json={"data": {"signature": 7}})
         return None
 
     def _housekeeping(self, request: httpx.Request) -> httpx.Response | None:
@@ -167,6 +178,7 @@ class OpenBaoStandIn(httpx.MockTransport):
     def _handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.requests.append(path)
+        self.origins.append((request.url.scheme, request.url.host, request.url.port))
         if self.unreachable:
             raise httpx.ConnectError("connection refused", request=request)
         housekeeping = self._housekeeping(request)
@@ -181,7 +193,7 @@ class OpenBaoStandIn(httpx.MockTransport):
             if self.accounts.get(body["role_id"]) != body["secret_id"]:
                 self.refused.append(path)
                 return httpx.Response(403, json={"errors": ["invalid credentials"]})
-            token = f"client-token-{len(self._tokens) + 1}"
+            token = secrets.token_urlsafe(24)
             self._tokens[token] = body["role_id"]
             return httpx.Response(200, json={"auth": {"client_token": token,
                                                       "lease_duration": 600}})
@@ -204,6 +216,14 @@ class OpenBaoStandIn(httpx.MockTransport):
     def role_of(self, sign: Sign) -> str:
         """The role whose login produced the client token `sign` used."""
         return self._tokens[sign.client_token]
+
+
+def deployment_origin() -> tuple[str, str, int | None]:
+    """The (scheme, host, port) of the deployment's OpenBao address (A1: the only address a signer may use)."""
+    from defender.configuration.issuer import DEPLOYMENT_ISSUER
+
+    url = httpx.URL(DEPLOYMENT_ISSUER.openbao_url)
+    return url.scheme, url.host, url.port
 
 
 def generation(  # noqa: PLR0913 — one keyword per field a test varies
