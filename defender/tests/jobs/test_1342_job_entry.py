@@ -594,6 +594,19 @@ def test_r6_6_a_tenant_folder_without_its_working_tree_is_accepted_by_the_job_en
     assert scene.job_end(run_id) == SETTLED
 
 
+def test_r6_6_the_tree_less_folder_is_refused_by_the_acceptance_that_wants_the_tree(scene):
+    """Control for the two tests around it: the same folder IS refused by `host_tenant(..., clone_tree=True)`, so `clone_tree=False` is what lets it through. (R6-6)"""
+    from defender import tenancy
+    from defender.records.formats import TenantRefused
+    from defender.run import DEFENDER_DIR
+    from defender.systems.run_tenant import host_tenant
+
+    _remove_working_tree(scene)
+
+    with pytest.raises(TenantRefused):
+        host_tenant(tenancy.resolve_data_root(), scene.t.tenant_id, defender_dir=DEFENDER_DIR, clone_tree=True)
+
+
 def test_r6_3_a_tenant_folder_without_its_working_tree_is_accepted_by_the_operator_run(scene, tmp_path):
     """The same folder, `run.main`: accepted, the run starts. (R6-3, R6-6: `main` and `job_main` pass the same acceptance arguments)"""
     _remove_working_tree(scene)
