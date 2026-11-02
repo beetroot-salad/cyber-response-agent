@@ -42,6 +42,8 @@ VULTURE_ARGS = [
     "--min-confidence", "60",
     "--exclude", "defender/.venv,defender/tests,defender/skills/invlang/schema.py",
     "--ignore-names", "key_field,key_value",
+    # pydantic calls its validators by decorator registration, never by name.
+    "--ignore-decorators", "@field_validator,@model_validator",
 ]
 
 # `path:lineno: message` — strip the lineno for a line-stable fingerprint.
