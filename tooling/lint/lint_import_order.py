@@ -238,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     gate_argv = ["--update-baseline"] if args.update_baseline else []
     status = gate(findings, args.baseline, gate_argv, label=LABEL, header=_HEADER,
                   require_reasons=True)
-    if args.update_baseline:
+    if args.update_baseline or status == 2:
         return status
     faults = _baseline_faults(findings, args.baseline)
     for line in faults:

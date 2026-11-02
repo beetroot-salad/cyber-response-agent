@@ -23,13 +23,12 @@ For each request (design "Proxy", in order, nothing sent or read before its chec
 8. audit, before answering: if the record cannot be written the answer is withheld (A13)."""
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import math
 import re
 import time
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -55,7 +54,7 @@ from defender.credential_proxy._credentials import (
     secret_values,
     static_headers,
 )
-from defender.credential_proxy._deadline import Deadline
+from defender.credential_proxy._deadline import Deadline, answering
 from defender.credential_proxy._openbao import OpenBaoStore, TransitVerifier
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, UPSTREAM, Refused
 from defender.credential_proxy._scope import Target, check_route, locate
@@ -107,6 +106,9 @@ class ProxyDeps:
     audit: AuditSink
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
     upstream_timeout_sec: float = DEFAULT_UPSTREAM_TIMEOUT_SEC
+    #: Seconds allowed on top of a request's timeout for the proxy's own calls (token check,
+    #: credential read); the shipped value is `PROXY_OVERHEAD_SEC`, which the caller's wait assumes.
+    proxy_overhead_sec: float = PROXY_OVERHEAD_SEC
 
     def __post_init__(self) -> None:
         if (isinstance(self.max_response_bytes, bool) or not isinstance(self.max_response_bytes, int)
@@ -114,6 +116,10 @@ class ProxyDeps:
             raise ConfigFault("max_response_bytes must be a positive whole number")
         if not self.upstream_timeout_sec > 0:
             raise ConfigFault("upstream_timeout_sec must be positive")
+        if not 0 < self.proxy_overhead_sec <= PROXY_OVERHEAD_SEC:
+            # the caller's wait assumes at most the shipped allowance (`caller_wait_sec`)
+            raise ConfigFault(f"proxy_overhead_sec must be positive and at most "
+                              f"{PROXY_OVERHEAD_SEC}")
 
 
 @dataclass(frozen=True)
@@ -152,8 +158,8 @@ def _refused_answer(fault: str, detail: str) -> dict[str, Any]:
 
 
 class _Proxy:
-    """The request pipeline over one `ProxyDeps`; holds the OAuth access tokens it obtains and
-    one pooled client for every upstream and token URL (each call sets its own timeout)."""
+    """The request pipeline over one `ProxyDeps`; holds the OAuth access tokens it obtains.
+    Every network leg runs under the request's deadline (`Deadline.run`), on its own client."""
 
     def __init__(self, deps: ProxyDeps) -> None:
         self.deps = deps
@@ -161,14 +167,15 @@ class _Proxy:
         # joined under it by tenancy, never spelled here.
         self._root = tenancy.data_root_from_path(deps.data_root)
         self.access_tokens = AccessTokens()
-        self.upstream = httpx.Client(follow_redirects=False, trust_env=False,
-                                     timeout=deps.upstream_timeout_sec)
 
-    def handle(self, authorization: str | None, raw: bytes | None) -> dict[str, Any]:
-        """The answer to one request, audited before it is returned (A13)."""
+    def handle(self, authorization: str | None, raw: bytes | None,
+               arrived: float | None = None) -> dict[str, Any]:
+        """The answer to one request, audited before it is returned (A13). `arrived` is when it
+        reached the proxy (monotonic), where its deadline starts (#1364); default now."""
         trail = _Trail()
         try:
-            answer = self._proxied(authorization, raw, trail)
+            answer = self._proxied(authorization, raw, trail,
+                                   time.monotonic() if arrived is None else arrived)
         except Refused as refused:
             answer = _refused_answer(refused.fault, refused.detail)
         except ConfigFault as fault:
@@ -189,13 +196,17 @@ class _Proxy:
         return answer
 
     def _proxied(self, authorization: str | None, raw: bytes | None,
-                 trail: _Trail) -> dict[str, Any]:
-        began = time.monotonic()
+                 trail: _Trail, began: float) -> dict[str, Any]:
         asked = _parse_request(raw)
         trail.system, trail.method = asked.system[:80], asked.method[:20]
         cap = self.deps.upstream_timeout_sec
         budget = cap if asked.timeout_sec is None else min(asked.timeout_sec, cap)
-        deadline = Deadline(began + budget + PROXY_OVERHEAD_SEC, per_wait=budget)
+        deadline = Deadline(began + budget + self.deps.proxy_overhead_sec, per_wait=budget)
+        with answering(deadline):
+            return self._within(authorization, asked, trail, deadline)
+
+    def _within(self, authorization: str | None, asked: _Asked, trail: _Trail,
+                deadline: Deadline) -> dict[str, Any]:
         claims = self._verified(authorization)
         trail.tenant, trail.investigation = claims.tenant, claims.investigation
         if not is_system_name(asked.system):
@@ -214,12 +225,11 @@ class _Proxy:
         if creds is None:
             raise Refused(CONFIG, f"no credential set is stored for {asked.system}")
         check_fit(declaration.auth, creds, asked.system)
-        client = self.upstream
         secrets = secret_values(creds)
         access_token = None
         if declaration.auth.scheme == OAUTH_CLIENT_CREDENTIALS:
-            access_token = self.access_tokens.token(client, claims.tenant, asked.system,
-                                                    declaration.auth, creds, deadline)
+            access_token = self.access_tokens.token(claims.tenant, asked.system, declaration,
+                                                    creds, deadline)
             secrets += (access_token,)
             headers["Authorization"] = f"Bearer {access_token}"
         else:
@@ -228,8 +238,7 @@ class _Proxy:
             # an upstream that echoes a Basic header back must not hand over its encoded form
             secrets += tuple(v.removeprefix("Basic ") for v in injected.values()
                              if v.startswith("Basic "))
-        answer = self._sent(client, asked, target, headers, secrets, trail,
-                            deadline.wait(f"calling {asked.system}"), deadline)
+        answer = self._sent(asked, target, headers, secrets, trail, deadline)
         if answer["status"] == 401 and access_token is not None:
             self.access_tokens.evict(claims.tenant, asked.system, access_token)
         return answer
@@ -264,24 +273,28 @@ class _Proxy:
             _logger.warning("tenant %s: %s", tenant_id, refused)
             raise Refused(CONFIG, f"tenant {tenant_id} has no published export to apply") from None
 
-    def _sent(self, client: httpx.Client, asked: _Asked, target: Target,  # noqa: PLR0913 — one call's state
+    def _sent(self, asked: _Asked, target: Target,  # noqa: PLR0913 — one call's state
               headers: dict[str, str], secrets: tuple[str, ...],
-              trail: _Trail, timeout: float, deadline: Deadline) -> dict[str, Any]:
+              trail: _Trail, deadline: Deadline) -> dict[str, Any]:
         cap = self.deps.max_response_bytes
         content = asked.body.encode("utf-8") if asked.body is not None else None
-        try:
-            with client.stream(asked.method, target.url, headers=headers,
-                               content=content, timeout=timeout) as reply:
-                status = reply.status_code
-                trail.outcome = f"sent {status}"
-                reply_headers = reply.headers.multi_items()
-                data, over = bytearray(), False
-                for chunk in reply.iter_bytes():
-                    deadline.left(f"{asked.system} finished answering")
+        what = f"calling {asked.system}"
+        timeout = deadline.wait(what)
+
+        async def leg() -> tuple[int, list[tuple[str, str]], bytes, bool]:
+            async with httpx.AsyncClient(follow_redirects=False, trust_env=False) as client, \
+                    client.stream(asked.method, target.url, headers=headers, content=content,
+                                  timeout=timeout) as reply:
+                trail.outcome = f"sent {reply.status_code}"
+                data = bytearray()
+                async for chunk in reply.aiter_bytes():
                     data += chunk
                     if len(data) > cap:
-                        over = True
-                        break
+                        return reply.status_code, [], b"", True
+                return reply.status_code, reply.headers.multi_items(), bytes(data), False
+
+        try:
+            status, reply_headers, data, over = deadline.run(what, leg)
         except httpx.TransportError as e:
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
                                      f"({type(e).__name__})") from None
@@ -299,7 +312,7 @@ class _Proxy:
             name, value = scrub_secrets(name, secrets), scrub_secrets(value, secrets)
             shown[name] = f"{shown[name]}, {value}" if name in shown else value
         return {"status": status, "headers": shown,
-                "body": scrub_secret_bytes(bytes(data), secrets).decode("utf-8", "replace"),
+                "body": scrub_secret_bytes(data, secrets).decode("utf-8", "replace"),
                 "fault": fault,
                 "detail": None if fault is None else f"{asked.system} answered {status}"}
 
@@ -388,18 +401,16 @@ def create_app(deps: ProxyDeps) -> FastAPI:  # lint-dup: ok — the proxy's own 
     """The proxy as an ASGI app over `deps`."""
     proxy = _Proxy(deps)
 
-    @contextlib.asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        yield
-        proxy.upstream.close()
-
     app = FastAPI(title="defender credential proxy", docs_url=None, redoc_url=None,
-                  openapi_url=None, lifespan=lifespan)
+                  openapi_url=None)
 
     async def proxy_request(request: Request) -> JSONResponse:
+        # The deadline runs from here: reading the body and waiting for a worker thread count
+        # against it, as they count against the caller's wait (#1364).
+        arrived = time.monotonic()
         raw = await _body_of(request)
         answer = await run_in_threadpool(proxy.handle, request.headers.get("authorization"),
-                                         raw)
+                                         raw, arrived)
         return JSONResponse(answer)
 
     app.add_api_route(PROXY_PATH, proxy_request, methods=["POST"])

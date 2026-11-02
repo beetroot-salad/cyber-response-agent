@@ -43,7 +43,9 @@ as the tenant's own sign-only AppRole, and publish now also refuses a repository
 1. Run migrations (revision `0003_sign_login` adds the generation's sign-login columns; every
    entry point refuses a database still at `0002_tenancy`). Mount transit at `transit/`.
 2. Extend the lifecycle's management policy with create, read, update and delete on
-   `transit/keys/request-token-*`.
+   `transit/keys/request-token-*`. If that policy names AppRoles by prefix (for example
+   `auth/approle/role/delivery-*`), give the new sign-only AppRoles `auth/approle/role/sign-*`
+   the same capabilities; their entities, `tenant-<T>-<salt>-sign`, already match `tenant-*`.
 3. Create the policy `defender-tenant-sign`: `update` on
    `transit/sign/request-token-{{identity.entity.metadata.tenant_id}}`.
 4. Set the proxy's policy to KV read plus `update` on `transit/verify/request-token-*`, and

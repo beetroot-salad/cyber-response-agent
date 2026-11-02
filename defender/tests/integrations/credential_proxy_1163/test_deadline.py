@@ -3,8 +3,12 @@ request inside one deadline built from it, and the caller waits past that deadli
 has given up before the caller does."""
 from __future__ import annotations
 
+import contextlib
 import json
+import socket
+import threading
 import time
+from collections.abc import Callable, Iterator
 
 import pytest
 
@@ -13,7 +17,7 @@ from defender.kit.faults import TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
-from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH
+from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH, proxy
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
 API = T.BASE_PATH
@@ -117,3 +121,218 @@ def test_t21_the_systems_timeout_bounds_the_token_exchange_too(tmp_path, data_ro
     assert answer["fault"] == "TransportFault", answer
     assert took < SLOW_SEC - 0.5, took
     assert r.up.seen == []
+
+
+# --- #1364 O1: the proxy answers every request by its deadline -------------------------------
+
+#: The proxy's own allowance in these tests, and the answer's slack past the deadline (O1).
+OVERHEAD_SEC = 0.5
+SLACK_SEC = 1.0
+#: A reply trickled in pieces this far apart: no single wait reaches the 1 s timeout, but the
+#: whole reply takes far longer than any deadline used here.
+TRICKLE_GAP_SEC = 0.6
+TRICKLE_PIECES = 10
+
+
+@contextlib.contextmanager
+def _trickler(body: bytes = b"{}") -> Iterator[str]:
+    """A loopback HTTP server that answers every request 200 with `body`, sending its status
+    line, then one header line every `TRICKLE_GAP_SEC`. Yields its base URL."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    stop = threading.Event()
+
+    def one(conn: socket.socket) -> None:
+        with conn:
+            try:
+                conn.recv(65536)
+                pieces = [b"HTTP/1.1 200 OK\r\n"] + [b"X-Slow: %d\r\n" % i for i in range(TRICKLE_PIECES)]
+                pieces.append(b"Content-Type: application/json\r\nContent-Length: %d\r\n\r\n%s"
+                              % (len(body), body))
+                for piece in pieces:
+                    if stop.wait(TRICKLE_GAP_SEC):
+                        return
+                    conn.sendall(piece)
+            except OSError:
+                return
+
+    def serve() -> None:
+        while not stop.is_set():
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=one, args=(conn,), daemon=True).start()
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.getsockname()[1]}"
+    finally:
+        stop.set()
+        srv.close()
+
+
+def _on_time(answer: dict, took: float, timeout: float = 1.0) -> None:
+    """O1: a `TransportFault` that says the request ran out of time, by deadline + slack."""
+    assert answer["fault"] == "TransportFault", answer
+    assert "ran out of time" in (answer["detail"] or ""), answer
+    assert took < timeout + OVERHEAD_SEC + SLACK_SEC, took
+
+
+def _timed(ask: Callable[[], dict]) -> tuple[dict, float]:
+    began = time.monotonic()
+    answer = ask()
+    return answer, time.monotonic() - began
+
+
+def test_o1_an_upstream_trickling_its_reply_is_cut_at_the_deadline(tmp_path, data_root):
+    """#1364 O1: an upstream whose reply arrives in pieces, none of them later than the system's
+    timeout, is cut at the request's deadline, not held for the whole reply."""
+    with _trickler() as slow, T.rig(tmp_path / "forge", data_root, lambda _u: H.declaration(
+            slow + API), proxy_overhead_sec=OVERHEAD_SEC) as r:
+        answer, took = _timed(lambda: r.ask(url=f"{slow}{API}/users/x", timeout_sec=1))
+
+    _on_time(answer, took)
+
+
+def test_o1_a_token_endpoint_trickling_its_reply_is_cut_at_the_deadline(tmp_path, data_root):
+    """#1364 O1: the OAuth token exchange runs under the same deadline as the upstream call."""
+    with _trickler(json.dumps({"access_token": "AT", "expires_in": 3600}).encode()) as slow, \
+            T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+                u + API, scheme=H.oauth_scheme(slow + "/token")), creds=T.oauth_set(),
+                proxy_overhead_sec=OVERHEAD_SEC) as r:
+        answer, took = _timed(lambda: r.ask(timeout_sec=1))
+
+    _on_time(answer, took)
+    assert r.up.seen == []
+
+
+_KV_REPLY = json.dumps({"data": {"data": {"kind": "static", "fields": {"api_key": H.CANARY_KEY}},
+                                 "metadata": {"version": 1}}}).encode()
+_VERIFY_REPLY = json.dumps({"data": {"valid": True}}).encode()
+
+
+@pytest.mark.parametrize("slow_call", ["token verify", "credential read"])
+def test_o1_a_slow_openbao_is_cut_at_the_deadline(tmp_path, data_root, slow_call):
+    """#1364 O1: the proxy's own OpenBao calls (checking the request token, reading the
+    credential set) come under the request's deadline too, so a slow OpenBao cannot hold the
+    proxy past the caller's wait."""
+    openbao = proxy()
+    reply = _VERIFY_REPLY if slow_call == "token verify" else _KV_REPLY
+    with _trickler(reply) as slow, T.rig(tmp_path / "forge", data_root) as r:
+        store = (openbao.OpenBaoStore(addr=slow, token="t", mount="secret")
+                 if slow_call == "credential read" else r.store)
+        verifier = (openbao.TransitVerifier(addr=slow, token="t")
+                    if slow_call == "token verify" else r.verifier)
+        client = T.client_of(T.deps(r.data_root, store, verifier=verifier, audit=r.audit,
+                                    proxy_overhead_sec=OVERHEAD_SEC))
+        answer, took = _timed(lambda: T.ask(client, r.tok(), "identity", "GET",
+                                            f"{r.up.url}{API}/users/x", None, None, 1))
+
+    _on_time(answer, took)
+    assert r.up.seen == []
+
+
+def test_o1_a_request_waiting_on_another_requests_exchange_answers_by_its_own_deadline(
+        tmp_path, data_root):
+    """#1364 O1: requests for one system take turns at the token exchange. A request queued
+    behind a slow exchange answers by its own deadline, not when the other exchange ends."""
+    issued: list[str] = []
+    exchanging = threading.Event()
+
+    def slow_token(seen):
+        exchanging.set()
+        time.sleep(2.5)
+        return H.token_endpoint(issued)(seen)
+
+    with H.upstream() as auth:
+        auth.replies["/token"] = slow_token
+        with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+                u + API, scheme=H.oauth_scheme(auth.url + "/token")), creds=T.oauth_set(),
+                proxy_overhead_sec=OVERHEAD_SEC) as r:
+            tok = r.tok()
+            first: list[dict] = []
+            holder = threading.Thread(target=lambda: first.append(r.ask(tok=tok, timeout_sec=5)))
+            holder.start()
+            assert exchanging.wait(5)
+            answer, took = _timed(lambda: r.ask(tok=tok, timeout_sec=0.3))
+            holder.join(10)
+
+    _on_time(answer, took, timeout=0.3)
+    assert len(first) == 1, first
+    assert first[0]["fault"] is None, first
+    assert issued == ["AT-1-canary-1163"], issued
+
+
+def test_o1_the_caller_waits_out_the_deadline_plus_a_grace_and_no_more():
+    """#1364 O1: with the deadline absolute, the caller's wait is the proxy's deadline plus a
+    grace longer than the proxy's slack; it no longer adds a second timeout."""
+    from defender.kit import access
+
+    graces = {access.caller_wait_sec(t) - t - access.PROXY_OVERHEAD_SEC for t in (1, 10, 30)}
+    assert len(graces) == 1, f"the wait past the deadline grows with the timeout: {graces}"
+    grace = graces.pop()
+    assert SLACK_SEC < grace <= 10, grace
+
+
+def test_o1_openbao_gets_the_proxys_own_allowance_not_the_systems_timeout(tmp_path, data_root):
+    """#1364 review: the proxy's OpenBao calls are bounded by the request's deadline, which
+    carries the proxy's own allowance; the upstream system's short timeout does not cap them.
+    An OpenBao answering in 1.5 s serves a request whose system timeout is 1 s."""
+    def slow_kv(_seen):
+        time.sleep(1.5)
+        return 200, {"Content-Type": "application/json"}, _KV_REPLY
+
+    with H.upstream() as openbao, T.rig(tmp_path / "forge", data_root) as r:
+        openbao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity"] = slow_kv
+        store = proxy().OpenBaoStore(addr=openbao.url, token="t", mount="secret")
+        client = T.client_of(T.deps(r.data_root, store, verifier=r.verifier, audit=r.audit))
+        answer = T.ask(client, r.tok(), "identity", "GET", f"{r.up.url}{API}/users/x",
+                       None, None, 1)
+
+    assert answer["fault"] is None, answer
+    assert len(openbao.seen) == 1
+    assert r.up.paths() == [f"{API}/users/x"]
+
+
+def test_o1_the_deadline_runs_from_when_the_request_arrives(tmp_path, data_root):
+    """#1364 review: the proxy's deadline starts when the request reaches it, not when a worker
+    thread picks it up after the body is in, so time spent before the proxy starts working
+    (queued for a thread, or here a body that arrives late) counts against the proxy's deadline
+    as it counts against the caller's wait. A request whose body arrives after the deadline is
+    answered as out of time, unsent."""
+    with T.rig(tmp_path / "forge", data_root) as r, \
+            A.proxy_for(r.t, r.store, proxy_overhead_sec=OVERHEAD_SEC) as (url, _tap):
+        body = json.dumps({"system": "identity", "method": "GET",
+                           "url": f"{r.up.url}{API}/users/x", "headers": {}, "body": None,
+                           "timeout_sec": 1}).encode()
+        host, port = url.removeprefix("http://").split(":")
+        with socket.create_connection((host, int(port)), timeout=10) as conn:
+            conn.sendall(b"POST %s HTTP/1.1\r\nHost: proxy\r\nAuthorization: Bearer %s\r\n"
+                         b"Content-Type: application/json\r\nContent-Length: %d\r\n"
+                         b"Connection: close\r\n\r\n"
+                         % (PROXY_PATH.encode(), r.tok().encode(), len(body)))
+            time.sleep(1 + OVERHEAD_SEC + 0.3)
+            conn.sendall(body)
+            raw = b""
+            while chunk := conn.recv(65536):
+                raw += chunk
+        answer = json.loads(raw.split(b"\r\n\r\n", 1)[1])
+
+    assert answer["fault"] == "TransportFault", answer
+    assert "ran out of time" in (answer["detail"] or ""), answer
+    assert r.up.seen == []
+
+
+@pytest.mark.parametrize("overhead", [0, -1, 20.5, 60])
+def test_o1_the_proxys_allowance_cannot_exceed_what_the_caller_waits_for(tmp_path, overhead):
+    """#1364 review: the caller's wait assumes the shipped allowance, so a proxy built with more
+    (or with none) is refused at construction, not discovered as a caller timing out first."""
+    from defender.kit import access
+    from defender.kit.faults import ConfigFault
+
+    assert access.PROXY_OVERHEAD_SEC == 20, "the cases above straddle the shipped allowance"
+    with pytest.raises(ConfigFault):
+        T.deps(tmp_path, H.FakeStore(), proxy_overhead_sec=overhead)
+    T.deps(tmp_path, H.FakeStore(), proxy_overhead_sec=access.PROXY_OVERHEAD_SEC)
