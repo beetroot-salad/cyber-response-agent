@@ -44,7 +44,6 @@ ROW_PATH_PROPERTY = "row_path"
 REQUIRED_SETTINGS = (
     "verb-grants.yaml",
     "lead-zero.yaml",
-    "systems/case-history/mapping.yaml",
 )
 
 #: The per-tenant id file, relative to `knowledge/`.

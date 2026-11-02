@@ -165,13 +165,13 @@ def test_a_required_file_linked_to_another_tenants_copy_is_refused(tmp_path, lin
 
 def test_a_linked_directory_on_the_way_to_a_required_file_is_refused(tmp_path):
     """`settings/systems -> bravo's settings/systems`: no required file is itself a link, but
-    the mapping reached through it is bravo's."""
+    the config reached through it is bravo's."""
     root = tmp_path / "tenants"
     a = T.place_tenant(root, fixture_uuid("tenant:acme"))
     b = T.place_tenant(root, fixture_uuid("tenant:bravo"))
     systems = a / "settings" / "systems"
     _swap_for_link(systems, Path(os.path.relpath(b / "settings" / "systems", systems.parent)))
-    assert (systems / "case-history" / "mapping.yaml").is_file(), \
+    assert (systems / "elastic" / "config.env").is_file(), \
         "the link must be a working one for the refusal to mean anything"
     message = _refusal(root, fixture_uuid("tenant:acme"))
     assert str(systems) in message, message

@@ -561,7 +561,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     """A set-up tenant under `root` (default: this test's data root, which `run.main` resolves
     from the environment). `alert_mapping` is a dict (written by `alert_mapping_text`), raw text
     (written verbatim — for a malformed file), or None (NOT written: the missing-file shape).
-    `case_mapping` defaults to `case_mapping_text()` (no top-level `source:`). `lead_zero`
+    `case_mapping` is the RETIRED `systems/case-history/mapping.yaml` (#1359), written only when given (a legacy tenant); by default the tenant has none. `lead_zero`
     defaults to the template the table's correlation holder needs. `omit_systems` drops those
     systems' `config.env` (an unconfigured system). `lessons` plants files (name -> text) in the
     tenant's own `agent/lessons/` (the checkout holds no corpus)."""
@@ -569,14 +569,19 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     if lead_zero is None:
         lead_zero = LEAD_ZERO_NON_ELASTIC if table is TABLE_NON_ELASTIC else LEAD_ZERO_ELASTIC
     texts = dict(configs) if configs is not None else T6.config_texts(tenant_id)
+    if case_mapping is None:
+        texts.pop("case-history", None)  # #1359: a tenant needs no case-history system
     for system in omit_systems:
         texts.pop(system, None)
     knowledge = T6.place_tenant(root, tenant_id, table=table, lead_zero=lead_zero,
                                 configs=texts)
     planted = Planted(root=root, tenant_id=tenant_id, knowledge=knowledge)
     (root / tenant_id / "learning").mkdir(exist_ok=True)  # setup provisions mutable state
-    planted.case_mapping.write_text(
-        case_mapping if case_mapping is not None else case_mapping_text(), encoding="utf-8")
+    legacy = planted.case_mapping.parent
+    if case_mapping is not None:  # a legacy tenant (#1359): the retired folder, only when asked for
+        planted.case_mapping.write_text(case_mapping, encoding="utf-8")
+    elif legacy.is_dir():
+        shutil.rmtree(legacy)
     if isinstance(alert_mapping, str):
         planted.alert_mapping.write_text(alert_mapping, encoding="utf-8")
     elif alert_mapping is not None:

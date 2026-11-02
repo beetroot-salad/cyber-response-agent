@@ -153,16 +153,24 @@ def _landed(record: Any, system: str, family: Family) -> bool:
         return family.key not in entry
     return entry.get(family.key) == family.value
 
+#: The ready-made case-comment adapters (#1359 r4): in every checkout roster, with `VERBS = {}`.
+NO_AGENT_ACTIONS = {"jira", "servicenow"}
+
 
 def test_o5_every_roster_adapter_declares_a_settings_check(checkout_roster):
     systems = set(checkout_roster.accepted)
     assert len(systems) >= 8, f"precondition: the roster was read: {sorted(systems)}"
-    assert systems == set(FAULTS), (
+    # #1359 r4: the ready-made case adapters have no agent actions, so no verb can raise a ConfigFault
+    # to hold their check to: they are judged by the check declaration alone (and by slice C's tests).
+    assert checkout_roster.declared_verbs("jira") == frozenset(), "jira offers the agent nothing"
+    assert checkout_roster.declared_verbs("servicenow") == frozenset(), "servicenow offers the agent nothing"
+    assert systems - NO_AGENT_ACTIONS == set(FAULTS), (
         f"the roster and this contract's fault table disagree — roster only: "
         f"{sorted(systems - set(FAULTS))}, table only: {sorted(set(FAULTS) - systems)} (a new "
         "adapter needs its fault families listed here)")
     undeclared = [s for s in sorted(systems)
                   if not callable(getattr(_adapter(checkout_roster, s), CHECK, None))]
+    assert (systems >= NO_AGENT_ACTIONS), f"the checkout roster lacks {sorted(NO_AGENT_ACTIONS - systems)}"
     assert undeclared == [], f"adapters that declare no `{CHECK}`: {undeclared}"
 
 

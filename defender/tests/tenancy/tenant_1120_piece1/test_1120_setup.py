@@ -325,13 +325,6 @@ def _first_unparseable_lead_zero(root: Path, tmp: Path) -> Path:
     return path
 
 
-def _first_unparseable_mapping(root: Path, tmp: Path) -> Path:
-    H.place_knowledge(root)
-    path = H.settings_dir(root) / "systems" / "case-history" / "mapping.yaml"
-    path.write_text("fields: {unclosed: [\n", encoding="utf-8")
-    return path
-
-
 FIRST_RUN_FAULTS = [
     pytest.param(_first_knowledge_symlink, id="knowledge_dir:symlink"),
     pytest.param(_first_knowledge_file, id="knowledge_dir:file"),
@@ -339,7 +332,6 @@ FIRST_RUN_FAULTS = [
     pytest.param(_first_hardlink_in_agent, id="agent_half:hardlink-inside"),
     pytest.param(_first_fifo_in_settings, id="settings_half:non-regular-entry:fifo"),
     pytest.param(_first_unparseable_lead_zero, id="tables-load:lead-zero.yaml"),
-    pytest.param(_first_unparseable_mapping, id="tables-load:mapping.yaml"),
 ]
 
 
@@ -350,8 +342,7 @@ def test_1214_acceptance_of_a_never_accepted_folder_applies_every_folder_rule(tm
     named = plant(root, tmp_path)
     before = H.tree_census(root)
     text = H.accept_refusal(_tenant, root)
-    # The case-history mapping's refusal names the file relative to settings/, never the host path.
-    needle = "systems/case-history/mapping.yaml" if named.name == "mapping.yaml" else str(named)
+    needle = str(named)
     assert needle in text, f"the refusal does not name {needle!r}: {text!r}"
     assert H.census_diff(before, H.tree_census(root)) == [], "the refused acceptance wrote something"
 
