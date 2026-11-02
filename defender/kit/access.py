@@ -11,17 +11,17 @@ from dataclasses import dataclass, field
 PROXY_URL_ENV = "DEFENDER_CREDENTIAL_PROXY_URL"
 
 #: Seconds the credential proxy allows for its own calls (token check, credential read) on top of
-#: a request's timeout, and the seconds a caller waits past the proxy's latest answer (r7 A21):
-#: the proxy has given up before its caller does.
+#: a request's timeout, and the seconds a caller waits past the proxy's deadline (r7 A21, #1364
+#: O1): the proxy answers by its deadline, so it has given up before its caller does.
 PROXY_OVERHEAD_SEC = 20
 CALLER_GRACE_SEC = 5
 
 
 def caller_wait_sec(timeout_sec: float) -> float:
     """How long a caller waits for the proxy's answer to a request with `timeout_sec`: the
-    proxy's deadline (`timeout_sec` + `PROXY_OVERHEAD_SEC`), one network wait the proxy began
-    before it (at most `timeout_sec`), and `CALLER_GRACE_SEC`."""
-    return 2 * timeout_sec + PROXY_OVERHEAD_SEC + CALLER_GRACE_SEC
+    proxy's deadline (`timeout_sec` + `PROXY_OVERHEAD_SEC`), which it answers by, and
+    `CALLER_GRACE_SEC`."""
+    return timeout_sec + PROXY_OVERHEAD_SEC + CALLER_GRACE_SEC
 
 #: The access method (D2) of a system reached through the credential proxy.
 HTTP_PROXY = "http-proxy"

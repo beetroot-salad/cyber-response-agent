@@ -29,6 +29,7 @@ from defender.kit.access import CREDENTIAL_KINDS
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.kit.verbs import is_system_name
 from defender.credential_proxy._credentials import CredentialSet
+from defender.credential_proxy._deadline import current as current_deadline
 
 #: How long one call to OpenBao may take, in seconds.
 OPENBAO_TIMEOUT_SEC = 10.0
@@ -98,6 +99,7 @@ class _OpenBao:
         self.addr = addr.rstrip("/")
         self.mount = _check_name(mount, "the mount")
         self._token = token
+        self._transport = transport
         #: One pooled connection for this login's calls, not a new one per call.
         self._client = internal_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert, transport=transport,
                                        timeout=OPENBAO_TIMEOUT_SEC)
@@ -114,9 +116,25 @@ class _OpenBao:
         return {"X-Vault-Token": self._token}
 
     def _call(self, method: str, rest: str, what: str, json: Any = None) -> httpx.Response:
+        """One synchronous call; inside a proxied request, it runs under that request's deadline
+        (#1364 O1), so a slow OpenBao cannot hold the proxy past it."""
+        deadline = current_deadline()
         try:
-            return self._client.request(method, self._url(rest), json=json,
-                                        headers=self._headers())
+            if deadline is None:
+                return self._client.request(method, self._url(rest), json=json,
+                                            headers=self._headers())
+            timeout = min(OPENBAO_TIMEOUT_SEC, deadline.wait(what))
+
+            async def leg() -> httpx.Response:
+                async with internal_async_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert,
+                                                 transport=self._transport,  # type: ignore[arg-type]  # a test's MockTransport serves both
+                                                 timeout=timeout) as client:
+                    reply = await client.request(method, self._url(rest), json=json,
+                                                 headers=self._headers())
+                    await reply.aread()
+                    return reply
+
+            return deadline.run(what, leg)
         except httpx.HTTPError as e:
             raise TransportFault(f"OpenBao at {self.addr} is unreachable for {what} "
                                  f"({type(e).__name__})") from None

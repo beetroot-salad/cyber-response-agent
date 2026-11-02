@@ -9,6 +9,7 @@ digest of the auth block); a token is reused only while it is unexpired by a mar
 from __future__ import annotations
 
 import base64
+import dataclasses
 import hashlib
 import json
 import threading
@@ -28,6 +29,7 @@ from defender.kit.access import (
     HEADER,
     PASSWORD,
     USERNAME,
+    AccessDeclaration,
     Auth,
     secret_fields,
 )
@@ -129,15 +131,18 @@ class _Held:
     good_until: float
 
 
-def _auth_digest(auth: Auth) -> str:
-    block = [auth.token_url, list(auth.scopes)]
-    return hashlib.sha256(json.dumps(block).encode("utf-8")).hexdigest()
+def _declaration_digest(declaration: AccessDeclaration) -> str:
+    """The whole parsed declaration (#1364 O2): any change to it is a change, a reformatted
+    export is not."""
+    canonical = json.dumps(dataclasses.asdict(declaration), sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class AccessTokens:
     """OAuth access tokens held in memory per (tenant, system), each under the set version and
-    the auth block it was issued for (A8). A changed version or block, or a token within
-    `REFRESH_MARGIN_SEC` of expiry, means a fresh exchange; one at a time per system."""
+    the whole declaration it was issued for (A8, #1364 O2). A changed version or declaration, or a
+    token within `REFRESH_MARGIN_SEC` of expiry, means a fresh exchange; one at a time per system,
+    a request waiting its turn no longer than its own deadline (#1364 O1)."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -151,23 +156,29 @@ class AccessTokens:
         with self._lock:
             return self._gates.setdefault(key, threading.Lock())
 
-    def token(self, client: httpx.Client, tenant_id: str, system: str, auth: Auth,  # noqa: PLR0913 — one exchange's inputs
+    def token(self, tenant_id: str, system: str, declaration: AccessDeclaration,
               creds: CredentialSet, deadline: Deadline) -> str:
-        """An access token for `creds` under `auth`: the held one if still good, else a new
-        exchange (whose failure is `Refused`, never retried)."""
-        key, digest = (tenant_id, system), _auth_digest(auth)
-        with self._gate(key):
+        """An access token for `creds` under `declaration`'s auth: the held one if still good,
+        else a new exchange (whose failure is `Refused`, never retried)."""
+        key, digest = (tenant_id, system), _declaration_digest(declaration)
+        what = f"the token exchange of {system}"
+        gate = self._gate(key)
+        if not gate.acquire(timeout=deadline.left(what)):
+            raise Refused(TRANSPORT, f"the request ran out of time waiting for {what}")
+        try:
             held = self._held.get(key)
             if (held is not None and (held.version, held.digest) == (creds.version, digest)
                     and time.monotonic() < held.good_until):
                 return held.token
             self._held.pop(key, None)
             asked_at = time.monotonic()
-            token, lifetime = _token_exchange(client, auth, creds, system, deadline)
+            token, lifetime = _token_exchange(declaration.auth, creds, system, deadline)
             if lifetime is not None and lifetime > REFRESH_MARGIN_SEC:
                 self._held[key] = _Held(creds.version, digest, token,
                                         asked_at + lifetime - REFRESH_MARGIN_SEC)
             return token
+        finally:
+            gate.release()
 
     def evict(self, tenant_id: str, system: str, token: str) -> None:
         """Drop the held token for (tenant, system) if it is `token` (the upstream refused it)."""
@@ -178,8 +189,8 @@ class AccessTokens:
                 del self._held[key]
 
 
-def _token_exchange(client: httpx.Client, auth: Auth, creds: CredentialSet,
-                    system: str, deadline: Deadline) -> tuple[str, int | None]:
+def _token_exchange(auth: Auth, creds: CredentialSet, system: str,
+                    deadline: Deadline) -> tuple[str, int | None]:
     """One client-credentials exchange at the declared token URL (A12): the access token and
     its stated lifetime in seconds (None: not stated, so it is not reused). The client secret
     goes in Basic auth (RFC 6749 2.3.1) and only here."""
@@ -192,17 +203,22 @@ def _token_exchange(client: httpx.Client, auth: Auth, creds: CredentialSet,
     headers = {"Authorization": f"Basic {base64.b64encode(packed).decode('ascii')}",
                "Accept": "application/json"}
     what = f"the token exchange of {system}"
-    try:
-        with client.stream("POST", str(auth.token_url), data=form, headers=headers,
-                           timeout=deadline.wait(what)) as reply:
-            status = reply.status_code
+    timeout = deadline.wait(what)
+
+    async def leg() -> tuple[int, bytes]:
+        async with httpx.AsyncClient(follow_redirects=False, trust_env=False) as client, \
+                client.stream("POST", str(auth.token_url), data=form, headers=headers,
+                              timeout=timeout) as reply:
             body = bytearray()
-            for chunk in reply.iter_bytes():
-                deadline.left(what)
+            async for chunk in reply.aiter_bytes():
                 body += chunk
                 if len(body) > TOKEN_REPLY_CAP:
                     raise Refused(CONFIG, f"the token endpoint of {system} answered more than "
                                           f"{TOKEN_REPLY_CAP} bytes")
+            return reply.status_code, bytes(body)
+
+    try:
+        status, body = deadline.run(what, leg)
     except httpx.TransportError as e:
         raise Refused(TRANSPORT, f"the token endpoint of {system} is unreachable "
                                  f"({type(e).__name__})") from None
@@ -213,7 +229,7 @@ def _token_exchange(client: httpx.Client, auth: Auth, creds: CredentialSet,
         raise Refused(TRANSPORT, f"the token endpoint of {system} answered {status}")
     if status != 200:
         raise Refused(CONFIG, f"the token endpoint of {system} refused the exchange ({status})")
-    return _issued(bytes(body), system)
+    return _issued(body, system)
 
 
 def _issued(body: bytes, system: str) -> tuple[str, int | None]:

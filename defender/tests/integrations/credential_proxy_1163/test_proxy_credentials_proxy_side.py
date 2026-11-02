@@ -12,9 +12,11 @@ import pytest
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
 from defender.tests.tenancy.tenant_1108_p4._support import OTHER_TENANT_ID, published_tenant
 
 BASE = T.BASE_PATH
+ACCESS = ACCESS_FILE.format(system="identity")
 SECRET_A = "canary-client-secret-1163-tenant-a"
 SECRET_B = "canary-client-secret-1163-tenant-b"
 
@@ -122,6 +124,56 @@ def test_c3_an_access_token_whose_stated_life_is_over_is_exchanged_again(
     assert issued == ["AT-1-canary-1163", "AT-2-canary-1163"], issued
     assert [s.header("Authorization") for s in seen] == [
         f"Bearer {issued[0]}", f"Bearer {issued[0]}", f"Bearer {issued[1]}"]
+
+
+@pytest.mark.parametrize(("change", "after_path"), [
+    pytest.param(lambda up, tok_url: H.declaration(up + "/api/v3", scheme=H.oauth_scheme(tok_url)),
+                 "/api/v3/users/x", id="base-moved"),
+    pytest.param(lambda up, tok_url: H.declaration(up + BASE, scheme=H.oauth_scheme(tok_url),
+                                                   reads=(("POST", "/search"),)),
+                 f"{BASE}/users/x", id="routes-only"),
+])
+def test_c3_a_changed_declaration_gets_a_fresh_access_token(tmp_path, data_root, change, after_path):
+    """#1364 O2: a held access token is reused only under the declaration it was obtained for.
+    The tenant publishes a change to the system's declaration that leaves the token URL, scopes
+    and credential set alone; the next request exchanges afresh and sends the new token, never
+    the old one."""
+    issued: list[str] = []
+    with H.upstream() as auth:
+        auth.replies["/token"] = H.token_endpoint(issued)
+        tok_url = auth.url + "/token"
+        with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+                u + BASE, scheme=H.oauth_scheme(tok_url)), creds=T.oauth_set()) as r:
+            tok = r.tok()
+            assert r.ask(tok=tok)["fault"] is None
+            r.t.merge({ACCESS: change(r.up.url, tok_url)}, "change the declaration")
+            r.t.publish()
+            after = r.ask(tok=tok, url=r.up.url + after_path)
+
+    assert after["fault"] is None, after
+    assert issued == ["AT-1-canary-1163", "AT-2-canary-1163"], issued
+    assert [(s.path, s.header("Authorization")) for s in r.up.seen] == [
+        (f"{BASE}/users/x", f"Bearer {issued[0]}"), (after_path, f"Bearer {issued[1]}")]
+
+
+def test_c3_republishing_an_unchanged_declaration_keeps_the_access_token(tmp_path, data_root):
+    """#1364 O2 control: a new export whose declaration means the same (reformatted only) does
+    not cost an exchange."""
+    issued: list[str] = []
+    with H.upstream() as auth:
+        auth.replies["/token"] = H.token_endpoint(issued)
+        tok_url = auth.url + "/token"
+        with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+                u + BASE, scheme=H.oauth_scheme(tok_url)), creds=T.oauth_set()) as r:
+            tok = r.tok()
+            assert r.ask(tok=tok)["fault"] is None
+            same = json.dumps(json.loads(H.declaration(r.up.url + BASE,
+                                                       scheme=H.oauth_scheme(tok_url))))
+            r.t.merge({ACCESS: same + "\n"}, "reformat the declaration")
+            r.t.publish()
+            assert r.ask(tok=tok)["fault"] is None
+
+    assert issued == ["AT-1-canary-1163"], issued
 
 
 # --- O2, O4 the adapter's own headers -------------------------------------------------------

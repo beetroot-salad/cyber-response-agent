@@ -188,7 +188,11 @@ which mints the bot's forge token, and a sign-only AppRole on `defender-tenant-s
 (`LifecycleConfig.sign_policy`), whose one rule is `update` on
 `transit/sign/request-token-{{identity.entity.metadata.tenant_id}}`, so a tenant's sign login signs
 only with its own key. The credential proxy's policy is KV read plus `update` on
-`transit/verify/request-token-*`.
+`transit/verify/request-token-*`. Login tokens are never revoked: every AppRole login, the lifecycle's
+one-shot ones (minting the bot's token, proving the sign pair at install) and the held ones (a
+run's request signer, the forge credential), lives out its 10-minute TTL. Revoking would not
+narrow exposure, since whoever can read a token from the process can read the secret file that
+logs in again (#1364).
 
 Moving an existing Forgejo off the old `forgejo-data` named volume, once: stop `forgejo`, run
 `.devcontainer/provision-dev-issuer.sh migrate-forgejo-data` (it copies the volume into
