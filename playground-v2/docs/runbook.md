@@ -582,7 +582,7 @@ YAML + FastAPI — the "authorized-change context" primitive from the v2 doc. Se
 
 **Rolling standing CRs.** `change-mgmt/seed/standing.yaml` declares a small set of recurring change windows (`daily` and `weekly` kinds — no croniter dependency). At startup and every `STANDING_REFRESH_SECONDS` (default 300s), the app materializes occurrences covering `[now-7d, now+1d]` into STORE so `/changes/active?host=…&at=…` returns a CR whenever the current time falls inside a standing window. CR ids encode the occurrence start (`CHG-DB-BACKUP-20260520T0200Z`), so the materialization is idempotent. Today's standing set: nightly db-1 backup (covers baseline action `db-backup`) + weekly Tuesday web-tier patching window. Kept tiny on purpose — most baseline activity is *not* CR-covered, and that's realistic; the standing layer covers only the slice that legitimately has a CR backing it.
 
-**Synthetic CRs from the attack runner.** `attacks/runner.py --cr-mode {valid,stale,scope-mismatch}` POSTs a synthetic `CHG-RUNNER-…` CR before firing, exercising the agent's CR scope-check (host scope, time-window scope, identity scope) rather than just presence. The CR ends up in change-mgmt's STORE alongside the seed + standing entries. See `attacks/README.md` for the mode semantics.
+**Synthetic CRs from the attack runner.** `attacks/runner.py --cr-mode {valid,stale,scope-mismatch}` POSTs an ordinary-looking `CHG-<n>` CR before firing (its id is in the run's `meta.json`), exercising the agent's CR scope-check (host scope, time-window scope, identity scope) rather than just presence. The CR ends up in change-mgmt's STORE alongside the seed + standing entries. See `attacks/README.md` for the mode semantics.
 
 #### identity
 
@@ -810,6 +810,13 @@ docker --context soc-playground compose down -v       # destroys volumes (ES clu
 docker --context soc-playground compose down -v
 docker --context soc-playground compose up -d
 ```
+
+### Data cleanups already applied to ES
+
+Deliberate deletions, so a gap or a count change in old telemetry has a known cause.
+
+- **2026-10-29, re-shipped log lines.** Before role hosts kept `/var/log` on a named volume, every container restart made the agent re-read each log file from line one, so auth, syslog, nginx and postgres held most lines several times (up to 29). `scripts/dedup_reshipped_logs.py` rebuilt each stream with one copy per line (done 2026-10-30: auth 30.6M → 1.7M docs, postgres 84.6M → 4.3M, nginx 19.9M → 1.1M, syslog 6.45M → 6.05M; independent per-day recounts matched exactly), keyed on host, file, offset, parsed time and message, keeping a copy from the line's first ingest hour with its fields unchanged. Document `_id`s changed, so alert ancestry pointing at the old copies no longer resolves. `scripts/check_log_reingest.py <host>` checks that a restart no longer re-ships.
+- **2026-10-29, attack tells.** Deleted the 27 log events and 9 alerts whose text named the harness (`attacker@elsewhere`, `fake_key`, `/tmp/payload_N.sh`, `/tmp/fetched_N.sh`, the "attack-sim" base64 script) from runs before the catalog stopped using those strings. Two of them were zeek records of the defender's own identity lookups for `attacker@elsewhere`.
 
 ## Gotchas
 

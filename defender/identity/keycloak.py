@@ -34,6 +34,45 @@ def _utc_now() -> _dt.datetime:
     return _dt.datetime.now(_dt.UTC)
 
 
+def _split_url(setting: str, value: str) -> urllib.parse.SplitResult:
+    """An absolute http(s) URL with a host, a valid port if any, and no credentials, query, fragment
+    or whitespace; else a ValueError naming the setting."""
+    def refuse(why: str) -> ValueError:
+        return ValueError(f"keycloak {setting} {value!r} {why}")
+
+    if any(c.isspace() or not c.isprintable() for c in value):
+        raise refuse("contains whitespace or a control character")
+    try:
+        parts = urllib.parse.urlsplit(value)
+        parts.port  # noqa: B018 — reading it is the check: a non-numeric or out-of-range port raises
+    except ValueError as e:
+        raise refuse(f"is not a URL: {e}") from None
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.query or parts.fragment \
+            or value.endswith(("?", "#")):
+        raise refuse("is not an absolute http(s) URL without query or fragment")
+    if parts.username is not None:
+        raise refuse("carries credentials")
+    return parts
+
+
+def _realm_url(issuer: str) -> tuple[str, str, str]:
+    """The issuer as (itself without a trailing slash, the server base before `/realms/`, the realm)."""
+    parts = _split_url("issuer", issuer)
+    base, sep, realm = parts.path.rstrip("/").rpartition("/realms/")
+    if not realm or "/" in realm:  # without `/realms/`, `realm` is the whole path, which has a slash
+        raise ValueError(f"keycloak issuer {issuer!r} is not <server>/realms/<realm>")
+    issuer = issuer.rstrip("/")
+    return issuer, issuer[: len(issuer) - len(sep + realm)], realm
+
+
+def _server_base(server_url: str) -> str:
+    """A URL as `_split_url` takes it; a path prefix is kept, but not one reaching into `/realms`
+    (that is the issuer)."""
+    if "realms" in _split_url("server_url", server_url).path.split("/"):
+        raise ValueError(f"keycloak server_url {server_url!r} names a realm path; give the server's base, not the issuer")
+    return server_url.rstrip("/")
+
+
 class KeycloakSignIn:
     """Sign-in and account administration against one Keycloak realm."""
 
@@ -46,10 +85,11 @@ class KeycloakSignIn:
         redirect_uri: str,
         admin_client_id: str,
         admin_client_secret: str,
+        server_url: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], _dt.datetime] = _utc_now,
     ) -> None:
-        self._issuer = issuer.rstrip("/")
+        self._issuer, base, realm = _realm_url(issuer)
         self._client_id = client_id
         self._client_secret = client_secret
         self._redirect_uri = redirect_uri
@@ -58,9 +98,13 @@ class KeycloakSignIn:
         self._http = httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS)
         # Keycloak serves every realm under <base>/realms/<name>; the admin API sits beside it. The
         # admin client's `manage-users` role reaches only its own realm, which is the sign-in realm.
-        base, realm = self._issuer.rsplit("/realms/", 1)
-        self._oidc = f"{self._issuer}/protocol/openid-connect"
-        self._admin_users_url = f"{base}/admin/realms/{realm}/users"
+        # `server_url`, when the API reaches Keycloak at another address than the browser does
+        # (#1349), replaces that base for every request the API sends itself; the browser's
+        # sign-in URL and the token's `iss` stay the issuer.
+        server = base if server_url is None else _server_base(server_url)
+        self._signin_url = f"{self._issuer}/protocol/openid-connect/auth"
+        self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
+        self._admin_users_url = f"{server}/admin/realms/{realm}/users"
         self._keys: dict[str, Any] = {}
         self._admin_token_held: tuple[str, _dt.datetime] | None = None
 
@@ -82,7 +126,7 @@ class KeycloakSignIn:
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         })
-        return f"{self._oidc}/auth?{query}"
+        return f"{self._signin_url}?{query}"
 
     async def finish_signin(self, *, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
         """Exchange the code, verify the ID token, and return who signed in and how."""

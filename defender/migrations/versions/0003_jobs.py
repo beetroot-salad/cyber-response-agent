@@ -1,14 +1,14 @@
 """The job store's tables (#1342): alerts, and the investigations of them.
 
-Revision ID: 0002_jobs
-Revises: 0001_baseline
+Revision ID: 0003_jobs
+Revises: 0002_tenancy
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0002_jobs"
-down_revision = "0001_baseline"
+revision = "0003_jobs"
+down_revision = "0002_tenancy"
 
 SCHEMA = "jobs"
 
@@ -32,7 +32,7 @@ def upgrade() -> None:
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("raw", sa.LargeBinary(), nullable=False),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_alerts")),
-        sa.ForeignKeyConstraint(["tenant_id"], ["identity.tenants.id"], name=op.f("fk_alerts_tenant_id_tenants")),
+        sa.ForeignKeyConstraint(["tenant_id"], ["tenancy.tenants.id"], name=op.f("fk_alerts_tenant_id_tenants")),
         sa.UniqueConstraint("tenant_id", "id", name=op.f("uq_alerts_tenant_id_id")),
         sa.UniqueConstraint("tenant_id", "vendor", "vendor_ticket_id",
                             name=op.f("uq_alerts_tenant_id_vendor_vendor_ticket_id")),

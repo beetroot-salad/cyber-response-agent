@@ -723,6 +723,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_web_1:/var/lib/elastic-agent
+      - var_log_web_1:/var/log
     healthcheck:
       test: ["CMD-SHELL", "pgrep -x sshd >/dev/null && pgrep -x nginx >/dev/null"]
       interval: 10s
@@ -751,6 +752,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_web_2:/var/lib/elastic-agent
+      - var_log_web_2:/var/log
     healthcheck:
       test: ["CMD-SHELL", "pgrep -x sshd >/dev/null && pgrep -x nginx >/dev/null"]
       interval: 10s
@@ -779,6 +781,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_db_1:/var/lib/elastic-agent
+      - var_log_db_1:/var/log
     # Postgres's default cluster + elastic-agent add a bit over the bare base.
     mem_limit: 768m
     healthcheck:
@@ -809,6 +812,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_jump_box_1:/var/lib/elastic-agent
+      - var_log_jump_box_1:/var/log
 
   dev-ws-1:
     <<: *host-defaults
@@ -831,6 +835,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_dev_ws_1:/var/lib/elastic-agent
+      - var_log_dev_ws_1:/var/log
 
   office-ws-1:
     <<: *host-defaults
@@ -853,6 +858,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_office_ws_1:/var/lib/elastic-agent
+      - var_log_office_ws_1:/var/log
 
   office-ws-2:
     <<: *host-defaults
@@ -875,6 +881,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_office_ws_2:/var/lib/elastic-agent
+      - var_log_office_ws_2:/var/log
 
   canary-1:
     <<: *host-defaults
@@ -897,6 +904,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_canary_1:/var/lib/elastic-agent
+      - var_log_canary_1:/var/log
 
   # ──────────────────────────────────────────────────────────────────────────
   # Noise-generator hosts. Sources of rule-fire-shaped benign activity:
@@ -927,6 +935,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_config_mgmt_1:/var/lib/elastic-agent
+      - var_log_config_mgmt_1:/var/log
 
   ci-1:
     <<: *host-defaults
@@ -949,6 +958,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_ci_1:/var/lib/elastic-agent
+      - var_log_ci_1:/var/log
 
   scanner-1:
     <<: *host-defaults
@@ -971,6 +981,7 @@ services:
       - certs:/fleet-certs:ro
       - fleet_tokens:/fleet-tokens:ro
       - agent_state_scanner_1:/var/lib/elastic-agent
+      - var_log_scanner_1:/var/log
 
   # Batch 9 stubs: CMDB, threat intel, change management, ticketing.
   # All auth-less FastAPI servers on 8080 internal. Exposed on loopback
@@ -1142,4 +1153,31 @@ volumes:
   agent_state_ci_1:
     driver: local
   agent_state_scanner_1:
+    driver: local
+  # Per-host /var/log. The agent remembers how far it read a file by device + inode;
+  # a container's own filesystem gets a new device number on every restart (and every
+  # lever-up), so without this each restart re-shipped every log file from line one.
+  # A named volume sits on the VPS disk, whose device number is stable.
+  # Check: python3 scripts/check_log_reingest.py <host>
+  var_log_web_1:
+    driver: local
+  var_log_web_2:
+    driver: local
+  var_log_db_1:
+    driver: local
+  var_log_jump_box_1:
+    driver: local
+  var_log_dev_ws_1:
+    driver: local
+  var_log_office_ws_1:
+    driver: local
+  var_log_office_ws_2:
+    driver: local
+  var_log_canary_1:
+    driver: local
+  var_log_config_mgmt_1:
+    driver: local
+  var_log_ci_1:
+    driver: local
+  var_log_scanner_1:
     driver: local

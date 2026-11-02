@@ -46,7 +46,7 @@ class _Refused(Exception):
         self.sqlstate = sqlstate
 
 
-def _storable(text: str) -> bool:
+def _postgres_can_hold(text: str) -> bool:
     """Whether PostgreSQL can hold `text`. An id it cannot hold names nothing, so it is looked up
     as an unknown one rather than crashing the query."""
     if "\x00" in text:
@@ -101,7 +101,7 @@ class JobStore:
         return stored_alert(row)
 
     async def get_alert(self, tenant_id: str, alert_id: str) -> StoredAlert | None:
-        if not _storable(alert_id):
+        if not _postgres_can_hold(alert_id):
             return None
         async with self._tx() as s:
             row = (await s.execute(select(AlertRow).where(
@@ -111,7 +111,7 @@ class JobStore:
     # --- reads --------------------------------------------------------------------------
 
     async def get_investigation(self, tenant_id: str, investigation_id: str) -> InvestigationRecord | None:
-        if not _storable(investigation_id):
+        if not _postgres_can_hold(investigation_id):
             return None
         async with self._tx() as s:
             row = await self._row(s, tenant_id, investigation_id)
@@ -132,9 +132,9 @@ class JobStore:
         §4.1): the latest attempt under the key; else the alert's live investigation, without
         recording this key; else a new attempt 1. `created` only when this call inserted the row.
         `UnknownReference` for an alert this tenant lacks."""
-        if not _storable(alert_id):
+        if not _postgres_can_hold(alert_id):
             raise UnknownReference(f"no alert {alert_id!r}")
-        if not _storable(request_key):
+        if not _postgres_can_hold(request_key):
             raise ValueError("the request key cannot be stored")
         async with self._tx() as s:
             locked = (await s.execute(select(AlertRow.id).where(
@@ -189,7 +189,7 @@ class JobStore:
     ) -> InvestigationRecord:
         """Abort a queued investigation (`aborted`, reason `cancelled`). `NotFound`; `Conflict` for a
         running one (cancelling a running investigation is not supported yet) and for an ended one."""
-        if not _storable(investigation_id):
+        if not _postgres_can_hold(investigation_id):
             raise NotFound(f"no investigation {investigation_id!r}")
         async with self._tx() as s:
             row = (await s.execute(
@@ -214,7 +214,7 @@ class JobStore:
     async def delete_investigation(self, tenant_id: str, investigation_id: str, *, actor: str) -> None:
         """Remove every attempt under the named investigation's request key. `NotFound`; `Conflict`
         while any of them is queued or running. Takes the alert lock, so it serializes with create."""
-        if not _storable(investigation_id):
+        if not _postgres_can_hold(investigation_id):
             raise NotFound(f"no investigation {investigation_id!r}")
         async with self._tx() as s:
             named = await self._row(s, tenant_id, investigation_id)
@@ -246,7 +246,7 @@ class JobStore:
         never ran), and the caller logs that and stops working on the row."""
         if stage not in TERMINAL:
             raise ValueError(f"{stage!r} is not a terminal stage")
-        if not _storable(investigation_id):
+        if not _postgres_can_hold(investigation_id):
             return None
         async with self._tx() as s:
             row = (await s.execute(

@@ -38,7 +38,7 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
 from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
-from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, TENANT_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._host_env import provider_scrubbed_environ
 from ._spec import DEFAULT_SPEC, _HostTransport
@@ -149,10 +149,14 @@ def _refuse_a_start_that_conflicts(
     _refuse_an_existing_container(docker, name)
 
 
+def _tenant_label(tenant_id: str | None) -> list[str]:
+    return [] if tenant_id is None else ["--label", f"{TENANT_LABEL}={tenant_id}"]
+
+
 def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
     name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
     mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
-    *, lane: Sequence[_LaneMount],
+    *, lane: Sequence[_LaneMount], tenant_id: str | None = None,
 ) -> Create:
     """The run box's create argv, its binds rendered from `lane`: the run lane's mount list
     (`_run_lane_mounts`) as `_start_boxed` built it for the publish-root check, so the argv
@@ -175,6 +179,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     argv = [
         "docker", "run", "--detach", "--name", name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
+        *_tenant_label(tenant_id),
         "--runtime", spec.runtime,
         "--network", "none",
         "--read-only",
@@ -462,7 +467,7 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
     run_dir: Path, defender_dir: Path, spec: BoxSpec, docker: DockerFn,
     shared_mounts: SharedMountsFn = _shared_mounts, tenant_agent: Path | None = None,
     write_verdict: Callable[[dict], None] | None = None,
-    staged_token: Path | None = None,
+    staged_token: Path | None = None, tenant_id: str | None = None,
     start_token: str | None = None,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
@@ -480,7 +485,7 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
     start_token = start_token or uuid.uuid4().hex
     create = _create_argv(
         name, run_dir, defender_dir, spec, shared_mounts(docker), start_token,
-        lane=lane,
+        lane=lane, tenant_id=tenant_id,
     )
     try:
         # Confirm the image before the create, so a missing image is its own refusal (with
@@ -543,6 +548,7 @@ def _render_argv(
     argv = [
         "docker", "run", "--detach", "--name", request.name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
+        *_tenant_label(request.tenant_id),
         "--runtime", request.spec.runtime,
         "--network", "none",
         "--read-only",
@@ -706,9 +712,10 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     copy's `stage/`, read back through the box before the executor is returned (O-A).
     `start_token` is the start-token label the box is stamped with, which its create-fault arm
     reaps by: a job's worker mints it and reaps the job's leftover by it (#1342 r5 C1); without
-    one the box mints its own. `tenant_id` is accepted for callers that still pass it and is
-    not read: P2's in-box `.tenant-id` check is retired (identity is checked at publish). The
-    tenant arguments are illegal with a `BoxRequest`, which carries its own mounts."""
+    one the box mints its own. `tenant_id` labels the run box's container `defender.tenant=<T>`,
+    so the tenant's teardown stops it (#1214 O4; P2's in-box `.tenant-id` check stays retired).
+    The tenant arguments are illegal with a `BoxRequest`, which carries its own mounts (and its
+    own `tenant_id`)."""
     if isinstance(run_dir_or_request, BoxRequest):
         request = run_dir_or_request
         # `is not None`, not a comparison with the env-resolved DEFAULT_SPEC. The env is not
@@ -741,20 +748,22 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
                            transport=_HostTransport(_host_fallback_env(request), request.view,
                                                     request.path_operands), name="")
 
-    del tenant_id
     return _start_run_box(run_dir_or_request, defender_dir, spec, docker, tenant_agent,
-                          staged_token, write_verdict, require_sandbox=require_sandbox,
+                          staged_token, write_verdict, tenant_id, require_sandbox=require_sandbox,
                           start_token=start_token)
 
 
 def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged token
     run_dir: Path, defender_dir: Path | None, spec: BoxSpec | None, docker: DockerFn,
     tenant_agent: Path | None, staged_token: Path | None,
-    write_verdict: Callable[[dict], None] | None, *, require_sandbox: bool = False,
-    start_token: str | None = None,
+    write_verdict: Callable[[dict], None] | None, tenant_id: str | None = None, *,
+    require_sandbox: bool = False, start_token: str | None = None,
 ) -> BoxExecutor:
     if defender_dir is None:
         raise TypeError("start_box(run_dir, defender_dir, ...) needs defender_dir")
+    if tenant_id is None or not str(tenant_id):
+        # r10 B1, r10.1 C8: every box carries its tenant's label, so its teardown can find it.
+        raise TypeError("start_box(run_dir, defender_dir, ...) needs tenant_id: every box carries its tenant")
     # Default runtime is runsc; runc (weaker isolation) only when the operator sets
     # DEFENDER_BOX_RUNTIME=runc, never by fallback.
     if spec is None:
@@ -772,7 +781,8 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
     try:
         return _start_boxed(run_dir, defender_dir, spec, docker,
                             tenant_agent=tenant_agent, staged_token=staged_token,
-                            write_verdict=write_verdict, start_token=start_token)
+                            write_verdict=write_verdict, tenant_id=tenant_id,
+                            start_token=start_token)
     except BoxFault as e:
         _opt_out_or_raise(e, require_sandbox=require_sandbox)
     # The host runs the bash lane in the model view too (#1255 "Every mode"): over a per-run

@@ -325,17 +325,19 @@ def product_lane(tmp_path: Path, product: Path) -> Any:
 
 def lead_lane(tmp_path: Path, *, adapters: tuple[str, ...], markers: tuple[str, ...],
               skills: tuple[str, ...] = (), catalog: tuple[str, ...] = (), name: str = "product",
-              extra: dict[str, str] | None = None) -> tuple[Path, Any]:
+              extra: dict[str, str] | None = None, tenant: Any = None) -> tuple[Path, Any]:
     """The declared-systems resolver's two sources: a product checkout holding `adapters`, and a
     batch draft of the fixture tenant over the lead lanes whose agent half holds the markers
-    (`markers`/`skills`/`catalog`, plus agent-relative `extra`)."""
+    (`markers`/`skills`/`catalog`, plus agent-relative `extra`). With `tenant`, the lane's paths are that accepted
+    tenant's (`draft_lane`), for a drain that serves claims."""
     from defender.tests.support.learning.curation import _curator1134 as C
     from defender.tests.support.runtime.engine._declared869 import seed_agent_files, seed_product
 
     product = seed_product(tmp_path, adapters=adapters, name=name)
     files = {**seed_agent_files(markers=markers, skills=skills, catalog=catalog), **(extra or {})}
     return product, C.draft_lane(tmp_path, lanes=C.LEAD_LANES, product=product, files=files,
-                                 state_dir=tmp_path / f"state-{name}")
+                                 state_dir=None if tenant is not None else tmp_path / f"state-{name}",
+                                 tenant=tenant)
 
 
 def run_pitfalls(lane: Any, state: Any, spawn: Any) -> int:

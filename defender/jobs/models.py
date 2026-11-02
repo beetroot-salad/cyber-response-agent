@@ -1,6 +1,6 @@
 """The job store's tables and the records it hands out. Every value is set in Python (no server
 defaults). The alerts and investigations tables carry exactly the lean constraints of #1081's
-design; the migration (`0002_jobs`) is their one creation."""
+design; the migration (`0003_jobs`) is their one creation."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from defender._model import model
 from defender.database import Base
-from defender.identity.models import SCHEMA as IDENTITY_SCHEMA
+from defender.tenancy.models import SCHEMA as TENANCY_SCHEMA
 
 SCHEMA = "jobs"
 
@@ -32,7 +32,7 @@ def _quoted(values: tuple[str, ...]) -> str:
 class AlertRow(Base, kw_only=True):
     __tablename__ = "alerts"
     __table_args__ = (
-        ForeignKeyConstraint(["tenant_id"], [f"{IDENTITY_SCHEMA}.tenants.id"]),
+        ForeignKeyConstraint(["tenant_id"], [f"{TENANCY_SCHEMA}.tenants.id"]),
         # The target of investigations' composite key: an investigation cannot name another tenant's alert.
         UniqueConstraint("tenant_id", "id"),
         UniqueConstraint("tenant_id", "vendor", "vendor_ticket_id"),

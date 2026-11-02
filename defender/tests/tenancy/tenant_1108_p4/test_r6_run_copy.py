@@ -171,14 +171,12 @@ def test_r6_a_run_that_cannot_write_its_host_knowledge_record_does_not_start(ten
     assert "knowledge record" in out.refusal, out.text()
 
 
-# --- the dev issuer config a binding names lies under no box mount source ---------------------
+# --- the host secret file a generation records lies under no box mount source ------------------
 
-def test_r6_the_dev_issuer_config_location_lies_under_no_box_mount_source(tenant, tmp_path,
+def test_r6_the_host_secret_file_location_lies_under_no_box_mount_source(tenant, tmp_path,
                                                                         boxed_only):  # noqa: F811 — fixture
-    """The dev provisioning's per-tenant issuer client config (`playground-issuer/client/
-    <tenant>/issuer.json`), named by the tenant's binding, is under no box mount source."""
-    DEV_ISSUER_CONFIG = WORKTREE / "playground-issuer" / "client" / tenant.tenant_id / "issuer.json"
-    bind_forge(tenant, issuer_config=DEV_ISSUER_CONFIG)
+    """The host secret file the tenant's live generation records (#1214: the AppRole secret id, one file per
+    tenant outside the tenant folder) is under no box mount source."""
+    secret = bind_forge(tenant)["generations"][0]["host_secret_file"]
     sources = _mount_sources(tenant, tmp_path)
-    assert not T.exposes(sources, DEV_ISSUER_CONFIG), (
-        f"a box mount exposes the issuer client config {DEV_ISSUER_CONFIG}")
+    assert not T.exposes(sources, secret), f"a box mount exposes the host secret file {secret}"

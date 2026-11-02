@@ -24,6 +24,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.tenancy import _tenants1106 as T6
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 DEFENDER = Path(__file__).resolve().parents[4]
 
@@ -403,7 +404,7 @@ class Estate:
         (`_published_template`) and its tenant folder copied in; nothing in it names its root.
         `configs` (`{system: config.env text}`) is written into the published settings."""
         root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
-        if not (root / tenant_id / "tenant.json").is_file():
+        if not (root / tenant_id / "knowledge").is_dir():
             import shutil
 
             shutil.copytree(_published_template(tenant_id, self.table(), dict(configs or {})),
@@ -1193,8 +1194,9 @@ def serving(*, oracle: Any = None, verifier: Any = None, box: Callable[[], Any] 
     reg = importlib.import_module(f"defender.{REGISTRY}")
     config = importlib.import_module("defender.learning.core.config")
     extra = {} if restart_after is None else {"restart_after": restart_after}
+    # B1/C8: the oracle's serving requires its tenant; every test names the one shared TEST_TENANT.
     return reg.oracle_serving(config.oracle_settings_with(**knobs), oracle=oracle,
-                              verifier=verifier, box=box, **extra)
+                              verifier=verifier, box=box, tenant_id=TEST_TENANT, **extra)
 
 
 def registry_seams(world: Any, ledger: Any, *, oracle_dir: Path | None = None,
@@ -1538,6 +1540,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     # The episode lands under the launching tenant's own `<T>/episodes/`; the launcher mints
     # its id, so it is found as the ONE new folder there.
     tenant_id = src.parent.parent.name
+    seams.setdefault("directory", T.launcher_directory(tenant_id))  # C9: one seeded active directory
     root = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
     before = {p.name for p in root.iterdir()} if root.is_dir() else set()
     try:

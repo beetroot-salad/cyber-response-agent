@@ -22,30 +22,14 @@ never the reverse.
 |---|---|---|
 | `held_out.py` | **Primary** — disposition accuracy | Does the *current* defender's disposition match ground truth on the labeled held-out alerts? This is the loop's north-star metric. |
 
-Run it by hand. Every run names its tenant, and there is no default (#1078) — clone your
-tenant's knowledge repo into the data root and set the tenant up once:
-
-```bash
-export DEFENDER_DATA_ROOT=/path/outside/the/checkout
-export TENANT_ID=$(python3 defender/cli/tenant.py new-id)  # save this UUID
-git clone <tenant repo> "$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge"
-python3 defender/cli/tenant.py setup "$TENANT_ID"
-```
-
-Clone with a credential helper or an ssh agent (never a credential in the URL), and run setup
-once the clone has exited 0; setup adopts the placed folder and copies nothing.
-A data root made before #1120 (no `<id>/knowledge/`) has no repo to clone: build the folder
-once with `tenant.py migrate <id> <root>/<id>/knowledge`, then run setup.
-
-For an existing named tenant, follow the offline identity migration in
+Run it by hand. Every run names its tenant, and there is no default (#1078). Create the tenant
+through the lifecycle service's admin API (see "Creating a tenant" in
+[development operations](../defender/docs/development-operations.md)); it records the tenant in
+PostgreSQL, so set `DEFENDER_DATABASE_DSN` and `DEFENDER_DATA_ROOT` for the run, and use the tenant's
+UUID. A run works only for an `active` tenant. For an existing named tenant, follow the offline
+identity migration in
 [development operations](../defender/docs/development-operations.md#migrating-named-tenants-to-uuids-1187);
-`tenant.py migrate` does not convert tenant IDs.
-
-Run `tenant.py setup` once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
-default data root) and no run, fork or drain in flight on any checkout of the host, as the same
-user that runs defender; a destination already occupied makes setup refuse, naming it in the
-message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
-setup run as root — that adoption case only.)
+`tenant.py migrate` does not convert tenant IDs and is retired.
 
 ```bash
 # Primary: score against ground truth. It walks fixtures/held_out/ and finds each

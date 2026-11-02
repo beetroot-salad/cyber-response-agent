@@ -19,6 +19,7 @@ from defender._frontmatter import (
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.validate import normalize_disposition
 from defender.tests.support.storage._alert_plant import plant_alert
+from defender.tests.support.learning.retrieval._lessons_corpus import accepted_trace_tenant, trace_main
 
 
 def _load_tl():
@@ -50,7 +51,7 @@ def _tenant_runs(_scenario: Path) -> Path:
 
 def _opened(tl, runs: Path) -> list:
     """`runs`' tenant's runs as the tracer opens them (the listing rule, then `runs.open`)."""
-    return tl.tenant_runs(runs.parent.name)
+    return tl.tenant_runs(accepted_trace_tenant(runs.parent.name))  # C1: the helper takes the accepted tenant
 
 
 def _flow_flood(depth: int = 3000) -> str:
@@ -107,7 +108,7 @@ def _all_row(tmp_path: Path, body_frontmatter: str, capsys, stem: str = "L"):
     lessons = base / "lessons"
     _mk_lesson(lessons, stem, body_frontmatter=body_frontmatter)
     runs = _std_runs(base, stem)
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
+    rc = trace_main(tl, ["--all", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     [row] = [ln for ln in cap.out.splitlines() if ln.split("\t")[0] == stem]
@@ -150,7 +151,7 @@ def test_d_b8_all_survives_flood_lesson_with_marker_row(tmp_path, capsys):
     _mk_run(runs, "case-a", disposition="benign",
             loads=[{"lesson_name": "ok", "ts": "2026-06-05T00:00:00+00:00"},
                    {"lesson_name": "flood", "ts": "2026-06-05T00:00:00+00:00"}])
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
+    rc = trace_main(tl, ["--all", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     lines = cap.out.splitlines()
@@ -168,7 +169,7 @@ def test_d_b9_named_flood_lesson_still_traces(tmp_path, capsys):
     runs = _tenant_runs(tmp_path)
     _mk_run(runs, "case-a", disposition="benign",
             loads=[{"lesson_name": "flood", "ts": "2026-06-05T00:00:00+00:00"}])
-    rc = tl.main(["flood", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
+    rc = trace_main(tl, ["flood", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     assert _case_ids(cap.out) == [C("case-a")]
@@ -217,7 +218,7 @@ def _named(tmp_path, body_frontmatter: str, capsys, stem: str = "L"):
     lessons = base / "lessons"
     _mk_lesson(lessons, stem, body_frontmatter=body_frontmatter)
     runs = _std_runs(base, stem)
-    rc = tl.main([stem, "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
+    rc = trace_main(tl, [stem, "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     return cap
@@ -271,7 +272,7 @@ def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
     runs = _tenant_runs(tmp_path)
     _mk_run(runs, "case-a", disposition='"ben\\tign\\nX"',
             loads=[{"lesson_name": "L", "ts": "2026-06-05\t00:00:00+00:00"}])
-    rc = tl.main(["L", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
+    rc = trace_main(tl, ["L", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     lines = cap.out.splitlines()
@@ -283,7 +284,7 @@ def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
     # `?` above is the hostile value being refused, not the column having gone dead.
     _mk_run(runs, "case-b", disposition="benign",
             loads=[{"lesson_name": "L", "ts": "2026-06-06T00:00:00+00:00"}])
-    assert tl.main(["L", "--lessons-dir", str(lessons), "--tenant", runs.parent.name]) == 0
+    assert trace_main(tl, ["L", "--lessons-dir", str(lessons), "--tenant", runs.parent.name]) == 0
     assert f"{C('case-b')}\tbenign\t" in capsys.readouterr().out
 
 

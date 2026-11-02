@@ -375,10 +375,13 @@ logging.getLogger().setLevel(logging.INFO)
 tenant = tenants.accept(Path(spec["data_root"]), spec["tenant_id"])
 paths = tenant.learning_paths(LoopPaths, repo_root=Path(spec["product"]))
 forge = ForgeHTTP(remote=spec["remote"], origin=spec["origin"])
+from defender.tests.support.tenancy._active1214 import active_directory
+
+directory = active_directory(Path(spec["data_root"]), spec["tenant_id"], origin=spec["origin"])  # #1214 Flow 4
 box = BoxSpy()
 resource.setrlimit(resource.RLIMIT_FSIZE, (spec["limit"], resource.RLIM_INFINITY))
 rc = _run_stage(lambda: drains.author_drain(
-    paths, client=forge.client, identity=VaultHTTP(spec["tenant_id"]).identity(),
+    paths, client=forge.client, identity=VaultHTTP(spec["tenant_id"]).identity(), directory=directory,
     start_box=box.start, stop_box=box.stop))
 print(json.dumps({"rc": rc, "lines": lines}))
 '''
@@ -553,7 +556,7 @@ def cell(name, root):
             os.environ["DEFENDER_DATA_ROOT"] = str(data_root)
             tenant = requested_tenant(data_root_from_path(data_root), run_dir.parent.parent.name)
             run = tenant.runs_repository().open(RunId.parse(run_dir.name))
-            out["answer"] = run_common.enqueue_curation(run, run_common.RunPaths(run_dir).alert)
+            out["answer"] = run_common.enqueue_curation(run, run_common.RunPaths(run_dir).alert, tenant=tenant)
             return out
         state = S.LearningState.open(paths)
         if name == "append":

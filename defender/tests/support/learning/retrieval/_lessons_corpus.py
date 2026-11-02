@@ -80,3 +80,22 @@ def _tenant_runs() -> Path:
     runs = root / H1105.T_ID / "runs"
     runs.mkdir(exist_ok=True)
     return runs
+
+
+def trace_main(tracer, argv: list[str]) -> int:
+    """`trace_lesson.main(argv, directory=...)` over one seeded ACTIVE directory for the `--tenant` in `argv`
+    (r10.1 C9: the tracer admits through the host acceptance, A1; a test hands the tenant records in)."""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
+    from defender.tests.support.tenancy._active1214 import active_directory
+
+    tenant = argv[argv.index("--tenant") + 1]
+    return tracer.main(argv, directory=active_directory(current_data_root(), tenant))
+
+
+def accepted_trace_tenant(tenant_id: str | None = None):
+    """The accepted `Tenant` a tracer helper (`tenant_runs`, `in_context_cases`' inputs) takes as its parameter
+    (r10.1 C1: the value of the command's acceptance, passed down)."""
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
+
+    return H1105.tenant(current_data_root(), tenant_id or H1105.T_ID)

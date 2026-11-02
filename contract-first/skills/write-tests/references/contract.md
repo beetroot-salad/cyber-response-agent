@@ -7,7 +7,7 @@ Keep the smallest record that lets a cold agent pick up the work: what the contr
 Scratch state lives under `.contract-first/`, outside the committed diff. It holds:
 
 - the identities everything depends on: design revision, base commit, current test ref, and the skill revision used;
-- the **contract map**: design obligations, their scenarios and entry points, the enforcing tests by node ID, each row's fold outcome (already enforced, extended, new, conflict updated, or, for a stale test the code stage returned, stale updated or retired), and verification status. A Markdown table is enough, for example `O-retry | same operation after uncertain result | import API | tests/test_import.py::test_retry_preserves_identity (extended): returned ID + row count | awaiting implementation`. A row is a claim to inspect, not proof. Because folded tests sit in many files, the map's node IDs, not a file list, define the contract;
+- the **contract map**: design obligations, their scenarios and entry points, the enforcing tests by node ID, each row's fold outcome (already enforced, extended, new, conflict updated, or, for a stale test the code stage returned, stale updated or retired), and verification status. A Markdown table is enough. A row is a claim to inspect, not proof. Because folded tests sit in many files, the map's node IDs, not a file list, define the contract;
 - findings and decisions by stable ID, with cause, disposition, evidence, the human's ruling where one was needed, and what they affect. Nothing gets silently dropped;
 - the claims inherited from discuss-issue plus new load-bearing observations, in its format. An ID does not make an unprobed fact settled;
 - which reviews ran against which revision, what verification is still owed and by whom, and the next action.
@@ -20,7 +20,7 @@ Before reusing anything, compare its recorded identities with the current inputs
 
 ## Commit
 
-The deliverable is the executable suite with its test-only fixtures and helpers. Never commit production code, stubs, scratch state, or a helper that substitutes for the policy under test.
+The deliverable is the executable suite with its test-only fixtures and helpers, plus any changes the maintain-cache run made to the project cache and rules files. Never commit production code, stubs, scratch state, or a helper that substitutes for the policy under test.
 
 Commit it on its own before any implementation, and record the base and the immutable ref in the hand-off. The implementer starts from that ref, and any later repair is measured against it.
 
@@ -39,3 +39,9 @@ State **ready**, **blocked**, or **repair required**, with:
 - open blockers and the precise next action. A ready verdict carries no known blocker.
 
 Name `write-code-from-tests` as the next stage.
+
+## Cache
+
+One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <application>`. Each applies a rule above to the context its tags name. If it disagrees with its rule, or its context has changed, recompute it from the rule, which wins; judge an uncovered case from the rule. Project-specific entries use the same format in the project's `.claude/contract-first-cache.md`: grep it for this skill's name.
+
+- write-tests/contract §working-record map-row | ctx: python | `O-retry | same operation after uncertain result | import API | tests/test_import.py::test_retry_preserves_identity (extended): returned ID + row count | awaiting implementation`.

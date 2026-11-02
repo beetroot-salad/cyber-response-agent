@@ -265,12 +265,13 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
     require_tail_seam(main)
     tenant_id = ensure_d9_tenant()
     location_path(requested_tenant(fixture_data_root(current_data_root()), tenant_id).learning).mkdir(exist_ok=True)
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 
     # The in-process launch-time publish (it publishes the tenant for real), when `main` takes one.
-    publish = ({"publish": in_process_publish()}
+    argv = [str(alert), "--tenant", tenant_id, *args]
+    publish = ({"publish": in_process_publish(), "directory": directory_for_argv(argv)}
                if "publish" in inspect.signature(main).parameters else {})
-    return main([str(alert), "--tenant", tenant_id, *args], lifecycle=tail.lifecycle,
+    return main(argv, lifecycle=tail.lifecycle,
                 visualize=tail.visualize, ticket_writer=tail, **publish)
 
 

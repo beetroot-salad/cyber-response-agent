@@ -2,6 +2,7 @@
 corpus and held-out index reading past runs by their record."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -476,7 +477,8 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
     traced: dict[str, list[str]] = {}
     for spelling, corpus in corpora.items():
         capsys.readouterr()
-        assert main(["--all", "--lessons-dir", str(corpus), "--tenant", fixture_uuid("tenant:acme")]) == 0, capsys.readouterr().err
+        argv = ["--all", "--lessons-dir", str(corpus), "--tenant", fixture_uuid("tenant:acme")]
+        assert main(argv, directory=directory_for_argv(argv)) == 0, capsys.readouterr().err
         traced[spelling] = [ln for ln in capsys.readouterr().out.splitlines()
                             if ln.startswith(f"{name}\t")]
     assert len(traced["unquoted"]) == 1, f"the tracer did not index the unquoted lesson once: {traced}"

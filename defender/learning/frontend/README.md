@@ -10,7 +10,7 @@ A read-only view of the learning loop. Two pages, one build:
   person moves them (or, on the pitfalls lane, re-offered to the curator until the offer
   ceiling — each lane says what its own hold means); plus what the drains set aside (markers
   they could not serve, batches committed but not delivered, tainted worktrees). Read off the
-  state root (`DEFENDER_LEARNING_STATE_DIR`, else `defender/learning/`), so it is per-host and
+  state root (the tenant's learning folder under its data root), so it is per-host and
   stale the moment it is built; the header says which root and when. The one exception is
   the tainted-worktree list, which lives beside the live worktrees under the REPO root
   (`.worktrees/quarantine`) and does not move with the state dir — the card names that

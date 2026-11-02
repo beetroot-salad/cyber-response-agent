@@ -12,6 +12,7 @@ from defender import box as box_mod
 from defender.box._clock import clock_dir
 from defender.tests.e2e import _box665 as B
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 TENANT = fixture_uuid("tenant:blue")
 REQUEST_NAME = "defender-runcycle-1279"
@@ -148,7 +149,7 @@ class RequestLane:
             box_mod.Mount(source=self.lane, target=self.lane, writable=True),
         )
         return box_mod.BoxRequest(name=name, mounts=mounts, workdir=B.REPO_ROOT, env={},
-                                  require_sandbox=require_sandbox)
+                                  require_sandbox=require_sandbox, tenant_id=TEST_TENANT)
 
 
 def request_lane(base: Path) -> RequestLane:

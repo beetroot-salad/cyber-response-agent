@@ -1,6 +1,7 @@
 """Permissions are per run: grants are built from the run's own tenant table, so one process can hold two tenants' grants."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -104,12 +105,14 @@ def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_te
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     base = ["show", "gather", "--run-dir", str(run_dir)]
-    assert policy_cli.main([*base, "--tenant", fixture_uuid("tenant:acme")]) == 0
+    acme = [*base, "--tenant", fixture_uuid("tenant:acme")]
+    assert policy_cli.main(acme, directory=directory_for_argv(acme)) == 0
     assert "agent: gather" in capsys.readouterr().out
 
     text = ""
+    ghost = [*base, "--tenant", fixture_uuid("tenant:ghost")]
     try:
-        rc = policy_cli.main([*base, "--tenant", fixture_uuid("tenant:ghost")])
+        rc = policy_cli.main(ghost, directory=directory_for_argv(ghost))
     except SystemExit as e:
         text = str(e.code)
     except Exception as e:  # noqa: BLE001 — the refusal's text is what is asserted
@@ -131,8 +134,9 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
+    argv = ["show", "gather", "--run-dir", str(run_dir), "--tenant", fixture_uuid("tenant:newco")]
     with pytest.raises(SystemExit) as caught:
-        policy_cli.main(["show", "gather", "--run-dir", str(run_dir), "--tenant", fixture_uuid("tenant:newco")])
+        policy_cli.main(argv, directory=directory_for_argv(argv))
     text = str(caught.value.code)
     assert text.startswith("defender-policy:"), text
     assert "verb-grants.yaml" in text, text
