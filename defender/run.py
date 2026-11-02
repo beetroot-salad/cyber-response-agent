@@ -506,7 +506,10 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
         except box_mod.BoxFault as fault:
             raise box_mod.BoxStartFault(f"the run's box did not start: {fault}") from fault
     drive = _judged(investigate, systems)
-    facts: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
+    # The job's facts holder (#1342) and the run's request access (#1163), each only when the run
+    # has one: a seam that predates either is not handed a keyword it has no use for.
+    keywords: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
+    keywords |= _access_kwargs(access)
     investigation_ok = False
     try:
         summary = drive(
@@ -521,8 +524,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             episode=episode,
             serving=serving,
             source=source,
-            **facts,
-            **_access_kwargs(access),
+            **keywords,
         )
         investigation_ok = True
     finally:
