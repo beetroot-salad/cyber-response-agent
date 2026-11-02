@@ -61,11 +61,16 @@ def test_delivery_refuses_unusable_tenant_with_named_reason(repo, fault, reason)
 
 
 @pytest.mark.parametrize("protection", [{"protected": False, "user_can_push": False}, {"protected": True, "user_can_push": True}, {"protected": True}, {"user_can_push": False}, {"protected": "true", "user_can_push": False}, {"protected": True, "user_can_push": 0},
-                                        None, [], "main", 1, True])
+                                        None, [], "main", 1, True,
+                                        # #1163 N13: the bot may not merge either, and merge
+                                        # rights must be known.
+                                        {"protected": True, "user_can_push": False, "user_can_merge": True},
+                                        {"protected": True, "user_can_push": False},
+                                        {"protected": True, "user_can_push": False, "user_can_merge": 0}])
 def test_main_requires_known_protected_and_bot_cannot_push(repo, protection):
     http = ForgeHTTP()
     http.protection = protection
-    with pytest.raises(target().DeliveryRefused, match="protect|push|main"):
+    with pytest.raises(target().DeliveryRefused, match="protect|push|merge|main"):
         delivery(repo, http)
     assert not http.creates
 

@@ -188,7 +188,11 @@ class SecretStore(Protocol):
     """Write-only from the API's side: nothing here can read a credential back. The credential
     proxy, which adds credentials to outgoing calls, reads them through its own port."""
 
-    async def put_credentials(self, tenant_id: str, system_id: str, credentials: dict[str, str]) -> None: ...
+    async def put_credentials(
+        self, tenant_id: str, system_id: str, kind: str, credentials: dict[str, str],
+    ) -> None:
+        """Replace the whole set, stored with its `kind` (`static` or `oauth-client-credentials`)."""
+        ...
 
     async def has_credentials(self, tenant_id: str, system_id: str) -> bool: ...
 

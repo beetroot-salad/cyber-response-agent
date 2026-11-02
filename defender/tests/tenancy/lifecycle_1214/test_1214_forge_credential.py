@@ -1,6 +1,9 @@
 """#1214 forge credential provider: `forge_credential(T, purpose)` reads the live generation and its recorded secret
 file on every mint, so a long run crosses a rotation (P4, O5, Flow 3).
 
+The login itself is one owner in `tenancy` shared with the #1163 request signer (A24, A24'); the forge credential
+keeps its observable fault chain over it and reads only the delivery pair, never the sign secret file.
+
 Pinned (GAP-C-2): `from defender.learning.author.version_control import forge_credential`;
 `forge_credential(tenant_id, purpose, *, directory, config, transport=None, clock=time.time) -> ForgeCredential`
 (`directory`: a `TenantDirectory`; `config`: the `LifecycleConfig` carrying `issuer_url`/`openbao_url`; `transport`: a
@@ -11,6 +14,8 @@ from __future__ import annotations
 import base64
 import json
 import time
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -18,6 +23,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+from defender.tests.support.shared._opened_paths import opened, opened_paths  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
 
 LOGIN = "/v1/auth/approle/login"
@@ -194,3 +200,164 @@ def test_a_token_still_valid_is_handed_out_without_reading_the_tenant_records(sc
     scene.later()
     assert credential.token() != first
     assert len(reads) == 2
+
+
+# --- the fault chain after the login moves to the shared owner (A24, A24') ---------------------------------------
+
+def _chain(error: BaseException) -> list[BaseException]:
+    seen: list[BaseException] = []
+    at: BaseException | None = error
+    while at is not None and all(at is not s for s in seen):
+        seen.append(at)
+        at = at.__cause__ or at.__context__
+    return seen
+
+
+def _set_live(world: LifecycleWorld, tenant: str, **fields: Any) -> None:
+    """Change the live generation's record in place, as a damaged row would read (the in-memory twin's rows)."""
+    for (owner, _salt), row in world.tenants._generations.items():  # noqa: SLF001
+        if owner == tenant and row.status == "live":
+            for name, value in fields.items():
+                setattr(row, name, value)
+
+
+def _login_fault(scene: _Scene, answer: Any) -> Any:
+    """A credential whose OpenBao login is answered by `answer(request)` (an exception is raised); every other
+    path goes to the fake as usual."""
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == LOGIN:
+            result = answer(request)
+            if isinstance(result, BaseException):
+                raise result
+            return result
+        return scene.shaped.handle(request)
+
+    from defender.learning.author.version_control import forge_credential
+
+    tenant = scene.world.active_tenant()
+    scene.shaped.tenant = tenant
+    return tenant, forge_credential(tenant, "publish", directory=scene.world.directory(), config=scene.world.config,
+                                    transport=httpx.MockTransport(handle), clock=scene.now)
+
+
+def _remove(path: Path) -> None:
+    path.unlink()
+
+
+def _make_a_folder(path: Path) -> None:
+    path.unlink()
+    path.mkdir()  # a read of a folder fails whoever the user is
+
+
+def _empty(path: Path) -> None:
+    path.write_text("", encoding="utf-8")
+
+
+def _two_secrets(path: Path) -> None:
+    path.write_text("one\ntwo\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("spoil", [_remove, _make_a_folder, _empty, _two_secrets],
+                         ids=["absent", "unreadable", "empty", "two secrets"])
+def test_a_delivery_secret_file_that_fails_is_a_misconfigured_credential_and_sends_no_login(scene, spoil):
+    """An absent, unreadable or malformed delivery secret file is `CredentialMisconfigured` with no login sent
+    and no secret in the message; before the damage the same credential mints. A24."""
+    from defender.learning.author.version_control.auth import CredentialMisconfigured
+    from defender.learning.author.version_control.status import is_misconfigured
+
+    tenant, gen = _active(scene)
+    credential = scene.make(tenant)
+    credential.token()  # control: the same credential mints with the file intact
+    secret = gen.host_secret_file.read_text(encoding="utf-8").strip()
+    spoil(gen.host_secret_file)
+    scene.later()
+    logins = len(scene.logins())
+    with pytest.raises(CredentialMisconfigured) as refused:
+        credential.token()
+    assert is_misconfigured(refused.value)
+    assert len(scene.logins()) == logins
+    assert secret not in str(refused.value)
+
+
+@pytest.mark.parametrize("fields", [{"host_secret_file": None}, {"host_secret_file": Path("relative/secret")}],
+                         ids=["none recorded", "relative"])
+def test_a_generation_that_records_no_absolute_secret_file_is_a_misconfigured_credential(scene, fields):
+    """A live generation recording no absolute delivery secret file is `CredentialMisconfigured`, no login. A24."""
+    from defender.learning.author.version_control.auth import CredentialMisconfigured
+
+    tenant, _gen = _active(scene)
+    credential = scene.make(tenant)
+    credential.token()  # control
+    _set_live(scene.world, tenant, **fields)
+    scene.later()
+    logins = len(scene.logins())
+    with pytest.raises(CredentialMisconfigured):
+        credential.token()
+    assert len(scene.logins()) == logins
+
+
+def test_an_unreachable_openbao_is_an_auth_error_with_the_transport_error_in_its_chain_and_transient(scene):
+    """The login cannot connect: `ForgejoAuthError` with the `httpx` error in its chain; publish status files it
+    `transient`, not misconfigured. A24."""
+    from defender.learning.author.version_control import ForgejoAuthError
+    from defender.learning.author.version_control.status import classify, is_misconfigured
+
+    tenant, credential = _login_fault(scene, lambda r: httpx.ConnectError("connection refused", request=r))
+    with pytest.raises(ForgejoAuthError) as refused:
+        credential.token()
+    assert any(isinstance(e, httpx.TransportError) for e in _chain(refused.value))
+    assert not is_misconfigured(refused.value)
+    assert classify(refused.value)[0] == "transient"
+
+
+@pytest.mark.parametrize(("status", "kind"), [(500, "transient"), (503, "transient"), (403, "operator"),
+                                              (400, "operator")])
+def test_a_refused_login_is_an_auth_error_with_the_status_in_its_chain_sorted_by_status(scene, status, kind):
+    """A login OpenBao answers 5xx is `transient`, 4xx `operator`; the `HTTPStatusError` is in the chain. A24."""
+    from defender.learning.author.version_control import ForgejoAuthError
+    from defender.learning.author.version_control.status import classify
+
+    tenant, credential = _login_fault(scene, lambda r: httpx.Response(status, json={"errors": ["no"]}))
+    with pytest.raises(ForgejoAuthError) as refused:
+        credential.token()
+    (http,) = [e for e in _chain(refused.value) if isinstance(e, httpx.HTTPStatusError)]
+    assert http.response.status_code == status
+    assert classify(refused.value)[0] == kind
+
+
+@pytest.mark.parametrize("cleartext", ["openbao_url", "issuer_url"])
+def test_a_cleartext_address_is_refused_before_the_secret_file_is_read_and_nothing_is_sent(scene, cleartext):
+    """With either address on http the credential is refused as an auth error that is not a file fault, though the
+    secret file is absent (it was not read), and nothing is sent. A24."""
+    from defender.learning.author.version_control import ForgejoAuthError, forge_credential
+    from defender.learning.author.version_control.status import is_misconfigured
+
+    tenant, gen = _active(scene)
+    sent: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return scene.shaped.handle(request)
+
+    config = SimpleNamespace(issuer_url=scene.world.config.issuer_url, openbao_url=scene.world.config.openbao_url,
+                             ca_cert=None)
+    setattr(config, cleartext, str(getattr(config, cleartext)).replace("https://", "http://"))
+    gen.host_secret_file.unlink()
+    credential = forge_credential(tenant, "publish", directory=scene.world.directory(), config=config,
+                                  transport=httpx.MockTransport(handle), clock=scene.now)
+    with pytest.raises(ForgejoAuthError, match=r"(?i)https") as refused:
+        credential.token()
+    assert not is_misconfigured(refused.value), "the secret file was judged before the address"
+    assert sent == []
+
+
+def test_the_forge_credential_never_reads_the_sign_secret_file(scene):
+    """With the live generation's sign secret file unreadable the credential still mints, with the delivery pair. A24'."""
+    tenant, gen = _active(scene)
+    _make_a_folder(gen.sign_secret_file)
+    credential = scene.make(tenant)
+    with opened_paths() as seen:
+        token = credential.token()
+    assert scene.role_of(token) == gen.oidc_role
+    assert not opened(seen, gen.sign_secret_file), "the credential opened the sign secret file"
+    assert scene.logins()[-1]["role_id"] == gen.role_id

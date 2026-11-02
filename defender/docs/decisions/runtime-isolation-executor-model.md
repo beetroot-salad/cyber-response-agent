@@ -17,6 +17,23 @@ This supersedes the broker architecture in
 capability-RPC (Phase 2) are not needed for v1. The isolate itself (#540) stays,
 and gets substantially cheaper.
 
+## Amendment (#1163): customer system credentials never reach the run
+
+The decision above kept credentialed adapters host-side, in the trusted driver. That holds
+for the model-provider key, which stays where it is. It no longer holds for the **credentials
+of a customer's own systems**: adapters are written by an AI through the connect skill, are
+loaded from disk by a run, and are reviewed by convention only, so an honest mistake in one
+(a logged value, a value in an error, a wrong host) would carry a customer credential into run
+files, tickets and learning output.
+
+So **a run, its driver and its adapters never hold a customer credential value.** A system
+that needs one is reached over HTTP through the **credential proxy**, a separate program: the
+run presents a signed, short-lived request token and the request; the proxy checks the
+destination, route and grant against the tenant's merged access declaration, adds the
+credential from OpenBao, sends, scrubs the reply, and audits. This is the broker this record
+once did without, now reintroduced for customer credentials only; the design is in #1163.
+`docker exec` stays for credential-free systems and never carries a credential of ours.
+
 ## How we got here
 
 #571 adopted Anthropic's managed-agents **brain/hands split**: the driver and LLM

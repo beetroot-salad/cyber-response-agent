@@ -11,7 +11,7 @@ from defender.lifecycle._job import answered, field_of
 LOGIN = "/v1/auth/approle/login"
 
 
-async def approle_login(openbao: httpx.AsyncClient, role_id: str, secret_id: str) -> str:
+async def log_in(openbao: httpx.AsyncClient, role_id: str, secret_id: str) -> str:
     """An OpenBao client token for the AppRole pair (the request carries no other token)."""
     done = answered(await openbao.post(LOGIN, json={"role_id": role_id, "secret_id": secret_id},
                                        headers={"X-Vault-Token": ""}))

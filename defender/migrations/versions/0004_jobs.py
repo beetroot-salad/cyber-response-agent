@@ -1,14 +1,14 @@
 """The job store's tables (#1342): alerts, and the investigations of them.
 
-Revision ID: 0003_jobs
-Revises: 0002_tenancy
+Revision ID: 0004_jobs
+Revises: 0003_sign_login
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0003_jobs"
-down_revision = "0002_tenancy"
+revision = "0004_jobs"
+down_revision = "0003_sign_login"
 
 SCHEMA = "jobs"
 

@@ -96,7 +96,14 @@ and [Vault Identity tokens](https://developer.hashicorp.com/vault/api-docs/secre
 For each tenant:
 
 1. Create a dedicated non-admin bot with write access only to that tenant's knowledge
-   repository. Protect `main` against bot pushes; humans merge the bot's pull requests.
+   repository. Protect `main` against bot pushes **and turn on its merge whitelist, naming
+   only the humans (or team) who merge**; humans merge the bot's pull requests. Blocking pushes
+   is not enough: without a merge whitelist Forgejo lets any writer merge, so the bot could
+   merge its own pull request, and publish refuses such a repository (#1163). A required
+   approval does block the merge, but Forgejo still reports the bot as able to merge, so it
+   does not satisfy the check either. The lifecycle service sets this rule itself when it creates a tenant or
+   rotates its forge credential: pushes off, and a merge whitelist of the organisation's
+   `Owners` team with no bot in it.
 2. Create a Generic JWT Authorized Integration for that bot. Bind its issuer to Vault's
    HTTPS identity issuer, require `tenant_id=<tenant>`, restrict it to the exact repository,
    and grant `write:repository` and `write:issue`. Record the generated audience (not secret).
@@ -169,6 +176,19 @@ Authorized Integration come from the lifecycle service when the tenant is create
 credential rotated (see "Creating a tenant"). The lifecycle logs in to OpenBao with the management
 login file its settings name, so OpenBao must be initialised and that login provisioned beforehand;
 this script does neither.
+
+The policies are operator-provisioned too; no file in the repository holds them (#1163). Transit is
+mounted at `transit/`. The management login's policy, besides what it needs for roles, AppRoles and
+entities, has create, read, update and delete on `transit/keys/request-token-*`: the lifecycle
+creates each tenant's ed25519 request-token key `request-token-<T>` when the tenant is created or
+rotated (an existing key is kept), and makes it deletable and deletes it at offboarding. Each
+credential generation has two AppRoles, each with its own entity carrying the tenant's
+`tenant_id` metadata: the delivery AppRole on `defender-tenant-token` (`LifecycleConfig.token_policy`),
+which mints the bot's forge token, and a sign-only AppRole on `defender-tenant-sign`
+(`LifecycleConfig.sign_policy`), whose one rule is `update` on
+`transit/sign/request-token-{{identity.entity.metadata.tenant_id}}`, so a tenant's sign login signs
+only with its own key. The credential proxy's policy is KV read plus `update` on
+`transit/verify/request-token-*`.
 
 Moving an existing Forgejo off the old `forgejo-data` named volume, once: stop `forgejo`, run
 `.devcontainer/provision-dev-issuer.sh migrate-forgejo-data` (it copies the volume into

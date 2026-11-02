@@ -13,6 +13,7 @@ if TYPE_CHECKING:
         split_status as split_status,
     )
 
+
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("docker_exec_curl", "load_config", "record_config", "split_status",), "_stub_transport"),

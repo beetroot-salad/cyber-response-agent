@@ -52,6 +52,12 @@ def current_export(tenant: Tenant) -> TenantExport:
     return _current_at(unwrap_exports_root(tenant.exports), tenant.id)
 
 
+def current_export_at(exports: Path, tenant_id: object) -> TenantExport:
+    """`current_export` over an exports folder named by path (`<T>/exports/`), for a reader that
+    holds folders and no `Tenant` (the credential proxy). Same refusals."""
+    return _current_at(exports, tenant_id)
+
+
 def _current_at(exports: Path, tenant_id: object) -> TenantExport:
     with _io.bind(exports) as folder:
         # Text, decoded with replacement: an oid is ASCII, so any byte that is not fails the

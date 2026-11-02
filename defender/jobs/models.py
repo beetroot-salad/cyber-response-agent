@@ -1,6 +1,6 @@
 """The job store's tables and the records it hands out. Every value is set in Python (no server
 defaults). The alerts and investigations tables carry exactly the lean constraints of #1081's
-design; the migration (`0003_jobs`) is their one creation."""
+design; the migration (`0004_jobs`) is their one creation."""
 
 from __future__ import annotations
 

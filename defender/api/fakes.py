@@ -293,7 +293,9 @@ class InMemorySecrets:
     def __init__(self) -> None:
         self._credentials: dict[tuple[str, str], dict[str, str]] = {}
 
-    async def put_credentials(self, tenant_id: str, system_id: str, credentials: dict[str, str]) -> None:
+    async def put_credentials(
+        self, tenant_id: str, system_id: str, kind: str, credentials: dict[str, str],
+    ) -> None:
         self._credentials[(tenant_id, system_id)] = dict(credentials)
 
     async def has_credentials(self, tenant_id: str, system_id: str) -> bool:

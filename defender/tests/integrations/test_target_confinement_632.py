@@ -270,6 +270,49 @@ def test_a_non_elastic_stub_adapter_is_confined_through_the_real_shared_transpor
     assert request.method == "GET"
 
 
+def _crm_tree(root: Path, *, via: str) -> Any:
+    """The run's record for a TENANT-ONLY system `crm` (in no product allowlist) reached `via`
+    `docker-exec` or `http-proxy` (#1163)."""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.integrations.credential_proxy_1163 import _harness as H
+
+    if via == "docker-exec":
+        folder = S.plant(root, configs={"crm": (
+            'CRM_URL_BASE=http://crm.invalid\nCRM_BASTION_HOST=b\nCRM_TIMEOUT_SEC=2\n'
+            'CRM_TRANSPORT=docker-exec\nCRM_DOCKER_CONTEXT=no-such-context-1163\n')})
+    else:
+        folder = S.plant(root, configs={"crm": A.env_text("crm")})
+        for rel, text in H.access_files("crm", H.declaration("http://crm.invalid/api")).items():
+            (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+            (folder / rel).write_text(text, encoding="utf-8")
+    return S.resolve(root)
+
+
+def test_a_tenant_only_system_is_confined_by_the_allowlist_on_docker_exec_only(tmp_path: Path):
+    """#1163 A6: `crm` on docker-exec is refused by the product allowlist before capture (regression
+    guard); on http-proxy the adapter guard records the capture and does not confine."""
+    from defender.integrations import _stub_transport as transport
+
+    docker = VerbContext(defender_dir=tmp_path / "tree", tenant=_crm_tree(tmp_path / "d", via="docker-exec"),
+                         run_dir=tmp_path / "run", env={}, capture=TransportCapture())
+    config = transport.load_config(docker, "crm", "CRM")
+    with pytest.raises(ConfinementFault):
+        transport.http_get(docker, config, "/accounts/1", system="crm")
+    assert not docker.capture.requests
+
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.integrations.credential_proxy_1163 import _harness as H
+
+    proxied = A.ctx_for(tmp_path, _crm_tree(tmp_path / "p", via="http-proxy"),
+                        f"http://127.0.0.1:{H.free_port()}", "unused", capture=TransportCapture())
+    config = transport.load_config(proxied, "crm", "CRM")
+    with pytest.raises(TransportFault):
+        transport.http_get(proxied, config, "/accounts/1", system="crm")
+    (request,) = proxied.capture.requests
+    assert (request.system, request.method) == ("crm", "GET")
+    assert normalize_endpoint(request.url) == "/api/accounts/1"
+
+
 def test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry():
     assert isinstance(READ_ENDPOINT_ALLOWLIST, ReadEndpointAllowlist), (
         "the shipped read-endpoint allowlist is not a constructed allowlist, so nothing in "
