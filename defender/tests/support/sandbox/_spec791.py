@@ -212,10 +212,10 @@ class SpecTail:
         self.visualized.append(run)
         self._note("visualize", run.run_dir)
 
-    def open_case_ticket(self, run: Any, *, tenant: Any, defender_dir: Path,
-                         env: Any) -> None:
-        self.ticket_tenants.append(tenant)
-        self._note("open_case_ticket", run.run_dir)
+    def clear_receipt(self, run: Any, **kw: Any) -> None:
+        # The writer seam's first method (#1359 r4 "Run start and the record leg"): run start
+        # clears an earlier attempt's receipt through the seam. There is no open leg.
+        self._note("clear_receipt", run.run_dir)
 
     def record_case_ticket(self, run: Any, *, tenant: Any, defender_dir: Path, env: Any,
                            **kw: Any) -> None:

@@ -1402,7 +1402,7 @@ class TicketStore(FakeStore):
 class _WriterOverTheShim:
     """The REAL ticket writer, as `run.main(ticket_writer=…)` takes it, with `store`'s fake `docker`
     first on the PATH of the env run.py hands the record leg (#1359 D-13: the writer has no request
-    seam). The retired open leg does nothing here; every other attribute is the writer's own."""
+    seam). Every attribute is the writer's own (`clear_receipt` included; there is no open leg)."""
 
     def __init__(self, store: TicketStore) -> None:
         self.store = store
@@ -1410,9 +1410,6 @@ class _WriterOverTheShim:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._writer, name)
-
-    def open_case_ticket(self, *_a: Any, **_kw: Any) -> None:
-        return None
 
     def record_case_ticket(self, run: Any, **kw: Any) -> Any:
         # An empty or absent env (a test driving the leg directly) means the process env.
@@ -1431,8 +1428,8 @@ class NoTicket:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Path]] = []
 
-    def open_case_ticket(self, run: Any, **_kw: Any) -> None:
-        self.calls.append(("open", run.run_dir))
+    def clear_receipt(self, run: Any, **_kw: Any) -> None:  # the seam's run-start method (#1359 r4)
+        self.calls.append(("clear", run.run_dir))
 
     def record_case_ticket(self, run: Any, **_kw: Any) -> None:
         self.calls.append(("record", run.run_dir))

@@ -113,10 +113,20 @@ def test_r1_an_http_proxy_case_system_must_declare_a_write_route(tmp_path, scrip
 @pytest.mark.parametrize("record", [
     "system: [unclosed\n", "- ticket\n", "comment:\n  body: x\n", "system: 42\n", "system: ''\n",
     "system: ticket\ncomment: [x]\n",
+    # D-17: `comment.body` is required (no product default), the same shape rule the record leg applies.
+    "system: ticket\n", "system: ticket\ncomment: {}\n", "system: ticket\ncomment:\n  body: 7\n",
 ])
 def test_r1_a_bad_case_record_file_is_judged_naming_the_file(tmp_path, script, record):
-    """A case-record file that is not a mapping with a system name (or whose comment is malformed) fails `check`, naming it. r4 tenant check."""
+    """A case-record file that is not a mapping with a system name and a text `comment.body` fails `check`, naming it, as the record leg refuses it. r4 tenant check, D-17."""
     H.assert_refused(_check(script, _folder(tmp_path, record=record)), CASE_RECORD)
+
+
+def test_r1_a_case_system_that_exports_no_comment_action_is_a_finding_naming_the_file(tmp_path, script):
+    """A case-record naming a roster system whose adapter has no `add_case_comment` (`cmdb`) fails `check`, naming `settings/case-record.yaml` and the system, as the record leg refuses it; control: `ticket`, which exports it, is clean. D-17."""
+    H.assert_clean(_check(script, _folder(tmp_path / "ok", record=C.case_record_text("ticket"))))
+    text = H.assert_refused(_check(script, _folder(tmp_path / "bad", record=C.case_record_text("cmdb"))),
+                            CASE_RECORD, "cmdb")
+    assert "Traceback" not in text
 
 
 def test_r1_a_legacy_case_history_folder_is_a_finding_naming_the_new_file(tmp_path, script):

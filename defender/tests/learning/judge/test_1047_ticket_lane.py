@@ -12,7 +12,6 @@ from defender.tests.support.shared.filesystem import _spec1047 as S
 
 def test_an_aborted_run_leaves_its_ticket_open_with_the_escalation(tmp_path):
     run_dir = S.closed_run_dir(tmp_path, report=False)
-    opened = S.open_ticket(run_dir)
     fake = S.record_ticket(run_dir, truncated_by="aborted", closed_before_cut=False)
 
     assert fake.records == [], (
@@ -20,9 +19,8 @@ def test_an_aborted_run_leaves_its_ticket_open_with_the_escalation(tmp_path):
     assert len(fake.notes) == 1, f"the aborted arm made {len(fake.notes)} note calls, not one"
     note = fake.notes[0]
     assert note.method == "POST"
-    assert note.key == opened.calls[0].body["key"], (
-        f"the note addressed ticket {note.key!r} while the open leg wrote "
-        f"{opened.calls[0].body['key']!r}")
+    assert note.key == S.CASE_KEY, (
+        f"the note addressed ticket {note.key!r}, not the one the alert named ({S.CASE_KEY!r})")
     body = note.text().lower()
     assert "aborted" in body, f"the note does not name the exit class: {note.text()!r}"
     assert "escalate" in body, (

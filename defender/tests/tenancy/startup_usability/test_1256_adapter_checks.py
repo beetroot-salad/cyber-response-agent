@@ -254,7 +254,7 @@ def test_o5_elastic_without_a_kibana_container_stays_usable(tmp_path, checkout_r
 def _no_systems(folder: Path, _system: str) -> None:
     """No system's settings at all: every `config.env` gone, and every system folder holding no
     file the resolver requires removed whole. What resolution requires stays
-    (`_tenants1106.REQUIRED_FILES`, `systems/case-history/mapping.yaml`): without it the tenant
+    (`_tenants1106.REQUIRED_FILES`, none of them under `systems/` since #1359): without them the tenant
     is refused before any check is asked, which is not this arm's subject."""
     settings = S.settings_of(folder)
     required = {settings / rel for rel in T6.REQUIRED_FILES}

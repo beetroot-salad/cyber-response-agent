@@ -323,6 +323,19 @@ def record(run_dir: Path, store: FakeStore, *,
         _run_handle_1165(run_dir), **_handed(run_dir, store, config), **kw)
 
 
+def posted_comment_body(run_dir: Path, scratch: Path) -> str:
+    """The comment the record leg posts for a finished run dir that other suites planted WITHOUT
+    a ticket key: the run gets this suite's `ALERT` (it names `CASE_KEY`, facts derived through
+    `ALERT_MAPPING`), the leg runs against a fresh fake store under `scratch` over the committed
+    fixture tenant, and the posted body below the agent tag line is returned. The boundary
+    through which readers of a report see what the ticket lane makes of it (#1359: the comment
+    builder is not a public function)."""
+    plant_alert(run_dir, ALERT, mapping=ALERT_MAPPING)
+    store = FakeStore(Path(scratch) / f"store-{len(list(Path(scratch).glob('store-*')))}")
+    record(run_dir, store)
+    return store.comment_body()
+
+
 def receipt_path(run_dir: Path) -> Path:
     """The receipt's location: a sidecar beside (not inside) the box-writable run dir, keyed by
     the run's name."""

@@ -141,7 +141,7 @@ def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
 
 def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
     """A sibling run writes no ticket row on any of its exits: the writer seam records nothing
-    for a resumed run, on the opening call and on the closing one alike."""
+    for a resumed run, on the run-start clear and on the closing record alike."""
     base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
 
@@ -150,9 +150,8 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
             self.calls: list[str] = []
             self.tenants: list[Any] = []
 
-        def open_case_ticket(self, run_dir, *, tenant, defender_dir, env):
-            self.calls.append("open")
-            self.tenants.append(tenant)
+        def clear_receipt(self, run_dir, **_kw):  # the seam's run-start method (#1359)
+            self.calls.append("clear")
 
         def record_case_ticket(self, run_dir, *, tenant, defender_dir, env, **_kw):
             self.calls.append("record")

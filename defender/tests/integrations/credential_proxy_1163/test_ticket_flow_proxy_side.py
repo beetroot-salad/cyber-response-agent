@@ -60,6 +60,26 @@ def test_t4_a_store_refusing_the_comment_is_reported_by_class_and_status(
     assert H.CANARY_KEY not in json.dumps(receipt)
 
 
+def test_t7_a_store_nothing_listens_at_is_reported_as_could_not_be_reached(tmp_path, data_root):
+    """The declared base has no listener behind the proxy: an error receipt saying the store could
+    not be reached (as a 5xx and the docker path's unreachable bastion do), not that the credential
+    proxy refused. O5."""
+    from defender.tests.integrations.credential_proxy_1163.test_ticket_flow import STORE, WRITES
+
+    dead = H.declaration(f"http://127.0.0.1:{H.free_port()}{STORE}", writes=WRITES)
+    with _published(tmp_path / "forge", data_root, dead) as t:
+        rec, run = _run(tmp_path)
+        store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
+        with A.proxy_for(t, store) as (url, tap):
+            receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw")}))
+    assert tap.tokens, "control: the proxy was reached"
+    assert receipt is not None
+    assert (receipt["ok"], receipt["status"], receipt["key"]) == (False, "error", KEY), receipt
+    reason = receipt["reason"].lower()
+    assert "could not be reached" in reason, receipt
+    assert "the credential proxy refused" not in reason, receipt
+
+
 class _DownOnce(H.FakeStore):
     """A store that is unreachable for its first read (an OpenBao blip), then answers."""
 

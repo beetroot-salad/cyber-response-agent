@@ -119,16 +119,43 @@ def test_t3_failures_are_text_in_the_receipt_and_carry_no_credential(tmp_path, d
             if name == "401-echo":
                 assert "the store refused" in reason
                 assert "401" in reason
+            elif name == "proxy-down":
+                # O5 (r4): an unreachable proxy is "could not be reached", not a refusal.
+                assert "could not be reached" in reason, (name, reason)
+                assert "the credential proxy refused" not in reason, (name, reason)
             elif name in ("no-credential", "read-only-token"):
                 assert "the credential proxy refused" in reason, (name, reason)
     assert H.CANARY_KEY not in caplog.text
 
 
-def test_t6_a_write_the_declaration_does_not_allow_is_a_refusal_not_a_transport_error(
+def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothing_is_sent(
         tmp_path, data_root):
-    """A case system whose declaration allows no write route: the receipt says the credential
-    proxy refused (not a store or transport error), once, and nothing reaches the store. O5, O4."""
-    with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up, writes=())) as t:
+    """A case system on `http-proxy` whose `access.yaml` declares no write route (or is
+    unparsable): the leg's own judgement names `systems/ticket/access.yaml` in the receipt and
+    makes no call, not even to the proxy. D-16, O5."""
+    for label in ("no write route", "unparsable"):
+        with H.upstream() as up:
+            decl = _decl(up, writes=()) if label == "no write route" else "access: [unclosed\n"
+            with _published(tmp_path / label / "forge", data_root, decl) as t:
+                store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
+                tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+                rec, run = _run(tmp_path / label)
+                with A.proxy_for(t, store) as (url, tap):
+                    receipt = _leg(t, run, rec, url, tok)
+            assert receipt is not None, label
+            assert (receipt["ok"], receipt["status"], receipt["url"]) == (False, "error", None), receipt
+            assert f"systems/{SYSTEM}/access.yaml" in receipt["reason"], (label, receipt)
+            assert tap.tokens == [], f"{label}: the proxy was called"
+            assert up.seen == [], f"{label}: the store was reached"
+
+
+def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport_error(
+        tmp_path, data_root):
+    """The declaration holds a write route, but not the comment's path: the leg's judgement
+    passes, the proxy refuses the call, and the receipt says so (not an access.yaml fault, not
+    "could not be reached"); nothing reaches the store. Control: t1 (matching route). O5, O4."""
+    other = (("POST", "/elsewhere/*"),)
+    with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up, writes=other)) as t:
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
         tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
         rec, run = _run(tmp_path)
@@ -139,5 +166,6 @@ def test_t6_a_write_the_declaration_does_not_allow_is_a_refusal_not_a_transport_
     reason = (receipt.get("reason") or "").lower()
     assert "the credential proxy refused" in reason, reason
     assert "could not be reached" not in reason, reason
+    assert "access.yaml" not in reason, reason
     assert tap.tokens == [tok]
     assert up.seen == []

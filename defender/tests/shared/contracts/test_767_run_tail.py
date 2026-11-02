@@ -27,10 +27,8 @@ CLEAR_STEP = "clear_receipt"
 
 
 class Tail(SpecTail):
-    """`_spec791`'s investigation-tail fake, with the writer seam's two methods (no open leg)."""
-
-    def clear_receipt(self, run, **kw) -> None:
-        self._note(CLEAR_STEP, run.run_dir)
+    """`_spec791`'s investigation-tail fake: the writer seam's two methods (`clear_receipt` is
+    inherited, no open leg), the record leg keeping the tenant it was handed."""
 
     def record_case_ticket(self, run, *, tenant, defender_dir, env, **kw) -> None:
         self.ticket_tenants.append(tenant)

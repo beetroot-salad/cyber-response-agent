@@ -78,13 +78,13 @@ def test_o4_no_checkout_adapter_exposes_the_comment_action(checkout_roster):
     held = sorted(s for s in checkout_roster.accepted
                   if {DASHED, ACTION} & checkout_roster.declared_verbs(s))
     assert held == [], held
-    assert checkout_roster.unparsed == {} or not set(checkout_roster.unparsed) & set(checkout_roster.accepted)
+    assert checkout_roster.unparsed == {}, dict(checkout_roster.unparsed)
     module = S.mod("systems.verbs").fresh_adapter_module(checkout_roster, "ticket")
     assert callable(getattr(module, ACTION, None)), "the ticket adapter exports no comment action"
 
 
 def test_r1_an_empty_verbs_literal_is_a_valid_adapter_with_no_verbs(tmp_path):
-    """`VERBS = {}` reads as an accepted adapter with no grantable verb; no readable VERBS does not. r4 no agent actions."""
+    """`VERBS = {}` reads as an accepted adapter with no grantable verb (a regression guard: base already does; the no-readable-VERBS half is the census and resolver arms below). r4."""
     roster = _roster(_tree(tmp_path / "empty", _source("{}")))
     assert "casesys" in roster.accepted
     assert "casesys" not in roster.unparsed
@@ -128,3 +128,32 @@ def test_r1_connect_check_registry_needs_no_health_check_for_a_comment_only_adap
     assert failures(_source("{}")) == []
     no_health = _source('{"other": health_check}')
     assert any("health-check" in m for m in failures(no_health)), "control: health-check still required"
+
+
+def _registry(tree: Path):
+    verbs = S.mod("systems.verbs")
+    grant = S.mod("systems.verb_grant").VerbGrant(role="gather", entries=())
+    return verbs.ModuleVerbRegistry(verbs.read_roster(tree / "integrations"), grant)
+
+
+def test_r1_the_agents_verb_listing_offers_nothing_for_an_empty_verbs_adapter_and_not_unavailable(
+        tmp_path):
+    """`list_verbs`' declared-verbs step for a granted-nothing `VERBS = {}` adapter that exports
+    the comment action gives no "UNAVAILABLE" line (it offers nothing). Control: an adapter with
+    no usable `VERBS` (absent, or not a mapping) is still UNAVAILABLE. r4 no agent actions."""
+    catalog = S.mod("investigation.query_catalog")
+
+    def listing(source: str) -> str:
+        registry = _registry(_tree(tmp_path / f"t{abs(hash(source))}", source))
+        _declared, degradation = catalog._list_verbs_declared(registry, "casesys", "casesys")
+        return degradation or ""
+
+    bare = _source("{}").rsplit("VERBS", 1)[0]
+    for label, source in (("absent", bare), ("not a mapping", _source("None"))):
+        assert "UNAVAILABLE" in listing(source), f"control [{label}]: a broken adapter must stay broken"
+    assert "UNAVAILABLE" not in listing(_source("{}")), "an empty VERBS adapter is listed as broken"
+    # Regression pin on the tool's whole answer (the grant reaches nothing, so it answers before
+    # the adapter is read; it must not call the adapter broken either).
+    assert "UNAVAILABLE" not in catalog._tool_list_verbs(
+        _registry(_tree(tmp_path / "whole", _source("{}"))), "casesys"), (
+        "the tool's whole answer for a granted-nothing empty-VERBS system says UNAVAILABLE")

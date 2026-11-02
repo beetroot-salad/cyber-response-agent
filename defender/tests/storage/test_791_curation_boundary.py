@@ -137,8 +137,10 @@ def test_791_the_investigation_tail_takes_its_dependencies_through_a_seam(tmp_pa
     assert run_dir.is_dir(), "the lifecycle was handed a run dir that does not exist"
     assert RunPaths(run_dir).alert.is_file(), \
         "the lifecycle was handed a run dir the entrypoint had not materialized the alert into"
-    for step in ("open_case_ticket", "lifecycle", "record_case_ticket", "visualize"):
+    # #1359 H1/r4: the open leg is retired; run start clears through the seam instead.
+    for step in ("clear_receipt", "lifecycle", "record_case_ticket", "visualize"):
         assert step in tail.names, f"the tail never reached {step} (ran {tail.names})"
+    assert "open_case_ticket" not in tail.names, "the retired open leg ran"
 
 
 def test_791_finished_investigation_drives_catalog_curation(published, tmp_path, state):

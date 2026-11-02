@@ -480,17 +480,27 @@ def health_check(ctx):
     return {{}}
 
 
-VERBS = {{"health-check": health_check}}
-
-
 def add_case_comment(ctx, *, key, body):
     cfg = transport.load_config(ctx, "ticket", "TICKET", ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC"))
     transport.http_write(ctx, cfg, {method!r}, f"/tickets/{{key}}{suffix}", {{"body": body}}, system="ticket")
     return None
+
+
+VERBS = {verbs}
 '''
 
+#: The planted adapter's `VERBS` as a harmless adapter spells it, and the three ways a cold read
+#: refuses one that holds the comment action (r4 "Host-only, first layer").
+HARMLESS_VERBS = '{"health-check": health_check}'
+VERBS_HOLDING_THE_ACTION = {
+    "dash-spelled key": '{"health-check": health_check, "add-case-comment": health_check}',
+    "underscore-spelled key": '{"health-check": health_check, "add_case_comment": health_check}',
+    "bare-name value": '{"health-check": health_check, "note": add_case_comment}',
+}
 
-def _leg_over_planted_adapter(tmp_path: Path, monkeypatch: Any, *, method: str, suffix: str):
+
+def _leg_over_planted_adapter(tmp_path: Path, monkeypatch: Any, *, method: str, suffix: str,
+                              verbs: str = HARMLESS_VERBS):
     """The record leg with a planted case adapter, the store a fake `docker`: (store, receipt)."""
     from defender import box as box_mod
     from defender.investigation import ticket_writer
@@ -501,7 +511,8 @@ def _leg_over_planted_adapter(tmp_path: Path, monkeypatch: Any, *, method: str, 
     tree = tmp_path / "tree"
     (tree / "integrations").mkdir(parents=True)
     (tree / "integrations" / "ticket_adapter.py").write_text(
-        PLANTED_TICKET_ADAPTER.format(method=method, suffix=suffix), encoding="utf-8")
+        PLANTED_TICKET_ADAPTER.format(method=method, suffix=suffix, verbs=verbs),
+        encoding="utf-8")
     store = M.FakeStore(tmp_path / "store")
     run_dir = M.make_run(tmp_path / "runs")
     ticket_writer.record_case_ticket(
@@ -531,3 +542,26 @@ def test_a_case_adapter_writing_outside_the_table_leaves_an_error_receipt_naming
     assert got["url"] is None, got
     assert "PATCH" in got["reason"], got
     assert f"/tickets/{M.CASE_KEY}" in got["reason"], got
+
+
+@pytest.mark.parametrize("spelling", list(VERBS_HOLDING_THE_ACTION))
+def test_a_case_adapter_the_cold_read_refused_serves_no_comment(
+        tmp_path: Path, monkeypatch: Any, spelling: str):
+    """Through the record leg, a case adapter whose `VERBS` holds the comment action is refused by
+    the cold read and does not serve the host's comment either: no request reaches the store, an
+    `error` receipt (`url` null) names `settings/case-record.yaml` and says the adapter was
+    refused. Control: the same adapter without that `VERBS` entry comments. O4, D-7 amended."""
+    control_store, control = _leg_over_planted_adapter(
+        tmp_path / "control", monkeypatch, method="POST", suffix="/comments")
+    assert control["status"] == "commented", control
+    assert len(control_store.calls) == 1, "positive control: the harmless adapter commented once"
+
+    store, got = _leg_over_planted_adapter(
+        tmp_path / "bad", monkeypatch, method="POST", suffix="/comments",
+        verbs=VERBS_HOLDING_THE_ACTION[spelling])
+    assert store.calls == [], f"{spelling}: a refused adapter still served the comment"
+    assert (got["status"], got["ok"], got["url"]) == ("error", False, None), got
+    reason = got["reason"].lower()
+    assert "case-record.yaml" in reason, got
+    assert "adapter" in reason, got
+    assert "refused" in reason, got

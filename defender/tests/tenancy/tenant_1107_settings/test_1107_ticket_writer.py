@@ -4,8 +4,11 @@ from __future__ import annotations
 import html
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from defender import box as box_mod
 from defender.records import RunPaths
@@ -223,6 +226,41 @@ CASE_RECORD_FAULTS: dict[str, bytes] = {
 }
 
 
+@pytest.mark.skipif(not hasattr(os, 'mkfifo'), reason="needs mkfifo")
+def test_o5_a_fifo_at_the_case_record_path_is_a_receipt_not_a_hang(tmp_path, monkeypatch):
+    """A FIFO where `case-record.yaml` belongs is an error receipt naming it, with no call, and
+    the leg never blocks on it (it was `load_case_mapping`'s FIFO guard). O5, #1107."""
+    import threading
+
+    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok())
+    root, folder, alert = _world(tmp_path, name="fifo")
+    path = S.case_record_path(folder)
+    path.unlink()
+    os.mkfifo(path)
+    blocked = threading.Event()
+
+    def unblock() -> None:  # a regression that opens it as a file blocks here; this frees it
+        blocked.set()
+        with open(path, "wb"):
+            pass
+
+    watchdog = threading.Timer(10, unblock)
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-fifo")
+    finally:
+        watchdog.cancel()
+    assert not blocked.is_set(), "the record leg blocked on a FIFO at the case-record path"
+    assert refused is None, f"rc={rc} refused={refused}"
+    assert rc == 0, f"rc={rc} refused={refused}"
+    assert not _post_calls(shim), "a FIFO case-record file still reached a POST"
+    got = S.receipt(run_dir)
+    assert got is not None, "no ticket_write.json"
+    assert (got.get("status"), got.get("ok"), got.get("url")) == ("error", False, None), got
+    assert CASE_RECORD in (got.get("reason") or ""), got
+
+
 def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch):
     """A tenant with no case-record file (or still holding `systems/case-history/`) run with
     `--update-ticket`: no call, an error receipt naming `case-record.yaml`, no silent ignore. O2, O5."""
@@ -248,6 +286,48 @@ def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch
     assert not S.receipt_path(run_dir).exists(), "a run without --update-ticket wrote a receipt"
 
 
+def _comment_argv(shim: S.DockerShim) -> list[str]:
+    (argv,) = _post_calls(shim)
+    return argv
+
+
+def _sent_body(argv: list[str]) -> str:
+    return argv[argv.index("-d") + 1]
+
+
+def test_o8_edits_to_the_case_settings_after_run_start_change_nothing_the_comment_carries(
+        tmp_path, monkeypatch):
+    """The leg uses the case settings recorded at run start (#1107 mf16): editing
+    `case-record.yaml` (body and system) or the system's `config.env` (its address) during the
+    run changes neither the comment's body, nor its system, nor its target. Control: the same
+    body planted before the run starts is what is sent. D-18."""
+    edited_body = "EDITED-BODY {disposition}"
+    control_shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-control")
+    root, _folder, alert = _world(tmp_path, name="control", case_body=edited_body)
+    _run(tmp_path, root, alert, run_id="r-control")
+    assert "EDITED-BODY" in _sent_body(_comment_argv(control_shim)), "control: the body is read"
+
+    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-edited")
+    root, folder, alert = _world(tmp_path, name="edited")
+
+    def edit_during_the_run(_run_dir: Path) -> None:
+        S.case_record_path(folder).write_text(
+            f'system: "cmdb"\ncomment:\n  body: "{edited_body}"\n', encoding="utf-8")
+        S.set_key(folder, CASE, "TICKET_URL_BASE", "http://edited-host.invalid:9")
+
+    rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-edited",
+                                      before=edit_during_the_run)
+    assert refused is None, f"rc={rc} refused={refused}"
+    assert rc == 0, f"rc={rc} refused={refused}"
+    argv = _comment_argv(shim)
+    assert S.curl_url(argv) == f"http://ticket-{MARKER}:8080/tickets/{KEY}/comments", argv
+    assert S.context_of(argv) == S.context_name(MARKER, CASE), argv
+    assert "EDITED-BODY" not in _sent_body(argv), "an edit made during the run reached the comment"
+    got = S.receipt(run_dir)
+    assert got is not None
+    assert (got["status"], got["ok"]) == ("commented", True), got
+
+
 def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     # Docker answers an unknown context with rc 1 and 'context not found' on stderr, before any
@@ -264,11 +344,10 @@ def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     assert got.get("url") is None, got
     reason = got.get("reason") or ""
     assert reason.strip(), f"no reason on the transport-fault receipt: {got}"
-    # The reason is the failing check's own text: docker's 'context not found', or the
-    # transport's naming of the context it could not reach.
-    assert ("context not found" in reason or "transport" in reason.lower()
-            or S.context_name(MARKER, CASE) in reason), (
-        f"the reason does not name the transport failure: {reason!r}")
+    # O5 (r4): a request that never got an answer is "the store could not be reached"; the
+    # failing check's own detail (docker's 'context not found', the context's name) may follow.
+    assert "the store could not be reached" in reason, (
+        f"the reason does not say the store could not be reached: {reason!r}")
     assert _warnings(caplog), "a transport fault logged no warning"
 
 

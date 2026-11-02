@@ -695,8 +695,10 @@ def test_1224_question_writer_prompt_when_configured_and_granted_systems_differ(
 
     settings = (Path(os.environ["DEFENDER_DATA_ROOT"]) / S.FIXTURE_TENANT / "knowledge"
                 / "settings" / "systems")
-    assert (settings / "case-history").is_dir(), "scenario precondition: case-history configured"
-    assert "case-history" not in est.grant().systems, "scenario precondition: not granted"
+    # #1359: the ungranted-but-configured system is the case system `ticket` (the tenant's
+    # case-record file names it; the retired `case-history` folder is gone).
+    assert (settings / "ticket").is_dir(), "scenario precondition: ticket configured"
+    assert "ticket" not in est.grant().systems, "scenario precondition: not granted"
     family = _manifest(launch.ep)
     assert family is not None, f"no family.yaml was written (rc={launch.rc}, {launch.message!r})"
     served = list(family.get("served_systems") or [])
@@ -707,7 +709,7 @@ def test_1224_question_writer_prompt_when_configured_and_granted_systems_differ(
         assert set(_system_names_in(host, served)) == set(served), (
             f"call {i} does not name every recorded served system {served}")
         assert _system_names_in(host, S.LAB_SYSTEMS) == [], f"call {i} names a lab system"
-        assert "case-history" not in prompt, f"call {i} names the ungranted case-history"
+        assert _system_names_in(host, ("ticket",)) == [], f"call {i} names the ungranted ticket"
     samples = S.read_samples(launch.ep)
     assert samples is not None, "no samples.yaml was written"
     assert set(samples) == set(served), (

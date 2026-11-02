@@ -122,6 +122,27 @@ def test_767_signature_in_the_template_is_the_runs_recorded_signature(tmp_path, 
         "the signature does not follow the run's own record (control)")
 
 
+def test_767_summary_and_event_time_placeholders_are_accepted_and_render_as_today(
+        tmp_path, monkeypatch):
+    """`{summary}` and `{event_time}` stay valid comment placeholders (a template naming them is
+    not a template fault) and render as the base comment renderer does: base
+    `case_record_to_comment` hands the context neither, so both render empty, whether or not the
+    alert carries them. Control: the sibling placeholders render. D-14, O7."""
+    _setup(monkeypatch, tmp_path, case_record_doc(body="[{summary}][{event_time}] {disposition}"))
+    assert ALERT["rule"]["description"], "fixture: the alert carries a summary"
+    assert ALERT["timestamp"], "fixture: the alert carries an event time"
+    present = _store(tmp_path)
+    record(make_run(tmp_path), present)
+    assert present.comment_body() == "[][] benign", present.wire_body()
+    absent_alert = {k: v for k, v in ALERT.items() if k != "timestamp"}
+    absent_alert["rule"] = {"id": ALERT["rule"]["id"]}
+    absent = _store(tmp_path)
+    run_dir = make_run(tmp_path, name="run-absent-facts", alert=absent_alert)
+    record(run_dir, absent)
+    assert absent.comment_body() == "[][] benign", absent.wire_body()
+    assert receipt(run_dir)["status"] == ticket_writer.RECEIPT_COMMENTED, receipt(run_dir)
+
+
 @pytest.mark.parametrize(("why", "rule"), [
     ("no rule id in the alert", {"description": "sshd: Attempt to login using a non-existent user"}),
     ("a rule id the signature rule refuses", {"id": "R 5710", "description": "x"}),
@@ -380,16 +401,19 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
     assert narrative.count(HOST_CAUSE) == 0
 
 
-@pytest.mark.parametrize(("arm", "answer"), [
-    ("an unreachable bastion (curl timed out)", S.curl_timed_out()),
-    ("no parseable response at all", S.answer("", None, rc=1, stderr="docker: unavailable")),
-    ("a key the store does not hold (404)", S.answer('{"detail": "no such ticket"}', "404")),
-    ("a 5xx", S.answer('{"detail": "down"}', "503")),
+@pytest.mark.parametrize(("arm", "answer", "reasons"), [
+    ("an unreachable bastion (curl timed out)", S.curl_timed_out(), ("could not be reached",)),
+    ("no parseable response at all", S.answer("", None, rc=1, stderr="docker: unavailable"),
+     ("could not be reached",)),
+    ("a key the store does not hold (404)", S.answer('{"detail": "no such ticket"}', "404"),
+     ("the store refused", "404", "not found")),
+    ("a 5xx", S.answer('{"detail": "down"}', "503"), ("could not be reached",)),
 ])
 def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch, capsys,
-                                                          arm, answer):
+                                                          arm, answer, reasons):
     """Every store fault is caught, warned once, never retried, and leaves the run's exit code
-    what it would have been. O1, O5."""
+    what it would have been; the receipt's reason tells the store refused (with its status) from
+    the store could not be reached (unreachable, timeout, 5xx alike). O1, O5."""
     _setup(monkeypatch, tmp_path)
     run_dir = make_run(tmp_path)
     store = _store(tmp_path, answers=[answer])
@@ -398,6 +422,9 @@ def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch,
     assert capsys.readouterr().err.count(WARNING) <= 1, f"{arm}: warned twice"
     assert receipt_path(run_dir).is_file(), f"{arm}: no receipt was written"
     assert receipt(run_dir)["url"] is None, f"{arm}: an error receipt carries a link (D-10)"
+    reason = receipt(run_dir)["reason"].lower()
+    for words in reasons:
+        assert words in reason, f"{arm}: the reason lacks {words!r}: {reason!r}"
 
 
 def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatch):
@@ -405,6 +432,7 @@ def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatc
     lost = make_run(tmp_path, name="run-unreachable")
     assert record(lost, _store(tmp_path, answers=[S.curl_timed_out()])) is None
     assert receipt(lost)["ok"] is False
+    assert "could not be reached" in receipt(lost)["reason"], receipt(lost)
 
     unconfigured = make_run(tmp_path, name="run-unconfigured")
     no_config = _store(tmp_path)

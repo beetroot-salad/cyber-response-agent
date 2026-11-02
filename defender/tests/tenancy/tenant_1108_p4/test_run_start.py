@@ -342,7 +342,7 @@ def test_o8_the_run_process_hands_the_publish_child_identifiers_only_and_holds_n
 def test_o8_operator_issuer_variables_never_reach_the_runs_environment(tenant, tmp_path,
                                                                        monkeypatch):
     """An operator shell exported `BAO_TOKEN`/`VAULT_TOKEN`: the environment run start builds
-    for its host lanes (`run_env`, seen through the ticket writer) carries neither. Control: an
+    for its host lanes (`run_env`, seen through the ticket writer's record leg) carries neither. Control: an
     ordinary variable passes."""
     monkeypatch.setenv("BAO_TOKEN", "s-b-operator-bao-token-77e1")
     monkeypatch.setenv("VAULT_TOKEN", "s-b-operator-vault-token-91a4")
@@ -350,8 +350,8 @@ def test_o8_operator_issuer_variables_never_reach_the_runs_environment(tenant, t
     envs: list[dict] = []
 
     class Writer:
-        def open_case_ticket(self, *_a: Any, env: Any, **_k: Any) -> None:
-            envs.append(dict(env))
+        def clear_receipt(self, *_a: Any, **_k: Any) -> None:  # the seam's run-start method (#1359)
+            pass
 
         def record_case_ticket(self, *_a: Any, env: Any, **_k: Any) -> None:
             envs.append(dict(env))
@@ -384,7 +384,7 @@ def test_r_s4_a_raise_after_the_lifecycle_still_removes_the_run_copy(tenant, tmp
         raise Boom(seam)
 
     class Writer:
-        def open_case_ticket(self, *_a: Any, **_k: Any) -> None:
+        def clear_receipt(self, *_a: Any, **_k: Any) -> None:  # the seam's run-start method (#1359)
             pass
 
         record_case_ticket = staticmethod(boom)

@@ -24,8 +24,8 @@ from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 KEY = C.TICKET_KEY
 #: Every punctuation/alphanumeric character a `case_key` may hold (P3: printable ASCII, no `/`,
 #: `\`, whitespace): the whole class, not a hand-picked list.
-#: `;` is left out: the proxy refuses it in any path (even percent-encoded), which P3's key shape
-#: does not (design gap in the report), so what a `;` key should do is not settled.
+#: `;` is left out (D-1): the proxy refuses it in any path, so P3's key shape refuses it at the
+#: front door too and such a key never reaches an adapter (`alert_front_door_1222/test_1359_case_key_fact.py`).
 KEY_CHARS = [chr(c) for c in range(0x21, 0x7F) if chr(c) not in "/\\;"]
 BY_ID = {v.id: v for v in VENDORS}
 vendors = pytest.mark.parametrize("vendor", VENDORS, ids=lambda v: v.id)
@@ -155,7 +155,7 @@ CHECKS = [
     pytest.param(JIRA_NO, _config("jira", ""), True, False, id="jira-service-desk-missing"),
     pytest.param(SERVICENOW, _config("servicenow", ""), True, False, id="servicenow-table-missing"),
     *[pytest.param(JIRA_NO, _config("jira", _JIRA.format(v)), True, False, id=f"jira-service-desk-{v or 'blank'}")
-      for v in ("maybe", "true", "1", "")],
+      for v in ("maybe", "true", "1", "", "YES", "No")],  # D-2: lowercase yes|no only
     *[pytest.param(SERVICENOW, _config("servicenow", _SN.format(v)), True, False,
                    id=f"servicenow-table-{n}")
       for n, v in (("slash", "incident/x"), ("space", "a b"), ("query", "x?y=1"), ("blank", ""))],
@@ -163,6 +163,12 @@ CHECKS = [
                  id="jira-docker-exec"),
     pytest.param(SERVICENOW, _config("servicenow", _SN.format("incident"), docker=True), False,
                  False, id="servicenow-docker-exec"),
+    # The same docker-exec configs WITH an access.yaml present, so the refusal is the transport's
+    # (r4: http-proxy only), not a missing declaration.
+    pytest.param(JIRA_NO, _config("jira", _JIRA.format("no"), docker=True), True, False,
+                 id="jira-docker-exec-with-access"),
+    pytest.param(SERVICENOW, _config("servicenow", _SN.format("incident"), docker=True), True,
+                 False, id="servicenow-docker-exec-with-access"),
 ]
 
 
