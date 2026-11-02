@@ -536,17 +536,21 @@ def test_p102_run_starts_with_a_faulted_alert_mapping(tmp_path: Path, capsys: An
         enqueued.append((args, kw))
         return True
 
-    # Positive control: a started run is enqueued for curation — the channel a refused run must
-    # leave untouched (#1359: no ticket is opened at run start any more).
+    # Positive control, on both channels a refused run must leave untouched: a started run is
+    # enqueued for curation and its record leg comments on the alert's ticket.
+    S.ticket_the_tenant(w.planted)
     store = S.TicketStore(w.tmp)
-    ok = at_run_start(w, tickets=S.ticket_writer(store), update_ticket=True, enqueue=enqueue)
+    ok = at_run_start(w, alert=S.ticketed_alert(), tickets=S.ticket_writer(store),
+                      update_ticket=True, enqueue=enqueue)
     assert_passed(ok)
     assert enqueued, "a started run was not enqueued for curation"
+    assert store.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], store.calls
     try:
         w.alert_shape(shape)
         store = S.TicketStore(w.tmp)
         enqueued.clear()
-        v = at_run_start(w, tickets=S.ticket_writer(store), update_ticket=True, enqueue=enqueue)
+        v = at_run_start(w, alert=S.ticketed_alert(), tickets=S.ticket_writer(store),
+                         update_ticket=True, enqueue=enqueue)
         assert_refused(v, ALERT_MAPPING)
         assert_no_run(v)
         assert store.calls == [], f"a ticket leg ran for a refused run: {store.calls!r}"

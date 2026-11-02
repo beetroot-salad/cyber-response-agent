@@ -1415,6 +1415,7 @@ class _WriterOverTheShim:
         return None
 
     def record_case_ticket(self, run: Any, **kw: Any) -> Any:
+        # An empty or absent env (a test driving the leg directly) means the process env.
         kw["env"] = self.store.env(kw.get("env") or None)
         return self._writer.record_case_ticket(run, **kw)
 

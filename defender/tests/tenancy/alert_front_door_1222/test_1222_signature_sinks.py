@@ -90,9 +90,7 @@ def _ticketed(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,
     for name, entries in (lessons or {}).items():
         S.plant_lesson(name, source_signature=list(entries))
     sink = store if store is not None else S.TicketStore(tmp_path)
-    if isinstance(alert, Mapping):
-        alert = S.ticketed_alert(alert)
-    d = S.run_alert(tmp_path, alert=alert, tenant=planted, tickets=S.ticket_writer(sink),
+    d = S.run_alert(tmp_path, alert=S.ticketed_alert(alert), tenant=planted, tickets=S.ticket_writer(sink),
                     update_ticket=True, orient_shim=shim,
                     main=main if main is not None else S.closing_main_turns(),
                     before=before)
@@ -469,7 +467,7 @@ def test_p056_alert_key_names_are_hostile_and_the_harness_name(tmp_path: Path) -
 
 def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -> None:
     """The comment carries the recorded signature verbatim; a signature the rule refuses (spaces,
-    commas) is the fallback, never the raw value."""
+    commas) is the fallback, never the raw value. D-14, O7."""
     signed, store = _ticketed(tmp_path / "signed", alert=S.generic_alert(rule_id=RULE_ID),
                               mapping=S.DEFAULT_MAPPING_GENERIC)
     assert _comment_signature(store) == RULE_ID, (
@@ -545,7 +543,7 @@ class _RewritesAlertAtClose(S.MainScript):
 
 
 def test_p112_case_ticket_opened_then_recorded_after_the_alert(tmp_path: Path) -> None:
-    """The comment carries the signature recorded at run start, not the rewritten alert's."""
+    """The comment carries the signature recorded at run start, not the rewritten alert's. D-14, O7."""
     rewritten = S.alert_bytes(S.generic_alert(rule_id="R9999"))
     main = _RewritesAlertAtClose(rewritten)
 
