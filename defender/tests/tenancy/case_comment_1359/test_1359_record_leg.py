@@ -67,7 +67,7 @@ def test_o1_a_store_that_does_not_know_the_key_leaves_a_not_found_receipt(tmp_pa
     got = S.receipt(run_dir)
     assert got is not None, "no receipt"
     assert (got["key"], got["status"], got["ok"]) == (C.TICKET_KEY, C.ERROR, False), got
-    assert C.PROVISIONAL_REASON_NOT_FOUND in (got.get("reason") or "").lower(), got
+    assert C.REASON_NOT_FOUND in (got.get("reason") or "").lower(), got
 
 
 def test_o5_an_alert_naming_no_ticket_is_an_empty_key_receipt_the_page_shows(tmp_path, monkeypatch):
@@ -85,7 +85,7 @@ def test_o5_an_alert_naming_no_ticket_is_an_empty_key_receipt_the_page_shows(tmp
     assert set(got) == C.RECEIPT_KEYS, got
     assert (got["key"], got["status"], got["ok"], got["url"]) == ("", C.ERROR, False, None), got
     reason = got.get("reason") or ""
-    assert C.PROVISIONAL_REASON_NO_KEY in reason, got
+    assert C.REASON_NO_KEY in reason, got
     page = S.page_html(run_dir)
     assert page, "positive control: the page rendered"
     assert html.escape(reason) in page or reason in page, "the page does not show the reason"

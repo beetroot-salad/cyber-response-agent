@@ -78,7 +78,7 @@ def test_o3_no_second_copy_of_a_transport_route():
 
 
 def _adapter_source(verb_key: str | None) -> str:
-    extra = f'    "{verb_key}": {C.PROVISIONAL_COMMENT_ACTION},\n' if verb_key else ""
+    extra = f'    "{verb_key}": {C.COMMENT_ACTION},\n' if verb_key else ""
     return textwrap.dedent(f"""\
         def check_settings(tenant):
             return None
@@ -88,7 +88,7 @@ def _adapter_source(verb_key: str | None) -> str:
             return {{}}
 
 
-        def {C.PROVISIONAL_COMMENT_ACTION}(ctx, *, key, body):
+        def {C.COMMENT_ACTION}(ctx, *, key, body):
             return None
 
 
@@ -100,7 +100,7 @@ def _adapter_source(verb_key: str | None) -> str:
 def test_o4_the_roster_refuses_an_adapter_whose_verbs_hold_the_comment_action(tmp_path):
     """An adapter whose VERBS holds the comment action is not accepted; the same adapter without it is. O4."""
     read_roster = S.mod("systems.verbs").read_roster
-    key = C.PROVISIONAL_COMMENT_ACTION.replace("_", "-")
+    key = C.COMMENT_ACTION.replace("_", "-")
     good, bad = tmp_path / "good", tmp_path / "bad"
     for where, verb_key in ((good, None), (bad, key)):
         where.mkdir()
@@ -114,10 +114,10 @@ def test_o4_the_roster_refuses_an_adapter_whose_verbs_hold_the_comment_action(tm
 def test_o4_no_checkout_adapter_declares_the_comment_action(checkout_roster):
     """No adapter in the checkout lists the comment action among its verbs. O4."""
     assert checkout_roster.declared_verbs("ticket"), "positive control: verbs were read"
-    key = C.PROVISIONAL_COMMENT_ACTION.replace("_", "-")
+    key = C.COMMENT_ACTION.replace("_", "-")
     holding = sorted(s for s in checkout_roster.accepted
-                     if {key, C.PROVISIONAL_COMMENT_ACTION} & checkout_roster.declared_verbs(s))
+                     if {key, C.COMMENT_ACTION} & checkout_roster.declared_verbs(s))
     assert holding == [], holding
     module = S.mod("systems.verbs").fresh_adapter_module(checkout_roster, "ticket")
-    assert callable(getattr(module, C.PROVISIONAL_COMMENT_ACTION, None)), (
+    assert callable(getattr(module, C.COMMENT_ACTION, None)), (
         "the playground ticket adapter exports no comment action")

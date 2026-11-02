@@ -37,7 +37,7 @@ SN_SYS_ID = "9d385017c611228701d22104cc95c371"
 
 def _files(system: str, decl: str, *, env_extra: str = "") -> dict[str, str]:
     files = A.system_files(system, decl, env_extra=env_extra)
-    files[f"settings/{C.PROVISIONAL_CASE_RECORD_REL}"] = C.case_record_text(system)
+    files[f"settings/{C.CASE_RECORD_REL}"] = C.case_record_text(system)
     files["settings/alert-mapping.yaml"] = C.alert_mapping_text()
     return files
 
@@ -102,7 +102,7 @@ def _vendor_comment(tmp_path, data_root, checkout_roster, system: str, base: str
 def test_o6_ready_made_jira_adapter_posts_an_adf_comment(tmp_path, data_root, checkout_roster):
     """A Jira case system configured with no code comments on the key in Jira's document format. O6, P1."""
     path = f"{JIRA_BASE}/rest/api/3/issue/{C.TICKET_KEY}/comment"
-    receipt, seen = _vendor_comment(tmp_path, data_root, checkout_roster, C.PROVISIONAL_JIRA_SYSTEM,
+    receipt, seen = _vendor_comment(tmp_path, data_root, checkout_roster, C.JIRA_SYSTEM,
                                     JIRA_BASE, JIRA_WRITE, C.TICKET_KEY, path)
     assert receipt is not None, "no receipt"
     assert receipt["ok"] is True, receipt
@@ -127,7 +127,7 @@ def test_o6_ready_made_servicenow_adapter_writes_a_work_note(tmp_path, data_root
     """A ServiceNow case system configured with no code writes the comment as an internal work note. O6, P4."""
     path = f"{SN_BASE}/api/now/table/{SN_TABLE}/{SN_SYS_ID}"
     receipt, seen = _vendor_comment(tmp_path, data_root, checkout_roster,
-                                    C.PROVISIONAL_SERVICENOW_SYSTEM, SN_BASE, SN_WRITE, SN_SYS_ID, path)
+                                    C.SERVICENOW_SYSTEM, SN_BASE, SN_WRITE, SN_SYS_ID, path)
     assert receipt is not None, "no receipt"
     assert receipt["ok"] is True, receipt
     assert [(s.method, s.path.split("?")[0]) for s in seen] == [("PATCH", path)]

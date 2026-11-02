@@ -1,7 +1,7 @@
 """Shared names and planting for the #1359 case-comment contract (no test functions).
 
-Every name the design leaves open is one `PROVISIONAL_*` constant here, so the suites cannot
-disagree and the thorough pass changes each in one place."""
+Every name the design (r3 + amendment r4) fixes is one constant here, so the suites cannot
+disagree."""
 from __future__ import annotations
 
 import json
@@ -28,23 +28,23 @@ RETIRED_PREFIX = "CASE_HISTORY"
 RETIRED_MAPPING_REL = "systems/case-history/mapping.yaml"
 
 # ======================================================================================
-# Names the design leaves open: provisional choices, listed in the sketch report.
+# Names fixed by amendment r4.
 # ======================================================================================
 
 #: The adapter's literally named comment function (design: "one literally named function").
-PROVISIONAL_COMMENT_ACTION = "add_case_comment"
-#: The tenant case-record settings file under `settings/` and its keys (design: "e.g.").
-PROVISIONAL_CASE_RECORD_REL = "case-record.yaml"
+COMMENT_ACTION = "add_case_comment"
+#: The tenant case-record settings file under `settings/` (r4 Data).
+CASE_RECORD_REL = "case-record.yaml"
 #: The ready-made adapters' system names (module `<system>_adapter.py`, prefix `<SYSTEM>_`).
-PROVISIONAL_JIRA_SYSTEM = "jira"
-PROVISIONAL_SERVICENOW_SYSTEM = "servicenow"
-#: Receipt reason substrings for the distinctions O5 names (design gives no words).
-PROVISIONAL_REASON_NO_KEY = "names no ticket"
-PROVISIONAL_REASON_NOT_FOUND = "not found"
-#: The record leg's entry point: assumed to keep run.py's module, name and keywords
+JIRA_SYSTEM = "jira"
+SERVICENOW_SYSTEM = "servicenow"
+#: Receipt reason substrings (r4 "Receipt reasons").
+REASON_NO_KEY = "names no ticket"
+REASON_NOT_FOUND = "not found"
+#: The record leg's entry point: run.py's module, name and keywords (r4 keeps the seam)
 #: (`run, tenant=, defender_dir=, env=, truncated_by=, closed_before_cut=, request_token=,
 #: proxy_url=`).
-PROVISIONAL_RECORD_LEG = ("investigation.ticket_writer", "record_case_ticket")
+RECORD_LEG = ("investigation.ticket_writer", "record_case_ticket")
 
 MARKER = "c1359"
 #: The ticket key the planted alert names, in the fixture ticket store's own key grammar
@@ -59,7 +59,7 @@ ALERT_MAPPING = {"signature": "rule.id", "event_time": "timestamp",
 
 
 def record_leg() -> Any:
-    module, name = PROVISIONAL_RECORD_LEG
+    module, name = RECORD_LEG
     return getattr(S.mod(module), name)
 
 
@@ -101,7 +101,7 @@ def plant_case_tenant(root: Path, *, case_system: str | None = "ticket",
     settings = S.settings_of(folder)
     (settings / "alert-mapping.yaml").write_text(alert_mapping_text(), encoding="utf-8")
     if case_system is not None:
-        (settings / PROVISIONAL_CASE_RECORD_REL).write_text(
+        (settings / CASE_RECORD_REL).write_text(
             case_record_text(case_system), encoding="utf-8")
     return folder
 
