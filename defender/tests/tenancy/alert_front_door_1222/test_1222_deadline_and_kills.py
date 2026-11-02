@@ -674,7 +674,7 @@ def test_p167_model_request_slow_retried_or_just_past_the_time(tmp_path: Path) -
 
 def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
                                                      monkeypatch: pytest.MonkeyPatch) -> None:
-    tenant = S.plant_tenant()
+    tenant = S.ticket_the_tenant(S.plant_tenant())
     real_enqueue = S.sym("run_common", "enqueue_curation")
 
     def post_steps() -> tuple[Any, Callable[..., bool], list[dict], list[bool]]:
@@ -688,7 +688,7 @@ def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
             answers.append(bool(real_enqueue(run_dir, alert, **kw)))
             return answers[-1]
 
-        return S.ticket_writer(S.TicketStore()), enqueue, handed, answers
+        return S.ticket_writer(S.TicketStore(tmp_path)), enqueue, handed, answers
 
     # The existing path: MAIN's own budget kill at its first tool call.
     tickets_a, enqueue_a, handed_a, answers_a = post_steps()
@@ -698,14 +698,14 @@ def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
             tmp_path / "main", tenant=tenant,
             main=S.MainScript(S.default_main_turns(), S.LeadFault(delay=KILL_DELAY_S)),
             limits=S.default_limits(wall_clock_timeout=KILL_WALL_S, grace_seconds=0),
-            tickets=tickets_a, update_ticket=True, no_learn=False,
+            alert=S.ticketed_alert(), tickets=tickets_a, update_ticket=True, no_learn=False,
             enqueue=enqueue_a)
     # The stop before MAIN's first request: a budget kill at the lead's own tool call.
     tickets_b, enqueue_b, handed_b, answers_b = post_steps()
     stores: list = []
     lead_kill = _budget_kill_during_lead(
         tmp_path / "lead", tenant, monkeypatch, stores=stores,
-        tickets=tickets_b, update_ticket=True, no_learn=False,
+        alert=S.ticketed_alert(), tickets=tickets_b, update_ticket=True, no_learn=False,
         enqueue=enqueue_b)
     _assert_budget_kill_during_lead(lead_kill, stores)
     assert lead_kill.summary is not None
@@ -717,9 +717,10 @@ def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
         f"the curation enqueue was handed {handed_b!r} for the stop before MAIN, {handed_a!r} for "
         "MAIN's own kill")
     assert answers_b == answers_a
-    assert tickets_b.store.comments() == tickets_a.store.comments(), (
+    assert tickets_b.store.comment_body() == tickets_a.store.comment_body(), (
         "the ticket's record leg did something different for the stop before MAIN")
-    assert len(tickets_b.store.opened()) == len(tickets_a.store.opened()) == 1
+    assert tickets_b.store.paths(S.COMMENTS_SUFFIX) == tickets_a.store.paths(S.COMMENTS_SUFFIX) == [
+        f"/tickets/{S.TICKET_KEY}/comments"]
 
 
 def test_p174_lead_and_main_failures_together_pass_the_kill_co(tmp_path: Path) -> None:

@@ -6,9 +6,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 
-from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
-import html
 import json
 import os
 import re
@@ -56,12 +54,6 @@ def _alert(*, alert_id: str | None = MAPPED, **over: Any) -> dict[str, Any]:
 
 # The case ticket
 
-def _signed_case_mapping() -> str:
-    """The case mapping whose comment body also renders `{signature}` (`S.SIGNED_COMMENT_BODY`)
-    — without it the record leg's signature (`read_case_record`) reaches no observable byte."""
-    return S.case_mapping_text(comment_body=S.SIGNED_COMMENT_BODY)
-
-
 def _completed(d: S.Drive) -> S.Drive:
     """`d`, asserted to have run to its end (no refusal, nothing raised)."""
     assert d.refusal is None, f"the run was refused: rc={d.rc} refusal={d.refusal!r}"
@@ -74,25 +66,12 @@ def _run_dir(d: S.Drive) -> Path:
     return d.run_dir
 
 
-def _labels(payload: Mapping[str, Any], prefix: str) -> list[str]:
-    labels = payload.get("labels")
-    assert isinstance(labels, list), f"the open payload carries no label list: {payload!r}"
-    return [lbl for lbl in labels if isinstance(lbl, str) and lbl.startswith(prefix)]
-
-
-def _sig_label(payload: Mapping[str, Any]) -> str:
-    """The ONE `sig:` label's value (the ticket gets exactly one)."""
-    sig = _labels(payload, "sig:")
-    assert len(sig) == 1, f"expected exactly one sig: label, got {payload.get('labels')!r}"
-    return sig[0][len("sig:"):]
-
-
 def _comment_signature(store: S.TicketStore) -> str:
-    """The signature the record leg rendered into its one comment."""
-    bodies = store.comments()
-    assert len(bodies) == 1, f"expected one record comment, got {store.calls!r}"
-    found = S.COMMENT_SIGNATURE.search(str(bodies[0].get("body")))
-    assert found, f"the comment rendered no signature slot: {bodies[0]!r}"
+    """The signature the record leg rendered into its one comment, on the alert's ticket (D-14:
+    the signature recorded at run start reaches the ticket only through the comment)."""
+    assert store.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], store.calls
+    found = S.COMMENT_SIGNATURE.search(store.comment_body())
+    assert found, f"the comment rendered no signature slot: {store.wire_body()!r}"
     return found.group(1)
 
 
@@ -102,13 +81,17 @@ def _ticketed(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,
               before: Callable[[Path], None] | None = None,
               lessons: Mapping[str, Sequence[str]] | None = None,
               store: S.TicketStore | None = None) -> tuple[S.Drive, S.TicketStore]:
-    """One run through `run.main` with `--update-ticket`: the open leg, the driver, the record
-    leg — the REAL ticket writer over `store` (default a fresh `TicketStore`), which records each
-    outbound body."""
-    planted = S.plant_tenant(alert_mapping=mapping, case_mapping=_signed_case_mapping())
+    """One run through `run.main` with `--update-ticket`: the driver, then the record leg — the REAL
+    ticket writer over `store` (default a fresh `TicketStore`), which records each request. The
+    alert names its ticket, and the case-record template renders `{signature}`."""
+    planted = S.plant_tenant(
+        alert_mapping=None if mapping is None else S.ticketed_mapping(mapping),
+        case_body=S.SIGNED_COMMENT_BODY)
     for name, entries in (lessons or {}).items():
         S.plant_lesson(name, source_signature=list(entries))
-    sink = store if store is not None else S.TicketStore()
+    sink = store if store is not None else S.TicketStore(tmp_path)
+    if isinstance(alert, Mapping):
+        alert = S.ticketed_alert(alert)
     d = S.run_alert(tmp_path, alert=alert, tenant=planted, tickets=S.ticket_writer(sink),
                     update_ticket=True, orient_shim=shim,
                     main=main if main is not None else S.closing_main_turns(),
@@ -352,8 +335,7 @@ def test_o10_no_reader_falls_back_to_a_vendor_field(tmp_path: Path) -> None:
     harness = S.harness_text(d.opening_message)
     assert any(RULE_ID in body for body in S.framed_bodies(d.opening_message)), (
         "the raw alert never reached MAIN, so its absence below proves nothing")
-    payload = store.only_open()
-    comment = store.comments()
+    comment = store.comment_payloads
     assert comment, "the record leg posted nothing"
     run_dir = _run_dir(d)
     corpus, _report = _corpus(run_dir.parent)
@@ -362,7 +344,6 @@ def test_o10_no_reader_falls_back_to_a_vendor_field(tmp_path: Path) -> None:
     for value in VENDOR_VALUES:
         assert value not in harness, f"orientation's harness prose fell back to {value!r}"
         assert not _argv_carries(shim.argvs(), value), f"a lookup was keyed on {value!r}"
-        assert value not in json.dumps(payload), f"the open ticket fell back to {value!r}"
         assert value not in json.dumps(comment), f"the record comment fell back to {value!r}"
     assert mine[0].signature_id is None, f"the corpus attributed the run to {mine[0].signature_id!r}"
 
@@ -434,7 +415,6 @@ def test_a6_every_sink_carries_and_matches_one_signature_text(tmp_path: Path) ->
         f"orientation's lookup was not handed the signature verbatim: {shim.lessons_lookups()}")
     assert _listed(d.opening_message, lessons) == {"fd1222-a6-exact"}, "orientation's lookup"
     assert _listed(_first_tool_return(d), lessons) == {"fd1222-a6-exact"}, "MAIN's own lookup"
-    assert _sig_label(store.only_open()) == sig
     assert _comment_signature(store) == sig
 
     base = tmp_path / "past"
@@ -488,68 +468,21 @@ def test_p056_alert_key_names_are_hostile_and_the_harness_name(tmp_path: Path) -
 
 
 def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -> None:
-    holding = S.HoldingTicketStore()
-    signed, _ = _ticketed(tmp_path / "signed", alert=S.generic_alert(rule_id=RULE_ID),
-                          mapping=S.DEFAULT_MAPPING_GENERIC, store=holding)
-    opened = holding.only_open()
-    assert _sig_label(opened) == RULE_ID, "the sig: label is not the recorded signature verbatim"
-    assert _labels(opened, "evt:") == [f"evt:{DETECTED_AT}"], (
-        f"the evt: label is not the event time as-is: {opened.get('labels')!r}")
-    assert holding.find(f"sig:{RULE_ID}") == [str(opened.get("key"))], (
-        "a later search by the stored sig: label does not find the case")
+    """The comment carries the recorded signature verbatim; a signature the rule refuses (spaces,
+    commas) is the fallback, never the raw value."""
+    signed, store = _ticketed(tmp_path / "signed", alert=S.generic_alert(rule_id=RULE_ID),
+                              mapping=S.DEFAULT_MAPPING_GENERIC)
+    assert _comment_signature(store) == RULE_ID, (
+        "the comment's signature is not the recorded signature verbatim")
     assert signed.recorded("signature") == RULE_ID
 
     name = "Beacon, outbound: rare destination"
     alert = S.generic_alert(rule={"id": RULE_ID, "name": name, "description": DESCRIPTION})
     d, store = _ticketed(tmp_path / "unsigned", alert=alert,
                          mapping={**S.DEFAULT_MAPPING_GENERIC, "signature": "rule.name"})
-    payload = store.only_open()
-    assert _sig_label(payload) == S.CASE_FALLBACK_SIGNATURE
-    assert _labels(payload, "evt:") == [f"evt:{DETECTED_AT}"]
-    assert payload.get("summary") == DESCRIPTION
+    assert _comment_signature(store) == S.CASE_FALLBACK_SIGNATURE
     assert d.recorded("signature") is None
 
-
-
-#: An event time a ticket store may refuse as a label: carried as-is, it holds spaces.
-SPACED_EVENT_TIME = "2026-09-30 08:15:00 UTC"
-
-
-def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
-        tmp_path: Path) -> None:
-    receipt_path = S.sym("investigation.ticket_writer", "receipt_path")
-    render_page = S.sym("presentation.visualize_run", "render_page")
-
-    accepting = S.HoldingTicketStore(refuse_label=S.LABEL_WITH_WHITESPACE)
-    ok, _ = _ticketed(tmp_path / "accepted", alert=S.generic_alert(rule_id=RULE_ID),
-                      mapping=S.DEFAULT_MAPPING_GENERIC, store=accepting)
-    assert accepting.refused == [], f"the control's ticket was refused: {accepting.refused}"
-    assert accepting.find(f"sig:{RULE_ID}") == [str(accepting.only_open().get("key"))], (
-        "the control's case is not found by its sig: label")
-    control = json.loads(receipt_path(_run_dir(ok)).read_text(encoding="utf-8"))
-    assert control.get("ok") is True, f"the accepted ticket's receipt is not a success: {control}"
-
-    refusing = S.HoldingTicketStore(refuse_label=S.LABEL_WITH_WHITESPACE)
-    d, _ = _ticketed(tmp_path / "refused",
-                     alert=S.generic_alert(rule_id=RULE_ID, detected_at=SPACED_EVENT_TIME),
-                     mapping=S.DEFAULT_MAPPING_GENERIC, store=refusing)
-    label = f"evt:{SPACED_EVENT_TIME}"
-    assert refusing.refused == [label], (
-        "the store never refused the create: the evt: label did not carry the event time "
-        f"as-is: {refusing.calls!r}")
-    assert d.rc == 0, f"a refused ticket changed the run's exit: rc={d.rc}"
-    assert d.report is not None, "the investigation did not end normally: no report.md"
-    reason = refusing.refusal_reason(label)
-    path = receipt_path(_run_dir(d))
-    assert path.is_file(), "the refused ticket left no receipt"
-    text = path.read_text(encoding="utf-8")
-    receipt = json.loads(text)
-    assert receipt.get("ok") is not True, (
-        f"the receipt reads as a success for a ticket the store refused: {receipt}")
-    assert reason in text, (
-        f"the receipt does not quote the store's reason {reason!r}: {receipt}")
-    page = html.unescape(render_page(_run_handle_1165(_run_dir(d)), update_ticket=True))
-    assert reason in page, "the run page does not quote the store's refusal of the ticket"
 
 
 LOOKALIKE = "R-1А"  # a Cyrillic capital A where a Latin one would print the same
@@ -562,14 +495,14 @@ def test_p089_signatures_that_look_identical_but_differ_in_cod(tmp_path: Path) -
         shim = S.RecordingShim()
         d, store = _ticketed(tmp_path / value, alert=S.generic_alert(rule_id=value),
                              mapping=S.DEFAULT_MAPPING_GENERIC, shim=shim, lessons=lessons)
-        assert _sig_label(store.only_open()) == value
+        assert _comment_signature(store) == value
         assert _listed(d.opening_message, lessons) == {f"fd1222-p089-{'upper' if value == upper else 'lower'}"}, (
             f"the lessons lookup for {value!r} folded case into {other!r}")
     for i, value in enumerate((LOOKALIKE, "Ré", "Ré", "R-1 ")):
         d, store = _ticketed(tmp_path / f"nonkey-{i}", alert=S.generic_alert(rule_id=value),
                              mapping=S.DEFAULT_MAPPING_GENERIC)
-        assert _sig_label(store.only_open()) == S.CASE_FALLBACK_SIGNATURE, (
-            f"{value!r}, not a valid signature, became a ticket label")
+        assert _comment_signature(store) == S.CASE_FALLBACK_SIGNATURE, (
+            f"{value!r}, not a valid signature, reached the ticket comment")
         assert d.recorded("signature") is None
     base = tmp_path / "past"
     _plant_past(base, "past-upper", alert=S.generic_alert(rule_id=upper), facts={"signature": upper})
@@ -598,7 +531,7 @@ def _rewrite_alert_mid_run(run_dir: Path, raw: bytes) -> None:
 
 class _RewritesAlertAtClose(S.MainScript):
     """MAIN closing its investigation, with the alert rewritten in the box's stead just before
-    MAIN's last answer — after the open leg and orientation, before the record leg."""
+    MAIN's last answer — after run start and orientation, before the record leg."""
 
     def __init__(self, raw: bytes) -> None:
         super().__init__(S.closing_main_turns())
@@ -612,6 +545,7 @@ class _RewritesAlertAtClose(S.MainScript):
 
 
 def test_p112_case_ticket_opened_then_recorded_after_the_alert(tmp_path: Path) -> None:
+    """The comment carries the signature recorded at run start, not the rewritten alert's."""
     rewritten = S.alert_bytes(S.generic_alert(rule_id="R9999"))
     main = _RewritesAlertAtClose(rewritten)
 
@@ -621,6 +555,5 @@ def test_p112_case_ticket_opened_then_recorded_after_the_alert(tmp_path: Path) -
     d, store = _ticketed(tmp_path, alert=S.generic_alert(rule_id=RULE_ID), main=main,
                          mapping=S.DEFAULT_MAPPING_GENERIC, before=remember)
     assert d.report is not None, "the run never closed, so the record leg had no report"
-    assert _sig_label(store.only_open()) == RULE_ID
     assert _comment_signature(store) == RULE_ID, "the record leg took the rewritten alert's value"
     assert d.recorded("signature") == RULE_ID

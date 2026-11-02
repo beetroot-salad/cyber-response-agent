@@ -1,5 +1,5 @@
 """One tenant check, the same verdict at every entry point, for the required
-`settings/alert-mapping.yaml` and the case mapping's top-level `source:` key."""
+`settings/alert-mapping.yaml` and for a legacy `systems/case-history/` folder (#1359)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -57,12 +57,12 @@ def _shape_params(shapes: Iterable[str]) -> list[Any]:
 #: Case-history mapping contents the one check refuses, as the BYTES written at its name.
 #: `unreadable` is a valid file put at mode 000 by `World.case_bytes`.
 CASE_FAULTS: dict[str, bytes | None] = {
-    "non_utf8": S.case_mapping_text().encode("utf-8").replace(
+    "non_utf8": S.legacy_case_mapping_text().encode("utf-8").replace(
         b"reporter: defender", b"reporter: d\xff\xfefender"),
     "unreadable": None,
     "unparseable_yaml": b"open: [key\ncomment: {\n",
     "not_a_mapping": b"- open\n- comment\n",
-    **{shape: S.case_mapping_text(source=text).encode("utf-8")
+    **{shape: S.legacy_case_mapping_text(source=text).encode("utf-8")
        for shape, text in S.CASE_SOURCE_SHAPES.items()},
 }
 
@@ -99,7 +99,7 @@ class World:
         with contextlib.suppress(FileNotFoundError):
             path.unlink()
         if data is None:
-            path.write_text(S.case_mapping_text(), encoding="utf-8")
+            path.write_text(S.legacy_case_mapping_text(), encoding="utf-8")
             path.chmod(0)
         else:
             path.write_bytes(data)
@@ -110,7 +110,7 @@ class World:
 
     def case_source(self, shape: str) -> Path:
         """A case-mapping `source` shape, through the shared planter."""
-        self.case_text(S.case_mapping_text())
+        self.case_text(S.legacy_case_mapping_text())
         return S.plant_case_source(self.planted, shape)
 
     def reset(self) -> None:
@@ -538,13 +538,13 @@ def test_p102_run_starts_with_a_faulted_alert_mapping(tmp_path: Path, capsys: An
 
     # Positive control: a started run is enqueued for curation — the channel a refused run must
     # leave untouched (#1359: no ticket is opened at run start any more).
-    store = S.TicketStore()
+    store = S.TicketStore(w.tmp)
     ok = at_run_start(w, tickets=S.ticket_writer(store), update_ticket=True, enqueue=enqueue)
     assert_passed(ok)
     assert enqueued, "a started run was not enqueued for curation"
     try:
         w.alert_shape(shape)
-        store = S.TicketStore()
+        store = S.TicketStore(w.tmp)
         enqueued.clear()
         v = at_run_start(w, tickets=S.ticket_writer(store), update_ticket=True, enqueue=enqueue)
         assert_refused(v, ALERT_MAPPING)

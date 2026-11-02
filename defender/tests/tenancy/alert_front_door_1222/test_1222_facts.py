@@ -70,11 +70,11 @@ def _drive(tmp_path: Path, planted: S.Planted, alert: Mapping[str, Any] | bytes,
            mapping: Mapping[str, Any] | None = None, main: Sequence[S.Turn] | None = None,
            ) -> S.Drive:
     """One alert through `run.main` with every reader recorded: the orientation lookups'
-    argv, the case ticket's open and record legs. `mapping` (when given) is written first."""
-    if mapping is not None:
-        S.remap(planted, mapping)
-    d = S.run_alert(tmp_path, alert=alert, tenant=planted, main=main,
-                    orient_shim=S.RecordingShim(), tickets=S.ticket_writer(S.TicketStore()),
+    argv, the case ticket's record leg (its comment renders the signature). The alert names its
+    ticket. `mapping` (when given) is written first."""
+    S.ticket_the_tenant(planted, mapping)
+    d = S.run_alert(tmp_path, alert=S.ticketed_alert(alert), tenant=planted, main=main,
+                    orient_shim=S.RecordingShim(), tickets=S.ticket_writer(S.TicketStore(tmp_path)),
                     update_ticket=True)
     ran = d.raised is None and d.refusal is None and d.rc == 0 and d.main.requests >= 1
     assert ran, (f"the run did not run to MAIN: rc={d.rc!r} refusal={d.refusal!r} "
@@ -123,19 +123,12 @@ def _hands(d: S.Drive, value: str) -> bool:
     return any(a == value or a.endswith("=" + value) for a in _handed(d))
 
 
-def _opened(d: S.Drive) -> dict[str, Any]:
-    """The case ticket's open payload as the store received it, the run id as a placeholder."""
-    payload = d.tickets.store.only_open()
-    text = json.dumps(payload, sort_keys=True, ensure_ascii=False).replace(_run_id(d), "<RUN_ID>")
-    doc = json.loads(text)
-    assert isinstance(doc, dict)
-    return doc
-
-
-def _labels(d: S.Drive, prefix: str) -> list[str]:
-    """The open payload's labels that start with `prefix` (`sig:` / `evt:`)."""
-    labels = d.tickets.store.only_open().get("labels") or []
-    return [lbl for lbl in labels if isinstance(lbl, str) and lbl.startswith(prefix)]
+def _comment_signature(d: S.Drive) -> str | None:
+    """The signature the record leg's one comment (on the alert's ticket) rendered, or None."""
+    store = d.tickets.store
+    assert store.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], store.calls
+    found = S.COMMENT_SIGNATURE.search(store.comment_body())
+    return found.group(1) if found else None
 
 
 def _diff(a: str, b: str, a_name: str, b_name: str) -> str:
@@ -145,8 +138,8 @@ def _diff(a: str, b: str, a_name: str, b_name: str) -> str:
 
 def _unlike_unmapped(case: S.Drive, ref: S.Drive, label: str) -> list[str]:
     """Every channel on which `case` was NOT treated exactly like the unmapped reference: what
-    MAIN was told and instructed, what each orientation lookup was handed, what the case ticket
-    opened with."""
+    MAIN was told and instructed, what each orientation lookup was handed, the signature the case
+    ticket's comment carries."""
     problems: list[str] = []
     told, ref_told = _told(case), _told(ref)
     if told != ref_told:
@@ -157,24 +150,24 @@ def _unlike_unmapped(case: S.Drive, ref: S.Drive, label: str) -> list[str]:
     if _argvs(case) != _argvs(ref):
         problems.append(f"[{label}] the orientation lookups were handed {_argvs(case)!r}; the "
                         f"unmapped run's were {_argvs(ref)!r}")
-    if _opened(case) != _opened(ref):
-        problems.append(f"[{label}] the case ticket opened with {_opened(case)!r}; the unmapped "
-                        f"run's opened with {_opened(ref)!r}")
+    if _comment_signature(case) != _comment_signature(ref):
+        problems.append(f"[{label}] the case ticket's comment carries {_comment_signature(case)!r}; "
+                        f"the unmapped run's carries {_comment_signature(ref)!r}")
     return problems
 
 
 def _carries(d: S.Drive, signature: str, label: str) -> list[str]:
     """Every reader that did NOT yield `signature` — the orientation lookups (one whole argument),
-    the ticket's one `sig:` label — or that yielded the decoy `rule.id` instead."""
+    the ticket comment's signature — or that yielded the decoy `rule.id` instead."""
     problems: list[str] = []
     if not _hands(d, signature):
         problems.append(f"[{label}] no orientation lookup was handed {signature!r}: {_argvs(d)!r}")
     if _hands(d, DECOY):
         problems.append(f"[{label}] an orientation lookup was handed the alert's rule.id "
                         f"{DECOY!r} instead: {_argvs(d)!r}")
-    if _labels(d, "sig:") != [f"sig:{signature}"]:
-        problems.append(f"[{label}] the case ticket's sig: labels are {_labels(d, 'sig:')!r}, "
-                        f"not ['sig:{signature}']")
+    if _comment_signature(d) != signature:
+        problems.append(f"[{label}] the case ticket's comment carries {_comment_signature(d)!r}, "
+                        f"not {signature!r}")
     return problems
 
 
@@ -206,19 +199,11 @@ def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
     partial = _drive(tmp_path, planted, _alert(detection=detection), mapping={"summary": "detection.title"})
 
     problems = _carries(mapped, "DK-7731", "mapped")
-    if _labels(mapped, "evt:") != ["evt:2026-09-30T08:20:00Z"]:
-        problems.append(f"[mapped] evt: labels {_labels(mapped, 'evt:')!r}")
-    if mapped.tickets.store.only_open().get("summary") != "Odd beacon cadence":
-        problems.append(f"[mapped] ticket summary {mapped.tickets.store.only_open().get('summary')!r}")
     # Never another field: neither the alert's rule.id, its detected_at nor its rule.description.
     for d, label in ((absent, "paths absent"), (partial, "signature and event_time unmapped")):
         problems += _not_handed(d, [DECOY, DETECTED_AT], label)
-        if _labels(d, "sig:") == [f"sig:{DECOY}"]:
-            problems.append(f"[{label}] the case ticket's sig: label is the alert's rule.id")
-        if _labels(d, "evt:"):
-            problems.append(f"[{label}] the case ticket carries {_labels(d, 'evt:')!r}")
-    if absent.tickets.store.only_open().get("summary") == DESCRIPTION:
-        problems.append("[paths absent] the ticket's summary is the alert's rule.description")
+        if _comment_signature(d) == DECOY:
+            problems.append(f"[{label}] the case ticket's signature is the alert's rule.id")
     assert not problems, _fail(problems)
 
     assert {f: mapped.recorded(f) for f in S.FACTS} == {
@@ -461,20 +446,11 @@ def test_p083_event_time_mapped_to_a_number_zero_or_object(tmp_path: Path) -> No
                for name, lit, want in shapes]
 
     problems: list[str] = []
-    for slug, stamp, d in fixtures:
-        if not isinstance(stamp, str) or _labels(d, "evt:") != [f"evt:{stamp}"]:
-            problems.append(f"[fixture {slug}] evt: labels {_labels(d, 'evt:')!r}, not "
-                            f"['evt:{stamp}']")
-    for name, want, d in generic:
-        expected = [f"evt:{want}"] if want is not None else []
-        if _labels(d, "evt:") != expected:
-            problems.append(f"[{name}] evt: labels {_labels(d, 'evt:')!r}, not {expected!r}")
-        if _labels(d, "sig:") != ["sig:R-EVT-1"]:
-            problems.append(f"[{name}] sig: labels {_labels(d, 'sig:')!r}")
-        if d.tickets.store.only_open().get("summary") != DESCRIPTION:
-            problems.append(f"[{name}] summary {d.tickets.store.only_open().get('summary')!r}")
-        if len(d.tickets.store.comments()) != 1:
-            problems.append(f"[{name}] the ticket's record leg posted {d.tickets.store.comments()!r}")
+    for name, _want, d in generic:
+        if _comment_signature(d) != "R-EVT-1":
+            problems.append(f"[{name}] the ticket comment's signature is {_comment_signature(d)!r}")
+        if len(d.tickets.store.comment_payloads) != 1:
+            problems.append(f"[{name}] the ticket's record leg posted {d.tickets.store.calls!r}")
     assert not problems, _fail(problems)
 
     for slug, stamp, d in fixtures:
@@ -525,9 +501,9 @@ def test_p181_negative_zero_padded_and_string_versus_integer_i(tmp_path: Path) -
     problems += _not_handed(padded, ["5710"], "zero-padded text")
     problems += _carries(as_text, "5710", "'5710' as text")
     problems += _carries(as_int, "5710", "5710 as an integer")
-    if _labels(as_text, "sig:") != _labels(as_int, "sig:"):
-        problems.append(f"the text and the integer 5710 label the ticket differently: "
-                        f"{_labels(as_text, 'sig:')!r} vs {_labels(as_int, 'sig:')!r}")
+    if _comment_signature(as_text) != _comment_signature(as_int):
+        problems.append(f"the text and the integer 5710 sign the ticket differently: "
+                        f"{_comment_signature(as_text)!r} vs {_comment_signature(as_int)!r}")
     assert not problems, _fail(problems)
 
     assert negative.recorded("signature") is None

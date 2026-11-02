@@ -103,6 +103,44 @@ def test_767_case_id_in_the_template_is_the_run_folder_not_the_ticket(tmp_path, 
     assert [c.path for c in store.calls] == [COMMENT_PATH]
 
 
+def test_767_signature_in_the_template_is_the_runs_recorded_signature(tmp_path, monkeypatch):
+    """`{signature}` renders the signature recorded at run start from the alert ("5710"), not the
+    ticket key or the run folder, with the run's alert as the only source. D-14, O7."""
+    _setup(monkeypatch, tmp_path, case_record_doc(body="sig={signature} / {disposition}"))
+    run_dir = make_run(tmp_path)
+    assert ALERT["rule"]["id"] == "5710", "fixture: the alert's rule id is the expected signature"
+    store = _store(tmp_path)
+    record(run_dir, store)
+    assert store.comment_body() == "sig=5710 / benign"
+    assert [c.path for c in store.calls] == [COMMENT_PATH]
+
+    other = make_run(tmp_path, name="run-other-sig",
+                     alert={**ALERT, "rule": {**ALERT["rule"], "id": "R-9001"}})
+    other_store = _store(tmp_path)
+    record(other, other_store)
+    assert other_store.comment_body() == "sig=R-9001 / benign", (
+        "the signature does not follow the run's own record (control)")
+
+
+@pytest.mark.parametrize(("why", "rule"), [
+    ("no rule id in the alert", {"description": "sshd: Attempt to login using a non-existent user"}),
+    ("a rule id the signature rule refuses", {"id": "R 5710", "description": "x"}),
+])
+def test_767_signature_is_unknown_when_the_record_has_none(tmp_path, monkeypatch, why, rule):
+    """A run whose record holds no signature renders `unknown` in `{signature}` and still comments
+    on the ticket. D-14, O7."""
+    _setup(monkeypatch, tmp_path, case_record_doc(body="sig={signature} / {disposition}"))
+    control = _store(tmp_path)
+    record(make_run(tmp_path, name="run-with-sig"), control)
+    assert control.comment_body() == "sig=5710 / benign", "control: a recorded signature renders"
+
+    run_dir = make_run(tmp_path, name="run-without-sig", alert={**ALERT, "rule": rule})
+    store = _store(tmp_path)
+    record(run_dir, store)
+    assert store.comment_body() == "sig=unknown / benign", why
+    assert [c.path for c in store.calls] == [COMMENT_PATH]
+
+
 def test_767_a_report_frontmatter_case_id_does_not_rename_the_run(tmp_path, monkeypatch):
     """`{case_id}` is the run folder, whatever `case_id:` the report's frontmatter claims. r3 Data."""
     _setup(monkeypatch, tmp_path, case_record_doc(body="run {case_id}"))

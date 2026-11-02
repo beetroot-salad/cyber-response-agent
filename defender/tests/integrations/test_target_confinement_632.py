@@ -403,15 +403,19 @@ def _ticket_cfg(ctx: VerbContext) -> dict[str, str]:
     return transport.load_config(ctx, "ticket", "TICKET", ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC"))
 
 
-def test_the_write_endpoint_table_declares_the_ticket_comment_and_nothing_else_for_it():
-    """`WRITE_ENDPOINT_ALLOWLIST` (beside the read allowlist, D-6) lets `ticket` POST one comment
-    path; it holds no `case-history` system and no transition or create path. O3, O2."""
-    from defender.integrations.confinement import WRITE_ENDPOINT_ALLOWLIST
-
-    assert {tuple(entry) for entry in WRITE_ENDPOINT_ALLOWLIST["ticket"]} == {
-        ("POST", "/tickets/*/comments")}
-    assert "case-history" not in WRITE_ENDPOINT_ALLOWLIST
-    assert "case-history" not in READ_ENDPOINT_ALLOWLIST
+def test_the_guard_admits_the_ticket_comment_as_a_write_and_the_retired_system_nowhere():
+    """What the guard admits, not how the table is stored (D-15): `ticket` may POST its comment
+    path at class `rw`; the retired `case-history` system is refused at every class, comment path
+    included; no create or transition path is admitted for `ticket`. O3, O2."""
+    confine_read_endpoint("ticket", f"http://host{COMMENT_PATH}", method="POST", verb_class="rw")
+    for verb_class in ("r", "rw"):
+        for method, path in (("POST", COMMENT_PATH), ("POST", "/tickets"), ("GET", "/tickets")):
+            with pytest.raises(ConfinementFault):
+                confine_read_endpoint("case-history", f"http://host{path}", method=method,
+                                      verb_class=verb_class)
+    for path in ("/tickets", "/tickets/SOC-1/transitions"):
+        with pytest.raises(ConfinementFault):
+            confine_read_endpoint("ticket", f"http://host{path}", method="POST", verb_class="rw")
 
 
 def test_the_write_class_admits_the_ticket_comment_and_refuses_every_other_write():
