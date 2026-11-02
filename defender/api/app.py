@@ -153,7 +153,7 @@ async def _no_unknown_query(request: Request) -> None:
     sending a filter the API dropped or never had learns it instead of getting everything."""
     route = request.scope.get("route")
     dependant = getattr(route, "dependant", None)
-    if dependant is None or getattr(route.endpoint, "_any_query", False):
+    if dependant is None or getattr(getattr(route, "endpoint", None), "_any_query", False):
         return
     declared = _declared_query(dependant)
     unknown = [name for name in dict.fromkeys(request.query_params.keys()) if name not in declared]
