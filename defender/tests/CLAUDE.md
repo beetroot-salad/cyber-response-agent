@@ -4,7 +4,6 @@
 - Inject collaborators through config/dependency seams; do not add `monkeypatch.setattr` sites. An oracle must not repeat the production operation it is meant to check.
 - While working, run `pytest --testmon`: it reruns only the tests whose recorded code paths your change touched. It sees Python code only. When you change a prompt, knowledge, fixture or config file, or a cached (`lru_cache`) function, also run the test files that read it; and always the relevant e2e replay.
 - Before shipping, run the full suite locally as CI's `test` job does (`.github/workflows/ci.yml`); CI runs it again.
-- Run every pytest invocation through this machine's test wrapper, as your local instructions describe.
 - A new worktree's first `--testmon` run starts from the main checkout's record once `tooling/git-hooks/post-checkout` is installed in the clone (one `ln -s`, see the hook).
 - In a git worktree, set `PYTHONPATH=<worktree-root>` and verify imports resolve there: the shared venv can point at the main checkout.
 - `.github/workflows/ci.yml` is authoritative for current checks. Before implementation, distinguish expected red from broken fixtures and unexercised assertions.
