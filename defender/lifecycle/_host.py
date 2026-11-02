@@ -118,6 +118,11 @@ class HostActor(Actor):
     async def _install_under_lock(self, held: HeldTenant) -> None:
         gen = only(await held.generations(), "pending")
         wiring = await held.forge_wiring()
+        if wiring is not None and gen.wrapped_secret and not gen.sign_wrapped_secret:
+            # Wrapped before the sign login existed (a job in flight across the upgrade, r8.5): back
+            # to `wrap`, which makes the sign chain and wraps both, with no failure to resume.
+            await held.commit(step="wrap", actor=SERVICE)
+            return
         if wiring is None or not gen.wrapped_secret or not gen.sign_wrapped_secret:
             raise StepFailed("there is no wrapped secret or forge wiring to install")
         secret_id, accessor = await self._unwrap(gen.wrapped_secret, "delivery")

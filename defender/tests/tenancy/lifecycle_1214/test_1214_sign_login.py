@@ -493,16 +493,18 @@ def test_a_pending_generation_recorded_before_r8_completes_with_its_sign_login(w
     assert (view["user_can_push"], view["user_can_merge"]) == (False, False)
 
 
+@pytest.mark.parametrize("parked", ["install", "sweep"])
 @pytest.mark.parametrize("kind", ["create", "rotate"])
-def test_a_job_that_installed_before_r8_and_is_parked_at_sweep_goes_back_to_wrap_and_completes(world, kind):
-    """A create or rotate job whose host installed the delivery secret before the sign login existed, parked at `sweep`,
-    goes back to `wrap` and completes with a working sign login, one secret id per AppRole and no failure (r8.5)."""
+def test_a_job_that_wrapped_or_installed_before_r8_goes_back_to_wrap_and_completes(world, kind, parked):
+    """A create or rotate job whose `wrap` (parked at `install`) or host install (parked at `sweep`) ran before the sign
+    login existed goes back to `wrap` and completes with a working sign login, one secret id per AppRole and no failure
+    (r8.5: an in-flight job finishes normally)."""
     if kind == "create":
         tenant = world.create()
     else:
         tenant = world.active_tenant()
         assert world.ops.post(f"/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
-    world.drive(stop=lambda: world.item(tenant)["step"] == "sweep")
+    world.drive(stop=lambda: world.item(tenant)["step"] == parked)
     seeded, row, bao = _only_pending(world, tenant), _row(world, tenant, "pending"), world.openbao
     bao.approles.pop(seeded.sign_approle)
     bao.approle_policies.pop(seeded.sign_approle, None)
@@ -510,12 +512,14 @@ def test_a_job_that_installed_before_r8_and_is_parked_at_sweep_goes_back_to_wrap
     bao.entities.pop(seeded.sign_entity)
     if kind == "create":
         bao.transit_keys.pop(_key(tenant))
-    seeded.sign_secret_file.unlink()
+    if parked == "sweep":
+        seeded.sign_secret_file.unlink()
     for name in SIGN_FIELDS:
         setattr(row, name, None)
-    item = world.item(tenant)
-    assert (item["step"], item["failure"], _only_pending(world, tenant).secret_accessor) == ("sweep", None, seeded.secret_accessor), \
-        "control: parked at sweep with only the delivery secret installed"
+    item, pending = world.item(tenant), _only_pending(world, tenant)
+    assert (item["step"], item["failure"]) == (parked, None)
+    assert (pending.wrapped_secret, pending.secret_accessor) == (seeded.wrapped_secret, seeded.secret_accessor), \
+        "control: only the delivery secret was wrapped (and, at sweep, installed)"
     world.drive()
     item = world.item(tenant)
     assert (item["state"], item["pending_action"], item["failure"]) == ("active", None, None), item

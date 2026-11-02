@@ -123,6 +123,23 @@ def test_q2_the_proxys_fault_class_comes_back_as_the_adapters_fault(
     assert H.CANARY_KEY not in str(raised.value)
 
 
+@pytest.mark.parametrize(("reply", "fault"), [
+    pytest.param((400, {}, b'{"detail":"field user.name unknown"}'), UpstreamFault, id="4xx"),
+    pytest.param((503, {}, b'{"detail":"field user.name unknown"}'), TransportFault, id="5xx"),
+])
+def test_q2c_a_systems_error_reaches_the_model_with_the_systems_own_reason(tmp_path, data_root, reply, fault):
+    """An upstream error raised through the proxy carries the vendor's own `detail`, as on the docker path: it is what
+    the model and pitfalls curation learn from. O7, A9."""
+    with H.upstream() as up, _published(tmp_path, data_root, up) as t:
+        up.replies[f"{API}/users/dev.dana"] = reply
+        with A.proxy_for(t, _store(t)) as (url, _tap):
+            ctx = A.ctx_for(tmp_path, T.run_record(t), url, T.token(t.tenant_id, GRANT))
+            with pytest.raises(AdapterFault) as raised:
+                identity_adapter.get_user(ctx, user="dev.dana")
+    assert type(raised.value) is fault, raised.value
+    assert "field user.name unknown" in str(raised.value)
+
+
 def test_q2b_requests_the_declaration_does_not_allow_are_refused_unsent(tmp_path, data_root):
     """`..` leaving the base is a ConfinementFault; another host and the same origin outside
     the base are ConfigFaults; none is sent. The control is the in-base call. O2, O7, A9, A6."""

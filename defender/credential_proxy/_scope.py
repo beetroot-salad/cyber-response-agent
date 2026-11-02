@@ -51,8 +51,12 @@ def locate(declaration: AccessDeclaration, url: str) -> Target:
             base.scheme.lower(), base.hostname, base.port or _DEFAULT_PORT.get(base.scheme.lower())):
         raise Refused(CONFIG, "the URL's scheme, host or port is not the declared base's")
     path = asked.path or "/"
-    if any(part in (".", "..") for part in _SEPARATOR.split(unquote(path))):
+    decoded = unquote(path)
+    if any(part in (".", "..") for part in _SEPARATOR.split(decoded)):
         raise Refused(CONFINEMENT, "the URL path holds a `.` or `..` segment")
+    if ";" in decoded:
+        # Some servers read `;` as starting a path parameter and resolve `/..;/` as `/../`.
+        raise Refused(CONFINEMENT, "the URL path holds a `;` (a path parameter)")
     base_path = base.path.rstrip("/")
     if not (path == base_path or path.startswith(base_path + "/")):
         raise Refused(CONFIG, "the URL path is not under the declared base")

@@ -72,6 +72,8 @@ DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 DEFAULT_UPSTREAM_TIMEOUT_SEC = 30.0
 #: The most a request to the proxy may hold, in bytes.
 MAX_REQUEST_BYTES = 16 * 1024 * 1024
+#: The most of a request's path an audit line keeps.
+_AUDIT_PATH_CAP = 512
 _REQUEST_KEYS = frozenset({"system", "method", "url", "headers", "body", "timeout_sec"})
 #: Request headers that describe the hop, not the request: never forwarded (httpx sets its own).
 _HOP_HEADERS = frozenset({"host", "content-length", "connection", "keep-alive",
@@ -205,7 +207,7 @@ class _Proxy:
         trail.commit = export.commit
         declaration = tenancy.read_export_access(export.path, asked.system)
         target = locate(declaration, asked.url)
-        trail.path = target.path
+        trail.path = target.path[:_AUDIT_PATH_CAP]
         check_route(declaration, asked.system, asked.method, target.path, mode)
         headers = _forwarded(asked.headers, declaration.auth)
         creds = self.deps.store.read(claims.tenant, asked.system)
@@ -331,7 +333,7 @@ def _parse_request(raw: bytes | None) -> _Asked:  # noqa: C901 — one flat shap
     if not isinstance(headers, dict):
         raise Refused(CONFIG, "the request's headers must be an object")
     for name, value in headers.items():
-        if not _HEADER_NAME.fullmatch(name) or not isinstance(value, str) or any(
+        if not _HEADER_NAME.fullmatch(name) or not isinstance(value, str) or not value.isascii() or any(
                 ch in value for ch in "\r\n\0"):
             raise Refused(CONFIG, f"the request header {name[:80]!r} is not a header")
     if body is not None and not isinstance(body, str):

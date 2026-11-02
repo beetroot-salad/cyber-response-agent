@@ -118,6 +118,10 @@ def test_s1_a_token_whose_tenant_has_no_exports_is_refused(tmp_path, data_root, 
                  id="encoded-dotdot"),
     pytest.param(lambda up, other: f"{up}/api/v2/%2E%2e/admin", "ConfinementFault",
                  id="encoded-dotdot-mixed-case"),
+    pytest.param(lambda up, other: f"{up}/api/v2/..;/admin", "ConfinementFault",
+                 id="dotdot-path-parameter"),
+    pytest.param(lambda up, other: f"{up}/api/v2/%2e%2e%3b/admin", "ConfinementFault",
+                 id="encoded-dotdot-path-parameter"),
     pytest.param(lambda up, other: f"http://127.0.0.1:{other}/api/v2/users/x", "ConfigFault",
                  id="other-port"),
     pytest.param(lambda up, other: up.replace("http://", "https://") + "/api/v2/users/x",
@@ -177,6 +181,7 @@ RD = {("identity", "r")}
     pytest.param("POST", "/tickets/7/comments", RW, None, id="write-granted"),
     pytest.param("PUT", "/tickets/7", RW, None, id="put-write-granted"),
     pytest.param("POST", "/tickets/7/delete", RW, "ConfinementFault", id="undeclared-under-rw"),
+    pytest.param("POST", "/tickets/..;/comments", RW, "ConfinementFault", id="write-wildcard-path-parameter"),
 ])
 def test_s3_only_declared_reads_and_granted_writes_are_sent(
         tmp_path, data_root, method, path, grant, fault):

@@ -85,12 +85,18 @@ def check_fit(auth: Auth, creds: CredentialSet, system: str) -> None:
                               f"scheme {auth.scheme!r} needs {auth.kind!r}")
 
 
+def _ascii(value: str, name: str | None, system: str) -> str:
+    if not value.isascii():
+        raise Refused(CONFIG, f"the credential field {name!r} of {system} is not ASCII, so it cannot be a header")
+    return value
+
+
 def static_headers(auth: Auth, creds: CredentialSet, system: str) -> dict[str, str]:
-    """The header a static scheme adds."""
+    """The header a static scheme adds. A value sent as is must be ASCII (a header is bytes)."""
     if auth.scheme == BEARER:
-        return {"Authorization": f"Bearer {_needed(creds, auth.field, system)}"}
+        return {"Authorization": f"Bearer {_ascii(_needed(creds, auth.field, system), auth.field, system)}"}
     if auth.scheme == HEADER:
-        return {str(auth.header): _needed(creds, auth.field, system)}
+        return {str(auth.header): _ascii(_needed(creds, auth.field, system), auth.field, system)}
     if auth.scheme == BASIC:
         user = _needed(creds, USERNAME, system)
         if ":" in user:

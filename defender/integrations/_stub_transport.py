@@ -367,12 +367,16 @@ def _raise_on_http_error(code: int, body_text: str, url: str) -> None:
         raise TransportFault(f"upstream {url} returned HTTP {code}: {body_text}")
     if code >= 400:
         # 4xx is a query error (bad arg, 404): the agent's own to fix.
-        try:
-            payload = json.loads(body_text) if body_text else {}
-        except json.JSONDecodeError:
-            payload = {"detail": body_text}
-        detail = payload.get("detail", payload) if isinstance(payload, dict) else payload
-        raise UpstreamFault(f"HTTP {code} from {url}: {detail}")
+        raise UpstreamFault(f"HTTP {code} from {url}: {_vendor_detail(body_text)}")
+
+
+def _vendor_detail(body_text: str) -> object:
+    """The vendor's own `detail` from an error body (the whole body when it names none)."""
+    try:
+        payload = json.loads(body_text) if body_text else {}
+    except json.JSONDecodeError:
+        payload = {"detail": body_text}
+    return payload.get("detail", payload) if isinstance(payload, dict) else payload
 
 
 def _request(
@@ -417,10 +421,14 @@ def _proxy_request(
 ) -> dict | list:
     answer = proxy_exchange(ctx, system=system, method=method, url=url, body=body,
                             timeout_sec=int(config.get("TIMEOUT_SEC", "10")))
+    if answer.fault in ("UpstreamFault", "TransportFault") and answer.status:
+        # The system answered: its own reason (scrubbed by the proxy) reaches the model and
+        # curation, as on the docker path (`_raise_on_http_error`).
+        raise_proxy_fault(answer.fault, f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}")
     if answer.fault is not None:
         raise_proxy_fault(answer.fault, answer.detail)
     if answer.status >= 400:
-        raise UpstreamFault(f"HTTP {answer.status} from {system}")
+        raise UpstreamFault(f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}")
     if not answer.body:
         return {}
     try:
