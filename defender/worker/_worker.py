@@ -1,7 +1,9 @@
 """The worker (#1342): claims queued investigations up to its slots, runs each as a child
 process through the job lane, and records the one terminal stage the child's host records say.
 
-Per claimed row, as a task: a box token is minted for the claim, the launch record (carrying it)
+Per claimed row, as a task: a box token is minted for the claim, the tenant's record is read and
+must be `active` (#1342 r6 R6-4: no host lock is taken and the worker is recorded as no holder, so
+a teardown never waits for it or signals it), the launch record (carrying the token)
 and alert file are written beside the run folder (the tenant's runs container must exist; the
 worker never makes it), the child is spawned from the event loop's thread in a session of its own
 with its output inherited, its exit awaited, a leftover box carrying the claim's token removed
@@ -22,7 +24,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender import _log
 from defender.box import container_name
@@ -33,6 +35,9 @@ from defender.tenancy import data_root_for_child, data_root_from_path
 
 from ._containers import Containers, DockerContainers
 
+if TYPE_CHECKING:
+    from defender.tenancy import TenantDirectory
+
 #: The backstop's answers (`Containers.reap`).
 _REMOVED, _ABSENT, _NOT_OURS = "removed", "absent", "not_ours"
 
@@ -40,6 +45,9 @@ _logger = logging.getLogger(__name__)
 
 #: How long an idle serving worker waits between claims (M10: a fixed interval, no NOTIFY).
 POLL_INTERVAL = 1.0
+
+#: How long one claim's read of its tenant's record may take before the row fails (R6-4).
+RECORDS_TIMEOUT = 30.0
 
 _RUN_PY = Path(__file__).resolve().parents[1] / "run.py"
 
@@ -110,13 +118,19 @@ class _WorkerFault(Exception):
 
 class Worker:
     """Runs claimed investigations, up to `slots` at once. `drain()` claims until nothing is
-    queued and waits for every slot's task; `serve()` polls until SIGTERM/SIGINT."""
+    queued and waits for every slot's task; `serve()` polls until SIGTERM/SIGINT.
+
+    `directory` is the tenant records (#1214 Flow 4; #1342 r6 R6-5): a test's; `None` reads them
+    from `DEFENDER_DATABASE_DSN`, built when `drain()` or `serve()` starts. That database must be
+    the store's (an investigation's tenant is a `tenancy.tenants` row). The worker reads only a
+    tenant's state from it."""
 
     def __init__(  # noqa: PLR0913 — the ratified signature
         self, store: Any, *, data_root: Path | DataRoot,
         child_argv: Callable[[Launch], list[str]] = run_argv,
         containers: Containers | None = None, slots: int = 3,
         clock: Callable[[], _dt.datetime], stop_grace: float = 30,
+        directory: TenantDirectory | None = None,
     ) -> None:
         if slots < 1:
             raise ValueError(f"a worker needs at least one slot, not {slots!r}")
@@ -127,6 +141,8 @@ class Worker:
         self._slots = slots
         self._clock = clock
         self._stop_grace = stop_grace
+        self._given_directory = directory
+        self._directory: TenantDirectory | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._children: dict[str, asyncio.subprocess.Process] = {}
         self._stopping = False
@@ -135,14 +151,18 @@ class Worker:
 
     async def drain(self) -> None:
         """Claim while a slot is free until nothing is queued, then wait for every task. A store
-        fault ends it (raised) and, like a cancellation, leaves no child behind (`_claim_loop`)."""
+        fault ends it (raised) and, like a cancellation, leaves no child behind (`_claim_loop`).
+        Tenant records that cannot be used refuse it before anything is claimed (`_open_records`)."""
+        await self._open_records()
         await self._claim_loop(stop=None)
 
     async def serve(self) -> None:
         """Poll for queued rows at a fixed interval until SIGTERM or SIGINT, then stop: each child
         gets SIGTERM, a child still alive after `stop_grace` has its group killed, the backstop
         runs, and no row is written (D3). A store fault is logged and the claim retried. Installs
-        its own handlers and removes them on return."""
+        its own handlers and removes them on return. Tenant records that cannot be used refuse it
+        before anything is claimed (`_open_records`)."""
+        await self._open_records()
         loop = asyncio.get_running_loop()
         stop = asyncio.Event()
         signals = (signal.SIGTERM, signal.SIGINT)
@@ -156,6 +176,15 @@ class Worker:
                 loop.remove_signal_handler(s)
                 if previous[s] is not None:
                     signal.signal(s, previous[s])
+
+    async def _open_records(self) -> None:
+        """The tenant records this run of the worker reads (R6-5), built off the event loop: the
+        given directory, else one over `DEFENDER_DATABASE_DSN` at this code's schema revision.
+        No address, or a database at another revision, is `TenantRefused` (raised: the worker
+        does not start); so is a database that cannot be reached now (`RecordsUnreachable`)."""
+        from defender.systems.run_tenant import entry_directory
+
+        self._directory = await asyncio.to_thread(entry_directory, self._given_directory)
 
     async def _claim_loop(self, *, stop: asyncio.Event | None) -> None:
         """The one claim loop of `drain` and `serve`: claim while a slot is free, else wait for a
@@ -329,11 +358,38 @@ class Worker:
         alert = await self._store.get_alert(record.tenant_id, record.alert_id)
         if alert is None:
             raise _WorkerFault("the job's alert is not in the store")
+        await self._require_active(record)
         launch = job_lane.LaunchRecord(
             investigation_id=record.investigation_id, tenant_id=record.tenant_id,
             alert_id=record.alert_id, digest=digest_of(alert.raw), label=alert.title,
             box_token=token)
         await asyncio.to_thread(self._write_launch_files, launch, alert.raw)
+
+    async def _require_active(self, record: Any) -> None:
+        """The tenant's record says `active` (R6-4), read through the records seam off the event
+        loop within `RECORDS_TIMEOUT`, else the fault naming why. Only the state is read: no host
+        lock, no process record (a teardown signals every holder, and a multi-tenant worker must
+        not be one), so a teardown always wins and a job racing it fails."""
+        from defender.systems.run_tenant import RecordsUnreachable
+
+        inv, tenant = record.investigation_id, record.tenant_id
+        directory = self._directory
+        if directory is None:  # a claim is made only inside `drain`/`serve`, after `_open_records`
+            raise _WorkerFault("the worker has no tenant records to read")
+        try:
+            state = await asyncio.wait_for(asyncio.to_thread(directory.state, tenant), timeout=RECORDS_TIMEOUT)
+        except RecordsUnreachable as down:
+            _logger.error("investigation %s: tenant %s's records: %s", inv, tenant, down)
+            raise _WorkerFault("the tenant's records could not be reached; the job was not started") from None
+        except TimeoutError:
+            _logger.error("investigation %s: tenant %s's records did not answer within %gs",
+                          inv, tenant, RECORDS_TIMEOUT)
+            raise _WorkerFault(f"the tenant's records did not answer within {RECORDS_TIMEOUT:g}s; "
+                               "the job was not started") from None
+        if state is None:
+            raise _WorkerFault("the tenant has no record; the job was not started")
+        if state != "active":
+            raise _WorkerFault(f"the tenant is {state}, not active; the job was not started")
 
     def _write_launch_files(self, launch: job_lane.LaunchRecord, raw: bytes) -> None:
         try:
