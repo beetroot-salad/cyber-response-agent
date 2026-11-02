@@ -20,7 +20,7 @@ from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, OPENBAO_URL 
 from defender.tests.tenancy.lifecycle_1214._support import REPO_DELETE, REPO_WINDOW, LifecycleWorld, lifecycle_config  # noqa: E402
 
 CREATE = ["names", "provider", "repo", "bot", "integration", "template", "wrap", "install", "sweep", "prepare", "activate"]
-ROTATE = ["names", "provider", "bot", "integration", "wrap", "install", "sweep", "retire", "remove_old_file"]
+ROTATE = ["names", "provider", "bot", "protect", "integration", "wrap", "install", "sweep", "retire", "remove_old_file"]
 
 
 def _runs(log: list[tuple[Any, Any]], action: str | None = None) -> list[Any]:
@@ -39,8 +39,8 @@ def world(tmp_path, data_root):
 # --- H-15 --------------------------------------------------------------------------------------------
 
 def test_each_action_runs_its_steps_in_the_order_the_design_lists(world):
-    """Every committed step, in order, is DC-3's list for create, rotate, offboard and the repo deletion: a pass runs
-    several service steps at once, so the handoffs alone do not show the order (DC-3)."""
+    """Every committed step, in order, is DC-3's list for create, rotate (r8.3: `protect` between `bot` and `integration`),
+    offboard and the repo deletion: a pass runs several service steps at once (DC-3, A23)."""
     log = watch_commits(world.tenants)
     tenant = world.active_tenant()
     assert _runs(log, "create") == CREATE
@@ -101,7 +101,7 @@ def test_a_transport_failure_after_the_unwrap_restarts_at_wrap_not_at_the_spent_
     tenant = world.create()
     world.drive()
     assert failing.hit, "control: the failure was never injected"
-    assert len(world.openbao.made("POST", "/v1/sys/wrapping/unwrap")) == 1, "control: the wrapper was spent"
+    assert len(world.openbao.made("POST", "/v1/sys/wrapping/unwrap")) == 2, "control: both wrappers were spent (A24')"
     item = world.item(tenant)
     assert (item["step"], item["step_actor"]) == ("wrap", "service")
     assert item["failure"] and "install" in item["failure"]

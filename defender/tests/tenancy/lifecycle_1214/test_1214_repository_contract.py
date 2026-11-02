@@ -12,6 +12,7 @@ import dataclasses
 import datetime as dt
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -139,7 +140,9 @@ def test_the_pinned_record_types_carry_the_pinned_fields():
     assert {"id", "created_at", "state", "pending_action", "step", "step_actor", "failure", "repo_url",
             "offboarded_at", "repo_delete_after"} <= names(TenantRecord)
     assert {"salt", "status", "bot_login", "oidc_role", "approle", "role_id", "entity", "audience",
-            "host_secret_file", "secret_accessor"} <= names(Generation)
+            "host_secret_file", "secret_accessor", "wrapped_secret"} <= names(Generation)
+    assert {"sign_approle", "sign_entity", "sign_role_id", "sign_secret_file", "sign_wrapped_secret",
+            "sign_secret_accessor"} <= names(Generation)  # A24' (r8.4)
     assert {"repo", "origin"} <= names(ForgeWiring)
 
 
@@ -387,11 +390,17 @@ async def test_generations_are_read_as_detached_copies(pg_store):
     """`generations(T)` returns the tenant's generation rows as readable records; editing one stores nothing (P4)."""
     await pg_store.seed(T1, ACTIVE)
     await pg_store.seed(T2, ACTIVE)
-    fill_row(pg_store.dsn, "generations", tenant_id=T1, salt="s1", status="live", bot_login="bot-s1")
+    fill_row(pg_store.dsn, "generations", tenant_id=T1, salt="s1", status="live", bot_login="bot-s1",
+             sign_approle="sign-s1", sign_entity="entity-s1-sign", sign_role_id="role-s1-sign",
+             sign_secret_file="/secrets/t1/sign-s1", sign_wrapped_secret="wrap-s1-sign", sign_secret_accessor="acc-s1-sign")
     fill_row(pg_store.dsn, "generations", tenant_id=T1, salt="s2", status="retiring", bot_login="bot-s2")
     fill_row(pg_store.dsn, "generations", tenant_id=T2, salt="s3", status="live", bot_login="bot-s3")
     got = {g.salt: g for g in await pg_store.repo.generations(T1)}
     assert {s: (g.status, g.bot_login) for s, g in got.items()} == {"s1": ("live", "bot-s1"), "s2": ("retiring", "bot-s2")}
+    assert (got["s1"].sign_approle, got["s1"].sign_entity, got["s1"].sign_role_id, got["s1"].sign_secret_file,
+            got["s1"].sign_wrapped_secret, got["s1"].sign_secret_accessor) == (
+        "sign-s1", "entity-s1-sign", "role-s1-sign", Path("/secrets/t1/sign-s1"), "wrap-s1-sign", "acc-s1-sign")
+    assert got["s2"].sign_approle is None, "a generation recorded before A24' reads back with no sign names"
     before = {s: _values(g) for s, g in got.items()}
     assert any([_mutate(g) for g in got.values()])
     assert {g.salt: _values(g) for g in await pg_store.repo.generations(T1)} == before

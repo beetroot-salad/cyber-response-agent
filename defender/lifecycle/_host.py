@@ -4,12 +4,13 @@ it unwraps the single-use secret the service wrapped for it, logs in with the Ap
 as the tenant's bot. Blocking work (git, files, signals, the publish child, waiting for the host
 lock) runs in a worker thread; the tenant's lock and its writes stay on the actor's own loop (RC-5).
 
-Secret files (DC-2): `<secrets dir>/<T>/<accessor>`, mode 0600, the AppRole secret id and a newline;
-the generation records the path. Host lock (RC-5): install and remove_old_file hold it shared,
-prepare and teardown exclusive."""
+Secret files (DC-2): `<secrets dir>/<T>/<accessor>`, mode 0600, the AppRole secret id and a newline,
+and beside it the sign-only AppRole's as `sign-<accessor>` (A24'); the generation records both
+paths. Host lock (RC-5): install and remove_old_file hold it shared, prepare and teardown exclusive."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import datetime as _dt
 import logging
@@ -24,7 +25,9 @@ import httpx
 
 from defender import _io
 from defender.configuration import publish_root
-from defender.lifecycle._bot import Minted, approle_login, mint
+from defender.configuration.issuer import TRANSIT_MOUNT
+from defender.credential_proxy import transit_key_for
+from defender.lifecycle._bot import Minted, log_in, mint
 from defender.lifecycle._job import (
     HOST,
     SERVICE,
@@ -45,6 +48,10 @@ _logger = logging.getLogger(__name__)
 #: Where an install that failed restarts: its wrapped secret may be spent (DC-4).
 _REWRAP = ("wrap", SERVICE)
 _KNOWLEDGE, _LEARNING = "knowledge", "learning"
+#: The sign secret file's name is its accessor after this prefix, beside the delivery file.
+_SIGN_FILE = "sign-"
+#: What install signs to prove the sign pair (A24', r8.4): a fixed payload, never a request token.
+_PROBE = base64.b64encode(b"defender install sign proof").decode("ascii")
 
 Git = Callable[..., subprocess.CompletedProcess[str]]
 Publish = Callable[..., str]
@@ -53,7 +60,7 @@ Publish = Callable[..., str]
 class HostActor(Actor):
     """The host's half of every tenant's job. `forge` is an HTTP client for the forge carrying NO
     credential (each call presents the bot's JWT); `openbao_login` reaches only unwrap, AppRole
-    login and token reads; `git` is the sealed-transport git runner; `publish` launches the first
+    login, token reads and install's one sign as the tenant's sign login; `git` is the sealed-transport git runner; `publish` launches the first
     publish (`launch_publish`'s shape) and answers its report line; `containers` removes a tenant's
     box containers (default: docker by label)."""
 
@@ -87,15 +94,17 @@ class HostActor(Actor):
             host_lock.release_lock(fd)
 
     async def _bot_jwt(self, gen: Generation, secret_id: str) -> str:
-        token = self.secret(await approle_login(self._bao, str(gen.role_id), secret_id))
+        token = self.secret(await log_in(self._bao, str(gen.role_id), secret_id))
         return self.secret(await mint(self._bao, gen.oidc_role, token))
 
     # --- install ----------------------------------------------------------------------------------
 
     async def _install(self, held: HeldTenant) -> None:
-        """Unwrap the secret, write its file, act as the bot: it reads the repo and `main` refuses its
-        pushes (`GET branches/main`: protected, user cannot push; DC-11, G22); then record the
-        accessor and the file (Flow 1.8). Any failure restarts at `wrap` (DC-4)."""
+        """Unwrap both secrets (delivery and sign) and write both files before any check; act as the
+        bot: it reads the repo and `main` refuses its pushes and merges (`GET branches/main`:
+        protected, user can neither push nor merge; DC-11, G22, A23); prove the sign pair by signing
+        (A24'); then record both accessors and files (Flow 1.8). Any failure removes the files written
+        and restarts at `wrap`, which wraps both again (DC-4)."""
         try:
             async with self._host_lock(held.tenant_id, exclusive=False):
                 await self._install_under_lock(held)
@@ -109,42 +118,67 @@ class HostActor(Actor):
     async def _install_under_lock(self, held: HeldTenant) -> None:
         gen = only(await held.generations(), "pending")
         wiring = await held.forge_wiring()
-        if wiring is None or not gen.wrapped_secret:
+        if wiring is not None and gen.wrapped_secret and not gen.sign_wrapped_secret:
+            # Wrapped before the sign login existed (a job in flight across the upgrade, r8.5): back
+            # to `wrap`, which makes the sign chain and wraps both, with no failure to resume.
+            await held.commit(step="wrap", actor=SERVICE)
+            return
+        if wiring is None or not gen.wrapped_secret or not gen.sign_wrapped_secret:
             raise StepFailed("there is no wrapped secret or forge wiring to install")
-        unwrapped = await self._bao.post("/v1/sys/wrapping/unwrap", headers={"X-Vault-Token": self.secret(gen.wrapped_secret)})
-        if unwrapped.status_code != 200:
-            raise StepFailed(f"the wrapped secret could not be unwrapped (HTTP {unwrapped.status_code}): it was "
-                             "spent or has expired")
-        secret_id = self.secret(str(field_of(unwrapped, "data", "secret_id")))
-        accessor = str(field_of(unwrapped, "data", "secret_id_accessor"))
-        path = await asyncio.to_thread(self._write_secret, held.tenant_id, accessor, secret_id)
+        secret_id, accessor = await self._unwrap(gen.wrapped_secret, "delivery")
+        sign_secret_id, sign_accessor = await self._unwrap(gen.sign_wrapped_secret, "sign")
+        paths: list[Path] = []
         try:
+            paths.append(await asyncio.to_thread(self._write_secret, held.tenant_id, accessor, secret_id))
+            paths.append(await asyncio.to_thread(self._write_secret, held.tenant_id, sign_accessor, sign_secret_id,
+                                                 prefix=_SIGN_FILE))
             jwt = await self._bot_jwt(gen, secret_id)
             bearer = {"Authorization": f"Bearer {jwt}"}
             answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}", headers=bearer))
             branch = answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}/branches/main", headers=bearer)).json()
-            if not (isinstance(branch, dict) and branch.get("protected") is True and branch.get("user_can_push") is False):
-                raise StepFailed(f"the bot could push to main of {wiring.repo} (protected={branch.get('protected')!r}, "
-                                 f"user_can_push={branch.get('user_can_push')!r})")
-            await self._commit_next_install(held, gen, accessor, path)
-        except FenceMissed:  # the commit may have landed with its answer lost: the file stays (a stray one is
+            if not (isinstance(branch, dict) and branch.get("protected") is True and branch.get("user_can_push") is False
+                    and branch.get("user_can_merge") is False):
+                seen = branch if isinstance(branch, dict) else {}
+                raise StepFailed(f"the bot could push to or merge main of {wiring.repo} (protected={seen.get('protected')!r}, "
+                                 f"user_can_push={seen.get('user_can_push')!r}, user_can_merge={seen.get('user_can_merge')!r})")
+            await self._prove_sign(held.tenant_id, gen, sign_secret_id)
+            step, actor = next_step(held)
+            await held.commit(step=step, actor=actor, update_generations={gen.salt: {
+                "wrapped_secret": None, "secret_accessor": accessor, "host_secret_file": paths[0],
+                "sign_wrapped_secret": None, "sign_secret_accessor": sign_accessor, "sign_secret_file": paths[1]}})
+        except FenceMissed:  # the commit may have landed with its answer lost: the files stay (a stray one is
             raise            # dropped by prepare and remove_old_file, and teardown removes the secrets directory)
         except BaseException:
-            path.unlink(missing_ok=True)
+            for path in paths:
+                path.unlink(missing_ok=True)
             raise
 
-    async def _commit_next_install(self, held: HeldTenant, gen: Generation, accessor: str, path: Path) -> None:
-        step, actor = next_step(held)
-        await held.commit(step=step, actor=actor, update_generations={
-            gen.salt: {"wrapped_secret": None, "secret_accessor": accessor, "host_secret_file": path}})
+    async def _unwrap(self, wrapped: str, which: str) -> tuple[str, str]:
+        """The secret id and its accessor that `wrapped` wraps (spent by this call)."""
+        unwrapped = await self._bao.post("/v1/sys/wrapping/unwrap", headers={"X-Vault-Token": self.secret(wrapped)})
+        if unwrapped.status_code != 200:
+            raise StepFailed(f"the wrapped {which} secret could not be unwrapped (HTTP {unwrapped.status_code}): it was "
+                             "spent or has expired")
+        secret_id = self.secret(str(field_of(unwrapped, "data", "secret_id")))
+        return secret_id, str(field_of(unwrapped, "data", "secret_id_accessor"))
 
-    def _write_secret(self, tenant: str, accessor: str, secret_id: str) -> Path:
+    async def _prove_sign(self, tenant: str, gen: Generation, sign_secret_id: str) -> None:
+        """The installed sign pair works (A24', r8.4): logged in as the generation's sign login, one fixed
+        probe is signed with the tenant's key, and the answer carries a signature."""
+        token = self.secret(await log_in(self._bao, str(gen.sign_role_id), sign_secret_id))
+        signed = answered(await self._bao.post(f"/v1/{TRANSIT_MOUNT}/sign/{transit_key_for(tenant)}",
+                                               json={"input": _PROBE}, headers={"X-Vault-Token": token}))
+        signature = field_of(signed, "data", "signature")
+        if not isinstance(signature, str) or not signature:
+            raise StepFailed("the sign proof answered no signature")
+
+    def _write_secret(self, tenant: str, accessor: str, secret_id: str, *, prefix: str = "") -> Path:
         if not accessor or "/" in accessor or accessor.startswith("."):
             raise StepFailed("OpenBao answered an unusable secret accessor")
         folder = self._tenant_secrets(tenant)
         _io.guarded_mkdir(folder, base=self._config.secrets_dir)
         os.chmod(folder, 0o700)
-        path = folder / accessor
+        path = folder / f"{prefix}{accessor}"
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as out:
             out.write(secret_id + "\n")
@@ -152,7 +186,8 @@ class HostActor(Actor):
 
     def _drop_unrecorded_secrets(self, tenant: str, gens: list[Generation]) -> None:
         """RC-8: every file of the tenant's secrets directory no generation still records goes."""
-        keep = {Path(g.host_secret_file) for g in gens if g.status != "destroyed" and g.host_secret_file}
+        keep = {Path(f) for g in gens if g.status != "destroyed"
+                for f in (g.host_secret_file, g.sign_secret_file) if f}
         folder = self._tenant_secrets(tenant)
         with contextlib.suppress(FileNotFoundError):
             for entry in folder.iterdir():

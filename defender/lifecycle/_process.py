@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 from defender import _git
+from defender._internal_http import internal_async_client
 from defender.lifecycle.config import LifecycleConfig
 
 _logger = logging.getLogger(__name__)
@@ -88,21 +89,21 @@ def integration_runner(container: str) -> Callable[[Sequence[str]], subprocess.C
 
 def forge_admin(config: LifecycleConfig) -> httpx.AsyncClient:
     """The management service's forge client: the admin token on every call."""
-    return httpx.AsyncClient(base_url=config.forge_url, timeout=CALL_TIMEOUT,
-                             headers={"Authorization": f"token {config.forge_admin_token}"})
+    return internal_async_client(base_url=config.forge_url, timeout=CALL_TIMEOUT,
+                                 headers={"Authorization": f"token {config.forge_admin_token}"})
 
 
 def forge_anonymous(config: LifecycleConfig) -> httpx.AsyncClient:
     """The host actor's forge client: no credential (each call presents the bot's JWT, F-1)."""
-    return httpx.AsyncClient(base_url=config.forge_url, timeout=CALL_TIMEOUT)
+    return internal_async_client(base_url=config.forge_url, timeout=CALL_TIMEOUT)
 
 
 def openbao_management(config: LifecycleConfig) -> httpx.AsyncClient:
     """The management service's OpenBao client: the management login on every call."""
-    return httpx.AsyncClient(base_url=config.openbao_url, timeout=CALL_TIMEOUT,
-                             headers={"X-Vault-Token": config.openbao_login})
+    return internal_async_client(base_url=config.openbao_url, timeout=CALL_TIMEOUT,
+                                 headers={"X-Vault-Token": config.openbao_login})
 
 
 def openbao_login(config: LifecycleConfig) -> httpx.AsyncClient:
     """The host actor's OpenBao client: no token (unwrap, AppRole login, token reads; DC-12)."""
-    return httpx.AsyncClient(base_url=config.openbao_url, timeout=CALL_TIMEOUT)
+    return internal_async_client(base_url=config.openbao_url, timeout=CALL_TIMEOUT)

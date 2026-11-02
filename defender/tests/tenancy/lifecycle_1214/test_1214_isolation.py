@@ -97,15 +97,19 @@ def _break_protection(world: LifecycleWorld, tenant: str, how: str) -> dict:
     saved = dict(protections["main"])
     if how == "missing":
         del protections["main"]
+    elif how == "bot merge-whitelisted":  # A23: the bot is named on the merge whitelist
+        protections["main"] = {**saved, "enable_merge_whitelist": True, "merge_whitelist_usernames": [bot]}
+    elif how == "merge whitelist off":  # A22: pushes blocked, no merge whitelist: the bot can merge
+        protections["main"] = {**saved, "enable_merge_whitelist": False}
     else:
         protections["main"] = {**saved, "enable_push": True, "push_whitelist_usernames": [bot]}
     return saved
 
 
-@pytest.mark.parametrize("how", ["missing", "bot whitelisted"])
-def test_install_fails_loudly_when_the_bot_could_push_main_and_resumes_once_it_cannot(world, how):
-    """A protection that leaves the bot able to push `main` fails install (failure names it), commits no
-    generation, tries no push; restored, resume finishes the job (DC-11, O1)."""
+@pytest.mark.parametrize("how", ["missing", "bot whitelisted", "bot merge-whitelisted", "merge whitelist off"])
+def test_install_fails_loudly_when_the_bot_could_push_or_merge_main_and_resumes_once_it_cannot(world, how):
+    """A protection that leaves the bot able to push or merge `main` fails install (failure names it), commits no
+    generation, tries no push; restored, resume finishes the job (DC-11, O1, A23)."""
     tenant = world.create()
     world.drive(stop=lambda: world.item(tenant)["step"] == "install")
     saved = _break_protection(world, tenant, how)

@@ -400,6 +400,14 @@ def box_mounted_episodes(data_root: DataRoot, raw_id: object) -> EpisodesRoot:
     return EpisodesRoot(_TenantPaths(data_root, TenantId(raw_id)).episodes)
 
 
+def tenant_exports(data_root: DataRoot, raw_id: object) -> Path:
+    """The tenant's published exports, `<data root>/<T>/exports`, for a reader that holds no
+    tenant record — the credential proxy, which is handed only the data root (#1163 A26). Judged
+    as every pre-acceptance site judges the root and the id (`TenantRefused`). A join: nothing is
+    read or made."""
+    return _TenantPaths(data_root, TenantId(raw_id)).exports
+
+
 def box_mounted_arm_container(data_root: DataRoot, raw_id: object, episode_id: str) -> RunsBase:
     """The arm container a sibling's box mounts — `<data root>/<T>/episodes/<episode id>/runs`
     — named BEFORE the tenant is accepted, so the sibling hands it to acceptance as

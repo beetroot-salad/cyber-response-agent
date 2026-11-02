@@ -124,7 +124,7 @@ def _snapshot(dsn: str, tenant: str) -> tuple[Any, ...]:
 
 
 def _generations(dsn: str, tenant: str) -> list[tuple[Any, ...]]:
-    return execute(dsn, "SELECT status, bot_login, oidc_role, approle, entity, audience FROM tenancy.generations "
+    return execute(dsn, "SELECT status, bot_login, oidc_role, approle, entity, audience, sign_approle, sign_entity FROM tenancy.generations "
                         "WHERE tenant_id = %s ORDER BY salt", (tenant,))
 
 
@@ -391,9 +391,11 @@ def test_a_worker_whose_lock_connection_is_terminated_writes_nothing_and_the_nex
     _settle(dsn, t, fakes, config, lambda row: row[3] == "host", rounds=6)  # the service's steps finish
     assert _row(dsn, t) == ("creating", "create", "install", "host", None)
     [gen] = _generations(dsn, t)
-    status, bot, role, approle, entity, audience = gen
+    status, bot, role, approle, entity, audience, sign_approle, sign_entity = gen
+    # r8.4: the recorded names include the sign AppRole and entity, and B finds them as it finds the delivery ones.
     assert (status, set(fakes.forge.users), set(fakes.openbao.oidc_roles), set(fakes.openbao.approles),
-            set(fakes.openbao.entities)) == ("pending", {bot}, {role}, {approle}, {entity}), "unknown or duplicate things"
+            set(fakes.openbao.entities)) == ("pending", {bot}, {role}, {approle, sign_approle},
+                                             {entity, sign_entity}), "unknown or duplicate things"
     assert list(fakes.forge.repos) == [f"tenants/{t}"] and len(fakes.forge.made("POST", REPOS)) == 1
     assert len(fakes.forge.made("POST", USERS)) == 1
     args = fakes.integration.calls

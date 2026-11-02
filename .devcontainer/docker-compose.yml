@@ -148,6 +148,36 @@ services:
     memswap_limit: 256m
     restart: unless-stopped
 
+  # The credential proxy (#1163, H4): the only process that reads customer system credentials
+  # (OpenBao KV) and the only one that adds them to a request. A run presents a signed request
+  # token; the proxy applies the declaration in each tenant's published `current` export (the
+  # data root is mounted read-only) and appends every use to its audit file. Reachable on the
+  # compose network only (no published port, no docker socket). It keeps no tenant list (#1163
+  # A26): a token's tenant id gives its exports, `/data/<tenant id>/exports/`, and its transit key;
+  # OpenBao is the deployment's fixed `https://openbao:8200` and `transit/` mount. Its config file
+  # (the operator's: the proxy role's token file, the KV mount, `"data_root": "/data"` and the
+  # audit file) lives under <repo>/playground-issuer/credential-proxy/ (gitignored); see
+  # `defender/credential_proxy/__main__.py`.
+  credential-proxy:
+    build:
+      context: ../
+      dockerfile: .devcontainer/Dockerfile.runtime
+    container_name: response-credential-proxy
+    hostname: credential-proxy
+    command: ["defender/.venv/bin/python", "-m", "defender.credential_proxy"]
+    environment:
+      DEFENDER_CREDENTIAL_PROXY_CONFIG: /proxy/config.json
+      DEFENDER_CREDENTIAL_PROXY_HOST: 0.0.0.0
+      DEFENDER_CREDENTIAL_PROXY_PORT: "8411"
+      SSL_CERT_DIR: /etc/ssl/certs:/etc/ssl/dev-issuer-ca
+    volumes:
+      - ../.defender-data:/data:ro
+      - ../playground-issuer/credential-proxy:/proxy
+      - ../playground-issuer/trust:/etc/ssl/dev-issuer-ca:ro
+    mem_limit: 256m
+    memswap_limit: 256m
+    restart: unless-stopped
+
   # The identity provider for the platform API (#1306): Keycloak signs people in and holds their
   # passwords and one-time codes; the API keeps everything else. Dev posture only: `start-dev`,
   # plain HTTP, and the dev-only placeholder secrets in `keycloak/realm-defender.json` (realm

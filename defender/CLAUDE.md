@@ -34,6 +34,31 @@ Experimental alert-triage product: an in-process PydanticAI investigation runtim
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1163
+
+Runs reach `http-proxy` systems through the credential proxy with a request token the run signs
+as the tenant's own sign-only AppRole, and publish now also refuses a repository whose bot can
+**merge** `main`. On a #1214 deployment, once:
+
+1. Run migrations (revision `0003_sign_login` adds the generation's sign-login columns; every
+   entry point refuses a database still at `0002_tenancy`). Mount transit at `transit/`.
+2. Extend the lifecycle's management policy with create, read, update and delete on
+   `transit/keys/request-token-*`.
+3. Create the policy `defender-tenant-sign`: `update` on
+   `transit/sign/request-token-{{identity.entity.metadata.tenant_id}}`.
+4. Set the proxy's policy to KV read plus `update` on `transit/verify/request-token-*`, and
+   replace the proxy config's `tenant_keys`, `tenant_exports`, `transit_mount` and
+   `openbao_addr` with `data_root` (an old config refuses to start).
+5. Rotate each existing tenant's forge credential
+   (`POST /admin/tenants/<T>/rotate-forge-credential`). Rotation gives it the sign
+   login, its signing key `request-token-<T>` and the merge whitelist on `main` (the
+   organisation's `Owners` team, never the bot). Until then its runs that reach an `http-proxy`
+   system refuse at start, and its publish refuses. A tenant whose repository is owned by a user
+   rather than an organisation fails rotation at `protect`: move the repository to an
+   organisation first.
+
+A create or rotate job in flight across the upgrade finishes normally.
+
 ## Upgrade from before #1279
 
 `run.py --run-id` is gone: the system mints every run id, announced as the first stdout line

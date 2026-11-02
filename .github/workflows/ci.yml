@@ -166,6 +166,17 @@ jobs:
             -p 127.0.0.1:5432:5432 postgres:17.11
           timeout 60 sh -c 'until docker exec defender-postgres pg_isready -h 127.0.0.1 -q; do sleep 1; done'
 
+      # The #1163 credential store and token signer (`openbao`-marked tests: the store's
+      # write-only policy, transit sign/verify, rotation). A dev-mode server: each test makes
+      # its own mounts and policies. Started here for the same reason as PostgreSQL above.
+      - name: Start OpenBao for the credential-proxy contract
+        run: |
+          docker run -d --name defender-openbao --runtime runc --cap-add IPC_LOCK \
+            -e BAO_DEV_ROOT_TOKEN_ID=ci-root \
+            -e 'BAO_LOCAL_CONFIG={"unsafe_allow_api_audit_creation": true}' \
+            -p 127.0.0.1:8200:8200 openbao/openbao:2.4.1 server -dev
+          timeout 60 sh -c 'until docker exec -e BAO_ADDR=http://127.0.0.1:8200 defender-openbao bao status >/dev/null 2>&1; do sleep 1; done'
+
       - name: Run unit tests
         working-directory: defender
         # ONE collection root. This used to read `tests/ learning/`, because test
@@ -206,6 +217,9 @@ jobs:
         env:
           DEFENDER_BUDGET_ENFORCE: "1"
           DEFENDER_TEST_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          DEFENDER_TEST_OPENBAO_ADDR: http://127.0.0.1:8200
+          DEFENDER_TEST_OPENBAO_TOKEN: ci-root
+          DEFENDER_TEST_OPENBAO_CONTAINER: defender-openbao
         run: >-
           uv run pytest tests/ -v -m "not live and not gate"
           -n auto --dist loadfile --durations=25

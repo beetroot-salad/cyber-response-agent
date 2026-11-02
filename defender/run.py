@@ -70,6 +70,11 @@ from defender.systems import system_status  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import RunTenant  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
+import time  # noqa: E402
+from datetime import UTC, datetime  # noqa: E402
+from defender.credential_proxy import mint_request_token, signing_access  # noqa: E402
+from defender.kit.access import AccessDeclaration, RequestAccess  # noqa: E402
+from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
 from defender.systems.verbs import (  # noqa: E402
     ModuleVerbRegistry,
@@ -267,7 +272,7 @@ class _Investigate(Protocol):
         self, *, alert_path: Path, run: Run, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
-        source: Run | None = None,
+        source: Run | None = None, access: RequestAccess | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -306,6 +311,9 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     #: judged once. `None` (a direct caller with no `main` before it): the roster is
     #: `defender_dir`'s, read here, and the driver judges it.
     systems: RunSystems | None = None,
+    #: The credential proxy's address and the run's read token (#1163); `None` when the run has
+    #: no `http-proxy` system.
+    access: RequestAccess | None = None,
 ) -> dict[str, Any]:
     """The production investigation call, as a synchronous callable (injected by the
     lifecycle so tests can pass a plain function).
@@ -373,7 +381,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     return investigate(
         alert_path=alert_path, run=run, defender_dir=defender_dir,
         model_name=model_name, model_override=model_override, box=box, verbs=verbs,
-        roster=roster, systems=systems, tenant=tenant,
+        roster=roster, systems=systems, tenant=tenant, **_access_kwargs(access),
     )
 
 
@@ -387,6 +395,12 @@ def _judged(investigate: _Investigate, systems: RunSystems | None) -> _Investiga
         return investigate
     seam: Callable[..., dict[str, Any]] = investigate
     return functools.partial(seam, systems=systems)
+
+
+def _access_kwargs(access: RequestAccess | None) -> dict[str, RequestAccess]:
+    """`access=` for a seam to take, only when the run has one: a seam that predates the
+    credential proxy is not handed a keyword it has no use for."""
+    return {} if access is None else {"access": access}
 
 
 def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs plus its four injection seams
@@ -414,6 +428,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: holds that verdict (`None`: the drive reads `defender_dir`'s roster and the driver
     #: judges it, as for a direct caller).
     systems: RunSystems | None = None,
+    #: The credential proxy's address and the run's read token (#1163), signed at run start.
+    access: RequestAccess | None = None,
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
@@ -453,6 +469,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             episode=episode,
             serving=serving,
             source=source,
+            **_access_kwargs(access),
         )
         investigation_ok = True
     finally:
@@ -462,6 +479,92 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             in_flight=not investigation_ok,
         )
     return summary
+
+
+#: Seconds a request token lives from when it is signed, read or write-back (r7 A20), and the
+#: life a held read token must have left to be handed out again.
+TOKEN_SEC = 600
+TOKEN_REUSE_MARGIN_SEC = 60
+
+
+class _TokenMint:
+    """Signs this run's request tokens in the run process (#1163 A1): a read token over the
+    granted `http-proxy` systems when a call first needs one, reused while it has life left (r7
+    A20), and a write-back token (`rw` on the ticket system only) at each ticket leg. Building
+    one checks configuration only; nothing contacts OpenBao until a token is asked for, and a
+    run with no `http-proxy` system to reach never does (A7)."""
+
+    def __init__(self, signer: Any, proxy_url: str | None, *, tenant_id: str, run_id: str,
+                 reads: tuple[str, ...], ticket_system: str | None) -> None:
+        self._signer = signer
+        self._proxy_url = proxy_url
+        self._tenant_id = tenant_id
+        self._run_id = run_id
+        self._reads = reads
+        self._ticket_system = ticket_system
+        self._held: tuple[str, float] | None = None
+        self._holding = threading.Lock()
+
+    @classmethod
+    def for_run(  # noqa: PLR0913 — the run's identity plus the operator's three seams
+            cls, tenant: RunTenant, systems: RunSystems, *, ns: argparse.Namespace,
+                world: Any, run_id: str, accepted: tenancy.Tenant,
+                records: tenancy.TenantDirectory, signer: Any, proxy_url: str | None,
+                issuer_transport: Any) -> _TokenMint:
+        """The mint for a run, or a mint that signs nothing when no `http-proxy` system is in
+        reach. A configuration that cannot sign (no proxy address; a tenant whose live generation
+        in `records` records no sign login, A24', whether or not a `signer` is injected, r8.6) refuses run start,
+        naming the cause, and contacts no OpenBao; called before the run folder is made, so the
+        refusal leaves none behind (r7 A20). The signer is the tenant's own
+        (`credential_proxy.request_signer`, r8.5) unless one is injected."""
+        proxied = {name for name, found in tenant.access.items()
+                   if isinstance(found, AccessDeclaration) and name not in systems.down}
+        reads = () if world is not None else tuple(sorted(
+            system_status.granted_systems(tenant.grants) & proxied))
+        ticket = _default_ticket_writer.SYSTEM
+        ticket_system = ticket if (world is None and ns.update_ticket and ticket in proxied) else None
+        if not reads and ticket_system is None:
+            return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
+                       ticket_system=None)
+        try:
+            signer, address = signing_access(str(accepted.id), directory=records, signer=signer,
+                                             proxy_url=proxy_url, transport=issuer_transport)
+        except ConfigFault as refused:
+            sys.exit(f"run start refused: {refused.detail}")
+        return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
+                   reads=reads, ticket_system=ticket_system)
+
+    def _mint(self, grant: set[tuple[str, str]], expires_at: float) -> str:
+        return mint_request_token(
+            self._signer, tenant_id=self._tenant_id, investigation=self._run_id, grant=grant,
+            expires_at=datetime.fromtimestamp(expires_at, UTC))
+
+    def _read_token(self) -> str:
+        """The run's read token: the held one while it has life left, else a new one. A mint
+        that fails raises its fault to the call that asked (r7 A20, A18)."""
+        with self._holding:
+            now = time.time()
+            if self._held is None or self._held[1] - TOKEN_REUSE_MARGIN_SEC <= now:
+                expires_at = now + TOKEN_SEC
+                self._held = (self._mint({(s, "r") for s in self._reads}, expires_at), expires_at)
+            return self._held[0]
+
+    def access_kwargs(self) -> dict[str, RequestAccess]:
+        return _access_kwargs(RequestAccess(self._proxy_url or "", self._read_token)
+                              if self._reads else None)
+
+    def write_back(self) -> dict[str, str]:
+        """The ticket leg's keywords: a fresh write-back token and the proxy's address, when the
+        ticket system is an `http-proxy` system; nothing otherwise. A mint that fails here is a
+        warning: the leg reports the missing grant itself, as a failed store call."""
+        if self._ticket_system is None:
+            return {}
+        try:
+            token = self._mint({(self._ticket_system, "rw")}, time.time() + TOKEN_SEC)
+        except AdapterFault as refused:
+            _logger.warning(f"no write-back token for the ticket leg: {refused.detail}")
+            return {}
+        return {"request_token": token, "proxy_url": self._proxy_url or ""}
 
 
 def _resolve_run_tenant(
@@ -862,6 +965,9 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
     roster: Any = None,
     publish: Callable[..., object] | None = None,
     directory: tenancy.TenantDirectory | None = None,
+    signer: Any = None,
+    proxy_url: str | None = None,
+    issuer_transport: Any = None,
 ) -> int:
     """`oracle` / `verifier` are a sibling's oracle and verifier models (#1224; `None` builds
     them from their knobs). `roster` is the adapters roster this run reads (`None`: the
@@ -876,7 +982,12 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
 
     `directory` is the tenant records (#1214 Flow 4): a test's or a launcher's; a production run
     passes none and reads them from `DEFENDER_DATABASE_DSN`. The run's tenant must be `active`
-    there, with its forge wiring recorded, before anything else of it is read."""
+    there, with its forge wiring recorded, before anything else of it is read.
+
+    `signer`, `proxy_url` and `issuer_transport` are the operator's seams for the credential
+    proxy (#1163): the request-token signer (else the tenant's own sign login, over `directory`'s
+    live generation, through `issuer_transport` when given), and the proxy's address (else
+    `PROXY_URL_ENV`)."""
     # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
     # injection seams defaulting to production.
     ns = parse_args(argv)
@@ -953,6 +1064,13 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                     tenant, defender_dir=DEFENDER_DIR,
                     roster=roster if roster is not None else _run_roster(DEFENDER_DIR),
                     known_ids=known_ids)
+                # The request tokens' signer, over the systems just judged: a configuration that
+                # cannot sign them refuses here, before the run is made; nothing is signed until a
+                # call or a ticket leg asks (r7 A20).
+                minting = _TokenMint.for_run(
+                    tenant, systems, ns=ns, world=world, run_id=early.run_dir.name,
+                    accepted=accepted, records=records, signer=signer, proxy_url=proxy_url,
+                    issuer_transport=issuer_transport)
 
                 model = driver.resolve_main_model(ns.model)
                 # Runs in siblings too: models are resolved per process, so each sibling must check (and
@@ -987,7 +1105,8 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                     if ns.update_ticket:
                         ticket_writer.open_case_ticket(
                             run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                            env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
+                            env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent),
+                            **minting.write_back())
 
                     _logger.info(f"run_dir={run_dir} model={model}")
                     _announce_provenance(run_dir)
@@ -1002,6 +1121,7 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                             world=world,
                             episode=episode,
                             systems=systems,
+                            **minting.access_kwargs(),
                             **seams,
                         )
                     except (ServingAbort, BaseExceptionGroup) as escaped:
@@ -1040,7 +1160,8 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                         ticket_writer.record_case_ticket(
                             run, tenant=tenant, defender_dir=DEFENDER_DIR,
                             env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
-                            closed_before_cut=summary.get("closed_before_cut") is True)
+                            closed_before_cut=summary.get("closed_before_cut") is True,
+                            **minting.write_back())
 
                     # A sibling's evidence was staged on purpose, so it must never feed the catalog.
                     if world is not None:

@@ -78,3 +78,18 @@ def test_r6_prepare_creates_its_private_files_private():
     text = SCRIPT.read_text(encoding="utf-8")
     assert "umask 077" in _function(text, "prepare")
     assert 'chmod 0400 "$STATE/seal/unseal"' in text
+
+
+
+DEV_OPS = REPO_ROOT / "defender" / "docs" / "development-operations.md"
+
+
+def test_the_operations_guide_names_the_signing_policy_rules_A25():
+    """A25/A24'/r8.2: the operator-provisioned policy bodies live in no repo file, so the guide
+    names each rule the operator creates: the sign-only templated rule on `defender-tenant-sign`,
+    the lifecycle's key rule, the proxy's verify rule and the fixed `transit/` mount."""
+    text = DEV_OPS.read_text(encoding="utf-8")
+    assert "provision-dev-issuer.sh" in text, "control: this is the operations guide"
+    for rule in ("defender-tenant-sign", "transit/sign/request-token-{{identity.entity.metadata.tenant_id}}",
+                 "transit/keys/request-token-*", "transit/verify/request-token-*"):
+        assert rule in text, f"development-operations.md does not name {rule}"
