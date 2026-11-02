@@ -12,6 +12,8 @@ from defender.tenancy.case_ticket import AGENT_TAG_PREFIX, agent_comment_tag as 
 from defender.investigation.payload_view import LEAF_MAX_CHARS, PASSTHROUGH_MAX_BYTES_DEFAULT
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.runtime.engine._spec767 import (
+    ALERT,
+    CASE_KEY,
     COMMENTS_SUFFIX,
     ELLIPSIS,
     HOST_CAUSE,
@@ -21,12 +23,12 @@ from defender.tests.support.runtime.engine._spec767 import (
     comment,
     listing,
     make_run,
-    mapping_doc,
+    case_record_doc,
     record,
     rendered,
-    shipped_mapping_doc,
+    shipped_case_record_doc,
     ticket,
-    use_mapping,
+    use_case_record,
 )
 
 #: A live run's and a branch run's ids: canonical UUIDs (`fixture_uuid(<label>)`), the label
@@ -44,6 +46,11 @@ def _tag_and_rest(body: str) -> tuple[str, str]:
     first, newline, rest = body.partition("\n")
     assert newline, f"the posted body is one line — no comment follows a tag: {body[:160]!r}"
     return first, rest
+
+
+def _store(tmp_path) -> FakeStore:
+    """A store whose fake `docker` lives under a fresh folder (one per call)."""
+    return FakeStore(tmp_path / f"store-{len(list(tmp_path.glob('store-*')))}")
 
 
 def _comment_post(store: FakeStore) -> tuple[str, str]:
@@ -99,15 +106,15 @@ def test_1221_the_tag_is_one_plain_line_naming_the_run():
 )
 def test_1221_every_posted_comment_opens_with_the_tag(
         tmp_path, arm, report_kw, record_kw, expected_rest):
-    assert shipped_mapping_doc()["comment"]["body"] == "{disposition} — {cause}\n\n{narrative}", (
+    assert shipped_case_record_doc()["comment"]["body"] == "{disposition} — {cause}\n\n{narrative}", (
         "the fixture tenant's comment template moved; re-spell the expected record body"
     )
     run_dir = make_run(tmp_path, name=RUN_ID, **report_kw)
-    store = FakeStore()
+    store = _store(tmp_path)
     record(run_dir, store, **record_kw)
 
     path, body = _comment_post(store)
-    assert path == f"{TICKETS_PATH}/{RUN_ID}{COMMENTS_SUFFIX}", f"{arm}: posted to {path}"
+    assert path == f"{TICKETS_PATH}/{CASE_KEY}{COMMENTS_SUFFIX}", f"{arm}: posted to {path}"
     first, rest = _tag_and_rest(body)
     assert first == _tag(RUN_ID), f"{arm}: the body's first line is {first!r}, not the agent tag"
     assert rest == expected_rest, f"{arm}: the comment below the tag is {rest!r}"
@@ -115,13 +122,12 @@ def test_1221_every_posted_comment_opens_with_the_tag(
 
 def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path, monkeypatch):
     key = "SOC-VENDOR-4242"
-    run_dir = make_run(tmp_path, name=RUN_ID, body=NARRATIVE)
+    run_dir = make_run(tmp_path, name=RUN_ID, body=NARRATIVE, alert={**ALERT, "alert_id": key})
     assert _tag(RUN_ID) != _tag(key), "the control is vacuous: the two ids tag alike"
 
-    use_mapping(monkeypatch, tmp_path / "dfn",
-                mapping_doc(comment_body="{disposition}"))
-    bare = FakeStore()
-    record(run_dir, bare, key=key)
+    use_case_record(monkeypatch, tmp_path / "dfn", case_record_doc(body="{disposition}"))
+    bare = _store(tmp_path)
+    record(run_dir, bare)
     path, body = _comment_post(bare)
     assert path == f"{TICKETS_PATH}/{key}{COMMENTS_SUFFIX}", f"posted to {path}, not the case key"
     first, rest = _tag_and_rest(body)
@@ -131,13 +137,13 @@ def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path, monkeypatch):
     assert rest == "benign", f"the template's own rendering changed: {rest!r}"
     assert RUN_ID not in rest, "the run id leaked into the template's rendering"
 
-    use_mapping(monkeypatch, tmp_path / "dfn",
-                mapping_doc(comment_body="[{case_id}] {disposition}"))
-    named = FakeStore()
-    record(run_dir, named, key=key)
+    use_case_record(monkeypatch, tmp_path / "dfn",
+                    case_record_doc(body="[{case_id}] {disposition}"))
+    named = _store(tmp_path)
+    record(run_dir, named)
     first, rest = _tag_and_rest(_comment_post(named)[1])
     assert first == _tag(RUN_ID)
-    assert rest == f"[{key}] benign", f"the template's `{{case_id}}` rendered {rest!r}"
+    assert rest == f"[{RUN_ID}] benign", f"the template's `{{case_id}}` rendered {rest!r}"
 
 
 @pytest.mark.parametrize(
@@ -153,9 +159,9 @@ def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path, monkeypatch):
 def test_1221_every_comment_kind_tags_the_run_under_a_vendor_key(
         tmp_path, arm, report_kw, record_kw):
     key = "SOC-VENDOR-4242"
-    run_dir = make_run(tmp_path, name=RUN_ID, **report_kw)
-    store = FakeStore()
-    record(run_dir, store, key=key, **record_kw)
+    run_dir = make_run(tmp_path, name=RUN_ID, alert={**ALERT, "alert_id": key}, **report_kw)
+    store = _store(tmp_path)
+    record(run_dir, store, **record_kw)
     path, body = _comment_post(store)
     assert path == f"{TICKETS_PATH}/{key}{COMMENTS_SUFFIX}", f"{arm}: posted to {path}"
     first, _rest = _tag_and_rest(body)
@@ -167,7 +173,7 @@ def test_1221_every_comment_kind_tags_the_run_under_a_vendor_key(
 @pytest.mark.parametrize("filler", ["x", "é", "🜁"])
 def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
     run_dir = make_run(tmp_path, name=run_id, body=filler * 20000)
-    store = FakeStore()
+    store = _store(tmp_path)
     record(run_dir, store)
     body = store.wire_body()
 
@@ -183,7 +189,7 @@ def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
     )
 
     small_dir = make_run(tmp_path / "small", name=run_id, body=NARRATIVE)
-    small = FakeStore()
+    small = _store(tmp_path)
     record(small_dir, small)
     first, rest = _tag_and_rest(small.wire_body())
     assert first == _tag(run_id)
@@ -197,7 +203,7 @@ def test_1221_the_tag_survives_the_listing_view_clip(tmp_path):
     bodies, last_words = {}, {}
     for run_id in (RUN_ID, BRANCH_RUN_ID):
         run_dir = make_run(tmp_path / run_id[-6:], name=run_id, body=narrative)
-        store = FakeStore()
+        store = _store(tmp_path)
         record(run_dir, store)
         bodies[run_id] = store.wire_body()
         assert bodies[run_id][:LEAF_MAX_CHARS].startswith(_tag(run_id) + "\n"), (

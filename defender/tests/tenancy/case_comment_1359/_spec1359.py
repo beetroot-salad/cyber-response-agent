@@ -36,6 +36,8 @@ COMMENT_ACTION = "add_case_comment"
 #: The tenant case-record settings file under `settings/` (r4 Data).
 CASE_RECORD_REL = "case-record.yaml"
 #: The ready-made adapters' system names (module `<system>_adapter.py`, prefix `<SYSTEM>_`).
+#: The playground system that records cases.
+CASE_SYSTEM_TICKET = "ticket"
 JIRA_SYSTEM = "jira"
 SERVICENOW_SYSTEM = "servicenow"
 #: Receipt reason substrings (r4 "Receipt reasons").

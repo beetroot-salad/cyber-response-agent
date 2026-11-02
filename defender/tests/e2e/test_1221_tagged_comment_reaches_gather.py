@@ -73,7 +73,7 @@ def test_a_posted_agent_comment_on_an_open_case_reaches_gather_beside_the_own_ca
     tag = case_ticket.agent_comment_tag(PRIOR)
 
     prior_dir = make_run(tmp_path / "prior", name=PRIOR, body=PRIOR_NOTES)
-    store = FakeStore()
+    store = FakeStore(tmp_path / "store")
     record(prior_dir, store)
     posted = store.only_comment()
     assert posted["body"].startswith(tag + "\n"), "the writer posted an untagged comment"
