@@ -25,7 +25,7 @@ COMMENTED, ESCALATED, ERROR = "commented", "escalated", "error"
 #: The retired system and its settings prefix (O2 census).
 RETIRED_SYSTEM = "case-history"
 RETIRED_PREFIX = "CASE_HISTORY"
-RETIRED_MAPPING_REL = "systems/case-history/mapping.yaml"
+RETIRED_MAPPING_REL = f"{T1106.RETIRED_CASE_FOLDER}/mapping.yaml"
 
 # ======================================================================================
 # Names fixed by amendment r4.
@@ -51,7 +51,7 @@ MARKER = "c1359"
 #: (`_tenants1106.config_texts`: `<MARKER upper>-[0-9]+`).
 TICKET_KEY = f"{MARKER.upper()}-4471"
 #: The comment body template the case-record file carries.
-BODY_TEMPLATE = "{disposition} — {cause}\\n\\n{narrative}"
+BODY_TEMPLATE = T1106.COMMENT_BODY
 
 #: The alert mapping run start reads, with the fourth fact on the alert's own id (P3).
 ALERT_MAPPING = {"signature": "rule.id", "event_time": "timestamp",
@@ -65,7 +65,7 @@ def record_leg() -> Any:
 
 def case_record_text(system: str, *, body: str = BODY_TEMPLATE) -> str:
     """The tenant's case-record settings: which system records cases, and the comment body."""
-    return f'system: "{system}"\ncomment:\n  body: "{body}"\n'
+    return T1106.case_record_text(system, body=body)
 
 
 def alert_mapping_text(mapping: Mapping[str, str] = ALERT_MAPPING) -> str:
@@ -92,18 +92,10 @@ def plant_alert(where: Path, *, key: str | None = TICKET_KEY) -> Path:
 
 def plant_case_tenant(root: Path, *, case_system: str | None = "ticket",
                       configs: dict[str, str] | None = None, **kw: Any) -> Path:
-    """The playground tenant with no `case-history` folder, its alert mapping carrying
-    `case_key`, and (unless `case_system` is None) a case-record file naming `case_system`.
-    Returns the knowledge folder."""
-    texts = dict(configs) if configs is not None else S.config_texts(MARKER)
-    texts.pop(RETIRED_SYSTEM, None)
-    folder = S.plant(root, marker=MARKER, configs=texts, omit=(RETIRED_MAPPING_REL,), **kw)
-    settings = S.settings_of(folder)
-    (settings / "alert-mapping.yaml").write_text(alert_mapping_text(), encoding="utf-8")
-    if case_system is not None:
-        (settings / CASE_RECORD_REL).write_text(
-            case_record_text(case_system), encoding="utf-8")
-    return folder
+    """The playground tenant as the machinery plants it after #1359: no `case-history` folder, an
+    alert mapping carrying `case_key`, and (unless `case_system` is None: a tenant with no case
+    file) a case-record file naming `case_system`. Returns the knowledge folder."""
+    return S.plant(root, marker=MARKER, configs=configs, case_system=case_system, **kw)
 
 
 class CaseRunRecorder(S.RunRecorder):

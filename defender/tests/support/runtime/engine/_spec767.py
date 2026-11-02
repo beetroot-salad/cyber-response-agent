@@ -1,4 +1,6 @@
-"""Shared builders, a fake ticket store and drivers for the #767 case-ticket writer suite."""
+"""Shared builders, a fake ticket store and drivers for the #767 case-ticket writer suite (#1359: the
+record leg comments through the case system's adapter, so the store is the docker route's fake
+`docker`, not a seam inside the writer)."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -8,15 +10,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender.records._alert_input import AlertFacts
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 
 # --------------------------------------------------------------------------------------
-# Vendor spellings. They live in the mapping; these are the test's copy, used to build a
-# mapping and to read the wire back, not a claim about what the writer may hardcode.
+# Vendor spellings: the test's copy, used to build a case-record file and read the wire back.
 # --------------------------------------------------------------------------------------
 
 #: The store's own `closed` status (its stub accepts only `open`/`in_progress`/`closed`). A
@@ -24,13 +24,10 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture
 #: comments on, and as a hostile value an alert might carry.
 CLOSED_STATUS = "closed"
 
-#: The legacy `released:` section an un-migrated tenant's mapping may carry: the loader accepts
-#: it and nothing reads it; the shipped mapping has none (`released=None`).
-LEGACY_RELEASED: dict[str, Any] = {"status": CLOSED_STATUS}
-#: The state the bridge opens a case in (`open.status`).
+#: The state a seeded ticket is in (store records the gather tests read).
 OPEN_STATUS = "open"
 
-#: The agent identity the mapping spells at `open.reporter` and `comment.author`.
+#: The agent identity the seeded store records spell as author.
 AGENT_AUTHOR = "defender"
 
 #: One bound: 4096 UTF-8 bytes on the rendered comment body. The cut rounds down to the last
@@ -45,14 +42,20 @@ COMMENTS_SUFFIX = "/comments"
 TRANSITIONS_SUFFIX = "/transitions"
 TICKETS_PATH = "/tickets"
 
-#: A case-history config the planted tenant carries — the three keys the writer itself requires.
+#: The `ticket` system's settings the planted tenant carries (docker route): the keys the
+#: adapter requires beside the access method.
 CONFIG: dict[str, str] = {
-    "URL_BASE": "http://case-history.test",
+    "URL_BASE": "http://ticket.test",
     "BASTION_HOST": "bastion.test",
     "TIMEOUT_SEC": "10",
+    "KEY_PATTERN": "C767-[0-9]+",
 }
+#: The system that records cases, and the ticket the planted alerts name (their own `alert_id`).
+CASE_SYSTEM = "ticket"
+CASE_KEY = "C767-4471"
 
 ALERT = {
+    "alert_id": CASE_KEY,
     "rule": {"id": "5710", "description": "sshd: Attempt to login using a non-existent user"},
     "agent": {"name": "target-endpoint"},
     "timestamp": "2026-05-07T07:15:01.561+0000",
@@ -61,74 +64,45 @@ ALERT = {
 #: The rendered comment body. The em-dash separator is the mapping's, not a code literal.
 COMMENT_BODY_TEMPLATE = "{disposition} — {cause}\n\n{narrative}"
 
-#: The mapping's path below a tenant's settings folder.
-MAPPING_RELPATH = "systems/case-history/mapping.yaml"
-CONFIG_RELPATH = "systems/case-history/config.env"
+#: The case-record file and the case system's config below a tenant's settings folder.
+CASE_RECORD_RELPATH = T1106.CASE_RECORD_REL
+CONFIG_RELPATH = f"systems/{CASE_SYSTEM}/config.env"
 
-#: The tenant `use_mapping` plants under the test's root.
+#: The tenant `use_case_record` plants under the test's root.
 TENANT_ID = fixture_uuid("tenant:t767")
 
 
 # --------------------------------------------------------------------------------------
-# The mapping — built as data, written to a settings folder, handed in explicitly (#1106)
+# The case-record file — built as data, written to a settings folder (#1359 r4 Data)
 # --------------------------------------------------------------------------------------
 
 
-def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises, not per concept
-    *,
-    open_labels: tuple[str, ...] = ("sig:{signature}", "evt:{event_time}"),
-    open_status: Any = OPEN_STATUS,
-    comment_author: str | None = AGENT_AUTHOR,
-    comment_body: str | None = COMMENT_BODY_TEMPLATE,
-    released: Any = LEGACY_RELEASED,
-    with_comment: bool = True,
-    close_section: dict[str, Any] | None = None,
-    extra_open: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """The mapping as a dict. `with_comment=False` drops the comment section; `open_status`
-    feeds the loader's literal-status rule; `released` is the legacy section (`None` omits it,
-    as shipped; any other value is written as-is and must be ignored); `close_section` is a
-    stale close lane; `extra_open` an operator-added open field."""
-    doc: dict[str, Any] = {
-        "open": {
-            "key": "{case_id}",
-            "summary": "{summary}",
-            "description": "Auto-created from alert {case_id} (rule {signature}).",
-            "status": open_status,
-            "reporter": AGENT_AUTHOR,
-            "labels": list(open_labels),
-        },
-    }
-    if extra_open:
-        doc["open"].update(extra_open)
+def case_record_doc(*, body: Any = COMMENT_BODY_TEMPLATE, system: Any = CASE_SYSTEM,
+                    with_comment: bool = True) -> dict[str, Any]:
+    """The case-record file as a dict (`system:`, `comment.body:`). `with_comment=False` drops the
+    comment section; a `None` member is left out."""
+    doc: dict[str, Any] = {}
+    if system is not None:
+        doc["system"] = system
     if with_comment:
-        section: dict[str, Any] = {}
-        if comment_author is not None:
-            section["author"] = comment_author
-        if comment_body is not None:
-            section["body"] = comment_body
-        doc["comment"] = section
-    if released is not None:
-        doc["released"] = dict(released) if isinstance(released, dict) else released
-    if close_section is not None:
-        doc["close"] = close_section
+        doc["comment"] = {} if body is None else {"body": body}
     return doc
 
 
 def settings_of(root: Path) -> Path:
-    """The settings folder `write_mapping` plants under `root` (`<root>/<T>/knowledge/settings`)."""
+    """The settings folder `write_case_record` plants under `root` (`<root>/<T>/knowledge/settings`)."""
     return Path(root) / TENANT_ID / "knowledge" / "settings"
 
 
-def write_mapping(root: Path, doc: dict[str, Any] | str) -> Path:
-    """Write a mapping into `settings_of(root)` (planting the rest of the tenant first, if the
-    folder is new) and return the mapping file's path."""
+def write_case_record(root: Path, doc: dict[str, Any] | str) -> Path:
+    """Write the case-record file into `settings_of(root)` (planting the rest of the tenant first,
+    if the folder is new) and return its path."""
     import yaml
 
     settings = settings_of(root)
     if not (settings / "verb-grants.yaml").exists():
         S1107.plant(Path(root), TENANT_ID, marker=TENANT_ID)
-    path = settings / MAPPING_RELPATH
+    path = settings / CASE_RECORD_RELPATH
     text = doc if isinstance(doc, str) else yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
     path.write_text(text, encoding="utf-8")
     return path
@@ -139,17 +113,17 @@ def write_mapping(root: Path, doc: dict[str, Any] | str) -> Path:
 _PLANTED: dict[str, Path] = {}
 
 
-def use_mapping(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None) -> Path:
-    """Plant a mapping of this test's choosing and return its settings folder. The writer's
-    record is resolved from it at call time (`current_record`), so a second planted mapping
+def use_case_record(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None) -> Path:
+    """Plant a case-record file of this test's choosing and return its settings folder. The
+    leg's record is resolved from it at call time (`current_record`), so a second planted file
     reaches the next call, while a record taken before keeps the first."""
-    write_mapping(root, mapping_doc() if doc is None else doc)
+    write_case_record(root, case_record_doc() if doc is None else doc)
     monkeypatch.setitem(_PLANTED, "settings", settings_of(root))
     return settings_of(root)
 
 
 def current_settings() -> Path:
-    """The settings folder the running test planted (`use_mapping`), else the committed
+    """The settings folder the running test planted (`use_case_record`), else the committed
     fixture tenant's."""
     return _PLANTED.get("settings", T1106.FIXTURE_SETTINGS)
 
@@ -159,52 +133,35 @@ def current_settings() -> Path:
 _CONFIG_UNSET = object()
 
 
-def _write_case_history_config(settings: Path, config: dict[str, str] | None) -> None:
+def _write_case_config(settings: Path, config: dict[str, str] | None) -> None:
     path = settings / CONFIG_RELPATH
     if config is None:
         path.unlink(missing_ok=True)
         return
-    lines = [f'CASE_HISTORY_{key}="{value}"' for key, value in config.items()]
-    lines += [f'CASE_HISTORY_TRANSPORT="{S1107.DOCKER_EXEC}"',
-              f'CASE_HISTORY_DOCKER_CONTEXT="{S1107.context_name(TENANT_ID, "case-history")}"']
+    lines = [f'TICKET_{key}="{value}"' for key, value in config.items()]
+    lines += [f'TICKET_TRANSPORT="{S1107.DOCKER_EXEC}"',
+              f'TICKET_DOCKER_CONTEXT="{S1107.context_name(TENANT_ID, CASE_SYSTEM)}"']
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def current_record(*, config: dict[str, str] | None | object = _CONFIG_UNSET) -> Any:
     """The run record of the tenant the running test planted (else the committed fixture
-    tenant), resolved now through the real resolver, with `config` as `_CONFIG_UNSET` says."""
+    tenant), resolved now through the real resolver, with `config` (the case system's
+    `config.env`) as `_CONFIG_UNSET` says."""
     if "settings" not in _PLANTED:
         return T1106.fixture_run_tenant()
     settings = current_settings()
-    _write_case_history_config(settings, CONFIG if config is _CONFIG_UNSET else config)
+    _write_case_config(settings, CONFIG if config is _CONFIG_UNSET else config)
     return T1106.run_tenant(T1106.accept(settings.parents[2], TENANT_ID))
 
 
-def current_mapping() -> Any:
-    """The `ticket_mapping` of `current_record()` — a `CaseMapping`, or the `CaseTicketError`
-    the record kept when the planted mapping could not stand."""
-    return current_record().ticket_mapping
-
-
-def shipped_comment_author() -> str:
-    """The agent identity as the shipped mapping spells it (`comment.author`), read off the real
-    file so whole-run scenarios assert about the file an operator edits, not a literal."""
-    comment_section = shipped_mapping_doc().get("comment") or {}
-    assert isinstance(comment_section.get("author"), str), (
-        "the shipped mapping has no `comment: {author}` section"
-    )
-    return comment_section["author"]
-
-
-def shipped_mapping_doc() -> dict[str, Any]:
-    """The repo's own checked-in mapping (the committed fixture tenant's), read off the
+def shipped_case_record_doc() -> dict[str, Any]:
+    """The repo's own checked-in case-record file (the committed fixture tenant's), read off the
     real file."""
     import yaml
 
-    from defender.tests.support.tenancy import _tenants1106
-
     return yaml.safe_load(
-        (_tenants1106.FIXTURE_SETTINGS / MAPPING_RELPATH).read_text(encoding="utf-8"))
+        (T1106.FIXTURE_SETTINGS / CASE_RECORD_RELPATH).read_text(encoding="utf-8"))
 
 
 # --------------------------------------------------------------------------------------
@@ -255,82 +212,54 @@ def make_run(tmp_path: Path, name: str = RUN_ID, *, alert: Any = None,
     return run_dir
 
 
-#: The paths this suite's alerts carry their three facts at.
-ALERT_MAPPING = {"signature": "rule.id", "event_time": "timestamp", "summary": "rule.description"}
-
-
-def facts_of(alert: dict[str, Any]) -> AlertFacts:
-    """The facts the front door records for `alert` under `ALERT_MAPPING` (what the mapper is
-    handed instead of the alert), passed through unvalidated."""
-    rule = alert.get("rule") if isinstance(alert.get("rule"), dict) else {}
-    return AlertFacts(signature=rule.get("id") or None, event_time=alert.get("timestamp") or None,
-                      summary=rule.get("description") or None)
+#: The paths this suite's alerts carry their four facts at (`case_key`: the alert's own id).
+ALERT_MAPPING = {"signature": "rule.id", "event_time": "timestamp", "summary": "rule.description",
+                 "case_key": "alert_id"}
 
 
 # --------------------------------------------------------------------------------------
-# The store fake — one fake per dependency, driven by a data fault-spec
+# The store fake — the docker route's fake `docker` (one per test), driven by canned answers
 # --------------------------------------------------------------------------------------
-
-
-#: `ticket` on `FakeStore` distinguishes "omitted" (a default open case) from an
-#: explicit `None` (the store holds no such key), the same way `_CONFIG_UNSET` does for `config`.
-_TICKET_UNSET = object()
 
 
 @dataclass(frozen=True)
 class OutboundCall:
-    """One request the writer handed the transport: what shape assertions check, never the
-    fake's canned reply."""
+    """One request the store received (read off the `curl` argv the transport forked): what
+    shape assertions check, never the canned reply."""
 
     method: str
     path: str
     body: Any
 
 
+def outbound(argv: list[str]) -> OutboundCall | None:
+    """The request a docker-exec'd `curl` argv carries, or `None` for any other docker call."""
+    from urllib.parse import urlparse
+
+    url = S1107.curl_url(argv)
+    if "curl" not in argv or url is None:
+        return None
+    method = argv[argv.index("-X") + 1] if "-X" in argv else "GET"
+    body = json.loads(argv[argv.index("-d") + 1]) if "-d" in argv else None
+    return OutboundCall(method=method, path=urlparse(url).path, body=body)
+
+
 class FakeStore:
-    """The writer's `request` dependency: records what it receives, injects a stated fault."""
+    """The ticket store behind the docker route: a fake `docker` on PATH that records each call
+    and answers `answers` in order (the last repeats). It injects a status and a body; it decides
+    nothing. `env()` puts the shim first on a run env's PATH."""
 
-    def __init__(
-        self,
-        *,
-        status: str = "201",
-        body: str = '{"author": "defender", "body": "ok", "created": "2026-09-17T00:00:00Z"}',
-        ticket: dict[str, Any] | None | object = _TICKET_UNSET,
-        status_by_suffix: dict[str, str] | None = None,
-        transport_fault_on: str | None = None,
-        transport_error_on: str | None = None,
-    ) -> None:
-        self.status = status
-        self.body = body
-        self.ticket = (
-            {"key": "any", "status": OPEN_STATUS, "labels": ["sig:5710"], "comments": []}
-            if ticket is _TICKET_UNSET else ticket
-        )
-        self.status_by_suffix = dict(status_by_suffix or {})
-        self.transport_fault_on = transport_fault_on
-        self.transport_error_on = transport_error_on
-        self.calls: list[OutboundCall] = []
+    def __init__(self, root: Path, *, status: str = "201", body: str = '{"id": 1}',
+                 answers: list[dict[str, Any]] | None = None) -> None:
+        self.shim = S1107.DockerShim(
+            Path(root), answers if answers is not None else [S1107.answer(body, status)])
 
-    def __call__(self, config: dict[str, str], method: str, path: str,
-                 body: Any = None, *, ctx: Any) -> tuple[str | None, str]:
-        self.calls.append(OutboundCall(method=method, path=path, body=body))
-        if self.transport_fault_on and path.endswith(self.transport_fault_on):
-            from defender.kit.faults import TransportFault
+    def env(self, base: Any) -> dict[str, str]:
+        return self.shim.env(base)
 
-            fault = TransportFault("injected: the bastion is unreachable")
-            return None, f"transport error: {fault.detail}"
-        if self.transport_error_on and path.endswith(self.transport_error_on):
-            return None, "transport error: injected"
-        for suffix, status in self.status_by_suffix.items():
-            if path.endswith(suffix):
-                return status, self.body
-        if method == "GET":
-            if self.ticket is None:
-                return "404", '{"detail": "not found"}'
-            return "200", json.dumps(self.ticket)
-        return self.status, self.body
-
-    # ---- what the fake recorded ---------------------------------------------------------
+    @property
+    def calls(self) -> list[OutboundCall]:
+        return [c for c in (outbound(x["argv"]) for x in self.shim.calls()) if c is not None]
 
     def writes(self) -> list[OutboundCall]:
         """Every call that could change the estate (any non-`GET`)."""
@@ -345,10 +274,6 @@ class FakeStore:
     @property
     def comment_payloads(self) -> list[Any]:
         return self.bodies(COMMENTS_SUFFIX)
-
-    @property
-    def open_payloads(self) -> list[Any]:
-        return [c.body for c in self.calls if c.path == TICKETS_PATH]
 
     def only_comment(self) -> dict[str, Any]:
         payloads = self.comment_payloads
@@ -380,35 +305,22 @@ class FakeStore:
         return rest
 
 
-def writer_deps(store: FakeStore):
-    """Bind the fake into the writer's real injection seam."""
-    from defender.investigation import ticket_writer
-
-    return ticket_writer.TicketWriterDeps(request=store)
-
-
-def _handed(run_dir: Path, config: dict[str, str] | None | object) -> dict[str, Any]:
-    """What run.py hands both legs: the record, the code tree and the run's env."""
+def _handed(run_dir: Path, store: FakeStore, config: dict[str, str] | None | object) -> dict[str, Any]:
+    """What run.py hands the leg: the record, the code tree and the run's env (the store's `docker` first on PATH)."""
     from defender import box as box_mod
 
     return {"tenant": current_record(config=config), "defender_dir": T1106.DEFENDER,
-            "env": box_mod.run_env(T1106.DEFENDER, Path(run_dir))}
+            "env": store.env(box_mod.run_env(T1106.DEFENDER, Path(run_dir)))}
 
 
-def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
-           **kw: Any) -> Any:
-    """Drive the writer (`record_case_ticket`) over one run dir, through the real seam."""
+def record(run_dir: Path, store: FakeStore, *,
+           config: dict[str, str] | None | object = _CONFIG_UNSET, **kw: Any) -> Any:
+    """Drive the record leg (`record_case_ticket`) over one run dir, through the real seam and
+    the real shared transport, the store being `store`'s fake `docker`."""
     from defender.investigation import ticket_writer
 
     return ticket_writer.record_case_ticket(
-        _run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config), **kw)
-
-
-def open_ticket(run_dir: Path, store: FakeStore) -> Any:
-    from defender.investigation import ticket_writer
-
-    return ticket_writer.open_case_ticket(
-        _run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, _CONFIG_UNSET))
+        _run_handle_1165(run_dir), **_handed(run_dir, store, config), **kw)
 
 
 def receipt_path(run_dir: Path) -> Path:
