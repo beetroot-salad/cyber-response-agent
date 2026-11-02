@@ -19,23 +19,12 @@ from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
 
-#: Marks every vendor request-shape assumption (design "Readiness": unverified against vendor docs).
-VENDOR_SHAPE_UNVERIFIED = True
-
 STORE = "/store"
 COMMENT_PATH = f"{STORE}/tickets/{C.TICKET_KEY}/comments"
 KEY_PATTERN = f'TICKET_KEY_PATTERN="{C.MARKER.upper()}-[0-9]+"\n'
 
-# Jira Cloud REST v3 (VENDOR_SHAPE_UNVERIFIED): POST rest/api/3/issue/{key}/comment, body in
-# Atlassian Document Format.
-JIRA_BASE = "/jira"
+# Jira Cloud (r4 Adapters); its request shapes are slice C's, in test_1359_ready_made_adapters.py.
 JIRA_WRITE = ("POST", "/rest/api/3/issue/*/comment")
-# ServiceNow Table API (VENDOR_SHAPE_UNVERIFIED): PATCH api/now/table/incident/{sys_id} with
-# `work_notes`; the case key is assumed to BE the record's sys_id.
-SN_BASE = "/sn"
-SN_TABLE = "incident"
-SN_WRITE = ("PATCH", f"/api/now/table/{SN_TABLE}/*")
-SN_SYS_ID = "9d385017c611228701d22104cc95c371"
 
 
 def _files(system: str, decl: str, *, env_extra: str = "") -> dict[str, str]:
@@ -83,61 +72,6 @@ def test_o3_o4_the_comment_goes_through_the_proxy_with_the_write_token_only(tmp_
     assert refused is not None, "no receipt"
     assert (refused["status"], refused["ok"]) == (C.ERROR, False), refused
     assert "proxy" in (refused.get("reason") or "").lower(), refused
-
-
-def _vendor_comment(tmp_path, data_root, checkout_roster, system: str, base: str,
-                    write: tuple[str, str], key: str, reply_path: str) -> tuple[Any, list[H.Seen]]:
-    """A tenant with `system` planted as /connect would leave it (config.env, access.yaml with
-    one write route, case-record file, case_key mapping); its adapter's check, then one comment."""
-    with H.upstream() as up:
-        decl = H.declaration(up.url + base, writes=(write,))
-        with published_tenant(tmp_path / "forge", root=data_root, files=_files(system, decl)) as t:
-            up.replies[reply_path] = (200, {"Content-Type": "application/json"}, b"{}")
-            module = S.mod("systems.verbs").fresh_adapter_module(checkout_roster, system)
-            assert module.check_settings(T.run_record(t)) is None
-            assert getattr(module, "VERBS", None) == {}, "a ready-made adapter declares no verbs"
-            store = H.FakeStore({(t.tenant_id, system): T.static_set()})
-            with A.proxy_for(t, store) as (url, _tap):
-                receipt = _comment(tmp_path, t, url, T.token(t.tenant_id, {(system, "rw")}), key=key)
-        return receipt, list(up.seen)
-
-
-def test_o6_ready_made_jira_adapter_posts_an_adf_comment(tmp_path, data_root, checkout_roster):
-    """A Jira case system configured with no code comments on the key in Jira's document format. O6, P1."""
-    path = f"{JIRA_BASE}/rest/api/3/issue/{C.TICKET_KEY}/comment"
-    receipt, seen = _vendor_comment(tmp_path, data_root, checkout_roster, C.JIRA_SYSTEM,
-                                    JIRA_BASE, JIRA_WRITE, C.TICKET_KEY, path)
-    assert receipt is not None, "no receipt"
-    assert receipt["ok"] is True, receipt
-    assert [(s.method, s.path) for s in seen] == [("POST", path)]
-    body = json.loads(seen[0].body)["body"]
-    assert (body.get("type"), body.get("version")) == ("doc", 1), body
-    texts = [n.get("text", "") for n in _walk(body) if n.get("type") == "text"]
-    assert any(t.strip() for t in texts), f"the document carries no text: {body}"
-
-
-def _walk(node: Any) -> list[dict[str, Any]]:
-    """Every ADF node under `node`, itself included."""
-    if not isinstance(node, dict):
-        return []
-    out = [node]
-    for child in node.get("content") or []:
-        out += _walk(child)
-    return out
-
-
-def test_o6_ready_made_servicenow_adapter_writes_a_work_note(tmp_path, data_root, checkout_roster):
-    """A ServiceNow case system configured with no code writes the comment as an internal work note. O6, P4."""
-    path = f"{SN_BASE}/api/now/table/{SN_TABLE}/{SN_SYS_ID}"
-    receipt, seen = _vendor_comment(tmp_path, data_root, checkout_roster,
-                                    C.SERVICENOW_SYSTEM, SN_BASE, SN_WRITE, SN_SYS_ID, path)
-    assert receipt is not None, "no receipt"
-    assert receipt["ok"] is True, receipt
-    assert [(s.method, s.path.split("?")[0]) for s in seen] == [("PATCH", path)]
-    doc = json.loads(seen[0].body)
-    assert isinstance(doc.get("work_notes"), str), doc
-    assert doc["work_notes"].strip(), doc
-    assert "comments" not in doc, f"a customer-visible comment was written: {doc}"
 
 
 class _RecordOnly:
