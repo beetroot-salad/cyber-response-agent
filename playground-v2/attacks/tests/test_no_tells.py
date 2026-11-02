@@ -5,7 +5,7 @@ process command line), what those commands write or print, the change requests t
 posts, and the threat-intel seed. A word like "attacker" or "synthetic" in any of them tells
 the agent it is in a test rather than an incident.
 
-    uv run --no-project --python 3.12 \
+    flock /tmp/defender-pytest.lock uv run --no-project --python 3.12 \
         --with pyyaml --with pytest -m pytest playground-v2/attacks/tests
 """
 from __future__ import annotations
