@@ -1,13 +1,13 @@
 """People, memberships and sign-in (#1306): the users, their tenants, invitations and sessions.
 
 Imports nothing from `api`, `runtime` or `learning`. It loads SQLAlchemy (the models are its
-tables), so it needs the `api` extra installed, even for the in-memory repository. The sign-in
+tables), so it needs the `database` extra installed, even for the in-memory repository. The sign-in
 provider's adapter and the PostgreSQL repository are separate modules, so importing this package
 loads neither a web client nor a database driver."""
 
 from __future__ import annotations
 
-from .bootstrap import Bootstrap, register_tenant
+from .bootstrap import Bootstrap
 from .errors import (
     BootstrapRefused,
     CallbackRefused,
@@ -39,5 +39,4 @@ __all__ = [
     "InMemoryIdentityRepository", "InvitationView", "LoginStart", "MailPort", "MemberView",
     "Membership", "MeView", "NotAuthenticated", "NotFound", "OpenInvitation", "Session",
     "SignInPort", "SignInRefused", "SignInUnavailable", "User", "VerifiedSignIn",
-    "register_tenant",
 ]

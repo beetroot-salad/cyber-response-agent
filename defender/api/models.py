@@ -8,6 +8,7 @@ from pydantic import AfterValidator, AwareDatetime, BaseModel, BeforeValidator, 
 
 from defender._clock import as_utc
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
+from defender.identity.models import Email
 
 InvestigationStatus = Literal["queued", "running", "completed", "unparseable", "failed", "aborted"]
 
@@ -215,7 +216,9 @@ class Problem(BaseModel):
 
 # --- people, memberships and sign-in (#1306) ---------------------------------------------------
 
-#: An email as typed: the shape is checked, deliverability is not. Stored lower-cased.
+#: An email as typed: the shape is checked, deliverability is not. The identity rule then normalizes
+#: it, and its refusal is a 422 like the pattern's; the pattern stays plain because the OpenAPI schema
+#: hands it to clients' own regex engines.
 EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+$"
 
 
@@ -224,7 +227,7 @@ class InviteCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    email: str = Field(pattern=EMAIL_PATTERN, max_length=254)
+    email: Email = Field(pattern=EMAIL_PATTERN, max_length=254)
 
 
 class Invitation(BaseModel):
@@ -250,6 +253,20 @@ class MeUser(BaseModel):
 
 class TenantRef(BaseModel):
     tenant_id: str
+
+
+class TenantItem(BaseModel):
+    """A tenant and its one job, as an administrator sees it (#1214): the state, the pending action,
+    the current step and whose it is, and the last failure (which names the step and the external
+    answer, never a secret). Nothing pending means `pending_action`, `step` and `step_actor` are null."""
+
+    tenant_id: str
+    state: Literal["creating", "active", "offboarding", "offboarded"]
+    pending_action: Literal["create", "rotate", "offboard", "delete_repo"] | None
+    step: str | None
+    step_actor: Literal["service", "host"] | None
+    failure: str | None
+    created_at: Instant
 
 
 class InvitationRef(BaseModel):

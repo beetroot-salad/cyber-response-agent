@@ -163,7 +163,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
     # The tenant and the source run, by id.
     rc = _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                      spawn=spawn, judge=judge, oracle=oracle.model, verifier=verifier.model,
-                     **seams)
+                     directory=T.launcher_directory(src.parent.parent.name), **seams)
     return Launch(rc, spawn, judge, nxt.dir, before, now_iso())
 
 

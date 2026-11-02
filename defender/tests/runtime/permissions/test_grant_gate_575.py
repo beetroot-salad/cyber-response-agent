@@ -38,6 +38,7 @@ from defender.investigation.permission import (  # noqa: E402
     under,
 )
 from defender.tests.support.tenancy import _tenants1106 as T1106
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared.contracts._repo import seed_adapter_stubs  # noqa: E402
 
 
@@ -499,8 +500,10 @@ def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env,
     tenant = (("--tenant", T1106.fixture_tenant().id) if which == "gather" else ())
     # The CLI's `main` in-process: the differential is about what `explain` decides, and a
     # fresh interpreter per (agent, command) pair would only re-pay the import.
-    rc = policy_cli.main(["explain", which, c, "--run-dir", str(env.run),
-                          "--defender-dir", str(env.dfn), *tenant, "--json"])
+    argv = ["explain", which, c, "--run-dir", str(env.run), "--defender-dir", str(env.dfn), *tenant, "--json"]
+    # Gather's grant is one tenant's, admitted through the host acceptance (r10.1 A1): the seeded records are
+    # handed in through the command's `directory=` seam (C9).
+    rc = policy_cli.main(argv, directory=directory_for_argv(argv))
     out = capsys.readouterr()
     assert rc == 0, out.err
     got = json.loads(out.out)

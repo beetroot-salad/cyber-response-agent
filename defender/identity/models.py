@@ -1,11 +1,13 @@
 """The identity models: the PostgreSQL tables and the records the repositories hand out, one
 declaration. Every value is set in Python (no server defaults): a field's starting value is
 declared on it, and a returned model is a detached copy: changing it changes nothing that is stored.
-A status outside the model is refused as it is set, so both repositories refuse it alike."""
+A status outside the model is refused as it is set, so both repositories refuse it alike.
+Tenants are tenancy's (#1214): a membership refers to `tenancy.tenants`."""
 
 from __future__ import annotations
 
 import datetime as _dt
+import unicodedata
 import uuid
 from typing import Annotated, Literal, get_args
 
@@ -16,6 +18,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from defender.database import Base
+# The memberships' foreign key names `tenancy.tenants`: its table must be on the metadata too.
+from defender.tenancy import models as _tenancy  # noqa: F401
 
 from .errors import DataRuleViolation
 
@@ -23,8 +27,15 @@ SCHEMA = "identity"
 
 
 def normalize_email(raw: str) -> str:
-    """The one form an email is stored and compared in."""
-    return raw.strip().lower()
+    """The one form an email is stored and compared in: trimmed of any whitespace, lower-cased.
+    Refused when blank, or holding what PostgreSQL text cannot (NUL, or a lone surrogate, which is
+    not valid text), so both repositories refuse alike rather than one failing in the database (#1349)."""
+    email = raw.strip().lower()
+    if not email:
+        raise DataRuleViolation("an email address cannot be blank")
+    if any(c == "\x00" or unicodedata.category(c) == "Cs" for c in email):
+        raise DataRuleViolation(f"{raw!r} is not an email address: it has a NUL or an invalid character")
+    return email
 
 
 #: An email field normalized as it is built, so nothing after the boundary normalizes again.
@@ -49,16 +60,6 @@ def _checked_status(model: str, allowed: object, value: str) -> str:
     if value not in get_args(allowed):
         raise DataRuleViolation(f"{value!r} is not a {model} status")
     return value
-
-
-class Tenant(Base):
-    """For now identity's own table; #1214 moves it to the tenancy feature."""
-
-    __tablename__ = "tenants"
-    __table_args__ = {"schema": SCHEMA}
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
 
 
 class User(Base, kw_only=True):
@@ -118,7 +119,7 @@ class Membership(Base, kw_only=True):
 
     id: Mapped[str] = mapped_column(Text, primary_key=True, default_factory=_new_id)
     user_id: Mapped[str] = mapped_column(Text, ForeignKey(f"{SCHEMA}.users.id"))
-    tenant_id: Mapped[str] = mapped_column(Text, ForeignKey(f"{SCHEMA}.tenants.id"))
+    tenant_id: Mapped[str] = mapped_column(Text, ForeignKey("tenancy.tenants.id"))
     status: Mapped[MembershipStatus] = mapped_column(Text)
     invited_by: Mapped[str] = mapped_column(Text)
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)

@@ -49,7 +49,7 @@ LABEL = "lint_import_order"
 ORDER = (
     "lazy_door", "kit", "configuration", "execution", "_filesystem", "_flat", "providers", "records", "database",
     "tenancy", "identity", "migrations", "knowledge", "box", "integrations", "systems", "hooks", "skills",
-    "investigation", "learning", "presentation", "run_common", "agents", "run", "cli", "api",
+    "investigation", "learning", "presentation", "run_common", "agents", "run", "lifecycle", "cli", "api",
 )
 _RANK = {node: rank for rank, node in enumerate(ORDER)}
 

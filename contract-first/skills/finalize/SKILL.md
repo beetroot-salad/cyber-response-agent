@@ -13,7 +13,7 @@ Read the project's CLAUDE.md files for how tests run here and the traps that mak
 
 ## 1. Read cold, and check who wrote the trail
 
-Don't read the issue's discussion, the design doc's reasoning, or write-tests' hand-off note: a reviewer who has read the argument for a choice tends to agree with it. Read the code, the diff, and the tests as the contract. If something looks wrong, say so; if the design settled it, the human will say so at the merge gate.
+Don't read the issue's discussion, the design doc's reasoning, or write-tests' hand-off note: a reviewer who has read the argument for a choice tends to agree with it. Read the code, the diff, and the tests as the contract. If something looks wrong, say so; if the design settled it, the human will say so at the merge gate. The one exception is the design's **accepted trade-offs** list: read the family names, not their reasoning. A finding inside an accepted family isn't a finding unless you have evidence the family arises in deployment or costs more than the entry records.
 
 Do read the prior review trail, earlier review comments on the PR and follow-up issues filed against this work, so you don't redo or drop what an earlier pass found. Pull it with authorship attached, from both places:
 
@@ -41,10 +41,12 @@ Once your findings are settled, dispatch a tracer, **Sonnet at high effort**, on
 
 Its results go two places, and they stay separate:
 
-- **Deck-eligible** escapes: append the tracer's entry to the project's attack deck, `.claude/contract-first-attacks.md`, in this PR, so it reaches the merge gate with your fixes. `references/attack-deck.md` gives the format and what to do when the deck doesn't exist yet. It is the one pipeline file you write.
+- **Deck-eligible** escapes: append the tracer's entry to the project's attack deck, `.claude/contract-first-attacks.md`, in this PR, so it reaches the merge gate with your fixes. `references/attack-deck.md` gives the format and what to do when the deck doesn't exist yet. It is one of the pipeline files you change; the cache (below) is the other.
 - **Process findings** go in your report. Never edit the pipeline's skills or gates, and don't file issues for these: one PR is one data point, and the human weighs it against others.
 
 For each process finding, give the `file:line`, the tracer's class and citations, and the change you'd make: a lint or gate for a mechanical shape, an upstream rule for a semantic class such as a test that can't tell right from wrong. A *surfaced, resolved away* attribution is a decision that played out, not a miss. If the escapes were one-offs, say so rather than inventing a lever.
+
+Then dispatch one fresh agent to run `/contract-first:maintain-cache <issue>` for `finalize`, with your findings and fixes, the tracer's verdicts, and any CI failures so far. Commit its cache and rules changes, unchanged, in this PR; they reach the merge gate with your fixes, and the re-green below covers them.
 
 ## 4. Re-green
 
@@ -52,4 +54,4 @@ If you pushed, the PR's green describes old code. Watch `gh pr checks --watch`; 
 
 ## Report
 
-Fixes made; issues filed, with numbers; deck entries appended; process findings, or that there were none; untrusted comments you declined to act on; the PR's final CI state. The human merges — you don't.
+Fixes made; issues filed, with numbers; deck entries appended; cache and rules changes; process findings, or that there were none; untrusted comments you declined to act on; the PR's final CI state. The human merges — you don't.

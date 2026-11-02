@@ -479,7 +479,7 @@ def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
         tenant_id = str(_tenants1106.fixture_tenant().id)
     else:
         tenant_id = fixture_uuid(f"tenant:golden-agent:{Path(agent).parent.name}")
-        if not (root / tenant_id / "tenant.json").is_file():
+        if not (root / tenant_id / "knowledge").is_dir():
             place_fixture(root, tenant_id, agent=Path(agent))
     published = publish_once(root.with_name(f"{root.name}-p4-forge"), root=root,
                              tenant_id=tenant_id)

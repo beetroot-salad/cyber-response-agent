@@ -68,6 +68,7 @@ from defender.tests.tenancy.tenant_1108_p4._support import (
     bind_forge,
     current_commit,
     git,
+    unbind_forge,
 )
 
 
@@ -165,6 +166,7 @@ def test_o9_a_tenant_with_no_forge_binding_refuses_the_drain_before_any_model_ca
     before touching the issuer, the forge, a draft, a box or the curator. Positive control: once
     bound, the same tick reaches them."""
     t = p4_tenant
+    unbind_forge(t)  # the fixture's directory wires every tenant; this case is the unwired one
     paths, trigger, box = _author_tick(t, product_repo(tmp_path))
     # The fixture's own publish already asked the issuer and the forge; only the drain counts.
     t.vault.calls.clear()
@@ -648,7 +650,7 @@ def _default_box_tick(t: Any, tmp_path: Path, monkeypatch: Any, drain: str) -> t
     """One tick through the real drain entry with no `start_box`/`stop_box` seam (production's
     default box start): `(rc, the lane calls made)`."""
     ran: list[str] = []
-    seams = {"client": t.forge.client, "identity": t.vault.identity()}
+    seams = {"client": t.forge.client, "identity": t.vault.identity(), "directory": t.directory}
     if drain == "author":
         paths = drain_paths(t, product_repo(tmp_path))
         queue(paths, [S.finding_row("f1", run_id="f1")])

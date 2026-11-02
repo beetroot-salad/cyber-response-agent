@@ -30,6 +30,12 @@ class ForgejoAuthError(Exception):
     """Vault did not provide a usable short-lived identity for this tenant."""
 
 
+class CredentialMisconfigured(ForgejoAuthError):
+    """The host cannot even start a login for the tenant: the generation records no host secret
+    file, or the file is missing, unreadable or does not hold one secret id. Decided locally, before
+    any request; a human must repair it (a publish reports `misconfigured`, a run is refused)."""
+
+
 @dataclass(frozen=True, repr=False)
 class AccessToken:
     value: str

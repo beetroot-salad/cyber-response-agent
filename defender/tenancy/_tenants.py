@@ -17,6 +17,15 @@ REQUIRED_SETTINGS: tuple[str, ...] = (
 SETTINGS_HALF = "settings"
 AGENT_HALF = "agent"
 
+#: The two reviewed tables among `REQUIRED_SETTINGS`, relative to `settings/`: what a refusal
+#: calls each and the top-level keys it may carry. Acceptance parses both at that level
+#: (#1214: a torn table refuses the tenant, naming the file); what the keys hold (the grant rows,
+#: the template the lead binds) is run start's readiness to judge, and grant gaps `check`'s.
+SETTINGS_TABLES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "verb-grants.yaml": ("verb-disposition table", ("dispositions",)),
+    "lead-zero.yaml": ("lead-zero config", ("correlation_template",)),
+}
+
 #: Every name a knowledge folder may hold at its top level: the two halves, the tenant repo's
 #: own git and CI files, a README, and `archive/` (outside both halves, never mounted). Any
 #: other top-level name — an operator's `.env` or `secrets/` — is refused. Only the two halves
@@ -54,6 +63,7 @@ __all__ = [
     "AGENT_HALF",
     "REQUIRED_SETTINGS",
     "SETTINGS_HALF",
+    "SETTINGS_TABLES",
     "TEMPLATE_DIRNAME",
     "TENANT_ID_FILE",
     "TOP_LEVEL_ALLOWED",

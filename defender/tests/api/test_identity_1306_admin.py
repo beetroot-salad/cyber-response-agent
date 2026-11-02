@@ -206,7 +206,7 @@ def test_an_invitation_to_an_administrator_expires_seven_days_after_it_was_made(
     me_session = world.sign_in(ME)
     world.invite(me_session, LAB, OPS)
     world.clock.advance(DAY)
-    world.restart(administrators=[], tenants={LAB: [ME]})  # DC-5: the file now lists nobody (no re-send yet due)
+    world.restart(administrators=[])  # DC-5: the file now lists nobody (no re-send yet due)
     world.clock.advance((days - 1) * DAY)
     assert tenants_of(world.sign_in(OPS)) == ({LAB} if joins else set())
 
@@ -216,7 +216,7 @@ def test_a_flagged_user_cannot_accept_even_through_a_session_without_a_code() ->
     world = lab()
     me_session = world.sign_in(ME)  # a password-only session, kept across the restart
     assert me_session.delete(f"/tenants/{LAB}/members/{user_id(me_session)}").status_code == 204
-    world.restart(administrators=[OPS, ME], tenants={LAB: []})  # ME is now flagged
+    world.restart(administrators=[OPS, ME])  # ME is now flagged
     ops = world.sign_in_admin()
     row = ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": ME})
     assert row.status_code == 202
@@ -243,7 +243,7 @@ def test_removing_an_email_from_the_file_removes_powers_at_the_next_request_afte
     world = lab()
     ops = world.sign_in_admin()
     assert ops.get("/admin/tenants").status_code == 200
-    world.restart(administrators=[], tenants={LAB: [ME]})
+    world.restart(administrators=[])
     refused = ops.get("/admin/tenants")
     assert refused.status_code == 403
     assert me(ops)["administrator"] is False
@@ -262,7 +262,7 @@ def test_an_unflagging_made_by_another_process_takes_effect_at_this_processs_nex
     ops = world.sign_in_admin()
     assert ops.get("/admin/tenants").status_code == 200  # the session has been used
     other_process = IdentityService(world.repo, signin=world.signin, mail=world.mail, clock=world.clock,
-                                    bootstrap=Bootstrap(administrators=(), tenants={LAB: (ME,)}))
+                                    bootstrap=Bootstrap(administrators=()))
     world.call(other_process.start)  # another API process, started with OPS removed from the file
     assert ops.get("/admin/tenants").status_code == 403
     assert me(ops)["administrator"] is False

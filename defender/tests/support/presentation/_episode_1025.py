@@ -24,6 +24,7 @@ from defender._io import bind, write_guarded
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core import _state1135
+from defender.tests.support.tenancy._active1214 import active_directory
 
 mod = T.mod
 sym = T.sym
@@ -818,7 +819,9 @@ def cli(argv: list[str], capsys, *, module: Any = None) -> tuple[int, str, str]:
     """`visualize_episode.main(argv)` with its stdout / stderr captured. An id-taking argv names
     an episode under its tenant's `<T>/episodes/` (no episodes base is configured)."""
     target = module if module is not None else page_module()
-    rc = target.main(argv)
+    directory = (active_directory(Path(os.environ["DEFENDER_DATA_ROOT"]), argv[argv.index("--tenant") + 1])
+                 if "--tenant" in argv else None)
+    rc = target.main(argv, directory=directory)
     out = capsys.readouterr()
     return rc, out.out, out.err
 

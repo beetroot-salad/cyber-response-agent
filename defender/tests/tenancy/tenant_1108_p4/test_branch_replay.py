@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.tenancy import _tenants1106 as tenants
@@ -122,11 +123,10 @@ def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     seams.setdefault("oracle", S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)).model)
     seams.setdefault("verifier", S.passing_verifier().model)
     message = ""
+    argv = ["--tenant", scene.t.tenant_id, scene.src.name, str(T.BRANCH_MESSAGE_ID), *argv_extra]
     try:
         rc = S.mod("cli.learning.branch").main(
-            ["--tenant", scene.t.tenant_id, scene.src.name, str(T.BRANCH_MESSAGE_ID),
-             *argv_extra],
-            spawn=spawn, questioner=questioner, **seams)
+            argv, spawn=spawn, questioner=questioner, directory=directory_for_argv(argv), **seams)
     except SystemExit as stop:
         rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
     S.log_refusal(rc, message)

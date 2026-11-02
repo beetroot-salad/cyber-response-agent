@@ -44,6 +44,7 @@ from defender.investigation.query_tool import CONTROL_FLOW_EXCEPTIONS  # noqa: E
 from defender.systems.verb_grant import VerbGrant  # noqa: E402
 from defender.systems.verbs import VerbRegistry  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFENDER = REPO_ROOT / "defender"
@@ -116,7 +117,7 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, state, enforce: bool | No
     from defender.tests.e2e._replay_harness import _no_docker_daemon, _unsandboxed_allowed
 
     with _unsandboxed_allowed():
-        box = box_mod.start_box(run_dir, DEFENDER, docker=_no_docker_daemon)
+        box = box_mod.start_box(run_dir, DEFENDER, docker=_no_docker_daemon, tenant_id=TEST_TENANT)
     bindable = _replace(defn, tools=effective_tools_for(defn))
     deps = _replace(bind(bindable, run_dir, defender_dir=DEFENDER, box=box), run_state=state)
     import asyncio

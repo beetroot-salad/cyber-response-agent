@@ -200,7 +200,7 @@ def _drain(t, paths, **overrides):
     box = BoxSpy()
     overrides.setdefault("run_pitfalls", lambda *_a, **_kw: 0)
     return drains.lead_author_drain(
-        paths, client=t.forge.client, identity=t.vault.identity(),
+        paths, client=t.forge.client, identity=t.vault.identity(), directory=t.directory,
         start_box=box.start, stop_box=box.stop, **overrides,
     )
 

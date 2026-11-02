@@ -16,7 +16,7 @@ from typing import Any
 
 from defender.learning.core.config import LoopPaths
 from defender.learning.core.state import LearningState, StateRefused  # noqa: F401 — re-exported: the tests open the handle as `S.LearningState`
-from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, run_of  # noqa: F401 — the 1135 suite's doors onto the planted run a row names (#1105 PR 2)
+from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, run_of, tenant_of  # noqa: F401 — the 1135 suite's doors onto the planted run a row names (#1105 PR 2)
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFENDER = REPO_ROOT / "defender"

@@ -15,6 +15,7 @@ from defender._io import REFUSED_ALIAS, Bound, Held, NotPlainEntry, RecordRead, 
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.tests.support.learning.curation._tree_listing_1134 import RealOs, fd_path, last_component
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.learning.core._state1135 import state_for_paths as open_state  # noqa: F401 — re-export: this module's tests open their handle through it
 
 #: The type `DrainTrees.tree_for` has (bound): a working-copy path to `(held mount, name)`, or
@@ -531,13 +532,17 @@ def draft_agent(at: Path, files: dict[str, str | bytes] | None = None) -> Path:
 
 def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
                files: dict[str, str | bytes] | None = None, agent: Path | None = None,
-               state_dir: Path | None = None, product: Path | None = None) -> DraftLane:
+               state_dir: Path | None = None, product: Path | None = None,
+               tenant: Any = None) -> DraftLane:
     """The fixture tenant published for real over its own data root (its agent content
     `draft_agent(files)`, or `agent`), then the real `start_batch("b1", lanes=lanes)`: the
     draft is built from that export, no branch yet. `files` are agent-relative
     (`"lessons/x.md"`). `product` is the product checkout `paths.repo_root` names (adapters; a
     scratch folder with no corpus by default). Each call gets its own data root, so a test may
-    build several."""
+    build several. `tenant` is the accepted tenant a drain over the lane serves (r10.1 C1: a drain serves
+    only through its own accepted tenant, so scratch paths refuse every claim): `paths` then are that tenant's
+    own learning paths (`tenant.learning_paths`, state under its learning root, so `state_dir` is not given)
+    over `product`; `_state1135.curation_tenant()` is the tenant whose runs `curation_run_dir` plants."""
     from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
     n = next(_DRAFT_SEQ)
@@ -546,14 +551,22 @@ def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
     with published_tenant(scene / "forge", root=scene / "data", agent=source) as t:
         batch = t.open_delivery().start_batch("b1", lanes=lanes)
         clone = t.clone
-    state = state_dir if state_dir is not None else scene / "state"
-    state.mkdir(parents=True, exist_ok=True)
+    if tenant is not None:
+        assert state_dir is None, "a tenant lane keeps its state under the tenant's learning root"
+        state = None
+    else:
+        state = state_dir if state_dir is not None else scene / "state"
+        state.mkdir(parents=True, exist_ok=True)
     # The product checkout holds no corpus: the lane's `paths` name a scratch checkout with none,
     # so a lane still reading `paths.lessons_dir` finds nothing there.
     if product is None:
         product = scene / "product"
         product.mkdir(exist_ok=True)
-    paths = LoopPaths(repo_root=product, state_dir=state)
+    if tenant is not None:
+        paths = tenant.learning_paths(LoopPaths, repo_root=product)
+        location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
+    else:
+        paths = LoopPaths(repo_root=product, state_dir=state)
     return DraftLane(tmp=scene, clone=clone, batch=batch, paths=paths, lanes=tuple(lanes))
 
 

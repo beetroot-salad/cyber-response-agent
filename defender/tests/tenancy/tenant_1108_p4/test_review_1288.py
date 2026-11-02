@@ -15,14 +15,15 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
 
 
 def _status(t) -> dict | None:
-    from defender.tenancy._publish_status import read_status
+    import asyncio
 
-    return read_status(t.tenant)
+    return asyncio.run(t.repository.publish_status(t.tenant_id))
 
 
 # --- a run copy is owned while it is built --------------------------------------------------------
@@ -79,7 +80,6 @@ def test_the_child_reports_and_records_running_out_of_its_network_budget(child_t
     budget. The child ends itself at the budget with `stale:transient` and records it, so
     `tenant.py check` names the outage."""
     t = child_tenant
-    config = B.write_issuer_config(tmp_path / "operator")
     t.merge(B.MERGE_FILES)
 
     def slow(_request):
@@ -87,7 +87,7 @@ def test_the_child_reports_and_records_running_out_of_its_network_budget(child_t
 
     t.forge.fault = slow
     began = time.monotonic()
-    line = B.run_child(t, config, budget=1.0)
+    line = B.run_child(t, budget=1.0)
     took = time.monotonic() - began
     assert line.startswith("stale:transient "), line
     assert "budget" in line, line
@@ -119,7 +119,7 @@ def test_the_launcher_records_a_child_that_reports_nothing_valid(p4_tenant, chil
     from defender.investigation import publish_launch
 
     line = publish_launch.launch_publish(
-        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0,
+        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0, directory=p4_tenant.directory,
         command=[sys.executable, "-c", child, "--"])
     assert line.startswith("stale:operator publish child failed:"), line
     status = _status(p4_tenant)
@@ -133,7 +133,7 @@ def test_control_a_child_that_reports_validly_is_not_recorded_by_the_launcher(p4
     from defender.investigation import publish_launch
 
     line = publish_launch.launch_publish(
-        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0,
+        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0, directory=p4_tenant.directory,
         command=[sys.executable, "-c", "print('stale:transient the forge is down')", "--"])
     assert line == "stale:transient the forge is down"
     status = _status(p4_tenant)
@@ -153,13 +153,13 @@ def test_a_lock_busy_publish_records_its_outcome_and_clears_an_earlier_refusal(
     """A refusal is recorded; then every launch overlaps a drain holding the lock while
     `current` already names `origin/main`. Each reports `fresh`, and `check` must say so
     rather than keep showing the old refusal."""
-    from defender.tenancy._publish_status import OPERATOR, record_refusal
+    import asyncio
 
     t = child_tenant
-    config = B.write_issuer_config(tmp_path / "operator")
-    record_refusal(t.tenant, kind=OPERATOR, reason="the issuer is sealed", by="launch-time publish")
+    asyncio.run(t.repository.record_publish_status(
+        t.tenant_id, "stale:operator the issuer is sealed", by="launch-time publish"))
     with _lock(t):
-        line = B.run_child(t, config)
+        line = B.run_child(t)
     assert line.startswith("fresh "), line
     status = _status(t)
     assert status is not None
@@ -169,10 +169,9 @@ def test_a_lock_busy_publish_records_its_outcome_and_clears_an_earlier_refusal(
 
 def test_a_lock_busy_stale_publish_is_recorded_transient(child_tenant, tmp_path):
     t = child_tenant
-    config = B.write_issuer_config(tmp_path / "operator")
     t.merge(B.MERGE_FILES)
     with _lock(t):
-        line = B.run_child(t, config)
+        line = B.run_child(t)
     assert line.startswith("stale:transient "), line
     status = _status(t)
     assert status is not None
@@ -183,14 +182,13 @@ def test_a_lock_busy_stale_publish_is_recorded_transient(child_tenant, tmp_path)
 def test_a_zero_budget_is_already_out_not_unbounded(child_tenant, tmp_path):
     """`setitimer(0)` disarms a timer: a budget of 0 must end the network phase at once."""
     t = child_tenant
-    config = B.write_issuer_config(tmp_path / "operator")
 
     def slow(_request):
         time.sleep(3.0)
 
     t.forge.fault = slow
     began = time.monotonic()
-    line = B.run_child(t, config, budget=0.0)
+    line = B.run_child(t, budget=0.0)
     assert time.monotonic() - began < 2.0, "a zero budget let the network phase run"
     assert line.startswith("stale:transient "), line
     assert "budget" in line, line
@@ -203,7 +201,7 @@ def test_the_launcher_refuses_a_budget_that_is_not_positive_and_records_it(p4_te
 
     spawn = _RecordingSpawn()
     line = publish_launch.launch_publish(p4_tenant.tenant_id, data_root=p4_tenant.data_root,
-                                         budget=budget, spawn=spawn)
+                                         budget=budget, spawn=spawn, directory=p4_tenant.directory)
     assert spawn.calls == [], "a child was started with no time to run in"
     assert line.startswith("stale:operator publish child failed:"), line
     assert "positive" in line, line
@@ -256,7 +254,7 @@ def test_a_stage_fault_is_refused_even_with_the_unsandboxed_opt_out(tmp_path, mo
     verdicts: list[dict] = []
     with pytest.raises(BoxFault):
         _lifecycle._start_run_box(run_dir, tmp_path, BoxSpec(), _no_docker, agent, token,
-                                  verdicts.append)
+                                  verdicts.append, tenant_id=TEST_TENANT)
     assert verdicts, "the refusal wrote no did-not-run marker"
 
 
@@ -346,7 +344,7 @@ def test_a_child_that_finishes_after_the_stop_is_reported_as_it_said(p4_tenant):
     child = ("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
              f"time.sleep(1.5); print('fresh {commit}')")
     line = publish_launch.launch_publish(
-        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=0.5,
+        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=0.5, directory=p4_tenant.directory,
         command=[sys.executable, "-c", child, "--"])
     assert line == f"fresh {commit}", line
     status = _status(p4_tenant)
@@ -385,17 +383,6 @@ def test_what_the_child_left_running_dies_with_it(p4_tenant, tmp_path):
         raise AssertionError("a process the child started outlived the publish")
 
 
-# --- the binding is judged once, when read -----------------------------------------------------
-
-def test_an_issuer_role_that_is_not_a_plain_name_is_a_refused_binding(p4_tenant):
-    from defender.tenancy._tenant import read_forge_binding
-    from defender.records._tenant_id import TenantRefused
-
-    bind_forge(p4_tenant, issuer_role="tenant role!")
-    with pytest.raises(TenantRefused, match="issuer_role"):
-        read_forge_binding(p4_tenant.tenant)
-
-
 # --- a run box is always a run copy's ----------------------------------------------------------
 
 def test_a_run_box_over_a_bare_agent_folder_is_refused(tmp_path):
@@ -406,7 +393,7 @@ def test_a_run_box_over_a_bare_agent_folder_is_refused(tmp_path):
     agent.mkdir()
     with pytest.raises(TypeError, match="run copy"):
         _lifecycle._start_run_box(tmp_path / "run", tmp_path, BoxSpec(), _no_docker, agent,
-                                  None, None)
+                                  None, None, tenant_id=TEST_TENANT)
 
 
 # --- knowledge commits from host-held records --------------------------------------------------

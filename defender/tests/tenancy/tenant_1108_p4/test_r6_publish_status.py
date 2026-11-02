@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, unbind_forge
 
 
 @pytest.fixture
@@ -16,22 +16,23 @@ def tenant(tmp_path, data_root):
 
 
 def _status(t):
-    from defender.learning.author.version_control import status
-    return status.read_status(t.tenant)
+    import asyncio
+
+    return asyncio.run(t.repository.publish_status(t.tenant_id))
 
 
 def test_r6_a_launch_time_publish_records_a_misconfiguration_and_a_success_clears_it(
         tenant, tmp_path):
-    missing = tmp_path / "no-such-dir" / "issuer.json"
-    line = B.run_child(tenant, missing)
+    unbind_forge(tenant)  # Flow 4: no forge wiring is the local misconfiguration the design pins
+    line = B.run_child(tenant, mint=True)
     assert B.outcome_class(line) == "misconfigured", line
     refused = _status(tenant)
     assert refused, f"a misconfiguration is invisible to check: {refused}"
     assert refused.get("refused"), f"a misconfiguration is invisible to check: {refused}"
 
+    bind_forge(tenant)
     merged = tenant.merge(B.MERGE_FILES)
-    good = B.write_issuer_config(tmp_path / "operator")
-    line = B.run_child(tenant, good)
+    line = B.run_child(tenant)
     assert B.outcome_class(line) == "fresh", line
     published = _status(tenant)
     assert published, published
@@ -41,8 +42,7 @@ def test_r6_a_launch_time_publish_records_a_misconfiguration_and_a_success_clear
 
 def test_r6_a_git_fetch_that_cannot_connect_is_a_transient_outage(tenant, tmp_path):
     tenant.server.close()  # the origin's port now refuses connections
-    good = B.write_issuer_config(tmp_path / "operator")
-    line = B.run_child(tenant, good)
+    line = B.run_child(tenant)
     assert B.outcome_class(line) == "stale:transient", line
     recorded = _status(tenant)
     assert recorded, recorded
@@ -52,13 +52,14 @@ def test_r6_a_git_fetch_that_cannot_connect_is_a_transient_outage(tenant, tmp_pa
 def test_r6_a_busy_lock_is_not_recorded_as_a_refusal_and_keeps_the_earlier_record(tenant):
     from defender.learning.author.version_control import LockBusy, status
 
-    status.record_refused(tenant.tenant, RuntimeError("a real refusal"), by="r6")
+    directory, tid = tenant.directory, tenant.tenant_id
+    status.record_refused(directory, tid, RuntimeError("a real refusal"), by="r6")
     before = _status(tenant)
     assert before
     assert before["refused"] == "a real refusal"
-    status.record_refused(tenant.tenant, LockBusy("lock busy"), by="r6-later")
+    status.record_refused(directory, tid, LockBusy("lock busy"), by="r6-later")
     assert _status(tenant) == before
-    with pytest.raises(LockBusy), status.recording(tenant.tenant, by="r6-later"):
+    with pytest.raises(LockBusy), status.recording(directory, tid, by="r6-later"):
         raise LockBusy("lock busy")
     assert _status(tenant) == before
 

@@ -19,6 +19,7 @@ from defender import box
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 
 from ._support import DEFENDER
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 pytestmark = pytest.mark.live
 
@@ -58,7 +59,7 @@ def test_a_host_made_copy_under_the_tenant_folder_binds_into_a_real_box(monkeypa
             name=f"defender-{tenant_dir.name}", workdir=copy / "agent", env={}, spec=spec,
             defender_dir=DEFENDER,
             mounts=(box.Mount(source=DEFENDER, target=DEFENDER, kind="code"),
-                    box.Mount(source=copy, target=copy, kind="staged")))
+                    box.Mount(source=copy, target=copy, kind="staged")), tenant_id=TEST_TENANT)
         executor = box.start_box(request)
         try:
             assert executor.sandboxed, "the start fell back to the host instead of a box"
