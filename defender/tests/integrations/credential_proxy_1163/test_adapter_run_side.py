@@ -20,6 +20,7 @@ from defender.tests.integrations.credential_proxy_1163 import test_query_flow as
 from defender.tests.integrations.credential_proxy_1163 import test_ticket_flow as K
 from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH, transport_uses_proxy
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
+from defender.tests.tenancy.tenant_1108_p4.test_r6_issuer import tls_issuer  # noqa: F401 — fixture
 
 GRANT = {("identity", "r")}
 EXPIRED = timedelta(minutes=-1)
@@ -194,3 +195,23 @@ def test_x9_a_read_token_that_cannot_be_minted_is_the_calls_transport_fault(
     assert source.asked == 2
     assert served["path"].endswith("/users/dev.dana")
     assert len(up.seen) == 1
+
+
+def test_the_run_reaches_the_proxy_directly_never_through_a_web_proxy_from_the_environment(tls_issuer, monkeypatch):  # noqa: F811
+    """A run's request (and its bearer token) goes straight to the proxy address it was handed, even when the
+    environment names a web proxy (P-1: the token reaches no third party)."""
+    from defender import _proxy_client
+    port, got, folder = tls_issuer
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    monkeypatch.setenv("SSL_CERT_FILE", str(folder / "server.pem"))
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        monkeypatch.setenv(name, "http://127.0.0.1:9")
+    _proxy_client._client.cache_clear()  # noqa: SLF001 — the pooled client reads trust once per process
+    try:
+        with pytest.raises(TransportFault, match="no usable answer"):
+            _proxy_client.proxy_call(f"https://localhost:{port}", "tok", system="identity", method="GET",
+                                     url="https://idp.example/users")
+    finally:
+        _proxy_client._client.cache_clear()  # noqa: SLF001
+    assert got, "the request reached the proxy address itself"
+    assert json.loads(got[0])["system"] == "identity"

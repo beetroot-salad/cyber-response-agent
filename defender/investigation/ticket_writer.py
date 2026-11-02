@@ -16,9 +16,8 @@ from defender.records import run_end
 from defender.systems.run_tenant import RunTenant
 from defender.kit.settings import SETTINGS_POINTER
 from defender.systems.verbs import VerbContext, redact_settings_path
-from defender import _proxy_client, integrations
-from defender.kit.access import HTTP_PROXY
-from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
+from defender import integrations
+from defender.kit.faults import AdapterFault, TransportFault
 
 _logger = logging.getLogger(__name__)
 
@@ -48,7 +47,7 @@ def _request(
     """One call to the store, over the context the caller built from the run's record."""
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
     timeout = int(config.get("TIMEOUT_SEC", "10"))
-    if _reached_by_proxy(ctx):
+    if integrations.uses_proxy(ctx.tenant, SYSTEM):
         return _via_proxy(ctx, method, url, body, timeout)
     bastion = config["BASTION_HOST"]
     try:
@@ -63,29 +62,19 @@ def _request(
     return status, body_text
 
 
-def _reached_by_proxy(ctx: VerbContext) -> bool:
-    """Does the run's record say the case-history store is reached through the proxy?"""
-    entry = ctx.tenant.systems.get(SYSTEM)
-    return (entry is not None and not isinstance(entry, ConfigFault)
-            and entry.get(f"{PREFIX}_TRANSPORT") == HTTP_PROXY)
-
-
 def _via_proxy(ctx: VerbContext, method: str, url: str, body: dict | None,
                    timeout: int) -> tuple[str | None, str]:
     """`_request` for a store reached through the credential proxy: the same transport as a
     query; a refusal or a transport failure is text, never raised."""
     try:
-        answer = _proxy_client.proxy_call(
-            ctx.proxy_url, ctx.request_token, system=SYSTEM, method=method, url=url,
-            headers={"Accept": "application/json"}
-            | ({"Content-Type": "application/json"} if body is not None else {}),
-            body=_proxy_client.request_body(body), timeout_sec=timeout)
+        answer = integrations.proxy_exchange(ctx, system=SYSTEM, method=method, url=url,
+                                             body=body, timeout_sec=timeout)
     except TransportFault as e:
         return None, f"transport error: {e.detail}"
-    if answer.fault == "ConfigFault":
-        # A refused credential or declaration: the system is down for the run (O7), so the
-        # record leg does not ask again.
-        return None, f"{PROXY_REFUSED}: {answer.detail}"
+    if answer.fault in _REFUSALS:
+        # A refused credential, or a call the declaration does not allow: the same for every
+        # attempt of the run (O7), so the record leg does not ask again.
+        return None, f"{PROXY_REFUSED} ({answer.fault}): {answer.detail}"
     if answer.fault is not None and not answer.status:
         return None, f"transport error: the credential proxy answered {answer.fault}: {answer.detail}"
     # The store's own refusal (409, 422, 5xx) keeps its status and body, as on the docker path.
@@ -168,9 +157,11 @@ def open_case_ticket(
         _logger.warning(f"open raised, ignored: {e!r}")
 
 
-#: What a failure text opens with when the credential proxy refused the call as a configuration
-#: fault (a missing or rejected credential, an undeclared destination): not retried by the record leg.
-PROXY_REFUSED = "the credential proxy refused the call (ConfigFault)"
+#: What a failure text opens with when the credential proxy refused the call (`_REFUSALS`: a
+#: missing or rejected credential, an undeclared destination or route): not retried by the record leg.
+PROXY_REFUSED = "the credential proxy refused the call"
+#: The proxy's fault classes that refuse a call before it reaches the store.
+_REFUSALS = frozenset({"ConfigFault", "ConfinementFault"})
 
 #: The receipt words: `commented` (the record) and `escalated` (the cut-short note) are the two
 #: comments the host can make; `error` is a failed call. There is no `closed`: the host never

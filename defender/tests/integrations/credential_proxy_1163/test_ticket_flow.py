@@ -106,3 +106,23 @@ def test_t3_failures_are_text_in_the_receipt_and_carry_no_credential(tmp_path, d
             assert H.CANARY_KEY not in json.dumps(receipt), name
             assert (len(up.seen) > before) is reaches, name
     assert H.CANARY_KEY not in caplog.text
+
+
+def test_t6_a_write_the_declaration_does_not_allow_is_a_refusal_not_a_transport_error(tmp_path, data_root):
+    """A store whose declaration allows no write route: the open leg's refusal is reported as the proxy's refusal (not a
+    transport error) in the receipt, and the record leg does not ask again. O7, A6, A9."""
+    with H.upstream() as up, A.published(tmp_path / "forge", data_root,
+                                         {SYSTEM: H.declaration(up.url + STORE, writes=())}) as t:
+        store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
+        tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+        rec, run = _run(tmp_path)
+        with A.proxy_for(t, store) as (url, tap):
+            receipt = _legs(tmp_path, t, run, rec, url, tok)
+    assert receipt is not None
+    assert receipt["ok"] is False
+    reason = receipt.get("reason") or ""
+    assert reason.startswith(ticket_writer.PROXY_REFUSED), reason
+    assert "ConfinementFault" in reason, reason
+    assert "transport error" not in reason, reason
+    assert tap.tokens == [tok], "the record leg asked again after the open leg was refused"
+    assert up.seen == []

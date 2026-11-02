@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from defender import tenancy
+from defender._internal_http import internal_client
 from defender.configuration.issuer import DEPLOYMENT_ISSUER, TRANSIT_MOUNT
 from defender.credential_proxy._openbao import OPENBAO_TIMEOUT_SEC, openbao_fault, transit_key_for
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
@@ -49,6 +50,8 @@ class TenantRequestSigner:
         self._directory = directory
         self._transport = transport
         self._client_token: str | None = None
+        #: One pooled client for every sign, made at the first (building reads nothing, G2).
+        self._http: httpx.Client | None = None
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(tenant={self._tenant_id!r})"
@@ -58,24 +61,25 @@ class TenantRequestSigner:
     def sign(self, payload: bytes) -> str:
         """The transit signature over `payload` (faults: module doc)."""
         key = transit_key_for(self._tenant_id)
-        with self._client() as client:
-            fresh = self._client_token is None
-            if fresh:
-                self._client_token = self._login(client)
+        client = self._client()
+        if self._client_token is None:
+            self._client_token = self._login(client)
+        response = self._post_sign(client, key, payload)
+        # a held login that expired (the AppRole token is short-lived), or a refused one, gets one
+        # fresh login: never a second
+        if response.status_code in (401, 403):
+            self._client_token = self._login(client)
             response = self._post_sign(client, key, payload)
-            # a held login that expired (the AppRole token is short-lived), or a refused one, gets one
-            # fresh login: never a second
-            if response.status_code in (401, 403):
-                self._client_token = self._login(client)
-                response = self._post_sign(client, key, payload)
         signature = _signature_of(response)
         if signature is None:
             raise openbao_fault(response.status_code, _refusal(f"signing with {key}", response))
         return signature
 
     def _client(self) -> httpx.Client:
-        return httpx.Client(transport=self._transport, timeout=OPENBAO_TIMEOUT_SEC, trust_env=False,
-                            follow_redirects=False)
+        if self._http is None:
+            self._http = internal_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert, transport=self._transport,
+                                         timeout=OPENBAO_TIMEOUT_SEC)
+        return self._http
 
     def _login(self, client: httpx.Client) -> str:
         try:

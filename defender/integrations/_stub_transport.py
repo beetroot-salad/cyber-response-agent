@@ -418,15 +418,24 @@ def raise_proxy_fault(fault: str, detail: str) -> None:
     raise classes.get(fault, TransportFault)(detail or fault)
 
 
+def proxy_exchange(
+    ctx: VerbContext, *, system: str, method: str, url: str, body: dict | None, timeout_sec: int,
+) -> _proxy_client.ProxyAnswer:
+    """One JSON request to `system` through the credential proxy, with the token `ctx` presents;
+    the proxy's answer as it came. `TransportFault` when the proxy is not reached."""
+    return _proxy_client.proxy_call(
+        ctx.proxy_url, _proxy_client.token_of(ctx), system=system, method=method, url=url,
+        headers={"Accept": "application/json"}
+        | ({"Content-Type": "application/json"} if body is not None else {}),
+        body=_proxy_client.request_body(body), timeout_sec=timeout_sec)
+
+
 def _proxy_request(
     ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
     body: dict | None,
 ) -> dict | list:
-    answer = _proxy_client.proxy_call(
-        ctx.proxy_url, _proxy_client.token_of(ctx), system=system, method=method, url=url,
-        headers={"Accept": "application/json"}
-        | ({"Content-Type": "application/json"} if body is not None else {}),
-        body=_proxy_client.request_body(body), timeout_sec=int(config.get("TIMEOUT_SEC", "10")))
+    answer = proxy_exchange(ctx, system=system, method=method, url=url, body=body,
+                            timeout_sec=int(config.get("TIMEOUT_SEC", "10")))
     if answer.fault is not None:
         raise_proxy_fault(answer.fault, answer.detail)
     if answer.status >= 400:

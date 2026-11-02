@@ -23,7 +23,8 @@ from typing import Any
 import httpx
 
 from defender import tenancy
-from defender.configuration.issuer import TRANSIT_MOUNT
+from defender._internal_http import internal_async_client, internal_client
+from defender.configuration.issuer import DEPLOYMENT_ISSUER, TRANSIT_MOUNT
 from defender.kit.access import CREDENTIAL_KINDS
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.kit.verbs import is_system_name
@@ -98,8 +99,8 @@ class _OpenBao:
         self.mount = _check_name(mount, "the mount")
         self._token = token
         #: One pooled connection for this login's calls, not a new one per call.
-        self._client = httpx.Client(transport=transport, timeout=OPENBAO_TIMEOUT_SEC,
-                                    trust_env=False, follow_redirects=False)
+        self._client = internal_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert, transport=transport,
+                                       timeout=OPENBAO_TIMEOUT_SEC)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(addr={self.addr!r}, mount={self.mount!r})"
@@ -123,8 +124,8 @@ class _OpenBao:
     async def _acall(self, method: str, rest: str, what: str,
                      json: Any = None) -> httpx.Response:
         try:
-            async with httpx.AsyncClient(timeout=OPENBAO_TIMEOUT_SEC, trust_env=False,
-                                         follow_redirects=False) as client:
+            async with internal_async_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert,
+                                             timeout=OPENBAO_TIMEOUT_SEC) as client:
                 return await client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
         except httpx.HTTPError as e:

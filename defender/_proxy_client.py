@@ -3,12 +3,14 @@ answer. Holds no credential and decides nothing: the proxy classifies every outc
 fault class, which the caller raises as its own."""
 from __future__ import annotations
 
+import functools
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 import httpx
 
+from defender._internal_http import internal_client
 from defender.kit.access import CALLER_GRACE_SEC, PROXY_OVERHEAD_SEC
 from defender.kit.faults import TransportFault
 from defender.kit.verbs import VerbContext
@@ -40,7 +42,7 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
     if not proxy_url or not token:
         raise TransportFault("no credential proxy address or request token was handed to this call")
     try:
-        response = httpx.post(
+        response = _client().post(
             proxy_url.rstrip("/") + PROXY_PATH, headers={"Authorization": f"Bearer {token}"},
             json={"system": system, "method": method, "url": url,
                   "headers": dict(headers or {}), "body": body, "timeout_sec": timeout_sec},
@@ -60,6 +62,12 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
     if response.status_code != 200:
         raise TransportFault(f"credential proxy answered HTTP {response.status_code}")
     return answer
+
+
+@functools.cache
+def _client() -> httpx.Client:
+    """The process's one pooled client to the proxy (`_internal_http`: no outbound web proxy)."""
+    return internal_client()
 
 
 def token_of(ctx: VerbContext) -> str | None:

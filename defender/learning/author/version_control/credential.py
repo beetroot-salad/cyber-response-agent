@@ -30,6 +30,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from defender import tenancy
+from defender._internal_http import internal_client
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
 
 from .auth import CLOCK_SKEW, CredentialMisconfigured, ForgejoAuthError, ForgejoIdentity
@@ -109,15 +110,12 @@ class TenantForgeCredential:
 
     def _client(self, **kw: Any) -> httpx.Client:
         if self.transport is not None:
-            return httpx.Client(transport=self.transport, timeout=ISSUER_TIMEOUT, **kw)
+            return internal_client(transport=self.transport, timeout=ISSUER_TIMEOUT, **kw)
         ca = getattr(self.config, "ca_cert", None)
-        if ca is None:
-            return httpx.Client(timeout=ISSUER_TIMEOUT, **kw)
         try:
-            verify = ssl.create_default_context(cafile=str(ca))
+            return internal_client(ca_cert=ca, timeout=ISSUER_TIMEOUT, **kw)
         except (OSError, ssl.SSLError) as bad:
             raise ForgejoAuthError(f"the issuer CA certificate {ca} is unusable: {type(bad).__name__}") from None
-        return httpx.Client(verify=verify, timeout=ISSUER_TIMEOUT, **kw)
 
 
 def forge_credential(

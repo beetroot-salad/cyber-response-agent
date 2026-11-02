@@ -17,10 +17,13 @@ from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.kit.faults import ConfigFault
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
+from defender.kit.faults import AdapterFault, TransportFault
+from defender.tests.tenancy.tenant_1108_p4.test_r6_issuer import tls_issuer  # noqa: F401 — fixture
 from defender.tests.integrations.credential_proxy_1163._target import (
     PROXY_PATH,
     REMOVED_CONFIG_KEYS,
     app_from_config,
+    transit_verifier,
 )
 
 BASE = T.BASE_PATH
@@ -268,6 +271,24 @@ def test_a26_the_proxy_calls_the_deployments_openbao_over_https_on_the_fixed_tra
         "positive control: an accepted signature leads to the credential read")
     assert accepted["fault"] == "ConfigFault", "no credential stored: nothing is sent"
     assert up.seen == []
+
+
+def test_a26_the_proxys_openbao_client_trusts_the_deployments_ca_and_no_web_proxy(tls_issuer, monkeypatch):  # noqa: F811
+    """The proxy's OpenBao calls trust what the deployment's TLS client trusts by default (`SSL_CERT_FILE`/`SSL_CERT_DIR`,
+    `DeploymentIssuer.ca_cert` None) and never go through a web proxy from the environment (A26, P-1)."""
+    port, got, folder = tls_issuer
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("SSL_CERT_FILE", str(folder / "server.pem"))
+    with contextlib.suppress(AdapterFault):  # the stand-in server answers no verdict; reaching it is the point
+        transit_verifier(f"https://localhost:{port}", "t").verify(b"p", "s", tenant_id=str(uuid.uuid4()))
+    assert got, "a server the trusted CA signed is reached, past the environment's web proxy"
+    got.clear()
+    monkeypatch.setenv("SSL_CERT_FILE", str(folder / "trusted.pem"))
+    with pytest.raises(TransportFault):
+        transit_verifier(f"https://localhost:{port}", "t").verify(b"p", "s", tenant_id=str(uuid.uuid4()))
+    assert got == [], "control: a server another CA signed is refused before anything is sent"
 
 
 class _AnyStore(H.FakeStore):
