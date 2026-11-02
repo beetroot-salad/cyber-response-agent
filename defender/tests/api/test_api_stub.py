@@ -605,7 +605,7 @@ def test_a_store_refusal_maps_to_its_status_and_audits_nothing(
     method: str, path: str, body: dict[str, str] | None, port: str, error: Exception, code: int,
 ) -> None:
     api = Api(**{port: error})
-    response = api.lenient().request(method, path, headers=AUTH, json=body)
+    response = api.client.request(method, path, headers=AUTH, json=body)
     assert response.status_code == code
     assert response.headers["Content-Type"] == "application/problem+json"
     assert response.json() == {"type": "about:blank", "title": HTTPStatus(code).phrase,

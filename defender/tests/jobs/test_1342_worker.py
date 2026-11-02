@@ -1496,11 +1496,9 @@ async def test_m1_a_symlinked_tenant_folder_or_runs_container_is_refused_and_not
     assert tree(world["root"]) == before
 
 
-@pytest.mark.parametrize("present", [".launch.json"])  # D-af: an entry at the alert file's name is replaced, so only the launch record's name refuses
-async def test_m1_a_symlink_where_a_launch_file_goes_is_not_written_through(world, present):
-    """A symlink planted at a launch file's name is refused: its target is never created; `failed`/`worker_error`, no child. (M1, O6)"""
-    import uuid
-
+@pytest.mark.parametrize("present", [".launch.json"])
+async def test_m1_a_symlink_where_the_launch_record_goes_is_not_written_through(world, present):
+    """A symlink planted at the launch record's name is refused: its target is never created; `failed`/`worker_error`, no child. (M1, O6)"""
     inv = str(uuid.uuid4())
     target = world["tmp"] / "elsewhere" / "target"
     target.parent.mkdir()
@@ -1515,6 +1513,49 @@ async def test_m1_a_symlink_where_a_launch_file_goes_is_not_written_through(worl
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
     assert not target.exists(), "the worker wrote through a planted symlink"
     assert child.seen() is None
+
+
+@pytest.mark.parametrize("target_exists", [False, True], ids=["target-absent", "target-present"])
+async def test_m1_a_symlink_where_the_alert_file_goes_is_replaced_not_written_through(world, target_exists):
+    """A symlink at `<id>.alert.json` is replaced (D-af: the entry under the name is replaced, never written through): its target is neither created nor changed, the name ends a regular file holding the stored alert bytes, and the row launches and completes. (M1, O6, D-af)"""
+    inv = str(uuid.uuid4())
+    target = world["tmp"] / "elsewhere" / "target"
+    target.parent.mkdir()
+    if target_exists:
+        target.write_bytes(b"not ours")
+    link = world["runs"] / f"{inv}.alert.json"
+    link.symlink_to(target)
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        alert = await an_alert(store, T1)
+        plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
+        await _worker(world, store, child).drain()
+
+    assert row(world["dsn"], inv)["stage"] == "completed"
+    assert child.seen(inv) is not None
+    assert not link.is_symlink(), "the alert file is still a link"
+    assert link.read_bytes() == ALERT_BYTES
+    if target_exists:
+        assert target.read_bytes() == b"not ours", "the worker wrote through the alert-file link"
+    else:
+        assert not target.exists(), "the worker created the link's target"
+
+
+async def test_d_af_an_id_the_job_lane_refuses_ends_the_row_worker_error_with_its_own_message(world):
+    """An id the database holds (a text column) but the lane's run-id grammar refuses (upper-case uuid) ends the row `failed`/`worker_error`, cost 0.0, with a message that is not the generic crash text, and no child starts. (D-af)"""
+    inv = str(uuid.uuid4()).upper()
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        alert = await an_alert(store, T1)
+        plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
+        await _worker(world, store, child).drain()
+
+    stored = row(world["dsn"], inv)
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert stored["cost_usd"] == 0
+    assert stored["failure_message"]
+    assert stored["failure_message"] != "the worker failed while running the job", "a refused id fell to the generic handler"
+    assert child.seen() is None, "a child started for an id the lane refuses"
 
 
 async def test_o8_the_childs_stdout_and_stderr_are_the_workers_own_descriptors(world, capfd):
@@ -2174,7 +2215,9 @@ async def test_d_ac_a_grandchild_left_by_a_child_that_exits_normally_is_gone_aft
 
 async def test_d_ac_a_row_cancelled_while_its_spawn_is_in_flight_ends_the_spawned_childs_group_and_runs_the_backstop(
         world, monkeypatch):
-    """A claim fault ends `drain()` while a row's spawn has not yet returned: the child and its grandchild die, the box is reaped under the claim's token, the row stays running. (D-ac)"""
+    """A claim fault ends `drain()` while a row's spawn has not yet returned: the child and its grandchild die, the box is reaped under the claim's token, the row stays running. (D-ac)
+
+    The worker's spawn through `asyncio.create_subprocess_exec` is a pinned test seam (r7 D-ac), like `JobLane.write_launch` (D-ab): this test patches it to hold the spawn in flight."""
     containers = StandInContainers(world["tmp"] / "containers")
     release = world["tmp"] / "release"
     child = _child(world, files=_committed(), box_dir=containers.where, wait_for=release, grandchild=True)
