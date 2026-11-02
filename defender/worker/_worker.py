@@ -387,7 +387,7 @@ class Worker:
                 raise _WorkerFault("a launch record for this job already exists") from None
             except job_lane.JobLaneRefused as refused:
                 _logger.error("investigation %s: %s", launch.investigation_id, refused)
-                raise _WorkerFault("the job's launch files cannot be written for this id") from None
+                raise _WorkerFault(f"the job's launch files cannot be written: {refused}") from None
             except OSError as fault:
                 _logger.error("investigation %s: writing the launch files: %s", launch.investigation_id, fault)
                 raise _WorkerFault("the worker could not write the job's launch files") from None
