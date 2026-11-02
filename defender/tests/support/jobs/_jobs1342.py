@@ -51,6 +51,10 @@ ZWNBSP_ALERT_BYTES = '{"rule": {"id": "r-1342"}, "text": "a\ufeffb"}\n'.encode()
 #: U+FEFF at the start of a value, at the end of one, twice in a row, twice apart, and inside an object key.
 FEFF_RICH_ALERT_BYTES = ('{"rule": {"id": "r-1342"}, "lead": "\ufeffx", "tail": "y\ufeff", "pair": "p\ufeff\ufeffq", '
                          '"apart": "\ufeffm\ufeffn", "k\ufeffey": 1}\n').encode()
+#: D-ab: the worker's per-claim records-read timeout, a module constant shortened in one test (spelled once, as _host1214.py does).
+RECORDS_TIMEOUT_MODULE = "defender.worker._worker"
+RECORDS_TIMEOUT_NAME = "RECORDS_TIMEOUT"
+
 TITLE = "SSH success after failures"
 DESCRIPTION = "Three failures then a success from one source."
 

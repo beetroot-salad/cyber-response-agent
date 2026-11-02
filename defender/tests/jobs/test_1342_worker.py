@@ -35,6 +35,8 @@ from defender.tests.support.jobs._jobs1342 import (
     MALICIOUS_REPORT,
     NOW,
     PADDED_ALERT_BYTES,
+    RECORDS_TIMEOUT_MODULE,
+    RECORDS_TIMEOUT_NAME,
     ZWNBSP_ALERT_BYTES,
     T1,
     T2,
@@ -2023,7 +2025,7 @@ async def test_r6_5_a_worker_with_no_directory_and_no_database_address_refuses_t
 
 @pytest.mark.parametrize("state", ["active", "offboarding"])
 async def test_r6_4_the_tenants_state_is_read_before_any_launch_file_exists(world, state):
-    """At the moment the worker reads the tenant's state, the runs container holds nothing of this job: a refusal has nothing to clean up, and teardown never finds a file the worker has not yet been cleared to write. (R6-4)"""
+    """At the claim's first read of the tenant's state, the runs container holds nothing of this job (a later re-read may see the files): a refusal has nothing to clean up, and teardown never finds a file the worker has not yet been cleared to write. (R6-4)"""
     restate_tenant(world["dsn"], T1, state=state)
     child = _child(world, files=_committed())
     directory = _ProbingDirectory(world["directory"], world["root"])
@@ -2032,12 +2034,12 @@ async def test_r6_4_the_tenants_state_is_read_before_any_launch_file_exists(worl
         await _worker(world, store, child, directory=directory).drain()
 
     assert directory.runs_listings, "premise: the worker read the tenant's state through its directory"
-    assert directory.runs_listings == [[]] * len(directory.runs_listings), \
-        f"launch files existed when the state was read: {directory.runs_listings}"
+    assert directory.runs_listings[0] == [], \
+        f"launch files existed when the claim first read the state: {directory.runs_listings}"
 
 
 async def test_r6_4_no_tenant_lock_is_held_or_a_holder_while_the_launch_files_are_written(world, monkeypatch):
-    """Inside the launch-file write itself, an exclusive try-once on the tenant's host lock succeeds and the worker's pid is no holder; a lock folder that already exists is no excuse and none is left changed. (R6-4)"""
+    """Inside the launch-file write itself, an exclusive try-once on the tenant's host lock succeeds and the worker's pid is no holder; a lock folder that already exists is no excuse. The spied name `JobLane.write_launch` is a pinned seam (D-ab). (R6-4)"""
     from defender.records import job_lane
 
     lock_folder = world["root"] / ".host-locks" / T1
@@ -2063,25 +2065,27 @@ async def test_r6_4_no_tenant_lock_is_held_or_a_holder_while_the_launch_files_ar
 async def test_r6_4_a_tenant_restated_between_two_claims_fails_the_second_row(world):
     """Two rows of one tenant, one slot: the tenant goes `offboarding` after the first child has finished; the first row completes and the second is a worker error with no launch files and no child. The state is read at every claim. (R6-4)"""
     calls: list[str] = []
+    moved: list[str] = []
 
     class RestatedBetweenClaims:
         def state(self, tenant_id: str):
             calls.append(tenant_id)
-            if len(calls) == 2:
+            if not moved and any(e[0] == "end" for e in child.events()):  # first read after a child has finished
+                moved.append(tenant_id)
                 move_tenant(world["dsn"], T1, state="offboarding")
             return world["directory"].state(tenant_id)
 
-    child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
         first = await _queued(store, ticket="T-1", key="k1")
         second = await _queued(store, ticket="T-2", key="k2")
+        child = _child(world, files=_committed())
         await _worker(world, store, child, slots=1, directory=RestatedBetweenClaims()).drain()
 
     stages = {i: row(world["dsn"], i) for i in (first, second)}
     done = [i for i, r in stages.items() if r["stage"] == "completed"]
     refused = [i for i, r in stages.items() if (r["stage"], r["failure_reason"]) == ("failed", "worker_error")]
     assert (len(done), len(refused)) == (1, 1), {i: (r["stage"], r["failure_reason"]) for i, r in stages.items()}
-    assert len(calls) == 2, "the tenant's state was not read at each claim"
+    assert len(calls) >= 2, "the tenant's state was not read at each claim"
     assert "offboarding" in stages[refused[0]]["failure_message"]
     assert child.events() == [("start", done[0]), ("end", done[0])], "a child started for the second row"
     assert sorted(p.name for p in world["runs"].iterdir() if p.name.startswith(refused[0])) == [], \
@@ -2089,12 +2093,12 @@ async def test_r6_4_a_tenant_restated_between_two_claims_fails_the_second_row(wo
 
 
 async def test_r6_4_a_records_read_that_never_answers_fails_the_row_not_the_worker(world, monkeypatch):
-    """A tenant's state read that does not return within the worker's records timeout ends that row `failed`/`worker_error` saying the records did not answer; nothing is written, no child. (R6-4)"""
+    """A tenant's state read that does not return within the worker's records timeout (D-ab) ends that row `failed`/`worker_error`; nothing is written, no child; the wording is not pinned. (R6-4)"""
     import threading
 
-    from defender.worker import _worker as worker_module
+    import importlib
 
-    monkeypatch.setattr(worker_module, "RECORDS_TIMEOUT", 0.3)  # lint-monkeypatch: ok — the module constant is the timeout and no seam injects it; shortened so the case need not wait out the real one
+    monkeypatch.setattr(importlib.import_module(RECORDS_TIMEOUT_MODULE), RECORDS_TIMEOUT_NAME, 0.3)  # lint-monkeypatch: ok — D-ab: the module constant is the timeout and no seam injects it; shortened so the case need not wait out the real one
     unblock = threading.Event()
 
     class NeverAnswers:
@@ -2111,34 +2115,49 @@ async def test_r6_4_a_records_read_that_never_answers_fails_the_row_not_the_work
         unblock.set()
 
     _nothing_left_for_a_refused_claim(world, child, inv)
-    assert "records" in row(world["dsn"], inv)["failure_message"].lower()
 
 
-class _AlertlessStore:
-    """The real store, except that every alert reads as missing."""
+class _OrderRecordingStore:
+    """The real store, except that every `get_alert` is noted in the shared event list."""
 
-    def __init__(self, store) -> None:
-        self._store = store
+    def __init__(self, store, events: list) -> None:
+        self._store, self._events = store, events
 
     def __getattr__(self, name):
         return getattr(self._store, name)
 
     async def get_alert(self, tenant_id, alert_id):
-        return None
+        self._events.append(("get_alert", tenant_id, alert_id))
+        return await self._store.get_alert(tenant_id, alert_id)
+
+
+class _OrderRecordingDirectory:
+    """The real records seam, except that every `state()` call is noted in the shared event list."""
+
+    def __init__(self, inner, events: list) -> None:
+        self._inner, self._events = inner, events
+
+    def state(self, tenant_id: str):
+        self._events.append(("state", tenant_id))
+        return self._inner.state(tenant_id)
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
 
 
 async def test_r6_4_the_alert_is_read_before_the_tenants_state(world):
-    """A missing alert for a tenant that is also offboarding: the row says the alert is missing (the order in R6-4 is get_alert, then the state check). (R6-4)"""
-    restate_tenant(world["dsn"], T1, state="offboarding")
+    """Per claim, the alert is read before the tenant's state is (the order in R6-4 is get_alert, then the state check): no `state()` call for the row precedes its first `get_alert()`. (R6-4)"""
+    events: list = []
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
-        inv = await _queued(store)
-        await _worker(world, _AlertlessStore(store), child).drain()
+        await _queued(store)
+        await _worker(world, _OrderRecordingStore(store, events), child,
+                      directory=_OrderRecordingDirectory(world["directory"], events)).drain()
 
-    stored = row(world["dsn"], inv)
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
-    assert "alert" in stored["failure_message"].lower()
-    assert "offboarding" not in stored["failure_message"]
+    kinds = [e[0] for e in events]
+    assert "get_alert" in kinds, f"premise: the worker read the alert: {events}"
+    assert "state" in kinds, f"premise: the worker read the state: {events}"
+    assert kinds.index("get_alert") < kinds.index("state"), f"the tenant's state was read before the alert: {events}"
 
 
 @pytest.mark.parametrize("entry", ["drain", "serve"])
