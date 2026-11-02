@@ -67,7 +67,7 @@ with diagrams, see [docs/design.md](docs/design.md).
 | `/contract-first:discuss-issue` | Opens with only the problem and open questions, then grounds and reviews a design covering behavior, scope, data models, flows and architecture. Hands off an intent+design doc with probed claims, or splits an issue that bundles separate problems into several. Also handles design amendments that tests or code expose. |
 | `/contract-first:write-tests` | Sketches the contract, spikes a throwaway implementation to settle the design, authors tests with Sonnet and reviews their fidelity with Opus. Commits the tests before any implementation, with a compact coverage and review record. |
 | `/contract-first:write-code-from-tests` | Implements against the committed contract, then has two or three Sonnet attackers try to keep it green with wrong variants of that code. Reconciles findings, ships, and repairs CI. |
-| `/contract-first:finalize` | Reviews the shipped PR **cold**, fixes or files what it finds, traces escaped bugs back to the stage that should have caught them, and re-greens the PR. |
+| `/contract-first:finalize` | Reviews the shipped PR **cold**, settles each finding by its cleaner resolution (dissolve or patch) or files it, traces escaped bugs back to the stage that should have caught them, and re-greens the PR. |
 | `/contract-first:proven-fix` | Fixes a bug against settled intent: a test written red first, the smallest fix, then up to five hand-written mutants of the fix's deciding lines. |
 | `/contract-first:refactor` | Restructures without behavior change; tests change only mechanically, and a lint is added when a removed pattern could return. |
 | `/contract-first:ship` | Branch, commit, push, open a PR. Used by the stages above; useful on its own. |
