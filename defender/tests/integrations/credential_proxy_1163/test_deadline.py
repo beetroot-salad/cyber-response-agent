@@ -95,3 +95,25 @@ def test_t21_the_caller_sends_its_timeout_and_waits_out_the_proxys_deadline(
 
     assert result == {"user": "dev.dana"}
     assert sent["timeout_sec"] == 1
+
+
+def test_t21_the_systems_timeout_bounds_the_token_exchange_too(tmp_path, data_root):
+    """A token endpoint slower than the system's timeout gets `TransportFault` after about that timeout, not after the
+    proxy's whole deadline: no single wait outlasts the system's timeout, so the caller's wait covers the proxy's. r7 A21."""
+    issued: list[str] = []
+
+    def slow_token(seen):
+        time.sleep(SLOW_SEC)
+        return H.token_endpoint(issued)(seen)
+
+    with H.upstream() as auth:
+        auth.replies["/token"] = slow_token
+        with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+                u + API, scheme=H.oauth_scheme(auth.url + "/token")), creds=T.oauth_set()) as r:
+            began = time.monotonic()
+            answer = r.ask(timeout_sec=1)
+            took = time.monotonic() - began
+
+    assert answer["fault"] == "TransportFault", answer
+    assert took < SLOW_SEC - 0.5, took
+    assert r.up.seen == []

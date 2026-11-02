@@ -193,7 +193,7 @@ class _Proxy:
         trail.system, trail.method = asked.system[:80], asked.method[:20]
         cap = self.deps.upstream_timeout_sec
         budget = cap if asked.timeout_sec is None else min(asked.timeout_sec, cap)
-        deadline = Deadline(began + budget + PROXY_OVERHEAD_SEC)
+        deadline = Deadline(began + budget + PROXY_OVERHEAD_SEC, per_wait=budget)
         claims = self._verified(authorization)
         trail.tenant, trail.investigation = claims.tenant, claims.investigation
         if not is_system_name(asked.system):
@@ -227,7 +227,7 @@ class _Proxy:
             secrets += tuple(v.removeprefix("Basic ") for v in injected.values()
                              if v.startswith("Basic "))
         answer = self._sent(client, asked, target, headers, secrets, trail,
-                            min(budget, deadline.left(f"calling {asked.system}")), deadline)
+                            deadline.wait(f"calling {asked.system}"), deadline)
         if answer["status"] == 401 and access_token is not None:
             self.access_tokens.evict(claims.tenant, asked.system, access_token)
         return answer

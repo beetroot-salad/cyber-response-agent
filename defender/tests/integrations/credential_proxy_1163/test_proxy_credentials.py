@@ -246,6 +246,28 @@ def test_c3_an_access_token_already_expired_at_issue_is_exchanged_again(tmp_path
     assert [s.header("Authorization") for s in r.up.seen] == [f"Bearer {a}" for a in issued]
 
 
+@pytest.mark.parametrize(("stated", "exchanges"), [("3600", 1), ("soon", 2), (-5, 2)],
+                         ids=["decimal text", "not a number", "negative"])
+def test_c3b_a_lifetime_stated_as_text_is_used_and_an_unusable_one_is_no_lifetime(tmp_path, data_root, stated, exchanges):
+    """`expires_in: "3600"` is a lifetime (the token is reused); one that is not a non-negative number is no stated
+    lifetime: the token is used, not reused, and the request is not refused. O7, A8."""
+    issued: list[str] = []
+
+    def answer(seen):
+        status, headers, body = H.token_endpoint(issued)(seen)
+        return status, headers, json.dumps({**json.loads(body), "expires_in": stated}).encode()
+
+    with H.upstream() as auth:
+        auth.replies["/token"] = answer
+        with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+                u + BASE, scheme=H.oauth_scheme(auth.url + "/token")), creds=T.oauth_set()) as r:
+            r.ask()
+            r.ask()
+
+    assert len(issued) == exchanges
+    assert [s.header("Authorization") for s in r.up.seen] == [f"Bearer {issued[0]}", f"Bearer {issued[-1]}"]
+
+
 # --- O6 rotation, A8 cache key ---------------------------------------------------------------
 
 def test_c4_a_rotated_static_key_is_used_from_the_next_request(tmp_path, data_root):

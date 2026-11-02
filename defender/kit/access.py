@@ -11,10 +11,17 @@ from dataclasses import dataclass, field
 PROXY_URL_ENV = "DEFENDER_CREDENTIAL_PROXY_URL"
 
 #: Seconds the credential proxy allows for its own calls (token check, credential read) on top of
-#: a request's timeout, and the seconds a caller waits past that whole deadline (r7 A21): the
-#: proxy has given up before its caller does.
+#: a request's timeout, and the seconds a caller waits past the proxy's latest answer (r7 A21):
+#: the proxy has given up before its caller does.
 PROXY_OVERHEAD_SEC = 20
 CALLER_GRACE_SEC = 5
+
+
+def caller_wait_sec(timeout_sec: float) -> float:
+    """How long a caller waits for the proxy's answer to a request with `timeout_sec`: the
+    proxy's deadline (`timeout_sec` + `PROXY_OVERHEAD_SEC`), one network wait the proxy began
+    before it (at most `timeout_sec`), and `CALLER_GRACE_SEC`."""
+    return 2 * timeout_sec + PROXY_OVERHEAD_SEC + CALLER_GRACE_SEC
 
 #: The access method (D2) of a system reached through the credential proxy.
 HTTP_PROXY = "http-proxy"
@@ -90,7 +97,7 @@ class AccessDeclaration:
 
 
 __all__ = [
-    "BASIC", "BEARER", "CALLER_GRACE_SEC", "CLIENT_ID", "CLIENT_SECRET", "CREDENTIAL_KINDS", "HEADER", "HTTP_PROXY",
+    "BASIC", "BEARER", "CALLER_GRACE_SEC", "caller_wait_sec", "CLIENT_ID", "CLIENT_SECRET", "CREDENTIAL_KINDS", "HEADER", "HTTP_PROXY",
     "OAUTH_CLIENT_CREDENTIALS", "PASSWORD", "PROXY_OVERHEAD_SEC", "PROXY_URL_ENV", "PUBLIC_FIELD", "SCHEMES", "STATIC",
     "USERNAME", "AccessDeclaration", "Auth", "RequestAccess", "Route", "secret_fields",
 ]

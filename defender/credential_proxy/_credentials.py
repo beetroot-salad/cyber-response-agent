@@ -188,7 +188,7 @@ def _token_exchange(client: httpx.Client, auth: Auth, creds: CredentialSet,
     what = f"the token exchange of {system}"
     try:
         with client.stream("POST", str(auth.token_url), data=form, headers=headers,
-                           timeout=deadline.left(what)) as reply:
+                           timeout=deadline.wait(what)) as reply:
             status = reply.status_code
             body = bytearray()
             for chunk in reply.iter_bytes():
@@ -225,10 +225,17 @@ def _issued(body: bytes, system: str) -> tuple[str, int | None]:
     if kind is not None and (not isinstance(kind, str) or kind.lower() != "bearer"):
         raise Refused(CONFIG, f"the token endpoint of {system} issued a token that is not a "
                               "bearer token")
-    if lifetime is not None and (isinstance(lifetime, bool) or not isinstance(lifetime, int)
-                                 or lifetime < 0):
-        raise Refused(CONFIG, f"the token endpoint of {system} stated an unusable expires_in")
-    return token, lifetime
+    return token, _lifetime(lifetime)
+
+
+def _lifetime(stated: object) -> int | None:
+    """`expires_in` in seconds: a non-negative integer, or its decimal text (some providers send
+    "3599"). Anything else is no stated lifetime, so the token is not reused."""
+    if isinstance(stated, str) and stated.isascii() and stated.isdigit():
+        return int(stated)
+    if isinstance(stated, int) and not isinstance(stated, bool) and stated >= 0:
+        return stated
+    return None
 
 
 __all__ = ["MARKER", "AccessTokens", "CredentialSet", "check_fit", "scrub_secrets",

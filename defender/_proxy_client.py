@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import httpx
 
 from defender._internal_http import internal_client
-from defender.kit.access import CALLER_GRACE_SEC, PROXY_OVERHEAD_SEC
+from defender.kit.access import caller_wait_sec
 from defender.kit.faults import TransportFault
 from defender.kit.verbs import VerbContext
 
@@ -46,7 +46,7 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
             proxy_url.rstrip("/") + PROXY_PATH, headers={"Authorization": f"Bearer {token}"},
             json={"system": system, "method": method, "url": url,
                   "headers": dict(headers or {}), "body": body, "timeout_sec": timeout_sec},
-            timeout=timeout_sec + PROXY_OVERHEAD_SEC + CALLER_GRACE_SEC)
+            timeout=caller_wait_sec(timeout_sec))
     except httpx.HTTPError as e:
         raise TransportFault(f"credential proxy unreachable: {type(e).__name__}") from None
     try:
