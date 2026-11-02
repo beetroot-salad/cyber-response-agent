@@ -512,8 +512,8 @@ class _TokenMint:
                 records: tenancy.TenantDirectory, signer: Any, proxy_url: str | None,
                 issuer_transport: Any) -> _TokenMint:
         """The mint for a run, or a mint that signs nothing when no `http-proxy` system is in
-        reach. A configuration that cannot sign (no proxy address; with no `signer` injected, a
-        tenant whose live generation in `records` records no sign login, A24') refuses run start,
+        reach. A configuration that cannot sign (no proxy address; a tenant whose live generation
+        in `records` records no sign login, A24', whether or not a `signer` is injected, r8.6) refuses run start,
         naming the cause, and contacts no OpenBao; called before the run folder is made, so the
         refusal leaves none behind (r7 A20). The signer is the tenant's own
         (`credential_proxy.request_signer`, r8.5) unless one is injected."""
@@ -530,16 +530,16 @@ class _TokenMint:
         if not address:
             sys.exit(f"run start refused: a system is reached through the credential proxy, but "
                      f"its address is not configured ({PROXY_URL_ENV})")
+        tenant_id = str(accepted.id)
+        # Run start's own read of the records it already holds: the sign login is recorded, an
+        # injected signer or not (r8.6). No file is read and nothing is sent (A24' run start).
+        try:
+            tenancy.recorded_login(tenancy.live_generation(records, tenant_id),
+                                   tenancy.SIGN_LOGIN, tenant_id)
+        except (tenancy.AppRoleLoginError, tenancy.RecordsUnreachable) as refused:
+            sys.exit(f"run start refused: the request tokens for the credential proxy cannot be "
+                     f"signed: {refused}")
         if signer is None:
-            tenant_id = str(accepted.id)
-            # Run start's own read of the records it already holds: the sign login is recorded.
-            # No file is read and nothing is sent (A24' run start).
-            try:
-                tenancy.recorded_login(tenancy.live_generation(records, tenant_id),
-                                       tenancy.SIGN_LOGIN, tenant_id)
-            except (tenancy.AppRoleLoginError, tenancy.RecordsUnreachable) as refused:
-                sys.exit(f"run start refused: the request tokens for the credential proxy cannot be "
-                         f"signed: {refused}")
             signer = request_signer(tenant_id, directory=records, transport=issuer_transport)
         return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
                    reads=reads, ticket_system=ticket_system)

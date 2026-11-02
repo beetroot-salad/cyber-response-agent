@@ -339,7 +339,10 @@ class ManagementService(Actor):
 
     async def _wrap(self, held: HeldTenant) -> None:
         """A fresh single-use wrapped secret id for the host of each AppRole, delivery and sign (Flow
-        1.7, DC-12, A24')."""
+        1.7, DC-12, A24'). First `main`'s rule is enforced again (r8.6): install, the host's step, checks
+        it as the bot but cannot change it, and a job in flight across the upgrade, or a rule changed by
+        hand, reaches it here, as does every install that failed and restarts at `wrap`."""
+        await self._protect_main(held, await self._wiring(held))
         gen = await self._building(held)
         if gen.sign_role_id is None:
             # A generation recorded before the sign login existed whose job was already past
