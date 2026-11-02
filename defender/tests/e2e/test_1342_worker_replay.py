@@ -21,7 +21,6 @@ from defender.tests.support.jobs._jobs1342 import (
     job_store,
     make_worker,
     register_tenant,
-    tenant_directory,
     row,
 )
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
@@ -81,7 +80,7 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=golden_bytes)
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
-            worker = make_worker(store, root, child, directory=tenant_directory(migrated_database), containers=StandInContainers(tmp_path / "containers"))
+            worker = make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers"))
             await worker.drain()
 
         stored = row(migrated_database, inv.investigation_id)
@@ -130,7 +129,7 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
-            await make_worker(store, root, child, directory=tenant_directory(migrated_database), containers=StandInContainers(tmp_path / "containers")).drain()
+            await make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers")).drain()
             row = await store.get_investigation(t.tenant_id, inv.investigation_id)
 
         runs = root / t.tenant_id / "runs"

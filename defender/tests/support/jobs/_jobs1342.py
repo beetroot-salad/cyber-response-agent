@@ -51,9 +51,6 @@ ZWNBSP_ALERT_BYTES = '{"rule": {"id": "r-1342"}, "text": "a\ufeffb"}\n'.encode()
 #: U+FEFF at the start of a value, at the end of one, twice in a row, twice apart, and inside an object key.
 FEFF_RICH_ALERT_BYTES = ('{"rule": {"id": "r-1342"}, "lead": "\ufeffx", "tail": "y\ufeff", "pair": "p\ufeff\ufeffq", '
                          '"apart": "\ufeffm\ufeffn", "k\ufeffey": 1}\n').encode()
-#: D-ab: the worker's per-claim records-read timeout, a module constant shortened in one test (spelled once, as _host1214.py does).
-RECORDS_TIMEOUT_MODULE = "defender.worker._worker"
-RECORDS_TIMEOUT_NAME = "RECORDS_TIMEOUT"
 
 TITLE = "SSH success after failures"
 DESCRIPTION = "Three failures then a success from one source."
@@ -81,13 +78,6 @@ def move_tenant(dsn: str, tenant_id: str, *, state: str) -> None:
     action, step, actor = _JOB.get(state, (None, None, None))
     execute(dsn, "UPDATE tenancy.tenants SET state = %s, pending_action = %s, step = %s, step_actor = %s WHERE id = %s",
             (state, action, step, actor, tenant_id))
-
-
-def tenant_directory(dsn: str) -> Any:
-    """A `TenantDirectory` over the same database rows `register_tenant` wrote (r6 R6-4: what a worker's `directory=` must agree with)."""
-    from defender.tests.support.tenancy._active1214 import postgres_directory
-
-    return postgres_directory(dsn)
 
 
 def fixed_clock() -> dt.datetime:
@@ -382,7 +372,7 @@ def fd_identity(fd: int) -> list[int]:
     return [found.st_dev, found.st_ino]
 
 
-def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], *, directory: Any,
+def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], *,
                 containers: Any = None, slots: int = 3, stop_grace: float | None = None) -> Any:
     from defender.worker import Worker
 
@@ -397,7 +387,7 @@ def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], 
         containers = StandInContainers(beside / "containers")
     extra = {} if stop_grace is None else {"stop_grace": stop_grace}
     return Worker(store, data_root=data_root, child_argv=child,
-                  containers=containers, directory=directory,
+                  containers=containers,
                   slots=slots, clock=fixed_clock, **extra)
 
 
