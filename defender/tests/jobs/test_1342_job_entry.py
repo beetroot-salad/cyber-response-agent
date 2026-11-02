@@ -23,6 +23,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -1337,7 +1338,6 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     assert (tripped, wire.called, launched) == ([], [], [])
     assert docker_execs() == ([], []), "a job-lane run launched a docker exec beneath the Python names"
     # control: the tripwire is live, so an alias of the real entry points would have been caught
-    from types import SimpleNamespace
     probe = SimpleNamespace(run_dir=tmp_path / "probe")
     real_open(probe, tenant=None, defender_dir=tmp_path, env={})
     with contextlib.suppress(AssertionError):  # the record leg's own handler reaches another tripped name
@@ -1346,7 +1346,8 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     wire.called.clear()
     config = {"URL_BASE": "http://store.invalid", "BASTION_HOST": "bastion.invalid"}
     with pytest.raises(AssertionError):  # control: a call through the writer's default deps reaches the tripped transport
-        writer_module.DEFAULT_DEPS.request(config, "POST", "/tickets", {}, ctx=None)
+        # #1163: `_request` reads `ctx.tenant` first; a tenant whose ticket system is not proxied reaches the transport
+        writer_module.DEFAULT_DEPS.request(config, "POST", "/tickets", {}, ctx=SimpleNamespace(tenant=SimpleNamespace(systems={})))
     assert wire.called == ["docker_exec_curl"]
     wire.called.clear()
     with pytest.raises(AssertionError):  # control: the process tripwire is live
@@ -1647,3 +1648,110 @@ def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path, spe
         record = json.loads((runs / f"{run_id}.job-end.json").read_text(encoding="utf-8"))
         assert record == {"setup": "refused", "box": "not_started", "report_committed": False,
                           "scrub_verified": False}
+
+
+
+# --- R6-8: a job signs like an operator run (#1163 on the job lane) -----------------------------------
+
+PROXY_ADDRESS = "http://proxy.invalid"
+SIGN_ROLE, SIGN_SECRET = "role-1342-sign", "secret-1342-sign"
+
+
+@pytest.fixture
+def proxied_scene(tmp_path, monkeypatch, migrated_database):
+    """A factory for a job scene whose tenant has `identity` on `http-proxy` (the declaration #1163's
+    operator-path tests plant), with a live generation holding a sign login when `sign`, and the proxy
+    address in the environment when `address`. `job_main` takes neither: the environment and the tenant's
+    records are all a worker's child has (R6-8)."""
+    from defender.kit.access import PROXY_URL_ENV
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.integrations.credential_proxy_1163 import _harness as H
+    from defender.tests.support.tenancy._active1214 import insert_generation
+
+    stack = contextlib.ExitStack()
+
+    def make(*, sign: bool, address: bool, proxied: bool = True) -> Scene:
+        root = tmp_path / "data"
+        root.mkdir()
+        monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+        monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+        monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+        if address:
+            monkeypatch.setenv(PROXY_URL_ENV, PROXY_ADDRESS)
+        else:
+            monkeypatch.delenv(PROXY_URL_ENV, raising=False)
+        systems = {"identity": H.declaration("http://x.invalid/api")} if proxied else {}
+        t = stack.enter_context(A.published(tmp_path / "forge", root, systems))
+        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        if sign:
+            insert_generation(migrated_database, t.tenant_id, A.generation(
+                t.tenant_id, tmp_path / "secrets", sign_role_id=SIGN_ROLE, sign_secret=SIGN_SECRET))
+        runs = root / t.tenant_id / "runs"
+        runs.mkdir(exist_ok=True)
+        return Scene(root, t, runs, dsn=migrated_database)
+
+    with stack:
+        yield make
+
+
+@pytest.mark.parametrize("missing", ["no sign login", "no proxy address"])
+def test_r6_8_a_job_whose_tenant_is_proxied_but_cannot_sign_is_refused_at_setup(proxied_scene, missing):
+    """A granted `http-proxy` system and no sign login (no live generation), or no proxy address in the
+    environment: `setup: refused`, recorded and not a crash, and no run is made - the operator path's own
+    refusal (#1163 R7), on the job lane. (R6-8)"""
+    scene = proxied_scene(sign=missing != "no sign login", address=missing != "no proxy address")
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+
+    ran = run_job(scene, run_id)
+
+    assert ran.raised is None, f"a refusal was a crash: {ran.raised!r}"
+    assert ran.calls["lifecycle"] == 0, "a run was made for a tenant that cannot sign"
+    assert scene.job_end(run_id) == REFUSED
+    assert not (scene.runs / run_id).exists(), "the run folder was made before the refusal"
+
+
+def test_r6_8_a_job_whose_tenant_can_sign_gets_the_read_access_on_its_investigate_call(proxied_scene):
+    """Control for the refusal: with a sign login and the address, the same job runs, and its lifecycle is
+    handed the `RequestAccess` the operator path's is (the proxy's address from the environment, a read
+    token to be signed when a call first asks). (R6-8)"""
+    scene = proxied_scene(sign=True, address=True)
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    seen: list[Any] = []
+    ran = Ran()
+    inner = verified_lifecycle(ran)
+
+    def lifecycle(**kw: Any) -> dict[str, Any]:
+        seen.append(kw.get("access"))
+        return inner(**kw)
+
+    got = run_job(scene, run_id, lifecycle=lifecycle, ran=ran)
+
+    assert got.raised is None, got
+    assert scene.job_end(run_id) == SETTLED
+    (access,) = seen
+    assert access is not None, "the job's lifecycle was handed no access: its calls carry no token"
+    assert access.proxy_url == PROXY_ADDRESS
+    assert callable(access.token)
+
+
+def test_r6_8_a_job_whose_tenant_has_no_http_proxy_system_is_handed_no_access_and_needs_no_signing(proxied_scene):
+    """Control: no `http-proxy` system, and neither a sign login nor an address, still runs; no access is
+    handed (the operator path's #1163 R3). (R6-8)"""
+    scene = proxied_scene(sign=False, address=False, proxied=False)
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    seen: list[Any] = []
+    ran = Ran()
+    inner = verified_lifecycle(ran)
+
+    def lifecycle(**kw: Any) -> dict[str, Any]:
+        seen.append(kw.get("access"))
+        return inner(**kw)
+
+    got = run_job(scene, run_id, lifecycle=lifecycle, ran=ran)
+
+    assert got.raised is None, got
+    assert scene.job_end(run_id) == SETTLED
+    assert seen == [None]
