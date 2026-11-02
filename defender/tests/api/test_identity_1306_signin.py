@@ -57,6 +57,15 @@ def test_login_redirects_to_the_port_and_sets_a_host_prelogin_cookie() -> None:
     assert "domain" not in attrs
 
 
+def test_r7_2_the_sign_in_callback_accepts_the_identity_providers_own_extra_parameters() -> None:
+    """`GET /auth/callback` with `session_state` and `iss` signs in (303, a session cookie): the one route exempt from the unknown-query refusal. (R7-2, D-ai)"""
+    world = World(tenants={T1: [ANN]})
+    browser = world.client()
+    callback = world.sign_in_response(browser, ANN, extra={"session_state": "kc-session", "iss": "https://idp.example/realms/x"})
+    assert callback.status_code == 303, callback.text
+    assert set_cookie(callback, SESSION_COOKIE)
+
+
 def test_sign_in_ends_in_a_host_session_cookie_and_me_names_the_user() -> None:
     """login -> callback -> 303 to exactly the frontend (whatever the query asks), HttpOnly Secure Lax cookie, /me (flow 2, O6, DC-6)."""
     world = World(tenants={T1: [ANN]})

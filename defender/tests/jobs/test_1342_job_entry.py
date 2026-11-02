@@ -131,34 +131,16 @@ class Ran:
         return "\n".join(said)
 
 
-def summary(*, report_committed: bool = True) -> dict[str, Any]:
+def summary(**over: Any) -> dict[str, Any]:
     return {"output": "x", "requests": 0, "truncated_by": None, "closed_before_cut": False,
-            "exit_reason": None, "report_committed": report_committed}
-
-
-def settle(kw: dict[str, Any], *, report_committed: bool = True, scrub_verified: bool = True) -> None:
-    """What a lifecycle that closed the report and verified the tree leaves on the facts holder the job
-    entry handed it (`job_facts`, r5 C2): the review state's close, and the scrub's fact. No holder (the
-    operator path): nothing to set."""
-    from defender.investigation.challenge_gate import ReviewState
-
-    facts = kw.get("job_facts")
-    if facts is None:
-        return
-    if report_committed:
-        facts.review_state["state"] = ReviewState(closed=True)
-    facts.scrub_verified = scrub_verified
+            "exit_reason": None, **over}  # D-ae: the summary carries no `report_committed`
 
 
 def verified_lifecycle(ran: Ran, *, report_committed: bool = True):
-    """A lifecycle seam that records the call, leaves the host scrub verdict a real scrub would, and sets
-    its facts on the holder (r5 C2); its summary's `report_committed` agrees, as the driver's does."""
-    def lifecycle(**kw: Any) -> dict[str, Any]:
-        ran.calls["lifecycle"] += 1
-        kw["run"].facts.scrub_verdict.write(json.dumps({"ran": True, "reason": "walk completed"}))
-        settle(kw, report_committed=report_committed)
-        return summary(report_committed=report_committed)
-    return lifecycle
+    """The real lifecycle over fake box, scrub and investigation seams (D-ad: the lifecycle itself marks `box: started`
+    when its box start returns, so no fake may stand in for it); the fake investigation commits the report on the
+    holder it is handed when `report_committed`."""
+    return _lifecycle(None, investigate=_investigate(ran, closes=report_committed))
 
 
 def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = None, materialize: Any = None,
@@ -759,9 +741,7 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
     def lifecycle(**kw: Any) -> dict[str, Any]:
         run_dirs.append(kw["run"].run_dir)
         before.append((list(spies.events), watch.reads_of(kw["run"].run_dir)))
-        kw["run"].facts.scrub_verdict.write(json.dumps({"ran": True, "reason": "walk completed"}))
-        settle(kw)
-        return summary()
+        return verified_lifecycle(Ran())(**kw)
 
     class Writer:
         def open_case_ticket(self, *_a: Any, **_k: Any) -> None: ...
@@ -876,13 +856,12 @@ def _closes(job_facts: Any, *, closed: bool = True) -> None:
 
 def _investigate(ran: Ran, *, without: str | None = None, closes: bool | str = True, **summary_kw: Any):
     """A fake investigation: with `closes` it commits the report on the holder it is handed (the
-    protocol's `job_facts` keyword, r5 C2), as the driver's review state does; the summary it returns
-    carries `report_committed` as the driver's would."""
+    protocol's `job_facts` keyword, r5 C2), as the driver's review state does; """
     def investigate(*, job_facts: Any = None, **_kw: Any) -> dict[str, Any]:
         ran.calls["lifecycle"] += 1
         if closes and job_facts is not None:  # the operator path hands none
             _closes(job_facts, closed=closes != "open")  # "open": a review state that never closed
-        doc = summary(**{"report_committed": closes is True, **summary_kw})
+        doc = summary(**summary_kw)
         if without is not None:
             del doc[without]
         return doc
@@ -917,20 +896,15 @@ def test_o8_report_committed_is_the_review_states_close_and_scrub_verified_the_s
     assert scene.job_end(run_id) == want
 
 
-@pytest.mark.parametrize(("closes", "claims", "want"), [
-    (True, None, True), (True, False, True), (False, True, False), ("open", True, False)],
-    ids=["summary-lacks-the-key", "summary-says-false-state-closed", "summary-says-true-state-empty",
-         "summary-says-true-state-present-not-closed"])
-def test_m2_the_record_reads_the_holders_review_state_not_the_summary(scene, closes, claims, want):
-    """A committed report is the holder's review state `closed`; the summary's `report_committed` (absent, false or true) does not decide it, and a review state that exists but is not closed is not committed. (M2, r5 C2, D-s)"""
+@pytest.mark.parametrize(("closes", "want"), [(True, True), (False, False), ("open", False)],
+                         ids=["state-closed", "state-empty", "state-present-not-closed"])
+def test_m2_the_record_reads_the_holders_review_state(scene, closes, want):
+    """A committed report is the holder's review state `closed`; a review state that exists but is not closed is not committed. (M2, r5 C2, D-s; D-ae retires the summary-claims cases: the summary has no such key)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     ran = Ran()
-    extra = {} if claims is None else {"report_committed": claims}
 
-    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(
-        scene, investigate=_investigate(ran, closes=closes, without="report_committed" if claims is None else None,
-                                        **extra)))
+    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran, closes=closes)))
 
     assert scene.job_end(run_id) == {**SETTLED, "report_committed": want}
 
@@ -1155,6 +1129,39 @@ def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
                                      "report_committed": False, "scrub_verified": False}
+
+
+def test_d_ad_a_fault_other_than_a_box_start_fault_while_the_box_is_starting_is_start_failed(scene):
+    """The box start raises `OSError` (the did-not-run verdict could not be written, so `BoxFault` never came): `box: start_failed`, the fault reaches the caller, nothing ran. (D-ad)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    ran = Ran()
+
+    def start(*_a: Any, **_k: Any) -> Any:
+        raise OSError("could not write the did-not-run verdict")
+
+    got = run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=start))
+
+    assert isinstance(got.raised, OSError), got
+    assert ran.calls["lifecycle"] == 0
+    assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
+                                     "report_committed": False, "scrub_verified": False}
+
+
+def test_d_ad_control_a_fault_after_the_box_started_stays_started(scene):
+    """Control: a stop-box fault after a successful start leaves `box: started`. (D-ad)"""
+    from defender.box import BoxFault
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    ran = Ran()
+
+    def stop(*_a: Any, **_k: Any) -> None:
+        raise BoxFault("could not tear down the box")
+
+    run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), stop_box=stop))
+
+    assert scene.job_end(run_id)["box"] == "started"
 
 
 def test_o8_a_crash_in_the_lifecycle_records_no_report_and_reaches_the_caller(scene):

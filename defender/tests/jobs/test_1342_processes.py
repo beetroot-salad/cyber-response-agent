@@ -28,7 +28,6 @@ from defender.tests.support.jobs._jobs1342 import (
     job_end,
     job_store,
     register_tenant,
-    tenant_directory,
     row,
 )
 
@@ -283,7 +282,6 @@ async def test_o7_serve_takes_sigterm_itself_and_returns(migrated_database, tmp_
     try:
         async with job_store(migrated_database) as store:
             worker = make_worker(store, Path("/nonexistent-root"), lambda launch: [sys.executable],
-                                 directory=tenant_directory(migrated_database),
                                  containers=StandInContainers(tmp_path / "containers"))
             serving = asyncio.create_task(worker.serve())
             await asyncio.sleep(0.5)

@@ -555,12 +555,12 @@ async def test_o4_a_claim_runs_the_oldest_queued_row_first_and_stamps_started_at
     async with store_with(dsn, clock) as store:
         got = [await store.claim() for _ in range(4)]
 
-    assert [g.investigation_id for g in got[:3]] == [ids[2], ids[1], ids[0]]
+    assert [g.record.investigation_id for g in got[:3]] == [ids[2], ids[1], ids[0]]
     assert got[3] is None
     first = row(dsn, ids[2])
     assert (first["stage"], first["started_at"], first["finished_at"]) == ("running", claimed_at, None)
-    assert got[0].stage == "running"
-    assert (got[0].cost_usd, first["cost_usd"]) == (0, 0), "a claimed row reads cost 0 (D-n)"
+    assert got[0].record.stage == "running"
+    assert (got[0].record.cost_usd, first["cost_usd"]) == (0, 0), "a claimed row reads cost 0 (D-n)"
 
 
 async def test_o4_rows_created_together_are_claimed_lowest_id_first(dsn):
@@ -574,7 +574,7 @@ async def test_o4_rows_created_together_are_claimed_lowest_id_first(dsn):
     async with job_store(dsn) as store:
         got = [await store.claim() for _ in range(3)]
 
-    assert [g.investigation_id for g in got[:2]] == [low, high]
+    assert [g.record.investigation_id for g in got[:2]] == [low, high]
     assert got[2] is None
 
 
@@ -588,7 +588,7 @@ async def test_o4_a_claim_skips_every_other_stage(dsn):
         assert await store.claim() is None
         queued = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket="Q"), key="k",
                                       attempt=1, stage="queued")
-        assert (await store.claim()).investigation_id == queued  # control: the queued one is found
+        assert (await store.claim()).record.investigation_id == queued  # control: the queued one is found
         assert await store.claim() is None
 
 
@@ -602,7 +602,7 @@ async def test_o4_a_cancelled_row_is_never_claimed(dsn):
         assert await store.claim() is None
         kept, _ = await store.create_investigation(T1, a2.alert_id, "k2", actor="u-1")
         got = await store.claim()
-    assert got.investigation_id == kept.investigation_id
+    assert got.record.investigation_id == kept.investigation_id
     assert row(dsn, cancelled.investigation_id)["stage"] == "aborted"
 
 
@@ -616,7 +616,7 @@ async def test_o4_two_claims_race_one_queued_row_and_exactly_one_wins(dsn):
         got = await asyncio.gather(a.claim(), b.claim())
 
     winners = [g for g in got if g is not None]
-    assert [w.investigation_id for w in winners] == [inv.investigation_id]
+    assert [w.record.investigation_id for w in winners] == [inv.investigation_id]
     stored = row(dsn, inv.investigation_id)
     assert (stored["stage"], stored["started_at"]) == ("running", NOW)
 
@@ -630,7 +630,7 @@ async def test_o4_three_workers_draining_six_rows_claim_each_row_once(dsn):
     async def drain(store: Any) -> list[str]:
         mine = []
         while (claimed := await store.claim()) is not None:
-            mine.append(claimed.investigation_id)
+            mine.append(claimed.record.investigation_id)
             await asyncio.sleep(0)
         return mine
 
@@ -656,7 +656,52 @@ async def test_o4_a_row_locked_elsewhere_is_skipped_not_waited_for(dsn):
             await conn.commit()
         claimed = await store.claim()
     assert claimed is not None
-    assert claimed.investigation_id == inv.investigation_id
+    assert claimed.record.investigation_id == inv.investigation_id
+
+
+@pytest.mark.parametrize("state", ["active", "creating", "offboarding", "offboarded"])
+async def test_r7_1_a_claim_carries_the_state_of_the_tenants_real_row(dsn, state):
+    """`claim()` returns a `defender.jobs.Claim` whose `tenant_state` is the `tenancy.tenants` state, whatever it is. (R7-1)"""
+    from defender.jobs import Claim, InvestigationRecord
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    move_tenant(dsn, T1, state=state)
+    queued = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn), key="k", attempt=1, stage="queued")
+    async with job_store(dsn) as store:
+        got = await store.claim()
+
+    assert isinstance(got, Claim)
+    assert isinstance(got.record, InvestigationRecord)
+    assert (got.record.investigation_id, got.record.stage, got.tenant_state) == (queued, "running", state)
+    assert row(dsn, queued)["stage"] == "running", "a claim for a non-active tenant still claims the row"
+
+
+async def test_r7_1_each_claim_reads_its_own_tenants_state(dsn):
+    """Two queued rows of two tenants in different states: each claim carries its own tenant's state. (R7-1)"""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    move_tenant(dsn, T2, state="offboarding")
+    one = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn), key="k", attempt=1, stage="queued",
+                               created_at=NOW - HOUR)
+    two = _plant_investigation(dsn, tenant=T2, alert_id=_plant_alert(dsn, tenant=T2), key="k", attempt=1,
+                               stage="queued")
+    async with job_store(dsn) as store:
+        first, second = await store.claim(), await store.claim()
+
+    assert [(c.record.investigation_id, c.tenant_state) for c in (first, second)] == [
+        (one, "active"), (two, "offboarding")]
+
+
+def test_r7_1_the_claim_is_a_frozen_dataclass_of_the_record_and_the_state_exported_by_the_door():
+    """`defender.jobs.Claim` is a frozen dataclass with fields `record` and `tenant_state`, in `__all__`. (R7-1)"""
+    import defender.jobs as door
+    from defender.jobs import Claim
+
+    assert dataclasses.is_dataclass(Claim)
+    assert [f.name for f in dataclasses.fields(Claim)] == ["record", "tenant_state"]
+    assert "Claim" in door.__all__
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        Claim(record=None, tenant_state="active").tenant_state = "x"  # type: ignore[misc]
 
 
 async def test_o4_a_claim_audits_with_the_system_actor_once_per_winner(dsn, caplog):
@@ -798,7 +843,7 @@ async def test_o9_cancel_and_claim_racing_for_one_row_have_exactly_one_winner(ds
                 assert (cancelled.stage, stage) == ("aborted", "aborted")
                 outcomes.add("cancel")
             else:
-                assert claimed.investigation_id == inv.investigation_id
+                assert claimed.record.investigation_id == inv.investigation_id
                 assert isinstance(cancelled, Conflict)
                 assert "running" in str(cancelled)
                 assert stage == "running"
@@ -966,6 +1011,49 @@ async def test_o13_create_cancel_delete_are_audited_after_commit_with_the_caller
                          ("investigation.delete", None)]
 
 
+class _FormattedLines(logging.Handler):
+    """Collects each record as the project's real JSON formatter writes it (`defender._log.JsonFormatter`)."""
+
+    def __init__(self) -> None:
+        from defender import _log
+
+        super().__init__(logging.DEBUG)
+        self.setFormatter(_log.JsonFormatter())
+        self.lines: list[dict[str, Any]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        import json
+
+        self.lines.append(json.loads(self.format(record)))
+
+
+async def test_d_ag_every_job_audit_event_formats_with_its_tenant_when_the_caller_bound_none(dsn, caplog):
+    """start, cancel, delete, claim and finish: the line the real JSON formatter writes carries the event's `tenant_id` with no `log_context` bound. (D-ag)"""
+    from defender import _log
+
+    JobsAudit(caplog)
+    lines = _FormattedLines()
+    logging.getLogger(JOBS_AUDIT).addHandler(lines)
+    try:
+        assert not _log.current_context().get("tenant_id"), "premise: the caller binds no tenant"
+        async with job_store(dsn) as store:
+            a1, a2 = await an_alert(store, T1, ticket="T-1"), await an_alert(store, T2, ticket="T-2")
+            gone, _ = await store.create_investigation(T1, a1.alert_id, "k1", actor="u-1")
+            await store.cancel_investigation(T1, gone.investigation_id, actor="u-1")
+            await store.delete_investigation(T1, gone.investigation_id, actor="u-1")
+            kept, _ = await store.create_investigation(T2, a2.alert_id, "k2", actor="u-1")
+            claimed = await store.claim()
+            await store.finish(T2, kept.investigation_id, stage="completed", disposition="benign", cost_usd=1.0)
+    finally:
+        logging.getLogger(JOBS_AUDIT).removeHandler(lines)
+
+    assert claimed is not None
+    seen = [(line["action"], line["tenant_id"]) for line in lines.lines]
+    assert seen == [("investigation.start", T1), ("investigation.cancel", T1), ("investigation.delete", T1),
+                    ("investigation.start", T2), ("investigation.claim", T2), ("investigation.finish", T2)], seen
+    assert not _log.current_context().get("tenant_id"), "announcing left a tenant bound"
+
+
 async def test_o13_a_claim_is_audited_only_after_its_commit(dsn, caplog):
     """The claim event is emitted when `running` is already visible on another connection. (O13)"""
     audit = JobsAudit(caplog)
@@ -1091,7 +1179,7 @@ async def test_o5_finish_ends_a_running_row_once_and_returns_it(dsn):
     async with job_store(dsn) as store:
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
-        assert (await store.claim()).investigation_id == inv.investigation_id
+        assert (await store.claim()).record.investigation_id == inv.investigation_id
         done = await store.finish(T1, inv.investigation_id, stage="completed", disposition="benign", cost_usd=1.5)
         again = await store.finish(T1, inv.investigation_id, stage="failed", failure_reason="no_report")
 
@@ -1190,7 +1278,7 @@ async def test_o15_a_row_inserted_through_one_store_is_claimed_and_followed_thro
         assert (await b.get_investigation(T1, inv.investigation_id)).stage == "queued"
 
         claimed = await b.claim()
-        assert claimed.investigation_id == inv.investigation_id
+        assert claimed.record.investigation_id == inv.investigation_id
         assert (await a.get_investigation(T1, inv.investigation_id)).stage == "running"
         assert await a.claim() is None  # A cannot claim what B holds
 

@@ -486,3 +486,23 @@ def test_end_tenant_ends_every_membership_and_revokes_every_invitation_as_system
     world.call(world.service.end_tenant, T1, now=world.clock())  # idempotent: nothing left to end
     assert audit.since(mark) == []
     assert bob.get(f"/tenants/{T2}/members").status_code == 200
+
+
+# --- R7-2: unknown query parameters are refused API-wide -------------------------------------------
+
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_r7_2_an_admin_route_refuses_an_undeclared_query_parameter_and_does_nothing(method: str) -> None:
+    """`/admin/tenants?bogus=1` is a 422 problem with `extra_forbidden` at `["query", "bogus"]`; no tenant is made. (R7-2)"""
+    world, ops = _admin_world()
+    before = len(ops.get("/admin/tenants").json()["items"])
+    refused = getattr(ops, method)("/admin/tenants?bogus=1")
+    _problem(refused, 422)
+    assert [(e["type"], e["loc"]) for e in refused.json()["errors"]] == [("extra_forbidden", ["query", "bogus"])]
+    assert len(ops.get("/admin/tenants").json()["items"]) == before
+
+
+def test_r7_2_control_the_same_admin_routes_without_the_parameter_answer() -> None:
+    """Control: the list answers 200 and the create 202 with no query string. (R7-2)"""
+    world, ops = _admin_world()
+    assert ops.get("/admin/tenants").status_code == 200
+    assert ops.post("/admin/tenants").status_code == 202
