@@ -1344,10 +1344,12 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
         real_record(probe, tenant=None, defender_dir=tmp_path, env={}, truncated_by=None, closed_before_cut=False)
     assert wire.called.count("_verb_context") == 2
     wire.called.clear()
+    from defender.tests.integrations.credential_proxy_1163._adapter1163 import ctx_for as _ctx_for
+    from defender.tests.support.tenancy import _tenants1106
     config = {"URL_BASE": "http://store.invalid", "BASTION_HOST": "bastion.invalid"}
     with pytest.raises(AssertionError):  # control: a call through the writer's default deps reaches the tripped transport
         # #1163: `_request` reads `ctx.tenant` first; a tenant whose ticket system is not proxied reaches the transport
-        writer_module.DEFAULT_DEPS.request(config, "POST", "/tickets", {}, ctx=SimpleNamespace(tenant=SimpleNamespace(systems={})))
+        writer_module.DEFAULT_DEPS.request(config, "POST", "/tickets", {}, ctx=_ctx_for(tmp_path, _tenants1106.fixture_run_tenant(), None, None))
     assert wire.called == ["docker_exec_curl"]
     wire.called.clear()
     with pytest.raises(AssertionError):  # control: the process tripwire is live
@@ -1711,11 +1713,28 @@ def test_r6_8_a_job_whose_tenant_is_proxied_but_cannot_sign_is_refused_at_setup(
     assert not (scene.runs / run_id).exists(), "the run folder was made before the refusal"
 
 
-def test_r6_8_a_job_whose_tenant_can_sign_gets_the_read_access_on_its_investigate_call(proxied_scene):
+def _openbao_under_httpx(monkeypatch, accounts):
+    """An OpenBao stand-in beneath the job entry: httpx's default transport (what the production signer's
+    client uses, `job_main` having no issuer seam) hands every request to it. Returns the stand-in."""
+    import httpx
+
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    bao = A.OpenBaoStandIn(accounts)
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request",  # lint-monkeypatch: ok — beneath the job entry, which has no issuer seam; the production signer's client reaches the default transport
+                        lambda _self, request: bao.handle_request(request))
+    return bao
+
+
+def test_r6_8_a_job_whose_tenant_can_sign_gets_the_read_access_on_its_investigate_call(proxied_scene, monkeypatch):
     """Control for the refusal: with a sign login and the address, the same job runs, and its lifecycle is
-    handed the `RequestAccess` the operator path's is (the proxy's address from the environment, a read
-    token to be signed when a call first asks). (R6-8)"""
+    handed the `RequestAccess` the operator path's is: the proxy's address from the environment and a read
+    token signed, when first asked, through the tenant's own sign login at the deployment's OpenBao. (R6-8)"""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.integrations.credential_proxy_1163._target import request_access_type
+
     scene = proxied_scene(sign=True, address=True)
+    bao = _openbao_under_httpx(monkeypatch, {SIGN_ROLE: SIGN_SECRET})
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     seen: list[Any] = []
@@ -1723,23 +1742,31 @@ def test_r6_8_a_job_whose_tenant_can_sign_gets_the_read_access_on_its_investigat
     inner = verified_lifecycle(ran)
 
     def lifecycle(**kw: Any) -> dict[str, Any]:
-        seen.append(kw.get("access"))
+        access = kw.get("access")
+        seen.append(access)
+        if access is not None and callable(access.token):
+            seen.append(access.token())
         return inner(**kw)
 
     got = run_job(scene, run_id, lifecycle=lifecycle, ran=ran)
 
     assert got.raised is None, got
     assert scene.job_end(run_id) == SETTLED
-    (access,) = seen
+    access, token = seen
     assert access is not None, "the job's lifecycle was handed no access: its calls carry no token"
+    assert isinstance(access, request_access_type())
     assert access.proxy_url == PROXY_ADDRESS
-    assert callable(access.token)
+    assert A.SIGNATURE_CANARY in token, "the read token was not signed by OpenBao"
+    assert bao.logins == [(SIGN_ROLE, SIGN_SECRET)], "the token was not minted through the tenant's sign login"
+    assert len(bao.signs) == 1, "positive control: the read token was signed"
+    assert set(bao.origins) == {A.deployment_origin()}, bao.origins
 
 
-def test_r6_8_a_job_whose_tenant_has_no_http_proxy_system_is_handed_no_access_and_needs_no_signing(proxied_scene):
+def test_r6_8_a_job_whose_tenant_has_no_http_proxy_system_is_handed_no_access_and_needs_no_signing(proxied_scene, monkeypatch):
     """Control: no `http-proxy` system, and neither a sign login nor an address, still runs; no access is
     handed (the operator path's #1163 R3). (R6-8)"""
     scene = proxied_scene(sign=False, address=False, proxied=False)
+    bao = _openbao_under_httpx(monkeypatch, {SIGN_ROLE: SIGN_SECRET})
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     seen: list[Any] = []
@@ -1754,4 +1781,6 @@ def test_r6_8_a_job_whose_tenant_has_no_http_proxy_system_is_handed_no_access_an
 
     assert got.raised is None, got
     assert scene.job_end(run_id) == SETTLED
-    assert seen == [None]
+    assert len(seen) == 1, seen
+    assert not seen[0], seen  # no access to sign with, and the job was not refused
+    assert (bao.requests, bao.logins, bao.signs) == ([], [], []), "the signer was contacted"
