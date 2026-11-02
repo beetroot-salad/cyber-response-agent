@@ -8,7 +8,6 @@ import contextvars
 
 
 import json
-import os
 
 
 
@@ -27,8 +26,8 @@ from typing import Any, NamedTuple
 
 from datetime import UTC, datetime, timedelta
 
-from defender.credential_proxy import mint_request_token, request_signer
-from defender.kit.access import PROXY_URL_ENV, AccessDeclaration, RequestAccess
+from defender.credential_proxy import mint_request_token, signing_access
+from defender.kit.access import AccessDeclaration, RequestAccess
 from defender.kit.faults import AdapterFault, ConfigFault
 from defender.records import formats
 
@@ -295,16 +294,16 @@ def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any],
                       if isinstance(tenant.access.get(call.system), AccessDeclaration)})
     if not proxied:
         return None
-    if signer is None:
-        if directory is None:
-            raise ConfigFault("no tenant records were handed to pre-flight to sign its read token with")
-        signer = request_signer(str(tenant.tenant_id), directory=directory, transport=issuer_transport)
+    if directory is None:
+        raise ConfigFault("no tenant records were handed to pre-flight to sign its read token with")
+    signer, address = signing_access(str(tenant.tenant_id), directory=directory, signer=signer,
+                                     proxy_url=proxy_url, transport=issuer_transport)
     token = mint_request_token(
         signer, tenant_id=str(tenant.tenant_id), investigation=source.run_dir.name,
         grant={(system, "r") for system in proxied},
         expires_at=datetime.now(UTC) + timedelta(seconds=PREFLIGHT_TOKEN_SEC))
     # Pre-flight is one short pass: its one token is signed here, not on demand (r7 A20).
-    return RequestAccess(proxy_url or os.environ.get(PROXY_URL_ENV, ""), lambda: token)
+    return RequestAccess(address, lambda: token)
 
 
 

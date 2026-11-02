@@ -72,9 +72,9 @@ from defender.systems.run_tenant import RunTenant  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
 import time  # noqa: E402
 from datetime import UTC, datetime  # noqa: E402
-from defender.credential_proxy import mint_request_token, request_signer  # noqa: E402
-from defender.kit.access import PROXY_URL_ENV, AccessDeclaration, RequestAccess  # noqa: E402
-from defender.kit.faults import AdapterFault  # noqa: E402
+from defender.credential_proxy import mint_request_token, signing_access  # noqa: E402
+from defender.kit.access import AccessDeclaration, RequestAccess  # noqa: E402
+from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
 from defender.systems.verbs import (  # noqa: E402
     ModuleVerbRegistry,
@@ -526,21 +526,11 @@ class _TokenMint:
         if not reads and ticket_system is None:
             return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
                        ticket_system=None)
-        address = proxy_url or os.environ.get(PROXY_URL_ENV)
-        if not address:
-            sys.exit(f"run start refused: a system is reached through the credential proxy, but "
-                     f"its address is not configured ({PROXY_URL_ENV})")
-        tenant_id = str(accepted.id)
-        # Run start's own read of the records it already holds: the sign login is recorded, an
-        # injected signer or not (r8.6). No file is read and nothing is sent (A24' run start).
         try:
-            tenancy.recorded_login(tenancy.live_generation(records, tenant_id),
-                                   tenancy.SIGN_LOGIN, tenant_id)
-        except (tenancy.AppRoleLoginError, tenancy.RecordsUnreachable) as refused:
-            sys.exit(f"run start refused: the request tokens for the credential proxy cannot be "
-                     f"signed: {refused}")
-        if signer is None:
-            signer = request_signer(tenant_id, directory=records, transport=issuer_transport)
+            signer, address = signing_access(str(accepted.id), directory=records, signer=signer,
+                                             proxy_url=proxy_url, transport=issuer_transport)
+        except ConfigFault as refused:
+            sys.exit(f"run start refused: {refused.detail}")
         return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
                    reads=reads, ticket_system=ticket_system)
 

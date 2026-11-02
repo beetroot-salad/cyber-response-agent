@@ -64,7 +64,8 @@ VERBS = {"query": query, "lookup": lookup, "health-check": health_check, "isolat
 '''
 
 
-def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env_url: str | None = None):
+def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env_url: str | None = None,  # noqa: PLR0913
+               proxy_address: bool = True):
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     if env_url is not None:  # operator OpenBao/Vault login material in the launcher's environment
         for name, value in (("VAULT_ADDR", env_url), ("BAO_ADDR", env_url),
@@ -106,7 +107,7 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env
                 tap_holder["tap"] = tap
                 run = S.launch(tmp_path, est, calls=calls, oracle=S.oracle(
                     then=S.submit(idp.payload, S.EMPTY_CLAIM)),
-                    verifier=S.passing_verifier(), issuer_transport=bao, proxy_url=url,
+                    verifier=S.passing_verifier(), issuer_transport=bao, proxy_url=url if proxy_address else None,
                     directory=records)
         outcome = S.read_outcome(run.ep)
     return run, outcome, bao, tap_holder["tap"], merged, wt
@@ -174,3 +175,18 @@ def test_p2_a_working_tree_base_that_differs_from_current_is_drift_unknown_and_s
     assert tap.tokens, "positive control: the proxy was asked"
     assert merged.seen == []
     assert wt.seen == []
+
+
+def test_p3_preflight_with_no_proxy_address_is_refused_once_and_contacts_no_openbao(tmp_path, monkeypatch, data_root):
+    """With no credential proxy address (none handed, none in the environment), pre-flight is REFUSED naming the missing
+    setting, as run start refuses, before any OpenBao login or sign and before any replayed call. A20, A24', H12."""
+    from defender.kit.access import PROXY_URL_ENV
+    monkeypatch.delenv(PROXY_URL_ENV, raising=False)
+    run, outcome, bao, tap, merged, _wt = _preflight(tmp_path, monkeypatch, data_root, working_tree_edit=False,
+                                                     proxy_address=False)
+    assert outcome is not None, run.message
+    assert outcome["outcome"] == "refused", outcome
+    assert PROXY_URL_ENV in outcome["reason"], outcome["reason"]
+    assert (bao.logins, bao.signs) == ([], [])
+    assert tap.tokens == []
+    assert merged.seen == []

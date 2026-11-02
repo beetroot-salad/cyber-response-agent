@@ -17,7 +17,8 @@ cannot be read, is `TransportFault`."""
 from __future__ import annotations
 
 import base64
-from typing import TYPE_CHECKING
+import os
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -25,6 +26,7 @@ from defender import tenancy
 from defender._internal_http import internal_client
 from defender.configuration.issuer import DEPLOYMENT_ISSUER, TRANSIT_MOUNT
 from defender.credential_proxy._openbao import OPENBAO_TIMEOUT_SEC, openbao_fault, transit_key_for
+from defender.kit.access import PROXY_URL_ENV
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 
 if TYPE_CHECKING:
@@ -124,4 +126,26 @@ def request_signer(tenant_id: str, *, directory: TenantDirectory,
     return TenantRequestSigner(str(tenant_id), directory, transport)
 
 
-__all__ = ["TenantRequestSigner", "request_signer"]
+def signing_access(tenant_id: str, *, directory: TenantDirectory, signer: Any = None,
+                   proxy_url: str | None = None,
+                   transport: httpx.BaseTransport | None = None) -> tuple[Any, str]:
+    """The request signer and proxy address a host process (run start, learning pre-flight) mints
+    tenant `tenant_id`'s request tokens with. `ConfigFault`, naming the cause, for a configuration
+    that cannot sign: no proxy address (`proxy_url`, else `DEFENDER_CREDENTIAL_PROXY_URL`), or a
+    live generation in `directory` that records no sign login, whether or not a `signer` is injected
+    (r8.6). Reads the records only, and sends nothing (A24'). The signer is the tenant's own
+    (`request_signer`) unless one is injected."""
+    address = proxy_url or os.environ.get(PROXY_URL_ENV)
+    if not address:
+        raise ConfigFault(f"a system is reached through the credential proxy, but its address is "
+                          f"not configured ({PROXY_URL_ENV})")
+    try:
+        tenancy.recorded_login(tenancy.live_generation(directory, tenant_id), tenancy.SIGN_LOGIN, tenant_id)
+    except (tenancy.AppRoleLoginError, tenancy.RecordsUnreachable) as refused:
+        raise ConfigFault(f"the request tokens for the credential proxy cannot be signed: {refused}") from None
+    if signer is None:
+        signer = request_signer(tenant_id, directory=directory, transport=transport)
+    return signer, address
+
+
+__all__ = ["TenantRequestSigner", "request_signer", "signing_access"]
