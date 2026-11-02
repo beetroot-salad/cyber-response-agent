@@ -15,7 +15,7 @@ the whole record a code session needs; the working notes it was built from are n
   (run start, publish child, report-line vocabulary), `_drain_support.py` (drains, lanes, AppRole
   issuer fake, owner records). Lane helpers over P3 drafts: `support/learning/curation/_curator1134.py`
   (`DraftLane`, `draft_lane`), `_spec773.py`, `_lead_author_1134.py`.
-- Run locally with `flock /tmp/defender-pytest.lock` and `PYTHONPATH=<worktree>`; affected files only.
+- Run locally through the machine's test wrapper with `PYTHONPATH=<worktree>`; affected files only.
 
 ## 1. Design identity
 
