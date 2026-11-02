@@ -321,18 +321,20 @@ def test_the_dev_command_without_a_database_refuses_loudly():
     assert "DEFENDER_DATABASE_DSN" in done.stderr
 
 
-# --- #1342 the jobs schema: revision 0003 on #1214's 0002_tenancy, the lean constraints and nothing more -------------
+# --- #1342 the jobs schema: revision 0004 on #1163's 0003_sign_login, the lean constraints and nothing more ----------
 
 
-def test_the_jobs_revision_sits_directly_on_the_tenancy_revision():
-    """The history is the baseline, `0002_tenancy`, then `0003_jobs` as head (#1342 O1; r6: tenants are #1214's records, so jobs sits on `0002_tenancy`)."""
+def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
+    """The history is the baseline, `0002_tenancy`, `0003_sign_login`, then `0004_jobs` as head (#1342 O1; r6: tenants are
+    #1214's records; jobs follows #1163's revision, the last on main, so the history stays one line)."""
     from defender.migrations import _scripts, head
 
     scripts = _scripts()
-    assert head() == "0003_jobs"
-    assert scripts.get_revision(head()).down_revision == "0002_tenancy"
+    assert head() == "0004_jobs"
+    assert scripts.get_revision(head()).down_revision == "0003_sign_login"
+    assert scripts.get_revision("0003_sign_login").down_revision == "0002_tenancy"
     assert scripts.get_revision("0002_tenancy").down_revision == "0001_baseline"
-    assert [r.revision for r in scripts.walk_revisions()] == ["0003_jobs", "0002_tenancy", "0001_baseline"]
+    assert [r.revision for r in scripts.walk_revisions()] == ["0004_jobs", "0003_sign_login", "0002_tenancy", "0001_baseline"]
 
 
 @pytest.mark.postgres
