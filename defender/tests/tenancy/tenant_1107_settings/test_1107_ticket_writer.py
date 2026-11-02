@@ -5,7 +5,6 @@ import html
 import json
 import logging
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from defender import box as box_mod
@@ -20,19 +19,21 @@ TW_LOGGER = ticket_writer.__name__
 MARKER = "tw1107"
 
 
-#: An `open.status` the loader refuses: a template, so alert text would pick the case's status.
-BAD_OPEN_STATUS = "{summary}"
+#: The ticket the planted alert names (`S.plant_alert`'s `alert_id`, mapped to `case_key`).
+KEY = "a-1107"
+CASE = "ticket"
+CASE_RECORD = "case-record.yaml"
 
 
-def _world(tmp_path: Path, *, marker: str = MARKER, open_status: str = "open",
-           name: str = "tenants") -> tuple[Path, Path, Path]:
+def _world(tmp_path: Path, *, marker: str = MARKER, name: str = "tenants",
+           **plant_kw: Any) -> tuple[Path, Path, Path]:
     """The data-root row, a complete tenant under this test's data root (the one `run.py` reads;
     a second call replaces the first's knowledge whole), and an alert. Returns (data root,
     knowledge folder, alert)."""
     ensure_d9_tenant()
     root = current_data_root()
-    folder = S.plant(root, marker=marker, open_status=open_status)
-    alert = S.plant_alert(tmp_path / f"alert-{name}")
+    folder = S.plant(root, marker=marker, **plant_kw)
+    alert = S.plant_alert(tmp_path / f"alert-{name}", alert_id=KEY)
     return root, folder, alert
 
 
@@ -93,7 +94,7 @@ def _post_calls(shim: S.DockerShim) -> list[list[str]]:
 def test_d_writer_context_from_run(tmp_path, monkeypatch):
     root, folder, alert = _world(tmp_path)
     run_id = "r-ctx"
-    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
+    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok())
     other_tree = tmp_path / "another-defender-tree"
     other_tree.mkdir()
     elsewhere = tmp_path / "some-other-cwd"
@@ -121,20 +122,20 @@ def test_d_writer_context_from_run(tmp_path, monkeypatch):
 def test_o6_missing_config_receipt(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     root_ok, _folder_ok, alert_ok = _world(tmp_path, name="tenants-ok")
-    _shim(tmp_path, monkeypatch, *S.store_answers_ok("r-present"))
+    _shim(tmp_path, monkeypatch, *S.store_answers_ok())
     rc_present, refused_present, _dir, _rec = _run(tmp_path, root_ok, alert_ok,
                                                    run_id="r-present", page=True)
     assert refused_present is None, f"the control run was refused: {refused_present}"
 
     root, folder, alert = _world(tmp_path, name="tenants-missing")
-    S.config_path(folder, "case-history").unlink()
+    S.config_path(folder, CASE).unlink()
     caplog.clear()
     rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-missing", page=True)
     assert refused is None, f"the run was refused over a ticket-config problem: {refused}"
     page = S.page_html(run_dir)
     assert page, "the run page did not render"
     got = S.receipt(run_dir)
-    assert got is not None, "no ticket_write.json for a tenant with no case-history config.env"
+    assert got is not None, "no ticket_write.json for a tenant with no config.env for its case system"
     assert got.get("ok") is False, got
     assert got.get("status") == "error", got
     assert "url" in got, f"url must be null with no config: {got}"
@@ -155,10 +156,10 @@ def test_o6_bad_config_receipt(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     _shim(tmp_path, monkeypatch)
     arms = {
-        "missing-key": ("CASE_HISTORY_BASTION_HOST", lambda f: S.drop_key(
-            f, "case-history", "CASE_HISTORY_BASTION_HOST")),
-        "non-digit-timeout": ("CASE_HISTORY_TIMEOUT_SEC", lambda f: S.set_key(
-            f, "case-history", "CASE_HISTORY_TIMEOUT_SEC", "ten")),
+        "missing-key": ("TICKET_BASTION_HOST", lambda f: S.drop_key(
+            f, CASE, "TICKET_BASTION_HOST")),
+        "non-digit-timeout": ("TICKET_TIMEOUT_SEC", lambda f: S.set_key(
+            f, CASE, "TICKET_TIMEOUT_SEC", "ten")),
     }
     for arm, (bad_key, spoil) in arms.items():
         root, folder, alert = _world(tmp_path, name=f"tenants-{arm}")
@@ -168,7 +169,7 @@ def test_o6_bad_config_receipt(tmp_path, monkeypatch, caplog):
         assert refused is None, f"{arm}: rc={rc} refused={refused}"
         assert rc == 0, f"{arm}: rc={rc} refused={refused}"
         got = S.receipt(run_dir)
-        assert got is not None, f"{arm}: no ticket_write.json for a bad case-history config"
+        assert got is not None, f"{arm}: no ticket_write.json for a bad case-system config"
         assert got.get("ok") is False, f"{arm}: {got}"
         assert got.get("status") == "error", f"{arm}: {got}"
         assert "url" in got, f"{arm}: url must be null: {got}"
@@ -180,31 +181,78 @@ def test_o6_bad_config_receipt(tmp_path, monkeypatch, caplog):
         assert _warnings(caplog), f"{arm}: no warning logged"
 
 
-def test_o6_mapping_fault_receipt(tmp_path, monkeypatch, caplog):
+def test_o6_case_record_fault_receipt(tmp_path, monkeypatch, caplog):
+    """A case-record file the run cannot use: no call, an error receipt naming `case-record.yaml`
+    (no link), the exit code unchanged. O5, run-start flow."""
     caplog.set_level(logging.INFO)
-    run_id = "r-mapping"
-    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
-    root, _folder, alert = _world(tmp_path, open_status=BAD_OPEN_STATUS)
-    rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id)
-    assert refused is None, f"rc={rc} refused={refused}"
-    assert rc == 0, f"rc={rc} refused={refused}"
-    assert not _post_calls(shim), f"a bad mapping still reached a POST: {_post_calls(shim)}"
-    got = S.receipt(run_dir)
-    assert got is not None, "no ticket_write.json for a bad mapping"
-    assert got.get("ok") is False, got
-    assert got.get("status") == "error", got
-    assert str(got.get("url") or "").startswith(f"http://case-history-{MARKER}:8080"), (
-        f"the receipt's url is not the store's: {got}")
-    reason = got.get("reason") or ""
-    assert "mapping" in reason.lower(), f"the reason does not name the mapping problem: {got}"
-    assert _warnings(caplog), "a bad mapping logged no warning"
+    root_ok, _f, alert_ok = _world(tmp_path, name="tenants-ok")
+    shim_ok = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-ok")
+    rc_ok, _refused, ok_dir, _rec = _run(tmp_path, root_ok, alert_ok, run_id="r-ok")
+    assert [c["argv"] for c in shim_ok.calls() if "POST" in c["argv"]], "the control posted nothing"
+    assert (S.receipt(ok_dir) or {}).get("ok") is True, "the control failed"
+
+    for arm, text in CASE_RECORD_FAULTS.items():
+        shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name=f"docker-{arm}")
+        root, folder, alert = _world(tmp_path, name=f"tenants-{arm}")
+        S.case_record_path(folder).write_bytes(text)
+        caplog.clear()
+        rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=f"r-{arm}")
+        assert refused is None, f"{arm}: rc={rc} refused={refused}"
+        assert rc == rc_ok, f"{arm}: the exit code changed: {rc} vs {rc_ok}"
+        assert not _post_calls(shim), f"{arm}: a bad case-record file still reached a POST"
+        got = S.receipt(run_dir)
+        assert got is not None, f"{arm}: no ticket_write.json"
+        assert (got.get("status"), got.get("ok"), got.get("url")) == ("error", False, None), got
+        if arm != "system-not-on-roster":  # which file names a roster miss is not settled (report)
+            assert CASE_RECORD in (got.get("reason") or ""), f"{arm}: the reason does not name the file: {got}"
+        assert _warnings(caplog), f"{arm}: no warning logged"
+
+
+#: Case-record files that cannot stand, as bytes: unparsable, not a mapping, a missing or wrong
+#: member, a system the roster lacks, non-UTF-8.
+CASE_RECORD_FAULTS: dict[str, bytes] = {
+    "unparsable": b"system: [unclosed\ncomment: {\n",
+    "not-a-mapping": b"- system\n- ticket\n",
+    "empty": b"",
+    "no-system": b'comment:\n  body: "{narrative}"\n',
+    "system-not-text": b'system: [ticket]\ncomment:\n  body: "{narrative}"\n',
+    "system-not-on-roster": b'system: "no-such-system"\ncomment:\n  body: "{narrative}"\n',
+    "no-body": b'system: "ticket"\n',
+    "body-not-text": b'system: "ticket"\ncomment:\n  body: 7\n',
+    "non-utf8": b'system: "ticket"\ncomment:\n  body: "\xff\xfe"\n',
+}
+
+
+def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch):
+    """A tenant with no case-record file (or still holding `systems/case-history/`) run with
+    `--update-ticket`: no call, an error receipt naming `case-record.yaml`, no silent ignore. O2, O5."""
+    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok())
+    for arm in ("none", "legacy-folder"):
+        root, folder, alert = _world(tmp_path, name=arm, case_system=None)
+        if arm == "legacy-folder":
+            legacy = S.settings_of(folder) / "systems" / "case-history"
+            legacy.mkdir(parents=True)
+            (legacy / "mapping.yaml").write_text("open:\n  status: open\ncomment:\n  body: x\n",
+                                                 encoding="utf-8")
+        rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=f"r-{arm}")
+        assert refused is None, f"{arm}: rc={rc} refused={refused}"
+        assert rc == 0, f"{arm}: rc={rc}"
+        got = S.receipt(run_dir)
+        assert got is not None, f"{arm}: no receipt for --update-ticket with no case-record file"
+        assert (got["status"], got["ok"]) == ("error", False), got
+        assert CASE_RECORD in (got.get("reason") or ""), got
+    assert not _post_calls(shim), "a call was made for a tenant with no case system"
+
+    root, _folder, alert = _world(tmp_path, name="no-flag", case_system=None)
+    _rc, _ref, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-no-flag", update_ticket=False)
+    assert not S.receipt_path(run_dir).exists(), "a run without --update-ticket wrote a receipt"
 
 
 def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     # Docker answers an unknown context with rc 1 and 'context not found' on stderr, before any
     # request — the request returns no status.
-    _shim(tmp_path, monkeypatch, S.context_not_found(S.context_name(MARKER, "case-history")))
+    _shim(tmp_path, monkeypatch, S.context_not_found(S.context_name(MARKER, CASE)))
     root, _folder, alert = _world(tmp_path)
     rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-transport")
     assert refused is None, f"rc={rc} refused={refused}"
@@ -218,7 +266,7 @@ def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     # The reason is the failing check's own text: docker's 'context not found', or the
     # transport's naming of the context it could not reach.
     assert ("context not found" in reason or "transport" in reason.lower()
-            or S.context_name(MARKER, "case-history") in reason), (
+            or S.context_name(MARKER, CASE) in reason), (
         f"the reason does not name the transport failure: {reason!r}")
     assert _warnings(caplog), "a transport fault logged no warning"
 
@@ -226,7 +274,7 @@ def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
 def test_o6_budget_cut_missing_config_no_receipt(tmp_path, monkeypatch):
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path)
-    S.config_path(folder, "case-history").unlink()
+    S.config_path(folder, CASE).unlink()
     # The control, same tenant, same missing config: an aborted run DOES write the error receipt,
     # so the channel below can see a receipt when one is written.
     _rc, _ref, aborted_dir, _rec = _run(
@@ -247,7 +295,7 @@ def test_o6_budget_cut_missing_config_no_receipt(tmp_path, monkeypatch):
 def test_o6_aborted_missing_config_receipt(tmp_path, monkeypatch):
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path)
-    S.config_path(folder, "case-history").unlink()
+    S.config_path(folder, CASE).unlink()
     rc, refused, run_dir, _rec = _run(
         tmp_path, root, alert, run_id="r-aborted",
         summary=_summary(run_end.TRUNCATED_BY_ABORTED))
@@ -262,40 +310,43 @@ def test_o6_aborted_missing_config_receipt(tmp_path, monkeypatch):
     assert (got.get("reason") or "").strip(), f"no reason: {got}"
 
 
-def test_o6_open_step_no_receipt(tmp_path, monkeypatch, caplog):
-    """open_case_ticket writes no ticket_write.json on any path (missing config, bad config, bad
-    mapping, transport fault) and only warns. The record step is the one receipt writer."""
-    caplog.set_level(logging.INFO)
-    for arm in ("missing-config", "bad-config", "bad-mapping", "transport"):
-        run_id = f"r-open-{arm}"
-        answers = ([S.context_not_found(S.context_name(MARKER, "case-history"))]
-                   if arm == "transport" else [S.answer('{"key": "x"}', "201")])
+def test_o5_run_start_makes_no_call_and_writes_no_receipt_on_any_path(tmp_path, monkeypatch):
+    """Whatever run start finds wrong with the case settings it neither calls the store nor leaves
+    a receipt: the record leg is the only source of one. O1, O5, run-start flow."""
+    for arm in ("ok", "missing-config", "bad-config", "bad-case-record", "no-key", "transport"):
+        answers = ([S.context_not_found(S.context_name(MARKER, CASE))] if arm == "transport"
+                   else S.store_answers_ok())
         shim = _shim(tmp_path, monkeypatch, *answers, name=f"docker-{arm}")
-        root, folder, alert = _world(
-            tmp_path, name=f"tenants-{arm}",
-            open_status=BAD_OPEN_STATUS if arm == "bad-mapping" else "open")
+        root, folder, alert = _world(tmp_path, name=f"tenants-{arm}")
         if arm == "missing-config":
-            S.config_path(folder, "case-history").unlink()
+            S.config_path(folder, CASE).unlink()
         elif arm == "bad-config":
-            S.set_key(folder, "case-history", "CASE_HISTORY_TIMEOUT_SEC", "ten")
-        # run.main's own seam, with the real open step and a record step that does nothing — so
-        # whatever lands at the receipt's name came from the open step.
-        writer = SimpleNamespace(open_case_ticket=ticket_writer.open_case_ticket,
-                                 record_case_ticket=lambda *a, **k: None)
-        rec = S.RunRecorder(tmp_path / "runs" / run_id)
-        caplog.clear()
-        rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec,
-                                  ticket_writer=writer, visualize=rec.visualize)
+            S.set_key(folder, CASE, "TICKET_TIMEOUT_SEC", "ten")
+        elif arm == "bad-case-record":
+            S.case_record_path(folder).write_text("- not\n- a mapping\n", encoding="utf-8")
+        elif arm == "no-key":
+            alert = _alert_without_key(tmp_path / f"alert-nokey-{arm}")
+        seen: list[tuple[int, bool]] = []
+
+        def at_start(run_dir: Path, shim=shim, seen=seen) -> None:
+            seen.append((len(shim.calls()), S.receipt_path(run_dir).exists()))
+
+        rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=f"r-start-{arm}",
+                                          before=at_start)
         assert refused is None, f"{arm}: rc={rc} refused={refused}"
-        assert rc == 0, f"{arm}: rc={rc} refused={refused}"
-        # The channel: the open step RAN and said so (a warning on every failing path; the
-        # transport arm also reached the store).
-        assert _warnings(caplog), f"{arm}: the open step logged no warning — did it run?"
-        if arm == "transport":
-            assert shim.calls(), "transport arm: the open step never reached the store"
-        path = S.receipt_path(rec.run_dir_at)
-        assert not path.exists(), f"{arm}: the open step wrote {path.name}: {path.read_text()!r}"
-        assert not path.is_symlink(), f"{arm}: the open step wrote {path.name}: {path.read_text()!r}"
+        assert seen == [(0, False)], f"{arm}: at the lifecycle, (store calls, receipt) = {seen}"
+        got = S.receipt(run_dir)
+        assert got is not None, f"{arm}: the record leg left no receipt"
+        assert got["ok"] is (arm == "ok"), f"{arm}: {got}"
+
+
+def _alert_without_key(where: Path) -> Path:
+    """An alert whose id field (the mapped `case_key`) is absent."""
+    where.mkdir(parents=True, exist_ok=True)
+    path = where / "alert.json"
+    path.write_text(json.dumps({"rule": {"id": "r-1107", "description": "spec 1107"},
+                                "timestamp": "2026-09-28T00:00:00Z"}), encoding="utf-8")
+    return path
 
 
 def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch, caplog):
@@ -303,28 +354,33 @@ def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch,
     with ok false and a reason, a warning log line, a page line, and the exit code unchanged."""
     caplog.set_level(logging.INFO)
     root, _folder, alert = _world(tmp_path)
-    _shim(tmp_path, monkeypatch, *S.store_answers_ok("r-ok"), name="docker-ok")
+    _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-ok")
     rc_ok, refused_ok, ok_dir, _rec = _run(tmp_path, root, alert, run_id="r-ok", page=True)
     assert refused_ok is None, refused_ok
     control = S.receipt(ok_dir)
     assert control is not None, f"the control failed: a 2xx record step wrote {control}"
     assert control.get("ok") is True, f"the control failed: a 2xx record step wrote {control}"
-    for status in ("403", "503"):
+    for status, words in (("403", ("the store refused", "403")),
+                          ("422", ("the store refused", "422")),
+                          ("404", ("the store refused", "404", "not found")),
+                          ("500", ("the store could not be reached",)),
+                          ("503", ("the store could not be reached",))):
         run_id = f"r-http-{status}"
-        read_back = S.answer(json.dumps({"key": run_id, "status": "open", "comments": []}), "200")
-        _shim(tmp_path, monkeypatch, read_back,
-              S.answer(json.dumps({"detail": f"store refused {status}"}), status),
-              name=f"docker-{status}")
+        shim = _shim(tmp_path, monkeypatch,
+                     S.answer(json.dumps({"detail": f"store said {status}"}), status),
+                     name=f"docker-{status}")
         caplog.clear()
         rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id, page=True)
         assert refused is None, f"HTTP {status}: refused {refused}"
+        assert len([c for c in shim.calls() if "POST" in c["argv"]]) == 1, (
+            f"HTTP {status}: positive control, the comment was sent once")
         page = S.page_html(run_dir)
         assert page, f"HTTP {status}: the run page did not render"
         got = S.receipt(run_dir)
         assert got is not None, f"HTTP {status}: {got}"
-        assert got.get("ok") is False, f"HTTP {status}: {got}"
-        reason = got.get("reason") or ""
-        assert reason.strip(), f"HTTP {status}: no reason on the receipt: {got}"
+        assert (got.get("key"), got.get("status"), got.get("ok")) == (KEY, "error", False), got
+        reason = (got.get("reason") or "")
+        assert all(w in reason.lower() for w in words), f"HTTP {status}: reason {reason!r}"
         assert _warnings(caplog), f"HTTP {status}: no warning logged"
         assert _ticket_line_near(page, reason, got["key"]), (
             f"HTTP {status}: the run page shows no ticket line for the failed record")
@@ -335,7 +391,7 @@ def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog
     caplog.set_level(logging.INFO)
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path, name="tenants-bad")
-    S.drop_key(folder, "case-history", "CASE_HISTORY_BASTION_HOST")
+    S.drop_key(folder, CASE, "TICKET_BASTION_HOST")
     caplog.clear()
     _rc, _ref, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-bad")
     got = S.receipt(run_dir)
@@ -354,9 +410,7 @@ def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog
     # gives says so. The writer never asks, so the record lands as on any case (#1221).
     root2, _folder2, alert2 = _world(tmp_path, name="tenants-closed")
     run_id = "r-closed"
-    shim2 = _shim(tmp_path, monkeypatch,
-                  S.answer(json.dumps({"key": run_id, "status": "closed", "comments": []}), "200"),
-                  name="docker-closed")
+    shim2 = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-closed")
     _rc2, _ref2, run_dir2, _rec2 = _run(tmp_path, root2, alert2, run_id=run_id)
     recorded = S.receipt(run_dir2)
     assert recorded is not None, "a closed case's record wrote no receipt"
@@ -376,7 +430,7 @@ def test_s7_nf24_receipt_write_failure_is_harmless(tmp_path, monkeypatch, caplog
 
     # A directory squatting the receipt's name: a real input the guarded replace cannot write
     # over. The record step itself succeeds against the store.
-    _shim(tmp_path, monkeypatch, *S.store_answers_ok("r-squat"), name="docker-squat")
+    _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-squat")
 
     def squat(run_dir: Path) -> None:
         S.receipt_path(run_dir).mkdir()
@@ -429,12 +483,12 @@ def test_s7_mf12_no_receipt_branch_clears_stale_receipt(tmp_path, monkeypatch):
 
 
 def test_o1_ticket_writer_ignores_env(tmp_path, monkeypatch):
-    """With CASE_HISTORY_URL_BASE exported, the record step's request URL and the receipt's url are
+    """With TICKET_URL_BASE exported, the record step's request URL and the receipt's url are
     the tenant file's."""
-    exported = "http://exported-case-history-1107:1"
-    monkeypatch.setenv("CASE_HISTORY_URL_BASE", exported)
+    exported = "http://exported-ticket-1107:1"
+    monkeypatch.setenv("TICKET_URL_BASE", exported)
     run_id = "r-o1"
-    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
+    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok())
     root, _folder, alert = _world(tmp_path)
     rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id)
     assert refused is None, f"rc={rc} refused={refused}"
@@ -442,9 +496,9 @@ def test_o1_ticket_writer_ignores_env(tmp_path, monkeypatch):
     calls = shim.calls()
     assert calls, "the record step reached the store through no docker child"
     # The variable was exported and reached the run env (it is passed through untouched).
-    assert calls[0]["env"].get("CASE_HISTORY_URL_BASE") == exported, (
+    assert calls[0]["env"].get("TICKET_URL_BASE") == exported, (
         "the exported variable never reached the run env — the fixture does not discriminate")
-    file_base = f"http://case-history-{MARKER}:8080"
+    file_base = f"http://ticket-{MARKER}:8080"
     for call in calls:
         url = S.curl_url(call["argv"]) or ""
         assert url.startswith(file_base), (
@@ -459,7 +513,7 @@ def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
     root, folder, alert = _world(tmp_path)
     # The run folder is rebuilt below from this id, so it is the canonical UUID the recorder uses.
     run_id = fixture_uuid("r-atomic")
-    _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
+    _shim(tmp_path, monkeypatch, *S.store_answers_ok())
     _run(tmp_path, root, alert, run_id=run_id)
     run_dir = tmp_path / "runs" / run_id
     path = S.receipt_path(run_dir)
@@ -469,7 +523,7 @@ def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
     old_inode = path.stat().st_ino
     # A reader holding the file open across the next write.
     with path.open("rb") as reader:
-        S.config_path(folder, "case-history").unlink()
+        S.config_path(folder, CASE).unlink()
         _run(tmp_path, root, alert, run_id=run_id)
         held = reader.read()
     assert held == old_bytes, "the second write changed the bytes under an open reader (in place)"
@@ -507,7 +561,7 @@ def test_s7_f6_run_env_handed_to_the_ticket_writer(tmp_path, monkeypatch):
     monkeypatch.setenv(marker_var, marker_value)
     root, _folder, alert = _world(tmp_path)
     run_id = "r-f6"
-    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
+    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok())
     rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id)
     assert refused is None, f"rc={rc} refused={refused}"
     assert rc == 0, f"rc={rc} refused={refused}"
