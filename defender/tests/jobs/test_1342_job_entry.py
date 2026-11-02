@@ -1,6 +1,6 @@
 """#1342 the child's job entry (`run.job_main`, `run.py --job`): run setup in the job lane (O6, M1, M5),
 the job-end record's facts (O8 child side, M3), the sidecar split, no outside write (M4), the job lane
-never running unsandboxed (R2), and the child's death-tie setup (O7). No database: the worker is not here.
+never running unsandboxed (R2), and the child's death-tie setup (O7). The tenant is a `tenancy.tenants` row (r6): a migrated database, `DEFENDER_DATABASE_DSN` set, no worker here.
 
 In-process cases drive `job_main` with the real `materialize` over a published fixture tenant, a
 planted launch record and alert file, and a lifecycle seam. Death-tie cases run `_job_entry1342.py`
@@ -37,8 +37,11 @@ from defender.tests.support.jobs._jobs1342 import (
     ZWNBSP_ALERT_BYTES,
     TITLE,
     WORKTREE,
+    register_tenant,
+    restate_tenant,
     tree,
 )
+from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
 ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
@@ -46,8 +49,8 @@ OTHER_TENANT = str(uuid.UUID(int=0x1342))
 SETTLED = {"setup": "done", "box": "started", "report_committed": True, "scrub_verified": True}
 
 
-pytestmark = pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="reads /proc/self/fd and uses prctl(PR_SET_PDEATHSIG), Linux only")
+pytestmark = [pytest.mark.postgres, pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="reads /proc/self/fd and uses prctl(PR_SET_PDEATHSIG), Linux only")]
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +73,7 @@ class Scene:
     t: Any
     runs: Path
     token: str = field(default_factory=lambda: uuid.uuid4().hex)  # the worker-minted box token (r5 C1)
+    dsn: str = ""  # the database holding this tenant's record (r6)
 
     def launch_doc(self, run_id: str, **over: Any) -> dict[str, Any]:
         return {"investigation_id": run_id, "tenant_id": self.t.tenant_id, "alert_id": str(uuid.uuid4()),
@@ -96,15 +100,17 @@ class Scene:
 
 
 @pytest.fixture
-def scene(tmp_path, monkeypatch):
+def scene(tmp_path, monkeypatch, migrated_database):
     root = tmp_path / "data"
     root.mkdir()
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)  # the entry reads tenant records here (R6-2)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root)  # active, wired to the fixture's own origin
         runs = root / t.tenant_id / "runs"
         runs.mkdir(exist_ok=True)
-        yield Scene(root, t, runs)
+        yield Scene(root, t, runs, dsn=migrated_database)
 
 
 @dataclass
@@ -474,17 +480,57 @@ def test_o6_an_alert_that_admission_refuses_is_refused_and_recorded_even_with_a_
     assert scene.job_end(run_id)["setup"] == "refused"
 
 
-def test_m1_a_tenant_acceptance_refusal_is_recorded_as_setup_refused(scene):
-    """The door is opened before tenant acceptance, so a tenant the host refuses still leaves the record. (M1)"""
+REFUSED = {"setup": "refused", "box": "not_started", "report_committed": False, "scrub_verified": False}
+
+
+@pytest.mark.parametrize("record", ["creating", "offboarding", "offboarded", "no wiring", "no record", "records unreachable"])
+def test_m1_a_tenant_acceptance_refusal_is_recorded_as_setup_refused(scene, monkeypatch, record):
+    """The door is opened before tenant acceptance, so a tenant the host refuses (any non-active state, no wiring, no record, unreachable records) leaves `setup: refused`, not `crashed`. (M1, R6-1)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
-    (scene.root / scene.t.tenant_id / "tenant.json").write_text("{", encoding="utf-8")
+    if record == "records unreachable":
+        monkeypatch.setenv("DEFENDER_DATABASE_DSN", "postgresql://nobody@127.0.0.1:1/none?connect_timeout=2")
+    elif record == "no record":
+        execute(scene.dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (scene.t.tenant_id,))
+        execute(scene.dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (scene.t.tenant_id,))
+    else:
+        restate_tenant(scene.dsn, scene.t.tenant_id, state="active" if record == "no wiring" else record,
+                       wiring=record != "no wiring", data_root=scene.root)
+    if record not in ("records unreachable", "no record"):  # premise: the records are there to be read
+        assert execute(scene.dsn, "SELECT count(*) FROM tenancy.tenants WHERE id = %s", (scene.t.tenant_id,)) == [(1,)]
 
     ran = run_job(scene, run_id)
 
+    assert ran.raised is None, f"a refusal was a crash: {ran.raised!r}"
     assert ran.calls["lifecycle"] == 0
-    assert scene.job_end(run_id) == {"setup": "refused", "box": "not_started",
-                                     "report_committed": False, "scrub_verified": False}
+    assert scene.job_end(run_id) == REFUSED
+
+
+def test_r6_6_the_job_end_record_is_written_while_the_entry_still_holds_its_tenant_acceptance(scene, monkeypatch):
+    """When the entry's tenant acceptance ends, the job-end record is already written, and until that moment an exclusive try-once on the tenant's host lock fails and the entry is a recorded holder. (R6-6)"""
+    from defender.systems.run_tenant import Admitted
+    from defender.tenancy import host_lock
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    at_release: list[tuple[bool, bool, bool]] = []
+    real_exit = Admitted.__exit__
+
+    def exit_recording_the_state(self: Any, *exc: object) -> None:
+        fd = host_lock.acquire(scene.root, scene.t.tenant_id, exclusive=True, timeout=0)
+        host_lock.release_lock(fd)
+        at_release.append((scene.job_end(run_id) is not None, fd is None,
+                           os.getpid() in [h.pid for h in host_lock.holders(scene.root, scene.t.tenant_id)]))
+        real_exit(self, *exc)
+
+    monkeypatch.setattr(Admitted, "__exit__", exit_recording_the_state)  # lint-monkeypatch: ok — the acceptance's release is the only point that orders "record written" against "lock given back"; the real release runs
+
+    ran = run_job(scene, run_id)
+
+    assert scene.job_end(run_id) == SETTLED, ran.message
+    assert at_release, "premise: the entry's acceptance ended through `with admitted:`"
+    assert at_release[-1] == (True, True, True), \
+        f"at the acceptance's release (record written, lock still held, entry a holder): {at_release}"
 
 
 def test_m1_a_preflight_that_returns_non_zero_is_a_refusal(scene):
@@ -1370,7 +1416,7 @@ def _child_cmd(s: Scene, marks: Path, run_id: str, parent: int, mode: str = "hol
 
 
 def _env(s: Scene) -> dict[str, str]:
-    return {**os.environ, "DEFENDER_DATA_ROOT": str(s.root),
+    return {**os.environ, "DEFENDER_DATA_ROOT": str(s.root), "DEFENDER_DATABASE_DSN": s.dsn,
             "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
 
 
@@ -1492,18 +1538,19 @@ def test_o7_a_child_whose_given_parent_is_not_its_parent_exits_at_once(scene, tm
 # --- one real `run.py --job` on a setup refusal (no model) -------------------------------------------------------
 
 @pytest.mark.parametrize("spelling", ["two-words", "equals"])
-def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path, spelling):
+def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path, spelling, migrated_database):
     """`run.py --job <id>` and `--job=<id>` with no launch record: exit 1 naming it, nothing made, the job-end record says what failed. (O6)"""
     root = tmp_path / "data"
     root.mkdir()
     run_id = str(uuid.uuid4())
     with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root)
         runs = root / t.tenant_id / "runs"
         runs.mkdir(exist_ok=True)
         proc = subprocess.run(  # noqa: S603 — the real run entry
             [sys.executable, str(DEFENDER / "run.py"), *(["--job", run_id] if spelling == "two-words" else [f"--job={run_id}"]),
              "--tenant", t.tenant_id, "--parent-pid", str(os.getpid())],
-            env={**os.environ, "DEFENDER_DATA_ROOT": str(root),
+            env={**os.environ, "DEFENDER_DATA_ROOT": str(root), "DEFENDER_DATABASE_DSN": migrated_database,
                  "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"},
             cwd=str(WORKTREE), capture_output=True, text=True, timeout=180, check=False)
 

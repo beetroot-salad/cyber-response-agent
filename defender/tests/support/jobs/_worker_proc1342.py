@@ -10,7 +10,7 @@ import json
 import sys
 from pathlib import Path
 
-from defender.tests.support.jobs._jobs1342 import ScriptedChild, StandInContainers, fixed_clock
+from defender.tests.support.jobs._jobs1342 import ScriptedChild, StandInContainers, fixed_clock, tenant_directory
 
 
 def _child(config: dict):
@@ -32,6 +32,7 @@ async def _main(config: dict) -> None:
     try:
         worker = Worker(store, data_root=Path(config["data_root"]), child_argv=_child(config),
                         containers=StandInContainers(Path(config["containers"])), slots=3,
+                        directory=tenant_directory(config["dsn"]),
                         clock=fixed_clock, stop_grace=config.get("stop_grace", 30.0))
         Path(config["ready"]).touch()
         await worker.serve()

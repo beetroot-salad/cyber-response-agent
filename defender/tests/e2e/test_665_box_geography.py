@@ -296,10 +296,10 @@ def test_a_start_given_a_token_stamps_that_token_and_an_operator_start_mints_its
     """`start_box(..., start_token=T)` stamps exactly T on the create argv (#1342 r5 C1); without one the box mints a fresh token. (#1342 r5 C1)"""
     given = "ab" * 16
     rec = RecordingDocker()
-    box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, start_token=given)
+    box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=given)
     assert rec.create_label(box_mod.START_TOKEN_LABEL) == given
     minted = RecordingDocker()
-    box_mod.start_box(make_run_dir(tmp_path / "second"), DEFENDER, docker=minted)
+    box_mod.start_box(make_run_dir(tmp_path / "second"), DEFENDER, docker=minted, tenant_id=TEST_TENANT)
     assert minted.create_label(box_mod.START_TOKEN_LABEL) not in (None, "", given)
 
 
@@ -331,7 +331,7 @@ def test_a_create_fault_reaps_only_a_container_carrying_the_token_the_start_was_
     """The create-fault arm owns the token the caller handed in: a leftover with exactly it is reaped; one with another, a near-miss or no token survives. (#1342 r5 C1)"""
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token=_HOLDERS[holder])
     with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, start_token=_GIVEN)
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
     assert reaped_after_create(rec.calls) is (holder == "the given token")
 
 
@@ -342,7 +342,7 @@ def test_a_create_fault_leaves_a_container_whose_token_differs_in_any_one_charac
         near = _GIVEN[:at] + digits[(digits.index(_GIVEN[at]) + 1) % 16] + _GIVEN[at + 1:]
         rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token=near)
         with pytest.raises(box_mod.BoxFault):
-            box_mod.start_box(make_run_dir(tmp_path / f"at{at}"), DEFENDER, docker=rec, start_token=_GIVEN)
+            box_mod.start_box(make_run_dir(tmp_path / f"at{at}"), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
         assert not reaped_after_create(rec.calls), f"a container differing at position {at} was removed"
 
 
@@ -363,7 +363,7 @@ def test_a_create_fault_leaves_a_container_whose_token_is_the_given_one_with_som
     """The given token with a hyphen, underscore, mark or space added before, inside or after it is another token: the leftover survives. (#1342 r5 C1)"""
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token=_DECORATED[holder])
     with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, start_token=_GIVEN)
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
     assert not reaped_after_create(rec.calls)
 
 
@@ -371,7 +371,7 @@ def test_a_create_fault_whose_leftover_label_cannot_be_read_does_not_reap_it(tmp
     """A container holds the name but the daemon fails the label read: ownership is unproven, so the create-fault arm leaves it (the start still fails with the create fault). (#1342 r5 C1, #1279 O6)"""
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self", label_unreadable=True)
     with pytest.raises(box_mod.BoxFault) as excinfo:
-        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, start_token=_GIVEN)
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
     assert _SHIM_FAULT["stderr"] in str(excinfo.value)
     assert not reaped_after_create(rec.calls), "a container whose owner could not be read was removed"
 

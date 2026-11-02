@@ -28,6 +28,7 @@ from defender.tests.support.jobs._jobs1342 import (
     job_end,
     job_store,
     register_tenant,
+    tenant_directory,
     row,
 )
 
@@ -37,8 +38,9 @@ SUPPORT = DEFENDER / "tests" / "support" / "jobs"
 IDLE_BEFORE_QUEUING = 4.0  # seconds the serving worker idles first: several fixed poll intervals (M10)
 
 
-def _env(data_root: Path) -> dict[str, str]:
-    return {**os.environ, "DEFENDER_DATA_ROOT": str(data_root),
+def _env(data_root: Path, dsn: str) -> dict[str, str]:
+    """The worker's environment: its children inherit it, so they read tenant records from `dsn` (r6 R6-2)."""
+    return {**os.environ, "DEFENDER_DATA_ROOT": str(data_root), "DEFENDER_DATABASE_DSN": dsn,
             "PYTHONPATH": f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
 
 
@@ -65,7 +67,7 @@ def worker_process(tmp_path: Path, config: dict) -> Iterator[subprocess.Popen]:
     path.write_text(json.dumps({**config, "ready": str(ready)}), encoding="utf-8")
     proc = subprocess.Popen(  # noqa: S603 — the test's own worker process
         [sys.executable, str(SUPPORT / "_worker_proc1342.py"), str(path)],
-        env=_env(Path(config["data_root"])), cwd=str(WORKTREE), stderr=subprocess.PIPE)
+        env=_env(Path(config["data_root"]), config["dsn"]), cwd=str(WORKTREE), stderr=subprocess.PIPE)
     try:
         _wait(lambda: ready.exists() or proc.poll() is not None, timeout=120, what="the worker")
         assert ready.exists(), f"the worker died at start: {proc.stderr.read().decode(errors='replace')[-2000:]}"
@@ -147,7 +149,7 @@ async def test_o7_killing_the_worker_ends_the_child_through_its_unwind_but_leave
     dsn, root = migrated_database, tmp_path / "data"
     root.mkdir()
     with B.run_tenant(tmp_path, root) as t:
-        register_tenant(dsn, t.tenant_id)
+        register_tenant(dsn, t.tenant_id, data_root=root)
         async with job_store(dsn) as store:
             alert = await an_alert(store, t.tenant_id)
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
@@ -173,7 +175,7 @@ async def test_o7_stopping_the_worker_terminates_the_child_removes_the_box_and_l
     dsn, root = migrated_database, tmp_path / "data"
     root.mkdir()
     with B.run_tenant(tmp_path, root) as t:
-        register_tenant(dsn, t.tenant_id)
+        register_tenant(dsn, t.tenant_id, data_root=root)
         async with job_store(dsn) as store:
             alert = await an_alert(store, t.tenant_id)
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
@@ -281,6 +283,7 @@ async def test_o7_serve_takes_sigterm_itself_and_returns(migrated_database, tmp_
     try:
         async with job_store(migrated_database) as store:
             worker = make_worker(store, Path("/nonexistent-root"), lambda launch: [sys.executable],
+                                 directory=tenant_directory(migrated_database),
                                  containers=StandInContainers(tmp_path / "containers"))
             serving = asyncio.create_task(worker.serve())
             await asyncio.sleep(0.5)

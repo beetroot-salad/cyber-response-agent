@@ -55,9 +55,26 @@ TITLE = "SSH success after failures"
 DESCRIPTION = "Three failures then a success from one source."
 
 
-def register_tenant(dsn: str, tenant_id: str) -> None:
-    """The tenant row #1339 owns, inserted directly (the identity service is not under test)."""
-    execute(dsn, "INSERT INTO identity.tenants (id, created_at) VALUES (%s, %s)", (tenant_id, NOW))
+def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: bool = True,
+                    data_root: Path | None = None) -> None:
+    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6)."""
+    from defender.tests.support.tenancy._active1214 import insert_active_tenant
+
+    insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
+
+
+def restate_tenant(dsn: str, tenant_id: str, *, state: str, wiring: bool = True, data_root: Path | None = None) -> None:
+    """Replace `tenant_id`'s record by one in `state` (a case's premise: do it before any alert names the tenant)."""
+    execute(dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant_id,))
+    execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
+    register_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
+
+
+def tenant_directory(dsn: str) -> Any:
+    """A `TenantDirectory` over the same database rows `register_tenant` wrote (r6 R6-4: what a worker's `directory=` must agree with)."""
+    from defender.tests.support.tenancy._active1214 import postgres_directory
+
+    return postgres_directory(dsn)
 
 
 def fixed_clock() -> dt.datetime:
@@ -352,7 +369,7 @@ def fd_identity(fd: int) -> list[int]:
     return [found.st_dev, found.st_ino]
 
 
-def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], *,
+def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], *, directory: Any,
                 containers: Any = None, slots: int = 3, stop_grace: float | None = None) -> Any:
     from defender.worker import Worker
 
@@ -367,7 +384,7 @@ def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], 
         containers = StandInContainers(beside / "containers")
     extra = {} if stop_grace is None else {"stop_grace": stop_grace}
     return Worker(store, data_root=data_root, child_argv=child,
-                  containers=containers,
+                  containers=containers, directory=directory,
                   slots=slots, clock=fixed_clock, **extra)
 
 
