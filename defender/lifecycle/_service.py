@@ -363,8 +363,13 @@ class ManagementService(Actor):
         """Every secret id of both AppRoles but the ones the host installed is destroyed (P1, RC-9,
         A24'); the new generation goes live, the one before it `retiring` (DC-5)."""
         gen = await self._building(held)
-        if not gen.secret_accessor or not gen.sign_approle or not gen.sign_secret_accessor:
+        if not gen.secret_accessor:
             raise StepFailed("the host recorded no installed secret")
+        if not gen.sign_secret_accessor:
+            # Installed before the sign login existed (a job in flight across the upgrade, r8.5): back
+            # to `wrap`, which makes the sign chain and wraps both secrets for a fresh install.
+            await held.commit(step="wrap", actor=SERVICE)
+            return
         await self._sweep_secret_ids(gen.approle, keep=gen.secret_accessor)
         await self._sweep_secret_ids(gen.sign_approle, keep=gen.sign_secret_accessor)
         await self._commit_next(held, go_live=gen.salt)
