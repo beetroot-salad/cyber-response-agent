@@ -28,9 +28,12 @@ def _decl(up, writes=WRITES):
 
 @contextmanager
 def _published(scratch, root, decl):
-    """The fixture tenant (its case-record file names `ticket`) with `ticket` on `http-proxy`."""
-    with published_tenant(scratch, root=root,
-                          files=A.system_files(SYSTEM, decl, env_extra=KEY_PATTERN)) as t:
+    """The fixture tenant (its case-record file names `ticket`) with `ticket` on `http-proxy`;
+    `decl=None` leaves `ticket` with no `access.yaml` at all."""
+    files = A.system_files(SYSTEM, decl or "", env_extra=KEY_PATTERN)
+    if decl is None:
+        files[H.ACCESS_FILE.format(system=SYSTEM)] = None
+    with published_tenant(scratch, root=root, files=files) as t:
         yield t
 
 
@@ -130,12 +133,13 @@ def test_t3_failures_are_text_in_the_receipt_and_carry_no_credential(tmp_path, d
 
 def test_t6_an_access_file_with_no_write_route_is_named_by_the_receipt_and_nothing_is_sent(
         tmp_path, data_root):
-    """A case system on `http-proxy` whose `access.yaml` declares no write route (or is
-    unparsable): the leg's own judgement names `systems/ticket/access.yaml` in the receipt and
-    makes no call, not even to the proxy. D-16, O5."""
-    for label in ("no write route", "unparsable"):
+    """A case system on `http-proxy` whose `access.yaml` declares no write route, is unparsable or
+    is absent: the leg's own judgement names `systems/ticket/access.yaml` in the receipt and makes
+    no call, not even to the proxy. D-16, O5."""
+    for label in ("no write route", "unparsable", "absent"):
         with H.upstream() as up:
-            decl = _decl(up, writes=()) if label == "no write route" else "access: [unclosed\n"
+            decl = {"no write route": _decl(up, writes=()), "unparsable": "access: [unclosed\n",
+                    "absent": None}[label]
             with _published(tmp_path / label / "forge", data_root, decl) as t:
                 store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
                 tok = T.token(t.tenant_id, {(SYSTEM, "rw")})

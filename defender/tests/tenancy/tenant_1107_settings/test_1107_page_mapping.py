@@ -423,6 +423,8 @@ def test_d_case_record_error_consumers(tmp_path, caplog):
     assert got["ok"] is False, got
     assert got["url"] is None, got
     assert "case-record.yaml" in got["reason"], got
+    for host in {str(folder), str(folder.resolve()), str(root), str(root.resolve())}:
+        assert host not in got["reason"], f"the reason carries the host path {host}: {got['reason']!r}"
     assert shim.calls() == [], "a docker child ran off a bad case-record file"
 
 

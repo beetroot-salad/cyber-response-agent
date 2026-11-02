@@ -110,6 +110,8 @@ def test_run_start_bad_case_settings_make_no_call_and_name_the_file(tmp_path, mo
     assert got is not None, "no receipt"
     assert (got["key"], got["status"], got["ok"]) == (C.TICKET_KEY, C.ERROR, False), got
     assert "config.env" in (got.get("reason") or ""), got
+    for host in (str(folder), str(folder.resolve()), str(root), str(root.resolve())):
+        assert host not in got["reason"], f"the reason carries the host path {host}: {got['reason']!r}"
 
 
 def test_o7_a_forced_close_escalates_and_the_posted_comments_row_is_keyed_on_the_ticket(

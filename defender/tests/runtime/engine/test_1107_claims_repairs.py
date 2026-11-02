@@ -31,8 +31,11 @@ def test_a_fifo_at_a_config_path_is_a_fault_not_a_hang(tmp_path):
     os.mkfifo(fifo)
     with pytest.raises(S.config_fault()):
         ts.read_env_file(fifo, shown="the tenant's settings/systems/x/config.env")
-    # The case-record file's own FIFO arm (the record leg must not hang on it) moved with the
-    # retired mapping loader: `test_1107_ticket_writer.py::test_o5_a_fifo_at_the_case_record_path_...`.
+    # The case-record file's FIFO arm is retired, not moved: acceptance's special-file walk refuses
+    # a FIFO anywhere in a tenant's knowledge (pinned by `tenancy/tenant_1120_piece1/
+    # test_1120_accept_tenant.py::test_1120_accept_tenant_refuses_a_fifo_socket_or_device_inside_
+    # either_half_without_opening_it`), and no export or run copy can hold one. The leg reads the
+    # run-start record (D-18), so it never re-reads the file.
 
 
 def test_huge_timeout_is_a_config_fault(tmp_path):

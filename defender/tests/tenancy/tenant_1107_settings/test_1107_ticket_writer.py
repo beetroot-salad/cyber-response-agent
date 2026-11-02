@@ -4,11 +4,9 @@ from __future__ import annotations
 import html
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 from defender import box as box_mod
 from defender.records import RunPaths
@@ -207,6 +205,8 @@ def test_o6_case_record_fault_receipt(tmp_path, monkeypatch, caplog):
         assert got is not None, f"{arm}: no ticket_write.json"
         assert (got.get("status"), got.get("ok"), got.get("url")) == ("error", False, None), got
         assert CASE_RECORD in (got.get("reason") or ""), f"{arm}: the reason does not name the file: {got}"
+        for host in _host_paths(folder, root):
+            assert host not in got["reason"], f"{arm}: the reason carries {host}: {got['reason']!r}"
         assert _warnings(caplog), f"{arm}: no warning logged"
 
 
@@ -224,41 +224,6 @@ CASE_RECORD_FAULTS: dict[str, bytes] = {
     "body-not-text": b'system: "ticket"\ncomment:\n  body: 7\n',
     "non-utf8": b'system: "ticket"\ncomment:\n  body: "\xff\xfe"\n',
 }
-
-
-@pytest.mark.skipif(not hasattr(os, 'mkfifo'), reason="needs mkfifo")
-def test_o5_a_fifo_at_the_case_record_path_is_a_receipt_not_a_hang(tmp_path, monkeypatch):
-    """A FIFO where `case-record.yaml` belongs is an error receipt naming it, with no call, and
-    the leg never blocks on it (it was `load_case_mapping`'s FIFO guard). O5, #1107."""
-    import threading
-
-    shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok())
-    root, folder, alert = _world(tmp_path, name="fifo")
-    path = S.case_record_path(folder)
-    path.unlink()
-    os.mkfifo(path)
-    blocked = threading.Event()
-
-    def unblock() -> None:  # a regression that opens it as a file blocks here; this frees it
-        blocked.set()
-        with open(path, "wb"):
-            pass
-
-    watchdog = threading.Timer(10, unblock)
-    watchdog.daemon = True
-    watchdog.start()
-    try:
-        rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id="r-fifo")
-    finally:
-        watchdog.cancel()
-    assert not blocked.is_set(), "the record leg blocked on a FIFO at the case-record path"
-    assert refused is None, f"rc={rc} refused={refused}"
-    assert rc == 0, f"rc={rc} refused={refused}"
-    assert not _post_calls(shim), "a FIFO case-record file still reached a POST"
-    got = S.receipt(run_dir)
-    assert got is not None, "no ticket_write.json"
-    assert (got.get("status"), got.get("ok"), got.get("url")) == ("error", False, None), got
-    assert CASE_RECORD in (got.get("reason") or ""), got
 
 
 def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch):
@@ -279,6 +244,8 @@ def test_o5_no_case_record_file_leaves_a_receipt_naming_it(tmp_path, monkeypatch
         assert got is not None, f"{arm}: no receipt for --update-ticket with no case-record file"
         assert (got["status"], got["ok"]) == ("error", False), got
         assert CASE_RECORD in (got.get("reason") or ""), got
+        for host in _host_paths(folder, root):
+            assert host not in got["reason"], f"{arm}: the reason carries {host}: {got['reason']!r}"
     assert not _post_calls(shim), "a call was made for a tenant with no case system"
 
     root, _folder, alert = _world(tmp_path, name="no-flag", case_system=None)
@@ -297,10 +264,8 @@ def _sent_body(argv: list[str]) -> str:
 
 def test_o8_edits_to_the_case_settings_after_run_start_change_nothing_the_comment_carries(
         tmp_path, monkeypatch):
-    """The leg uses the case settings recorded at run start (#1107 mf16): editing
-    `case-record.yaml` (body and system) or the system's `config.env` (its address) during the
-    run changes neither the comment's body, nor its system, nor its target. Control: the same
-    body planted before the run starts is what is sent. D-18."""
+    """Editing the tenant's case-record.yaml or the system's config.env under the data root during
+    a run changes nothing the comment carries; control: the body planted before start is sent. D-18."""
     edited_body = "EDITED-BODY {disposition}"
     control_shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-control")
     root, _folder, alert = _world(tmp_path, name="control", case_body=edited_body)

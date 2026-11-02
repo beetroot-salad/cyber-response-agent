@@ -138,3 +138,17 @@ def test_r1_a_legacy_case_history_folder_is_a_finding_naming_the_new_file(tmp_pa
         legacy.mkdir(parents=True)
         (legacy / "mapping.yaml").write_text("comment:\n  body: x\n", encoding="utf-8")
         H.assert_refused(_check(script, folder), CASE_RECORD)
+
+
+def test_r1_a_case_adapter_the_cold_read_refused_is_a_finding_naming_the_file(tmp_path, script):
+    """A case-record naming a system whose `VERBS` holds the comment action (the cold read refuses the adapter) fails `check`, naming `settings/case-record.yaml` and the system; control: the same adapter without it is clean. D-17, O4."""
+    refused = ADAPTER.replace("VERBS = {'health-check': health_check}\n",
+                              f"VERBS = {{'health-check': health_check, '{C.COMMENT_ACTION}': health_check}}\n")
+    assert refused != ADAPTER
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    H.add_adapter(checkout, CASE_SYSTEM, refused)
+    bad_script = checkout / H.script_of(tenant_py).resolve().relative_to(H.REPO_ROOT)
+    folder = _folder(tmp_path, record=C.case_record_text(CASE_SYSTEM), **_proxy_system())
+    H.assert_clean(_check(script, folder))
+    text = H.assert_refused(_check(bad_script, folder), CASE_RECORD, CASE_SYSTEM)
+    assert "Traceback" not in text

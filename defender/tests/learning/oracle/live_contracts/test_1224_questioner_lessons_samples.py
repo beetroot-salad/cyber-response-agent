@@ -690,15 +690,16 @@ def test_1224_question_writer_prompt_when_configured_and_granted_systems_differ(
     """the question-writer's system names are exactly the manifest's served systems (the gather grant's), not the systems the tenant's settings configure."""
     est = S.estate(tmp_path)
     agent = S.questioner_for()
+    # #1359: the estate's tenant configures no system on its own (the retired `case-history`
+    # folder is gone), so the ungranted-but-configured system is planted here, outside LAB_SYSTEMS.
+    configured_only = "ledger"
+    assert configured_only not in S.LAB_SYSTEMS
+    est.place(configs={configured_only: "LEDGER_TRANSPORT=carrier-pigeon\n"})
+    assert configured_only in est.run_tenant().systems, "scenario precondition: configured"
+    assert configured_only not in est.grant().systems, "scenario precondition: not granted"
 
     launch = _launch(tmp_path, monkeypatch, est, questioner=agent)
 
-    settings = (Path(os.environ["DEFENDER_DATA_ROOT"]) / S.FIXTURE_TENANT / "knowledge"
-                / "settings" / "systems")
-    # #1359: the ungranted-but-configured system is the case system `ticket` (the tenant's
-    # case-record file names it; the retired `case-history` folder is gone).
-    assert (settings / "ticket").is_dir(), "scenario precondition: ticket configured"
-    assert "ticket" not in est.grant().systems, "scenario precondition: not granted"
     family = _manifest(launch.ep)
     assert family is not None, f"no family.yaml was written (rc={launch.rc}, {launch.message!r})"
     served = list(family.get("served_systems") or [])
@@ -709,7 +710,8 @@ def test_1224_question_writer_prompt_when_configured_and_granted_systems_differ(
         assert set(_system_names_in(host, served)) == set(served), (
             f"call {i} does not name every recorded served system {served}")
         assert _system_names_in(host, S.LAB_SYSTEMS) == [], f"call {i} names a lab system"
-        assert _system_names_in(host, ("ticket",)) == [], f"call {i} names the ungranted ticket"
+        assert _system_names_in(host, (configured_only,)) == [], (
+            f"call {i} names the configured-but-ungranted {configured_only}")
     samples = S.read_samples(launch.ep)
     assert samples is not None, "no samples.yaml was written"
     assert set(samples) == set(served), (

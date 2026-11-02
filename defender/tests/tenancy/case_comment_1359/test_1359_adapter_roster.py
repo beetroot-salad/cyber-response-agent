@@ -115,19 +115,29 @@ def test_r1_the_verb_resolver_accepts_empty_verbs_and_refuses_no_readable_verbs(
     assert "health-check" in positive
 
 
+def _check_registry_failures(where: Path, source: str) -> list[str]:
+    """The failure rows connect's scaffold `check_registry` gives one `casesys` adapter source."""
+    scaffold = S.mod("skills.connect.validate_scaffold")
+    report = scaffold.Report()
+    scaffold.check_registry(report, _tree(where, source), "casesys")
+    return [m for status, m in report.rows if status == scaffold.FAIL and "settings check" not in m]
+
+
 def test_r1_connect_check_registry_needs_no_health_check_for_a_comment_only_adapter(tmp_path):
     """`check_registry` passes an adapter with `VERBS = {}` that exports the comment action; one with verbs still needs health-check. r4."""
-    scaffold = S.mod("skills.connect.validate_scaffold")
-
-    def failures(source: str) -> list[str]:
-        tree = _tree(tmp_path / str(abs(hash(source))), source)
-        report = scaffold.Report()
-        scaffold.check_registry(report, tree, "casesys")
-        return [m for status, m in report.rows if status == scaffold.FAIL and "settings check" not in m]
-
-    assert failures(_source("{}")) == []
+    assert _check_registry_failures(tmp_path / "empty", _source("{}")) == []
     no_health = _source('{"other": health_check}')
-    assert any("health-check" in m for m in failures(no_health)), "control: health-check still required"
+    assert any("health-check" in m for m in _check_registry_failures(tmp_path / "nh", no_health)), (
+        "control: health-check still required")
+
+
+def test_o4_connect_check_registry_refuses_an_adapter_whose_verbs_hold_the_comment_action(tmp_path):
+    """The `/connect` scaffold check fails an adapter whose `VERBS` holds the action (each spelling), naming it; a clean adapter passes. O4 (roster/scaffold check)."""
+    assert _check_registry_failures(tmp_path / "clean", _source(CLEAN)) == [], "positive control"
+    for label, body in HOLDING.items():
+        failed = _check_registry_failures(tmp_path / label.replace(" ", "-"), _source(body))
+        assert any(ACTION in m or DASHED in m for m in failed), (
+            f"[{label}] the scaffold check does not refuse it, naming the action: {failed}")
 
 
 def _registry(tree: Path):
@@ -151,6 +161,11 @@ def test_r1_the_agents_verb_listing_offers_nothing_for_an_empty_verbs_adapter_an
     bare = _source("{}").rsplit("VERBS", 1)[0]
     for label, source in (("absent", bare), ("not a mapping", _source("None"))):
         assert "UNAVAILABLE" in listing(source), f"control [{label}]: a broken adapter must stay broken"
+    # Why a private call: `_tool_list_verbs` answers "not reachable" before it reads the adapter
+    # unless the grant reaches the system, and the grant of an empty-VERBS adapter can reach it only
+    # through a row naming a verb the adapter lacks (which no honest tenant plants). So the
+    # declared-verbs step is not reachable by a public path for `VERBS = {}`; the implementer who
+    # restructures `list_verbs` repairs this one call (FR-2b, repair-1 gap 3).
     assert "UNAVAILABLE" not in listing(_source("{}")), "an empty VERBS adapter is listed as broken"
     # Regression pin on the tool's whole answer (the grant reaches nothing, so it answers before
     # the adapter is read; it must not call the adapter broken either).

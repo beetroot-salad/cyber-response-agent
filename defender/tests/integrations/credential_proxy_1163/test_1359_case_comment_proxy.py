@@ -119,9 +119,9 @@ def _drive_real_leg(tmp_path, data_root, **seams: Any):
 
 
 @pytest.mark.parametrize("system", list(CASES))
-def test_run_start_mints_the_write_back_token_for_the_named_case_system(tmp_path, data_root, system):
+def test_the_record_leg_gets_a_write_back_token_for_the_named_case_system(tmp_path, data_root, system):
     """With the case-record file naming an http-proxy system (`ticket` or another), the one
-    write-back token grants rw on that system only and the record leg gets it. Run-start flow, P2."""
+    write-back token (minted at the record leg, D-9 corrected) grants rw on that system only and the leg gets it. P2."""
     _case_tenant(data_root, system)
     signer = A.MarkedSigner()
     writer = _RecordOnly()
@@ -137,8 +137,8 @@ def test_run_start_mints_the_write_back_token_for_the_named_case_system(tmp_path
     assert kw.get("request_token"), kw
 
 
-def test_run_start_mints_no_write_back_token_for_a_tenant_with_no_case_file(tmp_path, data_root):
-    """No case-record file: nothing is minted for any system, and the run goes on. Run-start flow."""
+def test_no_write_back_token_is_minted_for_a_tenant_with_no_case_file(tmp_path, data_root):
+    """No case-record file: nothing is minted for any system, and the run goes on. D-9 corrected."""
     _case_tenant(data_root, C.CASE_SYSTEM_TICKET)
     (S.settings_of(data_root / S.PLAYGROUND_ID / "knowledge") / C.CASE_RECORD_REL).unlink()
     signer = A.MarkedSigner()

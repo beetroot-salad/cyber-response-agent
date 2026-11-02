@@ -377,14 +377,20 @@ def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_qu
 COMMENT_PATH = "/tickets/SOC-1/comments"
 
 
+#: The one place the host write entry's call shape is spelled (D-6/D-15: name and four arguments;
+#: house style adds the config and `system=`). `_host_write` and the planted adapter source below
+#: both use this text, with `ctx`, `cfg`, `method`, `path`, `payload` in scope; the code stage
+#: changes the shape here only.
+HTTP_WRITE_CALL = 'transport.http_write(ctx, cfg, method, path, payload, system="ticket")'
+
+
 def _host_write(ctx: VerbContext, cfg: dict[str, str], method: str, path: str,
                 body: dict | None = None) -> Any:
-    """The shared transport's host write entry (D-6: `http_write(ctx, method, path, body)`). The
-    one place this file spells its call shape; house style adds `config` and `system=` as
-    `http_post` has them (provisional: the design gives the name and the four arguments)."""
+    """The shared transport's host write entry, called as `HTTP_WRITE_CALL` spells it."""
     from defender.integrations import _stub_transport as transport
 
-    return transport.http_write(ctx, cfg, method, path, body or {}, system="ticket")
+    return eval(HTTP_WRITE_CALL, {"transport": transport},  # noqa: S307 - a constant of this file
+                {"ctx": ctx, "cfg": cfg, "method": method, "path": path, "payload": body or {}})
 
 
 def _docker_ticket_ctx(tmp_path: Path, monkeypatch: Any) -> tuple[VerbContext, Any]:
@@ -482,7 +488,8 @@ def health_check(ctx):
 
 def add_case_comment(ctx, *, key, body):
     cfg = transport.load_config(ctx, "ticket", "TICKET", ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC"))
-    transport.http_write(ctx, cfg, {method!r}, f"/tickets/{{key}}{suffix}", {{"body": body}}, system="ticket")
+    method, path, payload = {method!r}, f"/tickets/{{key}}{suffix}", {{"body": body}}
+    {write_call}
     return None
 
 
@@ -511,7 +518,8 @@ def _leg_over_planted_adapter(tmp_path: Path, monkeypatch: Any, *, method: str, 
     tree = tmp_path / "tree"
     (tree / "integrations").mkdir(parents=True)
     (tree / "integrations" / "ticket_adapter.py").write_text(
-        PLANTED_TICKET_ADAPTER.format(method=method, suffix=suffix, verbs=verbs),
+        PLANTED_TICKET_ADAPTER.format(method=method, suffix=suffix, verbs=verbs,
+                                      write_call=HTTP_WRITE_CALL),
         encoding="utf-8")
     store = M.FakeStore(tmp_path / "store")
     run_dir = M.make_run(tmp_path / "runs")
@@ -563,5 +571,6 @@ def test_a_case_adapter_the_cold_read_refused_serves_no_comment(
     assert (got["status"], got["ok"], got["url"]) == ("error", False, None), got
     reason = got["reason"].lower()
     assert "case-record.yaml" in reason, got
+    assert str(tmp_path).lower() not in reason, f"the reason carries a host path: {got}"
     assert "adapter" in reason, got
     assert "refused" in reason, got
