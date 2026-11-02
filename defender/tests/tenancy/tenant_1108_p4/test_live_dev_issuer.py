@@ -22,7 +22,7 @@ Inputs (test-only environment; P-4 bars environment for the product, not for a t
     DEFENDER_LIVE_O13_COMMIT       a lab commit made before the migration
     DEFENDER_LIVE_O13_BOT          the lab bot's Forgejo login before the migration
 
-    PYTHONPATH="$PWD" flock /tmp/defender-pytest.lock defender/.venv/bin/python -m pytest \\
+    PYTHONPATH="$PWD" defender/.venv/bin/python -m pytest \\
         -m live defender/tests/tenancy/tenant_1108_p4/test_live_dev_issuer.py
 
 Logins go through `version_control.forge_credential` over the live generation's host secret file.
