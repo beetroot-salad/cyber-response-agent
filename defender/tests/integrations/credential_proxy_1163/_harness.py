@@ -86,7 +86,7 @@ class Upstream:
                 if self.command != "HEAD":
                     self.wfile.write(body)
 
-            do_GET = do_POST = do_DELETE = do_PUT = do_HEAD = _serve  # noqa: N815 — http.server's dispatch names
+            do_GET = do_POST = do_DELETE = do_PUT = do_PATCH = do_HEAD = _serve  # noqa: N815 — http.server's dispatch names
 
             def log_message(self, *_: Any) -> None:
                 pass
