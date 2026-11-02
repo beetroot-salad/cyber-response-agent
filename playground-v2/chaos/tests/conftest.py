@@ -9,7 +9,7 @@ cmdb/app.py) or a tmp dir. Everything that would otherwise need
 The CMDB-stub fixtures import the real FastAPI app, whose deps the devcontainer's
 bare python3 does not carry (fastapi pinned to the version cmdb/Dockerfile installs):
 
-    flock /tmp/defender-pytest.lock uv run --no-project --python 3.12 \
+    uv run --no-project --python 3.12 \
         --with 'fastapi==0.115.*' --with pyyaml --with httpx --with pytest \
         -m pytest playground-v2/chaos/tests
 """
@@ -32,7 +32,7 @@ if str(PLAYGROUND_ROOT) not in sys.path:
     sys.path.insert(0, str(PLAYGROUND_ROOT))
 
 UV_HINT = (
-    "needs the CMDB stub's runtime deps; run: flock /tmp/defender-pytest.lock "
+    "needs the CMDB stub's runtime deps; run: "
     "uv run --no-project --python 3.12 "
     "--with 'fastapi==0.115.*' --with pyyaml --with httpx --with pytest "
     "-m pytest playground-v2/chaos/tests"
