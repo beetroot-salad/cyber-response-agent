@@ -1629,7 +1629,7 @@ def _gone(pid: int) -> bool:
         return False
     try:
         status = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):  # ESRCH: it exited while its status was being read
         return True
     return "\nState:\tZ" in status
 
@@ -2252,3 +2252,264 @@ async def test_d_ac_a_row_cancelled_while_its_spawn_is_in_flight_ends_the_spawne
         finally:
             release.touch()
             _kill_whatever_remains(seen or child.seen())
+
+
+# --- r7 attack round (candidate 33): D-ac one cleanup however the row ends, D-af, R7-1 -----------------
+
+async def _the_group_to_be_gone(seen: dict | None, what: str) -> None:
+    """The child and the grandchild it left in its session are both dead (a killed grandchild may linger a moment as a zombie)."""
+    assert seen is not None, "premise: the child ran"
+    assert seen["grandchild"], "premise: the child started a grandchild"
+    await _until(lambda: _gone(seen["pid"]) and _gone(seen["grandchild"]), what, timeout=5)
+
+
+async def test_d_ac_a_grandchild_left_by_a_child_that_exits_nonzero_is_gone_after_the_row_ends(world):
+    """The child starts a long `sleep` in its session and exits with a failure code; once `drain()` returns the grandchild is dead and the row is the child's failure. (D-ac: whatever way the row ends)"""
+    child = _child(world, exit=EXIT, grandchild=True)
+    seen = None
+    try:
+        inv, stored = await _run_one(world, child)
+        seen = child.seen(inv)
+        assert stored["stage"] == "failed", stored
+        await _the_group_to_be_gone(seen, "the grandchild of a failed child to be gone")
+    finally:
+        _kill_whatever_remains(seen or child.seen())
+
+
+async def test_d_ac_a_grandchild_is_gone_after_a_deliberate_stop_that_the_child_honours(world):
+    """`serve()` stopped by SIGTERM while a child (default SIGTERM) and its grandchild run: the child ends on the SIGTERM, and the grandchild left in its session is dead when `serve()` returns; the row is left running. (D-ac, D3)"""
+    import signal
+
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release, grandchild=True)
+    seen = None
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        serving = asyncio.create_task(_worker(world, store, child).serve())
+        try:
+            await _until(lambda: (child.seen(inv) or {}).get("grandchild"), "the child and its grandchild")
+            seen = child.seen(inv)
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+            await _the_group_to_be_gone(seen, "the grandchild to be gone after serve() returned")
+        finally:
+            release.touch()
+            if not serving.done():
+                serving.cancel()
+                await asyncio.gather(serving, return_exceptions=True)
+            _kill_whatever_remains(seen)
+    assert row(world["dsn"], inv)["stage"] == "running", "a stopping worker wrote the row"
+
+
+async def test_d_ac_a_grandchild_is_gone_after_a_drain_cancelled_while_a_child_that_honours_sigterm_runs(world):
+    """`drain()` cancelled (a claim fault ends the same way) after the child is up, the child taking SIGTERM and leaving a grandchild in its session: both are dead afterwards, the row is left running. (D-ac)"""
+    containers = StandInContainers(world["tmp"] / "containers")
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), box_dir=containers.where, wait_for=release, grandchild=True)
+    seen = None
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        draining = asyncio.create_task(_worker(world, store, child, containers=containers).drain())
+        try:
+            await _until(lambda: containers.held(f"defender-run-{inv}") and (child.seen(inv) or {}).get("grandchild"),
+                         "the child, its box and its grandchild")
+            seen = child.seen(inv)
+            draining.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(draining, timeout=30)
+            await _the_group_to_be_gone(seen, "the cancelled row's group to be gone")
+        finally:
+            release.touch()
+            _kill_whatever_remains(seen)
+    assert row(world["dsn"], inv)["stage"] == "running"
+
+
+class _ReapProbingContainers(StandInContainers):
+    """The stand-in containers whose `reap` notes, at the moment it is asked, whether anything the child left in its session is still alive."""
+
+    def __init__(self, where: Path, survivors) -> None:
+        super().__init__(where)
+        self._survivors = survivors
+        self.alive_at_reap: list[bool] = []
+
+    def reap(self, name: str, token: str) -> str:
+        deadline = time.monotonic() + 2.0  # a SIGKILL already sent takes a moment to land; one not yet sent never does within this
+        while self._survivors() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.alive_at_reap.append(bool(self._survivors()))
+        return super().reap(name, token)
+
+
+async def test_d_ac_the_childs_group_is_ended_before_the_backstop_runs(world):
+    """A child that exits normally and leaves a grandchild: when the backstop asks the container seam to reap, the grandchild is already dead (the group is ended first, then the box is removed). (D-ac: one step follows the child: the group kill, then the backstop)"""
+    seen: dict = {}
+
+    def survivors() -> bool:
+        grandchild = (child.seen() or {}).get("grandchild")
+        return bool(grandchild) and not _gone(grandchild)
+
+    containers = _ReapProbingContainers(world["tmp"] / "containers", survivors)
+    child = _child(world, files=_committed(), grandchild=True)
+    try:
+        inv, stored = await _run_one(world, child, containers=containers)
+        seen = child.seen(inv) or {}
+        assert stored["stage"] == "completed", stored
+        assert seen.get("grandchild"), "premise: the child started a grandchild"
+        assert containers.alive_at_reap == [False], "the backstop ran while the child's group still lived"
+    finally:
+        _kill_whatever_remains(seen or child.seen())
+
+
+async def test_d_ac_a_cancelled_row_ends_its_child_with_sigterm_first_as_a_stop_does(world):
+    """`drain()` cancelled while a child runs: the child is sent SIGTERM and gets `stop_grace` to answer it (a child that records the SIGTERM and exits has recorded it) before any SIGKILL. (D-ac, D3)"""
+    containers = StandInContainers(world["tmp"] / "containers")
+    release = world["tmp"] / "release"
+    mark = world["tmp"] / "termed"
+    child = _child(world, files=_committed(), box_dir=containers.where, wait_for=release, term="mark", term_mark=str(mark))
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        draining = asyncio.create_task(_worker(world, store, child, containers=containers, stop_grace=20).drain())
+        try:
+            await _until(lambda: containers.held(f"defender-run-{inv}"), "the child's box")
+            draining.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(draining, timeout=30)
+        finally:
+            release.touch()
+            _kill_whatever_remains(child.seen(inv))
+
+    assert mark.exists(), "the cancelled row's child was killed without the SIGTERM a stop sends first"
+    assert _gone(child.seen(inv)["pid"])
+    assert row(world["dsn"], inv)["stage"] == "running"
+
+
+async def test_d_ac_a_row_cancelled_twice_while_its_spawn_is_in_flight_still_ends_the_spawned_childs_group_and_runs_the_backstop(
+        world, monkeypatch):
+    """The row's task is cancelled, and cancelled again while it waits for its spawn: the child the spawn then returns is still ended with its grandchild, and the box is reaped under the claim's token. (D-ac: a cancelled row waits out its spawn however many cancels arrive)
+
+    The spawn through `asyncio.create_subprocess_exec` is the pinned seam (r7 D-ac): the patch holds it in flight while the test cancels the row's task twice (the one task the worker made for the claim)."""
+    containers = StandInContainers(world["tmp"] / "containers")
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), box_dir=containers.where, wait_for=release, grandchild=True)
+    real_spawn = asyncio.create_subprocess_exec
+    before = set(asyncio.all_tasks())
+    cancels: list[bool] = []
+    rows_seen: list[int] = []
+
+    async def spawn_cancelled_twice(*argv, **kw):
+        proc = await real_spawn(*argv, **kw)  # the child exists; the worker does not hold it yet
+        await _until((child.seen_dir / f"{argv[argv.index('--job') + 1]}.json").exists, "the spawned child to be up")
+        rows = [t for t in asyncio.all_tasks() if t not in before and t is not asyncio.current_task() and t is not draining]
+        rows_seen.append(len(rows))
+        for _ in range(2):
+            cancels.extend(t.cancel() for t in rows)
+            await asyncio.sleep(0.2)  # the row has taken the cancel and is waiting out the spawn
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_cancelled_twice)  # lint-monkeypatch: ok — the pinned spawn seam (D-ac); the real spawn runs
+    seen = None
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        draining = asyncio.create_task(_worker(world, store, child, containers=containers).drain())
+        try:
+            await asyncio.wait_for(draining, timeout=30)
+            assert rows_seen == [1], "premise: one row task was there to cancel"
+            assert cancels == [True, True], "premise: it was cancelled twice"
+            seen = child.seen(inv)
+            assert seen is not None, "premise: the child was spawned"
+            await _the_group_to_be_gone(seen, "the twice-cancelled row's group to be gone")
+            assert not containers.held(f"defender-run-{inv}"), "the box of the cancelled row was left behind"
+            assert set(containers.reaped(f"defender-run-{inv}")) == {_claim_token(world, inv)}
+            assert row(world["dsn"], inv)["stage"] == "running"
+        finally:
+            release.touch()
+            _kill_whatever_remains(seen or child.seen())
+
+
+# --- r7 attack round: the launch files (D-af) ---------------------------------------------------------
+
+def test_d_af_a_present_launch_record_leaves_the_alert_file_as_it_was(world):
+    """With the launch record already there, `write_launch` raises `FileExistsError` and neither file changes: the alert file keeps its bytes. (D-af: a launch record already present is `FileExistsError`; nothing is written)"""
+    inv = str(uuid.uuid4())
+    (world["runs"] / f"{inv}.launch.json").write_text("planted record", encoding="utf-8")
+    (world["runs"] / f"{inv}.alert.json").write_bytes(b"the alert of the earlier launch")
+
+    with pytest.raises(FileExistsError):
+        _lane_write(world, inv, ALERT_BYTES)
+
+    assert (world["runs"] / f"{inv}.alert.json").read_bytes() == b"the alert of the earlier launch"
+    assert (world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8") == "planted record"
+
+
+def test_d_af_the_launch_record_write_is_create_only_even_when_the_record_appears_after_the_presence_check(world, monkeypatch):
+    """A launch record that turns up between the lane's look and its record write (planted at the held folder's write of that name) is `FileExistsError` and is not replaced. (D-af: the record write is create-only)
+
+    Observation chosen: the real `write_launch` runs over the real held folder; the only seam is the held folder's `write`, which plants the record just before the real write of the record's name. It asserts what the planted file holds afterwards, not which `mode` was passed, so a lane that enforces create-only any other way passes."""
+    from defender import _io
+
+    inv = str(uuid.uuid4())
+    record = world["runs"] / f"{inv}.launch.json"
+    real_write = _io.Held.write
+
+    def write_after_a_racer(self, name, *args, **kwargs):
+        if str(name).endswith(".launch.json"):
+            record.write_text("planted by a racer", encoding="utf-8")
+        return real_write(self, name, *args, **kwargs)
+    monkeypatch.setattr(_io.Held, "write", write_after_a_racer)  # lint-monkeypatch: ok — the only point between a lane's presence check and its record write; the real write runs
+
+    with pytest.raises(FileExistsError):
+        _lane_write(world, inv, ALERT_BYTES)
+
+    assert record.read_text(encoding="utf-8") == "planted by a racer", "the launch record was replaced"
+
+
+async def test_d_af_an_alert_file_that_cannot_be_written_leaves_no_launch_record_and_the_id_stays_launchable(world):
+    """The alert file's write is refused (a symlink sits at its name): the row ends `failed`/`worker_error`, no launch record is left behind, and once the obstacle is gone the same id can be launched. (D-af: the alert is written first, the record is the only mark of a launch)"""
+    inv = str(uuid.uuid4())
+    link = world["runs"] / f"{inv}.alert.json"
+    link.symlink_to(world["tmp"] / "elsewhere")
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        alert = await an_alert(store, T1)
+        plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
+        await _worker(world, store, child).drain()
+
+    stored = row(world["dsn"], inv)
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert child.seen() is None
+    assert not (world["runs"] / f"{inv}.launch.json").exists(), "a launch record was left behind a failed alert write"
+    link.unlink()
+    _lane_write(world, inv, ALERT_BYTES)  # relaunchable: no record blocks it
+    assert (world["runs"] / f"{inv}.launch.json").is_file()
+
+
+# --- r7 attack round: the tenant's state belongs to each claim (R7-1) -----------------------------------
+
+async def test_r7_1_a_tenant_that_was_creating_at_one_claim_and_is_active_at_a_later_one_runs_the_later_row(world):
+    """Two rows of one tenant, one slot: the tenant is `creating` at the first claim (that row is a worker error) and `active` at the second, whose row runs to completion. A refusal is not remembered. (R7-1)"""
+    class ActivatedAtTheSecondClaim:
+        def __init__(self, inner) -> None:
+            self._inner, self.calls = inner, 0
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        async def claim(self):
+            self.calls += 1
+            if self.calls == 2:
+                move_tenant(world["dsn"], T1, state="active")
+            return await self._inner.claim()
+
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        first = await _queued(store, ticket="T-1", key="k1")
+        second = await _queued(store, ticket="T-2", key="k2")
+        move_tenant(world["dsn"], T1, state="creating")
+        await _worker(world, ActivatedAtTheSecondClaim(store), child, slots=1).drain()
+
+    stages = {i: row(world["dsn"], i) for i in (first, second)}
+    refused = [i for i, r in stages.items() if (r["stage"], r["failure_reason"]) == ("failed", "worker_error")]
+    ran = [i for i, r in stages.items() if r["stage"] == "completed"]
+    assert (len(refused), len(ran)) == (1, 1), {i: (r["stage"], r["failure_reason"]) for i, r in stages.items()}
+    assert "creating" in stages[refused[0]]["failure_message"]
+    assert child.events() == [("start", ran[0]), ("end", ran[0])]

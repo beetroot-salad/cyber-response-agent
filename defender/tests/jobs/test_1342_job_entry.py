@@ -166,7 +166,7 @@ def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = No
             result.rc = run_py.job_main(s.argv(run_id), **seams)
     except SystemExit as e:
         result.exit = e
-    except Exception as e:  # noqa: BLE001 — kept for the assertions to name
+    except BaseException as e:  # noqa: BLE001 — kept for the assertions to name (a `KeyboardInterrupt` from a seam included, D-ad)
         result.raised = e
     result.out, result.err = out.getvalue(), err.getvalue()
     return result
@@ -1131,18 +1131,21 @@ def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
                                      "report_committed": False, "scrub_verified": False}
 
 
-def test_d_ad_a_fault_other_than_a_box_start_fault_while_the_box_is_starting_is_start_failed(scene):
-    """The box start raises `OSError` (the did-not-run verdict could not be written, so `BoxFault` never came): `box: start_failed`, the fault reaches the caller, nothing ran. (D-ad)"""
+@pytest.mark.parametrize("fault", [OSError("could not write the did-not-run verdict"), RuntimeError("the start blew up"),
+                                   ValueError("the start was handed nonsense"), KeyboardInterrupt()],
+                         ids=["OSError", "RuntimeError", "ValueError", "KeyboardInterrupt"])
+def test_d_ad_a_fault_other_than_a_box_start_fault_while_the_box_is_starting_is_start_failed(scene, fault):
+    """Whatever the box start raises other than `BoxStartFault` (an `OSError` from writing the did-not-run verdict, any other `Exception`, even a `BaseException` such as `KeyboardInterrupt`): `box: start_failed`, the fault reaches the caller, nothing ran. (D-ad: if the lifecycle raises while the box is still `not_started`)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     ran = Ran()
 
     def start(*_a: Any, **_k: Any) -> Any:
-        raise OSError("could not write the did-not-run verdict")
+        raise fault
 
     got = run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=start))
 
-    assert isinstance(got.raised, OSError), got
+    assert got.raised is fault, got
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
                                      "report_committed": False, "scrub_verified": False}
