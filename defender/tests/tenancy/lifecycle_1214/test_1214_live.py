@@ -16,7 +16,7 @@ Skips are for absent infrastructure only, each with the variable that is missing
     DEFENDER_LIVE_OPENBAO_CA            the dev CA file (optional)
     DEFENDER_LIVE_LAB_TENANT, DEFENDER_LIVE_DATA_ROOT   the lab (its move only)
 
-    PYTHONPATH="$PWD" defender/.venv/bin/python -m pytest \\
+    PYTHONPATH="$PWD" flock /tmp/defender-pytest.lock defender/.venv/bin/python -m pytest \\
         -m live defender/tests/tenancy/lifecycle_1214/test_1214_live.py
 
 GAP-Rc-8: the real git runner of the lifecycle (the sealed-transport callable) is imported as `defender.lifecycle.git_runner`;

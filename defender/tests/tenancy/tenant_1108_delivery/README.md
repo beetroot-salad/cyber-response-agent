@@ -703,7 +703,7 @@ All assertions downstream of absent production targets require implementation-st
 Run from the worktree root with the project interpreter and worktree import root:
 
 ```sh
-PYTHONPATH="$PWD" /workspace/defender/.venv/bin/python -m pytest defender/tests/tenant_1108_delivery -q -n 4
+PYTHONPATH="$PWD" flock /tmp/defender-pytest.lock /workspace/defender/.venv/bin/python -m pytest defender/tests/tenant_1108_delivery -q -n 4
 ```
 
 The lock and credential cases start short-lived Python probe processes and a loopback `git http-backend` server; nothing leaves the host.
