@@ -1,4 +1,4 @@
-"""#767 — no model role reaches a ticket write; the host writer stays inside confinement."""
+"""#767 — no model role reaches a ticket write; the agent-facing transport entries stay read-only."""
 from __future__ import annotations
 
 import json
@@ -27,7 +27,7 @@ def _shipped_rows():
     return verb_dispositions.load_dispositions(
         verb_dispositions.dispositions_path(T1106.FIXTURE_SETTINGS))
 REPO_ROOT = PATHS.repo_root
-URL_BASE = "http://case-history.test"
+URL_BASE = "http://ticket.test"
 
 SHIPPED_PY = tuple(
     p for p in sorted(DEFENDER_DIR.rglob("*.py"))
@@ -69,9 +69,6 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
                  f"{TICKETS_PATH}/SOC-1{TRANSITIONS_SUFFIX}"):
         with pytest.raises(ConfinementFault):
             confinement.guard_outbound(None, "ticket", f"{URL_BASE}{path}", method="POST")
-    with pytest.raises(ConfinementFault):
-        confinement.guard_outbound(None, "case-history", f"{URL_BASE}{TICKETS_PATH}",
-                                   method="GET")
 
     from defender.investigation.permission.policies import _common
 
@@ -146,9 +143,9 @@ def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
             ctx, "ticket", f"{URL_BASE}{TICKETS_PATH}/SOC-1{COMMENTS_SUFFIX}", method="POST")
     assert len(capture.requests) == 1, "a refused request was still recorded as sent"
 
-    assert "case-history" not in confinement.READ_ENDPOINT_ALLOWLIST, (
-        "the host writer's system has an allowlist entry; it must consult none"
-    )
+    # #1359: the host writer's system is the tenant's `ticket`, not a `case-history` system of
+    # its own; its one comment write is the write-endpoint table's, reached only through the
+    # host write entry (test_target_confinement_632), never through `guard_outbound`'s read class.
 
 
 def test_767_query_tool_is_only_ticket_reader(tmp_path):

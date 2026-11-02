@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import http.server
+import json
 import os
 import shutil
 import threading
@@ -37,6 +38,7 @@ def server():
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802 — http.server's dispatch name
+            seen["path"] = self.path
             seen["body"] = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
             scheme, _, token = (self.headers.get("Authorization") or "").partition(" ")
             seen["user"] = base64.b64decode(token).decode() if scheme == "Basic" else ""
@@ -78,4 +80,41 @@ def test_the_credential_reaches_the_server_but_no_argv(tmp_path, monkeypatch, se
     assert seen["body"] == '{"query": "FROM x | LIMIT 1"}'
     logged = argv_log.read_text()
     assert logged.count("-X POST") == 2, logged  # both docker's and curl's argv were seen
+    assert SECRET not in logged
+
+
+def test_the_host_write_rides_the_same_transport_and_leaks_no_secret_to_argv(
+        tmp_path, monkeypatch, server):
+    """The comment action (the host write entry, #1359 D-6) reaches a real HTTP server through the
+    same docker-exec-curl chain: one POST on the key's comments path carrying the body, while a
+    secret in the run env appears on no command line. O3."""
+    from defender.integrations import ticket_adapter
+
+    url, seen = server
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    real_curl = shutil.which("curl")
+    assert real_curl, "curl is needed on PATH"
+    for name, script in (("docker", FAKE_DOCKER), ("curl", FAKE_CURL)):
+        (bin_dir / name).write_text(script)
+        (bin_dir / name).chmod(0o755)
+    argv_log = tmp_path / "argv.log"
+    env = {"PATH": f"{bin_dir}:{os.environ['PATH']}", "ARGV_LOG": str(argv_log),
+           "REAL_CURL": real_curl, "ELASTIC_PASSWORD": SECRET, "TICKET_PASSWORD": SECRET}
+    ctx = VerbContext(defender_dir=tmp_path / "defender", run_dir=tmp_path / "run", env=env,
+                      tenant=_tenants1106.fixture_run_tenant())
+    monkeypatch.setattr(transport, "docker_context", lambda ctx, system: "fake")  # lint-monkeypatch: ok — the docker-exec-curl transport has no in-process DI seam (tests/integrations/test_ticket_adapter.py's established pattern)
+    shaped = {"URL_BASE": url, "BASTION_HOST": "web-1", "TIMEOUT_SEC": "10"}
+    monkeypatch.setattr(  # lint-monkeypatch: ok — same: the config is the only thing replaced
+        transport, "load_config",
+        lambda ctx, system, prefix, required=transport.REQUIRED_CONFIG_KEYS_TEMPLATE: {
+            k: shaped.get(k, f"stub-{k}") for k in required})
+
+    link = ticket_adapter.add_case_comment(ctx, key="SOC-7", body="the findings")
+
+    assert link == f"{url}/tickets/SOC-7"
+    assert json.loads(seen["body"])["body"] == "the findings"
+    assert seen["path"] == "/tickets/SOC-7/comments"
+    logged = argv_log.read_text()
+    assert "-X POST" in logged, logged
     assert SECRET not in logged
