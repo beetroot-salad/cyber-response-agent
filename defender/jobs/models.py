@@ -116,6 +116,15 @@ class InvestigationRecord:
     failure_message: str | None
 
 
+@model(frozen=True)
+class Claim:
+    """A claimed investigation and its tenant's state, read in the claim's own transaction
+    (#1342 r7 R7-1): the worker starts a job only for an `active` tenant."""
+
+    record: InvestigationRecord
+    tenant_state: str
+
+
 def stored_alert(row: AlertRow) -> StoredAlert:
     return StoredAlert(
         alert_id=row.id, tenant_id=row.tenant_id, vendor=row.vendor, vendor_ticket_id=row.vendor_ticket_id,

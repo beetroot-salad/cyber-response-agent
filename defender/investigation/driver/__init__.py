@@ -182,22 +182,18 @@ def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None, *, s
 
 def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named once
     *, output: Any, model_name: str | None, requests: int, end: run_end.RunEnd,
-    exit_reason: str | None, case_id: str, store_path: Any, report_committed: bool,
+    exit_reason: str | None, case_id: str, store_path: Any,
 ) -> dict:
     """The one shape `run_investigation` returns on every exit, so exits cannot drift apart.
 
     `end` (exit class, and whether the model had already closed) is flattened on so `run.py`'s
-    post-steps read it in-process rather than off disk. `report_committed` is whether the host
-    committed a report (#1342 M2): the close tool's `ReviewState.closed` at the end of the run,
-    set only once its `report.md` write succeeded — the model's close or the host's forced one;
-    a review-record fault after the report still counts. The job entry records it. The run's live state is not on it
+    post-steps read it in-process rather than off disk. The run's live state is not on it
     (#1235): a caller that wants it hands it in (`run_investigation(run_state=…)`) and keeps its
     own reference."""
     return {
         "output": output, "model": model_name, "requests": requests,
         "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
         "exit_reason": exit_reason, "case_id": case_id, "store_path": store_path,
-        "report_committed": report_committed,
     }
 
 
@@ -523,8 +519,7 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
             _logger.error(f"the empty-trace fallback also failed ({fallback_err!r})")  # lint-run-records: ok — an operator diagnostic naming the missing record
     return _run_summary(
         output=None, model_name=model_name, requests=logger.n_requests, end=end,
-        exit_reason=exit_reason, case_id=case_id, store_path=store.path, report_committed=False,
-    )
+        exit_reason=exit_reason, case_id=case_id, store_path=store.path)
 
 
 async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the run's identity for an early stop
@@ -758,7 +753,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
                 output=None, model_name=model_name, requests=logger.n_requests,
                 end=run_end.RunEnd(session_store.TRUNCATED_BY_STORE, closed_before_cut=False),
                 exit_reason=type(e).__name__, case_id=case_id, store_path=None,
-                report_committed=False,
             )
 
         # One execution clock covers correlation and MAIN, including a stop before MAIN.
@@ -827,7 +821,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         return _run_summary(
             output=output, model_name=model_name, requests=logger.n_requests,
             end=end, exit_reason=exit_reason, case_id=case_id, store_path=store.path,
-            report_committed=challenge_gate.ReviewState.of(deps).closed,
         )
 
 

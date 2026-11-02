@@ -23,10 +23,13 @@ from defender.records.formats import admit
 
 from .audit import SYSTEM, announce
 from .errors import Conflict, NotFound, UnknownReference
+from defender.tenancy.models import TenantRecord
+
 from .models import (
     LIVE,
     TERMINAL,
     AlertRow,
+    Claim,
     InvestigationRecord,
     InvestigationRow,
     StoredAlert,
@@ -162,9 +165,10 @@ class JobStore:
 
     # --- claim --------------------------------------------------------------------------
 
-    async def claim(self) -> InvestigationRecord | None:
-        """Move the oldest queued investigation (by `created_at`, ties by id) to `running`, or `None`.
-        A row another transaction holds is skipped, never waited for."""
+    async def claim(self) -> Claim | None:
+        """Move the oldest queued investigation (by `created_at`, ties by id) to `running`, with its
+        tenant's state read in the same transaction (#1342 r7 R7-1), or `None`. A row another
+        transaction holds is skipped, never waited for."""
         async with self._tx() as s:
             oldest = (select(InvestigationRow.id).where(InvestigationRow.stage == "queued")
                       .order_by(InvestigationRow.created_at, InvestigationRow.id).limit(1)
@@ -179,8 +183,10 @@ class JobStore:
             if row is None:  # not reachable while this transaction holds the row; the compare-and-set is the contract
                 return None
             record = investigation_record(row)
+            # The investigation's tenant is a `tenancy.tenants` row (its foreign key), never deleted.
+            state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == record.tenant_id))).scalar_one()
         announce("investigation.claim", actor=SYSTEM, tenant_id=record.tenant_id, target=record.investigation_id)
-        return record
+        return Claim(record=record, tenant_state=state)
 
     # --- cancel -------------------------------------------------------------------------
 

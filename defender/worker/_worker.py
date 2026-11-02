@@ -1,14 +1,15 @@
 """The worker (#1342): claims queued investigations up to its slots, runs each as a child
 process through the job lane, and records the one terminal stage the child's host records say.
 
-Per claimed row, as a task: a box token is minted for the claim, the tenant's record is read and
-must be `active` (#1342 r6 R6-4: no host lock is taken and the worker is recorded as no holder, so
-a teardown never waits for it or signals it), the launch record (carrying the token)
+Per claimed row, as a task: a box token is minted for the claim, the tenant's state, read by the
+claim itself, must be `active` (#1342 r7 R7-1: no host lock is taken and the worker is recorded as
+no holder, so a teardown never waits for it or signals it), the launch record (carrying the token)
 and alert file are written beside the run folder (the tenant's runs container must exist; the
 worker never makes it), the child is spawned from the event loop's thread in a session of its own
 with its output inherited, its exit awaited, a leftover box carrying the claim's token removed
-(the backstop), and the job-end record read for the stage. The task owns its child: cancelled, it
-ends the child and runs the backstop. A deliberate stop ends the children and writes no row (D3):
+(the backstop), and the job-end record read for the stage. The task owns its child: however the
+row ends once the child exists (its exit, a stop, a cancel, even mid-spawn), the child's process
+group is killed and the backstop runs (r7 D-ac). A deliberate stop ends the children and writes no row (D3):
 such rows stay `running` until #1343."""
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from defender import _log
-from defender.box import container_name
+from defender.box import Reaped, container_name
 from defender.execution import kill_group
 from defender.records import job_facts, job_lane
 from defender.records.formats import DataRoot, digest_of
@@ -36,18 +37,12 @@ from defender.tenancy import data_root_for_child, data_root_from_path
 from ._containers import Containers, DockerContainers
 
 if TYPE_CHECKING:
-    from defender.tenancy import TenantDirectory
-
-#: The backstop's answers (`Containers.reap`).
-_REMOVED, _ABSENT, _NOT_OURS = "removed", "absent", "not_ours"
+    from defender.jobs import Claim
 
 _logger = logging.getLogger(__name__)
 
 #: How long an idle serving worker waits between claims (M10: a fixed interval, no NOTIFY).
 POLL_INTERVAL = 1.0
-
-#: How long one claim's read of its tenant's record may take before the row fails (R6-4).
-RECORDS_TIMEOUT = 30.0
 
 _RUN_PY = Path(__file__).resolve().parents[1] / "run.py"
 
@@ -118,19 +113,15 @@ class _WorkerFault(Exception):
 
 class Worker:
     """Runs claimed investigations, up to `slots` at once. `drain()` claims until nothing is
-    queued and waits for every slot's task; `serve()` polls until SIGTERM/SIGINT.
-
-    `directory` is the tenant records (#1214 Flow 4; #1342 r6 R6-5): a test's; `None` reads them
-    from `DEFENDER_DATABASE_DSN`, built when `drain()` or `serve()` starts. That database must be
-    the store's (an investigation's tenant is a `tenancy.tenants` row). The worker reads only a
-    tenant's state from it."""
+    queued and waits for every slot's task; `serve()` polls until SIGTERM/SIGINT. A tenant's state
+    comes with its claim (#1342 r7 R7-1); the children read their tenant records from
+    `DEFENDER_DATABASE_DSN`, which they inherit."""
 
     def __init__(  # noqa: PLR0913 — the ratified signature
         self, store: Any, *, data_root: Path | DataRoot,
         child_argv: Callable[[Launch], list[str]] = run_argv,
         containers: Containers | None = None, slots: int = 3,
         clock: Callable[[], _dt.datetime], stop_grace: float = 30,
-        directory: TenantDirectory | None = None,
     ) -> None:
         if slots < 1:
             raise ValueError(f"a worker needs at least one slot, not {slots!r}")
@@ -141,8 +132,6 @@ class Worker:
         self._slots = slots
         self._clock = clock
         self._stop_grace = stop_grace
-        self._given_directory = directory
-        self._directory: TenantDirectory | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._children: dict[str, asyncio.subprocess.Process] = {}
         self._stopping = False
@@ -151,18 +140,14 @@ class Worker:
 
     async def drain(self) -> None:
         """Claim while a slot is free until nothing is queued, then wait for every task. A store
-        fault ends it (raised) and, like a cancellation, leaves no child behind (`_claim_loop`).
-        Tenant records that cannot be used refuse it before anything is claimed (`_open_records`)."""
-        await self._open_records()
+        fault ends it (raised) and, like a cancellation, leaves no child behind (`_claim_loop`)."""
         await self._claim_loop(stop=None)
 
     async def serve(self) -> None:
         """Poll for queued rows at a fixed interval until SIGTERM or SIGINT, then stop: each child
         gets SIGTERM, a child still alive after `stop_grace` has its group killed, the backstop
         runs, and no row is written (D3). A store fault is logged and the claim retried. Installs
-        its own handlers and removes them on return. Tenant records that cannot be used refuse it
-        before anything is claimed (`_open_records`)."""
-        await self._open_records()
+        its own handlers and removes them on return."""
         loop = asyncio.get_running_loop()
         stop = asyncio.Event()
         signals = (signal.SIGTERM, signal.SIGINT)
@@ -176,15 +161,6 @@ class Worker:
                 loop.remove_signal_handler(s)
                 if previous[s] is not None:
                     signal.signal(s, previous[s])
-
-    async def _open_records(self) -> None:
-        """The tenant records this run of the worker reads (R6-5), built off the event loop: the
-        given directory, else one over `DEFENDER_DATABASE_DSN` at this code's schema revision.
-        No address, or a database at another revision, is `TenantRefused` (raised: the worker
-        does not start); so is a database that cannot be reached now (`RecordsUnreachable`)."""
-        from defender.systems.run_tenant import entry_directory
-
-        self._directory = await asyncio.to_thread(entry_directory, self._given_directory)
 
     async def _claim_loop(self, *, stop: asyncio.Event | None) -> None:
         """The one claim loop of `drain` and `serve`: claim while a slot is free, else wait for a
@@ -243,10 +219,10 @@ class Worker:
         """Claim one queued row into a task; False when nothing is queued."""
         if self._stopping:
             return False
-        record = await self._store.claim()
-        if record is None:
+        claim = await self._store.claim()
+        if claim is None:
             return False
-        task = asyncio.create_task(self._run_row(record))
+        task = asyncio.create_task(self._run_row(claim))
         self._tasks.add(task)
 
         def _done(t: asyncio.Task[None]) -> None:
@@ -290,11 +266,12 @@ class Worker:
 
     # -- one row ----------------------------------------------------------------------------------
 
-    async def _run_row(self, record: Any) -> None:
+    async def _run_row(self, claim: Claim) -> None:
+        record = claim.record
         inv, tenant = record.investigation_id, record.tenant_id
         with _log.log_context(run_id=inv, tenant_id=tenant):
             try:
-                await self._run_claimed(record)
+                await self._run_claimed(record, claim.tenant_state)
             except Exception:  # noqa: BLE001 — one row's fault never ends the worker
                 _logger.exception("investigation %s: the worker failed while running it", inv)
                 try:
@@ -304,14 +281,14 @@ class Worker:
                 except Exception:  # noqa: BLE001 — the row stays running; #1343 reclaims it
                     _logger.exception("investigation %s: its failure could not be recorded", inv)
 
-    async def _run_claimed(self, record: Any) -> None:
+    async def _run_claimed(self, record: Any, tenant_state: str) -> None:
         inv, tenant = record.investigation_id, record.tenant_id
         started = self._clock()
         # This claim's box token (#1342 r5 C1): the child's box is stamped with it, and the
         # backstop removes only a container that carries it.
         token = uuid.uuid4().hex
         try:
-            await self._write_launch(record, token)
+            await self._write_launch(record, token, tenant_state)
         except _WorkerFault as fault:
             _logger.error("investigation %s: %s", inv, fault)
             await self._finish(record, _Ending(_FAILED, failure_reason=_WORKER_ERROR,
@@ -319,77 +296,72 @@ class Worker:
             return
         if self._stopping:  # D3: claimed but not started; the row stays running
             return
+        proc: asyncio.subprocess.Process | None = None
+        # The start runs as its own task, so a cancel cannot land inside it and lose the child
+        # it makes (r7 D-ac): a cancelled row waits for it, and the child is ended below.
+        spawn = asyncio.ensure_future(self._spawn(Launch(inv, tenant, os.getpid())))
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *self._child_argv(Launch(inv, tenant, os.getpid())),
-                stdin=subprocess.DEVNULL, stdout=None, stderr=None, start_new_session=True,
-                env={**os.environ, "DEFENDER_DATA_ROOT": str(data_root_for_child(self._data_root))})
-        except (OSError, ValueError) as unstarted:
-            _logger.error("investigation %s: the child could not be started: %s", inv, unstarted)
-            await self._finish(record, _Ending(_FAILED, failure_reason=_WORKER_ERROR,
-                                              failure_message="the worker could not start the job's child process"),
-                               cost=0.0, knowledge=None)
-            return
-        self._children[inv] = proc
-        try:
-            if self._stopping:  # spawned while the stop was ending the others
+            try:
+                proc = await asyncio.shield(spawn)
+            except asyncio.CancelledError:
+                with contextlib.suppress(OSError, ValueError):
+                    proc = await spawn
+                if proc is not None:
+                    _logger.warning("investigation %s: the worker is leaving; ending child %d", inv, proc.pid)
+                    await self._end_child(proc)
+                raise
+            except (OSError, ValueError) as unstarted:
+                _logger.error("investigation %s: the child could not be started: %s", inv, unstarted)
+                await self._finish(record, _Ending(_FAILED, failure_reason=_WORKER_ERROR,
+                                                  failure_message="the worker could not start the job's child process"),
+                                   cost=0.0, knowledge=None)
+                return
+            self._children[inv] = proc
+            try:
+                if self._stopping:  # spawned while the stop was ending the others
+                    await self._end_child(proc)
+                returncode = await proc.wait()
+            except asyncio.CancelledError:
+                # The task owns its child: cancelled (the claim loop left by a fault, or was itself
+                # cancelled), it ends the child, and writes no row.
+                _logger.warning("investigation %s: the worker is leaving; ending child %d", inv, proc.pid)
                 await self._end_child(proc)
-            returncode = await proc.wait()
-        except asyncio.CancelledError:
-            # The task owns its child: cancelled (the claim loop left by a fault, or was itself
-            # cancelled), it ends the child and runs the backstop, and writes no row.
-            _logger.warning("investigation %s: the worker is leaving; ending child %d", inv, proc.pid)
-            await self._end_child(proc)
-            await self._backstop(inv, token)
-            raise
+                raise
         finally:
-            self._children.pop(inv, None)
+            if proc is not None:
+                self._children.pop(inv, None)
+                # One cleanup however the row ended (r7 D-ac): whatever the child left running in
+                # its session dies with it, then its box, if it outlived it, is removed.
+                kill_group(proc.pid)
+                await self._backstop(inv, token)
         _logger.info("investigation %s: child %d %s after %s", inv, proc.pid,
                      _exit_words(returncode), self._clock() - started)
-        await self._backstop(inv, token)
         if self._stopping:  # D3: a deliberate stop writes no row
             return
         ending, cost, knowledge = await asyncio.to_thread(self._read_ending, record, returncode)
         await self._finish(record, ending, cost=cost, knowledge=knowledge)
 
-    async def _write_launch(self, record: Any, token: str) -> None:
+    async def _spawn(self, launch: Launch) -> asyncio.subprocess.Process:
+        """The job's child, in a session of its own (its group id is its pid), output inherited."""
+        return await asyncio.create_subprocess_exec(
+            *self._child_argv(launch),
+            stdin=subprocess.DEVNULL, stdout=None, stderr=None, start_new_session=True,
+            env={**os.environ, "DEFENDER_DATA_ROOT": str(data_root_for_child(self._data_root))})
+
+    async def _write_launch(self, record: Any, token: str, tenant_state: str) -> None:
         """The launch record (carrying this claim's box token) and the alert file, create-only,
-        in the tenant's runs container."""
+        in the tenant's runs container, for a tenant whose state at the claim was `active`
+        (r7 R7-1; a teardown always wins, and a job racing it fails)."""
+        if tenant_state != "active":
+            raise _WorkerFault(f"the tenant is {tenant_state}, not active; the job was not started")
         alert = await self._store.get_alert(record.tenant_id, record.alert_id)
         if alert is None:
             raise _WorkerFault("the job's alert is not in the store")
-        await self._require_active(record)
         launch = job_lane.LaunchRecord(
             investigation_id=record.investigation_id, tenant_id=record.tenant_id,
             alert_id=record.alert_id, digest=digest_of(alert.raw), label=alert.title,
             box_token=token)
         await asyncio.to_thread(self._write_launch_files, launch, alert.raw)
-
-    async def _require_active(self, record: Any) -> None:
-        """The tenant's record says `active` (R6-4), read through the records seam off the event
-        loop within `RECORDS_TIMEOUT`, else the fault naming why. Only the state is read: no host
-        lock, no process record (a teardown signals every holder, and a multi-tenant worker must
-        not be one), so a teardown always wins and a job racing it fails."""
-        from defender.systems.run_tenant import RecordsUnreachable
-
-        inv, tenant = record.investigation_id, record.tenant_id
-        directory = self._directory
-        if directory is None:  # a claim is made only inside `drain`/`serve`, after `_open_records`
-            raise _WorkerFault("the worker has no tenant records to read")
-        try:
-            state = await asyncio.wait_for(asyncio.to_thread(directory.state, tenant), timeout=RECORDS_TIMEOUT)
-        except RecordsUnreachable as down:
-            _logger.error("investigation %s: tenant %s's records: %s", inv, tenant, down)
-            raise _WorkerFault("the tenant's records could not be reached; the job was not started") from None
-        except TimeoutError:
-            _logger.error("investigation %s: tenant %s's records did not answer within %gs",
-                          inv, tenant, RECORDS_TIMEOUT)
-            raise _WorkerFault(f"the tenant's records did not answer within {RECORDS_TIMEOUT:g}s; "
-                               "the job was not started") from None
-        if state is None:
-            raise _WorkerFault("the tenant has no record; the job was not started")
-        if state != "active":
-            raise _WorkerFault(f"the tenant is {state}, not active; the job was not started")
 
     def _write_launch_files(self, launch: job_lane.LaunchRecord, raw: bytes) -> None:
         try:
@@ -401,7 +373,10 @@ class Worker:
             try:
                 lane.write_launch(launch, raw)
             except FileExistsError:
-                raise _WorkerFault("a launch file for this job already exists") from None
+                raise _WorkerFault("a launch record for this job already exists") from None
+            except job_lane.JobLaneRefused as refused:
+                _logger.error("investigation %s: %s", launch.investigation_id, refused)
+                raise _WorkerFault("the job's launch files cannot be written for this id") from None
             except OSError as fault:
                 _logger.error("investigation %s: writing the launch files: %s", launch.investigation_id, fault)
                 raise _WorkerFault("the worker could not write the job's launch files") from None
@@ -416,12 +391,12 @@ class Worker:
         except Exception:  # noqa: BLE001 — the backstop is best effort
             _logger.exception("investigation %s: the backstop could not remove %s", inv, name)
             return
-        if reaped == _REMOVED:
+        if reaped == Reaped.REMOVED:
             _logger.info("investigation %s: its box %s outlived the child and was removed", inv, name)
-        elif reaped == _NOT_OURS:
+        elif reaped == Reaped.NOT_OURS:
             _logger.warning("investigation %s: a container named %s is not this job's; left in place",
                             inv, name)
-        elif reaped != _ABSENT:
+        elif reaped != Reaped.ABSENT:
             _logger.error("investigation %s: the backstop's answer for %s was %r", inv, name, reaped)
 
     def _read_ending(self, record: Any, returncode: int) -> tuple[_Ending, float | None, dict | None]:

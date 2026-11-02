@@ -182,11 +182,16 @@ class JobLane:
     # -- the launch (worker writes, job entry checks) --------------------------------------------
 
     def write_launch(self, record: LaunchRecord, alert: bytes) -> None:
-        """The alert file, then the launch record, each create-only: the record's presence says
-        both are complete. An entry already at either name is `FileExistsError`."""
+        """The alert file, then the launch record, create-only: the record is the only mark of a
+        launch, so its presence says both are complete (#1342 r7 D-af). An entry already at the
+        record's name is `FileExistsError` and nothing is written; an alert file without a record
+        (a launch whose record write failed) is replaced."""
         paths = self._paths(_run_id(record.investigation_id))
-        self._held.write(paths.launch_alert().name, alert, mode="create")
-        self._held.write(paths.launch_record().name, record.text(), mode="create")
+        where = paths.launch_record().name
+        if _io.stat_entry(self._held.view(), where).st is not None:
+            raise FileExistsError(f"a launch record is already at {where}")
+        self._held.write(paths.launch_alert().name, alert, mode="replace")
+        self._held.write(where, record.text(), mode="create")
 
     def check_launch(self, run_id: object) -> Launched:
         """The launch record of `run_id`, checked: present and a plain file, a JSON object of

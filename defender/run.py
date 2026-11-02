@@ -61,6 +61,7 @@ from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
 from defender.records import Run  # noqa: E402
 from defender.records import job_facts, job_lane  # noqa: E402
+from defender.records.job_facts import BOX_STARTED as _BOX_STARTED  # noqa: E402 — `lifecycle`'s `job_facts` keyword shadows the module
 from defender.records.job_lane import Launched  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender import tenancy  # noqa: E402
@@ -264,8 +265,11 @@ def preflight_role_models(  # noqa: C901 — one fail-fast check per role, plus 
 
 @dataclasses.dataclass
 class _JobEndFacts:
-    """The two job-end facts a job's run sets as each becomes true (#1342 r5 C2), on an object
-    the job entry holds, so a raise out of the run cannot discard one already set.
+    """The job-end facts a job's run sets as each becomes true (#1342 r5 C2, r7 D-ad), on an
+    object the job entry holds, so a raise out of the run cannot discard one already set.
+
+    `box` is set to `started` by the lifecycle once `start_box` has returned; the job entry
+    records `start_failed` for a run that raised while it was still `not_started`.
 
     `review_state` is the run's review-state dict, which the driver uses as
     `AgentDeps.review_state` (`{"state": ReviewState}` once the close gate first runs): the
@@ -274,6 +278,7 @@ class _JobEndFacts:
 
     review_state: dict[str, Any] = dataclasses.field(default_factory=dict)
     scrub_verified: bool = False
+    box: str = job_facts.BOX_NOT_STARTED
 
     @property
     def report_committed(self) -> bool:
@@ -472,8 +477,9 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: The box's start token, when the caller minted it (#1342 r5 C1: a job's launch record
     #: carries its worker's); `None`, the box mints its own.
     start_token: str | None = None,
-    #: A job's facts holder (#1342 r5 C2), handed to the investigation, and its
-    #: `scrub_verified` set here once the teardown and scrub returned. `None` off the job lane.
+    #: A job's facts holder (#1342 r5 C2), handed to the investigation; its `box` set here once
+    #: the box started (r7 D-ad) and its `scrub_verified` once the teardown and scrub returned.
+    #: `None` off the job lane.
     job_facts: _JobEndFacts | None = None,
 ) -> dict[str, Any]:
     """Start the box, run the investigation inside it, and reap both on every exit
@@ -505,6 +511,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
                             require_sandbox=True, **staged)
         except box_mod.BoxFault as fault:
             raise box_mod.BoxStartFault(f"the run's box did not start: {fault}") from fault
+    if job_facts is not None:
+        job_facts.box = _BOX_STARTED
     drive = _judged(investigate, systems)
     # The job's facts holder (#1342) and the run's request access (#1163), each only when the run
     # has one: a seam that predates either is not handed a keyword it has no use for.
@@ -1402,7 +1410,6 @@ class _JobFacts:
         self._lane = lane
         self._job = job
         self.setup: str | None = None
-        self.box = job_facts.BOX_NOT_STARTED
         self.held = _JobEndFacts()
 
     def __enter__(self) -> _JobFacts:
@@ -1413,7 +1420,11 @@ class _JobFacts:
         if self.setup is None:
             refused = isinstance(exc, (SystemExit, _PreflightRefused))
             self.setup = job_facts.SETUP_REFUSED if refused else job_facts.SETUP_CRASHED
-        end = job_lane.JobEnd(setup=self.setup, box=self.box,
+        if exc is not None and self.held.box == job_facts.BOX_NOT_STARTED and self.setup == job_facts.SETUP_DONE:
+            # Raised after setup with no box started: whatever stopped it, the box did not start
+            # (r7 D-ad). A run whose box started keeps `started`, however it ended.
+            self.held.box = job_facts.BOX_START_FAILED
+        end = job_lane.JobEnd(setup=self.setup, box=self.held.box,
                              report_committed=self.held.report_committed,
                              scrub_verified=self.held.scrub_verified)
         try:
@@ -1481,14 +1492,9 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
                 with _log.run_context(run.run_dir.name, started.tenant.tenant_id, logger=_logger):
                     _logger.info(f"run_dir={run.run_dir} model={started.model}")
                     _announce_provenance(run.run_dir)
-                    facts.box = job_facts.BOX_STARTED
-                    try:
-                        summary = lifecycle(**started.lifecycle_kwargs(ns), job_lane=True,
-                                            start_token=launch.record.box_token,
-                                            job_facts=facts.held)
-                    except box_mod.BoxStartFault:
-                        facts.box = job_facts.BOX_START_FAILED
-                        raise
+                    summary = lifecycle(**started.lifecycle_kwargs(ns), job_lane=True,
+                                        start_token=launch.record.box_token,
+                                        job_facts=facts.held)
                     _post_steps(started, summary, visualize=visualize, update_ticket=False)
                     return _exit_code(summary)
     except _PreflightRefused as refused:
