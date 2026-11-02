@@ -498,21 +498,24 @@ def test_m1_a_tenant_acceptance_refusal_is_recorded_as_setup_refused(scene, monk
                        wiring=record != "no wiring", data_root=scene.root)
     if record not in ("records unreachable", "no record"):  # premise: the records are there to be read
         assert execute(scene.dsn, "SELECT count(*) FROM tenancy.tenants WHERE id = %s", (scene.t.tenant_id,)) == [(1,)]
+    if record == "no wiring":  # premise: an active tenant, and no forge wiring row
+        assert execute(scene.dsn, "SELECT state FROM tenancy.tenants WHERE id = %s", (scene.t.tenant_id,)) == [("active",)]
+        assert execute(scene.dsn, "SELECT count(*) FROM tenancy.forge_wiring WHERE tenant_id = %s", (scene.t.tenant_id,)) == [(0,)]
 
     ran = run_job(scene, run_id)
 
     assert ran.raised is None, f"a refusal was a crash: {ran.raised!r}"
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == REFUSED
+    if record in ("creating", "offboarding", "offboarded"):
+        assert record in ran.message, f"the refusal text names the tenant's state: {ran.message!r}"
 
 
-def test_r6_6_the_job_end_record_is_written_while_the_entry_still_holds_its_tenant_acceptance(scene, monkeypatch):
-    """When the entry's tenant acceptance ends, the job-end record is already written, and until that moment an exclusive try-once on the tenant's host lock fails and the entry is a recorded holder. (R6-6)"""
+def _acceptance_release_states(scene: Scene, monkeypatch: Any, run_id: str) -> list[tuple[bool, bool, bool]]:
+    """Make the entry's acceptance report, at its release: (job-end record written, exclusive try-once on the tenant's lock refused, this process a recorded holder). The real release runs."""
     from defender.systems.run_tenant import Admitted
     from defender.tenancy import host_lock
 
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
     at_release: list[tuple[bool, bool, bool]] = []
     real_exit = Admitted.__exit__
 
@@ -524,6 +527,14 @@ def test_r6_6_the_job_end_record_is_written_while_the_entry_still_holds_its_tena
         real_exit(self, *exc)
 
     monkeypatch.setattr(Admitted, "__exit__", exit_recording_the_state)  # lint-monkeypatch: ok — the acceptance's release is the only point that orders "record written" against "lock given back"; the real release runs
+    return at_release
+
+
+def test_r6_6_the_job_end_record_is_written_while_the_entry_still_holds_its_tenant_acceptance(scene, monkeypatch):
+    """When the entry's tenant acceptance ends, the job-end record is already written, and until that moment an exclusive try-once on the tenant's host lock fails and the entry is a recorded holder. (R6-6)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    at_release = _acceptance_release_states(scene, monkeypatch, run_id)
 
     ran = run_job(scene, run_id)
 
@@ -531,6 +542,68 @@ def test_r6_6_the_job_end_record_is_written_while_the_entry_still_holds_its_tena
     assert at_release, "premise: the entry's acceptance ended through `with admitted:`"
     assert at_release[-1] == (True, True, True), \
         f"at the acceptance's release (record written, lock still held, entry a holder): {at_release}"
+
+
+@pytest.mark.parametrize("how", ["preflight refuses", "setup crashes"])
+def test_r6_6_a_failed_run_also_writes_its_job_end_record_before_the_acceptance_is_given_back(scene, monkeypatch, how):
+    """After the tenant is admitted, a setup that is refused or crashes still leaves its job-end record written while the entry holds its acceptance. (R6-6)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    at_release = _acceptance_release_states(scene, monkeypatch, run_id)
+    boom = RuntimeError("setup blew up")
+
+    def materialize(*_a: Any, **_k: Any) -> Any:
+        raise boom
+
+    ran = (run_job(scene, run_id, preflight=lambda *a, **k: 2) if how == "preflight refuses"
+           else run_job(scene, run_id, materialize=materialize))
+
+    assert (ran.raised is boom) == (how == "setup crashes"), ran
+    assert ran.calls["lifecycle"] == 0
+    assert scene.job_end(run_id)["setup"] == ("refused" if how == "preflight refuses" else "crashed")
+    assert at_release, "premise: the entry's acceptance ended through `with admitted:`"
+    assert at_release[-1] == (True, True, True), \
+        f"at the acceptance's release (record written, lock still held, entry a holder): {at_release}"
+
+
+def _remove_working_tree(scene: Scene) -> Path:
+    """Take the tenant's knowledge working tree away and keep its git objects (the folder rules then judge only what remains, as main's run-start acceptance does with `clone_tree=False`)."""
+    import shutil
+
+    from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
+
+    knowledge = scene.root / scene.t.tenant_id / "knowledge"
+    for half in (SETTINGS_HALF, AGENT_HALF):
+        shutil.rmtree(knowledge / half)
+    assert (knowledge / ".git").exists(), "premise: the git objects are kept"
+    assert not (knowledge / SETTINGS_HALF).exists()
+    assert not (knowledge / AGENT_HALF).exists()
+    return knowledge
+
+
+def test_r6_6_a_tenant_folder_without_its_working_tree_is_accepted_by_the_job_entry(scene):
+    """A tenant whose knowledge folder keeps its git objects but has no working tree is accepted (run start does not need the tree: it exports from the objects): the job sets up and runs. (R6-3, R6-6)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    _remove_working_tree(scene)
+
+    ran = run_job(scene, run_id)
+
+    assert ran.raised is None, ran
+    assert ran.calls["lifecycle"] == 1, ran.message
+    assert scene.job_end(run_id) == SETTLED
+
+
+def test_r6_3_a_tenant_folder_without_its_working_tree_is_accepted_by_the_operator_run(scene, tmp_path):
+    """The same folder, `run.main`: accepted, the run starts. (R6-3, R6-6: `main` and `job_main` pass the same acceptance arguments)"""
+    _remove_working_tree(scene)
+
+    out = B.launch(scene.t, tmp_path, publish=lambda *a, **k: B.fresh(scene.t.commit))
+
+    assert out.raised is None, out.raised
+    assert out.refusal is None, out.refusal
+    assert out.rc == 0, out.rc
+    assert out.seen, "the operator run did not start"
 
 
 def test_m1_a_preflight_that_returns_non_zero_is_a_refusal(scene):

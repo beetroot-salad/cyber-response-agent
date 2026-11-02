@@ -70,6 +70,15 @@ def restate_tenant(dsn: str, tenant_id: str, *, state: str, wiring: bool = True,
     register_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
 
 
+def move_tenant(dsn: str, tenant_id: str, *, state: str) -> None:
+    """Move `tenant_id`'s existing record to `state` in place (rows that reference it stay), as a lifecycle step would."""
+    from defender.tests.support.tenancy._active1214 import _JOB
+
+    action, step, actor = _JOB.get(state, (None, None, None))
+    execute(dsn, "UPDATE tenancy.tenants SET state = %s, pending_action = %s, step = %s, step_actor = %s WHERE id = %s",
+            (state, action, step, actor, tenant_id))
+
+
 def tenant_directory(dsn: str) -> Any:
     """A `TenantDirectory` over the same database rows `register_tenant` wrote (r6 R6-4: what a worker's `directory=` must agree with)."""
     from defender.tests.support.tenancy._active1214 import postgres_directory
