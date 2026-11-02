@@ -11,16 +11,7 @@ from defender.records._episode_handle import Episode
 import pytest
 
 from defender import run as run_py
-from defender.tests.support.runtime.engine._spec767 import (
-    COMMENTS_SUFFIX,
-    TENANT_ID,
-    TICKETS_PATH,
-    FakeStore,
-    make_run,
-    open_ticket,
-    record,
-    use_mapping,
-)
+from defender.tests.support.runtime.engine._spec767 import TENANT_ID
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
     author_markers,
@@ -30,11 +21,16 @@ from defender.tests.support.sandbox._spec791 import (
 )
 
 RECORD_STEP = "record_case_ticket"
-OPEN_STEP = "open_case_ticket"
+#: The writer seam's second method (#1359 r4): run start clears an earlier attempt's receipt
+#: through it, not through a module function.
+CLEAR_STEP = "clear_receipt"
 
 
 class Tail(SpecTail):
-    """`_spec791`'s investigation-tail fake, with the `record_case_ticket` writer method."""
+    """`_spec791`'s investigation-tail fake, with the writer seam's two methods (no open leg)."""
+
+    def clear_receipt(self, run, **kw) -> None:
+        self._note(CLEAR_STEP, run.run_dir)
 
     def record_case_ticket(self, run, *, tenant, defender_dir, env, **kw) -> None:
         self.ticket_tenants.append(tenant)
@@ -56,18 +52,19 @@ def state(tmp_path, monkeypatch):
     return dataclasses.replace(LoopPaths.for_tenant(tenant), repo_root=repo)
 
 
-def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch):
-    """Under `--update-ticket`, a run whose lifecycle COMPLETES records into its ticket after the
-    lifecycle, one that dies does not, and a failed open does not suppress the record."""
+def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state):
+    """Under `--update-ticket`, run start clears the receipt through the seam, a run whose
+    lifecycle COMPLETES then records after it, and one that dies does not. No open leg. O1, r4."""
     tail = Tail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "flagged"), tail, "--update-ticket") == 0
     assert RECORD_STEP in tail.names, (
         f"a completing run under the flag never recorded into its case (ran {tail.names})")
-    assert tail.names.index(OPEN_STEP) < tail.names.index("lifecycle") < tail.names.index(
+    assert tail.names.index(CLEAR_STEP) < tail.names.index("lifecycle") < tail.names.index(
         RECORD_STEP
     ), (
-        f"the tail did not reach the record step after a completed lifecycle (ran {tail.names})"
+        f"the tail did not clear at run start and record after a completed lifecycle (ran {tail.names})"
     )
+    assert "open_case_ticket" not in tail.names, "the open leg ran"
     assert tail.run_dirs, "main never drove the injected lifecycle"
     assert tail.step(RECORD_STEP).tree_certified, (
         "the record step read the run dir BEFORE the lifecycle certified it"
@@ -81,29 +78,6 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch
     with pytest.raises(RuntimeError):
         drive_tail(run_py.main, plant_alert(tmp_path / "dying"), dying, "--update-ticket")
     assert RECORD_STEP not in dying.names, "a run that never completed its lifecycle recorded anyway"
-
-    # A failed open does not suppress the record attempt.
-    use_mapping(monkeypatch, tmp_path / "dfn")
-    for arm, (why, store) in enumerate((
-        ("a 409 on the create (the key already exists)",
-         FakeStore(status_by_suffix={TICKETS_PATH: "409"})),
-        ("a raising transport (the bastion is unreachable)",
-         FakeStore(transport_fault_on=TICKETS_PATH)),
-    )):
-        run_dir = make_run(tmp_path / f"open-failed-{arm}")
-        try:
-            open_ticket(run_dir, store)
-        except Exception as exc:  # noqa: BLE001 — the open's own fate belongs to O7, not here
-            pytest.fail(f"the open raised out of the writer on {why}: {exc!r}")
-        record(run_dir, store)
-
-        opened = [c.body for c in store.calls if c.path == TICKETS_PATH]
-        assert [b.get("key") if isinstance(b, dict) else b for b in opened] == [
-            run_dir.name
-        ], f"the open was never attempted at all on {why}, so nothing here is a failed open"
-        assert store.paths(COMMENTS_SUFFIX) == [
-            f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}"
-        ], f"a failed open suppressed the record step on {why} (the writer's calls: {store.paths()})"
 
 
 def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
@@ -119,7 +93,7 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
         assert step in tail.names, (
             f"the unflagged run did not complete its tail at all (ran {tail.names})"
         )
-    for step in (OPEN_STEP, RECORD_STEP):
+    for step in (CLEAR_STEP, RECORD_STEP):
         assert step not in tail.names, (
             f"a run without --update-ticket reached the estate anyway (ran {tail.names})"
         )

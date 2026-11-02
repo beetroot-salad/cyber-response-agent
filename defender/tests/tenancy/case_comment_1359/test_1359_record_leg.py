@@ -1,11 +1,13 @@
 """#1359 the record leg comments on the ticket the alert names, through the case system's adapter
-(docker route), driven through `run.main` with the real writer."""
+(docker route), driven through `run.main` with the real writer. Here: O1, O5, O7 end to end."""
 from __future__ import annotations
 
 import html
 import json
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
@@ -109,13 +111,14 @@ def test_run_start_bad_case_settings_make_no_call_and_name_the_file(tmp_path, mo
     assert "config.env" in (got.get("reason") or ""), got
 
 
-def test_o7_exit_class_and_posted_comments_record_key_on_the_ticket_key(tmp_path, monkeypatch):
-    """A cut-short run escalates on the alert's key; the posted-comments row is keyed by the ticket key,
-    its body tagged with the run. O7."""
+def test_o7_a_forced_close_escalates_and_the_posted_comments_row_is_keyed_on_the_ticket(
+        tmp_path, monkeypatch):
+    """An aborted run escalates on the alert's key; the posted-comments row is keyed by the ticket
+    key (not the run folder), its body tagged with the run. O7, r3 Data."""
     root, _folder, alert = _world(tmp_path)
     shim = _shim(tmp_path, monkeypatch)
     rc, refused, run_dir = _run(tmp_path, root, alert, summary={
-        "output": "spec1359", "requests": 0, "truncated_by": "budget", "closed_before_cut": False})
+        "output": "spec1359", "requests": 0, "truncated_by": "aborted", "closed_before_cut": False})
 
     assert refused is None, refused
     assert len(C.comment_calls(shim)) == 1, shim.calls()
@@ -124,5 +127,49 @@ def test_o7_exit_class_and_posted_comments_record_key_on_the_ticket_key(tmp_path
     assert (got["key"], got["status"]) == (C.TICKET_KEY, C.ESCALATED), got
     posted = S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(run_dir))
     assert [k for k, _ in posted] == [C.TICKET_KEY], posted
+    assert run_dir.name not in [k for k, _ in posted]
     tag = S.mod("tenancy.case_ticket").agent_comment_tag(run_dir.name)
     assert posted[0][1].startswith(tag), posted
+
+
+@pytest.mark.parametrize(("truncated_by", "closed_before_cut", "expected"), [
+    (None, False, C.COMMENTED),
+    ("aborted", False, C.ESCALATED),
+    ("request-limit", False, C.ESCALATED),
+    ("retry-exhausted", False, C.ESCALATED),
+    ("budget", True, C.COMMENTED),
+    ("budget", False, None),
+    ("store", False, None),
+    ("provider-down", False, None),
+])
+def test_o7_exit_class_decides_whether_the_run_comments(tmp_path, monkeypatch, truncated_by,
+                                                        closed_before_cut, expected):
+    """Which exit classes comment, escalate or stay silent is unchanged: silent means no call and
+    no receipt. O7."""
+    root, _folder, alert = _world(tmp_path)
+    shim = _shim(tmp_path, monkeypatch)
+    rc, refused, run_dir = _run(tmp_path, root, alert, summary={
+        "output": "spec1359", "requests": 0, "truncated_by": truncated_by,
+        "closed_before_cut": closed_before_cut})
+
+    assert (refused, rc) == (None, 0)
+    got = S.receipt(run_dir)
+    if expected is None:
+        assert shim.calls() == [], f"a silent exit class called the store: {shim.calls()}"
+        assert got is None, f"a silent exit class left a receipt: {got}"
+    else:
+        assert len(C.comment_calls(shim)) == 1, shim.calls()
+        assert got is not None, "no receipt"
+        assert (got["key"], got["status"], got["ok"]) == (C.TICKET_KEY, expected, True), got
+
+
+def test_o1_a_failed_comment_adds_no_posted_comments_row(tmp_path, monkeypatch):
+    """A refused comment leaves no posted-comments row, a sent one leaves exactly one. O7, #1255."""
+    root, _folder, alert = _world(tmp_path)
+    _shim(tmp_path, monkeypatch, S.answer(json.dumps({"detail": "no such ticket"}), "404"))
+    _rc, _refused, failed = _run(tmp_path, root, alert)
+    assert S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(failed)) == []
+
+    _shim(tmp_path, monkeypatch)
+    _rc, _refused, sent = _run(tmp_path / "again", root, alert)
+    assert len(S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(sent))) == 1
