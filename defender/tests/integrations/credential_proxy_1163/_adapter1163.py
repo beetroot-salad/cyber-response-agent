@@ -33,6 +33,7 @@ import httpx
 from defender.systems.verbs import VerbContext
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, PublishedTenant, published_tenant
 
 #: A signature no honest token can lose: a census looks for it in every channel.
@@ -64,15 +65,34 @@ ELASTIC_ALERTS = "alerts-*"
 
 
 def elastic_files(base: str, *, ca: str | bytes | None = None, transport: str | None = "http-proxy",
-                  env_extra: str = "", scheme: dict[str, object] | None = None) -> dict[str, str]:
+                  env_extra: str = "", scheme: dict[str, object] | None = None,
+                  declared: bool = True) -> dict[str, str]:
     """Repo files making `elastic` a proxied system at `base`: a basic-auth declaration with
     `ELASTIC_READS` (and `ca` when given), and a config.env holding the access method (`transport`;
-    None writes none), the two index keys and `env_extra` (no URL, Kibana or container key)."""
+    None writes none), the two index keys and `env_extra` (no URL, Kibana or container key);
+    `declared=False` leaves the declaration out."""
     decl = H.declaration(base, scheme=scheme or H.basic_scheme(), reads=ELASTIC_READS, ca=ca)
     method = "" if transport is None else f'ELASTIC_TRANSPORT="{transport}"\n'
     env = (f'{method}ELASTIC_EVENTS_INDEX="{ELASTIC_EVENTS}"\n'
            f'ELASTIC_ALERTS_INDEX="{ELASTIC_ALERTS}"\n{env_extra}')
-    return H.access_files("elastic", decl, env=env)
+    files = H.access_files("elastic", decl, env=env)
+    if not declared:
+        files.pop(ACCESS_FILE.format(system="elastic"))
+    return files
+
+
+@contextlib.contextmanager
+def elastic_proxied(tmp_path: Path, data_root: Path, base: str, *, ca: bytes | None = None,
+                    ctx_kw: Mapping[str, Any] | None = None, **files_kw: Any) -> Iterator[tuple[VerbContext, Tap]]:
+    """`elastic` declared at `base` (basic auth, the two POST reads, `ca` when given; `files_kw`
+    shape its files, see `elastic_files`) behind the real proxy over a stored basic credential;
+    yields the verb context (`ctx_kw`: more VerbContext fields) and the proxy's `Tap`."""
+    with published_tenant(tmp_path / "forge", root=data_root,
+                          files=elastic_files(base, ca=ca, **files_kw)) as t:
+        store = H.FakeStore({(t.tenant_id, "elastic"): T.basic_set()})
+        with proxy_for(t, store) as (url, tap):
+            yield ctx_for(tmp_path, T.run_record(t), url,
+                          T.token(t.tenant_id, {("elastic", "r")}), **(ctx_kw or {})), tap
 
 
 def system_files(system: str, decl: str, *, env_extra: str = "") -> dict[str, str]:
@@ -324,19 +344,32 @@ def grant_of(claims: Mapping[str, Any]) -> list[tuple[str, str]]:
 
 
 class Tap:
-    """An ASGI wrapper that records every `Authorization` header value the proxy is sent. It
-    forwards unchanged and decides nothing."""
+    """An ASGI wrapper that records every `Authorization` header value the proxy is sent and
+    each request body (`bodies`: the adapter's call, `timeout_sec` included). It forwards
+    unchanged and decides nothing."""
 
     def __init__(self, app: Any) -> None:
         self.app = app
         self.tokens: list[str] = []
+        self.bodies: list[bytes] = []
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope["type"] == "http":
-            for key, value in scope["headers"]:
-                if key == b"authorization":
-                    self.tokens.append(value.decode().removeprefix("Bearer "))
-        await self.app(scope, receive, send)
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        for key, value in scope["headers"]:
+            if key == b"authorization":
+                self.tokens.append(value.decode().removeprefix("Bearer "))
+        chunks: list[bytes] = []
+
+        async def tapped() -> Any:
+            message = await receive()
+            if message["type"] == "http.request":
+                chunks.append(message.get("body", b""))
+                if not message.get("more_body"):
+                    self.bodies.append(b"".join(chunks))
+            return message
+
+        await self.app(scope, tapped, send)
 
 
 @contextlib.contextmanager

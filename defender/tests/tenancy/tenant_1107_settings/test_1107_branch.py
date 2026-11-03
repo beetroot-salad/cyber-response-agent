@@ -126,10 +126,10 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
     folder = S.plant(root, TID, marker="mf17")
     manifest = H.family_for(src)
     # At launch the Elastic part was whole ...
-    assert "ELASTIC_ES_CONTAINER" in _resolve(root).systems["elastic"], \
+    assert "ELASTIC_EVENTS_INDEX" in _resolve(root).systems["elastic"], \
         "the tenant's Elastic part was not whole at launch"
     # ... and is edited bad before the sibling starts.
-    S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
+    S.drop_key(folder, "elastic", "ELASTIC_EVENTS_INDEX")
 
     # A run reads its own copy of an export, never the clone's working tree: the sibling's own
     # (unpinned) launch publishes the edited folder (`S.drive_run`'s in-process publish) and
@@ -144,7 +144,7 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
     assert len(rec.lifecycle_calls) == 1, f"lifecycle ran {len(rec.lifecycle_calls)} times"
     record, world = rec.lifecycle_calls[0]["tenant"], rec.lifecycle_calls[0]["world"]
     assert world.label == "b", f"the sibling ran another world: {world!r}"
-    assert "ELASTIC_ES_CONTAINER" not in record.systems["elastic"], \
+    assert "ELASTIC_EVENTS_INDEX" not in record.systems["elastic"], \
         f"the sibling's own record does not see the edit: {record.systems['elastic']!r}"
     # Its Elastic calls fault.
     run_dir = tmp_path / "sibling-run"

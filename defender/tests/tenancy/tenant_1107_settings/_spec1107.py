@@ -188,6 +188,14 @@ def drop_key(folder: Path, system: str, key: str) -> Path:
     return path
 
 
+def drop_access(folder: Path, system: str) -> Path:
+    """Remove `system`'s access declaration (`access.yaml`): a proxied system with none (#1391 P1/D12)."""
+    path = settings_of(folder) / "systems" / system / "access.yaml"
+    assert path.is_file(), f"premise: {system} carries no access.yaml to drop"
+    path.unlink()
+    return path
+
+
 def render_env(entries: str | Mapping[str, str]) -> str:
     if isinstance(entries, str):
         return entries

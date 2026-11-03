@@ -213,7 +213,7 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
 
 #: Every system the playground tenant's table (`TABLE_A`) grants gather, with a key its adapter's
 #: settings check requires; dropping one makes that system not configured.
-ALL_DOWN = (("cmdb", "CMDB_URL_BASE"), ("elastic", "ELASTICSEARCH_URL"))
+ALL_DOWN = (("cmdb", "CMDB_URL_BASE"), ("elastic", "ELASTIC_EVENTS_INDEX"))
 
 
 def _episode_census(episode: Path) -> dict[str, bytes]:

@@ -289,10 +289,15 @@ def _relabeled(pem: bytes, label: str) -> bytes:
 
 
 @functools.cache
-def _ca_texts() -> dict[str, tuple[bytes, str]]:
+def _pki():
     from defender.tests.support.shared._tls_server import chain
 
-    pki = chain()
+    return chain()
+
+
+@functools.cache
+def _ca_texts() -> dict[str, tuple[bytes, str]]:
+    pki = _pki()
     texts = {
         "root-on-https": (pki.root.cert, ES),
         "root-and-intermediate": (pki.root.cert + pki.intermediate.cert, ES),
@@ -319,8 +324,12 @@ def test_1391_o4_a_declarations_ca_is_judged_when_it_is_parsed(kind):
     if kind in {"root-on-https", "root-and-intermediate"}:
         assert parse_access(text, system="elastic").base == base
     else:
-        with pytest.raises(ConfigFault):
+        with pytest.raises(ConfigFault) as refused:
             parse_access(text, system="elastic")
+        key_body = _pki().root.key.splitlines()[1]  # a line of the base64 body, whatever the label
+        if key_body in ca:
+            assert key_body.decode() not in str(refused.value), (
+                "a pasted private key reached the fault text, so the run record")
 
 
 @pytest.mark.parametrize(("token_url", "ca", "fault"), [

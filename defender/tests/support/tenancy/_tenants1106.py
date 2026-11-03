@@ -241,6 +241,19 @@ def access_lines(marker: str, system: str) -> str:
             f'{prefix}_DOCKER_CONTEXT="{context_name(marker, system)}"\n')
 
 
+def elastic_access_text(marker: str, *, base: str | None = None) -> str:
+    """The elastic declaration every fixture tenant carries (#1391 O3 P1/D12): basic auth at
+    `base` (default: a made-up one carrying `marker`), with the two POST reads (JSON is YAML)."""
+    import json
+    return json.dumps({
+        "access": "http-proxy",
+        "base": base or f"http://elastic-{marker}:9200",
+        "auth": {"scheme": "basic"},
+        "reads": [{"method": "POST", "path": "/*/_search"}, {"method": "POST", "path": "/_query"}],
+        "writes": [],
+    }, indent=2) + "\n"
+
+
 def config_texts(marker: str, *, events_index: str | None = None,
                  alerts_index: str | None = None) -> dict[str, str]:
     """One complete `config.env` per system, every value carrying `marker` so a reader that
@@ -362,6 +375,8 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     system_configs = configs if configs is not None else config_texts(marker or tenant_id)
     for system, text in system_configs.items():
         files[f"systems/{system}/config.env"] = text
+    if "elastic" in system_configs and "ELASTIC_TRANSPORT" in system_configs["elastic"]:
+        files["systems/elastic/access.yaml"] = elastic_access_text(marker or tenant_id)
     for rel, text in files.items():
         if rel in omit:
             continue
@@ -559,6 +574,7 @@ __all__ = [
     "TEMPLATE_DIR",
     "TEMPLATE_SETTINGS",
     "config_texts",
+    "elastic_access_text",
     "lead_zero_text",
     "case_record_text",
     "CASE_RECORD_REL",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import ssl
 import tracemalloc
 import zlib
 
@@ -13,6 +14,7 @@ from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
 from defender.tests.support.shared._tls_server import chain, issue, tls_server
+from defender.tests.support.tenancy._host1214 import counting_calls
 
 BASE = T.BASE_PATH
 PATH = f"{BASE}/users/x"
@@ -479,14 +481,22 @@ def test_1391_o4_the_chain_must_end_at_a_root_in_ca(tmp_path, data_root, request
     when it holds only the intermediate, also under 3.13 partial-chain defaults. #1391 O4, F7."""
     if flags:
         request.getfixturevalue("defaults_of_python_313")
+    import httpx
+
     pki = chain()
     ca = pki.root.cert if trusted == "root" else pki.intermediate.cert
     with (tls_server(tmp_path, _ok, served=pki.served()) as server,
-          _ca_rig(tmp_path, data_root, server.url + BASE, ca) as r):
+          _ca_rig(tmp_path, data_root, server.url + BASE, ca) as r,
+          counting_calls(client=httpx.AsyncClient.__init__) as calls):
         answer = r.ask(url=server.url + PATH)
 
     assert answer["fault"] == fault, answer
     assert len(server.seen) == (1 if fault is None else 0)
+    handed = [c["verify"] for c in calls.locals["client"] if isinstance(c["verify"], ssl.SSLContext)]
+    assert handed, "no TLS context was handed to a client: the verify flags cannot be judged"
+    assert not [c for c in handed if c.verify_flags & ssl.VERIFY_X509_PARTIAL_CHAIN], (
+        "a context handed to the ca leg accepts a partial chain: the verify flags are inherited, "
+        "not an exact named set (F7)")
 
 
 def test_1391_o4_ca_adds_nothing_from_the_public_bundle_and_a_system_without_one_keeps_it(
@@ -533,11 +543,21 @@ def test_1391_o4_the_token_exchange_of_a_declaration_with_ca_trusts_that_ca(tmp_
 def test_1391_o4_the_token_exchange_of_a_declaration_with_ca_does_not_trust_the_public_bundle(
         tmp_path, data_root, monkeypatch):
     """OAuth with a `ca` naming another root: the token endpoint (signed by the public bundle here)
-    is refused and the API is never called. #1391 O4, D13."""
+    is refused and the API is never called; the same declaration without `ca` reaches it. #1391 O4, D13."""
     import certifi
 
     other = issue("another private root", ca=True)
     token_reply = json.dumps({"access_token": "AT-1391", "expires_in": 3600}).encode()
+    control_dir = tmp_path / "control"
+    control_dir.mkdir()
+    with tls_server(control_dir, lambda *_: (200, token_reply)) as control:
+        monkeypatch.setattr(certifi, "where", lambda: str(control.ca))  # lint-monkeypatch: ok — same as above
+        with _ca_rig(control_dir, data_root, control.url + BASE, None,
+                     scheme=H.oauth_scheme(control.url + "/token")) as r:
+            reached = r.ask(url=control.url + PATH)
+    assert reached["fault"] is None, f"control: without `ca` the bundle's server is refused: {reached}"
+    assert [(m, p) for m, p, _ in control.seen] == [("POST", "/token"), ("GET", PATH)]
+
     with tls_server(tmp_path, lambda *_: (200, token_reply)) as server:
         monkeypatch.setattr(certifi, "where", lambda: str(server.ca))  # lint-monkeypatch: ok — same as above
         with _ca_rig(tmp_path, data_root, server.url + BASE, other.cert,

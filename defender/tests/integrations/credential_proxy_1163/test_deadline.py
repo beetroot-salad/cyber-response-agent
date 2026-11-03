@@ -367,14 +367,17 @@ def test_1375_o1_a_request_builds_no_tls_context_on_any_leg(tmp_path, data_root)
         # Counted on every thread the request runs on: the TestClient, not entered as a context
         # manager, starts a fresh event-loop thread per request, inside this block. Every route to a
         # context today (httpx's, httpcore's default, `tls_trust`) passes `create_default_context`.
-        with counting_calls(context=ssl.create_default_context) as calls:
+        # `SSLContext.__new__` is every context however built (a new route past `create_default_context`
+        # included), as the #1391 O4 build counts read it.
+        with counting_calls(context=ssl.create_default_context, built=ssl.SSLContext.__new__) as calls:
             answer = T.ask(client, r.tok(), "identity", "GET", f"{r.up.url}{API}/users/x",
                            None, None, 5)
 
     assert answer["fault"] is None, answer
     assert (len(bao.seen), len(issued), r.up.paths()) == (2, 1, [f"{API}/users/x"]), \
         "control: every leg ran"
-    assert calls["context"] == 0, f"a request built {calls['context']} TLS contexts"
+    assert (calls["context"], calls["built"]) == (0, 0), (
+        f"a request built {calls['context']} default and {calls['built']} TLS contexts")
 
 
 def test_1391_o4_a_second_request_under_the_same_ca_builds_no_tls_context(tmp_path, data_root):

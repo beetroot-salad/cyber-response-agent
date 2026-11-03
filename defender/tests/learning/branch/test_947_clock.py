@@ -10,6 +10,7 @@ import datetime as dt
 import json
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,8 @@ from defender.learning.branch.ledger import (  # noqa: E402
 from defender.systems.verb_grant import VerbGrant  # noqa: E402
 from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.tests.support.runtime.state import _1255_clock as C
+from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A  # noqa: E402
+from defender.tests.integrations.credential_proxy_1163 import _harness as H  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
 from defender.integrations import elastic_adapter, host_state_adapter  # noqa: E402
@@ -226,33 +229,32 @@ def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
 
 
 def _fixture_tenant(tmp_path: Path) -> Any:
-    """The record resolved from a tenant folder planted under `tmp_path`, whose host-state and
-    elastic (this file's indices) config name the docker context `spec-947`."""
+    """The record resolved from a tenant folder planted under `tmp_path`, whose host-state config
+    names the docker context `spec-947` and whose elastic holds this file's indices."""
     root = tmp_path / "tenants"
     texts = S.config_texts("spec947", events_index=EVENTS_INDEX, alerts_index=ALERTS_INDEX)
     folder = S.plant(root, marker="spec947", configs=texts)
     S.set_key(folder, "host-state", "HOST_STATE_DOCKER_CONTEXT", "spec-947")
-    S.set_key(folder, "elastic", "ELASTIC_DOCKER_CONTEXT", "spec-947")
     return S.resolve(root)
 
 
-def elastic_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None) -> VerbContext:
-    """`docker_ctx`, over a tenant that carries the elastic config `load_config` refuses to run
-    without."""
-    return docker_ctx(tmp_path, as_of=as_of, defender_dir=tmp_path / "defender")
+@contextlib.contextmanager
+def elastic_ctx(tmp_path: Path, data_root: Path, *,
+                as_of: dt.datetime | None = None) -> Iterator[tuple[VerbContext, Any]]:
+    """A `VerbContext` over the proxy channel (#1391 O3): elastic declared at a recording upstream
+    behind the real proxy. Yields the context and the upstream, whose `seen` holds each request
+    the cluster received; every search is answered with no hits."""
+    with H.upstream() as up:
+        for path in (f"/{A.ELASTIC_EVENTS}/_search", f"/{A.ELASTIC_ALERTS}/_search", "/_query"):
+            up.replies[path] = (200, {"Content-Type": "application/json"},
+                                json.dumps({"hits": {"total": {"value": 0}, "hits": []}}).encode())
+        with A.elastic_proxied(tmp_path, data_root, up.url, ctx_kw={"as_of": as_of}) as (ctx, _tap):
+            yield ctx, up
 
 
-def docker_calls(tmp_path: Path) -> list[list[str]]:
-    log = tmp_path / DOCKER_LOG
-    if not log.is_file():
-        return []
-    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line]
-
-
-def search_body(tmp_path: Path) -> dict:
-    """The search body the LAST driven query actually put on the wire."""
-    argv = docker_calls(tmp_path)[-1]
-    return json.loads(argv[argv.index("-d") + 1])
+def search_body(up: Any) -> dict:
+    """The body of the LAST request the cluster received: what the search put on the wire."""
+    return json.loads(up.seen[-1].body)
 
 
 def range_filter(body: dict) -> dict | None:
@@ -467,24 +469,22 @@ def test_the_health_check_stamps_nothing_and_stays_that_way(tmp_path):
 
 
 @pytest.mark.parametrize("verb", ["query", "alerts"])
-def test_an_unbounded_search_is_closed_at_the_runs_clock(tmp_path, verb):
+def test_an_unbounded_search_is_closed_at_the_runs_clock(tmp_path, data_root, verb):
     """A search naming NEITHER bound is bounded at T0 on the wire — and only at T0."""
-    ctx = elastic_ctx(tmp_path, as_of=T0)
+    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
+        getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login")
 
-    getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login")
-
-    assert range_filter(search_body(tmp_path)) == {"lte": T0_Z}, (
+    assert range_filter(search_body(up)) == {"lte": T0_Z}, (
         "the unbounded search did not close at the branch point's own moment")
 
 
 @pytest.mark.parametrize("verb", ["query", "alerts"])
-def test_an_empty_string_end_is_closed_at_the_runs_clock(tmp_path, verb):
+def test_an_empty_string_end_is_closed_at_the_runs_clock(tmp_path, data_root, verb):
     """``end=""`` is the same open bound the body builder already treats as absent."""
-    ctx = elastic_ctx(tmp_path, as_of=T0)
+    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
+        getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login", end="")
 
-    getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login", end="")
-
-    assert range_filter(search_body(tmp_path)) == {"lte": T0_Z}
+    assert range_filter(search_body(up)) == {"lte": T0_Z}
 
 
 @pytest.mark.parametrize(("start", "end", "expected"), [
@@ -493,40 +493,38 @@ def test_an_empty_string_end_is_closed_at_the_runs_clock(tmp_path, verb):
     ("2026-05-01T00:00:00Z", "2026-06-01T00:00:00Z",
      {"gte": "2026-05-01T00:00:00Z", "lte": "2026-06-01T00:00:00Z"}),
 ])
-def test_a_search_that_names_its_own_end_is_never_rewritten(tmp_path, start, end, expected):
+def test_a_search_that_names_its_own_end_is_never_rewritten(tmp_path, data_root, start, end, expected):
     """A PRESENT `end` survives untouched — including one that runs past T0 — and an absent one is filled beside whatever `start` the caller gave."""
-    ctx = elastic_ctx(tmp_path, as_of=T0)
+    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
+        elastic_adapter.query(ctx, native_query="event.action:ssh_login", start=start, end=end)
 
-    elastic_adapter.query(ctx, native_query="event.action:ssh_login", start=start, end=end)
-
-    assert range_filter(search_body(tmp_path)) == expected
+    assert range_filter(search_body(up)) == expected
 
 
 @pytest.mark.parametrize("verb", ["query", "alerts"])
-def test_a_branched_search_bounds_its_hits_at_the_cluster_and_keeps_its_window(tmp_path, verb):
+def test_a_branched_search_bounds_its_hits_at_the_cluster_and_keeps_its_window(
+        tmp_path, data_root, verb):
     """A branched search carries the clock as a `post_filter` beside the caller's own `query`
     window, so the cluster drops hits past T0 without the window being rewritten."""
-    ctx = elastic_ctx(tmp_path, as_of=T0)
+    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
+        getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login",
+                                       start="2026-05-01T00:00:00Z", end="2026-06-01T00:00:00Z")
 
-    getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login",
-                                   start="2026-05-01T00:00:00Z", end="2026-06-01T00:00:00Z")
-
-    body = search_body(tmp_path)
+    body = search_body(up)
     assert range_filter(body) == {"gte": "2026-05-01T00:00:00Z", "lte": "2026-06-01T00:00:00Z"}
     bounds = [c["range"]["@timestamp"] for c in body["post_filter"]["bool"]["should"]
               if "range" in c]
     assert bounds == [{"lte": T0_Z}]
 
 
-def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path):
+def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path, data_root):
     """The window fill goes into a fresh local: a second search through the same context is
     filled from T0 again, not from anything the first one left behind."""
-    ctx = elastic_ctx(tmp_path, as_of=T0)
-
-    elastic_adapter.query(ctx, native_query="a")
-    first = range_filter(search_body(tmp_path))
-    elastic_adapter.query(ctx, native_query="b", start="2026-05-01T00:00:00Z")
-    second = range_filter(search_body(tmp_path))
+    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
+        elastic_adapter.query(ctx, native_query="a")
+        first = range_filter(search_body(up))
+        elastic_adapter.query(ctx, native_query="b", start="2026-05-01T00:00:00Z")
+        second = range_filter(search_body(up))
 
     assert first == {"lte": T0_Z}
     assert second == {"gte": "2026-05-01T00:00:00Z", "lte": T0_Z}
@@ -576,30 +574,28 @@ def test_the_models_own_time_predicate_is_left_exactly_as_written(tmp_path):
         "the model's own predicate was edited — the clock reads no predicate and writes none")
 
 
-def test_the_bound_reaches_the_wire_and_stays_out_of_the_evidence(tmp_path):
+def test_the_bound_reaches_the_wire_and_stays_out_of_the_evidence(tmp_path, data_root):
     """The BOUNDED query is what Elasticsearch runs; the payload records the query as asked."""
-    ctx = elastic_ctx(tmp_path, as_of=T0)
     asked = "FROM logs-zeek.ssh-*\n| LIMIT 5"
-
-    payload = elastic_adapter.esql(ctx, query=asked)
+    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
+        payload = elastic_adapter.esql(ctx, query=asked)
 
     assert payload["query"] == asked, (
         f"the payload records {payload['query']!r} — a clause the model never wrote is now in "
         "the run's own record of the question it asked")
-    assert search_body(tmp_path)["query"] == f"FROM logs-zeek.ssh-*\n{BOUND}\n| LIMIT 5", (
+    assert search_body(up)["query"] == f"FROM logs-zeek.ssh-*\n{BOUND}\n| LIMIT 5", (
         "the query that reached the cluster carries no bound, so the episode reads the live "
         "tail and cannot be replayed")
 
 
-def test_both_halves_of_the_window_include_the_branch_point_itself(tmp_path):
+def test_both_halves_of_the_window_include_the_branch_point_itself(tmp_path, data_root):
     """The ES|QL clause and the search body close the window INCLUSIVELY, both of them."""
-    ctx = elastic_ctx(tmp_path, as_of=T0)
-
-    clause = elastic_adapter.bounded_esql(ctx, "FROM logs-zeek.ssh-*")
-    elastic_adapter.query(ctx, native_query="event.action:ssh_login")
+    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
+        clause = elastic_adapter.bounded_esql(ctx, "FROM logs-zeek.ssh-*")
+        elastic_adapter.query(ctx, native_query="event.action:ssh_login")
 
     assert clause.splitlines()[-1] == f'| WHERE @timestamp <= "{T0_Z}"'
-    assert range_filter(search_body(tmp_path)) == {"lte": T0_Z}
+    assert range_filter(search_body(up)) == {"lte": T0_Z}
 
 
 # 4. T0 itself: derived from the prefix, and pinned into the spec

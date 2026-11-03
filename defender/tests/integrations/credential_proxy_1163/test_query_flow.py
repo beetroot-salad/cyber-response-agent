@@ -3,11 +3,11 @@ loopback and a recording upstream, over a non-root base (r5 A2)."""
 from __future__ import annotations
 
 import base64
-import contextlib
 import datetime
 import inspect
 import json
 import logging
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -23,7 +23,7 @@ from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.support.shared._tls_server import chain, tls_server
-from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
+from defender.tests.tenancy.tenant_1108_p4._support import export_dir, published_tenant
 
 GRANT = {("identity", "r")}
 API = "/api/v2"
@@ -229,17 +229,7 @@ ES_BASIC = "Basic " + base64.b64encode(f"svc-reader:{H.CANARY_KEY}".encode()).de
 HIT = {"@timestamp": "2026-11-03T10:00:00Z", "user": {"name": "root"}}
 
 
-@contextlib.contextmanager
-def _elastic(tmp_path, data_root, base: str, *, ca: bytes | None = None, ctx_kw=None, **files_kw):
-    """`elastic` declared at `base` (basic auth, the two POST reads, `ca` when given; `files_kw`
-    shape its files, see `A.elastic_files`) behind the real proxy; yields the verb context
-    (`ctx_kw` more VerbContext fields) and the proxy's `Tap`."""
-    with published_tenant(tmp_path / "forge", root=data_root,
-                          files=A.elastic_files(base, ca=ca, **files_kw)) as t:
-        store = H.FakeStore({(t.tenant_id, "elastic"): T.basic_set()})
-        with A.proxy_for(t, store) as (url, tap):
-            yield A.ctx_for(tmp_path, T.run_record(t), url,
-                            T.token(t.tenant_id, {("elastic", "r")}), **(ctx_kw or {})), tap
+_elastic = A.elastic_proxied
 
 
 def test_1391_o3_query_is_a_search_of_the_events_index_with_basic_auth_added_by_the_proxy(
@@ -341,6 +331,8 @@ def _answered(status: int) -> tuple[int, dict, bytes]:
                  id="esql-503"),
     pytest.param("query", {"native_query": "*"}, f"/{A.ELASTIC_EVENTS}/_search", 403,
                  UpstreamFault, id="query-403"),
+    pytest.param("alerts", {"native_query": "*"}, f"/{A.ELASTIC_ALERTS}/_search", 403,
+                 UpstreamFault, id="alerts-403"),
 ])
 def test_1391_o3_elastic_faults_follow_the_proxys_classification(
         tmp_path, data_root, verb, kw, path, status, fault):
@@ -373,6 +365,7 @@ def test_1391_o3_health_check_faults_by_the_reply_and_a_403_names_the_monitor_pr
     assert type(raised.value) is fault, raised.value
     if names:
         assert names in str(raised.value), raised.value
+    assert [s.path for s in up.seen] == ["/_cluster/health"], "the request was never sent"
 
 
 @pytest.mark.parametrize("transport", [
@@ -394,6 +387,20 @@ def test_1391_o3_elastic_without_the_http_proxy_method_is_a_settings_fault_namin
         with pytest.raises(ConfigFault, match="ELASTIC_TRANSPORT"):
             elastic_adapter.check_settings(ctx.tenant)
         with pytest.raises(ConfigFault, match="ELASTIC_TRANSPORT"):
+            elastic_adapter.VERBS["query"](ctx, native_query="*")
+
+    assert (tap.tokens, up.seen) == ([], [])
+
+
+def test_1391_o3_elastic_on_the_http_proxy_method_with_no_access_yaml_is_a_settings_fault(
+        tmp_path, data_root):
+    """`ELASTIC_TRANSPORT=http-proxy` beside no `access.yaml` is a ConfigFault naming it at the
+    settings check and at a verb, nothing sent. #1391 O3, P1, D12."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url,
+                                      declared=False) as (ctx, tap):
+        with pytest.raises(ConfigFault, match="access.yaml"):
+            elastic_adapter.check_settings(ctx.tenant)
+        with pytest.raises(ConfigFault, match="access.yaml"):
             elastic_adapter.VERBS["query"](ctx, native_query="*")
 
     assert (tap.tokens, up.seen) == ([], [])
@@ -437,8 +444,52 @@ def test_1391_o3_each_elastic_request_is_captured_once_and_reaches_the_proxy_onc
 
     assert [(r.system, r.method) for r in capture.requests] == [
         ("elastic", method) for _verb, _kw, method in verbs]
+    sent = [urlsplit(r.url)[:3] for r in capture.requests]
+    assert sent == [urlsplit(up.url)._replace(path=s.path.split("?")[0])[:3] for s in up.seen], (
+        "a capture names a URL other than the one sent")
     for request in capture.requests:
         confine_read_endpoint(request.system, request.url, method=request.method, verb_class="r")
+
+
+@pytest.mark.parametrize(("verb", "kw", "timeout"), [
+    pytest.param("query", {"native_query": "*"}, 30, id="query"),
+    pytest.param("alerts", {"native_query": "*"}, 30, id="alerts"),
+    pytest.param("esql", {"query": f"FROM {A.ELASTIC_EVENTS} | LIMIT 1"}, 30, id="esql"),
+    pytest.param("health-check", {}, 10, id="health-check"),
+])
+def test_1391_o3_each_verb_asks_the_proxy_for_its_constant_timeout(
+        tmp_path, data_root, verb, kw, timeout):
+    """The adapter's constants ride the proxy call as `timeout_sec`: 30 s for query, alerts and
+    esql, 10 s for health-check (no timeout key). #1391 O3, F8."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, tap):
+        for path in (f"/{A.ELASTIC_EVENTS}/_search", f"/{A.ELASTIC_ALERTS}/_search"):
+            up.replies[path] = (200, {}, b'{"hits": {"hits": []}}')
+        up.replies["/_query"] = (200, {}, b'{"columns": [], "values": []}')
+        up.replies["/_cluster/health"] = (200, {}, b'{"status": "green", "number_of_nodes": 1}')
+        elastic_adapter.VERBS[verb](ctx, **kw)
+
+    assert [json.loads(b)["timeout_sec"] for b in tap.bodies] == [timeout]
+
+
+def test_1391_o3_an_index_edit_after_resolve_does_not_reach_the_wire(tmp_path, data_root):
+    """The run's record is parsed once: an events-index edit made to the settings after resolve
+    changes nothing a verb sends, while a record resolved after it sends the edit. #1391 O3
+    (restores the elastic half of `test_o2_adapter_config_snapshot`)."""
+    with H.upstream() as up, published_tenant(
+            tmp_path / "forge", root=data_root, files=A.elastic_files(up.url)) as t:
+        store = H.FakeStore({(t.tenant_id, "elastic"): T.basic_set()})
+        record = T.run_record(t)
+        config = export_dir(t.tenant, t.commit) / "settings/systems/elastic/config.env"
+        config.write_text(config.read_text(encoding="utf-8").replace(
+            f'"{A.ELASTIC_EVENTS}"', '"edited-*"'), encoding="utf-8")
+        with A.proxy_for(t, store) as (url, _tap):
+            token = T.token(t.tenant_id, {("elastic", "r")})
+            elastic_adapter.query(A.ctx_for(tmp_path, record, url, token), native_query="*")
+            elastic_adapter.query(A.ctx_for(tmp_path / "later", T.run_record(t), url, token),
+                                  native_query="*")
+
+    assert [s.path.split("?")[0] for s in up.seen] == [
+        f"/{A.ELASTIC_EVENTS}/_search", "/edited-*/_search"]
 
 
 def test_1391_o3_alerts_keeps_its_output_shape_through_the_proxy(tmp_path, data_root):

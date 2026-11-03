@@ -57,8 +57,8 @@ def test_d_systems_verbatim(tmp_path):
     assert "URL_BASE" not in rec.systems["cmdb"], "the prefix was stripped at resolve"
     assert dict(rec.systems["extra-sys"]) == {"EXTRA_SYS_URL_BASE": "http://extra-vb:1"}
     elastic = dict(rec.systems["elastic"])
-    assert elastic["ELASTIC_EVENTS_INDEX"] == "vb-events-*", elastic
-    assert elastic["KIBANA_URL"] == "http://kibana-vb:5601", elastic
+    assert elastic == {"ELASTIC_TRANSPORT": "http-proxy", "ELASTIC_EVENTS_INDEX": "vb-events-*",
+                       "ELASTIC_ALERTS_INDEX": "vb-alerts-*"}, elastic
 
 
 def test_d_systems_fault_kept(tmp_path):
@@ -290,8 +290,7 @@ def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
         "TICKET_KEY_PATTERN": "ENV-[0-9]+",
         "ELASTIC_EVENTS_INDEX": "env-events-*",
         "ELASTIC_ALERTS_INDEX": "env-alerts-*",
-        "ELASTICSEARCH_URL": "https://from-env:9200",
-        "ELASTIC_SSL_VERIFY": "false",
+        "ELASTIC_TRANSPORT": "docker-exec",
         "SOC_PLAYGROUND_DOCKER_CONTEXT": "env-context",
         "SOC_PLAYGROUND_ES_CONTAINER": "env-es",
         "CMDB_DOCKER_CONTEXT": "env-cmdb-context",
@@ -311,8 +310,8 @@ def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
     assert rec.systems["ticket"]["TICKET_KEY_PATTERN"] == "O1R-[0-9]+"
     elastic = rec.systems["elastic"]
     assert elastic["ELASTIC_EVENTS_INDEX"] == "o1r-events-*"
-    assert elastic["ELASTICSEARCH_URL"] == "https://es-o1r:9200"
-    assert elastic["ELASTIC_DOCKER_CONTEXT"] == S.context_name("o1r", "elastic")
+    assert elastic["ELASTIC_TRANSPORT"] == "http-proxy", dict(elastic)
+    assert "ELASTIC_DOCKER_CONTEXT" not in elastic, dict(elastic)
 
 
 def _config_keys(path: Path) -> set[str]:
@@ -337,8 +336,12 @@ def test_d2_shipped_tenants_complete():
             assert config_env.is_file(), config_env
             keys = _config_keys(config_env)
             needed = {f"{prefix}_TRANSPORT", f"{prefix}_DOCKER_CONTEXT"}
-            if name == "elastic":
-                needed |= {"ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER"}
+            if name == "elastic":  # #1391 D2/D12: the proxy method, its declaration, no Docker or base keys
+                needed = {"ELASTIC_TRANSPORT", "ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX"}
+                retired = {"ELASTIC_DOCKER_CONTEXT", "ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER",
+                           "ELASTICSEARCH_URL", "KIBANA_URL", "ELASTIC_SSL_VERIFY"}
+                assert not retired & keys, (tenant_settings, sorted(retired & keys))
+                assert (systems / name / "access.yaml").is_file(), (tenant_settings, "no declaration")
             assert needed <= keys, (tenant_settings, name, sorted(needed - keys))
 
     # The committed fixture, set up under this test's data root as `playground`.
