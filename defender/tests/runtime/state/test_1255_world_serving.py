@@ -502,12 +502,15 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
 
 @pytest.mark.parametrize(("gone", "expected"), [
     ({"comment_id": "c-2", "author": "defender", "body": "SOURCE-CLOSING"}, "reconstructed"),
+    ({"comment_id": "c-2", "author": "alice", "body": "SOURCE-CLOSING"}, ORACLE),
     ({"comment_id": "c-3", "author": "alice", "body": "I did not do this"}, ORACLE),
-], ids=["source-write-on-a-ticket-no-fact-names", "comment-naming-a-fact-entity"])
+    ({"comment_id": "c-4", "author": "bob", "body": "checked the queue"}, "reconstructed"),
+], ids=["source-write-on-a-ticket-no-fact-names", "source-write-naming-a-fact-entity",
+        "comment-naming-a-fact-entity", "other-comment-naming-no-fact-entity"])
 def test_1385_a_removed_comment_is_oracle_only_when_it_names_a_fact_entity(
         tmp_path: Path, gone: dict, expected: str) -> None:
     """World b serving its ticket without a comment is `reconstructed`, unless a string in the
-    comment equals an entity a fact names (`alice`), then `oracle` (T2, O4, A1)."""
+    comment equals a fact's entity (`alice`), then `oracle`; a source write is no rule (T2, A1)."""
     from defender.tests.support.runtime.engine import _spec767 as S767
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
@@ -515,7 +518,8 @@ def test_1385_a_removed_comment_is_oracle_only_when_it_names_a_fact_entity(
                                disposition="malicious", body=CLOSING_MARKER)
     store = S767.FakeStore(tmp_path / "store")
     S767.record(source_dir, store)
-    gone = {**gone, "body": store.wire_body()} if gone["comment_id"] == "c-2" else gone
+    if gone["body"] == "SOURCE-CLOSING":
+        gone = {**gone, "body": store.wire_body()}
     est = S24.estate(tmp_path)
     est.answer("siem-x", "lookup", CASE, {**TICKET_AT_FORK, "comments": [ANALYST_NOTE, gone]})
     side = S24.query_params(f"comment_id:{gone['comment_id']}")

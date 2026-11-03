@@ -123,3 +123,66 @@ def test_host_state_using_time_for_something_else_is_not_found(tmp_path, src):
 def test_another_adapter_reading_the_date_is_not_found(tmp_path):
     """Positive control: a non-host-state adapter's date in its reply is allowed (L1)."""
     assert _GATE.scan(_tree(tmp_path, {"integrations/x_adapter.py": _CLEAN_ADAPTER})) == []
+
+
+_PLATFORM_CONTEXT = ("from datetime import datetime\n"
+                     "class VerbContext:\n"
+                     "    env: dict\n"
+                     "    capture: object = None\n"
+                     "{extra}")
+
+
+@pytest.mark.parametrize("field", ["as_of: datetime | None = None",
+                                   "run_state: object | None = None"],
+                         ids=["as_of", "run_state"])
+def test_the_concrete_verb_context_declaring_a_replay_input_is_found(tmp_path, field):
+    """`systems.verbs.VerbContext` declaring `as_of` or `run_state` is a finding at its line (L1)."""
+    src = _PLATFORM_CONTEXT.format(extra=f"    {field}\n")
+    found = _GATE.scan(_tree(tmp_path, {"systems/verbs.py": src}))
+    assert len(found) == 1 and "systems/verbs.py:5" in found[0], found
+
+
+def test_the_concrete_verb_context_without_a_replay_input_is_not_found(tmp_path):
+    """Positive control: a context of env and capture, and a non-context class holding
+    `run_state` on the platform side, are clean (L1)."""
+    src = _PLATFORM_CONTEXT.format(extra="class Holder:\n    run_state: object | None = None\n")
+    assert _GATE.scan(_tree(tmp_path, {"systems/verbs.py": src})) == []
+
+
+@pytest.mark.parametrize("extra", [
+    "class RunClock(Protocol):\n    def now(self) -> datetime: ...\n",
+    "class Ticker(Protocol):\n    def now(self): ...\n",
+    "class Wall(Protocol):\n    def __call__(self) -> datetime: ...\n    def now(self): ...\n",
+], ids=["run-clock", "other-name", "callable-with-now"])
+def test_the_kit_interface_offering_a_clock_under_any_name_is_found(tmp_path, extra):
+    """A protocol in the kit with a `now()` is a finding whatever the protocol is called (L1)."""
+    kit = f"from datetime import datetime\n{_KIT}{extra}"
+    found = _GATE.scan(_tree(tmp_path, {"kit/verbs.py": kit}))
+    assert len(found) == 1 and "kit/verbs.py" in found[0] and "now" in found[0], found
+
+
+def test_the_kit_interface_with_no_clock_is_not_found(tmp_path):
+    """Positive control: a kit protocol with `env` and a date-typed field, no `now()`, is clean (L1)."""
+    kit = f"from datetime import datetime\n{_KIT}    @property\n    def started(self) -> datetime: ...\n"
+    assert _GATE.scan(_tree(tmp_path, {"kit/verbs.py": kit})) == []
+
+
+_TEMPLATE = "skills/connect/examples/example_adapter.py"
+
+
+@pytest.mark.parametrize("line", [
+    "    at = getattr(ctx, 'as_of', None)",
+    "    at = ctx.as_of",
+    "    at = ctx.run_state.now()",
+    "    at = CALL_RUN_STATE.get()",
+])
+def test_the_tenant_adapter_template_reading_the_branch_point_is_found(tmp_path, line):
+    """The adapter template under `skills/connect/examples/` is held to the adapters' rule (L1)."""
+    src = f"def query(ctx, *, q):\n{line}\n    return {{'q': q}}\n"
+    found = _GATE.scan(_tree(tmp_path, {_TEMPLATE: src}))
+    assert found and all(f"{_TEMPLATE}:2" in f for f in found), found
+
+
+def test_a_replay_blind_adapter_template_is_not_found(tmp_path):
+    """Positive control: a template reading only `ctx.env` is clean (L1)."""
+    assert _GATE.scan(_tree(tmp_path, {_TEMPLATE: _CLEAN_ADAPTER})) == []

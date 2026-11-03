@@ -497,21 +497,30 @@ _BOUNDED = S.query_params("host:web-1", end=S.AS_OF, limit=2)
 _RE_ASK = S.re_asked(system="idp", verb="query", params=_BOUNDED)
 
 
-@pytest.mark.parametrize(("label", "dropped_user", "forge", "expected"), [
-    ("b", "carol", False, "reconstructed"),
-    ("b", "alice", False, S.ORACLE_DECISION),
-    ("b", "carol", True, S.ORACLE_DECISION),
-    ("a", "alice", False, "reconstructed"),
+_LATE = "2026-07-28T17:05:00Z"
+_NESTED = {"action": "logon", "event_id": "e-300", "ts": _LATE,
+           "detail": {"session": {"actor": ["x", {"name": "alice"}]}}}
+
+
+@pytest.mark.parametrize(("label", "dropped", "older", "forge", "expected"), [
+    ("b", _event("carol", "e-300", _LATE), _OLDER, False, "reconstructed"),
+    ("b", _event("alice", "e-300", _LATE), _OLDER, False, S.ORACLE_DECISION),
+    ("b", _event("carol", "e-300", _LATE), _OLDER, True, S.ORACLE_DECISION),
+    ("a", _event("alice", "e-300", _LATE), _OLDER, False, "reconstructed"),
+    ("b", _NESTED, _OLDER, False, S.ORACLE_DECISION),
+    ("b", _event("alice-admin", "e-300", _LATE), _OLDER, False, "reconstructed"),
+    ("b", _event("carol", "e-300", _LATE), _event("alice", "e-099", "2026-07-28T14:00:00Z"),
+     False, "reconstructed"),
 ], ids=["cut-drops-no-fact-entity", "cut-drops-a-fact-entity-row", "cut-plus-forged-row",
-        "world-without-facts"])
+        "world-without-facts", "dropped-row-names-it-nested", "near-miss-value",
+        "re-ask-brings-in-a-fact-entity-row"])
 def test_1385_a_cut_is_oracle_only_for_what_it_shows_of_the_worlds_facts(
-        tmp_path, label, dropped_user, forge, expected):
-    """A re-asked answer is `oracle` when it drops a row naming a fact entity or carries a forged
-    row, else `reconstructed`; a world without facts is never `oracle` (T2, O4)."""
+        tmp_path, label, dropped, older, forge, expected):
+    """A re-asked answer is `oracle` when a dropped row has a string equal to a fact entity at any
+    depth, or it carries a forged row, else `reconstructed`; no facts, never (T2, O4)."""
     est = S.estate(tmp_path)
-    est.answer("idp", "query", _CAPPED, {"rows": [_event(dropped_user, "e-300",
-                                                         "2026-07-28T17:05:00Z"), _KEPT]})
-    at_branch = {"rows": [_KEPT, _OLDER]}
+    est.answer("idp", "query", _CAPPED, {"rows": [dropped, _KEPT]})
+    at_branch = {"rows": [_KEPT, older]}
     est.answer("idp", "query", _BOUNDED, at_branch)
     served, claim = at_branch, S.claim(re_ask=_RE_ASK)
     moves = []

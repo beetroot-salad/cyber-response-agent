@@ -414,6 +414,34 @@ def test_1385_older_real_rows_pass_check_1_only_under_a_declared_re_ask(tmp_path
         ("idp", "query", AT_BRANCH)], "the re-asked answer was not kept as a base answer (A3)"
 
 
+#: Rows no claim covers: one after the branch point, one real older row the re-ask never returned.
+STRAY_ROW = {"user": "alice", "event_id": "e-050", "action": "logon", "host": "web-2",
+             "ts": "2026-07-28T13:00:00Z"}
+
+
+@pytest.mark.parametrize("extra", [POST_ROW, STRAY_ROW], ids=["post-branch-row", "unclaimed-row"])
+def test_1385_a_declared_re_ask_does_not_excuse_a_row_beyond_its_answer(tmp_path, extra):
+    """A served answer of the re-asked answer plus another unclaimed row fails check 1; the
+    re-asked answer alone passes (T1, O4)."""
+    live = [("idp", "query", CAPPED, {"rows": [POST_ROW, BASE_ROW]}),
+            ("idp", "query", BOUNDED, AT_BRANCH)]
+    re_ask = S.re_asked(system="idp", verb="query", params=BOUNDED)
+    padded = {"rows": [*AT_BRANCH["rows"], extra]}
+    sc = _scene(tmp_path / "flawed", live=live)
+    o = S.oracle(S.submit(padded, S.claim(re_ask=re_ask)),
+                 S.submit(AT_BRANCH, S.claim(re_ask=re_ask)))
+    assert sc.call(sc.registry(o), "idp", "query", **CAPPED) == AT_BRANCH
+    _assert_verdict(o, 1, "check 1")
+    _spent(o)
+    assert o.submissions() == 2, "the padded answer was served"
+
+    ctl = _scene(tmp_path / "control", live=live)
+    o = S.oracle(S.submit(AT_BRANCH, S.claim(re_ask=re_ask)))
+    assert ctl.call(ctl.registry(o), "idp", "query", **CAPPED) == AT_BRANCH
+    _spent(o)
+    assert o.submissions() == 1, "positive control: the re-asked answer alone was refused"
+
+
 def _col(name: str) -> dict:
     return {"name": name, "type": "keyword"}
 
@@ -424,7 +452,6 @@ ES_CAPPED = {"columns": [_col("event_id"), _col("ts")],
 ES_BOUNDED = {"columns": [_col("event_id"), _col("ts")],
               "values": [["e-100", TS_BASE], ["e-099", "2026-07-28T14:00:00Z"]]}
 ES_NARROW = {"columns": [_col("event_id")], "values": [["e-100"], ["e-099"]]}
-OTHER = S.query_params("host:web-1", end=S.AS_OF, limit=2)
 
 
 def _re_ask_scene(tmp_path: Path, case: str, *, flawed: bool):
@@ -436,9 +463,9 @@ def _re_ask_scene(tmp_path: Path, case: str, *, flawed: bool):
     re_ask = S.re_asked(system="idp", verb="query", params=BOUNDED)
     if case == "esql-columns":
         base, served = ES_CAPPED, ES_BOUNDED
-        live = [("idp", "query", BOUNDED, ES_BOUNDED), ("idp", "query", OTHER, ES_NARROW)]
+        live = [("idp", "query", BOUNDED, ES_NARROW if flawed else ES_BOUNDED)]
         if flawed:
-            served, re_ask = ES_NARROW, S.re_asked(system="idp", verb="query", params=OTHER)
+            served = ES_NARROW
     elif flawed and case == "other-system":
         live.append(("siem-x", "query", BOUNDED, AT_BRANCH))
         re_ask = S.re_asked(system="siem-x", verb="query", params=BOUNDED)

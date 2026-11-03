@@ -233,7 +233,6 @@ def test_1385_the_model_sees_the_run_clocks_stamp_beside_each_reply(tmp_path):
 
     first, second = C.at(start, 17), C.at(start, 22)
     assert len(gather.seen) >= 3, f"the gather lead made {len(gather.seen)} request(s), not 3"
-    assert not C.mentions(gather.seen[0], first), "fixture: the reply's time was shown before it"
     assert C.mentions(_outside_untrusted(gather.seen[1]), first), (
         "the first reply reached the model without the run clock's stamp beside it")
     assert C.mentions(_outside_untrusted(gather.seen[2]), second), (
@@ -249,11 +248,12 @@ def test_1385_the_model_sees_the_run_clocks_stamp_beside_each_reply(tmp_path):
 
 
 def test_1385_a_failed_call_and_a_refused_call_each_get_the_stamp_too(tmp_path):
-    """An error result and a refusal each carry the run clock's reading outside the untrusted
-    frame; the error's equals its row's `received_at` (T4, O7, A6)."""
+    """A success, an error and a refusal each show the run clock's arrival reading outside the
+    frame, equal to their own row's `received_at` (T4, O7, A6)."""
     from defender.tests.support.runtime.state import _1255_clock as C
 
     def ok(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:
+        clock.advance(2)
         return PAYLOAD
 
     def down(ctx: VerbContext, *, native_query: str = "FROM logs") -> list[dict]:
@@ -272,19 +272,30 @@ def test_1385_a_failed_call_and_a_refused_call_each_get_the_stamp_too(tmp_path):
           verbs=FakeVerbs({"elastic": {"query": ok, "probe": down}}), clock=clock)
     r = _Run(run_dir, main, gather)
 
-    ok_at, error_at, refused_at = C.at(start, 14), C.at(start, 20), C.at(start, 23)
+    request_at, ok_at = C.at(start, 14), C.at(start, 16)
+    error_at, refused_at = C.at(start, 22), C.at(start, 25)
     assert len(gather.seen) >= 4, f"the gather lead made {len(gather.seen)} request(s), not 4"
     assert "shard 3 is down" in gather.seen[2], "fixture: the error result did not reach the model"
     assert "no_such_verb" in gather.seen[3], "fixture: the refusal did not reach the model"
     assert C.mentions(_outside_untrusted(gather.seen[1]), ok_at), (
-        "positive control: the success carried no stamp")
+        "positive control: the success carried no arrival stamp")
+    assert not C.mentions(_outside_untrusted(gather.seen[1]), request_at), (
+        "the success was stamped with the request's reading, not its arrival's")
     assert C.mentions(_outside_untrusted(gather.seen[2]), error_at), (
         "the error result reached the model without the run clock's stamp")
     assert C.mentions(_outside_untrusted(gather.seen[3]), refused_at), (
         "the refusal reached the model without the run clock's stamp")
-    failed = [row for row in r.own_rows if row.get("exit_code") != 0]
-    assert len(failed) == 1, failed
-    assert C.instant(failed[0].get("received_at")) == error_at, failed
+    rows = r.own_rows
+    assert len(rows) == 3, rows
+    assert rows[0].get("exit_code") == 0, rows
+    failed = rows[1:]
+    assert all(row.get("exit_code") != 0 for row in failed), rows
+    for row, shown, moment in zip(failed, (gather.seen[2], gather.seen[3]),
+                                  (error_at, refused_at), strict=True):
+        assert C.instant(row.get("received_at")) == moment, row
+        assert C.mentions(_outside_untrusted(shown), C.instant(row["received_at"])), (
+            "the stamp shown to the model is not that row's stored received_at")
+    assert C.instant(rows[0].get("received_at")) == ok_at, rows[0]
 
 
 def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
