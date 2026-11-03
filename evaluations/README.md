@@ -32,11 +32,7 @@ identity migration in
 `tenant.py migrate` does not convert tenant IDs and is retired.
 
 
-**How to run these tools (#1276).** Every tool here runs as a module, from the repository root, with
-the defender venv's Python and no `PYTHONPATH`: `defender/.venv/bin/python -m evaluations.held_out ...`,
-`-m evaluations.oracle_golden.score ...`, `-m evaluations.harness_lead ...`. Running one by filename
-(`python evaluations/held_out.py`) no longer works and fails with `No module named 'defender'`; another
-working directory fails the same way. No tool edits `sys.path` (`tooling/lint/lint_eval_entrypoints.py`).
+Run every tool here as a module from the repository root (`defender/.venv/bin/python -m evaluations.held_out ...`); by filename it fails with `No module named 'defender'`.
 
 ```bash
 # Primary: score against ground truth. It walks fixtures/held_out/ and finds each

@@ -27,8 +27,6 @@ from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
 from defender.integrations.elastic_adapter import esql_payload
 # `split_commands` is re-exported for `validate_cases` and tests. The F401 `noqa` must stay on
 # the name's own line: ruff ignores a `noqa` on a separate comment line.
@@ -37,6 +35,8 @@ from defender.integrations.esql_text import (
     split_first_command,
 )
 from defender._io import read_text_utf8
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 ES_SH = REPO_ROOT / "playground-v2" / "infra" / "bin" / "es.sh"
 

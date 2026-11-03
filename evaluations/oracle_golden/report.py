@@ -41,11 +41,11 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-GOLDEN_DIR = Path(__file__).resolve().parent
-
 from defender import _yaml
 from evaluations.oracle_golden import stats as STATS
 from defender._io import read_text_utf8
+
+GOLDEN_DIR = Path(__file__).resolve().parent
 
 #: Fewest independent units before an interval is published. At n=1 Wilson spans
 #: [0.21, 1.00] and at n=2 [0.34, 1.00], which only invites reading the point estimate.
