@@ -1,11 +1,14 @@
 """Record ids are PostgreSQL `uuid` (#1382): tenant, user, membership, alert and investigation ids,
-and every column that refers to one. A row whose id is not UUID text makes the cast fail, and the
-upgrade stops there with nothing changed. A membership's `invited_by`/`ended_by` hold a user id or,
+and every column that refers to one. A row whose id is not canonical lowercase UUID text (the
+grammar the code checks; PostgreSQL's cast would also take upper case, braces or no hyphens and
+rewrite them, so a row would lose the id its run folders carry) stops the upgrade, naming the row,
+with nothing changed. A membership's `invited_by`/`ended_by` hold a user id or,
 for the system, NULL (they held the text `'system'`) and now refer to `identity.users`.
 
 Revision ID: 0005_uuid_ids
 Revises: 0004_jobs
 """
+import sqlalchemy as sa
 from alembic import op
 
 revision = "0005_uuid_ids"
@@ -24,6 +27,15 @@ _FOREIGN_KEYS = (
     ("jobs.investigations", "fk_investigations_tenant_id_alert_id_alerts", "tenant_id, alert_id",
      "jobs.alerts", "tenant_id, id"),
 )
+
+#: Canonical lowercase UUID text, as `records._run_id` holds it (a migration keeps its own copy:
+#: it must mean what it meant when written).
+_CANONICAL = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+
+class NotCanonical(RuntimeError):
+    """A row holds an id that is not canonical UUID text; the upgrade changes nothing."""
+
 
 #: Every id column, by table.
 _ID_COLUMNS = (
@@ -46,6 +58,7 @@ def upgrade() -> None:
     op.execute("ALTER TABLE identity.memberships ALTER COLUMN invited_by DROP NOT NULL")
     op.execute("UPDATE identity.memberships SET invited_by = NULL WHERE invited_by = 'system'")
     op.execute("UPDATE identity.memberships SET ended_by = NULL WHERE ended_by = 'system'")
+    _refuse_non_canonical()
     for table, names in _ID_COLUMNS:
         changes = ", ".join(f"ALTER COLUMN {c} TYPE uuid USING {c}::uuid" for c in names)
         op.execute(f"ALTER TABLE {table} {changes}")
@@ -57,3 +70,16 @@ def upgrade() -> None:
                    f" FOREIGN KEY ({column}) REFERENCES identity.users (id)")
     op.execute("ALTER TABLE identity.memberships ADD CONSTRAINT ck_memberships_ended_is_ended"
                " CHECK (status <> 'ended' OR ended_at IS NOT NULL)")
+
+
+def _refuse_non_canonical() -> None:
+    """`NotCanonical` naming the first id, by table and column, that is not canonical UUID text
+    (NULL actors excepted: the system's, set just above)."""
+    bind = op.get_bind()
+    for table, names in _ID_COLUMNS:
+        for column in names:
+            found = bind.execute(sa.text(f"SELECT {column} FROM {table} WHERE {column} !~ :canonical LIMIT 1"),
+                                 {"canonical": _CANONICAL}).scalar()
+            if found is not None:
+                raise NotCanonical(f"{table}.{column} holds {found!r}, not canonical lowercase UUID text: "
+                                   "recreate this development database (#1382)")

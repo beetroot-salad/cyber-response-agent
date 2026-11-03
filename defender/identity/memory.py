@@ -45,7 +45,6 @@ def _due(next_try_at: _dt.datetime | None, now: _dt.datetime) -> bool:
 
 def check_membership_fields(
     status: MembershipStatus, *, accepted_at: _dt.datetime | None, ended_at: _dt.datetime | None,
-    ended_by: UserId | None,
 ) -> None:
     """The rule that ties a status to its timestamps (the SQL schema carries it as a CHECK)."""
     if status == "active" and accepted_at is None:
@@ -181,7 +180,7 @@ class InMemoryIdentityRepository:
     ) -> Membership:
         """Seeder."""
         self._refuse_dangling(user_id, tenant_id)
-        check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by)
+        check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at)
         if status in _LIVE and self._live_row(user_id, tenant_id) is not None:
             raise DataRuleViolation("the user already has a live membership in this tenant")
         return _copy(self._insert_membership(

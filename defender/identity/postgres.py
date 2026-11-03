@@ -73,7 +73,7 @@ class PostgresIdentityRepository:
         return await self._one(select(exists().where(_active_tenant(tenant_id)))) is True
 
     async def active_tenants(self, tenant_ids: Collection[TenantId]) -> set[TenantId]:
-        wanted = {t for t in tenant_ids}
+        wanted = set(tenant_ids)
         if not wanted:
             return set()
         return set(await self._all(select(TenantRecord.id).where(
@@ -153,7 +153,7 @@ class PostgresIdentityRepository:
         ended_by: UserId | None = None,
     ) -> Membership:
         """Seeder."""
-        check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by)
+        check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at)
         row = Membership(
             user_id=user_id, tenant_id=tenant_id, status=status, invited_by=invited_by, created_at=created_at,
             expires_at=expires_at, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by)

@@ -2,24 +2,19 @@
 `_run_id` so that module stays loadable without pydantic."""
 from __future__ import annotations
 
-from defender._shown import escaped
-from defender.records._record_ids import UuidId
+from defender.records._record_ids import IdRefused, UuidId
 
 
-class TenantRefused(Exception):
+class TenantRefused(IdRefused):
     """The one refusal shape (#0, F0/J29) for every tenant owner — this module (acceptance
     and its knowledge-folder rules included) and the run's grants (`run_tenant`): the
     message names the value that was refused, and every entry catches THIS and surfaces it
-    verbatim. An `Exception`, not a `ValueError` (#1067's `_model.py` convention): pydantic
-    wraps a `ValueError` raised inside a validator into its own `ValidationError`, where an
-    `except TenantRefused` would silently miss it. A pydantic field typed `TenantId` checks the
-    UUID pattern first (#1382), so malformed input there is pydantic's `ValidationError` (the
-    API's 422), never this; `TenantId(raw)` called directly still raises this."""
-
-    def __init__(self, message: object = "") -> None:
-        # Escaped where it is built, as `RunRefused` is: a path or a value read off disk can
-        # carry a control character, and no raising site has to remember to escape it.
-        super().__init__(escaped(message))
+    verbatim. A record id refusal (#1382), so `except IdRefused` covers every id family. Not a
+    `ValueError` (#1067's `_model.py` convention): pydantic wraps a `ValueError` raised inside a
+    validator into its own `ValidationError`, where an `except TenantRefused` would silently miss
+    it. A pydantic field typed `TenantId` checks the UUID pattern first (#1382), so malformed input
+    there is pydantic's `ValidationError` (the API's 422), never this; `TenantId(raw)` called
+    directly still raises this."""
 
 
 class TenantId(UuidId):

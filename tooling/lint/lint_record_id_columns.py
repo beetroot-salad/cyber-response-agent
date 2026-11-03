@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Record id columns (#1382): every ORM table's own `id` is an `IdColumn`.
+"""Record id columns (#1382): a column that holds a record id is an `IdColumn` of its family.
 
 A record id the system mints is canonical UUID text, stored as PostgreSQL `uuid` and read back as
-its family's type (`TenantId`, `AlertId`, ...). A table whose primary key `id` is declared `Text`
-(or anything but `IdColumn(<family>)`) brings back free-text ids and the store guards they needed.
-A column that refers to an id needs no rule here: PostgreSQL refuses a foreign key from `text` to
-`uuid`, and the catalog comparison of #1339 holds the migration to the model.
+its family's type (`TenantId`, `AlertId`, ...). A column declared otherwise (`Text`, `String`, a
+bare `Uuid`) brings back free-text ids that read back unchecked as plain `str`.
 
-In every production module under `defender/` (tests excluded), a class that sets `__tablename__`
-and declares `id = mapped_column(...)` must pass `IdColumn(...)` as its first argument. A tree
-with no such table is a finding (the rule moved), never a pass. A file that does not parse is
+In every production module under `defender/` (tests excluded), in a class that sets `__tablename__`,
+a column whose `Mapped[...]` annotation names an id family (`X` or `X | None`), and the table's own
+`id` whatever its annotation, must be `mapped_column(IdColumn(<that family>), ...)`. The families are
+read from `defender/records/`: every class there descending from `UuidId`. A tree with no such
+column, or no family, is a finding (the rule moved), never a pass. A file that does not parse is
 exit 2. No baseline, no suppression.
 
 Run from anywhere:  python tooling/lint/lint_record_id_columns.py [--root DIR]
@@ -29,6 +29,26 @@ DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
 EXCLUDED_DIRS = ("tests", ".venv", "__pycache__")
 _COLUMN = "IdColumn"
+_ROOT_FAMILY = "UuidId"
+
+
+def _families(root: Path) -> set[str]:
+    """Every class under `records/` descending from `UuidId` (by base-class name, transitively)."""
+    bases: dict[str, set[str]] = {}
+    records = root / "records"
+    for rel in _astlib.source_files(records, EXCLUDED_DIRS) if records.is_dir() else ():
+        _text, tree = _astlib.read_and_parse(records / rel, rel)
+        for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+            bases[cls.name] = {ast.unparse(b).split(".")[-1] for b in cls.bases}
+    found: set[str] = set()
+    grew = True
+    while grew:
+        grew = False
+        for name, parents in bases.items():
+            if name not in found and parents & (found | {_ROOT_FAMILY}):
+                found.add(name)
+                grew = True
+    return found
 
 
 def _is_table(cls: ast.ClassDef) -> bool:
@@ -38,41 +58,67 @@ def _is_table(cls: ast.ClassDef) -> bool:
                for stmt in cls.body)
 
 
-def _id_column(cls: ast.ClassDef) -> ast.Call | None:
-    """The `mapped_column(...)` call the class assigns to `id`, if any."""
-    for stmt in cls.body:
-        target = stmt.target if isinstance(stmt, ast.AnnAssign) else (
-            stmt.targets[0] if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 else None)
-        if isinstance(target, ast.Name) and target.id == "id" and isinstance(stmt.value, ast.Call) \
-                and ast.unparse(stmt.value.func).split(".")[-1] == "mapped_column":
-            return stmt.value
+def _annotated_family(annotation: ast.expr, families: set[str]) -> str | None:
+    """The id family `Mapped[F]` or `Mapped[F | None]` names, if any."""
+    if not (isinstance(annotation, ast.Subscript) and ast.unparse(annotation.value).split(".")[-1] == "Mapped"):
+        return None
+    inner = annotation.slice
+    names = [inner]
+    if isinstance(inner, ast.BinOp) and isinstance(inner.op, ast.BitOr):
+        names = [inner.left, inner.right]
+    for node in names:
+        name = ast.unparse(node).split(".")[-1]
+        if name in families:
+            return name
     return None
 
 
-def _is_id_column(call: ast.Call) -> bool:
+def _column_family(call: ast.Call) -> str | None:
+    """`F` when the call's first argument is `IdColumn(F)`, else None."""
     first = call.args[0] if call.args else None
-    return isinstance(first, ast.Call) and ast.unparse(first.func).split(".")[-1] == _COLUMN
+    if isinstance(first, ast.Call) and ast.unparse(first.func).split(".")[-1] == _COLUMN and first.args:
+        return ast.unparse(first.args[0]).split(".")[-1]
+    return None
+
+
+def _columns(cls: ast.ClassDef) -> list[tuple[str, ast.expr | None, ast.Call]]:
+    """(name, annotation, `mapped_column(...)` call) of every column the class declares."""
+    out = []
+    for stmt in cls.body:
+        target = stmt.target if isinstance(stmt, ast.AnnAssign) else (
+            stmt.targets[0] if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 else None)
+        if isinstance(target, ast.Name) and isinstance(stmt.value, ast.Call) \
+                and ast.unparse(stmt.value.func).split(".")[-1] == "mapped_column":
+            out.append((target.id, stmt.annotation if isinstance(stmt, ast.AnnAssign) else None, stmt.value))
+    return out
 
 
 def scan(root: Path) -> list[str]:
     root = Path(root).resolve()
     if not root.is_dir():
         raise _astlib.ScanBlind(f"{root} is not a directory")
+    families = _families(root)
+    if not families:
+        return [f"no class under records/ descends from `{_ROOT_FAMILY}`; re-site the rule"]
     findings: list[str] = []
-    tables = 0
+    checked = 0
     for rel in _astlib.source_files(root, EXCLUDED_DIRS):
         _text, tree = _astlib.read_and_parse(root / rel, rel)
         for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and _is_table(n)):
-            call = _id_column(cls)
-            if call is None:
-                continue
-            tables += 1
-            if not _is_id_column(call):
-                findings.append(f"{rel}:{call.lineno}: table class `{cls.name}` declares its `id` as "
-                                f"`{ast.unparse(call.args[0]) if call.args else '(no type)'}`; a record id is "
-                                f"`{_COLUMN}(<family>)` (PostgreSQL uuid, read back as its id type)")
-    if not tables:
-        findings.append("no table class declares an `id` column; re-site the rule")
+            for name, annotation, call in _columns(cls):
+                family = _annotated_family(annotation, families) if annotation is not None else None
+                if family is None and name != "id":
+                    continue
+                checked += 1
+                declared = _column_family(call)
+                if declared is None or (family is not None and declared != family):
+                    want = family or "<family>"
+                    got = ast.unparse(call.args[0]) if call.args else "(no type)"
+                    findings.append(f"{rel}:{call.lineno}: table class `{cls.name}` declares `{name}` as "
+                                    f"`{got}`; a record id is `{_COLUMN}({want})` (PostgreSQL uuid, read back "
+                                    f"as its id type)")
+    if not checked:
+        findings.append("no table class declares an id column; re-site the rule")
     return findings
 
 

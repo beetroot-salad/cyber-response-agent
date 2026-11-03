@@ -27,6 +27,7 @@ import httpx
 from defender import _io
 
 if TYPE_CHECKING:
+    from defender.records.formats import TenantId
     from defender.tenancy._directory import TenantDirectory
     from defender.tenancy.models import Generation
 
@@ -94,7 +95,7 @@ class AppRoleLogin:
     client_token: str = field(repr=False)
 
 
-def live_generation(directory: TenantDirectory, tenant_id: str) -> Generation:
+def live_generation(directory: TenantDirectory, tenant_id: TenantId) -> Generation:
     """The tenant's live credential generation as the records hold it now, or `NoLiveGeneration`."""
     live = [g for g in directory.generations(tenant_id) if g.status == "live"]
     if not live:
@@ -131,7 +132,7 @@ def _secret(path: Path, pair: LoginPair, tenant_id: str) -> str:
     return secret
 
 
-def approle_login(directory: TenantDirectory, tenant_id: str, *, pair: LoginPair, address: str,
+def approle_login(directory: TenantDirectory, tenant_id: TenantId, *, pair: LoginPair, address: str,
                   client: httpx.Client) -> AppRoleLogin:
     """Log in to OpenBao at `address` over `client` as `pair` of the tenant's live generation, read
     now: the generation, then the recorded pair, then the https rule, and only then the secret

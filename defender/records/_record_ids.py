@@ -19,8 +19,9 @@ UUID_PATTERN = f"^{_UUID_TEXT.pattern}$"
 
 
 class IdRefused(Exception):
-    """A value refused as a record id; the message names the value. An `Exception`, not a
-    `ValueError`, for the reason `TenantRefused` gives."""
+    """A value refused as a record id; the message names the value, escaped where it is built (a
+    value read off disk can carry a control character). An `Exception`, not a `ValueError`, for
+    the reason `TenantRefused` gives; `TenantRefused` is one."""
 
     def __init__(self, message: object = "") -> None:
         super().__init__(escaped(message))
@@ -42,6 +43,12 @@ class UuidId(str):
             raise cls.refused(fault)
         assert isinstance(raw, str)
         return super().__new__(cls, raw)
+
+    @classmethod
+    def stored(cls, text: str) -> Self:
+        """An id read back from a store that holds only canonical UUID text (a PostgreSQL `uuid`
+        column): not checked again. Parsing belongs where outside text becomes an id."""
+        return super().__new__(cls, text)
 
     @classmethod
     def mint(cls) -> Self:

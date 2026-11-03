@@ -78,14 +78,17 @@ def test_the_system_actor_becomes_null_and_a_user_actor_is_kept(empty_database):
 
 
 @pytest.mark.postgres
-def test_a_row_whose_id_is_not_uuid_text_stops_the_upgrade_and_changes_nothing(empty_database):
-    """D3: a non-UUID id fails the cast loudly; the database stays at `0004_jobs` with its text columns and rows."""
-    from sqlalchemy.exc import DataError
-
+@pytest.mark.parametrize("bad", ["acme", "A2000000-0000-4000-8000-0000000000FF", "{a2000000-0000-4000-8000-0000000000ff}",
+                                 "a20000000000400080000000000000ff"],
+                         ids=["not-a-uuid", "upper-case", "braced", "no-hyphens"])
+def test_a_row_whose_id_is_not_canonical_uuid_text_stops_the_upgrade_and_changes_nothing(empty_database, bad):
+    """D3: an id the code would refuse stops the upgrade, naming the row, even one PostgreSQL's cast would take and
+    rewrite (its run folders carry the old text); the database stays at `0004_jobs` with its text columns and rows."""
     _at_jobs(empty_database)
-    execute(empty_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES ('acme', %s, 'active')", (CREATED,))
-    with pytest.raises(DataError, match="invalid input syntax for type uuid: \"acme\""):
+    execute(empty_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, %s, 'active')", (bad, CREATED))
+    with pytest.raises(Exception, match=r"tenancy\.tenants\.id holds .*not canonical") as stopped:  # noqa: PT011
         _upgrade_to(empty_database, "head")
+    assert type(stopped.value).__name__ == "NotCanonical"
     assert execute(empty_database, "SELECT version_num FROM public.alembic_version") == [(JOBS,)]
     assert _types(empty_database)[("tenancy", "tenants", "id")] == "text"
     assert execute(empty_database, "SELECT invited_by FROM identity.memberships ORDER BY id") == [("system",), (ANN,)]

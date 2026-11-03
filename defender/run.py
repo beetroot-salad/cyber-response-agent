@@ -605,7 +605,7 @@ class _TokenMint:
             return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
                        case_system=None)
         try:
-            signer, address = signing_access(str(accepted.id), directory=records, signer=signer,
+            signer, address = signing_access(accepted.id, directory=records, signer=signer,
                                              proxy_url=proxy_url, transport=issuer_transport)
         except ConfigFault as refused:
             if reads:

@@ -37,8 +37,10 @@ class Base(MappedAsDataclass, DeclarativeBase):
 
 class IdColumn(TypeDecorator[UuidId]):
     """A record id column (#1382): PostgreSQL `uuid`, read back as its family's id type, so a row
-    hands out a checked `TenantId`, `AlertId`, ... with no wrapping. A value bound to it is checked
-    the same way first: a malformed id raises the family's refusal, naming it, before any query."""
+    hands out a `TenantId`, `AlertId`, ... with no wrapping. Nothing here parses: an id is checked
+    once, where outside text becomes one, and the type carries that inward (the repositories take
+    the family types). The column holds only canonical UUID text, so what it reads back is trusted
+    (`UuidId.stored`)."""
 
     impl = Uuid(as_uuid=False)
     cache_ok = True
@@ -48,10 +50,10 @@ class IdColumn(TypeDecorator[UuidId]):
         self.family = family
 
     def process_bind_param(self, value: Any, _dialect: Any) -> str | None:
-        return None if value is None else str(self.family(value))
+        return None if value is None else str(value)
 
     def process_result_value(self, value: Any, _dialect: Any) -> UuidId | None:
-        return None if value is None else self.family(value)
+        return None if value is None else self.family.stored(value)
 
 
 def url(dsn: str) -> URL:

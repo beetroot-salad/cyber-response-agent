@@ -406,14 +406,13 @@ class IdentityService:
     async def admin_invite(self, auth: Authenticated, tenant_id: TenantId, email: str) -> InvitationView:
         """An administrator's invitation: only into a tenant with no active members."""
         self.require_administrator(auth)
-        tenant = tenant_id
-        if not await self._repo.tenant_exists(tenant):
+        if not await self._repo.tenant_exists(tenant_id):
             raise NotFound("no such tenant")
-        if await self._repo.tenant_has_active_members(tenant):
+        if await self._repo.tenant_has_active_members(tenant_id):
             raise Conflict("the tenant already has members; they invite")
-        view = await self._invite(auth.user.id, tenant, email)
-        audit.emit("admin.invite", actor=auth.user.id, tenant_id=None, target=tenant)
-        audit.emit("member.invite", actor=auth.user.id, tenant_id=tenant, target=view.id)
+        view = await self._invite(auth.user.id, tenant_id, email)
+        audit.emit("admin.invite", actor=auth.user.id, tenant_id=None, target=tenant_id)
+        audit.emit("member.invite", actor=auth.user.id, tenant_id=tenant_id, target=view.id)
         return view
 
     async def revoke(self, auth: Authenticated, tenant_id: TenantId, invitation_id: MembershipId) -> None:

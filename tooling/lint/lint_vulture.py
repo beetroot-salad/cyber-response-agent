@@ -41,7 +41,9 @@ VULTURE_ARGS = [
     "evaluations",
     "--min-confidence", "60",
     "--exclude", "defender/.venv,defender/tests,defender/skills/invlang/schema.py",
-    "--ignore-names", "key_field,key_value",
+    # SQLAlchemy calls a `TypeDecorator`'s hooks and reads its class settings by name, never in
+    # our code (#1214's path column, #1382's id column).
+    "--ignore-names", "key_field,key_value,impl,cache_ok,process_bind_param,process_result_value",
     # pydantic calls its validators by decorator registration, never by name.
     "--ignore-decorators", "@field_validator,@model_validator",
 ]

@@ -1169,18 +1169,17 @@ async def test_o13_a_transaction_that_fails_at_commit_emits_nothing_and_stores_n
 
 # --- #1382 P-ID (withdraws D-a): a malformed id reaching the store is a bug, refused loudly -----------------------
 
+#: Text that is no UUID at all. (A non-canonical UUID, upper case or braced, is not here: the database's
+#: `uuid` would take and canonicalise it. Ids are parsed where outside text enters, #1382; the store trusts the type.)
 MALFORMED_IDS = {"NUL": "a\x00b", "lone NUL": "\x00", "lone surrogate": "\ud800", "surrogate inside": "x\udfffy",
-                 "api-style": "al-1", "upper-case uuid": "AF3BA774-355D-4DBC-B8B6-3BECC9D3E7A1"}
+                 "api-style": "al-1"}
 
 
 @pytest.mark.parametrize("bad", sorted(MALFORMED_IDS))
-async def test_p_id_a_malformed_id_is_refused_before_any_query_and_changes_nothing(dsn, bad):
-    """Get, create, cancel, delete and finish refuse an id that is not canonical UUID text with the family's
-    refusal naming it, not "unknown" (#1382 P-ID; D-a withdrawn); the stored row is untouched."""
-    from sqlalchemy.exc import StatementError
-
-    from defender.records.formats import IdRefused
-
+async def test_p_id_text_that_is_no_uuid_fails_loudly_at_the_store_and_changes_nothing(dsn, bad):
+    """The store does not parse ids: they are checked where outside text becomes one, and its signatures take the
+    family types (#1382 r3.1). Text that gets past the types anyway is never answered as "unknown" (D-a withdrawn):
+    get, create, cancel, delete and finish raise, and the stored row is untouched."""
     ident = MALFORMED_IDS[bad]
     calls = {
         "get_alert": lambda store: store.get_alert(T1, ident),
@@ -1193,10 +1192,9 @@ async def test_p_id_a_malformed_id_is_refused_before_any_query_and_changes_nothi
     async with job_store(dsn) as store:
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
-        for name, call in calls.items():
-            with pytest.raises(StatementError) as refused:
+        for call in calls.values():
+            with pytest.raises(Exception):  # noqa: B017, PT011 — whatever the driver raises, so long as it is loud
                 await call(store)
-            assert isinstance(refused.value.orig, IdRefused), name
         assert row(dsn, inv.investigation_id)["stage"] == "queued"
     assert _count(dsn, "investigations") == 1
 
