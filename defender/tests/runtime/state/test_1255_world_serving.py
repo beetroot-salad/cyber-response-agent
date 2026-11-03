@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +103,14 @@ def _assert_reconstructed(decision: Any, where: str) -> None:
         f"else)")
     assert normalized_source(decision) == decision, (
         f"{where}: {decision!r} is not a decision word of the ledger's own vocabulary")
+
+
+_STAMP_LINE = re.compile(r"^.*\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d.*\n?", re.M)
+
+
+def _without_stamp(text: str) -> str:
+    """`text` less the platform's time-stamp line (#1385 A6): the two runs' clocks differ by design."""
+    return _STAMP_LINE.sub("", text)
 
 
 def _rows_asking(rows: list[dict], params: dict) -> list[dict]:
@@ -491,12 +500,14 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
     assert marker in inbound, "the oracle was not told what the source's closing comment says"
 
 
-@pytest.mark.parametrize(("undone", "expected"), [("source-write", "reconstructed"),
-                                                  ("analyst-note", ORACLE)])
-def test_1385_undoing_the_sources_own_post_fork_write_alone_is_reconstructed(
-        tmp_path: Path, undone: str, expected: str) -> None:
-    """World b serving its ticket without the source's own closing comment is `reconstructed`;
-    removing anyone else's comment is `oracle` (T2, O9)."""
+@pytest.mark.parametrize(("gone", "expected"), [
+    ({"comment_id": "c-2", "author": "defender", "body": "SOURCE-CLOSING"}, "reconstructed"),
+    ({"comment_id": "c-3", "author": "alice", "body": "I did not do this"}, ORACLE),
+], ids=["source-write-on-a-ticket-no-fact-names", "comment-naming-a-fact-entity"])
+def test_1385_a_removed_comment_is_oracle_only_when_it_names_a_fact_entity(
+        tmp_path: Path, gone: dict, expected: str) -> None:
+    """World b serving its ticket without a comment is `reconstructed`, unless a string in the
+    comment equals an entity a fact names (`alice`), then `oracle` (T2, O4, A1)."""
     from defender.tests.support.runtime.engine import _spec767 as S767
     from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
@@ -504,13 +515,12 @@ def test_1385_undoing_the_sources_own_post_fork_write_alone_is_reconstructed(
                                disposition="malicious", body=CLOSING_MARKER)
     store = S767.FakeStore(tmp_path / "store")
     S767.record(source_dir, store)
-    closing = {"comment_id": "c-2", "author": "defender", "body": store.wire_body()}
+    gone = {**gone, "body": store.wire_body()} if gone["comment_id"] == "c-2" else gone
     est = S24.estate(tmp_path)
-    est.answer("siem-x", "lookup", CASE, {**TICKET_AT_FORK, "comments": [ANALYST_NOTE, closing]})
-    gone, kept = (closing, ANALYST_NOTE) if undone == "source-write" else (ANALYST_NOTE, closing)
+    est.answer("siem-x", "lookup", CASE, {**TICKET_AT_FORK, "comments": [ANALYST_NOTE, gone]})
     side = S24.query_params(f"comment_id:{gone['comment_id']}")
     est.answer("siem-x", "query", side, {"rows": [gone]})
-    served = {**TICKET_AT_FORK, "comments": [kept]}
+    served = TICKET_AT_FORK
     oracle = S24.oracle(S24.submit(served, S24.claim(removed=[S24.removed(
         gone, system="siem-x", verb="query", params=side, count=1)])))
     ep = S24.episode_v2(tmp_path, base_rows=[])
@@ -587,8 +597,8 @@ def test_1255_every_refusal_the_control_world_can_give_reads_as_a_natural_runs(
                                      verifier=S24.passing_verifier())
     arm_dir, arm = W.drive_lead(tmp_path / "arm", verbs=control, est=est, turns=list(turns))
 
-    expected = [W.normalized(t, natural_dir) for t in natural.handed_back()]
-    handed = [W.normalized(t, arm_dir) for t in arm.handed_back()]
+    expected = [_without_stamp(W.normalized(t, natural_dir)) for t in natural.handed_back()]
+    handed = [_without_stamp(W.normalized(t, arm_dir)) for t in arm.handed_back()]
     assert len(expected) == 6, f"fixture: six refusals reached the natural run's model: {expected}"
     assert all(t.strip() for t in expected), f"fixture: a refusal text was empty: {expected}"
     assert len(set(expected)) == 6, "fixture: the six refusal classes read alike"

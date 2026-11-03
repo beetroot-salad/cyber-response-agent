@@ -484,39 +484,68 @@ def test_1224_unchanged_answer_in_a_fact_world_still_passes_the_verifier(tmp_pat
 
 
 #: #1385: a live base capped at two rows, one after the branch point, and its bounded re-ask.
-_POST = {"action": "logon", "event_id": "e-300", "user": "alice", "ts": "2026-07-28T17:05:00Z"}
-_KEPT = {"action": "logon", "event_id": "e-100", "user": "alice", "ts": "2026-07-28T15:00:00Z"}
-_OLDER = {"action": "logon", "event_id": "e-099", "user": "alice", "ts": "2026-07-28T14:00:00Z"}
-_FACT_ROW = {"action": "tgt-issued", "event_id": "e-9001", "user": "alice",
-             "ts": "2026-07-28T15:22:00Z"}
-_CAPPED = S.query_params("user:alice", limit=2)
-_BOUNDED = S.query_params("user:alice", end=S.AS_OF, limit=2)
-_AT_BRANCH = {"rows": [_KEPT, _OLDER]}
+#: World b's fact names `alice` and `db-1`; nobody else.
+def _event(user: str, event_id: str, ts: str, host: str = "web-1") -> dict:
+    return {"action": "logon", "event_id": event_id, "user": user, "host": host, "ts": ts}
 
 
-@pytest.mark.parametrize(("with_fact", "label"), [(False, "reconstructed"),
-                                                  (True, S.ORACLE_DECISION)],
-                         ids=["cut-alone", "cut-plus-fact"])
-def test_1385_a_cut_alone_is_reconstructed_and_a_cut_with_a_fact_is_oracle(tmp_path, with_fact,
-                                                                            label):
-    """In a world with facts a served re-ask is `reconstructed`; facts on top make it `oracle` (T2)."""
+_KEPT = _event("dan", "e-100", "2026-07-28T15:00:00Z")
+_OLDER = _event("dan", "e-099", "2026-07-28T14:00:00Z")
+_FACT_ROW = _event("alice", "e-9001", "2026-07-28T15:22:00Z", "db-1")
+_CAPPED = S.query_params("host:web-1", limit=2)
+_BOUNDED = S.query_params("host:web-1", end=S.AS_OF, limit=2)
+_RE_ASK = S.re_asked(system="idp", verb="query", params=_BOUNDED)
+
+
+@pytest.mark.parametrize(("label", "dropped_user", "forge", "expected"), [
+    ("b", "carol", False, "reconstructed"),
+    ("b", "alice", False, S.ORACLE_DECISION),
+    ("b", "carol", True, S.ORACLE_DECISION),
+    ("a", "alice", False, "reconstructed"),
+], ids=["cut-drops-no-fact-entity", "cut-drops-a-fact-entity-row", "cut-plus-forged-row",
+        "world-without-facts"])
+def test_1385_a_cut_is_oracle_only_for_what_it_shows_of_the_worlds_facts(
+        tmp_path, label, dropped_user, forge, expected):
+    """A re-asked answer is `oracle` when it drops a row naming a fact entity or carries a forged
+    row, else `reconstructed`; a world without facts is never `oracle` (T2, O4)."""
     est = S.estate(tmp_path)
-    est.answer("idp", "query", _CAPPED, {"rows": [_POST, _KEPT]})
-    est.answer("idp", "query", _BOUNDED, _AT_BRANCH)
-    re_ask = S.re_asked(system="idp", verb="query", params=_BOUNDED)
-    if with_fact:
-        served = {"rows": [*_AT_BRANCH["rows"], _FACT_ROW]}
-        moves = [S.forge("fg-1", "f1", "idp", _FACT_ROW),
-                 S.submit(served, S.claim(added=[S.added("fg-1", "f1")], re_ask=re_ask))]
-    else:
-        served, moves = _AT_BRANCH, [S.submit(_AT_BRANCH, S.claim(re_ask=re_ask))]
+    est.answer("idp", "query", _CAPPED, {"rows": [_event(dropped_user, "e-300",
+                                                         "2026-07-28T17:05:00Z"), _KEPT]})
+    at_branch = {"rows": [_KEPT, _OLDER]}
+    est.answer("idp", "query", _BOUNDED, at_branch)
+    served, claim = at_branch, S.claim(re_ask=_RE_ASK)
+    moves = []
+    if forge:
+        served = {"rows": [*at_branch["rows"], _FACT_ROW]}
+        claim = S.claim(added=[S.added("fg-1", "f1")], re_ask=_RE_ASK)
+        moves.append(S.forge("fg-1", "f1", "idp", _FACT_ROW))
     ep = _episode(tmp_path, captured=[])
-    oracle = S.oracle(*moves)
-    reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
+    oracle = S.oracle(*moves, S.submit(served, claim))
+    reg = S.sandboxed_registry(ep, label, est, oracle=oracle, verifier=S.passing_verifier())
 
     assert S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), **_CAPPED) == served
     assert oracle.submissions() == 1, "the re-asked answer was refused"
-    assert _decisions(ep, "b") == [label]
+    assert _decisions(ep, label) == [expected]
+
+
+@pytest.mark.parametrize(("entity", "expected"), [("alice", S.ORACLE_DECISION),
+                                                  ("bob", "reconstructed")],
+                         ids=["fact-entity", "other-entity"])
+def test_1385_a_changed_entry_is_oracle_only_on_a_fact_entity(tmp_path, entity, expected):
+    """A `changed` entry on an entity a fact names labels the answer `oracle`; on any other
+    entity it is `reconstructed` (T2, O4)."""
+    est = S.estate(tmp_path)
+    record = {"entity": entity, "risk": "low", "record_id": "r-0001"}
+    est.answer("siem-x", "lookup", {"entity": entity}, record)
+    served = {**record, "risk": "high"}
+    ep = _episode(tmp_path, captured=[])
+    oracle = S.oracle(S.submit(served, S.claim(changed=[S.changed(entity, "risk", "low",
+                                                                  "high")])))
+    reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
+
+    assert S.call(reg, "siem-x", "lookup", est.ctx(tmp_path / "run"), entity=entity) == served
+    assert oracle.submissions() == 1, "the change was refused"
+    assert _decisions(ep, "b") == [expected]
 
 
 def test_1224_served_answer_is_recorded_and_screened_as_real_data(tmp_path):

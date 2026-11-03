@@ -409,6 +409,68 @@ def test_1385_older_real_rows_pass_check_1_only_under_a_declared_re_ask(tmp_path
     assert len(ledger) == 1, ledger
     assert _payload(ledger[0]) == AT_BRANCH, ledger
     assert ledger[0].get("attempts") == 2, ledger
+    kept = [r for r in sc.rows("base") if r["params"] == BOUNDED]
+    assert [(r["system"], r["verb"], json.loads(r["payload_text"])) for r in kept] == [
+        ("idp", "query", AT_BRANCH)], "the re-asked answer was not kept as a base answer (A3)"
+
+
+def _col(name: str) -> dict:
+    return {"name": name, "type": "keyword"}
+
+
+#: ES|QL-shaped answers: the capped page, its bounded re-ask, and one projecting fewer columns.
+ES_CAPPED = {"columns": [_col("event_id"), _col("ts")],
+             "values": [["e-300", "2026-07-28T17:05:00Z"], ["e-100", TS_BASE]]}
+ES_BOUNDED = {"columns": [_col("event_id"), _col("ts")],
+              "values": [["e-100", TS_BASE], ["e-099", "2026-07-28T14:00:00Z"]]}
+ES_NARROW = {"columns": [_col("event_id")], "values": [["e-100"], ["e-099"]]}
+OTHER = S.query_params("host:web-1", end=S.AS_OF, limit=2)
+
+
+def _re_ask_scene(tmp_path: Path, case: str, *, flawed: bool):
+    """`(scene, base, served, re_ask)`: a capped live (or, for `recorded`, recorded) base and a
+    submission whose re-ask has the one flaw `case` names, or none."""
+    live = [("idp", "query", BOUNDED, AT_BRANCH)]
+    recorded: tuple = ()
+    base, served = {"rows": [POST_ROW, BASE_ROW]}, AT_BRANCH
+    re_ask = S.re_asked(system="idp", verb="query", params=BOUNDED)
+    if case == "esql-columns":
+        base, served = ES_CAPPED, ES_BOUNDED
+        live = [("idp", "query", BOUNDED, ES_BOUNDED), ("idp", "query", OTHER, ES_NARROW)]
+        if flawed:
+            served, re_ask = ES_NARROW, S.re_asked(system="idp", verb="query", params=OTHER)
+    elif flawed and case == "other-system":
+        live.append(("siem-x", "query", BOUNDED, AT_BRANCH))
+        re_ask = S.re_asked(system="siem-x", verb="query", params=BOUNDED)
+    elif flawed and case == "other-verb":
+        live.append(("idp", "lookup", BOUNDED, AT_BRANCH))
+        re_ask = S.re_asked(system="idp", verb="lookup", params=BOUNDED)
+    if case == "recorded-base" and flawed:
+        recorded = (("idp", "query", CAPPED, base),)
+    else:
+        live.append(("idp", "query", CAPPED, base))
+    return _scene(tmp_path, live=live, recorded=recorded), base, served, re_ask
+
+
+@pytest.mark.parametrize("case", ["recorded-base", "other-system", "other-verb", "esql-columns"])
+def test_1385_the_host_refuses_a_re_ask_that_is_not_the_calls_own_question_bounded(tmp_path, case):
+    """A re-ask on a recorded base, on another system or verb, or changing an ES|QL column set is
+    refused; without that flaw it is served (T1, O4)."""
+    sc, base, served, re_ask = _re_ask_scene(tmp_path / "flawed", case, flawed=True)
+    o = S.oracle(S.submit(served, S.claim(re_ask=re_ask)), S.submit(base, S.EMPTY_CLAIM))
+    assert sc.call(sc.registry(o), "idp", "query", **CAPPED) == base
+    _assert_some_check(o, 1)
+    _spent(o)
+    assert o.submissions() == 2, "the flawed re-ask was served"
+    assert not [r for r in sc.rows("base") if r["params"] == re_ask["params"]
+                and r["verb"] == re_ask["verb"] and r["system"] == re_ask["system"]], (
+        "a refused re-ask was kept as a base answer")
+
+    ctl, base, served, re_ask = _re_ask_scene(tmp_path / "control", case, flawed=False)
+    o = S.oracle(S.submit(served, S.claim(re_ask=re_ask)))
+    assert ctl.call(ctl.registry(o), "idp", "query", **CAPPED) == served
+    _spent(o)
+    assert o.submissions() == 1, "positive control: the same re-ask without the flaw was refused"
 
 
 def test_1224_silent_edit_of_a_base_row_fails_check_1(tmp_path):

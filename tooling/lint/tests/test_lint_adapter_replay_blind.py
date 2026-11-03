@@ -1,5 +1,6 @@
 """Tests for the lint_adapter_replay_blind gate (#1385 L1): no adapter, nor the adapter kit's
-interface, reads the branch point, the run state or the run clock; host-state stamps no time."""
+interface, reads the branch point, the run state (or its call-scoped carrier `CALL_RUN_STATE`) or
+the run clock; host-state puts no time stamp in its reply."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -64,8 +65,61 @@ def test_the_kit_interface_offering_a_replay_input_is_found(tmp_path, name):
     assert len(found) == 1 and "kit/verbs.py" in found[0] and name in found[0], found
 
 
-def test_host_state_stamping_its_own_time_is_found(tmp_path):
-    """Host-state reading a clock to stamp a capture is a finding; another adapter's is not (L1)."""
-    found = _GATE.scan(_tree(tmp_path, {"integrations/host_state_adapter.py": _CLEAN_ADAPTER,
-                                        "integrations/x_adapter.py": _CLEAN_ADAPTER}))
-    assert len(found) == 1 and "integrations/host_state_adapter.py:3" in found[0], found
+@pytest.mark.parametrize("line", [
+    "    from defender.systems.verbs import CALL_RUN_STATE",
+    "    at = CALL_RUN_STATE.get()",
+    "    at = verbs.CALL_RUN_STATE.get().clock",
+])
+def test_an_adapter_reaching_the_call_scoped_run_state_carrier_is_found(tmp_path, line):
+    """Any reference to `CALL_RUN_STATE` under integrations/ is a finding at its line (L1, A5)."""
+    src = f"def query(ctx, *, q):\n{line}\n    return {{'q': q}}\n"
+    found = _GATE.scan(_tree(tmp_path, {"integrations/x_adapter.py": src}))
+    assert found, found
+    assert all("integrations/x_adapter.py:2" in f for f in found), found
+
+
+def test_the_platform_and_tests_may_reference_the_run_state_carrier(tmp_path):
+    """Positive control: `CALL_RUN_STATE` on the platform side or in a test is no finding (L1)."""
+    platform = ("import contextvars\n"
+                "CALL_RUN_STATE = contextvars.ContextVar('call_run_state', default=None)\n"
+                "def paused(): return CALL_RUN_STATE.get()\n")
+    files = {"systems/verbs.py": platform, "tests/t_registry.py": platform,
+             "integrations/x_adapter.py": _CLEAN_ADAPTER}
+    assert _GATE.scan(_tree(tmp_path, files)) == []
+
+
+_HOST_STATE = "integrations/host_state_adapter.py"
+_STAMPED = [
+    "import datetime as dt\ndef query(ctx, *, q):\n    return {'captured_at': 'x'}\n",
+    ("import datetime as dt\ndef query(ctx, *, q):\n"
+     "    return {'seen': dt.datetime.now(dt.UTC).isoformat()}\n"),
+    ("import datetime as dt\ndef query(ctx, *, q):\n    stamp = dt.datetime.now(dt.UTC)\n"
+     "    return {'seen': stamp.isoformat()}\n"),
+    _CLEAN_ADAPTER,
+]
+
+
+@pytest.mark.parametrize("src", _STAMPED, ids=["field-name", "inline-read", "read-then-output",
+                                                "date-in-output"])
+def test_host_state_putting_a_time_stamp_in_its_reply_is_found(tmp_path, src):
+    """Host-state's `captured_at`, or a datetime read feeding its output, is a finding (L1, A5)."""
+    found = _GATE.scan(_tree(tmp_path, {_HOST_STATE: src}))
+    assert len(found) == 1 and f"{_HOST_STATE}:3" in found[0], found
+
+
+@pytest.mark.parametrize("src", [
+    ("import time\ndef query(ctx, *, q):\n    deadline = time.monotonic() + 5\n"
+     "    while time.monotonic() < deadline and not ctx.env.get('UP'):\n        pass\n"
+     "    return {'q': q}\n"),
+    ("import datetime as dt\nSTART = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)\n"
+     "def query(ctx, *, q):\n    if (dt.datetime.now(dt.UTC) - START).days > 3:\n"
+     "        raise RuntimeError('stale')\n    return {'q': q}\n"),
+], ids=["monotonic-deadline", "age-check"])
+def test_host_state_using_time_for_something_else_is_not_found(tmp_path, src):
+    """Positive control: host-state reading a clock without it reaching its reply is clean (L1)."""
+    assert _GATE.scan(_tree(tmp_path, {_HOST_STATE: src})) == []
+
+
+def test_another_adapter_reading_the_date_is_not_found(tmp_path):
+    """Positive control: a non-host-state adapter's date in its reply is allowed (L1)."""
+    assert _GATE.scan(_tree(tmp_path, {"integrations/x_adapter.py": _CLEAN_ADAPTER})) == []
