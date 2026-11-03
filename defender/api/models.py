@@ -10,6 +10,7 @@ from pydantic import (
 )
 
 from defender._clock import as_utc
+from defender._text import postgres_can_hold
 from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
@@ -23,6 +24,13 @@ LearningJobStatus = Literal["queued", "running", "completed", "failed", "skipped
 RECORD_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 RecordId = Annotated[str, Field(pattern=RECORD_ID_PATTERN)]
 
+def _refuse_unstorable_id(value: str) -> str:
+    """Refuse text PostgreSQL cannot hold, here rather than at the store (#1379 O1a)."""
+    if not postgres_can_hold(value):
+        raise ValueError("it holds a NUL or a lone surrogate, which cannot be stored")
+    return value
+
+
 #: The id a caller mints once per user action, so a retried or double-clicked create
 #: returns the record the first attempt made.
 ClientRequestId = Annotated[str, Field(
@@ -30,7 +38,7 @@ ClientRequestId = Annotated[str, Field(
     description="Minted once per user action. Repeating the request with it answers the latest "
                 "attempt of the request this id started; a request answered with an investigation "
                 "already live started nothing, so repeating it is a new request.",
-)]
+), AfterValidator(_refuse_unstorable_id)]
 
 
 def _not_a_number(value: object) -> object:

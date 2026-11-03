@@ -12,7 +12,9 @@ The child holds its own deadline over its network phase, a little inside the lau
 `budget`, and reports (and records) running out of it itself. The launcher's wait is the
 backstop: a child still in its network phase when `budget` runs out is stopped; a child that
 has taken the tenant lock (its local phase) is never stopped, so a kill never leaves
-`index.lock` or a half-swapped `current` behind. Whatever the child does, the launcher returns
+`index.lock` or a half-swapped `current` behind. A launcher left by an exception (the run's
+SIGTERM) asks the child to stop and waits for it before cleaning up its group, for the same reason
+(#1379 r3). Whatever the child does, the launcher returns
 one report line of the child's vocabulary:
 
 - the child's own line, when it exited 0 having printed a valid one (OD20);
@@ -25,6 +27,7 @@ records it is handed (`directory`).
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -55,6 +58,8 @@ _REPORT_MARGIN = 5.0
 _TRIGGER = "launch-time publish"
 #: How long a child asked to stop (SIGTERM) may take to unwind before it is killed.
 _STOP_GRACE = 5.0
+#: How often a launcher that is leaving checks whether the child it asked to stop has exited.
+_EXIT_POLL = 0.1
 
 Spawn = Callable[..., Any]
 
@@ -142,6 +147,15 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
         except subprocess.TimeoutExpired:
             late = not _holds_lock(proc, tenant_id, data_root)
             out, err = _stop(proc, tenant_id, data_root) if late else proc.communicate()
+        except BaseException:
+            # The launcher is leaving (the run's SIGTERM, an interrupt): ask the child to stop and
+            # wait for it. It unwinds at once in its network phase and finishes first while it holds
+            # the tenant lock (O-BUDGET), so whoever stopped the run, waiting for it, waits for the
+            # publish too; a kill here could cut a lock holder mid-write (#1379 r3).
+            with contextlib.suppress(ProcessLookupError):
+                proc.send_signal(signal.SIGTERM)
+            _wait_for_exit(proc)
+            raise
     finally:
         # One publish is one process group (the child's session; its network git joins it):
         # whatever the child left running dies with it, however it ended.
@@ -154,6 +168,19 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
         line = (f"{STALE_TRANSIENT} the launch-time publish did not finish its network phase "
                 f"within the {budget:g}s budget")
     return _recorded(directory, tenant_id, line)
+
+
+def _wait_for_exit(proc: Any) -> None:
+    """Until the child itself has exited, draining its pipes meanwhile so it never blocks writing
+    them. Not until they close: a grandchild in its group can hold them open after the child is
+    gone, and the caller's group kill is what ends it."""
+    while True:
+        try:
+            proc.communicate(timeout=_EXIT_POLL)
+            return
+        except subprocess.TimeoutExpired:
+            if proc.poll() is not None:
+                return
 
 
 def _holds_lock(proc: Any, tenant_id: str, data_root: Path) -> bool:

@@ -370,6 +370,39 @@ async def test_o3_a_first_request_queues_attempt_one(dsn):
                    (inv.investigation_id,)) == [(T1, NOW)]
 
 
+#: Text PostgreSQL cannot hold (#1379 O1).
+UNSTORABLE = {"NUL": "a\x00b", "lone surrogate": "a\ud800b"}
+
+
+@pytest.mark.parametrize("text", list(UNSTORABLE.values()), ids=list(UNSTORABLE))
+@pytest.mark.parametrize("field", ["vendor", "vendor_ticket_id", "title", "description"])
+async def test_1379_an_alert_field_postgresql_cannot_hold_is_refused_by_name_and_nothing_is_stored(
+        dsn, field, text):
+    """The store's own typed refusal, naming the field, before any query; a good alert still goes in. (#1379 O1b)"""
+    fields = {"vendor": "splunk", "vendor_ticket_id": "SPL-9", "title": "t", "description": "d", field: text}
+    async with job_store(dsn) as store:
+        with pytest.raises(ValueError, match=rf"\b{field}\b") as refused:
+            await store.insert_alert(T1, fired_at=NOW, changed_at=NOW, received_at=NOW, raw=ALERT_BYTES,
+                                     **fields)
+        from defender.jobs import UnstorableText
+        assert type(refused.value) is UnstorableText
+        assert _count(dsn, "alerts") == 0
+        await an_alert(store, T1)  # positive control on the same path
+    assert _count(dsn, "alerts") == 1
+
+
+@pytest.mark.parametrize("key", list(UNSTORABLE.values()), ids=list(UNSTORABLE))
+async def test_1379_a_request_key_postgresql_cannot_hold_is_refused_by_name_and_nothing_is_inserted(dsn, key):
+    """(#1379 O1b)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        with pytest.raises(ValueError, match=r"\brequest_key\b") as refused:
+            await store.create_investigation(T1, alert.alert_id, key, actor="u-1")
+        from defender.jobs import UnstorableText
+        assert type(refused.value) is UnstorableText
+    assert _count(dsn, "investigations") == 0
+
+
 @pytest.mark.parametrize("key", ["x" * 200, "ü-日本-😀", "has space and \"quotes\"", "0"])
 async def test_o3_the_request_key_is_kept_as_given(dsn, key):
     """Keys up to the API's 200 characters, non-ASCII included, round-trip and replay. (O3)"""

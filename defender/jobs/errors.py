@@ -14,3 +14,9 @@ class Conflict(Exception):
 
 class UnknownReference(Exception):
     """A request names an alert, or a tenant, that does not exist."""
+
+
+class UnstorableText(ValueError):
+    """A text argument holds what PostgreSQL text cannot (a NUL or a lone surrogate). Names the
+    field, never the value. The API's own models refuse such text first (#1379 O1), so from the
+    API this is unreachable; any other caller that reaches it has a bug."""
