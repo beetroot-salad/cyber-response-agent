@@ -44,6 +44,11 @@ _logger = logging.getLogger(__name__)
 #: How long an idle serving worker waits between claims (M10: a fixed interval, no NOTIFY).
 POLL_INTERVAL = 1.0
 
+#: How many times the worker tries to write a row's decided ending, and the pause between tries
+#: (#1378): a store fault can delay a verdict, never change it.
+FINISH_ATTEMPTS = 3
+FINISH_RETRY_DELAY = 0.5
+
 _RUN_PY = Path(__file__).resolve().parents[1] / "run.py"
 
 _FAILED, _COMPLETED, _UNPARSEABLE = "failed", "completed", "unparseable"
@@ -74,6 +79,11 @@ class _Ending:
     disposition: str | None = None
     failure_reason: str | None = None
     failure_message: str | None = None
+
+
+# The ending a row's task decided, with its cost and knowledge. Where a task may write nothing
+# (D3), its result is `_Decided | None`.
+_Decided = tuple[_Ending, float | None, dict | None]
 
 
 def _exit_words(returncode: int) -> str:
@@ -284,18 +294,41 @@ class Worker:
         if self._stopping:  # D3: claimed as the stop landed; the row stays running, nothing launched
             return
         with _log.log_context(run_id=inv, tenant_id=tenant):
+            decided: _Decided | None
             try:
-                await self._run_claimed(record, claim.tenant_state)
+                decided = await self._run_claimed(record, claim.tenant_state)
             except Exception:  # noqa: BLE001 — one row's fault never ends the worker
                 _logger.exception("investigation %s: the worker failed while running it", inv)
-                try:
-                    await self._finish(record, _Ending(_FAILED, failure_reason=_WORKER_ERROR,
-                                                      failure_message="the worker failed while running the job"),
-                                       cost=None, knowledge=None)
-                except Exception:  # noqa: BLE001 — the row stays running; #1343 reclaims it
-                    _logger.exception("investigation %s: its failure could not be recorded", inv)
+                decided = (_Ending(_FAILED, failure_reason=_WORKER_ERROR,
+                                   failure_message="the worker failed while running the job"), None, None)
+            if decided is None:
+                return
+            await self._write_ending(record, decided)
 
-    async def _run_claimed(self, record: Any, tenant_state: str) -> None:
+    async def _write_ending(self, record: Any, decided: _Decided) -> None:
+        """The one write of a row's decided ending, outside `_run_row`'s catch-all, tried up to
+        `FINISH_ATTEMPTS` times with the same values (#1378): a store fault never turns a decided
+        ending into another one. A try that committed though its answer was lost makes the next
+        a no-op (`_finish`: the row is no longer running)."""
+        inv = record.investigation_id
+        ending, cost, knowledge = decided
+        for attempt in range(1, FINISH_ATTEMPTS + 1):
+            try:
+                await self._finish(record, ending, cost=cost, knowledge=knowledge)
+                return
+            except Exception:  # noqa: BLE001 — one row's fault never ends the worker
+                if attempt == FINISH_ATTEMPTS:
+                    # #1343 reclaims a row left running
+                    _logger.exception("investigation %s: its %s ending could not be recorded after %d tries; "
+                                      "unless a try committed and only its answer was lost, the row is "
+                                      "still running", inv, ending.stage, attempt)
+                    return
+                _logger.warning("investigation %s: writing its %s ending failed (try %d of %d); retrying",
+                                inv, ending.stage, attempt, FINISH_ATTEMPTS, exc_info=True)
+            await asyncio.sleep(FINISH_RETRY_DELAY)
+
+    async def _run_claimed(self, record: Any, tenant_state: str) -> _Decided | None:
+        """Run one claimed row and decide its ending; the caller writes it (`_run_row`)."""
         inv, tenant = record.investigation_id, record.tenant_id
         started = self._clock()
         # This claim's box token (#1342 r5 C1): the child's box is stamped with it, and the
@@ -305,11 +338,9 @@ class Worker:
             await self._write_launch(record, token, tenant_state)
         except _WorkerFault as fault:
             _logger.error("investigation %s: %s", inv, fault)
-            await self._finish(record, _Ending(_FAILED, failure_reason=_WORKER_ERROR,
-                                              failure_message=str(fault)), cost=0.0, knowledge=None)
-            return
+            return _Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message=str(fault)), 0.0, None
         if self._stopping:  # D3: claimed but not started; the row stays running
-            return
+            return None
         proc: asyncio.subprocess.Process | None = None
         # The start runs as its own task, so a cancel cannot land inside it and lose the child
         # it makes (r7 D-ac): a cancelled row waits for it, and the child is ended below.
@@ -325,10 +356,9 @@ class Worker:
                 raise
             except (OSError, ValueError) as unstarted:
                 _logger.error("investigation %s: the child could not be started: %s", inv, unstarted)
-                await self._finish(record, _Ending(_FAILED, failure_reason=_WORKER_ERROR,
-                                                  failure_message="the worker could not start the job's child process"),
-                                   cost=0.0, knowledge=None)
-                return
+                return (_Ending(_FAILED, failure_reason=_WORKER_ERROR,
+                                failure_message="the worker could not start the job's child process"),
+                        0.0, None)
             self._children[inv] = proc
             try:
                 if self._stopping:  # spawned while the stop was ending the others
@@ -350,9 +380,8 @@ class Worker:
         _logger.info("investigation %s: child %d %s after %s", inv, proc.pid,
                      _exit_words(returncode), self._clock() - started)
         if self._stopping:  # D3: a deliberate stop writes no row
-            return
-        ending, cost, knowledge = await asyncio.to_thread(self._read_ending, record, returncode)
-        await self._finish(record, ending, cost=cost, knowledge=knowledge)
+            return None
+        return await asyncio.to_thread(self._read_ending, record, returncode)
 
     async def _spawn(self, launch: Launch) -> asyncio.subprocess.Process:
         """The job's child, in a session of its own (its group id is its pid), output inherited."""
@@ -412,7 +441,7 @@ class Worker:
         elif reaped != Reaped.ABSENT:
             _logger.error("investigation %s: the backstop's answer for %s was %r", inv, name, reaped)
 
-    def _read_ending(self, record: Any, returncode: int) -> tuple[_Ending, float | None, dict | None]:
+    def _read_ending(self, record: Any, returncode: int) -> _Decided:
         """The stage, cost and knowledge from the host records, through the job lane (in a thread)."""
         inv = record.investigation_id
         try:
