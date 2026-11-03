@@ -14,20 +14,4 @@ elasticsearch.password: "${KBN_ES_PASSWORD}"
 xpack.security.encryptionKey: "${KBN_ENCRYPTION_KEY}"
 xpack.reporting.encryptionKey: "${KBN_ENCRYPTION_KEY}"
 xpack.encryptedSavedObjects.encryptionKey: "${KBN_ENCRYPTION_KEY}"
-
-# The alert → ticket hook (#1400): when a detection rule fires, the ticket-server opens a ticket
-# keyed by the alert's id. Preconfigured, so the id is fixed and the connector survives a reset;
-# scripts/install_detection_rules.py attaches it to every rule under this id. Kibana reaches
-# ticket-server over the `soar` network.
-xpack.actions.preconfigured:
-  playground-alert-tickets:
-    name: "Playground: open the alert's ticket"
-    actionTypeId: .webhook
-    config:
-      url: "http://ticket-server:8080/hooks/kibana-alerts"
-      method: post
-      headers:
-        Content-Type: application/json
-      hasAuth: false
-
 # keyRotation.decryptionOnlyKeys is appended at start by with-previous-key.sh, only after a rotation.

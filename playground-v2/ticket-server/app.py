@@ -167,11 +167,11 @@ def add_comment(key: str, body: CommentIn):
 
 
 # --- Kibana alert hook (#1400) ---------------------------------------------
-# Stands in for the customer's alert automation: when a detection rule fires,
-# Kibana's preconfigured webhook connector (kibana/kibana.yml) posts the new
-# alerts here and each one gets an OPEN ticket keyed by the alert's own id, so
-# the ticket exists before any run comments on it. The rule action that sends
-# them is attached by scripts/install_detection_rules.py.
+# Stands in for the customer's alert automation: the alert-ticket-watcher
+# service posts each new security alert here and each one gets an OPEN ticket
+# keyed by the alert's own id, so the ticket exists before any run comments on
+# it. Alerts arrive as stored in the alerts index (flat dotted keys); nested
+# objects are read too.
 #
 # Create-only: it never transitions or comments, so it gives nothing that can
 # reach this stub a way to move a ticket along its lifecycle.
@@ -242,7 +242,7 @@ def ticket_for_alert(alert: dict) -> Optional[TicketCreate]:
 def kibana_alert_hook(payload: dict | list = Body(...)):
     # Body(...) explicitly: FastAPI reads a bare `dict | list` parameter as form data,
     # which fails at import without python-multipart (not in the image).
-    """Body: `{"alerts": [...]}` (what the installed rule action sends) or a bare list."""
+    """Body: `{"alerts": [...]}` (what the watcher sends) or a bare list."""
     alerts = payload.get("alerts") if isinstance(payload, dict) else payload
     if not isinstance(alerts, list):
         raise HTTPException(status_code=422, detail="expected a list of alerts")

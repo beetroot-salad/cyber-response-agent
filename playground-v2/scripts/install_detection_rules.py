@@ -98,35 +98,11 @@ def _curl_command(method: str, path: str, has_body: bool) -> str:
     return " ".join(parts)
 
 
-# The alert → ticket hook (#1400): the preconfigured webhook connector in kibana/kibana.yml,
-# under this id, posts each execution's new alerts to the ticket-server, which opens one ticket
-# per alert keyed by the alert's id. Attached here rather than in each rule file so every rule,
-# including a new one, gets it. Triple braces keep Kibana from escaping the alerts' JSON.
-ALERT_TICKET_CONNECTOR_ID = "playground-alert-tickets"
-ALERT_TICKET_ACTION = {
-    "group": "default",
-    "id": ALERT_TICKET_CONNECTOR_ID,
-    "action_type_id": ".webhook",
-    "params": {"body": '{"alerts": {{{context.alerts}}} }'},
-    "frequency": {"summary": True, "notifyWhen": "onActiveAlert", "throttle": None},
-}
-
-
-def with_ticket_action(rule: dict) -> dict:
-    """The rule as installed: its own actions plus the alert → ticket hook, once."""
-    actions = list(rule.get("actions") or [])
-    if not any(a.get("id") == ALERT_TICKET_CONNECTOR_ID for a in actions):
-        actions.append(ALERT_TICKET_ACTION)
-    return {**rule, "actions": actions}
-
-
 def install_rule(password: str, rule: dict, dry_run: bool) -> bool:
-    rule = with_ticket_action(rule)
     rule_id = rule["rule_id"]
     name = rule["name"]
     if dry_run:
-        print(f"  DRY-RUN would install rule_id={rule_id} ({name!r}) "
-              f"with actions {[a['id'] for a in rule['actions']]}")
+        print(f"  DRY-RUN would install rule_id={rule_id} ({name!r})")
         return True
 
     # Delete any existing rule with this rule_id first (idempotency); 404 is fine

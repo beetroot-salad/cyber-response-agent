@@ -1,9 +1,8 @@
 """#1400 — when an alert fires, the playground opens its ticket, keyed by the alert's id.
 
-Kibana's preconfigured webhook connector (kibana/kibana.yml) posts each rule execution's new
-alerts to the ticket-server's hook; the detection-rule installer attaches that action to every
-rule. These tests drive the real FastAPI app and read the real committed config files; nothing
-touches the live stack. Run with the stub's runtime deps:
+The alert-ticket-watcher service posts each new security alert to the ticket-server's hook
+(its own tests are in playground-v2/alert-ticket-watcher/tests). These drive the real FastAPI
+app; nothing touches the live stack. Run with the stub's runtime deps:
 
     uv run --no-project --python 3.12 \
         --with 'fastapi==0.115.*' --with httpx --with pyyaml --with pytest \
@@ -12,10 +11,8 @@ touches the live stack. Run with the stub's runtime deps:
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 
@@ -128,41 +125,3 @@ def test_an_alert_with_no_id_is_skipped_not_keyed_by_something_else(client):
 
 def test_a_body_without_alerts_is_refused(client):
     assert _hook(client, {"alerts": "nope"}).status_code == 422
-
-
-# --- the wiring: Kibana's connector and the rule action point at this route ---
-
-def _connector() -> tuple[str, dict]:
-    yaml = pytest.importorskip("yaml")
-    cfg = yaml.safe_load((PLAYGROUND / "kibana" / "kibana.yml").read_text())
-    (cid, connector), = cfg["xpack.actions.preconfigured"].items()
-    return cid, connector
-
-
-def test_kibanas_connector_posts_to_the_hook_on_the_ticket_server():
-    _, connector = _connector()
-    assert connector["actionTypeId"] == ".webhook"
-    url = urlparse(connector["config"]["url"])
-    assert (url.hostname, url.port, url.path) == ("ticket-server", 8080, "/hooks/kibana-alerts")
-    assert connector["config"]["method"] == "post"
-
-
-def test_every_installed_rule_carries_the_hook_once_under_the_connectors_id():
-    cid, _ = _connector()
-    installer = _load("install_detection_rules_1400",
-                      PLAYGROUND / "scripts" / "install_detection_rules.py")
-    assert installer.ALERT_TICKET_CONNECTOR_ID == cid
-
-    rule_files = sorted((PLAYGROUND / "detection-rules").glob("*.json"))
-    assert rule_files
-    for path in rule_files:
-        installed = installer.with_ticket_action(json.loads(path.read_text()))
-        hooks = [a for a in installed["actions"] if a["id"] == cid]
-        assert len(hooks) == 1, path.name
-        assert installer.with_ticket_action(installed)["actions"] == installed["actions"]
-
-    body = installer.ALERT_TICKET_ACTION["params"]["body"]
-    # Kibana renders {{{context.alerts}}} as raw JSON; stand in a list and the body must parse.
-    assert json.loads(body.replace("{{{context.alerts}}}", json.dumps([flat_alert()]))) == {
-        "alerts": [flat_alert()]
-    }
