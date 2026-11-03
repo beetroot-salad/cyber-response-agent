@@ -23,6 +23,7 @@ from defender.tests.e2e._box665 import (
 from defender.tests.support.sandbox import _box1279 as X
 from defender.tests.support.sandbox._box1195 import FakeDaemon
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
 _PINNED = box_mod.BoxSpec(runtime="runc", rootfs="defender-box:t1279")
@@ -298,7 +299,7 @@ def _request_without_a_code_mount(req: X.RequestLane) -> box_mod.BoxRequest:
         box_mod.Mount(source=req.lane, target=req.lane, writable=True),
     )
     return box_mod.BoxRequest(name=X.REQUEST_NAME, mounts=mounts, workdir=DEFENDER.parent, env={},
-                              require_sandbox=False)
+                              require_sandbox=False, tenant_id=TEST_TENANT)
 
 
 def test_a8_a_request_with_no_code_mount_is_still_judged(tmp_path, monkeypatch):
@@ -591,7 +592,7 @@ def test_o3_the_oracle_box_refuses_a_mount_overlapping_the_publish_root(
     from defender.box import _oracle
 
     runner, scratch = oracle_tree
-    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"})
+    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
     clear = FakeDaemon(tmp_path / "clear")
     box_mod.start_box(request, docker=clear)
@@ -615,7 +616,7 @@ def test_o3_the_oracle_start_carries_the_refusal_as_the_cause_of_its_own(tmp_pat
     daemon = FakeDaemon(tmp_path)
     daemon.install(monkeypatch)
     with pytest.raises(_oracle.BoxStartRefused) as refused:
-        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"})
+        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     assert any(isinstance(e, X.conflict_type()) for e in _chain(refused.value)), (
         f"the refusal's text did not survive as the cause: {_chain(refused.value)}")
     assert daemon.created() == []
@@ -632,7 +633,7 @@ def test_o3_the_estate_oracle_start_turns_the_refusal_into_its_own_failure_keepi
     daemon = FakeDaemon(tmp_path)
     daemon.install(monkeypatch)
     with pytest.raises(estate_oracle.OracleSandboxError) as refused:
-        estate_oracle.start_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"})
+        estate_oracle.start_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     conflicts = [e for e in _chain(refused.value) if isinstance(e, X.conflict_type())]
     assert conflicts, f"the refusal did not survive the oracle's re-wrapping: {_chain(refused.value)}"
     assert str(conflicts[0]) in str(refused.value), (
@@ -645,7 +646,7 @@ def test_o6_the_oracle_request_name_refuses_a_finished_container(tmp_path, oracl
     from defender.box import _oracle
 
     runner, scratch = oracle_tree
-    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"})
+    request = _oracle.oracle_box_request(scratch, runner, env={"DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     daemon = FakeDaemon(tmp_path)
     daemon.hold(request.name, "exited")
     with pytest.raises(X.conflict_type()) as refused:
@@ -665,7 +666,7 @@ def test_o6_the_oracle_entry_refuses_a_held_same_name_container_and_leaves_it(
     env = {"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}
     free = FakeDaemon(tmp_path / "free")
     free.install(monkeypatch)
-    started = _oracle.start_oracle_box(env=env)
+    started = _oracle.start_oracle_box(env=env, tenant_id=TEST_TENANT)
     try:
         assert started.sandboxed, "control: the oracle did not start on a free name"
         assert len(free.created()) == 1
@@ -675,7 +676,7 @@ def test_o6_the_oracle_entry_refuses_a_held_same_name_container_and_leaves_it(
     X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
     log = X.hold_every_name(tmp_path / "holding", monkeypatch)
     with pytest.raises(_oracle.BoxStartRefused) as refused:
-        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"})
+        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}, tenant_id=TEST_TENANT)
     conflicts = [e for e in _chain(refused.value) if isinstance(e, X.conflict_type())]
     assert conflicts, f"the refusal did not survive as the cause: {_chain(refused.value)}"
     calls = X.logged_calls(log)
@@ -692,5 +693,156 @@ def test_o6_every_oracle_box_name_is_fresh(tmp_path, oracle_tree):
 
     runner, scratch = oracle_tree
     env = {"DEFENDER_BOX_RUNTIME": "runc"}
-    names = [_oracle.oracle_box_request(scratch, runner, env=env).name for _ in range(3)]
+    names = [_oracle.oracle_box_request(scratch, runner, env=env, tenant_id=TEST_TENANT).name for _ in range(3)]
     assert len(set(names)) == 3, f"an oracle name repeated: {names}"
+
+
+def _sibling_serving(tenant: str):
+    """A sibling's oracle side, as `run.py` settles it for its world."""
+    from defender import run as run_mod
+
+    return run_mod._world_seams(object(), oracle=None, verifier=None, source=None, tenant_id=tenant)["serving"]
+
+
+def _launcher_serving(tenant: str):
+    from defender.learning.branch.estate.registry import oracle_serving
+    from defender.learning.core.config import oracle_settings_with
+
+    return oracle_serving(oracle_settings_with(), tenant_id=tenant)
+
+
+@pytest.mark.parametrize("serving", [_launcher_serving, _sibling_serving], ids=["registry", "sibling"])
+def test_the_production_oracle_box_carries_its_tenant_label(tmp_path, monkeypatch, serving):
+    """The oracle's box a world is served with is labelled `defender.tenant=<T>` as the run box is, so the tenant's
+    teardown finds and removes it (#1214 O4)."""
+    tenant = fixture_uuid("oracle-label-tenant")
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
+    daemon = FakeDaemon(tmp_path / "daemon")
+    daemon.install(monkeypatch)
+    started = serving(tenant).box()
+    try:
+        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+        labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
+        assert f"defender.tenant={tenant}" in labels, labels
+    finally:
+        from defender.box import _oracle
+
+        _oracle.stop_oracle_box(started)
+
+
+@pytest.mark.parametrize("given", [{}, {"tenant_id": None}, {"tenant_id": ""}], ids=["omitted", "none", "empty"])
+def test_a_box_request_without_a_tenant_is_a_construction_error(tmp_path, given):
+    """Every box carries its tenant: a `BoxRequest` with no tenant (omitted, None, empty) is refused at construction; one
+    naming a tenant is made (r10 B1, O-B1; r10.1 C8)."""
+    made = box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, tenant_id=TEST_TENANT)
+    assert made.tenant_id == TEST_TENANT, "control: a request naming its tenant is made"
+    with pytest.raises((TypeError, ValueError)):
+        box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, **given)
+
+
+def test_a_box_request_names_its_tenant_without_judging_the_grammar(tmp_path):
+    """A `BoxRequest` naming any non-empty tenant id is made; the id's grammar is judged at acceptance only (r10.1 C8)."""
+    made = box_mod.BoxRequest(name="defender-box-b1", workdir=tmp_path, tenant_id="not-a-uuid")
+    assert made.tenant_id == "not-a-uuid"
+
+
+@pytest.mark.parametrize(("given", "refusal"), [
+    ({}, TypeError), ({"tenant_id": None}, TypeError), ({"tenant_id": ""}, (TypeError, ValueError)),
+], ids=["omitted", "none", "empty"])
+def test_the_run_box_start_refuses_a_missing_tenant_like_its_missing_defender_dir(tmp_path, monkeypatch, given, refusal):
+    """`start_box(run_dir, defender_dir, ...)` with no tenant is a `TypeError` (omitted, None) or `TypeError`/`ValueError`
+    (empty), naming the tenant, before any container is asked for; with one the same call starts, labelled (r10.1 C8, O-B1)."""
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "published")
+    lane = X.run_lane(tmp_path / "run")
+    rec = RecordingDocker()
+    lane.start(rec, spec=_PINNED)
+    assert f"defender.tenant={lane.tenant_id}" in rec.create_argv, "control: the run box carries its tenant label"
+    bare = RecordingDocker()
+    with pytest.raises(refusal, match="tenant"):
+        box_mod.start_box(lane.run_dir, lane.defender_dir, tenant_agent=lane.agent, staged_token=lane.token,
+                          docker=bare, spec=_PINNED, **given)
+    assert bare.create_argv is None, "a tenantless run box reached the container runtime"
+
+
+def test_the_run_box_start_judges_no_grammar_of_a_non_empty_tenant_id(tmp_path, monkeypatch):
+    """`start_box(run_dir, ...)` with a non-empty id that is not a tenant-id grammar starts and labels the box with it:
+    the grammar is judged at acceptance only (r10.1 C8)."""
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "published")
+    lane = replace(X.run_lane(tmp_path / "run"), tenant_id="not-a-uuid")
+    rec = RecordingDocker()
+    lane.start(rec, spec=_PINNED)
+    assert "defender.tenant=not-a-uuid" in rec.create_argv, rec.create_argv
+
+
+def _oracle_box_entries() -> dict:
+    import importlib
+
+    oracle = importlib.import_module("defender.box._oracle")
+    estate = importlib.import_module("defender.learning.branch.estate.oracle")
+    registry = importlib.import_module("defender.learning.branch.estate.registry")
+    return {
+        "oracle_box_request": oracle.oracle_box_request, "start_oracle_box": oracle.start_oracle_box,
+        "start_process_oracle_box": oracle.start_process_oracle_box, "estate start_box": estate.start_box,
+        "start_process_box": estate.start_process_box, "oracle_serving": registry.oracle_serving,
+    }
+
+
+@pytest.mark.parametrize("entry", ["oracle_box_request", "start_oracle_box", "start_process_oracle_box",
+                                   "estate start_box", "start_process_box", "oracle_serving"])
+def test_every_oracle_box_entry_requires_its_tenant(entry):
+    """No oracle box function defaults its tenant, so no caller can serve a world a tenantless box (r10 B1: the oracle's
+    box functions all require the tenant)."""
+    import inspect
+
+    param = inspect.signature(_oracle_box_entries()[entry]).parameters["tenant_id"]
+    assert param.default is inspect.Parameter.empty, f"{entry} defaults its tenant to {param.default!r}"
+
+
+def test_the_oracle_serving_requires_its_tenant():
+    """The launcher's oracle serving takes no default tenant, so a call that names none is a `TypeError` (r10 B1,
+    `learning/branch/preflight.py:120`)."""
+    from defender.learning.branch.estate.registry import oracle_serving
+    from defender.learning.core.config import oracle_settings_with
+
+    assert oracle_serving(oracle_settings_with(), tenant_id=TEST_TENANT).box is not None, "control: named, it is built"
+    with pytest.raises(TypeError):
+        oracle_serving(oracle_settings_with())
+
+
+@pytest.mark.parametrize("entry", ["oracle_box_request", "start_oracle_box", "estate start_box",
+                                   "start_process_oracle_box", "start_process_box", "oracle_serving"])
+def test_every_oracle_box_entry_labels_a_non_empty_tenant_id_without_judging_its_grammar(
+        tmp_path, monkeypatch, entry, oracle_tree):
+    """Each oracle box entry starts a box for a non-empty id that is no tenant-id grammar, labelled with it; the grammar is
+    judged at acceptance only (r10.1 C8)."""
+    from defender.box import _oracle
+    from defender.learning.branch.estate import oracle as estate_oracle
+
+    bad = "not-a-uuid"
+    env = {"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"}
+    X.dev_root(monkeypatch, tmp_path / "elsewhere" / "pub")
+    monkeypatch.setenv("DEFENDER_BOX_RUNTIME", "runc")
+    daemon = FakeDaemon(tmp_path / "daemon")
+    daemon.install(monkeypatch)
+    if entry == "oracle_box_request":  # builds the request only: the label is read off the box that request starts
+        runner, scratch = oracle_tree
+        box_mod.start_box(_oracle.oracle_box_request(scratch, runner, env=env, tenant_id=bad), docker=daemon)
+        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+        labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
+        assert f"defender.tenant={bad}" in labels, labels
+        return
+    starts = {
+        "start_oracle_box": lambda: _oracle.start_oracle_box(env=env, tenant_id=bad),
+        "estate start_box": lambda: estate_oracle.start_box(env=env, tenant_id=bad),
+        "start_process_oracle_box": lambda: _oracle.start_process_oracle_box(tenant_id=bad),
+        "start_process_box": lambda: estate_oracle.start_process_box(tenant_id=bad),
+        "oracle_serving": lambda: _launcher_serving(bad).box(),
+    }
+    started = starts[entry]()
+    try:
+        [create] = [c for c in daemon.docker_calls() if c[:2] == ["docker", "run"]]
+        labels = [create[i + 1] for i, arg in enumerate(create) if arg == "--label"]
+        assert f"defender.tenant={bad}" in labels, labels
+    finally:
+        _oracle.stop_oracle_box(started)

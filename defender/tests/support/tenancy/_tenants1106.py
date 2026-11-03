@@ -7,7 +7,6 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import dataclasses
 import importlib
-import json
 from pathlib import Path
 from typing import Any
 
@@ -26,14 +25,20 @@ FIXTURE_SETTINGS = FIXTURE / "settings"
 FIXTURE_AGENT = FIXTURE / "agent"
 TEMPLATE_AGENT = TEMPLATE_DIR / "agent"
 
-#: The three files run start requires, relative to a tenant's `settings/`. A system's
-#: `config.env` is deliberately not here: some adapters need none, and a missing one fails only
-#: that system's settings check, so the system is down, not the run (#1256).
+#: The files run start requires, relative to a tenant's `settings/`. A system's `config.env` is
+#: deliberately not here: some adapters need none, and a missing one fails only that system's
+#: settings check, so the system is down, not the run (#1256). The case-record file is optional
+#: (#1359 r3 "Tenant case-record settings": a tenant with no case system loads and runs).
 REQUIRED_FILES: tuple[str, ...] = (
     "verb-grants.yaml",
     "lead-zero.yaml",
-    "systems/case-history/mapping.yaml",
 )
+
+#: The tenant's optional case-record file under `settings/` (#1359 r4 Data): `system:` names the
+#: system that records cases, `comment.body:` is the comment template.
+CASE_RECORD_REL = "case-record.yaml"
+#: The folder a tenant repo from before #1359 still holds (`tenant check` finds it).
+RETIRED_CASE_FOLDER = "systems/case-history"
 
 #: The lead-zero template the fixture tenant names (it binds `elastic.alerts`). The catalog is
 #: the tenant's own (`agent/skills/gather/queries/`), never the checkout's, so the run-start
@@ -54,7 +59,7 @@ def run_grants(settings_dir: Path) -> Any:
 def fixture_tenant(tenant_id: str | None = None) -> Any:
     """The committed fixture tenant set up under the current test's data root and accepted
     through the real `accept_tenant`: what every replay that names no tenant runs as.
-    Idempotent within one test."""
+    Idempotent within one test. The returned `Tenant` carries `.directory` (see `set_up_tenant`)."""
     from defender.tests.support.shared.contracts import _data_root_1078
 
     return _data_root_1078.set_up_tenant(
@@ -191,31 +196,18 @@ def lead_zero_text(template_id: str = SHIPPED_CORRELATION_TEMPLATE) -> str:
     return f"correlation_template: {template_id}\n"
 
 
-#: The tenant's alert mapping (#1222): the file every planted tenant carries beside its case-history mapping.
-ALERT_MAPPING_TEXT = "signature: rule.id\nevent_time: timestamp\nsummary: rule.description\n"
+#: The tenant's alert mapping (#1222; `case_key` #1359): the file every planted tenant carries.
+#: `case_key` is on the alert's own id, a field the alerting system sets (#1359 P3).
+ALERT_MAPPING_TEXT = ("signature: rule.id\nevent_time: timestamp\nsummary: rule.description\n"
+                      "case_key: alert_id\n")
+
+#: The comment body template a planted case-record file carries.
+COMMENT_BODY = "{disposition} — {cause}\\n\\n{narrative}"
 
 
-def mapping_text(reporter: str = "defender", open_status: str = "open") -> str:
-    """A complete case-history mapping whose `open.reporter` is the one value a reader test
-    watches flow out. `open_status` is written quoted as given, so a template (`"{summary}"`)
-    makes the one mapping the loader refuses (#1221). It keeps the legacy `released:` section an
-    un-migrated tenant repo carries, so every planted tenant exercises the loader's tolerance."""
-    return f"""\
-open:
-  key: "{{case_id}}"
-  summary: "{{summary}}"
-  description: "Auto-created from alert {{case_id}} (rule {{signature}})."
-  status: "{open_status}"
-  reporter: {reporter}
-  labels:
-    - "sig:{{signature}}"
-    - "evt:{{event_time}}"
-comment:
-  author: defender
-  body: "{{disposition}} — {{cause}}\\n\\n{{narrative}}"
-released:
-  status: closed
-"""
+def case_record_text(system: str = "ticket", *, body: str = COMMENT_BODY) -> str:
+    """A tenant's `settings/case-record.yaml`: the system that records cases and the comment body."""
+    return f'system: "{system}"\ncomment:\n  body: "{body}"\n'
 
 
 #: The one implemented access method (#1107 D2).
@@ -226,7 +218,6 @@ PREFIX: dict[str, str] = {
     "cmdb": "CMDB",
     "identity": "IDENTITY",
     "ticket": "TICKET",
-    "case-history": "CASE_HISTORY",
     "change-mgmt": "CHANGE_MGMT",
     "threat-intel": "THREAT_INTEL",
     "elastic": "ELASTIC",
@@ -284,11 +275,6 @@ def config_texts(marker: str, *, events_index: str | None = None,
             f'TICKET_BASTION_HOST="bastion-{marker}"\n'
             'TICKET_TIMEOUT_SEC="10"\n'
             f'TICKET_KEY_PATTERN="{marker.upper()}-[0-9]+"\n'
-        ),
-        "case-history": (
-            f'CASE_HISTORY_URL_BASE="http://case-history-{marker}:8080"\n'
-            f'CASE_HISTORY_BASTION_HOST="bastion-{marker}"\n'
-            'CASE_HISTORY_TIMEOUT_SEC="10"\n'
         ),
         "elastic": (
             f'ELASTICSEARCH_URL="https://es-{marker}:9200"\n'
@@ -363,8 +349,8 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     root: Path, tenant_id: str, *,
     table: str = TABLE_A,
     lead_zero: str | None = None,
-    reporter: str = "defender",
-    open_status: str = "open",
+    case_system: str | None = "ticket",
+    case_body: str = COMMENT_BODY,
     marker: str | None = None,
     configs: dict[str, str] | None = None,
     omit: tuple[str, ...] = (),
@@ -373,7 +359,8 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
 ) -> Path:
     """Write a plain knowledge folder `root/<tenant_id>/{settings,agent}/` and return it: the
     committed template's shape (no `.tenant-id`, no row). `omit` names settings-relative files
-    not to write (e.g. one of `REQUIRED_FILES`), for refusal tests. `agent/` always holds one
+    not to write (e.g. one of `REQUIRED_FILES`), for refusal tests. `case_system` names the
+    system the case-record file points at; `None` plants a tenant with no case file (#1359). `agent/` always holds one
     marker file, so a mount of it is observably this tenant's."""
     tenant = Path(root) / tenant_id
     settings = tenant / "settings"
@@ -381,9 +368,10 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     files: dict[str, str] = {
         "verb-grants.yaml": table,
         "lead-zero.yaml": lead_zero if lead_zero is not None else lead_zero_text(),
-        "systems/case-history/mapping.yaml": mapping_text(reporter, open_status),
         "alert-mapping.yaml": ALERT_MAPPING_TEXT,
     }
+    if case_system is not None:
+        files[CASE_RECORD_REL] = case_record_text(case_system, body=case_body)
     system_configs = configs if configs is not None else config_texts(marker or tenant_id)
     for system, text in system_configs.items():
         files[f"systems/{system}/config.env"] = text
@@ -423,17 +411,19 @@ def system_skill_text(system: str) -> str:
 
 def place_tenant(root: Path, tenant_id: str, **kw: Any) -> Path:
     """A set-up tenant under `root`: `plant_tenant`'s folder as `root/<tenant_id>/knowledge/`,
-    `agent/.tenant-id` naming it, and its row written by hand (so one root can hold several
-    tenants: `create_tenant`'s one-tenant guard is setup's, not acceptance's). Returns the
-    knowledge folder; `accept(root, tenant_id)` accepts it."""
+    `agent/.tenant-id` naming it (no row: O6; one root can hold several tenants). Returns the
+    knowledge folder; `accept(root, tenant_id)` accepts it.
+
+    The returned folder (a `KnowledgeFolder`, equal to the plain path) carries `.directory` (#1214): a
+    `TenantDirectory` holding the tenant active with its forge wiring, for `directory=` at a migrated call
+    site; it is the only record that the tenant exists, and `accept(root, tenant_id)` accepts the folder."""
     folder = Path(root) / tenant_id
     defaults = {"marker": tenant_id, "agent_files": {"AGENT.md": f"agent half of {tenant_id}\n"}}
     knowledge = plant_tenant(folder, "knowledge", **{**defaults, **kw})
     (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
-    (folder / "tenant.json").write_text(json.dumps(
-        {"tenant_id": tenant_id, "created_at": "2026-09-28T00:00:00+00:00"},
-        indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return knowledge
+    from defender.tests.support.shared.contracts._data_root_1078 import KnowledgeFolder
+
+    return KnowledgeFolder(knowledge)
 
 
 #: The lead-zero id a planted census repo's folders name, and the template carrying it: the CI
@@ -483,7 +473,7 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
                               else rows)):
         folder = repo / "knowledge" / name
         files = {"lead-zero.yaml": lead_zero_text(CENSUS_LEAD_ZERO_ID),
-                 "systems/case-history/mapping.yaml": mapping_text(),
+                 CASE_RECORD_REL: case_record_text(),
                  "alert-mapping.yaml": ALERT_MAPPING_TEXT}
         for rel, text in files.items():
             (folder / "settings" / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -583,7 +573,10 @@ __all__ = [
     "TEMPLATE_SETTINGS",
     "config_texts",
     "lead_zero_text",
-    "mapping_text",
+    "case_record_text",
+    "CASE_RECORD_REL",
+    "RETIRED_CASE_FOLDER",
+    "COMMENT_BODY",
     "mod",
     "paths_in",
     "place_tenant",

@@ -1,6 +1,6 @@
 ---
 title: VPS deployment, service architecture, and identity
-status: deployment direction selected; detailed contracts and findings migration proposed
+status: deployment direction selected; detailed contracts proposed; findings migration tracked in #1278
 date: 2026-10-22
 ---
 
@@ -19,11 +19,16 @@ The selected direction is:
   experimental data rather than buying high availability in advance.
 - Separate the application host from the execution host and its runtime privileges.
 - Serve static frontend assets behind Cloudflare and a TLS reverse proxy.
-- Authenticate API requests with signed JWT access tokens carrying tenant context;
-  accept bounded authorization staleness and keep request authentication stateless.
+- Authenticate browsers with a backend-held session: the backend keeps OAuth tokens
+  server-side and the browser holds only an opaque HttpOnly session cookie. Each user
+  belongs to exactly one tenant, a product constraint for now.
 - Use PostgreSQL for application state, audit, and transactional job coordination.
 - Confine brains and output processors separately from the privileged launcher.
-- Serve generated HTML on tenant-specific artifact origins with sandbox restrictions.
+- Serve generated HTML from a separate registrable artifact domain. Renderer output runs
+  only its fixed, fingerprinted script; model-written HTML is opaquely sandboxed.
+- Keep execution-host learning state on a detachable block volume so the server can
+  be deleted without losing it.
+- Schedule jobs on a slot-counted worker pool with capacity reserved for investigations.
 - Use Tailscale SSH for administrative access.
 - Collect application and operational telemetry centrally, separately from audit
   records and run evidence.
@@ -32,8 +37,9 @@ The selected direction is:
 
 Keycloak, OpenBao, a Caddy proxy, and the initial blob-storage backend
 are service recommendations. PostgreSQL is selected for application state and jobs.
-**Moving findings and curation workflow state to
-PostgreSQL is a proposal for further decision**, described below. This document
+**Moving findings and curation workflow state to PostgreSQL is a follow-up,
+[#1278](https://github.com/beetroot-salad/cyber-response-agent/issues/1278)**,
+summarized below; the first deployment does not depend on it. This document
 sets architectural direction; it does not claim that production integrations or
 that migration are implemented.
 
@@ -44,8 +50,11 @@ Inherit the [engineering principles](../../../docs/principles.md),
 [credential-free executor model](runtime-isolation-executor-model.md).
 
 Model output and writable run files are untrusted. Arbitrary model-written code
-runs only in an executor; trusted orchestration and adapters hold the credentials
-needed for their specific work. Separate logical roles do not imply a security
+runs only in an executor. Trusted orchestration holds the model-provider key; **no run
+process, adapters included, holds a customer system credential** (#1163): those live in
+OpenBao and only the credential proxy reads them. A run reaches a credentialed system through
+the proxy with a signed request token, and the proxy obeys only the access declaration merged
+to the tenant repository's protected `main`. Separate logical roles do not imply a security
 boundary unless their credentials, processes, network access, and filesystem
 access are actually restricted.
 
@@ -59,7 +68,7 @@ visible. Budget constraints do not weaken tenant authorization or isolation.
 - **V1 — Complete deployment:** start the frontend, identity, API, storage,
   knowledge service, and workers through reproducible host configurations.
 - **V2 — Tenant authorization:** derive request tenant authority from verified,
-  issuer-controlled claims. Scope resource operations to that tenant. Machine
+  issuer-controlled claims held by the backend session. Scope resource operations to that tenant. Machine
   authority is independently limited by tenant, job, and purpose.
 - **V3 — Executor isolation:** confine model-written code to approved filesystems
   and resources without credentials, administration sockets, or network access.
@@ -127,7 +136,7 @@ flowchart TB
 | Component | Responsibility |
 | --- | --- |
 | Proxy, proposed Caddy | TLS, static assets, explicit public routes and request limits. |
-| Backend API | JWT validation, tenant-scoped records and audit, job submission/status, artifact grants. No runtime administration. |
+| Backend API | OIDC client and session store, JWT validation, tenant-scoped records and audit, job submission/status, artifact grants. No runtime administration. |
 | Keycloak, proposed | Product OIDC issuer, external OIDC/SAML identity brokering, controlled membership/invites. Separate from lab identity services. |
 | PostgreSQL | Application records, audit, and durable job coordination. Proposed findings workflow owner. Keycloak uses a separate database/user on the same server if colocated. |
 | Blob service | Run/episode bundles, transcripts, reports, HTML and assets; private storage with authorized artifact delivery. |
@@ -144,37 +153,44 @@ artifact grants constrain worker access; private networking alone is insufficien
 The worker can access neither the application host's Docker daemon nor Keycloak's
 database. Worker credentials do not authorize host administration.
 
-### 2. Human identity and stateless API authentication
+### 2. Human identity and backend-held sessions
 
-The static frontend uses OIDC Authorization Code with PKCE, a public client, and
-exact redirect URLs. Keycloak is the proposed application issuer and can broker
-external identity providers; Google is one example, not a product constraint.
+The backend is the OIDC client: it runs Authorization Code with PKCE as a
+confidential client with exact redirect URLs. Keycloak is the proposed application
+issuer and can broker external identity providers; Google is one example, not a
+product constraint.
 [Keycloak supports external OIDC/SAML identity brokering](https://www.keycloak.org/docs/latest/server_admin/index.html#_identity_broker).
 External login establishes a person, not tenant membership. Membership must be
 controlled by trusted enrollment/invite administration, with one authoritative
 owner feeding issuer claims. Do not link accounts solely by matching email.
 
-The browser holds access and refresh tokens in memory and sends access tokens in
-the Authorization header. It does not persist them in localStorage or
-sessionStorage. Refresh/reload can use the IdP session, subject to browser limits.
-This follows the [Keycloak browser adapter guidance](https://www.keycloak.org/securing-apps/javascript-adapter).
-The API validates allowed algorithm, signature/JWKS, issuer, API audience, and
-validity times. It derives principal and tenant from verified claims, never from
-an untrusted tenant selector. Resource queries and writes enforce that tenant.
+Each user belongs to exactly one tenant. This is a product constraint, not a
+technical one: enrollment refuses a second membership, and a person who needs two
+tenants uses two accounts. Lifting it later requires choosing the active tenant
+at token issuance, with the issuer checking membership, never through a client-supplied selector.
 
-Ordinary request authentication has no per-user application session lookup or
-membership lookup. Application data and the IdP's own sessions remain stateful.
-A proposed five-minute access-token lifetime bounds stale membership authority;
-refresh issuance must reevaluate current membership. Logout or disabling refresh
-does not retroactively invalidate an already issued access token. The accepted
-trade-off also covers ordinary sensitive operations unless a future policy adds
-fresh authorization or step-up checks; do not silently promise immediate revocation.
+The backend stores access and refresh tokens in its session store (PostgreSQL) and
+gives the browser an opaque, HttpOnly, Secure, host-only session cookie. The
+browser never holds OAuth tokens, so reload and refresh need no hidden IdP frame
+and are unaffected by third-party cookie blocking. On each request the backend
+looks up the session and validates the token it holds: allowed algorithm,
+signature/JWKS, issuer, API audience, and validity times. It derives principal
+and tenant from verified claims, never from an untrusted tenant selector.
+Resource queries and writes enforce that tenant.
 
-This is direct SPA-to-API bearer authentication. A backend-for-frontend (BFF)
-would instead keep OAuth tokens server-side and give the browser an opaque
-HttpOnly session cookie. That is the cookie-based alternative discussed, not the
-selected request-authentication design. JWT format alone does not determine
-browser storage or session architecture.
+Each request costs one session lookup; at this scale that is negligible. Deleting
+a session stops that browser immediately, so logout and forced sign-out take
+effect at once. Membership changes still take effect at the next token refresh: a
+proposed five-minute access-token lifetime bounds that staleness, and refresh
+must reevaluate current membership. Sensitive operations needing fresher
+authority require a future fresh-authorization or step-up policy.
+
+Cookie authentication requires request-forgery protection. Use `SameSite` session
+cookies and reject state-changing requests whose `Origin` header is not the
+application origin. This matters because browsers treat subdomains of one
+registrable domain as same-site. This replaces the earlier direct SPA-to-API
+bearer design: that design needed in-memory tokens and silent IdP frames, and
+was brittle under browser cookie restrictions.
 
 Keep Keycloak administration private: its admin routes share its application
 listener, so restricting only the management port is insufficient. Configure
@@ -235,14 +251,29 @@ close/draft semantics.
 
 Use one worker codebase/image with fixed investigation and learning handlers.
 Permission profiles and process/container placement remain explicit; a single
-all-privileged worker pool is not required. Initially propose one active outer
-job, queued investigations ahead of queued learning, and no preemption. A running
-learning job may therefore delay an investigation. Independently cap actual boxes,
-since learning can fan out into multiple runs. Budget aggregate brains, parsers,
-adapters, provider requests, memory, disk, and spend as well as executors. Admit a
-learning family only when its required concurrent siblings fit those budgets;
-do not silently serialize siblings when that changes experimental semantics.
-Family width and aggregate limits must be set before execution-host sizing.
+all-privileged worker pool is not required.
+
+The worker pool counts capacity in **slots**, roughly one brain plus its executor,
+not in jobs. An investigation needs one slot. A learning family needs one slot per
+sibling it runs at once. At least one slot is reserved for investigations, so a
+running learning job never blocks one; there is no preemption. Other slots go to
+the highest effective priority, computed in the claim query:
+
+- Investigations have a higher base priority than learning.
+- Effective priority grows with time waited, not with skip count, so a steady
+  stream of investigations cannot starve learning.
+- Once a multi-slot job has waited past a limit, admission stops starting smaller
+  jobs until it fits, so small jobs cannot keep it out indefinitely.
+
+Learning does not have to run siblings at once. Today the launcher starts every
+sibling world together, with each holding an equal share of the episode's query
+rate. No stated experimental requirement depends on that: preflight freezes each
+world's store before any sibling starts. Running siblings one after another is
+acceptable and lowers a family to one slot. Pausing learning between siblings to
+yield to investigations, or surviving a worker restart mid-episode, additionally
+requires resumable episodes. A relaunch today starts a new episode. Budget
+aggregate brains, parsers, adapters, provider requests, memory, disk, and spend
+as well as slots. Pool size and family width must be set before execution-host sizing.
 
 The API commits an investigation or learning-job record and its audit atomically.
 Job status/claim fields belong to those domain records; no separate dispatch row
@@ -289,10 +320,22 @@ contract to settle, not an exactly-once guarantee.
 | Findings and curation coordination proposed | PostgreSQL, after an explicit ownership migration |
 | Provider/system secrets and workload grants | Secret/identity issuer |
 
-Until a database migration is approved, tenant-local LearningState and retained
-Git branches live on persistent execution-host storage. Queues, claims, consumed
-ledgers, pending-delivery records, and the actual branch commits remain authoritative;
-blob uploads or delivery metadata alone do not replace them.
+Until #1278 lands, tenant-local LearningState and retained Git branches live on a
+**detachable block volume** attached to the execution host. A detachable volume is a
+provider disk billed separately from the server. It survives server deletion and
+reattaches to a replacement in the same datacenter. The volume holds both:
+
+- each tenant's learning state directory: queues, in-flight claims, pending
+  deliveries, staging folders, and any adopted legacy run bundles;
+- each tenant's knowledge repository checkout, where retained branches and batch
+  worktrees live. Retained branches are kept in that git repository, not under
+  the learning directory.
+
+Queues, claims, consumed ledgers, pending-delivery records, and the actual branch
+commits remain authoritative; blob uploads or delivery metadata alone do not
+replace them. A blob snapshot may serve as a backup but is not the working copy.
+The volume's size has not been measured against real tenant data; measure both
+locations before sizing it.
 
 Start blob storage with either a filesystem-backed service on the application
 host or an object-storage implementation. Select its backend separately from its
@@ -300,97 +343,97 @@ HTTP-serving and authorization contract. Local volumes are acceptable; a blob
 interface does not require buying managed durable storage.
 
 The application run viewer displays transcripts and other model-controlled
-strings using safe text rendering or sanitized markup. Serve independently
-generated HTML from a separate origin per tenant, on a dedicated artifact domain,
-with short-lived grants bound to tenant, hostname, and object scope. Wildcard DNS,
-TLS, and hostname routing allow these origins to share one serving deployment;
-there is no tenant-specific server requirement. Unknown tenant hosts refuse.
+strings using safe text rendering or sanitized markup.
 
-Apply document sandbox restrictions as well as escaping/sanitization. Active
-artifact scripts must not receive normal same-origin authority; use an opaque
-sandbox origin when scripts are needed, and restrict navigation, forms, popups,
-and network destinations. Enforce equivalent restrictions for direct artifact
-navigation, not only the application's iframe. Exact CSP/sandbox settings and
-asset/sibling-link behavior require a renderer contract before deployment.
+Generated HTML is served from a **separate registrable artifact domain**, not a
+subdomain of the application's domain. HttpOnly stops a script from reading the
+session cookie but not from using it. A report on the application origin could
+call the API with the user's authority, and one on a sibling subdomain is still
+same-site, so a form there could carry the session cookie. A separate domain
+removes that class of attack. Per-tenant hostnames under it, such as
+`<tenant>.<artifact-domain>`, are one wildcard level and fit Cloudflare's free
+edge certificate; a second wildcard level would need a paid certificate. Unknown
+tenant hosts refuse. One serving deployment handles all hostnames.
 
-Tenant origins separate browser authority between tenants; sandbox restrictions
-also limit interaction between reports within a tenant. Share no application
-tokens or parent-domain cookies, grant no broad CORS access, and preserve hostname
-and authorization scope through caching and artifact delivery. Relative assets
-and sibling run links must preserve authorization. Avoid placing signed grants
-in logs, referrers, or third-party page resources. Origin routing never replaces
-object authorization.
+Artifact HTML comes in two kinds, served under different restrictions:
 
-### 6. Findings in PostgreSQL — proposal
+- **Renderer output.** Product renderers emit a page with one fixed script of our
+  own. Model data is embedded as inert JSON data islands. Serve it with a CSP that
+  allows only that script by its fingerprint and blocks network calls, forms,
+  framing, and other scripts. The serving layer owns the fingerprint list; the
+  renderer runs on hostile input and cannot add to it. The document keeps a
+  normal origin, so cookies work.
+- **Model-written HTML**, if any product path serves it. It runs in an opaque
+  sandbox with no same-origin authority, with navigation, forms, popups, and
+  network destinations restricted, for direct navigation as well as the iframe.
 
-Findings are mutable workflow inputs, while published knowledge is reviewed,
-versioned content. Database ownership fits claims, filtering, retries, queue
-visibility, and multi-worker coordination; Forgejo fits the resulting knowledge
-changes. **Current findings already live outside Forgejo**, in tenant-local
-LearningState files. This proposal replaces that operational state, not the Git
-corpus or the run evidence.
+Delivery of renderer output: the application issues a short-lived, one-time link
+bound to tenant and object scope. The artifact server exchanges it for a
+host-only HttpOnly cookie scoped to that tenant hostname and run, then redirects
+to a URL without the grant. Relative assets and sibling links within the run
+then carry authorization with no grant in the URL. Opaque-sandboxed documents do
+not send cookies on their requests; if they need relative assets, carry the grant
+in the URL path rather than the query string, and send no referrer.
 
-The proposed model has three related records:
+Share no application tokens or cookies with artifact origins, grant no broad CORS
+access, and preserve hostname and authorization scope through caching. Keep
+grants out of logs and third-party resources. With injected scripts unable to
+run, per-tenant hostnames are defense in depth rather than the primary barrier.
+Origin routing never replaces object authorization. Exact CSP values and the
+complete inventory of HTML-producing paths require a renderer contract before
+deployment.
 
-- **Finding:** tenant, channel/lane, stable producer identity and finding ID,
-  source run/episode references, payload/schema version, and accepted timestamp.
-  Content is untrusted even after database insertion. Preserve separate domains
-  for defender-conduct and world-construction findings.
-- **Curation processing:** eligibility/hold reason, claim owner/epoch and lease,
-  batch membership, disposition, retry history, and dead-letter reason. Admission,
-  claim, and disposition are transactional; no transaction spans an LLM call.
-- **Knowledge delivery:** batch ID, base commit, resulting commit/branch,
-  delivery status, and Forgejo PR/merge references. Processing, push/PR delivery,
-  and publication are distinct states.
+### 6. Findings in PostgreSQL — follow-up
 
-A representative flow is: a trusted producer admits an idempotently identified
-finding; a curator claims eligible findings in its tenant/lane; it works in a
-local batch checkout; trusted code scrubs and reviews the resulting changes;
-processing disposition and a recoverable delivery obligation are recorded; the
-batch is pushed and a PR opened; human review determines publication.
-No finding becomes published knowledge merely because it is consumed or a PR
-exists. A skipped or rejected finding retains its reason and provenance.
+Tracked in [#1278](https://github.com/beetroot-salad/cyber-response-agent/issues/1278).
+Findings are mutable workflow inputs; published knowledge is reviewed, versioned
+content. Database ownership fits claims, filtering, retries, queue visibility, and
+multi-worker coordination, and Forgejo fits the resulting knowledge changes.
+Findings already live outside Forgejo, in tenant-local LearningState. The move
+replaces that operational state, not the Git corpus or run evidence.
 
-The critical failure is a Git side effect followed by a database failure, or the
-reverse. PostgreSQL and Forgejo do not share a transaction. Retain the batch and
-its commit until delivery is durably recoverable, identify external work by stable
-batch identity, and reconcile existing branch/PR state before retrying. A local
-commit is not durable against execution-host loss. The exact commit/delivery
-protocol, claim renewal/termination, rejected-PR reprocessing policy, and per-tenant
-corpus writer serialization must be settled before adopting this migration.
-A delivery failure must not cause a fresh batch to author the same findings again.
+The first deployment does not depend on it: with one persistent execution host
+and its state on a detachable volume (section 5), local state is simpler. Do the
+move when a second or replaceable execution host is needed, when the API needs
+direct queue visibility, or when volume preservation proves insufficient.
 
-Large transcripts and evidence stay in blob storage, referenced by immutable
-identities. Findings retain the provenance needed to understand dispositions;
-artifact retention must account for references from pending work and published
-knowledge, rather than silently deleting evidence that is still needed.
-
-**Trade-off:** PostgreSQL gives the API direct queue visibility and supports
-replaceable execution hosts without sharing JSONL files or filesystem locks.
-It also makes learning coordination depend on database availability and introduces
-schema/role migration plus Git/database reconciliation. Keeping local state is
-simpler for one persistent execution host and remains the current implementation.
-Git-based queues would add commit/merge contention without supplying transactional
-claim semantics. A broker is unnecessary for this proposal.
-
-If selected, move one clearly defined state domain at a time behind an explicit
-repository contract, inventory all producers/readers/claims/ledgers, quiesce those
-writers, import stable identities and pending delivery records, and switch them
-together. There must be one writable authority, not dual file/database queues.
-Retain local scratch checkouts and artifact files as such; moving queue records
-does not turn arbitrary local draft state into database state. Existing
-[tenant-state guarantees](tenant-learning-state.md) remain in force until an
-approved replacement defines its compatibility and migration contract.
+The issue records the proposed record model (finding, curation processing, and
+knowledge delivery) and what must be settled first. The central hazard is that
+PostgreSQL and Forgejo share no transaction: a Git side effect can be followed by
+a database failure, or the reverse. Delivery must be reconciled by stable batch
+identity before any retry, and a delivery failure must not cause a fresh batch
+to author the same findings again. Migration keeps one writable authority, with
+no dual file and database queues. The [tenant-state guarantees](tenant-learning-state.md)
+stay in force until a replacement defines its compatibility contract.
 
 ### 7. Machine identity and trust
 
-OpenBao is the proposed Vault-compatible issuer in development and production.
+OpenBao is the proposed Vault-compatible issuer in development and production. It is also the
+store of customer system credentials (KV v2, written whole through a write-only role and read
+only by the credential proxy) and the signer of request tokens (transit, one key per tenant;
+the launcher may only sign and the proxy may only verify) (#1163).
 The development issuer belongs in the existing devcontainer Compose environment;
 if OpenBao is selected, use it there as well. Its immediate justification is the
 existing authenticated Forgejo identity-issuance contract; broader secret-store
 integration needs its own concrete scope.
 Production uses protected storage, bootstrap credentials, and unseal custody;
 development convenience settings are not a production configuration.
+
+OpenBao encrypts its storage with a key it never writes to disk. After every
+start it is sealed until that key is supplied. A copied disk, snapshot, or
+backup therefore reveals nothing, but a root user on the running host can still
+reach the key in memory. While sealed, workers cannot obtain Forgejo credentials.
+
+- **Development:** OpenBao's built-in static key seal, with the key in a file
+  outside Git and outside model-visible mounts. This is acceptable only in development.
+- **Production, initially:** manual unseal by key-share holders, with an alert
+  whenever OpenBao is sealed. Accepted downtime makes this tolerable; reboots are rare.
+- **Production, later:** automatic unsealing through an external key service.
+  Hetzner offers none, so this means a small AWS or Google key-service dependency,
+  around $1 a month. Choose it explicitly when manual unsealing becomes a burden.
+  OpenBao 2.7 moves cloud key-service seals into plugins.
+- **CI/CD never holds unseal keys.** A pipeline compromise would otherwise expose
+  every secret, and a plain reboot without a deploy would stay sealed regardless.
 
 A trusted supervisor authenticates using a workload mechanism, proposed AppRole
 for a generic VPS, and delegates tenant/purpose authority to the relevant job.
@@ -407,7 +450,8 @@ a requirement of this architecture.
 
 | Boundary | Authority and limit |
 | --- | --- |
-| Browser to API | Verified tenant JWT scopes resource access; authority can be stale until expiry. |
+| Browser to API | HttpOnly session cookie, with `Origin` checks on writes. The backend-held tenant JWT scopes resource access. Session deletion is immediate; membership changes take effect at refresh. |
+| CI/CD to hosts | Deploy credentials only, reaching hosts over Tailscale as an ephemeral tagged node; no unseal keys or tenant secrets. |
 | Cloudflare to origin | Explicit web routes and trusted proxy configuration; administration remains private. |
 | Execution host to application host | Scoped service access; no application-host runtime administration. |
 | Brain to executor | Assigned working directory and execution only; no secrets or network. |
@@ -425,8 +469,16 @@ path. A separate jump-box VPS is not required initially.
 [Tailscale SSH](https://tailscale.com/docs/features/tailscale-ssh) supplies
 identity-based SSH policy over the private network.
 
-Build images in CI; deploy immutable versions through repeatable per-host Compose
-configuration. Coordinate API/worker schema compatibility. Initially stop
+Application code lives on GitHub. Proposed deployment path:
+
+- GitHub Actions builds immutable images and pushes them to GitHub's container registry.
+- The deploy job joins the tailnet as an ephemeral, tagged node allowed to reach
+  only the deploy entry point on each host.
+- It pulls the pinned image versions and restarts the per-host Compose services
+  from versioned configuration.
+
+The pipeline holds deploy and registry credentials only, never unseal material,
+issuer credentials, or tenant secrets. Coordinate API/worker schema compatibility. Initially stop
 admissions and drain work for disruptive migrations rather than promise rolling
 upgrades. Host patching, disk pressure, issuer custody, DNS/TLS, deployments, and
 restore procedures remain operator responsibilities.
@@ -468,9 +520,11 @@ and outside model-visible mounts. Partial restores must not combine incompatible
 tenant, issuer, Forgejo, and application state.
 
 The execution host can be stopped independently after admissions stop, jobs finish
-or cancel, and owned executors are reconciled. Upload committed artifacts and
-transfer current LearningState plus retained branches/commits before planned
-replacement or destruction of execution-host storage. Preserve corresponding
+or cancel, and owned executors are reconciled. Most providers, Hetzner and
+DigitalOcean included, bill a powered-off server, so saving money means deleting
+it. Before deletion, upload committed artifacts and detach the learning-state
+volume (section 5); a replacement server reattaches it. Destroying the volume
+itself requires transferring LearningState plus retained branches and commits first. Preserve corresponding
 tenant identities and publication references. Discarding this state is a separate
 explicit reset, not an ordinary worker shutdown. Keep the
 application host running if login, API, and historical pages should remain
@@ -485,15 +539,19 @@ not resolve state ownership, tenant authorization, or duplicate-execution safety
 
 ## Remaining decisions
 
-- Findings database ownership, its processing/delivery model, and migration scope.
 - VPS providers/sizes, isolation backend, launcher interface, and actual resource budgets.
-- Membership/enrollment owner, JWT lifetime/refresh configuration, and identity-provider setup.
-- Issuer bootstrap/delegation and live Forgejo integration.
+- Measured learning-state volume size: learning directories plus knowledge checkouts.
+- Pool size, reserved investigation slots, aging rate and wait limit, and whether
+  to run learning siblings one after another.
+- Resumable learning episodes, needed to pause between siblings or to survive restarts.
+- Membership/enrollment owner, token lifetime/refresh configuration, and identity-provider setup.
+- Issuer bootstrap/delegation and live Forgejo integration; when to adopt automatic unsealing.
 - Job fencing, cancellation, recovery and artifact-publication contracts.
-- Artifact CSP/sandbox settings, renderer compatibility, and authorized asset/navigation behavior.
+- Exact artifact CSP values and the complete inventory of HTML-producing paths.
 - Blob and observability backends, retention, privacy settings, and spending limits.
+- Findings migration: [#1278](https://github.com/beetroot-salad/cyber-response-agent/issues/1278).
 
-These prevent implementation readiness. The selected hosting, PostgreSQL, JWT,
+These prevent implementation readiness. The selected hosting, PostgreSQL, session,
 edge, administration, and observability directions remain valid while they are resolved.
 
 ## Related architecture
@@ -525,6 +583,18 @@ artifact contracts, termination fencing, and the proposed findings migration
 remain deployment decisions. A fail-stop single-supervisor recovery policy with
 manual resolution of uncertain attempts is a simpler candidate than automatic
 takeover; no automatic takeover is selected. No runtime tests were run.
+
+Revision 2026-10-22b, at source base `0f62791e0fe1d070a4551fe87d33b271e4418b07`,
+records review decisions:
+- a backend-held session replacing SPA bearer tokens;
+- one tenant per user;
+- a separate registrable artifact domain, with fingerprint-restricted renderer scripts;
+- a detachable learning-state volume;
+- a slot-counted worker pool with reserved investigation capacity and priority aging;
+- the OpenBao unseal posture and CI/CD deploy path;
+- the findings migration split into #1278.
+
+Claims VPS-C6 to VPS-C8 below were read at that base. The volume size was not measured.
 
 <details>
 <summary>Supporting source evidence and unverified behavior</summary>
@@ -601,6 +671,27 @@ claims:
     probe_kind: executed
     observed: This is a design proposal, not observed behavior.
     verdict: unprobed
+  - id: VPS-C6
+    kind: referential
+    claim: Retained delivery branches live in the tenant knowledge repository checkout, not under the learning state root.
+    probe: Read defender/learning/author/branch.py (start_batch, finish_batch) and learning/core/state.py (_adoption_entries).
+    probe_kind: read
+    observed: Batch worktrees and branches are created from repo_root; a failed push leaves the commit on the local branch there. The state root holds queues, pending delivery and staging entries, plus adopted runs bundles.
+    verdict: holds
+  - id: VPS-C7
+    kind: referential
+    claim: The run report embeds one fixed product script and carries model data as inert JSON data islands.
+    probe: Read defender/presentation/visualize_run.py and visualize_runtime.py.
+    probe_kind: read
+    observed: The page inlines RUNTIME_JS from a product asset; tool payloads are emitted as script type application/json with "<" escaped. learning/frontend/build.py and other HTML producers were not inventoried.
+    verdict: holds
+  - id: VPS-C8
+    kind: referential
+    claim: Learning siblings currently start together, but no stated requirement depends on concurrency.
+    probe: Read defender/learning/branch/cli.py (module docstring, launch loop) and docs/learning-development.md.
+    probe_kind: read
+    observed: A barrier starts every sibling together, each with an equal slice of the query rate; preflight freezes each world's store before RUNS; a relaunch is a new episode (N17). No rationale tying results to simultaneous execution was found.
+    verdict: holds
 
 ```
 

@@ -1,7 +1,6 @@
 """#1108 P4: malformed inputs, each case a wrong-but-green production variant."""
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import sys
@@ -11,13 +10,11 @@ import pytest
 
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 from defender.tests.tenancy.tenant_1108_p4._support import (
-    _row_path,
     current_commit,
     export_dir,
     git,
     push_to_remote,
 )
-from defender.records._tenant_id import TenantRefused
 
 OID = "0123456789abcdef0123456789abcdef01234567"
 
@@ -62,39 +59,6 @@ def test_r6_a_clone_missing_one_half_of_its_tree_is_refused_at_run_start(
         shutil.rmtree(Path(t.clone) / half)
         out = B.launch(t, tmp_path / "broken", publish=lambda *a, **k: B.fresh(t.commit))
         assert not out.reached, f"a run started over a clone with no {half}/: {out.text()}"
-
-
-# --- a forge binding with an empty or non-string field ----------------------------------------
-
-@pytest.mark.parametrize("field", ["origin", "audience", "issuer_role", "issuer_config"])
-@pytest.mark.parametrize("bad", ["", None, 7, ["x"]])
-def test_r6_a_forge_binding_with_an_empty_or_non_string_field_is_refused(p4_tenant, field, bad):
-    from defender.tenancy import _tenant
-    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
-
-    binding = bind_forge(p4_tenant)
-    assert _tenant.read_forge_binding(p4_tenant.tenant).origin == binding["origin"], "control"
-    path = _row_path(p4_tenant)
-    row = json.loads(path.read_text(encoding="utf-8"))
-    row["forge"][field] = bad
-    path.write_text(json.dumps(row), encoding="utf-8")
-    with pytest.raises(TenantRefused):
-        _tenant.read_forge_binding(p4_tenant.tenant)
-
-
-def test_r6_a_forge_binding_naming_a_relative_issuer_config_is_refused(p4_tenant):
-    """The binding names its tenant's issuer client config by an absolute path: a relative
-    one would resolve against whatever directory a delivery process happens to run in."""
-    from defender.tenancy import _tenant
-    from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
-
-    bind_forge(p4_tenant)
-    path = _row_path(p4_tenant)
-    row = json.loads(path.read_text(encoding="utf-8"))
-    row["forge"]["issuer_config"] = "playground-issuer/client/issuer.json"
-    path.write_text(json.dumps(row), encoding="utf-8")
-    with pytest.raises(TenantRefused, match="relative issuer_config"):
-        _tenant.read_forge_binding(p4_tenant.tenant)
 
 
 # --- materialise takes only a full lowercase commit id -----------------------------------------

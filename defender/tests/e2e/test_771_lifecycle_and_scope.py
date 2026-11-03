@@ -31,6 +31,7 @@ from defender.tests.e2e._spec771 import (
     worktree_tree,
     write_verdict,
 )
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 pytestmark = pytest.mark.e2e
 
@@ -254,7 +255,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     # ARM 3: the half this codebase owns, what the box's bind mounts pin.
     run = run_tree(tmp_path / "boxed")
     rec = AliasProbeDocker(BAN_IN_FORCE)
-    box_mod.start_box(run, DEFENDER, docker=rec)
+    box_mod.start_box(run, DEFENDER, docker=rec, tenant_id=TEST_TENANT)
 
     argv = rec.create_argv or []
     specs = [tok for prev, tok in zip(argv, argv[1:], strict=False) if prev == "--mount"]
@@ -290,7 +291,7 @@ def test_the_box_start_fault_removes_the_container_it_created(tmp_path):
     leave it holding the shared tree open."""
     rec = AliasProbeDocker(BAN_ABSENT)
     with pytest.raises(box_mod.AliasBanNotInForce):
-        box_mod.start_box(run_tree(tmp_path), DEFENDER, docker=rec)
+        box_mod.start_box(run_tree(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT)
 
     assert reaped_after_create(rec.calls), "the faulted start left its container running"
 
@@ -329,7 +330,7 @@ def test_a_faulted_box_create_leaves_a_verdict_on_the_tree_it_touched(tmp_path):
                            create=DockerFault(rc=1, stderr="no such image\n", cite="R3"))
 
     with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(run, DEFENDER, docker=rec)
+        box_mod.start_box(run, DEFENDER, docker=rec, tenant_id=TEST_TENANT)
 
     verdict = read_verdict(run)
     assert verdict, (

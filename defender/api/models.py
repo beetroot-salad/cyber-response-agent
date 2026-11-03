@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
-from pydantic import AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import (
+    AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator,
+    model_validator,
+)
 
 from defender._clock import as_utc
+from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
+from defender.identity.models import Email
 
 InvestigationStatus = Literal["queued", "running", "completed", "unparseable", "failed", "aborted"]
 
@@ -22,9 +27,9 @@ RecordId = Annotated[str, Field(pattern=RECORD_ID_PATTERN)]
 #: returns the record the first attempt made.
 ClientRequestId = Annotated[str, Field(
     min_length=1, max_length=200,
-    description="Minted once per user action. Repeating the request with it answers the record "
-                "that request created; a request answered with an investigation already live "
-                "created nothing, so repeating it is a new request.",
+    description="Minted once per user action. Repeating the request with it answers the latest "
+                "attempt of the request this id started; a request answered with an investigation "
+                "already live started nothing, so repeating it is a new request.",
 )]
 
 
@@ -61,15 +66,14 @@ class AlertSummary(BaseModel):
     vendor: str = Field(description="The ticket system the alert was pulled from.")
     vendor_ticket_id: str = Field(description="The vendor's own id; unique per tenant and vendor.")
     title: str
-    severity: str | None
-    rule: str | None
+    description: str
     fired_at: Instant = Field(description="When the vendor says the alert fired.")
     changed_at: Instant = Field(description="When the vendor last changed the ticket.")
     received_at: Instant = Field(description="When we pulled it; our own clock.")
 
 
 class Alert(AlertSummary):
-    raw: dict[str, Any] = Field(description="The alert exactly as the vendor sent it.")
+    raw: str = Field(description="The alert's text exactly as the vendor sent it: not parsed, not re-serialized.")
 
 
 KnowledgeStatus = Literal["current", "stale", "pinned"]
@@ -94,15 +98,26 @@ class Investigation(BaseModel):
     investigation_id: RecordId
     alert_id: RecordId
     status: InvestigationStatus
+    request_key: str = Field(
+        description="The `client_request_id` of the request this investigation answers.")
+    attempt: int = Field(description="Which attempt of the request this is; the first is 1.")
     disposition: str | None = Field(
         default=None,
         description="Set once the investigation completes with a readable report.",
         json_schema_extra={"enum": [*DISPOSITION_VALUES, None]},
     )
-    cost_usd: float = Field(description="Model cost so far; final once the status is terminal.")
+    cost_usd: float | None = Field(
+        description="Model cost: 0 until the run ends, final once the status is terminal; "
+                    "null when the run ended but its cost could not be read (unknown).")
     created_at: Instant
     started_at: Instant | None = None
     finished_at: Instant | None = None
+    failure_reason: str | None = Field(
+        default=None,
+        description="Set when the investigation failed or was aborted: a fixed reason such as "
+                    "`setup_refused`, `no_report`, `worker_error` or `cancelled`.")
+    failure_message: str | None = Field(
+        default=None, description="Our own words on why it failed; never model or run output.")
     artifacts: list[str] = Field(
         default_factory=list,
         description="Keys readable at `/investigations/{id}/artifacts/{key}`; empty until upload.",
@@ -183,10 +198,29 @@ class SystemPut(_Request):
     settings: dict[str, SettingValue]
 
 
-class CredentialsPut(_Request):
-    """The whole credential set, replaced; no field has a default."""
+#: The shortest a secret credential value may be (#1163 A4): a typed-in placeholder is refused
+#: at write time, not found out at the first call.
+SECRET_MIN_LENGTH = 16
 
+
+class CredentialsPut(_Request):
+    """The whole credential set, replaced; no field has a default. `kind` says which fields are
+    secret, by the rule the credential proxy scrubs by (r7 A19): all but `username` in a
+    `static` set, all but `client_id` in an `oauth-client-credentials` set."""
+
+    kind: Literal["static", "oauth-client-credentials"]
     credentials: dict[CredentialKey, str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _secrets_are_long_enough(self) -> CredentialsPut:
+        secret = secret_fields(self.kind, self.credentials)
+        short = sorted(k for k in secret if len(self.credentials[k]) < SECRET_MIN_LENGTH)
+        if short:
+            raise ValueError(
+                f"secret field(s) {short} are shorter than {SECRET_MIN_LENGTH} characters")
+        return self
+
+
 
 
 class SystemCheck(BaseModel):
@@ -215,7 +249,9 @@ class Problem(BaseModel):
 
 # --- people, memberships and sign-in (#1306) ---------------------------------------------------
 
-#: An email as typed: the shape is checked, deliverability is not. Stored lower-cased.
+#: An email as typed: the shape is checked, deliverability is not. The identity rule then normalizes
+#: it, and its refusal is a 422 like the pattern's; the pattern stays plain because the OpenAPI schema
+#: hands it to clients' own regex engines.
 EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+$"
 
 
@@ -224,7 +260,7 @@ class InviteCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    email: str = Field(pattern=EMAIL_PATTERN, max_length=254)
+    email: Email = Field(pattern=EMAIL_PATTERN, max_length=254)
 
 
 class Invitation(BaseModel):
@@ -250,6 +286,20 @@ class MeUser(BaseModel):
 
 class TenantRef(BaseModel):
     tenant_id: str
+
+
+class TenantItem(BaseModel):
+    """A tenant and its one job, as an administrator sees it (#1214): the state, the pending action,
+    the current step and whose it is, and the last failure (which names the step and the external
+    answer, never a secret). Nothing pending means `pending_action`, `step` and `step_actor` are null."""
+
+    tenant_id: str
+    state: Literal["creating", "active", "offboarding", "offboarded"]
+    pending_action: Literal["create", "rotate", "offboard", "delete_repo"] | None
+    step: str | None
+    step_actor: Literal["service", "host"] | None
+    failure: str | None
+    created_at: Instant
 
 
 class InvitationRef(BaseModel):

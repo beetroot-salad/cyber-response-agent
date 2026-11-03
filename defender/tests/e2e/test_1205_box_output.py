@@ -15,6 +15,7 @@ from defender.records.run_end import CALL_RECORDS, CallRecordWriteFailed
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 from defender.tests.support.sandbox._spec1092 import make_run_dir
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 pytestmark = pytest.mark.e2e
 
@@ -59,7 +60,7 @@ def test_live_box_printing_past_limit_is_refused_and_stopped(tmp_path, runtime):
     try:
         run_dir = make_run_dir(root, name="run-1205")
         executor = box.start_box(run_dir, Path(__file__).resolve().parents[2],
-                                 spec=box.BoxSpec(runtime=runtime))
+                                 spec=box.BoxSpec(runtime=runtime), tenant_id=TEST_TENANT)
         assert executor.sandboxed
         cwd = Path("/runs/current")
         control = executor.run_parsed(bash_exec.parse("echo answer"), command="echo answer", cwd=cwd, timeout=30)

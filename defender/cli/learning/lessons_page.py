@@ -25,10 +25,10 @@ from defender.presentation.lessons_page import render, render_queues  # noqa: E4
 from defender.presentation.publisher import NoPublishRoot, Publisher  # noqa: E402
 
 if TYPE_CHECKING:
-    from defender.tenancy import Tenant
+    from defender.tenancy import Tenant, TenantDirectory
 
 
-def main(tenant: Tenant) -> int:
+def build(tenant: Tenant) -> int:
     """Both pages and their contracts, published into the accepted tenant's learning area (#1279
     O1). Refuses before building when there is nowhere to publish: outside `dev` (O4), or a
     `dev` deployment with no publish folder set (A11). The lessons page shows the tenant's
@@ -60,16 +60,34 @@ def main(tenant: Tenant) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    from defender._log import configure_from_env
-    configure_from_env()
+def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
+    """`lessons_page.py --tenant T`: the tenant through the one host acceptance (r10 A1), held
+    while both pages are built and published (`build`). `directory` is the tenant records a test
+    hands in; a production process passes none and reads them from `DEFENDER_DATABASE_DSN`. A
+    refusal is one stderr line and exit 2, before anything is built."""
     import argparse
-    from defender.learning.core.cli import command_line_tenant
+
+    from defender import tenancy
+    from defender.records.formats import TenantRefused
+    from defender.systems.run_tenant import host_tenant
 
     parser = argparse.ArgumentParser(description="Build this tenant's learning queue pages")
     parser.add_argument("--tenant", required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
-        sys.exit(main(command_line_tenant(parser, args.tenant)))
-    except NoPublishRoot as refused:
-        parser.exit(2, f"{parser.prog}: {refused}\n")
+        admitted = host_tenant(tenancy.resolve_data_root(), args.tenant, directory=directory)
+    except TenantRefused as refused:
+        print(f"{parser.prog}: {refused}", file=sys.stderr)
+        return 2
+    with admitted:
+        try:
+            return build(admitted.tenant)
+        except NoPublishRoot as refused:
+            print(f"{parser.prog}: {refused}", file=sys.stderr)
+            return 2
+
+
+if __name__ == "__main__":
+    from defender._log import configure_from_env
+    configure_from_env()
+    sys.exit(main(sys.argv[1:]))

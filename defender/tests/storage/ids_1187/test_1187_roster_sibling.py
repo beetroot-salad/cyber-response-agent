@@ -903,19 +903,25 @@ def test_1279_o8_setup_refuses_an_existing_run_dir_at_the_arms_id_and_resumes_no
         assert existing.is_symlink()
 
 
-#: Every reserved sidecar suffix, spelled out: the sidecar tests run over THIS list, and the
-#: coverage test below pins it to the layout's, so a suffix added there cannot be missed silently.
+#: Every suffix that means "this id was used" (#1342 split the layout's list in two), spelled out:
+#: the refusal tests run over THIS list, and the coverage test pins it to the layout's, so a suffix
+#: added there cannot be missed silently. The job lane's launch record and alert file are accepted
+#: beside a run folder but do not mean "used".
 ALL_SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
                         ".ticket-write.json", ".session-pointer.json", ".call-join.jsonl",
-                        ".ticket-comments.jsonl", ".knowledge-source.json")
+                        ".ticket-comments.jsonl", ".knowledge-source.json", ".job-end.json")
+ACCEPTED_ONLY_SIDECAR_SUFFIXES = (".launch.json", ".alert.json")
 
 
 def test_1279_o8_the_sidecar_tests_cover_every_reserved_suffix():
-    """The suffixes the sidecar tests run over are exactly the layout's reserved ones."""
-    from defender.records._layout import _SIDECAR_SUFFIXES
+    """The suffixes the sidecar tests run over are exactly the layout's used and accepted ones."""
+    from defender.records._layout import ACCEPTED_SIDECAR_SUFFIXES, USED_SIDECAR_SUFFIXES
 
-    assert sorted(ALL_SIDECAR_SUFFIXES) == sorted(_SIDECAR_SUFFIXES), (
-        "the layout reserves a different set of sidecar suffixes: update ALL_SIDECAR_SUFFIXES")
+    assert sorted(ALL_SIDECAR_SUFFIXES) == sorted(USED_SIDECAR_SUFFIXES), (
+        "the layout uses a different set of sidecar suffixes: update ALL_SIDECAR_SUFFIXES")
+    assert sorted(ACCEPTED_ONLY_SIDECAR_SUFFIXES) == sorted(
+        set(ACCEPTED_SIDECAR_SUFFIXES) - set(USED_SIDECAR_SUFFIXES)), (
+        "the layout accepts a different set of unused-id sidecars: update ACCEPTED_ONLY_SIDECAR_SUFFIXES")
 
 
 @pytest.mark.parametrize("suffix", ALL_SIDECAR_SUFFIXES)
@@ -930,7 +936,7 @@ def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
     # Other ids' sidecars, every suffix, sit in the same base: the refusal is for THIS id's
     # sidecar, not for any sidecar (a glob would refuse the control below too).
     for neighbour in (S.new_id(), S.new_id()):
-        for other in ALL_SIDECAR_SUFFIXES:
+        for other in (*ALL_SIDECAR_SUFFIXES, *ACCEPTED_ONLY_SIDECAR_SUFFIXES):
             (scene.ep / "runs" / f"{neighbour}{other}").write_text("{}\n", encoding="utf-8")
     before = S.tree(scene.ep / "runs")
 
@@ -948,6 +954,20 @@ def test_1279_o8_setup_refuses_a_sidecar_at_the_arms_id_before_making_the_dir(
 
     sidecar.unlink()
     ok = _run_control(scene, f"sidecar-{suffix}")
+    assert ok.run_dir.name == arm
+
+
+@pytest.mark.parametrize("suffix", ACCEPTED_ONLY_SIDECAR_SUFFIXES)
+def test_1342_a_launch_record_or_alert_file_at_the_arms_id_does_not_refuse_setup(
+        tmp_path, data_root, suffix):
+    """The job lane's launch and alert files do not mean "used": setup goes on over one beside the id."""
+    scene = _Scene(tmp_path, data_root, B_ID)
+    scene.start_runs_by_hand()
+    arm = scene.roster[WORLD_ID]
+    (scene.ep / "runs" / f"{arm}{suffix}").write_text("{}\n", encoding="utf-8")
+
+    ok = _run_control(scene, f"accepted-only-{suffix}")
+
     assert ok.run_dir.name == arm
 
 

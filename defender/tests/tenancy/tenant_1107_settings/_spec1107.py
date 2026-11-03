@@ -65,7 +65,7 @@ def run_tenant_mod() -> Any:
 
 
 def record_type(name: str) -> type:
-    """One of `SystemConfig`, `ElasticSettings`, `CaseMapping`, `SecretLookup` — asserted to be a
+    """One of `SystemConfig`, `ElasticSettings`, `CaseRecordSettings`, `SecretLookup` — asserted to be a
     class the record's module defines, so a test that asks where a type lives, or whether a
     value is one, can never read an absent or stand-in name as an answer."""
     cls = getattr(run_tenant_mod(), name, None)
@@ -154,8 +154,9 @@ def secrets_path(folder: Path) -> Path:
     return settings_of(folder) / SECRETS_ENV
 
 
-def mapping_path(folder: Path) -> Path:
-    return settings_of(folder) / "systems" / "case-history" / "mapping.yaml"
+def case_record_path(folder: Path) -> Path:
+    """The tenant's case-record file (#1359): which system records cases, and the comment body."""
+    return settings_of(folder) / T1106.CASE_RECORD_REL
 
 
 def write_config(folder: Path, system: str, text: str | bytes) -> Path:
@@ -249,13 +250,6 @@ def verb_context(record: Any, run_dir: Path, env: Mapping[str, str], **kw: Any) 
 def record_on(ctx: Any) -> Any:
     """The record a context carries."""
     return getattr(ctx, RECORD_FIELD)
-
-
-def open_reporter(mapping: Any) -> str:
-    """The `open.reporter` a record's `ticket_mapping` carries — the value a snapshot test plants
-    distinct per edit and watches flow out (`_tenants1106.mapping_text(reporter=...)`); the
-    open leg sends it."""
-    return mapping["open"]["reporter"]
 
 
 # ======================================================================================
@@ -483,7 +477,8 @@ class RunRecorder:
         from defender.tests.support.storage._alert_plant import plant_alert as _plant_with_record
 
         _plant_with_record(run_dir, Path(alert).read_bytes(), mapping={
-            "signature": "rule.id", "event_time": "timestamp", "summary": "rule.description"})
+            "signature": "rule.id", "event_time": "timestamp", "summary": "rule.description",
+            "case_key": "alert_id"})
         seed_session_store(run_dir)
         return _run_handle_1165(run_dir)
 
@@ -525,7 +520,7 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
     from defender.tests.support.tenancy._launch_publish_p4 import with_publish
 
     try:
-        return run_py().main(argv, **with_publish({**rec.seams(), **seams})), None
+        return run_py().main(argv, **with_publish({**rec.seams(), **seams}, argv)), None
     except SystemExit as refused:
         return None, refused
 
@@ -558,12 +553,10 @@ def receipt(run_dir: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-#: The shim's answers to a run's two store calls: the open leg's create, then the record step's
-#: one comment POST (the writer reads nothing back first). Canned in curl's body + status-line
-#: shape; the last answer repeats.
-def store_answers_ok(key: str) -> list[dict[str, Any]]:
-    return [answer(json.dumps({"key": key}), "201"),
-            answer(json.dumps({"id": 1}), "201")]
+#: The shim's answer to a run's one store call (#1359: the record leg's comment POST; no call is
+#: made at run start). Canned in curl's body + status-line shape.
+def store_answers_ok() -> list[dict[str, Any]]:
+    return [answer(json.dumps({"id": 1}), "201")]
 
 
 # ======================================================================================

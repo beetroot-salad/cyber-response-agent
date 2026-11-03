@@ -33,6 +33,7 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     fixture_identity,
 )
 from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_target
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 pytestmark = pytest.mark.e2e
 
@@ -103,7 +104,7 @@ def _start_investigation(
 ) -> None:
     """No `spec=`: the env-resolved default every investigation gets."""
     staged = {} if tenant_agent is None else {"staged_token": tenant_agent.parent / "token"}
-    box_mod.start_box(run_dir, DEFENDER, tenant_agent=tenant_agent, docker=rec, **staged)
+    box_mod.start_box(run_dir, DEFENDER, tenant_agent=tenant_agent, docker=rec, tenant_id=TEST_TENANT, **staged)
 
 
 def _tenant_agent(base: Path) -> Path:
@@ -127,6 +128,7 @@ def _start_lane(tmp_path: Path, rec: AliasProbeDocker, spec) -> None:
             name="defender-tenant-1188-batch",
             mounts=(box_mod.Mount(source=src, target=src, writable=True),),
             workdir=src, env={}, spec=spec,
+            tenant_id=TEST_TENANT,
         ),
         docker=rec,
     )
@@ -278,6 +280,7 @@ def _investigation_box(base: Path, runtime: str) -> Iterator[_AgentExec]:
     box = box_mod.start_box(
         run_dir, DEFENDER, spec=box_mod.BoxSpec(runtime=runtime),
         tenant_agent=agent, staged_token=agent.parent / "token", docker=box_mod.run_docker,
+        tenant_id=TEST_TENANT,
     )
     try:
         # A startup fault under DEFENDER_ALLOW_UNSANDBOXED=1 degrades to the host executor,

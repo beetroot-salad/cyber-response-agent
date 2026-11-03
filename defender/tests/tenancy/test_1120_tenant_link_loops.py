@@ -62,7 +62,9 @@ def test_runs_linked_onto_knowledge_puts_settings_in_a_mounted_tree(tmp_path: Pa
     assert location_path(H.accept(_tenant, root).runs) == runs
 
 
-def test_a_linked_folder_above_a_required_setting_is_named_as_a_link(tmp_path: Path) -> None:
+def test_a_linked_settings_systems_folder_is_named_as_a_link(tmp_path: Path) -> None:
+    """#1359: no required setting sits under `systems/` any more, so a linked `systems/` is
+    refused by the link walk, not as the way to a missing required file."""
     root = tmp_path / "data"
     H.adopted(root)
     systems = H.settings_dir(root) / "systems"
@@ -70,8 +72,8 @@ def test_a_linked_folder_above_a_required_setting_is_named_as_a_link(tmp_path: P
     shutil.move(str(systems), copy)
     systems.symlink_to(copy, target_is_directory=True)
     text = H.accept_refusal(_tenant, root)
-    assert "reached through a link" in text, text
-    assert str(systems / "case-history" / "mapping.yaml") in text, text
+    assert f"{systems} is a link" in text, text
+    assert "required settings file is missing" not in text, text
 
 
 def test_a_tenant_folder_linked_into_the_checkout_is_refused_before_acceptance(

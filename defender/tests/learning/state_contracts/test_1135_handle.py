@@ -194,7 +194,7 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, data_ro
         run_state.write_text("a file, not a folder\n", encoding="utf-8")
     answered: list[bool] = []
     enqueued = S.caught(lambda: answered.append(
-        run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json")))
+        run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json", tenant=S.tenant_of(run_dir))))
     assert enqueued is None, f"the run-end enqueue raised {enqueued!r} into the investigation"
     assert answered == [False], f"the run-end enqueue answered {answered!r}"
     assert any(str(run_state) in r.getMessage() for r in caplog.records), "the run-end enqueue did not log the tenant root error"

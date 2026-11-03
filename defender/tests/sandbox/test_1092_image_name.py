@@ -26,6 +26,7 @@ from defender.tests.support.sandbox._spec1092 import (
     recipe_version,
     subcommands,
 )
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 #: The devcontainer-shaped mount table `test_box_dood_c46.py` uses: `/workspace` is shared
 #: with the daemon, a pytest `tmp_path` is not.
@@ -41,7 +42,7 @@ def _request(defender_root: Path, run_dir: Path, *, spec: BoxSpec | None = None,
     the defender dir is `workdir / "defender"`, one rw mount for the markers."""
     kw = {} if spec is None else {"spec": spec}
     return BoxRequest(
-        name=name, workdir=defender_root, env={},
+        name=name, workdir=defender_root, env={}, tenant_id=TEST_TENANT,
         mounts=(Mount(source=run_dir, target=run_dir, writable=True),),
         **kw,
     )
@@ -218,7 +219,7 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     start = (
-        (lambda: box_mod.start_box(run_dir, defender_dir, docker=rec)) if lane == "run-dir"
+        (lambda: box_mod.start_box(run_dir, defender_dir, docker=rec, tenant_id=TEST_TENANT)) if lane == "run-dir"
         else (lambda: box_mod.start_box(_request(root, run_dir), docker=rec))
     )
     with pytest.raises(BoxFault) as e:

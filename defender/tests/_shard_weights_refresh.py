@@ -1,11 +1,11 @@
-"""Rewrite `_shard_weights.json` from one CI run's two `test (shard I/2)` job logs (#1333).
+"""Rewrite `_shard_weights.json` from one CI run's `test (shard I/N)` job logs (#1333).
 
     python3 defender/tests/_shard_weights_refresh.py <run id>
 
 The job runs `pytest -v -n auto --dist loadfile`, so each worker runs a file's tests back to
 back and logs every result with a timestamp. A test's cost is its result's timestamp minus the
 previous result on the same worker (the first one is timed from the session start); a file's
-cost is the sum over its tests. Use a run in which both shards finished their pytest step.
+cost is the sum over its tests. Use a run in which every shard finished its pytest step.
 `gh run view --log` cuts a long log short, so the logs come from the jobs' log endpoint."""
 from __future__ import annotations
 
@@ -55,8 +55,8 @@ def main(argv: list[str]) -> int:
         return 2
     jobs = json.loads(_gh("run", "view", argv[0], "--json", "jobs"))["jobs"]
     shards = [j["databaseId"] for j in jobs if j["name"].startswith("test (shard ")]
-    if len(shards) != 2:
-        print(f"run {argv[0]}: expected two test shards, found {len(shards)}", file=sys.stderr)
+    if not shards:
+        print(f"run {argv[0]}: found no test shards", file=sys.stderr)
         return 1
     repo = _gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").strip()
     table: dict[str, float] = {}

@@ -35,12 +35,14 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     fixture_identity,
 )
 from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_target
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 
 def _request(root: Path, run_dir: Path) -> BoxRequest:
     return BoxRequest(
         name="defender-drain-1092", workdir=root, env={},
         mounts=(Mount(source=run_dir, target=run_dir, writable=True),),
+        tenant_id=TEST_TENANT,
     )
 
 
@@ -68,7 +70,7 @@ def test_a_no_such_image_create_fault_names_the_build_command_with_the_mounted_t
 
     rec = NoSuchImageDocker()
     with pytest.raises(BoxFault) as e:
-        box_mod.start_box(run_dir, defender_dir, docker=rec)
+        box_mod.start_box(run_dir, defender_dir, docker=rec, tenant_id=TEST_TENANT)
     message = str(e.value)
     assert inspected_image(rec.calls) == expected, rec.calls
     assert "run" not in subcommands(rec.calls), rec.calls
@@ -108,7 +110,7 @@ def test_a_create_fault_of_any_other_shape_never_names_the_build_command(tmp_pat
         cite = "N1 (27.x spelling, #1095)"
     rec = RecordingDocker(create=DockerFault(rc=125, stderr=stderr, cite=cite))
     start = (
-        (lambda d: box_mod.start_box(run_dir, defender_dir, docker=d)) if lane == "run-dir"
+        (lambda d: box_mod.start_box(run_dir, defender_dir, docker=d, tenant_id=TEST_TENANT)) if lane == "run-dir"
         else (lambda d: box_mod.start_box(_request(root, run_dir), docker=d))
     )
     with pytest.raises(BoxFault) as e:
@@ -132,7 +134,7 @@ def test_a_daemon_that_stopped_answering_is_reported_as_that_and_never_told_to_b
     defender_dir = plant_tree(root, copy_code=False)
     run_dir = make_run_dir(tmp_path)
     start = (
-        (lambda d: box_mod.start_box(run_dir, defender_dir, docker=d)) if lane == "run-dir"
+        (lambda d: box_mod.start_box(run_dir, defender_dir, docker=d, tenant_id=TEST_TENANT)) if lane == "run-dir"
         else (lambda d: box_mod.start_box(_request(root, run_dir), docker=d))
     )
     rec = NoSuchImageDocker(daemon_down=True)
@@ -160,14 +162,14 @@ def test_a_missing_image_raises_and_no_docker_build_is_ever_attempted(tmp_path, 
     run_dir = make_run_dir(tmp_path)
     rec = NoSuchImageDocker()
     with pytest.raises(BoxFault):
-        box_mod.start_box(run_dir, defender_dir, docker=rec)
+        box_mod.start_box(run_dir, defender_dir, docker=rec, tenant_id=TEST_TENANT)
     subs = subcommands(rec.calls)
     assert "build" not in subs, subs
     assert "pull" not in subs, subs
     assert "run" not in subs, subs
 
     held = RecordingDocker()
-    box_mod.start_box(run_dir, defender_dir, docker=held)
+    box_mod.start_box(run_dir, defender_dir, docker=held, tenant_id=TEST_TENANT)
     subs = subcommands(held.calls)
     assert "build" not in subs, subs
     assert "pull" not in subs, subs

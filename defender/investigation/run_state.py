@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.systems.system_status import ReasonScope, StartCause
 
+from defender.kit.access import RequestAccess
+
 from .._clock import now_iso, parse_iso_utc
 from .run_clock import ClockSource, RunClock
 
@@ -58,6 +60,10 @@ class RunState:
         #: at run start, or when a call's `ConfigFault` escapes the start check — and never
         #: cleared: a system does not come back up within a run.
         self.system_down: dict[str, StartCause] = {}
+        #: The credential proxy's address and this run's read token (#1163), set at the driver's
+        #: boundary when the run has an `http-proxy` system. Read only by the contexts the run
+        #: builds for its verb calls; never copied into a snapshot or a record.
+        self.access: RequestAccess | None = None
         #: `system_status`: the scope this run's down-cause reasons are shown in, held with its
         #: start verdict (`hold_at_start`) so a cause made later hides what the start's did;
         #: `None` until then.

@@ -28,6 +28,7 @@ from defender.records.formats import TenantId, TenantRefused
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from defender.records.job_lane import Launched
     from defender.records.formats import ResumeWorld
     from defender.tenancy.run_knowledge import KnowledgeSource
 
@@ -43,6 +44,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     world: ResumeWorld | None = None,
     settings: Path | None = None, knowledge: KnowledgeSource | None = None,
     started_at: _dt.datetime | None = None,
+    launch: Launched | None = None,
 ) -> Run:
     """Build the run directory of a fresh run and return the tenant-bound handle the run's later
     records are saved through. No caller names the run's id (#1279 A3): `run` is the handle the
@@ -57,6 +59,10 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     records (O-B: the export copied, never a clone's HEAD). Both default to what a caller that
     names no run copy has: the tenant's own folder, and a stamp that says nothing of knowledge.
 
+    `launch` is a job's checked launch record (#1342 O6, M5): `alert` is then its alert file, the
+    bytes admitted are compared to the record's digest (one read, as a sibling's are to its
+    record), and the stamp's label is the record's (the alert's title), not the file's name.
+
     `started_at` is the start the stamp records when the run's clock does not start now (a run
     served as of another moment, #1347 O5: its run clock's origin); `None` is the wall time."""
     if not alert.is_file():
@@ -67,7 +73,8 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     started = _started_at() if started_at is None else _z_seconds(started_at)
     if settings is None:
         settings = tenancy.clone_halves(tenant)[1]
-    front_door = _admit_input(alert, settings=settings, world=world)
+    front_door = _admit_input(alert, settings=settings, world=world,
+                              digest=None if launch is None else launch.record.digest)
     world_id: str | None = None
     if run is None:
         try:
@@ -96,7 +103,8 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     _stamp(
         run, knowledge=knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
-        started_at=started, alert_label=_alert_label(alert),
+        started_at=started,
+        alert_label=_alert_label(alert) if launch is None else launch.record.label,
     )
     return run
 
@@ -119,12 +127,14 @@ class _FrontDoor:
     record: str
 
 
-def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None) -> _FrontDoor:
+def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None,
+                 digest: str | None = None) -> _FrontDoor:
     """Admit the operator's alert (A8) and settle its facts through the alert mapping of the
     run's `settings`, read once (A1) — or exit with the fixed reason, before a run folder
     exists. A sibling's input
     is its episode's copy of the source run's alert, carried with the record launch copied
-    beside it; neither is derived again."""
+    beside it; neither is derived again. A job's alert (`digest`, its launch record's) must be
+    the bytes its worker recorded."""
     try:
         raw = formats.read_operator_alert(alert)
         admitted = formats.admit(raw)
@@ -132,6 +142,9 @@ def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None) -> _
         sys.exit(f"[run.py] {refused}")
     except OSError as e:
         sys.exit(f"[run.py] the alert {alert} could not be read: {e}")
+    if digest is not None and admitted.digest != digest:
+        sys.exit(f"[run.py] the alert {alert} is not the one its launch record names: its digest "
+                 "differs from the record's")
     if world is not None:
         from defender.records.formats import EpisodePaths
 
@@ -320,14 +333,23 @@ def enqueue_curation(
     run: Run,
     alert: Path | None = None,
     *,
+    tenant: tenancy.Tenant,
     truncated_by: str | None = None,
     fixtures_dir: Path = HELD_OUT_FIXTURES,
 ) -> bool:
     """Enqueue catalog curation for a run, through `learning_refusal_gate` — this hands
     attacker-influenced content (goal text, bound params, rendered queries) to the curator. The
     request is keyed on the run's recorded digest; `alert`, the operator's input path, is only
-    the held-out gate's path arm."""
+    the held-out gate's path arm.
+
+    `tenant` is the run's accepted tenant, the value of run start's host acceptance (r10 O-A5): the
+    request is written under it with no second read of the tenant. A tenant whose id is not the
+    run's is refused here, on the same NOT-enqueuing channel (r10.1 C7, fail closed)."""
     run_dir = run.run_dir
+    if str(tenant.id) != str(run.tenant_id):
+        _logger.error(f"NOT enqueuing for curation: the request names tenant {tenant.id}, but the run "
+                      f"is tenant {run.tenant_id}'s")
+        return False
     reason = learning_refusal_gate(
         run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=truncated_by
     )
@@ -346,8 +368,7 @@ def enqueue_curation(
         if record is None:
             raise OSError("the run's record vanished")
         case_id = case_ref_of_digest(record.digest)
-        with LearningState.open(LoopPaths.for_tenant(
-                tenancy.requested_tenant(tenancy.resolve_data_root(), run.tenant_id))) as state:
+        with LearningState.open(LoopPaths.for_tenant(tenant)) as state:
             state.enqueue_curation(
                 case_id, {"case_id": case_id, "tenant_id": str(address.tenant_id),
                           "run_id": str(address.run_id)})

@@ -126,15 +126,42 @@ READ_ENDPOINT_ALLOWLIST = ReadEndpointAllowlist({
 })
 
 
+#: The writes the HOST makes to a case system on the docker route (#1359 D-6): the one comment
+#: path of the playground ticket store. Consulted only for the write class (`rw`), which only the
+#: shared transport's host write entry passes; the read allowlist above never admits a write, so no
+#: query verb can reach any of these. A `*` is exactly one path segment here.
+WRITE_ENDPOINT_ALLOWLIST = ReadEndpointAllowlist({
+    "ticket": (
+        ("/tickets/*/comments", "POST"),
+    ),
+})
+
+#: The verb class of a host write; every other class is a read.
+WRITE_CLASS = "rw"
+
+
+def _segments_match(path: str, pattern: str) -> bool:
+    got, want = path.split("/"), pattern.split("/")
+    return len(got) == len(want) and all(fnmatch.fnmatchcase(g, w) for g, w in zip(got, want, strict=True))
+
+
 def confine_read_endpoint(system: str, url: str, *, method: str, verb_class: str) -> str:
-    """Refuse a request whose resolved, normalized target is not a declared read endpoint for
-    `system` under `method`. Checked against REAL requests via the capture seam, never against
-    the allowlist's own entries."""
+    """Refuse a request whose resolved, normalized target is not a declared endpoint for
+    `system` under `method`: a read endpoint for the read class, a write endpoint for the write
+    class (`WRITE_CLASS`). Checked against REAL requests via the capture seam, never against the
+    allowlist's own entries."""
     path = normalize_endpoint(url)
-    entries = READ_ENDPOINT_ALLOWLIST.get(system, ())
-    if not any(m == method and fnmatch.fnmatchcase(path, pattern) for pattern, m in entries):
+    if verb_class == WRITE_CLASS:
+        entries = WRITE_ENDPOINT_ALLOWLIST.get(system, ())
+        allowed = any(m == method and _segments_match(path, pattern) for pattern, m in entries)
+        kind = "write"
+    else:
+        entries = READ_ENDPOINT_ALLOWLIST.get(system, ())
+        allowed = any(m == method and fnmatch.fnmatchcase(path, pattern) for pattern, m in entries)
+        kind = "read"
+    if not allowed:
         raise ConfinementFault(
-            f"{system} verb attempted {method} {path}, outside its declared read-endpoint "
+            f"{system} verb attempted {method} {path}, outside its declared {kind}-endpoint "
             f"allowlist (verb_class={verb_class!r})"
         )
     return url
@@ -160,10 +187,16 @@ class TransportCapture:
         self.requests.append(CapturedRequest(system=system, url=url, method=method))
 
 
-def guard_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
+def guard_outbound(ctx: Any, system: str, url: str, *, method: str, verb_class: str = "r") -> None:
     """Confine, then record — what every outbound HTTP path does before connecting. Both
     transports call this rather than restating the pair."""
-    confine_read_endpoint(system, url, method=method, verb_class="r")
+    confine_read_endpoint(system, url, method=method, verb_class=verb_class)
+    record_outbound(ctx, system, url, method=method)
+
+
+def record_outbound(ctx: Any, system: str, url: str, *, method: str) -> None:
+    """Record the request on the call's capture, if it has one. The whole guard for a system
+    reached through the credential proxy, whose route check is the proxy's (#1163 A6)."""
     capture = getattr(ctx, "capture", None)
     if capture is not None:
         capture.record(system=system, url=url, method=method)
@@ -234,6 +267,8 @@ def confine_esql(query: str, configured_patterns: Iterable[str]) -> str:
 
 __all__ = [
     "READ_ENDPOINT_ALLOWLIST",
+    "WRITE_CLASS",
+    "WRITE_ENDPOINT_ALLOWLIST",
     "AllowlistError",
     "CapturedRequest",
     "ConfinementFault",
@@ -244,4 +279,5 @@ __all__ = [
     "confine_read_endpoint",
     "guard_outbound",
     "normalize_endpoint",
+    "record_outbound",
 ]

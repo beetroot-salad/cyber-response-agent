@@ -5,16 +5,20 @@ from operator-editable files. Resolving them once, before the box and any model 
 every later frame sees the same values instead of re-reading files that may have changed.
 
 `resolve_run_tenant` is run start's readiness function: it holds the run-start refusals, each
-naming the file an operator edits. `tenant.py setup` calls the same function, so a tenant setup
-passes is one a run can start with.
+naming the file an operator edits.
+
+`entry_directory` is every host entry point's tenant directory (#1214 Flow 4): the one it is
+given, else one over the database `DEFENDER_DATABASE_DSN` names, after the light version check.
 """
 from __future__ import annotations
 
 from defender.records.formats import DataRoot, RunsBase, EpisodesRoot
 
+import contextlib
 import dataclasses
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from defender.knowledge import QueryTemplate, iter_query_templates
@@ -22,15 +26,20 @@ from defender.knowledge import KnowledgePaths
 from defender.tenancy import Tenant, accept_tenant, clone_halves
 from defender.records.formats import TenantId, TenantRefused
 from defender.tenancy import AGENT_HALF
+from defender.tenancy import RecordsUnreachable
 from defender.systems.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.systems.verb_grant import GrantError, VerbGrant
+from defender import tenancy
 from defender.tenancy import tenant_settings
-from defender.tenancy.case_ticket import CaseMapping, CaseTicketError, load_case_mapping
-from defender.kit.settings import SystemConfig
+from defender.tenancy.case_ticket import CaseRecordSettings, CaseTicketError, load_case_record
+from defender.kit.access import HTTP_PROXY, AccessDeclaration
+from defender.kit.settings import SystemConfig, system_prefix
 from defender.kit.faults import ConfigFault
 
 if TYPE_CHECKING:
     from defender.systems.correlation import CorrelationDispatch
+    from defender.tenancy import TenantDirectory
+    from defender.tenancy.models import ForgeWiring
 
 
 def table_pointer(tenant_id: str) -> str:
@@ -74,8 +83,15 @@ class RunTenant:
     #: is refused by the run's start check (O-8), never here (D4). Asking for a system with no
     #: folder gets the "not configured" fault.
     systems: Mapping[str, SystemConfig | ConfigFault]
-    #: `systems/case-history/mapping.yaml`, loaded once; a bad file is kept as its error.
-    ticket_mapping: CaseMapping | CaseTicketError
+    #: `settings/case-record.yaml` (#1359): the system that records cases and the comment body
+    #: template, loaded once and held for the run (D-18); `None` for a tenant with no such file;
+    #: a bad file is kept as its error.
+    case_record: CaseRecordSettings | CaseTicketError | None
+    #: One entry per `http-proxy` system (its `config.env` says so), each `access.yaml` parsed
+    #: ONCE here: the `AccessDeclaration`, or the `ConfigFault` for why there is none (#1163).
+    #: Adapters, the ticket writer and the run-start settings check read this, never the file.
+    access: Mapping[str, AccessDeclaration | ConfigFault] = dataclasses.field(
+        default_factory=lambda: MappingProxyType({}))
     #: The run's knowledge, one export commit (#1108 P4, O-B): the agent root the run reads (its
     #: run copy's `stage/agent/`) and the settings it was resolved from (the copy's `settings/`).
     #: `None` only for a record resolved over the tenant's own folder (`clone_halves`).
@@ -199,7 +215,7 @@ def resolve_run_tenant(
     defender_dir: Path | None = None,
 ) -> RunReadiness:
     """Run start's readiness function: load a tenant's grants from its `settings` folder and
-    check them, before the run dir, the box and any model call. `tenant.py setup` calls it too.
+    check them, before the run dir, the box and any model call.
 
     The lead-zero template is resolved against `agent_root`'s catalog (#1108 P4, O2: the run
     copy's, never the product tree's), by default the agent half beside `settings`.
@@ -221,28 +237,154 @@ def resolve_run_tenant(
     return RunReadiness(grants=grants, correlation=correlation)
 
 
+#: The database addresses this process has checked the schema revision of (r10: the version check
+#: runs at the first acceptance in a process only; a failed check is not remembered).
+_VERSION_CHECKED: set[str] = set()
+
+
+def _check_version_once(dsn: str) -> None:
+    """The light version check, once per process per address (r10 Finding 9)."""
+    if dsn not in _VERSION_CHECKED:
+        _check_version(dsn)
+        _VERSION_CHECKED.add(dsn)
+
+
+class Admitted:
+    """The value of one host acceptance (r10.1 C3): the accepted `tenant`, the `directory` it was
+    admitted through (run, the drain's per-claim check and credential and revert's delivery read
+    it after) and the tenant's forge `wiring`. The acceptance already holds the tenant's host lock;
+    `with admitted:` releases it when the block ends. Only `host_tenant` makes one."""
+
+    __slots__ = ("_release", "directory", "tenant", "wiring")
+
+    def __init__(self, tenant: Tenant, directory: TenantDirectory, wiring: ForgeWiring,
+                 release: contextlib.ExitStack) -> None:
+        self.tenant, self.directory, self.wiring, self._release = tenant, directory, wiring, release
+
+    def __enter__(self) -> Admitted:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._release.close()
+
+
+def host_tenant(  # noqa: PLR0913 — the request (root, id), the records seam and the folder rules' inputs
+    data_root: DataRoot, raw_id: object, *, directory: TenantDirectory | None = None,
+    defender_dir: Path | None = None, box_mounted: Iterable[Path | RunsBase | EpisodesRoot] = (),
+    clone_tree: bool = True,
+) -> Admitted:
+    """The one host acceptance (r10 A1): the only way a host entry point gets its tenant.
+
+    Checked now, at the call, in this order: the id's grammar; the data root's placement; this
+    process recorded and the tenant's host lock held shared (`host_lock.hold_shared`: a nested
+    acceptance reuses the open hold; while prepare or teardown holds it exclusive it waits, with
+    no timeout, saying so once on stderr); the database's schema revision (the first acceptance
+    in the process only); the tenant's record, read once (`active`, its forge wiring recorded);
+    the folder rules (`accept_tenant`). A refusal at any step is `TenantRefused` (an unreachable
+    database its `RecordsUnreachable`) and releases what was taken (O-A6). The returned value
+    holds the lock until `with admitted:` ends (r10.1 C3).
+
+    `directory` is the tenant records a test or a launcher hands in; a production process passes
+    none and reads them from `DEFENDER_DATABASE_DSN`. Refused in the lifecycle's own process
+    (r10.1 C6, A4): prepare holds the lock exclusive there, so a shared hold would wait on itself."""
+    from defender import tenancy
+    from defender._paths import process_defender_dir
+    from defender.tenancy import host_lock
+
+    if tenancy.in_lifecycle_process():
+        raise TenantRefused("the host acceptance never runs in the lifecycle process: prepare holds the "
+                            "tenant's host lock exclusive there, and the lifecycle loads a tenant with the "
+                            "folder rules only")
+    tenant_id = tenancy.requested_tenant_id(raw_id)
+    tenancy.refuse_unplaceable_data_root(data_root)
+    held = contextlib.ExitStack()
+    try:
+        held.enter_context(host_lock.hold_shared(tenancy.data_root_for_child(data_root), tenant_id))
+    except OSError as unheld:
+        raise TenantRefused(f"tenant {tenant_id}'s host lock could not be taken: "
+                            f"{unheld.strerror or type(unheld).__name__}") from None
+    try:
+        # A1 order: the version check runs only now, with the hold taken (`host_directory` calls it
+        # when no directory is handed in).
+        records = tenancy.host_directory(directory, check_version=_check_version_once)
+        wiring = tenancy.admit_tenant(records, tenant_id)
+        tenant = accept_tenant(data_root, tenant_id,
+                               defender_dir=defender_dir if defender_dir is not None else process_defender_dir(),
+                               box_mounted=box_mounted, clone_tree=clone_tree)
+    except BaseException:
+        held.close()
+        raise
+    return Admitted(tenant, records, wiring, held)
+
+
+def entry_directory(given: TenantDirectory | None) -> TenantDirectory:
+    """The `TenantDirectory` a host entry point admits its tenant through: `given`, else one over
+    `DEFENDER_DATABASE_DSN` once the database is at this code's revision (#1339's light check,
+    run once at process start and never a migration). No directory and no address, or a database
+    at another revision (named with this code's), is `TenantRefused`; a database that cannot be
+    reached is its `RecordsUnreachable`, which a caller may treat as transient."""
+    from defender import tenancy
+
+    return tenancy.host_directory(given, check_version=_check_version)
+
+
+def _check_version(dsn: str) -> None:
+    from defender.migrations import DatabaseUnreachable, RevisionMismatch, check_version
+
+    try:
+        check_version(dsn)
+    except RevisionMismatch as behind:
+        raise TenantRefused(str(behind)) from behind
+    except DatabaseUnreachable as down:
+        raise RecordsUnreachable(str(down)) from down
+
+
 def resolved_settings(tenant: Tenant, *, settings_root: Path | None = None) -> dict[str, Any]:
     """The parts of the record built from a settings folder — `settings_root` (the run copy's,
     #1108 P4), by default the accepted tenant's own (`clone_halves`): each system's `config.env`
-    (`systems`) and the case-history mapping (`ticket_mapping`) — as the keyword arguments
+    (`systems`) and the case-record file (`case_record`) — as the keyword arguments
     `RunTenant` takes. Read ONCE, here, when a run (or a launch) begins; nothing ever raises for a
     part's content (O5): a part that cannot stand is carried as the fault that says why."""
     settings = Path(settings_root) if settings_root is not None else clone_halves(tenant)[1]
+    return folder_settings(settings)
+
+
+def folder_settings(settings: Path) -> dict[str, Any]:
+    """`resolved_settings` over a bare `settings/` folder: the same parts, read the same way —
+    what `tenant check` judges a folder by, with no accepted tenant to name."""
     systems = tenant_settings.read_systems(settings)
+    case_record: CaseRecordSettings | CaseTicketError | None
     try:
-        ticket_mapping: CaseMapping | CaseTicketError = load_case_mapping(settings)
+        case_record = load_case_record(settings)
     except CaseTicketError as error:
         # The text only: the caught error's traceback and cause (the OSError, with its host
         # path) must not ride the record.
-        ticket_mapping = CaseTicketError(str(error))
+        case_record = CaseTicketError(str(error))
     return {
         "systems": systems,
-        "ticket_mapping": ticket_mapping,
+        "case_record": case_record,
+        "access": _read_access(settings, systems),
     }
 
 
+def _read_access(
+    settings: Path, systems: Mapping[str, SystemConfig | ConfigFault],
+) -> Mapping[str, AccessDeclaration | ConfigFault]:
+    """The declaration of every system whose `config.env` names the `http-proxy` access method."""
+    out: dict[str, AccessDeclaration | ConfigFault] = {}
+    for name, entry in systems.items():
+        if isinstance(entry, ConfigFault) or entry.get(f"{system_prefix(name)}_TRANSPORT") != HTTP_PROXY:
+            continue
+        try:
+            out[name] = tenancy.read_access(settings, name)
+        except ConfigFault as fault:
+            out[name] = ConfigFault(str(fault))  # the text only, as the other parts do
+    return MappingProxyType(out)
+
+
 __all__ = [
-    "CaseMapping",
+    "CaseRecordSettings",
+    "RecordsUnreachable",
     "RunReadiness",
     "RunTenant",
     "SystemConfig",
@@ -250,6 +392,10 @@ __all__ = [
     "resolve_tenant",
     "catalog_templates",
     "correlation_dispatch",
+    "folder_settings",
+    "Admitted",
+    "entry_directory",
+    "host_tenant",
     "refusals",
     "resolve_run_tenant",
     "resolve_run_tenant_or_refuse",

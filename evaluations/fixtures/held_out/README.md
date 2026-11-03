@@ -123,7 +123,7 @@ for case in evaluations/fixtures/held_out/*/; do
 done
 
 # Score correctness against ground truth:
-python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
+python3 -m evaluations.held_out "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```
 
 Only rows bound to a case's current freeze count. A case with no such row, whose newest row is

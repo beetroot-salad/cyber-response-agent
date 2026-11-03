@@ -192,6 +192,9 @@ class SpecTail:
         #: The tenant record each ticket leg was handed by `run.py`; kept apart from
         #: `record_calls`, which stays the exit-class record.
         self.ticket_tenants: list[Any] = []
+        #: The case system's verdict each ticket leg was handed (#1392: judged once, by `run.py`);
+        #: kept apart from `record_calls` for the same reason.
+        self.ticket_cases: list[Any] = []
 
     # the seam's three dependencies
     def lifecycle(self, *, run: Any, **_kw: Any) -> dict:
@@ -212,14 +215,15 @@ class SpecTail:
         self.visualized.append(run)
         self._note("visualize", run.run_dir)
 
-    def open_case_ticket(self, run: Any, *, tenant: Any, defender_dir: Path,
-                         env: Any) -> None:
-        self.ticket_tenants.append(tenant)
-        self._note("open_case_ticket", run.run_dir)
+    def clear_receipt(self, run: Any, **kw: Any) -> None:
+        # The writer seam's first method (#1359 r4 "Run start and the record leg"): run start
+        # clears an earlier attempt's receipt through the seam. There is no open leg.
+        self._note("clear_receipt", run.run_dir)
 
     def record_case_ticket(self, run: Any, *, tenant: Any, defender_dir: Path, env: Any,
-                           **kw: Any) -> None:
+                           case: Any = None, **kw: Any) -> None:
         self.ticket_tenants.append(tenant)
+        self.ticket_cases.append(case)
         # `**kw` takes #1047's `truncated_by=`/`closed_before_cut=`: this fakes the ticket SEAM,
         # not the lane's per-class branching, but records the call to show they are passed on.
         self.record_calls.append(kw)
@@ -265,12 +269,13 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
     require_tail_seam(main)
     tenant_id = ensure_d9_tenant()
     location_path(requested_tenant(fixture_data_root(current_data_root()), tenant_id).learning).mkdir(exist_ok=True)
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 
     # The in-process launch-time publish (it publishes the tenant for real), when `main` takes one.
-    publish = ({"publish": in_process_publish()}
+    argv = [str(alert), "--tenant", tenant_id, *args]
+    publish = ({"publish": in_process_publish(), "directory": directory_for_argv(argv)}
                if "publish" in inspect.signature(main).parameters else {})
-    return main([str(alert), "--tenant", tenant_id, *args], lifecycle=tail.lifecycle,
+    return main(argv, lifecycle=tail.lifecycle,
                 visualize=tail.visualize, ticket_writer=tail, **publish)
 
 

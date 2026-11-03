@@ -8,23 +8,18 @@ You get your own worktree detached at the recorded implementation commit, the is
 
 A suite pins what somebody thought to assert; a comment states what they believed they had built. Nothing compares them, so the comment is free to be the more ambitious of the two. It usually is, and not through carelessness — the pattern is an author who understood the principle exactly and implemented a subset of it.
 
-Real examples that shipped, each sitting directly above the code that contradicted it:
-
-- *"faking an authorization takes two coordinated rows instead of one cell"* — it took **zero**: the cell the check read was optional, so omitting it skipped the check.
-- *"the two cells that ride into `report.md`'s BODY"* — there were **seven**; a third carried the payload straight through.
-- *"the spellings covering EVERYTHING cannot be written at all"* — `[!QQQQ]*` matches every actor alive and cleared the rule.
-- *"THE freshness bound"* — only one end of the range was checked, so moving both dates forward bought unlimited validity.
+Real examples that shipped, each above the code that contradicted it, are in the project's cache, when it has any (`grep claims-adversary .claude/contract-first-cache.md`).
 
 ## What counts as a claim
 
 Harvest from files the diff **touched**, plus any prompt or reference file whose rules that code implements. A false claim in untouched code is real but not this PR's — note it and move on.
 
-A claim is in scope when it is checkable. Four markers, in descending hit rate — spend your budget in this order:
+A claim is in scope when it is checkable. Four markers make a claim checkable; spend your budget on the ones that have proven wrong most often (Cache):
 
-1. **It counts.** "two coordinated rows", "eight fields", "three refusals". Re-derive the list; every counted example above counted wrong.
-2. **It is absolute.** "never", "cannot", "every", "only", "no X can". One counterexample away from false.
-3. **It names a guarantee.** "THE bound", "fails closed", "read-only end to end", "@owns X", "refused on write".
-4. **It claims a symmetry.** "the same rule as X", "modelled on Y", "split the same way". Go read X, list what X does, diff. The sibling usually has a guard the copy dropped.
+1. **It counts.** Re-derive the list.
+2. **It is absolute.** One counterexample away from false.
+3. **It names a guarantee.** Find the input that breaks it.
+4. **It claims a symmetry.** Go read the original, list what it does, diff.
 
 Not in scope, and do not report: a claim too vague to falsify ("carefully handled"); a comment merely incomplete without being wrong; style, naming, tone; a sentence you would have phrased differently.
 
@@ -43,7 +38,7 @@ Say so on every finding. A pass that only ever demanded code changes would teach
 
 ## Bound and verdict
 
-Cap at roughly **25 claims examined**, in the priority order above. Track every one you took: a claim that resisted three angles is weak evidence the code means it, and **no findings never means the code is honest** — one pass on a hardening PR found fifteen defects, and the pass after it found fifteen more.
+Cap the claims you examine (Cache), in the priority order above. Track every one you took: a claim that resisted three angles is weak evidence the code means it, and **no findings never means the code is honest**.
 
 Return inline, nothing else:
 
@@ -51,4 +46,12 @@ Return inline, nothing else:
 - **Out-of-diff claims** you saw falsified — one line each, flagged as follow-up.
 - **The attempts ledger** — what you took, and what resisted.
 
-The examples above show which claim shapes have been wrong before, not which are wrong now. New shapes reach this file through `finalize`'s exit report at the merge gate, not through the attack deck, which records exploits that pass a *suite*.
+The cached examples show which claim shapes have been wrong before, not which are wrong now. New shapes reach this file through `finalize`'s exit report at the merge gate, not through the attack deck, which records exploits that pass a *suite*.
+
+## Cache
+
+One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <application>`. Each applies a rule above to the context its tags name. If it disagrees with its rule, or its context has changed, recompute it from the rule, which wins; judge an uncovered case from the rule. Project-specific entries use the same format in the project's `.claude/contract-first-cache.md`: grep it for this skill's name.
+
+- write-code-from-tests/claims-adversary §what-counts marker-order | ctx: past-runs | counts ("two coordinated rows", "eight fields"; every counted example among this plugin's shipped false claims counted wrong); absolutes ("never", "cannot", "every", "only"); named guarantees ("THE bound", "fails closed", "read-only end to end", "@owns X"); symmetries ("the same rule as X", "modelled on Y"; the sibling usually has a guard the copy dropped).
+- write-code-from-tests/claims-adversary §bound-and-verdict claim-cap | ctx: past-runs | roughly 25 claims.
+- write-code-from-tests/claims-adversary §bound-and-verdict no-findings-is-not-honesty | ctx: past-runs | one pass on a hardening PR found fifteen defects, and the pass after it found fifteen more.

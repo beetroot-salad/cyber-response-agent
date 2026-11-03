@@ -28,6 +28,8 @@ dependencies = [
 # is the default provider; openai backs the Fireworks OpenAI-compatible path (GLM 5.3, selected
 # via a `fireworks:`/`glm-*` model id). Install with: uv pip install -e '.[runtime]'.
 runtime = [
+    # Host processes read the tenant's record from PostgreSQL (#1214 Flow 4); the box image does not.
+    "defender[database]",
     # Host-side Forgejo tenant delivery; kept outside the sandbox's core+box closure.
     "httpx",
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.43",
@@ -96,7 +98,13 @@ api = [
     # The HTTP client `identity/keycloak.py` uses for the token endpoint and admin API; the `dev`
     # extra's `httpx` is not installed in a production `api` sync.
     "httpx",
-    # The Postgres driver for the people and memberships store (#1306); `[binary]` ships libpq.
+    # The people, memberships and tenants stores (#1306, #1214).
+    "defender[database]",
+]
+# The database packages (#1339, #1214): what the API and the host processes need to reach
+# PostgreSQL. Included by `api` and `runtime`; never by `box`.
+database = [
+    # The Postgres driver; `[binary]` ships libpq.
     "psycopg[binary]>=3.2",
     # The async ORM the stores are written against, and the one migration history for every
     # feature's tables (#1339). The revisions ship with the source tree.
@@ -112,6 +120,10 @@ dev = [
     # it was turned on — zero tests changed outcome versus a serial run.
     "pytest-xdist>=3.5",
     "pytest-cov",
+    # Local test selection for working changes: `pytest --testmon` reruns only the tests whose
+    # recorded code paths a change touched. Opt-in by flag; CI and the pre-ship local run do
+    # not pass it and run the full suite. It tracks Python code only, see CLAUDE.md.
+    "pytest-testmon",
     # tests/integrations/test_sql_idioms.py reads the doc's fences with a CommonMark parse. The `runtime`
     # extra happens to carry it (fastmcp -> rich -> markdown-it-py); a dev-only sync does not.
     "markdown-it-py",
@@ -138,6 +150,7 @@ tmp_path_retention_policy = "failed"
 markers = [
     "live: requires live external infrastructure (skip in CI with -m 'not live')",
     "postgres: needs a PostgreSQL server at DEFENDER_TEST_POSTGRES_DSN (skips without one, fails without one in CI); CI's test job runs a PostgreSQL service for it",
+    "openbao: needs an OpenBao server at DEFENDER_TEST_OPENBAO_ADDR with a root token in DEFENDER_TEST_OPENBAO_TOKEN (skips without one, fails without one in CI); #1163's store, transit and rotation cases",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",
     "box: drives a REAL container to pin the #540 execution boundary (needs a native docker daemon + the gVisor runtime; self-skips under docker-outside-of-Docker)",
     # NOT a way to skip a check — a `gate`-marked test re-runs a repo-wide lint gate over
@@ -228,9 +241,14 @@ select = [
     "PT",            # flake8-pytest-style
     "UP",            # pyupgrade
 ]
-# E402: tests/scripts intentionally do sys.path.insert(...) before imports.
 # E501: line length is enforced by formatter, not lint.
-ignore = ["E402", "E501"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# E402 (import below code) is off outside evaluations/: defender's scripts and tests still put
+# code before their imports. evaluations/ runs as modules from the repo root (#1276) and keeps it.
+# E402 exempts sys.path edits, so tooling/lint/lint_eval_entrypoints.py is what bans a bootstrap.
+"!**/evaluations/**" = ["E402"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

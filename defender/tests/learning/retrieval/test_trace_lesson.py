@@ -11,6 +11,7 @@ from defender.tests.support.shared.contracts._by_path import load_trace_lesson
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
 from defender.tests.support.shared._fixture_uuid import fixture_uuid as C
+from defender.tests.support.learning.retrieval._lessons_corpus import accepted_trace_tenant, trace_main
 
 #: The tenant whose runs the tracer walks (`--tenant` is required; its runs are
 #: `<data root>/<T>/runs`, opened through the repository).
@@ -40,7 +41,7 @@ def _tenant_runs_dir(tmp_path: Path) -> Path:
 def _opened(tl) -> list:
     """The tenant's runs as the tracer opens them (`tenant_runs`: the listing rule, then
     `runs.open` for each id)."""
-    return tl.tenant_runs(TID)
+    return tl.tenant_runs(accepted_trace_tenant(TID))  # C1: the tracer's helpers take the accepted tenant
 
 
 def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]):
@@ -102,7 +103,7 @@ def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
                body_frontmatter='name: L\ndescription: "a\\tb\\nc"\ncreated_at: 2026-06-04')
     _tenant_runs_dir(tmp_path)
 
-    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
+    rc = trace_main(tl, ["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     assert rc == 0, capsys.readouterr().err
     lines = capsys.readouterr().out.splitlines()
     assert lines == ["L\ta b c\t0\t0"]
@@ -114,7 +115,7 @@ def test_all_drops_terminal_controls_from_the_description(tmp_path, capsys):
                body_frontmatter='name: L\ndescription: "a\\e[2Kb\\x1fc"\ncreated_at: 2026-06-04')
     _tenant_runs_dir(tmp_path)
 
-    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
+    rc = trace_main(tl, ["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     assert rc == 0, capsys.readouterr().err
     assert capsys.readouterr().out.splitlines() == ["L\ta[2Kbc\t0\t0"]
 
@@ -180,7 +181,7 @@ def test_trace_reports_the_cases_a_lesson_was_loaded_into(
         _mk_run(runs_dir, name, disposition=disposition,
                 loads=[{"lesson_name": stem, "ts": ts}])
 
-    rc = tl.main([stem, "--lessons-dir", str(tmp_path / "lessons"),
+    rc = trace_main(tl, [stem, "--lessons-dir", str(tmp_path / "lessons"),
                   "--tenant", TID])
     cap = capsys.readouterr()
     out = cap.out
@@ -222,7 +223,7 @@ def test_all_survives_undecodable_report(tmp_path, capsys):
                  loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
     (rd / "report.md").write_bytes(b"---\ndisposition: benign\n---\n\xff")
 
-    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
+    rc = trace_main(tl, ["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     assert rc == 0, capsys.readouterr().err
     assert "L\td\t1\t0" in capsys.readouterr().out.splitlines()
 
@@ -238,7 +239,7 @@ def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
     _mk_run(runs, "case-b", disposition="benign",
             loads=[{"lesson_name": "ok", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", TID])
+    rc = trace_main(tl, ["--all", "--lessons-dir", str(lessons), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     lines = cap.out.splitlines()
@@ -256,7 +257,7 @@ def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, capsys):
     (lessons / "_draft.md").write_text("not a lesson\n")
     _tenant_runs_dir(tmp_path)
 
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", TID])
+    rc = trace_main(tl, ["--all", "--lessons-dir", str(lessons), "--tenant", TID])
     assert rc == 0, capsys.readouterr().err
     assert capsys.readouterr().out.splitlines() == ["ok\tfine\t0\t0"]
 
@@ -270,7 +271,7 @@ def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, capsy
     _mk_run(runs, "case-a", disposition="malicious",
             loads=[{"lesson_name": "broken", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    rc = tl.main(["broken", "--lessons-dir", str(lessons), "--tenant", TID])
+    rc = trace_main(tl, ["broken", "--lessons-dir", str(lessons), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     assert _case_ids(cap.out) == [C("case-a")]
@@ -285,7 +286,7 @@ def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, capsys)
     _mk_run(runs, "case-a", disposition="benign",
             loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
+    rc = trace_main(tl, ["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     assert _case_ids(cap.out) == [C("case-a")]
@@ -297,7 +298,7 @@ def test_all_with_lesson_name_is_a_usage_error(tmp_path, capsys):
     _mk_lesson(tmp_path / "lessons", "L", body_frontmatter="name: L\ndescription: d")
     _tenant_runs_dir(tmp_path)
 
-    rc = tl.main(["L", "--all",
+    rc = trace_main(tl, ["L", "--all",
                   "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 1
@@ -312,7 +313,7 @@ def test_named_path_unreadable_lesson_is_still_an_error(tmp_path, capsys):
     (lessons / "undecodable.md").write_bytes(b"---\nname: u\n---\n\xff")
     _tenant_runs_dir(tmp_path)
 
-    rc = tl.main(["undecodable", "--lessons-dir", str(lessons), "--tenant", TID])
+    rc = trace_main(tl, ["undecodable", "--lessons-dir", str(lessons), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 1
     assert "cannot read undecodable.md" in cap.err

@@ -227,13 +227,17 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "2")
     r1, linked, nope, only_in_u = (str(uuid.uuid4()) for _ in range(4))
     t = _uuid_tenant(r1)
-    u = _uuid_tenant(r1, only_in_u, tenant_id=H.U_ID)
+    _uuid_tenant(r1, only_in_u, tenant_id=H.U_ID)  # `crossed` names a run only this other tenant holds
     os.symlink(Path(location_path(t.runs)) / r1, Path(location_path(t.runs)) / linked)
-    paths = P.loop_paths(tmp_path)
+    # The drain of T: it rehydrates through the tenant it accepted and opens no other (r10.1 C1). The two rows that
+    # pinned another tenant's folder being refused at the claim (`ghost`, `unreachable`) pinned a per-claim acceptance
+    # the design removes; a folder refusal is now the drain's own start (host acceptance, folder rules).
+    paths = P.tenant_loop_paths(t)
+    # The `stranger` row (a tenant the directory does not know, in T's queue) pinned the per-claim state read of ANOTHER
+    # tenant's claim. A drain serves its accepted tenant only (r10.1 C1); Flow 4's per-claim re-check of the drain's own
+    # tenant is pinned by `test_1214_host_entry::test_the_lead_drain_rechecks_the_tenant_state_at_each_claim`.
     transient = {
-        "ghost": {"case_id": "ghost", "tenant_id": fixture_uuid("tenant:ghost"), "run_id": r1},
         "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": linked},
-        "unreachable": {"case_id": "unreachable", "tenant_id": H.U_ID, "run_id": r1},
     }
     for case_id, body in transient.items():
         P.queue_row(paths, case_id, body)
@@ -244,9 +248,6 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     for case_id, body in gone.items():
         P.queue_row(paths, case_id, body)
     P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.T_ID, "run_id": r1})
-    moved = tmp_path / "u-runs-elsewhere"
-    Path(location_path(u.runs)).rename(moved)
-    os.symlink(moved, location_path(u.runs))
 
     lane = P.Lane()
     P.drain(paths, lane)
@@ -310,7 +311,7 @@ def _tick(t: Any, paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> i
 
     return drains.lead_author_drain(
         paths, run_lead_author=lane, run_pitfalls=run_pitfalls,
-        client=t.forge.client, identity=t.vault.identity(), start_box=box.start,
+        client=t.forge.client, identity=t.vault.identity(), directory=t.directory, start_box=box.start,
         stop_box=lambda *_a, **_k: None)
 
 

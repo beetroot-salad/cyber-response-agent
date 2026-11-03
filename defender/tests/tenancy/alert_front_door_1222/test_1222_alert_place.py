@@ -204,7 +204,7 @@ def _main_boxed(tmp_path: Path, planted: S.Planted, alert: bytes, *,  # noqa: PL
 
     # The in-process launch-time publish: publishes the planted tenant for real.
     return S.sym("run", "main")(
-        argv, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
+        argv, directory=planted.directory, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
         visualize=lambda *_a, **_k: None, ticket_writer=S.NoTicket(),
         enqueue=enqueue if enqueue is not None else (lambda *_a, **_k: False),
         publish=in_process_publish())
@@ -567,12 +567,14 @@ def test_a1_a_replaced_alert_is_refused_at_the_next_host_read_whatever_the_runti
         # `enqueue=` records every hand-off to the learning loop (`d.enqueued`) and refuses it.
         return _run(where, main=[S.call("read_file", path=rel), S.text(S.DONE)],
                     leads={S.L3: [S.call("read_file", path=rel), S.text("ok")]},
-                    tickets=S.ticket_writer(S.TicketStore()), update_ticket=True, no_learn=False,
+                    alert=S.ticketed_alert(_alert()), tenant=S.ticket_the_tenant(_tenant()),
+                    tickets=S.ticket_writer(S.TicketStore(where)), update_ticket=True,
+                    no_learn=False,
                     enqueue=lambda *_a, **_k: False, **kw)
 
     ok = drive(tmp_path / "ok")
     S.assert_wrapped_untrusted(ok.opening_message, MARK, "the untouched alert")
-    assert ok.tickets.store.opened(), "the untouched run opened no ticket"
+    assert ok.tickets.store.comment_payloads, "the untouched run commented on no ticket"
     assert ok.enqueued, "the untouched run was not enqueued for learning"
 
     d = drive(tmp_path / "bad", before=_replace_alert)
@@ -794,7 +796,7 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     # Plus the in-process launch-time publish.
     rc = S.sym("run", "main")(
         ["--episode", ep.name, "--world", "b", "--tenant", planted.tenant_id],
-        lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
+        directory=planted.directory, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
         ticket_writer=S.NoTicket(), publish=in_process_publish())
     assert rc == 0, f"the sibling run failed (rc={rc})"
     assert "run_dir" in sib, "the sibling never started its box"
@@ -948,7 +950,8 @@ def test_p152_host_replaces_a_file_inside_the_directory_mid_ru(tmp_path, monkeyp
         return _state({"alert": S.alert_file(run_dir), "record": S.record_file(run_dir)})
 
     d = _run(tmp_path / "steps", before=lambda run_dir: stats.update(setup=snapshot(run_dir)),
-             tickets=S.ticket_writer(S.TicketStore()), update_ticket=True)
+             alert=S.ticketed_alert(_alert()), tenant=S.ticket_the_tenant(_tenant()),
+             tickets=S.ticket_writer(S.TicketStore(tmp_path)), update_ticket=True)
     assert d.raised is None, f"the run did not end cleanly: {d.raised!r}"
     assert d.rc == 0, f"the run did not end cleanly: rc={d.rc}"
     assert snapshot(d.folder) == stats["setup"], "a host step rewrote the alert or the record"

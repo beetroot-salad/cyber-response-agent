@@ -18,7 +18,8 @@ from defender.tests.support.shared._postgres1339 import VERSION_TABLE, database,
 
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
-IDENTITY_TABLES = {"tenants", "users", "memberships", "sessions"}
+IDENTITY_TABLES = {"users", "memberships", "sessions"}  # #1214: `tenants` moved to `tenancy`
+JOBS_TABLES = {"alerts", "investigations"}  # #1342
 UNKNOWN_REVISION = "f00dfeedbeef"
 ROOT = Path(__file__).resolve().parents[3]  # the checkout under test, put first on the child's path
 
@@ -92,6 +93,7 @@ def test_upgrading_an_empty_database_records_head_and_creates_identitys_tables(e
     upgrade(empty_database)
     assert _recorded_revision(empty_database) == [head()]
     assert _tables(empty_database, "identity") == IDENTITY_TABLES
+    assert _tables(empty_database, "jobs") == JOBS_TABLES
     assert _tables(empty_database, "public") == {"alembic_version"}
 
 
@@ -159,7 +161,7 @@ def test_the_migrated_schema_is_the_schema_the_models_declare(migrated_database)
 
     # The comparison sees what O3 is about: CHECKs, the partial unique index, and no server defaults (P4).
     migrated = catalog(migrated_database)
-    assert [s for (s,) in migrated["schemas"] if s != "public"] == ["identity"]
+    assert [s for (s,) in migrated["schemas"] if s != "public"] == ["identity", "jobs", "tenancy"]  # #1342 adds `jobs`
     assert any(c[:2] == ("identity", "users") and c[3] == "c" for c in migrated["constraints"])
     assert any(i[:2] == ("identity", "memberships") and "WHERE" in i[3] and "invited" in i[3]
                for i in migrated["indexes"])
@@ -171,8 +173,8 @@ _DRIFTS = {
     "a CHECK's text": "ALTER TABLE identity.users DROP CONSTRAINT {check}, ADD CONSTRAINT {check} CHECK (true)",
     "a constraint's name": "ALTER TABLE identity.users RENAME CONSTRAINT {check} TO renamed_by_hand",
     "a partial index's predicate": "DROP INDEX identity.{partial}; CREATE UNIQUE INDEX {partial} ON identity.memberships (user_id, tenant_id) WHERE status = 'invited'",
-    "a server default": "ALTER TABLE identity.tenants ALTER COLUMN created_at SET DEFAULT now()",
-    "a column's type modifier": "ALTER TABLE identity.tenants ALTER COLUMN created_at TYPE timestamptz(3)",
+    "a server default": "ALTER TABLE tenancy.tenants ALTER COLUMN created_at SET DEFAULT now()",
+    "a column's type modifier": "ALTER TABLE tenancy.tenants ALTER COLUMN created_at TYPE timestamptz(3)",
 }
 
 
@@ -223,7 +225,7 @@ def test_autogenerate_ignores_tables_in_public_and_still_sees_drift_in_a_feature
 def test_tenants_created_at_is_a_column_the_repository_must_supply(migrated_database):
     """D/P4: `tenants.created_at` exists and has no server default (the caller passes `now`)."""
     rows = execute(migrated_database, """SELECT column_default FROM information_schema.columns
-                   WHERE table_schema = 'identity' AND table_name = 'tenants' AND column_name = 'created_at'""")
+                   WHERE table_schema = 'tenancy' AND table_name = 'tenants' AND column_name = 'created_at'""")
     assert rows == [(None,)]
 
 
@@ -257,17 +259,19 @@ def test_the_version_check_only_reads(empty_database):
 
 
 def test_head_and_heads_load_no_features_models():
-    """H: reading the history imports no `defender.identity`; the control shows the probe can see it."""
+    """H: reading the history imports no `defender.identity` or `defender.jobs`; the control shows the probe can see both."""
     probe = run_python("""
         import sys
         from defender.migrations import head, heads
         heads(); head()
-        print("identity" if "defender.identity" in sys.modules else "clean")
+        def seen():
+            return " ".join(name for name in ("identity", "jobs") if f"defender.{name}" in sys.modules) or "clean"
+        print(seen())
         from defender.migrations.models import target_metadata
-        print("identity" if "defender.identity" in sys.modules else "clean")
+        print(seen())
     """)
     assert probe.returncode == 0, probe.stderr
-    assert probe.stdout.split() == ["clean", "identity"]
+    assert probe.stdout.splitlines() == ["clean", "identity jobs"]
 
 
 @pytest.mark.postgres
@@ -277,7 +281,7 @@ def test_the_version_check_loads_no_features_models(migrated_database):
         import os, sys
         from defender.migrations import check_version
         check_version(os.environ["DSN"])
-        print("identity" if "defender.identity" in sys.modules else "clean")
+        print("loaded" if {"defender.identity", "defender.jobs"} & set(sys.modules) else "clean")
     """, DSN=migrated_database)
     assert probe.returncode == 0, probe.stderr
     assert probe.stdout.split() == ["clean"]
@@ -315,3 +319,119 @@ def test_the_dev_command_without_a_database_refuses_loudly():
     done = dev_command(None, "upgrade")
     assert done.returncode != 0
     assert "DEFENDER_DATABASE_DSN" in done.stderr
+
+
+# --- #1342 the jobs schema: revision 0004 on #1163's 0003_sign_login, the lean constraints and nothing more ----------
+
+
+def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
+    """The history is the baseline, `0002_tenancy`, `0003_sign_login`, then `0004_jobs` as head (#1342 O1; r6: tenants are
+    #1214's records; jobs follows #1163's revision, the last on main, so the history stays one line)."""
+    from defender.migrations import _scripts, head
+
+    scripts = _scripts()
+    assert head() == "0004_jobs"
+    assert scripts.get_revision(head()).down_revision == "0003_sign_login"
+    assert scripts.get_revision("0003_sign_login").down_revision == "0002_tenancy"
+    assert scripts.get_revision("0002_tenancy").down_revision == "0001_baseline"
+    assert [r.revision for r in scripts.walk_revisions()] == ["0004_jobs", "0003_sign_login", "0002_tenancy", "0001_baseline"]
+
+
+@pytest.mark.postgres
+def test_upgrading_a_database_at_the_baseline_adds_jobs_and_keeps_the_tenant_in_tenancy(empty_database):
+    """From `0001_baseline` with a tenant row, `upgrade` moves it to `tenancy`, adds the jobs tables and records head (#1342 O1, r6)."""
+    from alembic import command
+
+    from defender.migrations import _config, head, upgrade
+
+    config = _config()
+    config.attributes["dsn"] = empty_database
+    command.upgrade(config, "0001_baseline")
+    assert _tables(empty_database, "jobs") == set()
+    execute(empty_database, "INSERT INTO identity.tenants (id, created_at) VALUES ('t-1', now())")
+
+    upgrade(empty_database)
+    assert _recorded_revision(empty_database) == [head()]
+    assert _tables(empty_database, "jobs") == JOBS_TABLES
+    assert execute(empty_database, "SELECT id FROM tenancy.tenants") == [("t-1",)]
+
+
+def _jobs_columns(dsn: str, table: str) -> dict[str, tuple[str, bool, Any]]:
+    rows = execute(dsn, """SELECT column_name, data_type, is_nullable = 'YES', column_default
+                           FROM information_schema.columns WHERE table_schema = 'jobs' AND table_name = %s""",
+                   (table,))
+    return {name: (kind, nullable, default) for name, kind, nullable, default in rows}
+
+
+def _jobs_constraints(dsn: str, table: str) -> list[tuple[str, tuple[str, ...], str]]:
+    """(type, key columns sorted, definition) of every constraint on `jobs.<table>`."""
+    rows = execute(dsn, """
+        SELECT k.contype, array_agg(a.attname ORDER BY a.attname), pg_get_constraintdef(k.oid)
+        FROM pg_constraint k JOIN pg_class t ON t.oid = k.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+        LEFT JOIN LATERAL unnest(k.conkey) AS u(attnum) ON true
+        LEFT JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = u.attnum
+        WHERE n.nspname = 'jobs' AND t.relname = %s GROUP BY k.oid, k.contype""", (table,))
+    return sorted((kind, tuple(cols), definition) for kind, cols, definition in rows if kind != "n")
+
+
+def _jobs_indexes(dsn: str, table: str) -> list[str]:
+    return sorted(r[0] for r in execute(
+        dsn, "SELECT indexdef FROM pg_indexes WHERE schemaname = 'jobs' AND tablename = %s", (table,)))
+
+
+@pytest.mark.postgres
+def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated_database):
+    """Both tables hold exactly the designed columns; required ones are NOT NULL; `cost_usd` is a nullable float; `raw` is bytea; no defaults (#1342 M10, R3)."""
+    alerts = _jobs_columns(migrated_database, "alerts")
+    investigations = _jobs_columns(migrated_database, "investigations")
+    assert set(alerts) == {"id", "tenant_id", "vendor", "vendor_ticket_id", "fired_at", "changed_at",
+                           "received_at", "title", "description", "raw"}
+    assert set(investigations) == {"id", "tenant_id", "alert_id", "request_key", "attempt", "stage", "created_at",
+                                   "started_at", "finished_at", "disposition", "cost_usd", "knowledge",
+                                   "failure_reason", "failure_message"}
+    assert [n for n, (_, nullable, _) in alerts.items() if nullable] == []
+    nullable = {n for n, (_, can_be_null, _) in investigations.items() if can_be_null}
+    assert nullable == {"started_at", "finished_at", "disposition", "cost_usd", "knowledge", "failure_reason",
+                        "failure_message"}
+    assert alerts["raw"][0] == "bytea"
+    assert investigations["cost_usd"][0] == "double precision"
+    assert [c for cols in (alerts, investigations) for c, (_, _, default) in cols.items() if default is not None] == []
+
+
+@pytest.mark.postgres
+def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
+    """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique and a stage CHECK; no other constraint (#1342 M10)."""
+    alerts = _jobs_constraints(migrated_database, "alerts")
+    assert [(kind, cols) for kind, cols, _ in alerts] == sorted([
+        ("f", ("tenant_id",)), ("p", ("id",)), ("u", ("id", "tenant_id")),
+        ("u", ("tenant_id", "vendor", "vendor_ticket_id"))])
+    assert next(d for k, _, d in alerts if k == "f") == "FOREIGN KEY (tenant_id) REFERENCES tenancy.tenants(id)", \
+        "no ON DELETE / ON UPDATE action: the default restricts (M10)"
+
+    investigations = _jobs_constraints(migrated_database, "investigations")
+    assert sorted((kind, cols) for kind, cols, _ in investigations if kind != "c") == sorted([
+        ("f", ("alert_id", "tenant_id")), ("p", ("id",)),
+        ("u", ("alert_id", "attempt", "request_key", "tenant_id"))])
+    foreign = next(d for k, _, d in investigations if k == "f")
+    assert foreign == "FOREIGN KEY (tenant_id, alert_id) REFERENCES jobs.alerts(tenant_id, id)", \
+        "no ON DELETE / ON UPDATE action: delete and cascade are the store's, under the alert lock (M10, O10)"
+    [check] = [d for k, _, d in investigations if k == "c"]
+    for stage in ("queued", "running", "completed", "unparseable", "failed", "aborted"):
+        assert f"'{stage}'" in check
+
+
+@pytest.mark.postgres
+def test_the_jobs_indexes_are_the_constraints_plus_one_partial_unique_and_nothing_else(migrated_database):
+    """Three indexes per table: key-backed ones, and on investigations one partial unique over the live stages only (#1342 M10)."""
+    assert len(_jobs_indexes(migrated_database, "alerts")) == 3
+    investigations = _jobs_indexes(migrated_database, "investigations")
+    assert len(investigations) == 3
+    [partial] = [i for i in investigations if "WHERE" in i]
+    assert "UNIQUE" in partial
+    assert "(tenant_id, alert_id)" in partial
+    assert "'queued'" in partial
+    assert "'running'" in partial
+    assert not any(f"'{stage}'" in partial for stage in ("completed", "unparseable", "failed", "aborted"))
+
+    execute(migrated_database, "CREATE INDEX extra_1342 ON jobs.investigations (stage)")  # control: the census sees one
+    assert len(_jobs_indexes(migrated_database, "investigations")) == 4

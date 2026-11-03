@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from functools import partial
 
 from defender.records import RUN_LAYOUT
-from defender.tenancy import is_valid_tenant_id
+from defender.tenancy import InMemoryTenantRepository, is_valid_tenant_id
 from defender.records.formats import TenantId
 
 from defender.identity import (
@@ -25,7 +25,6 @@ from defender.identity import (
     InMemoryIdentityRepository,
     SignInUnavailable,
     VerifiedSignIn,
-    register_tenant,
 )
 
 from .fakes import (
@@ -109,11 +108,13 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
     for n, tenant in enumerate(tenants[1:], start=9):
         store.add_alert(tenant, _alert(
             tenant, n, fired=now - _dt.timedelta(hours=2), title=f"An alert of {tenant}'s",
-            severity="low", rule="misc",
+            rule="misc",
         ))
-    people = InMemoryIdentityRepository()
+    # One store: the tenants are seeded `active` in the tenant twin, and identity reads them there.
+    tenant_rows = InMemoryTenantRepository()
+    people = InMemoryIdentityRepository(tenants=tenant_rows)
     for tenant in tenants:
-        await register_tenant(people, TenantId(tenant), now=now)
+        await tenant_rows.add_tenant(TenantId(tenant), created_at=now)
         for role in DEMO_ROLES:
             user = await people.add_user(f"{role}@{tenant}.example", created_at=now, status="active",
                                    display_name=role.title())
@@ -122,10 +123,11 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
             await people.add_session(demo_sessions([tenant])[f"{tenant}-{role}"], user.id, now=now,
                                expires_at=now + _SESSION_LIFETIME)
     identity = IdentityService(people, signin=_NoSignIn(), mail=_LoggedMail(), clock=clock,
-                               bootstrap=Bootstrap(administrators=(), tenants={}),
+                               bootstrap=Bootstrap(administrators=()),
                                session_idle_limit=_SESSION_LIFETIME)
     return ApiDeps(
         identity=identity,
+        tenants=tenant_rows,
         frontend_origin=frontend_origin,
         alerts=store,
         investigations=store,
@@ -139,19 +141,18 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
     )
 
 
-def _alert(tenant: str, n: int, *, fired: _dt.datetime, title: str, severity: str, rule: str) -> Alert:
+def _alert(tenant: str, n: int, *, fired: _dt.datetime, title: str, rule: str) -> Alert:
     # Ids are global, as the store's primary keys will be, so each carries its tenant.
     return Alert(
         alert_id=f"{tenant}-alert-{n:04d}",
         vendor="demo-tickets",
         vendor_ticket_id=f"SEC-{1000 + n}",
         title=title,
-        severity=severity,
-        rule=rule,
+        description=f"{title} (rule {rule}).",
         fired_at=fired,
         changed_at=fired + _dt.timedelta(minutes=4),
         received_at=fired + _dt.timedelta(minutes=5),
-        raw={"summary": title, "rule": rule, "severity": severity, "host": f"host-{n:02d}"},
+        raw=json.dumps({"summary": title, "rule": rule, "host": f"host-{n:02d}"}),
     )
 
 
@@ -159,19 +160,20 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now
     hour = _dt.timedelta(hours=1)
     brute = store.add_alert(tenant, _alert(
         tenant, 1, fired=now - 30 * hour, title="Repeated failed logins followed by success",
-        severity="high", rule="auth-bruteforce",
+        rule="auth-bruteforce",
     ))
     shell = store.add_alert(tenant, _alert(
         tenant, 2, fired=now - 3 * hour, title="Interactive shell spawned by web server",
-        severity="critical", rule="web-shell",
+        rule="web-shell",
     ))
     store.add_alert(tenant, _alert(
         tenant, 3, fired=now - hour, title="New admin group member",
-        severity="medium", rule="priv-group-change",
+        rule="priv-group-change",
     ))
 
     done = store.add_investigation(tenant, Investigation(
         investigation_id=f"{tenant}-inv-completed", alert_id=brute.alert_id, status="completed",
+        request_key="demo-request-1", attempt=1,
         disposition="benign", cost_usd=1.84, created_at=now - 29 * hour,
         started_at=now - 29 * hour, finished_at=now - 29 * hour + _dt.timedelta(minutes=11),
         artifacts=[RUN_LAYOUT.report.name, RUN_LAYOUT.investigation.name,
@@ -179,7 +181,8 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now
     ))
     running = store.add_investigation(tenant, Investigation(
         investigation_id=f"{tenant}-inv-running", alert_id=shell.alert_id, status="running",
-        cost_usd=0.42, created_at=now - 2 * hour, started_at=now - 2 * hour,
+        request_key="demo-request-2", attempt=1,
+        cost_usd=0.0, created_at=now - 2 * hour, started_at=now - 2 * hour,
     ))
     # Each run's knowledge record as run start writes it (#1108 P4, O-WARN): the completed run
     # read the latest approved knowledge; the running one started on the last published
@@ -211,4 +214,5 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now
         system_id="siem", kind="siem", display_name="Event search", enabled=True,
         settings={"base_url": f"https://siem.{tenant}.example"},
     ))
-    await secrets.put_credentials(tenant, "tickets", {"api_token": "demo-secret"})
+    await secrets.put_credentials(
+        tenant, "tickets", "static", {"api_token": "demo-secret-token-1163"})

@@ -1,0 +1,29 @@
+#!/bin/sh
+# Seed a new worktree's testmon record from the main checkout's, so its first
+# `pytest --testmon` reruns only what the branch changed instead of every test.
+#
+# Git runs post-checkout after `git worktree add` with the old HEAD all zeros.
+# The record is a SQLite file keyed on code content, so a copy from a different
+# revision stays valid: unchanged code matches, changed code reruns its tests.
+# Copied with SQLite's backup API, which is safe while a run is writing the source.
+#
+# Install once per clone (worktrees share the clone's hooks):
+#   ln -s ../../tooling/git-hooks/post-checkout .git/hooks/post-checkout
+
+[ "$1" = "0000000000000000000000000000000000000000" ] || exit 0
+
+main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+here=$(git rev-parse --show-toplevel)
+src="$main/defender/.testmondata"
+dst="$here/defender/.testmondata"
+
+[ "$main" != "$here" ] && [ -f "$src" ] && [ -d "$here/defender" ] && [ ! -e "$dst" ] || exit 0
+
+python3 -c '
+import sqlite3, sys
+src = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+dst = sqlite3.connect(sys.argv[2])
+src.backup(dst)
+dst.close(); src.close()
+' "$src" "$dst" && echo "post-checkout: seeded defender/.testmondata from the main checkout" >&2
+exit 0

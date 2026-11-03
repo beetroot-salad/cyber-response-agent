@@ -30,6 +30,7 @@ from defender.tests.e2e._spec771 import (
     run_tree,
     shapes_named_in,
 )
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 pytestmark = pytest.mark.e2e
 
@@ -38,7 +39,7 @@ DEFENDER = Path(__file__).resolve().parents[2]
 
 def _start_investigation_lane(run_dir: Path, docker) -> object:
     """Drive the REAL investigation-lane creation path (`_create_argv` tier)."""
-    return box_mod.start_box(run_dir, DEFENDER, docker=docker)
+    return box_mod.start_box(run_dir, DEFENDER, docker=docker, tenant_id=TEST_TENANT)
 
 
 def _request(tmp_path: Path, *, writable: bool = True) -> object:
@@ -51,6 +52,7 @@ def _request(tmp_path: Path, *, writable: bool = True) -> object:
         workdir=src,
         env={},
         spec=box_mod.BoxSpec(rootfs="python:3.11-slim"),
+        tenant_id=TEST_TENANT,
     )
 
 
@@ -360,7 +362,7 @@ def live_run_base(tmp_path: Path) -> Iterator[Path]:
 @requires_real_box
 def test_box_under_the_alias_profile_still_starts_and_creates_ordinarily(live_run_base):
     run = run_tree(live_run_base)
-    box = box_mod.start_box(run, DEFENDER)
+    box = box_mod.start_box(run, DEFENDER, tenant_id=TEST_TENANT)
     try:
         seen = _box_probe(box, run, "ordinary", _ORDINARY_OPS_PROBE)
     finally:
@@ -378,7 +380,7 @@ def test_box_under_the_alias_profile_still_starts_and_creates_ordinarily(live_ru
 @requires_real_box
 def test_no_unobserved_window_between_the_probe_and_the_first_real_write(live_run_base):
     run = run_tree(live_run_base)
-    box = box_mod.start_box(run, DEFENDER)
+    box = box_mod.start_box(run, DEFENDER, tenant_id=TEST_TENANT)
     try:
         seen = _box_probe(box, run, "after_probe", """
 import json, os
@@ -404,7 +406,7 @@ def test_an_alias_between_two_artifacts_inside_the_tree_is_refused_too(live_run_
     first = run / "gather_raw" / "l-001" / "0.json"
     first.write_text("[]", encoding="utf-8")
     second = run / "gather_raw" / "l-001" / "1.json"
-    box = box_mod.start_box(run, DEFENDER)
+    box = box_mod.start_box(run, DEFENDER, tenant_id=TEST_TENANT)
     try:
         seen = _box_probe(box, run, "intra_tree", f"""
 import json, os

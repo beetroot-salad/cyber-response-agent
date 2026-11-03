@@ -1,10 +1,11 @@
-"""resolve_tenant / resolve_run_tenant: systems, ticket mapping, faults kept per system, fresh read per resolve, read-only parts.
+"""resolve_tenant / resolve_run_tenant: systems, case-record file never refusing, faults kept per system, fresh read per resolve, read-only parts.
 
 Relies on `defender.systems.verbs.ReadCut(as_of, arrived_by=None).applied(ctx)` (a VerbContext copy
 carrying the cut) for the read-only-parts test.
 """
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -27,7 +28,7 @@ from defender.tests.support.shared.contracts._data_root_1078 import current_data
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 TID = S.PLAYGROUND_ID
-RECORD_TYPES = ("SystemConfig", "CaseMapping")
+RECORD_TYPES = ("SystemConfig",)  # CaseMapping retired with the mapping file (#1359)
 
 
 def _resolve(root: Path, tenant_id: str = TID) -> object:
@@ -86,33 +87,32 @@ def test_d_systems_fault_kept(tmp_path):
         assert str(raised.value) == str(rec.systems[system]), (system, str(raised.value))
 
 
-def test_d_ticket_mapping_kept(tmp_path):
+def test_d_a_case_record_file_never_refuses_the_tenant(tmp_path):
+    """Acceptance never refuses a tenant over its case-record file, whatever it holds or whether it
+    exists; only a required settings file does (D-12, r4 Data). The record leg judges the file."""
     root = tmp_path / "tenants"
-    CaseTicketError = S.case_ticket_error()
     cases = {
-        "valid": T1106.mapping_text(),
-        "open-is-released": T1106.mapping_text(open_status="closed"),  # == the legacy released
-        "lifecycle": T1106.mapping_text(open_status="{summary}"),  # a templated open.status
+        "valid": T1106.case_record_text(),
+        "names-an-unknown-system": T1106.case_record_text("no-such-system"),
+        "not-yaml": "system: [unclosed\n  comment: : :\n",
+        "not-a-mapping": "- system\n- ticket\n",
+        "empty": "",
     }
-    got = {}
     for label, text in cases.items():
         tenant_id = fixture_uuid(f"tenant:{label}")
         folder = S.plant(root, tenant_id, marker=label)
-        S.mapping_path(folder).write_text(text, encoding="utf-8")
-        got[label] = _resolve(root, tenant_id).ticket_mapping  # never raised
+        S.case_record_path(folder).write_text(text, encoding="utf-8")
+        _resolve(root, tenant_id)  # never raises
 
-    for good in ("valid", "open-is-released"):
-        assert isinstance(got[good], S.record_type("CaseMapping")), (good, got[good])
-    assert isinstance(got["lifecycle"], CaseTicketError), got["lifecycle"]
+    none = fixture_uuid("tenant:no-case-file")
+    S.plant(root, none, marker="none", case_system=None)
+    _resolve(root, none)  # a tenant with no case system is accepted
 
-    TenantRefused = S.tenant_refused()
-    for label, text in {"not-yaml": "open: [unclosed\n  status: : :\n",
-                            "not-a-mapping": "- open\n- released\n"}.items():
-        tenant_id = fixture_uuid(f"tenant:{label}")
-        folder = S.plant(root, tenant_id, marker=label)
-        S.mapping_path(folder).write_text(text, encoding="utf-8")
-        with pytest.raises(TenantRefused):
-            _resolve(root, tenant_id)
+    # Control: a required settings file is still a refusal, so the arms above are not vacuous.
+    broken = S.plant(root, fixture_uuid("tenant:no-grants"), marker="grants")
+    (S.settings_of(broken) / "verb-grants.yaml").unlink()
+    with pytest.raises(S.tenant_refused()):
+        _resolve(root, fixture_uuid("tenant:no-grants"))
 
 
 def test_o5_resolve_keeps_system_faults(tmp_path):
@@ -120,21 +120,19 @@ def test_o5_resolve_keeps_system_faults(tmp_path):
     folder = S.plant(root, marker="o5")
     S.config_path(folder, "cmdb").unlink()
     S.write_config(folder, "identity", b"IDENTITY_URL_BASE=\xff\n")
-    S.mapping_path(folder).write_text(
-        T1106.mapping_text(open_status="{summary}"), encoding="utf-8")
-    rec = _resolve(root)  # never raises because of a system's config
+    S.case_record_path(folder).write_text("- not\n- a mapping\n", encoding="utf-8")
+    rec = _resolve(root)  # never raises because of a system's config or the case-record file
     ConfigFault = S.config_fault()
     assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
     assert isinstance(rec.systems["identity"], ConfigFault), rec.systems["identity"]
-    assert isinstance(rec.ticket_mapping, S.case_ticket_error()), rec.ticket_mapping
 
     # TenantRefused keeps its tenant-acceptance reasons, each still refusing.
     TenantRefused = S.tenant_refused()
-    missing_mapping = S.plant(root, fixture_uuid("tenant:no-mapping"), marker="o5c")
-    S.mapping_path(missing_mapping).unlink()  # a REQUIRED_SETTINGS file
+    missing_grants = S.plant(root, fixture_uuid("tenant:no-grants"), marker="o5c")
+    (S.settings_of(missing_grants) / "verb-grants.yaml").unlink()  # a REQUIRED_SETTINGS file
     with pytest.raises(TenantRefused) as refused:
-        _resolve(root, fixture_uuid("tenant:no-mapping"))
-    assert "mapping.yaml" in str(refused.value), str(refused.value)
+        _resolve(root, fixture_uuid("tenant:no-grants"))
+    assert "verb-grants.yaml" in str(refused.value), str(refused.value)
     # A linked config.env refuses too: test_s60_config_env_fs_confinement.
     with pytest.raises(TenantRefused):
         _resolve(root, fixture_uuid("tenant:absent"))
@@ -208,16 +206,12 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
     # Resolved twice around an edit: nothing is cached.
     first = _resolve(root)
     S.set_key(folder, "cmdb", "CMDB_URL_BASE", "http://cmdb-edited:1")
-    S.mapping_path(folder).write_text(T1106.mapping_text(reporter="done"),
-                                      encoding="utf-8")
     second = _resolve(root)
     direct = run_tenant.run_tenant_for(
         S.tenant_folder_of(root), defender_dir=S.DEFENDER, dispatches_lead_zero=False)
     assert first.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-nf4:8080"
     assert second.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
     assert direct.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
-    assert S.open_reporter(second.ticket_mapping) == "done"
-    assert S.open_reporter(first.ticket_mapping) == "defender"
     # ...and across tenants: resolving another tenant in between memoizes nothing.
     assert _resolve(root, fixture_uuid("tenant:other")).systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-nf4o:8080"
     assert _resolve(root).systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
@@ -372,9 +366,11 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     (run_dir / "gather_raw").mkdir(parents=True)
     base = ["show", "gather", "--run-dir", str(run_dir)]
 
-    assert policy_cli.main([*base, "--tenant", fixture_uuid("tenant:healthy")]) == 0
+    healthy = [*base, "--tenant", fixture_uuid("tenant:healthy")]
+    assert policy_cli.main(healthy, directory=directory_for_argv(healthy)) == 0
     healthy_out = capsys.readouterr().out
-    assert policy_cli.main([*base, "--tenant", fixture_uuid("tenant:broken")]) == 0  # resolves without raising
+    broken_argv = [*base, "--tenant", fixture_uuid("tenant:broken")]
+    assert policy_cli.main(broken_argv, directory=directory_for_argv(broken_argv)) == 0  # resolves without raising
     broken_out = capsys.readouterr().out
     assert "agent: gather" in broken_out, broken_out
     assert broken_out == healthy_out, "the grants answer moved with a system's config"
@@ -451,9 +447,6 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
     for attempt in (
         lambda: rec.systems["cmdb"].__setitem__("CMDB_URL_BASE", "http://hijacked:1"),
         lambda: rec.systems.__setitem__("cmdb", {"CMDB_URL_BASE": "http://hijacked:1"}),
-        lambda: rec.ticket_mapping["open"].__setitem__("reporter", "hijacked"),
-        lambda: rec.ticket_mapping.__setitem__("open", {"reporter": "hijacked"}),
-        lambda: setattr(rec.ticket_mapping, "open", {"reporter": "hijacked"}),
     ):
         # raising is one of the two allowed outcomes
         with contextlib.suppress(Exception):
@@ -462,5 +455,4 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
     for reader in (rec, S.record_on(carried)):
         assert reader.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-mf11:8080", dict(
             reader.systems["cmdb"])
-        assert S.open_reporter(reader.ticket_mapping) == "defender", (
-            "an in-place edit leaked, or the resolve-time reporter was lost")
+

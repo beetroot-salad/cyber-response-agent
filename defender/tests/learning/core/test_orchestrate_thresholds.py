@@ -1,6 +1,7 @@
 """A non-numeric loop threshold env var fails loud as exit 2 (FatalConfigError), and the drain's quarantine/requeue/dead-letter behavior."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_root
 from defender.tests.support.shared._locations_1210 import location_path
 
 import json
@@ -42,6 +43,7 @@ def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queue
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-x")
+    paths = _state1135.drained_for(paths, run_dir)
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
     with pytest.raises(FatalConfigError, match="LEARNING_PITFALLS_THRESHOLD"):
@@ -53,30 +55,38 @@ def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeyp
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "high")
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-x")
+    paths = _state1135.drained_for(paths, run_dir)
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
     with pytest.raises(FatalConfigError, match="LEAD_AUTHOR_MAX_RETRIES"):
         drains._drain_lead_author_markers(
             paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None,
-            accept_tenant=drains._tenant_acceptor(paths.tenant))
+            directory=directory_for_root())
 
 
-def test_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
+def test_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch, caplog):
+    """The drain is handed its tenant records (#1214 Flow 4), so the exit 2 is the threshold's, which it names."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
     paths = _paths(tmp_path)
-    assert cli._run_stage(lambda: drains.author_drain(paths=paths)) == 2
+    directory = directory_for_root(tmp_path)
+    assert cli._run_stage(lambda: drains.author_drain(paths=paths, directory=directory)) == 2
+    assert "LEARNING_AUTHOR_THRESHOLD" in caplog.text, caplog.text
 
 
-def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
+def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch, caplog):
+    """As above, for the lead-author drain's pitfalls threshold."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
     paths = _paths(tmp_path)
-    assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 2
+    directory = directory_for_root(tmp_path)
+    assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths, directory=directory)) == 2
+    assert "LEARNING_PITFALLS_THRESHOLD" in caplog.text, caplog.text
 
 
 def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-x")
+    paths = _state1135.drained_for(paths, run_dir)
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
 
@@ -85,7 +95,7 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
 
     with pytest.raises(FatalConfigError):
         drains._drain_lead_author_markers(
-            paths, state, _run_lead_author, accept_tenant=drains._tenant_acceptor(paths.tenant))
+            paths, state, _run_lead_author, directory=directory_for_root())
 
     failed_dir = location_path(paths.state_root) / "author-queue" / "failed"
     assert not (failed_dir / f"{run_dir.name}.json").exists()
@@ -110,12 +120,13 @@ def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-ok")
+    paths = _state1135.drained_for(paths, run_dir)
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
 
     drains._drain_lead_author_markers(
         paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None,
-        accept_tenant=drains._tenant_acceptor(paths.tenant))
+        directory=directory_for_root())
 
     assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
     assert not (location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
@@ -127,6 +138,7 @@ def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-boom")
+    paths = _state1135.drained_for(paths, run_dir)
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
 
@@ -134,7 +146,7 @@ def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
         raise RuntimeError("poison run dir")
 
     drains._drain_lead_author_markers(
-        paths, state, _run_lead_author, accept_tenant=drains._tenant_acceptor(paths.tenant))
+        paths, state, _run_lead_author, directory=directory_for_root())
 
     assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
     failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
@@ -148,6 +160,7 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-transient")
+    paths = _state1135.drained_for(paths, run_dir)
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
 
@@ -155,7 +168,7 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
         raise drains._LeadAuthorRetry("rc=None transient")
 
     drains._drain_lead_author_markers(
-        paths, state, _run_lead_author, accept_tenant=drains._tenant_acceptor(paths.tenant))
+        paths, state, _run_lead_author, directory=directory_for_root())
 
     marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
     assert marker.exists()

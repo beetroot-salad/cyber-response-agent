@@ -546,3 +546,103 @@ async def test_an_admin_token_with_no_stated_lifetime_is_not_reused(kc):
     await port.has_otp(USER_ID)
     await port.has_otp(USER_ID)
     assert _admin_token_requests(kc) == 2
+
+
+# --- #1349 B3: the address the API itself reaches Keycloak at --------------------------------
+
+
+class _Wire(httpx.AsyncBaseTransport):
+    """Records each request's full URL, then hands the fake the same request with `prefix`
+    removed from the path (the fake serves Keycloak's paths from the root)."""
+
+    def __init__(self, kc: Keycloak, prefix: str = "") -> None:
+        self._inner, self._prefix, self.urls = kc.transport(), prefix, []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.urls.append(str(request.url.copy_with(query=None)))
+        assert request.url.path.startswith(self._prefix)
+        request.url = request.url.copy_with(path=request.url.path[len(self._prefix):])
+        return await self._inner.handle_async_request(request)
+
+
+async def _every_server_call(kc: Keycloak, *, issuer: str, wire: _Wire, **setting: str) -> str:
+    """Drive a sign-in, a key fetch, the admin token and the admin API; the sign-in URL handed to the browser."""
+    kc.id_token = kc.signer.sign(claims(iss=issuer))
+    port = KeycloakSignIn(
+        issuer=issuer, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI,
+        admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET,
+        transport=wire, clock=lambda: NOW, **setting)
+    kc.opened.append(port)
+    browser = await port.begin_signin(state="s1", nonce="n1", code_challenge="chal")
+    await port.finish_signin(code="code-1", code_verifier="verifier-1", nonce="n1")
+    await port.create_account(username="u-1", email="ann@x.org", required_actions=frozenset())
+    await port.has_otp(USER_ID)
+    return browser
+
+
+async def test_with_a_server_url_every_call_the_api_makes_goes_there_and_the_browser_and_token_keep_the_issuer(kc):
+    """The browser's sign-in URL and the token's `iss` stay the public issuer; token exchange,
+    keys, admin token and admin API go to the server address."""
+    wire = _Wire(kc)
+    browser = await _every_server_call(kc, issuer=ISSUER, wire=wire, server_url="http://keycloak.internal:8080")
+    assert browser.startswith(f"{ISSUER}/protocol/openid-connect/auth?")
+    assert {urllib.parse.urlsplit(u).netloc for u in wire.urls} == {"keycloak.internal:8080"}
+    assert f"http://keycloak.internal:8080/realms/{REALM}/protocol/openid-connect/certs" in wire.urls
+    assert f"http://keycloak.internal:8080/realms/{REALM}/protocol/openid-connect/token" in wire.urls
+    assert f"http://keycloak.internal:8080/admin/realms/{REALM}/users" in wire.urls
+
+
+async def test_a_token_naming_the_server_address_as_issuer_is_refused(kc):
+    """`iss` is checked against the public issuer, never against the server address."""
+    server = "http://keycloak.internal:8080"
+    kc.id_token = kc.signer.sign(claims(iss=f"{server}/realms/{REALM}"))
+    port = KeycloakSignIn(
+        issuer=ISSUER, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI,
+        admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET,
+        transport=kc.transport(), clock=lambda: NOW, server_url=server)
+    kc.opened.append(port)
+    await port.begin_signin(state="s1", nonce="n1", code_challenge="chal")
+    with pytest.raises(SignInRefused):
+        await port.finish_signin(code="code-1", code_verifier="verifier-1", nonce="n1")
+
+
+@pytest.mark.parametrize(("issuer", "setting", "reached"), [
+    # no setting: everything from the issuer, path prefix included (today's behavior)
+    ("https://kc.test/auth/realms/defender", {}, "https://kc.test/auth"),
+    # the setting replaces everything before /realms/, prefix and all
+    ("https://kc.test/auth/realms/defender", {"server_url": "http://kc-int:8080/auth"}, "http://kc-int:8080/auth"),
+    ("https://kc.test/realms/defender", {"server_url": "http://kc-int:8080/"}, "http://kc-int:8080"),
+])
+async def test_the_server_url_replaces_what_comes_before_realms_in_the_issuer(kc, issuer, setting, reached):
+    prefix = urllib.parse.urlsplit(reached).path
+    wire = _Wire(kc, prefix)
+    browser = await _every_server_call(kc, issuer=issuer, wire=wire, **setting)
+    assert browser.startswith(f"{issuer}/protocol/openid-connect/auth?")
+    assert wire.urls
+    assert all(u.startswith((f"{reached}/realms/{REALM}/", f"{reached}/admin/realms/{REALM}/")) for u in wire.urls), wire.urls
+
+
+@pytest.mark.parametrize("issuer", ["https://kc.test", "https://kc.test/auth", "https://kc.test/realms/",
+                                    "kc.test/realms/defender", "https://kc.test/realms/defender?x=1",
+                                    "https://kc.test/realms/defender/account"])
+def test_an_issuer_that_is_not_a_realm_url_refuses_construction_naming_the_setting(issuer):
+    with pytest.raises(ValueError, match="issuer"):
+        KeycloakSignIn(
+            issuer=issuer, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI,
+            admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET)
+
+
+@pytest.mark.parametrize("server_url", [
+    "keycloak:8080", "//keycloak:8080", "ftp://keycloak:8080", "http://keycloak:8080/?x=1",
+    "http://keycloak:8080/#f", "", "http:///auth",
+    "http://keycloak:8080\n", " http://keycloak:8080", "http://key\tcloak:8080",  # pasted with whitespace
+    "http://keycloak:abc", "http://keycloak:99999",  # a port that is not one
+    "http://user:pw@keycloak:8080",  # credentials in the address
+    "http://kc-int:8080/realms/defender", "http://kc-int:8080/auth/realms",  # the issuer, not the server
+    "http://[::1:8080",  # a broken IPv6 host, which the URL parser refuses in its own words
+])
+def test_a_malformed_server_url_refuses_construction(server_url):
+    with pytest.raises(ValueError, match="server_url"):
+        KeycloakSignIn(
+            issuer=ISSUER, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=REDIRECT_URI,
+            admin_client_id=ADMIN_CLIENT_ID, admin_client_secret=ADMIN_CLIENT_SECRET, server_url=server_url)

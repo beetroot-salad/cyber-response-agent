@@ -1,4 +1,4 @@
-"""`run_common.materialize_run`: the runs base follows from the accepted tenant; a missing row refuses; a sibling lands in its episode."""
+"""`run_common.materialize_run`: the runs base follows from the accepted tenant; an unplaced tenant refuses and nothing is created; a sibling lands in its episode."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -8,7 +8,6 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run as _ru
 
 import json
 import os
-import sys
 from pathlib import Path
 from defender.records import RunPaths
 
@@ -22,7 +21,7 @@ X = fixture_uuid("case-x")
 
 
 def _materialize(alert: Path, tenant_id: str, **kw):
-    """The entry's pipeline: resolve the data root and accept `tenant_id` there (the row check),
+    """The entry's pipeline: resolve the data root and accept `tenant_id` there (the knowledge-folder check),
     then `materialize_run(tenant=...)`. Setup takes no run id: it mints one, or is handed the
     arm's run (`run=`, made from its roster id by the episode view)."""
     tenant = H.accept(H.resolve_data_root(), tenant_id)
@@ -43,7 +42,7 @@ def _refused(fn) -> str:
 
 @pytest.fixture
 def tenant_root(tmp_path, monkeypatch) -> Path:
-    """A data root under this test's tmp dir, holding T (created through the real owner)."""
+    """A data root under this test's tmp dir, holding T (its knowledge folder placed)."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     H.make_tenant(root, T_ID)
@@ -118,13 +117,13 @@ def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
     from defender.tests.support.tenancy._launch_publish_p4 import forge_scratch
     from defender.tests.tenancy.tenant_1108_p4._support import publish_once
 
-    row_bytes = location_path(H.row_path)(tenant_root, T_ID).read_bytes()
     # A run reads a PUBLISHED export, and the replay harness publishes the tenant before it
     # drives. What publishing leaves in the tenant folder is taken up front as the baseline, so
     # the listings below pin that materialize and the driver add only `runs/` and `sessions/`.
     publish_once(forge_scratch(tenant_root), root=tenant_root, tenant_id=T_ID)
     published = set(H.entries(tenant_root / T_ID))
-    assert {H.ROW_NAME, "knowledge"} <= published, published
+    assert "knowledge" in published, published
+    assert H.ROW_NAME not in published, published
     assert not published & {"runs", "sessions"}, published
     run_dir = Path(_materialize(_golden_alert(tmp_path), T_ID))
     # `knowledge/` is the operator's (placed before setup), never materialize's.
@@ -133,47 +132,21 @@ def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
     _replay(run_dir)
     assert H.entries(tenant_root / T_ID) == sorted(published | {"runs", "sessions"})
     assert H.entries(tenant_root) == [T_ID]
-    assert location_path(H.row_path)(tenant_root, T_ID).read_bytes() == row_bytes, "the row was rewritten"
 
 
-def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
+def test_o2_materialize_never_creates_a_row(tmp_path, monkeypatch):
     root = tmp_path / "data"
     root.mkdir()
     H.set_data_root(monkeypatch, root)
     alert = H.plant_alert(tmp_path / "in")
     text = _refused(lambda: _materialize(alert, T_ID))
-    H.assert_verbatim(text, H.owner_refusal(H.require_tenant, root, T_ID),
+    H.assert_verbatim(text, H.owner_refusal(H.accept, root, T_ID),
                       entry="materialize_run")
     assert H.entries(root) == [], "the refused materialize created something"
 
     H.make_tenant(root, T_ID)
-    row_bytes = location_path(H.row_path)(root, T_ID).read_bytes()
     _materialize(alert, T_ID)
-    assert location_path(H.row_path)(root, T_ID).read_bytes() == row_bytes
-
-
-def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
-    row = location_path(H.row_path)(tenant_root, T_ID)
-    fired: list[str] = []
-
-    def hook(frame, event, _arg):
-        if (event == "return" and not fired and frame.f_code.co_name == "accept_tenant"
-                and frame.f_globals.get("__name__") == "defender.tenancy._tenant"):
-            row.unlink()
-            fired.append("row removed")
-
-    alert = H.plant_alert(tmp_path / "in")
-    previous = sys.getprofile()
-    sys.setprofile(hook)
-    try:
-        run_dir = Path(_materialize(alert, T_ID))
-    finally:
-        sys.setprofile(previous)
-    assert fired, "the pipeline never ran defender.tenancy._tenant.accept_tenant"
-    assert not row.exists()
-    assert run_dir.parent == tenant_root / T_ID / "runs"
-    assert run_dir.is_dir()
-    assert _stamp(run_dir)["tenant_id"] == T_ID
+    assert not location_path(H.row_path)(root, T_ID).exists(), "materialize wrote a tenant row"
 
 
 def test_d2_sibling_runs_base(tenant_root):

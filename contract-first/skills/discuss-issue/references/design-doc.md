@@ -15,6 +15,7 @@ Include these elements where relevant:
 - **Flows.** How a request or event moves through the system, its boundaries and state transitions, where outcomes become observable, and credible partial-failure/recovery behavior. Discuss retry, cancellation, concurrency, or ordering when they affect a promised property or interact with shared state.
 - **Architecture and decisions.** Chosen mechanisms, the obligations they discharge, and the significant alternatives and trade-offs. Explain why a choice fits this scope and the design properties. Remove a mechanism with no justified purpose or expose the missing requirement. Carry user choices and reasoning accurately; separate adopted decisions from agent recommendations.
 - **Representative scenarios and boundaries.** Use a few cases to demonstrate how the model and properties determine outcomes. An edge case should reveal or test a rule, not become an isolated requirement by default. Name consequential uncertainty and deferred verification explicitly.
+- **Accepted trade-offs.** Families of failure the human chose not to close: the family in one sentence, why it is acceptable, what closing it would cost, and who decided. These usually arrive from the code stage's triage. They are design decisions, so attackers don't attack them and the final reviewer doesn't re-raise them. An entry is reopened only by new evidence that the family arises in deployment or costs more than recorded.
 
 Use diagrams when they clarify a model or flow. Do not replace the design with an implementation checklist, test catalog, or reviewer transcript.
 
@@ -63,7 +64,7 @@ Name the design revision (commit, document revision, or issue-comment permalink)
 An amendment records:
 
 - The defect or new evidence and the affected design property.
-- The chosen patch or dissolving change, trade-offs, and who decided it.
+- The chosen patch or dissolving change, trade-offs, and who decided it. A family accepted rather than fixed goes to **Accepted trade-offs**.
 - Changes to obligations, models, flows, architecture, or scope; unchanged commitments remain in force.
 - Which grounding, tests, and implementation regions must be rechecked.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
 
 import contextlib
 import functools
@@ -39,18 +40,17 @@ class StartBoxRecorder:
 
 
 class TicketWriterRecorder:
-    """`main`'s `ticket_writer` seam (a module-shaped object), recording each call and its tenant."""
+    """`main`'s `ticket_writer` seam (a module-shaped object: `clear_receipt` and `record_case_ticket`,
+    no open leg, #1359), recording each call and its tenant."""
 
     def __init__(self) -> None:
-        self.opened: list[tuple[tuple, dict]] = []
+        self.cleared: list[tuple[tuple, dict]] = []
         self.recorded: list[tuple[tuple, dict]] = []
         self.tenants: list[Any] = []
 
-    def open_case_ticket(self, *args: Any, tenant: Any, defender_dir: Any, env: Any,
-                         **kwargs: Any) -> None:
-        self.tenants.append(tenant)
-        self.opened.append((args, {"tenant": tenant, "defender_dir": defender_dir,
-                                   "env": env, **kwargs}))
+    def clear_receipt(self, *args: Any, **kwargs: Any) -> None:
+        # The writer seam's first method (#1359 r4): run start clears an earlier receipt.
+        self.cleared.append((args, dict(kwargs)))
 
     def record_case_ticket(self, *args: Any, tenant: Any, defender_dir: Any, env: Any,
                            **kwargs: Any) -> None:
@@ -78,12 +78,9 @@ def world(tmp_path, monkeypatch):
     def runs_base(tenant_id: str) -> Path:
         tenant = T.mod("tenancy._tenant")
         layout = tenant._TenantPaths(fixture_data_root(root), tenant_id)
-        if not layout.row.exists():
-            # The row alone (no knowledge folder): a tenant set up in name only.
+        if not layout.tenant_root.exists():
+            # No knowledge folder: a tenant active in the directory in name only (O6: no row on disk).
             layout.tenant_root.mkdir(parents=True, exist_ok=True)
-            layout.row.write_text(json.dumps(
-                {"tenant_id": tenant_id, "created_at": "2026-09-28T00:00:00+00:00"}) + "\n",
-                encoding="utf-8")
         chosen["tenant"] = tenant_id
         return location_path(layout.runs)
 
@@ -134,7 +131,10 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
         # never reaches the publish.
         seams = ({} if own is None
                  else {"publish": lambda *a, own=own, **k: f"fresh {own.commit}"})
-        rc = _run().main(argv, lifecycle=_lifecycle(start), visualize=lambda p, **kw: None,
+        # #1214 Flow 4: the tenant is active in the directory whether or not its folder is placed.
+        directory = (own.directory if own is not None
+                     else tenant_directory(world["root"], world["chosen"]["tenant"]))
+        rc = _run().main(argv, directory=directory, lifecycle=_lifecycle(start), visualize=lambda p, **kw: None,
                          preflight=lambda m: 0, **seams)
     except _StartBoxReached:
         pytest.fail(f"start_box was reached for a tenant that must be refused: {start.calls}")
@@ -175,13 +175,19 @@ def _published_without(world: dict, tenant_id: str, rel: str) -> Any:
     return t
 
 
-def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base(world, capsys):
-    """Over a published tenant, so "no `current`" cannot mask the missing mapping."""
-    _published_without(world, T.PLAYGROUND_ID, "systems/case-history/mapping.yaml")
-    base = world["runs_base"](T.PLAYGROUND_ID)
-    text, _ = _refusal(world, capsys)
-    assert _settings_named(text, "systems/case-history/mapping.yaml"), text
-    assert not base.exists(), "a refused run created its runs base"
+def test_a_tenant_with_no_case_record_file_is_not_refused_and_reaches_the_box(world):
+    """#1359 O2: the case-record file is optional (the retired `systems/case-history/mapping.yaml`
+    was required): a published tenant whose export lacks it starts and reaches the box.
+    Control: the sibling test below, where a missing required file refuses."""
+    own = _published_without(world, T.PLAYGROUND_ID, "case-record.yaml")
+    world["runs_base"](T.PLAYGROUND_ID)
+    start = StartBoxRecorder(stop=True)
+    argv = [str(world["alert"]), "--tenant", T.PLAYGROUND_ID, "--no-learn"]
+    with pytest.raises(_StartBoxReached):
+        _run().main(argv, directory=own.directory, lifecycle=_lifecycle(start),
+                    visualize=lambda p, **kw: None, preflight=lambda m: 0,
+                    publish=lambda *a, own=own, **k: f"fresh {own.commit}")
+    assert len(start.calls) == 1, start.calls
 
 
 @pytest.mark.parametrize("missing", ["verb-grants.yaml", "lead-zero.yaml"])
@@ -302,8 +308,9 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
                 run._drive_investigation, registry_cls=_RegistryRecorder,
                 investigate=lambda driven=driven, **kw: (
                     driven.append(kw) or {"output": "done", "requests": 0}))
+            argv = [str(world["alert"]), "--tenant", tenant_id, "--no-learn", "--update-ticket"]
             rc = run.main(
-                [str(world["alert"]), "--tenant", tenant_id, "--no-learn", "--update-ticket"],
+                argv, directory=own.directory,
                 lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p, **kw: None,
                 preflight=lambda m: 0, ticket_writer=writer,
                 publish=lambda *a, own=own, **k: B.fresh(own.commit))
@@ -325,9 +332,10 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             grant = _grant_of(_RegistryRecorder.built[0])
             assert {(s, v) for s, v, _ in grant.entries} == set(expected[tenant_id]), tenant_id
 
+            # The writer seam: run start cleared through it (it takes the run, not the settings).
+            assert writer.cleared, "run start never cleared the receipt through the seam"
             # The driver and the ticket writer: this run copy's settings, and no other.
-            for seam, payload in (("driver", driven[0]), ("ticket open", writer.opened),
-                                  ("ticket record", writer.recorded)):
+            for seam, payload in (("driver", driven[0]), ("ticket record", writer.recorded)):
                 assert payload, seam
                 assert T.reaches(payload, own_settings), f"{seam} was not handed {own_settings}"
                 assert not T.reaches(payload, B.clone_dir(own) / "settings"), f"{seam} got the clone's"

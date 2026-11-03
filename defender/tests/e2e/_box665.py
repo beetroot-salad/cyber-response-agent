@@ -86,7 +86,7 @@ class RecordingDocker:
         self, *, create: DockerFault | None = None,
         sentinel: DockerFault | None = None, reap: DockerFault | None = None,
         exec_replies: list | None = None, existing_token: str | None = None,
-        status: str | None = None,
+        status: str | None = None, label_unreadable: bool = False,
     ):
         # What `docker inspect -f {{.State.Status}}` answers: docker's own word, or None for a
         # free name (rc 1, as a real daemon answers). A word, not a bool, so it can say `created`.
@@ -97,6 +97,8 @@ class RecordingDocker:
         #            fault arm may reap
         #   <other>  another lane's box that won a name race: it must survive
         self.existing_token = existing_token
+        # The container answers its state but the daemon fails the label read (rc 1, not "no such object").
+        self.label_unreadable = label_unreadable
         self.create = create            # DockerFault on `docker run` (create)
         self.sentinel = sentinel        # DockerFault on the sentinel exec readback
         self.reap = reap                # DockerFault on `docker rm -f`
@@ -119,6 +121,8 @@ class RecordingDocker:
             return _cp(1, "", "No such object\n")
         if self.existing_token is None:
             return _cp(1, "", "No such object\n")
+        if self.label_unreadable:
+            return _cp(1, "", "Error: the daemon dropped the label read\n")
         token = self.existing_token
         if token == "self":
             # Echo the token THIS start stamped, read off the captured argv so a token box.py
@@ -278,10 +282,10 @@ def run_cycle_mounts(run_dir: Path) -> tuple:
     )
 
 
-def BoxRequest(*, name: str, mounts, workdir: Path, env, spec=None, defender_dir=None):
-    """`box.BoxRequest`, the caller-owned geography box.py renders. `spec` and `defender_dir`
-    (the explicit code root) are passed only when given."""
-    kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env))
+def BoxRequest(*, name: str, mounts, workdir: Path, env, tenant_id, spec=None, defender_dir=None):
+    """`box.BoxRequest`, the caller-owned geography box.py renders. `tenant_id` is required: every box carries its tenant
+    (r10 B1/C8), so a call names it. `spec` and `defender_dir` (the explicit code root) are passed only when given."""
+    kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env), tenant_id=tenant_id)
     if spec is not None:
         kw["spec"] = spec
     if defender_dir is not None:

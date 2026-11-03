@@ -1,154 +1,163 @@
-"""#1108 P4: the issuer login's wire behaviour, each case a wrong-but-green production variant.
+"""#1108 P4 / #1214: the credential provider's wire behaviour, each case a wrong-but-green production variant.
 The TLS case is a real local TLS server whose certificate the configured CA did not sign."""
 from __future__ import annotations
 
-import datetime
-import http.server
 import json
+import base64
 import logging
-import ssl
-import threading
+import time
 
 import httpx
 import pytest
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
 
-from defender.tests.tenancy.tenant_1108_p4._drain_support import (
-    ROLE_ID,
-    SECRET_ID,
-    AppRoleVault,
-    write_issuer_config,
-)
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+from defender.tests.support.shared._tls_server import self_signed, tls_server
+from defender.tests.support.tenancy._active1214 import generation_fields
+
+SECRET_ID = "p4-secret-id-9e7f3b"
 
 
-def vc():
-    from defender.learning.author.version_control import issuer
-    return issuer
+def _credential(t: Any, tmp_path: Path, *, openbao_url: str, transport: Any = None, ca_cert: str | None = None,
+                fields: dict | None = None) -> Any:
+    """`forge_credential` (GAP-C-2) for `t` over a live generation whose host secret file holds `SECRET_ID`
+    (or `fields`), against `openbao_url`; `config` carries `issuer_url`, `openbao_url` and `ca_cert`."""
+    from defender.learning.author.version_control import forge_credential
+
+    if fields is None:
+        fields = generation_fields(t.tenant_id, tmp_path / "secrets")
+        fields["host_secret_file"].parent.mkdir(parents=True, exist_ok=True)
+        fields["host_secret_file"].write_text(SECRET_ID + "\n", encoding="utf-8")
+    config = SimpleNamespace(issuer_url=f"{openbao_url}/v1/identity/oidc", openbao_url=openbao_url, ca_cert=ca_cert)
+    return forge_credential(t.tenant_id, "drain", directory=t.directory_with(generations=[fields]), config=config,
+                            transport=transport)
 
 
-def _cert(cn: str, *, san: bool):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
-    now = datetime.datetime.now(datetime.UTC)
-    builder = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
-               .public_key(key.public_key()).serial_number(x509.random_serial_number())
-               .not_valid_before(now - datetime.timedelta(minutes=5))
-               .not_valid_after(now + datetime.timedelta(days=1)))
-    if san:
-        import ipaddress
-        builder = builder.add_extension(x509.SubjectAlternativeName(
-            [x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
-            critical=False)
-    cert = builder.sign(key, hashes.SHA256())
-    return (cert.public_bytes(serialization.Encoding.PEM),
-            key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                              serialization.NoEncryption()))
+def _jwt(claims: dict) -> str:
+    """An unsigned token with `claims` (the credential decodes claims; OpenBao's signature is not its check)."""
+    part = lambda doc: base64.urlsafe_b64encode(json.dumps(doc).encode()).decode().rstrip("=")  # noqa: E731
+    return f"{part({'alg': 'none'})}.{part(claims)}.sig"
 
 
 @pytest.fixture
 def tls_issuer(tmp_path):
-    """A local HTTPS server with a self-signed certificate; the CA the config names is another."""
-    trusted_pem, _ = _cert("the configured CA", san=False)
-    server_pem, server_key = _cert("localhost", san=True)
+    """A local HTTPS server with a self-signed certificate; the CA the config names is another.
+    Other suites import it: keep its shape."""
+    trusted_pem, _ = self_signed("the configured CA", san=False)
     (tmp_path / "trusted.pem").write_bytes(trusted_pem)
-    (tmp_path / "server.pem").write_bytes(server_pem)
-    (tmp_path / "server.key").write_bytes(server_key)
-    got: list[str] = []
+    token = json.dumps({"auth": {"client_token": "tok"}}).encode()
+    with tls_server(tmp_path, lambda *_: (200, token)) as server:
+        yield server.port, server.got, tmp_path
 
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_POST(self):  # noqa: N802
-            got.append(self.rfile.read(int(self.headers.get("content-length", 0))).decode())
-            out = json.dumps({"auth": {"client_token": "tok"}}).encode()
-            self.send_response(200)
-            self.send_header("content-length", str(len(out)))
-            self.end_headers()
-            self.wfile.write(out)
 
-        def log_message(self, *a):
-            pass
+@pytest.fixture
+def tls_openbao(tmp_path, p4_tenant):
+    """A local HTTPS server with a self-signed certificate, answering the AppRole login and the token
+    mint as OpenBao would for `p4_tenant`'s generation; the CA `trusted.pem` names is another."""
+    trusted_pem, _ = self_signed("the configured CA", san=False)
+    (tmp_path / "trusted.pem").write_bytes(trusted_pem)
+    audience = generation_fields(p4_tenant.tenant_id, tmp_path / "secrets")["audience"]
+    port: list[int] = []
 
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(tmp_path / "server.pem", tmp_path / "server.key")
-    server.socket = ctx.wrap_socket(server.socket, server_side=True)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield server.server_port, got, tmp_path
-    finally:
-        server.shutdown()
-        server.server_close()
+    def answer(method: str, path: str, _body: bytes) -> tuple[int, bytes]:
+        if method == "POST":
+            return 200, json.dumps({"auth": {"client_token": "tok"}}).encode()
+        now = int(time.time())
+        claims = {"iss": f"https://localhost:{port[0]}/v1/identity/oidc", "tenant_id": p4_tenant.tenant_id,
+                  "aud": audience, "iat": now, "exp": now + 600}
+        return 200, json.dumps({"data": {"token": _jwt(claims)}}).encode()
+
+    with tls_server(tmp_path, answer) as server:
+        port.append(server.port)
+        yield server, tmp_path
 
 
 def test_r6_a_tls_server_the_configured_ca_did_not_sign_is_refused_and_gets_no_secret(
-        p4_tenant, tls_issuer):
-    port, got, folder = tls_issuer
-    bind_forge(p4_tenant)
-    config = write_issuer_config(folder / "cfg", issuer=f"https://localhost:{port}",
-                                 ca_cert=str(folder / "trusted.pem"))
-    with pytest.raises(Exception) as refused:  # noqa: PT011 — the class is the code's choice
-        vc().issuer_login(p4_tenant.tenant, issuer_config=config)
+        p4_tenant, tls_openbao):
     from defender.learning.author.version_control import ForgejoAuthError
+
+    server, folder = tls_openbao
+    url = f"https://localhost:{server.port}"
+    credential = _credential(p4_tenant, folder, openbao_url=url, ca_cert=str(folder / "trusted.pem"))
+    with pytest.raises(Exception) as refused:  # noqa: PT011 — the class is the code's choice
+        credential.token()
     assert isinstance(refused.value, ForgejoAuthError), repr(refused.value)
-    assert got == [], f"the secret reached a server the configured CA did not sign: {got}"
+    assert server.got == [], f"the secret reached a server the configured CA did not sign: {server.got}"
     assert SECRET_ID not in str(refused.value)
+
+    # The control: the same provider, trusting the CA that did sign the server, reaches it and gets a
+    # token, so the refusal above is the certificate's and not some earlier failure.
+    trusting = _credential(p4_tenant, folder, openbao_url=url, ca_cert=str(server.ca))
+    assert trusting.token().count(".") == 2
+    trusting.close()
+    assert any(SECRET_ID.encode() in body for body in server.got), server.got
 
 
 def test_r6_the_login_never_follows_a_redirect(p4_tenant, tmp_path):
     from defender.learning.author.version_control import ForgejoAuthError
 
-    bind_forge(p4_tenant)
-    config = write_issuer_config(tmp_path / "cfg")
     seen: list[tuple[str, str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append((request.url.host, request.content.decode()))
-        if request.url.host == httpx.URL(json.loads(config.read_text())["issuer"]).host:
+        if request.url.host == "openbao.test":
             return httpx.Response(307, headers={"Location": "https://evil.invalid/steal"})
         return httpx.Response(200, json={"auth": {"client_token": "tok"}})
 
+    credential = _credential(p4_tenant, tmp_path, openbao_url="https://openbao.test",
+                             transport=httpx.MockTransport(handler))
     with pytest.raises(ForgejoAuthError):
-        vc().issuer_login(p4_tenant.tenant, issuer_config=config,
-                          transport=httpx.MockTransport(handler))
+        credential.token()
     assert [h for h, _ in seen if h == "evil.invalid"] == [], "the login body was re-POSTed"
     assert len(seen) == 1
 
 
 def test_r6_an_http_issuer_is_refused_before_any_request(p4_tenant, tmp_path):
-    bind_forge(p4_tenant)
-    config = write_issuer_config(tmp_path / "cfg", issuer="http://openbao:8200")
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.content.decode())
         return httpx.Response(200, json={"auth": {"client_token": "tok"}})
 
+    credential = _credential(p4_tenant, tmp_path, openbao_url="http://openbao:8200",
+                             transport=httpx.MockTransport(handler))
     with pytest.raises(Exception):  # noqa: B017, PT011
-        vc().issuer_login(p4_tenant.tenant, issuer_config=config,
-                          transport=httpx.MockTransport(handler))
+        credential.token()
     assert seen == [], f"the AppRole secret was POSTed to a cleartext issuer: {seen}"
 
 
 def test_r6_no_secret_reaches_a_log_record_or_an_error_text(p4_tenant, tmp_path, caplog):
     from defender.learning.author.version_control import ForgejoAuthError
+    from defender.tests.support.tenancy._active1214 import provision_generation
+    from defender.tests.tenancy.lifecycle_1214._fakes import FakeOpenBao
 
-    bind_forge(p4_tenant)
-    config = write_issuer_config(tmp_path / "cfg")
-    vault = AppRoleVault(p4_tenant.tenant_id)
+    bao = FakeOpenBao()
+    management = httpx.Client(transport=httpx.MockTransport(bao.handle), base_url="https://openbao.test",
+                              headers={"X-Vault-Token": bao.management_token})
+    fields = provision_generation(management, p4_tenant.tenant_id, tmp_path / "secrets")
+    secret = fields["host_secret_file"].read_text(encoding="utf-8").strip()
+
+    def signed(request: httpx.Request) -> httpx.Response:
+        # The fake mints opaque strings; the credential decodes claims, so give the token a JWT's shape.
+        answer = bao.handle(request)
+        if request.method != "GET" or "/identity/oidc/token/" not in request.url.path or answer.status_code != 200:
+            return answer
+        claims = {"iss": "https://openbao.test/v1/identity/oidc", "tenant_id": p4_tenant.tenant_id, "aud": fields["audience"], "iat": int(time.time()), "exp": int(time.time()) + 600}
+        return httpx.Response(200, json={"data": {"token": _jwt(claims)}})
 
     def echo(request: httpx.Request) -> httpx.Response:
         # A refusing issuer (or a proxy in front of it) that echoes the request back.
         return httpx.Response(403, text=f"denied {request.url} {request.content.decode()}")
 
     with caplog.at_level(logging.DEBUG):
-        vc().issuer_login(p4_tenant.tenant, issuer_config=config, transport=vault.transport)
+        _credential(p4_tenant, tmp_path, openbao_url="https://openbao.test", fields=fields,
+                    transport=httpx.MockTransport(signed)).token()
         with pytest.raises(ForgejoAuthError) as refused:
-            vc().issuer_login(p4_tenant.tenant, issuer_config=config,
-                              transport=httpx.MockTransport(echo))
+            _credential(p4_tenant, tmp_path, openbao_url="https://openbao.test", fields=fields,
+                        transport=httpx.MockTransport(echo)).token()
+    assert "denied" not in str(refused.value), "the issuer's echoed body reached the error text"
     texts = [r.getMessage() for r in caplog.records]
     texts.append(str(refused.value))
     cause = refused.value
@@ -156,6 +165,5 @@ def test_r6_no_secret_reaches_a_log_record_or_an_error_text(p4_tenant, tmp_path,
         texts.append(str(cause))
         cause = cause.__cause__
     blob = "\n".join(texts)
-    for secret in (SECRET_ID, ROLE_ID):
-        assert secret not in blob, f"{secret!r} reached a log record or an error text"
-    assert "denied" not in str(refused.value), "the issuer's response body reached the error text"
+    for leaked in (secret, fields["role_id"]):
+        assert leaked not in blob, f"{leaked!r} reached a log record or an error text"

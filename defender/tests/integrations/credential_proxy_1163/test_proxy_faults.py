@@ -1,0 +1,392 @@
+"""#1163 the proxy's fault table (O7, A9): every outcome is classified, a refused request is
+never sent, and a breaker or transport outcome is told apart from a plain refusal."""
+from __future__ import annotations
+
+import gzip
+import json
+import tracemalloc
+import zlib
+
+import pytest
+
+from defender.tests.integrations.credential_proxy_1163 import _harness as H
+from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.support.shared._tls_server import tls_server
+
+BASE = T.BASE_PATH
+PATH = f"{BASE}/users/x"
+
+
+@pytest.mark.parametrize(("status", "headers", "fault"), [
+    pytest.param(200, {}, None, id="200-control"),
+    pytest.param(404, {}, "UpstreamFault", id="404"),
+    pytest.param(400, {}, "UpstreamFault", id="400"),
+    pytest.param(403, {}, "UpstreamFault", id="403-is-not-a-breaker"),
+    pytest.param(429, {}, "UpstreamFault", id="429"),
+    pytest.param(401, {}, "ConfigFault", id="401-with-a-credential"),
+    pytest.param(302, {"Location": "/elsewhere"}, "UpstreamFault", id="302"),
+    pytest.param(500, {}, "TransportFault", id="500"),
+    pytest.param(502, {}, "TransportFault", id="502"),
+    pytest.param(503, {}, "TransportFault", id="503"),
+])
+def test_f1_an_upstream_reply_is_classified(tmp_path, data_root, status, headers, fault):
+    """The upstream's status maps to its fault class; 2xx is no fault. O7, A9."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        r.up.replies[PATH] = (status, headers, b"{}")
+        answer = r.ask()
+
+    assert answer["fault"] == fault, answer
+    assert r.up.paths() == [PATH]
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_f1_a_redirect_is_not_followed_and_the_credential_goes_nowhere_else(
+        tmp_path, data_root, status):
+    """A 3xx is an `UpstreamFault`; its Location, even on another host, is never fetched.
+    O2, O7."""
+    with H.upstream() as elsewhere, T.rig(tmp_path / "forge", data_root) as r:
+        r.up.replies[PATH] = (status, {"Location": f"{elsewhere.url}/landing"}, b"")
+        answer = r.ask()
+
+    assert answer["fault"] == "UpstreamFault"
+    assert (elsewhere.seen, r.up.paths()) == ([], [PATH])
+
+
+def test_f1_an_unreachable_upstream_is_a_transport_fault(tmp_path, data_root):
+    """Nothing listening at the declared base: `TransportFault`; after a merged change to the
+    live upstream the same token is sent. O7, A9."""
+    port = H.free_port()
+    with T.rig(tmp_path / "forge", data_root,
+               lambda u: H.declaration(f"http://127.0.0.1:{port}{BASE}")) as r:
+        answer = r.ask(url=f"http://127.0.0.1:{port}{PATH}")
+        assert (answer["fault"], r.up.seen) == ("TransportFault", [])
+        r.t.merge({"settings/systems/identity/access.yaml": H.declaration(r.up.url + BASE)},
+                  "point at the live upstream")
+        r.t.publish()
+        control = r.ask()
+
+    assert control["fault"] is None
+    assert r.up.paths() == [PATH]
+
+
+@pytest.mark.parametrize(("size", "fault"), [(1024, None), (1025, "UpstreamFault")])
+def test_f1_a_response_over_the_cap_is_an_upstream_fault(tmp_path, data_root, size, fault):
+    """With a 1024-byte cap, 1024 bytes pass and 1025 are an `UpstreamFault`. O7."""
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=1024) as r:
+        r.up.replies[PATH] = (200, {"Content-Type": "text/plain"}, b"a" * size)
+        answer = r.ask()
+
+    assert answer["fault"] == fault, answer["fault"]
+    if fault is None:
+        assert len(answer["body"]) == 1024
+
+
+def test_f2_no_credential_set_is_a_config_fault_unsent(tmp_path, data_root):
+    """A system with a merged declaration and no stored set is refused unsent; after the set
+    is written the same token works. O7."""
+    with T.rig(tmp_path / "forge", data_root, creds=None) as r:
+        refused = r.ask()
+        assert (refused["fault"], r.up.seen, r.store.reads) == (
+            "ConfigFault", [], [(r.t.tenant_id, "identity")])
+        r.store.sets[(r.t.tenant_id, "identity")] = T.static_set()
+        control = r.ask()
+
+    assert control["fault"] is None
+
+
+def test_f2_a_system_without_a_merged_declaration_is_a_config_fault_unsent(
+        tmp_path, data_root):
+    """`cmdb` is granted but has no http-proxy declaration: refused, no store read. O7."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        refused = r.ask(system="cmdb", grant={("cmdb", "r")}, url=f"{r.up.url}{BASE}/hosts")
+
+    assert (refused["fault"], r.up.seen, r.store.reads) == ("ConfigFault", [], [])
+
+
+def test_f2_a_system_outside_the_token_grant_is_a_config_fault_unsent(tmp_path, data_root):
+    """A declared system the token does not grant is refused unsent and unread. O7, A9."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        refused = r.ask(grant={("cmdb", "r")})
+
+    assert (refused["fault"], r.up.seen, r.store.reads) == ("ConfigFault", [], [])
+
+
+def _oauth_rig(tmp_path, data_root, token_url):
+    return T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+        u + BASE, scheme=H.oauth_scheme(token_url)), creds=T.oauth_set())
+
+
+@pytest.mark.parametrize(("status", "body", "fault"), [
+    pytest.param(400, b'{"error":"invalid_client"}', "ConfigFault", id="400"),
+    pytest.param(401, b'{"error":"invalid_client"}', "ConfigFault", id="401"),
+    pytest.param(500, b"{}", "TransportFault", id="500"),
+    pytest.param(503, b"{}", "TransportFault", id="503"),
+    pytest.param(200, b"{}", "ConfigFault", id="200-without-access-token"),
+    pytest.param(200, b'{"access_token": ""}', "ConfigFault", id="200-empty-access-token"),
+    pytest.param(200, b"not json", "ConfigFault", id="200-not-json"),
+])
+def test_f3_a_failed_oauth_exchange_is_classified_and_nothing_is_sent(
+        tmp_path, data_root, status, body, fault):
+    """A 4xx or an unusable 200 from the token endpoint is ConfigFault, a 5xx TransportFault;
+    one attempt, the API request never sent. O7, A12."""
+    with H.upstream() as auth:
+        auth.replies["/token"] = (status, {}, body)
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
+            answer = r.ask()
+
+    assert answer["fault"] == fault, answer
+    assert (len(auth.seen), r.up.seen) == (1, [])
+    assert H.CANARY_SECRET not in json.dumps(answer)
+
+
+def test_f3_an_unreachable_token_endpoint_is_a_transport_fault_and_nothing_is_sent(
+        tmp_path, data_root):
+    """A token URL nothing listens at is TransportFault, the API request never sent; control:
+    a working token endpoint on the same rig shape sends. O7, A12."""
+    issued: list[str] = []
+    with _oauth_rig(tmp_path, data_root, f"http://127.0.0.1:{H.free_port()}/token") as r:
+        answer = r.ask()
+    assert answer["fault"] == "TransportFault", answer
+    assert r.up.seen == []
+
+    with H.upstream() as auth:
+        auth.replies["/token"] = H.token_endpoint(issued)
+        with _oauth_rig(tmp_path / "ok", data_root, auth.url + "/token") as control:
+            assert control.ask()["fault"] is None
+    assert len(issued) == 1
+
+
+def test_f3_a_401_on_the_access_token_evicts_it_without_a_retry(tmp_path, data_root):
+    """The upstream refusing the cached token is a `ConfigFault` after one exchange and one
+    send; the next request exchanges afresh and succeeds. O7, A8."""
+    issued: list[str] = []
+    with H.upstream() as auth:
+        auth.replies["/token"] = H.token_endpoint(issued)
+        with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+                u + BASE, scheme=H.oauth_scheme(auth.url + "/token")),
+                creds=T.oauth_set()) as r:
+            r.up.replies[PATH] = lambda s: (
+                (401, {}, b'{"detail":"token rejected"}') if len(r.up.seen) == 1
+                else (200, {}, b"{}"))
+            first = r.ask()
+            assert (first["fault"], len(auth.seen), len(r.up.seen)) == ("ConfigFault", 1, 1)
+            second = r.ask()
+
+    assert second["fault"] is None
+    assert len(auth.seen) == 2
+    assert [s.header("Authorization") for s in r.up.seen] == [f"Bearer {a}" for a in issued]
+
+
+# --- #1375 O2/O3: trust and the token reply's cap, unchanged by building contexts once ----------
+
+@pytest.mark.parametrize("leg", ["upstream", "token exchange"])
+def test_1375_o2_a_system_is_trusted_by_the_bundle_not_the_environment(
+        tmp_path, data_root, monkeypatch, leg):
+    """#1375 O2: the upstream call and the token exchange verify a system's certificate against
+    the bundle they always used, never one the environment names: with `SSL_CERT_FILE` naming the
+    very CA that signed the system's certificate, the connection is still refused and the server
+    gets no request. Control: a client that does trust that CA reaches the server."""
+    import ssl
+
+    import httpx
+
+    token_reply = json.dumps({"access_token": "AT", "expires_in": 3600}).encode()
+    with tls_server(tmp_path, lambda *_: (200, token_reply)) as server:
+        url = f"https://127.0.0.1:{server.port}"
+        with httpx.Client(verify=ssl.create_default_context(cafile=str(server.ca)),
+                          trust_env=False) as trusting:
+            assert trusting.get(url + "/").status_code == 200, "control: the server answers"
+        server.got.clear()
+        monkeypatch.setenv("SSL_CERT_FILE", str(server.ca))
+        monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+        if leg == "upstream":
+            with T.rig(tmp_path / "forge", data_root, lambda _u: H.declaration(url + BASE)) as r:
+                answer = r.ask(url=f"{url}{PATH}")
+        else:
+            with _oauth_rig(tmp_path, data_root, url + "/token") as r:
+                answer = r.ask()
+            assert r.up.seen == [], "the API request was sent without a token"
+
+    assert answer["fault"] == "TransportFault", answer
+    assert "(ConnectError)" in (answer["detail"] or ""), answer
+    assert server.got == [], "the request reached a server the proxy should not trust"
+
+
+@pytest.mark.parametrize(("size", "fault"), [(65536, None), (65537, "ConfigFault")])
+def test_1375_o3_a_token_reply_over_the_cap_is_a_config_fault_unsent(
+        tmp_path, data_root, size, fault):
+    """#1375 O3: the token endpoint's reply is read up to `TOKEN_REPLY_CAP` (64 KiB): a reply of
+    exactly the cap is used, one byte more is `ConfigFault` saying so, and the API request is never
+    sent."""
+    head = json.dumps({"access_token": "AT-cap", "expires_in": 3600, "pad": ""}).encode()
+    body = head[:-2] + b"x" * (size - len(head)) + head[-2:]
+    assert len(body) == size
+    assert json.loads(body)["access_token"] == "AT-cap"
+    with H.upstream() as auth:
+        auth.replies["/token"] = (200, {"Content-Type": "application/json"}, body)
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
+            answer = r.ask()
+
+    assert answer["fault"] == fault, answer
+    if fault is None:
+        assert r.up.paths() == [PATH]
+    else:
+        assert "more than 65536 bytes" in answer["detail"], answer
+        assert r.up.seen == []
+
+
+def _accept_encoding(seen: H.Seen) -> str | None:
+    return next((v for k, v in seen.headers.items() if k.lower() == "accept-encoding"), None)
+
+
+_TOKEN = json.dumps({"access_token": "AT-1383", "expires_in": 3600}).encode()
+
+
+@pytest.mark.parametrize(("encoding", "body", "fault"), [
+    pytest.param("identity", b'{"ok": true}', None, id="identity-control"),
+    pytest.param("Identity", b'{"ok": true}', None, id="identity-any-case"),
+    pytest.param("identity, identity", b'{"ok": true}', None, id="identity-listed-twice"),
+    pytest.param("gzip", gzip.compress(b'{"ok": true}'), "UpstreamFault", id="gzip"),
+    pytest.param("deflate", zlib.compress(b'{"ok": true}'), "UpstreamFault", id="deflate"),
+    pytest.param("identity, gzip", gzip.compress(b'{"ok": true}'), "UpstreamFault",
+                 id="gzip-listed-after-identity"),
+])
+def test_1383_a_compressed_upstream_reply_is_an_upstream_fault(
+        tmp_path, data_root, encoding, body, fault):
+    """#1383: the proxy asks for an uncompressed reply even when the adapter asks otherwise, and
+    a reply compressed anyway is an `UpstreamFault` saying so, however small it decodes to."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        r.up.replies[PATH] = (200, {"Content-Type": "application/json",
+                                    "Content-Encoding": encoding}, body)
+        answer = r.ask(headers={"Accept-Encoding": "gzip, br"})
+
+    assert [_accept_encoding(s) for s in r.up.seen] == ["identity"]
+    assert answer["fault"] == fault, answer
+    if fault is None:
+        assert json.loads(answer["body"]) == {"ok": True}
+    else:
+        assert "compressed" in answer["detail"], answer
+        assert answer["body"] == ""
+
+
+@pytest.mark.parametrize(("encoding", "body", "fault"), [
+    pytest.param(None, _TOKEN, None, id="plain-control"),
+    pytest.param("gzip", gzip.compress(_TOKEN), "ConfigFault", id="gzip"),
+])
+def test_1383_a_compressed_token_reply_is_a_config_fault_unsent(
+        tmp_path, data_root, encoding, body, fault):
+    """#1383: the token exchange asks for an uncompressed reply; one compressed anyway is
+    `ConfigFault` saying so, and the API request is never sent."""
+    headers = {"Content-Type": "application/json"} | (
+        {} if encoding is None else {"Content-Encoding": encoding})
+    with H.upstream() as auth:
+        auth.replies["/token"] = (200, headers, body)
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
+            answer = r.ask()
+
+    assert [_accept_encoding(s) for s in auth.seen] == ["identity"]
+    assert answer["fault"] == fault, answer
+    if fault is None:
+        assert r.up.paths() == [PATH]
+    else:
+        assert "compressed" in answer["detail"], answer
+        assert r.up.seen == []
+
+
+@pytest.mark.parametrize(("status", "fault"), [
+    pytest.param(503, "TransportFault", id="503"),
+    pytest.param(401, "ConfigFault", id="401"),
+    pytest.param(404, "UpstreamFault", id="404"),
+])
+def test_1383_a_compressed_error_reply_keeps_its_status_fault(tmp_path, data_root, status, fault):
+    """#1383 review: a compressed non-2xx reply is classified by its status, as the same reply
+    uncompressed is, and keeps its headers; only its body is withheld, and the detail says so."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        r.up.replies[PATH] = (status, {"Content-Encoding": "gzip", "Retry-After": "30"},
+                              gzip.compress(b"down"))
+        answer = r.ask()
+
+    assert answer["fault"] == fault, answer
+    assert answer["detail"] == (f"identity answered {status} with a compressed body (gzip), "
+                                "withheld"), answer
+    assert (answer["body"], answer["headers"].get("retry-after")) == ("", "30"), answer
+
+
+@pytest.mark.parametrize("status", [204, 304])
+def test_1383_a_bodyless_reply_marked_compressed_is_not_refused(tmp_path, data_root, status):
+    """#1383 review: a reply with no body has nothing to inflate; its encoding is no fault."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        r.up.replies[PATH] = (status, {"Content-Encoding": "gzip", "X-Seen": "yes"}, b"")
+        answer = r.ask()
+
+    assert answer["detail"] == (None if status == 204 else f"identity answered {status}"), answer
+    assert answer["headers"].get("x-seen") == "yes", answer
+
+
+@pytest.mark.parametrize(("status", "fault", "said"), [
+    pytest.param(503, "TransportFault", "answered 503", id="503"),
+    pytest.param(400, "ConfigFault", "refused the exchange (400)", id="400"),
+])
+def test_1383_a_compressed_token_error_keeps_its_status_fault(
+        tmp_path, data_root, status, fault, said):
+    """#1383 review: a compressed token-endpoint error is classified by its status (a 5xx is
+    still a transport fault), and the API request is never sent."""
+    with H.upstream() as auth:
+        auth.replies["/token"] = (status, {"Content-Encoding": "gzip"}, gzip.compress(b"{}"))
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
+            answer = r.ask()
+
+    assert answer["fault"] == fault, answer
+    assert said in answer["detail"], answer
+    assert r.up.seen == []
+
+
+def test_1383_a_compression_bomb_is_never_inflated(tmp_path, data_root):
+    """#1383: the reply is read as raw network bytes, so 128 MiB of zeros sent as ~128 KiB of
+    gzip never becomes 128 MiB in the proxy, not even one inflated chunk of it."""
+    packer, block = zlib.compressobj(wbits=31), b"\0" * (1 << 20)
+    bomb = b"".join(packer.compress(block) for _ in range(128)) + packer.flush()
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=1024) as r:
+        r.up.replies[PATH] = (200, {"Content-Encoding": "gzip"}, bomb)
+        r.ask()
+        tracemalloc.start()
+        try:
+            answer = r.ask()
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+    assert answer["fault"] == "UpstreamFault", answer
+    assert peak < 16 << 20, f"peak {peak >> 20} MiB while refusing the bomb"
+
+
+@pytest.mark.parametrize(("status", "fault"), [
+    pytest.param(200, "UpstreamFault", id="200"),
+    pytest.param(503, "TransportFault", id="503"),
+    pytest.param(401, "ConfigFault", id="401"),
+])
+def test_1383_an_oversized_reply_keeps_its_status_fault_and_headers(
+        tmp_path, data_root, status, fault):
+    """#1383 review: a body over the cap is withheld like a compressed one: the status still
+    decides the fault (a 2xx is the upstream's), and the headers still arrive."""
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=1024) as r:
+        r.up.replies[PATH] = (status, {"Retry-After": "30"}, b"a" * 1025)
+        answer = r.ask()
+
+    assert answer["fault"] == fault, answer
+    assert answer["detail"] == ("identity answered more than 1024 bytes" if status == 200 else
+                                f"identity answered {status} with more than 1024 bytes, "
+                                "withheld"), answer
+    assert (answer["body"], answer["headers"].get("retry-after")) == ("", "30"), answer
+
+
+def test_1383_an_oversized_token_error_is_a_transport_fault(tmp_path, data_root):
+    """#1383 review: a token endpoint's 5xx is a transport fault however large its body."""
+    with H.upstream() as auth:
+        auth.replies["/token"] = (503, {}, b"x" * (65536 + 1))
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
+            answer = r.ask()
+
+    assert answer["fault"] == "TransportFault", answer
+    assert "answered 503" in answer["detail"], answer
+    assert r.up.seen == []

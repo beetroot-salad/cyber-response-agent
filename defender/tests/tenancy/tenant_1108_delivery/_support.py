@@ -217,7 +217,9 @@ class ForgeHTTP:
     def __init__(self, on_request=None, *, remote=None, origin=None):
         self.requests = []
         self.foreign = []
-        self.protection = {"name": "main", "protected": True, "user_can_push": False}
+        #: #1163 N13: the bot can neither push nor merge to a protected `main`.
+        self.protection = {"name": "main", "protected": True, "user_can_push": False,
+                           "user_can_merge": False}
         self.repository = dict(OURS)
         self.fail_create = False
         self.fault = None

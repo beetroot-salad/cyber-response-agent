@@ -78,7 +78,7 @@ OWNER_PACKAGE = "records"
 #: The owners outside the package. `records/_episode_handle.py` owns the episode folder with
 #: `records/_episode_paths.py` (#1105 rev 5.1's data model): its private `runs/` container, on which the
 #: runs repository's episode view is built, is an owner read.
-_OWNER_FLAT_MODULES = ("records/_episode_paths.py", "records/_episode_handle.py", "tenancy/_tenant.py")
+_OWNER_FLAT_MODULES = ("records/_episode_paths.py", "records/_episode_handle.py", "records/job_lane.py", "tenancy/_tenant.py")
 
 #: The owner modules by their path under `defender/`, the exempt set everything below is
 #: defined relative to. Matched by path, never by basename — a package submodule's basename
@@ -91,8 +91,8 @@ OWNER_MODULES: frozenset[str] = frozenset({
 
 #: The sweep set. Never shrinks below this.
 SWEEP_DIRS: tuple[str, ...] = ("investigation", "learning", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
-                               "api", "tenancy", "identity", "knowledge", "configuration", "records", "kit", "providers",
-                               "systems", "database", "migrations")
+                               "api", "tenancy", "identity", "jobs", "knowledge", "configuration", "records", "kit", "providers",
+                               "systems", "database", "migrations", "credential_proxy", "worker", "lifecycle")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 
@@ -249,10 +249,15 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("exports_root", _EXPORT_READER): frozenset({"current_export"}),
     ("knowledge_lock", _EXPORT_READER): frozenset({"knowledge_lock_holder"}),
     ("commit_record", _RECORD_OWNER): frozenset({"_record_made", "_Record.read"}),
+    # #1214: the lifecycle's own setting, read once each where it makes or removes a tenant's folder.
+    ("data_root", "lifecycle/config.py"): frozenset({"LifecycleConfig.__post_init__"}),
+    ("data_root", "lifecycle/_host.py"): frozenset({"HostActor.__init__"}),
+    # #1163 A26: the credential proxy's one setting, converted once when its pipeline is built.
+    ("data_root", "credential_proxy/_app.py"): frozenset({"_Proxy.__init__"}),
 }
 _ATTRIBUTE_ROLES = {
     "exports": "exports_root", "drafts": "drafts_root", "knowledge_lock": "knowledge_lock",
-    "commit_record": "commit_record",
+    "commit_record": "commit_record", "data_root": "data_root",
 }
 _ROOT_OVERRIDE_METHODS = frozenset({
     "run_end_sidecar", "scrub_verdict", "ticket_write", "call_join", "ticket_comments",

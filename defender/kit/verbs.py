@@ -14,9 +14,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from defender.kit.access import AccessDeclaration
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import SystemConfig
 
+
+#: The one function a case-recording adapter exports to take the host's comment (#1359): never a
+#: verb, so no grant, query tool or model can reach it. `systems.verbs` refuses an adapter whose
+#: `VERBS` exposes it in either spelling.
+COMMENT_ACTION = "add_case_comment"
 
 #: The alphabet of a system name, unanchored, for scanners that find a name inside text. A
 #: fragment rather than a compiled pattern so nobody matches with it and skips the length bound
@@ -46,6 +52,12 @@ class TenantRecord(Protocol):
     @property
     def systems(self) -> Mapping[str, SystemConfig | ConfigFault]:
         """Each configured system's parsed `config.env`, or the fault for why there is none."""
+        ...
+
+    @property
+    def access(self) -> Mapping[str, AccessDeclaration | ConfigFault]:
+        """Each `http-proxy` system's parsed access declaration, or the fault for why there is
+        none (#1163)."""
         ...
 
     @property
@@ -86,6 +98,21 @@ class VerbContext(Protocol):
 
     @property
     def arrived_by(self) -> datetime | None: ...
+
+    @property
+    def proxy_url(self) -> str | None:
+        """The credential proxy's address, handed in by the run (never read from `env`)."""
+        ...
+
+    @property
+    def request_token(self) -> str | None:
+        """The request token this call presents to the proxy; never shown in a repr."""
+        ...
+
+    @property
+    def token_source(self) -> Callable[[], str] | None:
+        """Where the call gets its request token when it holds none (r7 A20)."""
+        ...
 
 
 Verb = Callable[..., Any]

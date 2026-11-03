@@ -33,8 +33,13 @@ services:
       # Where dev publishes (#1279 A11): named here, never worked out from a checkout.
       # No box mounts the workspace root, so a folder at its top level is safe.
       DEFENDER_RUN_VISUALIZATIONS_DIR: /workspace/run-visualizations
+      # The dev issuer (the `openbao` service) serves a certificate from the private dev CA. Host
+      # processes mint tokens from it (#1214), so this container trusts that CA, as `forgejo` does.
+      SSL_CERT_DIR: /etc/ssl/certs:/etc/ssl/dev-issuer-ca
     volumes:
       - ../:/workspace # Mount full workspace directory
+      # The dev CA's certificate only (never its key).
+      - ../playground-issuer/trust:/etc/ssl/dev-issuer-ca:ro
       # Docker-outside-of-Docker: hand the dev container the HOST daemon so it can
       # build and run the runtime image (Dockerfile.runtime) as a *sibling*
       # container — keeping the actual investigation runtime separate from this
@@ -139,6 +144,36 @@ services:
       - ../playground-issuer/storage:/openbao/file
       - ../playground-issuer/seal:/openbao/seal:ro
       - ../playground-issuer/tls:/openbao/tls:ro
+    mem_limit: 256m
+    memswap_limit: 256m
+    restart: unless-stopped
+
+  # The credential proxy (#1163, H4): the only process that reads customer system credentials
+  # (OpenBao KV) and the only one that adds them to a request. A run presents a signed request
+  # token; the proxy applies the declaration in each tenant's published `current` export (the
+  # data root is mounted read-only) and appends every use to its audit file. Reachable on the
+  # compose network only (no published port, no docker socket). It keeps no tenant list (#1163
+  # A26): a token's tenant id gives its exports, `/data/<tenant id>/exports/`, and its transit key;
+  # OpenBao is the deployment's fixed `https://openbao:8200` and `transit/` mount. Its config file
+  # (the operator's: the proxy role's token file, the KV mount, `"data_root": "/data"` and the
+  # audit file) lives under <repo>/playground-issuer/credential-proxy/ (gitignored); see
+  # `defender/credential_proxy/__main__.py`.
+  credential-proxy:
+    build:
+      context: ../
+      dockerfile: .devcontainer/Dockerfile.runtime
+    container_name: response-credential-proxy
+    hostname: credential-proxy
+    command: ["defender/.venv/bin/python", "-m", "defender.credential_proxy"]
+    environment:
+      DEFENDER_CREDENTIAL_PROXY_CONFIG: /proxy/config.json
+      DEFENDER_CREDENTIAL_PROXY_HOST: 0.0.0.0
+      DEFENDER_CREDENTIAL_PROXY_PORT: "8411"
+      SSL_CERT_DIR: /etc/ssl/certs:/etc/ssl/dev-issuer-ca
+    volumes:
+      - ../.defender-data:/data:ro
+      - ../playground-issuer/credential-proxy:/proxy
+      - ../playground-issuer/trust:/etc/ssl/dev-issuer-ca:ro
     mem_limit: 256m
     memswap_limit: 256m
     restart: unless-stopped

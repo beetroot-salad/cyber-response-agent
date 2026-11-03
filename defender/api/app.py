@@ -5,19 +5,21 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Annotated, NamedTuple
+from typing import Annotated, Any, NamedTuple
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import RedirectResponse
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from defender import identity as _identity
-from defender.identity import Authenticated, IdentityService
+from defender import tenancy as _tenancy
+from defender.identity import Authenticated, IdentityService, audit
 from defender.identity.service import SESSION_LIFETIME
-from defender.records.formats import TenantId
+from defender.records.formats import TenantId, TenantRefused
 
 from .models import (
     RECORD_ID_PATTERN,
@@ -40,6 +42,7 @@ from .models import (
     SystemCheck,
     SystemPut,
     SystemSettings,
+    TenantItem,
     TenantRef,
 )
 from .pages import Order, Page, newest_first, ordered_by_id, paginate
@@ -130,6 +133,36 @@ async def _administrator(auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)])
 Deps = Annotated[ApiDeps, Depends(_deps)]
 Admin = Annotated[Authenticated, Depends(_administrator)]
 Caller = Annotated[Principal, Depends(_principal)]
+def _declared_query(dependant: Any) -> set[str]:
+    """The query parameter names a route reads, its dependencies' included."""
+    names = {param.alias for param in dependant.query_params}
+    for sub in dependant.dependencies:
+        names |= _declared_query(sub)
+    return names
+
+
+def _any_query(endpoint: Callable[..., Any]) -> Callable[..., Any]:
+    """Mark a route whose caller is not an API client and may add parameters of its own (the
+    identity provider's redirect to the sign-in callback adds `session_state`, `iss`, ...)."""
+    endpoint.__dict__["_any_query"] = True
+    return endpoint
+
+
+async def _no_unknown_query(request: Request) -> None:
+    """Refuse a query parameter the matched route does not read (#1342 r7 R7-2), so a client
+    sending a filter the API dropped or never had learns it instead of getting everything."""
+    route = request.scope.get("route")
+    dependant = getattr(route, "dependant", None)
+    if dependant is None or getattr(getattr(route, "endpoint", None), "_any_query", False):
+        return
+    declared = _declared_query(dependant)
+    unknown = [name for name in dict.fromkeys(request.query_params.keys()) if name not in declared]
+    if unknown:
+        raise RequestValidationError([
+            {"type": "extra_forbidden", "loc": ("query", name), "msg": "Extra inputs are not permitted",
+             "input": request.query_params.get(name)} for name in unknown])
+
+
 Limit = Annotated[int, Query(ge=1, le=MAX_PAGE)]
 Cursor = Annotated[str | None, Query(max_length=2048, description="`next_cursor` from the previous page.")]
 Id = Annotated[str, Path(pattern=RECORD_ID_PATTERN)]
@@ -185,18 +218,16 @@ async def list_alerts(
     caller: Caller,
     fired_after: Instant | None = None,
     fired_before: Instant | None = None,
-    severity: str | None = None,
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> Page[AlertSummary]:
     return await paginate(
         lambda after, n: deps.alerts.list_alerts(
             caller.tenant_id, fired_after=fired_after, fired_before=fired_before,
-            severity=severity, after=after, limit=n,
+            after=after, limit=n,
         ),
         _ALERT_ORDER, list_name="alerts", tenant_id=caller.tenant_id, cursor=cursor, limit=limit,
-        filters={"fired_after": _filter_moment(fired_after), "fired_before": _filter_moment(fired_before),
-                 "severity": severity},
+        filters={"fired_after": _filter_moment(fired_after), "fired_before": _filter_moment(fired_before)},
     )
 
 
@@ -266,7 +297,8 @@ async def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id)
 @investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT,
                         responses=responses(404, 409))
 async def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> None:
-    """Hide an investigation from every read. Its records are kept: lessons cite runs."""
+    """Delete an investigation and every attempt of the request it belongs to. Its run folders
+    stay: lessons cite runs. Refused while any attempt is queued or running."""
     async with _transaction(deps, caller) as tx:
         await tx.delete_investigation(investigation_id)
         await tx.audit("investigation.delete", investigation_id)
@@ -409,7 +441,8 @@ async def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: Crede
     async with _transaction(deps, caller) as tx:
         await tx.audit("system.credentials", system_id,
                  detail="fields: " + ", ".join(sorted(body.credentials)))
-        await deps.secrets.put_credentials(caller.tenant_id, system_id, body.credentials)
+        await deps.secrets.put_credentials(
+            caller.tenant_id, system_id, body.kind, body.credentials)
 
 
 @systems.post("/{system_id}/check", responses=responses(404))
@@ -444,6 +477,7 @@ async def login(deps: Deps) -> RedirectResponse:
 
 @auth.get("/auth/callback", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse,
           responses=responses(403, 503, 422, 500))
+@_any_query
 async def callback(request: Request, deps: Deps, code: str = "", state: str = "") -> Response:
     """Finish a sign-in: a session cookie and a redirect to the frontend, or a 403 problem of one
     of four types. The pre-login cookie is cleared whatever the outcome."""
@@ -528,45 +562,119 @@ async def revoke_invitation(deps: Deps, member: Membered, invitation_id: str = P
 admin = APIRouter(prefix="/admin", tags=["admin"], responses={**_IDENTITY, **responses(404)})
 
 
+async def _tenant_path(tenant_id: Annotated[str, Path(description="The tenant the request acts on.")]) -> str:
+    """The path's tenant id in canonical form; a malformed one is no tenant (404, as on the member routes),
+    so the repository never sees a value it cannot store or compare."""
+    try:
+        return str(TenantId(tenant_id))
+    except TenantRefused as e:
+        raise _tenancy.NotFound("no such tenant") from e
+
+
+AdminTenant = Annotated[str, Depends(_tenant_path)]
+
+
+def _tenant_item(record: _tenancy.TenantRecord) -> TenantItem:
+    return TenantItem(
+        tenant_id=record.id, state=record.state, pending_action=record.pending_action,  # type: ignore[arg-type]
+        step=record.step, step_actor=record.step_actor, failure=record.failure,  # type: ignore[arg-type]
+        created_at=record.created_at)
+
+
 @admin.get("/tenants")
-async def list_all_tenants(deps: Deps, caller: Admin) -> Page[TenantRef]:
-    return Page(items=[TenantRef(tenant_id=t) for t in await deps.identity.all_tenants(caller)], next_cursor=None)
+async def list_all_tenants(deps: Deps, caller: Admin) -> Page[TenantItem]:
+    items = [_tenant_item(r) for r in await deps.tenants.tenants()]
+    audit.emit("admin.tenants.list", actor=caller.user.id, tenant_id=None, target=None)
+    return Page(items=items, next_cursor=None)
+
+
+@admin.post("/tenants", status_code=status.HTTP_202_ACCEPTED)
+async def create_tenant(deps: Deps, caller: Admin, request: Request, response: Response) -> TenantItem:
+    """Mint a tenant and record it `creating`; the management service does the rest. No members."""
+    record = await deps.tenants.request_create(now=deps.identity.now())
+    audit.emit("tenant.create", actor=caller.user.id, tenant_id=record.id, target=record.id)
+    response.headers["Location"] = str(request.app.url_path_for("get_tenant", tenant_id=record.id))
+    return _tenant_item(record)
+
+
+@admin.get("/tenants/{tenant_id}")
+async def get_tenant(deps: Deps, caller: Admin, tenant_id: AdminTenant) -> TenantItem:
+    record = await deps.tenants.tenant(tenant_id)
+    if record is None:
+        raise _tenancy.NotFound(f"no tenant {tenant_id}")
+    return _tenant_item(record)
+
+
+@admin.post("/tenants/{tenant_id}/resume", status_code=status.HTTP_202_ACCEPTED, responses=responses(409))
+async def resume_tenant(deps: Deps, caller: Admin, tenant_id: AdminTenant) -> TenantItem:
+    """Clear the failure of a stopped job so the next pass retries its step."""
+    record = await deps.tenants.request_resume(tenant_id)
+    audit.emit("tenant.resume", actor=caller.user.id, tenant_id=record.id, target=record.id)
+    return _tenant_item(record)
+
+
+@admin.post("/tenants/{tenant_id}/offboard", status_code=status.HTTP_202_ACCEPTED, responses=responses(409))
+async def offboard_tenant(deps: Deps, caller: Admin, tenant_id: AdminTenant) -> TenantItem:
+    """End access at once and queue the teardown, replacing any pending action."""
+    record = await deps.tenants.request_offboard(tenant_id, now=deps.identity.now())
+    audit.emit("tenant.offboard", actor=caller.user.id, tenant_id=record.id, target=record.id)
+    return _tenant_item(record)
+
+
+@admin.post("/tenants/{tenant_id}/rotate-forge-credential", status_code=status.HTTP_202_ACCEPTED,
+            responses=responses(409))
+async def rotate_tenant_credential(deps: Deps, caller: Admin, tenant_id: AdminTenant) -> TenantItem:
+    """Queue a new credential generation for an active tenant with nothing pending."""
+    record = await deps.tenants.request_rotate(tenant_id)
+    audit.emit("tenant.rotate", actor=caller.user.id, tenant_id=record.id, target=record.id)
+    return _tenant_item(record)
 
 
 @admin.post("/tenants/{tenant_id}/invitations", status_code=status.HTTP_202_ACCEPTED,
             responses=responses(409))
 async def admin_invite(deps: Deps, caller: Admin, body: InviteCreate,
-                 tenant_id: str = Path(max_length=64)) -> Invitation:
+                       tenant_id: AdminTenant) -> Invitation:
     """Invite the first member into a tenant that has no active members."""
     return _invitation(await deps.identity.admin_invite(caller, tenant_id, body.email))
 
 
-async def _send_then_close(identity: IdentityService, stop: asyncio.Event) -> None:
-    """The sender until `stop`, then the service's close: in one task, so nothing closes what the
-    sender uses while it runs, even when the lifespan waiting on it is itself cancelled."""
+async def _run_then_close(identity: IdentityService, stop: asyncio.Event) -> None:
+    """The background loop (sender and session purge) until `stop`, then the service's close: in one
+    task, so nothing closes what the loop uses while it runs, even when the lifespan waiting on it is
+    itself cancelled."""
     try:
-        await identity.run_sender(stop)
+        await identity.run_background(stop)
     finally:
         await identity.close()
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Apply the bootstrap before serving and run the sender as a task on this loop. On shutdown
-    the sender finishes the email it is on, then the service closes."""
-    identity: IdentityService = app.state.deps.identity
+    """Apply the bootstrap before serving and run the background loop as a task on this loop. On
+    shutdown the loop finishes the email or session purge it is on (a purge is cut off at its
+    deadline), then the service closes, then the tenant repository (its own connections; the store
+    outlives both)."""
+    deps: ApiDeps = app.state.deps
+    identity = deps.identity
+    try:
+        await _start_identity(identity)
+        stop = asyncio.Event()
+        background = asyncio.create_task(_run_then_close(identity, stop), name="identity-background")
+        try:
+            yield
+        finally:
+            stop.set()
+            await asyncio.shield(background)
+    finally:
+        await deps.tenants.close()
+
+
+async def _start_identity(identity: IdentityService) -> None:
     try:
         await identity.start()
     except BaseException:
         await identity.close()
         raise
-    stop = asyncio.Event()
-    sender = asyncio.create_task(_send_then_close(identity, stop), name="identity-sender")
-    try:
-        yield
-    finally:
-        stop.set()
-        await asyncio.shield(sender)
 
 
 def create_app(deps: ApiDeps) -> FastAPI:
@@ -575,6 +683,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
         version=API_VERSION,
         summary="Stub: the routes and shapes are the contract; the records behind them are not yet real.",
         lifespan=_lifespan,
+        dependencies=[Depends(_no_unknown_query)],
     )
     app.state.deps = deps
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
@@ -594,5 +703,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_exception_handler(_identity.Forbidden, refusal(status.HTTP_403_FORBIDDEN))
     app.add_exception_handler(_identity.NotFound, refusal(status.HTTP_404_NOT_FOUND))
     app.add_exception_handler(_identity.Conflict, refusal(status.HTTP_409_CONFLICT))
+    app.add_exception_handler(_tenancy.NotFound, refusal(status.HTTP_404_NOT_FOUND))
+    app.add_exception_handler(_tenancy.Conflict, refusal(status.HTTP_409_CONFLICT))
     app.add_exception_handler(_identity.SignInUnavailable, refusal(status.HTTP_503_SERVICE_UNAVAILABLE))
     return app

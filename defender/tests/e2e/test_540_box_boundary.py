@@ -34,6 +34,7 @@ from defender.box import (  # noqa: E402
     start_box,
     stop_box,
 )
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 pytestmark = pytest.mark.e2e
 
@@ -101,8 +102,8 @@ def sibling_run(run_dir: Path) -> Path:
 
 @contextlib.contextmanager
 def _box(run_dir: Path, *, spec: BoxSpec | None = None):
-    box = start_box(run_dir, DEFENDER) if spec is None else start_box(
-        run_dir, DEFENDER, spec=spec)
+    box = start_box(run_dir, DEFENDER, tenant_id=TEST_TENANT) if spec is None else start_box(
+        run_dir, DEFENDER, spec=spec, tenant_id=TEST_TENANT)
     try:
         yield box
     finally:

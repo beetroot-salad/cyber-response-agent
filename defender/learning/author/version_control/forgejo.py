@@ -226,9 +226,13 @@ class ForgejoForge:
             not isinstance(value, dict)
             or value.get("protected") is not True
             or value.get("user_can_push") is not False
+            or value.get("user_can_merge") is not False
         ):
+            # Merge rights too (#1163 N13): a declaration merged by the bot would be one no
+            # human reviewed, and the proxy obeys the merged `main` alone.
             raise ForgeError(
-                "main protection must be known and the bot must not be able to push"
+                "main protection must be known and the bot must be able neither to push "
+                "nor to merge"
             )
 
     def _rows(self, state: str) -> list[dict]:

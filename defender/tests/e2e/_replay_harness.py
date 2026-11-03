@@ -479,7 +479,7 @@ def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
         tenant_id = str(_tenants1106.fixture_tenant().id)
     else:
         tenant_id = fixture_uuid(f"tenant:golden-agent:{Path(agent).parent.name}")
-        if not (root / tenant_id / "tenant.json").is_file():
+        if not (root / tenant_id / "knowledge").is_dir():
             place_fixture(root, tenant_id, agent=Path(agent))
     published = publish_once(root.with_name(f"{root.name}-p4-forge"), root=root,
                              tenant_id=tenant_id)
@@ -535,7 +535,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
         clock: Callable[[], Any] | None = None, roster: Any = None, systems: Any = None, wrap_model: Any = None,
-        agent: Path | None = None) -> dict:
+        agent: Path | None = None, review_state: dict | None = None) -> dict:
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -551,7 +551,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         store_factory=store_factory, review_stages=review_stages, bounds=bounds,
         toolset=toolset, resume=resume, source_run=source_run, defender_dir=defender_dir, tenant=tenant,
         orient_shim=orient_shim, run_state=state, clock=clock, roster=roster, systems=systems,
-        wrap_model=wrap_model, agent=agent,
+        wrap_model=wrap_model, agent=agent, review_state=review_state,
     )
     return {**summary, "run_state": state}
 
@@ -562,7 +562,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
         clock: Callable[[], Any] | None = None, roster: Any = None, systems: Any = None, wrap_model: Any = None,
-        agent: Path | None = None) -> dict:
+        agent: Path | None = None, review_state: dict | None = None) -> dict:
     """`drive`'s run (every seam as `drive` documents it), returning `run_investigation`'s own
     summary exactly as production's caller gets it. `run_state` is what the run is handed
     (`run_investigation(run_state=…)`), the caller keeping its reference; omitted, it is not
@@ -606,6 +606,8 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         seams["roster"] = roster
     if systems is not None:
         seams["systems"] = systems
+    if review_state is not None:  # the job-facts holder's dict, as `run.py` hands it on the job lane (#1342 D-ae)
+        seams["review_state"] = review_state
     # The run's tenant and per-run grants reach the driver as ONE `RunTenant`, resolved before
     # the box as `run.py` resolves it; a replay naming no tenant runs as the committed fixture
     # tenant, accepted through the real `accept_tenant`. Lead-zero dispatch identity is checked

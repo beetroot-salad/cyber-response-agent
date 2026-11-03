@@ -261,7 +261,12 @@ class VerbResolver:
             raise ScaffoldRuleError(
                 f"adapter for system {system!r} failed to import: {type(exc).__name__}: {exc}"
             ) from exc
-        if not verbs:
+        refused = self._registry.roster.unparsed.get(system)
+        if refused is not None:
+            raise ScaffoldRuleError(f"adapter for system {system!r} is refused: {refused}")
+        if not verbs and system not in self._registry.roster.no_verbs:
+            # An empty `VERBS` literal is an adapter with no agent actions (#1359 R1); no
+            # `VERBS` at all, or one that is not a dict literal, is a broken one.
             raise ScaffoldRuleError(
                 f"adapter for system {system!r} declares no verbs (empty or missing VERBS)"
             )

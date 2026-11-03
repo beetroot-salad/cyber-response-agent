@@ -30,6 +30,7 @@ from defender.tests.support.learning.retrieval._lessons_corpus import (
     _run_copy_main_deps,
     _tenant_runs,
     _write_lesson,
+    trace_main,
 )
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105
@@ -219,7 +220,7 @@ def _named(tmp_path: Path, capsys, lesson: str = "L") -> dict[str, list[str]]:
     """`trace_lesson <lesson>` over `<tmp>/lessons` and the tenant's runs (`_tenant_runs`), as
     `{case_id: cells}`."""
     tl = _tl()
-    rc = tl.main([lesson, "--lessons-dir", str(tmp_path / "lessons"),
+    rc = trace_main(tl, [lesson, "--lessons-dir", str(tmp_path / "lessons"),
                   "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
@@ -280,7 +281,7 @@ def test_the_index_counts_cases_with_a_main_read_in_a_fourth_column(tmp_path, ca
         _row("L", kind="push", role="main"), _row("M", kind="push", role="main")])
 
     tl = _tl()
-    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
+    rc = trace_main(tl, ["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     assert sorted(cap.out.splitlines()) == ["L\td\t4\t1", "M\td\t4\t0"], (
@@ -305,7 +306,7 @@ def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp
     _mk_run(runs, "list-role", [_row("L", kind="read", role=["main"])])
 
     tl = _tl()
-    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
+    rc = trace_main(tl, ["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     lines = cap.out.splitlines()

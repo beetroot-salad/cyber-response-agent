@@ -7,7 +7,7 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -184,6 +184,9 @@ def judge_calls_for(judge: Any, label: str, *, episode_dir: Path) -> list[str]:
 # The ticket lane.
 # --------------------------------------------------------------------------------------
 
+#: The ticket the planted alerts name (`closed_run_dir`'s `alert_id`), re-exported for the suites.
+from defender.tests.support.runtime.engine._spec767 import CASE_KEY  # noqa: E402,F401
+
 #: The words the two comment kinds are told apart by on the wire. `ESCALATION_MARK` is a
 #: phrase of the host's fixed escalation sentence; `UNREADABLE_MARK` is the fixed sentence the
 #: record carries when the report yields no disposition — a record with no
@@ -227,8 +230,7 @@ class TicketCall:
     @property
     def key(self) -> str:
         """The ticket key this call addressed — the path segment between `/tickets/` and the
-        verb. `open_case_ticket` writes its key in the BODY and the record addresses it in the
-        PATH, so a scenario proving the two lanes share one namespace has to read both."""
+        verb: the ticket key the alert named (#1359: the leg's only call is the comment)."""
         parts = self.path.strip("/").split("/")
         return parts[1] if len(parts) > 1 else ""
 
@@ -239,28 +241,30 @@ class TicketCall:
 
 @dataclass
 class FakeTicketSystem:
-    """The ticket system's HTTP endpoint, injected through `TicketWriterDeps`."""
+    """The case system's store behind the docker route (#1359: the writer calls the case
+    adapter, so the store is the fake `docker` of `_spec767.FakeStore`, not a seam inside the
+    writer). `status=None` makes the request die in transport (curl times out). The calls it
+    received are read off the fake's argvs once a drive has attached it."""
 
     status: str | None = "200"
     configured: bool = True
-    calls: list[TicketCall] = field(default_factory=list)
+    store: Any = None
 
-    def request(self, _config: dict[str, str], method: str, path: str,
-                body: dict | None = None, *, ctx: Any) -> tuple[str | None, str]:
-        self.calls.append(TicketCall(method, path, body))
-        if method == "GET":
-            # The writer's courtesy read-back before it comments: an open, unreleased
-            # case. The scripted fault below is about the WRITE — a note call that fails —
-            # so the read always answers.
-            return "200", json.dumps({"key": path.rsplit("/", 1)[-1], "status": "open",
-                                      "labels": [], "comments": []})
+    def attach(self, scratch: Path) -> Any:
+        from defender.tests.support.runtime.engine._spec767 import FakeStore
+        from defender.tests.tenancy.tenant_1107_settings import _spec1107
+
         if self.status is None:
-            return None, "transport error: docker exec failed"
-        return self.status, ""
+            self.store = FakeStore(scratch, answers=[_spec1107.curl_timed_out()])
+        else:
+            self.store = FakeStore(scratch, status=self.status, body="{}")
+        return self.store
 
-    def deps(self) -> Any:
-        return sym("investigation.ticket_writer", "TicketWriterDeps")(
-            request=self.request)
+    @property
+    def calls(self) -> list[TicketCall]:
+        if self.store is None:
+            return []
+        return [TicketCall(c.method, c.path, c.body) for c in self.store.calls]
 
     @property
     def writes(self) -> list[TicketCall]:
@@ -287,25 +291,19 @@ def record_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
     `**kw` is `truncated_by=` / `closed_before_cut=`, which `run.py` passes in-process from the
     driver's own summary; nothing reads them from inside the run dir."""
     fake = ticket or FakeTicketSystem()
+    scratch = Path(run_dir).parent
+    fake.attach(scratch / f"ticket-store-{len(list(scratch.glob('ticket-store-*')))}")
     mod("investigation.ticket_writer").record_case_ticket(
-        _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake), **kw)
-    return fake
-
-
-def open_ticket(run_dir: Path) -> FakeTicketSystem:
-    """Drive the REAL `open_case_ticket` — the leg that establishes the ticket key's namespace,
-    with no `report.md` anywhere on disk."""
-    fake = FakeTicketSystem()
-    mod("investigation.ticket_writer").open_case_ticket(
-        _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake))
+        _run_handle_1165(Path(run_dir)), **_handed(run_dir, fake), **kw)
     return fake
 
 
 def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
-    """What `run.py` hands both legs: the tenant record, the code tree and the run's env.
+    """What `run.py` hands the record leg: the tenant record, the code tree and the run's env
+    (the store's fake `docker` first on PATH).
 
     A configured fake gets the committed fixture tenant's record; an unconfigured one gets a
-    tenant planted beside the run with no case-history `config.env`."""
+    tenant planted beside the run with no `config.env` for its case system."""
     from defender.tests.support.tenancy import _tenants1106
     from defender.tests.tenancy.tenant_1107_settings import _spec1107
 
@@ -316,7 +314,7 @@ def _handed(run_dir: Path, fake: FakeTicketSystem) -> dict[str, Any]:
         _spec1107.plant(root, "t1047", configs={})
         record = _spec1107.resolve(root, "t1047")
     return {"tenant": record, "defender_dir": _tenants1106.DEFENDER,
-            "env": mod("box").run_env(_tenants1106.DEFENDER, Path(run_dir))}
+            "env": fake.store.env(mod("box").run_env(_tenants1106.DEFENDER, Path(run_dir)))}
 
 
 def receipt_path(run_dir: Path) -> Path:
@@ -344,8 +342,11 @@ def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bo
     run_dir.mkdir(parents=True, exist_ok=True)
     from defender.tests.support.storage._alert_plant import plant_alert
 
+    from defender.tests.support.runtime.engine._spec767 import ALERT_MAPPING
+
     plant_alert(run_dir, {"rule": {"id": ALERT_ID, "description": "lateral movement from web1"},
-                          "timestamp": "2026-09-16T11:00:00Z"})
+                          "timestamp": "2026-09-16T11:00:00Z", "alert_id": CASE_KEY},
+                mapping=ALERT_MAPPING)
     if report:
         (run_dir / "report.md").write_text(report_text(disposition), encoding="utf-8")
     return run_dir

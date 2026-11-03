@@ -126,11 +126,24 @@ _TICKET_COMMENTS_SUFFIX = ".ticket-comments.jsonl"
 #: written by run start. Host-held like the ticket receipt: the raw publish reason it may carry
 #: never enters a file the box can read, and the run page, the ticket and the API read it here.
 KNOWLEDGE_SOURCE_SUFFIX = ".knowledge-source.json"
-#: The host-only sidecar names, each `<run id><suffix>` beside the run folder in the runs base
-#: (the accounting-failures name reserved, see above).
-_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
-                     TICKET_WRITE_SUFFIX, SESSION_POINTER_SUFFIX, _CALL_JOIN_SUFFIX,
-                     _TICKET_COMMENTS_SUFFIX, KNOWLEDGE_SOURCE_SUFFIX)
+#: The job lane's files (#1342), each `<run id><suffix>` beside the run folder. The worker writes
+#: the launch record (`{investigation_id, tenant_id, alert_id, digest, label}`) and the alert's
+#: exact bytes before it starts the child; the job entry writes the job-end record (the facts the
+#: worker classifies the ending by) as it exits. All three are host-held: no box mount reaches them.
+#: Private, like the call join's: `RunPaths` hands the paths out.
+_LAUNCH_SUFFIX = ".launch.json"
+_LAUNCH_ALERT_SUFFIX = ".alert.json"
+_JOB_END_SUFFIX = ".job-end.json"
+#: The sidecar names that mean "this id was used" (#1279 O8): run setup refuses an id with any of
+#: them beside its folder (`sidecar_names`). The accounting-failures name reserved, see above.
+USED_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
+                         TICKET_WRITE_SUFFIX, SESSION_POINTER_SUFFIX, _CALL_JOIN_SUFFIX,
+                         _TICKET_COMMENTS_SUFFIX, KNOWLEDGE_SOURCE_SUFFIX, _JOB_END_SUFFIX)
+#: Every host-only sidecar name a runs folder may hold beside its run folders (`sidecar_owner`:
+#: the listing, the run-name check, the retire command). The launch record and alert file are
+#: written before the run folder exists and do not mean "used": the child's setup goes on over
+#: them. `USED_SIDECAR_SUFFIXES` is a subset (#1342).
+ACCEPTED_SIDECAR_SUFFIXES = (*USED_SIDECAR_SUFFIXES, _LAUNCH_SUFFIX, _LAUNCH_ALERT_SUFFIX)
 #: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
 #: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
 _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
@@ -466,6 +479,20 @@ class RunPaths:
         that was fresh, stale or pinned, and the publish's reason. Beside the run folder, so the
         box can neither read the reason nor forge the record."""
         return self._container(runs_base) / f"{self.run_dir.name}{KNOWLEDGE_SOURCE_SUFFIX}"
+
+    def launch_record(self, runs_base: RunsBase | None = None) -> Path:
+        """The job lane's launch record (#1342): which investigation, tenant and alert this id
+        runs, and the alert's digest and label. Written by the worker before the run exists."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_LAUNCH_SUFFIX}"
+
+    def launch_alert(self, runs_base: RunsBase | None = None) -> Path:
+        """The job lane's alert file (#1342): the alert's exact bytes, beside the launch record."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_LAUNCH_ALERT_SUFFIX}"
+
+    def job_end(self, runs_base: RunsBase | None = None) -> Path:
+        """The job entry's job-end record (#1342): the facts the worker classifies the run's
+        ending by, written create-only as the job entry exits."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_JOB_END_SUFFIX}"
 
     def session_pointer(self, runs_base: RunsBase | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the

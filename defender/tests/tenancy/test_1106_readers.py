@@ -1,29 +1,30 @@
 """Every host-side settings reader reads the injected tenant's folder, never the checkout's."""
 from __future__ import annotations
 
-from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from pathlib import Path
 
 import pytest
 
+from defender.tests.support.runtime.engine._spec767 import write_report
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
-from defender.tests.support.storage._alert_plant import plant_alert
 
 MARK = "injected"
+#: The injected tenant's comment template; the checkout's fixture carries a different one.
+INJECTED_BODY = "injected-tenant-body {disposition}"
 
 
 @pytest.fixture
 def injected(tmp_path) -> Path:
     """The injected tenant's settings folder: `<tmp root>/<T>/knowledge/settings`, every value
-    carrying `MARK`, the mapping's reporter distinct from the checkout's."""
+    carrying `MARK`, its case-record body distinct from the checkout's."""
     root = tmp_path / "injected-root"
     S.plant(
         root, T.PLAYGROUND_ID, table=T.TABLE_B, marker=MARK,
         lead_zero=T.lead_zero_text("elastic.injected-tenant-template"),
-        reporter="injected-reporter",
+        case_body=INJECTED_BODY,
     )
     td = T.accept(root, T.PLAYGROUND_ID)
     assert not td.settings.is_relative_to(T.REPO_ROOT), "the fixture root must be outside"
@@ -68,49 +69,32 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
     assert (T.FIXTURE_SETTINGS / "systems" / "cmdb" / "config.env").is_file()
 
 
-# ---- the case-history mapping --------------------------------------------------------------
+# ---- the case-record settings ----------------------------------------------------------------
 
 
-def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
-    case_ticket = T.mod("tenancy.case_ticket")
-    settings = tmp_path / "bare" / "settings"
-    settings.mkdir(parents=True)
-    with pytest.raises(case_ticket.CaseTicketError) as caught:
-        case_ticket.load_case_mapping(settings)
-    assert "the tenant's settings/systems/case-history/mapping.yaml" in str(caught.value)
-    assert str(settings) not in str(caught.value)
-    assert (T.FIXTURE_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
-
-
-def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
+def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_record(
         injected, tmp_path):
-    """The `--update-ticket` lane: the real writer, over a recording request seam, is handed
-    the run's record — and both the store it
-    addresses (`case-history/config.env`) and the payload it renders (`mapping.yaml`) are the
-    injected tenant's."""
-    writer = T.mod("investigation.ticket_writer")
-    # A run folder's name is its canonical UUID run id.
+    """The `--update-ticket` lane: the real record leg, handed the run's record, addresses the
+    injected tenant's case store (`ticket/config.env`) and renders the injected tenant's
+    `case-record.yaml` body, not the checkout's. Replaces the retired `case-history` mapping
+    reader tests (#1359 O2: the open leg and `load_case_mapping` are gone)."""
+    from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
+
     run_dir = tmp_path / fixture_uuid("run-1106")
     run_dir.mkdir()
-    plant_alert(run_dir, {"rule": {"id": "r-1", "description": "d"},
-                          "timestamp": "2026-09-26T00:00:00Z"})
-    sent: list[tuple] = []
+    C.plant_record(run_dir)
+    write_report(run_dir)  # a readable report: the injected body renders over it
+    shim = S.DockerShim(tmp_path / "shim", S.store_answers_ok())
+    S.record_step(run_dir, _record(injected), env=shim.env({}))
 
-    def request(config, method, path, body=None, *, ctx):
-        sent.append((dict(config), method, path, body, ctx))
-        return "201", "{}"
-
-    writer.open_case_ticket(
-        _run_handle_1165(run_dir), deps=writer.TicketWriterDeps(request=request), tenant=_record(injected),
-        defender_dir=T.DEFENDER, env={})
-    assert len(sent) == 1, sent
-    config, method, path, body, ctx = sent[0]
-    assert (method, path) == ("POST", "/tickets")
-    # The transport's verb context carries the SAME tenant record the config came from,
-    # handed to the request as an argument rather than carried inside the config dict.
-    assert ctx.tenant.settings == injected
-    assert config["URL_BASE"] == f"http://case-history-{MARK}:8080"
-    assert body["reporter"] == "injected-reporter"
+    posts = [c["argv"] for c in shim.calls() if "POST" in c["argv"]]
+    assert len(posts) == 1, shim.calls()
+    argv = posts[0]
+    assert S.curl_url(argv) == f"http://ticket-{MARK}:8080/tickets/{C.TICKET_KEY}/comments", argv
+    assert S.context_of(argv) == T.context_name(MARK, "ticket"), argv
+    assert any("injected-tenant-body" in a for a in argv), "the injected case-record body was not sent"
+    checkout_text = (T.FIXTURE_SETTINGS / "case-record.yaml").read_text(encoding="utf-8")
+    assert "injected-tenant-body" not in checkout_text, "the fixture no longer discriminates"
 
 
 # ---- lead-zero ---------------------------------------------------------------------------------

@@ -11,7 +11,7 @@ from defender.tests.tooling.layout_contracts import _spec1080 as S
 
 #: One anchor name per moved engine; `S.home_of` finds the module that defines it.
 ANCHORS = ("passthrough_max_bytes", "_load_payload", "usage_cost", "reexec_into_venv", "cmd_tags",
-           "match_lessons", "resolve_corpus", "load_case_mapping", "is_reserved_query_id")
+           "match_lessons", "resolve_corpus", "is_reserved_query_id")
 #: Each engine a shim's wrapper delegates to, by an anchor the engine defines.
 ENGINE_OF_SHIM = {"defender-sql": "_load_payload", "defender-lessons": "cmd_tags"}
 #: The moved module whose `__main__` block travels with it, by anchor.

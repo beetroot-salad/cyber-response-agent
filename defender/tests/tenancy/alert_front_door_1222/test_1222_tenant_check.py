@@ -1,5 +1,5 @@
 """One tenant check, the same verdict at every entry point, for the required
-`settings/alert-mapping.yaml` and the case mapping's top-level `source:` key."""
+`settings/alert-mapping.yaml` and for a legacy `systems/case-history/` folder (#1359)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
@@ -28,7 +28,9 @@ from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 ALERT_MAPPING = S.ALERT_MAPPING_REL
 #: The case-history mapping, named the way every reason naming it spells it.
 CASE_MAPPING = S.CASE_MAPPING_REL.split("/", 1)[1]
-MAPPING_NAMES = (ALERT_MAPPING, CASE_MAPPING)
+#: The file that replaced it (#1359): a reason about the retired folder names this.
+CASE_RECORD = "case-record.yaml"
+MAPPING_NAMES = (ALERT_MAPPING, CASE_MAPPING, CASE_RECORD)
 #: The old top-level section of the case mapping; a reason refusing it names it.
 SOURCE_SECTION = re.compile(r"\bsource\b")
 #: The move a `source:` refusal names: to the alert mapping, by its file name or in words.
@@ -41,7 +43,7 @@ PAST_THE_CHECK = 97
 #: How long a site may sit on the FIFO before the watcher stands in for a writer.
 FIFO_GRACE_S = 10.0
 
-SITES = ("acceptance", "setup", "check-folder", "run-start", "branch-launch", "sibling-resume",
+SITES = ("acceptance", "check-folder", "run-start", "branch-launch", "sibling-resume",
          "policy-cli")
 
 #: The alert mapping's fault shapes, `unreadable` only where the kernel can say so (non-root).
@@ -57,12 +59,12 @@ def _shape_params(shapes: Iterable[str]) -> list[Any]:
 #: Case-history mapping contents the one check refuses, as the BYTES written at its name.
 #: `unreadable` is a valid file put at mode 000 by `World.case_bytes`.
 CASE_FAULTS: dict[str, bytes | None] = {
-    "non_utf8": S.case_mapping_text().encode("utf-8").replace(
+    "non_utf8": S.legacy_case_mapping_text().encode("utf-8").replace(
         b"reporter: defender", b"reporter: d\xff\xfefender"),
     "unreadable": None,
     "unparseable_yaml": b"open: [key\ncomment: {\n",
     "not_a_mapping": b"- open\n- comment\n",
-    **{shape: S.case_mapping_text(source=text).encode("utf-8")
+    **{shape: S.legacy_case_mapping_text(source=text).encode("utf-8")
        for shape, text in S.CASE_SOURCE_SHAPES.items()},
 }
 
@@ -96,10 +98,11 @@ class World:
     def case_bytes(self, data: bytes | None) -> Path:
         """Write the case-history mapping's bytes (`None`: a valid file at mode 000)."""
         path = self.planted.case_mapping
+        path.parent.mkdir(parents=True, exist_ok=True)  # the shipped template no longer has it
         with contextlib.suppress(FileNotFoundError):
             path.unlink()
         if data is None:
-            path.write_text(S.case_mapping_text(), encoding="utf-8")
+            path.write_text(S.legacy_case_mapping_text(), encoding="utf-8")
             path.chmod(0)
         else:
             path.write_bytes(data)
@@ -110,15 +113,13 @@ class World:
 
     def case_source(self, shape: str) -> Path:
         """A case-mapping `source` shape, through the shared planter."""
-        self.case_text(S.case_mapping_text())
+        self.case_text(S.legacy_case_mapping_text())
         return S.plant_case_source(self.planted, shape)
 
     def reset(self) -> None:
-        """Back to a tenant the check accepts: the generic alert mapping, a source-free case
-        mapping."""
+        """Back to a tenant the check accepts: the generic alert mapping, no case file."""
         S.restore_modes(self.planted.settings)
         self.alert_shape("valid")
-        self.case_text(S.case_mapping_text())
 
 
 
@@ -185,17 +186,15 @@ def at_acceptance(w: World) -> Verdict:
     return Verdict("acceptance", False, "", True)
 
 
-def tenant_py(capsys: Any, *argv: str) -> tuple[int, str]:
-    """`cli/tenant.py`'s `main(argv)` in this process: its exit code and what it printed
-    on stderr (its refusals and findings, `[tenant.py] <message>` each)."""
+def tenant_py(capsys: Any, *argv: str, directory: Any = None) -> tuple[int, str]:
+    """`cli/tenant.py`'s `main(argv, directory=)` in this process: its exit code and what it printed
+    on stderr (its refusals and findings, `[tenant.py] <message>` each). `directory` defaults to
+    one that knows no tenant (`check --folder` names none; Flow 4 fails closed otherwise)."""
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
     capsys.readouterr()
-    rc = S.mod("cli.tenant").main(list(argv))
+    rc = S.mod("cli.tenant").main(list(argv), directory=directory if directory is not None else directory_for_argv(()))
     return rc, capsys.readouterr().err
-
-
-def at_setup(w: World) -> Verdict:
-    rc, err = tenant_py(w.capsys, "setup", w.planted.tenant_id)
-    return Verdict("setup", rc != 0, err, rc == 0)
 
 
 def check_folder_verdict(capsys: Any, folder: Path) -> Verdict:
@@ -224,11 +223,13 @@ def at_branch_launch(w: World) -> Verdict:
     # stamps that pinned export, not wherever `current` has moved since (another site of this
     # test may have republished the tenant): the fake live tree answers with the source's own.
     stamp = json.loads((w.source_run / "provenance.json").read_text(encoding="utf-8"))
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
     text = ""
+    argv = ["--tenant", w.planted.tenant_id, w.source_run.name, str(T.BRANCH_MESSAGE_ID)]
     try:
         S.mod("cli.learning.branch").main(
-            ["--tenant", w.planted.tenant_id, w.source_run.name,
-             str(T.BRANCH_MESSAGE_ID)],
+            argv, directory=directory_for_argv(argv),
             spawn=spawn, preflight=preflight,
             live_tree=T.source_capture(knowledge=stamp["knowledge"]))
     except SystemExit as stop:
@@ -254,8 +255,8 @@ def at_sibling_resume(w: World) -> Verdict:
         S.mod("run").main(
             ["--episode", w.episode.name, "--world", "b",
              "--tenant", w.planted.tenant_id],
-            lifecycle=lifecycle, visualize=lambda *_a, **_k: None, preflight=preflight,
-            publish=in_process_publish())
+            directory=w.planted.directory, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
+            preflight=preflight, publish=in_process_publish())
     except SystemExit as stop:
         text = _exit_text(stop)
     passed = bool(preflight.calls)
@@ -264,11 +265,12 @@ def at_sibling_resume(w: World) -> Verdict:
 
 
 def at_policy_cli(w: World) -> Verdict:
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
+
     w.capsys.readouterr()
+    argv = ["show", "gather", "--run-dir", str(w.tmp / "policy-run"), "--tenant", w.planted.tenant_id]
     try:
-        rc = S.mod("cli.policy_cli").main(
-            ["show", "gather", "--run-dir", str(w.tmp / "policy-run"),
-             "--tenant", w.planted.tenant_id])
+        rc = S.mod("cli.policy_cli").main(argv, directory=directory_for_argv(argv))
     except SystemExit as stop:
         return Verdict("policy-cli", True, _exit_text(stop), False)
     out = w.capsys.readouterr().out
@@ -277,7 +279,6 @@ def at_policy_cli(w: World) -> Verdict:
 
 DRIVERS: dict[str, Callable[[World], Verdict]] = {
     "acceptance": at_acceptance,
-    "setup": at_setup,
     "check-folder": at_check_folder,
     "run-start": at_run_start,
     "branch-launch": at_branch_launch,
@@ -449,34 +450,49 @@ def test_bad_alert_mapping_is_refused_by_the_tenant_check(tmp_path: Path, capsys
         assert vs["acceptance"].text in vs["run-start"].text, (
             "run start does not give the tenant check's own reason: "
             f"{vs['run-start'].text!r} vs {vs['acceptance'].text!r}")
-        # Every fault reported, one reason each, in a fixed order: a second fault, in the
-        # other file, joins the first.
-        w.case_source("top_level_source_populated")
-        both = verdicts(w, ("acceptance", "run-start"))
-        for v in both.values():
-            assert_refused(v, ALERT_MAPPING, CASE_MAPPING)
-        assert_no_run(both["run-start"])
-        assert both["acceptance"].text in both["run-start"].text
-        assert first_named(both["acceptance"].text) == first_named(both["run-start"].text)
-        assert at_acceptance(w).text == both["acceptance"].text, "the report's order is not fixed"
     finally:
         S.restore_modes(w.planted.root)
 
 
-@pytest.mark.parametrize("shape", sorted(S.CASE_SOURCE_SHAPES))
-def test_case_mapping_carrying_a_top_level_source_is_refused(tmp_path: Path, capsys: Any,
-                                                             shape: str) -> None:
+#: What a legacy tenant (#1359) still holds at the retired mapping, as the bytes written.
+LEGACY_RECORD = "settings/case-record.yaml"
+
+
+@pytest.mark.parametrize("shape", _shape_params(CASE_FAULTS))
+def test_a_legacy_case_history_folder_is_a_check_finding_naming_the_new_file(
+        tmp_path: Path, capsys: Any, shape: str) -> None:
+    """Whatever the retired mapping holds, `check` names `settings/case-record.yaml`; acceptance and run start go on. #1359 r4."""
     w = world(tmp_path, capsys)
-    # Positive control: a `source` field inside `open:` is ticket configuration — accepted.
-    w.case_source("open_source_field")
-    assert_passed(at_acceptance(w))
-    # The same key at the top level is the old section: refused, naming the file, the section
-    # and (the alert mapping being in place, nothing else would name it) the move to it.
-    w.case_source(shape)
-    v = at_acceptance(w)
-    assert_refused(v, CASE_MAPPING)
-    assert SOURCE_SECTION.search(v.text), f"the refusal does not name the source section: {v.text!r}"
-    assert THE_MOVE.search(v.text), f"the refusal does not name the move to the alert mapping: {v.text!r}"
+    sites = ("acceptance", "check-folder", "run-start")
+    for v in verdicts(w, sites).values():
+        assert_passed(v)  # control: with no case folder every site passes
+    try:
+        w.case_bytes(CASE_FAULTS[shape])
+        # A run starts from a published tenant, and `git add` cannot read a file at mode 000: an
+        # unreadable file never reaches a published tenant, so that shape has no run-start site.
+        planted_sites = tuple(site for site in sites if not (shape == "unreadable" and site == "run-start"))
+        vs = verdicts(w, planted_sites)
+        assert_refused(vs["check-folder"], LEGACY_RECORD)
+        assert_passed(vs["acceptance"])
+        if "run-start" in vs:
+            assert_passed(vs["run-start"])
+    finally:
+        S.restore_modes(w.planted.root)
+
+
+@pytest.mark.parametrize("entry", ["case_key: ticket.key", "case_key: alert_id"])
+def test_a_case_key_entry_is_an_alert_mapping_fact_at_every_site(
+        tmp_path: Path, capsys: Any, entry: str) -> None:
+    """A dotted `case_key` path passes every site; an unusable one is refused naming the alert mapping like any fact. #1359."""
+    w = world(tmp_path, capsys, alert_mapping=(
+        "signature: rule.id\nevent_time: detected_at\n" + entry + "\n"))
+    for v in verdicts(w, ("acceptance", "check-folder", "run-start")).values():
+        assert_passed(v)
+    for bad in ('case_key: ""', "case_key: ticket..key", "case_key: 42"):
+        w.planted.alert_mapping.write_text(
+            "signature: rule.id\nevent_time: detected_at\n" + bad + "\n", encoding="utf-8")
+        for v in verdicts(w, ("acceptance", "check-folder", "run-start")).values():
+            assert_refused(v, ALERT_MAPPING)
 
 
 # A5 — one tenant check at every entry point
@@ -486,8 +502,6 @@ A5_FAULTS: dict[str, tuple[str | None, str | None, tuple[str, ...]]] = {
     "alert-mapping-missing": ("missing_file", None, (ALERT_MAPPING,)),
     "alert-mapping-unparseable": ("unparseable_yaml", None, (ALERT_MAPPING,)),
     "alert-mapping-unknown-key": ("unknown_key", None, (ALERT_MAPPING,)),
-    "case-mapping-top-level-source": (None, "top_level_source_populated", (CASE_MAPPING,)),
-    "both-files": ("missing_file", "top_level_source_populated", (ALERT_MAPPING, CASE_MAPPING)),
 }
 
 
@@ -511,59 +525,7 @@ def test_a5_every_entry_point_gives_the_same_tenant_verdict(tmp_path: Path, caps
     assert not vs["branch-launch"].detail.launches, "a sibling was spawned on a refused tenant"
 
 
-@pytest.mark.parametrize("shape", _shape_params(CASE_FAULTS))
-def test_r7_run_start_never_carries_a_faulted_case_mapping_into_a_started_run(
-        tmp_path: Path, capsys: Any, shape: str) -> None:
-    w = world(tmp_path, capsys, launchable=True)
-    sites = ("run-start", "branch-launch", "sibling-resume")
-    # Positive control: `open.source` loads, the run starts and its tenant record carries the
-    # loaded mapping, never a kept fault; launch and resume get past the check.
-    w.case_source("open_source_field")
-    ok = verdicts(w, sites)
-    for v in ok.values():
-        assert_passed(v)
-    kept_fault = S.sym("tenancy.case_ticket", "CaseTicketError")
-    carried = ok["run-start"].detail.lifecycle_calls[0]["tenant"].ticket_mapping
-    assert not isinstance(carried, kept_fault), f"the run carried a kept fault: {carried!r}"
-    try:
-        w.case_bytes(CASE_FAULTS[shape])
-        vs = verdicts(w, sites)
-        for v in vs.values():
-            assert_refused(v, CASE_MAPPING)
-        run = vs["run-start"].detail
-        assert not run.lifecycle_calls, (
-            "a run started carrying the case mapping as a kept fault: "
-            f"{[c['tenant'].ticket_mapping for c in run.lifecycle_calls]!r}")
-        assert_no_run(vs["run-start"])
-        assert not vs["branch-launch"].detail.launches, "a sibling was opened on the tenant"
-        assert not vs["sibling-resume"].detail, "a sibling's investigation ran on the tenant"
-    finally:
-        S.restore_modes(w.planted.root)
-
-
 # Further cases
-
-def test_p095_case_mapping_carries_source_and_an_alert_mapping(tmp_path: Path,
-                                                              capsys: Any) -> None:
-    """The source: section is named as refused; nothing silently wins."""
-    w = world(tmp_path, capsys, alert_mapping={
-        "signature": "rule.uuid", "event_time": "detected_at", "summary": "rule.description"})
-    alert = S.generic_alert(rule={"id": "R-1001", "uuid": "U-7f3a", "name": "Generic outbound",
-                                  "description": "Host contacted a rare destination."})
-    w.case_text(S.case_mapping_text(source="source:\n  signature: rule.id\n"))
-    vs = {"acceptance": at_acceptance(w), "run-start": at_run_start(w, alert=alert)}
-    for v in vs.values():
-        assert_refused(v, CASE_MAPPING)
-        assert SOURCE_SECTION.search(v.text), f"{v.site} does not name the source section"
-    # Nothing won: no run, so no record carries either signature.
-    assert_no_run(vs["run-start"])
-    # Positive control: `source:` dropped, the run starts and its record holds the alert
-    # mapping's signature — the `rule.uuid` value, never `rule.id`.
-    w.case_text(S.case_mapping_text())
-    ok = at_run_start(w, alert=alert)
-    assert_passed(ok)
-    assert ok.detail.recorded("signature") == "U-7f3a"
-
 
 #: The fault shapes p102 runs through the run's own channels — one of each kind.
 P102_SHAPES = ("missing_file", "empty_file", "unparseable_yaml", "non_utf8", "directory",
@@ -581,18 +543,21 @@ def test_p102_run_starts_with_a_faulted_alert_mapping(tmp_path: Path, capsys: An
         enqueued.append((args, kw))
         return True
 
-    # Positive control: a started run opens its case ticket, records into it and is enqueued
-    # for curation — the channels a refused run must leave untouched.
-    store = S.TicketStore()
-    ok = at_run_start(w, tickets=S.ticket_writer(store), update_ticket=True, enqueue=enqueue)
+    # Positive control, on both channels a refused run must leave untouched: a started run is
+    # enqueued for curation and its record leg comments on the alert's ticket.
+    S.ticket_the_tenant(w.planted)
+    store = S.TicketStore(w.tmp)
+    ok = at_run_start(w, alert=S.ticketed_alert(), tickets=S.ticket_writer(store),
+                      update_ticket=True, enqueue=enqueue)
     assert_passed(ok)
-    assert store.opened(), "a started run opened no case ticket"
     assert enqueued, "a started run was not enqueued for curation"
+    assert store.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], store.calls
     try:
         w.alert_shape(shape)
-        store = S.TicketStore()
+        store = S.TicketStore(w.tmp)
         enqueued.clear()
-        v = at_run_start(w, tickets=S.ticket_writer(store), update_ticket=True, enqueue=enqueue)
+        v = at_run_start(w, alert=S.ticketed_alert(), tickets=S.ticket_writer(store),
+                         update_ticket=True, enqueue=enqueue)
         assert_refused(v, ALERT_MAPPING)
         assert_no_run(v)
         assert store.calls == [], f"a ticket leg ran for a refused run: {store.calls!r}"

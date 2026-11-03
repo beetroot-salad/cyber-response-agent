@@ -24,6 +24,7 @@ from defender.tests.support.sandbox._spec1092 import (
     requires_live_box,
     requires_real_box,
 )
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 SITE = "/usr/local/lib/python3.11/site-packages"
 
@@ -110,7 +111,7 @@ def test_a_command_inside_the_box_sees_defender_box_1_and_the_env_is_still_exact
 @requires_live_box
 def test_the_live_suites_duckdb_startup_probe_exits_zero_in_a_box_from_the_owned_image(tmp_path):
     run_dir = make_run_dir(tmp_path)
-    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker)
+    box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod.run_docker, tenant_id=TEST_TENANT)
     try:
         res = box_run(box, "python3 -c 'import duckdb'", cwd=Path("/"))
     finally:

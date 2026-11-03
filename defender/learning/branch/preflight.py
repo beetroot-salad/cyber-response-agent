@@ -24,6 +24,11 @@ from pathlib import Path
 from contextlib import AbstractContextManager
 from typing import Any, NamedTuple
 
+from datetime import UTC, datetime, timedelta
+
+from defender.credential_proxy import mint_request_token, signing_access
+from defender.kit.access import AccessDeclaration, RequestAccess
+from defender.kit.faults import AdapterFault, ConfigFault
 from defender.records import formats
 
 from defender.records.formats import Episode
@@ -79,7 +84,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
     """Everything that can refuse before the questioner is paid for, in one block, so an
     operator with several problems hears about them all before spending anything."""
     source_run_dir = source.run_dir
-    _check_oracle_side(oracle=oracle, verifier=verifier)
+    _check_oracle_side(oracle=oracle, verifier=verifier, tenant_id=str(source.tenant_id))
     _check_branch_point(source, branch_message_id)
     # The live tree is judged as a one-member family by `verify_family`'s own rules, before the
     # paid role preflight.
@@ -106,7 +111,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
 
 
 
-def _check_oracle_side(*, oracle: Any, verifier: Any) -> None:
+def _check_oracle_side(*, oracle: Any, verifier: Any, tenant_id: str) -> None:
     """Refuse a launch whose oracle `preflight_replay` could not configure: a bad oracle knob
     (`FatalConfigError`) or a role with no pricing row (`OraclePricingError`). The same
     functions pre-flight's `oracle_settings_with` and each world's `Oracle` call, so the rule
@@ -117,7 +122,7 @@ def _check_oracle_side(*, oracle: Any, verifier: Any) -> None:
     from defender.learning.core.config import oracle_settings_with
 
     try:
-        serving = oracle_serving(oracle_settings_with(), oracle=oracle, verifier=verifier)
+        serving = oracle_serving(oracle_settings_with(), oracle=oracle, verifier=verifier, tenant_id=tenant_id)
         price_row("oracle", serving.oracle)
         price_row("verifier", serving.verifier)
     except (FatalConfigError, OraclePricingError) as bad:
@@ -253,11 +258,15 @@ def _not_admitted(reader: Any, call: _Original) -> str | None:
 
 
 
+#: Seconds a preflight read token lives: one pass of live reads.
+PREFLIGHT_TOKEN_SEC = 3600
+
 #: The checkout's `defender/`, from this file's own location (not `$DEFENDER_DIR`).
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 
 
-def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any) -> Any:
+def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any,
+                       access: Any = None) -> Any:
     """The host-side context pre-flight's reads run in: the episode's tenant record, the
     family's branch-point clock, and no capture (pre-flight is not a run and writes no query
     row). `DEFENDER_RUNS_BASE` is the source run's container — the tenant's natural runs folder
@@ -267,15 +276,42 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any) 
 
     env = run_env(_DEFENDER_DIR, Path(episode_dir))
     env["DEFENDER_RUNS_BASE"] = source.runs_base_export()
+    proxied = ({} if access is None
+               else {"proxy_url": access.proxy_url, "request_token": access.token()})
     return VerbContext(defender_dir=_DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
-                       capture=None, tenant=tenant, as_of=as_of)
+                       capture=None, tenant=tenant, as_of=as_of, **proxied)
+
+
+def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any], *, signer: Any,  # noqa: PLR0913 — the pass's identity plus the operator's seams
+                      proxy_url: str | None, issuer_transport: Any,
+                      directory: Any) -> RequestAccess | None:
+    """A read token over the `http-proxy` systems the source run's replayable calls reach (H12),
+    signed in this process as the run does (A11, A24'), with the source run as its investigation;
+    `None` when no replayed call reaches one. With no `signer` injected, the tenant's own
+    (`request_signer`) over the episode's tenant records `directory`, the launcher's (no second
+    records read here). Curators and the author are handed none."""
+    proxied = sorted({call.system for call in replayable
+                      if isinstance(tenant.access.get(call.system), AccessDeclaration)})
+    if not proxied:
+        return None
+    if directory is None:
+        raise ConfigFault("no tenant records were handed to pre-flight to sign its read token with")
+    signer, address = signing_access(str(tenant.tenant_id), directory=directory, signer=signer,
+                                     proxy_url=proxy_url, transport=issuer_transport)
+    token = mint_request_token(
+        signer, tenant_id=str(tenant.tenant_id), investigation=source.run_dir.name,
+        grant={(system, "r") for system in proxied},
+        expires_at=datetime.now(UTC) + timedelta(seconds=PREFLIGHT_TOKEN_SEC))
+    # Pre-flight is one short pass: its one token is signed here, not on demand (r7 A20).
+    return RequestAccess(address, lambda: token)
 
 
 
 
-def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
+def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
     episode: Episode, *, source: Run, roster: Any, tenant: RunTenant, oracle: Any = None,
-    verifier: Any = None, **knobs: Any,
+    verifier: Any = None, signer: Any = None, proxy_url: str | None = None,
+    issuer_transport: Any = None, directory: Any = None, **knobs: Any,
 ) -> dict[str, Any]:
     """`Step.PREFLIGHT`: replay every original call through each fact world's oracle and
     verifier, and write the episode's write-once outcome record (`outcome.write_outcome`)."""
@@ -339,7 +375,13 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     restart_after = knobs.pop("restart_after", DEFAULT_RESTART_AFTER)
     settings = oracle_settings_with(**knobs)
     limiter = RateLimiter(settings.rate)
-    ctx = _preflight_context(episode.dir, source, tenant, family.as_of)
+    try:
+        access = _preflight_access(source, tenant, replayable, signer=signer, proxy_url=proxy_url,
+                                   issuer_transport=issuer_transport, directory=directory)
+    except AdapterFault as unsigned:
+        return record(REFUSED, f"the read token for the credential proxy cannot be signed: "
+                               f"{unsigned.detail}")
+    ctx = _preflight_context(episode.dir, source, tenant, family.as_of, access)
     resumed = {w.label: formats.resume_world_from(family, w.label, episode.dir)
                for w in fact_worlds}
     recording = Ledger.for_world(episode, resumed[fact_worlds[0].label].world_id)
@@ -406,7 +448,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
         # event loop, so the production models — each with its provider and HTTP client — are
         # never shared across loops. Only the limiter is the pass's one (S18).
         serving = oracle_serving(settings, oracle=oracle, verifier=verifier, box=box,
-                                 restart_after=restart_after)
+                                 tenant_id=str(tenant.tenant_id), restart_after=restart_after)
         registry = WorldRegistry(
             roster, tenant.grants.gather, world=world, ledger=ledger, as_of=family.as_of,
             serving=serving, oracle_dir=default_oracle_dir(world, ledger), limiter=limiter,

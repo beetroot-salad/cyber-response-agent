@@ -540,6 +540,11 @@ box = [
     { name = "libfaketime" },
     { name = "pytz" },
 ]
+database = [
+    { name = "alembic" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+]
 dev = [
     { name = "coverage" },
     { name = "httpx" },
@@ -547,23 +552,29 @@ dev = [
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pytest-testmon" },
     { name = "pytest-xdist" },
     { name = "radon" },
     { name = "ruff" },
     { name = "vulture" },
 ]
 runtime = [
+    { name = "alembic" },
     { name = "duckdb" },
     { name = "httpx" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-ai-slim", extra = ["anthropic", "mcp", "openai"] },
     { name = "pytz" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "toons" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", marker = "extra == 'api'", specifier = ">=1.13" },
+    { name = "alembic", marker = "extra == 'database'", specifier = ">=1.13" },
     { name = "coverage", marker = "extra == 'dev'" },
+    { name = "defender", extras = ["database"], marker = "extra == 'api'" },
+    { name = "defender", extras = ["database"], marker = "extra == 'runtime'" },
     { name = "duckdb", marker = "extra == 'box'", specifier = ">=1.5,<2" },
     { name = "duckdb", marker = "extra == 'runtime'", specifier = ">=1.5,<2" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
@@ -573,25 +584,26 @@ requires-dist = [
     { name = "libfaketime", marker = "extra == 'box'", specifier = "==3.0.1" },
     { name = "markdown-it-py", marker = "extra == 'dev'" },
     { name = "mypy", marker = "extra == 'dev'" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'api'", specifier = ">=3.2" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'database'", specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "mcp", "openai"], marker = "extra == 'runtime'", specifier = ">=2.43" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'api'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
+    { name = "pytest-testmon", marker = "extra == 'dev'" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.5" },
     { name = "pytz", marker = "extra == 'box'" },
     { name = "pytz", marker = "extra == 'runtime'" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "radon", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
-    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'api'", specifier = ">=2.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'database'", specifier = ">=2.0" },
     { name = "toons", marker = "extra == 'runtime'", specifier = ">=0.7,<0.8" },
     { name = "typing-extensions", specifier = ">=4.12" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.30" },
     { name = "vulture", marker = "extra == 'dev'" },
 ]
-provides-extras = ["runtime", "box", "api", "dev"]
+provides-extras = ["runtime", "box", "api", "database", "dev"]
 
 [[package]]
 name = "dnspython"
@@ -1928,6 +1940,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b1/51/a849f96e117386044471c8ec2bd6cfebacda285da9525c9106aeb28da671/pytest_cov-7.1.0.tar.gz", hash = "sha256:30674f2b5f6351aa09702a9c8c364f6a01c27aae0c1366ae8016160d1efc56b2", size = 55592, upload-time = "2026-03-21T20:11:16.284Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/7a/d968e294073affff457b041c2be9868a40c1c71f4a35fcc1e45e5493067b/pytest_cov-7.1.0-py3-none-any.whl", hash = "sha256:a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678", size = 22876, upload-time = "2026-03-21T20:11:14.438Z" },
+]
+
+[[package]]
+name = "pytest-testmon"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "coverage" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/10/c5/12ad97c49648f24768449822c5b032f87215060efa8c0cb214a1464d46d0/pytest_testmon-2.3.0.tar.gz", hash = "sha256:7bcd50afce305393edc6b530ee77a61c91949efafe0c54f799f12fe3da999623", size = 24373, upload-time = "2026-11-02T13:07:10.334Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1b/f1/0312fca79f6695ce17426e8d30df0c4c2f6efa297094ea6fd81fe7a257b4/pytest_testmon-2.3.0-py3-none-any.whl", hash = "sha256:fd541506efa483e5a217e6cc5c07c73b382619c218d1ed4ffa80584c34defd77", size = 26512, upload-time = "2026-11-02T13:07:09.07Z" },
 ]
 
 [[package]]

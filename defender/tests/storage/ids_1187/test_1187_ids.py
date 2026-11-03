@@ -234,7 +234,7 @@ def test_1279_o5_the_minted_id_is_the_first_stdout_line_before_the_ticket_and_bo
     assert ran.seen["preflight"] == "", f"stdout before setup: {ran.seen['preflight']!r}"
     assert ran.seen["lifecycle"] == line, f"stdout when the box was reached: {ran.seen['lifecycle']!r}"
     if update_ticket:
-        assert ran.seen["ticket"] == line, f"stdout when the ticket opened: {ran.seen['ticket']!r}"
+        assert ran.seen["ticket"] == line, f"stdout when the ticket lane began (run start's clear_receipt): {ran.seen['ticket']!r}"
 
 
 def test_1279_o5_the_announce_is_flushed_not_left_in_stdouts_block_buffer(tmp_path, data_root):

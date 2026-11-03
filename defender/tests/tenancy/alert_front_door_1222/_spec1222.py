@@ -10,17 +10,14 @@ import asyncio
 import contextlib
 import shutil
 from contextvars import ContextVar
-import functools
 import hashlib
 import json
 import os
 import re
 import threading
-import urllib.parse
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -41,6 +38,7 @@ from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
+from defender.tests.support.runtime.engine._spec767 import COMMENTS_SUFFIX, FakeStore  # noqa: E402, F401
 from collections.abc import Iterator
 
 _TENANT_ACME = fixture_uuid('tenant:acme')
@@ -79,7 +77,8 @@ L3 = "l-00c"
 L0 = "l-000"
 #: The tenant's alert mapping, relative to `settings/`.
 ALERT_MAPPING_REL = "alert-mapping.yaml"
-#: The case-history mapping, relative to `settings/` (a REQUIRED_SETTINGS member).
+#: The RETIRED case-history mapping, relative to `settings/` (#1359: a legacy tenant may still hold it;
+#: `tenant check` reports the folder).
 CASE_MAPPING_REL = "systems/case-history/mapping.yaml"
 #: The three facts; also the record's keys.
 FACTS = ("signature", "event_time", "summary")
@@ -184,8 +183,8 @@ def recorded_digest(run_dir: Path) -> str:
 
 def record_doc(alert: bytes, *, digest: str | None = None, **facts: str | None) -> dict[str, Any]:
     """A record in the coined shape for `alert`'s bytes: its digest (or `digest`, to plant a
-    mismatch) and the facts given (`signature=`, `event_time=`, `summary=`; omitted = absent)."""
-    unknown = set(facts) - set(FACTS)
+    mismatch) and the facts given (`signature=`, `event_time=`, `summary=`, `case_key=`; omitted = absent)."""
+    unknown = set(facts) - {*FACTS, "case_key"}
     assert not unknown, f"not a fact: {sorted(unknown)}"
     doc: dict[str, Any] = {COINED["record.digest"]: digest if digest is not None
                            else sha256_hex(alert)}
@@ -438,24 +437,63 @@ def alert_mapping_text(mapping: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-#: The case-history comment body `case_mapping_text` writes by default (no signature slot).
-PLAIN_COMMENT_BODY = "{disposition} — {cause}\\n\\n{narrative}"
-#: A comment body that ALSO renders `{signature}`, as `[sig=<value>]`: without it the record
-#: leg's signature (`read_case_record`) reaches no observable byte. Pass it as
-#: `case_mapping_text(comment_body=SIGNED_COMMENT_BODY)`; read the value back with
-#: `COMMENT_SIGNATURE`.
+#: A case-record comment body that ALSO renders `{signature}`, as `[sig=<value>]` (D-14: the
+#: template keeps every placeholder it has; the signature recorded at run start reaches the
+#: ticket only through the comment). Pass it as `plant_tenant(case_body=SIGNED_COMMENT_BODY)`;
+#: read the value back with `COMMENT_SIGNATURE`. Written as `T6.case_record_text` writes a body
+#: (YAML double-quoted, so `\\n` is a newline).
 SIGNED_COMMENT_BODY = "{disposition} — {cause} [sig={signature}]\\n\\n{narrative}"
 COMMENT_SIGNATURE = re.compile(r"\[sig=(.*?)\]")
 
+#: The ticket the suite's alerts name (#1359 P3): the member `ticket.key`, mapped by the
+#: `case_key` entry. A run names a ticket only when both are in place (`ticketed_mapping`,
+#: `ticketed_alert`); otherwise its record leg has no ticket to comment on.
+TICKET_KEY = "SOC-1222"
+TICKET_KEY_PATH = "ticket.key"
+TICKET_KEY_PATTERN = "SOC-[0-9]+"
 
-def case_mapping_text(*, source: str | None = None, open_source_field: bool = False,
-                      reporter: str = "defender",
-                      comment_body: str = PLAIN_COMMENT_BODY) -> str:
-    """A complete case-history `mapping.yaml` with no top-level `source:` unless `source`
-    names one (a literal block, e.g. `"source:\\n  signature: rule.id\\n"`, `"source:\\n"`,
-    `"source: null\\n"`). `open_source_field` adds a `source` field inside `open:` (ordinary
-    ticket configuration, never refused). `comment_body` is the record leg's comment template,
-    YAML-double-quoted as written (`SIGNED_COMMENT_BODY` renders the signature too)."""
+
+def ticketed_mapping(mapping: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """`mapping` (default `DEFAULT_MAPPING_GENERIC`) plus the `case_key` entry naming the alert's ticket."""
+    return {**(DEFAULT_MAPPING_GENERIC if mapping is None else mapping),
+            "case_key": TICKET_KEY_PATH}
+
+
+def ticketed_alert(alert: Mapping[str, Any] | bytes | None = None) -> Any:
+    """`alert` (default `generic_alert()`) naming the ticket `TICKET_KEY` at `ticket.key`. Raw bytes
+    (a JSON object, spelled as the test needs: a number literal `json.dumps` would respell) get the
+    member inserted in front, the rest untouched."""
+    if isinstance(alert, bytes):
+        head, brace, rest = alert.partition(b"{")
+        assert brace, f"not a JSON object: {alert[:40]!r}"
+        assert head.strip() == b"", f"not a JSON object: {alert[:40]!r}"
+        member = f'"ticket": {json.dumps({"key": TICKET_KEY})}'.encode()
+        return head + brace + member + (b"" if rest.strip() == b"}" else b", ") + rest
+    doc = dict(generic_alert() if alert is None else alert)
+    doc["ticket"] = {"key": TICKET_KEY}
+    return doc
+
+
+def ticket_the_tenant(planted: Planted, mapping: Mapping[str, Any] | None = None) -> Planted:
+    """Make `planted`'s runs name their ticket and render their signature in the comment: its alert
+    mapping becomes `mapping` (default: its current entries) plus `case_key`, and its case-record
+    file the one with `SIGNED_COMMENT_BODY`. Pair with `ticketed_alert`."""
+    import yaml
+
+    current = (mapping if mapping is not None
+               else yaml.safe_load(planted.alert_mapping.read_text(encoding="utf-8")))
+    remap(planted, ticketed_mapping(current))
+    (planted.settings / T6.CASE_RECORD_REL).write_text(
+        T6.case_record_text("ticket", body=SIGNED_COMMENT_BODY), encoding="utf-8")
+    return planted
+
+
+def legacy_case_mapping_text(*, source: str | None = None, open_source_field: bool = False,
+                             reporter: str = "defender") -> str:
+    """The bytes a LEGACY tenant still holds at the retired `systems/case-history/mapping.yaml`
+    (#1359: nothing reads them; `tenant check` reports the folder). `source` is a literal
+    top-level block (e.g. `"source:\\n  signature: rule.id\\n"`); `open_source_field` adds a
+    `source` field inside `open:`."""
     extra_open = '  source: "defender"\n' if open_source_field else ""
     return (source or "") + f"""\
 open:
@@ -469,7 +507,7 @@ open:
     - "evt:{{event_time}}"
 comment:
   author: defender
-  body: "{comment_body}"
+  body: "{{disposition}} — {{cause}}\\n\\n{{narrative}}"
 """
 
 
@@ -503,12 +541,19 @@ TENANT_CATALOG: dict[str, str] = T6.TENANT_CATALOG
 
 @dataclass(frozen=True)
 class Planted:
-    """One set-up tenant under a data root: `knowledge/{settings,agent}` placed, its row written,
+    """One set-up tenant under a data root: `knowledge/{settings,agent}` placed (no row: O6),
     its alert mapping and source-free case mapping in place."""
 
     root: Path
     tenant_id: str
     knowledge: Path
+
+    @property
+    def directory(self) -> Any:
+        """A `TenantDirectory` holding this tenant active with its forge wiring (#1214 Flow 4)."""
+        from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
+
+        return tenant_directory(self.root, self.tenant_id)
 
     @property
     def settings(self) -> Path:
@@ -544,7 +589,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     tenant_id: str = _TENANT_ACME, *,
     root: Path | None = None,
     alert_mapping: Mapping[str, Any] | str | None = DEFAULT_MAPPING_GENERIC,
-    case_mapping: str | None = None,
+    case_body: str = T6.COMMENT_BODY,
     table: str = TABLE_ELASTIC,
     lead_zero: str | None = None,
     configs: Mapping[str, str] | None = None,
@@ -554,7 +599,8 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     """A set-up tenant under `root` (default: this test's data root, which `run.main` resolves
     from the environment). `alert_mapping` is a dict (written by `alert_mapping_text`), raw text
     (written verbatim — for a malformed file), or None (NOT written: the missing-file shape).
-    `case_mapping` defaults to `case_mapping_text()` (no top-level `source:`). `lead_zero`
+    `case_body` is the comment template of the tenant's `settings/case-record.yaml` (`SIGNED_COMMENT_BODY`
+    also renders the signature). The tenant's ticket system accepts keys of `TICKET_KEY_PATTERN`. `lead_zero`
     defaults to the template the table's correlation holder needs. `omit_systems` drops those
     systems' `config.env` (an unconfigured system). `lessons` plants files (name -> text) in the
     tenant's own `agent/lessons/` (the checkout holds no corpus)."""
@@ -562,14 +608,15 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     if lead_zero is None:
         lead_zero = LEAD_ZERO_NON_ELASTIC if table is TABLE_NON_ELASTIC else LEAD_ZERO_ELASTIC
     texts = dict(configs) if configs is not None else T6.config_texts(tenant_id)
+    if configs is None:  # the ticket system's key grammar: the suite's `TICKET_KEY` fits it
+        texts["ticket"] = re.sub(r'(?m)^TICKET_KEY_PATTERN=.*$',
+                                 f'TICKET_KEY_PATTERN="{TICKET_KEY_PATTERN}"', texts["ticket"])
     for system in omit_systems:
         texts.pop(system, None)
     knowledge = T6.place_tenant(root, tenant_id, table=table, lead_zero=lead_zero,
-                                configs=texts)
+                                configs=texts, case_body=case_body)
     planted = Planted(root=root, tenant_id=tenant_id, knowledge=knowledge)
     (root / tenant_id / "learning").mkdir(exist_ok=True)  # setup provisions mutable state
-    planted.case_mapping.write_text(
-        case_mapping if case_mapping is not None else case_mapping_text(), encoding="utf-8")
     if isinstance(alert_mapping, str):
         planted.alert_mapping.write_text(alert_mapping, encoding="utf-8")
     elif alert_mapping is not None:
@@ -677,11 +724,11 @@ CASE_SOURCE_SHAPES = {
 
 
 def plant_case_source(planted: Planted, shape: str) -> Path:
-    """Write the case mapping in one `CASE_SOURCE_SHAPES` shape, or `open_source_field`."""
+    """Write the LEGACY case mapping (the retired folder) in one `CASE_SOURCE_SHAPES` shape, or `open_source_field`."""
     if shape == "open_source_field":
-        text = case_mapping_text(open_source_field=True)
+        text = legacy_case_mapping_text(open_source_field=True)
     else:
-        text = case_mapping_text(source=CASE_SOURCE_SHAPES[shape])
+        text = legacy_case_mapping_text(source=CASE_SOURCE_SHAPES[shape])
     planted.case_mapping.write_text(text, encoding="utf-8")
     return planted.case_mapping
 
@@ -1342,92 +1389,37 @@ class RecordingShim:
         return [a for a in self.argvs() if a and a[0] == "defender-invlang"]
 
 
-class TicketStore:
-    """The case-history store, at the ticket writer's ONE seam (`TicketWriterDeps.request`):
-    every call recorded with its outbound body, answered `status` (default 201)."""
+class TicketStore(FakeStore):
+    """The case system's store behind the docker route (`_spec767.FakeStore`: a fake `docker` on PATH
+    recording every request, answering 201), in a fresh folder under `where`. Observe it at the wire:
+    `.calls` (method, path, body), `.comment_payloads`, `.only_comment()`, `.comment_body()`."""
 
-    def __init__(self, status: str = "201", body: str = "{}") -> None:
-        self.calls: list[dict[str, Any]] = []
-        self.status = status
-        self.body = body
-
-    def request(self, config: Mapping[str, str], method: str, path: str,
-                body: dict | None = None, *, ctx: Any) -> tuple[str | None, str]:
-        self.calls.append({"method": method, "path": path, "body": body, "config": dict(config)})
-        return self.status, self.body
-
-    def opened(self) -> list[dict[str, Any]]:
-        return [c["body"] for c in self.calls if c["method"] == "POST" and c["path"] == "/tickets"]
-
-    def comments(self) -> list[dict[str, Any]]:
-        return [c["body"] for c in self.calls
-                if c["method"] == "POST" and c["path"].endswith("/comments")]
-
-    def only_open(self) -> dict[str, Any]:
-        opened = self.opened()
-        assert len(opened) == 1, f"expected one open payload, got {len(opened)}: {self.calls}"
-        return opened[0]
+    def __init__(self, where: Path, **kw: Any) -> None:
+        n = len(list(Path(where).glob("ticket-store-*")))
+        super().__init__(Path(where) / f"ticket-store-{n}", **kw)
 
 
-#: The emulated vendor label rule: Jira refuses a label with a space.
-LABEL_WITH_WHITESPACE = re.compile(r"\s")
+class _WriterOverTheShim:
+    """The REAL ticket writer, as `run.main(ticket_writer=…)` takes it, with `store`'s fake `docker`
+    first on the PATH of the env run.py hands the record leg (#1359 D-13: the writer has no request
+    seam). Every attribute is the writer's own (`clear_receipt` included; there is no open leg)."""
 
+    def __init__(self, store: TicketStore) -> None:
+        self.store = store
+        self._writer = mod("investigation.ticket_writer")
 
-class HoldingTicketStore(TicketStore):
-    """`TicketStore` with state, at the same seam: it holds the tickets it accepts (keyed by the
-    open payload's `key`); `find(label)` is the playground stub's own search (exact,
-    case-sensitive label membership). A comment on a key it never stored answers the stub's 404.
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._writer, name)
 
-    `refuse_label`: a create carrying a matching label is refused with 400 and a Jira-shaped
-    `errors.labels` body, and nothing is stored — an emulated vendor rule, not a claim about any
-    real vendor. The store decides nothing else."""
-
-    def __init__(self, *, refuse_label: re.Pattern[str] | None = None) -> None:
-        super().__init__()
-        self.refuse_label = refuse_label
-        self.tickets: dict[str, dict[str, Any]] = {}
-        self.refused: list[str] = []
-
-    def refusal_reason(self, label: str) -> str:
-        """The sentence the store's refusal body carries for `label` (its `errors.labels`)."""
-        return f"The label '{label}' contains spaces."
-
-    def request(self, config: Mapping[str, str], method: str, path: str,
-                body: dict | None = None, *, ctx: Any) -> tuple[str | None, str]:
-        self.calls.append({"method": method, "path": path, "body": body, "config": dict(config)})
-        if method == "POST" and path == "/tickets":
-            labels = [str(lbl) for lbl in (body or {}).get("labels") or []]
-            hit = [lbl for lbl in labels
-                   if self.refuse_label is not None and self.refuse_label.search(lbl)]
-            if hit:
-                self.refused.append(hit[0])
-                return "400", json.dumps({"errorMessages": [],
-                                          "errors": {"labels": self.refusal_reason(hit[0])}})
-            key = str((body or {}).get("key"))
-            self.tickets[key] = dict(body or {})
-            return "201", json.dumps({"key": key})
-        if method == "POST" and path.startswith("/tickets/") and path.endswith("/comments"):
-            key = urllib.parse.unquote(path[len("/tickets/"):-len("/comments")])
-            if key not in self.tickets:
-                return "404", json.dumps({"detail": f"ticket {key} not found"})
-            return "201", "{}"
-        return "200", "{}"
-
-    def find(self, label: str) -> list[str]:
-        """The keys of the stored tickets carrying `label` — the stub's `label in t.labels`."""
-        return [key for key, ticket in self.tickets.items()
-                if label in (ticket.get("labels") or [])]
+    def record_case_ticket(self, run: Any, **kw: Any) -> Any:
+        # An empty or absent env (a test driving the leg directly) means the process env.
+        kw["env"] = self.store.env(kw.get("env") or None)
+        return self._writer.record_case_ticket(run, **kw)
 
 
 def ticket_writer(store: TicketStore) -> Any:
-    """The REAL ticket writer's two legs bound to `store` — what `run.main(ticket_writer=…)` takes."""
-    tw = mod("investigation.ticket_writer")
-    deps = tw.TicketWriterDeps(request=store.request)
-    return SimpleNamespace(
-        open_case_ticket=functools.partial(tw.open_case_ticket, deps=deps),
-        record_case_ticket=functools.partial(tw.record_case_ticket, deps=deps),
-        store=store,
-    )
+    """The real writer over `store` — what `run.main(ticket_writer=…)` takes."""
+    return _WriterOverTheShim(store)
 
 
 class NoTicket:
@@ -1436,8 +1428,8 @@ class NoTicket:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Path]] = []
 
-    def open_case_ticket(self, run: Any, **_kw: Any) -> None:
-        self.calls.append(("open", run.run_dir))
+    def clear_receipt(self, run: Any, **_kw: Any) -> None:  # the seam's run-start method (#1359 r4)
+        self.calls.append(("clear", run.run_dir))
 
     def record_case_ticket(self, run: Any, **_kw: Any) -> None:
         self.calls.append(("record", run.run_dir))
@@ -1638,12 +1630,12 @@ def publish_planted(tmp_path: Path, planted: Planted) -> tuple[Any, str | None]:
     """Publish the planted tenant's folder as it is now, for real (`publish_once`), so the run
     has an export to read. Returns `(PublishedTenant, None)`; `(None, refusal)` when acceptance
     or the publish refuses the folder (a tenant broken on purpose); `(None, None)` when the
-    tenant was never placed (no row)."""
+    tenant was never placed (no knowledge folder)."""
     from defender.learning.author.version_control import DeliveryRefused, LockBusy
     from defender.records._tenant_id import TenantRefused
     from defender.tests.tenancy.tenant_1108_p4._support import publish_once
 
-    if not (Path(planted.root) / planted.tenant_id / "tenant.json").is_file():
+    if not (Path(planted.root) / planted.tenant_id / "knowledge").is_dir():
         return None, None
     try:
         return publish_once(Path(tmp_path) / "p4-forge", root=planted.root,
@@ -1763,6 +1755,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     if materialize is not None:
         seams["materialize"] = materialize  # run.main's setup seam (faults planted in setup)
     seams["publish"] = publish_double(d.published)
+    seams["directory"] = planted.directory
     try:
         d.rc = run_main(
             argv, lifecycle=lifecycle_fn, preflight=lambda *_a, **_k: 0,

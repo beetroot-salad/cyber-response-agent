@@ -2,6 +2,7 @@
 accounting and pricing, pre-flight worlds, pre-branch calls, esql forging checks."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -1052,7 +1053,7 @@ def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path
            "DEFENDER_BOX_RUNTIME": "runc"}
     monkeypatch.setenv("PATH", env["PATH"])
     with pytest.raises(box_oracle.BoxStartRefused):
-        box_oracle.start_oracle_box(env=env)
+        box_oracle.start_oracle_box(env=env, tenant_id=TEST_TENANT)  # B1/C8: one shared test tenant
     creates = B._creates(B._docker_argvs(argv_log))
     assert creates, "the oracle box start never reached a container create"
     checkout = box_oracle.CHECKOUT
@@ -1068,7 +1069,7 @@ def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path
     # What the runner bind exposes, file for file: the transport's modules and nothing else.
     runner = box_oracle._make_runner()
     try:
-        request = box_oracle.oracle_box_request(tmp_path / "scratch", runner, env=env)
+        request = box_oracle.oracle_box_request(tmp_path / "scratch", runner, env=env, tenant_id=TEST_TENANT)
         assert [(m.source, m.target, m.writable) for m in request.mounts] == [
             (runner, checkout, False), (tmp_path / "scratch", tmp_path / "scratch", True)]
         shipped = sorted(str(p.relative_to(runner)) for p in runner.rglob("*") if p.is_file())

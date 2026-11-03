@@ -264,18 +264,18 @@ described below. Everything that follows still runs against the committed cases.
 # Score a projection. Writes cases/<case_id>/scores/<oracle-tag>__<judge-tag>.json.
 # Exits non-zero on a lead-set mismatch — a partial projection is not a result.
 # --dry-run runs the mechanical checks only and calls no model.
-python3 evaluations/oracle_golden/score.py cases/<case_id> \
+python3 -m evaluations.oracle_golden.score cases/<case_id> \
     cases/<case_id>/projections/<tag>.yaml [--jobs 4] [--relabel] [--dry-run]
 
 # Roll every case's scores up per tag, split dev / held-out, never pooled.
-python3 evaluations/oracle_golden/report.py [--tag <tag>] [--target-lower-bound 0.90]
+python3 -m evaluations.oracle_golden.report [--tag <tag>] [--target-lower-bound 0.90]
 
 # Calibrate the label pass against the hand labels + measure its own noise floor.
-python3 evaluations/oracle_golden/audit_judge.py --repeats 5 --out audits/<name>.json
+python3 -m evaluations.oracle_golden.audit_judge --repeats 5 --out audits/<name>.json
 
 # Append a held-out result. Refuses a second entry per (case, tag), and refuses any
 # score whose tag does not name the judge recorded inside it.
-python3 evaluations/oracle_golden/record_held_out.py cases/<case_id> <tag>
+python3 -m evaluations.oracle_golden.record_held_out cases/<case_id> <tag>
 ```
 
 The replay driver drove the exact production seam (the per-lead oracle invocation and
@@ -322,13 +322,9 @@ explicit denylist, `--strict-mcp-config`, a neutral temp working directory, and
    `defender/run.py <alert.json> --tenant playground --no-learn` (the run is named by a minted
    UUID — `run.py` takes no run id since #1279; every run
    names its tenant, and there is no default — #1078;
-   clone the tenant repo into `$DEFENDER_DATA_ROOT/playground/knowledge` on the host, then,
-   once the clone exits 0, run
-   `python3 defender/cli/tenant.py setup playground` once, from the main checkout, with
-   `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as
-   the same user that runs defender; a destination already occupied makes setup refuse, naming
-   it in the message — adopting an existing (B)/(C) installation whose old entries are
-   root-owned may need setup run as root, that adoption case only).
+   the tenant is created through the lifecycle service and must be `active`, with
+   `DEFENDER_DATABASE_DSN` and `DEFENDER_DATA_ROOT` set; see "Creating a tenant" in
+   `defender/docs/development-operations.md`).
 4. Author `story.md` from that record — state **only what happened** (an invented
    step makes the oracle "wrong" for a story reason), and **nothing about the
    evaluation**: no result class, no "a faithful oracle would…", no mention of

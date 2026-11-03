@@ -10,6 +10,12 @@ from pathlib import Path
 
 import pytest
 
+# Hooks (not fixtures): take the OpenBao test-server variables out of os.environ at configure.
+from defender.tests.support.shared._openbao1163 import (  # noqa: F401
+    pytest_configure,
+    pytest_configure_node,
+)
+
 
 #: What `-n auto` means off CI. xdist's one worker per core suits a runner that owns its box,
 #: not a developer machine several sessions share (each worker grows to hundreds of MB). A set
@@ -158,8 +164,8 @@ def _test_owns_its_stores() -> Iterator[None]:
 
 @pytest.fixture
 def d9_tenant(data_root) -> str:
-    """D9's one tenant, created in this test's data root through the real `create_tenant`,
-    and returned as the id a test hands to `--tenant`."""
+    """D9's one tenant: its knowledge folder set up in this test's data root, returned as the id a test hands
+    to `--tenant`. A `str` subclass with `.directory` (#1214, O6): the only record of the tenant, for `directory=`."""
     from defender.tests.support.shared.contracts._data_root_1078 import ensure_d9_tenant
 
     return ensure_d9_tenant()

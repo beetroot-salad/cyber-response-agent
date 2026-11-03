@@ -12,16 +12,19 @@ import secrets
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import httpx
+
+    from defender.tenancy import TenantDirectory
 from defender import _io
-from defender.tenancy import Tenant, read_forge_binding
+from defender.tenancy import Tenant
+from defender.records.formats import TenantRefused
 from defender import box
 from defender.box import DockerFn, run_docker
 
-from .auth import ForgejoIdentity
+from .auth import ForgeCredential
 from .batch import Batch
 from .commits import CommitMaker, _Line
 from .exports import (
@@ -33,7 +36,7 @@ from .exports import (
     tenant_lock,
 )
 from .forgejo import PullRequest
-from .issuer import issuer_login
+from .credential import forge_credential
 from .model import (
     _PRECEDENCE,
     AgentChange,
@@ -56,32 +59,40 @@ LESSONS_BRANCH_PREFIX = "lessons/"
 
 
 @contextlib.contextmanager
-def opened_delivery(
+def opened_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-process stand-ins
     tenant: Tenant,
     *,
     defender_dir: Path,
+    directory: TenantDirectory,
+    purpose: str,
     client: httpx.Client | None = None,
-    identity: ForgejoIdentity | None = None,
-    issuer_config: Path | None = None,
+    identity: ForgeCredential | None = None,
+    credential_config: Any = None,
     issuer_transport: httpx.BaseTransport | None = None,
 ) -> Iterator[TenantDelivery]:
-    """The tenant's delivery, opened against its row's forge binding: the binding's origin;
-    `identity`, else an AppRole login with the issuer client config the binding names
-    (`issuer_config` and `issuer_transport` are in-process stand-ins); `client`, else a new
-    forge client. A client made here is closed on exit; a given one stays its caller's. An
-    unbound row is `TenantRefused`; a refused open, `DeliveryRefused` or `ForgejoAuthError`."""
-    binding = read_forge_binding(tenant)
+    """The tenant's delivery, opened against its forge wiring in the tenant records (#1214
+    Flow 4): the recorded origin; `identity`, else the tenant's forge credential for `purpose`
+    (`forge_credential`, minting through its live generation; `credential_config` and
+    `issuer_transport` are the host's issuer configuration and an in-process stand-in transport);
+    `client`, else a new forge client. A client or credential made here is closed on exit; a
+    given one stays its caller's. No wiring recorded is `TenantRefused`; a refused open,
+    `DeliveryRefused` or `ForgejoAuthError`. Publish outcomes are recorded through `directory`."""
+    wiring = directory.forge_wiring(str(tenant.id))
+    if wiring is None:
+        raise TenantRefused(f"tenant {tenant.id} has no forge wiring recorded: its repository is not bound to "
+                            "a forge")
     with contextlib.ExitStack() as owned:
         if identity is None:
-            identity = issuer_login(tenant, issuer_config=issuer_config,
-                                    transport=issuer_transport, binding=binding)
-            owned.callback(identity.client.close)
+            credential = forge_credential(str(tenant.id), purpose, directory=directory,
+                                          config=credential_config, transport=issuer_transport)
+            owned.callback(credential.close)
+            identity = credential
         if client is None:
             import httpx
 
             client = owned.enter_context(httpx.Client())
         yield TenantDelivery.open(tenant, defender_dir=defender_dir, client=client,
-                                  identity=identity, origin=binding.origin)
+                                  identity=identity, origin=wiring.origin, directory=directory)
 
 
 @dataclass(frozen=True, eq=False)
@@ -92,6 +103,9 @@ class TenantDelivery:
     defender_dir: Path
     repository: GitRepository = field(repr=False)
     branch_prefix: str = LESSONS_BRANCH_PREFIX
+    #: Where this delivery's publish outcomes are recorded (`None`: an in-process caller with no
+    #: tenant records records none).
+    directory: TenantDirectory | None = field(default=None, repr=False)
 
     @property
     def network_timeout(self) -> float:
@@ -104,11 +118,12 @@ class TenantDelivery:
         *,
         defender_dir: Path,
         client: httpx.Client,
-        identity: ForgejoIdentity,
+        identity: ForgeCredential,
         origin: str,
         network_timeout: float = NETWORK_TIMEOUT,
+        directory: TenantDirectory | None = None,
     ) -> TenantDelivery:
-        with recording(accepted_tenant, by="delivery"), _refusals():
+        with recording(directory, accepted_tenant.id, by="delivery"), _refusals():
             repository = GitRepository.open(
                 accepted_tenant.knowledge,
                 tenant_id=str(accepted_tenant.id),
@@ -118,7 +133,8 @@ class TenantDelivery:
                 network_timeout=network_timeout,
             )
             return cls(
-                tenant=accepted_tenant, defender_dir=defender_dir, repository=repository
+                tenant=accepted_tenant, defender_dir=defender_dir, repository=repository,
+                directory=directory,
             )
 
     def publish(self) -> TenantExport:
@@ -126,11 +142,11 @@ class TenantDelivery:
         and publish its export. Refuses, publishing nothing, a dirty, untracked or diverged
         clone, a tree entry under `agent/` or `settings/` that is not a regular blob, and an
         `agent/.tenant-id` not naming this tenant."""
-        with recording(self.tenant, by="delivery"), _refusals():
+        with recording(self.directory, self.tenant.id, by="delivery"), _refusals():
             self.repository.fetch()
             with tenant_lock(self.tenant):
                 export = publish_locked(self.tenant, self.repository)
-        record_published(self.tenant, export.commit, by="delivery")
+        record_published(self.directory, self.tenant.id, export.commit, by="delivery")
         return export
 
     def start_batch(self, batch_id: str, *, lanes: Sequence[str]) -> Batch:
@@ -144,14 +160,14 @@ class TenantDelivery:
             declared = _lanes(lanes)
             branch = f"{self.branch_prefix}{batch_id}"
             self._refuse_taken(batch_id, branch)
-            with recording(self.tenant, by="delivery"), _refusals():
+            with recording(self.directory, self.tenant.id, by="delivery"), _refusals():
                 self.repository.fetch()
             with tenant_lock(self.tenant):
-                with recording(self.tenant, by="delivery"), _refusals():
+                with recording(self.directory, self.tenant.id, by="delivery"), _refusals():
                     export = publish_locked(
                         self.tenant, self.repository, temporaries_only=True
                     )
-                record_published(self.tenant, export.commit, by="delivery")
+                record_published(self.directory, self.tenant.id, export.commit, by="delivery")
                 self._refuse_taken(batch_id, branch)
                 build_draft(
                     self.tenant, self.repository, batch_id, export.commit, declared

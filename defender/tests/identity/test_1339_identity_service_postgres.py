@@ -37,6 +37,11 @@ T2 = TenantId(fixture_uuid("tenant:t2"))
 AUDIT_LOGGER = "defender.identity.audit"
 
 
+def insert_active_tenant(dsn: str, tenant: str, *, wiring: bool = False) -> None:
+    """An `active` tenant row, written as test support (no port registers tenants, r9 DC-6)."""
+    execute(dsn, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, %s, 'active')", (tenant, NOW))
+
+
 class Spy:
     """Forwards every repository call and records `(name, result)`; `after[name]` runs once after that call returns."""
 
@@ -129,9 +134,9 @@ async def _build(dsn: str) -> Stack:
     repo = Spy(PostgresIdentityRepository(dsn))
     signin, mail = SignIn(), Mail()
     service = IdentityService(
-        repo, signin=signin, mail=mail, clock=lambda: NOW, bootstrap=Bootstrap(administrators=(), tenants={}))
-    for tenant in (T1, T2):
-        await repo.register_tenant(tenant, now=NOW)
+        repo, signin=signin, mail=mail, clock=lambda: NOW, bootstrap=Bootstrap(administrators=()))
+    for tenant in (T1, T2):  # active tenants are seeded through tenancy, not an identity port (r9 DC-6)
+        insert_active_tenant(dsn, str(tenant), wiring=False)
     return Stack(dsn, repo, service, signin, mail)
 
 
