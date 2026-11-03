@@ -72,22 +72,23 @@ def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
 # --- one revision, the version check ----------------------------------------------------------------
 
 
-def test_the_history_is_the_baseline_and_three_revisions_on_it_in_a_line():
+def test_the_history_is_the_baseline_and_four_revisions_on_it_in_a_line():
     """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11); #1163 adds one more, the six
-    sign columns of the generation record (A24/r8.4); #1342 puts its jobs revision on #1163's: a single line
-    baseline -> #1214's -> #1163's -> #1342's, no branch."""
+    sign columns of the generation record (A24/r8.4); #1342 puts its jobs revision on #1163's, and #1343 one on that: a single line
+    baseline -> #1214's -> #1163's -> #1342's -> #1343's, no branch. (#1343: one more revision; conflict updated)"""
     from alembic.script import ScriptDirectory
 
     from defender.migrations import _config
 
     script = ScriptDirectory.from_config(_config())
     chain = [(r.revision, r.down_revision) for r in script.walk_revisions()]  # newest first
-    assert len(chain) == 4
-    [(head_revision, sign), (sign_revision, middle), (middle_revision, down), (base, base_down)] = chain
-    assert (sign, middle, down, base, base_down) == (sign_revision, middle_revision, BASELINE, BASELINE, None)
+    assert len(chain) == 5
+    [(head_revision, jobs), (jobs_revision, sign), (sign_revision, middle), (middle_revision, down), (base, base_down)] = chain
+    assert (jobs, sign, middle, down, base, base_down) == (jobs_revision, sign_revision, middle_revision, BASELINE, BASELINE, None)
+    assert jobs_revision == "0004_jobs", "#1342's revision keeps its id"
     assert middle_revision == TENANCY, "#1214's revision keeps its id"
     assert sign_revision == SIGN_LOGIN, "#1163's revision keeps its id"
-    assert len({head_revision, sign_revision, middle_revision, BASELINE}) == 4
+    assert len({head_revision, jobs_revision, sign_revision, middle_revision, BASELINE}) == 5
     assert script.get_heads() == [head_revision], "the history branches"
 
 @pytest.mark.postgres

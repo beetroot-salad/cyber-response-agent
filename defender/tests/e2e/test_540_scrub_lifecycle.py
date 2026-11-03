@@ -143,7 +143,7 @@ class FakeDocker:
         double saw (nested mounts winning), as a real daemon resolves it; unchanged when no bind
         covers it. The run box mounts each tree at a fixed model path (`/runs/current`, …),
         so an in-box path is not the host path it reads."""
-        creates = [c.argv for c in self.calls if c.verb == "run"]
+        creates = [c.argv for c in self.calls if c.verb in ("run", "create")]
         if not creates:
             return inside
         argv = creates[-1]
@@ -606,7 +606,7 @@ def test_a_taint_outranks_the_work_s_own_failure(tmp_path):
 
 def test_box_construction_failure_refuses_the_run(tmp_path):
     run = _clean_run_dir(tmp_path)
-    docker = FakeDocker(lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", ""))
+    docker = FakeDocker(lambda verb: C43B_NAME_COLLISION if verb in ("run", "create") else (0, "", ""))
 
     with pytest.raises(BoxFault):
         start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT)

@@ -160,7 +160,7 @@ class FakeDocker:
     def __call__(self, argv: list[str], **_kw: object) -> subprocess.CompletedProcess:
         argv = list(argv)
         self.calls.append(argv)
-        if argv[:3] == ["docker", "run", "--detach"]:
+        if argv[:2] == ["docker", "create"]:   # #1343 B10: the run box is created, then started attached
             return subprocess.CompletedProcess(argv, 1, "", self.CREATE_REFUSAL)
         if argv[:3] == ["docker", "image", "inspect"]:
             return subprocess.CompletedProcess(argv, 0, "sha256:0\n", "")
@@ -170,7 +170,7 @@ class FakeDocker:
 
     @property
     def create(self) -> list[str]:
-        creates = [c for c in self.calls if c[:3] == ["docker", "run", "--detach"]]
+        creates = [c for c in self.calls if c[:2] == ["docker", "create"]]
         assert len(creates) == 1, f"expected exactly one create, saw {len(creates)}: {self.calls}"
         return creates[0]
 

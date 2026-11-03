@@ -360,7 +360,11 @@ class NoSuchImageDocker(RecordingDocker):
 
 
 def image_token(argv: list[str]) -> str:
-    """The image a create argv names: the token before `sleep infinity` on both builders."""
+    """The image a create argv names: the token before the box's main process, which is `cat` for the
+    run box (`docker create -i --rm`, #1343 B10) and `sleep infinity` for the request builder."""
+    if argv[:2] == ["docker", "create"]:
+        assert argv[-1] == "cat", argv[-3:]
+        return argv[-2]
     assert argv[-2:] == ["sleep", "infinity"], argv[-3:]
     return argv[-3]
 

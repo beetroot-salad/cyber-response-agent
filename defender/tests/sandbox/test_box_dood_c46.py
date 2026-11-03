@@ -263,7 +263,7 @@ class _CapturingDocker:
         self.create_argv: list[str] | None = None
 
     def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
-        if argv[:2] == ["docker", "run"]:
+        if argv[:2] == ["docker", "create"]:   # #1343 B10: the run box is created, then started attached
             self.create_argv = argv
             return subprocess.CompletedProcess(argv, 1, "", "create refused by the fake")
         if argv[:2] == ["docker", "inspect"]:

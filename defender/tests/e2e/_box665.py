@@ -105,6 +105,27 @@ class RecordingDocker:
         self._exec_replies = list(exec_replies or [])
         self.calls: list[list[str]] = []
         self.create_argv: list[str] | None = None
+        # #1343 B10: the run box is `docker create`d, then started by a held attached `docker start -a -i`
+        # the executor asks of the `popen=` seam (pass `popen=rec.popen`). The daemon's phase for that name:
+        # None (none), "created", then "running" once the start landed, after `start_lag` status reads.
+        self.phase: str | None = None
+        self.start_lag = 0
+        self.starter_exit: tuple[int, bytes] | None = None   # (rc, stderr): the starter dies before it ran
+        self.starters: list = []
+        self.running_seen_at: int | None = None              # len(calls) when status first answered running
+
+    def popen(self, argv, **kw):
+        """The attached-start seam: records the start and lands it (the container then reports running),
+        unless `starter_exit` says the starter dies first."""
+        from defender.tests.support.sandbox._box1343 import FakeStarter
+
+        argv = list(argv)
+        self.calls.append(argv)
+        starter = FakeStarter(argv, kw, exits=self.starter_exit)
+        self.starters.append(starter)
+        if self.starter_exit is None and self.phase == "created":
+            self.phase = "starting"
+        return starter
 
     def _inspect(self, argv: list[str]) -> subprocess.CompletedProcess:
         """`docker inspect` answers three questions, told apart by the format string as on a
@@ -118,6 +139,15 @@ class RecordingDocker:
         if "Config.Labels" not in fmt:
             if self.status is not None:
                 return _cp(0, f"{self.status}\n")
+            if self.phase == "starting":
+                if self.start_lag > 0:
+                    self.start_lag -= 1
+                    return _cp(0, "created\n")
+                self.phase = "running"
+            if self.phase is not None:
+                if self.phase == "running" and self.running_seen_at is None:
+                    self.running_seen_at = len(self.calls)
+                return _cp(0, f"{self.phase}\n")
             return _cp(1, "", "No such object\n")
         if self.existing_token is None:
             return _cp(1, "", "No such object\n")
@@ -184,10 +214,14 @@ class RecordingDocker:
             return self._inspect(argv)
         if sub == "rm":
             f = self.reap
+            if f is None:
+                self.phase = None
             return _cp(f.rc, f.stdout, f.stderr) if f else _cp(0)
-        if sub == "run":
+        if sub in ("run", "create"):
             self.create_argv = argv
             f = self.create
+            if f is None and sub == "create":
+                self.phase = "created"
             return _cp(f.rc, f.stdout, f.stderr) if f else _cp(0, "container-id\n")
         if sub == "exec":
             return self._exec(argv)
@@ -253,7 +287,7 @@ class RecordingDocker:
 def reaped_after_create(calls) -> bool:
     """Whether the container the create asked for was reaped after the create."""
     create = next(
-        (i for i, c in enumerate(calls) if len(c) > 1 and c[1] == "run"), None
+        (i for i, c in enumerate(calls) if len(c) > 1 and c[1] in ("run", "create")), None
     )
     assert create is not None, "no `docker run` was issued — the fault fired before create"
     argv = calls[create]
