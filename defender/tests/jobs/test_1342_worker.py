@@ -1432,6 +1432,40 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
     assert row(world["dsn"], good)["stage"] == "completed", "one row's fault stopped the others"
 
 
+class _StoreWhoseFinishFails:
+    """The real store, except that the first finish of one row raises before anything is written, and every finish is noted."""
+
+    def __init__(self, store, inv: str, fault: Exception) -> None:
+        self._store, self._inv, self._fault = store, inv, fault
+        self.finishes: list[tuple[str, str]] = []
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def finish(self, tenant_id, investigation_id, **kw):
+        self.finishes.append((investigation_id, kw["stage"]))
+        if investigation_id == self._inv and self._fault is not None:
+            fault, self._fault = self._fault, None
+            raise fault
+        return await self._store.finish(tenant_id, investigation_id, **kw)
+
+
+@pytest.mark.parametrize("fault_type", [ConnectionError, RuntimeError, _NobodyPlannedThis])
+async def test_o6_a_failed_write_of_a_decided_ending_never_becomes_a_worker_error(world, fault_type):
+    """The ending is decided (`completed`) and its write fails without committing: the worker writes no other verdict, the row stays running for the reclaim (#1343), and the worker goes on. (#1378)"""
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        bad = await _queued(store, ticket="T-1", key="k1")
+        good = await _queued(store, ticket="T-2", key="k2")
+        used = _StoreWhoseFinishFails(store, bad, fault_type("the connection dropped"))
+        await _worker(world, used, child).drain()
+
+    assert [stage for inv, stage in used.finishes if inv == bad] == ["completed"], \
+        "the decided ending was replaced by a second write"
+    assert row(world["dsn"], bad)["stage"] == "running"
+    assert row(world["dsn"], good)["stage"] == "completed", "one row's failed finish stopped the others"
+
+
 # --- M1: what the worker reads, and where ------------------------------------------------------------
 
 OVER_THE_LIMIT = 70 * 1024 * 1024
