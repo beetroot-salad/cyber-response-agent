@@ -130,18 +130,17 @@ class _OpenBao:
                                             headers=self._headers())
             # The proxy's own allowance covers OpenBao, not the upstream system's timeout.
             timeout = min(OPENBAO_TIMEOUT_SEC, deadline.left(what))
-            return deadline.run(what, lambda: self._acall(
-                method, rest, what, json, timeout=timeout,
-                transport=self._transport))  # type: ignore[arg-type]  # a test's MockTransport serves both
+            return deadline.run(what, lambda: self._acall(method, rest, what, json,
+                                                          timeout=timeout))
         except httpx.HTTPError as e:
             raise TransportFault(f"OpenBao at {self.addr} is unreachable for {what} "
                                  f"({type(e).__name__})") from None
 
     async def _acall(self, method: str, rest: str, what: str,  # noqa: PLR0913 — one call's parts
-                     json: Any = None, *, timeout: float = OPENBAO_TIMEOUT_SEC,
-                     transport: httpx.AsyncBaseTransport | None = None) -> httpx.Response:
+                     json: Any = None, *, timeout: float = OPENBAO_TIMEOUT_SEC) -> httpx.Response:
         try:
-            async with internal_async_client(trust=self._loop_trust, transport=transport,
+            async with internal_async_client(trust=self._loop_trust,
+                                             transport=self._transport,  # type: ignore[arg-type]  # a test's MockTransport serves both
                                              timeout=timeout) as client:
                 return await client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
