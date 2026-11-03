@@ -474,6 +474,7 @@ def test_r5_the_signing_login_is_never_taken_from_the_environment(
     run start refuses and nothing is sent to the address the environment names; a run's
     children still get no login variable. A1, A24."""
     from defender.box import run_env
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
     from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 
     _plant(data_root, proxy=("identity",))
@@ -485,9 +486,11 @@ def test_r5_the_signing_login_is_never_taken_from_the_environment(
             monkeypatch.setenv(name, value)
         rec = S.RunRecorder(tmp_path / "run")
         alert = S.plant_alert(tmp_path / "in")
+        argv = S.run_argv(alert, data_root)
+        # No live generation: the shared fixture's default sign login (#1391 _proxied1391) is withheld.
         try:
-            rc, refused = S.drive_run(S.run_argv(alert, data_root), rec,
-                                      proxy_url="http://proxy.invalid")
+            rc, refused = S.drive_run(argv, rec, proxy_url="http://proxy.invalid",
+                                      directory=directory_for_argv(argv, generations=()))
         except ConfigFault as fault:
             rc, refused = None, fault
         env = run_env(DEFENDER, tmp_path / "run")
