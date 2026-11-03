@@ -84,8 +84,10 @@ class JobStore:
         """Store an alert's exact bytes. `AlertRefused` for anything alert admission refuses; `Conflict`
         for a second alert with this vendor's ticket id; `UnknownReference` for a tenant with no row;
         `UnstorableText` for a text field PostgreSQL cannot hold."""
+        if not postgres_can_hold(tenant_id):
+            raise UnknownReference(f"no tenant {tenant_id!r}")
         _refuse_unstorable_text(vendor=vendor, vendor_ticket_id=vendor_ticket_id, title=title,
-                           description=description)
+                                description=description)
         admit(raw)
         row = AlertRow(
             id=str(uuid.uuid4()), tenant_id=tenant_id, vendor=vendor, vendor_ticket_id=vendor_ticket_id,

@@ -391,6 +391,19 @@ async def test_1379_an_alert_field_postgresql_cannot_hold_is_refused_by_name_and
     assert _count(dsn, "alerts") == 1
 
 
+@pytest.mark.parametrize("tenant", list(UNSTORABLE.values()), ids=list(UNSTORABLE))
+async def test_1379_an_alert_for_a_tenant_id_postgresql_cannot_hold_is_for_an_unknown_tenant(dsn, tenant):
+    """A tenant id is a reference, so one the database cannot hold names no tenant, as every other id does (D-a);
+    nothing is stored. (#1379 O1b)"""
+    from defender.jobs import UnknownReference
+
+    async with job_store(dsn) as store:
+        with pytest.raises(UnknownReference):
+            await store.insert_alert(tenant, vendor="splunk", vendor_ticket_id="SPL-9", fired_at=NOW, changed_at=NOW,
+                                     received_at=NOW, title="t", description="d", raw=ALERT_BYTES)
+    assert _count(dsn, "alerts") == 0
+
+
 @pytest.mark.parametrize("key", list(UNSTORABLE.values()), ids=list(UNSTORABLE))
 async def test_1379_a_request_key_postgresql_cannot_hold_is_refused_by_name_and_nothing_is_inserted(dsn, key):
     """(#1379 O1b)"""

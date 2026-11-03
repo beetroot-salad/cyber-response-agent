@@ -235,15 +235,16 @@ def test_r6_a_run_start_stopped_while_its_publish_runs_takes_the_childs_group_wi
 
 
 _LOCKED_WHEN_THE_RUN_IS_STOPPED = '''
-import pathlib, signal, sys, time
+import os, pathlib, signal, sys, time
+marks = pathlib.Path(sys.argv[1])
+signal.signal(signal.SIGTERM, lambda *_: (marks / "asked").write_text("1"))  # ignored, as the real child does while locked
+(marks / "pid").write_text(str(os.getpid()))
 from defender.learning.author.version_control import tenant_lock
 from defender.tenancy._tenant import data_root_from_path, requested_tenant
-marks = pathlib.Path(sys.argv[1])
 tenant = requested_tenant(data_root_from_path(pathlib.Path(sys.argv[4])), sys.argv[2])
-signal.signal(signal.SIGTERM, lambda *_: (marks / "asked").write_text("1"))  # ignored, as the real child does while locked
 with tenant_lock(tenant):
     (marks / "locked").write_text("1")
-    time.sleep(3)
+    time.sleep(float(sys.argv[6]))
     (marks / "finished").write_text("1")
 print("fresh " + sys.argv[5])
 '''
@@ -252,7 +253,7 @@ _RUN_START_PUBLISHING_FOR = '''
 import functools, pathlib, sys, types
 from defender import run, tenancy
 from defender.investigation.publish_launch import launch_publish
-publish = functools.partial(launch_publish, budget=60.0,
+publish = functools.partial(launch_publish, budget=float(sys.argv[5]),
                             command=[sys.executable, "-c", sys.argv[1], sys.argv[2]])
 run._publish_report(publish, types.SimpleNamespace(id=sys.argv[4]),
                     tenancy.data_root_from_path(pathlib.Path(sys.argv[3])), None)
@@ -260,32 +261,85 @@ print("the publish returned", flush=True)
 '''
 
 
-def test_1379_a_run_start_stopped_while_its_publish_holds_the_lock_waits_for_it_to_finish(
-        tenant, tmp_path, child_env):
-    """The run's SIGTERM asks the publish child to stop and waits: a child holding the tenant lock
-    finishes its locked phase (O-BUDGET) before the run exits, so teardown, which waits for the run,
-    waits for the publish too; the run still exits non-zero and never goes on. (#1379 r3 O3)"""
+def _stop_a_run_whose_publish_holds_the_lock(tenant, tmp_path, *, budget, locked_for, stops, after_lock=0.0):
+    """Run start with a publish child that takes the tenant lock at once and holds it `locked_for` seconds (ignoring
+    SIGTERM, as the real child does while locked); once it holds the lock and `after_lock` has passed, the run is sent
+    SIGTERM `stops` times. Returns the marks folder and the run's (returncode, out, err)."""
     marks = tmp_path / "marks"
     marks.mkdir()
-    code = _LOCKED_WHEN_THE_RUN_IS_STOPPED.replace("sys.argv[5]", repr(OID))
+    code = _LOCKED_WHEN_THE_RUN_IS_STOPPED.replace("sys.argv[5]", repr(OID)).replace("sys.argv[6]", repr(str(locked_for)))
     parent = subprocess.Popen(  # noqa: S603
         [sys.executable, "-c", _RUN_START_PUBLISHING_FOR, code, str(marks), str(tenant.data_root),
-         tenant.tenant_id], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+         tenant.tenant_id, str(budget)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         deadline = time.monotonic() + 30
         while not (marks / "locked").exists():
             assert parent.poll() is None, parent.communicate()
             assert time.monotonic() < deadline, "premise: the publish child never took the lock"
             time.sleep(0.02)
-        parent.send_signal(signal.SIGTERM)
-        out, err = parent.communicate(timeout=20)
+        time.sleep(after_lock)
+        for _ in range(stops):
+            parent.send_signal(signal.SIGTERM)
+            time.sleep(0.3)
+        out, err = parent.communicate(timeout=30)
     finally:
         if parent.poll() is None:
             parent.kill()
-    assert (marks / "asked").exists(), "the publish child was never asked to stop"
+        with contextlib.suppress(OSError, ValueError):  # never leave a lock holder behind on a failure
+            os.kill(int((marks / "pid").read_text()), signal.SIGKILL)
+    return marks, (parent.returncode, out, err)
+
+
+@pytest.mark.parametrize(("budget", "after_lock", "stops"), [
+    pytest.param(60.0, 0.0, 1, id="stopped within the budget"),
+    pytest.param(1.0, 1.5, 1, id="stopped after the budget ran out"),
+    pytest.param(60.0, 0.0, 3, id="stopped again while it waits"),
+])
+def test_1379_a_run_start_stopped_while_its_publish_holds_the_lock_waits_for_it_to_finish(
+        tenant, tmp_path, child_env, budget, after_lock, stops):
+    """However the run's stop arrives (within the publish budget, after it ran out, or repeated), the publish child is
+    asked to stop and, holding the tenant lock, finishes its locked phase (O-BUDGET) before the run exits; the run
+    still exits non-zero and never goes on. (#1379 r3 O3)"""
+    from defender.investigation import publish_launch
+
+    marks, (returncode, out, err) = _stop_a_run_whose_publish_holds_the_lock(  # held past the launcher's grace
+        tenant, tmp_path, budget=budget, locked_for=publish_launch._STOP_GRACE + 2 + after_lock, stops=stops,
+        after_lock=after_lock)
     assert (marks / "finished").exists(), f"the run's stop cut a lock-holding publish child: {err[-500:]!r}"
-    assert parent.returncode != 0, (out, err)
+    assert (marks / "asked").exists(), "the publish child was never asked to stop"
+    assert returncode != 0, (out, err)
     assert b"the publish returned" not in out, "a stopped run went on past its publish"
+
+
+def test_1379_a_run_start_stopped_while_its_publish_will_not_stop_kills_it_after_the_grace(tmp_path, child_env):
+    """A publish child in its network phase that ignores the run's stop is killed after the launcher's grace, with
+    its whole group, and the run exits non-zero: the run never waits on it without limit. (#1379 r3 O3)"""
+    from defender.investigation import publish_launch
+
+    pidfile = tmp_path / "child.pids"
+    stubborn = "import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" + _WAITING_CHILD
+    parent = subprocess.Popen([sys.executable, "-c", _RUN_START_PUBLISHING, stubborn, str(pidfile), str(tmp_path)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    pids: list[int] = []
+    try:
+        deadline = time.monotonic() + 30
+        while not (pidfile.exists() and len(pidfile.read_text().split()) == 2):
+            assert parent.poll() is None, parent.communicate()
+            assert time.monotonic() < deadline, "the publish child never started"
+            time.sleep(0.02)
+        pids = [int(p) for p in pidfile.read_text().split()]
+        parent.send_signal(signal.SIGTERM)
+        out, err = parent.communicate(timeout=publish_launch._STOP_GRACE + 10)
+        assert parent.returncode != 0, (out, err)
+        assert b"the publish returned" not in out, "a stopped run went on past its publish"
+        for pid in pids:
+            assert not _outlives(pid), f"process {pid} of the publish child's group outlived the stopped run"
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+        for pid in pids:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGKILL)
 
 
 def test_r6_the_publish_wait_puts_back_the_sigterm_handler_it_found():
