@@ -168,7 +168,9 @@ class JobStore:
     async def claim(self) -> Claim | None:
         """Move the oldest queued investigation (by `created_at`, ties by id) to `running`, with its
         tenant's state read in the same transaction (#1342 r7 R7-1), or `None`. A row another
-        transaction holds is skipped, never waited for."""
+        transaction holds is skipped, never waited for. The state read takes no lock: a teardown
+        that commits just after it still races the job, and the job's own tenant admission is what
+        refuses it then."""
         async with self._tx() as s:
             oldest = (select(InvestigationRow.id).where(InvestigationRow.stage == "queued")
                       .order_by(InvestigationRow.created_at, InvestigationRow.id).limit(1)
