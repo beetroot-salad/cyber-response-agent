@@ -1,0 +1,5 @@
+# contract-first rules
+
+Rules agents wrote for this project, each removing the cause behind several cache entries; written only by the plugin's `maintain-cache` skill, one rule per line.
+
+- R1 | Before hand-off, every changed test that drives a planted or published tenant has run its own setup and preconditions up to its own assertions. When the contract changes what base tenant loading requires (`tenancy/_tenants.REQUIRED_SETTINGS`, `records/_alert_input.FACT_KEYS`, the committed `knowledge/tenant-fixture`), run those tests (through `defender-pytest`) under an uncommitted pytest plugin, kept in the run's working record, that patches only those loading facts over base; a red that stops at base acceptance (`TenantRefused`, `AlertMappingFault`) is stopped early, not evidence about the test | why: the committed fixture ships ahead of the base product, so every run.main or published-tenant test stops at acceptance and defects in its setup (planting-helper semantics, acceptance rules in front of the leg) stay hidden until the code stage; #1359's RC-1, RC-2 and RC3-2 surfaced only through a reviewer's probes and `sim1359.py`-style plugin | src: #1359
