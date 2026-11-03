@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from defender import tenancy
-from defender._internal_http import internal_client
+from defender._internal_http import internal_client, tls_trust
 from defender.configuration.issuer import DEPLOYMENT_ISSUER, TRANSIT_MOUNT
 from defender.credential_proxy._openbao import OPENBAO_TIMEOUT_SEC, openbao_fault, transit_key_for
 from defender.kit.access import PROXY_URL_ENV
@@ -79,7 +79,7 @@ class TenantRequestSigner:
 
     def _client(self) -> httpx.Client:
         if self._http is None:
-            self._http = internal_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert, transport=self._transport,
+            self._http = internal_client(trust=tls_trust(DEPLOYMENT_ISSUER.ca_cert), transport=self._transport,
                                          timeout=OPENBAO_TIMEOUT_SEC)
         return self._http
 

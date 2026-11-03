@@ -336,3 +336,43 @@ def test_o1_the_proxys_allowance_cannot_exceed_what_the_caller_waits_for(tmp_pat
     with pytest.raises(ConfigFault):
         T.deps(tmp_path, H.FakeStore(), proxy_overhead_sec=overhead)
     T.deps(tmp_path, H.FakeStore(), proxy_overhead_sec=access.PROXY_OVERHEAD_SEC)
+
+
+# --- #1375 O1: no network leg builds a TLS context ----------------------------------------------
+
+def test_1375_o1_a_request_builds_no_tls_context_on_any_leg(tmp_path, data_root):
+    """#1375 O1: building a TLS context loads a trust store and blocks the event loop every leg
+    runs on, so the proxy builds its contexts once, with the app and its OpenBao adapters, and a
+    request (the first included) builds none, on any of its four legs: the token check and the
+    credential read at OpenBao, the token exchange and the upstream call."""
+    import ssl
+
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    openbao = proxy()
+    issued: list[str] = []
+    with H.upstream() as auth, H.upstream() as bao, T.rig(
+            tmp_path / "forge", data_root, lambda u: H.declaration(
+                u + API, scheme=H.oauth_scheme(auth.url + "/token")), creds=T.oauth_set()) as r:
+        auth.replies["/token"] = H.token_endpoint(issued)
+        held = T.oauth_set()
+        oauth = json.dumps({"data": {"data": {"kind": held.kind, "fields": held.fields},
+                                     "metadata": {"version": held.version}}}).encode()
+        bao.replies[f"/v1/secret/data/{r.t.tenant_id}/identity"] = (
+            200, {"Content-Type": "application/json"}, oauth)
+        bao.replies[f"/v1/transit/verify/{openbao.transit_key_for(r.t.tenant_id)}"] = (
+            200, {"Content-Type": "application/json"}, _VERIFY_REPLY)
+        client = T.client_of(T.deps(
+            r.data_root, openbao.OpenBaoStore(addr=bao.url, token="t", mount="secret"),
+            verifier=openbao.TransitVerifier(addr=bao.url, token="t"), audit=r.audit))
+        # Counted on every thread the request runs on: the TestClient, not entered as a context
+        # manager, starts a fresh event-loop thread per request, inside this block. Every route to a
+        # context today (httpx's, httpcore's default, `tls_trust`) passes `create_default_context`.
+        with counting_calls(context=ssl.create_default_context) as calls:
+            answer = T.ask(client, r.tok(), "identity", "GET", f"{r.up.url}{API}/users/x",
+                           None, None, 5)
+
+    assert answer["fault"] is None, answer
+    assert (len(bao.seen), len(issued), r.up.paths()) == (2, 1, [f"{API}/users/x"]), \
+        "control: every leg ran"
+    assert calls["context"] == 0, f"a request built {calls['context']} TLS contexts"
