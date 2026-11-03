@@ -102,8 +102,9 @@ def read_knowledge_status(record: Path, stamp: Path) -> KnowledgeStatus | None:
     return knowledge_status(text, stamp_names_source=True)
 
 
-#: The API's word for a fresh export: the latest approved knowledge.
-API_CURRENT = "current"
+#: The API's word for a fresh export: the latest approved knowledge (also spelled in
+#: `api.models.KnowledgeStatus`; records sits below the API and cannot import it).
+_API_CURRENT = "current"
 
 
 def api_knowledge(status: KnowledgeStatus | None) -> dict[str, str | None] | None:
@@ -113,12 +114,12 @@ def api_knowledge(status: KnowledgeStatus | None) -> dict[str, str | None] | Non
     `None` stays `None`: no status to show."""
     if status is None:
         return None
-    return {"status": API_CURRENT if status.kind == FRESH else status.kind,
+    return {"status": _API_CURRENT if status.kind == FRESH else status.kind,
             "commit": status.commit, "stale_kind": status.stale_kind}
 
 
 __all__ = [
-    "API_CURRENT", "FRESH", "OPERATOR", "PINNED", "STALE", "TRANSIENT", "UNREADABLE",
+    "FRESH", "OPERATOR", "PINNED", "STALE", "TRANSIENT", "UNREADABLE",
     "UNREADABLE_REASON", "KnowledgeStatus", "api_knowledge", "knowledge_status",
     "read_knowledge_status",
 ]
