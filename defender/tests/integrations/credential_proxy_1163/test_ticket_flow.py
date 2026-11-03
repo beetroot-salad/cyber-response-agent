@@ -173,3 +173,53 @@ def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport
     assert "access.yaml" not in reason, reason
     assert tap.tokens == [tok]
     assert up.seen == []
+
+
+def test_t8_a_proxy_the_leg_cannot_use_is_named_in_the_receipt_not_the_store(tmp_path, data_root):
+    """#1404: a proxy that is down or answers a non-200 status (readable or not) is "the
+    credential proxy could not be reached; check that it is running"; a call handed no proxy
+    address is "the run was not given the credential proxy's address or token"; neither blames
+    the store, and nothing reaches it. Control: a store down behind a healthy proxy is still "the
+    store could not be reached", and the proxy is not blamed. O5."""
+    unreachable = "the credential proxy could not be reached; check that it is running"
+    unwired = "the run was not given the credential proxy's address or token"
+    with H.upstream() as up, H.upstream() as broken, _published(
+            tmp_path / "forge", data_root, _decl(up)) as t:
+        broken.replies["/v1/request"] = (502, {}, b"bad gateway")
+        store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
+        tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+        cases = {
+            "proxy-down": (f"http://127.0.0.1:{H.free_port()}", unreachable),
+            "proxy-502": (broken.url, unreachable),
+            "no-address": (None, unwired),
+        }
+        for name, (url, expected) in cases.items():
+            rec, run = _run(tmp_path / name)
+            receipt = _leg(t, run, rec, url, tok)
+            assert receipt is not None, name
+            assert (receipt["ok"], receipt["status"]) == (False, "error"), (name, receipt)
+            reason = receipt.get("reason") or ""
+            assert reason.startswith(expected), (name, reason)
+            assert "the store" not in reason, (name, reason)
+        assert len(broken.seen) == 1, "positive control: the 502 proxy was called"
+        assert up.seen == [], "the store was reached"
+
+        # A proxy answering a readable body with a non-200 status is still the proxy's failure.
+        broken.replies["/v1/request"] = (503, {"Content-Type": "application/json"}, json.dumps(
+            {"status": 0, "headers": {}, "body": "", "fault": None, "detail": ""}).encode())
+        rec, run = _run(tmp_path / "proxy-503-json")
+        reason = (_leg(t, run, rec, broken.url, tok) or {}).get("reason") or ""
+        assert reason.startswith(unreachable), reason
+
+    # Control: the proxy is healthy and the store behind it is down.
+    down = H.declaration(f"http://127.0.0.1:{H.free_port()}{STORE}", writes=WRITES)
+    with _published(tmp_path / "forge-down", data_root, down) as t:
+        store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
+        tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+        rec, run = _run(tmp_path / "store-down")
+        with A.proxy_for(t, store) as (url, tap):
+            receipt = _leg(t, run, rec, url, tok)
+        assert tap.tokens == [tok], "positive control: the proxy was called"
+    reason = (receipt or {}).get("reason") or ""
+    assert reason.startswith("the store could not be reached"), reason
+    assert "credential proxy could not be reached" not in reason, reason

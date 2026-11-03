@@ -12,7 +12,7 @@ import pytest
 
 from defender.integrations import _stub_transport as transport
 from defender.integrations import identity_adapter
-from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
+from defender.kit.faults import AdapterFault, ConfigFault, ProxyUnreachableFault, TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
@@ -57,7 +57,7 @@ def test_x1_a_refused_query_shows_neither_the_token_nor_its_signature(
             direct = httpx.post(url + PROXY_PATH, headers={"Authorization": f"Bearer {tok}"},
                                 json=body).text if reachable else ""
 
-    assert type(raised.value) is (ConfigFault if reachable else TransportFault), raised.value
+    assert type(raised.value) is (ConfigFault if reachable else ProxyUnreachableFault), raised.value
     assert str(raised.value).strip(), "positive control: the fault has a text"
     if reachable:
         assert tap.tokens == [tok, tok], "positive control: the proxy was sent the token"

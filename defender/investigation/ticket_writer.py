@@ -11,7 +11,8 @@ import logging
 from collections.abc import Mapping
 from pathlib import Path
 
-from defender.kit.faults import AdapterFault, ConfigFault, TransportFault, UpstreamFault
+from defender.kit.faults import (
+    AdapterFault, ConfigFault, ProxyUnreachableFault, ProxyUnwiredFault, TransportFault, UpstreamFault)
 from defender.kit.settings import config_pointer
 from defender.records import Run, RunPaths, formats, run_end
 from defender.systems import case_system
@@ -156,6 +157,11 @@ def _fault_reason(fault: AdapterFault, *, tenant: RunTenant, system: str) -> str
         status = fault.status
         shown = "" if status is None else f" (HTTP {status}{', not found' if status == 404 else ''})"
         return f"the store refused the comment{shown}: {detail}"
+    if isinstance(fault, ProxyUnwiredFault):
+        return ("the run was not given the credential proxy's address or token; check the host's "
+                f"proxy settings: {detail}")
+    if isinstance(fault, ProxyUnreachableFault):
+        return f"the credential proxy could not be reached; check that it is running: {detail}"
     if isinstance(fault, TransportFault):
         return f"the store could not be reached: {detail}"
     if fault.from_proxy:

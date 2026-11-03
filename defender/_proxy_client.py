@@ -13,7 +13,7 @@ import httpx
 
 from defender._internal_http import internal_client, tls_trust
 from defender.kit.access import HTTP_PROXY, caller_wait_sec
-from defender.kit.faults import ConfigFault, TransportFault
+from defender.kit.faults import ConfigFault, ProxyUnreachableFault, ProxyUnwiredFault
 from defender.kit.settings import system_prefix
 from defender.kit.verbs import VerbContext
 
@@ -42,10 +42,11 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
 ) -> ProxyAnswer:
     """POST the request to the proxy with `token` and the system's `timeout_sec`, which the proxy
     runs the request inside (r7 A21); this call waits past the proxy's whole deadline.
-    `TransportFault` when no address or token was handed to the caller, the proxy cannot be
-    reached, or its answer is not the proxy's."""
+    `ProxyUnwiredFault` when no address or token was handed to the caller;
+    `ProxyUnreachableFault` when the proxy cannot be reached or its answer is not the proxy's
+    (both `TransportFault`)."""
     if not proxy_url or not token:
-        raise TransportFault("no credential proxy address or request token was handed to this call")
+        raise ProxyUnwiredFault("no credential proxy address or request token was handed to this call")
     try:
         response = _client().post(
             proxy_url.rstrip("/") + PROXY_PATH, headers={"Authorization": f"Bearer {token}"},
@@ -53,7 +54,7 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
                   "headers": dict(headers or {}), "body": body, "timeout_sec": timeout_sec},
             timeout=caller_wait_sec(timeout_sec))
     except httpx.HTTPError as e:
-        raise TransportFault(f"credential proxy unreachable: {type(e).__name__}") from None
+        raise ProxyUnreachableFault(f"credential proxy unreachable: {type(e).__name__}") from None
     try:
         data = response.json()
         answer = ProxyAnswer(
@@ -61,11 +62,11 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
             body=str(data.get("body") or ""), fault=data.get("fault"),
             detail=str(data.get("detail") or ""))
     except (ValueError, KeyError, TypeError):
-        raise TransportFault(
+        raise ProxyUnreachableFault(
             f"credential proxy answered HTTP {response.status_code} with no usable answer"
         ) from None
     if response.status_code != 200:
-        raise TransportFault(f"credential proxy answered HTTP {response.status_code}")
+        raise ProxyUnreachableFault(f"credential proxy answered HTTP {response.status_code}")
     return answer
 
 
