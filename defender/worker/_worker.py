@@ -44,6 +44,11 @@ _logger = logging.getLogger(__name__)
 #: How long an idle serving worker waits between claims (M10: a fixed interval, no NOTIFY).
 POLL_INTERVAL = 1.0
 
+#: How many times the worker tries to write a row's decided ending, and the pause between tries
+#: (#1378): a store fault can delay a verdict, never change it.
+FINISH_ATTEMPTS = 3
+FINISH_RETRY_DELAY = 0.5
+
 _RUN_PY = Path(__file__).resolve().parents[1] / "run.py"
 
 _FAILED, _COMPLETED, _UNPARSEABLE = "failed", "completed", "unparseable"
@@ -76,7 +81,8 @@ class _Ending:
     failure_message: str | None = None
 
 
-# The ending a row's task decided, with its cost and knowledge; `None` when nothing is to be written (D3).
+# The ending a row's task decided, with its cost and knowledge. Where a task may write nothing
+# (D3), its result is `_Decided | None`.
 _Decided = tuple[_Ending, float | None, dict | None]
 
 
@@ -297,14 +303,29 @@ class Worker:
                                    failure_message="the worker failed while running the job"), None, None)
             if decided is None:
                 return
-            # The one write of the row's ending, outside the catch-all above: a fault here never
-            # turns a decided ending into another one (#1378).
-            ending, cost, knowledge = decided
+            await self._write_ending(record, decided)
+
+    async def _write_ending(self, record: Any, decided: _Decided) -> None:
+        """The one write of a row's decided ending, outside `_run_row`'s catch-all, tried up to
+        `FINISH_ATTEMPTS` times with the same values (#1378): a store fault never turns a decided
+        ending into another one. A try that committed though its answer was lost makes the next
+        a no-op (`_finish`: the row is no longer running)."""
+        inv = record.investigation_id
+        ending, cost, knowledge = decided
+        for attempt in range(1, FINISH_ATTEMPTS + 1):
             try:
                 await self._finish(record, ending, cost=cost, knowledge=knowledge)
-            except Exception:  # noqa: BLE001 — the row stays running; #1343 reclaims it
-                _logger.exception("investigation %s: its %s ending could not be recorded; the row stays running",
-                                  inv, ending.stage)
+                return
+            except Exception:  # noqa: BLE001 — one row's fault never ends the worker
+                if attempt == FINISH_ATTEMPTS:
+                    # #1343 reclaims a row left running
+                    _logger.exception("investigation %s: its %s ending could not be recorded after %d tries; "
+                                      "unless a try committed and only its answer was lost, the row is "
+                                      "still running", inv, ending.stage, attempt)
+                    return
+                _logger.warning("investigation %s: writing its %s ending failed (try %d of %d); retrying",
+                                inv, ending.stage, attempt, FINISH_ATTEMPTS, exc_info=True)
+            await asyncio.sleep(FINISH_RETRY_DELAY)
 
     async def _run_claimed(self, record: Any, tenant_state: str) -> _Decided | None:
         """Run one claimed row and decide its ending; the caller writes it (`_run_row`)."""
@@ -420,7 +441,7 @@ class Worker:
         elif reaped != Reaped.ABSENT:
             _logger.error("investigation %s: the backstop's answer for %s was %r", inv, name, reaped)
 
-    def _read_ending(self, record: Any, returncode: int) -> tuple[_Ending, float | None, dict | None]:
+    def _read_ending(self, record: Any, returncode: int) -> _Decided:
         """The stage, cost and knowledge from the host records, through the job lane (in a thread)."""
         inv = record.investigation_id
         try:

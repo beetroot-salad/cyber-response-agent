@@ -1433,37 +1433,98 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
 
 
 class _StoreWhoseFinishFails:
-    """The real store, except that the first finish of one row raises before anything is written, and every finish is noted."""
+    """The real store, except that one row's first `fails` finishes raise, and every finish is noted. With `commit`, each failing finish first writes, then loses its answer; with `alert_missing`, that row's alert reads as absent."""
 
-    def __init__(self, store, inv: str, fault: Exception) -> None:
+    def __init__(self, store, inv: str, fault: Exception, *, fails: int, commit: bool = False,
+                 alert_missing: bool = False) -> None:
         self._store, self._inv, self._fault = store, inv, fault
-        self.finishes: list[tuple[str, str]] = []
+        self._fails, self._commit, self._alert_missing = fails, commit, alert_missing
+        self.finishes: list[tuple[str, dict]] = []
 
     def __getattr__(self, name):
         return getattr(self._store, name)
 
+    async def get_alert(self, tenant_id, alert_id):
+        if self._alert_missing and alert_id == (await self._store.get_investigation(tenant_id, self._inv)).alert_id:
+            return None
+        return await self._store.get_alert(tenant_id, alert_id)
+
     async def finish(self, tenant_id, investigation_id, **kw):
-        self.finishes.append((investigation_id, kw["stage"]))
-        if investigation_id == self._inv and self._fault is not None:
-            fault, self._fault = self._fault, None
-            raise fault
+        self.finishes.append((investigation_id, kw))
+        if investigation_id == self._inv and self._fails > 0:
+            self._fails -= 1
+            if self._commit:
+                await self._store.finish(tenant_id, investigation_id, **kw)
+            raise self._fault
         return await self._store.finish(tenant_id, investigation_id, **kw)
 
+    def tries(self, inv: str) -> list[tuple]:
+        return [(kw["stage"], kw["failure_reason"], kw["cost_usd"]) for i, kw in self.finishes if i == inv]
 
-@pytest.mark.parametrize("fault_type", [ConnectionError, RuntimeError, _NobodyPlannedThis])
-async def test_o6_a_failed_write_of_a_decided_ending_never_becomes_a_worker_error(world, fault_type):
-    """The ending is decided (`completed`) and its write fails without committing: the worker writes no other verdict, the row stays running for the reclaim (#1343), and the worker goes on. (#1378)"""
+
+async def _run_with_failing_finish(world, fault, **kw) -> tuple[str, str, _StoreWhoseFinishFails]:
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
         bad = await _queued(store, ticket="T-1", key="k1")
         good = await _queued(store, ticket="T-2", key="k2")
-        used = _StoreWhoseFinishFails(store, bad, fault_type("the connection dropped"))
+        used = _StoreWhoseFinishFails(store, bad, fault, **kw)
+        await _worker(world, used, child).drain()
+    assert row(world["dsn"], good)["stage"] == "completed", "one row's failed finish stopped the others"
+    return bad, good, used
+
+
+@pytest.mark.parametrize("fault_type", [ConnectionError, RuntimeError, _NobodyPlannedThis])
+async def test_o6_a_decided_ending_whose_write_fails_once_is_written_again_unchanged(world, fault_type):
+    """The ending is decided (`completed`) and its write fails without committing: the worker writes the same ending again, never another verdict. (#1378)"""
+    bad, _, used = await _run_with_failing_finish(world, fault_type("the connection dropped"), fails=1)
+
+    tries = used.tries(bad)
+    assert [t[:2] for t in tries] == [("completed", None)] * 2, "the decided ending was replaced"
+    assert tries[0] == tries[1]
+    assert row(world["dsn"], bad)["stage"] == "completed"
+
+
+async def test_o6_a_decided_ending_whose_write_keeps_failing_is_tried_a_bounded_number_of_times_and_the_row_left_running(
+        world):
+    """Every write of the decided ending fails: exactly `FINISH_ATTEMPTS` tries, all the same ending, and the row stays running for the reclaim (#1343); the worker goes on. (#1378)"""
+    from defender.worker._worker import FINISH_ATTEMPTS
+
+    bad, _, used = await _run_with_failing_finish(world, ConnectionError("the database is gone"), fails=99)
+
+    assert FINISH_ATTEMPTS > 1
+    assert [t[0] for t in used.tries(bad)] == ["completed"] * FINISH_ATTEMPTS
+    assert row(world["dsn"], bad)["stage"] == "running"
+
+
+async def test_o6_a_decided_ending_that_committed_but_lost_its_answer_is_not_changed_by_the_retry(world):
+    """The first write commits and only its answer is lost: the retry changes nothing, the row keeps that ending. (#1378)"""
+    bad, _, used = await _run_with_failing_finish(world, ConnectionError("the answer was lost"), fails=1, commit=True)
+
+    assert [t[0] for t in used.tries(bad)] == ["completed", "completed"]
+    stored = row(world["dsn"], bad)
+    assert (stored["stage"], stored["failure_reason"]) == ("completed", None)
+
+
+@pytest.mark.parametrize("path", ["worker-fault", "catch-all"])
+async def test_o6_a_worker_error_ending_whose_write_fails_is_retried_unchanged_and_never_rewritten(world, path):
+    """A `failed`/`worker_error` ending (from a worker fault before the child, or from the catch-all) whose write fails: retried with the same values, then the row is left running; no other ending is written. (#1378)"""
+    from defender.worker._worker import FINISH_ATTEMPTS
+
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        bad = await _queued(store, ticket="T-1", key="k1")
+        if path == "worker-fault":
+            used = _StoreWhoseFinishFails(store, bad, ConnectionError("dropped"), fails=99, alert_missing=True)
+        else:
+            alert_id = (await store.get_investigation(T1, bad)).alert_id
+            used = _StoreWhoseFinishFails(_StoreWhoseAlertReadFails(store, alert_id, _NobodyPlannedThis("x")),
+                                          bad, ConnectionError("dropped"), fails=99)
         await _worker(world, used, child).drain()
 
-    assert [stage for inv, stage in used.finishes if inv == bad] == ["completed"], \
-        "the decided ending was replaced by a second write"
+    expect_cost = 0.0 if path == "worker-fault" else None
+    assert used.tries(bad) == [("failed", "worker_error", expect_cost)] * FINISH_ATTEMPTS
     assert row(world["dsn"], bad)["stage"] == "running"
-    assert row(world["dsn"], good)["stage"] == "completed", "one row's failed finish stopped the others"
+    assert child.seen(bad) is None, "a child started for a row that failed before its launch"
 
 
 # --- M1: what the worker reads, and where ------------------------------------------------------------
