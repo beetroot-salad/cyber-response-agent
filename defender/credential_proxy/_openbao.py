@@ -88,11 +88,11 @@ def openbao_fault(status: int, detail: str) -> AdapterFault:
 
 class _OpenBao:
     """One login's calls to one OpenBao server. The token is never shown. `transport` is a test's
-    `httpx` transport (none: the network); inside a proxied request the call is made
-    asynchronously, so a test's transport must serve both (`httpx.MockTransport` does)."""
+    `httpx.MockTransport` (none: the network): it serves the synchronous calls and the
+    asynchronous ones (the secret port's, and any made inside a proxied request)."""
 
     def __init__(self, *, addr: str, token: str, mount: str,
-                 transport: httpx.BaseTransport | None = None) -> None:
+                 transport: httpx.MockTransport | None = None) -> None:
         if not isinstance(addr, str) or not addr.startswith(("http://", "https://")):
             raise ConfigFault("the OpenBao address must be an http(s) URL")
         if not isinstance(token, str) or not token or not token.isprintable():
@@ -128,20 +128,15 @@ class _OpenBao:
             if deadline is None:
                 return self._client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
-            # The proxy's own allowance covers OpenBao, not the upstream system's timeout.
-            timeout = min(OPENBAO_TIMEOUT_SEC, deadline.left(what))
-            return deadline.run(what, lambda: self._acall(method, rest, what, json,
-                                                          timeout=timeout))
+            return deadline.run(what, lambda: self._acall(method, rest, what, json))
         except httpx.HTTPError as e:
             raise TransportFault(f"OpenBao at {self.addr} is unreachable for {what} "
                                  f"({type(e).__name__})") from None
 
-    async def _acall(self, method: str, rest: str, what: str,  # noqa: PLR0913 — one call's parts
-                     json: Any = None, *, timeout: float = OPENBAO_TIMEOUT_SEC) -> httpx.Response:
+    async def _acall(self, method: str, rest: str, what: str, json: Any = None) -> httpx.Response:
         try:
-            async with internal_async_client(trust=self._loop_trust,
-                                             transport=self._transport,  # type: ignore[arg-type]  # a test's MockTransport serves both
-                                             timeout=timeout) as client:
+            async with internal_async_client(trust=self._loop_trust, transport=self._transport,
+                                             timeout=OPENBAO_TIMEOUT_SEC) as client:
                 return await client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
         except httpx.HTTPError as e:
@@ -230,7 +225,7 @@ class TransitVerifier(_OpenBao):
     destroyed (offboarded) is refused by OpenBao, `ConfigFault`."""
 
     def __init__(self, *, addr: str, token: str,
-                 transport: httpx.BaseTransport | None = None) -> None:
+                 transport: httpx.MockTransport | None = None) -> None:
         super().__init__(addr=addr, token=token, mount=TRANSIT_MOUNT, transport=transport)
 
     def verify(self, payload: bytes, signature: str, *, tenant_id: str) -> bool:

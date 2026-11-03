@@ -439,7 +439,7 @@ def _openbao_token(config: Mapping[str, Any]) -> str:
 
 
 def create_app_from_config(config: Mapping[str, Any], *, openbao_addr: str | None = None,
-                           transport: httpx.BaseTransport | None = None) -> FastAPI:
+                           transport: httpx.MockTransport | None = None) -> FastAPI:
     """The shipped proxy from the operator's settings: the OpenBao store and transit verifier
     (the proxy role's token, `kv_mount`), the data root whose tenants' `exports/` folders it reads
     (`data_root`, read only) and the append-only audit file (`audit_path`). OpenBao is the
