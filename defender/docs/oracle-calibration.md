@@ -240,7 +240,7 @@ estimate invites the point estimate to be read.
 6. **Assemble and label.**
 
    ```bash
-   python3 evaluations/oracle_golden/build_case.py \
+   python3 -m evaluations.oracle_golden.build_case \
        <run_dir> <story.md> <controls.yaml> cases/<case-id>     # dir name IS the case id
    ```
 
@@ -294,8 +294,8 @@ disagreements and written off as model jitter.
 ## C. Replay and score
 
 ```bash
-python3 evaluations/oracle_golden/replay.py cases/<case-id> [--tag <model>_effort-<e>]
-python3 evaluations/oracle_golden/score.py  cases/<case-id> \
+python3 -m evaluations.oracle_golden.replay cases/<case-id> [--tag <model>_effort-<e>]
+python3 -m evaluations.oracle_golden.score  cases/<case-id> \
     cases/<case-id>/projections/<tag>.yaml --json cases/<case-id>/scores/<tag>.json
 ```
 

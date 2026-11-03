@@ -42,14 +42,12 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from defender import _yaml  # noqa: E402
-from evaluations.oracle_golden import controls as CONTROLS  # noqa: E402
-from evaluations.oracle_golden.score import (  # noqa: E402
+from defender import _yaml
+from evaluations.oracle_golden import controls as CONTROLS
+from evaluations.oracle_golden.score import (
     DERIVED_KINDS, forbidden_values, is_derived, required_values,
 )
-from evaluations.oracle_golden.story_from_run import eval_tells_in  # noqa: E402
+from evaluations.oracle_golden.story_from_run import eval_tells_in
 from defender._io import read_bytes_capped, read_text_utf8
 
 GOLDEN_DIR = Path(__file__).resolve().parent

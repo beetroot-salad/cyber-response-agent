@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from _harness_util import LocalTenant
+from evaluations._harness_util import LocalTenant
 
 from defender import _git
 from defender._model import model

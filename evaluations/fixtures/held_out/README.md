@@ -122,7 +122,7 @@ for f in evaluations/fixtures/held_out/*/alert.json; do
 done
 
 # Score correctness against ground truth:
-python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
+python3 -m evaluations.held_out "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```
 
 A run that crashes before announcing its id leaves no row, and the slug's older row (if any) is

@@ -25,7 +25,7 @@ For comparable scores, pin every run of one index to one knowledge revision with
 Score (an evaluation tool outside the application: it takes no tenant and never resolves
 ``DEFENDER_DATA_ROOT``; it scores exactly the runs dir it is handed)::
 
-    python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/<tenant-uuid>/runs" --index F
+    python3 -m evaluations.held_out "$DEFENDER_DATA_ROOT/<tenant-uuid>/runs" --index F
 
 The newest row per slug names the run scored, opened by id under the runs dir. A slug whose
 newest row names a run that is absent, or has no alert record, counts as **wrong** ("launched,
@@ -46,9 +46,6 @@ from pathlib import Path
 from types import MappingProxyType
 
 import yaml
-
-if (_root := str(Path(__file__).resolve().parents[1])) not in sys.path:
-    sys.path.insert(0, _root)
 
 from defender import _io
 from defender.records import _alert_input

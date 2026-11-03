@@ -241,9 +241,14 @@ select = [
     "PT",            # flake8-pytest-style
     "UP",            # pyupgrade
 ]
-# E402: tests/scripts intentionally do sys.path.insert(...) before imports.
 # E501: line length is enforced by formatter, not lint.
-ignore = ["E402", "E501"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# E402 (import below code) is off outside evaluations/: defender's scripts and tests still put
+# code before their imports. evaluations/ runs as modules from the repo root (#1276) and keeps it.
+# E402 exempts sys.path edits, so tooling/lint/lint_eval_entrypoints.py is what bans a bootstrap.
+"!**/evaluations/**" = ["E402"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
