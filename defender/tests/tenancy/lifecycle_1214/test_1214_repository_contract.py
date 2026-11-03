@@ -451,7 +451,10 @@ async def _holding_tenant(dsn: str, tenant: str) -> AsyncIterator[None]:
     """`SELECT ... FOR UPDATE` on one tenants row in an open transaction, released on exit."""
     import psycopg
 
+    from psycopg.types.string import TextLoader
+
     async with await psycopg.AsyncConnection.connect(dsn) as conn:
+        conn.adapters.register_loader("uuid", TextLoader)  # ids read back as their text (#1382)
         cur = await conn.execute("SELECT id FROM tenancy.tenants WHERE id = %s FOR UPDATE", (tenant,))
         assert await cur.fetchall() == [(tenant,)], "the row to hold does not exist"
         try:

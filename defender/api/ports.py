@@ -13,7 +13,7 @@ from defender.identity import IdentityService
 # The store's refusals are the API's: one class each, so the store's raise is the API's answer
 # with no mapping between them (#1342).
 from defender.jobs.errors import Conflict, NotFound, UnknownReference  # noqa: F401 — re-exported: the API's refusals
-from defender.records.formats import TenantId
+from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, UserId
 
 from .models import (
     Alert,
@@ -41,7 +41,7 @@ class Principal:
     `Principal` exists (`app._principal`)."""
 
     tenant_id: TenantId
-    user_id: str
+    user_id: UserId
 
 
 class StoreBrokePromise(Exception):
@@ -52,7 +52,7 @@ class StoreBrokePromise(Exception):
 class AlertsRepository(Protocol):
     async def list_alerts(
         self,
-        tenant_id: str,
+        tenant_id: TenantId,
         *,
         fired_after: _dt.datetime | None,
         fired_before: _dt.datetime | None,
@@ -64,7 +64,7 @@ class AlertsRepository(Protocol):
         a gap or an overlap."""
         ...
 
-    async def get_alert(self, tenant_id: str, alert_id: str) -> Alert | None: ...
+    async def get_alert(self, tenant_id: TenantId, alert_id: AlertId) -> Alert | None: ...
 
 
 class InvestigationsRepository(Protocol):
@@ -77,31 +77,31 @@ class InvestigationsRepository(Protocol):
     OD22')."""
 
     async def list_investigations(
-        self, tenant_id: str, *, alert_id: str | None, after: TimePosition | None, limit: int
+        self, tenant_id: TenantId, *, alert_id: AlertId | None, after: TimePosition | None, limit: int
     ) -> list[Investigation]:
         """Up to `limit` strictly after `after`, newest first by `(created_at,
         investigation_id)`."""
         ...
 
-    async def get_investigation(self, tenant_id: str, investigation_id: str) -> Investigation | None:
+    async def get_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId) -> Investigation | None:
         """`None` for an investigation this tenant does not have."""
         ...
 
 
 class LearningJobsRepository(Protocol):
     async def list_learning_jobs(
-        self, tenant_id: str, *, investigation_id: str | None, after: TimePosition | None,
+        self, tenant_id: TenantId, *, investigation_id: InvestigationId | None, after: TimePosition | None,
         limit: int,
     ) -> list[LearningJob]:
         """Up to `limit` strictly after `after`, newest first by `(created_at,
         learning_job_id)`."""
         ...
 
-    async def get_learning_job(self, tenant_id: str, learning_job_id: str) -> LearningJob | None: ...
+    async def get_learning_job(self, tenant_id: TenantId, learning_job_id: LearningJobId) -> LearningJob | None: ...
 
 
 class LessonsRepository(Protocol):
-    async def list_lessons(self, tenant_id: str, *, after: str | None, limit: int) -> list[Lesson]:
+    async def list_lessons(self, tenant_id: TenantId, *, after: str | None, limit: int) -> list[Lesson]:
         """Up to `limit` lessons with a `lesson_id` greater than `after`, by `lesson_id`."""
         ...
 
@@ -110,12 +110,12 @@ class SystemsRepository(Protocol):
     """Settings only. Whether a system has credentials is the secret store's answer."""
 
     async def list_systems(
-        self, tenant_id: str, *, after: str | None, limit: int
+        self, tenant_id: TenantId, *, after: str | None, limit: int
     ) -> list[SystemSettings]:
         """Up to `limit` systems with a `system_id` greater than `after`, by `system_id`."""
         ...
 
-    async def get_system(self, tenant_id: str, system_id: str) -> SystemSettings | None: ...
+    async def get_system(self, tenant_id: TenantId, system_id: str) -> SystemSettings | None: ...
 
 
 AuditAction = Literal[
@@ -138,7 +138,7 @@ class WriteTransaction(Protocol):
     block emits none and an event can be lost in a crash between the commit and its emission."""
 
     async def create_investigation(
-        self, alert_id: str, client_request_id: str
+        self, alert_id: AlertId, client_request_id: str
     ) -> tuple[Investigation, bool]:
         """Start an investigation of `alert_id`, or answer the one this request already has —
         the rules are §4.1's (the latest attempt of a repeated request, one live investigation
@@ -146,19 +146,19 @@ class WriteTransaction(Protocol):
         the row. `UnknownReference` for an alert this tenant does not have."""
         ...
 
-    async def cancel_investigation(self, investigation_id: str) -> Investigation:
+    async def cancel_investigation(self, investigation_id: InvestigationId) -> Investigation:
         """Abort a queued investigation. `NotFound`; `Conflict` if it is running (not supported
         yet) or already ended."""
         ...
 
-    async def delete_investigation(self, investigation_id: str) -> None:
+    async def delete_investigation(self, investigation_id: InvestigationId) -> None:
         """Remove every attempt of the request the investigation belongs to (its run folders
         stay). `NotFound`, or `Conflict` while any attempt is live. A replay of the request
         afterwards starts a new investigation."""
         ...
 
     async def create_learning_job(
-        self, investigation_id: str, client_request_id: str
+        self, investigation_id: InvestigationId, client_request_id: str
     ) -> tuple[LearningJob, bool]:
         """Queue an explicit re-learn of an investigation, or answer the job this request
         already queued — the rules are §2.5's. Returns `(job, created)`. `UnknownReference` for
@@ -189,22 +189,22 @@ class SecretStore(Protocol):
     proxy, which adds credentials to outgoing calls, reads them through its own port."""
 
     async def put_credentials(
-        self, tenant_id: str, system_id: str, kind: str, credentials: dict[str, str],
+        self, tenant_id: TenantId, system_id: str, kind: str, credentials: dict[str, str],
     ) -> None:
         """Replace the whole set, stored with its `kind` (`static` or `oauth-client-credentials`)."""
         ...
 
-    async def has_credentials(self, tenant_id: str, system_id: str) -> bool: ...
+    async def has_credentials(self, tenant_id: TenantId, system_id: str) -> bool: ...
 
 
 class SystemChecker(Protocol):
-    async def check(self, tenant_id: str, system: System) -> SystemCheck:
+    async def check(self, tenant_id: TenantId, system: System) -> SystemCheck:
         """Test the connection and a first query."""
         ...
 
 
 class ArtifactLinks(Protocol):
-    async def signed_url(self, tenant_id: str, investigation_id: str, key: str) -> str:
+    async def signed_url(self, tenant_id: TenantId, investigation_id: InvestigationId, key: str) -> str:
         """A short-lived link on the blob store's own origin, never the app's: a run page renders
         attacker-influenced text and must not run beside the logged-in session (#1131 "API")."""
         ...

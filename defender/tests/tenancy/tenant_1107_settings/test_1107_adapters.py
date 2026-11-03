@@ -37,7 +37,7 @@ _INSPECT = S.answer('"/web-1"\t"nginx:1.27"\n', None)
 _INSPECT_MISSING = S.answer("", None, rc=1, stderr="error: no such object: c0ffee1107\n")
 _NAMES = S.answer("web-1\nweb-2", None)
 
-#: The five stub systems that have an adapter module (case-history's reader is the ticket writer).
+#: The five stub systems that have an adapter module.
 _STUB_ADAPTERS = {
     "cmdb": cmdb_adapter,
     "identity": identity_adapter,

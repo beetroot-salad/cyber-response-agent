@@ -1,15 +1,20 @@
 """The shared database layer (#1339): the declarative base every feature's models extend, and the
 one place that turns a DSN into an engine, for the async application and for Alembic alike.
 
-Imports no feature. Each feature defines its models in its own package, with its own schema on the
+Imports no feature; record id types come from `records`. Each feature defines its models in its own package, with its own schema on the
 table; the one migration history that creates them is `defender.migrations`."""
 
 from __future__ import annotations
 
-from sqlalchemy import MetaData
+from typing import Any
+
+from sqlalchemy import MetaData, Uuid
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, MappedAsDataclass
+from sqlalchemy.types import TypeDecorator
+
+from defender.records.formats import UuidId
 
 #: Every constraint and index name derives from its table and columns, so a migration and a model
 #: that declare the same thing give it the same name, every column named for a multi-column one.
@@ -28,6 +33,27 @@ class Base(MappedAsDataclass, DeclarativeBase):
     no server defaults, so the repositories agree on every value they return."""
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+class IdColumn(TypeDecorator[UuidId]):
+    """A record id column (#1382): PostgreSQL `uuid`, read back as its family's id type, so a row
+    hands out a `TenantId`, `AlertId`, ... with no wrapping. Nothing here parses: an id is checked
+    once, where outside text becomes one, and the type carries that inward (the repositories take
+    the family types). The column holds only canonical UUID text, so what it reads back is trusted
+    (`UuidId.stored`)."""
+
+    impl = Uuid(as_uuid=False)
+    cache_ok = True
+
+    def __init__(self, family: type[UuidId]) -> None:
+        super().__init__()
+        self.family = family
+
+    def process_bind_param(self, value: Any, _dialect: Any) -> str | None:
+        return None if value is None else str(value)
+
+    def process_result_value(self, value: Any, _dialect: Any) -> UuidId | None:
+        return None if value is None else self.family.stored(value)
 
 
 def url(dsn: str) -> URL:

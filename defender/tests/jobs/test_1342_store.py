@@ -391,19 +391,6 @@ async def test_1379_an_alert_field_postgresql_cannot_hold_is_refused_by_name_and
     assert _count(dsn, "alerts") == 1
 
 
-@pytest.mark.parametrize("tenant", list(UNSTORABLE.values()), ids=list(UNSTORABLE))
-async def test_1379_an_alert_for_a_tenant_id_postgresql_cannot_hold_is_for_an_unknown_tenant(dsn, tenant):
-    """A tenant id is a reference, so one the database cannot hold names no tenant, as every other id does (D-a);
-    nothing is stored. (#1379 O1b)"""
-    from defender.jobs import UnknownReference
-
-    async with job_store(dsn) as store:
-        with pytest.raises(UnknownReference):
-            await store.insert_alert(tenant, vendor="splunk", vendor_ticket_id="SPL-9", fired_at=NOW, changed_at=NOW,
-                                     received_at=NOW, title="t", description="d", raw=ALERT_BYTES)
-    assert _count(dsn, "alerts") == 0
-
-
 @pytest.mark.parametrize("key", list(UNSTORABLE.values()), ids=list(UNSTORABLE))
 async def test_1379_a_request_key_postgresql_cannot_hold_is_refused_by_name_and_nothing_is_inserted(dsn, key):
     """(#1379 O1b)"""
@@ -530,7 +517,7 @@ async def test_o3_the_same_key_on_another_alert_or_tenant_is_a_different_request
     assert len({first.investigation_id, on_a2.investigation_id, on_b1.investigation_id}) == 3
 
 
-@pytest.mark.parametrize("alert_id", [str(uuid.uuid4()), "al-1", "a" * 128], ids=["uuid", "api-style id", "longest id"])
+@pytest.mark.parametrize("alert_id", [str(uuid.uuid4()), "a1000000-0000-4000-8000-000000000001"], ids=["uuid", "api-style id"])
 async def test_o3_an_alert_this_tenant_lacks_is_an_unknown_reference(dsn, alert_id):
     """An alert id that exists nowhere is `UnknownReference` (API-shaped ids too), and nothing is inserted. (O3)"""
     from defender.jobs import UnknownReference
@@ -806,7 +793,7 @@ async def test_o9_cancel_of_an_ended_investigation_changes_nothing(dsn, stage):
     assert row(dsn, inv.investigation_id) == before
 
 
-@pytest.mark.parametrize("target", [str(uuid.uuid4()), "inv-1"], ids=["uuid", "api-style id"])
+@pytest.mark.parametrize("target", [str(uuid.uuid4()), "b1000000-0000-4000-8000-000000000001"], ids=["uuid", "api-style id"])
 async def test_o9_cancel_of_an_unknown_or_another_tenants_investigation_is_not_found(dsn, target):
     """No such id, or another tenant's, is `NotFound`; that tenant's own cancel (control) works. (O9)"""
     from defender.jobs import NotFound
@@ -979,7 +966,7 @@ async def test_o10_delete_takes_only_its_own_key_and_leaves_the_alert(dsn):
     assert alerts == 2
 
 
-@pytest.mark.parametrize("target", [str(uuid.uuid4()), "inv-1"], ids=["uuid", "api-style id"])
+@pytest.mark.parametrize("target", [str(uuid.uuid4()), "b1000000-0000-4000-8000-000000000001"], ids=["uuid", "api-style id"])
 async def test_o10_delete_of_an_unknown_or_another_tenants_investigation_is_not_found(dsn, target):
     """`NotFound` for no such id and for another tenant's; the row survives. (O10)"""
     from defender.jobs import NotFound
@@ -1213,29 +1200,34 @@ async def test_o13_a_transaction_that_fails_at_commit_emits_nothing_and_stores_n
     assert len(audit.events()) == len(before_events) + 1
 
 
-# --- D-a: an id PostgreSQL cannot hold names nothing -------------------------------------------------------------
+# --- #1382 P-ID (withdraws D-a): a malformed id reaching the store is a bug, refused loudly -----------------------
 
-UNSTORABLE_IDS = {"NUL": "a\x00b", "lone NUL": "\x00", "lone surrogate": "\ud800", "surrogate inside": "x\udfffy"}
+#: Text that is no UUID at all. (A non-canonical UUID, upper case or braced, is not here: the database's
+#: `uuid` would take and canonicalise it. Ids are parsed where outside text enters, #1382; the store trusts the type.)
+MALFORMED_IDS = {"NUL": "a\x00b", "lone NUL": "\x00", "lone surrogate": "\ud800", "surrogate inside": "x\udfffy",
+                 "api-style": "al-1"}
 
 
-@pytest.mark.parametrize("bad", sorted(UNSTORABLE_IDS))
-async def test_d_a_an_id_the_database_cannot_hold_reads_as_unknown_and_never_crashes(dsn, bad):
-    """Get, create, cancel, delete and finish treat a NUL or lone-surrogate id as an unknown one. (D-a)"""
-    from defender.jobs import NotFound, UnknownReference
-
-    ident = UNSTORABLE_IDS[bad]
+@pytest.mark.parametrize("bad", sorted(MALFORMED_IDS))
+async def test_p_id_text_that_is_no_uuid_fails_loudly_at_the_store_and_changes_nothing(dsn, bad):
+    """The store does not parse ids: they are checked where outside text becomes one, and its signatures take the
+    family types (#1382 r3.1). Text that gets past the types anyway is never answered as "unknown" (D-a withdrawn):
+    get, create, cancel, delete and finish raise, and the stored row is untouched."""
+    ident = MALFORMED_IDS[bad]
+    calls = {
+        "get_alert": lambda store: store.get_alert(T1, ident),
+        "get_investigation": lambda store: store.get_investigation(T1, ident),
+        "create": lambda store: store.create_investigation(T1, ident, "k2", actor="u-1"),
+        "cancel": lambda store: store.cancel_investigation(T1, ident, actor="u-1"),
+        "delete": lambda store: store.delete_investigation(T1, ident, actor="u-1"),
+        "finish": lambda store: store.finish(T1, ident, stage="failed", failure_reason="worker_error"),
+    }
     async with job_store(dsn) as store:
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
-        await _absent(store.get_alert(T1, ident))
-        await _absent(store.get_investigation(T1, ident))
-        with pytest.raises(UnknownReference):
-            await store.create_investigation(T1, ident, "k2", actor="u-1")
-        with pytest.raises(NotFound):
-            await store.cancel_investigation(T1, ident, actor="u-1")
-        with pytest.raises(NotFound):
-            await store.delete_investigation(T1, ident, actor="u-1")
-        assert await store.finish(T1, ident, stage="failed", failure_reason="worker_error") is None
+        for call in calls.values():
+            with pytest.raises(Exception):  # noqa: B017, PT011 — whatever the driver raises, so long as it is loud
+                await call(store)
         assert row(dsn, inv.investigation_id)["stage"] == "queued"
     assert _count(dsn, "investigations") == 1
 
@@ -1332,7 +1324,7 @@ async def test_o14_an_unknown_or_another_tenants_investigation_is_absent(dsn):
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
         assert (await store.get_investigation(T1, inv.investigation_id)).investigation_id == inv.investigation_id
         await _absent(store.get_investigation(T2, inv.investigation_id))
-        await _absent(store.get_investigation(T1, "inv-1"))
+        await _absent(store.get_investigation(T1, "b1000000-0000-4000-8000-000000000001"))
         await _absent(store.get_investigation(T1, str(uuid.uuid4())))
 
 

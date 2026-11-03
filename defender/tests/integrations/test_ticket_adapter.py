@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import urllib.parse
-from pathlib import Path
 
 import pytest
 
@@ -169,29 +168,32 @@ def test_get_ticket_percent_encodes_the_key_into_the_path(monkeypatch, ctx, key,
     assert seen["path"] == expect_path
 
 
-def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
-    from defender.investigation import ticket_writer
-
-    seen = {}
+def test_reader_fetches_the_key_the_comment_action_writes(monkeypatch, ctx):
+    """The key is the alert's (the host mints none, #1359): the reader asks for the very path
+    segment the comment action posts to, whatever the key's URL-special characters. P3."""
+    reads, writes = [], []
 
     def fake_get_obj(c, cfg, path, system=None, params=None):
-        seen["path"] = path
+        reads.append(path)
         return {"key": "k", "status": "closed"}
 
-    monkeypatch.setattr(transport, "http_get_obj", fake_get_obj)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
-    for case_id in ("20260720T0000Z-sshd-672", "SOC-1042", "case id/with space", "SOC-λ42"):
-        ticket_adapter.get_ticket(ctx, key=case_id)
-        writers_url = f"/tickets/{urllib.parse.quote(case_id, safe='')}"
-        assert seen["path"] == writers_url, (
-            f"the reader asks for {seen['path']} but the writer stores {case_id!r} at "
-            f"{writers_url} — the two sides encode differently"
-        )
+    def fake_write(c, *args, **kwargs):
+        # The host write entry (D-6); only the path it was handed matters here.
+        strings = [a for a in (*args, *kwargs.values()) if isinstance(a, str)]
+        writes.append(next(a for a in strings if a.startswith("/")))
+        return {"id": 1}
 
-    writer_src = Path(ticket_writer.__file__).read_text(encoding="utf-8")
-    assert 'quote(case_id, safe="")' in writer_src, (
-        "ticket_writer no longer encodes the keys it mints the way this test assumes — "
-        "re-derive the reader's encoding from what the writer now does"
-    )
+    monkeypatch.setattr(transport, "http_get_obj", fake_get_obj)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
+    monkeypatch.setattr(transport, "http_write", fake_write)  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
+    for key in ("SOC-1042", "SOC#42", "a?b=c", "50%", 'q"uote', "a+b"):
+        ticket_adapter.get_ticket(ctx, key=key)
+        ticket_adapter.add_case_comment(ctx, key=key, body="note")
+        segment = f"/tickets/{urllib.parse.quote(key, safe='')}"
+        assert reads[-1] == segment, f"the reader asks for {reads[-1]}, not {segment}"
+        assert writes[-1] == f"{segment}/comments", (
+            f"the comment action posts to {writes[-1]}, not {segment}/comments — the two sides "
+            "encode the key differently")
+    assert len(reads) == len(writes) == 6, (reads, writes)
 
 
 @pytest.mark.parametrize(

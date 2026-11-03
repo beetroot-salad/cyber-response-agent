@@ -17,7 +17,8 @@ from sqlalchemy import ARRAY, CheckConstraint, DateTime, ForeignKey, Index, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
-from defender.database import Base
+from defender.database import Base, IdColumn
+from defender.records.formats import TenantId
 
 SCHEMA = "tenancy"
 
@@ -79,7 +80,7 @@ class TenantRecord(Base, kw_only=True):
         {"schema": SCHEMA},
     )
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), primary_key=True)
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     state: Mapped[str] = mapped_column(Text)
     pending_action: Mapped[str | None] = mapped_column(Text, default=None)
@@ -97,7 +98,7 @@ class ForgeWiring(Base, kw_only=True):
     __tablename__ = "forge_wiring"
     __table_args__ = {"schema": SCHEMA}
 
-    tenant_id: Mapped[str] = mapped_column(Text, ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
     repo: Mapped[str] = mapped_column(Text)
     origin: Mapped[str] = mapped_column(Text)
 
@@ -119,7 +120,7 @@ class Generation(Base, kw_only=True):
         {"schema": SCHEMA},
     )
 
-    tenant_id: Mapped[str] = mapped_column(Text, ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
     salt: Mapped[str] = mapped_column(Text, primary_key=True)
     status: Mapped[str] = mapped_column(Text, default="pending")
     bot_login: Mapped[str] = mapped_column(Text)
@@ -147,7 +148,7 @@ class PublishStatus(Base, kw_only=True):
     __tablename__ = "publish_status"
     __table_args__ = {"schema": SCHEMA}
 
-    tenant_id: Mapped[str] = mapped_column(Text, ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
     recorded_by: Mapped[str] = mapped_column(Text)
     published: Mapped[str | None] = mapped_column(Text, default=None)
     refused: Mapped[str | None] = mapped_column(Text, default=None)

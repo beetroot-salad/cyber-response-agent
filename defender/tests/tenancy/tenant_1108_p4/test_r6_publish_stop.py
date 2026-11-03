@@ -237,7 +237,9 @@ def test_r6_a_run_start_stopped_while_its_publish_runs_takes_the_childs_group_wi
 _LOCKED_WHEN_THE_RUN_IS_STOPPED = '''
 import os, pathlib, signal, sys, time
 marks = pathlib.Path(sys.argv[1])
-signal.signal(signal.SIGTERM, lambda *_: (marks / "asked").write_text("1"))  # ignored, as the real child does while locked
+# Ignored, as the real child does while locked; noted only when it comes while the lock is held (a stop
+# that comes first, while it still imports, is the launcher's to send).
+signal.signal(signal.SIGTERM, lambda *_: (marks / "locked").exists() and (marks / "asked").write_text("1"))
 (marks / "pid").write_text(str(os.getpid()))
 from defender.learning.author.version_control import tenant_lock
 from defender.tenancy._tenant import data_root_from_path, requested_tenant
@@ -307,7 +309,7 @@ def test_1379_a_run_start_stopped_while_its_publish_holds_the_lock_waits_for_it_
         tenant, tmp_path, budget=budget, locked_for=publish_launch._STOP_GRACE + 2 + after_lock, stops=stops,
         after_lock=after_lock)
     assert (marks / "finished").exists(), f"the run's stop cut a lock-holding publish child: {err[-500:]!r}"
-    assert not (marks / "asked").exists(), "a publish child that took the lock was signalled"
+    assert not (marks / "asked").exists(), "a publish child holding the lock was signalled"
     assert returncode == 128 + signal.SIGTERM, (out, err)
     assert b"the publish returned" not in out, "a stopped run went on past its publish"
 

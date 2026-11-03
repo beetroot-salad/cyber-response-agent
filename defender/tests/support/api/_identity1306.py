@@ -13,7 +13,7 @@ named in `World(tenants={T: [emails]})` is seeded `active` through the twin's `a
 `register_tenant`, which no port has). `Bootstrap(administrators=...)` only.
 First members (the `[emails]`) are seeded, NOT invited through an administrator: when the world is built,
 and on `restart(tenants=...)` for a tenant that never had a membership, each email gets its user, an
-invitation `invited_by="system"` and the same set-password / notification request the old bootstrap made,
+invitation `invited_by=None` and the same set-password / notification request the old bootstrap made,
 all through the raw identity repository's existing seeders (so `failing_writes` never touches seeding).
 So every old observable (sends, first sign-in accepting the invitation, audit lines) is unchanged; the
 administrator invite path is `World.member(admin_browser, tenant, email)` (a world with an administrator
@@ -59,7 +59,6 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
     SignInUnavailable,
     VerifiedSignIn,
 )
-from defender.identity.audit import SYSTEM as _SYSTEM
 from defender.tenancy import InMemoryTenantRepository
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -90,8 +89,8 @@ ANN, BOB, NEW, NINA = "ann@a.example", "bob@b.example", "new@n.example", "nina@n
 OPS, ME = "ops@x.example", "me@x.example"
 
 ALERT = Alert(
-    alert_id="al-1", vendor="tickets", vendor_ticket_id="T-1", title="t", description="d",
-    fired_at=T0, changed_at=T0, received_at=T0, raw='{"id": "al-1"}',
+    alert_id="a1000000-0000-4000-8000-000000000001", vendor="tickets", vendor_ticket_id="T-1", title="t", description="d",
+    fired_at=T0, changed_at=T0, received_at=T0, raw='{"id": "a1000000-0000-4000-8000-000000000001"}',
 )
 SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
 
@@ -654,7 +653,7 @@ class World:
             return
         for email in dict.fromkeys(emails):
             user = await repo.ensure_user(email, now=now)
-            row = await repo.ensure_invitation(user.id, tenant, invited_by=_SYSTEM, now=now)
+            row = await repo.ensure_invitation(user.id, tenant, invited_by=None, now=now)
             if row is None:
                 continue
             if user.status == "invited":

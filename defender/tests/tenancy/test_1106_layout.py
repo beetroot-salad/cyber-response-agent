@@ -118,7 +118,7 @@ def test_every_settings_file_is_denied_by_both_read_surfaces_and_a_corpus_file_i
     files = _settings_files()
     names = {p.name for p in files}
     # The census is non-vacuous: every kind is present to be denied.
-    assert {"verb-grants.yaml", "lead-zero.yaml", "mapping.yaml", "config.env"} <= names, names
+    assert {"verb-grants.yaml", "lead-zero.yaml", "case-record.yaml", "config.env"} <= names, names
     control = T.DEFENDER / "skills" / "gather" / "SKILL.md"
     for role, policy in _reader_policies(run_dir).items():
         allowed = [

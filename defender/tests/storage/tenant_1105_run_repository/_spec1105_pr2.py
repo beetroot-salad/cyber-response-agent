@@ -324,12 +324,13 @@ class StdoutRun:
 
 
 class _TicketTap:
-    """A ticket writer that records stdout when the ticket is opened (`--update-ticket`)."""
+    """A ticket writer seam that records stdout when the ticket lane begins (`--update-ticket`).
+    #1359: there is no open leg; run start's first act on the lane is `clear_receipt`."""
 
     def __init__(self, tap: Any) -> None:
         self._tap = tap
 
-    def open_case_ticket(self, *_a: Any, **_kw: Any) -> None:
+    def clear_receipt(self, *_a: Any, **_kw: Any) -> None:
         self._tap("ticket")
 
     def record_case_ticket(self, *_a: Any, **_kw: Any) -> None:

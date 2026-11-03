@@ -70,14 +70,12 @@ def test_a_row_missing_from_one_tenant_turns_the_gate_red_naming_that_tenant(tmp
     assert "beta.lookup" in out, out
 
 
-@pytest.mark.parametrize("fault", ["no agent half", "no mapping", "linked settings half"])
+@pytest.mark.parametrize("fault", ["no agent half", "linked settings half"])
 def test_a_tenant_the_run_would_refuse_at_start_turns_the_gate_red(tmp_path, fault):
     repo = _repo(tmp_path)
     one = repo / "knowledge" / "tenant-fixture"
     if fault == "no agent half":
         shutil.rmtree(one / "agent")
-    elif fault == "no mapping":
-        (one / "settings" / "systems" / "case-history" / "mapping.yaml").unlink()
     else:
         shutil.rmtree(one / "settings")
         (one / "settings").symlink_to(repo / "knowledge" / "tenant-template" / "settings")
@@ -85,6 +83,16 @@ def test_a_tenant_the_run_would_refuse_at_start_turns_the_gate_red(tmp_path, fau
     assert rc != 0, out
     assert "tenant-fixture" in out, out
     assert "a run would refuse this folder" in out, out
+
+
+def test_a_fixture_with_no_case_file_keeps_the_gate_green(tmp_path):
+    """#1359 O2: neither a case-record file nor a case-history folder is required of a tenant."""
+    repo = _repo(tmp_path)
+    one = repo / "knowledge" / "tenant-fixture" / "settings"
+    shutil.rmtree(one / "systems" / "case-history", ignore_errors=True)
+    (one / "case-record.yaml").unlink(missing_ok=True)
+    rc, out = _gate(repo)
+    assert rc == 0, out
 
 
 def test_a_row_missing_from_the_template_turns_the_gate_red_naming_the_template(tmp_path):

@@ -58,8 +58,10 @@ async def until_blocked(dsn: str, count: int) -> None:
 async def holding_row(dsn: str, table: str, row_id: str) -> AsyncIterator[None]:
     """`SELECT ... FOR UPDATE` on one row (`identity.<table>`) in an open transaction, released on exit."""
     import psycopg
+    from psycopg.types.string import TextLoader
 
     async with await psycopg.AsyncConnection.connect(dsn) as conn:
+        conn.adapters.register_loader("uuid", TextLoader)  # ids read back as their text (#1382)
         cur = await conn.execute(f"SELECT id FROM identity.{table} WHERE id = %s FOR UPDATE", (row_id,))  # noqa: S608
         assert await cur.fetchall() == [(row_id,)], "the row to hold does not exist"
         try:

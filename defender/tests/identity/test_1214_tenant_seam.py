@@ -136,8 +136,8 @@ async def test_accepting_an_invitation_needs_the_tenant_active_in_the_same_state
     for tenant in (T1, other):
         await world.seed(tenant)
     user = await world.identity.add_user("ann@x.org", created_at=NOW)
-    kept = await world.identity.ensure_invitation(user.id, T1, invited_by="system", now=NOW)
-    live = await world.identity.ensure_invitation(user.id, other, invited_by="system", now=NOW)
+    kept = await world.identity.ensure_invitation(user.id, T1, invited_by=None, now=NOW)
+    live = await world.identity.ensure_invitation(user.id, other, invited_by=None, now=NOW)
     await world.tenants.request_offboard(T1, now=NOW)
     assert await world.identity.accept_invitation(kept.id, now=NOW) is False
     assert (await world.identity.membership(kept.id)).status == "invited"

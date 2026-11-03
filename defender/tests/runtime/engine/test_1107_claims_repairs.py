@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from defender.tenancy import case_ticket
 from defender.tenancy import tenant_settings as ts
 from defender.integrations import _stub_transport as transport
 from defender.investigation import ticket_writer
@@ -32,10 +31,11 @@ def test_a_fifo_at_a_config_path_is_a_fault_not_a_hang(tmp_path):
     os.mkfifo(fifo)
     with pytest.raises(S.config_fault()):
         ts.read_env_file(fifo, shown="the tenant's settings/systems/x/config.env")
-    mapping = tmp_path / "mapping.yaml"
-    os.mkfifo(mapping)
-    with pytest.raises(case_ticket.CaseTicketError):
-        case_ticket.load_case_mapping(tmp_path)  # looks for the mapping under `settings`
+    # The case-record file's FIFO arm is retired, not moved: acceptance's special-file walk refuses
+    # a FIFO anywhere in a tenant's knowledge (pinned by `tenancy/tenant_1120_piece1/
+    # test_1120_accept_tenant.py::test_1120_accept_tenant_refuses_a_fifo_socket_or_device_inside_
+    # either_half_without_opening_it`), and no export or run copy can hold one. The leg reads the
+    # run-start record (D-18), so it never re-reads the file.
 
 
 def test_huge_timeout_is_a_config_fault(tmp_path):
@@ -46,12 +46,6 @@ def test_huge_timeout_is_a_config_fault(tmp_path):
     ctx = S.verb_context(record, tmp_path / "run", {})
     with pytest.raises(S.config_fault()):
         transport.load_config(ctx, "cmdb", "CMDB")
-
-
-def test_a_mapping_set_cannot_be_edited_through_plain():
-    mapping = case_ticket.CaseMapping({"a": {"s": {"x"}}})
-    mapping.plain()["a"]["s"].add("MUTATED")
-    assert "MUTATED" not in mapping["a"]["s"]
 
 
 @pytest.mark.parametrize("bomb", ["[" * 200000, '{"a":' * 100000])

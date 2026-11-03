@@ -260,8 +260,9 @@ def _list_verbs_declared(
         raise
     except BaseException as e:  # noqa: BLE001 — an adapter that will not import is a degradation
         return {}, _LIST_VERBS_UNLOADABLE.format(system=shown, err=f"{type(e).__name__}: {e}")
-    if not declared:
-        # `{}` here is a broken adapter (no usable `VERBS`), not a withheld grant.
+    if not declared and system not in getattr(getattr(registry, "roster", None), "no_verbs", ()):
+        # `{}` here is a broken adapter (no usable `VERBS`), not a withheld grant. An empty `VERBS`
+        # literal is an adapter with no agent actions (#1359 R1): it offers nothing.
         return {}, _LIST_VERBS_NO_VERBS.format(system=shown)
     return declared, None
 

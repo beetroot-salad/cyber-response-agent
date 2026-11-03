@@ -3,9 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 from defender.tests.support.runtime.engine._spec923 import finished_run
-from defender.tests.support.tenancy._tenants1106 import fixture_run_tenant
+from defender.tests.support.runtime.engine._spec767 import posted_comment_body
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
 )
@@ -17,7 +16,6 @@ def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
     from evaluations.held_out import predicted_disposition
     from defender.learning.core.validate import normalize_disposition
     from defender.cli.learning.trace_lesson import _report_disposition
-    from defender.tenancy import case_ticket
 
     report = run_dir / "report.md"
 
@@ -31,7 +29,9 @@ def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
         "report_reader": call(lambda: read_report(report).disposition),
         "learning_validate": call(lambda: normalize_disposition(report)),
         "held_out": call(lambda: predicted_disposition(run_dir)),
-        "ticket_lane": call(lambda: case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=fixture_run_tenant().ticket_mapping).disposition),
+        # #1359: the lane is observed where it leaves the host, as the disposition head of the
+        # comment the record leg posts (a verdict it cannot read leaves the one host sentence).
+        "ticket_lane": call(lambda: posted_comment_body(run_dir, run_dir.parent).split(" — ", 1)[0]),
         "trace_lesson": call(lambda: _report_disposition(run_dir)),
     }
 

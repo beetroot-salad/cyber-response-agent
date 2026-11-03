@@ -79,15 +79,15 @@ def test_settings_faults_name_no_host_path(tmp_path):
         "elastic key": str(_raised(elastic_adapter.query, ctx, native_query="*")),
         "no folder": str(_raised(transport.system_entry, ctx, "no-such-system")),
     }
-    # An unreadable case-history mapping is refused by the tenant check (#1222), which names
-    # the file by its settings-relative path.
+    # An unreadable alert mapping is refused by the tenant check (#1222), which names the file by
+    # its settings-relative path. (The case-record file is not refused by acceptance: D-12.)
     from defender.records._tenant_id import TenantRefused
 
     bad_root, bad_folder = _tenant(tmp_path, "pth2")
-    S.mapping_path(bad_folder).write_text("- not\n- a mapping\n", encoding="utf-8")
+    (S.settings_of(bad_folder) / "alert-mapping.yaml").write_text("- not\n- a mapping\n", encoding="utf-8")
     with pytest.raises(TenantRefused) as refused:
         S.resolve(bad_root)
-    assert "systems/case-history/mapping.yaml" in str(refused.value)
+    assert "alert-mapping.yaml" in str(refused.value)
     assert str(tmp_path) not in str(refused.value)
     host = str(tmp_path)
     for arm, text in texts.items():
@@ -211,14 +211,12 @@ def test_stored_faults_carry_no_traceback_or_cause(tmp_path):
     cfg = S.config_path(folder, "cmdb")
     cfg.unlink()
     cfg.mkdir()  # unreadable as a file: an OSError underneath the fault
-    # A mapping that parses (so the tenant check admits the folder) but breaks the lifecycle rule.
-    S.mapping_path(folder).write_text("open:\n  status: '{x}'\n", encoding="utf-8")
     record = S.resolve(root)
-    for kept in (record.systems["cmdb"], record.ticket_mapping):
-        assert isinstance(kept, Exception), kept
-        assert kept.__traceback__ is None, f"{kept!r} keeps a traceback"
-        assert kept.__cause__ is None, f"{kept!r} keeps its cause: {kept.__cause__!r}"
-        assert kept.__context__ is None, f"{kept!r} keeps its context: {kept.__context__!r}"
+    kept = record.systems["cmdb"]
+    assert isinstance(kept, Exception), kept
+    assert kept.__traceback__ is None, f"{kept!r} keeps a traceback"
+    assert kept.__cause__ is None, f"{kept!r} keeps its cause: {kept.__cause__!r}"
+    assert kept.__context__ is None, f"{kept!r} keeps its context: {kept.__context__!r}"
 
 
 def _validate(tmp_path: Path, extra: str) -> list[tuple[str, str]]:

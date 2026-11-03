@@ -81,7 +81,8 @@ def _unreadable_adapters(
     empty walk yields no `undecided` and would print "clean" over an undecided system. Adapter
     presence (`roster.accepted`) separates this from an MCP-path system, which is declared by
     its committed `execution.md` marker and has no adapter module by design."""
-    return tuple(s for s in sorted(walked) if not walked[s] and s in roster.accepted)
+    return tuple(s for s in sorted(walked)
+                 if not walked[s] and s in roster.accepted and s not in roster.no_verbs)
 
 
 @dataclasses.dataclass(frozen=True)

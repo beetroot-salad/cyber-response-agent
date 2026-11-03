@@ -133,7 +133,7 @@ def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_
     Path, a `RunTenant`), and `runs.open` anything but a `RunId`, with `TypeError` before any
     read: the runs folder is a link that would otherwise refuse, and the seam records no call."""
     from defender.records import RunId, RunsRepository
-    from defender.systems.run_tenant import RunTenant
+    from defender.tests.support.tenancy._tenants1106 import fixture_run_tenant
 
     rid = str(uuid.uuid4())
     root = tmp_path / "data"
@@ -142,8 +142,7 @@ def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_
     elsewhere = tmp_path / "elsewhere"
     H.make_run(elsewhere, rid)
     os.symlink(elsewhere, location_path(t.runs))
-    carrier = RunTenant(tenant=t, grants=None, correlation=None, systems={},
-                        ticket_mapping=None)
+    carrier = fixture_run_tenant()  # a run record the real resolver built: no field of it is named here
 
     for bad in (t.id, TenantId(t.id), location_path(t.runs), carrier):
         rec = H.RecordingIO()

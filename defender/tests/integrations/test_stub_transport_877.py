@@ -6,7 +6,7 @@ import pytest
 from defender.systems.verbs import VerbContext
 from defender.integrations import _stub_transport as transport
 from defender.integrations import ticket_adapter
-from defender.kit.faults import TransportFault
+from defender.kit.faults import TransportFault, UpstreamFault
 from defender.tests.support.tenancy import _tenants1106
 
 CURL_FAULTS = [
@@ -88,3 +88,81 @@ def test_an_http_error_is_still_the_upstreams_own_verdict(monkeypatch, ctx):
         ticket_adapter.health_check(ctx)
     assert "503" in str(exc.value)
     assert "000" not in str(exc.value)
+
+
+# ---- the host write entry (#1359 D-6): the same fault floor under the comment action ------------
+
+def _comment(ctx, key: str = "SOC-1"):
+    """The host's one write on this route: the `ticket` adapter's comment action, through the
+    shared transport's host write entry."""
+    return ticket_adapter.add_case_comment(ctx, key=key, body="findings")
+
+
+def _curl_recording(monkeypatch, rc: int, stdout: str, stderr: str) -> list[dict]:
+    """`_curl`, also recording the request the transport handed the container's curl."""
+    seen: list[dict] = []
+
+    def fake(ctx, container, url, **kw):
+        seen.append({"container": container, "url": url, **kw})
+        return rc, stdout, stderr
+
+    monkeypatch.setattr(transport, "docker_exec_curl", fake)  # lint-monkeypatch: ok — the transport's only seam is the subprocess it forks
+    return seen
+
+
+@pytest.mark.parametrize(("rc", "stderr"), CURL_FAULTS)
+def test_a_curl_level_failure_on_the_host_write_is_a_transport_fault(monkeypatch, ctx, rc, stderr):
+    """The write entry has the read entries' fault floor: no empty success. O3."""
+    _curl(monkeypatch, rc, "\n000", stderr)
+    with pytest.raises(TransportFault) as exc:
+        _comment(ctx)
+    assert f"rc={rc}" in str(exc.value), str(exc.value)
+    assert stderr.split(":")[0] in str(exc.value), str(exc.value)
+
+
+def test_http_000_on_the_host_write_raises_even_when_curl_reports_success(monkeypatch, ctx):
+    _curl(monkeypatch, 0, "\n000", "")
+    with pytest.raises(TransportFault) as exc:
+        _comment(ctx)
+    assert "000" in str(exc.value)
+
+
+def test_a_missing_bastion_on_the_host_write_still_names_the_container(monkeypatch, ctx):
+    _curl(monkeypatch, 125, "", 'Error: No such container: web-1')
+    with pytest.raises(TransportFault) as exc:
+        _comment(ctx)
+    assert "web-1" in str(exc.value)
+
+
+@pytest.mark.parametrize("status", [400, 403, 404, 409, 422])
+def test_a_4xx_on_the_host_write_is_an_upstream_fault_carrying_the_status(monkeypatch, ctx, status):
+    """The store's own refusal, with its status as data (D-5), not text to be parsed. O3, r4."""
+    _curl(monkeypatch, 0, f'{{"detail": "no"}}\n{status}', "")
+    with pytest.raises(UpstreamFault) as exc:
+        _comment(ctx)
+    assert getattr(exc.value, "status", None) == status, vars(exc.value)
+
+
+@pytest.mark.parametrize("status", [500, 502, 503])
+def test_a_5xx_on_the_host_write_stays_a_transport_fault(monkeypatch, ctx, status):
+    _curl(monkeypatch, 0, f'{{"detail": "down"}}\n{status}', "")
+    with pytest.raises(TransportFault) as exc:
+        _comment(ctx)
+    assert str(status) in str(exc.value)
+    assert not isinstance(exc.value, UpstreamFault)
+
+
+@pytest.mark.parametrize("answer", ['{"id": 1}', "", "created", "<html>ok</html>", "[]"])
+def test_any_2xx_on_the_host_write_is_success_whatever_its_body(monkeypatch, ctx, answer):
+    """A 2xx whose body is not a JSON object is still the store taking the comment. D-8."""
+    seen = _curl_recording(monkeypatch, 0, f"{answer}\n201", "")
+    assert _comment(ctx) == "http://ticket-store:8080/tickets/SOC-1"
+    assert len(seen) == 1, "the comment was not sent exactly once"
+
+
+def test_the_host_write_hands_curl_its_method_and_json_body(monkeypatch, ctx):
+    """Positive control for the faults above: a live store receives one POST of the comment."""
+    seen = _curl_recording(monkeypatch, 0, '{"id": 1}\n201', "")
+    _comment(ctx, key="SOC-9")
+    assert [(c["method"], c["url"], c["body"]["body"]) for c in seen] == [
+        ("POST", "http://ticket-store:8080/tickets/SOC-9/comments", "findings")]

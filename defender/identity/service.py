@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
 from defender._model import model
-from defender.records.formats import TenantId, TenantRefused
+from defender.records.formats import MembershipId, TenantId, UserId
 
 from . import audit
 from .bootstrap import Bootstrap
@@ -72,7 +72,7 @@ class LoginStart:
 class InvitationView:
     """What an invitation listing shows: nothing the inviter did not type, but its own date."""
 
-    id: str
+    id: MembershipId
     email: str
     status: Literal["invited"]
     created_at: _dt.datetime
@@ -80,35 +80,27 @@ class InvitationView:
 
 @model(frozen=True)
 class MemberView:
-    user_id: str
+    user_id: UserId
     email: str
     display_name: str
 
 
 @model(frozen=True)
 class OpenInvitation:
-    id: str
-    tenant_id: str
+    id: MembershipId
+    tenant_id: TenantId
 
 
 @model(frozen=True)
 class MeView:
     user: User
-    tenants: tuple[str, ...]
+    tenants: tuple[TenantId, ...]
     administrator: bool
     invitations: tuple[OpenInvitation, ...]
 
 
 def _pkce_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode()
-
-
-def _accept_tenant(raw: str) -> str:
-    """`raw` as a tenant id, or `NotFound`: a malformed id is no tenant."""
-    try:
-        return str(TenantId(raw))
-    except TenantRefused as e:
-        raise NotFound("no such tenant") from e
 
 
 class IdentityService:
@@ -343,15 +335,15 @@ class IdentityService:
         await self._repo.delete_session(value)
 
     # --- the caller's own view ---------------------------------------------------------------
-    async def member_of(self, auth: Authenticated, tenant_id: str) -> str:
+    async def member_of(self, auth: Authenticated, tenant_id: TenantId) -> TenantId:
         """The tenant's id when the tenant is `active` and the caller an active member, else
-        `NotFound` (the same answer for a tenant that does not exist or is not active, a
-        malformed id and a non-member): offboarding ends access with its request (#1214)."""
-        tenant = _accept_tenant(tenant_id)
-        if not await self._repo.tenant_exists(tenant) \
-                or await self._repo.active_membership(auth.user.id, tenant) is None:
+        `NotFound` (the same answer for a tenant that does not exist or is not active and a
+        non-member): offboarding ends access with its request (#1214). A malformed id never
+        gets here: the API refuses it (#1382)."""
+        if not await self._repo.tenant_exists(tenant_id) \
+                or await self._repo.active_membership(auth.user.id, tenant_id) is None:
             raise NotFound("no such tenant")
-        return tenant
+        return tenant_id
 
     def require_administrator(self, auth: Authenticated) -> None:
         if not auth.administrator:
@@ -370,17 +362,17 @@ class IdentityService:
             administrator=auth.administrator, invitations=tuple(open_rows))
 
     # --- tenant people -----------------------------------------------------------------------
-    async def members(self, tenant_id: str) -> list[MemberView]:
+    async def members(self, tenant_id: TenantId) -> list[MemberView]:
         views = [MemberView(user_id=user.id, email=user.email, display_name=user.display_name)
                  for _, user in await self._repo.people_of_tenant(tenant_id, "active")]
         return sorted(views, key=lambda v: v.email)
 
-    async def invitations(self, tenant_id: str) -> list[InvitationView]:
+    async def invitations(self, tenant_id: TenantId) -> list[InvitationView]:
         views = [InvitationView(id=row.id, email=user.email, status="invited", created_at=row.created_at)
                  for row, user in await self._repo.people_of_tenant(tenant_id, "invited")]
         return sorted(views, key=lambda v: (v.created_at, v.id))
 
-    async def _invite(self, inviter: str, tenant_id: str, email: str) -> InvitationView:
+    async def _invite(self, inviter: UserId, tenant_id: TenantId, email: str) -> InvitationView:
         """Flow 1, the request part: only rows are written. Nothing is sent, and nothing in the
         answer depends on who the email belongs to (P-E)."""
         now = self._clock()
@@ -406,37 +398,36 @@ class IdentityService:
         else:
             await self._repo.request_notification(row.id, now=now)
 
-    async def invite(self, auth: Authenticated, tenant_id: str, email: str) -> InvitationView:
+    async def invite(self, auth: Authenticated, tenant_id: TenantId, email: str) -> InvitationView:
         view = await self._invite(auth.user.id, tenant_id, email)
         audit.emit("member.invite", actor=auth.user.id, tenant_id=tenant_id, target=view.id)
         return view
 
-    async def admin_invite(self, auth: Authenticated, tenant_id: str, email: str) -> InvitationView:
+    async def admin_invite(self, auth: Authenticated, tenant_id: TenantId, email: str) -> InvitationView:
         """An administrator's invitation: only into a tenant with no active members."""
         self.require_administrator(auth)
-        tenant = _accept_tenant(tenant_id)
-        if not await self._repo.tenant_exists(tenant):
+        if not await self._repo.tenant_exists(tenant_id):
             raise NotFound("no such tenant")
-        if await self._repo.tenant_has_active_members(tenant):
+        if await self._repo.tenant_has_active_members(tenant_id):
             raise Conflict("the tenant already has members; they invite")
-        view = await self._invite(auth.user.id, tenant, email)
-        audit.emit("admin.invite", actor=auth.user.id, tenant_id=None, target=tenant)
-        audit.emit("member.invite", actor=auth.user.id, tenant_id=tenant, target=view.id)
+        view = await self._invite(auth.user.id, tenant_id, email)
+        audit.emit("admin.invite", actor=auth.user.id, tenant_id=None, target=tenant_id)
+        audit.emit("member.invite", actor=auth.user.id, tenant_id=tenant_id, target=view.id)
         return view
 
-    async def revoke(self, auth: Authenticated, tenant_id: str, invitation_id: str) -> None:
+    async def revoke(self, auth: Authenticated, tenant_id: TenantId, invitation_id: MembershipId) -> None:
         row = await self._repo.membership(invitation_id)
         if row is None or row.tenant_id != tenant_id or not await self._repo.revoke_invitation(invitation_id):
             raise NotFound("no such invitation")
         audit.emit("invitation.revoke", actor=auth.user.id, tenant_id=tenant_id, target=invitation_id)
 
-    async def remove(self, auth: Authenticated, tenant_id: str, user_id: str) -> None:
+    async def remove(self, auth: Authenticated, tenant_id: TenantId, user_id: UserId) -> None:
         row = await self._repo.active_membership(user_id, tenant_id)
         if row is None or not await self._repo.end_membership(row.id, ended_by=auth.user.id, now=self._clock()):
             raise NotFound("no such member")
         audit.emit("member.remove", actor=auth.user.id, tenant_id=tenant_id, target=user_id)
 
-    async def accept(self, auth: Authenticated, invitation_id: str) -> str:
+    async def accept(self, auth: Authenticated, invitation_id: MembershipId) -> TenantId:
         """Accept an invitation addressed to the caller; the tenant it opened."""
         row = await self._repo.membership(invitation_id)
         if (row is None or row.user_id != auth.user.id or auth.user.is_platform_admin
@@ -447,12 +438,12 @@ class IdentityService:
         return row.tenant_id
 
     # --- tenants ending ---------------------------------------------------------------------
-    async def end_tenant(self, tenant_id: str, *, now: _dt.datetime) -> None:
+    async def end_tenant(self, tenant_id: TenantId, *, now: _dt.datetime) -> None:
         """Offboarding's people step (#1214): end every active membership of the tenant
-        (`ended_by="system"`) and revoke every open invitation, each with its usual audit line
+        (`ended_by` None: the system) and revoke every open invitation, each with its usual audit line
         by `system`. Idempotent: a row already finished is left as it is."""
         for row in await self._repo.memberships_of_tenant(tenant_id):
-            if row.status == "active" and await self._repo.end_membership(row.id, ended_by=audit.SYSTEM, now=now):
+            if row.status == "active" and await self._repo.end_membership(row.id, ended_by=None, now=now):
                 audit.emit("member.remove", actor=audit.SYSTEM, tenant_id=row.tenant_id, target=row.user_id)
             elif row.status == "invited" and await self._repo.revoke_invitation(row.id):
                 audit.emit("invitation.revoke", actor=audit.SYSTEM, tenant_id=row.tenant_id, target=row.id)

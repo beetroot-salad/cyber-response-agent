@@ -1,6 +1,6 @@
 """#1163 the run signs its request tokens in the run process: a read token over the granted
-`http-proxy` systems when a call first needs one (r7 A20), and a write-back token at each ticket
-leg when the ticket system is `http-proxy`. Run start checks configuration only and contacts no
+`http-proxy` systems when a call first needs one (r7 A20), and a write-back token for the record
+leg when the case system the case-record file names is `http-proxy` (#1359: no open leg). Run start checks configuration only and contacts no
 OpenBao. Driven through `run.main` and its injection seams."""
 from __future__ import annotations
 
@@ -35,13 +35,14 @@ CLOCK_TOLERANCE = 60
 
 
 class TicketRecorder:
-    """The `ticket_writer` seam of `run.main`: records each leg's keyword arguments."""
+    """The `ticket_writer` seam of `run.main` (#1359 r4): `record_case_ticket` and `clear_receipt`
+    only, so a run that called an open leg would fail. Records each call's keyword arguments."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    def open_case_ticket(self, run: Any, **kw: Any) -> None:
-        self.calls.append(("open", kw))
+    def clear_receipt(self, run: Any, **kw: Any) -> None:
+        self.calls.append(("clear", kw))
 
     def record_case_ticket(self, run: Any, **kw: Any) -> None:
         self.calls.append(("record", kw))
@@ -51,15 +52,22 @@ class TicketRecorder:
         return kw
 
 
-def _plant(data_root, *, proxy: tuple[str, ...]):
+#: What a case system on `http-proxy` needs beside its access method (the `ticket` adapter's key
+#: grammar) and its one declared write route.
+EXTRA = {"ticket": 'TICKET_KEY_PATTERN="[A-Za-z0-9-]+"\n'}
+CASE_WRITES = {"ticket": (("POST", "/tickets/*/comments"),)}
+
+
+def _plant(data_root, *, proxy: tuple[str, ...], case_system: str | None = "ticket", **kw: Any):
     """The playground tenant with each system of `proxy` on `http-proxy` (declaration planted
-    beside its config.env)."""
+    beside its config.env) and a case-record file naming `case_system` (None: no such file)."""
     configs = dict(S.config_texts("t1163"))
     for system in proxy:
-        configs[system] = A.env_text(system)
-    folder = S.plant(data_root, configs=configs, table=TABLE)
+        configs[system] = A.env_text(system, extra=EXTRA.get(system, ""))
+    folder = S.plant(data_root, configs=configs, table=TABLE, case_system=case_system, **kw)
     for system in proxy:
-        for rel, text in H.access_files(system, H.declaration("http://x.invalid/api")).items():
+        decl = H.declaration("http://x.invalid/api", writes=CASE_WRITES.get(system, ()))
+        for rel, text in H.access_files(system, decl).items():
             (folder / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / rel).write_text(text, encoding="utf-8")
 
@@ -83,9 +91,9 @@ class RunAtHandedRecorder(S.RunRecorder):
         return super().materialize(alert, **kw)
 
 
-def _drive(tmp_path, data_root, *, signer=None, ticket=True, **seams):
+def _drive(tmp_path, data_root, *, signer=None, ticket=True, summary=None, **seams):
     """Drive `run.main`; with no `signer` none is injected (the production signing path)."""
-    rec, tickets = RunAtHandedRecorder(tmp_path / "run"), TicketRecorder()
+    rec, tickets = RunAtHandedRecorder(tmp_path / "run", summary=summary), TicketRecorder()
     alert = S.plant_alert(tmp_path / "in")
     started = time.time()
     if signer is not None:
@@ -112,14 +120,14 @@ def _claims_of_token(signer: H.FakeSigner, token: str) -> dict[str, Any]:
     return A.claims_of_payload(signer.payloads[n - 1])
 
 
-def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_per_leg(
+def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_for_the_record_leg(
         tmp_path, data_root, caplog):
-    """Run start signs no read token; the ticket legs each sign `rw` on the ticket system only.
+    """Run start signs no read token; the record leg's one write-back token is `rw` on the case system only.
     The read token, asked of the run's access, is signed then, grants only http-proxy systems,
     lives 600 s and is reused while it has life left; no token reaches disk or log.
     O8, O10, O4, A7, r7 A20."""
     caplog.set_level(logging.DEBUG)
-    _plant(data_root, proxy=("identity", "case-history"))
+    _plant(data_root, proxy=("identity", "ticket"))
     signer = A.MarkedSigner()
     rec, tickets, rc, refused, started = _drive(tmp_path, data_root, signer=signer)
 
@@ -127,14 +135,14 @@ def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_per
     assert rc == 0, (rc, refused)
     run_id = rec.run_dir_at.name
     write_back = [A.claims_of_payload(p) for p in signer.payloads]
-    assert [A.grant_of(c) for c in write_back] == [[("case-history", "rw")]] * 2, (
-        "nothing but the two ticket legs was signed during the run")
+    assert [A.grant_of(c) for c in write_back] == [[("ticket", "rw")]], (
+        "nothing but the record leg's one write-back token was signed during the run")
     access = read_access(rec)
     asked = time.time()
     first = access.token()
     assert access.token() == first, "a token with life left is reused"
-    assert len(signer.payloads) == 3
-    read = A.claims_of_payload(signer.payloads[2])
+    assert len(signer.payloads) == 2
+    read = A.claims_of_payload(signer.payloads[1])
     assert A.grant_of(read) == [("identity", "r")], "the cmdb (docker-exec) system is not granted"
     for c in [*write_back, read]:
         assert (c["tenant"], c["investigation"]) == (S.PLAYGROUND_ID, run_id)
@@ -142,11 +150,9 @@ def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_per
     for c in write_back:
         assert started < c["exp"] <= started + TOKEN_SEC + CLOCK_TOLERANCE
 
-    open_tok, record_tok = tickets.leg("open")["request_token"], tickets.leg(
-        "record")["request_token"]
-    assert open_tok != record_tok
-    assert A.grant_of(_claims_of_token(signer, open_tok)) == [("case-history", "rw")]
-    assert A.grant_of(_claims_of_token(signer, record_tok)) == [("case-history", "rw")]
+    record_tok = tickets.leg("record")["request_token"]
+    assert A.grant_of(_claims_of_token(signer, record_tok)) == [("ticket", "rw")]
+    assert [n for n, _ in tickets.calls if n not in ("clear", "record")] == [], "an open leg ran"
 
     (life,) = rec.lifecycle_calls
     for held in (life["tenant"], life["run"], life["systems"]):
@@ -159,8 +165,27 @@ def test_r1_the_read_token_is_signed_when_first_asked_and_a_write_back_token_per
     assert "run_dir=" in caplog.text, "positive control: the log channel is read"
 
 
+@pytest.mark.parametrize("truncated_by", ["budget", "store", "provider-down"])
+def test_r1_a_run_that_will_not_comment_signs_no_write_back_token(tmp_path, data_root, truncated_by):
+    """A run cut short before a verdict leaves the case alone: no write-back token is signed for
+    it, and the record step is handed none. The case system was judged once, at run start, and
+    that verdict reaches the record step. Control: `test_r1_the_read_token_is_signed_…` signs one
+    for a run that ends normally. #1392 review."""
+    _plant(data_root, proxy=("identity", "ticket"))
+    signer = A.MarkedSigner()
+    _rec, tickets, rc, refused, _started = _drive(
+        tmp_path, data_root, signer=signer, summary={
+            "output": "x", "requests": 0, "truncated_by": truncated_by, "closed_before_cut": False})
+
+    assert refused is None, (rc, refused)
+    assert signer.payloads == [], "a write-back token was signed for a run that will not comment"
+    leg = tickets.leg("record")
+    assert "request_token" not in leg, leg
+    assert type(leg["case"]).__name__ == "CaseTarget", leg["case"]
+
+
 def test_r2_a_docker_exec_ticket_system_gets_no_write_back_token(tmp_path, data_root):
-    """Only the identity system is `http-proxy`: neither ticket leg is handed a token, and the
+    """Only the identity system is `http-proxy`: the record leg is handed no token, and the
     one token signed is the read token, when asked. A7, r7 A20."""
     _plant(data_root, proxy=("identity",))
     signer = A.MarkedSigner()
@@ -171,7 +196,6 @@ def test_r2_a_docker_exec_ticket_system_gets_no_write_back_token(tmp_path, data_
     assert signer.payloads == []
     read_access(rec).token()
     assert [A.grant_of(A.claims_of_payload(p)) for p in signer.payloads] == [[("identity", "r")]]
-    assert tickets.leg("open").get("request_token") is None
     assert tickets.leg("record").get("request_token") is None
 
 
@@ -185,7 +209,7 @@ def test_r3_a_run_with_no_http_proxy_system_never_contacts_the_signer(tmp_path, 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
     assert signer.asked == 0
-    assert tickets.leg("open").get("request_token") is None
+    assert tickets.leg("record").get("request_token") is None
     assert rec.lifecycle_calls, "positive control: the run reached its lifecycle"
 
 

@@ -125,14 +125,15 @@ def test_the_list_and_the_get_show_the_job_of_every_tenant() -> None:
     assert _item(ops, LAB) == lab_item
 
 
-@pytest.mark.parametrize("tenant", [UNKNOWN, MALFORMED])
-def test_an_unknown_or_malformed_tenant_is_404_on_every_tenant_route(tenant: str, audit: AuditLog) -> None:
-    """Get, resume, offboard and rotate answer 404 for a tenant that is not there; nothing is audited (O2, RC-3)."""
+@pytest.mark.parametrize(("tenant", "code"), [(UNKNOWN, 404), (MALFORMED, 422)])
+def test_an_unknown_or_malformed_tenant_is_refused_on_every_tenant_route(tenant: str, code: int, audit: AuditLog) -> None:
+    """Get, resume, offboard and rotate answer 404 for a tenant that is not there, 422 for a malformed id (#1382);
+    nothing is audited (O2, RC-3)."""
     world, ops = _admin_world()
     world.register(EMPTY)
     mark = audit.mark()
     for method, path in (("GET", ""), ("POST", "/resume"), ("POST", "/offboard"), ("POST", "/rotate-forge-credential")):
-        _problem(ops.request(method, f"/admin/tenants/{tenant}{path}"), 404)
+        _problem(ops.request(method, f"/admin/tenants/{tenant}{path}"), code)
     assert _events(audit, mark) == []
     assert ops.post(f"/admin/tenants/{EMPTY}/offboard").status_code == 202  # control: a real tenant
 
@@ -474,7 +475,7 @@ def test_end_tenant_ends_every_membership_and_revokes_every_invitation_as_system
     assert len(ended) == 2
     assert pending in after
     assert {after[i].status for i in ended} == {"ended"}
-    assert {after[i].ended_by for i in ended} == {"system"}
+    assert {after[i].ended_by for i in ended} == {None}
     assert after[pending].status == "revoked"
     [past] = [r for r in rows.values() if r.status == "ended"]
     assert after[past.id] == past  # control: an earlier leaver keeps their own record

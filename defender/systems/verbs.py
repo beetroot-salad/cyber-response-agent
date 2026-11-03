@@ -24,6 +24,7 @@ from defender._io import read_bytes_capped
 from defender._paths import name_roots, root_spellings
 from defender.kit.settings import SETTINGS_POINTER
 from defender.kit.verbs import (
+    COMMENT_ACTION,
     SYSTEM_MAX_LEN,
     SYSTEM_PATTERN,
     Verb,
@@ -309,28 +310,52 @@ def _adapter_path_under(root: Path, system: str) -> Path | None:
     return path
 
 
-def _verb_names_in(source: bytes, path: Path) -> tuple[frozenset[str], str | None]:
+_ACTION_SPELLINGS = frozenset({COMMENT_ACTION, COMMENT_ACTION.replace("_", "-")})
+
+
+def _exposes_comment_action(table: ast.Dict) -> bool:
+    """Does this `VERBS` literal hand the host-only comment action to the agent (#1359 O4)? A key
+    spelling it either way, or a value that is the bare name."""
+    for key, value in zip(table.keys, table.values, strict=True):
+        if isinstance(key, ast.Constant) and key.value in _ACTION_SPELLINGS:
+            return True
+        if isinstance(value, ast.Name) and value.id == COMMENT_ACTION:
+            return True
+    return False
+
+
+def _verb_names_in(source: bytes, path: Path) -> tuple[frozenset[str], str | None, bool]:
     """Cold read of one adapter's `VERBS = {...}` literal from its source bytes, without disk I/O.
 
-    Returns `(names, None)`, or `(frozenset(), why)` when the source does not parse. Parses
-    bytes rather than decoded text so it accepts exactly what the import accepts (a `# coding:`
-    line, a non-UTF-8 byte in a comment). Only string keys of a dict-literal assignment count;
-    a table built any other way declares nothing, so the grant's load check fails rather than
-    treating an unreadable table as a blank cheque."""
+    Returns `(names, None, empty)`, or `(frozenset(), why, False)` when the source does not parse
+    or its `VERBS` exposes the host-only comment action (the adapter is then refused whole: none
+    of its verbs is granted). `empty` is true when a `VERBS` dict literal exists and holds nothing:
+    an adapter with no agent actions, valid, as against one with no readable `VERBS`. Parses bytes
+    rather than decoded text so it accepts exactly what the import accepts (a `# coding:` line, a
+    non-UTF-8 byte in a comment). Only string keys of a dict-literal assignment count; a table
+    built any other way declares nothing, so the grant's load check fails rather than treating an
+    unreadable table as a blank cheque."""
     try:
         tree = ast.parse(source, filename=str(path))
     except (SyntaxError, ValueError, RecursionError) as e:
-        return frozenset(), f"{type(e).__name__}: {e}"
+        return frozenset(), f"{type(e).__name__}: {e}", False
     names: set[str] = set()
+    literal = False
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)):
             continue
         if not any(isinstance(t, ast.Name) and t.id == "VERBS" for t in node.targets):
             continue
+        literal = True
+        if _exposes_comment_action(node.value):
+            return frozenset(), (
+                f"its VERBS exposes the host-only comment action `{COMMENT_ACTION}`: that "
+                "function takes the host's comment and is never a verb an agent may be granted"
+            ), False
         for key in node.value.keys:
             if isinstance(key, ast.Constant) and isinstance(key.value, str):
                 names.add(key.value)
-    return frozenset(names), None
+    return frozenset(names), None, literal and not names
 
 
 GRANTED = "GRANTED"
@@ -354,6 +379,9 @@ class RosterRead:
     verbs: types.MappingProxyType[str, frozenset[str]]
     unparsed: types.MappingProxyType[str, str]
     refused: tuple[str, ...]
+    #: Systems whose `VERBS` is an empty dict literal: adapters with no agent actions (#1359 R1),
+    #: valid, as against one whose `VERBS` cannot be read.
+    no_verbs: frozenset[str] = frozenset()
 
     def declared_verbs(self, system: str) -> frozenset[str]:
         """The verb names `system`'s adapter declares; empty if not accepted or unparsed."""
@@ -401,16 +429,20 @@ def read_roster(adapters_dir: Path) -> RosterRead:
         raise RegistryError(_cannot_read(adapters_dir, e)) from e
     declared: dict[str, frozenset[str]] = {}
     unparsed: dict[str, str] = {}
+    empty: set[str] = set()
     for name, source in sources.items():
-        declared[name], why = _verb_names_in(source, accepted[name])
+        declared[name], why, none_declared = _verb_names_in(source, accepted[name])
         if why is not None:
             unparsed[name] = why
+        elif none_declared:
+            empty.add(name)
     return RosterRead(
         root=adapters_dir,
         accepted=types.MappingProxyType(accepted),
         verbs=types.MappingProxyType(declared),
         unparsed=types.MappingProxyType(unparsed),
         refused=tuple(refused),
+        no_verbs=frozenset(empty),
     )
 
 @model(frozen=True)
@@ -591,8 +623,15 @@ class ModuleVerbRegistry(VerbRegistry):
         path = self.roster.accepted.get(system)
         if path is None:
             raise KeyError(system)
-        verbs = getattr(_load_adapter_module(path), "VERBS", None)
+        module = _load_adapter_module(path)
+        verbs = getattr(module, "VERBS", None)
         if not isinstance(verbs, Mapping):
+            return {}
+        action = getattr(module, COMMENT_ACTION, None)
+        if action is not None and any(fn is action for fn in verbs.values()):
+            # The cold read refuses a table that names the host-only comment action; this is the
+            # same refusal by identity, for a table whose literal hides it (an alias, a table
+            # filled in after its literal): none of the adapter's verbs is served (#1359 O4).
             return {}
         return dict(verbs)
 

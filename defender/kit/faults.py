@@ -24,8 +24,14 @@ class TransportFault(AdapterFault):
 
 
 class UpstreamFault(AdapterFault):
+    """The system answered and refused. `status` is its HTTP status when the refusal came from
+    an HTTP answer (#1359: data for callers to branch on, never text to be parsed)."""
 
     exit_code = 1
+
+    def __init__(self, detail: str, status: int | None = None):
+        super().__init__(detail)
+        self.status = status
 
 
 __all__ = [

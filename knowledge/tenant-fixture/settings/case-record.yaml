@@ -1,0 +1,14 @@
+# The tenant's case-record settings (#1359): which system records the run's findings as a
+# comment on the alert's case, and the comment's body. The run only ever adds one comment, to the
+# ticket the alert names (`case_key` in alert-mapping.yaml); it never creates a ticket or changes
+# its fields or status. A tenant with no case system leaves this file out.
+#
+# `system`        the system folder (under systems/) whose adapter adds the comment.
+# `comment.body`  rendered from the run's `disposition` (proposed, never committed by this
+#                 write), `cause` (the host's own sentence) and `narrative` (the report's body,
+#                 fence-stripped); {case_id} is the run's folder name. The host opens every
+#                 posted body with the agent tag naming its run, outside this template (#1221),
+#                 and bounds the whole on the wire.
+system: ticket
+comment:
+  body: "{disposition} — {cause}\n\n{narrative}"
