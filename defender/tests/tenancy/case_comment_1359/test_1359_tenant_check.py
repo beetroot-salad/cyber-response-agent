@@ -152,3 +152,36 @@ def test_r1_a_case_adapter_the_cold_read_refused_is_a_finding_naming_the_file(tm
     H.assert_clean(_check(script, folder))
     text = H.assert_refused(_check(bad_script, folder), CASE_RECORD, CASE_SYSTEM)
     assert "Traceback" not in text
+
+
+def _script_with(tmp_path: Path, adapter: str) -> Path:
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    H.add_adapter(checkout, CASE_SYSTEM, adapter)
+    return checkout / H.script_of(tenant_py).resolve().relative_to(H.REPO_ROOT)
+
+
+@pytest.mark.parametrize(("why", "adapter"), ids=["check-crashes", "no-check"], argvalues=[
+    ("a check that crashes", ADAPTER.replace(
+        "    transport.check_docker_curl_settings(tenant, 'casesys', 'CASESYS')\n",
+        "    return tenant.grants.missing\n")),
+    ("no check at all", ADAPTER.replace("def check_settings(tenant):", "def _unused(tenant):")),
+])
+def test_r1_a_case_adapter_whose_check_cannot_judge_is_a_finding_not_a_crash(tmp_path, script, why, adapter):
+    """A case adapter whose settings check raises something other than a settings fault, or that
+    declares none, is a finding naming `settings/case-record.yaml` and the system, as run start
+    judges such an adapter broken (O-5a); `check` still lists it, with no traceback. Control: the
+    sound adapter is clean. #1392 review."""
+    folder = _folder(tmp_path, record=C.case_record_text(CASE_SYSTEM), **_proxy_system())
+    H.assert_clean(_check(script, folder))
+    text = H.assert_refused(_check(_script_with(tmp_path, adapter), folder), CASE_RECORD, CASE_SYSTEM)
+    assert "Traceback" not in text, why
+
+
+def test_r1_a_config_env_fault_that_mentions_access_yaml_names_config_env(tmp_path, script):
+    """`CASESYS_URL_BASE` set in `config.env` of an http-proxy case system is that file's fault,
+    though its text tells the operator the base lives in `access.yaml`: the finding names
+    `config.env`, never `access.yaml`. #1392 review."""
+    env = PROXY_ENV + 'CASESYS_URL_BASE="https://cases.example.test"\n'
+    folder = _folder(tmp_path, record=C.case_record_text(CASE_SYSTEM), **_proxy_system(env=env))
+    text = H.assert_refused(_check(script, folder), f"systems/{CASE_SYSTEM}/config.env")
+    assert f"systems/{CASE_SYSTEM}/access.yaml:" not in text, text

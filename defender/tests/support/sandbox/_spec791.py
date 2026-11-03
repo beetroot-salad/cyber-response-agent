@@ -192,6 +192,9 @@ class SpecTail:
         #: The tenant record each ticket leg was handed by `run.py`; kept apart from
         #: `record_calls`, which stays the exit-class record.
         self.ticket_tenants: list[Any] = []
+        #: The case system's verdict each ticket leg was handed (#1392: judged once, by `run.py`);
+        #: kept apart from `record_calls` for the same reason.
+        self.ticket_cases: list[Any] = []
 
     # the seam's three dependencies
     def lifecycle(self, *, run: Any, **_kw: Any) -> dict:
@@ -218,8 +221,9 @@ class SpecTail:
         self._note("clear_receipt", run.run_dir)
 
     def record_case_ticket(self, run: Any, *, tenant: Any, defender_dir: Path, env: Any,
-                           **kw: Any) -> None:
+                           case: Any = None, **kw: Any) -> None:
         self.ticket_tenants.append(tenant)
+        self.ticket_cases.append(case)
         # `**kw` takes #1047's `truncated_by=`/`closed_before_cut=`: this fakes the ticket SEAM,
         # not the lane's per-class branching, but records the call to show they are passed on.
         self.record_calls.append(kw)

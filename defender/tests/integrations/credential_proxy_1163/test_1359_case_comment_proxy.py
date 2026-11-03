@@ -74,6 +74,28 @@ def test_o3_o4_the_comment_goes_through_the_proxy_with_the_write_token_only(tmp_
     assert "proxy" in (refused.get("reason") or "").lower(), refused
 
 
+def test_o5_a_write_the_store_took_is_a_comment_whatever_the_proxy_made_of_its_reply(tmp_path, data_root):
+    """A 201 whose reply is over the proxy's size cap is still the store taking the comment:
+    `commented`, never "the store refused (HTTP 200)". The host never reads a write's reply.
+    Control: the same store's 404 is a refusal. O5, #1392 review."""
+    with H.upstream() as up:
+        decl = H.declaration(up.url + STORE, writes=(("POST", "/tickets/*/comments"),))
+        files = _files("ticket", decl, env_extra=KEY_PATTERN)
+        with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
+            store = H.FakeStore({(t.tenant_id, "ticket"): T.static_set()})
+            tok = T.token(t.tenant_id, {("ticket", "rw")})
+            with A.proxy_for(t, store, max_response_bytes=64) as (url, _tap):
+                up.replies[COMMENT_PATH] = (201, {}, json.dumps({"id": 1, "body": "x" * 4096}).encode())
+                took = _comment(tmp_path / "took", t, url, tok)
+                up.replies[COMMENT_PATH] = (404, {}, json.dumps({"detail": "no such ticket"}).encode())
+                lost = _comment(tmp_path / "lost", t, url, tok)
+
+    assert took is not None and lost is not None, (took, lost)
+    assert (took["status"], took["ok"]) == (C.COMMENTED, True), took
+    assert (lost["status"], lost["ok"]) == (C.ERROR, False), lost
+    assert "404" in (lost.get("reason") or ""), lost
+
+
 class _RecordOnly:
     """`run.main`'s writer seam after #1359: `record_case_ticket` and `clear_receipt` only (an open
     leg would fail the run's call)."""

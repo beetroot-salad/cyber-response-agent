@@ -178,3 +178,22 @@ def test_o1_a_failed_comment_adds_no_posted_comments_row(tmp_path, monkeypatch):
     _shim(tmp_path, monkeypatch)
     _rc, _refused, sent = _run(tmp_path / "again", root, alert)
     assert len(S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(sent))) == 1
+
+
+def test_o5_a_redirect_is_the_store_refusing_not_a_comment(tmp_path, monkeypatch):
+    """A 302 on the comment is not a 2xx: an error receipt carrying the status and no
+    posted-comments row, so no world is later served a comment the store never stored. Control:
+    a 201 comments. O5, #1392 review."""
+    root, _folder, alert = _world(tmp_path)
+    _shim(tmp_path, monkeypatch, S.answer("", "302"))
+    _rc, refused, run_dir = _run(tmp_path, root, alert)
+    assert refused is None, refused
+    got = S.receipt(run_dir)
+    assert got is not None, "no receipt"
+    assert (got["status"], got["ok"], got["url"]) == (C.ERROR, False, None), got
+    assert "302" in (got.get("reason") or ""), got
+    assert S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(run_dir)) == []
+
+    _shim(tmp_path, monkeypatch)
+    _rc, _refused, sent = _run(tmp_path / "again", root, alert)
+    assert S.receipt(sent)["status"] == C.COMMENTED, S.receipt(sent)

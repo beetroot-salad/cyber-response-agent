@@ -309,9 +309,9 @@ def http_write(
     """The HOST's write to a case system (#1359): `method` <URL_BASE><path> with a JSON `body`.
     Used only by an adapter's `add_case_comment`; no query verb reaches it. On the docker route
     the write class is confined by the write-endpoint table; on the proxy route the proxy's
-    declared write routes judge it. Any 2xx is success whatever its body. A 4xx is an
-    `UpstreamFault` carrying the status; a 5xx, an unreachable store or a failed curl is a
-    `TransportFault`."""
+    declared write routes judge it. Whether the store took it is `_judge_write`'s, on both
+    routes: any 2xx is success whatever its body, a redirect or a 4xx is an `UpstreamFault`
+    carrying the status, and a 5xx, an unreachable store or a failed curl is a `TransportFault`."""
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
     _perform(ctx, config, url, system=system, method=method, body=body, write=True)
 
@@ -385,6 +385,18 @@ def _raise_on_http_error(code: int, body_text: str, url: str) -> None:
         raise UpstreamFault(f"HTTP {code} from {url}: {_vendor_detail(body_text)}", status=code)
 
 
+def _judge_write(code: int, body_text: str, where: str) -> None:
+    """THE judgement of the host's write (#1359), on either route, from the store's own status
+    alone: a 2xx is success whatever its body (the body is never read), a 5xx is the store down
+    (`TransportFault`), and anything else — a redirect, a 4xx — is the store's refusal
+    (`UpstreamFault` carrying the status)."""
+    if 200 <= code < 300:
+        return
+    if code >= 500:
+        raise TransportFault(f"upstream {where} returned HTTP {code}: {body_text}")
+    raise UpstreamFault(f"HTTP {code} from {where}: {_vendor_detail(body_text)}", status=code)
+
+
 def _vendor_detail(body_text: str) -> object:
     """The vendor's own `detail` from an error body (the whole body when it names none)."""
     try:
@@ -421,9 +433,12 @@ def _perform(  # noqa: PLR0913 — one request's per-call state
 
     _raise_on_transport_failure(ctx, bastion, rc, stderr, system)
     body_text, code = _parse_status_code(stdout, stderr, url, rc)
+    if write:
+        _judge_write(code, body_text, url)
+        return {}
     _raise_on_http_error(code, body_text, url)
 
-    if write or not body_text:
+    if not body_text:
         return {}
     try:
         return json.loads(body_text)
@@ -447,23 +462,24 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
 ) -> dict | list:
     answer = proxy_exchange(ctx, system=system, method=method, url=url, body=body,
                             timeout_sec=int(config.get("TIMEOUT_SEC", "10")))
+    if write:
+        if answer.status:
+            # The store answered: its status alone decides, whatever the proxy made of the body.
+            _judge_write(answer.status, answer.body, system)
+            return {}
+        raise_proxy_fault(answer.fault or "TransportFault", answer.detail)
     if answer.fault in ("UpstreamFault", "TransportFault") and answer.status:
         # The system answered: its own reason (scrubbed by the proxy) reaches the model and
         # curation, as on the docker path (`_raise_on_http_error`).
         raise_proxy_fault(answer.fault,
                           f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
                           answer.status)
-    if write and answer.fault == "ConfigFault" and answer.status >= 400:
-        # The store itself refused the host's write (the proxy's classification of a 401 with a
-        # credential attached): the store's refusal, with its status, not the proxy's own (#1359 O5).
-        raise UpstreamFault(f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
-                            status=answer.status)
     if answer.fault is not None:
         raise_proxy_fault(answer.fault, answer.detail)
     if answer.status >= 400:
         raise UpstreamFault(f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
                             status=answer.status)
-    if write or not answer.body:
+    if not answer.body:
         return {}
     try:
         parsed = json.loads(answer.body)

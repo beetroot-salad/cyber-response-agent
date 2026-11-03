@@ -4,9 +4,11 @@ the tenant's settings let it.
 One judgement, two askers (D-17): the record leg at run end and `tenant check` on a folder both
 call `judge_case_system`, so the check cannot pass what the leg would refuse. It reads the
 tenant's `settings/case-record.yaml` as recorded when the run began, the case system's adapter
-(read fresh from the checkout), its `check_settings` over the same record, and — for a system
-reached through the credential proxy — its access declaration. Every failure is a
-`CaseSettingsFault` naming the one file that is wrong.
+(read fresh from the checkout), its access declaration when the system is reached through the
+credential proxy, then its `check_settings` over the same record — judged by
+`system_status.judge_adapter`, the run start's own rules, so a missing or crashing check is the
+adapter's defect here as there. Every failure is a `CaseSettingsFault` naming the one file that is
+wrong, and nothing else escapes: both askers may call it unguarded.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ from defender.kit.access import AccessDeclaration
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import config_pointer, pointer_to
 from defender.kit.verbs import COMMENT_ACTION
+from defender.systems.system_status import AdapterBroken, NotConfigured, ReasonScope, judge_adapter
 from defender.systems.verbs import RegistryError, RosterRead, fresh_adapter_module, read_roster
 from defender.tenancy.case_ticket import (
     CASE_RECORD_REL, CaseRecordSettings, CaseTicketError)
@@ -66,15 +69,7 @@ def legacy_folder_finding(settings: Path) -> str | None:
     return None
 
 
-def _settings_text(system: str, fault: ConfigFault) -> CaseSettingsFault:
-    text = fault.detail
-    access = pointer_to(f"systems/{system}/access.yaml")
-    if "access.yaml" in text:
-        return CaseSettingsFault(access, text.removeprefix(f"{access}: "))
-    return CaseSettingsFault(config_pointer(system), text.removeprefix(f"{config_pointer(system)}: "))
-
-
-def _adapter_of(system: str, *, defender_dir: Path, roster: RosterRead | None) -> Any:
+def _adapter_of(system: str, *, defender_dir: Path, roster: RosterRead | None) -> tuple[Any, RosterRead]:
     """`system`'s adapter module, read fresh from the checkout, or the `CaseSettingsFault` naming
     `settings/case-record.yaml` for why it cannot take a comment: no adapter, an adapter the
     roster refused, one that will not load, or one without the comment action."""
@@ -106,7 +101,7 @@ def _adapter_of(system: str, *, defender_dir: Path, roster: RosterRead | None) -
             CASE_RECORD_POINTER,
             f"names the system `{system}`, whose adapter has no `{COMMENT_ACTION}`: it cannot "
             "record a comment")
-    return module
+    return module, roster
 
 
 def judge_case_system(
@@ -126,18 +121,33 @@ def judge_case_system(
         raise CaseSettingsFault(CASE_RECORD_POINTER,
                                 str(case).removeprefix(f"settings/{CASE_RECORD_REL} "))
     system = case.system
-    module = _adapter_of(system, defender_dir=defender_dir, roster=roster)
-    check = getattr(module, "check_settings", None)
-    if callable(check):
-        try:
-            check(record)
-        except ConfigFault as fault:
-            raise _settings_text(system, fault) from None
+    module, roster = _adapter_of(system, defender_dir=defender_dir, roster=roster)
     if system in record.access:
         # Only a system reached through the credential proxy has an access declaration (or the
-        # fault for why it has none): it must declare the comment's route.
+        # fault for why it has none): it must declare the comment's route. Judged before the
+        # settings check, so a fault the check raises is about `config.env`, never this file.
         _judge_access(system, record.access)
+    scope = ReasonScope(defender_dir=Path(defender_dir), adapters_root=Path(roster.root))
+    cause = judge_adapter(lambda: module, tenant=record, scope=scope)
+    if isinstance(cause, NotConfigured):
+        config = config_pointer(system)
+        raise CaseSettingsFault(config, cause.reason.removeprefix(f"{config}: "))
+    if isinstance(cause, AdapterBroken):
+        raise CaseSettingsFault(CASE_RECORD_POINTER,
+                                f"names the system `{system}`, whose adapter cannot be used: "
+                                f"{cause.reason}", adapter_refused=True)
     return CaseTarget(system=system, template=case, module=module)
+
+
+def case_verdict(
+    record: Any, *, defender_dir: Path, roster: RosterRead | None = None,
+) -> CaseTarget | CaseSettingsFault:
+    """`judge_case_system` as a value: the run end judges once and hands the verdict to both the
+    token mint and the record step, so they cannot disagree."""
+    try:
+        return judge_case_system(record, defender_dir=defender_dir, roster=roster)
+    except CaseSettingsFault as fault:
+        return fault
 
 
 def _judge_access(system: str, access: Mapping[str, AccessDeclaration | ConfigFault]) -> None:
@@ -157,5 +167,5 @@ def _judge_access(system: str, access: Mapping[str, AccessDeclaration | ConfigFa
 
 __all__ = [
     "CASE_RECORD_POINTER", "CaseSettingsFault", "CaseTarget", "LEGACY_SYSTEM",
-    "judge_case_system", "legacy_folder_finding",
+    "case_verdict", "judge_case_system", "legacy_folder_finding",
 ]

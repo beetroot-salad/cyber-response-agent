@@ -648,16 +648,6 @@ class _TokenMint:
         return {"request_token": token, "proxy_url": self._proxy_url or ""}
 
 
-def _case_settings_sound(tenant: RunTenant) -> bool:
-    """Do the tenant's case settings, as recorded when the run began, let its case system take a
-    comment? The record step's own judgement, asked before a write-back token is minted."""
-    try:
-        case_system.judge_case_system(tenant, defender_dir=DEFENDER_DIR)
-    except case_system.CaseSettingsFault:
-        return False
-    return True
-
-
 def _resolve_run_tenant(
     tenant: tenancy.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
     copy: run_knowledge.RunCopy | None = None,
@@ -1347,14 +1337,16 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                     # curation marker, which a drainer may pick up immediately.
                     if ns.update_ticket:
                         # Both inputs come from the driver's summary, not from a possibly stale sidecar.
-                        # The case settings are judged here before the token is minted (D-9), so a bad
-                        # setting is reported as that and never as a missing token; the step judges
-                        # again on its own.
+                        # The case system is judged once, here, before the token is minted (D-9): the
+                        # mint and the step read the one verdict, so a bad setting is reported as that
+                        # and never as a missing token. The judgement raises nothing else.
+                        case = case_system.case_verdict(tenant, defender_dir=DEFENDER_DIR)
                         ticket_writer.record_case_ticket(
                             run, tenant=tenant, defender_dir=DEFENDER_DIR,
                             env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
                             closed_before_cut=summary.get("closed_before_cut") is True,
-                            **started.minting.write_back(judged=_case_settings_sound(tenant)))
+                            case=case, **started.minting.write_back(
+                                judged=isinstance(case, case_system.CaseTarget)))
 
                     # A sibling's evidence was staged on purpose, so it must never feed the catalog.
                     if world is not None:
