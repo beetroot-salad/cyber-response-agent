@@ -231,24 +231,14 @@ def context_name(marker: str, system: str) -> str:
     return f"ctx-{marker}-{system}"
 
 
-def es_container(marker: str) -> str:
-    return f"es-{marker}"
-
-
-def kibana_container(marker: str) -> str:
-    return f"kibana-{marker}"
-
-
 def access_lines(marker: str, system: str) -> str:
-    """`system`'s access method and docker context lines (and elastic's two containers):
+    """`system`'s access method and docker context lines (elastic: the proxy method alone):
     without them its settings check fails and the system starts down (#1256)."""
     prefix = PREFIX[system]
-    text = (f'{prefix}_TRANSPORT="{DOCKER_EXEC}"\n'
+    if system == "elastic":  # #1391 O3 D12: proxy only; its base, `ca` and credential are the declaration's
+        return f'{prefix}_TRANSPORT="http-proxy"\n'
+    return (f'{prefix}_TRANSPORT="{DOCKER_EXEC}"\n'
             f'{prefix}_DOCKER_CONTEXT="{context_name(marker, system)}"\n')
-    if system == "elastic":
-        text += (f'ELASTIC_ES_CONTAINER="{es_container(marker)}"\n'
-                 f'ELASTIC_KIBANA_CONTAINER="{kibana_container(marker)}"\n')
-    return text
 
 
 def config_texts(marker: str, *, events_index: str | None = None,
@@ -277,11 +267,8 @@ def config_texts(marker: str, *, events_index: str | None = None,
             f'TICKET_KEY_PATTERN="{marker.upper()}-[0-9]+"\n'
         ),
         "elastic": (
-            f'ELASTICSEARCH_URL="https://es-{marker}:9200"\n'
-            f'KIBANA_URL="http://kibana-{marker}:5601"\n'
             f'ELASTIC_EVENTS_INDEX="{events}"\n'
             f'ELASTIC_ALERTS_INDEX="{alerts}"\n'
-            'ELASTIC_SSL_VERIFY="true"\n'
         ),
         "change-mgmt": (
             f'CHANGE_MGMT_URL_BASE="http://change-mgmt-{marker}:8080"\n'

@@ -29,9 +29,6 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 _OK = S.answer('{"status": "ok"}')
 _HOST = S.answer('{"hostname": "web-1"}')
-_SEARCH = S.answer(json.dumps({"hits": {"total": {"value": 0}, "hits": []}}))
-_ES_HEALTH = S.answer(json.dumps({"status": "green", "number_of_nodes": 1}))
-_KB_STATUS = S.answer(json.dumps({"status": {"overall": {"level": "available"}}}))
 _PS = S.answer("PID PPID USER\n1 0 root", None)
 _INSPECT = S.answer('"/web-1"\t"nginx:1.27"\n', None)
 _INSPECT_MISSING = S.answer("", None, rc=1, stderr="error: no such object: c0ffee1107\n")
@@ -104,8 +101,7 @@ def test_d_load_config_shape_survives(tmp_path):
     m = "lcs"
     root, folder = _tenant(tmp_path, m)
     record = S.resolve(root)
-    for system in ("cmdb", "elastic"):
-        S.config_path(folder, system).unlink()
+    S.config_path(folder, "cmdb").unlink()
     assert not S.config_path(folder, "cmdb").exists(), "precondition: cmdb's file is gone"
     shim = S.DockerShim(tmp_path / "shim")
     ctx = _ctx(record, tmp_path, shim)
@@ -118,27 +114,17 @@ def test_d_load_config_shape_survives(tmp_path):
     assert not [k for k in cmdb if k.startswith("CMDB_")], \
         f"cmdb's load_config returned prefixed keys (its shape changed): {sorted(cmdb)}"
 
-    elastic = elastic_adapter.load_config(ctx)
-    want_es = {"ELASTICSEARCH_URL": f"https://es-{m}:9200", "KIBANA_URL": f"http://kibana-{m}:5601",
-               "ELASTIC_EVENTS_INDEX": f"{m}-events-*", "ELASTIC_ALERTS_INDEX": f"{m}-alerts-*"}
-    assert {k: elastic.get(k) for k in want_es} == want_es, \
-        f"elastic's load_config lost its key set or their file values: {elastic}"
     assert shim.calls() == [], "load_config spawned a docker child"
 
     # Missing required keys, judged from the entry: the file is deleted after resolve here too.
     root2, folder2 = _tenant(tmp_path, "lcm", name="t2")
     S.drop_key(folder2, "cmdb", "CMDB_BASTION_HOST")
-    S.drop_key(folder2, "elastic", "KIBANA_URL")
     record2 = S.resolve(root2)
-    for system in ("cmdb", "elastic"):
-        S.config_path(folder2, system).unlink()
+    S.config_path(folder2, "cmdb").unlink()
     ctx2 = _ctx(record2, tmp_path / "t2", shim)
     fault = _raised(transport.load_config, ctx2, "cmdb", "CMDB")
     assert isinstance(fault, ConfigFault), f"a missing CMDB_BASTION_HOST must be a ConfigFault naming it, got {fault!r}"
     assert "CMDB_BASTION_HOST" in str(fault), f"a missing CMDB_BASTION_HOST must be a ConfigFault naming it, got {fault!r}"
-    fault = _raised(elastic_adapter.load_config, ctx2)
-    assert isinstance(fault, ConfigFault), f"a missing KIBANA_URL must be a ConfigFault naming it, got {fault!r}"
-    assert "KIBANA_URL" in str(fault), f"a missing KIBANA_URL must be a ConfigFault naming it, got {fault!r}"
 
 
 def test_d2_transport_domain(tmp_path):
@@ -215,56 +201,17 @@ def test_d2_docker_context_per_system(tmp_path):
     assert "soc-playground" not in every, "a call fell back to the soc-playground default"
 
 
-def test_d2_elastic_containers_no_default(tmp_path):
-    m = "ecn"
-    root, _ = _tenant(tmp_path, m)
-    shim_q = S.DockerShim(tmp_path / "shim", [_SEARCH])
-    ctx = _ctx(S.resolve(root), tmp_path, shim_q)
-    elastic_adapter.query(ctx, native_query="*")
-    shim_h = S.DockerShim(tmp_path / "shim-h", [_ES_HEALTH, _KB_STATUS])
-    elastic_adapter.health_check(_ctx(S.record_on(ctx), tmp_path, shim_h))
-    [es_argv] = _argvs(shim_q)
-    assert S.exec_target(es_argv) == S.es_container(m), \
-        f"an Elasticsearch URL must target ELASTIC_ES_CONTAINER: {es_argv}"
-    health = _argvs(shim_h)
-    assert [S.exec_target(a) for a in health] == [S.es_container(m), S.kibana_container(m)], \
-        f"health_check must target ES then Kibana by the file's containers: {health}"
-
-    for key in ("ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER"):
-        name = key.lower()
-        root_k, folder_k = _tenant(tmp_path, "ecx", name=name)
-        S.drop_key(folder_k, "elastic", key)
-        record = S.resolve(root_k)
-        shim_k = S.DockerShim(tmp_path / name / "shim", [_SEARCH])
-        ctx_k = _ctx(record, tmp_path / name, shim_k)
-        if key == "ELASTIC_ES_CONTAINER":
-            fault = _raised(elastic_adapter.query, ctx_k, native_query="*")
-            assert isinstance(fault, ConfigFault), f"{key} absent: query must fault, got {fault!r}"
-            assert _argvs(shim_k) == [], f"{key} absent: a docker child ran: {_argvs(shim_k)}"
-        else:
-            shim_k.respond(_ES_HEALTH, _KB_STATUS)
-            _raised(elastic_adapter.health_check, ctx_k)
-        targets = [S.exec_target(a) for a in _argvs(shim_k)]
-        assert not {"elasticsearch", "kibana", "", None} & set(targets), \
-            f"{key} absent: a call fell back to a built-in container: {targets}"
-
-
 def test_o2_adapter_config_snapshot(tmp_path):
     m = "ocs"
     root, folder = _tenant(tmp_path, m)
     record = S.resolve(root)
     S.set_key(folder, "cmdb", "CMDB_URL_BASE", "http://edited-cmdb:9")
-    S.set_key(folder, "elastic", "ELASTIC_EVENTS_INDEX", "edited-*")
     shim = S.DockerShim(tmp_path / "shim", [_HOST])
     ctx = _ctx(record, tmp_path, shim)
     cmdb_adapter.get_host(ctx, host="web-1")
-    shim.respond(_SEARCH)
-    elastic_adapter.query(ctx, native_query="*")
-    cmdb_argv, es_argv = _argvs(shim)
+    [cmdb_argv] = _argvs(shim)
     assert S.curl_url(cmdb_argv) == f"http://cmdb-{m}:8080/hosts/web-1", \
         f"cmdb's call followed an edit made after resolve: {cmdb_argv}"
-    assert f"/{m}-events-*/_search" in (S.curl_url(es_argv) or ""), \
-        f"elastic's call followed an index edit made after resolve: {es_argv}"
 
     # Positive control: the edit is real, so a record built after it does address it.
     shim2 = S.DockerShim(tmp_path / "shim2", [_HOST])
@@ -343,26 +290,6 @@ def test_s7_mf3_empty_destination_is_config_fault(tmp_path):
         assert "CMDB_DOCKER_CONTEXT" in str(fault), f"CMDB_DOCKER_CONTEXT={value!r}: expected a ConfigFault naming it, got {fault!r}"
         assert _argvs(shim) == [], f"CMDB_DOCKER_CONTEXT={value!r} spawned a child: {_argvs(shim)}"
 
-    for key in ("ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER"):
-        name = key.lower()
-        root, folder = _tenant(tmp_path, "mde", name=name)
-        S.set_key(folder, "elastic", key, "")
-        record = S.resolve(root)
-        shim = S.DockerShim(tmp_path / name / "shim", [_ES_HEALTH, _KB_STATUS])
-        ctx = _ctx(record, tmp_path / name, shim)
-        if key == "ELASTIC_ES_CONTAINER":
-            fault = _raised(elastic_adapter.query, ctx, native_query="*")
-            assert isinstance(fault, ConfigFault), f"{key}='': query must fault, got {fault!r}"
-            assert _argvs(shim) == [], f"{key}='': a docker child ran: {_argvs(shim)}"
-        else:
-            _raised(elastic_adapter.health_check, ctx)
-            kibana = [a for a in _argvs(shim)
-                      if (S.curl_url(a) or "").startswith("http://kibana-mde:5601")]
-            assert kibana == [], f"{key}='': a Kibana call still reached docker: {kibana}"
-        empty = [a for a in _argvs(shim) if S.exec_target(a) in ("", None)]
-        assert empty == [], f"{key}='': a child targeted an empty container: {empty}"
-
-
 def test_s7_mf3_destination_never_from_process_env(tmp_path, monkeypatch):
     # Docker's steering variables still reach the child's environment (stripping them is
     # deferred), so each argv must name its destination explicitly.
@@ -392,12 +319,7 @@ def test_s7_mf3_destination_never_from_process_env(tmp_path, monkeypatch):
              want=[("host-state", "web-1")]),
         call([_NAMES], host_state_adapter.health_check,
              want=[("host-state", None)]),
-        call([_SEARCH], elastic_adapter.query, native_query="*",
-             want=[("elastic", S.es_container(m))]),
     ]
-    fresh = S.DockerShim(tmp_path / "shim-h", [_ES_HEALTH, _KB_STATUS])
-    elastic_adapter.health_check(_ctx(S.record_on(ctx), tmp_path, fresh, **exported))
-    groups.append((_argvs(fresh), [("elastic", S.es_container(m)), ("elastic", S.kibana_container(m))]))
 
     for argvs, want in groups:
         assert len(argvs) == len(want), f"unexpected child count {argvs} for {want}"
@@ -410,7 +332,7 @@ def test_s7_mf3_destination_never_from_process_env(tmp_path, monkeypatch):
                     f"{system}'s child must target the file's container {container}: {argv}"
             leaked = [v for v in exported.values() if any(v in tok for tok in argv)]
             assert leaked == [], f"{system}'s child took a destination from the env: {leaked}"
-    assert len(expected) == 6, f"precondition: every call spawned its children: {expected}"
+    assert len(expected) == 3, f"precondition: every call spawned its children: {expected}"
 
 
 def test_s7_nf6_dash_leading_context_is_a_name(tmp_path):
@@ -645,29 +567,6 @@ def test_o8_example_reads_record(tmp_path, monkeypatch):
     assert fault is None, f"the example's get-record faulted with its entry in the record: {fault!r}"
     assert f"{base}/records/r1" in addressed, \
         f"the example must address its record entry's URL: {addressed}"
-
-
-def test_s7_mf7c_the_adapter_judges_its_own_required_keys(tmp_path):
-    m = "mf7"
-    root, folder = _tenant(tmp_path, m, name="kc")
-    S.drop_key(folder, "elastic", "ELASTIC_KIBANA_CONTAINER")
-    record = S.resolve(root)
-    shim = S.DockerShim(tmp_path / "kc" / "shim", [_SEARCH])
-    envelope = elastic_adapter.query(_ctx(record, tmp_path / "kc", shim), native_query="*")
-    [argv] = _argvs(shim)
-    assert envelope.get("index") == f"{m}-events-*", f"the ES verb must still answer: {envelope}"
-    assert S.exec_target(argv) == S.es_container(m), f"the ES verb's child: {argv}"
-    assert S.context_of(argv) == S.context_name(m, "elastic"), f"the ES verb's child: {argv}"
-
-    # A key the adapter requires of every verb (KIBANA_URL).
-    root2, folder2 = _tenant(tmp_path, "mf8", name="ku")
-    S.drop_key(folder2, "elastic", "KIBANA_URL")
-    record2 = S.resolve(root2)
-    shim2 = S.DockerShim(tmp_path / "ku" / "shim", [_SEARCH])
-    fault = _raised(elastic_adapter.query, _ctx(record2, tmp_path / "ku", shim2), native_query="*")
-    assert isinstance(fault, ConfigFault), f"the adapter requires KIBANA_URL itself and must fault naming it: {fault!r}"
-    assert "KIBANA_URL" in str(fault), f"the adapter requires KIBANA_URL itself and must fault naming it: {fault!r}"
-    assert _argvs(shim2) == [], f"the faulted adapter spawned a child: {_argvs(shim2)}"
 
 
 _O5_TABLE = _REPLAY_TABLE + "    lookup: {roles: [gather]}\n"

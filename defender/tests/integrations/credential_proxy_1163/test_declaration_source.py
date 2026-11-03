@@ -4,6 +4,7 @@ the next request."""
 from __future__ import annotations
 
 import base64
+import functools
 import json
 import shutil
 from pathlib import Path
@@ -276,29 +277,66 @@ def test_d3_adapter_over_the_working_tree_reaches_nothing_the_merged_declaration
     assert [s.path for s in r.up.seen] == [f"{T.BASE_PATH}/users/dev.dana"]
 
 
-@pytest.mark.parametrize(("kind", "fault"), [
-    pytest.param("root-on-https", None, id="control"),
-    pytest.param("not-pem", ConfigFault, id="not-pem"),
-    pytest.param("a-key-not-a-certificate", ConfigFault, id="key-not-cert"),
-    pytest.param("on-an-http-base", ConfigFault, id="http-base"),
+ES = "https://es.corp.example/es"
+_OTHER_LABELS = ("PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "PUBLIC KEY", "X509 CRL",
+                 "TRUSTED CERTIFICATE", "CERTIFICATE REQUEST")
+
+
+def _relabeled(pem: bytes, label: str) -> bytes:
+    """Well-formed PEM of `pem`'s body under another block `label`."""
+    kind = pem.splitlines()[0].decode().removeprefix("-----BEGIN ").removesuffix("-----")
+    return pem.replace(kind.encode(), label.encode())
+
+
+@functools.cache
+def _ca_texts() -> dict[str, tuple[bytes, str]]:
+    from defender.tests.support.shared._tls_server import chain
+
+    pki = chain()
+    texts = {
+        "root-on-https": (pki.root.cert, ES),
+        "root-and-intermediate": (pki.root.cert + pki.intermediate.cert, ES),
+        "not-pem": (b"-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----\n", ES),
+        "key-not-cert": (pki.root.key, ES),
+        "cert-and-key": (pki.root.cert + pki.root.key, ES),
+        "cert-then-junk": (pki.root.cert + b"junk after the certificate\n", ES),
+        "on-an-http-base": (pki.root.cert, "http://es.corp.example/es"),
+    }
+    for label in _OTHER_LABELS:
+        texts[f"cert-and-{label.lower().replace(' ', '-')}"] = (
+            pki.root.cert + _relabeled(pki.root.key, label), ES)
+    return texts
+
+
+@pytest.mark.parametrize("kind", sorted(_ca_texts()))
+def test_1391_o4_a_declarations_ca_is_judged_when_it_is_parsed(kind):
+    """`ca` of certificates only, on an https base, parses; anything else (not PEM, a key, a
+    certificate beside a non-certificate block or junk, an http base) is a ConfigFault. #1391 O4, F6."""
+    from defender.tenancy._access import parse_access
+
+    ca, base = _ca_texts()[kind]
+    text = H.declaration(base, scheme=H.basic_scheme(), ca=ca)
+    if kind in {"root-on-https", "root-and-intermediate"}:
+        assert parse_access(text, system="elastic").base == base
+    else:
+        with pytest.raises(ConfigFault):
+            parse_access(text, system="elastic")
+
+
+@pytest.mark.parametrize(("token_url", "ca", "fault"), [
+    pytest.param("https://idp.corp.example/token", True, None, id="https-control"),
+    pytest.param("http://idp.corp.example/token", False, None, id="http-without-ca"),
+    pytest.param("http://idp.corp.example/token", True, ConfigFault, id="http-with-ca"),
 ])
-def test_1391_o4_a_declarations_ca_is_judged_when_it_is_parsed(kind, fault):
-    """A `ca` of certificates on an https base parses; one that is not PEM certificates, or sits
-    on an http base, is a ConfigFault at parse. #1391 O4."""
+def test_1391_o4_a_ca_with_an_http_token_url_is_a_settings_fault(token_url, ca, fault):
+    """`ca` covers the token exchange, so it is refused beside an `http://` token URL. #1391 O4, D13, F6."""
     from defender.tenancy._access import parse_access
     from defender.tests.support.shared._tls_server import issue
 
-    root = issue("tenant private root", ca=True)
-    ca, base = {
-        "root-on-https": (root.cert, "https://es.corp.example/es"),
-        "not-pem": (b"-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----\n",
-                    "https://es.corp.example/es"),
-        "a-key-not-a-certificate": (root.key, "https://es.corp.example/es"),
-        "on-an-http-base": (root.cert, "http://es.corp.example/es"),
-    }[kind]
-    text = H.declaration(base, scheme=H.basic_scheme(), ca=ca)
+    text = H.declaration(ES, scheme=H.oauth_scheme(token_url),
+                         ca=issue("tenant private root", ca=True).cert if ca else None)
     if fault is None:
-        assert parse_access(text, system="elastic").base == base
+        assert parse_access(text, system="elastic").base == ES
     else:
         with pytest.raises(fault):
             parse_access(text, system="elastic")

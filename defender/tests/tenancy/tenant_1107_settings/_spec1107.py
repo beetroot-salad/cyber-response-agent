@@ -100,8 +100,6 @@ def settings_pointer() -> str:
 PREFIX = T1106.PREFIX
 
 context_name = T1106.context_name
-es_container = T1106.es_container
-kibana_container = T1106.kibana_container
 
 
 def config_texts(marker: str, *, events_index: str | None = None,

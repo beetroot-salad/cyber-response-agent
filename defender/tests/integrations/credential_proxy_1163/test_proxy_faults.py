@@ -450,13 +450,35 @@ def test_1391_o4_a_ca_naming_another_root_refuses_even_what_the_environment_trus
     assert len(server.seen) == 1, "the refused request reached the server"
 
 
+@pytest.fixture
+def defaults_of_python_313(monkeypatch):
+    """`ssl.create_default_context` as Python 3.13 builds it: partial-chain and strict verification on."""
+    import ssl
+
+    real = ssl.create_default_context
+
+    def with_313_flags(*args, **kwargs):
+        context = real(*args, **kwargs)
+        context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN | ssl.VERIFY_X509_STRICT
+        return context
+
+    monkeypatch.setattr(ssl, "create_default_context", with_313_flags)  # lint-monkeypatch: ok — the 3.13 default cannot be had on 3.11 and the stdlib offers no seam
+
+
+@pytest.mark.parametrize("flags", [
+    pytest.param(False, id="runtime-defaults"),
+    pytest.param(True, id="python-3.13-defaults"),
+])
 @pytest.mark.parametrize(("trusted", "fault"), [
     pytest.param("root", None, id="root-control"),
     pytest.param("intermediate", "TransportFault", id="intermediate-only"),
 ])
-def test_1391_o4_the_chain_must_end_at_a_root_in_ca(tmp_path, data_root, trusted, fault):
+def test_1391_o4_the_chain_must_end_at_a_root_in_ca(tmp_path, data_root, request, trusted, fault,
+                                                    flags):
     """A server presenting leaf+intermediate is reached when `ca` holds the root, refused unsent
-    when it holds only the intermediate (no partial chain). #1391 O4."""
+    when it holds only the intermediate, also under 3.13 partial-chain defaults. #1391 O4, F7."""
+    if flags:
+        request.getfixturevalue("defaults_of_python_313")
     pki = chain()
     ca = pki.root.cert if trusted == "root" else pki.intermediate.cert
     with (tls_server(tmp_path, _ok, served=pki.served()) as server,
@@ -465,6 +487,28 @@ def test_1391_o4_the_chain_must_end_at_a_root_in_ca(tmp_path, data_root, trusted
 
     assert answer["fault"] == fault, answer
     assert len(server.seen) == (1 if fault is None else 0)
+
+
+def test_1391_o4_ca_adds_nothing_from_the_public_bundle_and_a_system_without_one_keeps_it(
+        tmp_path, data_root, monkeypatch):
+    """With the public bundle (`certifi.where()`) holding the server's CA: a `ca` naming another
+    root refuses the server unsent, and the same system without `ca` reaches it. #1391 O4, P4, F8."""
+    import certifi
+
+    other = issue("another private root", ca=True)
+    with tls_server(tmp_path, _ok) as server:
+        monkeypatch.setattr(certifi, "where", lambda: str(server.ca))  # lint-monkeypatch: ok — the bundle path is a third-party function; the proxy builds its public context from it at start
+        base = server.url + BASE
+        with _ca_rig(tmp_path, data_root, base, other.cert) as r:
+            pinned = r.ask(url=server.url + PATH)
+            reached_pinned = len(server.seen)
+            r.t.merge({ACCESS: H.declaration(base)}, "drop the ca")
+            r.t.publish()
+            public = r.ask(url=server.url + PATH)
+
+    assert pinned["fault"] == "TransportFault", pinned
+    assert reached_pinned == 0, "the request reached a server only the public bundle trusts"
+    assert (public["fault"], public["status"]) == (None, 200), public
 
 
 def test_1391_o4_the_token_exchange_of_a_declaration_with_ca_trusts_that_ca(tmp_path, data_root):
@@ -484,3 +528,21 @@ def test_1391_o4_the_token_exchange_of_a_declaration_with_ca_trusts_that_ca(tmp_
     assert got["fault"] is None, got
     assert [(m, p) for m, p, _ in server.seen] == [("POST", "/token"), ("GET", PATH)]
     assert server.seen[1][2].get("authorization") == "Bearer AT-1391"
+
+
+def test_1391_o4_the_token_exchange_of_a_declaration_with_ca_does_not_trust_the_public_bundle(
+        tmp_path, data_root, monkeypatch):
+    """OAuth with a `ca` naming another root: the token endpoint (signed by the public bundle here)
+    is refused and the API is never called. #1391 O4, D13."""
+    import certifi
+
+    other = issue("another private root", ca=True)
+    token_reply = json.dumps({"access_token": "AT-1391", "expires_in": 3600}).encode()
+    with tls_server(tmp_path, lambda *_: (200, token_reply)) as server:
+        monkeypatch.setattr(certifi, "where", lambda: str(server.ca))  # lint-monkeypatch: ok — same as above
+        with _ca_rig(tmp_path, data_root, server.url + BASE, other.cert,
+                     scheme=H.oauth_scheme(server.url + "/token")) as r:
+            got = r.ask(url=server.url + PATH)
+
+    assert got["fault"] == "TransportFault", got
+    assert server.seen == [], "the token endpoint or the API was reached"

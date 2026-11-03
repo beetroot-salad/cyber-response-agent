@@ -15,7 +15,6 @@ from defender.integrations import elastic_adapter
 from defender.kit.faults import ConfigFault
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
-_ES_HEALTH = S.answer(json.dumps({"status": "green", "number_of_nodes": 1}))
 _POINTER = "the tenant's settings/"
 
 
@@ -28,22 +27,6 @@ def _ctx(record, where: Path, shim: S.DockerShim):
     run_dir = where / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     return S.verb_context(record, run_dir, shim.env())
-
-
-def test_health_check_reports_missing_kibana_container_as_data(tmp_path):
-    """An elastic config with no ELASTIC_KIBANA_CONTAINER: the health check still returns the
-    green Elasticsearch answer, says Kibana is not configured, and spawns no Kibana call."""
-    root, folder = _tenant(tmp_path, "kbn")
-    S.drop_key(folder, "elastic", "ELASTIC_KIBANA_CONTAINER")
-    shim = S.DockerShim(tmp_path / "shim", [_ES_HEALTH])
-    ctx = _ctx(S.resolve(root), tmp_path, shim)
-
-    out = elastic_adapter.health_check(ctx)
-
-    assert out["elasticsearch"] == "green", out
-    assert "not configured" in out["kibana"], out
-    assert "ELASTIC_KIBANA_CONTAINER" in out["kibana"], out
-    assert len(shim.calls()) == 1, [c["argv"] for c in shim.calls()]
 
 
 @pytest.mark.parametrize("call", [
@@ -186,22 +169,6 @@ def test_deeply_nested_receipt_is_unreadable_at_any_depth(tmp_path):
         f'"x": {deep}}}', encoding="utf-8")
     line = visualize_run.render_ticket_line(run_dir)
     assert visualize_run.RECEIPT_UNREADABLE in line, line
-
-
-def test_elasticsearch_calls_never_route_to_kibana_by_url(tmp_path):
-    root, folder = _tenant(tmp_path, "kpx")
-    S.drop_key(folder, "elastic", "ELASTIC_KIBANA_CONTAINER")
-    es_url = S.config_path(folder, "elastic").read_text(encoding="utf-8").split(
-        'ELASTICSEARCH_URL="', 1)[1].split('"', 1)[0]
-    S.set_key(folder, "elastic", "KIBANA_URL", es_url)
-    shim = S.DockerShim(tmp_path / "shim", [
-        S.answer(json.dumps({"hits": {"total": {"value": 0}, "hits": []}}))])
-    ctx = _ctx(S.resolve(root), tmp_path, shim)
-
-    elastic_adapter.query(ctx, native_query="*")
-
-    targets = [S.exec_target(c["argv"]) for c in shim.calls()]
-    assert targets == [S.es_container("kpx")], targets
 
 
 def test_stored_faults_carry_no_traceback_or_cause(tmp_path):

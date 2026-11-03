@@ -63,13 +63,15 @@ ELASTIC_EVENTS = "logs-*"
 ELASTIC_ALERTS = "alerts-*"
 
 
-def elastic_files(base: str, *, ca: str | bytes | None = None) -> dict[str, str]:
+def elastic_files(base: str, *, ca: str | bytes | None = None, transport: str | None = "http-proxy",
+                  env_extra: str = "", scheme: dict[str, object] | None = None) -> dict[str, str]:
     """Repo files making `elastic` a proxied system at `base`: a basic-auth declaration with
-    `ELASTIC_READS` (and `ca` when given), and a config.env holding only the access method and
-    the two index keys (no URL, Kibana or container key)."""
-    decl = H.declaration(base, scheme=H.basic_scheme(), reads=ELASTIC_READS, ca=ca)
-    env = (f'{transport_line("elastic")}ELASTIC_EVENTS_INDEX="{ELASTIC_EVENTS}"\n'
-           f'ELASTIC_ALERTS_INDEX="{ELASTIC_ALERTS}"\n')
+    `ELASTIC_READS` (and `ca` when given), and a config.env holding the access method (`transport`;
+    None writes none), the two index keys and `env_extra` (no URL, Kibana or container key)."""
+    decl = H.declaration(base, scheme=scheme or H.basic_scheme(), reads=ELASTIC_READS, ca=ca)
+    method = "" if transport is None else f'ELASTIC_TRANSPORT="{transport}"\n'
+    env = (f'{method}ELASTIC_EVENTS_INDEX="{ELASTIC_EVENTS}"\n'
+           f'ELASTIC_ALERTS_INDEX="{ELASTIC_ALERTS}"\n{env_extra}')
     return H.access_files("elastic", decl, env=env)
 
 
