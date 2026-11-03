@@ -79,22 +79,18 @@ def test_f1_a_chunked_response_is_capped_like_any_other(tmp_path, data_root, chu
         assert answer["body"] == ""
 
 
-@pytest.mark.parametrize(("size", "fault"), [(CAP, None), (CAP + 1, "UpstreamFault"),
-                                              (50_000, "UpstreamFault")])
-def test_f1_a_compressed_response_is_capped_after_it_is_expanded(
-        tmp_path, data_root, size, fault):
-    """A gzip reply whose wire size is tiny is capped on its expanded size: 1024 bytes pass, more
-    are an `UpstreamFault`. O7."""
+@pytest.mark.parametrize("size", [1, CAP, CAP + 1, 50_000])
+def test_f1_a_compressed_response_is_refused_whatever_it_expands_to(tmp_path, data_root, size):
+    """A gzip reply is an `UpstreamFault` saying so, whether it would expand within the cap or
+    past it: the proxy asks for none and never inflates one (#1383). O7."""
     with T.rig(tmp_path / "forge", data_root, max_response_bytes=CAP) as r:
         r.up.replies[PATH] = (200, {"Content-Type": "text/plain", "Content-Encoding": "gzip"},
                               gzip.compress(b"a" * size))
         answer = r.ask()
 
-    assert answer["fault"] == fault, answer["fault"]
-    if fault is None:
-        assert answer["body"] == "a" * CAP
-    else:
-        assert answer["body"] == ""
+    assert answer["fault"] == "UpstreamFault", answer
+    assert "compressed body (gzip)" in answer["detail"], answer
+    assert answer["body"] == ""
 
 
 # --- A9 a request that cannot be processed is classified and audited --------------------------

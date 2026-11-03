@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import tracemalloc
 import zlib
 
 import pytest
@@ -302,3 +303,66 @@ def test_1383_a_compressed_token_reply_is_a_config_fault_unsent(
     else:
         assert "compressed" in answer["detail"], answer
         assert r.up.seen == []
+
+
+@pytest.mark.parametrize(("status", "fault"), [
+    pytest.param(503, "TransportFault", id="503"),
+    pytest.param(401, "ConfigFault", id="401"),
+    pytest.param(404, "UpstreamFault", id="404"),
+])
+def test_1383_a_compressed_error_reply_keeps_its_status_fault(tmp_path, data_root, status, fault):
+    """#1383 review: a compressed non-2xx reply is classified by its status, as the same reply
+    uncompressed is; its body is not read."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        r.up.replies[PATH] = (status, {"Content-Encoding": "gzip"}, gzip.compress(b"down"))
+        answer = r.ask()
+
+    assert (answer["fault"], answer["detail"]) == (fault, f"identity answered {status}"), answer
+    assert answer["body"] == ""
+
+
+@pytest.mark.parametrize("status", [204, 304])
+def test_1383_a_bodyless_reply_marked_compressed_is_not_refused(tmp_path, data_root, status):
+    """#1383 review: a reply with no body has nothing to inflate; its encoding is no fault."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        r.up.replies[PATH] = (status, {"Content-Encoding": "gzip", "X-Seen": "yes"}, b"")
+        answer = r.ask()
+
+    assert answer["detail"] == (None if status == 204 else f"identity answered {status}"), answer
+    assert answer["headers"].get("x-seen") == "yes", answer
+
+
+@pytest.mark.parametrize(("status", "fault", "said"), [
+    pytest.param(503, "TransportFault", "answered 503", id="503"),
+    pytest.param(400, "ConfigFault", "refused the exchange (400)", id="400"),
+])
+def test_1383_a_compressed_token_error_keeps_its_status_fault(
+        tmp_path, data_root, status, fault, said):
+    """#1383 review: a compressed token-endpoint error is classified by its status (a 5xx is
+    still a transport fault), and the API request is never sent."""
+    with H.upstream() as auth:
+        auth.replies["/token"] = (status, {"Content-Encoding": "gzip"}, gzip.compress(b"{}"))
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
+            answer = r.ask()
+
+    assert answer["fault"] == fault, answer
+    assert said in answer["detail"], answer
+    assert r.up.seen == []
+
+
+def test_1383_a_compression_bomb_is_never_inflated(tmp_path, data_root):
+    """#1383: the reply is read as raw network bytes, so 128 MiB of zeros sent as ~128 KiB of
+    gzip never becomes 128 MiB in the proxy, not even one inflated chunk of it."""
+    bomb = gzip.compress(b"\0" * (128 << 20))
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=1024) as r:
+        r.up.replies[PATH] = (200, {"Content-Encoding": "gzip"}, bomb)
+        r.ask()
+        tracemalloc.start()
+        try:
+            answer = r.ask()
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+    assert answer["fault"] == "UpstreamFault", answer
+    assert peak < 16 << 20, f"peak {peak >> 20} MiB while refusing the bomb"

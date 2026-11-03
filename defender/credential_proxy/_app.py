@@ -294,18 +294,16 @@ class _Proxy:
         except httpx.TransportError as e:
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
                                      f"({type(e).__name__})") from None
-        except httpx.DecodingError:
-            raise Refused(UPSTREAM, f"{asked.system} answered a body that does not "
-                                    "decode") from None
         status = reply.status
         if reply.over:
             return {"status": status, "headers": {}, "body": "", "fault": UPSTREAM,
                     "detail": f"{asked.system} answered more than {cap} bytes"}
-        if reply.compressed is not None:
-            return {"status": status, "headers": {}, "body": "", "fault": UPSTREAM,
-                    "detail": f"{asked.system} answered a compressed body ({reply.compressed}) "
-                              "though asked for none"}
         fault = _fault_of(status)
+        if reply.compressed is not None:
+            return {"status": status, "headers": {}, "body": "", "fault": fault or UPSTREAM,
+                    "detail": f"{asked.system} answered {status}" if fault else
+                    f"{asked.system} answered a compressed body ({reply.compressed}) though "
+                    "asked for none"}
         shown: dict[str, str] = {}
         for name, value in reply.headers:
             if name.lower() in _REPLY_HOP_HEADERS:

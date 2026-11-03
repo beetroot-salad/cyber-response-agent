@@ -216,20 +216,17 @@ def _token_exchange(auth: Auth, creds: CredentialSet, system: str,
     except httpx.TransportError as e:
         raise Refused(TRANSPORT, f"the token endpoint of {system} is unreachable "
                                  f"({type(e).__name__})") from None
-    except httpx.DecodingError:
-        raise Refused(CONFIG, f"the token endpoint of {system} answered an undecodable "
-                              "body") from None
     if reply.over:
         raise Refused(CONFIG, f"the token endpoint of {system} answered more than "
                               f"{TOKEN_REPLY_CAP} bytes")
-    if reply.compressed is not None:
-        raise Refused(CONFIG, f"the token endpoint of {system} answered a compressed body "
-                              f"({reply.compressed}) though asked for none")
     status, body = reply.status, reply.body
     if status >= 500:
         raise Refused(TRANSPORT, f"the token endpoint of {system} answered {status}")
     if status != 200:
         raise Refused(CONFIG, f"the token endpoint of {system} refused the exchange ({status})")
+    if reply.compressed is not None:
+        raise Refused(CONFIG, f"the token endpoint of {system} answered a compressed body "
+                              f"({reply.compressed}) though asked for none")
     return _issued(body, system)
 
 

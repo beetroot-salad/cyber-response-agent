@@ -24,8 +24,8 @@ def public_trust() -> ssl.SSLContext:
 @dataclass(frozen=True)
 class CappedReply:
     """A reply's status, headers and body; `over` when the body passed the cap, `compressed` the
-    content coding a reply came in though none was asked for (either way the headers and body are
-    empty, the body unread)."""
+    content coding of a body that came compressed though none was asked for (either way the
+    headers and body are empty; a compressed body is not read past its first raw chunk)."""
 
     status: int
     headers: list[tuple[str, str]]
@@ -38,11 +38,11 @@ async def capped_reply(trust: ssl.SSLContext, method: str, url: str, *, cap: int
                        timeout: float, on_status: Callable[[int], None] | None = None,
                        **send: Any) -> CappedReply:
     """`method` on `url` (`send`: `headers`, `content`, `data`) with a fresh client over `trust`,
-    following no redirect and taking nothing from the environment; the body read until more than
-    `cap` bytes have arrived. The reply is asked for uncompressed, whatever `send`'s headers ask,
-    and one compressed anyway is not read: decoding a chunk inflates it whole before the cap is
-    checked (#1383). `on_status` hears the status before the body is read. `httpx.HTTPError` as
-    raised."""
+    following no redirect and taking nothing from the environment; the body read as it arrived on
+    the wire, never decoded, until more than `cap` bytes have arrived. The reply is asked for
+    uncompressed, whatever `send`'s headers ask, and a body compressed anyway is refused, not
+    inflated (#1383); a reply with no body has nothing to inflate and passes. `on_status` hears
+    the status before the body is read. `httpx.HTTPError` as raised."""
     headers = httpx.Headers(send.pop("headers", None))
     headers["Accept-Encoding"] = "identity"
     async with httpx.AsyncClient(verify=trust, follow_redirects=False, trust_env=False) as client, \
@@ -50,10 +50,11 @@ async def capped_reply(trust: ssl.SSLContext, method: str, url: str, *, cap: int
         if on_status is not None:
             on_status(reply.status_code)
         coding = reply.headers.get("Content-Encoding", "").strip()
-        if coding and coding.lower() != "identity":
-            return CappedReply(reply.status_code, [], b"", False, coding)
+        compressed = coding if coding and coding.lower() != "identity" else None
         body = bytearray()
-        async for chunk in reply.aiter_bytes():
+        async for chunk in reply.aiter_raw():
+            if compressed is not None:
+                return CappedReply(reply.status_code, [], b"", False, compressed)
             body += chunk
             if len(body) > cap:
                 return CappedReply(reply.status_code, [], b"", True)
