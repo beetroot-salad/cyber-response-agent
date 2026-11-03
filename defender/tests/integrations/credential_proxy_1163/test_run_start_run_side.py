@@ -10,21 +10,21 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 
 def test_w1_each_write_back_token_expires_within_the_runs_own_ceiling(tmp_path, data_root):
-    """Both ticket legs' `rw` tokens expire after the run began and within a token's lifetime
+    """The record leg's `rw` token expires after the run began and within a token's lifetime
     (plus clock tolerance). A7, O8, r7 A20."""
-    R._plant(data_root, proxy=("identity", "case-history"))
+    R._plant(data_root, proxy=("identity", "ticket"))
     signer = A.MarkedSigner()
     rec, tickets, rc, refused, started = R._drive(tmp_path, data_root, signer=signer)
 
     assert refused is None, (rc, refused)
     assert rc == 0, (rc, refused)
     claims = [A.claims_of_payload(p) for p in signer.payloads]
-    write_back = [c for c in claims if A.grant_of(c) == [("case-history", "rw")]]
-    assert len(write_back) == 2, "one write-back token per ticket leg"
+    write_back = [c for c in claims if A.grant_of(c) == [("ticket", "rw")]]
+    assert len(write_back) == 1, "one write-back token, for the record leg"
     for c in write_back:
         assert started < c["exp"] <= started + R.TOKEN_SEC + R.CLOCK_TOLERANCE, (
             c["exp"] - started)
-    assert tickets.leg("open")["request_token"], "positive control: the legs were handed tokens"
+    assert tickets.leg("record")["request_token"], "positive control: the leg was handed a token"
 
 
 def test_w2_the_runs_request_access_shows_no_token_in_any_repr(tmp_path, data_root):

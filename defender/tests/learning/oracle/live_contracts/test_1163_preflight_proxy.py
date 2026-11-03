@@ -26,7 +26,7 @@ CLOCK_TOLERANCE = 60
 ROLE, SECRET = "role-1163-learning", "secret-1163-learning"
 DELIVERY_ROLE, DELIVERY_SECRET = "role-1163-delivery", "secret-1163-delivery"
 FIXTURE_SYSTEMS = ("identity", "ticket", "host-state", "threat-intel", "change-mgmt",
-                   "elastic", "cmdb", "case-history")
+                   "elastic", "cmdb")
 #: `idp` is a tenant-only name: no product allowlist knows it (A6). Its `query` goes through the
 #: shared transport; its other verbs answer locally.
 IDP_ADAPTER = '''\

@@ -391,20 +391,15 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
     file's value appears in none of the run's environment, what it handed the child, the stamp, host
     record, page, comment or report line (control: a value planted in the environment is found)."""
     import os
-    from functools import partial
-    from types import SimpleNamespace
 
     from defender import run_common
-    from defender.investigation import ticket_writer
     from defender.tests.support.runtime.engine._spec767 import FakeStore, write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
     merged = tenant.merge(B.MERGE_FILES)
-    store = FakeStore()
-    deps = ticket_writer.TicketWriterDeps(request=store)
-    writer = SimpleNamespace(
-        open_case_ticket=partial(ticket_writer.open_case_ticket, deps=deps),
-        record_case_ticket=partial(ticket_writer.record_case_ticket, deps=deps))
+    # The real writer; the store is the docker route's fake `docker` first on the run env's PATH.
+    store = FakeStore(tmp_path / "ticket-store")
+    monkeypatch.setenv("PATH", store.shim.path_value())
     lines: list[str] = []
 
     def seed(seen: B.Seen) -> None:
@@ -414,7 +409,7 @@ def test_o7b_a_run_launched_after_a_merge_reads_and_stamps_the_merge(tenant, tmp
     scene = minting(tenant, tmp_path, purpose="publish")
     secrets = scene.secrets
     out = B.launch(tenant, tmp_path, publish=_child_publish(tenant, lines=lines, identity=scene.credential),
-                   argv_extra=("--update-ticket",), during=seed, ticket_writer=writer,
+                   argv_extra=("--update-ticket",), during=seed,
                    visualize=run_common.visualize)
     assert out.reached, out.text()
     scene.assert_logged_in_with_the_file()

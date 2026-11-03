@@ -31,7 +31,7 @@ from defender.systems.verb_dispositions import RunGrants, require_gather_query, 
 from defender.systems.verb_grant import GrantError, VerbGrant
 from defender import tenancy
 from defender.tenancy import tenant_settings
-from defender.tenancy.case_ticket import CaseMapping, CaseTicketError, load_case_mapping
+from defender.tenancy.case_ticket import CaseRecordSettings, CaseTicketError, load_case_record
 from defender.kit.access import HTTP_PROXY, AccessDeclaration
 from defender.kit.settings import SystemConfig, system_prefix
 from defender.kit.faults import ConfigFault
@@ -83,8 +83,10 @@ class RunTenant:
     #: is refused by the run's start check (O-8), never here (D4). Asking for a system with no
     #: folder gets the "not configured" fault.
     systems: Mapping[str, SystemConfig | ConfigFault]
-    #: `systems/case-history/mapping.yaml`, loaded once; a bad file is kept as its error.
-    ticket_mapping: CaseMapping | CaseTicketError
+    #: `settings/case-record.yaml` (#1359): the system that records cases and the comment body
+    #: template, loaded once and held for the run (D-18); `None` for a tenant with no such file;
+    #: a bad file is kept as its error.
+    case_record: CaseRecordSettings | CaseTicketError | None
     #: One entry per `http-proxy` system (its `config.env` says so), each `access.yaml` parsed
     #: ONCE here: the `AccessDeclaration`, or the `ConfigFault` for why there is none (#1163).
     #: Adapters, the ticket writer and the run-start settings check read this, never the file.
@@ -340,20 +342,27 @@ def _check_version(dsn: str) -> None:
 def resolved_settings(tenant: Tenant, *, settings_root: Path | None = None) -> dict[str, Any]:
     """The parts of the record built from a settings folder — `settings_root` (the run copy's,
     #1108 P4), by default the accepted tenant's own (`clone_halves`): each system's `config.env`
-    (`systems`) and the case-history mapping (`ticket_mapping`) — as the keyword arguments
+    (`systems`) and the case-record file (`case_record`) — as the keyword arguments
     `RunTenant` takes. Read ONCE, here, when a run (or a launch) begins; nothing ever raises for a
     part's content (O5): a part that cannot stand is carried as the fault that says why."""
     settings = Path(settings_root) if settings_root is not None else clone_halves(tenant)[1]
+    return folder_settings(settings)
+
+
+def folder_settings(settings: Path) -> dict[str, Any]:
+    """`resolved_settings` over a bare `settings/` folder: the same parts, read the same way —
+    what `tenant check` judges a folder by, with no accepted tenant to name."""
     systems = tenant_settings.read_systems(settings)
+    case_record: CaseRecordSettings | CaseTicketError | None
     try:
-        ticket_mapping: CaseMapping | CaseTicketError = load_case_mapping(settings)
+        case_record = load_case_record(settings)
     except CaseTicketError as error:
         # The text only: the caught error's traceback and cause (the OSError, with its host
         # path) must not ride the record.
-        ticket_mapping = CaseTicketError(str(error))
+        case_record = CaseTicketError(str(error))
     return {
         "systems": systems,
-        "ticket_mapping": ticket_mapping,
+        "case_record": case_record,
         "access": _read_access(settings, systems),
     }
 
@@ -374,7 +383,7 @@ def _read_access(
 
 
 __all__ = [
-    "CaseMapping",
+    "CaseRecordSettings",
     "RecordsUnreachable",
     "RunReadiness",
     "RunTenant",
@@ -383,6 +392,7 @@ __all__ = [
     "resolve_tenant",
     "catalog_templates",
     "correlation_dispatch",
+    "folder_settings",
     "Admitted",
     "entry_directory",
     "host_tenant",

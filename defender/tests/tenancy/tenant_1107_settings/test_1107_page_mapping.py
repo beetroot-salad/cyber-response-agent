@@ -1,4 +1,4 @@
-"""Run page ticket line and receipt rendering, ticket replies independent of mapping, estate registry."""
+"""Run page ticket line and receipt rendering, ticket replies independent of the case-record file, estate registry."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
@@ -77,7 +77,7 @@ def _failure_receipt(key: str, reason: str) -> dict[str, Any]:
 
 def _success_receipt(key: str) -> dict[str, Any]:
     # A success receipt carries reason null.
-    return {"key": key, "status": "commented", "url": f"http://case-history-1107/tickets/{key}",
+    return {"key": key, "status": "commented", "url": f"http://ticket-1107/tickets/{key}",
             "ok": True, "reason": None}
 
 
@@ -87,15 +87,16 @@ def _header(run_dir: Path) -> str:
 
 
 class _ReceiptWriter:
-    """`run.main`'s `ticket_writer` seam: records each call and, on the record step, writes the
-    receipt it was given where the real writer writes its receipt. It decides nothing."""
+    """`run.main`'s `ticket_writer` seam (#1359 r4: `clear_receipt` and `record_case_ticket`, no
+    open leg): records each call and, on the record step, writes the receipt it was given where
+    the real writer writes its receipt. It decides nothing."""
 
     def __init__(self, receipt: dict[str, Any]) -> None:
         self.receipt = receipt
         self.calls: list[str] = []
 
-    def open_case_ticket(self, run: Any, *_a: Any, **_kw: Any) -> None:
-        self.calls.append("open")
+    def clear_receipt(self, run: Any, *_a: Any, **_kw: Any) -> None:
+        self.calls.append("clear")
 
     def record_case_ticket(self, run: Any, *_a: Any, **_kw: Any) -> None:
         self.calls.append("record")
@@ -185,10 +186,32 @@ def test_o6_run_page_renders_receipt(tmp_path):
     assert _header(run_dir) in succeeded, "the rest of the page did not render"
 
 
+def test_o5_a_receipt_with_no_key_renders_its_reason_not_unreadable(tmp_path):
+    """The receipt of an alert that names no ticket has key `""`: the page shows its reason, not
+    "receipt unreadable". Control: a key-less receipt that is malformed otherwise still is. O5."""
+    reason = "REASON-NOKEY-1107 the alert names no ticket"
+    for label, receipt in (
+        ("an error receipt", _failure_receipt("", reason)),
+        ("a success receipt with no link", {**_success_receipt("SOC-NOURL-1107"), "url": None,
+                                            "reason": None}),
+    ):
+        run_dir = _seeded_run(tmp_path, f"r-nokey-{label.split()[1]}")
+        _write_receipt(run_dir, receipt)
+        page = S.render_page(run_dir, update_ticket=True)
+        assert _header(run_dir) in page, f"{label}: the page did not render"
+        assert S.RECEIPT_UNREADABLE not in page, f"{label}: rendered as {S.RECEIPT_UNREADABLE!r}"
+        shown = reason if receipt["status"] == "error" else "SOC-NOURL-1107"
+        assert shown in page, f"{label}: the receipt's {shown!r} is not on the page"
+    control = _seeded_run(tmp_path, "r-nokey-control")
+    _write_receipt(control, {"key": "", "status": ["error"], "url": None, "ok": False, "reason": reason})
+    assert S.RECEIPT_UNREADABLE in S.render_page(control, update_ticket=True), (
+        "positive control: a malformed receipt is still unreadable")
+
+
 def test_s7_nf26_page_reads_receipt_without_following_links(tmp_path):
     secret = "HOSTONLY-NF26-1107-do-not-render"
     folder = S.plant(tmp_path / "tenants", marker="nf26")
-    settings_file = S.set_key(folder, "case-history", "CASE_HISTORY_MARKER_1107", secret)
+    settings_file = S.set_key(folder, "ticket", "TICKET_MARKER_1107", secret)
     elsewhere = tmp_path / "elsewhere" / "receipt.json"
     elsewhere.parent.mkdir(parents=True)
     elsewhere.write_text(json.dumps(_failure_receipt("SOC-LINKED-NF26-1107",
@@ -204,7 +227,7 @@ def test_s7_nf26_page_reads_receipt_without_following_links(tmp_path):
     assert secret in settings_file.read_text(encoding="utf-8"), "the marker was not planted"
 
     for label, target, needles in (
-        ("a settings file", settings_file, (secret, "CASE_HISTORY_MARKER_1107")),
+        ("a settings file", settings_file, (secret, "TICKET_MARKER_1107")),
         ("another file", elsewhere, ("SOC-LINKED-NF26-1107", "REASON-LINKED-NF26-1107")),
     ):
         run_dir = _seeded_run(tmp_path, f"r-nf26-{target.stem}")
@@ -272,7 +295,7 @@ def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
                               ticket_writer=writer, visualize=run_common.visualize)
     run_dir = rec.run_dir_at
     assert (rc, refused) == (0, None), f"the flagged run did not finish: {refused}"
-    assert writer.calls == ["open", "record"], f"the ticket lane ran {writer.calls}"
+    assert writer.calls == ["clear", "record"], f"the ticket lane ran {writer.calls}"
     assert S.receipt(run_dir) is not None, "the flagged run left no receipt"
     flagged = S.page_html(run_dir)
     # The standalone render of the SAME dir, receipt still present: handed no flag.
@@ -363,16 +386,17 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
         "nothing")
 
 
-def test_d_mapping_error_consumers(tmp_path, caplog):
+def test_d_case_record_error_consumers(tmp_path, caplog):
+    """A bad case-record file touches only the record step: the query tool serves tickets whole
+    (no read of the file), and the leg leaves an error receipt naming the file and sends no
+    comment. (D-7, D-12; the retired mapping's `open.status` lifecycle rule is gone with the open leg.)"""
     root = tmp_path / "tenants"
-    S.plant(root, marker="bad", table=TICKET_TABLE, open_status="{summary}")
+    folder = S.plant(root, marker="bad", table=TICKET_TABLE)
+    S.case_record_path(folder).write_text("- not\n- a mapping\n", encoding="utf-8")
     record = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                       dispatches_lead_zero=False)
-    error = record.ticket_mapping
-    assert isinstance(error, S.case_ticket_error()), f"ticket_mapping is {error!r}"
-    said = str(error)
+                                       dispatches_lead_zero=False)  # acceptance does not refuse
 
-    # (a) The query tool: no mapping is read, so every ticket is served whole; no warning.
+    # (a) The query tool: no case-record file is read, so every ticket is served whole; no warning.
     caplog.set_level(logging.WARNING)
     tickets = [M.ticket("SOC-OPEN-1107", status="open", comments=[M.comment("MARK-OPEN-1107")]),
                M.ticket("SOC-CLOSED-1107", status="closed",
@@ -381,63 +405,56 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
     run_dir, gather, calls = _screen_leg(tmp_path, root, "screen-err", tickets)
     assert len(calls) == 1, f"the ticket verb ran {len(calls)} times"
     for shown in ("SOC-OPEN-1107", "SOC-CLOSED-1107", "MARK-OPEN-1107", "MARK-CLOSED-1107"):
-        assert _shown(gather, shown), f"{shown} was withheld from gather under a bad mapping"
+        assert _shown(gather, shown), f"{shown} was withheld from gather under a bad case-record file"
     warned = [r for r in caplog.records
               if r.name == "defender.investigation.query_tool" and r.levelno >= logging.WARNING
-              and said in r.getMessage()]
-    assert warned == [], "the query tool still reads the case-history mapping"
+              and "case-record" in r.getMessage()]
+    assert warned == [], "the query tool reads the case-record file"
 
-    # (b) The record step: a warning and an error receipt, no comment sent.
+    # (b) The record step: an error receipt naming the file, no comment sent.
     case_dir = M.make_run(tmp_path / "runs", "case-err-1107")
     # The shim on the child's PATH receives argv + env; it answers a POST as created, in
     # curl's body + status-line shape.
-    shim = S.DockerShim(tmp_path / "docker", S.store_answers_ok(case_dir.name))
-    caplog.clear()
-    assert S.record_step(case_dir, record, env=shim.env()) is None
+    shim = S.DockerShim(tmp_path / "docker", S.store_answers_ok())
+    S.record_step(case_dir, record, env=shim.env())
     got = S.receipt(case_dir)
     assert got is not None, "the record step left no receipt"
     assert got["status"] == "error", got
     assert got["ok"] is False, got
-    assert got["reason"], got
-    assert any(r.levelno >= logging.WARNING and said in r.getMessage()
-               for r in caplog.records), "the record step did not warn naming the mapping error"
-    assert not any("/comments" in " ".join(c["argv"]) for c in shim.calls()), (
-        "a comment was sent off a bad mapping")
+    assert got["url"] is None, got
+    assert "case-record.yaml" in got["reason"], got
+    for host in {str(folder), str(folder.resolve()), str(root), str(root.resolve())}:
+        assert host not in got["reason"], f"the reason carries the host path {host}: {got['reason']!r}"
+    assert shim.calls() == [], "a docker child ran off a bad case-record file"
 
 
-def test_o2_ticket_replies_ignore_the_mapping(tmp_path):
+def test_o2_ticket_replies_ignore_the_case_record_file(tmp_path):
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="o2", table=TICKET_TABLE)
-    record = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                       dispatches_lead_zero=False)
-    assert S.open_reporter(record.ticket_mapping) == "defender"
 
-    def edit_mapping() -> None:
-        # Mid-run, after the record was built: an operator edits the mapping.
-        S.mapping_path(folder).write_text(
-            T1106.mapping_text(reporter="done-edited-1107"), encoding="utf-8")
+    def edit_case_record() -> None:
+        # Mid-run, after the record was built: an operator edits the case-record file.
+        S.case_record_path(folder).write_text(
+            T1106.case_record_text(body="{disposition} done-edited-1107"), encoding="utf-8")
 
     tickets = [M.ticket("SOC-CLOSED-O2", status="closed", comments=[M.comment("MARK-CLOSED-O2")]),
                M.ticket("SOC-EDITED-O2", status="done-edited-1107",
                         comments=[M.comment("MARK-EDITED-O2")]),
                M.ticket("SOC-OPEN-O2", status="open", comments=[M.comment("MARK-OPEN-O2")])]
     run_dir, gather, calls = _screen_leg(tmp_path, root, "screen-o2", tickets,
-                                         while_serving=edit_mapping)
+                                         while_serving=edit_case_record)
     assert len(calls) == 1, f"the ticket verb ran {len(calls)} times"
-    assert "done-edited-1107" in S.mapping_path(folder).read_text(encoding="utf-8"), (
+    assert "done-edited-1107" in S.case_record_path(folder).read_text(encoding="utf-8"), (
         "the mid-run edit did not land")
     for marker in ("MARK-CLOSED-O2", "MARK-EDITED-O2", "MARK-OPEN-O2"):
-        assert _shown(gather, marker), f"{marker} was withheld — a ticket reply read the mapping"
+        assert _shown(gather, marker), f"{marker} was withheld — a ticket reply read the case-record file"
         assert S.holders(run_dir, marker), f"{marker} never reached the run's capture"
 
 
-def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
+def test_c_estate_registry_takes_no_case_record_file(tmp_path, monkeypatch):
     # The resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
     folder = S.plant(root, marker="est", table=TICKET_TABLE)
-    probe = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                      dispatches_lead_zero=False)
-    assert S.open_reporter(probe.ticket_mapping) == "defender"
 
     def note(entity: str, status: str) -> list[dict[str, Any]]:
         return [T.fact("f1", f"case {entity} is in status {status} and carries a defender note "
@@ -461,14 +478,13 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
     def resume(world: str) -> tuple[Any, list[dict[str, Any]], dict[str, Any]]:
         # The record is built from the file as planted; the edit lands after (preflight runs
         # after `tenant = tenant_of()`), each run afresh.
-        S.mapping_path(folder).write_text(T1106.mapping_text(),
-                                          encoding="utf-8")
+        S.case_record_path(folder).write_text(T1106.case_record_text(), encoding="utf-8")
         investigated: list[dict[str, Any]] = []
         handed: dict[str, Any] = {}
 
         def edit_after_record(_model: str | None = None, *, branching: bool = False) -> int:
-            S.mapping_path(folder).write_text(
-                T1106.mapping_text(reporter="done-edited-1107"), encoding="utf-8")
+            S.case_record_path(folder).write_text(
+                T1106.case_record_text(body="{disposition} done-edited-1107"), encoding="utf-8")
             return 0
 
         def lifecycle(**kw: Any) -> dict[str, Any]:
@@ -494,7 +510,7 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
         return outcome, investigated, handed
 
     got_b, investigated_b, _ = resume("b")
-    assert "done-edited-1107" in S.mapping_path(folder).read_text(encoding="utf-8"), (
+    assert "done-edited-1107" in S.case_record_path(folder).read_text(encoding="utf-8"), (
         "the post-record edit did not land")
     assert got_b == (0, None), (
         f"world b (comments on a case moved to the status the record was built with) was "

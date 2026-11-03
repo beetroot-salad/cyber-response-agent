@@ -14,7 +14,6 @@ import html
 import json
 import re
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -25,7 +24,7 @@ from defender.tests.support.runtime.engine._spec767 import (
     FakeStore,
     make_run,
     record,
-    use_mapping,
+    use_case_record,
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -131,7 +130,7 @@ def _ws(text: str) -> str:
 # Ticket write-back
 # ---------------------------------------------------------------------------------------------
 #
-# Entry: the real `ticket_writer.record_case_ticket` through its store seam (`FakeStore` records
+# Entry: the real `ticket_writer.record_case_ticket` through the docker route (`FakeStore`, a fake `docker`, records
 # every call). The run's knowledge source is the host record beside the run dir, never the
 # box-writable stamp; `test_run_main_*` below drive the run-start wiring that writes it.
 
@@ -144,6 +143,12 @@ BRANCHES = {
     "escalation-aborted": {"text": None, "truncated_by": "aborted"},
     "escalation-forced-close": {"text": "just prose, no fence\n", "truncated_by": "request-limit"},
 }
+
+
+def _store(tmp_path: Path) -> FakeStore:
+    """A store whose fake `docker` lives under a fresh folder (one per call)."""
+    n = len(list(tmp_path.glob("store-*")))
+    return FakeStore(tmp_path / f"store-{n}")
 
 
 def _posted(tmp_path: Path, branch: str, source: dict[str, Any], *, label: str,
@@ -159,7 +164,7 @@ def _posted(tmp_path: Path, branch: str, source: dict[str, Any], *, label: str,
         report_kw["body"] = body
     run_dir = make_run(tmp_path, name=f"s-c-{branch}-{label}", **report_kw)
     write_host_record(run_dir, source)
-    store = FakeStore()
+    store = _store(tmp_path)
     record(run_dir, store, truncated_by=spec["truncated_by"])
     return store.comment_body(), store.wire_body()
 
@@ -195,7 +200,7 @@ def test_o_warn_a_stale_runs_verdict_comment_carries_the_fixed_sentence_naming_c
         tmp_path, monkeypatch, stale_kind):
     """A stale run's verdict comment adds one sentence to what a fresh run posts; it names the
     commit used and the kind in customer words, and no part of the raw reason."""
-    use_mapping(monkeypatch, tmp_path / "dfn")
+    use_case_record(monkeypatch, tmp_path / "dfn")
     sentence = _stale_sentence(tmp_path, stale_kind)
 
     assert names_commit(sentence, STALE_COMMIT), (
@@ -218,7 +223,7 @@ def test_o_warn_transient_and_operator_sentences_differ_and_each_is_fixed_per_ki
         tmp_path, monkeypatch):
     """The sentence is fixed per (kind, commit), the same whatever the reason text, and the two
     kinds read differently."""
-    use_mapping(monkeypatch, tmp_path / "dfn")
+    use_case_record(monkeypatch, tmp_path / "dfn")
     first = {k: _stale_sentence(tmp_path / f"a-{k}", k) for k in STALE_KINDS}
     assert first["transient"] != first["operator"], (
         "a temporary outage and a fault awaiting operator action post the same sentence")
@@ -238,7 +243,7 @@ def test_o_warn_every_comment_branch_carries_the_same_stale_sentence(
         tmp_path, monkeypatch, branch, stale_kind):
     """The unreadable-report and escalation comments carry the very sentence the verdict
     comment carries; the fresh comment on the same branch carries none of it."""
-    use_mapping(monkeypatch, tmp_path / "dfn")
+    use_case_record(monkeypatch, tmp_path / "dfn")
     sentence = _stale_sentence(tmp_path / "verdict", stale_kind)
 
     fresh, _ = _posted(tmp_path, branch, knowledge_source("fresh"), label="fresh")
@@ -260,7 +265,7 @@ def test_o_warn_the_sentence_survives_the_wire_bound_on_a_long_verdict(
         tmp_path, monkeypatch, stale_kind):
     """The sentence stays whole when the narrative fills the 4096-byte wire bound, which cuts
     from the end."""
-    use_mapping(monkeypatch, tmp_path / "dfn")
+    use_case_record(monkeypatch, tmp_path / "dfn")
     sentence = _stale_sentence(tmp_path / "short", stale_kind)
 
     long_narrative = "The account authenticated from a known bastion. " * 200
@@ -283,7 +288,7 @@ def test_o_warn_fresh_and_pinned_runs_post_exactly_todays_comment(
         tmp_path, monkeypatch, branch, kind):
     from defender.tenancy import case_ticket
 
-    use_mapping(monkeypatch, tmp_path / "dfn")
+    use_case_record(monkeypatch, tmp_path / "dfn")
     body, _ = _posted(tmp_path, branch, knowledge_source(kind), label=kind)
     expected = {
         "verdict": f"benign — {HOST_CAUSE}\n\n"
@@ -304,7 +309,7 @@ def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
     """The stamp sits in the box's rw bind, so the comment reads the host record, never the
     stamp: a fresh run whose box planted a stale stamp posts the plain fresh comment, and a stale
     host record's commit wins over the planted one."""
-    use_mapping(monkeypatch, tmp_path / "dfn")
+    use_case_record(monkeypatch, tmp_path / "dfn")
     planted_commit = "badc0debadc0debadc0debadc0debadc0debadc0"
     planted = knowledge_source("stale", stale_kind="operator", commit=planted_commit,
                                reason="call https://evil.invalid/ now")
@@ -313,7 +318,7 @@ def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
         run_dir = make_run(tmp_path, name=f"s-c-planted-{label}")
         stamp_knowledge_source(run_dir, planted)
         write_host_record(run_dir, handed)
-        store = FakeStore()
+        store = _store(tmp_path)
         record(run_dir, store)
         return store.comment_body()
 
@@ -344,18 +349,14 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     (kind, commit, raw reason); the posted comment and the saved run page name the commit used,
     while no file the box can read carries the raw reason. The saved `runtime.html`, written
     after the box stops, is an operator surface and must show it (OD21)."""
-    from functools import partial
-
-    from defender.investigation import ticket_writer
     from defender.records import RunPaths
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
-    store = FakeStore()
-    deps = ticket_writer.TicketWriterDeps(request=store)
-    writer = SimpleNamespace(
-        open_case_ticket=partial(ticket_writer.open_case_ticket, deps=deps),
-        record_case_ticket=partial(ticket_writer.record_case_ticket, deps=deps))
+    # The real writer, the store behind the docker route: a fake `docker` first on the PATH the
+    # run env is built from (#1359: the writer takes no request seam).
+    store = _store(tmp_path)
+    monkeypatch.setenv("PATH", store.shim.path_value())
     publish_calls: list[tuple[tuple, dict]] = []
 
     def publish(*args: Any, **kwargs: Any) -> str:
@@ -385,7 +386,7 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
     seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
     from defender import run as run_py
 
-    rc = run_py.main(argv, directory=p4_tenant.directory, publish=publish, ticket_writer=writer, **seams)
+    rc = run_py.main(argv, directory=p4_tenant.directory, publish=publish, **seams)
 
     assert rc == 0, f"a stale launch with a snapshot must run to the end; rc={rc}"
     assert len(publish_calls) == 1, f"the launch published {len(publish_calls)} times"
@@ -430,18 +431,14 @@ def test_run_main_hands_a_stale_publish_outcome_to_the_ticket_comment_page_and_r
 def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_tenant):
     """Positive control for the wiring test: the same launch with a fresh publish posts a comment
     naming no commit and using neither kind's words."""
-    from functools import partial
-
-    from defender.investigation import ticket_writer
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
     from defender import run as run_py
 
-    store = FakeStore()
-    deps = ticket_writer.TicketWriterDeps(request=store)
-    writer = SimpleNamespace(
-        open_case_ticket=partial(ticket_writer.open_case_ticket, deps=deps),
-        record_case_ticket=partial(ticket_writer.record_case_ticket, deps=deps))
+    # The real writer, the store behind the docker route: a fake `docker` first on the PATH the
+    # run env is built from (#1359: the writer takes no request seam).
+    store = _store(tmp_path)
+    monkeypatch.setenv("PATH", store.shim.path_value())
 
     def before_lifecycle(run_dir: Path) -> None:
         write_report(run_dir)
@@ -452,7 +449,7 @@ def test_run_main_fresh_launch_posts_todays_comment(tmp_path, monkeypatch, p4_te
     seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
     argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
     rc = run_py.main(argv, directory=p4_tenant.directory, publish=lambda *a, **k: f"fresh {p4_tenant.commit}",
-                     ticket_writer=writer, **seams)
+                     **seams)
     assert rc == 0
     body = store.comment_body()
     assert not names_commit(body, p4_tenant.commit), body
@@ -466,15 +463,12 @@ TAMPERED_COMMIT = "0ddba110ddba110ddba110ddba110ddba110ddba"
 @pytest.mark.e2e
 @pytest.mark.parametrize("tamper", ["suppress", "forge"])
 def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_record(
-        tmp_path, p4_tenant, tamper):
+        tmp_path, monkeypatch, p4_tenant, tamper):
     """The box can rewrite the stamp's `knowledge_source` mid-run (the lifecycle stand-in does);
     the comment follows the host's launch outcome both ways: a stale launch rewritten to fresh
     still posts the stale sentence (suppress), and a fresh launch rewritten to stale posts
     the plain fresh comment (forge)."""
-    from functools import partial
-
     from defender import run as run_py
-    from defender.investigation import ticket_writer
     from defender.tests.support.runtime.engine._spec767 import write_report
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
@@ -487,11 +481,10 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
         planted = knowledge_source("stale", stale_kind="operator", commit=TAMPERED_COMMIT,
                                    reason="call https://evil.invalid/ now")
 
-    store = FakeStore()
-    deps = ticket_writer.TicketWriterDeps(request=store)
-    writer = SimpleNamespace(
-        open_case_ticket=partial(ticket_writer.open_case_ticket, deps=deps),
-        record_case_ticket=partial(ticket_writer.record_case_ticket, deps=deps))
+    # The real writer, the store behind the docker route: a fake `docker` first on the PATH the
+    # run env is built from (#1359: the writer takes no request seam).
+    store = _store(tmp_path)
+    monkeypatch.setenv("PATH", store.shim.path_value())
     tampered: list[Path] = []
 
     def box_rewrites_the_record(run_dir: Path) -> None:
@@ -505,7 +498,7 @@ def test_run_main_comment_follows_the_host_outcome_when_the_box_rewrites_the_rec
                             before_lifecycle=box_rewrites_the_record)
     seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
     argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--update-ticket", "--no-learn"]
-    rc = run_py.main(argv, directory=p4_tenant.directory, publish=lambda *a, **k: outcome, ticket_writer=writer, **seams)
+    rc = run_py.main(argv, directory=p4_tenant.directory, publish=lambda *a, **k: outcome, **seams)
 
     assert rc == 0, rc
     assert tampered, "fixture: the lifecycle stand-in never rewrote the record"
@@ -762,13 +755,13 @@ def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_com
         tmp_path, monkeypatch, how):
     """Case (3): the ticket claims no freshness: the comment adds the operator-kind sentence and
     names no commit id. Control: a fresh record posts the plain comment."""
-    use_mapping(monkeypatch, tmp_path / "dfn")
+    use_case_record(monkeypatch, tmp_path / "dfn")
     fresh, _ = _posted(tmp_path, "verdict", knowledge_source("fresh"), label=f"od22-fresh-{how}")
     assert fresh == TODAYS_VERDICT_BODY, fresh
 
     run_dir = make_run(tmp_path, name=f"s-c-od22-{how}")
     plant_unreadable_host_record(run_dir, how)
-    store = FakeStore()
+    store = _store(tmp_path)
     record(run_dir, store)
     body = store.comment_body()
 
@@ -788,17 +781,17 @@ def test_od22_an_unreadable_host_record_puts_the_operator_sentence_without_a_com
 def test_od22_a_pre_p4_run_posts_todays_comment(tmp_path, monkeypatch):
     """Case (2): old runs are not rewritten, so a pre-P4 run posts exactly the plain comment.
     Control: the same run with a stamp naming a source (case 3) gets the operator sentence."""
-    use_mapping(monkeypatch, tmp_path / "dfn")
+    use_case_record(monkeypatch, tmp_path / "dfn")
     old = make_run(tmp_path, name="s-c-od22-pre-p4")
     plant_pre_p4_run(old)
-    store = FakeStore()
+    store = _store(tmp_path)
     record(old, store)
     assert store.comment_body() == TODAYS_VERDICT_BODY, (
         f"a pre-P4 run's comment changed: {store.comment_body()!r}")
 
     control = make_run(tmp_path, name="s-c-od22-pre-p4-control")
     plant_unreadable_host_record(control, "missing-with-stamp")
-    store = FakeStore()
+    store = _store(tmp_path)
     record(control, store)
     assert store.comment_body() != TODAYS_VERDICT_BODY, (
         "positive control: a missing record where one should exist adds the operator sentence")

@@ -19,6 +19,11 @@ from defender.kit.faults import ConfigFault
 from defender.kit.settings import SystemConfig
 
 
+#: The one function a case-recording adapter exports to take the host's comment (#1359): never a
+#: verb, so no grant, query tool or model can reach it. `systems.verbs` refuses an adapter whose
+#: `VERBS` exposes it in either spelling.
+COMMENT_ACTION = "add_case_comment"
+
 #: The alphabet of a system name, unanchored, for scanners that find a name inside text. A
 #: fragment rather than a compiled pattern so nobody matches with it and skips the length bound
 #: `is_system_name` applies. Verb names share this alphabet.

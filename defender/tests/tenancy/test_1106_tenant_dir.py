@@ -163,18 +163,20 @@ def test_a_required_file_linked_to_another_tenants_copy_is_refused(tmp_path, lin
     assert str(own) in message, message
 
 
-def test_a_linked_directory_on_the_way_to_a_required_file_is_refused(tmp_path):
-    """`settings/systems -> bravo's settings/systems`: no required file is itself a link, but
-    the mapping reached through it is bravo's."""
+def test_a_linked_settings_systems_directory_is_refused_as_a_link(tmp_path):
+    """`settings/systems -> bravo's settings/systems`: the config reached through it is bravo's.
+    #1359: no required file sits under `systems/` any more, so this is the link walk's reason,
+    not a missing required file's (which also named the path)."""
     root = tmp_path / "tenants"
     a = T.place_tenant(root, fixture_uuid("tenant:acme"))
     b = T.place_tenant(root, fixture_uuid("tenant:bravo"))
     systems = a / "settings" / "systems"
     _swap_for_link(systems, Path(os.path.relpath(b / "settings" / "systems", systems.parent)))
-    assert (systems / "case-history" / "mapping.yaml").is_file(), \
+    assert (systems / "elastic" / "config.env").is_file(), \
         "the link must be a working one for the refusal to mean anything"
     message = _refusal(root, fixture_uuid("tenant:acme"))
-    assert str(systems) in message, message
+    assert f"{systems} is a link" in message, message
+    assert "required settings file is missing" not in message, message
 
 
 @pytest.mark.parametrize("linked", [
