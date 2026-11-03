@@ -148,7 +148,8 @@ def _leg_refused(run: Run, key: str, reason: str) -> None:
 
 def _fault_reason(fault: AdapterFault, *, tenant: RunTenant, system: str) -> str:
     """The receipt reason for a fault the case system's comment action raised (O5): chosen by the
-    fault's class and the route, from the fault's data rather than its text. The fault's own
+    fault's class and whether the proxy itself named it (`from_proxy`, #1398), never by the
+    route alone, and from the fault's data rather than its text. The fault's own
     detail follows, redacted."""
     detail = redact_settings_path(fault.detail, tenant.settings)
     if isinstance(fault, UpstreamFault):
