@@ -23,42 +23,46 @@ def public_trust() -> ssl.SSLContext:
 
 @dataclass(frozen=True)
 class CappedReply:
-    """A reply's status, headers and body; `over` when the body passed the cap, `compressed` the
-    content coding of a body that came compressed though none was asked for (either way the
-    headers and body are empty; a compressed body is not read past its first raw chunk)."""
+    """A reply's status, headers and body. The status and headers always arrive; the body is
+    `withheld` (then empty) for a reason that reads after "answered": `more than N bytes`, or `a
+    compressed body (gzip)` when it came compressed though none was asked for (#1383)."""
 
     status: int
     headers: list[tuple[str, str]]
     body: bytes
-    over: bool
-    compressed: str | None = None
+    withheld: str | None
 
 
 async def capped_reply(trust: ssl.SSLContext, method: str, url: str, *, cap: int,  # noqa: PLR0913 — one leg's parts
                        timeout: float, on_status: Callable[[int], None] | None = None,
                        **send: Any) -> CappedReply:
     """`method` on `url` (`send`: `headers`, `content`, `data`) with a fresh client over `trust`,
-    following no redirect and taking nothing from the environment; the body read as it arrived on
-    the wire, never decoded, until more than `cap` bytes have arrived. The reply is asked for
-    uncompressed, whatever `send`'s headers ask, and a body compressed anyway is refused, not
-    inflated (#1383); a reply with no body has nothing to inflate and passes. `on_status` hears
-    the status before the body is read. `httpx.HTTPError` as raised."""
+    following no redirect and taking nothing from the environment. The reply is asked for
+    uncompressed, whatever `send`'s headers ask; its body is read as it arrives on the wire, never
+    decoded, and withheld once more than `cap` bytes have arrived, or at its first byte when it
+    came compressed anyway: decoding would inflate a chunk whole before any cap (#1383). A reply
+    with no body has nothing to withhold. `on_status` hears the status before the body is read.
+    `httpx.HTTPError` as raised."""
     headers = httpx.Headers(send.pop("headers", None))
     headers["Accept-Encoding"] = "identity"
     async with httpx.AsyncClient(verify=trust, follow_redirects=False, trust_env=False) as client, \
             client.stream(method, url, timeout=timeout, headers=headers, **send) as reply:
         if on_status is not None:
             on_status(reply.status_code)
-        coding = reply.headers.get("Content-Encoding", "").strip()
-        compressed = coding if coding and coding.lower() != "identity" else None
+        coding = reply.headers.get("Content-Encoding", "")
+        compressed = any(c.strip().lower() not in ("", "identity") for c in coding.split(","))
         body = bytearray()
         async for chunk in reply.aiter_raw():
-            if compressed is not None:
-                return CappedReply(reply.status_code, [], b"", False, compressed)
+            if compressed:
+                return _withheld(reply, f"a compressed body ({coding.strip()})")
             body += chunk
             if len(body) > cap:
-                return CappedReply(reply.status_code, [], b"", True)
-        return CappedReply(reply.status_code, reply.headers.multi_items(), bytes(body), False)
+                return _withheld(reply, f"more than {cap} bytes")
+        return CappedReply(reply.status_code, reply.headers.multi_items(), bytes(body), None)
+
+
+def _withheld(reply: httpx.Response, why: str) -> CappedReply:
+    return CappedReply(reply.status_code, reply.headers.multi_items(), b"", why)
 
 
 __all__ = ["CappedReply", "capped_reply", "public_trust"]

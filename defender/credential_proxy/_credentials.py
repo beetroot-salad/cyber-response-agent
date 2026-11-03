@@ -216,18 +216,16 @@ def _token_exchange(auth: Auth, creds: CredentialSet, system: str,
     except httpx.TransportError as e:
         raise Refused(TRANSPORT, f"the token endpoint of {system} is unreachable "
                                  f"({type(e).__name__})") from None
-    if reply.over:
-        raise Refused(CONFIG, f"the token endpoint of {system} answered more than "
-                              f"{TOKEN_REPLY_CAP} bytes")
-    status, body = reply.status, reply.body
+    status, withheld = reply.status, reply.withheld
+    besides = "" if withheld is None else f" with {withheld}, withheld"
     if status >= 500:
-        raise Refused(TRANSPORT, f"the token endpoint of {system} answered {status}")
+        raise Refused(TRANSPORT, f"the token endpoint of {system} answered {status}{besides}")
     if status != 200:
-        raise Refused(CONFIG, f"the token endpoint of {system} refused the exchange ({status})")
-    if reply.compressed is not None:
-        raise Refused(CONFIG, f"the token endpoint of {system} answered a compressed body "
-                              f"({reply.compressed}) though asked for none")
-    return _issued(body, system)
+        raise Refused(CONFIG, f"the token endpoint of {system} refused the exchange "
+                              f"({status}){besides}")
+    if withheld is not None:
+        raise Refused(CONFIG, f"the token endpoint of {system} answered {withheld}")
+    return _issued(reply.body, system)
 
 
 def _issued(body: bytes, system: str) -> tuple[str, int | None]:

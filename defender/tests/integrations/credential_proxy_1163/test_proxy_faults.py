@@ -245,8 +245,11 @@ _TOKEN = json.dumps({"access_token": "AT-1383", "expires_in": 3600}).encode()
 @pytest.mark.parametrize(("encoding", "body", "fault"), [
     pytest.param("identity", b'{"ok": true}', None, id="identity-control"),
     pytest.param("Identity", b'{"ok": true}', None, id="identity-any-case"),
+    pytest.param("identity, identity", b'{"ok": true}', None, id="identity-listed-twice"),
     pytest.param("gzip", gzip.compress(b'{"ok": true}'), "UpstreamFault", id="gzip"),
     pytest.param("deflate", zlib.compress(b'{"ok": true}'), "UpstreamFault", id="deflate"),
+    pytest.param("identity, gzip", gzip.compress(b'{"ok": true}'), "UpstreamFault",
+                 id="gzip-listed-after-identity"),
 ])
 def test_1383_a_compressed_upstream_reply_is_an_upstream_fault(
         tmp_path, data_root, encoding, body, fault):
@@ -264,21 +267,6 @@ def test_1383_a_compressed_upstream_reply_is_an_upstream_fault(
     else:
         assert "compressed" in answer["detail"], answer
         assert answer["body"] == ""
-
-
-def test_1383_a_compression_bomb_is_refused_as_compressed_not_read_to_the_cap(
-        tmp_path, data_root):
-    """#1383: a few KiB of gzip that inflate to 8 MiB is refused for its encoding, not
-    inflated and then caught by the size cap."""
-    bomb = gzip.compress(b"\0" * (8 << 20))
-    assert len(bomb) < 1 << 16
-    with T.rig(tmp_path / "forge", data_root, max_response_bytes=1024) as r:
-        r.up.replies[PATH] = (200, {"Content-Encoding": "gzip"}, bomb)
-        answer = r.ask()
-
-    assert answer["fault"] == "UpstreamFault", answer
-    assert "compressed" in answer["detail"], answer
-    assert "more than" not in answer["detail"], answer
 
 
 @pytest.mark.parametrize(("encoding", "body", "fault"), [
@@ -312,13 +300,16 @@ def test_1383_a_compressed_token_reply_is_a_config_fault_unsent(
 ])
 def test_1383_a_compressed_error_reply_keeps_its_status_fault(tmp_path, data_root, status, fault):
     """#1383 review: a compressed non-2xx reply is classified by its status, as the same reply
-    uncompressed is; its body is not read."""
+    uncompressed is, and keeps its headers; only its body is withheld, and the detail says so."""
     with T.rig(tmp_path / "forge", data_root) as r:
-        r.up.replies[PATH] = (status, {"Content-Encoding": "gzip"}, gzip.compress(b"down"))
+        r.up.replies[PATH] = (status, {"Content-Encoding": "gzip", "Retry-After": "30"},
+                              gzip.compress(b"down"))
         answer = r.ask()
 
-    assert (answer["fault"], answer["detail"]) == (fault, f"identity answered {status}"), answer
-    assert answer["body"] == ""
+    assert answer["fault"] == fault, answer
+    assert answer["detail"] == (f"identity answered {status} with a compressed body (gzip), "
+                                "withheld"), answer
+    assert (answer["body"], answer["headers"].get("retry-after")) == ("", "30"), answer
 
 
 @pytest.mark.parametrize("status", [204, 304])
@@ -353,7 +344,8 @@ def test_1383_a_compressed_token_error_keeps_its_status_fault(
 def test_1383_a_compression_bomb_is_never_inflated(tmp_path, data_root):
     """#1383: the reply is read as raw network bytes, so 128 MiB of zeros sent as ~128 KiB of
     gzip never becomes 128 MiB in the proxy, not even one inflated chunk of it."""
-    bomb = gzip.compress(b"\0" * (128 << 20))
+    packer, block = zlib.compressobj(wbits=31), b"\0" * (1 << 20)
+    bomb = b"".join(packer.compress(block) for _ in range(128)) + packer.flush()
     with T.rig(tmp_path / "forge", data_root, max_response_bytes=1024) as r:
         r.up.replies[PATH] = (200, {"Content-Encoding": "gzip"}, bomb)
         r.ask()
@@ -366,3 +358,35 @@ def test_1383_a_compression_bomb_is_never_inflated(tmp_path, data_root):
 
     assert answer["fault"] == "UpstreamFault", answer
     assert peak < 16 << 20, f"peak {peak >> 20} MiB while refusing the bomb"
+
+
+@pytest.mark.parametrize(("status", "fault"), [
+    pytest.param(200, "UpstreamFault", id="200"),
+    pytest.param(503, "TransportFault", id="503"),
+    pytest.param(401, "ConfigFault", id="401"),
+])
+def test_1383_an_oversized_reply_keeps_its_status_fault_and_headers(
+        tmp_path, data_root, status, fault):
+    """#1383 review: a body over the cap is withheld like a compressed one: the status still
+    decides the fault (a 2xx is the upstream's), and the headers still arrive."""
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=1024) as r:
+        r.up.replies[PATH] = (status, {"Retry-After": "30"}, b"a" * 1025)
+        answer = r.ask()
+
+    assert answer["fault"] == fault, answer
+    assert answer["detail"] == ("identity answered more than 1024 bytes" if status == 200 else
+                                f"identity answered {status} with more than 1024 bytes, "
+                                "withheld"), answer
+    assert (answer["body"], answer["headers"].get("retry-after")) == ("", "30"), answer
+
+
+def test_1383_an_oversized_token_error_is_a_transport_fault(tmp_path, data_root):
+    """#1383 review: a token endpoint's 5xx is a transport fault however large its body."""
+    with H.upstream() as auth:
+        auth.replies["/token"] = (503, {}, b"x" * (65536 + 1))
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
+            answer = r.ask()
+
+    assert answer["fault"] == "TransportFault", answer
+    assert "answered 503" in answer["detail"], answer
+    assert r.up.seen == []
