@@ -378,6 +378,29 @@ def test_1375_o1_a_request_builds_no_tls_context_on_any_leg(tmp_path, data_root)
     assert calls["context"] == 0, f"a request built {calls['context']} TLS contexts"
 
 
+def test_1391_o4_a_second_request_under_the_same_ca_builds_no_tls_context(tmp_path, data_root):
+    """Contexts are cached by `ca` content: once a request has used a declaration's `ca`, the next
+    one builds no TLS context on any route. #1391 O4 (T1: the first one is not pinned)."""
+    import ssl
+
+    from defender.tests.support.shared._tls_server import chain, tls_server
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    pki = chain()
+    with tls_server(tmp_path, lambda *_: (200, b"{}"), served=pki.served()) as server:
+        url = f"{server.url}{API}/users/x"
+        with T.rig(tmp_path / "forge", data_root, lambda _u: H.declaration(
+                server.url + API, ca=pki.root.cert)) as r:
+            first = r.ask(url=url)
+            # SSLContext.__new__ is every route to a context: create_default_context included.
+            with counting_calls(context=ssl.SSLContext.__new__) as calls:
+                second = r.ask(url=url)
+
+    assert (first["fault"], second["fault"]) == (None, None), (first, second)
+    assert len(server.seen) == 2, "control: both requests reached the server"
+    assert calls["context"] == 0, f"the second request built {calls['context']} TLS contexts"
+
+
 TENANT_1384 = "11111111-1111-4111-8111-111111111111"
 
 

@@ -11,7 +11,8 @@ import pytest
 
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
-from defender.tests.support.shared._tls_server import tls_server
+from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
+from defender.tests.support.shared._tls_server import chain, issue, tls_server
 
 BASE = T.BASE_PATH
 PATH = f"{BASE}/users/x"
@@ -390,3 +391,96 @@ def test_1383_an_oversized_token_error_is_a_transport_fault(tmp_path, data_root)
     assert answer["fault"] == "TransportFault", answer
     assert "answered 503" in answer["detail"], answer
     assert r.up.seen == []
+
+
+# --- #1391 O4: a declaration's `ca` is the only trust for that system's legs ------------------
+
+ACCESS = ACCESS_FILE.format(system="identity")
+
+
+def _ok(*_: object) -> tuple[int, bytes]:
+    return 200, b"{}"
+
+
+def _ca_rig(tmp_path, data_root, base: str, ca: bytes, *, scheme=None):
+    """A rig whose identity declaration is `base` with `ca` (an OAuth set stored with `scheme`)."""
+    return T.rig(tmp_path / "forge", data_root,
+                 lambda _u: H.declaration(base, ca=ca, scheme=scheme),
+                 **({"creds": T.oauth_set()} if scheme is not None else {}))
+
+
+def test_1391_o4_a_declared_ca_reaches_its_private_upstream_and_dropping_it_refuses_it(
+        tmp_path, data_root):
+    """A server under a private root is reached with that root as `ca`; the same declaration
+    merged without `ca` is refused unsent (public bundle, no trust left behind). #1391 O4, P4."""
+    pki = chain()
+    with tls_server(tmp_path, _ok, served=pki.served()) as server:
+        base = server.url + BASE
+        with _ca_rig(tmp_path, data_root, base, pki.root.cert) as r:
+            trusted = r.ask(url=server.url + PATH)
+            reached = [p for _, p, _ in server.seen]
+            r.t.merge({ACCESS: H.declaration(base)}, "drop the ca")
+            r.t.publish()
+            dropped = r.ask(url=server.url + PATH)
+
+    assert (trusted["fault"], trusted["status"]) == (None, 200), trusted
+    assert reached == [PATH]
+    assert dropped["fault"] == "TransportFault", dropped
+    assert [p for _, p, _ in server.seen] == [PATH], "the request reached an untrusted server"
+
+
+def test_1391_o4_a_ca_naming_another_root_refuses_even_what_the_environment_trusts(
+        tmp_path, data_root, monkeypatch):
+    """`ca` is sole trust: with another root declared, the server is refused unsent although
+    `SSL_CERT_FILE` names its signer; the detail names the system. Control: its own CA. #1391 O4, P4."""
+    other = issue("another private root", ca=True)
+    with tls_server(tmp_path, _ok) as server:
+        monkeypatch.setenv("SSL_CERT_FILE", str(server.ca))
+        monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+        base = server.url + BASE
+        with _ca_rig(tmp_path, data_root, base, server.ca.read_bytes()) as r:
+            control = r.ask(url=server.url + PATH)
+            r.t.merge({ACCESS: H.declaration(base, ca=other.cert)}, "another root")
+            r.t.publish()
+            refused = r.ask(url=server.url + PATH)
+
+    assert control["fault"] is None, control
+    assert refused["fault"] == "TransportFault", refused
+    assert (refused["detail"] or "").startswith("identity "), refused
+    assert len(server.seen) == 1, "the refused request reached the server"
+
+
+@pytest.mark.parametrize(("trusted", "fault"), [
+    pytest.param("root", None, id="root-control"),
+    pytest.param("intermediate", "TransportFault", id="intermediate-only"),
+])
+def test_1391_o4_the_chain_must_end_at_a_root_in_ca(tmp_path, data_root, trusted, fault):
+    """A server presenting leaf+intermediate is reached when `ca` holds the root, refused unsent
+    when it holds only the intermediate (no partial chain). #1391 O4."""
+    pki = chain()
+    ca = pki.root.cert if trusted == "root" else pki.intermediate.cert
+    with (tls_server(tmp_path, _ok, served=pki.served()) as server,
+          _ca_rig(tmp_path, data_root, server.url + BASE, ca) as r):
+        answer = r.ask(url=server.url + PATH)
+
+    assert answer["fault"] == fault, answer
+    assert len(server.seen) == (1 if fault is None else 0)
+
+
+def test_1391_o4_the_token_exchange_of_a_declaration_with_ca_trusts_that_ca(tmp_path, data_root):
+    """An OAuth declaration with `ca`: the token endpoint and the API under that CA are both
+    reached, the API call carrying the exchanged token. #1391 O4."""
+    token_reply = json.dumps({"access_token": "AT-1391", "expires_in": 3600}).encode()
+    pki = chain()
+
+    def answer(_method: str, path: str, _body: bytes) -> tuple[int, bytes]:
+        return (200, token_reply) if path == "/token" else (200, b"{}")
+
+    with (tls_server(tmp_path, answer, served=pki.served()) as server,
+          _ca_rig(tmp_path, data_root, server.url + BASE, pki.root.cert,
+                  scheme=H.oauth_scheme(server.url + "/token")) as r):
+        got = r.ask(url=server.url + PATH)
+
+    assert got["fault"] is None, got
+    assert [(m, p) for m, p, _ in server.seen] == [("POST", "/token"), ("GET", PATH)]
+    assert server.seen[1][2].get("authorization") == "Bearer AT-1391"

@@ -274,3 +274,31 @@ def test_d3_adapter_over_the_working_tree_reaches_nothing_the_merged_declaration
 
     assert merged["path"].endswith("/users/dev.dana")
     assert [s.path for s in r.up.seen] == [f"{T.BASE_PATH}/users/dev.dana"]
+
+
+@pytest.mark.parametrize(("kind", "fault"), [
+    pytest.param("root-on-https", None, id="control"),
+    pytest.param("not-pem", ConfigFault, id="not-pem"),
+    pytest.param("a-key-not-a-certificate", ConfigFault, id="key-not-cert"),
+    pytest.param("on-an-http-base", ConfigFault, id="http-base"),
+])
+def test_1391_o4_a_declarations_ca_is_judged_when_it_is_parsed(kind, fault):
+    """A `ca` of certificates on an https base parses; one that is not PEM certificates, or sits
+    on an http base, is a ConfigFault at parse. #1391 O4."""
+    from defender.tenancy._access import parse_access
+    from defender.tests.support.shared._tls_server import issue
+
+    root = issue("tenant private root", ca=True)
+    ca, base = {
+        "root-on-https": (root.cert, "https://es.corp.example/es"),
+        "not-pem": (b"-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----\n",
+                    "https://es.corp.example/es"),
+        "a-key-not-a-certificate": (root.key, "https://es.corp.example/es"),
+        "on-an-http-base": (root.cert, "http://es.corp.example/es"),
+    }[kind]
+    text = H.declaration(base, scheme=H.basic_scheme(), ca=ca)
+    if fault is None:
+        assert parse_access(text, system="elastic").base == base
+    else:
+        with pytest.raises(fault):
+            parse_access(text, system="elastic")

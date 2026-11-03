@@ -47,10 +47,30 @@ def prefix_of(system: str) -> str:
     return system.upper().replace("-", "_")
 
 
+def transport_line(system: str) -> str:
+    """The config.env line putting `system` on `http-proxy`: the one place a case writes it."""
+    return f'{prefix_of(system)}_TRANSPORT="http-proxy"\n'
+
+
 def env_text(system: str, *, extra: str = "") -> str:
     """`system`'s config.env on `http-proxy`: an access method and a timeout, no base, no bastion."""
-    p = prefix_of(system)
-    return f'{p}_TRANSPORT="http-proxy"\n{p}_TIMEOUT_SEC="5"\n{extra}'
+    return f'{transport_line(system)}{prefix_of(system)}_TIMEOUT_SEC="5"\n{extra}'
+
+
+#: The two POST reads an Elastic declaration lists (#1391 O3); GET /_cluster/health is a read by method.
+ELASTIC_READS = (("POST", "/*/_search"), ("POST", "/_query"))
+ELASTIC_EVENTS = "logs-*"
+ELASTIC_ALERTS = "alerts-*"
+
+
+def elastic_files(base: str, *, ca: str | bytes | None = None) -> dict[str, str]:
+    """Repo files making `elastic` a proxied system at `base`: a basic-auth declaration with
+    `ELASTIC_READS` (and `ca` when given), and a config.env holding only the access method and
+    the two index keys (no URL, Kibana or container key)."""
+    decl = H.declaration(base, scheme=H.basic_scheme(), reads=ELASTIC_READS, ca=ca)
+    env = (f'{transport_line("elastic")}ELASTIC_EVENTS_INDEX="{ELASTIC_EVENTS}"\n'
+           f'ELASTIC_ALERTS_INDEX="{ELASTIC_ALERTS}"\n')
+    return H.access_files("elastic", decl, env=env)
 
 
 def system_files(system: str, decl: str, *, env_extra: str = "") -> dict[str, str]:
