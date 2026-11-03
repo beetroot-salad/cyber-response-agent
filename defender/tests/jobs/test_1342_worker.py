@@ -1472,12 +1472,12 @@ async def _run_with_failing_finish(world, fault, **kw) -> tuple[str, str, _Store
     return bad, good, used
 
 
-_OUTAGES = ["connection-error", "os-error", "operational", "interface", "pool-timeout"]
+_OUTAGES = ["connection-error", "os-error", "operational", "interface", "pool-timeout", "invalidated"]
 
 
 def _outage(kind: str) -> Exception:
     """An environment fault (r5 item 13): the database could not be reached or answered transiently."""
-    from sqlalchemy.exc import InterfaceError, OperationalError
+    from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
     from sqlalchemy.exc import TimeoutError as PoolTimeout
 
     sql, gone = "UPDATE jobs.investigations", Exception("server closed the connection unexpectedly")
@@ -1485,6 +1485,7 @@ def _outage(kind: str) -> Exception:
             "os-error": lambda: OSError("network is unreachable"),
             "operational": lambda: OperationalError(sql, {}, gone),
             "interface": lambda: InterfaceError(sql, {}, gone),
+            "invalidated": lambda: DBAPIError(sql, {}, gone, connection_invalidated=True),
             "pool-timeout": lambda: PoolTimeout("QueuePool limit of size 10 overflow 10 reached")}[kind]()
 
 
@@ -2045,6 +2046,7 @@ async def _serve_with_a_stop_landing_while_the_child_is_spawned(world, monkeypat
 
     async def spawn_while_stopping(*argv, **kw):
         nonlocal landed_in_spawn
+        assert not serving.done()
         os.kill(os.getpid(), signal.SIGTERM)
         landed_in_spawn = True  # until the real spawn has returned
         proc = await real_spawn(*argv, **kw)
@@ -2432,6 +2434,7 @@ async def test_d_ac_a_grandchild_is_gone_after_a_deliberate_stop_that_the_child_
         try:
             await _until(lambda: (child.seen(inv) or {}).get("grandchild"), "the child and its grandchild")
             seen = child.seen(inv)
+            assert not serving.done()
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
             await _the_group_to_be_gone(seen, "the grandchild to be gone after serve() returned")
@@ -2904,6 +2907,7 @@ async def test_b1_a_deliberate_stop_keeps_renewing_until_the_rows_last_write_so_
         try:
             await _until(lambda: child.seen(inv), "the child to start")
             began = time.monotonic()
+            assert not serving.done()
             os.kill(os.getpid(), signal.SIGTERM)
             while not serving.done() and accounting_written(dsn, inv) is None:  # the mark: the hand-back landed
                 assert row(dsn, inv)["stage"] == "running", "the row was taken over while its worker was stopping"
@@ -2993,6 +2997,7 @@ async def test_b2_a_failed_cost_read_keeps_the_last_good_figure_mid_run_and_writ
             elif end == "finish":
                 (marks / "go-0").touch()
             else:
+                assert not serving.done()
                 os.kill(os.getpid(), signal.SIGTERM)
             await _until(lambda: accounting_written(dsn, inv) is not None, "the end write", timeout=10)
         finally:
@@ -3233,6 +3238,7 @@ async def test_b11_a_deliberate_stop_hands_a_running_row_back_with_its_final_cos
         serving = asyncio.create_task(_worker(world, store, child, **_FAST).serve())
         try:
             await _until(lambda: (marks / "wrote-0").exists(), "the child's spend")
+            assert not serving.done()
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
         finally:
@@ -3257,6 +3263,7 @@ async def test_b11_a_child_that_completes_on_its_own_as_the_stop_signals_it_is_f
         serving = asyncio.create_task(_worker(world, store, child, **_FAST).serve())
         try:
             await _until(lambda: (marks / "wrote-0").exists(), "the child's spend")
+            assert not serving.done()
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
         finally:
@@ -3281,6 +3288,7 @@ async def test_b11_a_row_that_became_terminal_before_the_stop_gets_its_final_acc
         try:
             await _until(lambda: (marks / "wrote-0").exists(), "the child's spend")
             await store.cancel_investigation(T1, inv, actor="u-1")
+            assert not serving.done()
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
         finally:
@@ -3302,6 +3310,7 @@ async def test_b11_a_pending_end_write_gets_one_try_during_the_stop_then_the_sto
         serving = asyncio.create_task(_worker(world, used, child, **_FAST).serve())
         try:
             await _until(lambda: used.tries(bad), "the first failed end write")
+            assert not serving.done()
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=10)
         finally:
@@ -3326,6 +3335,7 @@ async def test_b11_a_redeploy_mid_run_hands_the_row_back_and_another_worker_runs
         b = None
         try:
             await _until(lambda: (marks / "wrote-0").exists(), "the child's spend")
+            assert not a.done()
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(a, timeout=60)
             (marks / "go-0").touch()
@@ -3381,9 +3391,10 @@ async def test_b5_r5_13_an_end_write_to_a_database_that_does_not_answer_is_retri
         used = _StoreWhoseEndWritesReachNobody(inner, unreachable)
         used.down = True
         inv = await _queued(inner, ticket="T-1", key="k1")
-        later = await _queued(inner, ticket="T-2", key="k2")
         serving = asyncio.create_task(_worker(world, used, child, **_FAST).serve())
         try:
+            await _until(lambda: used.tries >= 1, "the first failed end write try", timeout=20)
+            later = await _queued(inner, ticket="T-2", key="k2")
             await _until(lambda: used.tries >= 3, "the end write to be tried again and again", timeout=20)
             assert used.errors, "premise: the unreachable database raised nothing"
             assert row(dsn, inv)["stage"] == "running"
@@ -3409,8 +3420,8 @@ async def test_b5_t2_a_renewal_that_errors_fences_nothing_claims_nothing_and_the
         try:
             await _until(lambda: child.seen(inv), "the child to start")
             store.down = True
-            later = await _queued(inner, ticket="T-2", key="k2")
             await _until(lambda: store.refused, "a renewal to be refused")
+            later = await _queued(inner, ticket="T-2", key="k2")
             await asyncio.sleep(1.0)
             assert len(store.refused) >= 2, "premise: renewals were not failing tick after tick"
             assert not _termed(world, inv), "a renewal that errored ended the child"
@@ -3422,17 +3433,20 @@ async def test_b5_t2_a_renewal_that_errors_fences_nothing_claims_nothing_and_the
             await _until(lambda: lease_left(dsn, inv) > down_left + 0.5, "the next tick to renew the lease")
             await _until(lambda: child.seen(later), "the queued row to run")
             assert not _termed(world, inv)
+            release.touch()
+            await _until(lambda: row(dsn, inv)["stage"] == "completed", "the first row to complete", timeout=15)
+            await _until(lambda: row(dsn, later)["stage"] == "completed", "the second row to complete", timeout=15)
         finally:
             release.touch()
             if not serving.done():
                 os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
-    assert (row(dsn, inv)["stage"], row(dsn, later)["stage"]) == ("completed", "completed")
 
 
 async def test_b11_a_hand_back_that_errors_gets_one_try_and_the_stop_returns_promptly_the_lease_lapsing_on_its_own(world):
     """SIGTERM with the store down and a child running: `serve()` returns promptly, the hand-back is tried at most twice, the row stays `running` unmarked and its lease lapses by itself. (B11, r5 item 3)"""
-    child = _child(world, files=_committed(), term="mark", term_mark=_term_mark(world))
+    release = world["tmp"] / "release"  # never touched: the child is still running when the stop lands
+    child = _child(world, files=_committed(), wait_for=release, term="mark", term_mark=_term_mark(world))
     dsn = world["dsn"]
     async with job_store(dsn, lease=3.0) as inner:
         store = _StoreOutage(inner)
@@ -3444,6 +3458,7 @@ async def test_b11_a_hand_back_that_errors_gets_one_try_and_the_stop_returns_pro
             await _until(lambda: store.refused, "a renewal to be refused")
             periodic, before = set(store.refused), len(store.refused)
             began = time.monotonic()
+            assert not serving.done()
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=15)
             assert time.monotonic() - began < 10, "the stop waited on writes that were failing"
@@ -3452,7 +3467,7 @@ async def test_b11_a_hand_back_that_errors_gets_one_try_and_the_stop_returns_pro
                 os.kill(os.getpid(), signal.SIGTERM)
             await _stop_all(serving)
         hand_back = [name for name in store.refused[before:] if name not in periodic]
-        assert 1 <= len(hand_back) <= 2, f"the hand-back was tried {len(hand_back)} times: {hand_back}"
+        assert len(hand_back) == 1, f"the hand-back was tried {len(hand_back)} times, not once: {hand_back} (renewals {sorted(periodic)} excluded)"
         assert _termed(world, inv)
         assert row(dsn, inv)["stage"] == "running"
         assert accounting_written(dsn, inv) is None
@@ -3537,6 +3552,7 @@ async def test_b11_a_child_that_writes_a_failing_ending_as_the_stop_lands_is_han
         serving = asyncio.create_task(_worker(world, store, child, **_FAST).serve())
         try:
             await _until(lambda: (marks / "wrote-0").exists(), "the child's spend")
+            assert not serving.done()
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
         finally:
@@ -3560,6 +3576,7 @@ async def test_b11_a_child_that_failed_on_its_own_before_the_stop_signalled_it_e
         serving = asyncio.create_task(_worker(world, used, child, **_FAST).serve())
         try:
             await _until(lambda: used.tries(inv), "the first failed end write")
+            assert not serving.done()
             os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=15)
         finally:

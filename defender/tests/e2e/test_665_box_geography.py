@@ -204,6 +204,7 @@ def _dies_after_create(rec, *subcommands):
         if rec.create_argv is not None and len(argv) > 1 and argv[1] in subcommands:
             raise OSError("daemon socket gone")
         return rec(argv, **kw)
+    docker.popen = rec.popen   # the attached-start capability the run lane asks of its docker seam (#1343 r5 item 15)
     return docker
 
 

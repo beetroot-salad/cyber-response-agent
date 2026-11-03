@@ -169,13 +169,14 @@ def test_b10_a_run_lane_start_through_a_docker_without_the_attached_start_fails_
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """A docker seam lacking `.popen`: an error naming it, and no real `docker start` (never a fall-back to the daemon). (B10, r5 15)"""
 
-    class NoAttachedStart:
-        def __init__(self) -> None:
-            self.calls: list[list[str]] = []
+    class NoAttachedStart(RecordingDocker):
+        """A healthy daemon (create, inspect, rm all answer) whose object has no `.popen`: the loud error
+        comes wherever the capability is first used, not from a fault on the way."""
 
-        def __call__(self, argv, **_kw):  # noqa: ANN001
-            self.calls.append(list(argv))
-            return subprocess.CompletedProcess(argv, 1, "", "Error: No such object\n")
+        def __getattribute__(self, name: str):
+            if name == "popen":
+                raise AttributeError("'NoAttachedStart' object has no attribute 'popen'")
+            return super().__getattribute__(name)
 
     log = tmp_path / "real-docker-calls"
     fake_bin = tmp_path / "bin"

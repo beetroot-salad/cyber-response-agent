@@ -72,7 +72,7 @@ def test_live_box_printing_past_limit_is_refused_and_stopped(tmp_path, runtime):
         status = box.run_docker(["docker", "inspect", "-f", "{{.State.Status}}", executor.name])
         # The run box is auto-removed once stopped (#1343 B10): stopped is `exited`/`dead` or already gone.
         assert status.stdout.strip() in {"exited", "dead"} or (
-            status.returncode != 0 and "No such object" in status.stderr)
+            status.returncode != 0 and "no such object" in status.stderr.lower())
         with pytest.raises(box.BoxOutputLimitExceeded):
             executor.run_parsed([], command="again", cwd=cwd, timeout=5)
     finally:
