@@ -35,9 +35,16 @@ def _credential(t: Any, tmp_path: Path, *, openbao_url: str, transport: Any = No
                             transport=transport)
 
 
+def _jwt(claims: dict) -> str:
+    """An unsigned token with `claims` (the credential decodes claims; OpenBao's signature is not its check)."""
+    part = lambda doc: base64.urlsafe_b64encode(json.dumps(doc).encode()).decode().rstrip("=")  # noqa: E731
+    return f"{part({'alg': 'none'})}.{part(claims)}.sig"
+
+
 @pytest.fixture
 def tls_issuer(tmp_path):
-    """A local HTTPS server with a self-signed certificate; the CA the config names is another."""
+    """A local HTTPS server with a self-signed certificate; the CA the config names is another.
+    Other suites import it: keep its shape."""
     trusted_pem, _ = self_signed("the configured CA", san=False)
     (tmp_path / "trusted.pem").write_bytes(trusted_pem)
     token = json.dumps({"auth": {"client_token": "tok"}}).encode()
@@ -45,18 +52,47 @@ def tls_issuer(tmp_path):
         yield server.port, server.got, tmp_path
 
 
+@pytest.fixture
+def tls_openbao(tmp_path, p4_tenant):
+    """A local HTTPS server with a self-signed certificate, answering the AppRole login and the token
+    mint as OpenBao would for `p4_tenant`'s generation; the CA `trusted.pem` names is another."""
+    trusted_pem, _ = self_signed("the configured CA", san=False)
+    (tmp_path / "trusted.pem").write_bytes(trusted_pem)
+    audience = generation_fields(p4_tenant.tenant_id, tmp_path / "secrets")["audience"]
+    port: list[int] = []
+
+    def answer(method: str, path: str, _body: bytes) -> tuple[int, bytes]:
+        if method == "POST":
+            return 200, json.dumps({"auth": {"client_token": "tok"}}).encode()
+        now = int(time.time())
+        claims = {"iss": f"https://localhost:{port[0]}/v1/identity/oidc", "tenant_id": p4_tenant.tenant_id,
+                  "aud": audience, "iat": now, "exp": now + 600}
+        return 200, json.dumps({"data": {"token": _jwt(claims)}}).encode()
+
+    with tls_server(tmp_path, answer) as server:
+        port.append(server.port)
+        yield server, tmp_path
+
+
 def test_r6_a_tls_server_the_configured_ca_did_not_sign_is_refused_and_gets_no_secret(
-        p4_tenant, tls_issuer):
+        p4_tenant, tls_openbao):
     from defender.learning.author.version_control import ForgejoAuthError
 
-    port, got, folder = tls_issuer
-    credential = _credential(p4_tenant, folder, openbao_url=f"https://localhost:{port}",
-                             ca_cert=str(folder / "trusted.pem"))
+    server, folder = tls_openbao
+    url = f"https://localhost:{server.port}"
+    credential = _credential(p4_tenant, folder, openbao_url=url, ca_cert=str(folder / "trusted.pem"))
     with pytest.raises(Exception) as refused:  # noqa: PT011 — the class is the code's choice
         credential.token()
     assert isinstance(refused.value, ForgejoAuthError), repr(refused.value)
-    assert got == [], f"the secret reached a server the configured CA did not sign: {got}"
+    assert server.got == [], f"the secret reached a server the configured CA did not sign: {server.got}"
     assert SECRET_ID not in str(refused.value)
+
+    # The control: the same provider, trusting the CA that did sign the server, reaches it and gets a
+    # token, so the refusal above is the certificate's and not some earlier failure.
+    trusting = _credential(p4_tenant, folder, openbao_url=url, ca_cert=str(server.ca))
+    assert trusting.token().count(".") == 2
+    trusting.close()
+    assert any(SECRET_ID.encode() in body for body in server.got), server.got
 
 
 def test_r6_the_login_never_follows_a_redirect(p4_tenant, tmp_path):
@@ -108,9 +144,8 @@ def test_r6_no_secret_reaches_a_log_record_or_an_error_text(p4_tenant, tmp_path,
         answer = bao.handle(request)
         if request.method != "GET" or "/identity/oidc/token/" not in request.url.path or answer.status_code != 200:
             return answer
-        part = lambda doc: base64.urlsafe_b64encode(json.dumps(doc).encode()).decode().rstrip("=")  # noqa: E731
         claims = {"iss": "https://openbao.test/v1/identity/oidc", "tenant_id": p4_tenant.tenant_id, "aud": fields["audience"], "iat": int(time.time()), "exp": int(time.time()) + 600}
-        return httpx.Response(200, json={"data": {"token": f"{part({'alg': 'none'})}.{part(claims)}.sig"}})
+        return httpx.Response(200, json={"data": {"token": _jwt(claims)}})
 
     def echo(request: httpx.Request) -> httpx.Response:
         # A refusing issuer (or a proxy in front of it) that echoes the request back.
