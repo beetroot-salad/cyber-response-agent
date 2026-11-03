@@ -75,7 +75,7 @@ def test_an_unset_rootfs_resolves_to_the_image_named_by_the_mounted_trees_three_
     assert shape.group("version") == recipe_version()
 
     rec = RecordingDocker()
-    box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: (), popen=rec.popen)
+    box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: ())
     assert image_token(rec.create_argv or []) == expected
     assert not any("{" in t or "}" in t for t in rec.create_argv or []), rec.create_argv
 
@@ -104,7 +104,7 @@ def test_an_explicit_rootfs_is_appended_verbatim_and_reads_no_file(tmp_path):
     spec = BoxSpec(rootfs=STOCK_ROOTFS)
 
     rec = RecordingDocker()
-    box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: (), popen=rec.popen)
+    box_mod._start_boxed(run_dir, defender_dir, spec, rec, lambda _d: ())
     assert image_token(rec.create_argv or []) == STOCK_ROOTFS
 
     rec2 = RecordingDocker()
@@ -293,7 +293,7 @@ def test_the_image_name_carries_the_running_packages_recipe_version_and_never_th
 
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
-    box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), rec, lambda _d: (), popen=rec.popen)
+    box_mod._start_boxed(run_dir, defender_dir, BoxSpec(), rec, lambda _d: ())
     assert image_token(rec.create_argv or []) == expected
     rec2 = RecordingDocker()
     box_mod._start_boxed_request(_request(root, run_dir), rec2, lambda _d: ())

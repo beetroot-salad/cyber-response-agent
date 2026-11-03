@@ -1,8 +1,9 @@
 """#1343 B10: the run box dies with the process that started it (T6). Fake-daemon cases observe the
-create and the attached start at the `popen=` seam; real-daemon cases (`box`) observe the deaths."""
+create and the attached start at the docker seam's `.popen` capability (r5 item 15); real-daemon cases (`box`) observe the deaths."""
 from __future__ import annotations
 
 import gc
+import inspect
 import os
 import shutil
 import signal
@@ -17,13 +18,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from defender import box as box_mod
 from defender.box._docker import resolve_rootfs
 from defender.box._spec import _DockerTransport
 from defender.tests.e2e._box665 import DEFENDER, RecordingDocker, reaped_after_create
 from defender.tests.e2e._spec771 import requires_real_box
 from defender.tests.support.sandbox._box1279 import request_lane, run_lane
+from defender.tests.support.sandbox._box1343 import input_open
 from defender.tests.support.sandbox._docker import dood_anchor, is_dood
 from defender.tests.support.sandbox._spec1092 import make_run_dir
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
@@ -34,14 +35,14 @@ BoxFault = box_mod.BoxFault
 
 # ---- fake-daemon cases: what the run box's start asks of the daemon and of the attached-start seam ----
 
-def _start(rec: RecordingDocker, run_dir: Path, within: float = 20.0) -> Any:
+def _start(rec: RecordingDocker, run_dir: Path, within: float = 20.0, **knobs: Any) -> Any:
     """`start_box` on the run lane through the seam, failing (not hanging) when it does not return."""
     out: dict[str, Any] = {}
 
     def go() -> None:
         try:
-            out["box"] = box_mod.start_box(run_dir, DEFENDER, docker=rec, popen=rec.popen,
-                                           tenant_id=TEST_TENANT, require_sandbox=True)
+            out["box"] = box_mod.start_box(run_dir, DEFENDER, docker=rec,
+                                           tenant_id=TEST_TENANT, require_sandbox=True, **knobs)
         except BaseException as e:  # noqa: BLE001 — handed back to the test thread
             out["raised"] = e
 
@@ -64,9 +65,12 @@ def test_b10_the_run_box_is_created_for_an_attached_start_with_its_hardening_unc
     _start(rec, make_run_dir(tmp_path))
     argv = rec.create_argv or []
     assert argv[:2] == ["docker", "create"], argv[:3]
-    assert argv[-1] == "cat" and "sleep" not in argv and "--detach" not in argv, argv[-4:]
+    assert argv[-1] == "cat", argv[-4:]
+    assert "sleep" not in argv, argv[-4:]
+    assert "--detach" not in argv, argv[-4:]
     image_at = len(argv) - 2
-    assert argv.index("-i") < image_at and argv.index("--rm") < image_at, "-i/--rm must be options, before the image"
+    assert argv.index("-i") < image_at, "-i must be an option, before the image"
+    assert argv.index("--rm") < image_at, "--rm must be an option, before the image"
     name = argv[argv.index("--name") + 1]
     assert name.startswith("defender-run-")
     labels = [argv[i + 1] for i, a in enumerate(argv) if a == "--label"]
@@ -74,7 +78,9 @@ def test_b10_the_run_box_is_created_for_an_attached_start_with_its_hardening_unc
     assert any(label.startswith("defender.tenant=") for label in labels), labels
     for flag, value in (("--network", "none"), ("--runtime", box_mod.BoxSpec.from_env(os.environ).runtime)):
         assert argv[argv.index(flag) + 1] == value
-    assert "--read-only" in argv and "--pull=never" in argv and any(a.startswith("fsize=") for a in argv)
+    assert "--read-only" in argv
+    assert "--pull=never" in argv
+    assert any(a.startswith("fsize=") for a in argv)
     assert sum(1 for a in argv if a == "--mount") >= 4, "the run box keeps its mounts"
 
 
@@ -83,7 +89,7 @@ def test_b10_the_attached_start_follows_the_create_and_precedes_every_probe(tmp_
     rec = RecordingDocker()
     _start(rec, make_run_dir(tmp_path))
     name = (rec.create_argv or [])[(rec.create_argv or []).index("--name") + 1]
-    assert [s.args for s in rec.starters] == [["docker", "start", "-a", "-i", name]]
+    assert [a.argv for a in rec.asks] == [["docker", "start", "-a", "-i", name]]
     calls = rec.calls
     create_at = _index(calls, lambda c: c[:2] == ["docker", "create"])
     start_at = _index(calls, lambda c: c[:2] == ["docker", "start"])
@@ -103,12 +109,14 @@ def test_b10_start_up_probes_wait_until_the_box_reports_running(tmp_path: Path):
 
 
 def test_b10_the_box_input_stays_open_for_the_life_of_the_executor(tmp_path: Path):
-    """The held starter's input is not closed or collected while the executor lives. (B10 start path)"""
+    """The attached start is given a piped input, and that starter is kept (not collected) while the executor lives. (B10)"""
     rec = RecordingDocker()
     box = _start(rec, make_run_dir(tmp_path))
     gc.collect()
-    [starter] = rec.starters
-    assert starter.input_open(), "the box's input was closed (collected) while its executor lives"
+    [ask] = rec.asks
+    assert ask.kwargs.get("stdin") == subprocess.PIPE, f"the box's input was not asked for as a pipe: {ask.kwargs}"
+    [starter] = rec.held_starters()   # only the executor can be holding it: the fake keeps it weakly
+    assert input_open(ask.read_fd), "the box's input was closed (collected) while its executor lives"
     assert starter.poll() is None, "the starter was ended while its executor lives"
     assert box.name
 
@@ -129,10 +137,59 @@ def test_b10_a_starter_that_exits_before_the_box_runs_is_a_start_fault_reaped_by
     if exits[1]:
         assert exits[1].decode().strip() in text, text
     verdict = box_mod.verdict_path(run_dir)
-    assert verdict.is_file() and '"ran": false' in verdict.read_text(encoding="utf-8").replace('":false', '": false')
+    assert verdict.is_file()
+    assert '"ran": false' in verdict.read_text(encoding="utf-8").replace('":false', '": false')
     assert verdict.read_text(encoding="utf-8").count(str(exits[0])) >= 1
     assert not [c for c in rec.calls if c[:2] == ["docker", "exec"]], "probes ran against a box that never ran"
     assert reaped_after_create(rec.calls) is (owner == "self"), "the reap must follow the start token's owner"
+
+
+def test_b10_the_wait_for_a_running_box_is_bounded_at_thirty_seconds_by_default():
+    """The run box's wait-until-running bound is a `start_box` knob defaulting to 30 s. (B10, r5 16)"""
+    assert inspect.signature(box_mod.start_box).parameters["running_wait"].default == 30.0
+
+
+def test_b10_a_box_that_never_reports_running_while_its_starter_lives_is_a_start_fault_after_the_bound(tmp_path: Path):
+    """Starter alive, box stuck `created`: after the bound a start fault, marker, token reap, starter ended. (B10, r5 16)"""
+    run_dir = make_run_dir(tmp_path)
+    rec = RecordingDocker()
+    rec.lands = False
+    began = time.monotonic()
+    with pytest.raises(BoxFault):
+        _start(rec, run_dir, within=20, running_wait=1.0)
+    assert 0.9 < time.monotonic() - began < 15, "the wait was not bounded by `running_wait`"
+    [ask] = rec.asks
+    assert ask.returncode is not None, "the starter was left alive after the start fault"
+    assert '"ran": false' in box_mod.verdict_path(run_dir).read_text(encoding="utf-8").replace('":false', '": false')
+    assert not [c for c in rec.calls if c[:2] == ["docker", "exec"]], "probes ran against a box that never ran"
+    assert reaped_after_create(rec.calls), "the box was not reaped by its token"
+
+
+def test_b10_a_run_lane_start_through_a_docker_without_the_attached_start_fails_loudly_and_starts_nothing(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A docker seam lacking `.popen`: an error naming it, and no real `docker start` (never a fall-back to the daemon). (B10, r5 15)"""
+
+    class NoAttachedStart:
+        def __init__(self) -> None:
+            self.calls: list[list[str]] = []
+
+        def __call__(self, argv, **_kw):  # noqa: ANN001
+            self.calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, 1, "", "Error: No such object\n")
+
+    log = tmp_path / "real-docker-calls"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    shim = fake_bin / "docker"
+    shim.write_text(f'#!/bin/sh\necho "$@" >> {log}\nexit 1\n', encoding="utf-8")
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}{os.environ['PATH']}")   # a real `docker` would land here
+    seam = NoAttachedStart()
+    with pytest.raises((AttributeError, TypeError), match="popen"):
+        _start(seam, make_run_dir(tmp_path))
+    started = [c for c in seam.calls if c[:2] == ["docker", "start"]]
+    assert not started, "a `docker start` was issued without the seam's attached-start capability"
+    assert "start" not in (log.read_text() if log.exists() else ""), "a real `docker start` was issued"
 
 
 def test_b10_teardown_of_a_run_box_that_is_being_removed_is_clean_and_the_scrub_runs(tmp_path: Path):
@@ -204,8 +261,9 @@ def test_b10_the_output_limit_stop_of_a_run_box_counts_a_removing_or_gone_box_as
     rec = _StopsInto(after)
     box = _start(rec, make_run_dir(tmp_path))
     overflow = _overflow(box)
-    assert getattr(overflow, "__notes__", []) == [] and overflow.__cause__ is None, \
+    assert getattr(overflow, "__notes__", []) == [], \
         f"a removing/gone run box was read as unconfirmed: {getattr(overflow, '__notes__', None)}"
+    assert overflow.__cause__ is None
     assert any(c[1:2] in (["stop"], ["rm"]) and box.name in c for c in rec.calls), "the box was never stopped"
 
 
@@ -221,8 +279,10 @@ def test_b10_a_stop_start_box_is_still_started_detached_forever_and_removed_expl
     rec = _StopsInto("exited")
     box = _stop_start_box(tmp_path, rec)
     argv = rec.create_argv or []
-    assert argv[:3] == ["docker", "run", "--detach"] and argv[-2:] == ["sleep", "infinity"], argv
-    assert "--rm" not in argv and "-i" not in argv
+    assert argv[:3] == ["docker", "run", "--detach"], argv
+    assert argv[-2:] == ["sleep", "infinity"], argv
+    assert "--rm" not in argv
+    assert "-i" not in argv
     assert not [c for c in rec.calls if c[:2] == ["docker", "start"]], "a stop/start box was started at its start"
     box_mod.stop_box(box)
     assert ["docker", "rm", "-f", box.name] in rec.calls, "a stop/start box is removed explicitly"
@@ -403,8 +463,8 @@ def test_b10_output_past_the_limit_stops_and_removes_the_run_box_with_the_plain_
 
 _CREATE_THEN_START = textwrap.dedent("""
     import subprocess, sys, time
-    name, image = sys.argv[1], sys.argv[2]
-    subprocess.run(["docker", "create", "-i", "--rm", "--pull=never", "--network", "none", "--name", name,
+    name, image, runtime = sys.argv[1:4]
+    subprocess.run(["docker", "create", "-i", "--rm", "--pull=never", "--runtime", runtime, "--network", "none", "--name", name,
                     image, "cat"], check=True, stdout=subprocess.DEVNULL)
     print("created", flush=True)
     held = subprocess.Popen(["docker", "start", "-a", "-i", name], stdin=subprocess.PIPE,
@@ -420,11 +480,12 @@ _CREATE_THEN_START = textwrap.dedent("""
 def test_b10_a_starter_killed_between_the_create_and_the_start_never_leaves_a_running_box(
         tmp_path: Path, kill: str, delay: float):
     """Killed right after `docker create` returns: the box ends gone or `Created` (inert), never running. (B10, r4 item 1)"""
-    image = resolve_rootfs(box_mod.BoxSpec.from_env(os.environ).rootfs, DEFENDER).image
+    spec = box_mod.BoxSpec.from_env(os.environ)
+    image = resolve_rootfs(spec.rootfs, DEFENDER).image
     script = tmp_path / "create_then_start.py"
     script.write_text(_CREATE_THEN_START, encoding="utf-8")
     name = f"t1343-{uuid.uuid4().hex[:10]}"
-    child = subprocess.Popen([sys.executable, str(script), name, image], stdout=subprocess.PIPE, text=True,
+    child = subprocess.Popen([sys.executable, str(script), name, image, spec.runtime], stdout=subprocess.PIPE, text=True,
                              start_new_session=True)
     try:
         assert child.stdout.readline().strip() == "created"

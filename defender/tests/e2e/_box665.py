@@ -12,6 +12,7 @@ from defender import box as box_mod
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.tests.e2e._local_box_command import run_box_python_command
+from defender.tests.support.sandbox._box1343 import AttachedStartSeam
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -73,7 +74,7 @@ class DockerFault:
     cite: str = ""
 
 
-class RecordingDocker:
+class RecordingDocker(AttachedStartSeam):
     """Injectable `docker` fn for `start_box(..., docker=…)`.
 
     Records every argv and models a healthy daemon unless a declared fault is supplied:
@@ -106,26 +107,32 @@ class RecordingDocker:
         self.calls: list[list[str]] = []
         self.create_argv: list[str] | None = None
         # #1343 B10: the run box is `docker create`d, then started by a held attached `docker start -a -i`
-        # the executor asks of the `popen=` seam (pass `popen=rec.popen`). The daemon's phase for that name:
+        # asked of this object's `.popen` capability (r5 item 15). The daemon's phase for that name:
         # None (none), "created", then "running" once the start landed, after `start_lag` status reads.
         self.phase: str | None = None
         self.start_lag = 0
-        self.starter_exit: tuple[int, bytes] | None = None   # (rc, stderr): the starter dies before it ran
-        self.starters: list = []
+        self.starter_exit = None            # (rc, stderr): the starter dies before it ran
+        self.lands = True                   # False: the start never lands, the box never reports running
         self.running_seen_at: int | None = None              # len(calls) when status first answered running
+        self._attached_state()
 
-    def popen(self, argv, **kw):
-        """The attached-start seam: records the start and lands it (the container then reports running),
-        unless `starter_exit` says the starter dies first."""
-        from defender.tests.support.sandbox._box1343 import FakeStarter
-
-        argv = list(argv)
+    def _record(self, argv: list[str]) -> None:
         self.calls.append(argv)
-        starter = FakeStarter(argv, kw, exits=self.starter_exit)
-        self.starters.append(starter)
-        if self.starter_exit is None and self.phase == "created":
+
+    def _phase_word(self) -> str:
+        """The status the daemon answers for the created box: `created` for `start_lag` reads after the start landed."""
+        if self.phase == "starting":
+            if self.start_lag > 0:
+                self.start_lag -= 1
+                return "created"
+            self.phase = "running"
+        if self.phase == "running" and self.running_seen_at is None:
+            self.running_seen_at = len(self.calls)
+        return str(self.phase)
+
+    def _landed(self, argv: list[str]) -> None:
+        if self.phase == "created":
             self.phase = "starting"
-        return starter
 
     def _inspect(self, argv: list[str]) -> subprocess.CompletedProcess:
         """`docker inspect` answers three questions, told apart by the format string as on a
@@ -139,15 +146,8 @@ class RecordingDocker:
         if "Config.Labels" not in fmt:
             if self.status is not None:
                 return _cp(0, f"{self.status}\n")
-            if self.phase == "starting":
-                if self.start_lag > 0:
-                    self.start_lag -= 1
-                    return _cp(0, "created\n")
-                self.phase = "running"
             if self.phase is not None:
-                if self.phase == "running" and self.running_seen_at is None:
-                    self.running_seen_at = len(self.calls)
-                return _cp(0, f"{self.phase}\n")
+                return _cp(0, f"{self._phase_word()}\n")
             return _cp(1, "", "No such object\n")
         if self.existing_token is None:
             return _cp(1, "", "No such object\n")

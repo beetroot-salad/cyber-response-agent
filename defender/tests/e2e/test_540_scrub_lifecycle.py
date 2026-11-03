@@ -51,6 +51,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
 )
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.sandbox._box1343 import AttachedStartSeam
 
 pytestmark = pytest.mark.e2e
 
@@ -103,11 +104,15 @@ class _DockerCall:
         return self.argv[1] if len(self.argv) > 1 else ""
 
 
-class FakeDocker:
-    """The injected `docker` seam: records every argv and replies from a scripted table."""
+class FakeDocker(AttachedStartSeam):
+    """The injected `docker` seam: records every argv and replies from a scripted table. The run box's
+    attached start (#1343 B10) is its `.popen`; once a create succeeded and the start landed the
+    container reports `running`, until it is removed."""
 
     def __init__(self, reply=None, existing: str | None = None):
         self.calls: list[_DockerCall] = []
+        self.phase: str | None = None
+        self._attached_state()
         self._reply = reply
         #: The `.State.Status` of a container already holding the name, or `None` for the
         #: default — nothing in the way, which is what almost every test here wants.
@@ -122,14 +127,27 @@ class FakeDocker:
             rc, out, err = (
                 self._reply(call.verb) if self._reply is not None else self._all_succeed(call)
             )
+        if rc == 0 and call.verb == "create":
+            self.phase = "created"
+        elif call.verb in ("rm", "stop"):
+            self.phase = None
         return subprocess.CompletedProcess(list(argv), rc, out, err)
+
+    def _record(self, argv: list[str]) -> None:
+        self.calls.append(_DockerCall(argv))
+
+    def _landed(self, argv: list[str]) -> None:
+        if self.phase == "created":
+            self.phase = "running"
 
     def _inspect(self, argv: list[str]) -> tuple[int, str, str]:
         """box.py asks THREE different questions through `docker inspect`, and the format string
         is what separates them — on a real daemon and here."""
-        if self.existing is None:
-            return (1, "", "Error: No such object\n")
         fmt = argv[argv.index("-f") + 1] if "-f" in argv else ""
+        if self.existing is None:
+            if self.phase is not None and fmt and "Config.Labels" not in fmt:
+                return (0, f"{self.phase}\n", "")
+            return (1, "", "Error: No such object\n")
         if not fmt:
             # `--format`, not `-f`: the DooD shared-mounts query. A container that exists but
             # whose mount table we do not model answers with an empty table, never a state.

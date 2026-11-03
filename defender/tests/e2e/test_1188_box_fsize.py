@@ -106,7 +106,7 @@ def _start_investigation(
 ) -> None:
     """No `spec=`: the env-resolved default every investigation gets."""
     staged = {} if tenant_agent is None else {"staged_token": tenant_agent.parent / "token"}
-    box_mod.start_box(run_dir, DEFENDER, tenant_agent=tenant_agent, docker=rec, popen=rec.popen, tenant_id=TEST_TENANT, **staged)
+    box_mod.start_box(run_dir, DEFENDER, tenant_agent=tenant_agent, docker=rec, tenant_id=TEST_TENANT, **staged)
 
 
 def _tenant_agent(base: Path) -> Path:

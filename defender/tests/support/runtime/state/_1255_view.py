@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.records import RUN_LAYOUT
+from defender.tests.support.sandbox._box1343 import AttachedStartSeam
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[4]
@@ -149,19 +150,39 @@ def scan(text: str, tokens: Sequence[str]) -> list[str]:
     return hits
 
 
-class FakeDocker:
-    """`DockerFn` that records every argv."""
+class FakeDocker(AttachedStartSeam):
+    """`DockerFn` that records every argv. By default it refuses the run box's create (the tests read the
+    argv, then stop); `refuse_create=False` lets the create land and the attached start (`.popen`, #1343 B10)
+    make the container report `running`."""
 
     CREATE_REFUSAL = "refused by the #1255 static check\n"
 
-    def __init__(self) -> None:
+    def __init__(self, *, refuse_create: bool = True) -> None:
         self.calls: list[list[str]] = []
+        self.refuse_create = refuse_create
+        self.phase: str | None = None
+        self._attached_state()
+
+    def _record(self, argv: list[str]) -> None:
+        self.calls.append(argv)
+
+    def _landed(self, argv: list[str]) -> None:
+        if self.phase == "created":
+            self.phase = "running"
 
     def __call__(self, argv: list[str], **_kw: object) -> subprocess.CompletedProcess:
         argv = list(argv)
         self.calls.append(argv)
         if argv[:2] == ["docker", "create"]:   # #1343 B10: the run box is created, then started attached
-            return subprocess.CompletedProcess(argv, 1, "", self.CREATE_REFUSAL)
+            if self.refuse_create:
+                return subprocess.CompletedProcess(argv, 1, "", self.CREATE_REFUSAL)
+            self.phase = "created"
+            return subprocess.CompletedProcess(argv, 0, "container-id\n", "")
+        if argv[:2] in (["docker", "rm"], ["docker", "stop"]):
+            self.phase = None
+        if argv[:2] == ["docker", "inspect"] and self.phase and "-f" in argv \
+                and "Config.Labels" not in argv[argv.index("-f") + 1]:
+            return subprocess.CompletedProcess(argv, 0, f"{self.phase}\n", "")
         if argv[:3] == ["docker", "image", "inspect"]:
             return subprocess.CompletedProcess(argv, 0, "sha256:0\n", "")
         if argv[:2] == ["docker", "version"]:
