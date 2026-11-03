@@ -3,12 +3,12 @@ never sent, and a breaker or transport outcome is told apart from a plain refusa
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.support.shared._tls_server import tls_server
 
 BASE = T.BASE_PATH
 PATH = f"{BASE}/users/x"
@@ -176,75 +176,25 @@ def test_f3_a_401_on_the_access_token_evicts_it_without_a_retry(tmp_path, data_r
 
 # --- #1375 O2/O3: trust and the token reply's cap, unchanged by building contexts once ----------
 
-def _tls_server(tmp_path, body: bytes) -> tuple[Any, str]:
-    """A loopback HTTPS server answering 200 `body` to everything, with a self-signed
-    certificate for 127.0.0.1 written to `tmp_path / "ca.pem"`. Returns (server, base URL)."""
-    import datetime
-    import http.server
-    import ipaddress
-    import ssl
-    import threading
-
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.x509.oid import NameOID
-
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "the test CA")])
-    now = datetime.datetime.now(datetime.UTC)
-    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
-            .public_key(key.public_key()).serial_number(x509.random_serial_number())
-            .not_valid_before(now - datetime.timedelta(minutes=5))
-            .not_valid_after(now + datetime.timedelta(days=1))
-            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-            .add_extension(x509.SubjectAlternativeName(
-                [x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]), critical=False)
-            .sign(key, hashes.SHA256()))
-    (tmp_path / "ca.pem").write_bytes(cert.public_bytes(serialization.Encoding.PEM))
-    (tmp_path / "ca.key").write_bytes(key.private_bytes(
-        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption()))
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def _answer(self) -> None:
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        do_GET = do_POST = _answer  # noqa: N815
-
-        def log_message(self, *_: Any) -> None:
-            pass
-
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(tmp_path / "ca.pem", tmp_path / "ca.key")
-    server.socket = ctx.wrap_socket(server.socket, server_side=True)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server, f"https://127.0.0.1:{server.server_port}"
-
-
 @pytest.mark.parametrize("leg", ["upstream", "token exchange"])
 def test_1375_o2_a_system_is_trusted_by_the_bundle_not_the_environment(
         tmp_path, data_root, monkeypatch, leg):
     """#1375 O2: the upstream call and the token exchange verify a system's certificate against
     the bundle they always used, never one the environment names: with `SSL_CERT_FILE` naming the
-    very CA that signed the system's certificate, the call is still refused, unsent. Control: a
-    client that does trust that CA reaches the server."""
+    very CA that signed the system's certificate, the connection is still refused and the server
+    gets no request. Control: a client that does trust that CA reaches the server."""
     import ssl
 
     import httpx
 
     token_reply = json.dumps({"access_token": "AT", "expires_in": 3600}).encode()
-    server, url = _tls_server(tmp_path, token_reply)
-    try:
-        with httpx.Client(verify=ssl.create_default_context(cafile=str(tmp_path / "ca.pem")),
-                      trust_env=False) as trusting:
+    with tls_server(tmp_path, lambda *_: (200, token_reply)) as server:
+        url = f"https://127.0.0.1:{server.port}"
+        with httpx.Client(verify=ssl.create_default_context(cafile=str(server.ca)),
+                          trust_env=False) as trusting:
             assert trusting.get(url + "/").status_code == 200, "control: the server answers"
-        monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "ca.pem"))
+        server.got.clear()
+        monkeypatch.setenv("SSL_CERT_FILE", str(server.ca))
         monkeypatch.delenv("SSL_CERT_DIR", raising=False)
         if leg == "upstream":
             with T.rig(tmp_path / "forge", data_root, lambda _u: H.declaration(url + BASE)) as r:
@@ -253,11 +203,10 @@ def test_1375_o2_a_system_is_trusted_by_the_bundle_not_the_environment(
             with _oauth_rig(tmp_path, data_root, url + "/token") as r:
                 answer = r.ask()
             assert r.up.seen == [], "the API request was sent without a token"
-    finally:
-        server.shutdown()
-        server.server_close()
 
     assert answer["fault"] == "TransportFault", answer
+    assert "(ConnectError)" in (answer["detail"] or ""), answer
+    assert server.got == [], "the request reached a server the proxy should not trust"
 
 
 @pytest.mark.parametrize(("size", "fault"), [(65536, None), (65537, "ConfigFault")])

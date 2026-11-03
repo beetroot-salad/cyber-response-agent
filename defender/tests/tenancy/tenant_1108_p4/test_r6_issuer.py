@@ -2,26 +2,19 @@
 The TLS case is a real local TLS server whose certificate the configured CA did not sign."""
 from __future__ import annotations
 
-import datetime
-import http.server
 import json
 import base64
 import logging
 import time
-import ssl
-import threading
 
 import httpx
 import pytest
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
 
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from defender.tests.support.shared._tls_server import self_signed, tls_server
 from defender.tests.support.tenancy._active1214 import generation_fields
 
 SECRET_ID = "p4-secret-id-9e7f3b"
@@ -42,58 +35,14 @@ def _credential(t: Any, tmp_path: Path, *, openbao_url: str, transport: Any = No
                             transport=transport)
 
 
-def _cert(cn: str, *, san: bool):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
-    now = datetime.datetime.now(datetime.UTC)
-    builder = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
-               .public_key(key.public_key()).serial_number(x509.random_serial_number())
-               .not_valid_before(now - datetime.timedelta(minutes=5))
-               .not_valid_after(now + datetime.timedelta(days=1)))
-    if san:
-        import ipaddress
-        builder = builder.add_extension(x509.SubjectAlternativeName(
-            [x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
-            critical=False)
-    cert = builder.sign(key, hashes.SHA256())
-    return (cert.public_bytes(serialization.Encoding.PEM),
-            key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                              serialization.NoEncryption()))
-
-
 @pytest.fixture
 def tls_issuer(tmp_path):
     """A local HTTPS server with a self-signed certificate; the CA the config names is another."""
-    trusted_pem, _ = _cert("the configured CA", san=False)
-    server_pem, server_key = _cert("localhost", san=True)
+    trusted_pem, _ = self_signed("the configured CA", san=False)
     (tmp_path / "trusted.pem").write_bytes(trusted_pem)
-    (tmp_path / "server.pem").write_bytes(server_pem)
-    (tmp_path / "server.key").write_bytes(server_key)
-    got: list[str] = []
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_POST(self):  # noqa: N802
-            got.append(self.rfile.read(int(self.headers.get("content-length", 0))).decode())
-            out = json.dumps({"auth": {"client_token": "tok"}}).encode()
-            self.send_response(200)
-            self.send_header("content-length", str(len(out)))
-            self.end_headers()
-            self.wfile.write(out)
-
-        def log_message(self, *a):
-            pass
-
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(tmp_path / "server.pem", tmp_path / "server.key")
-    server.socket = ctx.wrap_socket(server.socket, server_side=True)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield server.server_port, got, tmp_path
-    finally:
-        server.shutdown()
-        server.server_close()
+    token = json.dumps({"auth": {"client_token": "tok"}}).encode()
+    with tls_server(tmp_path, lambda *_: (200, token)) as server:
+        yield server.port, server.got, tmp_path
 
 
 def test_r6_a_tls_server_the_configured_ca_did_not_sign_is_refused_and_gets_no_secret(

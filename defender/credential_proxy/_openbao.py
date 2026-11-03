@@ -101,12 +101,13 @@ class _OpenBao:
         self.mount = _check_name(mount, "the mount")
         self._token = token
         self._transport = transport
-        #: The deployment's TLS trust, built once: building it blocks, and a call inside a proxied
-        #: request runs on the event loop (#1375 O1).
-        self._trust = tls_trust(DEPLOYMENT_ISSUER.ca_cert)
         #: One pooled connection for this login's calls made outside a proxied request.
-        self._client = internal_client(trust=self._trust, transport=transport,
-                                       timeout=OPENBAO_TIMEOUT_SEC)
+        self._client = internal_client(trust=tls_trust(DEPLOYMENT_ISSUER.ca_cert),
+                                       transport=transport, timeout=OPENBAO_TIMEOUT_SEC)
+        #: The trust of the calls made on the event loop, each on its own short-lived client:
+        #: built once, here, since building it blocks the loop (#1375 O1), and apart from the
+        #: pooled client's, which other threads use.
+        self._loop_trust = tls_trust(DEPLOYMENT_ISSUER.ca_cert)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(addr={self.addr!r}, mount={self.mount!r})"
@@ -140,7 +141,7 @@ class _OpenBao:
                      json: Any = None, *, timeout: float = OPENBAO_TIMEOUT_SEC,
                      transport: httpx.AsyncBaseTransport | None = None) -> httpx.Response:
         try:
-            async with internal_async_client(trust=self._trust, transport=transport,
+            async with internal_async_client(trust=self._loop_trust, transport=transport,
                                              timeout=timeout) as client:
                 return await client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
