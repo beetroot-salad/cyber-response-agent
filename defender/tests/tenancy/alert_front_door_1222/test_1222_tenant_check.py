@@ -468,10 +468,14 @@ def test_a_legacy_case_history_folder_is_a_check_finding_naming_the_new_file(
         assert_passed(v)  # control: with no case folder every site passes
     try:
         w.case_bytes(CASE_FAULTS[shape])
-        vs = verdicts(w, sites)
+        # A run starts from a published tenant, and `git add` cannot read a file at mode 000: an
+        # unreadable file never reaches a published tenant, so that shape has no run-start site.
+        planted_sites = tuple(site for site in sites if not (shape == "unreadable" and site == "run-start"))
+        vs = verdicts(w, planted_sites)
         assert_refused(vs["check-folder"], LEGACY_RECORD)
         assert_passed(vs["acceptance"])
-        assert_passed(vs["run-start"])
+        if "run-start" in vs:
+            assert_passed(vs["run-start"])
     finally:
         S.restore_modes(w.planted.root)
 
