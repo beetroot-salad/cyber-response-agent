@@ -72,7 +72,6 @@ from defender import providers  # noqa: E402
 from defender.records import run_end  # noqa: E402
 from defender.tenancy import run_knowledge  # noqa: E402
 from defender.systems import case_system, system_status  # noqa: E402
-from defender.tenancy.case_ticket import CaseRecordSettings  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
@@ -581,7 +580,8 @@ class _TokenMint:
     @classmethod
     def for_run(  # noqa: PLR0913 — the run's identity plus the operator's three seams
             cls, tenant: RunTenant, systems: RunSystems, *, ns: argparse.Namespace,
-                world: Any, run_id: str, accepted: tenancy.Tenant,
+                world: Any, case: case_system.CaseTarget | case_system.CaseSettingsFault | None,
+                run_id: str, accepted: tenancy.Tenant,
                 records: tenancy.TenantDirectory, signer: Any, proxy_url: str | None,
                 issuer_transport: Any) -> _TokenMint:
         """The mint for a run, or a mint that signs nothing when no `http-proxy` system is in
@@ -596,9 +596,12 @@ class _TokenMint:
                    if isinstance(found, AccessDeclaration) and name not in systems.down}
         reads = () if world is not None else tuple(sorted(
             system_status.granted_systems(tenant.grants) & proxied))
-        named = tenant.case_record.system if isinstance(tenant.case_record, CaseRecordSettings) else None
-        case_system = named if (world is None and ns.update_ticket and named in proxied) else None
-        if not reads and case_system is None:
+        # The write-back token is for a case system run start judged sound (`case`), reached
+        # through the proxy; a case system with bad settings is told so by the record step.
+        named = case.system if isinstance(case, case_system.CaseTarget) else None
+        written = named if (world is None and ns.update_ticket
+                                and isinstance(tenant.access.get(named or ""), AccessDeclaration)) else None
+        if not reads and written is None:
             return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
                        case_system=None)
         try:
@@ -609,9 +612,9 @@ class _TokenMint:
                 sys.exit(f"run start refused: {refused.detail}")
             _logger.warning(f"the write-back token cannot be signed: {refused.detail}")
             return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
-                       case_system=case_system, unsigned=refused.detail)
+                       case_system=written, unsigned=refused.detail)
         return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
-                   reads=reads, case_system=case_system)
+                   reads=reads, case_system=written)
 
     def _mint(self, grant: set[tuple[str, str]], expires_at: float) -> str:
         return mint_request_token(
@@ -632,13 +635,13 @@ class _TokenMint:
         return _access_kwargs(RequestAccess(self._proxy_url or "", self._read_token)
                               if self._reads else None)
 
-    def write_back(self, *, judged: bool) -> dict[str, str]:
+    def write_back(self) -> dict[str, str]:
         """The record step's keywords: a fresh write-back token (`rw` on the case system only) and
-        the proxy's address, when the case system is an `http-proxy` system whose settings the
-        record step judged sound (`judged`: a system with bad settings is told so by the step, not
-        by a token it would never use); nothing otherwise. A mint that fails here is a warning:
-        the step reports the missing token itself."""
-        if self._case_system is None or not judged or self._unsigned is not None:
+        the proxy's address, when the case system is an `http-proxy` system run start judged sound
+        (a system with bad settings is told so by the step, not by a token it would never use);
+        nothing otherwise. A mint that fails here is a warning: the step reports the missing token
+        itself."""
+        if self._case_system is None or self._unsigned is not None:
             return {}
         try:
             token = self._mint({(self._case_system, "rw")}, time.time() + TOKEN_SEC)
@@ -1067,6 +1070,9 @@ class _Started:
     alert: Path
     #: The run's request-token signer (#1163), built at setup on both lanes (#1342 R6-8).
     minting: _TokenMint
+    #: The case system's verdict, judged once at setup when the run records its case
+    #: (`--update-ticket`); `None` otherwise.
+    case: case_system.CaseTarget | case_system.CaseSettingsFault | None = None
 
     def lifecycle_kwargs(self, ns: argparse.Namespace) -> dict[str, Any]:
         return {"run": self.run, "model": self.model, "model_override": ns.model,
@@ -1173,8 +1179,12 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             # The request tokens' signer, over the systems just judged, on both lanes (#1342
             # R6-8): a configuration that cannot sign them refuses here, before the run is made;
             # nothing is signed until a call or a ticket leg asks (r7 A20).
+            # The case system the record step will comment through, judged once here by run
+            # start's own adapter rules over the roster just read (#1359 D-17); nothing is called.
+            case = (case_system.case_verdict(tenant, defender_dir=DEFENDER_DIR, roster=systems.roster)
+                    if ns.update_ticket else None)
             minting = _TokenMint.for_run(
-                tenant, systems, ns=ns, world=world, run_id=early.run_dir.name,
+                tenant, systems, ns=ns, world=world, case=case, run_id=early.run_dir.name,
                 accepted=accepted, records=records, signer=signer, proxy_url=proxy_url,
                 issuer_transport=issuer_transport)
 
@@ -1210,7 +1220,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             _write_knowledge_record(run_dir, knowledge)
             yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world,
                            episode=episode, systems=systems, seams=seams, alert=alert,
-                           minting=minting)
+                           minting=minting, case=case)
         finally:
             copy.remove()
 
@@ -1337,16 +1347,17 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                     # curation marker, which a drainer may pick up immediately.
                     if ns.update_ticket:
                         # Both inputs come from the driver's summary, not from a possibly stale sidecar.
-                        # The case system is judged once, here, before the token is minted (D-9): the
-                        # mint and the step read the one verdict, so a bad setting is reported as that
-                        # and never as a missing token. The judgement raises nothing else.
-                        case = case_system.case_verdict(tenant, defender_dir=DEFENDER_DIR)
+                        # The case system was judged once, at setup (`started.case`), and the token
+                        # minted on that verdict — and only for a run that will comment.
+                        truncated_by = summary.get("truncated_by")
+                        closed_before_cut = summary.get("closed_before_cut") is True
+                        token = (started.minting.write_back()
+                                 if _default_ticket_writer.comments_on(truncated_by, closed_before_cut) else {})
                         ticket_writer.record_case_ticket(
                             run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                            env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
-                            closed_before_cut=summary.get("closed_before_cut") is True,
-                            case=case, **started.minting.write_back(
-                                judged=isinstance(case, case_system.CaseTarget)))
+                            env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent),
+                            truncated_by=truncated_by, closed_before_cut=closed_before_cut,
+                            case=started.case, **token)
 
                     # A sibling's evidence was staged on purpose, so it must never feed the catalog.
                     if world is not None:

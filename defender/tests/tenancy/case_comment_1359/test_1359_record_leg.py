@@ -197,3 +197,40 @@ def test_o5_a_redirect_is_the_store_refusing_not_a_comment(tmp_path, monkeypatch
     _shim(tmp_path, monkeypatch)
     _rc, _refused, sent = _run(tmp_path / "again", root, alert)
     assert S.receipt(sent)["status"] == C.COMMENTED, S.receipt(sent)
+
+
+CRASHING_CASE_ADAPTER = (
+    "def check_settings(tenant):\n"
+    "    raise RuntimeError(f'cannot judge {tenant.agent_root}')\n\n\n"
+    "def add_case_comment(ctx, *, key, body):\n    return None\n\n\n"
+    "VERBS = {}\n")
+
+
+def test_run_start_a_crashing_case_check_is_a_receipt_that_names_no_host_root(tmp_path, monkeypatch):
+    """A case adapter whose settings check crashes with a host path in its text: the run goes on,
+    no store call, and the error receipt names the data root as `<data root>`, never the path —
+    the run start judgement's own redaction. #1392 review."""
+    import shutil
+
+    from defender.systems.verbs import read_roster
+
+    root, _folder, alert = _world(tmp_path, case_system="casesys")
+    tree = tmp_path / "tree" / "defender"
+    shutil.copytree(S.DEFENDER / "integrations", tree / "integrations",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    (tree / "integrations" / "casesys_adapter.py").write_text(CRASHING_CASE_ADAPTER, encoding="utf-8")
+    shim = _shim(tmp_path, monkeypatch)
+    rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
+    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec,
+                              visualize=rec.visualize,
+                              roster=read_roster(tree / "integrations"))
+
+    assert (refused, rc) == (None, 0), (refused, rc)
+    assert shim.calls() == [], shim.calls()
+    got = S.receipt(rec.run_dir_at)
+    assert got is not None, "no receipt"
+    reason = got.get("reason") or ""
+    assert (got["status"], got["ok"]) == (C.ERROR, False), got
+    assert "RuntimeError" in reason, "positive control: the check's crash reached the receipt"
+    for host in (str(root), str(root.resolve())):
+        assert host not in reason, f"the receipt carries the host path {host}: {reason!r}"

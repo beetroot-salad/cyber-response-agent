@@ -4,7 +4,7 @@ the tenant's settings let it.
 One judgement, two askers (D-17): the record leg at run end and `tenant check` on a folder both
 call `judge_case_system`, so the check cannot pass what the leg would refuse. It reads the
 tenant's `settings/case-record.yaml` as recorded when the run began, the case system's adapter
-(read fresh from the checkout), its access declaration when the system is reached through the
+(from the roster the run reads), its access declaration when the system is reached through the
 credential proxy, then its `check_settings` over the same record — judged by
 `system_status.judge_adapter`, the run start's own rules, so a missing or crashing check is the
 adapter's defect here as there. Every failure is a `CaseSettingsFault` naming the one file that is
@@ -22,6 +22,7 @@ from defender.kit.access import AccessDeclaration
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import config_pointer, pointer_to
 from defender.kit.verbs import COMMENT_ACTION
+from defender.systems.run_tenant import RunTenant
 from defender.systems.system_status import AdapterBroken, NotConfigured, ReasonScope, judge_adapter
 from defender.systems.verbs import RegistryError, RosterRead, fresh_adapter_module, read_roster
 from defender.tenancy.case_ticket import (
@@ -127,7 +128,10 @@ def judge_case_system(
         # fault for why it has none): it must declare the comment's route. Judged before the
         # settings check, so a fault the check raises is about `config.env`, never this file.
         _judge_access(system, record.access)
-    scope = ReasonScope(defender_dir=Path(defender_dir), adapters_root=Path(roster.root))
+    # The run's own reason scope, as run start's judgement uses: a crash text naming the
+    # tenant's folder or the data root is shown by name, never located.
+    scope = ReasonScope(tenant=record if isinstance(record, RunTenant) else None,
+                        defender_dir=Path(defender_dir), adapters_root=Path(roster.root))
     cause = judge_adapter(lambda: module, tenant=record, scope=scope)
     if isinstance(cause, NotConfigured):
         config = config_pointer(system)
@@ -142,8 +146,8 @@ def judge_case_system(
 def case_verdict(
     record: Any, *, defender_dir: Path, roster: RosterRead | None = None,
 ) -> CaseTarget | CaseSettingsFault:
-    """`judge_case_system` as a value: the run end judges once and hands the verdict to both the
-    token mint and the record step, so they cannot disagree."""
+    """`judge_case_system` as a value: run start judges once, over the roster the run reads, and
+    hands the verdict to both the token mint and the record step, so they cannot disagree."""
     try:
         return judge_case_system(record, defender_dir=defender_dir, roster=roster)
     except CaseSettingsFault as fault:

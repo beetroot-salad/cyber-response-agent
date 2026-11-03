@@ -75,6 +75,16 @@ def _ticket_key(run: Run) -> str | None:
     return None if record is None else record.facts.case_key
 
 
+def comments_on(truncated_by: str | None, closed_before_cut: bool) -> bool:
+    """Does a run that ended this way comment on its case? Not a run cut short by its budget,
+    its store or its model provider before it reached a verdict: it leaves the case open and
+    writes no receipt. The one rule, read by the record step and by `run.py`, which signs no
+    write-back token for a run that will not comment."""
+    return closed_before_cut or run_end.normalized_truncated_by(truncated_by) not in (
+        run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE,
+        run_end.TRUNCATED_BY_PROVIDER_DOWN)
+
+
 def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exit record (#1047)
     run: Run, *, tenant: RunTenant, defender_dir: Path, env: Mapping[str, str],
     truncated_by: str | None = None, closed_before_cut: bool = False,
@@ -86,16 +96,14 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     `closed` mean "a person reviewed this". Every path that meant to call out but did not leaves
     a warning and an `error` receipt.
 
-    `case` is the case system's verdict the caller already judged (`case_system.case_verdict`),
-    the one the write-back token was minted on; without it the step judges the record itself."""
+    `case` is the case system's verdict run start made (`case_system.case_verdict`), the one the
+    write-back token was minted on; without it (a direct caller) the step judges the record."""
     run_dir = run.run_dir
     key = ""
     try:
         key = _ticket_key(run) or ""
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
-        if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE,
-                             run_end.TRUNCATED_BY_PROVIDER_DOWN)
-                and not closed_before_cut):
+        if not comments_on(truncated_by, closed_before_cut):
             clear_receipt(run)
             _logger.info(f"{run_dir.name}: run ended ({truncated_by}) with no verdict; "
                          "leaving ticket open")
@@ -273,4 +281,4 @@ def _write_receipt(
 
 
 # The path accessor remains the public read-side compatibility surface for run pages.
-__all__ = ["record_case_ticket", "receipt_path", "clear_receipt"]
+__all__ = ["comments_on", "record_case_ticket", "receipt_path", "clear_receipt"]
