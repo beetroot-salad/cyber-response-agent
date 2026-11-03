@@ -90,7 +90,8 @@ def test_o5_a_write_the_store_took_is_a_comment_whatever_the_proxy_made_of_its_r
                 up.replies[COMMENT_PATH] = (404, {}, json.dumps({"detail": "no such ticket"}).encode())
                 lost = _comment(tmp_path / "lost", t, url, tok)
 
-    assert took is not None and lost is not None, (took, lost)
+    assert took is not None, "no receipt for the accepted write"
+    assert lost is not None, "no receipt for the refused write"
     assert (took["status"], took["ok"]) == (C.COMMENTED, True), took
     assert (lost["status"], lost["ok"]) == (C.ERROR, False), lost
     assert "404" in (lost.get("reason") or ""), lost
