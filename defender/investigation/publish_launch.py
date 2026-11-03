@@ -14,7 +14,8 @@ backstop: a child still in its network phase when `budget` runs out is stopped; 
 has taken the tenant lock (its local phase) is never stopped, so a kill never leaves
 `index.lock` or a half-swapped `current` behind. A SIGTERM to the launcher's process while the
 child runs (teardown stopping the run) is the same request as the budget running out: it is noted,
-the child is stopped by that one rule, and the signal is delivered again once the child is gone
+the child is stopped by that one rule (a child that took the lock is waited for, never signalled),
+and the signal is delivered again once the child is gone
 (#1379 r3). Whatever the child does, the launcher returns one report line of the child's
 vocabulary:
 
@@ -164,8 +165,8 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
             f"it could not be started: {type(unstarted).__name__}: "
             f"{getattr(unstarted, 'strerror', None) or unstarted}"))
     try:
-        out, err, late = _wait(proc, budget=budget, asked=asked,
-                     holds_lock=lambda: _holds_lock(proc, tenant_id, data_root))
+        out, err, stopped = _wait(proc, budget=budget, asked=asked,
+                                  holds_lock=lambda: _holds_lock(proc, tenant_id, data_root))
     finally:
         # One publish is one process group (the child's session; its network git joins it):
         # whatever the child left running dies with it, however it ended.
@@ -173,46 +174,66 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
     line, failed = _read_report(proc.returncode, out, err)
     if not failed:
         return line
-    if late:
+    if stopped is not None:
         # Stopped in its network phase with nothing to say (a stopped child prints nothing).
-        why = "was stopped with its run" if asked else f"did not finish its network phase within the {budget:g}s budget"
-        line = f"{STALE_TRANSIENT} the launch-time publish {why}"
+        line = f"{STALE_TRANSIENT} the launch-time publish {stopped}"
     return _recorded(directory, tenant_id, line)
 
 
 def _wait(
     proc: Any, *, budget: float, asked: list[int], holds_lock: Callable[[], bool],
-) -> tuple[Any, Any, bool]:
+) -> tuple[Any, Any, str | None]:
     """Until the child itself has exited, reading its pipes meanwhile so it never blocks writing them
     (not until they close: a grandchild in its group can hold them open, and is killed with the
-    group once the child is gone). The one stop rule: once the budget runs out or the run is asked to stop, the child is
-    asked to end (it unwinds its network calls); a child that holds the tenant lock is let finish
-    (O-BUDGET), any other is killed with its group after `_STOP_GRACE`. Returns whether it was
-    Returns everything the child wrote, and whether it was asked to end while outside the lock
-    (the launcher's stale line, when it says nothing)."""
+    group once the child is gone).
+
+    The one stop rule, once the budget runs out or the run is asked to stop: a child that has taken
+    the tenant lock is let finish, never signalled (O-BUDGET: its locked phase, and the report it
+    writes and prints after it); any other is asked to end (it unwinds its network calls) and, if it
+    has not ended or taken the lock within `_STOP_GRACE`, killed with its group. Returns everything
+    the child wrote, and why it was asked to end (None when it never was)."""
     deadline = time.monotonic() + budget
     told_at: float | None = None
-    late = False
-    while True:
-        try:
-            out, err = proc.communicate(timeout=_POLL)
-            return out, err, late
-        except subprocess.TimeoutExpired:
-            if proc.poll() is not None:
-                kill_group(proc.pid)
-                out, err = proc.communicate()
-                return out, err, late
+    settled = False  # spared or killed: nothing more to decide
+    stopped: str | None = None
+    while (ended := _ended(proc)) is None:
         now = time.monotonic()
+        if settled:
+            continue
         if told_at is None:
-            if asked or now >= deadline:
-                late = not holds_lock()
-                proc.send_signal(signal.SIGTERM)
-                told_at = now
-        elif now >= told_at + _STOP_GRACE and not holds_lock():
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                proc.kill()
+            if not (asked or now >= deadline):
+                continue
+            if holds_lock():
+                settled = True
+                continue
+            stopped = ("was stopped with its run" if asked
+                       else f"did not finish its network phase within the {budget:g}s budget")
+            proc.send_signal(signal.SIGTERM)
+            told_at = now
+        elif now >= told_at + _STOP_GRACE:
+            settled = True
+            if not holds_lock():
+                _kill(proc)
+    return ended[0], ended[1], stopped
+
+
+def _ended(proc: Any) -> tuple[Any, Any] | None:
+    """Everything the child wrote once it has exited, else None after a short wait. A child gone
+    while its pipes stay open (a grandchild holds them) has its group killed first."""
+    try:
+        return proc.communicate(timeout=_POLL)
+    except subprocess.TimeoutExpired:
+        if proc.poll() is None:
+            return None
+    kill_group(proc.pid)
+    return proc.communicate()
+
+
+def _kill(proc: Any) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        proc.kill()
 
 
 def _holds_lock(proc: Any, tenant_id: str, data_root: Path) -> bool:
