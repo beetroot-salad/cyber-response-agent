@@ -292,6 +292,90 @@ def test_the_box_is_stamped_with_the_token_its_own_fault_arm_checks(tmp_path):
         "the token is not per-START — two starts stamped the same value"
 
 
+def test_a_start_given_a_token_stamps_that_token_and_an_operator_start_mints_its_own(tmp_path):
+    """`start_box(..., start_token=T)` stamps exactly T on the create argv (#1342 r5 C1); without one the box mints a fresh token. (#1342 r5 C1)"""
+    given = "ab" * 16
+    rec = RecordingDocker()
+    box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=given)
+    assert rec.create_label(box_mod.START_TOKEN_LABEL) == given
+    minted = RecordingDocker()
+    box_mod.start_box(make_run_dir(tmp_path / "second"), DEFENDER, docker=minted, tenant_id=TEST_TENANT)
+    assert minted.create_label(box_mod.START_TOKEN_LABEL) not in (None, "", given)
+
+
+#: What a container holding the name carries when a create faults: the given token, or a token that is
+#: not it (another's; a near miss in the first, a middle or the last character, case, length or
+#: containment; the same letters moved about) or none at all. `_GIVEN` is not periodic, so no swap,
+#: rotation or reshuffle of it reads as itself.
+_GIVEN = "3f9a1c07be52d84e6a0b7c19e3d5f248"
+_HOLDERS = {
+    "the given token": "self",
+    "another lane's token": "cd" * 16,
+    "first character differs": "4" + _GIVEN[1:],
+    "a middle character differs": _GIVEN[:16] + "f" + _GIVEN[17:],
+    "last character differs": _GIVEN[:-1] + "c",
+    "an adjacent pair swapped": _GIVEN[:4] + _GIVEN[5] + _GIVEN[4] + _GIVEN[6:],
+    "first and last swapped": _GIVEN[-1] + _GIVEN[1:-1] + _GIVEN[0],
+    "rotated by one": _GIVEN[1:] + _GIVEN[0],
+    "reversed": _GIVEN[::-1],
+    "case changed": _GIVEN[:1] + _GIVEN[1].upper() + _GIVEN[2:],
+    "a prefix of it": _GIVEN[:-1],
+    "it with a suffix": _GIVEN + "0",
+    "no token label": "<no value>",
+    "the label set to nothing": "",
+}
+
+
+@pytest.mark.parametrize("holder", list(_HOLDERS))
+def test_a_create_fault_reaps_only_a_container_carrying_the_token_the_start_was_given(tmp_path, holder):
+    """The create-fault arm owns the token the caller handed in: a leftover with exactly it is reaped; one with another, a near-miss or no token survives. (#1342 r5 C1)"""
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token=_HOLDERS[holder])
+    with pytest.raises(box_mod.BoxFault):
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
+    assert reaped_after_create(rec.calls) is (holder == "the given token")
+
+
+def test_a_create_fault_leaves_a_container_whose_token_differs_in_any_one_character_wherever_it_differs(tmp_path):
+    """For every position of the given token, a leftover whose token differs in that one character alone is not ours and survives (no position is skipped). (#1342 r5 C1)"""
+    digits = "0123456789abcdef"
+    for at in range(len(_GIVEN)):
+        near = _GIVEN[:at] + digits[(digits.index(_GIVEN[at]) + 1) % 16] + _GIVEN[at + 1:]
+        rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token=near)
+        with pytest.raises(box_mod.BoxFault):
+            box_mod.start_box(make_run_dir(tmp_path / f"at{at}"), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
+        assert not reaped_after_create(rec.calls), f"a container differing at position {at} was removed"
+
+
+_DECORATED = {
+    "a hyphen after it": _GIVEN + "-",
+    "an underscore after it": _GIVEN + "_",
+    "an exclamation mark after it": _GIVEN + "!",
+    "a hyphen before it": "-" + _GIVEN,
+    "an underscore before it": "_" + _GIVEN,
+    "a hyphen inside it": _GIVEN[:16] + "-" + _GIVEN[16:],
+    "an underscore inside it": _GIVEN[:16] + "_" + _GIVEN[16:],
+    "a space inside it": _GIVEN[:16] + " " + _GIVEN[16:],
+}
+
+
+@pytest.mark.parametrize("holder", list(_DECORATED))
+def test_a_create_fault_leaves_a_container_whose_token_is_the_given_one_with_something_added(tmp_path, holder):
+    """The given token with a hyphen, underscore, mark or space added before, inside or after it is another token: the leftover survives. (#1342 r5 C1)"""
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token=_DECORATED[holder])
+    with pytest.raises(box_mod.BoxFault):
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
+    assert not reaped_after_create(rec.calls)
+
+
+def test_a_create_fault_whose_leftover_label_cannot_be_read_does_not_reap_it(tmp_path):
+    """A container holds the name but the daemon fails the label read: ownership is unproven, so the create-fault arm leaves it (the start still fails with the create fault). (#1342 r5 C1, #1279 O6)"""
+    rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self", label_unreadable=True)
+    with pytest.raises(box_mod.BoxFault) as excinfo:
+        box_mod.start_box(make_run_dir(tmp_path), DEFENDER, docker=rec, tenant_id=TEST_TENANT, start_token=_GIVEN)
+    assert _SHIM_FAULT["stderr"] in str(excinfo.value)
+    assert not reaped_after_create(rec.calls), "a container whose owner could not be read was removed"
+
+
 def test_a_reap_that_cannot_reach_the_daemon_does_not_replace_the_create_fault(tmp_path):
     """The create-fault arm's reap is best-effort on BOTH halves, `docker inspect` included."""
     run_dir = make_run_dir(tmp_path)

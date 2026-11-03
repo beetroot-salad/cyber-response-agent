@@ -17,6 +17,7 @@ from defender.tests.tenancy.lifecycle_1214.test_1214_repository_contract import 
 
 BASELINE = "0001_baseline"
 TENANCY = "0002_tenancy"
+SIGN_LOGIN = "0003_sign_login"
 SIGN_COLUMNS = {"sign_approle", "sign_entity", "sign_role_id", "sign_secret_file", "sign_wrapped_secret", "sign_secret_accessor"}
 LAB = "37963319-1bcf-49a6-9644-6a0699bfe9a3"
 OTHER = "5c1f2a52-0a47-4c0c-8a7e-6f3a0a7f4a11"
@@ -71,20 +72,22 @@ def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
 # --- one revision, the version check ----------------------------------------------------------------
 
 
-def test_the_history_is_the_baseline_and_two_revisions_on_it_in_a_line():
+def test_the_history_is_the_baseline_and_three_revisions_on_it_in_a_line():
     """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11); #1163 adds one more, the six
-    sign columns of the generation record (A24/r8.4): a single line baseline -> #1214's -> #1163's, no branch."""
+    sign columns of the generation record (A24/r8.4); #1342 puts its jobs revision on #1163's: a single line
+    baseline -> #1214's -> #1163's -> #1342's, no branch."""
     from alembic.script import ScriptDirectory
 
     from defender.migrations import _config
 
     script = ScriptDirectory.from_config(_config())
     chain = [(r.revision, r.down_revision) for r in script.walk_revisions()]  # newest first
-    assert len(chain) == 3
-    [(head_revision, middle), (middle_revision, down), (base, base_down)] = chain
-    assert (middle, down, base, base_down) == (middle_revision, BASELINE, BASELINE, None)
+    assert len(chain) == 4
+    [(head_revision, sign), (sign_revision, middle), (middle_revision, down), (base, base_down)] = chain
+    assert (sign, middle, down, base, base_down) == (sign_revision, middle_revision, BASELINE, BASELINE, None)
     assert middle_revision == TENANCY, "#1214's revision keeps its id"
-    assert len({head_revision, middle_revision, BASELINE}) == 3
+    assert sign_revision == SIGN_LOGIN, "#1163's revision keeps its id"
+    assert len({head_revision, sign_revision, middle_revision, BASELINE}) == 4
     assert script.get_heads() == [head_revision], "the history branches"
 
 @pytest.mark.postgres
@@ -198,13 +201,12 @@ def _sign_values(tag: str) -> dict[str, str]:
 
 @pytest.mark.postgres
 def test_the_third_revision_adds_exactly_the_six_sign_columns_as_nullable_text_with_no_default(empty_database):
-    """Upgrading #1214's database to head changes its catalog by exactly six `generations` columns: text, nullable, no server
-    default, and nothing else (A24/r8.4 'the generation record gains six fields (a migration)')."""
-    from defender.migrations import upgrade
-
+    """Upgrading #1214's database to #1163's revision changes its catalog by exactly six `generations` columns: text,
+    nullable, no server default, and nothing else (A24/r8.4 'the generation record gains six fields (a migration)').
+    #1342's jobs revision follows #1163's, so the step is to `0003_sign_login`, not to head."""
     _upgrade_to(empty_database, TENANCY)
     before = catalog(empty_database)
-    upgrade(empty_database)
+    _upgrade_to(empty_database, SIGN_LOGIN)
     after = catalog(empty_database)
     added = [c for c in after["columns"] if c not in before["columns"]]
     assert [c for c in before["columns"] if c not in after["columns"]] == []

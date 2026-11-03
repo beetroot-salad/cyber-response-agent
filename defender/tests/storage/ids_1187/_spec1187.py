@@ -45,7 +45,7 @@ NON_CANONICAL_IDS = (
     "..",
 )
 
-#: The known sidecar suffixes beside a run folder (`_layout._SIDECAR_SUFFIXES`).
+#: The known sidecar suffixes beside a run folder (a subset of `_layout.ACCEPTED_SIDECAR_SUFFIXES`, #1342).
 SIDECAR_SUFFIXES = H5.SIDECAR_SUFFIXES
 
 

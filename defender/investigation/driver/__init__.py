@@ -519,8 +519,7 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
             _logger.error(f"the empty-trace fallback also failed ({fallback_err!r})")  # lint-run-records: ok — an operator diagnostic naming the missing record
     return _run_summary(
         output=None, model_name=model_name, requests=logger.n_requests, end=end,
-        exit_reason=exit_reason, case_id=case_id, store_path=store.path,
-    )
+        exit_reason=exit_reason, case_id=case_id, store_path=store.path)
 
 
 async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the run's identity for an early stop
@@ -658,6 +657,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     orient_shim: orient.ShimRunner | None = None,
     run_state: RunState | None = None,
     clock: ClockSource | None = None,
+    #: The review gate's state container MAIN's deps use (`AgentDeps.review_state`), when the
+    #: caller holds it (#1342 r5 C2: a job's facts holder, which reads the close however the
+    #: run ends). `None`: a fresh one of the run's own.
+    review_state: dict | None = None,
     #: The credential proxy's address and the run's read token (#1163); `None` when the run has
     #: no `http-proxy` system.
     access: RequestAccess | None = None,
@@ -802,6 +805,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             tenant=tenant,
             run_state=state,
             run=run,
+            review_state={} if review_state is None else review_state,
         )
 
         agent_run, end, exit_reason = await _drive_agent(

@@ -44,7 +44,7 @@ LIFECYCLE_MARK = "DEFENDER_LIFECYCLE_PROCESS"
 TEST_TENANT = "3d6f0b8e-2a41-4c97-9e15-7b2c8a4d6f01"
 
 #: C2: the functions of an entry module that may open a host acceptance (the command, not a helper).
-COMMAND_FUNCTIONS = frozenset({"main", "_launch"})
+COMMAND_FUNCTIONS = frozenset({"main", "_launch", "job_main"})  # #1342 r6 R6-3: the job entry admits its own tenant
 
 #: The raw folder acceptance's own module (it defines `accept_tenant`). The census derives every wrapper that reaches
 #: it by reachability; no list of wrapper names is kept.

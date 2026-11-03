@@ -51,6 +51,7 @@ from defender.api.ports import (  # noqa: E402
     Principal,
     UnknownReference,
 )
+from defender.jobs import errors as store_errors  # noqa: E402
 from defender.identity import (  # noqa: E402
     Bootstrap,
     IdentityService,
@@ -83,12 +84,13 @@ AUTH_AB = {"Cookie": f"{SESSION_COOKIE}={SESSION_AB}", "Origin": ORIGIN}
 BASE = "https://testserver"
 
 ALERT = Alert(
-    alert_id="al-1", vendor="tickets", vendor_ticket_id="T-1", title="t", severity="high",
-    rule="r", fired_at=NOW, changed_at=NOW, received_at=NOW, raw={"id": "al-1"},
+    alert_id="al-1", vendor="tickets", vendor_ticket_id="T-1", title="t", description="d",
+    fired_at=NOW, changed_at=NOW, received_at=NOW, raw='{"id": "al-1"}',
 )
 SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
 INV = Investigation(
     investigation_id="inv-1", alert_id="al-1", status="completed", disposition="benign",
+    request_key="req-1", attempt=1,
     cost_usd=1.5, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
     # The knowledge revision the run used (`current` = the run record's `fresh`).
     knowledge={"status": "current", "commit": "f4e5c0de0000f4e5c0de0000f4e5c0de0000f4e5",
@@ -525,7 +527,7 @@ def test_a_create_whose_audit_write_fails_commits_nothing() -> None:
 def test_put_system_is_a_201_at_its_own_url_when_created_and_200_when_replaced() -> None:
     body = {"kind": "ticketing", "display_name": "T", "enabled": False, "settings": {"q": "s"}}
     created = Api(put_system=(SETTINGS, True), has_credentials=False)
-    response = created.client.put(f"{T}/systems/tix", headers=AUTH, params={"x": "1"}, json=body)
+    response = created.client.put(f"{T}/systems/tix", headers=AUTH, json=body)  # R7-2: a stray `x=1` here is now refused, see below
     assert (response.status_code, response.headers["Location"]) == (201, BASE + f"{T}/systems/tix")
     ((system_id, sent), kwargs), = created.ports.called("put_system")
     assert (system_id, sent.model_dump(), kwargs) == ("tix", body, {})
@@ -591,6 +593,13 @@ def test_a_read_the_store_answers_none_is_a_404(path: str, port: str) -> None:
      "create_learning_job", UnknownReference("x"), 422),
     ("POST", f"{T}/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r"},
      "create_learning_job", Conflict("x"), 409),
+    # the job store's own refusals, as the store raises them (#1342): nothing maps them to the API's
+    ("POST", f"{T}/investigations/inv-1/cancel", None, "cancel_investigation", store_errors.NotFound("x"), 404),
+    ("POST", f"{T}/investigations/inv-1/cancel", None, "cancel_investigation", store_errors.Conflict("x"), 409),
+    ("DELETE", f"{T}/investigations/inv-1", None, "delete_investigation", store_errors.NotFound("x"), 404),
+    ("DELETE", f"{T}/investigations/inv-1", None, "delete_investigation", store_errors.Conflict("x"), 409),
+    ("POST", f"{T}/investigations", {"alert_id": "al-1", "client_request_id": "r"},
+     "create_investigation", store_errors.UnknownReference("x"), 422),
 ])
 def test_a_store_refusal_maps_to_its_status_and_audits_nothing(
     method: str, path: str, body: dict[str, str] | None, port: str, error: Exception, code: int,
@@ -871,14 +880,74 @@ def test_an_aware_time_reaches_the_store_as_the_same_instant_in_utc() -> None:
     api = Api(list_alerts=[SUMMARY])
     after = _dt.datetime(2026, 9, 28, 8, 0, tzinfo=_dt.timezone(_dt.timedelta(hours=2)))
     response = api.client.get(f"{T}/alerts", headers=AUTH, params={
-        "fired_after": after.isoformat(), "severity": "high", "limit": 7,
+        "fired_after": after.isoformat(), "limit": 7,  # R7-2: the retired `severity` filter is no longer ignored, see below
     })
     assert response.json() == {"items": [SUMMARY.model_dump(mode="json")], "next_cursor": None}
     ((tenant,), kwargs), = api.ports.called("list_alerts")
     assert tenant == A
-    assert kwargs == {"fired_after": after, "fired_before": None, "severity": "high",
+    assert kwargs == {"fired_after": after, "fired_before": None,
                       "after": None, "limit": 8}
     assert kwargs["fired_after"].utcoffset() == _dt.timedelta(0)
+
+
+_UNKNOWN_QUERY_ROUTES = [
+    ("GET", f"{T}/alerts?severity=high"),
+    ("GET", f"{T}/alerts?limit=5&nonsense=1"),
+    ("GET", f"{T}/alerts/al-1?extra=1"),
+    ("GET", f"{T}/investigations?bogus=x"),
+    ("POST", f"{T}/investigations?bogus=x"),
+    ("GET", f"{T}/learning-jobs?bogus=x"),
+    ("GET", f"{T}/lessons?bogus=x"),
+    ("GET", f"{T}/systems?bogus=x"),
+    ("GET", f"{T}/members?bogus=x"),
+]
+
+
+@pytest.mark.parametrize(("method", "path"), _UNKNOWN_QUERY_ROUTES)
+def test_r7_2_a_query_parameter_the_route_does_not_declare_is_a_422_problem_before_the_handler_runs(
+        method: str, path: str) -> None:
+    """An undeclared query parameter is a 422 problem with one `extra_forbidden` entry at `["query", name]`; no port is called. (R7-2)"""
+    api = Api()
+    name = path.split("?", 1)[1].split("&")[-1].split("=")[0]
+    response = api.lenient().request(method, path, headers=AUTH, json={"alert_id": "al-1", "client_request_id": "r"}
+                                  if method == "POST" else None)
+    assert response.status_code == 422, response.text
+    assert response.headers["Content-Type"] == "application/problem+json"
+    errors = response.json()["errors"]
+    assert [(e["type"], e["loc"]) for e in errors if e["loc"] == ["query", name]] == [
+        ("extra_forbidden", ["query", name])]
+    assert api.ports.calls == [], "the handler ran for a request with an unknown query parameter"
+
+
+def test_r7_2_a_put_with_an_undeclared_query_parameter_is_refused_and_changes_nothing() -> None:
+    """`PUT /systems/tix?x=1` (once let through, its Location built without the query) is a 422 `extra_forbidden` at `["query", "x"]`; no system is written. (R7-2)"""
+    api = Api(put_system=(SETTINGS, True), has_credentials=False)
+    body = {"kind": "ticketing", "display_name": "T", "enabled": False, "settings": {"q": "s"}}
+    response = api.client.put(f"{T}/systems/tix", headers=AUTH, params={"x": "1"}, json=body)
+    assert response.status_code == 422
+    assert [(e["type"], e["loc"]) for e in response.json()["errors"]] == [("extra_forbidden", ["query", "x"])]
+    assert api.ports.called("put_system") == []
+
+
+def test_r7_2_every_unknown_query_parameter_gets_its_own_entry() -> None:
+    """Two undeclared parameters give two `extra_forbidden` entries, one per name. (R7-2)"""
+    api = Api()
+    response = api.lenient().get(f"{T}/alerts?one=1&two=2&limit=5", headers=AUTH)
+    assert response.status_code == 422
+    entries = sorted((e["type"], tuple(e["loc"])) for e in response.json()["errors"])
+    assert entries == [("extra_forbidden", ("query", "one")), ("extra_forbidden", ("query", "two"))]
+
+
+@pytest.mark.parametrize(("path", "answers"), [
+    (f"{T}/alerts?limit=5&fired_after=2026-09-28T08:00:00Z", {"list_alerts": [SUMMARY]}),
+    (f"{T}/investigations?alert_id=al-1&limit=5", {"list_investigations": [INV]}),
+    (f"{T}/learning-jobs?investigation_id=i-1&limit=5", {"list_learning_jobs": []}),
+    (f"{T}/lessons?limit=5", {"list_lessons": [LESSON]}),
+])
+def test_r7_2_control_declared_query_parameters_are_served_as_before(path: str, answers: dict[str, Any]) -> None:
+    """Control: the declared parameters of the same routes answer 200. (R7-2)"""
+    api = Api(**answers)
+    assert api.client.get(path, headers=AUTH).status_code == 200
 
 
 def test_a_record_time_is_served_in_utc() -> None:
@@ -931,7 +1000,7 @@ def test_a_blank_client_request_id_is_refused() -> None:
 def test_a_disposition_outside_the_vocabulary_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="not a disposition"):
         Investigation(investigation_id="i", alert_id="a", status="completed", disposition="fine",
-                      cost_usd=0.0, created_at=NOW)
+                      request_key="k", attempt=1, cost_usd=0.0, created_at=NOW)
 
 
 @pytest.mark.parametrize("bad", ["a/b", "a b", "a?b#c", "é", ""])
@@ -952,7 +1021,7 @@ def test_a_principal_carries_a_checked_tenant(legacy) -> None:
 def test_a_naive_time_cannot_be_served() -> None:
     with pytest.raises(ValueError, match="timezone"):
         Investigation(investigation_id="i", alert_id="a", status="queued", cost_usd=0.0,
-                      created_at=NOW.replace(tzinfo=None))
+                      request_key="k", attempt=1, created_at=NOW.replace(tzinfo=None))
 
 
 # --- pagination ----------------------------------------------------------------------------
@@ -999,14 +1068,17 @@ def test_every_list_pages_by_cursor_from_the_last_row_served(
 
 
 def test_a_cursor_stays_short_whatever_the_filters_and_is_accepted_back() -> None:
-    severity = "x" * 1600
-    api = Api(list_alerts=_rows_after([SUMMARY_2, SUMMARY]))
-    cursor = _cursor(api, f"{T}/alerts", {"severity": severity})
+    # #1342: alerts keep only moment filters, so the longest admitted filter is the investigations list's alert id.
+    alert_id = "a" * 128
+    api = Api(list_investigations=_rows_after([INV_2, INV]))
+    cursor = _cursor(api, f"{T}/investigations", {"alert_id": alert_id})
     assert len(cursor) < 400
-    page = api.client.get(f"{T}/alerts", headers=AUTH,
-                          params={"limit": 1, "severity": severity, "cursor": cursor})
+    short = _cursor(Api(list_investigations=_rows_after([INV_2, INV])), f"{T}/investigations", {"alert_id": "a"})
+    assert len(cursor) == len(short), "the cursor grows with the filter: it carries it, not a digest"
+    page = api.client.get(f"{T}/investigations", headers=AUTH,
+                          params={"limit": 1, "alert_id": alert_id, "cursor": cursor})
     assert page.status_code == 200, page.text
-    assert [a["alert_id"] for a in page.json()["items"]] == ["al-1"]
+    assert [i["investigation_id"] for i in page.json()["items"]] == ["inv-1"]
 
 
 def _edited(cursor: str, **changes: Any) -> str:
@@ -1164,6 +1236,26 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
         params = {"limit": 2, "cursor": page["next_cursor"]}
     assert seen == ["al-3", "al-2", "al-1", "al-0", "al-4"]
 
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_the_demo_store_refuses_to_delete_a_live_investigation_as_the_port_promises(status: str) -> None:
+    """`delete_investigation` is a `Conflict` while the investigation is live (the port's
+    contract, which the job store keeps); an ended one is deleted. (finalize #1354)"""
+    store = InMemoryStore(lambda: NOW)
+    store.add_alert(A, ALERT)
+
+    async def scenario() -> tuple[bool, bool]:
+        inv, _ = await store.create_investigation(A, ALERT.alert_id, "k1")
+        store.add_investigation(A, inv.model_copy(update={"status": status}))
+        with pytest.raises(Conflict):
+            await store.delete_investigation(A, inv.investigation_id)
+        kept = await store.get_investigation(A, inv.investigation_id) is not None
+        store.add_investigation(A, inv.model_copy(update={"status": "completed"}))
+        await store.delete_investigation(A, inv.investigation_id)
+        return kept, await store.get_investigation(A, inv.investigation_id) is None
+
+    assert anyio.run(scenario) == (True, True)
 
 def _api_routes(routes: Any) -> Any:
     """Every route under `routes` as it is served: an included router (FastAPI includes them lazily)

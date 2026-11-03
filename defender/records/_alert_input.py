@@ -70,10 +70,15 @@ def digest_of(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+#: The one byte cap on an alert (#1342 M5): admission refuses more (`REFUSE_SIZE`), and the
+#: operator's file read stops there. The store's insert takes it through `admit`.
+ALERT_BYTE_CAP = _io.READ_LIMIT
+
+
 def read_operator_alert(path: Path) -> bytes:
     """The operator's input file, whole, or `AlertRefused` when it is over the read limit."""
     try:
-        return _io.read_bytes_capped(path)
+        return _io.read_bytes_capped(path, limit=ALERT_BYTE_CAP)
     except _io.TEXT_READ_ERRORS as error:
         if getattr(error, "errno", None) == 27:  # EFBIG: the read step's own size refusal
             raise AlertRefused(REFUSE_SIZE) from None
@@ -101,6 +106,8 @@ def _has_surrogate(document: Any) -> bool:
 
 def admit(raw: bytes) -> Admitted:
     """The admitted alert, or `AlertRefused`. @owns alert admission"""
+    if len(raw) > ALERT_BYTE_CAP:
+        raise AlertRefused(REFUSE_SIZE)
     if raw.startswith(_BOM):
         raise AlertRefused(REFUSE_ENCODING)
     try:

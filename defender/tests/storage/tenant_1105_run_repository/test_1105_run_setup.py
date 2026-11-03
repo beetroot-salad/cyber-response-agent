@@ -223,9 +223,14 @@ def test_1279_o8_make_run_dir_refuses_what_appears_between_a_check_and_the_make(
 
 
 def _sidecar_suffixes() -> tuple[str, ...]:
-    from defender.records._layout import _SIDECAR_SUFFIXES
+    return H.USED_SUFFIXES
 
-    return tuple(_SIDECAR_SUFFIXES)
+
+def test_1342_the_used_suffixes_are_the_layouts():
+    """The natural-lane refusal tests run over exactly the layout's used-id suffixes. (#1342)"""
+    from defender.records._layout import USED_SIDECAR_SUFFIXES
+
+    assert sorted(H.USED_SUFFIXES) == sorted(USED_SIDECAR_SUFFIXES)
 
 
 @pytest.mark.parametrize("kind", ["regular-file", "directory", "dangling-link", "link-to-file", "link-to-dir"])
