@@ -38,7 +38,7 @@ from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
-from defender.tests.support.runtime.engine._spec767 import FakeStore  # noqa: E402
+from defender.tests.support.runtime.engine._spec767 import COMMENTS_SUFFIX, FakeStore  # noqa: E402, F401
 from collections.abc import Iterator
 
 _TENANT_ACME = fixture_uuid('tenant:acme')

@@ -71,9 +71,11 @@ def _drive(tmp_path: Path, planted: S.Planted, alert: Mapping[str, Any] | bytes,
            ) -> S.Drive:
     """One alert through `run.main` with every reader recorded: the orientation lookups'
     argv, the case ticket's record leg (its comment renders the signature). The alert names its
-    ticket. `mapping` (when given) is written first."""
+    ticket. MAIN closes a report unless `main` says otherwise: the comment renders the
+    signature only from a readable report. `mapping` (when given) is written first."""
     S.ticket_the_tenant(planted, mapping)
-    d = S.run_alert(tmp_path, alert=S.ticketed_alert(alert), tenant=planted, main=main,
+    d = S.run_alert(tmp_path, alert=S.ticketed_alert(alert), tenant=planted,
+                    main=main if main is not None else S.closing_main_turns(),
                     orient_shim=S.RecordingShim(), tickets=S.ticket_writer(S.TicketStore(tmp_path)),
                     update_ticket=True)
     ran = d.raised is None and d.refusal is None and d.rc == 0 and d.main.requests >= 1

@@ -28,7 +28,9 @@ from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 ALERT_MAPPING = S.ALERT_MAPPING_REL
 #: The case-history mapping, named the way every reason naming it spells it.
 CASE_MAPPING = S.CASE_MAPPING_REL.split("/", 1)[1]
-MAPPING_NAMES = (ALERT_MAPPING, CASE_MAPPING)
+#: The file that replaced it (#1359): a reason about the retired folder names this.
+CASE_RECORD = "case-record.yaml"
+MAPPING_NAMES = (ALERT_MAPPING, CASE_MAPPING, CASE_RECORD)
 #: The old top-level section of the case mapping; a reason refusing it names it.
 SOURCE_SECTION = re.compile(r"\bsource\b")
 #: The move a `source:` refusal names: to the alert mapping, by its file name or in words.
@@ -96,6 +98,7 @@ class World:
     def case_bytes(self, data: bytes | None) -> Path:
         """Write the case-history mapping's bytes (`None`: a valid file at mode 000)."""
         path = self.planted.case_mapping
+        path.parent.mkdir(parents=True, exist_ok=True)  # the shipped template no longer has it
         with contextlib.suppress(FileNotFoundError):
             path.unlink()
         if data is None:

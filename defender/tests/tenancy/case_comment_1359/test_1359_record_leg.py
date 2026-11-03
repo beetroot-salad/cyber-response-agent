@@ -155,7 +155,9 @@ def test_o7_exit_class_decides_whether_the_run_comments(tmp_path, monkeypatch, t
         "output": "spec1359", "requests": 0, "truncated_by": truncated_by,
         "closed_before_cut": closed_before_cut})
 
-    assert (refused, rc) == (None, 0)
+    # A run whose model provider stayed down exits 4 (`run.PROVIDER_DOWN_EXIT`): that status is
+    # the run's own and unrelated to the record leg, which is silent for it.
+    assert (refused, rc) == (None, 4 if truncated_by == "provider-down" else 0)
     got = S.receipt(run_dir)
     if expected is None:
         assert shim.calls() == [], f"a silent exit class called the store: {shim.calls()}"

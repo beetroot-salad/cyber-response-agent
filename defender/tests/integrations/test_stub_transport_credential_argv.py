@@ -19,10 +19,13 @@ from defender.tests.support.tenancy import _tenants1106
 
 SECRET = "S3cretValue42"
 
-# `docker --context C exec -i CONTAINER <cmd…>`: log the argv it was handed, then run <cmd…> here.
+# `docker --context C exec [-i] CONTAINER <cmd…>` (`-i` only on the credentialed form): log the
+# argv it was handed, then run <cmd…> here.
 FAKE_DOCKER = """#!/bin/sh
 printf '%s\\n' "$*" >> "$ARGV_LOG"
-shift 5
+shift 3
+if [ "$1" = "-i" ]; then shift; fi
+shift
 exec "$@"
 """
 # The in-container shell expands the credential, so curl's own argv is the one a monitor sees.

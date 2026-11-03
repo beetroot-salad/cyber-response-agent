@@ -717,10 +717,11 @@ def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
         f"the curation enqueue was handed {handed_b!r} for the stop before MAIN, {handed_a!r} for "
         "MAIN's own kill")
     assert answers_b == answers_a
-    assert tickets_b.store.comment_body() == tickets_a.store.comment_body(), (
+    # A run cut by its budget leaves the ticket alone (#1359 O7: that exit class is silent), and
+    # the stop before MAIN is the same exit class: neither arm reaches the store.
+    assert [(c.method, c.path) for c in tickets_b.store.calls] == [
+        (c.method, c.path) for c in tickets_a.store.calls] == [], (
         "the ticket's record leg did something different for the stop before MAIN")
-    assert tickets_b.store.paths(S.COMMENTS_SUFFIX) == tickets_a.store.paths(S.COMMENTS_SUFFIX) == [
-        f"/tickets/{S.TICKET_KEY}/comments"]
 
 
 def test_p174_lead_and_main_failures_together_pass_the_kill_co(tmp_path: Path) -> None:

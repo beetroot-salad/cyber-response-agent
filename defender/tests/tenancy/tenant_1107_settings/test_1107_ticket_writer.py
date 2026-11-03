@@ -262,6 +262,14 @@ def _sent_body(argv: list[str]) -> str:
     return argv[argv.index("-d") + 1]
 
 
+def _with_report(run_dir: Path) -> None:
+    """A readable report: the comment template renders over it (without one the fixed
+    unreadable-report sentence is sent in its place)."""
+    from defender.tests.support.runtime.engine._spec767 import write_report
+
+    write_report(run_dir)
+
+
 def test_o8_edits_to_the_case_settings_after_run_start_change_nothing_the_comment_carries(
         tmp_path, monkeypatch):
     """Editing the tenant's case-record.yaml or the system's config.env under the data root during
@@ -269,13 +277,14 @@ def test_o8_edits_to_the_case_settings_after_run_start_change_nothing_the_commen
     edited_body = "EDITED-BODY {disposition}"
     control_shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-control")
     root, _folder, alert = _world(tmp_path, name="control", case_body=edited_body)
-    _run(tmp_path, root, alert, run_id="r-control")
+    _run(tmp_path, root, alert, run_id="r-control", before=_with_report)
     assert "EDITED-BODY" in _sent_body(_comment_argv(control_shim)), "control: the body is read"
 
     shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-edited")
     root, folder, alert = _world(tmp_path, name="edited")
 
-    def edit_during_the_run(_run_dir: Path) -> None:
+    def edit_during_the_run(run_dir: Path) -> None:
+        _with_report(run_dir)
         S.case_record_path(folder).write_text(
             f'system: "cmdb"\ncomment:\n  body: "{edited_body}"\n', encoding="utf-8")
         S.set_key(folder, CASE, "TICKET_URL_BASE", "http://edited-host.invalid:9")

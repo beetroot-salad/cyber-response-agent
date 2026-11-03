@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.runtime.engine._spec767 import write_report
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
@@ -82,6 +83,7 @@ def test_the_record_leg_comments_to_the_injected_tenants_store_with_its_case_rec
     run_dir = tmp_path / fixture_uuid("run-1106")
     run_dir.mkdir()
     C.plant_record(run_dir)
+    write_report(run_dir)  # a readable report: the injected body renders over it
     shim = S.DockerShim(tmp_path / "shim", S.store_answers_ok())
     S.record_step(run_dir, _record(injected), env=shim.env({}))
 

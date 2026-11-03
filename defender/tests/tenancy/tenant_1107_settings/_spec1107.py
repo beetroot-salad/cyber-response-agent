@@ -65,7 +65,7 @@ def run_tenant_mod() -> Any:
 
 
 def record_type(name: str) -> type:
-    """One of `SystemConfig`, `ElasticSettings`, `CaseMapping`, `SecretLookup` — asserted to be a
+    """One of `SystemConfig`, `ElasticSettings`, `CaseRecordSettings`, `SecretLookup` — asserted to be a
     class the record's module defines, so a test that asks where a type lives, or whether a
     value is one, can never read an absent or stand-in name as an answer."""
     cls = getattr(run_tenant_mod(), name, None)
