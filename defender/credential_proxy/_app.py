@@ -18,7 +18,7 @@ For each request (design "Proxy", in order, nothing sent or read before its chec
 4. the URL must be under the one declared base, the route a read or a granted write (O2, O3);
 5. read the credential set; it must fit the declared scheme (A4); exchange an OAuth token if
    none is held (A8, A12);
-6. send, following no redirect, with the response capped (O7);
+6. send, following no redirect, with the response's body capped and never inflated (O7, #1383);
 7. scrub each secret value used from the answer (O4, N6);
 8. audit, before answering: if the record cannot be written the answer is withheld (A13)."""
 from __future__ import annotations
@@ -82,7 +82,8 @@ _HOP_HEADERS = frozenset({"host", "content-length", "connection", "keep-alive",
 #: Request headers that carry a credential: an adapter holds none, so one that sends one is
 #: refused, as is one sending the declared header scheme's header.
 _CREDENTIAL_HEADERS = frozenset({"authorization", "proxy-authorization", "cookie"})
-#: Response headers that describe the upstream hop or a body encoding already undone.
+#: Response headers that describe the upstream hop, or the encoding of a body that is passed on
+#: only when it has none (#1383).
 _REPLY_HOP_HEADERS = frozenset({"content-length", "transfer-encoding", "connection",
                                 "keep-alive", "content-encoding"})
 _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}")
@@ -294,14 +295,14 @@ class _Proxy:
         except httpx.TransportError as e:
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
                                      f"({type(e).__name__})") from None
-        except httpx.DecodingError:
-            raise Refused(UPSTREAM, f"{asked.system} answered a body that does not "
-                                    "decode") from None
-        status = reply.status
-        if reply.over:
-            return {"status": status, "headers": {}, "body": "", "fault": UPSTREAM,
-                    "detail": f"{asked.system} answered more than {cap} bytes"}
+        status, withheld = reply.status, reply.withheld
         fault = _fault_of(status)
+        if fault is None:
+            detail = None if withheld is None else f"{asked.system} answered {withheld}"
+            fault = None if withheld is None else UPSTREAM
+        else:
+            detail = f"{asked.system} answered {status}" + (
+                "" if withheld is None else f" with {withheld}, withheld")
         shown: dict[str, str] = {}
         for name, value in reply.headers:
             if name.lower() in _REPLY_HOP_HEADERS:
@@ -310,8 +311,7 @@ class _Proxy:
             shown[name] = f"{shown[name]}, {value}" if name in shown else value
         return {"status": status, "headers": shown,
                 "body": scrub_secret_bytes(reply.body, secrets).decode("utf-8", "replace"),
-                "fault": fault,
-                "detail": None if fault is None else f"{asked.system} answered {status}"}
+                "fault": fault, "detail": detail}
 
 
 def _fault_of(status: int) -> str | None:
