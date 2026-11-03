@@ -27,7 +27,7 @@ re-coining.
 
 ## Run
 
-    defender/.venv/bin/python evaluations/harness_lead.py \
+    defender/.venv/bin/python -m evaluations.harness_lead \
         evaluations/scenarios_lead/underfold-sshd-narrowing
 
 The lead-author runs in-process on PydanticAI (metered key); this is a live agent run,

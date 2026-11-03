@@ -43,11 +43,8 @@ from pathlib import Path
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 
-# Runnable as a script from anywhere.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from defender import _yaml  # noqa: E402
-from evaluations.oracle_golden import stats as STATS  # noqa: E402 — after the bootstrap
+from defender import _yaml
+from evaluations.oracle_golden import stats as STATS
 from defender._io import read_text_utf8
 
 #: Fewest independent units before an interval is published. At n=1 Wilson spans

@@ -558,7 +558,7 @@ jobs:
       # is the instrument's own limits, and a log that hides them invites a reader to
       # assume they are zero.
       - name: Golden case tree (hard gate — artifacts, not code)
-        run: defender/.venv/bin/python evaluations/oracle_golden/validate_cases.py
+        run: defender/.venv/bin/python -m evaluations.oracle_golden.validate_cases
 
       # The tacit-knowledge registry, also artifacts and not code — and the gate is HERE
       # because for this system the commit IS the sign-off. It is the one system of record
@@ -763,6 +763,11 @@ jobs:
       # commands name still exist.
       - name: Paths-resolve fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_paths_resolve.py
+
+      # Evaluation entrypoints (#1276): the evaluation tools run as modules from the repo root
+      # (`python -m evaluations...`); none edits sys.path to find `defender`. No baseline.
+      - name: Evaluation-entrypoint fence (no baseline)
+        run: defender/.venv/bin/python tooling/lint/lint_eval_entrypoints.py
 
       # Working-investigation I/O (#1165): every file I/O occurrence on a run's records in the
       # runtime, hooks, box and ticket writer is a handled record operation or counted residue.

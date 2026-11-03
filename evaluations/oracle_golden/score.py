@@ -53,11 +53,9 @@ from collections.abc import Mapping, Set
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from defender._model import model  # noqa: E402
-from defender._yaml import safe_load, safe_load_typed_and_spelled  # noqa: E402
-from evaluations.oracle_golden import judge  # noqa: E402
+from defender._model import model
+from defender._yaml import safe_load, safe_load_typed_and_spelled
+from evaluations.oracle_golden import judge
 from defender._io import read_text_utf8
 
 # The closed marker vocabulary; anything else is malformed output, not an answer.
