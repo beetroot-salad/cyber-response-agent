@@ -57,7 +57,7 @@ class CaseTarget:
 
 
 def legacy_folder_finding(settings: Path) -> str | None:
-    """The finding for a tenant still holding the retired case-history system folder, naming the
+    """The finding for a tenant still holding the retired system folder for case recording, naming the
     file that replaces it; `None` when it holds none."""
     if (Path(settings) / "systems" / LEGACY_SYSTEM).exists():
         return (f"{pointer_to('systems/' + LEGACY_SYSTEM)} is retired: cases are recorded through "

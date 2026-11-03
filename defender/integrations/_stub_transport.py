@@ -313,7 +313,7 @@ def http_write(
     `UpstreamFault` carrying the status; a 5xx, an unreachable store or a failed curl is a
     `TransportFault`."""
     url = f"{config['URL_BASE'].rstrip('/')}{path}"
-    _request(ctx, config, url, system=system, method=method, body=body, write=True)
+    _send(ctx, config, url, system=system, method=method, body=body, write=True)
 
 
 def http_get_obj(
@@ -394,7 +394,14 @@ def _vendor_detail(body_text: str) -> object:
     return payload.get("detail", payload) if isinstance(payload, dict) else payload
 
 
-def _request(  # noqa: PLR0913 — one request's per-call state
+def _request(
+    ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
+    body: dict | None = None,
+) -> dict | list:
+    return _send(ctx, config, url, system=system, method=method, body=body)
+
+
+def _send(  # noqa: PLR0913 — one request's per-call state
     ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
     body: dict | None = None, write: bool = False,
 ) -> dict | list:
