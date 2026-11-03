@@ -623,8 +623,15 @@ class ModuleVerbRegistry(VerbRegistry):
         path = self.roster.accepted.get(system)
         if path is None:
             raise KeyError(system)
-        verbs = getattr(_load_adapter_module(path), "VERBS", None)
+        module = _load_adapter_module(path)
+        verbs = getattr(module, "VERBS", None)
         if not isinstance(verbs, Mapping):
+            return {}
+        action = getattr(module, COMMENT_ACTION, None)
+        if action is not None and any(fn is action for fn in verbs.values()):
+            # The cold read refuses a table that names the host-only comment action; this is the
+            # same refusal by identity, for a table whose literal hides it (an alias, a table
+            # filled in after its literal): none of the adapter's verbs is served (#1359 O4).
             return {}
         return dict(verbs)
 
