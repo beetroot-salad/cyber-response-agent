@@ -10,7 +10,7 @@ the real lab clone; the digest check prints the record to paste on the PR (run w
 
     DEFENDER_LIVE_DATA_ROOT=/workspace/.defender-data DEFENDER_LIVE_TENANT=<lab id> \\
     DEFENDER_O14_PRODUCT_COMMIT=<the P4 PR's parent> PYTHONPATH="$PWD" \\
-        flock /tmp/defender-pytest.lock defender/.venv/bin/python -m pytest -m live -s \\
+        defender/.venv/bin/python -m pytest -m live -s \\
         defender/tests/tenancy/tenant_1108_p4/test_cutover.py
 
 Optional: DEFENDER_O14_LAB_REF (default `refs/remotes/origin/main` of the lab clone; fetch

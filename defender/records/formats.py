@@ -9,11 +9,13 @@ from defender.lazy_door import lazy_door
 
 if TYPE_CHECKING:
     from defender.records._alert_input import (
+        ALERT_BYTE_CAP as ALERT_BYTE_CAP,
         AlertFacts as AlertFacts,
         AlertMappingFault as AlertMappingFault,
         AlertRecord as AlertRecord,
         AlertRefused as AlertRefused,
         AlertReplaced as AlertReplaced,
+        REFUSE_SIZE as REFUSE_SIZE,
         admit as admit,
         derive_facts as derive_facts,
         digest_of as digest_of,
@@ -82,6 +84,7 @@ if TYPE_CHECKING:
         FRESH as FRESH,
         OPERATOR as OPERATOR,
         TRANSIENT as TRANSIENT,
+        api_knowledge as api_knowledge,
         knowledge_status as knowledge_status,
         read_knowledge_status as read_knowledge_status,
     )
@@ -149,13 +152,13 @@ if TYPE_CHECKING:
 
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
-    **dict.fromkeys(("AlertFacts", "AlertMappingFault", "AlertRecord", "AlertRefused", "AlertReplaced", "admit", "derive_facts", "digest_of", "load_alert_mapping", "parse_alert_record", "read_operator_alert", "read_record", "record_beside", "record_text", "settings_reasons", "verified_alert", "verified_document", "verified_input", "verify_input_bytes",), "_alert_input"),  # lint-run-records: ok — the submodule `records/_alert_input.py`, not the run folder of that name
+    **dict.fromkeys(("ALERT_BYTE_CAP", "AlertFacts", "AlertMappingFault", "AlertRecord", "AlertRefused", "AlertReplaced", "admit", "derive_facts", "digest_of", "load_alert_mapping", "parse_alert_record", "read_operator_alert", "read_record", "record_beside", "record_text", "settings_reasons", "verified_alert", "verified_document", "verified_input", "verify_input_bytes", "REFUSE_SIZE",), "_alert_input"),  # lint-run-records: ok — the submodule `records/_alert_input.py`, not the run folder of that name
     **dict.fromkeys(("REPORT_CLOSE_DELIMITER", "UNCHANGED_LEAD", "UNCHANGED_NOTICE", "artifact_names", "committed_investigation_reason", "encodable_or_reason", "needs_baseline", "register_invlang_validator", "render_diagnostic", "utf8_len", "validate_artifact", "validate_report",), "_artifact_schema"),
     **dict.fromkeys(("AppendRecord", "Episode", "EpisodeRefused", "refuse_bad_episode_id",), "_episode_handle"),
     **dict.fromkeys(("EpisodePaths", "LAYOUT", "OracleStorePaths", "WORLD_LEAVES", "WorldPaths",), "_episode_paths"),
     **dict.fromkeys(("BASE_ROLE", "Family", "FamilyError", "ManifestPredatesOracle", "ResumeWorld", "accept_family", "family_identities", "label_for_world_id", "load_family", "load_manifest_document", "parse_family", "resume_world_from", "runnable_worlds", "world_id_for", "write_family",), "_family"),
     **dict.fromkeys(("PinUnreadable", "pin_text", "read_pin",), "_knowledge_pin"),
-    **dict.fromkeys(("FRESH", "OPERATOR", "TRANSIENT", "knowledge_status", "read_knowledge_status",), "_knowledge_status"),
+    **dict.fromkeys(("FRESH", "OPERATOR", "TRANSIENT", "api_knowledge", "knowledge_status", "read_knowledge_status",), "_knowledge_status"),
     **dict.fromkeys(("CommitRecord", "DataRoot", "DraftsRoot", "EpisodesRoot", "ExportsRoot", "KnowledgeLock", "LearningRoot", "LegacyEpisodesRoot", "LegacyRunsRoot", "RunsBase", "SessionsRoot", "TenantRecord", "TenantRoot", "WorktreesRoot", "unwrap_commit_record", "unwrap_data_root", "unwrap_drafts_root", "unwrap_episodes_root", "unwrap_exports_root", "unwrap_knowledge_lock", "unwrap_learning_root", "unwrap_runs_base", "unwrap_tenant_root",), "_locations"),
     **dict.fromkeys(("KnowledgeRevision", "RunProvenance", "capture_tree", "read_provenance",), "_provenance"),
     **dict.fromkeys(("ReportRead", "ReportUnreadable", "UNKNOWN_DISPOSITION", "parse_report_text", "read_report", "repeats_disposition", "require_report",), "_report"),

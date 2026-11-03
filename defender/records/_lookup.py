@@ -27,6 +27,7 @@ from defender.records._held import (
     require_run_id, tenant_levels, walk_from_tenant,
 )
 from defender.records._id import RunId
+from defender.records.job_lane import Launched
 
 #: A container's opener: the folder held (the caller closes it), `FileNotFoundError` when a
 #: level is absent, `TenantRefused` when one cannot be held.
@@ -264,6 +265,24 @@ class RunsRepository(Generic[_T]):
         R1) and no claim is read. The run folder itself is not made here."""
         self._natural(create=True).close()
         return Run.under(self._tenant.runs, RunId.mint(), io=self._io, tenant_id=self._tenant.id)
+
+    def launched(self, launched: Launched) -> Run:
+        """The `Run` run setup builds for a job (#1342 O6): at the id of its checked launch
+        record (`JobLane.check_launch`), never one a caller names or this repository mints. The
+        launch must be this tenant's (else `TenantRefused`) and the natural container there — walked
+        no-follow and never made (R1: an absent one is `TenantRefused`). Nothing is written; the
+        run folder itself is made by run setup, exclusively."""
+        if not isinstance(launched, Launched):
+            raise TypeError(f"launched takes a checked launch, not {type(launched).__name__}")
+        if launched.record.tenant_id != str(self._tenant.id):
+            raise TenantRefused(f"the launch record of job {quoted(launched.record.investigation_id)} "
+                                f"names another tenant than {quoted(self._tenant.id)}")
+        try:
+            self._natural().close()
+        except FileNotFoundError:
+            raise TenantRefused(f"the runs folder {unwrap_runs_base(self._tenant.runs)} is absent: "
+                                "tenant setup makes it, and a job never does") from None
+        return Run.under(self._tenant.runs, launched.run_id, io=self._io, tenant_id=self._tenant.id)
 
     def resolve(self, address: RunAddress) -> Run:
         """The run a stored `address` names, in this repository, refused as `open` refuses

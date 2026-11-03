@@ -12,8 +12,8 @@ explains how the defender works — it does not investigate alerts. Use
 actual run — every run names its tenant, and there is no default; on the host,
 the tenant is created through the platform API (`POST /admin/tenants`) and the tenant lifecycle
 (`python -m defender.lifecycle serve`), which places its knowledge under
-`$DEFENDER_DATA_ROOT/<tenant>/knowledge`; a run works only for an `active` tenant. The defender is
-an experimental PoC; `content/design.md` says what it is and which gates it carries.
+`$DEFENDER_DATA_ROOT/<tenant>/knowledge`; a run works only for an `active` tenant.
+`content/design.md` says what the defender is and which gates it carries.
 
 ## Who asks this skill questions
 

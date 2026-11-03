@@ -17,7 +17,7 @@ missed. The guard that keeps the corpus positional is
 `evaluations/tests/test_controls.py::test_the_corpus_speaks_the_SAME_esql_encoding_production_does`.
 
 Usage:
-  python evaluations/oracle_golden/migrate_esql_encoding.py [--cases-dir DIR]
+  python -m evaluations.oracle_golden.migrate_esql_encoding [--cases-dir DIR]
 
 `--cases-dir` defaults to this script's own `cases/` directory; the flag lets the
 migration run over a temporary copy of the tree (how it is tested).

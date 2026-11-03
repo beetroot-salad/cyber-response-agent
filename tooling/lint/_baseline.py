@@ -30,8 +30,14 @@ supports one) use its inline `# lint-<name>: ok — <reason>` marker.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+try:  # bare-name import, as every gate reaches its siblings
+    from _astlib import ScanBlind
+except ImportError:  # imported as part of a package (a test loading `tooling.lint`)
+    from ._astlib import ScanBlind  # type: ignore[no-redef]
 
 
 @dataclass(frozen=True)
@@ -44,15 +50,35 @@ class Finding:
     display: str
 
 
+def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ScanBlind(f"duplicate key {key!r}")
+        out[key] = value
+    return out
+
+
 def _load_entries(path: Path) -> dict[str, str]:
+    """The baseline's entries; `{}` when there is no baseline yet. A baseline that cannot be read
+    unambiguously (not JSON, a duplicate key at any level, not `{"entries": {fp: reason}}`) is
+    `ScanBlind` naming the file (#1364 O5): read as empty, `--update-baseline` would rewrite it
+    and drop every reason."""
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    entries = data.get("entries", {})
-    return entries if isinstance(entries, dict) else {}
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique)
+    except ScanBlind as exc:
+        raise ScanBlind(f"{path.name}: {exc}") from None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ScanBlind(f"{path.name}: not valid JSON ({exc})") from None
+    entries = data.get("entries", {}) if isinstance(data, dict) else None
+    if not isinstance(data, dict) or not isinstance(entries, dict):
+        raise ScanBlind(f"{path.name}: not an object whose `entries` is an object")
+    for fp, reason in entries.items():
+        if not isinstance(reason, str):
+            raise ScanBlind(f"{path.name}: the reason of {fp!r} is not text")
+    return entries
 
 
 def _write_entries(path: Path, entries: dict[str, str], *, header: str) -> None:
@@ -85,7 +111,11 @@ def gate(
     populations.
     """
     current = {f.fingerprint for f in findings}
-    baseline = _load_entries(baseline_path)
+    try:
+        baseline = _load_entries(baseline_path)
+    except ScanBlind as exc:
+        print(f"[{label}] {exc}: fix the file by hand (exit 2, scan-blind)", file=sys.stderr)
+        return 2
 
     if "--update-baseline" in argv:
         merged = {fp: baseline.get(fp, "") for fp in current}

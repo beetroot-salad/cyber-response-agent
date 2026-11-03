@@ -4,12 +4,11 @@ High-level answer to "what is the defender and how does it work?"
 
 ## What it is
 
-The **defender** (`defender/`) is an experimental track for alert-triage
-agent design. Given an `alert.json`, a single-agent ReAct loop investigates
+The **defender** (`defender/`) is an alert-triage agent. Given an `alert.json`, a single-agent ReAct loop investigates
 the alert and emits the audit trail (`investigation.md`), the two live
 lead/query tables (`executed_queries.jsonl` + `gather_raw/`, the contract
 surface for the offline learning loop), and `report.md` (disposition + one
-paragraph). It is **PoC-stage, learning-loop
+paragraph). It is **learning-loop
 first** — the point is to iterate fast on the learning loop, not to harden a
 runtime.
 

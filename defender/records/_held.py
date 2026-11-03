@@ -19,7 +19,7 @@ from defender.records._run_id import run_id_fault
 from defender.records._tenant_id import TenantId, TenantRefused
 from defender.records._errors import RunRefused
 from defender.records._id import RunId
-from defender.records._layout import _SIDECAR_SUFFIXES, _STAGED_TAIL
+from defender.records._layout import ACCEPTED_SIDECAR_SUFFIXES, USED_SIDECAR_SUFFIXES, _STAGED_TAIL
 
 #: The one-time command every refusal of a pre-#1187 entry sends the operator to (#1187 O6,
 #: Flow 7), as the operator runs it from the checkout's root.
@@ -88,17 +88,18 @@ def sidecar_owner(name: str) -> str | None:
     refused). It judges a name, not a path; outside the package it is asked through
     `run_name_fault`."""
     bare = name[: m.start()] if (m := _STAGED_TAIL.search(name)) else name
-    for suffix in _SIDECAR_SUFFIXES:
+    for suffix in ACCEPTED_SIDECAR_SUFFIXES:
         if bare.endswith(suffix) and len(bare) > len(suffix):
             return bare[: -len(suffix)]
     return None
 
 
 def sidecar_names(run_id: RunId) -> tuple[str, ...]:
-    """Every host-only sidecar name beside the run folder of `run_id`, for each reserved suffix
-    (including a retired one): the names run setup finds absent before it makes the run (#1279
-    O8). Built from the one suffix list the sidecar clause above reads."""
-    return tuple(f"{run_id}{suffix}" for suffix in _SIDECAR_SUFFIXES)
+    """Every host-only sidecar name beside the run folder of `run_id` that means the id was used,
+    for each reserved suffix (including a retired one): the names run setup finds absent before
+    it makes the run (#1279 O8). The used list is within the one the sidecar clause above reads
+    (#1342): a launch record or alert file beside the id does not refuse setup."""
+    return tuple(f"{run_id}{suffix}" for suffix in USED_SIDECAR_SUFFIXES)
 
 
 def run_name_fault(text: str) -> str | None:

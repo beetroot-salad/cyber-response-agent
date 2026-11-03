@@ -29,12 +29,13 @@ concurrency:
 # its commands. `test` is the binding job and carries 12: before #1333 rebalanced it, its heavier
 # shard ran ~9m50s on main (run 40495781426) and PR runs were cancelled at 10 minutes with every
 # test passed. A shard that drifts heavy again as files are added gets two minutes of warning
-# before it cancels green runs, and a stall that burns the gVisor step's full 5-minute bound
-# still lands inside 12, so the step's own timeout fires first and names the command. Raising
-# the step bound without raising this one inverts that and hands every stall to GitHub's
-# generic job cancel.
+# before it cancels green runs (it did again on 2026-11-02: main's heavier shard ran 11m06s and
+# a PR's two shards both passed every test past 12 minutes, so the suite went to three shards),
+# and a stall that burns the gVisor step's full 5-minute bound still lands inside 12, so the
+# step's own timeout fires first and names the command. Raising the step bound without raising
+# this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
-  # Two shards of the unit suite, run in parallel: this job was the critical path (~6-8 min against
+  # Three shards of the unit suite, run in parallel: this job is the critical path (~6-8 min against
   # <2.5 min for every other job), and its CPU time is balanced across the runner's four cores, so
   # the only way down is more cores. `--shard I/N` (defender/tests/_shard.py) hands each shard whole
   # test files, balanced by each file's recorded cost, so together they run every test exactly once
@@ -44,13 +45,13 @@ jobs:
   # the extra runner minutes are free. `fail-fast: false` so one shard failing still reports the
   # other's results.
   test:
-    name: test (shard ${{ matrix.shard }}/2)
+    name: test (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
 
     steps:
       - uses: actions/checkout@v5
@@ -223,7 +224,7 @@ jobs:
         run: >-
           uv run pytest tests/ -v -m "not live and not gate"
           -n auto --dist loadfile --durations=25
-          --shard ${{ matrix.shard }}/2
+          --shard ${{ matrix.shard }}/3
           --ignore tests/e2e/test_540_box_boundary.py
 
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
@@ -557,7 +558,7 @@ jobs:
       # is the instrument's own limits, and a log that hides them invites a reader to
       # assume they are zero.
       - name: Golden case tree (hard gate — artifacts, not code)
-        run: defender/.venv/bin/python evaluations/oracle_golden/validate_cases.py
+        run: defender/.venv/bin/python -m evaluations.oracle_golden.validate_cases
 
       # The tacit-knowledge registry, also artifacts and not code — and the gate is HERE
       # because for this system the commit IS the sign-off. It is the one system of record
@@ -762,6 +763,11 @@ jobs:
       # commands name still exist.
       - name: Paths-resolve fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_paths_resolve.py
+
+      # Evaluation entrypoints (#1276): the evaluation tools run as modules from the repo root
+      # (`python -m evaluations...`); none edits sys.path to find `defender`. No baseline.
+      - name: Evaluation-entrypoint fence (no baseline)
+        run: defender/.venv/bin/python tooling/lint/lint_eval_entrypoints.py
 
       # Working-investigation I/O (#1165): every file I/O occurrence on a run's records in the
       # runtime, hooks, box and ticket writer is a handled record operation or counted residue.

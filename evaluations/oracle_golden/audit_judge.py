@@ -26,16 +26,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from defender import _yaml  # noqa: E402
-from defender._model import model  # noqa: E402
-from evaluations.oracle_golden import judge, score  # noqa: E402
+from defender import _yaml
+from defender._model import model
+from evaluations.oracle_golden import judge, score
 from defender._io import read_text_utf8
 
 GOLDEN_DIR = Path(__file__).resolve().parent

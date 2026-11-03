@@ -156,7 +156,7 @@ A coined `query_id` need **not** resolve to a template file — the offline
 lead-author mints and curates a `_draft/{id}.md` skeleton later. A dispatch that
 hit a wall before running anything writes no query row (the dead end lives under
 ANALYZE in `investigation.md`). The learning loop joins across cases on
-`(query_id, params)`; the schema may tighten through the PoC phase.
+`(query_id, params)`; the schema may tighten.
 
 ## Debugging a run
 

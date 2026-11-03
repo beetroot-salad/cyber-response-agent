@@ -2,26 +2,19 @@
 The TLS case is a real local TLS server whose certificate the configured CA did not sign."""
 from __future__ import annotations
 
-import datetime
-import http.server
 import json
 import base64
 import logging
 import time
-import ssl
-import threading
 
 import httpx
 import pytest
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
 
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from defender.tests.support.shared._tls_server import self_signed, tls_server
 from defender.tests.support.tenancy._active1214 import generation_fields
 
 SECRET_ID = "p4-secret-id-9e7f3b"
@@ -42,72 +35,64 @@ def _credential(t: Any, tmp_path: Path, *, openbao_url: str, transport: Any = No
                             transport=transport)
 
 
-def _cert(cn: str, *, san: bool):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
-    now = datetime.datetime.now(datetime.UTC)
-    builder = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
-               .public_key(key.public_key()).serial_number(x509.random_serial_number())
-               .not_valid_before(now - datetime.timedelta(minutes=5))
-               .not_valid_after(now + datetime.timedelta(days=1)))
-    if san:
-        import ipaddress
-        builder = builder.add_extension(x509.SubjectAlternativeName(
-            [x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
-            critical=False)
-    cert = builder.sign(key, hashes.SHA256())
-    return (cert.public_bytes(serialization.Encoding.PEM),
-            key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                              serialization.NoEncryption()))
+def _jwt(claims: dict) -> str:
+    """An unsigned token with `claims` (the credential decodes claims; OpenBao's signature is not its check)."""
+    part = lambda doc: base64.urlsafe_b64encode(json.dumps(doc).encode()).decode().rstrip("=")  # noqa: E731
+    return f"{part({'alg': 'none'})}.{part(claims)}.sig"
 
 
 @pytest.fixture
 def tls_issuer(tmp_path):
-    """A local HTTPS server with a self-signed certificate; the CA the config names is another."""
-    trusted_pem, _ = _cert("the configured CA", san=False)
-    server_pem, server_key = _cert("localhost", san=True)
+    """A local HTTPS server with a self-signed certificate; the CA the config names is another.
+    Other suites import it: keep its shape."""
+    trusted_pem, _ = self_signed("the configured CA", san=False)
     (tmp_path / "trusted.pem").write_bytes(trusted_pem)
-    (tmp_path / "server.pem").write_bytes(server_pem)
-    (tmp_path / "server.key").write_bytes(server_key)
-    got: list[str] = []
+    token = json.dumps({"auth": {"client_token": "tok"}}).encode()
+    with tls_server(tmp_path, lambda *_: (200, token)) as server:
+        yield server.port, server.got, tmp_path
 
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_POST(self):  # noqa: N802
-            got.append(self.rfile.read(int(self.headers.get("content-length", 0))).decode())
-            out = json.dumps({"auth": {"client_token": "tok"}}).encode()
-            self.send_response(200)
-            self.send_header("content-length", str(len(out)))
-            self.end_headers()
-            self.wfile.write(out)
 
-        def log_message(self, *a):
-            pass
+@pytest.fixture
+def tls_openbao(tmp_path, p4_tenant):
+    """A local HTTPS server with a self-signed certificate, answering the AppRole login and the token
+    mint as OpenBao would for `p4_tenant`'s generation; the CA `trusted.pem` names is another."""
+    trusted_pem, _ = self_signed("the configured CA", san=False)
+    (tmp_path / "trusted.pem").write_bytes(trusted_pem)
+    audience = generation_fields(p4_tenant.tenant_id, tmp_path / "secrets")["audience"]
+    port: list[int] = []
 
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(tmp_path / "server.pem", tmp_path / "server.key")
-    server.socket = ctx.wrap_socket(server.socket, server_side=True)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield server.server_port, got, tmp_path
-    finally:
-        server.shutdown()
-        server.server_close()
+    def answer(method: str, path: str, _body: bytes) -> tuple[int, bytes]:
+        if method == "POST":
+            return 200, json.dumps({"auth": {"client_token": "tok"}}).encode()
+        now = int(time.time())
+        claims = {"iss": f"https://localhost:{port[0]}/v1/identity/oidc", "tenant_id": p4_tenant.tenant_id,
+                  "aud": audience, "iat": now, "exp": now + 600}
+        return 200, json.dumps({"data": {"token": _jwt(claims)}}).encode()
+
+    with tls_server(tmp_path, answer) as server:
+        port.append(server.port)
+        yield server, tmp_path
 
 
 def test_r6_a_tls_server_the_configured_ca_did_not_sign_is_refused_and_gets_no_secret(
-        p4_tenant, tls_issuer):
+        p4_tenant, tls_openbao):
     from defender.learning.author.version_control import ForgejoAuthError
 
-    port, got, folder = tls_issuer
-    credential = _credential(p4_tenant, folder, openbao_url=f"https://localhost:{port}",
-                             ca_cert=str(folder / "trusted.pem"))
+    server, folder = tls_openbao
+    url = f"https://localhost:{server.port}"
+    credential = _credential(p4_tenant, folder, openbao_url=url, ca_cert=str(folder / "trusted.pem"))
     with pytest.raises(Exception) as refused:  # noqa: PT011 — the class is the code's choice
         credential.token()
     assert isinstance(refused.value, ForgejoAuthError), repr(refused.value)
-    assert got == [], f"the secret reached a server the configured CA did not sign: {got}"
+    assert server.got == [], f"the secret reached a server the configured CA did not sign: {server.got}"
     assert SECRET_ID not in str(refused.value)
+
+    # The control: the same provider, trusting the CA that did sign the server, reaches it and gets a
+    # token, so the refusal above is the certificate's and not some earlier failure.
+    trusting = _credential(p4_tenant, folder, openbao_url=url, ca_cert=str(server.ca))
+    assert trusting.token().count(".") == 2
+    trusting.close()
+    assert any(SECRET_ID.encode() in body for body in server.got), server.got
 
 
 def test_r6_the_login_never_follows_a_redirect(p4_tenant, tmp_path):
@@ -159,9 +144,8 @@ def test_r6_no_secret_reaches_a_log_record_or_an_error_text(p4_tenant, tmp_path,
         answer = bao.handle(request)
         if request.method != "GET" or "/identity/oidc/token/" not in request.url.path or answer.status_code != 200:
             return answer
-        part = lambda doc: base64.urlsafe_b64encode(json.dumps(doc).encode()).decode().rstrip("=")  # noqa: E731
         claims = {"iss": "https://openbao.test/v1/identity/oidc", "tenant_id": p4_tenant.tenant_id, "aud": fields["audience"], "iat": int(time.time()), "exp": int(time.time()) + 600}
-        return httpx.Response(200, json={"data": {"token": f"{part({'alg': 'none'})}.{part(claims)}.sig"}})
+        return httpx.Response(200, json={"data": {"token": _jwt(claims)}})
 
     def echo(request: httpx.Request) -> httpx.Response:
         # A refusing issuer (or a proxy in front of it) that echoes the request back.

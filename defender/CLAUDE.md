@@ -1,6 +1,6 @@
 # defender/
 
-Experimental alert-triage product: an in-process PydanticAI investigation runtime plus an offline learning loop. Product agent prompts under `skills/` are distinct from Claude Code skills. The lab environment is maintained separately under `playground-v2/` and `playground-v2/infra/`. <!-- lint-shippable: ok — developer documentation identifies the separate lab, not a product assumption. -->
+Alert-triage product: an in-process PydanticAI investigation runtime plus an offline learning loop. Product agent prompts under `skills/` are distinct from Claude Code skills. The lab environment is maintained separately under `playground-v2/` and `playground-v2/infra/`. <!-- lint-shippable: ok — developer documentation identifies the separate lab, not a product assumption. -->
 
 ## Design and authority
 
@@ -16,7 +16,7 @@ Experimental alert-triage product: an in-process PydanticAI investigation runtim
 - Use existing seams: `_git` for git, `_io` for bounded UTF-8 reads and JSONL, `_frontmatter` for frontmatter, and guarded I/O for model-writable trees. Consult the relevant checker or `docs/development-lints.md` before implementing a competing helper.
 - Diagnostics use `_log` and `logging.getLogger(__name__)`; command results remain stdout, refusals remain visible stderr or API errors. Entrypoints configure logging. Detailed rules are in `docs/runtime-development.md`.
 - Runs live under `$DEFENDER_DATA_ROOT/<tenant>/runs/`, outside tracked source; no default data root or tenant. Devcontainer bind-mount details and existing CLI procedures are in `docs/development-operations.md`.
-- Tests live in `tests/`, including runtime unit tests and hermetic e2e replay. Run affected files and relevant replay locally, not the full suite; every pytest invocation here uses `flock /tmp/defender-pytest.lock`. In worktrees, verify imports and set `PYTHONPATH=<worktree-root>`. <!-- lint-hygiene: ok — shared host test lock, not a product data path. -->
+- Tests live in `tests/`, including runtime unit tests and hermetic e2e replay. While working, run only what your change can reach: `pytest --testmon` plus the relevant replay (see `tests/CLAUDE.md`). Before shipping, run the full suite locally as CI's `test` job does. In worktrees, verify imports and set `PYTHONPATH=<worktree-root>`.
 - `.github/workflows/ci.yml` at the repository root defines current CI gates. Fix new lint findings; never hide them by updating a baseline. Regenerate baselines only for pre-existing findings moved/refingerprinted by an unrelated change, and explain why.
 
 ## Find the relevant context
@@ -43,7 +43,9 @@ as the tenant's own sign-only AppRole, and publish now also refuses a repository
 1. Run migrations (revision `0003_sign_login` adds the generation's sign-login columns; every
    entry point refuses a database still at `0002_tenancy`). Mount transit at `transit/`.
 2. Extend the lifecycle's management policy with create, read, update and delete on
-   `transit/keys/request-token-*`.
+   `transit/keys/request-token-*`. If that policy names AppRoles by prefix (for example
+   `auth/approle/role/delivery-*`), give the new sign-only AppRoles `auth/approle/role/sign-*`
+   the same capabilities; their entities, `tenant-<T>-<salt>-sign`, already match `tenant-*`.
 3. Create the policy `defender-tenant-sign`: `update` on
    `transit/sign/request-token-{{identity.entity.metadata.tenant_id}}`.
 4. Set the proxy's policy to KV read plus `update` on `transit/verify/request-token-*`, and

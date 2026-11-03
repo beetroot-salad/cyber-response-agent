@@ -31,6 +31,9 @@ identity migration in
 [development operations](../defender/docs/development-operations.md#migrating-named-tenants-to-uuids-1187);
 `tenant.py migrate` does not convert tenant IDs and is retired.
 
+
+Run every tool here as a module from the repository root (`defender/.venv/bin/python -m evaluations.held_out ...`); by filename it fails with `No module named 'defender'`.
+
 ```bash
 # Primary: score against ground truth. It walks fixtures/held_out/ and finds each
 # fixture's run through the held-out index F you name (outside every runs and episodes
@@ -39,7 +42,7 @@ identity migration in
 # and the slug's older row (if any) is scored instead. Pin every run of one index to one
 # knowledge revision (--knowledge-commit K, #1108 P4) so its scores are comparable.
 python3 defender/run.py evaluations/fixtures/held_out/<slug>/alert.json --tenant "$TENANT_ID" --no-learn --knowledge-commit K
-python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
+python3 -m evaluations.held_out "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```
 
 **There used to be a second metric here.** `secondary.py` scored a *frozen-actor
@@ -63,6 +66,6 @@ working tree and run the author / lead-author stages against the scenarios in
 (`_tmp/`, `_tmp_lead/`, `results/`, `results_lead/`) are gitignored.
 
 ```bash
-defender/.venv/bin/python evaluations/harness_lead.py \
+defender/.venv/bin/python -m evaluations.harness_lead \
     evaluations/scenarios_lead/underfold-sshd-narrowing
 ```

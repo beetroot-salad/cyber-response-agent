@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from defender._internal_http import internal_client
+from defender._internal_http import internal_client, tls_trust
 from defender.kit.access import HTTP_PROXY, caller_wait_sec
 from defender.kit.faults import ConfigFault, TransportFault
 from defender.kit.settings import system_prefix
@@ -72,7 +72,7 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
 @functools.cache
 def _client() -> httpx.Client:
     """The process's one pooled client to the proxy (`_internal_http`: no outbound web proxy)."""
-    return internal_client()
+    return internal_client(trust=tls_trust())
 
 
 def token_of(ctx: VerbContext) -> str | None:

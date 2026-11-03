@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from defender import _git  # noqa: E402 — needs REPO_ROOT on sys.path
+from defender import _git
 
 
 def run(cmd: list[str], cwd: Path, env: dict | None = None,

@@ -8,6 +8,7 @@ import pytest
 
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.support.shared._tls_server import tls_server
 
 BASE = T.BASE_PATH
 PATH = f"{BASE}/users/x"
@@ -171,3 +172,61 @@ def test_f3_a_401_on_the_access_token_evicts_it_without_a_retry(tmp_path, data_r
     assert second["fault"] is None
     assert len(auth.seen) == 2
     assert [s.header("Authorization") for s in r.up.seen] == [f"Bearer {a}" for a in issued]
+
+
+# --- #1375 O2/O3: trust and the token reply's cap, unchanged by building contexts once ----------
+
+@pytest.mark.parametrize("leg", ["upstream", "token exchange"])
+def test_1375_o2_a_system_is_trusted_by_the_bundle_not_the_environment(
+        tmp_path, data_root, monkeypatch, leg):
+    """#1375 O2: the upstream call and the token exchange verify a system's certificate against
+    the bundle they always used, never one the environment names: with `SSL_CERT_FILE` naming the
+    very CA that signed the system's certificate, the connection is still refused and the server
+    gets no request. Control: a client that does trust that CA reaches the server."""
+    import ssl
+
+    import httpx
+
+    token_reply = json.dumps({"access_token": "AT", "expires_in": 3600}).encode()
+    with tls_server(tmp_path, lambda *_: (200, token_reply)) as server:
+        url = f"https://127.0.0.1:{server.port}"
+        with httpx.Client(verify=ssl.create_default_context(cafile=str(server.ca)),
+                          trust_env=False) as trusting:
+            assert trusting.get(url + "/").status_code == 200, "control: the server answers"
+        server.got.clear()
+        monkeypatch.setenv("SSL_CERT_FILE", str(server.ca))
+        monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+        if leg == "upstream":
+            with T.rig(tmp_path / "forge", data_root, lambda _u: H.declaration(url + BASE)) as r:
+                answer = r.ask(url=f"{url}{PATH}")
+        else:
+            with _oauth_rig(tmp_path, data_root, url + "/token") as r:
+                answer = r.ask()
+            assert r.up.seen == [], "the API request was sent without a token"
+
+    assert answer["fault"] == "TransportFault", answer
+    assert "(ConnectError)" in (answer["detail"] or ""), answer
+    assert server.got == [], "the request reached a server the proxy should not trust"
+
+
+@pytest.mark.parametrize(("size", "fault"), [(65536, None), (65537, "ConfigFault")])
+def test_1375_o3_a_token_reply_over_the_cap_is_a_config_fault_unsent(
+        tmp_path, data_root, size, fault):
+    """#1375 O3: the token endpoint's reply is read up to `TOKEN_REPLY_CAP` (64 KiB): a reply of
+    exactly the cap is used, one byte more is `ConfigFault` saying so, and the API request is never
+    sent."""
+    head = json.dumps({"access_token": "AT-cap", "expires_in": 3600, "pad": ""}).encode()
+    body = head[:-2] + b"x" * (size - len(head)) + head[-2:]
+    assert len(body) == size
+    assert json.loads(body)["access_token"] == "AT-cap"
+    with H.upstream() as auth:
+        auth.replies["/token"] = (200, {"Content-Type": "application/json"}, body)
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
+            answer = r.ask()
+
+    assert answer["fault"] == fault, answer
+    if fault is None:
+        assert r.up.paths() == [PATH]
+    else:
+        assert "more than 65536 bytes" in answer["detail"], answer
+        assert r.up.seen == []

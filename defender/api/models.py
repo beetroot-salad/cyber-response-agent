@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     AfterValidator, AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, field_validator,
@@ -27,9 +27,9 @@ RecordId = Annotated[str, Field(pattern=RECORD_ID_PATTERN)]
 #: returns the record the first attempt made.
 ClientRequestId = Annotated[str, Field(
     min_length=1, max_length=200,
-    description="Minted once per user action. Repeating the request with it answers the record "
-                "that request created; a request answered with an investigation already live "
-                "created nothing, so repeating it is a new request.",
+    description="Minted once per user action. Repeating the request with it answers the latest "
+                "attempt of the request this id started; a request answered with an investigation "
+                "already live started nothing, so repeating it is a new request.",
 )]
 
 
@@ -66,15 +66,14 @@ class AlertSummary(BaseModel):
     vendor: str = Field(description="The ticket system the alert was pulled from.")
     vendor_ticket_id: str = Field(description="The vendor's own id; unique per tenant and vendor.")
     title: str
-    severity: str | None
-    rule: str | None
+    description: str
     fired_at: Instant = Field(description="When the vendor says the alert fired.")
     changed_at: Instant = Field(description="When the vendor last changed the ticket.")
     received_at: Instant = Field(description="When we pulled it; our own clock.")
 
 
 class Alert(AlertSummary):
-    raw: dict[str, Any] = Field(description="The alert exactly as the vendor sent it.")
+    raw: str = Field(description="The alert's text exactly as the vendor sent it: not parsed, not re-serialized.")
 
 
 KnowledgeStatus = Literal["current", "stale", "pinned"]
@@ -99,15 +98,26 @@ class Investigation(BaseModel):
     investigation_id: RecordId
     alert_id: RecordId
     status: InvestigationStatus
+    request_key: str = Field(
+        description="The `client_request_id` of the request this investigation answers.")
+    attempt: int = Field(description="Which attempt of the request this is; the first is 1.")
     disposition: str | None = Field(
         default=None,
         description="Set once the investigation completes with a readable report.",
         json_schema_extra={"enum": [*DISPOSITION_VALUES, None]},
     )
-    cost_usd: float = Field(description="Model cost so far; final once the status is terminal.")
+    cost_usd: float | None = Field(
+        description="Model cost: 0 until the run ends, final once the status is terminal; "
+                    "null when the run ended but its cost could not be read (unknown).")
     created_at: Instant
     started_at: Instant | None = None
     finished_at: Instant | None = None
+    failure_reason: str | None = Field(
+        default=None,
+        description="Set when the investigation failed or was aborted: a fixed reason such as "
+                    "`setup_refused`, `no_report`, `worker_error` or `cancelled`.")
+    failure_message: str | None = Field(
+        default=None, description="Our own words on why it failed; never model or run output.")
     artifacts: list[str] = Field(
         default_factory=list,
         description="Keys readable at `/investigations/{id}/artifacts/{key}`; empty until upload.",

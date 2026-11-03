@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Annotated, NamedTuple
+from typing import Annotated, Any, NamedTuple
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import RedirectResponse
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -132,6 +133,36 @@ async def _administrator(auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)])
 Deps = Annotated[ApiDeps, Depends(_deps)]
 Admin = Annotated[Authenticated, Depends(_administrator)]
 Caller = Annotated[Principal, Depends(_principal)]
+def _declared_query(dependant: Any) -> set[str]:
+    """The query parameter names a route reads, its dependencies' included."""
+    names = {param.alias for param in dependant.query_params}
+    for sub in dependant.dependencies:
+        names |= _declared_query(sub)
+    return names
+
+
+def _any_query(endpoint: Callable[..., Any]) -> Callable[..., Any]:
+    """Mark a route whose caller is not an API client and may add parameters of its own (the
+    identity provider's redirect to the sign-in callback adds `session_state`, `iss`, ...)."""
+    endpoint.__dict__["_any_query"] = True
+    return endpoint
+
+
+async def _no_unknown_query(request: Request) -> None:
+    """Refuse a query parameter the matched route does not read (#1342 r7 R7-2), so a client
+    sending a filter the API dropped or never had learns it instead of getting everything."""
+    route = request.scope.get("route")
+    dependant = getattr(route, "dependant", None)
+    if dependant is None or getattr(getattr(route, "endpoint", None), "_any_query", False):
+        return
+    declared = _declared_query(dependant)
+    unknown = [name for name in dict.fromkeys(request.query_params.keys()) if name not in declared]
+    if unknown:
+        raise RequestValidationError([
+            {"type": "extra_forbidden", "loc": ("query", name), "msg": "Extra inputs are not permitted",
+             "input": request.query_params.get(name)} for name in unknown])
+
+
 Limit = Annotated[int, Query(ge=1, le=MAX_PAGE)]
 Cursor = Annotated[str | None, Query(max_length=2048, description="`next_cursor` from the previous page.")]
 Id = Annotated[str, Path(pattern=RECORD_ID_PATTERN)]
@@ -187,18 +218,16 @@ async def list_alerts(
     caller: Caller,
     fired_after: Instant | None = None,
     fired_before: Instant | None = None,
-    severity: str | None = None,
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> Page[AlertSummary]:
     return await paginate(
         lambda after, n: deps.alerts.list_alerts(
             caller.tenant_id, fired_after=fired_after, fired_before=fired_before,
-            severity=severity, after=after, limit=n,
+            after=after, limit=n,
         ),
         _ALERT_ORDER, list_name="alerts", tenant_id=caller.tenant_id, cursor=cursor, limit=limit,
-        filters={"fired_after": _filter_moment(fired_after), "fired_before": _filter_moment(fired_before),
-                 "severity": severity},
+        filters={"fired_after": _filter_moment(fired_after), "fired_before": _filter_moment(fired_before)},
     )
 
 
@@ -268,7 +297,8 @@ async def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id)
 @investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT,
                         responses=responses(404, 409))
 async def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> None:
-    """Hide an investigation from every read. Its records are kept: lessons cite runs."""
+    """Delete an investigation and every attempt of the request it belongs to. Its run folders
+    stay: lessons cite runs. Refused while any attempt is queued or running."""
     async with _transaction(deps, caller) as tx:
         await tx.delete_investigation(investigation_id)
         await tx.audit("investigation.delete", investigation_id)
@@ -447,6 +477,7 @@ async def login(deps: Deps) -> RedirectResponse:
 
 @auth.get("/auth/callback", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse,
           responses=responses(403, 503, 422, 500))
+@_any_query
 async def callback(request: Request, deps: Deps, code: str = "", state: str = "") -> Response:
     """Finish a sign-in: a session cookie and a redirect to the frontend, or a 403 problem of one
     of four types. The pre-login cookie is cleared whatever the outcome."""
@@ -652,6 +683,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
         version=API_VERSION,
         summary="Stub: the routes and shapes are the contract; the records behind them are not yet real.",
         lifespan=_lifespan,
+        dependencies=[Depends(_no_unknown_query)],
     )
     app.state.deps = deps
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)

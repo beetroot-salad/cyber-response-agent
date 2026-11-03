@@ -162,3 +162,6 @@ experiments/*/sessions/
 /playground-issuer/
 # contract-first plugin working state (scratch maps, findings, hand-off drafts)
 /.contract-first/
+
+# pytest-testmon records (local test selection; see defender/tests/CLAUDE.md)
+.testmondata*

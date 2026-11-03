@@ -4,13 +4,15 @@ A set's kind must fit the scheme (`bearer`/`basic`/`header` need `static`, OAuth
 `oauth-client-credentials`) and every field the scheme reads must be present, or nothing is
 sent. `secret_values` names the values the answer is scrubbed of (every field but the kind's
 public one, r7 A19; the pipeline adds the access token). OAuth access tokens live only in this
-process, keyed by (tenant, system, set version,
-digest of the auth block); a token is reused only while it is unexpired by a margin."""
+process, keyed by (tenant, system, set version, digest of the whole declaration, #1364 O2); a
+token is reused only while it is unexpired by a margin."""
 from __future__ import annotations
 
 import base64
+import dataclasses
 import hashlib
 import json
+import ssl
 import threading
 import time
 from collections.abc import Mapping
@@ -28,12 +30,14 @@ from defender.kit.access import (
     HEADER,
     PASSWORD,
     USERNAME,
+    AccessDeclaration,
     Auth,
     secret_fields,
 )
 from defender.kit.faults import ConfigFault
 from defender.credential_proxy._deadline import Deadline
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, Refused
+from defender.credential_proxy._reply import capped_reply
 
 #: What replaces a secret value the upstream echoed (N6: literal echoes only).
 MARKER = "[credential removed]"
@@ -129,17 +133,22 @@ class _Held:
     good_until: float
 
 
-def _auth_digest(auth: Auth) -> str:
-    block = [auth.token_url, list(auth.scopes)]
-    return hashlib.sha256(json.dumps(block).encode("utf-8")).hexdigest()
+def _declaration_digest(declaration: AccessDeclaration) -> str:
+    """The whole parsed declaration (#1364 O2): any change to it is a change, a reformatted
+    export is not."""
+    canonical = json.dumps(dataclasses.asdict(declaration), sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class AccessTokens:
     """OAuth access tokens held in memory per (tenant, system), each under the set version and
-    the auth block it was issued for (A8). A changed version or block, or a token within
-    `REFRESH_MARGIN_SEC` of expiry, means a fresh exchange; one at a time per system."""
+    the whole declaration it was issued for (A8, #1364 O2). A changed version or declaration, or a
+    token within `REFRESH_MARGIN_SEC` of expiry, means a fresh exchange; one at a time per system,
+    a request waiting its turn no longer than its own deadline (#1364 O1). Each exchange verifies
+    the token endpoint with `trust`, built once by the caller (#1375 O1)."""
 
-    def __init__(self) -> None:
+    def __init__(self, trust: ssl.SSLContext) -> None:
+        self._trust = trust
         self._lock = threading.Lock()
         self._gates: dict[tuple[str, str], threading.Lock] = {}
         self._held: dict[tuple[str, str], _Held] = {}
@@ -151,23 +160,30 @@ class AccessTokens:
         with self._lock:
             return self._gates.setdefault(key, threading.Lock())
 
-    def token(self, client: httpx.Client, tenant_id: str, system: str, auth: Auth,  # noqa: PLR0913 — one exchange's inputs
+    def token(self, tenant_id: str, system: str, declaration: AccessDeclaration,
               creds: CredentialSet, deadline: Deadline) -> str:
-        """An access token for `creds` under `auth`: the held one if still good, else a new
-        exchange (whose failure is `Refused`, never retried)."""
-        key, digest = (tenant_id, system), _auth_digest(auth)
-        with self._gate(key):
+        """An access token for `creds` under `declaration`'s auth: the held one if still good,
+        else a new exchange (whose failure is `Refused`, never retried)."""
+        key, digest = (tenant_id, system), _declaration_digest(declaration)
+        what = f"the token exchange of {system}"
+        gate = self._gate(key)
+        if not gate.acquire(timeout=deadline.left(what)):
+            raise Refused(TRANSPORT, f"the request ran out of time waiting for {what}")
+        try:
             held = self._held.get(key)
             if (held is not None and (held.version, held.digest) == (creds.version, digest)
                     and time.monotonic() < held.good_until):
                 return held.token
             self._held.pop(key, None)
             asked_at = time.monotonic()
-            token, lifetime = _token_exchange(client, auth, creds, system, deadline)
+            token, lifetime = _token_exchange(declaration.auth, creds, system, deadline,
+                                              self._trust)
             if lifetime is not None and lifetime > REFRESH_MARGIN_SEC:
                 self._held[key] = _Held(creds.version, digest, token,
                                         asked_at + lifetime - REFRESH_MARGIN_SEC)
             return token
+        finally:
+            gate.release()
 
     def evict(self, tenant_id: str, system: str, token: str) -> None:
         """Drop the held token for (tenant, system) if it is `token` (the upstream refused it)."""
@@ -178,8 +194,8 @@ class AccessTokens:
                 del self._held[key]
 
 
-def _token_exchange(client: httpx.Client, auth: Auth, creds: CredentialSet,
-                    system: str, deadline: Deadline) -> tuple[str, int | None]:
+def _token_exchange(auth: Auth, creds: CredentialSet, system: str,
+                    deadline: Deadline, trust: ssl.SSLContext) -> tuple[str, int | None]:
     """One client-credentials exchange at the declared token URL (A12): the access token and
     its stated lifetime in seconds (None: not stated, so it is not reused). The client secret
     goes in Basic auth (RFC 6749 2.3.1) and only here."""
@@ -192,28 +208,26 @@ def _token_exchange(client: httpx.Client, auth: Auth, creds: CredentialSet,
     headers = {"Authorization": f"Basic {base64.b64encode(packed).decode('ascii')}",
                "Accept": "application/json"}
     what = f"the token exchange of {system}"
+    timeout = deadline.wait(what)
     try:
-        with client.stream("POST", str(auth.token_url), data=form, headers=headers,
-                           timeout=deadline.wait(what)) as reply:
-            status = reply.status_code
-            body = bytearray()
-            for chunk in reply.iter_bytes():
-                deadline.left(what)
-                body += chunk
-                if len(body) > TOKEN_REPLY_CAP:
-                    raise Refused(CONFIG, f"the token endpoint of {system} answered more than "
-                                          f"{TOKEN_REPLY_CAP} bytes")
+        reply = deadline.run(what, lambda: capped_reply(
+            trust, "POST", str(auth.token_url), cap=TOKEN_REPLY_CAP, timeout=timeout,
+            data=form, headers=headers))
     except httpx.TransportError as e:
         raise Refused(TRANSPORT, f"the token endpoint of {system} is unreachable "
                                  f"({type(e).__name__})") from None
     except httpx.DecodingError:
         raise Refused(CONFIG, f"the token endpoint of {system} answered an undecodable "
                               "body") from None
+    if reply.over:
+        raise Refused(CONFIG, f"the token endpoint of {system} answered more than "
+                              f"{TOKEN_REPLY_CAP} bytes")
+    status, body = reply.status, reply.body
     if status >= 500:
         raise Refused(TRANSPORT, f"the token endpoint of {system} answered {status}")
     if status != 200:
         raise Refused(CONFIG, f"the token endpoint of {system} refused the exchange ({status})")
-    return _issued(bytes(body), system)
+    return _issued(body, system)
 
 
 def _issued(body: bytes, system: str) -> tuple[str, int | None]:

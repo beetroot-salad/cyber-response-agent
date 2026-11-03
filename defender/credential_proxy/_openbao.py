@@ -23,12 +23,13 @@ from typing import Any
 import httpx
 
 from defender import tenancy
-from defender._internal_http import internal_async_client, internal_client
+from defender._internal_http import internal_async_client, internal_client, tls_trust
 from defender.configuration.issuer import DEPLOYMENT_ISSUER, TRANSIT_MOUNT
 from defender.kit.access import CREDENTIAL_KINDS
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.kit.verbs import is_system_name
 from defender.credential_proxy._credentials import CredentialSet
+from defender.credential_proxy._deadline import current as current_deadline
 
 #: How long one call to OpenBao may take, in seconds.
 OPENBAO_TIMEOUT_SEC = 10.0
@@ -87,10 +88,11 @@ def openbao_fault(status: int, detail: str) -> AdapterFault:
 
 class _OpenBao:
     """One login's calls to one OpenBao server. The token is never shown. `transport` is a test's
-    `httpx` transport for the synchronous calls (none: the network)."""
+    `httpx.MockTransport` (none: the network): it serves the synchronous calls and the
+    asynchronous ones (the secret port's, and any made inside a proxied request)."""
 
     def __init__(self, *, addr: str, token: str, mount: str,
-                 transport: httpx.BaseTransport | None = None) -> None:
+                 transport: httpx.MockTransport | None = None) -> None:
         if not isinstance(addr, str) or not addr.startswith(("http://", "https://")):
             raise ConfigFault("the OpenBao address must be an http(s) URL")
         if not isinstance(token, str) or not token or not token.isprintable():
@@ -98,9 +100,14 @@ class _OpenBao:
         self.addr = addr.rstrip("/")
         self.mount = _check_name(mount, "the mount")
         self._token = token
-        #: One pooled connection for this login's calls, not a new one per call.
-        self._client = internal_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert, transport=transport,
-                                       timeout=OPENBAO_TIMEOUT_SEC)
+        self._transport = transport
+        #: One pooled connection for this login's calls made outside a proxied request.
+        self._client = internal_client(trust=tls_trust(DEPLOYMENT_ISSUER.ca_cert),
+                                       transport=transport, timeout=OPENBAO_TIMEOUT_SEC)
+        #: The trust of the calls made on the event loop, each on its own short-lived client:
+        #: built once, here, since building it blocks the loop (#1375 O1), and apart from the
+        #: pooled client's, which other threads use.
+        self._loop_trust = tls_trust(DEPLOYMENT_ISSUER.ca_cert)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(addr={self.addr!r}, mount={self.mount!r})"
@@ -114,17 +121,21 @@ class _OpenBao:
         return {"X-Vault-Token": self._token}
 
     def _call(self, method: str, rest: str, what: str, json: Any = None) -> httpx.Response:
+        """One synchronous call; inside a proxied request, it runs under that request's deadline
+        (#1364 O1), so a slow OpenBao cannot hold the proxy past it."""
+        deadline = current_deadline()
         try:
-            return self._client.request(method, self._url(rest), json=json,
-                                        headers=self._headers())
+            if deadline is None:
+                return self._client.request(method, self._url(rest), json=json,
+                                            headers=self._headers())
+            return deadline.run(what, lambda: self._acall(method, rest, what, json))
         except httpx.HTTPError as e:
             raise TransportFault(f"OpenBao at {self.addr} is unreachable for {what} "
                                  f"({type(e).__name__})") from None
 
-    async def _acall(self, method: str, rest: str, what: str,
-                     json: Any = None) -> httpx.Response:
+    async def _acall(self, method: str, rest: str, what: str, json: Any = None) -> httpx.Response:
         try:
-            async with internal_async_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert,
+            async with internal_async_client(trust=self._loop_trust, transport=self._transport,
                                              timeout=OPENBAO_TIMEOUT_SEC) as client:
                 return await client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
@@ -214,7 +225,7 @@ class TransitVerifier(_OpenBao):
     destroyed (offboarded) is refused by OpenBao, `ConfigFault`."""
 
     def __init__(self, *, addr: str, token: str,
-                 transport: httpx.BaseTransport | None = None) -> None:
+                 transport: httpx.MockTransport | None = None) -> None:
         super().__init__(addr=addr, token=token, mount=TRANSIT_MOUNT, transport=transport)
 
     def verify(self, payload: bytes, signature: str, *, tenant_id: str) -> bool:
