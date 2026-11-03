@@ -162,8 +162,8 @@ def test_the_kit_interface_offering_a_clock_under_any_name_is_found(tmp_path, ex
 
 
 def test_the_kit_interface_with_no_clock_is_not_found(tmp_path):
-    """Positive control: a kit protocol with `env` and a date-typed field, no `now()`, is clean (L1)."""
-    kit = f"from datetime import datetime\n{_KIT}    @property\n    def started(self) -> datetime: ...\n"
+    """Positive control: a kit protocol with `env` and a non-time field, no `now()`, is clean (L1)."""
+    kit = f"from datetime import datetime\n{_KIT}    @property\n    def system(self) -> str: ...\n"
     assert _GATE.scan(_tree(tmp_path, {"kit/verbs.py": kit})) == []
 
 
