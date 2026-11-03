@@ -376,3 +376,33 @@ def test_1375_o1_a_request_builds_no_tls_context_on_any_leg(tmp_path, data_root)
     assert (len(bao.seen), len(issued), r.up.paths()) == (2, 1, [f"{API}/users/x"]), \
         "control: every leg ran"
     assert calls["context"] == 0, f"a request built {calls['context']} TLS contexts"
+
+
+TENANT_1384 = "11111111-1111-4111-8111-111111111111"
+
+
+def test_1384_the_secret_writers_async_calls_go_through_its_injected_transport():
+    """#1384: an `OpenBaoSecrets` built with a test transport serves its write and its
+    existence check from that transport, not by dialing `addr`. The address is one nothing
+    listens on, so a call that ignores the transport fails instead of being answered."""
+    import asyncio
+
+    import httpx
+
+    seen: list[tuple[str, str]] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        if request.method == "POST":
+            return httpx.Response(200, json={"data": {"version": 1}})
+        return httpx.Response(200, json={"data": {"current_version": 1, "versions": {"1": {}}}})
+
+    secrets = proxy().OpenBaoSecrets(addr="http://127.0.0.1:1", token="t", mount="secret",
+                                     transport=httpx.MockTransport(answer))
+
+    async def both() -> bool:
+        await secrets.put_credentials(TENANT_1384, "identity", "static", {"api_key": "k"})
+        return await secrets.has_credentials(TENANT_1384, "identity")
+
+    assert asyncio.run(both()) is True
+    assert [method for method, _ in seen] == ["POST", "GET"], seen
