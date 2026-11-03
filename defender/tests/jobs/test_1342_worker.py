@@ -3393,7 +3393,7 @@ async def test_b5_r5_13_an_end_write_to_a_database_that_does_not_answer_is_retri
         inv = await _queued(inner, ticket="T-1", key="k1")
         serving = asyncio.create_task(_worker(world, used, child, **_FAST).serve())
         try:
-            await _until(lambda: used.tries >= 1, "the first failed end write try", timeout=20)
+            await _until(lambda: bool(used.errors), "the first failed end write", timeout=20)
             later = await _queued(inner, ticket="T-2", key="k2")
             await _until(lambda: used.tries >= 3, "the end write to be tried again and again", timeout=20)
             assert used.errors, "premise: the unreachable database raised nothing"
@@ -3444,7 +3444,7 @@ async def test_b5_t2_a_renewal_that_errors_fences_nothing_claims_nothing_and_the
 
 
 async def test_b11_a_hand_back_that_errors_gets_one_try_and_the_stop_returns_promptly_the_lease_lapsing_on_its_own(world):
-    """SIGTERM with the store down and a child running: `serve()` returns promptly, the hand-back is tried at most twice, the row stays `running` unmarked and its lease lapses by itself. (B11, r5 item 3)"""
+    """SIGTERM with the store down and a child running: `serve()` returns promptly, the hand-back is tried once, the row stays `running` unmarked and its lease lapses by itself. (B11, r5 item 3)"""
     release = world["tmp"] / "release"  # never touched: the child is still running when the stop lands
     child = _child(world, files=_committed(), wait_for=release, term="mark", term_mark=_term_mark(world))
     dsn = world["dsn"]
