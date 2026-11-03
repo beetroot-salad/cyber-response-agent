@@ -17,11 +17,12 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from defender._text import postgres_can_hold
 from defender.database import async_engine, sessions
 from defender.records.formats import AlertId, InvestigationId, TenantId, admit
 
 from .audit import SYSTEM, announce
-from .errors import Conflict, NotFound, UnknownReference
+from .errors import Conflict, NotFound, UnknownReference, UnstorableText
 from defender.tenancy.models import TenantRecord
 
 from .models import (
@@ -48,16 +49,11 @@ class _Refused(Exception):
         self.sqlstate = sqlstate
 
 
-def _postgres_can_hold(text: str) -> bool:
-    """Whether PostgreSQL can hold `text`. Asked of free text only (the request key): an id is a
-    checked `UuidId` and needs no such question (#1382)."""
-    if "\x00" in text:
-        return False
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return True
+def _refuse_unstorable_text(**fields: str) -> None:
+    """`UnstorableText` naming the first field PostgreSQL text cannot hold, before any query."""
+    for name, text in fields.items():
+        if not postgres_can_hold(text):
+            raise UnstorableText(f"{name} holds a NUL or a lone surrogate, which PostgreSQL text cannot hold")
 
 
 class JobStore:
@@ -85,7 +81,10 @@ class JobStore:
         changed_at: _dt.datetime, received_at: _dt.datetime, title: str, description: str, raw: bytes,
     ) -> StoredAlert:
         """Store an alert's exact bytes. `AlertRefused` for anything alert admission refuses; `Conflict`
-        for a second alert with this vendor's ticket id; `UnknownReference` for a tenant with no row."""
+        for a second alert with this vendor's ticket id; `UnknownReference` for a tenant with no row;
+        `UnstorableText` for a text field PostgreSQL cannot hold."""
+        _refuse_unstorable_text(vendor=vendor, vendor_ticket_id=vendor_ticket_id, title=title,
+                                description=description)
         admit(raw)
         row = AlertRow(
             id=AlertId.mint(), tenant_id=tenant_id, vendor=vendor, vendor_ticket_id=vendor_ticket_id,
@@ -130,8 +129,7 @@ class JobStore:
         §4.1): the latest attempt under the key; else the alert's live investigation, without
         recording this key; else a new attempt 1. `created` only when this call inserted the row.
         `UnknownReference` for an alert this tenant lacks."""
-        if not _postgres_can_hold(request_key):
-            raise ValueError("the request key cannot be stored")
+        _refuse_unstorable_text(request_key=request_key)
         async with self._tx() as s:
             locked = (await s.execute(select(AlertRow.id).where(
                 AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id).with_for_update())).first()

@@ -7,7 +7,6 @@ Tenants are tenancy's (#1214): a membership refers to `tenancy.tenants`."""
 from __future__ import annotations
 
 import datetime as _dt
-import unicodedata
 from typing import Annotated, Literal, get_args
 
 from pydantic import AfterValidator
@@ -16,6 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
+from defender._text import postgres_can_hold
 from defender.database import Base, IdColumn
 from defender.records.formats import MembershipId, TenantId, UserId
 # The memberships' foreign key names `tenancy.tenants`: its table must be on the metadata too.
@@ -33,7 +33,7 @@ def normalize_email(raw: str) -> str:
     email = raw.strip().lower()
     if not email:
         raise DataRuleViolation("an email address cannot be blank")
-    if any(c == "\x00" or unicodedata.category(c) == "Cs" for c in email):
+    if not postgres_can_hold(email):
         raise DataRuleViolation(f"{raw!r} is not an email address: it has a NUL or an invalid character")
     return email
 
