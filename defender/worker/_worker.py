@@ -106,7 +106,7 @@ def _ending_from(end: job_lane.JobEnd | None, returncode: int,
     return _Ending(_FAILED, failure_reason=_NO_REPORT, failure_message=why)
 
 
-async def _settled(spawn: asyncio.Future[asyncio.subprocess.Process]) -> asyncio.subprocess.Process | None:
+async def _spawn_outcome(spawn: asyncio.Future[asyncio.subprocess.Process]) -> asyncio.subprocess.Process | None:
     """The child a cancelled row's spawn made, waiting for the spawn to finish however many
     further cancels arrive (r7 D-ac: a child made after the cancel is still this row's to end);
     None when the spawn failed. Waiting on it never cancels the spawn itself."""
@@ -316,7 +316,7 @@ class Worker:
             try:
                 proc = await asyncio.shield(spawn)
             except asyncio.CancelledError:
-                proc = await _settled(spawn)
+                proc = await _spawn_outcome(spawn)
                 if proc is not None:
                     _logger.warning("investigation %s: the worker is leaving; ending child %d", inv, proc.pid)
                     await self._end_child(proc)
