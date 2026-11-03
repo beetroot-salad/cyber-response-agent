@@ -96,14 +96,14 @@ class IdentityRepository(Protocol):
     async def request_set_password(self, user_id: UserId, *, now: _dt.datetime) -> int: ...
     async def request_notification(self, membership_id: MembershipId, *, now: _dt.datetime) -> int: ...
     async def claim_set_password(
-        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[UserId] = (),
     ) -> User | None:
         """An `invited` user with a due set-password send that is not in `skip`, or `None`.
         Moves its next try to `hold_until` before returning, so any other claimant skips it
         until then; nothing stays locked after the call."""
         ...
     async def claim_notification(
-        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[MembershipId] = (),
     ) -> Membership | None:
         """As `claim_set_password`, for an `invited` row with a due notification."""
         ...

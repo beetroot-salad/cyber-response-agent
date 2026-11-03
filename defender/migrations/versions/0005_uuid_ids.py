@@ -1,8 +1,9 @@
 """Record ids are PostgreSQL `uuid` (#1382): tenant, user, membership, alert and investigation ids,
 and every column that refers to one. A row whose id is not canonical lowercase UUID text (the
 grammar the code checks; PostgreSQL's cast would also take upper case, braces or no hyphens and
-rewrite them, so a row would lose the id its run folders carry) stops the upgrade, naming the row,
-with nothing changed. A membership's `invited_by`/`ended_by` hold a user id or,
+rewrite them, so a row would lose the id its run folders carry), or an `invited_by`/`ended_by` that
+names no user (the new foreign key's refusal would name neither), stops the upgrade, naming the
+row, with nothing changed. A membership's `invited_by`/`ended_by` hold a user id or,
 for the system, NULL (they held the text `'system'`) and now refer to `identity.users`.
 
 Revision ID: 0005_uuid_ids
@@ -34,7 +35,8 @@ _CANONICAL = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 
 class NotCanonical(RuntimeError):
-    """A row holds an id that is not canonical UUID text; the upgrade changes nothing."""
+    """A row holds an id that is not canonical UUID text, or an actor that is no user; the upgrade
+    changes nothing."""
 
 
 #: Every id column, by table.
@@ -74,7 +76,7 @@ def upgrade() -> None:
 
 def _refuse_non_canonical() -> None:
     """`NotCanonical` naming the first id, by table and column, that is not canonical UUID text
-    (NULL actors excepted: the system's, set just above)."""
+    (NULL actors excepted: the system's, set just above), then the first actor that is no user."""
     bind = op.get_bind()
     for table, names in _ID_COLUMNS:
         for column in names:
@@ -83,3 +85,10 @@ def _refuse_non_canonical() -> None:
             if found is not None:
                 raise NotCanonical(f"{table}.{column} holds {found!r}, not canonical lowercase UUID text: "
                                    "recreate this development database (#1382)")
+    for column in ("invited_by", "ended_by"):
+        found = bind.execute(sa.text(
+            f"SELECT m.id, m.{column} FROM identity.memberships m WHERE m.{column} IS NOT NULL"
+            f" AND NOT EXISTS (SELECT 1 FROM identity.users u WHERE u.id = m.{column}) LIMIT 1")).first()
+        if found is not None:
+            raise NotCanonical(f"identity.memberships.{column} of membership {found[0]!r} names {found[1]!r}, which is "
+                               "no user: recreate this development database (#1382)")

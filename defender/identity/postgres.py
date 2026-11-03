@@ -244,7 +244,7 @@ class PostgresIdentityRepository:
         return int(seq)
 
     async def claim_set_password(
-        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[UserId] = (),
     ) -> User | None:
         due = (select(User.id).where(
             User.status == "invited", User.set_password_requested_seq > User.set_password_sent_seq,
@@ -256,7 +256,7 @@ class PostgresIdentityRepository:
             .returning(User).execution_options(synchronize_session=False))
 
     async def claim_notification(
-        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[MembershipId] = (),
     ) -> Membership | None:
         due = (select(Membership.id).where(
             Membership.status == "invited", Membership.notify_requested_seq > Membership.notify_sent_seq,

@@ -92,3 +92,16 @@ def test_a_row_whose_id_is_not_canonical_uuid_text_stops_the_upgrade_and_changes
     assert execute(empty_database, "SELECT version_num FROM public.alembic_version") == [(JOBS,)]
     assert _types(empty_database)[("tenancy", "tenants", "id")] == "text"
     assert execute(empty_database, "SELECT invited_by FROM identity.memberships ORDER BY id") == [("system",), (ANN,)]
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("column", ["invited_by", "ended_by"])
+def test_an_actor_who_is_no_user_stops_the_upgrade_naming_the_row(empty_database, column):
+    """D2: the new actor foreign keys would refuse a membership whose actor names no user without naming the row; the
+    upgrade stops first, naming it, and changes nothing."""
+    _at_jobs(empty_database)
+    ghost = "d2000000-0000-4000-8000-0000000000ff"
+    execute(empty_database, f"UPDATE identity.memberships SET {column} = %s WHERE user_id = %s", (ghost, ANN))
+    with pytest.raises(Exception, match=rf"memberships\.{column} of membership .* names '{ghost}', which is no user"):  # noqa: PT011
+        _upgrade_to(empty_database, "head")
+    assert execute(empty_database, "SELECT version_num FROM public.alembic_version") == [(JOBS,)]

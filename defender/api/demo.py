@@ -15,11 +15,10 @@ import logging
 import uuid
 from collections.abc import Callable, Sequence
 from functools import partial
-from typing import TypeVar
 
 from defender.records import RUN_LAYOUT
-from defender.tenancy import InMemoryTenantRepository, is_valid_tenant_id
-from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, UuidId
+from defender.tenancy import InMemoryTenantRepository
+from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, TenantRefused
 
 from defender.identity import (
     Bootstrap,
@@ -30,6 +29,7 @@ from defender.identity import (
 )
 
 from .fakes import (
+    _Id,
     InMemorySecrets,
     InMemoryStore,
     StubArtifactLinks,
@@ -38,7 +38,6 @@ from .fakes import (
 from .models import Alert, Investigation, LearningJob, Lesson, SystemSettings
 from .ports import ApiDeps
 
-_Id = TypeVar("_Id", bound=UuidId)
 
 #: The users each tenant gets, each signed in as `<tenant>-<role>` (see `demo_sessions`).
 DEMO_ROLES = ("analyst", "engineer")
@@ -102,10 +101,10 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
         raise ValueError("name at least one tenant")
     if len(set(tenants)) != len(tenants):
         raise ValueError(f"tenants repeat: {list(tenants)}")
-    for raw in tenants:
-        if not is_valid_tenant_id(raw):
-            raise ValueError(f"not a tenant id: {raw!r}")
-    tenant_ids = [TenantId(raw) for raw in tenants]
+    try:
+        tenant_ids = [TenantId(raw) for raw in tenants]
+    except TenantRefused as refused:
+        raise ValueError(f"not a tenant id: {refused}") from None
     secrets = InMemorySecrets()
     store = InMemoryStore(clock)
     now = clock()

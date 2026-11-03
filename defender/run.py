@@ -25,7 +25,7 @@ takes precedence over the ambient value.
 
 from __future__ import annotations
 
-from defender.records.formats import DataRoot, RunsBase
+from defender.records.formats import DataRoot, RunsBase, TenantId
 
 import logging
 import json
@@ -710,7 +710,7 @@ def _knowledge_pin(ns: argparse.Namespace) -> str | None:
 
 
 def _publish_report(
-    publish: Callable[..., object] | None, tenant: tenancy.Tenant, data_root: DataRoot,
+    publish: PublishLaunch | None, tenant: tenancy.Tenant, data_root: DataRoot,
     records: tenancy.TenantDirectory,
 ) -> run_knowledge.PublishReport:
     """The launch-time publish's outcome (#1108 P4, U7): the child is handed identifiers only
@@ -721,7 +721,7 @@ def _publish_report(
     try:
         launch = publish if publish is not None else _default_publish(records)
         with _stopped_by_sigterm():
-            line = launch(str(tenant.id), data_root=tenancy.data_root_for_child(data_root))
+            line = launch(tenant.id, data_root=tenancy.data_root_for_child(data_root))
     except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
         from defender.tenancy import record_report
 
@@ -750,7 +750,14 @@ def _stopped_by_sigterm() -> Iterator[None]:
         signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
 
 
-def _default_publish(records: tenancy.TenantDirectory) -> Callable[..., object]:
+class PublishLaunch(Protocol):
+    """The launch-time publish run start calls (`publish_launch.launch_publish`, or an in-process
+    caller's stand-in): typed, so the tenant id reaches the records it writes as a `TenantId`."""
+
+    def __call__(self, tenant_id: TenantId, *, data_root: Path) -> object: ...
+
+
+def _default_publish(records: tenancy.TenantDirectory) -> PublishLaunch:
     """The real launch-time publish: a separate child process (O-BUDGET, P-3), whose outcomes
     only the launcher sees are recorded through this run's tenant records."""
     from defender.investigation.publish_launch import launch_publish as real
@@ -759,7 +766,7 @@ def _default_publish(records: tenancy.TenantDirectory) -> Callable[..., object]:
 
 
 def _knowledge_source(
-    tenant: tenancy.Tenant, *, pin: str | None, publish: Callable[..., object] | None,
+    tenant: tenancy.Tenant, *, pin: str | None, publish: PublishLaunch | None,
     data_root: DataRoot, records: tenancy.TenantDirectory,
 ) -> run_knowledge.KnowledgeSource:
     """Which export this run reads and why: the pinned one (no publish), else `current` after
@@ -1102,7 +1109,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
     oracle: Any,
     verifier: Any,
     roster: Any,
-    publish: Callable[..., object] | None,
+    publish: PublishLaunch | None,
     signer: Any = None,
     proxy_url: str | None = None,
     issuer_transport: Any = None,
@@ -1275,7 +1282,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     oracle: Any = None,
     verifier: Any = None,
     roster: Any = None,
-    publish: Callable[..., object] | None = None,
+    publish: PublishLaunch | None = None,
     directory: tenancy.TenantDirectory | None = None,
     signer: Any = None,
     proxy_url: str | None = None,
@@ -1482,7 +1489,7 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
     preflight: Callable[..., int] = preflight_role_models,
     materialize: Callable[..., Run] = _materialize_run,
     roster: Any = None,
-    publish: Callable[..., object] | None = None,
+    publish: PublishLaunch | None = None,
 ) -> int:
     """The job entry (#1342): `run.py --job <id> --tenant <T> --parent-pid <pid>`, the worker's
     child. The job composition: tied to its worker first, then the job lane's door opened before

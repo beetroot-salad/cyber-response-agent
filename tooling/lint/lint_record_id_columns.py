@@ -6,8 +6,10 @@ its family's type (`TenantId`, `AlertId`, ...). A column declared otherwise (`Te
 bare `Uuid`) brings back free-text ids that read back unchecked as plain `str`.
 
 In every production module under `defender/` (tests excluded), in a class that sets `__tablename__`,
-a column whose `Mapped[...]` annotation names an id family (`X` or `X | None`), and the table's own
-`id` whatever its annotation, must be `mapped_column(IdColumn(<that family>), ...)`. The families are
+a column whose `Mapped[...]` annotation names an id family (`X`, `X | None` or `Optional[X]`), a
+column with a `ForeignKey` (every reference in the schema is to a record id), and the table's own
+`id`, whatever their annotation, must be `mapped_column(IdColumn(<family>), ...)`, of the annotated
+family when there is one. The families are
 read from `defender/records/`: every class there descending from `UuidId`. A tree with no such
 column, or no family, is a finding (the rule moved), never a pass. A file that does not parse is
 exit 2. No baseline, no suppression.
@@ -66,11 +68,17 @@ def _annotated_family(annotation: ast.expr, families: set[str]) -> str | None:
     names = [inner]
     if isinstance(inner, ast.BinOp) and isinstance(inner.op, ast.BitOr):
         names = [inner.left, inner.right]
+    elif isinstance(inner, ast.Subscript) and ast.unparse(inner.value).split(".")[-1] == "Optional":
+        names = [inner.slice]
     for node in names:
         name = ast.unparse(node).split(".")[-1]
         if name in families:
             return name
     return None
+
+
+def _has_foreign_key(call: ast.Call) -> bool:
+    return any(isinstance(a, ast.Call) and ast.unparse(a.func).split(".")[-1] == "ForeignKey" for a in call.args)
 
 
 def _column_family(call: ast.Call) -> str | None:
@@ -107,7 +115,7 @@ def scan(root: Path) -> list[str]:
         for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and _is_table(n)):
             for name, annotation, call in _columns(cls):
                 family = _annotated_family(annotation, families) if annotation is not None else None
-                if family is None and name != "id":
+                if family is None and name != "id" and not _has_foreign_key(call):
                     continue
                 checked += 1
                 declared = _column_family(call)

@@ -57,20 +57,24 @@ _REFERENCES = {
     "text": ("Mapped[TenantId]", "Text", True),
     "optional-text": ("Mapped[TenantId | None]", "Text", True),
     "wrong-family": ("Mapped[TenantId]", "IdColumn(AlertId)", True),
+    "optional-old-spelling": ("Mapped[Optional[TenantId]]", "IdColumn(TenantId)", False),
+    "optional-old-spelling-text": ("Mapped[Optional[TenantId]]", "Text", True),
     "free-text-not-an-id": ("Mapped[str]", "Text", False),
+    "free-text-with-a-foreign-key": ("Mapped[str]", "Text, ForeignKey('tenancy.tenants.id')", True),
+    "id-column-with-a-foreign-key": ("Mapped[TenantId]", "IdColumn(TenantId), ForeignKey('tenancy.tenants.id')", False),
 }
 
 
 @pytest.mark.parametrize("case", sorted(_REFERENCES))
 def test_a_reference_column_is_held_to_its_annotated_family(tmp_path, case):
-    """Not only `id`: a column annotated with an id family, foreign key or not, is that family's
-    `IdColumn` (a column referring to an id with no foreign key once escaped the rule)."""
+    """Not only `id`: a column annotated with an id family, foreign key or not, is that family's `IdColumn`, and a
+    column with a foreign key is an `IdColumn` whatever its annotation (each once escaped the rule)."""
     annotation, column, found = _REFERENCES[case]
     src = _NEW + f"    tenant_id: {annotation} = mapped_column({column})\n"
     findings = _GATE.scan(_tree(tmp_path, **{"m.py": src}))
     assert bool(findings) is found, findings
     if found:
-        assert "`tenant_id`" in findings[0] and "IdColumn(TenantId)" in findings[0], findings
+        assert "`tenant_id`" in findings[0] and "IdColumn(" in findings[0], findings
 
 
 def test_a_family_is_found_through_an_intermediate_base(tmp_path):

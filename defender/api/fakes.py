@@ -11,7 +11,7 @@ from pydantic import AwareDatetime
 
 from defender._model import model
 from defender.records import formats
-from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId
+from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, UuidId
 
 from .models import (
     Alert,
@@ -34,7 +34,8 @@ from .ports import (
 )
 
 T = TypeVar("T")
-_Id = TypeVar("_Id", bound=formats.UuidId)
+#: Any one id family (`demo` mints by family too).
+_Id = TypeVar("_Id", bound=UuidId)
 
 
 def _newest_after(rows: list[T], key: Callable[[T], TimePosition], after: TimePosition | None,
@@ -164,7 +165,7 @@ class InMemoryStore:
         if await self.get_alert(tenant_id, alert_id) is None:
             raise UnknownReference(f"no alert {alert_id!r}")
         investigation = Investigation(
-            investigation_id=self._mint(formats.InvestigationId), alert_id=alert_id, status="queued",
+            investigation_id=self._mint(InvestigationId), alert_id=alert_id, status="queued",
             request_key=client_request_id, attempt=1, cost_usd=0.0, created_at=self._clock(),
         )
         return self.add_investigation(tenant_id, investigation), True
@@ -212,7 +213,7 @@ class InMemoryStore:
         if investigation is None:
             raise UnknownReference(f"no investigation {investigation_id!r}")
         job = LearningJob(
-            learning_job_id=self._mint(formats.LearningJobId), investigation_id=investigation_id,
+            learning_job_id=self._mint(LearningJobId), investigation_id=investigation_id,
             alert_id=investigation.alert_id, status="queued", trigger="explicit",
             created_at=self._clock(),
         )

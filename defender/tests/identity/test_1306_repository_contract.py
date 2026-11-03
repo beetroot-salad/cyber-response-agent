@@ -151,6 +151,23 @@ async def test_a_membership_for_an_unknown_user_is_refused(seeded):
         await seeded.ensure_invitation(NO_SUCH_USER, T1, invited_by=None, now=NOW)
 
 
+async def test_an_actor_who_is_no_user_is_refused_and_changes_nothing(seeded):
+    """#1382 D2: `invited_by`/`ended_by` name a user, or None for the system; a user that does not exist is refused
+    by the invite, the seeder and the end, and the rows stay as they were."""
+    u, v = await _user(seeded, "u@x.org"), await _user(seeded, "v@x.org")
+    with pytest.raises(DataRuleViolation):
+        await seeded.ensure_invitation(u.id, T1, invited_by=NO_SUCH_USER, now=NOW)
+    with pytest.raises(DataRuleViolation):
+        await seeded.add_membership(u.id, T1, status="ended", invited_by=None, created_at=NOW, ended_at=NOW,
+                                    ended_by=NO_SUCH_USER)
+    assert await seeded.memberships_of_tenant(T1) == []
+    mem = await _active(seeded, v)
+    with pytest.raises(DataRuleViolation):
+        await seeded.end_membership(mem.id, ended_by=NO_SUCH_USER, now=NOW)
+    assert (await seeded.membership(mem.id)).status == "active"
+    assert await seeded.end_membership(mem.id, ended_by=None, now=NOW) is True, "control: the system may end it"
+
+
 async def test_a_membership_row_outlives_revoke_and_end(seeded):
     """O8: a tenant's membership rows are kept after revoke/end, so 'has any row' (the seeder's
     once-only guard) stays true. The port's `tenant_has_ever_had_membership` was removed with its

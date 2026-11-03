@@ -167,6 +167,12 @@ class InMemoryIdentityRepository:
         if self._tenants.state_of(tenant_id) is None:
             raise DataRuleViolation(f"no tenant {tenant_id!r}")
 
+    def _refuse_unknown_actor(self, *actors: UserId | None) -> None:
+        """An actor (`invited_by`, `ended_by`) is a user or None for the system: the foreign key #1382 gave them."""
+        for actor in actors:
+            if actor is not None and actor not in self._users:
+                raise DataRuleViolation(f"no user {actor!r} to act")
+
     def _insert_membership(self, **fields: object) -> Membership:
         row = Membership(**fields)  # type: ignore[arg-type]
         self._memberships[row.id] = row
@@ -180,6 +186,7 @@ class InMemoryIdentityRepository:
     ) -> Membership:
         """Seeder."""
         self._refuse_dangling(user_id, tenant_id)
+        self._refuse_unknown_actor(invited_by, ended_by)
         check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at)
         if status in _LIVE and self._live_row(user_id, tenant_id) is not None:
             raise DataRuleViolation("the user already has a live membership in this tenant")
@@ -196,6 +203,7 @@ class InMemoryIdentityRepository:
         live = self._live_row(user_id, tenant_id)
         if live is not None:
             return None if live.status == "active" else _copy(live)
+        self._refuse_unknown_actor(invited_by)
         return _copy(self._insert_membership(
             user_id=user_id, tenant_id=tenant_id, status="invited", invited_by=invited_by,
             created_at=now, expires_at=expires_at, accepted_at=None, ended_at=None, ended_by=None))
@@ -215,6 +223,7 @@ class InMemoryIdentityRepository:
         row = self._memberships.get(membership_id)
         if row is None or row.status != "active":
             return False
+        self._refuse_unknown_actor(ended_by)
         self._update_membership(membership_id, status="ended", ended_at=now, ended_by=ended_by)
         return True
 
@@ -260,7 +269,7 @@ class InMemoryIdentityRepository:
         return seq
 
     async def claim_set_password(
-        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[UserId] = (),
     ) -> User | None:
         found = next((u for u in self._users.values()
                       if u.status == "invited" and u.set_password_requested_seq > u.set_password_sent_seq
@@ -271,7 +280,7 @@ class InMemoryIdentityRepository:
         return _copy(self._users[found.id])
 
     async def claim_notification(
-        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[str] = (),
+        self, *, now: _dt.datetime, hold_until: _dt.datetime, skip: Collection[MembershipId] = (),
     ) -> Membership | None:
         found = next((m for m in self._memberships.values()
                       if m.status == "invited" and m.notify_requested_seq > m.notify_sent_seq
