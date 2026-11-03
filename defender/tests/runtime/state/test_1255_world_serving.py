@@ -491,6 +491,38 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
     assert marker in inbound, "the oracle was not told what the source's closing comment says"
 
 
+@pytest.mark.parametrize(("undone", "expected"), [("source-write", "reconstructed"),
+                                                  ("analyst-note", ORACLE)])
+def test_1385_undoing_the_sources_own_post_fork_write_alone_is_reconstructed(
+        tmp_path: Path, undone: str, expected: str) -> None:
+    """World b serving its ticket without the source's own closing comment is `reconstructed`;
+    removing anyone else's comment is `oracle` (T2, O9)."""
+    from defender.tests.support.runtime.engine import _spec767 as S767
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+    source_dir = S767.make_run(tmp_path / "runs", name=S24.SOURCE_RUN_ID,
+                               disposition="malicious", body=CLOSING_MARKER)
+    store = S767.FakeStore(tmp_path / "store")
+    S767.record(source_dir, store)
+    closing = {"comment_id": "c-2", "author": "defender", "body": store.wire_body()}
+    est = S24.estate(tmp_path)
+    est.answer("siem-x", "lookup", CASE, {**TICKET_AT_FORK, "comments": [ANALYST_NOTE, closing]})
+    gone, kept = (closing, ANALYST_NOTE) if undone == "source-write" else (ANALYST_NOTE, closing)
+    side = S24.query_params(f"comment_id:{gone['comment_id']}")
+    est.answer("siem-x", "query", side, {"rows": [gone]})
+    served = {**TICKET_AT_FORK, "comments": [kept]}
+    oracle = S24.oracle(S24.submit(served, S24.claim(removed=[S24.removed(
+        gone, system="siem-x", verb="query", params=side, count=1)])))
+    ep = S24.episode_v2(tmp_path, base_rows=[])
+    world = W.world_registry_with_source(ep, "b", est, source_run=fixture_run(source_dir),
+                                         oracle=oracle, verifier=S24.passing_verifier())
+
+    assert S24.call(world, "siem-x", "lookup", est.ctx(tmp_path / "run"), **CASE) == served
+    assert oracle.submissions() == 1, "the removal was refused"
+    rows = _rows_asking(S24.ledger_rows(ep, "b"), CASE)
+    assert [r.get("source") for r in rows] == [expected], rows
+
+
 @pytest.mark.parametrize("post", ["post-failed", "never-posted"])
 @pytest.mark.parametrize("label", ["a", "b"], ids=["control-world", "world-with-facts"])
 def test_1255_a_worlds_oracle_is_not_told_a_closing_comment_the_source_never_posted(

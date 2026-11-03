@@ -551,11 +551,15 @@ def text_only(text: str = "I could not decide what to serve.") -> Move:
 
 def claim(*, added: Iterable[Mapping] = (), removed: Iterable[Mapping] = (),
           changed: Iterable[Mapping] = (), counts: Iterable[Mapping] = (),
-          entity_refs: Iterable[Mapping] = ()) -> dict:
-    """A claim document, as `check` and `submit` take it."""
-    return {"added": [dict(a) for a in added], "removed": [dict(r) for r in removed],
-            "changed": [dict(c) for c in changed], "counts": [dict(c) for c in counts],
-            "entity_refs": [dict(e) for e in entity_refs]}
+          entity_refs: Iterable[Mapping] = (), re_ask: Mapping | None = None) -> dict:
+    """A claim document, as `check` and `submit` take it. `re_ask` (#1385, `re_asked`) is
+    carried only when given, so a claim without one is spelled as before."""
+    doc = {"added": [dict(a) for a in added], "removed": [dict(r) for r in removed],
+           "changed": [dict(c) for c in changed], "counts": [dict(c) for c in counts],
+           "entity_refs": [dict(e) for e in entity_refs]}
+    if re_ask is not None:
+        doc["re_ask"] = dict(re_ask)
+    return doc
 
 
 EMPTY_CLAIM = claim()
@@ -569,6 +573,11 @@ def removed(row: Mapping[str, Any], *, system: str, verb: str, params: Mapping[s
             count: int) -> dict:
     return {"row": dict(row), "side_query": {"system": system, "verb": verb,
                                              "params": dict(params)}, "count": count}
+
+
+def re_asked(*, system: str, verb: str, params: Mapping[str, Any]) -> dict:
+    """A claim's re-ask (#1385): the call's own question, bounded at the branch point."""
+    return {"system": system, "verb": verb, "params": dict(params)}
 
 
 def changed(entity: str, field_: str, old: Any, new: Any) -> dict:

@@ -208,6 +208,40 @@ def test_query_return_wrap_mints_its_own_salt(tmp_path):
             f"the frame salt {tag!r} occurs inside its own body — gather can close its frame"
 
 
+def _outside_untrusted(text: str) -> str:
+    """`text` with every `<run-…-untrusted>` span cut out: what the platform itself wrote."""
+    return re.sub(r"<run-([0-9a-f]+)-untrusted>.*?</run-\1-untrusted>", "", text, flags=re.S)
+
+
+def test_1385_the_model_sees_the_run_clocks_stamp_beside_each_reply(tmp_path):
+    """Each query reply is shown with the run clock's reading at its arrival, outside the
+    payload's bytes and its untrusted frame (T4, O7)."""
+    from defender.tests.support.runtime.state import _1255_clock as C
+
+    start = C.SOURCE_START
+    clock = C.FakeClock(start)
+    main = C.script(clock, (10, Turn(tool_calls=[("gather", {
+        "lead_id": LEAD, "system": "elastic", "goal": "measure this lead",
+        "what_to_summarize": ["auth events"]})])), (0, Turn(text="Investigation complete.")))
+    gather = C.script(clock, (7, q("elastic", "query", {"native_query": "FROM logs | LIMIT 1"})),
+                      (5, q("elastic", "query", {"native_query": "FROM logs | LIMIT 2"})),
+                      (0, DONE))
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="q1385")
+    drive(run_dir, run_id="q1385", main=main, gather=gather, verbs=elastic_ok(VerbRecorder()),
+          clock=clock)
+    r = _Run(run_dir, main, gather)
+
+    first, second = C.at(start, 17), C.at(start, 22)
+    assert len(gather.seen) >= 3, f"the gather lead made {len(gather.seen)} request(s), not 3"
+    assert not C.mentions(gather.seen[0], first), "fixture: the reply's time was shown before it"
+    assert C.mentions(_outside_untrusted(gather.seen[1]), first), (
+        "the first reply reached the model without the run clock's stamp beside it")
+    assert C.mentions(_outside_untrusted(gather.seen[2]), second), (
+        "the second reply reached the model without its own arrival stamp")
+    for seq, moment in ((0, first), (1, second)):
+        assert not C.mentions(r.payload(seq), moment), "the stamp was written into the payload"
+
+
 def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[

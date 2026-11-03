@@ -380,6 +380,37 @@ def test_1224_undeclared_added_row_fails_check_1_and_is_not_served(tmp_path):
     assert "e-bad1" not in json.dumps(row), row
 
 
+#: #1385: a live base capped at two rows, one dated after the branch point (S.AS_OF); its
+#: re-ask bounded there brings in an older real row the capped page had pushed out.
+POST_ROW = {"user": "alice", "event_id": "e-300", "action": "logon", "host": "web-1",
+            "ts": "2026-07-28T17:05:00Z"}
+OLDER_ROW = {"user": "alice", "event_id": "e-099", "action": "logon", "host": "web-1",
+             "ts": "2026-07-28T14:00:00Z"}
+CAPPED = S.query_params("user:alice", limit=2)
+BOUNDED = S.query_params("user:alice", end=S.AS_OF, limit=2)
+AT_BRANCH = {"rows": [BASE_ROW, OLDER_ROW]}
+
+
+def test_1385_older_real_rows_pass_check_1_only_under_a_declared_re_ask(tmp_path):
+    """Rows a bounded re-ask brings in are no unclaimed addition; without one they are (T1)."""
+    sc = _scene(tmp_path, live=[("idp", "query", CAPPED, {"rows": [POST_ROW, BASE_ROW]}),
+                                ("idp", "query", BOUNDED, AT_BRANCH)])
+    re_ask = S.re_asked(system="idp", verb="query", params=BOUNDED)
+    o = S.oracle(S.submit(AT_BRANCH, S.EMPTY_CLAIM), S.submit(AT_BRANCH, S.claim(re_ask=re_ask)))
+    reg = sc.registry(o)
+
+    assert sc.call(reg, "idp", "query", **CAPPED) == AT_BRANCH
+    _assert_verdict(o, 1, "check 1")
+    _spent(o)
+    assert o.submissions() == 2, "the re-asked answer was not served on the second attempt"
+    reruns = [c for c in sc.est.calls("idp", "query") if c["params"] == BOUNDED]
+    assert reruns, "the host never re-read the declared re-ask against the real system"
+    ledger = sc.ledger()
+    assert len(ledger) == 1, ledger
+    assert _payload(ledger[0]) == AT_BRANCH, ledger
+    assert ledger[0].get("attempts") == 2, ledger
+
+
 def test_1224_silent_edit_of_a_base_row_fails_check_1(tmp_path):
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE)])
     edited = {**BASE_ROW, "host": "db-9"}
