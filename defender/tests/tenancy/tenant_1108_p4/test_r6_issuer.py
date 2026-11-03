@@ -42,7 +42,18 @@ def _jwt(claims: dict) -> str:
 
 
 @pytest.fixture
-def tls_issuer(tmp_path, p4_tenant):
+def tls_issuer(tmp_path):
+    """A local HTTPS server with a self-signed certificate; the CA the config names is another.
+    Other suites import it: keep its shape."""
+    trusted_pem, _ = self_signed("the configured CA", san=False)
+    (tmp_path / "trusted.pem").write_bytes(trusted_pem)
+    token = json.dumps({"auth": {"client_token": "tok"}}).encode()
+    with tls_server(tmp_path, lambda *_: (200, token)) as server:
+        yield server.port, server.got, tmp_path
+
+
+@pytest.fixture
+def tls_openbao(tmp_path, p4_tenant):
     """A local HTTPS server with a self-signed certificate, answering the AppRole login and the token
     mint as OpenBao would for `p4_tenant`'s generation; the CA `trusted.pem` names is another."""
     trusted_pem, _ = self_signed("the configured CA", san=False)
@@ -64,10 +75,10 @@ def tls_issuer(tmp_path, p4_tenant):
 
 
 def test_r6_a_tls_server_the_configured_ca_did_not_sign_is_refused_and_gets_no_secret(
-        p4_tenant, tls_issuer):
+        p4_tenant, tls_openbao):
     from defender.learning.author.version_control import ForgejoAuthError
 
-    server, folder = tls_issuer
+    server, folder = tls_openbao
     url = f"https://localhost:{server.port}"
     credential = _credential(p4_tenant, folder, openbao_url=url, ca_cert=str(folder / "trusted.pem"))
     with pytest.raises(Exception) as refused:  # noqa: PT011 — the class is the code's choice
