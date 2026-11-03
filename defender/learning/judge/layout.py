@@ -329,12 +329,14 @@ def _reference_block(run: RunView, focus_answers: dict[str, Any],
 def _claim_parts(claim: dict[str, Any]) -> list[Part]:
     """An `oracle` call's claim and verifier verdict, or the words saying either was never
     stored — a call with no stored claim is never presented as verified (N22)."""
+    cut = claim.get("re_ask")
+    seen = [" — cut by a re-ask at the branch point ", _run(cut)] if isinstance(cut, dict) else []
     if not isinstance(claim.get("claim"), dict):
-        return [" — claim unavailable (none was stored for this call; it is not verified)"]
+        return [*seen, " — claim unavailable (none was stored for this call; it is not verified)"]
     if not isinstance(claim.get("verifier_verdict"), dict):
-        return [" — claim ", _run(claim["claim"]), "; verifier verdict unavailable (none was "
-                "stored; the claim is not verified)"]
-    return [" — claim ", _run(claim["claim"]), "; verifier verdict ",
+        return [*seen, " — claim ", _run(claim["claim"]), "; verifier verdict unavailable (none "
+                "was stored; the claim is not verified)"]
+    return [*seen, " — claim ", _run(claim["claim"]), "; verifier verdict ",
             _run(claim["verifier_verdict"])]
 
 

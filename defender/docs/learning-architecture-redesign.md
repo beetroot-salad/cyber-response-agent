@@ -28,7 +28,7 @@ each world's corpus into a private copy on the tenant's cluster and patched look
 fixed table, then reviewed the result by replay. #1224 deleted that path (the stagers, the
 applier and lookups, the write door and the review). A world is now a short list of facts
 in natural language. Every sibling call reads its real base answer (the family's recording,
-else one live read bounded at the branch point) and, in a world with facts, is served by
+else one live read; the oracle, not the adapter, serves it as it stood at the branch point, #1385) and, in a world with facts, is served by
 that world's oracle: a model turn that forges telemetry for the facts the call covers and
 submits the answer with a claim of every difference, held to host checks and then to a
 separate verifier before it reaches the defender. Nothing is written to a tenant system.

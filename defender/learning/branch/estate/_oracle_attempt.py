@@ -57,6 +57,10 @@ class _Attempt:
 
     forged: dict[str, dict] = field(default_factory=dict)
     facts: dict[tuple[str, str], Any] = field(default_factory=dict)
+    #: The re-ask the verified submission declared and the host read (`checks.ReAsked`), or
+    #: `None`: the registry keeps its answer as a base answer of the world when it commits (#1385
+    #: A3).
+    re_asked: Any = None
 
 
 
@@ -137,6 +141,9 @@ class _Run:
     began: float = field(default_factory=time.monotonic)
     #: This attempt's limiter waits; the verifier's run shares its attempt's.
     waits: LimiterWaits = field(default_factory=LimiterWaits)
+    #: Whether the call's base is a live read, as opposed to the source's recording: a re-ask is
+    #: allowed only on a live base (#1385).
+    live: bool = False
     #: The oracle attempt's python box (`None` for the verifier, which runs no python).
     box: _AttemptBox | None = None
     #: Asked of a submission before its checks (`Oracle.serve`'s `gate`).

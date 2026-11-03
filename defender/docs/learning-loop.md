@@ -200,10 +200,15 @@ systems through `estate/registry.py`'s `serve_one`. Nothing is written to a
 tenant system: there is no staging, no per-world copy of a corpus and no patch
 table. Per call, in order: the world's own stored answer (a repeated call is
 served byte for byte); else the call's base answer — the family's recording, or
-one live read bounded at the branch point; a real error passes through as itself
+one live read, unbounded: the adapter is told neither the branch point nor the run clock, and the
+oracle applies the cut (#1385); a real error passes through as itself
 (`real-error`). A world with no facts is served its base (`passthrough`).
 Otherwise the world's **oracle** (`estate/oracle.py`, `AgentRole.ORACLE`) takes
-one turn: it sees the call, a handle to the base answer and the world's facts,
+one turn, in which it serves the world as it stood at the branch point: for a system that takes a
+query it declares a **re-ask** (the call's own question, edited to end there), which the host
+re-reads, keeps as a base answer of the world and holds the claim against; for a system of record it
+undoes the source run's own later writes and edits the response to the world's facts. It sees the
+call, a handle to the base answer and the world's facts,
 may explore real examples through the same grant decision (rate-limited,
 recorded only on the oracle side), forges telemetry for facts the call covers,
 and submits a served answer plus a claim of every difference. Host checks
@@ -216,8 +221,12 @@ unservable and the sibling aborts with that reason. Each world owns its oracle
 state with one writer; one oracle turn runs at a time per sibling, and the
 investigator's clock pauses while it does. `branch/ledger.py` records every
 response the estate served with the decision behind it (`oracle`, `passthrough`,
-`real-error`, `refused`, `fault`) — what makes the difference between worlds
-checkable rather than asserted.
+`reconstructed`, `real-error`, `refused`, `fault`) — what makes the difference between worlds
+checkable rather than asserted. `oracle` means the answer showed the world's difference: it carries
+a forged row, or a change, removal or row the cut dropped that names an entity one of the world's
+facts names. A changed answer that shows no such difference (a cut alone, undoing the source run's
+own write on a ticket no fact names) is `reconstructed`, the baseline the control world also has;
+an unchanged one is `passthrough`.
 
 The comparison is **blind by signature** (`branch/comparator.py`): two payloads
 and an axis, nothing else. It cannot see which side is the base or what a world

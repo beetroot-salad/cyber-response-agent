@@ -1,7 +1,6 @@
 
 from __future__ import annotations
 
-import datetime as _dt
 import json
 import urllib.parse
 from typing import TYPE_CHECKING
@@ -12,12 +11,10 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
-from defender import _clock
 from defender.kit.settings import config_pointer
 from defender.kit.verbs import VerbContext, verb
 from defender.integrations import _stub_transport as transport
 from defender.integrations.confinement import confine_index, guard_outbound
-from defender.integrations.esql_text import opens_with_from, split_first_command
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -38,7 +35,7 @@ REQUEST_TIMEOUT_SEC = 30
 
 
 class OutboundBody:
-    """A request body that has already been past the run's clock."""
+    """A request body minted by `_search_body` or `_esql_body`, the one door a request body leaves by."""
 
     payload: dict
     __slots__ = ("payload",)
@@ -49,7 +46,7 @@ class OutboundBody:
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError(
             f"OutboundBody is immutable (tried to set {name!r}) — mint a new one through "
-            f"_search_body or _esql_body, which is what puts the run's clock on it")
+            f"_search_body or _esql_body")
 
 
 
@@ -212,9 +209,7 @@ def resolve_sort(sort: str) -> str:
 def _bound_set(bound) -> bool:
     """Does this window bound say anything?
 
-    Shared by `_bounded_end` ("is the end open?") and the body builder ("is there a bound to
-    emit?"); if they disagreed, `end=""` could be treated as present by one and absent by the
-    other and a branched run would search with no range filter. Falsy means omitted, as
+    The body builder's one test of "is there a bound to emit?". Falsy means omitted, as
     elsewhere in this adapter (`index=""` means the default), and `validate_params` only
     type-checks, so `""` does arrive.
     """
@@ -248,29 +243,11 @@ def _search_body(  # noqa: PLR0913 — one search body's parameters, threaded wh
     ctx: VerbContext, *, query_string: str, time_start: str | None, time_end: str | None,
     time_field: str, limit: int, sort: str,
 ) -> OutboundBody:
-    """The search body, with the window's open end closed at the run's clock.
-
-    The clock is consulted here, where every search body is built, rather than at call sites.
-    `_bounded_end` decides what the bound is. A branched read also carries the clock as a
-    `post_filter` (`_before_clock`): the caller's own window stays in `query` exactly as spelled
-    (R-10=A), and the cluster drops the later hits before it sorts, pages and counts — so a
-    page is never emptied, nor its total inflated, by rows past the branch point.
-    """
-    body = _build_search_body(
-        query_string, time_start, _bounded_end(ctx, time_end), time_field, limit, sort)
-    at = getattr(ctx, "as_of", None)
-    if at is not None:
-        body["post_filter"] = _before_clock(time_field, at)
-    return OutboundBody(body)
-
-
-def _before_clock(time_field: str, at: _dt.datetime) -> dict:
-    """Hits dated at or before `at`, and undated ones (as `_after_clock` keeps them). Spelled as
-    `_bounded_end` and `bounded_esql` spell the clock, so every path cuts at the same moment."""
-    return {"bool": {"minimum_should_match": 1, "should": [
-        {"range": {time_field: {"lte": _clock.z_seconds(at)}}},
-        {"bool": {"must_not": {"exists": {"field": time_field}}}},
-    ]}}
+    """The search body, as the caller asked it. The adapter knows only its target system: a
+    branched run's cut at the branch point is the oracle's (#1385), so nothing here depends on
+    the run or its clock."""
+    return OutboundBody(_build_search_body(
+        query_string, time_start, time_end, time_field, limit, sort))
 
 
 def _search(
@@ -308,45 +285,7 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
             time_field="@timestamp", limit=limit, sort=sort,
         ),
     )
-    # The cluster already dropped later hits (`post_filter`); this is the backstop for one that
-    # did not, and finds nothing to drop against Elasticsearch itself.
-    kept = [d for d in docs if not _after_clock(ctx, d.get("@timestamp"))]
-    return search_envelope(resolved, kept, total - (len(docs) - len(kept)), truncated, sort)
-
-
-def _after_clock(ctx: VerbContext, stamp: object) -> bool:
-    """Is `stamp` dated after the run's clock? A branched read keeps the caller's own window end
-    on the wire, however it is spelled (#1224, R-10=A); the cluster drops later hits by
-    `post_filter`, and any that still arrive are dropped here. Unbranched runs (no clock) and
-    undated rows keep every row."""
-    at = getattr(ctx, "as_of", None)
-    if at is None:
-        return False
-    if isinstance(stamp, (int, float)) and not isinstance(stamp, bool):
-        moment = _dt.datetime.fromtimestamp(stamp / 1000, _dt.UTC)
-    else:
-        parsed = _clock.parse_iso_utc(stamp)
-        if parsed is None:
-            return False
-        moment = parsed
-    return moment > _clock.as_utc(at)
-
-
-def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
-    """The window's upper bound, closed at the run's own clock when the caller left it open.
-
-    Without it an unbounded search of this live stream (sorted `desc`, 20-doc cap) returns the
-    newest documents right now, so a replayed episode would read a different corpus. "Open" is
-    `_bound_set`'s answer.
-
-    A present `end` is never touched: it is a scenario-timeline value, often far from the wall
-    clock, and the caller has already bounded the query. The start stays open because the past
-    does not change.
-
-    Returns a new value rather than editing `params`, so the caller's params stay as asked.
-    """
-    at = getattr(ctx, "as_of", None)
-    return end if _bound_set(end) or at is None else _clock.z_seconds(at)
+    return search_envelope(resolved, docs, total, truncated, sort)
 
 
 def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: str) -> dict:
@@ -453,45 +392,18 @@ def esql_payload(query: str, resp: dict) -> dict:
     }
 
 
-def bounded_esql(ctx: VerbContext, query: str) -> str:
-    """`query` with the run's clock as an upper bound, when the run has one."""
-    at = getattr(ctx, "as_of", None)
-    if at is None or not opens_with_from(query):
-        return query
-    head, tail = split_first_command(query)
-    return f'{head.rstrip()}\n| WHERE @timestamp <= "{_clock.z_seconds(at)}"\n{tail.lstrip()}'
-
-
 def _esql_body(ctx: VerbContext, query: str) -> OutboundBody:
-    """The ES|QL request body, with the run's clock spliced in (the counterpart of
-    `_search_body`)."""
-    return OutboundBody({"query": bounded_esql(ctx, query)})
+    """The ES|QL request body: the query as asked (the counterpart of `_search_body`)."""
+    return OutboundBody({"query": query})
 
 
 @verb(engine="esql", body_param="query")
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
     config = load_config(ctx)
     url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
-    # The bounded query is sent, but the payload echoes the query as asked: the harness's bound
-    # stays out of the run's record, and branched payloads stay byte-comparable with the
-    # capture (`stagers/elastic.restore` only repairs the corpus identity in the echo).
     status, resp = _http_json(ctx, "POST", url, config, body=_esql_body(ctx, query))
     _raise_on_es_error(status, resp, "ES|QL query")
-    return esql_payload(query, _esql_within_clock(ctx, resp))
-
-
-def _esql_within_clock(ctx: VerbContext, resp: dict) -> dict:
-    """`resp` with every row whose `@timestamp` column is dated after the run's clock dropped
-    (R-10=A): the spliced bound covers only a query opening with `FROM`, this covers any
-    source command."""
-    columns = resp.get("columns") or []
-    names = [c.get("name") if isinstance(c, dict) else None for c in columns]
-    if getattr(ctx, "as_of", None) is None or "@timestamp" not in names:
-        return resp
-    at = names.index("@timestamp")
-    values = [row for row in resp.get("values", [])
-              if not (isinstance(row, list) and len(row) > at and _after_clock(ctx, row[at]))]
-    return {**resp, "values": values}
+    return esql_payload(query, resp)
 
 
 VERBS = {

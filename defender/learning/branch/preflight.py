@@ -205,8 +205,6 @@ class _Original:
     system: str
     verb: str
     params: dict
-    #: The capture recorded an error for it (no base answer was primed).
-    failed: bool
 
     @property
     def entry(self) -> dict[str, Any]:
@@ -231,8 +229,7 @@ def _originals(source_run_dir: Path) -> list[_Original]:
         if key in seen:
             continue
         seen.add(key)
-        out.append(_Original(system=row.system, verb=row.verb, params=dict(row.params),
-                             failed=row.exit_code != 0))
+        out.append(_Original(system=row.system, verb=row.verb, params=dict(row.params)))
     return out
 
 
@@ -265,11 +262,11 @@ PREFLIGHT_TOKEN_SEC = 3600
 _DEFENDER_DIR = Path(__file__).resolve().parents[2]
 
 
-def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any,
+def _preflight_context(episode_dir: Path, source: Run, tenant: Any,
                        access: Any = None) -> Any:
-    """The host-side context pre-flight's reads run in: the episode's tenant record, the
-    family's branch-point clock, and no capture (pre-flight is not a run and writes no query
-    row). `DEFENDER_RUNS_BASE` is the source run's container — the tenant's natural runs folder
+    """The host-side context pre-flight's reads run in: the episode's tenant record and no
+    capture (pre-flight is not a run and writes no query row); like every adapter's context it
+    carries neither the branch point nor a run state (#1385 O1). `DEFENDER_RUNS_BASE` is the source run's container — the tenant's natural runs folder
     — from the source `Run`'s own hand-out, not `run_env`'s `run_dir.parent`."""
     from defender.box import run_env
     from defender.systems.verbs import VerbContext
@@ -279,7 +276,7 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any,
     proxied = ({} if access is None
                else {"proxy_url": access.proxy_url, "request_token": access.token()})
     return VerbContext(defender_dir=_DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
-                       capture=None, tenant=tenant, as_of=as_of, **proxied)
+                       capture=None, tenant=tenant, **proxied)
 
 
 def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any], *, signer: Any,  # noqa: PLR0913 — the pass's identity plus the operator's seams
@@ -328,7 +325,6 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
         prebranch_calls,
         read_family_answers,
     )
-    from defender.learning.branch.estate.checks import canonical_json
     from defender.learning.branch.ledger import payload_text, request_key
     from defender.learning.core.config import oracle_settings_with
     from defender.systems.verbs import ModuleVerbRegistry
@@ -348,13 +344,13 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
             not_replayable.append({**call.entry, "reason": why})
     fact_worlds = [w for w in runnable_worlds(family) if w.facts]
 
-    def record(outcome: str, reason: str, *, unservable: Sequence[Mapping[str, Any]] = (),
-               drift: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+    def record(outcome: str, reason: str, *,
+               unservable: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
         outcome_mod.write_outcome(episode, outcome, reason=reason, unservable_worlds=unservable,
-                                  not_replayable=not_replayable, drift=drift)
+                                  not_replayable=not_replayable)
         return {"outcome": outcome, "reason": reason,
                 "unservable_worlds": [dict(u) for u in unservable],
-                "not_replayable": list(not_replayable), "drift": [dict(d) for d in drift]}
+                "not_replayable": list(not_replayable)}
 
     # M05=A: nothing to calibrate, for a reason that belongs to no world — refused before any
     # tenant read or oracle turn.
@@ -381,7 +377,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     except AdapterFault as unsigned:
         return record(REFUSED, f"the read token for the credential proxy cannot be signed: "
                                f"{unsigned.detail}")
-    ctx = _preflight_context(episode.dir, source, tenant, family.as_of, access)
+    ctx = _preflight_context(episode.dir, source, tenant, access)
     resumed = {w.label: formats.resume_world_from(family, w.label, episode.dir)
                for w in fact_worlds}
     recording = Ledger.for_world(episode, resumed[fact_worlds[0].label].world_id)
@@ -392,34 +388,26 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     # D6 (#1255): the calls the primer recorded unanswered are never fixed.
     unrecorded = recording.unrecorded_keys()
 
-    drift: list[dict[str, Any]] = []
     calibrated: list[tuple[_Original, Any, bool, bool]] = []
     for call in replayable:
         recorded = recording.base_payload(call.system, call.verb, call.params)
-        limiter.acquire()
-        try:
-            live_text = payload_text(reader.verbs(call.system)[call.verb](ctx, **call.params))
-        except Exception:  # noqa: BLE001 — a tenant error on a drift read is drift-unknown (N16)
-            if recorded is None:
-                # The capture's own failure, still failing: world telemetry, passed through as
-                # itself to any sibling that asks (`real-error`), never the oracle's to serve.
+        if recorded is None:
+            # No recording holds this call's answer: its base is a live read, as the system
+            # stands now, which the oracle serves as the world stood at the branch point. A
+            # recorded call is read no further: it is the source's own answer (#1385 H6).
+            limiter.acquire()
+            try:
+                base_text = payload_text(reader.verbs(call.system)[call.verb](ctx, **call.params))
+            except Exception:  # noqa: BLE001 — the capture's own failure, still failing
+                # World telemetry, passed through as itself to any sibling that asks
+                # (`real-error`), never the oracle's to serve.
                 continue
-            drift.append({**call.entry, "status": "unknown"})
-            base_text = recorded
         else:
-            if recorded is None:
-                drift.append({**call.entry, "status": "drifted" if call.failed else "unknown"})
-                base_text = live_text
-            else:
-                if canonical_json(json.loads(recorded)) != canonical_json(json.loads(live_text)):
-                    drift.append({**call.entry, "status": "drifted"})
-                base_text = recorded
-        # D6 (#1255): a pre-branch call the primer recorded unanswered is never fixed; a live
-        # base is the system now, which the oracle serves as it stood at the fork.
-        live = recorded is None
+            base_text = recorded
+        # D6 (#1255): a pre-branch call the primer recorded unanswered is never fixed.
         key = request_key(call.system, call.verb, call.params)
         fixed = key in prebranch and key not in unrecorded
-        calibrated.append((call, json.loads(base_text), fixed, live))
+        calibrated.append((call, json.loads(base_text), fixed, recorded is None))
 
     stop = threading.Event()
     failures: list[dict[str, Any]] = []
@@ -487,11 +475,11 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
     if len(unservable) >= outcome_mod.UNUSABLE_AT:
         return record(UNUSABLE, f"{len(unservable)} worlds failed calibration ({names}), so "
                                 "the family cannot be compared (O5)",
-                      unservable=unservable, drift=drift)
+                      unservable=unservable)
     reason = ("every fact world calibrated" if not unservable else
               f"world {names} failed calibration and runs no sibling; the family is graded "
               "on the rest")
-    return record(ACCEPTED, reason, unservable=unservable, drift=drift)
+    return record(ACCEPTED, reason, unservable=unservable)
 
 
 

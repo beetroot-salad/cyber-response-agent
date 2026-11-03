@@ -9,7 +9,6 @@ import json
 import logging
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
-from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -29,6 +28,7 @@ from defender.tenancy.case_ticket import read_posted_comments
 from defender.systems.verbs import (
     CALL_DELIVERY,
     CALL_ID,
+    CALL_RUN_STATE,
     DENIED,
     TABLE_POINTER,
     ModuleVerbRegistry,
@@ -49,7 +49,7 @@ from ..ledger import (
     LedgerError,
     ServedCall,
 )
-from .checks import RealData, canonical_json
+from .checks import RealData, canonical_json, cut_rows
 from .limiter import RateLimiter
 from .oracle import (
     DEFAULT_RESTART_AFTER,
@@ -102,13 +102,22 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
 
     def commit(served: Any, claim: dict, verdict: dict, attempts: int, staged: Any) -> None:
         changed = changes_base(served, base)
-        decision = (PASSTHROUGH if not changed
-                    else ORACLE if registry.world_facts else RECONSTRUCTED)
+        re_asked = staged.re_asked
+        decision = served_label(base, served, claim, registry.world_facts, re_asked)
         answer = {"system": system, "verb": verb, "params": asked,
                   "served": json.loads(payload_text_of(served if changed else base)),
                   "decision": decision,
                   "base_digest": digest, "claim": claim, "verifier_verdict": verdict,
                   "attempts": attempts}
+        if re_asked is not None:
+            # The re-asked answer is a base answer of this world under its own request key
+            # (A3): kept across resume, indexed as real data, and the rows the cut dropped are
+            # recomputed from it and the live base. Its question rides the answer for audit.
+            registry.store.keep_base(re_asked.system, re_asked.verb, re_asked.params,
+                                     payload_text_of(re_asked.answer))
+            answer["re_ask"] = {"system": re_asked.system, "verb": re_asked.verb,
+                                "params": re_asked.params,
+                                "dropped": cut_rows(base, re_asked.answer)[0]}
         registry.store.commit(forged=list(staged.forged.values()),
                               facts=[{"entity": e, "field": f, "value": v}
                                      for (e, f), v in staged.facts.items()],
@@ -128,6 +137,49 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
 PREBRANCH_REFUSAL = ("this call was made before the branch point; serve its base answer "
                      "unchanged (the investigator's inherited transcript already holds it, "
                      "M01=A)")
+
+
+def fact_entities(world_facts: Collection[Any]) -> frozenset[str]:
+    """Every entity the world's facts name, as text."""
+    return frozenset(str(entity) for fact in world_facts
+                     for entity in (getattr(fact, "entities", None)
+                                    or (fact.get("entities") if isinstance(fact, Mapping) else ())
+                                    or ()))
+
+
+def names_an_entity(value: Any, entities: Collection[str]) -> bool:
+    """Whether any string in `value`, at any depth, equals one of `entities` exactly (never a
+    substring: `alice-admin` is not `alice`)."""
+    if isinstance(value, str):
+        return value in entities
+    if isinstance(value, Mapping):
+        return any(names_an_entity(v, entities) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(names_an_entity(v, entities) for v in value)
+    return False
+
+
+def served_label(base: Any, served: Any, claim: Mapping[str, Any], world_facts: Collection[Any],
+                 re_asked: Any = None) -> str:
+    """The ledger label of a verified answer (#1385 A1): decided by the difference, not by
+    whether the answer changed. Unchanged from the live base is `passthrough`. A changed answer
+    is `oracle` ("showed the world's difference") when it carries a forged row, a `changed`
+    entry on an entity a fact names, or a removal or dropped row (the cut: the live base against
+    the re-asked answer) with a string value equal to such an entity; otherwise `reconstructed`.
+    Rows the cut brings in never count. A world without facts names no entity, so it is never
+    `oracle`."""
+    if not changes_base(served, base):
+        return PASSTHROUGH
+    entities = fact_entities(world_facts)
+    if not entities:
+        return RECONSTRUCTED
+    dropped = cut_rows(base, re_asked.answer)[0] if re_asked is not None else []
+    shown = (bool(claim.get("added"))
+             or any(isinstance(e.get("entity"), str) and e["entity"] in entities
+                    for e in claim.get("changed") or ())
+             or any(names_an_entity(e.get("row"), entities) for e in claim.get("removed") or ())
+             or any(names_an_entity(row, entities) for row in dropped))
+    return ORACLE if shown else RECONSTRUCTED
 
 
 def changes_base(served: Any, base: Any) -> bool:
@@ -196,7 +248,7 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,  # 
                                      for (e, f), v in staged.facts.items()],
                               answer=None)
 
-    with registry._turn(_carrying(ctx, as_of=registry.as_of), pauses_clock=False):
+    with registry._turn(ctx, pauses_clock=False):
         registry.oracle.serve((system, verb, asked), base,
                               lambda: registry._real(system, base), commit, fixed=fixed,
                               live=live)
@@ -387,9 +439,6 @@ class WorldRegistry(ModuleVerbRegistry):
         @functools.wraps(fn)
         def served(ctx: Any, **params: Any) -> Any:
             _refuse_unstorable(system, verb, params)
-            # The clock is set on every call: every read this world makes, the oracle's own
-            # included, is bounded by the branch point (O6).
-            ctx = _carrying(ctx, as_of=self.as_of)
             return serve_one(self, system, verb, fn, ctx, params)
 
         return served
@@ -432,6 +481,7 @@ class WorldRegistry(ModuleVerbRegistry):
             source=answer.get("decision") or ORACLE, world_id=self.world.world_id,
             base_digest=answer.get("base_digest"), claim=answer.get("claim"),
             verifier_verdict=answer.get("verifier_verdict"), attempts=answer.get("attempts"),
+            re_ask=answer.get("re_ask"),
             # This call's id, never the stored answer's: a repeat is its own call (A12).
             call_id=CALL_ID.get()))
 
@@ -453,8 +503,9 @@ class WorldRegistry(ModuleVerbRegistry):
         """One oracle turn at a time in this world (S11), its oracle-side queries run in `ctx`,
         and — for an investigator's call (`pauses_clock`) — the investigator's clock paused for
         as long as the turn is held (S12-S15). The clock is the run's own, on the run state the
-        call's context carries (#1235); pre-flight's replay carries none and has no clock."""
-        state = getattr(ctx, "run_state", None) if pauses_clock else None
+        query tool sets around the call (`CALL_RUN_STATE`, #1235, #1385 O8); pre-flight's replay
+        sets none and has no clock."""
+        state = CALL_RUN_STATE.get() if pauses_clock else None
         with self._turn_lock:
             self._turn_ctx = ctx
             if state is not None:
@@ -480,9 +531,9 @@ class WorldRegistry(ModuleVerbRegistry):
                                         f"({unclosed!r}) while the turn was aborting")
 
     def _oracle_context(self) -> Any:
-        """The context an oracle-side query runs in: that of the call whose turn is held,
-        carrying the branch-point clock."""
-        return _carrying(self._turn_ctx, as_of=self.as_of)
+        """The context an oracle-side query runs in: that of the call whose turn is held.
+        Adapters read neither the branch point nor the run clock from it (#1385 O1)."""
+        return self._turn_ctx
 
     def _real(self, system: str, base: Any) -> RealData:
         """This world's real data as the host checks read it: the family recording, every base
@@ -654,21 +705,3 @@ def _ledger_write_failed(call: ServedCall, failed: OSError) -> CallRecordWriteFa
         TRUNCATED_BY_SERVED_LEDGER,
         f"the {call.source} row of {call.system}.{call.verb} "
         f"({call.call_id or 'no call id'}): {failed!r}")
-
-
-def _carrying(ctx: Any, **values: Any) -> Any:
-    """`ctx` with `values` set on the fields it declares, or `ctx` untouched.
-
-    The conditions for setting each field stay at the call sites; this holds only the guard.
-
-    A ctx that cannot carry a field (a test stub; the real seam builds `VerbContext`) is
-    returned untouched, because `replace` raising `TypeError` inside `served` would be filed as
-    an infra fault. `fields()` rather than `__dataclass_fields__`, which also holds `ClassVar`
-    and `InitVar` pseudo-fields; `f.init` excludes `init=False` fields, on which `replace`
-    raises `ValueError`.
-    """
-    if not is_dataclass(ctx) or isinstance(ctx, type):
-        return ctx
-    declared = {f.name for f in fields(ctx) if f.init}
-    settable = {name: value for name, value in values.items() if name in declared}
-    return replace(ctx, **settable) if settable else ctx

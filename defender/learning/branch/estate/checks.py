@@ -7,13 +7,16 @@ import json
 import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeGuard
 
 from defender._untrusted import wrap_fresh
 
 #: The claim's structured keys (coined, `_spec1224`). Anything else at the top level is a claim
 #: the host cannot read, and fails check 1.
 CLAIM_KEYS = ("added", "removed", "changed", "counts", "entity_refs")
+#: The optional claim section naming a query system's re-ask (#1385): the call's own question,
+#: bounded at the branch point. Not a list of entries: one `{system, verb, params}`.
+RE_ASK_KEY = "re_ask"
 
 #: Values that stand for "no value" and are never ids (check 3).
 _PLACEHOLDERS = frozenset({"", "-", "--", "0", "none", "null", "n/a", "na", "unknown", "nil"})
@@ -225,6 +228,8 @@ class _Claim:
     changed: list[dict]
     counts: list[dict]
     entity_refs: list[dict]
+    #: The declared re-ask, `{system, verb, params}`, or `None`.
+    re_ask: dict | None = None
 
 
 # --------------------------------------------------------------------------------------------
@@ -236,7 +241,7 @@ def parse_claim(claim: Any) -> tuple[_Claim | None, str | None]:  # noqa: C901 �
     """The claim's structured entries, or why it is not a claim the host can read."""
     if not isinstance(claim, Mapping):
         return None, "the claim is not a mapping"
-    unknown = sorted(str(k) for k in claim if k not in CLAIM_KEYS)
+    unknown = sorted(str(k) for k in claim if k not in (*CLAIM_KEYS, RE_ASK_KEY))
     if unknown:
         return None, f"the claim carries fields the host does not know: {unknown}"
     parts: dict[str, list[dict]] = {}
@@ -265,13 +270,34 @@ def parse_claim(claim: Any) -> tuple[_Claim | None, str | None]:  # noqa: C901 �
     for entry in parts["entity_refs"]:
         if not all(isinstance(entry.get(k), str) for k in ("forged_id", "column", "entity")):
             return None, "an `entity_refs` entry needs string forged_id, column and entity"
-    return _Claim(**parts), None
+    re_ask, malformed = _parse_re_ask(claim.get(RE_ASK_KEY))
+    return (None, malformed) if malformed is not None else (_Claim(**parts, re_ask=re_ask), None)
+
+
+def _parse_re_ask(entry: Any) -> tuple[dict | None, str | None]:
+    """The claim's `re_ask` section as a spec, `None` when it declares none, or why not."""
+    if entry is None:
+        return None, None
+    if not re_ask_shaped(entry):
+        return None, "a `re_ask` needs exactly a string system, a string verb and a params mapping"
+    return _re_ask_spec(entry), None
+
+
+def re_ask_shaped(entry: Any) -> TypeGuard[Mapping[str, Any]]:
+    return (isinstance(entry, Mapping) and set(entry) == {"system", "verb", "params"}
+            and isinstance(entry["system"], str) and isinstance(entry["verb"], str)
+            and isinstance(entry["params"], Mapping))
+
+
+def _re_ask_spec(entry: Mapping[str, Any]) -> dict:
+    return {"system": entry["system"], "verb": entry["verb"], "params": dict(entry["params"])}
 
 
 def structured(claim: _Claim) -> dict:
     """The claim's structured entries only — what the verifier is shown (M17=A): no free text
     beside an entry or the claim."""
     return {
+        **({RE_ASK_KEY: _re_ask_spec(claim.re_ask)} if claim.re_ask is not None else {}),
         "added": [{"forged_id": e["forged_id"], "fact_id": e["fact_id"]} for e in claim.added],
         "removed": [{"row": e["row"], "side_query": {
             "system": e["side_query"]["system"], "verb": e["side_query"]["verb"],
@@ -717,12 +743,25 @@ def _check_ids(matched: _Matched, claim: _Claim, store: CheckStore, real: RealDa
 
 
 @dataclass
+class ReAsked:
+    """A declared re-ask the host accepted and read (#1385): its question, and the host's own
+    answer to it. That answer is what the claim is made against, in place of the live base."""
+
+    system: str
+    verb: str
+    params: dict
+    answer: Any
+
+
+@dataclass
 class Checked:
     """One submission's host-check outcome: its failures (`[]` passes) and what check 1 found,
-    so the collision record reuses the structural diff instead of recomputing it."""
+    so the collision record reuses the structural diff instead of recomputing it. `re_asked` is
+    the accepted re-ask, if the claim declared one."""
 
     failures: list[str]
     matched: _Matched = field(default_factory=list)
+    re_asked: ReAsked | None = None
 
 
 def frozen_id_collisions(checked: Checked, *, store: CheckStore,
@@ -859,29 +898,80 @@ def _check_counts(claim: _Claim, store: CheckStore) -> list[str]:
     return failures
 
 
-def run_checks(base: Any, served: Any, claim: Any, *, world: Any, store: CheckStore,
-               real_data: RealData) -> Checked:
-    """Checks 1-5 for one submission, the structural diff computed once (`check_submission`)."""
+def _read_re_ask(spec: dict | None, base: Any, *, call: tuple[str, str] | None, recorded: bool,
+                 store: CheckStore) -> tuple[ReAsked | None, list[str]]:
+    """The claim's re-ask as the host reads it, or why it is refused (#1385 T1, O4, O5). Only a
+    query system's live base can be re-asked: the question must be the call's own system and verb
+    (the window or query is the oracle's to edit, and the verifier judges it), and an ES|QL
+    answer keeps its columns, so forged rows zip against the right ones. A recorded base is the
+    source's capture, which is the world by definition and is not re-cut."""
+    if spec is None:
+        return None, []
+
+    def refused(why: str) -> tuple[None, list[str]]:
+        return None, [f"check 1: the re-ask is refused: {why}"]
+
+    if recorded:
+        return refused("the base is the source run's own recorded answer, which is the world "
+                       "and is not re-asked")
+    if call is None or (spec["system"], spec["verb"]) != tuple(call):
+        return refused("it must ask the call's own system and verb")
+    try:
+        answer = store.rerun(spec["system"], spec["verb"], dict(spec["params"]))
+    except Refused as unread:
+        return refused(f"it could not be read: {wrap_fresh(str(unread), 'untrusted')}")
+    names = esql_names(base)
+    if names is not None and esql_names(answer) != names:
+        return refused("it changes the ES|QL column set of the call's answer")
+    return ReAsked(spec["system"], spec["verb"], dict(spec["params"]), answer), []
+
+
+def cut_rows(live: Any, re_asked: Any) -> tuple[list[Any], list[Any]]:
+    """`(dropped, brought_in)`: the rows the live base has that the re-asked answer lacks, and the
+    older rows the re-asked answer has that the live base lacks (#1385 A3). Both are recomputed
+    from the two kept answers wherever they are needed — the label, the verifier, the judge."""
+    out = _Diff()
+    _diff(live, re_asked, (), out, lambda _new, _names: True)
+    return [row for _path, row, _names in out.removed], [row for _path, row, _names in out.added]
+
+
+def run_checks(base: Any, served: Any, claim: Any, *, world: Any, store: CheckStore,  # noqa: PLR0913 — the submission, its world and store, and the call it answers
+               real_data: RealData, call: tuple[str, str] | None = None,
+               recorded: bool = False) -> Checked:
+    """Checks 1-5 for one submission, the structural diff computed once (`check_submission`).
+    `call` is the call's `(system, verb)` and `recorded` whether its base is the source's
+    recording: what a declared re-ask is held to. A declared, accepted re-ask replaces the live
+    base as the answer the claim is made against."""
     parsed, malformed = parse_claim(claim)
     if parsed is None:
         return Checked([f"check 1: the claim cannot be read: {malformed}"])
+    re_asked, refusals = _read_re_ask(parsed.re_ask, base, call=call, recorded=recorded,
+                                      store=store)
+    if refusals:
+        return Checked(refusals)
+    if re_asked is not None and call is not None:
+        # Real data the host itself read: the older rows it brings in are no forged row's to
+        # reuse (check 3), kept beside the world's other base answers.
+        real_data.add(call[0], re_asked.answer)
+    against = base if re_asked is None else re_asked.answer
     world_facts = {str(getattr(f, "fact_id", None) or (f.get("fact_id") if isinstance(f, Mapping) else ""))
                    for f in (getattr(world, "facts", None) or ())}
-    failures, matched, missing = _check_structure(base, served, parsed, store, world_facts)
+    failures, matched, missing = _check_structure(against, served, parsed, store, world_facts)
     failures += _check_shape(_fresh(matched, store), real_data)
     failures += _check_ids(matched, parsed, store, real_data)
     failures += _check_facts(served, parsed, store, missing)
     failures += _check_counts(parsed, store)
-    return Checked(failures, matched)
+    return Checked(failures, matched, re_asked)
 
 
-def check_submission(base: Any, served: Any, claim: Any, *, world: Any, store: CheckStore,
-                     real_data: RealData) -> list[str]:
+def check_submission(base: Any, served: Any, claim: Any, *, world: Any, store: CheckStore,  # noqa: PLR0913 — the submission, its world and store, and the call it answers
+                     real_data: RealData, call: tuple[str, str] | None = None,
+                     recorded: bool = False) -> list[str]:
     """Every failure of checks 1-5 for one submission, each naming its check; `[]` passes.
 
     `world` is the served world (its `facts` give the fact ids a claim may name), `store` the
     world's frozen and staged state plus the side-query door, `real_data` this world's real
     answers. The host gate and the oracle's `check` tool both call this (through
     `run_checks`)."""
-    return run_checks(base, served, claim, world=world, store=store,
-                      real_data=real_data).failures
+    return run_checks(base, served, claim, world=world, store=store, real_data=real_data,
+                      call=call, recorded=recorded).failures
