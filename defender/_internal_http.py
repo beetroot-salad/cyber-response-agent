@@ -34,8 +34,10 @@ def internal_client(*, trust: ssl.SSLContext, transport: httpx.BaseTransport | N
                     **kw: Any) -> httpx.Client:
     """A synchronous client of the deployment's services (module doc) verifying with `trust`, a
     `tls_trust` context; `kw` as `httpx.Client`. The caller decides when the context is built
-    (building one loads a trust store and blocks, #1375) and gives one context to one client, or
-    to the short-lived clients of one thread (httpcore sets the context's ALPN on every connect)."""
+    (building one loads a trust store and blocks, #1375). httpcore sets the context's ALPN on
+    every connect, so connects on different threads through one context race on it: give a
+    context to the clients of one thread. A pooled client shared across threads already does
+    this to its own context; harmless while every connect sets the same ALPN (HTTP/1.1 only)."""
     return httpx.Client(verify=trust, transport=transport, trust_env=False,
                         follow_redirects=False, **kw)
 

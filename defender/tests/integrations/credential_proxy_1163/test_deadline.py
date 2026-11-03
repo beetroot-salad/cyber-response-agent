@@ -365,6 +365,9 @@ def test_1375_o1_a_request_builds_no_tls_context_on_any_leg(tmp_path, data_root)
         client = T.client_of(T.deps(
             r.data_root, openbao.OpenBaoStore(addr=bao.url, token="t", mount="secret"),
             verifier=openbao.TransitVerifier(addr=bao.url, token="t"), audit=r.audit))
+        # Counted on every thread the request runs on: the TestClient, not entered as a context
+        # manager, starts a fresh event-loop thread per request, inside this block. Every route to a
+        # context today (httpx's, httpcore's default, `tls_trust`) passes `create_default_context`.
         with counting_calls(context=ssl.create_default_context) as calls:
             answer = T.ask(client, r.tok(), "identity", "GET", f"{r.up.url}{API}/users/x",
                            None, None, 5)
