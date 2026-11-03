@@ -23,7 +23,6 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -744,7 +743,7 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
         return verified_lifecycle(Ran())(**kw)
 
     class Writer:
-        def open_case_ticket(self, *_a: Any, **_k: Any) -> None: ...
+        def clear_receipt(self, *_a: Any, **_k: Any) -> None: ...
         def record_case_ticket(self, *_a: Any, **_k: Any) -> None: ...
 
     try:
@@ -1245,15 +1244,15 @@ class _Tripwire:
         return refuse
 
 
-def _operator_composition_still_opens_records_and_enqueues(scene: Scene, tmp_path: Path) -> None:
-    """Positive control: the operator composition, through its seams, still opens, records and enqueues."""
+def _operator_composition_still_clears_records_and_enqueues(scene: Scene, tmp_path: Path) -> None:
+    """Positive control: the operator composition, through its seams, still clears, records and enqueues."""
     from defender import run as run_py
 
     seen: list[str] = []
 
     class Writer:
-        def open_case_ticket(self, *_a: Any, **_k: Any) -> None:
-            seen.append("open")
+        def clear_receipt(self, *_a: Any, **_k: Any) -> None:
+            seen.append("clear")
 
         def record_case_ticket(self, *_a: Any, **_k: Any) -> None:
             seen.append("record")
@@ -1268,7 +1267,7 @@ def _operator_composition_still_opens_records_and_enqueues(scene: Scene, tmp_pat
                      visualize=lambda *a, **k: None, ticket_writer=Writer(), enqueue=enq,
                      publish=lambda *a, **k: B.fresh(scene.t.commit))
     assert rc == 0
-    assert seen == ["open", "record", "enqueue"], seen
+    assert seen == ["clear", "record", "enqueue"], seen
 
 
 @pytest.fixture
@@ -1309,15 +1308,16 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     monkeypatch.setattr(run_common, "enqueue_curation", enqueue)  # lint-monkeypatch: ok — a tripwire on the module attribute the job entry would reach; no seam exists by design
     wire = _Tripwire()
     writer_module = run_py._default_ticket_writer
-    real_open, real_record = writer_module.open_case_ticket, writer_module.record_case_ticket
+    real_record = writer_module.record_case_ticket
     # the writer's own entry points swallow every fault, and an import-time alias escapes a patch of the
     # public names: trip the names both entry points resolve at call time, recording before raising
-    for name in ("open_case_ticket", "record_case_ticket", "_verb_context", "_config_of", "_post_comment",
-                 "_write_receipt"):
+    for name in ("record_case_ticket", "_verb_context", "_post_comment", "_write_receipt"):
         monkeypatch.setattr(writer_module, name, getattr(wire, name))  # lint-monkeypatch: ok — same tripwire, ticket writer
     # an import-time alias of the writer's helpers or of `DEFAULT_DEPS.request` escapes all of those: the
     # transport every route ends in is tripped too
-    monkeypatch.setattr(writer_module.integrations, "docker_exec_curl", wire.docker_exec_curl)  # lint-monkeypatch: ok — same tripwire, the writer's transport
+    from defender.integrations import _stub_transport
+
+    monkeypatch.setattr(_stub_transport, "docker_exec_curl", wire.docker_exec_curl)  # lint-monkeypatch: ok — same tripwire, the writer's transport
     # a function object bound at import time escapes even that: trip the process launch beneath it, on
     # any `docker ... exec` (the one thing the transport does), whatever route reached it
     import subprocess
@@ -1348,18 +1348,13 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     assert (tripped, wire.called, launched) == ([], [], [])
     assert docker_execs() == ([], []), "a job-lane run launched a docker exec beneath the Python names"
     # control: the tripwire is live, so an alias of the real entry points would have been caught
-    probe = SimpleNamespace(run_dir=tmp_path / "probe")
-    real_open(probe, tenant=None, defender_dir=tmp_path, env={})
-    with contextlib.suppress(AssertionError):  # the record leg's own handler reaches another tripped name
-        real_record(probe, tenant=None, defender_dir=tmp_path, env={}, truncated_by=None, closed_before_cut=False)
-    assert wire.called.count("_verb_context") == 2
+    assert real_record is not writer_module.record_case_ticket, "the tripwire replaced the record entry"
+    with pytest.raises(AssertionError):  # control: the writer's context builder is tripped
+        writer_module._verb_context(None, tmp_path, tmp_path, {}, None, None)
+    assert wire.called == ["_verb_context"]
     wire.called.clear()
-    from defender.tests.integrations.credential_proxy_1163._adapter1163 import ctx_for as _ctx_for
-    from defender.tests.support.tenancy import _tenants1106
-    config = {"URL_BASE": "http://store.invalid", "BASTION_HOST": "bastion.invalid"}
-    with pytest.raises(AssertionError):  # control: a call through the writer's default deps reaches the tripped transport
-        # #1163: `_request` reads `ctx.tenant` first; a tenant whose ticket system is not proxied reaches the transport
-        writer_module.DEFAULT_DEPS.request(config, "POST", "/tickets", {}, ctx=_ctx_for(tmp_path, _tenants1106.fixture_run_tenant(), None, None))
+    with pytest.raises(AssertionError):  # control: the transport every docker route ends in is tripped
+        _stub_transport.docker_exec_curl(None, "bastion.invalid", "http://store.invalid/tickets")
     assert wire.called == ["docker_exec_curl"]
     wire.called.clear()
     with pytest.raises(AssertionError):  # control: the process tripwire is live
@@ -1374,7 +1369,7 @@ def test_m4_a_job_run_opens_no_ticket_and_enqueues_no_curation_while_the_operato
     made = [k for k in set(tree(scene.root)) - before if re.search(r"curat|queue|learn", k, re.IGNORECASE)]
     assert made == [], f"the job lane left curation state behind: {made}"
 
-    _operator_composition_still_opens_records_and_enqueues(scene, tmp_path)
+    _operator_composition_still_clears_records_and_enqueues(scene, tmp_path)
 
 def test_m4_the_job_entry_has_no_open_seam_and_refuses_a_ticket_writer(scene):
     """`job_main` takes no `*args` or `**kwargs`, and a call handing it a `ticket_writer` or an `enqueue` is a `TypeError`. (M4, O11)"""
@@ -1442,7 +1437,7 @@ def test_m4_the_disk_check_sees_the_operator_default_enqueue(scene, tmp_path):
     from defender import run as run_py
 
     class Writer:
-        def open_case_ticket(self, *_a: Any, **_k: Any) -> None: ...
+        def clear_receipt(self, *_a: Any, **_k: Any) -> None: ...
         def record_case_ticket(self, *_a: Any, **_k: Any) -> None: ...
 
     def lifecycle(**kw: Any) -> dict[str, Any]:
