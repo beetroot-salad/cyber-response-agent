@@ -301,6 +301,10 @@ class _Proxy:
         if reply.over:
             return {"status": status, "headers": {}, "body": "", "fault": UPSTREAM,
                     "detail": f"{asked.system} answered more than {cap} bytes"}
+        if reply.compressed is not None:
+            return {"status": status, "headers": {}, "body": "", "fault": UPSTREAM,
+                    "detail": f"{asked.system} answered a compressed body ({reply.compressed}) "
+                              "though asked for none"}
         fault = _fault_of(status)
         shown: dict[str, str] = {}
         for name, value in reply.headers:

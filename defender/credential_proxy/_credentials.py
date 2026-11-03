@@ -222,6 +222,9 @@ def _token_exchange(auth: Auth, creds: CredentialSet, system: str,
     if reply.over:
         raise Refused(CONFIG, f"the token endpoint of {system} answered more than "
                               f"{TOKEN_REPLY_CAP} bytes")
+    if reply.compressed is not None:
+        raise Refused(CONFIG, f"the token endpoint of {system} answered a compressed body "
+                              f"({reply.compressed}) though asked for none")
     status, body = reply.status, reply.body
     if status >= 500:
         raise Refused(TRANSPORT, f"the token endpoint of {system} answered {status}")

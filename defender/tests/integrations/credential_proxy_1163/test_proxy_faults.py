@@ -2,7 +2,9 @@
 never sent, and a breaker or transport outcome is told apart from a plain refusal."""
 from __future__ import annotations
 
+import gzip
 import json
+import zlib
 
 import pytest
 
@@ -229,4 +231,74 @@ def test_1375_o3_a_token_reply_over_the_cap_is_a_config_fault_unsent(
         assert r.up.paths() == [PATH]
     else:
         assert "more than 65536 bytes" in answer["detail"], answer
+        assert r.up.seen == []
+
+
+def _accept_encoding(seen: H.Seen) -> str | None:
+    return next((v for k, v in seen.headers.items() if k.lower() == "accept-encoding"), None)
+
+
+_TOKEN = json.dumps({"access_token": "AT-1383", "expires_in": 3600}).encode()
+
+
+@pytest.mark.parametrize(("encoding", "body", "fault"), [
+    pytest.param("identity", b'{"ok": true}', None, id="identity-control"),
+    pytest.param("Identity", b'{"ok": true}', None, id="identity-any-case"),
+    pytest.param("gzip", gzip.compress(b'{"ok": true}'), "UpstreamFault", id="gzip"),
+    pytest.param("deflate", zlib.compress(b'{"ok": true}'), "UpstreamFault", id="deflate"),
+])
+def test_1383_a_compressed_upstream_reply_is_an_upstream_fault(
+        tmp_path, data_root, encoding, body, fault):
+    """#1383: the proxy asks for an uncompressed reply even when the adapter asks otherwise, and
+    a reply compressed anyway is an `UpstreamFault` saying so, however small it decodes to."""
+    with T.rig(tmp_path / "forge", data_root) as r:
+        r.up.replies[PATH] = (200, {"Content-Type": "application/json",
+                                    "Content-Encoding": encoding}, body)
+        answer = r.ask(headers={"Accept-Encoding": "gzip, br"})
+
+    assert [_accept_encoding(s) for s in r.up.seen] == ["identity"]
+    assert answer["fault"] == fault, answer
+    if fault is None:
+        assert json.loads(answer["body"]) == {"ok": True}
+    else:
+        assert "compressed" in answer["detail"], answer
+        assert answer["body"] == ""
+
+
+def test_1383_a_compression_bomb_is_refused_as_compressed_not_read_to_the_cap(
+        tmp_path, data_root):
+    """#1383: a few KiB of gzip that inflate to 8 MiB is refused for its encoding, not
+    inflated and then caught by the size cap."""
+    bomb = gzip.compress(b"\0" * (8 << 20))
+    assert len(bomb) < 1 << 16
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=1024) as r:
+        r.up.replies[PATH] = (200, {"Content-Encoding": "gzip"}, bomb)
+        answer = r.ask()
+
+    assert answer["fault"] == "UpstreamFault", answer
+    assert "compressed" in answer["detail"], answer
+    assert "more than" not in answer["detail"], answer
+
+
+@pytest.mark.parametrize(("encoding", "body", "fault"), [
+    pytest.param(None, _TOKEN, None, id="plain-control"),
+    pytest.param("gzip", gzip.compress(_TOKEN), "ConfigFault", id="gzip"),
+])
+def test_1383_a_compressed_token_reply_is_a_config_fault_unsent(
+        tmp_path, data_root, encoding, body, fault):
+    """#1383: the token exchange asks for an uncompressed reply; one compressed anyway is
+    `ConfigFault` saying so, and the API request is never sent."""
+    headers = {"Content-Type": "application/json"} | (
+        {} if encoding is None else {"Content-Encoding": encoding})
+    with H.upstream() as auth:
+        auth.replies["/token"] = (200, headers, body)
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
+            answer = r.ask()
+
+    assert [_accept_encoding(s) for s in auth.seen] == ["identity"]
+    assert answer["fault"] == fault, answer
+    if fault is None:
+        assert r.up.paths() == [PATH]
+    else:
+        assert "compressed" in answer["detail"], answer
         assert r.up.seen == []
