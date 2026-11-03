@@ -7,6 +7,9 @@ USAGE_EXIT_CODE = 64
 class AdapterFault(Exception):
 
     exit_code: int = 1
+    #: Set where the credential proxy's answer is turned into a fault (#1398), so a caller can
+    #: tell the proxy's refusal from a fault the adapter raised itself on the same route.
+    from_proxy: bool = False
 
     def __init__(self, detail: str):
         super().__init__(detail)

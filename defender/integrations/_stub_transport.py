@@ -21,7 +21,7 @@ from defender.kit.settings import (
 from defender.kit.verbs import VerbContext
 from defender.integrations.confinement import (
     WRITE_CLASS, ConfinementFault, guard_outbound, record_outbound)
-from defender.kit.faults import USAGE_EXIT_CODE, ConfigFault, TransportFault, UpstreamFault
+from defender.kit.faults import USAGE_EXIT_CODE, AdapterFault, ConfigFault, TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.kit.verbs import TenantRecord
@@ -447,13 +447,17 @@ def _perform(  # noqa: PLR0913 — one request's per-call state
 
 
 def raise_proxy_fault(fault: str, detail: str, status: int | None = None) -> None:
-    """Raise the fault class the proxy named, with its detail (A9); an `UpstreamFault` carries
-    the store's `status` when the proxy relayed one."""
+    """Raise the fault class the proxy named, with its detail (A9), marked `from_proxy`; an
+    `UpstreamFault` carries the store's `status` when the proxy relayed one."""
+    raised: AdapterFault
     if fault == "UpstreamFault":
-        raise UpstreamFault(detail or fault, status=status or None)
-    classes = {"ConfigFault": ConfigFault, "ConfinementFault": ConfinementFault,
-               "TransportFault": TransportFault}
-    raise classes.get(fault, TransportFault)(detail or fault)
+        raised = UpstreamFault(detail or fault, status=status or None)
+    else:
+        classes = {"ConfigFault": ConfigFault, "ConfinementFault": ConfinementFault,
+                   "TransportFault": TransportFault}
+        raised = classes.get(fault, TransportFault)(detail or fault)
+    raised.from_proxy = True
+    raise raised
 
 
 def _proxy_request(  # noqa: PLR0913 — one request's per-call state
