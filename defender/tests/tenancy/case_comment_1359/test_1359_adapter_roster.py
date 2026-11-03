@@ -14,13 +14,16 @@ DASHED = ACTION.replace("_", "-")
 
 
 def _source(verbs_body: str, *, export: bool = True) -> str:
-    comment = f"\n\ndef {ACTION}(ctx, *, key, body):\n    return None\n" if export else ""
+    comment = f"\n\ndef {ACTION}(ctx: VerbContext, *, key: str, body: str):\n    return None\n" if export else ""
     return textwrap.dedent("""\
+        from defender.systems.verbs import VerbContext
+
+
         def check_settings(tenant):
             return None
 
 
-        def health_check(ctx):
+        def health_check(ctx: VerbContext):
             return {}
         """) + comment + f"\n\nVERBS = {verbs_body}\n"
 

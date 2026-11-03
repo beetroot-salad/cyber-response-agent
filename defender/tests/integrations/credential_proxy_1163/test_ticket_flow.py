@@ -32,7 +32,7 @@ def _published(scratch, root, decl):
     `decl=None` leaves `ticket` with no `access.yaml` at all."""
     files = A.system_files(SYSTEM, decl or "", env_extra=KEY_PATTERN)
     if decl is None:
-        files[H.ACCESS_FILE.format(system=SYSTEM)] = None
+        files.pop(H.ACCESS_FILE.format(system=SYSTEM))
     with published_tenant(scratch, root=root, files=files) as t:
         yield t
 
