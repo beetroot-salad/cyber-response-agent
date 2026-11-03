@@ -244,6 +244,10 @@ def _remove_container(docker: DockerFn, name: str) -> str | None:
     second = _call(docker, argv)
     if second.returncode == 0:
         return None
+    # Removed by someone else meanwhile (a teardown racing a worker's backstop): it is gone.
+    with contextlib.suppress(BoxFault):
+        if _container_status(docker, name) is None:
+            return None
     return f"{(first.stderr or '').strip()}; after waiting: {(second.stderr or '').strip()}"
 
 

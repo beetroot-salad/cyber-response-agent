@@ -2513,3 +2513,38 @@ async def test_r7_1_a_tenant_that_was_creating_at_one_claim_and_is_active_at_a_l
     assert (len(refused), len(ran)) == (1, 1), {i: (r["stage"], r["failure_reason"]) for i, r in stages.items()}
     assert "creating" in stages[refused[0]]["failure_message"]
     assert child.events() == [("start", ran[0]), ("end", ran[0])]
+
+
+class _StopDuringClaim:
+    """The job store, except that its first claim sends this process SIGTERM and lets the loop
+    act on it before the claim answers: the stop lands while a row is being claimed."""
+
+    def __init__(self, store) -> None:
+        self._store = store
+        self._sent = False
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def claim(self):
+        import signal
+
+        if not self._sent:
+            self._sent = True
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.sleep(0.05)  # the worker's handler runs: the stop is set before the claim answers
+        return await self._store.claim()
+
+
+async def test_d3_a_row_claimed_while_the_stop_lands_is_left_running_with_nothing_launched(world):
+    """SIGTERM while `serve()` is claiming: the row it claimed stays `running` with no launch record,
+    no alert file and no child, so nothing marks it launched when it is taken up again. (D3, D-af; finalize #1354)"""
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        await asyncio.wait_for(_worker(world, _StopDuringClaim(store), child).serve(), timeout=30)
+
+    assert row(world["dsn"], inv)["stage"] == "running"
+    assert not (world["runs"] / f"{inv}.launch.json").exists(), "a stopping worker launched the row"
+    assert not (world["runs"] / f"{inv}.alert.json").exists(), "a stopping worker wrote the row's alert"
+    assert child.events() == [], "a stopping worker started a child"

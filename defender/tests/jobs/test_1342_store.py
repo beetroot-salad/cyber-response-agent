@@ -1311,3 +1311,19 @@ async def test_o15_a_row_inserted_through_one_store_is_claimed_and_followed_thro
             "completed", "benign", 1.25, NOW + HOUR)
         replay, created = await b.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
     assert (replay.investigation_id, replay.stage, created) == (inv.investigation_id, "completed", False)
+
+
+async def test_o5_no_knowledge_is_sql_null_not_a_json_null(dsn):
+    """A row with no knowledge, queued or finished without it, holds SQL NULL, so `knowledge IS
+    NULL` finds it; never the JSON literal `null`. (finalize #1354)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        queued = execute(dsn, "SELECT knowledge IS NULL FROM jobs.investigations WHERE id = %s",
+                         (inv.investigation_id,))
+        await store.claim()
+        await store.finish(T1, inv.investigation_id, stage="failed", failure_reason="no_report", knowledge=None)
+
+    finished = execute(dsn, "SELECT knowledge IS NULL FROM jobs.investigations WHERE id = %s",
+                       (inv.investigation_id,))
+    assert (queued, finished) == ([(True,)], [(True,)])

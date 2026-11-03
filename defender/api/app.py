@@ -297,7 +297,8 @@ async def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id)
 @investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT,
                         responses=responses(404, 409))
 async def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> None:
-    """Hide an investigation from every read. Its records are kept: lessons cite runs."""
+    """Delete an investigation and every attempt of the request it belongs to. Its run folders
+    stay: lessons cite runs. Refused while any attempt is queued or running."""
     async with _transaction(deps, caller) as tx:
         await tx.delete_investigation(investigation_id)
         await tx.audit("investigation.delete", investigation_id)

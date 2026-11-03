@@ -281,6 +281,8 @@ class Worker:
     async def _run_row(self, claim: Claim) -> None:
         record = claim.record
         inv, tenant = record.investigation_id, record.tenant_id
+        if self._stopping:  # D3: claimed as the stop landed; the row stays running, nothing launched
+            return
         with _log.log_context(run_id=inv, tenant_id=tenant):
             try:
                 await self._run_claimed(record, claim.tenant_state)

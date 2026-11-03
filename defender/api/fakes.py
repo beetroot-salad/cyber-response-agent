@@ -194,7 +194,9 @@ class InMemoryStore:
         return self.add_investigation(tenant_id, aborted)
 
     async def delete_investigation(self, tenant_id: str, investigation_id: str) -> None:
-        await self._existing(tenant_id, investigation_id)
+        existing = await self._existing(tenant_id, investigation_id)
+        if existing.status in ("queued", "running"):
+            raise Conflict("cannot delete an investigation that is queued or running")
         del self._investigations[(tenant_id, investigation_id)]
 
     # --- LearningJobsRepository ---------------------------------------------------------

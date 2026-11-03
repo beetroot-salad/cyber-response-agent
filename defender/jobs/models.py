@@ -76,7 +76,7 @@ class InvestigationRow(Base, kw_only=True):
     #: Null only when unknown (a cost read that faulted); 0 until the end.
     cost_usd: Mapped[float | None] = mapped_column(Float, default=None)
     #: The API's mapped shape (`status`, `commit`, `stale_kind`), or null.
-    knowledge: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    knowledge: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), default=None)
     failure_reason: Mapped[str | None] = mapped_column(Text, default=None)
     failure_message: Mapped[str | None] = mapped_column(Text, default=None)
 

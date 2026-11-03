@@ -1237,6 +1237,26 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
     assert seen == ["al-3", "al-2", "al-1", "al-0", "al-4"]
 
 
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_the_demo_store_refuses_to_delete_a_live_investigation_as_the_port_promises(status: str) -> None:
+    """`delete_investigation` is a `Conflict` while the investigation is live (the port's
+    contract, which the job store keeps); an ended one is deleted. (finalize #1354)"""
+    store = InMemoryStore(lambda: NOW)
+    store.add_alert(A, ALERT)
+
+    async def scenario() -> tuple[bool, bool]:
+        inv, _ = await store.create_investigation(A, ALERT.alert_id, "k1")
+        store.add_investigation(A, inv.model_copy(update={"status": status}))
+        with pytest.raises(Conflict):
+            await store.delete_investigation(A, inv.investigation_id)
+        kept = await store.get_investigation(A, inv.investigation_id) is not None
+        store.add_investigation(A, inv.model_copy(update={"status": "completed"}))
+        await store.delete_investigation(A, inv.investigation_id)
+        return kept, await store.get_investigation(A, inv.investigation_id) is None
+
+    assert anyio.run(scenario) == (True, True)
+
 def _api_routes(routes: Any) -> Any:
     """Every route under `routes` as it is served: an included router (FastAPI includes them lazily)
     yields its effective routes, which carry include-level `dependencies=` as well."""

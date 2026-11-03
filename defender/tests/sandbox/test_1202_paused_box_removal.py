@@ -109,3 +109,39 @@ class _no_raise:  # noqa: N801 — reads as a context-manager keyword beside `py
 
     def __exit__(self, *exc: object) -> bool:
         return False
+
+
+GONE = f"Error response from daemon: No such container: {NAME}"
+
+
+class RemovedMeanwhile(Daemon):
+    """Another remover (a teardown racing a backstop) got there first: both of this site's `rm`
+    answer "No such container", and `inspect` finds nothing while the daemon itself answers."""
+
+    def __init__(self) -> None:
+        super().__init__([(1, GONE), (1, GONE)])
+
+    def __call__(self, argv: list[str], **kw) -> subprocess.CompletedProcess:
+        if argv[1] == "inspect":
+            self.calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr=GONE)
+        return super().__call__(argv, **kw)
+
+
+def test_a_box_removed_by_someone_else_meanwhile_is_removed_not_a_fault():
+    """The removal step's promise is "`None` once it is gone": a box another remover took between
+    our look and our `rm` is gone, so `stop_box` does not fault and the tenant sweep reports nothing.
+    (finalize #1354)"""
+    from defender.box import remove_tenant_containers
+
+    _stop(RemovedMeanwhile())  # no BoxFault
+
+    swept = RemovedMeanwhile()
+    real = swept.__call__
+
+    def listing(argv: list[str], **kw) -> subprocess.CompletedProcess:
+        if argv[1] == "ps":
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{NAME}\n", stderr="")
+        return real(argv, **kw)
+
+    assert remove_tenant_containers("t-1", docker=listing) is None
