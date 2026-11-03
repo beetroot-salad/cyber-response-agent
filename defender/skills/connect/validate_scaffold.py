@@ -35,7 +35,7 @@ from defender.systems.verbs import (  # noqa: E402
     fresh_adapter_module,
     read_roster,
 )
-from defender.kit.verbs import VerbContext as AdapterContext, engine_of  # noqa: E402
+from defender.kit.verbs import COMMENT_ACTION, VerbContext as AdapterContext, engine_of  # noqa: E402
 from defender.records.formats import TenantRefused
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
@@ -90,13 +90,26 @@ def check_registry(report: Report, defender: Path, system: str):
         report.add(FAIL, f"adapter module {adapter.name}: {exc}")
         return None
     report.add(PASS, f"adapter {adapter.name} imports; VERBS declares {len(verbs)} verb(s)")
-    if "health-check" in verbs:
+    if not verbs and _exports_comment_action(defender, system):
+        report.add(PASS, f"VERBS is empty and the adapter exports `{COMMENT_ACTION}`: a "
+                         "comment-only adapter offers the agent nothing, so no health-check")
+    elif "health-check" in verbs:
         report.add(PASS, "VERBS declares a health-check verb")
     else:
         report.add(FAIL, f"VERBS declares no health-check verb (has {sorted(verbs)})")
     check_signatures(report, verbs)
     check_settings_declared(report, defender, system)
     return verbs
+
+
+def _exports_comment_action(defender: Path, system: str) -> bool:
+    """Does `system`'s adapter export the host's comment action (#1359)?"""
+    adapters = adapters_under(defender)
+    try:
+        module = fresh_adapter_module(read_roster(adapters), system)
+    except Exception:  # noqa: BLE001 — the resolver above already reported an adapter that will not import
+        return False
+    return callable(getattr(module, COMMENT_ACTION, None))
 
 
 def check_settings_declared(report: Report, defender: Path, system: str) -> None:

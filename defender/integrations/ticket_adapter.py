@@ -136,6 +136,23 @@ def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> d
     return payload
 
 
+#: The author the playground's stub store attributes the host's comment to (a real store's author
+#: is the credential's user, so the product's case-record file carries none).
+COMMENT_AUTHOR = "defender"
+
+
+def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  # lint-dup: ok — every case-recording adapter exports the host's comment action under this one name (#1359)
+    """The host's one write to a case (#1359): add the plain-text `body` as a comment on ticket
+    `key`, and return the ticket's web link. Not a verb (never in `VERBS`): no role or query tool
+    can reach it. The key is one percent-encoded path segment, so it cannot reshape the request.
+    Faults are the shared classes: a 4xx is an `UpstreamFault` carrying the status."""
+    config = _config(ctx)
+    quoted = urllib.parse.quote(key, safe="")
+    transport.http_write(ctx, config, "POST", f"/tickets/{quoted}/comments",
+                         {"author": COMMENT_AUTHOR, "body": body}, system=SYSTEM)
+    return f"{config['URL_BASE'].rstrip('/')}/tickets/{quoted}"
+
+
 VERBS = {
     "health-check": health_check,
     "list-tickets": list_tickets,

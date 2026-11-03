@@ -1,124 +1,86 @@
-# Case-history write path (issue #317, gated by #767)
+# Case comment path (issue #317, gated by #767, reshaped by #1359)
 
-Design context for the runtime → ticket-store write path. This is the first slice
-of #317; the read/seed/judge-confirm work is a separate change. #767 then changed
-what the write IS — a comment, not a close — and put a person's close between the
-write and any later run's read of it; the decisions below are annotated where that
-moved them. When this doc and the code disagree, the code wins.
+Design context for the runtime → case-system write path. This started as the first slice
+of #317 and was changed by #767 (the write is a comment, never a close) and by #1359 (the
+comment goes through the tenant's case-system adapter onto the ticket the alert names). When
+this doc and the code disagree, the code wins.
 
 ## Why
 
-The benign (FP-direction) learning loop wants to ground dispositions in the org's
-*past closed cases* — ticket history as a confirmable policy authority, not just
-routing. That requires a case-history store that **accrues from runs** (no
-bootstrapping). The store exists (`playground-v2/ticket-server`) but starts empty.
-This slice makes each investigated alert write a case into it, so the read PR has
-real history to sample and confirm against.
-
-It is shipped first because it is fully testable today and because *running* it is
-what manufactures the read PR's fixtures.
+The benign (FP-direction) learning loop wants to ground dispositions in the org's *past closed
+cases*, and a person reviewing a case wants the defender's findings on the ticket they already
+have. Each investigated alert, run with `--update-ticket`, adds one comment of findings to its
+case; a person closes it.
 
 ## Decisions
 
-- **Realistic lifecycle — the defender records, a person closes (#767).** A ticket
-  pre-exists when the alert is raised; the defender investigates and RECORDS its
-  findings onto it as a comment; a person reviews the case and closes it. Modeled
-  as a thin **bridge** (open ticket at `materialize_run`) + a post-run
-  **comment**. The close is the person's act. (Until #1221 it also released the
-  case's comments to later runs; now every comment is served, and the host's own
-  open with the agent tag naming their run, so a later run reads them as past
-  cases.) What makes a close MEAN "a person did this" is
-  structural, not a check: the defender's client has no transition call at all —
-  create and comment are the only writes it can make, and `test_767_writer.py` /
-  `test_1047_ticket_lane.py` keep it that way. (In a real store this is the
-  agent credential's permission scheme; in the playground, which has no auth, the
-  client is the enforcement.) The writer does not read the case back before it
-  appends (#1221 A1): a comment can land on a case a person already closed.
-  Idempotency still falls out: create-once (a replay's `POST /tickets`
-  returns 409 = already there); a re-run of an open case appends a second
-  comment, which the person's close then covers too.
+- **The defender records, a person closes (#767).** The ticket already exists when the alert
+  fires (a real SOC's alert-to-ticket automation made it; the playground stands in for that with
+  its own step). The run only ever adds one comment: it never creates a ticket, changes fields or
+  moves its status. What makes a close MEAN "a person did this" is structural: the comment action
+  is not a verb (`kit.verbs.COMMENT_ACTION`, refused in any adapter's `VERBS`), so no grant, query
+  tool or model reaches it; and its call carries the host's write-back token, the only token with
+  `rw`, matched by the proxy against the system's declared write routes (the docker route has no
+  token layer; there the transport's write-endpoint table holds the first layer alone). The writer
+  does not read the case back before it appends (#1221 A1).
 
-- **Cut-short runs record per exit class (#1047 O2), still as comments.** The exit
-  class comes in-process from `run.py` off the driver's own summary, never off
-  anything in the run dir. `aborted` → an escalation note (no verdict; "environment
-  appears unreachable or unconfigured, escalate"), ticket stays open. `request-limit` /
-  `retry-exhausted` → the record, proposing the host's forced `unresolved`; with no
-  usable report (the forced close itself failed) → the escalation note.
-  `budget` / `store` / `provider-down` → no call at all. Anything else → the record off the report.
-  A run whose model had already closed when the cut landed (`closed_before_cut`)
-  records its own verdict instead. Before #767 the forced-close arms CLOSED the
-  ticket; that is the one thing this design cannot allow, since a host-set `closed`
-  would read to every later run as a person's approval.
+- **The product owns what and when; the adapter owns how (#1359 P1).** Exit-class rules, comment
+  content, agent tag, stale-knowledge sentence, the 4096-byte bound and the receipt are the
+  product's and identical for every store. The request shape, the text format, what a status means
+  and the ticket's web link are the adapter's: each case-recording adapter exports
+  `add_case_comment(ctx, *, key, body) -> link | None`, found by name on the loaded module, never
+  imported by product code. The ready-made `jira` and `servicenow` adapters carry no verbs
+  (`VERBS = {}`); the playground's `ticket` adapter has the action beside its read verbs.
 
-- **Anti-corruption boundary — internal model ≠ external model.** `report.md`
-  (+ `alert.json`) is the *internal* case model; the ticket schema is the *external*
-  model. `tenancy/case_ticket.py` is the **only** code that knows both: it
-  parses the internal artifacts into a `CaseRecord` and maps that to/from ticket
-  payloads. The drivers, the report schema, and (PR 2) the learning reader never bind
-  to ticket field names. When the store changes (e.g. Elastic Cases), only the mapper,
-  the transport, and the mapping config move.
+- **The ticket is the one the alert names (#1359 P3).** The tenant's `alert-mapping.yaml` maps a
+  fourth optional fact, `case_key`, onto a field the alerting system sets (the alert's own id, or
+  a key its automation writes), never one copied from the logged activity. It is read once at run
+  start and recorded; at most 128 printable ASCII characters, no `/`, `\`, `;` or whitespace, not
+  made only of dots. A refused or absent key records none and the receipt says the alert names no
+  ticket. The key is sent as one percent-encoded path segment.
 
-- **The mapping is configuration, not code.** The de-facto schema — which internal
-  facts land in which ticket fields, the `sig:` label, the comment body template
-  `{disposition} — {cause}\n\n{narrative}`, the agent's `comment.author`, and the dotted `source.*`
-  paths into `alert.json` — lives in
-  the tenant's `settings/systems/case-history/mapping.yaml` and is *rendered* by
-  the mapper. Changing the convention (label prefix, body format, which alert
-  field is the signature) is a config edit, no code
-  change. Nothing decodes a disposition back out of the store any more: the
-  proposed disposition is the comment's first line for a person to read, and the
-  person's own verdict is the closed case's `resolution`.
+- **Which system records cases is the tenant's setting.** `settings/case-record.yaml` names the
+  `system:` and the `comment.body:` template. A tenant without the file has no case system and
+  needs none. `tenant check` and the record step share one judgement (`systems/case_system.py`):
+  the system on the roster, its adapter accepted and exporting the action, its `check_settings`
+  and, through the credential proxy, a declared write route. The settings are read once when the
+  run begins (D-18); a folder still holding `systems/case-history/` is told to move to the file.
 
-- **Decoupled stores / config.** The case-history store has its own config
-  (`systems/case-history/config.env`, `CASE_HISTORY_*`), distinct from the read-side
-  gather adapter's `systems/ticket/config.env` (`TICKET_*`), even though both point
-  at the same ticket-server today. The case-history the loop accrues is conceptually
-  the learning store, not the customer ticketing SoR the defender reads during an
-  investigation; the split keeps that explicit for a real deployment. The write path
-  also carries **no `defender.learning` import** — runtime and learning stay
-  decoupled (the disposition enum is mirrored locally, drift-guarded by a test).
+- **Cut-short runs record per exit class (#1047 O2), still as comments.** The exit class comes
+  in-process from `run.py` off the driver's own summary. `aborted` → an escalation note (no
+  verdict), ticket stays open. `request-limit` / `retry-exhausted` → the record, proposing the
+  host's forced `unresolved`; with no usable report → the escalation note. `budget` / `store` /
+  `provider-down` → no call at all. Anything else → the record off the report. A run whose model
+  had already closed when the cut landed (`closed_before_cut`) records its own verdict.
 
-- **Not the gather adapter.** The writer is a driver **post-step**, separate from the
-  read-only `ticket_adapter.py` (which is deliberately read-only and lives inside the
-  gather gate regime). It uses the low-level transport primitives (`docker_exec_curl`
-  + `split_status`), **not** `http_post` — `http_post` `sys.exit`s on error, which is
-  right for a CLI adapter but fatal for an in-process post-step.
+- **Anti-corruption boundary.** `report.md` (+ the run's alert record) is the internal case model;
+  the ticket is the external one. `tenancy/case_ticket.py` renders the comment from the tenant's
+  template; the drivers and the report schema never bind to ticket field names.
 
-- **Never breaks the run.** Like `cross_check_tables` / `visualize`, every failure —
-  missing config, unreachable stub, HTTP error, a mapping the loader refuses — is a WARN, a receipt and a return, never a raise/exit. A
-  report that is missing or carries no parsable disposition still records, with a
-  fixed host sentence and no proposal in it — the person sees on the ticket that
-  the run ended with nothing to propose, rather than inferring it from silence.
-  (The cut-short exit classes above take their own arms first.)
+- **One transport.** The comment goes through the shared adapter transport's host write entry
+  (`_stub_transport.http_write`: docker route or proxy route, any 2xx is success, a 4xx is an
+  `UpstreamFault` carrying the store's status, a 5xx or unreachable store a `TransportFault`).
+  There is no second copy of either route in the writer.
 
-- **Opt-in, deferred product target.** `--update-ticket` (default off) on both
-  engines; users turn it on per deployment. The helper is engine-agnostic (one
-  helper, two call sites). Only the playground target (the stub) is wired; a
-  real-customer target rides the future act-mode close path and is out of scope.
+- **Never breaks the run.** Every failure is a WARN, a receipt and a return, never a raise/exit.
+  The write-back token is minted at the record step; a run that cannot sign goes on and the
+  receipt says the write-back token could not be minted.
 
-- **Thin write, all dispositions.** The runtime writes one comment — `{author,
-  body}`, the body bounded at 4096 bytes on the wire — and writes **every**
-  disposition (benign, inconclusive, malicious) as a proposal for the person to
-  read. The store is the full case history; what a later run may read of it is the
-  person's close, not anything the writer decides.
+- **Opt-in.** `--update-ticket` (default off); `--episode` refuses it.
 
 ## Shape
 
-- `tenancy/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, the
-  mapper (`alert_to_open_payload`, `case_record_to_comment`), the agent tag
-  (`agent_comment_tag`, `posted_comment`), rendering from the mapping config.
-- `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/case-history/mapping.yaml` — the de-facto schema
-  (field mapping + conventions), editable without touching code.
-- `investigation/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
-  `record_case_ticket` (at most one comment POST, a receipt on every
-  branch that called out; no transition call exists), non-fatal.
-- The read side has no ticket screen (#1221): every ticket is served whole. Each
-  comment the host posts opens with the agent tag naming its run, so a later run
-  reads it as a past case (invlang rule #27), never a person's finding.
-- `run.py` — `--update-ticket`: open after materialize, record after
-  `cross_check_tables`.
-- `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/case-history/config.env` — `CASE_HISTORY_*`.
+- `tenancy/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, `CaseRecordSettings`
+  (`settings/case-record.yaml`), the comment renderer, the agent tag (`agent_comment_tag`,
+  `posted_comment`).
+- `systems/case_system.py` — the shared judgement of the case system and its legacy-folder finding.
+- `investigation/ticket_writer.py` — I/O: `record_case_ticket` (at most one comment, a receipt on
+  every branch that called out), `clear_receipt`.
+- `integrations/{ticket,jira,servicenow}_adapter.py` — the adapters' `add_case_comment`.
+- `run.py` — `--update-ticket`: clear the receipt at run start; at run end judge the case
+  settings, mint the write-back token, call `record_case_ticket`.
 
 The receipt (`{key, status, url, ok, reason}`) is a sidecar beside the run dir,
-`<runs_base>/<run id>.ticket-write.json`, out of the box's reach. Its one reader is the run
-page's ticket line; nothing keys on it.
+`<runs_base>/<run id>.ticket-write.json`, out of the box's reach. `key` is the ticket key (empty
+when the alert names none); `url` is the ticket's web link when the adapter gives one, null on
+every error receipt. Its one reader is the run page's ticket line.

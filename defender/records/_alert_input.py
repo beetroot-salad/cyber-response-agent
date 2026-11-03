@@ -14,12 +14,16 @@ import yaml
 
 from defender import _io, _yaml
 
-#: The alert mapping's name under a tenant's `settings/`, and the case-history mapping's.
+#: The alert mapping's name under a tenant's `settings/`.
 ALERT_MAPPING_REL = "alert-mapping.yaml"
-CASE_MAPPING_REL = "systems/case-history/mapping.yaml"
 
-#: The three facts, in the design's words; also the mapping's only keys and the record's keys.
-FACT_KEYS = ("signature", "event_time", "summary")
+#: The four facts, in the design's words; also the mapping's only keys and the record's keys.
+FACT_KEYS = ("signature", "event_time", "summary", "case_key")
+#: What a case key IS (#1359 P3): one URL path segment of at most 128 printable ASCII characters,
+#: with no `/`, `\\`, `;` (the credential proxy refuses any `;` in a decoded path) or whitespace, and
+#: not made only of dots (curl collapses `.` and `..` segments, so the request would go elsewhere).
+CASE_KEY_RE = re.compile(r"[\x21-\x7e]{1,128}")
+_CASE_KEY_FORBIDDEN = frozenset("/\\;")
 #: The record's digest key.
 DIGEST_KEY = "digest"
 
@@ -125,27 +129,18 @@ def admit(raw: bytes) -> Admitted:
 # =============================================================================================
 
 _ALERT_FILE = f"settings/{ALERT_MAPPING_REL}"
-_CASE_FILE = CASE_MAPPING_REL
 
 
 def _reasons(kind: str) -> str:
     return {
         "missing": f"{_ALERT_FILE} is missing: every tenant maps its alerts' signature, "
-                   "event_time and summary there",
+                   "event_time, summary and case_key there",
         "unreadable": f"{_ALERT_FILE} cannot be read: it must be a plain file this user can read",
         "encoding": f"{_ALERT_FILE} is not UTF-8 text",
         "yaml": f"{_ALERT_FILE} is not valid YAML",
         "shape": f"{_ALERT_FILE} must be a YAML mapping of fact names (signature, event_time, "
-                 "summary) to dotted alert paths",
-        "key": f"{_ALERT_FILE} names a key that is not one of signature, event_time, summary",
-        "case_unreadable": f"{_CASE_FILE} cannot be read: it must be a plain file this user "
-                           "can read",
-        "case_encoding": f"{_CASE_FILE} is not UTF-8 text",
-        "case_yaml": f"{_CASE_FILE} is not valid YAML",
-        "case_shape": f"{_CASE_FILE} must be a YAML mapping",
-        "case_source": f"{_CASE_FILE} still carries a top-level `source:` section: the "
-                       "tenant's alert mapping now holds the signature, event_time and summary "
-                       "paths — move them there and drop the section",
+                 "summary, case_key) to dotted alert paths",
+        "key": f"{_ALERT_FILE} names a key that is not one of signature, event_time, summary, case_key",
     }[kind]
 
 
@@ -206,10 +201,9 @@ def _read_setting(settings: _io.Bound, rel: str) -> tuple[str | None, str | None
 
 
 def settings_reasons(settings: _io.Bound) -> list[str]:
-    """The one tenant check's reasons about the two mapping files of the `settings/` folder
+    """The one tenant check's reasons about the alert mapping of the `settings/` folder
     `settings` is bound to: every fault, one fixed reason each, alert mapping first. Empty when
-    both stand. The case-history mapping's absence is `REQUIRED_SETTINGS`' to report, not this
-    check's."""
+    it stands."""
     reasons: list[str] = []
     text, kind = _read_setting(settings, ALERT_MAPPING_REL)
     if text is None:
@@ -219,20 +213,6 @@ def settings_reasons(settings: _io.Bound) -> list[str]:
             parse_mapping(text)
         except AlertMappingFault as fault:
             reasons.append(str(fault))
-    case_text, case_kind = _read_setting(settings, CASE_MAPPING_REL)
-    if case_text is not None:
-        try:
-            case_doc = _yaml.safe_load(case_text)
-        except (yaml.YAMLError, RecursionError):
-            reasons.append(_reasons("case_yaml"))
-        else:
-            if not isinstance(case_doc, dict):
-                reasons.append(_reasons("case_shape"))
-            elif "source" in case_doc:
-                reasons.append(_reasons("case_source"))
-    elif case_kind in ("unreadable", "encoding"):
-        reasons.append(_reasons("case_unreadable" if case_kind == "unreadable"
-                                else "case_encoding"))
     return reasons
 
 
@@ -252,11 +232,13 @@ def load_alert_mapping(settings: Path) -> AlertMapping:
 
 @dataclasses.dataclass(frozen=True)
 class AlertFacts:
-    """The three facts, each text or `None` (unmapped, absent from the alert, or not a fact)."""
+    """The four facts, each text or `None` (unmapped, absent from the alert, or not a fact)."""
 
     signature: str | None = None
     event_time: str | None = None
     summary: str | None = None
+    #: The ticket the alert names (#1359): from a field the alerting system sets, read by the host.
+    case_key: str | None = None
 
     def as_json(self) -> dict[str, str]:
         return {k: v for k, v in dataclasses.asdict(self).items() if v is not None}
@@ -292,8 +274,18 @@ def signature_of(value: Any) -> str | None:
     return text
 
 
+def case_key_of(value: Any) -> str | None:
+    """A mapped value as a ticket key, or `None` when it is not one URL path segment (#1359 P3):
+    the same text rules as any fact (an integer is its decimal text), then the segment shape."""
+    text = _scalar_text(value)
+    if (text is None or CASE_KEY_RE.fullmatch(text) is None
+            or _CASE_KEY_FORBIDDEN & set(text) or not text.strip(".")):
+        return None
+    return text
+
+
 def derive_facts(document: Mapping[str, Any], mapping: AlertMapping) -> AlertFacts:
-    """@owns signature @owns event_time @owns summary — the three facts of an admitted alert
+    """@owns signature @owns event_time @owns summary @owns case_key — the four facts of an admitted alert
     through the tenant's mapping, derived once at run start and recorded; every later reader
     takes them from the record. A fact whose key is unmapped, whose path is absent, or whose
     value is not text (or, for the signature, not key-shaped) is `None`: no vendor default
@@ -306,6 +298,7 @@ def derive_facts(document: Mapping[str, Any], mapping: AlertMapping) -> AlertFac
         signature=signature_of(at("signature")),
         event_time=_scalar_text(at("event_time")),
         summary=_scalar_text(at("summary")),
+        case_key=case_key_of(at("case_key")),
     )
 
 
@@ -359,7 +352,7 @@ def parse_alert_record(text: str) -> AlertRecord | None:
 
     return AlertRecord(digest=digest, facts=AlertFacts(
         signature=signature_of(fact("signature")), event_time=fact("event_time"),
-        summary=fact("summary")))
+        summary=fact("summary"), case_key=case_key_of(fact("case_key"))))
 
 
 def read_record(record_path: Path) -> AlertRecord | None:

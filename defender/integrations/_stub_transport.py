@@ -19,7 +19,8 @@ from defender.kit.settings import (
     system_prefix,
 )
 from defender.kit.verbs import VerbContext
-from defender.integrations.confinement import ConfinementFault, guard_outbound, record_outbound
+from defender.integrations.confinement import (
+    WRITE_CLASS, ConfinementFault, guard_outbound, record_outbound)
 from defender.kit.faults import USAGE_EXIT_CODE, ConfigFault, TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -123,7 +124,7 @@ def load_config(
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
 ) -> dict[str, str]:
     """`record_config` over the call's run record (`ctx.tenant`): the loader every verb calls,
-    under the signature the case-history ticket writer and the connect example keep."""
+    under the signature the case-comment writer and the connect example keep."""
     return record_config(ctx.tenant, system, prefix, required)
 
 
@@ -301,6 +302,20 @@ def http_post(
     return _request(ctx, config, url, system=system, method="POST", body=body)
 
 
+def http_write(
+    ctx: VerbContext, config: dict[str, str], method: str, path: str, body: dict | None, *,
+    system: str,
+) -> None:
+    """The HOST's write to a case system (#1359): `method` <URL_BASE><path> with a JSON `body`.
+    Used only by an adapter's `add_case_comment`; no query verb reaches it. On the docker route
+    the write class is confined by the write-endpoint table; on the proxy route the proxy's
+    declared write routes judge it. Any 2xx is success whatever its body. A 4xx is an
+    `UpstreamFault` carrying the status; a 5xx, an unreachable store or a failed curl is a
+    `TransportFault`."""
+    url = f"{config['URL_BASE'].rstrip('/')}{path}"
+    _request(ctx, config, url, system=system, method=method, body=body, write=True)
+
+
 def http_get_obj(
     ctx: VerbContext, config: dict[str, str], path: str, *, system: str,
     params: dict | None = None,
@@ -367,7 +382,7 @@ def _raise_on_http_error(code: int, body_text: str, url: str) -> None:
         raise TransportFault(f"upstream {url} returned HTTP {code}: {body_text}")
     if code >= 400:
         # 4xx is a query error (bad arg, 404): the agent's own to fix.
-        raise UpstreamFault(f"HTTP {code} from {url}: {_vendor_detail(body_text)}")
+        raise UpstreamFault(f"HTTP {code} from {url}: {_vendor_detail(body_text)}", status=code)
 
 
 def _vendor_detail(body_text: str) -> object:
@@ -379,16 +394,17 @@ def _vendor_detail(body_text: str) -> object:
     return payload.get("detail", payload) if isinstance(payload, dict) else payload
 
 
-def _request(
+def _request(  # noqa: PLR0913 — one request's per-call state
     ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
-    body: dict | None = None,
+    body: dict | None = None, write: bool = False,
 ) -> dict | list:
     if uses_proxy(ctx.tenant, system):
         # The proxy's route check is the only guard for this system (A6); the capture is kept.
         record_outbound(ctx, system, url, method=method)
-        return _proxy_request(ctx, config, url, system=system, method=method, body=body)
+        return _proxy_request(ctx, config, url, system=system, method=method, body=body,
+                              write=write)
     # Confinement before any transport; every HTTP stub funnels through here.
-    guard_outbound(ctx, system, url, method=method)
+    guard_outbound(ctx, system, url, method=method, verb_class=WRITE_CLASS if write else "r")
 
     bastion = config["BASTION_HOST"]
     timeout = int(config.get("TIMEOUT_SEC", "10"))
@@ -400,7 +416,7 @@ def _request(
     body_text, code = _parse_status_code(stdout, stderr, url, rc)
     _raise_on_http_error(code, body_text, url)
 
-    if not body_text:
+    if write or not body_text:
         return {}
     try:
         return json.loads(body_text)
@@ -408,28 +424,39 @@ def _request(
         raise TransportFault(f"non-JSON response from {url}: {e} (body: {body_text!r})") from e
 
 
-def raise_proxy_fault(fault: str, detail: str) -> None:
-    """Raise the fault class the proxy named, with its detail (A9)."""
+def raise_proxy_fault(fault: str, detail: str, status: int | None = None) -> None:
+    """Raise the fault class the proxy named, with its detail (A9); an `UpstreamFault` carries
+    the store's `status` when the proxy relayed one."""
+    if fault == "UpstreamFault":
+        raise UpstreamFault(detail or fault, status=status or None)
     classes = {"ConfigFault": ConfigFault, "ConfinementFault": ConfinementFault,
-               "TransportFault": TransportFault, "UpstreamFault": UpstreamFault}
+               "TransportFault": TransportFault}
     raise classes.get(fault, TransportFault)(detail or fault)
 
 
-def _proxy_request(
+def _proxy_request(  # noqa: PLR0913 — one request's per-call state
     ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
-    body: dict | None,
+    body: dict | None, write: bool = False,
 ) -> dict | list:
     answer = proxy_exchange(ctx, system=system, method=method, url=url, body=body,
                             timeout_sec=int(config.get("TIMEOUT_SEC", "10")))
     if answer.fault in ("UpstreamFault", "TransportFault") and answer.status:
         # The system answered: its own reason (scrubbed by the proxy) reaches the model and
         # curation, as on the docker path (`_raise_on_http_error`).
-        raise_proxy_fault(answer.fault, f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}")
+        raise_proxy_fault(answer.fault,
+                          f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
+                          answer.status)
+    if write and answer.fault == "ConfigFault" and answer.status >= 400:
+        # The store itself refused the host's write (the proxy's classification of a 401 with a
+        # credential attached): the store's refusal, with its status, not the proxy's own (#1359 O5).
+        raise UpstreamFault(f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
+                            status=answer.status)
     if answer.fault is not None:
         raise_proxy_fault(answer.fault, answer.detail)
     if answer.status >= 400:
-        raise UpstreamFault(f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}")
-    if not answer.body:
+        raise UpstreamFault(f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
+                            status=answer.status)
+    if write or not answer.body:
         return {}
     try:
         parsed = json.loads(answer.body)

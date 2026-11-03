@@ -61,7 +61,7 @@ class SystemConfig(Mapping[str, str]):
 
 
 def system_prefix(system: str) -> str:
-    """A system folder's config-key prefix: `case-history` → `CASE_HISTORY`."""
+    """A system folder's config-key prefix: `change-mgmt` → `CHANGE_MGMT`."""
     return system.upper().replace("-", "_")
 
 

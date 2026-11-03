@@ -66,7 +66,8 @@ from defender.investigation import driver  # noqa: E402
 from defender import providers  # noqa: E402
 from defender.records import run_end  # noqa: E402
 from defender.tenancy import run_knowledge  # noqa: E402
-from defender.systems import system_status  # noqa: E402
+from defender.systems import case_system, system_status  # noqa: E402
+from defender.tenancy.case_ticket import CaseRecordSettings  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import RunTenant  # noqa: E402
 from defender.systems.system_status import RunSystems  # noqa: E402
@@ -118,7 +119,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="Skip enqueuing for learning (also skips catalog curation — the "
                         "flag now governs both lanes)")
     p.add_argument("--update-ticket", action="store_true",
-                   help="Write/close a case-history ticket for this alert (default off)")
+                   help="Add one comment of findings to the ticket the alert names, through the tenant's "
+                        "case system (default off)")
     p.add_argument("--model", default=None,
                    help="model id (overrides $DEFENDER_MODEL); e.g. a claude-* id, "
                         "or 'glm-5.3' / 'fireworks:<id>' for the Fireworks-served GLM")
@@ -490,18 +492,22 @@ TOKEN_REUSE_MARGIN_SEC = 60
 class _TokenMint:
     """Signs this run's request tokens in the run process (#1163 A1): a read token over the
     granted `http-proxy` systems when a call first needs one, reused while it has life left (r7
-    A20), and a write-back token (`rw` on the ticket system only) at each ticket leg. Building
-    one checks configuration only; nothing contacts OpenBao until a token is asked for, and a
-    run with no `http-proxy` system to reach never does (A7)."""
+    A20), and a write-back token (`rw` on the case system only) at the record step (#1359 D-9).
+    Building one checks configuration only; nothing contacts OpenBao until a token is asked for,
+    and a run with no `http-proxy` system to reach never does (A7)."""
 
     def __init__(self, signer: Any, proxy_url: str | None, *, tenant_id: str, run_id: str,
-                 reads: tuple[str, ...], ticket_system: str | None) -> None:
+                 reads: tuple[str, ...], case_system: str | None,
+                 unsigned: str | None = None) -> None:
         self._signer = signer
         self._proxy_url = proxy_url
         self._tenant_id = tenant_id
         self._run_id = run_id
         self._reads = reads
-        self._ticket_system = ticket_system
+        self._case_system = case_system
+        #: Why a write-back token cannot be signed (R4), when it cannot: the run goes on, and the
+        #: record step says so.
+        self._unsigned = unsigned
         self._held: tuple[str, float] | None = None
         self._holding = threading.Lock()
 
@@ -513,26 +519,32 @@ class _TokenMint:
                 issuer_transport: Any) -> _TokenMint:
         """The mint for a run, or a mint that signs nothing when no `http-proxy` system is in
         reach. A configuration that cannot sign (no proxy address; a tenant whose live generation
-        in `records` records no sign login, A24', whether or not a `signer` is injected, r8.6) refuses run start,
-        naming the cause, and contacts no OpenBao; called before the run folder is made, so the
-        refusal leaves none behind (r7 A20). The signer is the tenant's own
+        in `records` records no sign login, A24', whether or not a `signer` is injected, r8.6)
+        refuses run start when the run needs a READ token, naming the cause, and contacts no
+        OpenBao; called before the run folder is made, so the refusal leaves none behind (r7
+        A20). A run that needs only the write-back token goes on instead (R4): it mints nothing
+        and the record step says why. The signer is the tenant's own
         (`credential_proxy.request_signer`, r8.5) unless one is injected."""
         proxied = {name for name, found in tenant.access.items()
                    if isinstance(found, AccessDeclaration) and name not in systems.down}
         reads = () if world is not None else tuple(sorted(
             system_status.granted_systems(tenant.grants) & proxied))
-        ticket = _default_ticket_writer.SYSTEM
-        ticket_system = ticket if (world is None and ns.update_ticket and ticket in proxied) else None
-        if not reads and ticket_system is None:
+        named = tenant.case_record.system if isinstance(tenant.case_record, CaseRecordSettings) else None
+        case_system = named if (world is None and ns.update_ticket and named in proxied) else None
+        if not reads and case_system is None:
             return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
-                       ticket_system=None)
+                       case_system=None)
         try:
             signer, address = signing_access(str(accepted.id), directory=records, signer=signer,
                                              proxy_url=proxy_url, transport=issuer_transport)
         except ConfigFault as refused:
-            sys.exit(f"run start refused: {refused.detail}")
+            if reads:
+                sys.exit(f"run start refused: {refused.detail}")
+            _logger.warning(f"the write-back token cannot be signed: {refused.detail}")
+            return cls(None, None, tenant_id=str(tenant.tenant_id), run_id=run_id, reads=(),
+                       case_system=case_system, unsigned=refused.detail)
         return cls(signer, address, tenant_id=str(tenant.tenant_id), run_id=run_id,
-                   reads=reads, ticket_system=ticket_system)
+                   reads=reads, case_system=case_system)
 
     def _mint(self, grant: set[tuple[str, str]], expires_at: float) -> str:
         return mint_request_token(
@@ -553,18 +565,30 @@ class _TokenMint:
         return _access_kwargs(RequestAccess(self._proxy_url or "", self._read_token)
                               if self._reads else None)
 
-    def write_back(self) -> dict[str, str]:
-        """The ticket leg's keywords: a fresh write-back token and the proxy's address, when the
-        ticket system is an `http-proxy` system; nothing otherwise. A mint that fails here is a
-        warning: the leg reports the missing grant itself, as a failed store call."""
-        if self._ticket_system is None:
+    def write_back(self, *, judged: bool) -> dict[str, str]:
+        """The record step's keywords: a fresh write-back token (`rw` on the case system only) and
+        the proxy's address, when the case system is an `http-proxy` system whose settings the
+        record step judged sound (`judged`: a system with bad settings is told so by the step, not
+        by a token it would never use); nothing otherwise. A mint that fails here is a warning:
+        the step reports the missing token itself."""
+        if self._case_system is None or not judged or self._unsigned is not None:
             return {}
         try:
-            token = self._mint({(self._ticket_system, "rw")}, time.time() + TOKEN_SEC)
+            token = self._mint({(self._case_system, "rw")}, time.time() + TOKEN_SEC)
         except AdapterFault as refused:
-            _logger.warning(f"no write-back token for the ticket leg: {refused.detail}")
+            _logger.warning(f"no write-back token for the record step: {refused.detail}")
             return {}
         return {"request_token": token, "proxy_url": self._proxy_url or ""}
+
+
+def _case_settings_sound(tenant: RunTenant) -> bool:
+    """Do the tenant's case settings, as recorded when the run began, let its case system take a
+    comment? The record step's own judgement, asked before a write-back token is minted."""
+    try:
+        case_system.judge_case_system(tenant, defender_dir=DEFENDER_DIR)
+    except case_system.CaseSettingsFault:
+        return False
+    return True
 
 
 def _resolve_run_tenant(
@@ -1103,10 +1127,9 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                 # process resolved once above and hands inward as one value.
                 with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
                     if ns.update_ticket:
-                        ticket_writer.open_case_ticket(
-                            run, tenant=tenant, defender_dir=DEFENDER_DIR,
-                            env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent),
-                            **minting.write_back())
+                        # Nothing is called at run start (#1359 O1): a receipt an earlier attempt
+                        # left is cleared, and the record step does the rest.
+                        ticket_writer.clear_receipt(run)
 
                     _logger.info(f"run_dir={run_dir} model={model}")
                     _announce_provenance(run_dir)
@@ -1157,11 +1180,14 @@ def main(  # noqa: C901, PLR0913, PLR0915 — the entry point's inputs plus its 
                     # drainer may pick up immediately.
                     if ns.update_ticket:
                         # Both inputs come from the driver's summary, not from a possibly stale sidecar.
+                        # The case settings are judged here before the token is minted (D-9), so a bad
+                        # setting is reported as that and never as a missing token; the step judges
+                        # again on its own.
                         ticket_writer.record_case_ticket(
                             run, tenant=tenant, defender_dir=DEFENDER_DIR,
                             env=box_mod.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
                             closed_before_cut=summary.get("closed_before_cut") is True,
-                            **minting.write_back())
+                            **minting.write_back(judged=_case_settings_sound(tenant)))
 
                     # A sibling's evidence was staged on purpose, so it must never feed the catalog.
                     if world is not None:

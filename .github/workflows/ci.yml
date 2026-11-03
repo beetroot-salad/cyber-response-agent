@@ -703,7 +703,7 @@ jobs:
         run: defender/.venv/bin/python tooling/lint/lint_monkeypatch.py
 
       # A tenant's settings are its settings/ folder, resolved once into the run's record; the
-      # adapters, the estate, the case-history writer and lead-zero never read them (or a
+      # adapters, the estate, the case-comment writer and lead-zero never read them (or a
       # secret) out of the process environment. Empty allow-list: no baseline.
       - name: Tenant-settings env-read gate (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_tenant_env_reads.py
