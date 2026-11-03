@@ -12,6 +12,7 @@ import base64
 import dataclasses
 import hashlib
 import json
+import ssl
 import threading
 import time
 from collections.abc import Mapping
@@ -36,6 +37,7 @@ from defender.kit.access import (
 from defender.kit.faults import ConfigFault
 from defender.credential_proxy._deadline import Deadline
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, Refused
+from defender.credential_proxy._reply import capped_reply
 
 #: What replaces a secret value the upstream echoed (N6: literal echoes only).
 MARKER = "[credential removed]"
@@ -142,9 +144,11 @@ class AccessTokens:
     """OAuth access tokens held in memory per (tenant, system), each under the set version and
     the whole declaration it was issued for (A8, #1364 O2). A changed version or declaration, or a
     token within `REFRESH_MARGIN_SEC` of expiry, means a fresh exchange; one at a time per system,
-    a request waiting its turn no longer than its own deadline (#1364 O1)."""
+    a request waiting its turn no longer than its own deadline (#1364 O1). Each exchange verifies
+    the token endpoint with `trust`, built once by the caller (#1375 O1)."""
 
-    def __init__(self) -> None:
+    def __init__(self, trust: ssl.SSLContext) -> None:
+        self._trust = trust
         self._lock = threading.Lock()
         self._gates: dict[tuple[str, str], threading.Lock] = {}
         self._held: dict[tuple[str, str], _Held] = {}
@@ -172,7 +176,8 @@ class AccessTokens:
                 return held.token
             self._held.pop(key, None)
             asked_at = time.monotonic()
-            token, lifetime = _token_exchange(declaration.auth, creds, system, deadline)
+            token, lifetime = _token_exchange(declaration.auth, creds, system, deadline,
+                                              self._trust)
             if lifetime is not None and lifetime > REFRESH_MARGIN_SEC:
                 self._held[key] = _Held(creds.version, digest, token,
                                         asked_at + lifetime - REFRESH_MARGIN_SEC)
@@ -190,7 +195,7 @@ class AccessTokens:
 
 
 def _token_exchange(auth: Auth, creds: CredentialSet, system: str,
-                    deadline: Deadline) -> tuple[str, int | None]:
+                    deadline: Deadline, trust: ssl.SSLContext) -> tuple[str, int | None]:
     """One client-credentials exchange at the declared token URL (A12): the access token and
     its stated lifetime in seconds (None: not stated, so it is not reused). The client secret
     goes in Basic auth (RFC 6749 2.3.1) and only here."""
@@ -204,27 +209,20 @@ def _token_exchange(auth: Auth, creds: CredentialSet, system: str,
                "Accept": "application/json"}
     what = f"the token exchange of {system}"
     timeout = deadline.wait(what)
-
-    async def leg() -> tuple[int, bytes]:
-        async with httpx.AsyncClient(follow_redirects=False, trust_env=False) as client, \
-                client.stream("POST", str(auth.token_url), data=form, headers=headers,
-                              timeout=timeout) as reply:
-            body = bytearray()
-            async for chunk in reply.aiter_bytes():
-                body += chunk
-                if len(body) > TOKEN_REPLY_CAP:
-                    raise Refused(CONFIG, f"the token endpoint of {system} answered more than "
-                                          f"{TOKEN_REPLY_CAP} bytes")
-            return reply.status_code, bytes(body)
-
     try:
-        status, body = deadline.run(what, leg)
+        reply = deadline.run(what, lambda: capped_reply(
+            trust, "POST", str(auth.token_url), cap=TOKEN_REPLY_CAP, timeout=timeout,
+            data=form, headers=headers))
     except httpx.TransportError as e:
         raise Refused(TRANSPORT, f"the token endpoint of {system} is unreachable "
                                  f"({type(e).__name__})") from None
     except httpx.DecodingError:
         raise Refused(CONFIG, f"the token endpoint of {system} answered an undecodable "
                               "body") from None
+    if reply.over:
+        raise Refused(CONFIG, f"the token endpoint of {system} answered more than "
+                              f"{TOKEN_REPLY_CAP} bytes")
+    status, body = reply.status, reply.body
     if status >= 500:
         raise Refused(TRANSPORT, f"the token endpoint of {system} answered {status}")
     if status != 200:

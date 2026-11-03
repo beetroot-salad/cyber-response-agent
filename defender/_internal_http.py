@@ -28,19 +28,22 @@ def tls_trust(ca_cert: Path | None = None) -> ssl.SSLContext:
     return ssl.create_default_context()
 
 
-def internal_client(*, ca_cert: Path | None = None, transport: httpx.BaseTransport | None = None,
-                    **kw: Any) -> httpx.Client:
-    """A synchronous client of the deployment's services (module doc); `kw` as `httpx.Client`."""
-    return httpx.Client(verify=tls_trust(ca_cert), transport=transport, trust_env=False,
-                        follow_redirects=False, **kw)
+def internal_client(*, ca_cert: Path | None = None, trust: ssl.SSLContext | None = None,
+                    transport: httpx.BaseTransport | None = None, **kw: Any) -> httpx.Client:
+    """A synchronous client of the deployment's services (module doc); `kw` as `httpx.Client`.
+    `trust`, when given, is a `tls_trust` context the caller built once (#1375), used in place of
+    building one from `ca_cert`."""
+    return httpx.Client(verify=tls_trust(ca_cert) if trust is None else trust,
+                        transport=transport, trust_env=False, follow_redirects=False, **kw)
 
 
-def internal_async_client(*, ca_cert: Path | None = None,
+def internal_async_client(*, ca_cert: Path | None = None, trust: ssl.SSLContext | None = None,
                           transport: httpx.AsyncBaseTransport | None = None,
                           **kw: Any) -> httpx.AsyncClient:
-    """An asynchronous client of the deployment's services (module doc); `kw` as `httpx.AsyncClient`."""
-    return httpx.AsyncClient(verify=tls_trust(ca_cert), transport=transport, trust_env=False,
-                             follow_redirects=False, **kw)
+    """An asynchronous client of the deployment's services (module doc); `kw` as
+    `httpx.AsyncClient`; `trust` as `internal_client`'s."""
+    return httpx.AsyncClient(verify=tls_trust(ca_cert) if trust is None else trust,
+                             transport=transport, trust_env=False, follow_redirects=False, **kw)
 
 
 __all__ = ["internal_async_client", "internal_client", "tls_trust"]

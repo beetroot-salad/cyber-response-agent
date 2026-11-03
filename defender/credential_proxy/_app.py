@@ -57,6 +57,7 @@ from defender.credential_proxy._credentials import (
 from defender.credential_proxy._deadline import Deadline, answering
 from defender.credential_proxy._openbao import OpenBaoStore, TransitVerifier
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, UPSTREAM, Refused
+from defender.credential_proxy._reply import capped_reply, public_trust
 from defender.credential_proxy._scope import Target, check_route, locate
 from defender.credential_proxy._tokens import Claims, TokenVerifier, split_token
 
@@ -159,14 +160,16 @@ def _refused_answer(fault: str, detail: str) -> dict[str, Any]:
 
 class _Proxy:
     """The request pipeline over one `ProxyDeps`; holds the OAuth access tokens it obtains.
-    Every network leg runs under the request's deadline (`Deadline.run`), on its own client."""
+    Every network leg runs under the request's deadline (`Deadline.run`), on its own client over
+    the one TLS context built here (#1375 O1)."""
 
     def __init__(self, deps: ProxyDeps) -> None:
         self.deps = deps
         # The one conversion of the data root this proxy is handed (A26); a tenant's exports are
         # joined under it by tenancy, never spelled here.
         self._root = tenancy.data_root_from_path(deps.data_root)
-        self.access_tokens = AccessTokens()
+        self._trust = public_trust()
+        self.access_tokens = AccessTokens(self._trust)
 
     def handle(self, authorization: str | None, raw: bytes | None,
                arrived: float | None = None) -> dict[str, Any]:
@@ -281,38 +284,32 @@ class _Proxy:
         what = f"calling {asked.system}"
         timeout = deadline.wait(what)
 
-        async def leg() -> tuple[int, list[tuple[str, str]], bytes, bool]:
-            async with httpx.AsyncClient(follow_redirects=False, trust_env=False) as client, \
-                    client.stream(asked.method, target.url, headers=headers, content=content,
-                                  timeout=timeout) as reply:
-                trail.outcome = f"sent {reply.status_code}"
-                data = bytearray()
-                async for chunk in reply.aiter_bytes():
-                    data += chunk
-                    if len(data) > cap:
-                        return reply.status_code, [], b"", True
-                return reply.status_code, reply.headers.multi_items(), bytes(data), False
+        def sent(status: int) -> None:
+            trail.outcome = f"sent {status}"
 
         try:
-            status, reply_headers, data, over = deadline.run(what, leg)
+            reply = deadline.run(what, lambda: capped_reply(
+                self._trust, asked.method, target.url, cap=cap, timeout=timeout,
+                on_status=sent, headers=headers, content=content))
         except httpx.TransportError as e:
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
                                      f"({type(e).__name__})") from None
         except httpx.DecodingError:
             raise Refused(UPSTREAM, f"{asked.system} answered a body that does not "
                                     "decode") from None
-        if over:
+        status = reply.status
+        if reply.over:
             return {"status": status, "headers": {}, "body": "", "fault": UPSTREAM,
                     "detail": f"{asked.system} answered more than {cap} bytes"}
         fault = _fault_of(status)
         shown: dict[str, str] = {}
-        for name, value in reply_headers:
+        for name, value in reply.headers:
             if name.lower() in _REPLY_HOP_HEADERS:
                 continue
             name, value = scrub_secrets(name, secrets), scrub_secrets(value, secrets)
             shown[name] = f"{shown[name]}, {value}" if name in shown else value
         return {"status": status, "headers": shown,
-                "body": scrub_secret_bytes(data, secrets).decode("utf-8", "replace"),
+                "body": scrub_secret_bytes(reply.body, secrets).decode("utf-8", "replace"),
                 "fault": fault,
                 "detail": None if fault is None else f"{asked.system} answered {status}"}
 

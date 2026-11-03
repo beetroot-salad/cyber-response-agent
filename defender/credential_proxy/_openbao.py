@@ -23,7 +23,7 @@ from typing import Any
 import httpx
 
 from defender import tenancy
-from defender._internal_http import internal_async_client, internal_client
+from defender._internal_http import internal_async_client, internal_client, tls_trust
 from defender.configuration.issuer import DEPLOYMENT_ISSUER, TRANSIT_MOUNT
 from defender.kit.access import CREDENTIAL_KINDS
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
@@ -101,8 +101,11 @@ class _OpenBao:
         self.mount = _check_name(mount, "the mount")
         self._token = token
         self._transport = transport
+        #: The deployment's TLS trust, built once: building it blocks, and a call inside a proxied
+        #: request runs on the event loop (#1375 O1).
+        self._trust = tls_trust(DEPLOYMENT_ISSUER.ca_cert)
         #: One pooled connection for this login's calls made outside a proxied request.
-        self._client = internal_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert, transport=transport,
+        self._client = internal_client(trust=self._trust, transport=transport,
                                        timeout=OPENBAO_TIMEOUT_SEC)
 
     def __repr__(self) -> str:
@@ -137,8 +140,8 @@ class _OpenBao:
                      json: Any = None, *, timeout: float = OPENBAO_TIMEOUT_SEC,
                      transport: httpx.AsyncBaseTransport | None = None) -> httpx.Response:
         try:
-            async with internal_async_client(ca_cert=DEPLOYMENT_ISSUER.ca_cert,
-                                             transport=transport, timeout=timeout) as client:
+            async with internal_async_client(trust=self._trust, transport=transport,
+                                             timeout=timeout) as client:
                 return await client.request(method, self._url(rest), json=json,
                                             headers=self._headers())
         except httpx.HTTPError as e:
