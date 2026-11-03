@@ -1637,23 +1637,6 @@ async def test_m1_a_symlink_where_the_alert_file_goes_is_refused_not_written_thr
         assert not target.exists(), "the worker created the link's target"
 
 
-async def test_d_af_an_id_the_job_lane_refuses_ends_the_row_worker_error_with_its_own_message(world):
-    """An id the database holds (a text column) but the lane's run-id grammar refuses (upper-case uuid) ends the row `failed`/`worker_error`, cost 0.0, with a message that is not the generic crash text, and no child starts. (D-af)"""
-    inv = str(uuid.uuid4()).upper()
-    child = _child(world, files=_committed())
-    async with job_store(world["dsn"]) as store:
-        alert = await an_alert(store, T1)
-        plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
-        await _worker(world, store, child).drain()
-
-    stored = row(world["dsn"], inv)
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
-    assert stored["cost_usd"] == 0
-    assert stored["failure_message"]
-    assert stored["failure_message"] != "the worker failed while running the job", "a refused id fell to the generic handler"
-    assert child.seen() is None, "a child started for an id the lane refuses"
-
-
 async def test_o8_the_childs_stdout_and_stderr_are_the_workers_own_descriptors(world, capfd):
     """The child's fd 1 and fd 2 are open on what the worker's are (not a pipe the worker reads). (design: child output)"""
     child = _child(world, files=_committed(), printed=MARKER)

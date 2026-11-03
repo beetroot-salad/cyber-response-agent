@@ -48,9 +48,9 @@ def test_a_request_without_a_valid_session_cookie_is_401_with_no_bearer_challeng
             assert "bearer" not in response.headers.get("www-authenticate", "").lower()
 
 
-@pytest.mark.parametrize("other", [T2, UNKNOWN, BAD_TENANT])
-def test_a_non_member_an_unknown_and_a_malformed_tenant_get_the_same_404(other: str) -> None:
-    """A member reaches their tenant; every other tenant answers alike (O1/P-D)."""
+@pytest.mark.parametrize("other", [T2, UNKNOWN])
+def test_a_non_member_and_an_unknown_tenant_get_the_same_404(other: str) -> None:
+    """A member reaches their tenant; every other tenant answers alike (O1/P-D). A malformed id is a 422 (#1382)."""
     world, ann, _ = two_tenants()
     assert ann.get(f"/tenants/{T1}/alerts").status_code == 200
     reference = ann.get(f"/tenants/{UNKNOWN}/alerts")
@@ -113,7 +113,7 @@ def test_an_invitation_id_of_someone_else_or_nobody_is_the_same_404_at_accept() 
 def test_a_member_of_two_tenants_reads_and_writes_only_in_the_paths_tenant() -> None:
     """The path's tenant, not one of the caller's others, is the tenant every data route acts in (P-D, O7)."""
     world, ann, bob = two_tenants()
-    other = ALERT.model_copy(update={"alert_id": "al-2", "title": "T2's own"})
+    other = ALERT.model_copy(update={"alert_id": "a1000000-0000-4000-8000-000000000002", "title": "T2's own"})
     world.store.add_alert(T2, other)
     world.invite(bob, T2, ANN)
     world.send_pending()
@@ -125,7 +125,7 @@ def test_a_member_of_two_tenants_reads_and_writes_only_in_the_paths_tenant() -> 
         assert items(ann.get(f"/tenants/{tenant}/alerts")) == [summary], tenant
         assert ann.get(f"/tenants/{tenant}/alerts/{own.alert_id}").json() == own.model_dump(mode="json")
         assert ann.get(f"/tenants/{tenant}/alerts/{foreign.alert_id}").status_code == 404, tenant
-    created = ann.post(f"/tenants/{T2}/investigations", json={"alert_id": "al-2", "client_request_id": "r1"})
+    created = ann.post(f"/tenants/{T2}/investigations", json={"alert_id": "a1000000-0000-4000-8000-000000000002", "client_request_id": "r1"})
     assert created.status_code == 201, created.text
     [event] = world.store.audit_events
     assert (event.tenant_id, event.user_id) == (T2, user_id(ann))
@@ -138,5 +138,5 @@ def test_the_alerts_routes_answer_unchanged_under_the_tenant_prefix() -> None:
     """Existing routes move under /tenants/{T}/ with unchanged behaviour (O7)."""
     _, ann, _ = two_tenants()
     assert items(ann.get(f"/tenants/{T1}/alerts")) == [SUMMARY.model_dump(mode="json")]
-    assert ann.get(f"/tenants/{T1}/alerts/al-1").json() == ALERT.model_dump(mode="json")
+    assert ann.get(f"/tenants/{T1}/alerts/a1000000-0000-4000-8000-000000000001").json() == ALERT.model_dump(mode="json")
     assert ann.get("/alerts").status_code == 404

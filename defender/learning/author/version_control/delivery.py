@@ -77,13 +77,13 @@ def opened_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-pr
     `client`, else a new forge client. A client or credential made here is closed on exit; a
     given one stays its caller's. No wiring recorded is `TenantRefused`; a refused open,
     `DeliveryRefused` or `ForgejoAuthError`. Publish outcomes are recorded through `directory`."""
-    wiring = directory.forge_wiring(str(tenant.id))
+    wiring = directory.forge_wiring(tenant.id)
     if wiring is None:
         raise TenantRefused(f"tenant {tenant.id} has no forge wiring recorded: its repository is not bound to "
                             "a forge")
     with contextlib.ExitStack() as owned:
         if identity is None:
-            credential = forge_credential(str(tenant.id), purpose, directory=directory,
+            credential = forge_credential(tenant.id, purpose, directory=directory,
                                           config=credential_config, transport=issuer_transport)
             owned.callback(credential.close)
             identity = credential

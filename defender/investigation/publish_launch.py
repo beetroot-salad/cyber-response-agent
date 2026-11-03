@@ -39,7 +39,7 @@ from defender.tenancy import run_knowledge
 from defender.tenancy import knowledge_lock_holder
 from defender.tenancy import STALE_TRANSIENT, record_report
 from defender.tenancy import Tenant, data_root_from_path, database_address_variable, requested_tenant
-from defender.records.formats import TenantRefused
+from defender.records.formats import TenantId, TenantRefused
 
 if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
@@ -66,7 +66,7 @@ def _tenant(tenant_id: str, data_root: Path) -> Tenant | None:
         return None
 
 
-def _recorded(directory: TenantDirectory | None, tenant_id: str, line: str) -> str:
+def _recorded(directory: TenantDirectory | None, tenant_id: TenantId, line: str) -> str:
     """`line`, an outcome the child never recorded, recorded for `tenant.py check` by the
     child's own recorder (`record_report`) in the tenant records, so it reads as the child's
     would. With no records handed in nothing is recorded."""
@@ -92,7 +92,7 @@ def child_budget(budget: float) -> float:
 
 
 def launch_publish(
-    tenant_id: str,
+    tenant_id: TenantId,
     *,
     data_root: Path,
     budget: float = 60.0,
@@ -118,7 +118,7 @@ def launch_publish(
 
 
 def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
-    tenant_id: str, *, data_root: Path, budget: float, command: Sequence[str] | None,
+    tenant_id: TenantId, *, data_root: Path, budget: float, command: Sequence[str] | None,
     spawn: Spawn | None, directory: TenantDirectory | None,
 ) -> str:
     if not budget > 0:

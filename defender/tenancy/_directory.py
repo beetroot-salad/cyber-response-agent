@@ -19,7 +19,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from defender.records.formats import TenantRefused
+from defender.records.formats import TenantId, TenantRefused
 
 if TYPE_CHECKING:
     from defender.tenancy.models import ForgeWiring, Generation
@@ -50,30 +50,30 @@ class TenantDirectory:
     def __init__(self, open_repository: Callable[[], Any]) -> None:
         self._open = open_repository
 
-    def state(self, tenant_id: str) -> str | None:
+    def state(self, tenant_id: TenantId) -> str | None:
         """The tenant's state (`creating`, `active`, `offboarding`, `offboarded`), None when unknown."""
         async def read(repository: Any) -> str | None:
-            record = await repository.tenant(str(tenant_id))
+            record = await repository.tenant(tenant_id)
             return None if record is None else record.state
         return self._call(read)
 
-    def forge_wiring(self, tenant_id: str) -> ForgeWiring | None:
+    def forge_wiring(self, tenant_id: TenantId) -> ForgeWiring | None:
         """The tenant's recorded repo and origin, None when none is recorded."""
         async def read(repository: Any) -> ForgeWiring | None:
-            return await repository.forge_wiring(str(tenant_id))
+            return await repository.forge_wiring(tenant_id)
         return self._call(read)
 
-    def admission(self, tenant_id: str) -> tuple[str | None, ForgeWiring | None]:
+    def admission(self, tenant_id: TenantId) -> tuple[str | None, ForgeWiring | None]:
         """The tenant's state and its recorded forge wiring in one repository call (r10 Finding 9)."""
         async def read(repository: Any) -> tuple[str | None, ForgeWiring | None]:
-            return await repository.admission(str(tenant_id))
+            return await repository.admission(tenant_id)
         return self._call(read)
 
-    def generations(self, tenant_id: str) -> list[Generation]:
+    def generations(self, tenant_id: TenantId) -> list[Generation]:
         """The tenant's credential generations (the live one among them), [] when none: what the
         host's forge credential provider reads on every mint (P4)."""
         async def read(repository: Any) -> list[Generation]:
-            return await repository.generations(str(tenant_id))
+            return await repository.generations(tenant_id)
         return self._call(read)
 
     def _call(self, read: Callable[[Any], Awaitable[_R]]) -> _R:

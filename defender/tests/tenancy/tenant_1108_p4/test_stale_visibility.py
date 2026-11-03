@@ -10,6 +10,8 @@ to those properties. The API serves `Investigation.knowledge = {status, commit, 
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import html
 import json
 import re
@@ -540,7 +542,9 @@ def _investigation(investigation_id: str, knowledge: dict[str, Any] | None) -> A
     from defender.api.models import Investigation
 
     doc: dict[str, Any] = {
-        "investigation_id": investigation_id, "alert_id": "al-1", "status": "completed",
+        # #1382: ids are UUIDs; the label names the case's own one.
+        "investigation_id": fixture_uuid(f"investigation:{investigation_id}"),
+        "alert_id": "a1000000-0000-4000-8000-000000000001", "status": "completed",
         "disposition": "benign", "cost_usd": 1.0, "created_at": _NOW, "started_at": _NOW,
         "finished_at": _NOW,
         "request_key": f"rk-{investigation_id}", "attempt": 1,  # required on the wire model (#1342 D-d)
@@ -585,7 +589,7 @@ def _client(*investigations: Any) -> Any:
         # The in-memory repositories hold no loop state, so a throwaway loop seeds them.
         await tenants.add_tenant(TenantId(_TENANT), created_at=now())
         ann = await repo.add_user("ann@example.invalid", created_at=now(), status="active", display_name="Ann")
-        await repo.add_membership(ann.id, TenantId(_TENANT), status="active", invited_by="system",
+        await repo.add_membership(ann.id, TenantId(_TENANT), status="active", invited_by=None,
                                   created_at=now(), accepted_at=now())
         await repo.add_session(_SESSION, ann.id, now=now(), expires_at=now() + _dt.timedelta(days=7))
 

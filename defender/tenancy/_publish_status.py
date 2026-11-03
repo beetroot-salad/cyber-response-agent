@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from defender._text import one_line
 
 if TYPE_CHECKING:
+    from defender.records.formats import TenantId
     from defender.tenancy._directory import TenantDirectory
 
 _logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ STALE_OPERATOR = f"{STALE_PREFIX}{OPERATOR}"
 MISCONFIGURED = "misconfigured"
 
 
-def record_report(directory: TenantDirectory | None, tenant_id: object, line: str, *, by: str) -> None:
+def record_report(directory: TenantDirectory | None, tenant_id: TenantId, line: str, *, by: str) -> None:
     """The outcome a launch-time publish report `line` states, recorded as `by`'s: `fresh`
     publishes its commit; `stale:transient` is a transient refusal; `stale:operator` and
     `misconfigured` need a human. The one recorder for every trigger, so the recorded outcome is
@@ -41,19 +42,18 @@ def record_report(directory: TenantDirectory | None, tenant_id: object, line: st
     recorded."""
     if directory is None:
         return
-    tenant = str(tenant_id)
     try:
-        directory._call(lambda repository: repository.record_publish_status(tenant, line, by=by))  # noqa: SLF001 — this package's own facade
+        directory._call(lambda repository: repository.record_publish_status(tenant_id, line, by=by))  # noqa: SLF001 — this package's own facade
     except Exception:  # noqa: BLE001 — best effort: a status that cannot be written never hides the outcome
-        _logger.warning("the publish outcome of tenant %s could not be recorded", tenant, exc_info=True)
+        _logger.warning("the publish outcome of tenant %s could not be recorded", tenant_id, exc_info=True)
 
 
-def record_published(directory: TenantDirectory | None, tenant_id: object, commit: str, *, by: str) -> None:
+def record_published(directory: TenantDirectory | None, tenant_id: TenantId, commit: str, *, by: str) -> None:
     """A publish by `by` (the trigger) succeeded at `commit`: any earlier refusal is over."""
     record_report(directory, tenant_id, f"{FRESH} {commit}", by=by)
 
 
-def record_refusal(directory: TenantDirectory | None, tenant_id: object, *, kind: str, reason: str,
+def record_refusal(directory: TenantDirectory | None, tenant_id: TenantId, *, kind: str, reason: str,
                    by: str) -> None:
     """A publish by `by` was refused: `kind` (`TRANSIENT` or `OPERATOR`) and why."""
     if kind not in (TRANSIENT, OPERATOR):
@@ -61,8 +61,7 @@ def record_refusal(directory: TenantDirectory | None, tenant_id: object, *, kind
     record_report(directory, tenant_id, f"{STALE_PREFIX}{kind} {one_line(reason)}", by=by)
 
 
-def read_status(directory: TenantDirectory, tenant_id: object) -> dict[str, Any] | None:
+def read_status(directory: TenantDirectory, tenant_id: TenantId) -> dict[str, Any] | None:
     """The last publish outcome recorded (`by`, then `published`, or `refused` with `kind`), or
     `None` when none is."""
-    tenant = str(tenant_id)
-    return directory._call(lambda repository: repository.publish_status(tenant))  # noqa: SLF001 — this package's own facade
+    return directory._call(lambda repository: repository.publish_status(tenant_id))  # noqa: SLF001 — this package's own facade

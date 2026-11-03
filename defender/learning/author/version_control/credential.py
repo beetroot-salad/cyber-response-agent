@@ -36,6 +36,7 @@ from defender.configuration.issuer import DEPLOYMENT_ISSUER
 from .auth import CLOCK_SKEW, CredentialMisconfigured, ForgejoAuthError, ForgejoIdentity
 
 if TYPE_CHECKING:
+    from defender.records.formats import TenantId
     from defender.tenancy import TenantDirectory
 
 #: Each issuer request's own bound.
@@ -47,7 +48,7 @@ class TenantForgeCredential:
     """One tenant's forge credential (a `ForgeCredential`): `token()` mints through the tenant's
     live generation as it stands at that moment (module doc)."""
 
-    tenant_id: str
+    tenant_id: TenantId
     purpose: str
     directory: TenantDirectory = field(repr=False)
     config: Any = field(repr=False)
@@ -119,12 +120,12 @@ class TenantForgeCredential:
 
 
 def forge_credential(
-    tenant_id: str, purpose: str, *, directory: TenantDirectory, config: Any,
+    tenant_id: TenantId, purpose: str, *, directory: TenantDirectory, config: Any,
     transport: httpx.BaseTransport | None = None, clock: Callable[[], float] = time.time,
 ) -> TenantForgeCredential:
     """Tenant `tenant_id`'s forge credential for `purpose` (`publish`, `drain`, `connect`: named in
     refusals). Nothing is read or sent until its first `token()`. `config` is a test's issuer; with
     none, the deployment's (`DEPLOYMENT_ISSUER`)."""
-    return TenantForgeCredential(tenant_id=str(tenant_id), purpose=purpose, directory=directory,
+    return TenantForgeCredential(tenant_id=tenant_id, purpose=purpose, directory=directory,
                                  config=DEPLOYMENT_ISSUER if config is None else config,
                                  transport=transport, clock=clock)

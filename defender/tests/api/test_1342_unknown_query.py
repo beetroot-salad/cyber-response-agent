@@ -79,12 +79,12 @@ def test_r7_2_a_path_parameters_name_is_not_a_query_name(name: str) -> None:
 
 
 @pytest.mark.parametrize(("path", "name", "value"), [
-    ("/systems", "alert_id", "al-1"),                # `/systems` declares `cursor` and `limit` only
+    ("/systems", "alert_id", "a1000000-0000-4000-8000-000000000001"),                # `/systems` declares `cursor` and `limit` only
     ("/systems", "fired_after", "2026-09-28T08:00:00Z"),
     (f"/alerts/{ALERT.alert_id}", "limit", "5"),     # one alert: the list's names are not its own
-    ("/lessons", "alert_id", "al-1"),                # another route's filter
-    ("/alerts", "alert_id", "al-1"),
-    ("/alerts", "investigation_id", "inv-1"),
+    ("/lessons", "alert_id", "a1000000-0000-4000-8000-000000000001"),                # another route's filter
+    ("/alerts", "alert_id", "a1000000-0000-4000-8000-000000000001"),
+    ("/alerts", "investigation_id", "b1000000-0000-4000-8000-000000000001"),
     ("/investigations", "fired_after", "2026-09-28T08:00:00Z"),
     ("/learning-jobs", "fired_before", "2026-09-28T08:00:00Z"),
     ("/members", "cursor", "x"),
@@ -129,7 +129,7 @@ def test_r7_2_control_declared_names_beside_no_unknown_one_are_served() -> None:
 def test_r7_2_a_delete_route_refuses_an_undeclared_parameter() -> None:
     """`DELETE /tenants/{T}/investigations/{id}?x=1` is refused like any other method's request. (R7-2)"""
     _, ann, _ = two_tenants()
-    _refused(ann.delete(f"/tenants/{T1}/investigations/inv-1", params={"x": "1"}), "x")
+    _refused(ann.delete(f"/tenants/{T1}/investigations/b1000000-0000-4000-8000-000000000001", params={"x": "1"}), "x")
 
 
 def test_r7_2_sign_in_start_refuses_an_undeclared_parameter() -> None:

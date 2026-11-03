@@ -30,6 +30,7 @@ from defender.kit.access import PROXY_URL_ENV
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 
 if TYPE_CHECKING:
+    from defender.records.formats import TenantId
     from defender.tenancy import TenantDirectory
 
 
@@ -46,7 +47,7 @@ class TenantRequestSigner:
     """Signs request-token payloads with the tenant's transit key, logged in as its live
     generation's sign login. Shows only the tenant it signs for."""
 
-    def __init__(self, tenant_id: str, directory: TenantDirectory,
+    def __init__(self, tenant_id: TenantId, directory: TenantDirectory,
                  transport: httpx.BaseTransport | None) -> None:
         self._tenant_id = tenant_id
         self._directory = directory
@@ -118,15 +119,15 @@ def _refusal(what: str, response: httpx.Response) -> str:
     return f"OpenBao refused {what}: HTTP {response.status_code}{sealed}"
 
 
-def request_signer(tenant_id: str, *, directory: TenantDirectory,
+def request_signer(tenant_id: TenantId, *, directory: TenantDirectory,
                    transport: httpx.BaseTransport | None = None) -> TenantRequestSigner:
     """The request signer of tenant `tenant_id` over its records `directory`: an object with
     `sign(payload: bytes) -> str`. Reads and sends nothing until its first sign; `transport` is
     the `httpx` transport OpenBao is reached by (a test's; none: the network)."""
-    return TenantRequestSigner(str(tenant_id), directory, transport)
+    return TenantRequestSigner(tenant_id, directory, transport)
 
 
-def signing_access(tenant_id: str, *, directory: TenantDirectory, signer: Any = None,
+def signing_access(tenant_id: TenantId, *, directory: TenantDirectory, signer: Any = None,
                    proxy_url: str | None = None,
                    transport: httpx.BaseTransport | None = None) -> tuple[Any, str]:
     """The request signer and proxy address a host process (run start, learning pre-flight) mints

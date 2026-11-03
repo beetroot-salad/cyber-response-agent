@@ -156,7 +156,7 @@ def test_an_administrators_invitation_calls_no_port_before_the_response() -> Non
 
 
 def test_an_administrator_invites_only_into_a_tenant_with_no_active_members() -> None:
-    """Empty tenant 202, tenant with members 409, unknown or malformed 404; the invitee joins (O2, O5)."""
+    """Empty tenant 202, tenant with members 409, unknown 404, malformed 422 (#1382); the invitee joins (O2, O5)."""
     world = lab()
     world.register(EMPTY)
     world.sign_in(ME)  # the lab now has an active member
@@ -164,7 +164,7 @@ def test_an_administrator_invites_only_into_a_tenant_with_no_active_members() ->
     assert ops.post(f"/admin/tenants/{EMPTY}/invitations", json={"email": NEW}).status_code == 202
     assert ops.post(f"/admin/tenants/{LAB}/invitations", json={"email": NINA}).status_code == 409
     assert ops.post(f"/admin/tenants/{UNKNOWN}/invitations", json={"email": NINA}).status_code == 404
-    assert ops.post("/admin/tenants/not-a-tenant-id/invitations", json={"email": NINA}).status_code == 404
+    assert ops.post("/admin/tenants/not-a-tenant-id/invitations", json={"email": NINA}).status_code == 422
     world.send_pending()
     assert world.signin.sends_to(NEW) == 1
     assert world.signin.sends_to(NINA) == 0

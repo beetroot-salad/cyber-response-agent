@@ -754,6 +754,11 @@ jobs:
       - name: Venv-guard fence (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_venv_guard.py
 
+      # Record id columns (#1382): every ORM table's own `id` is an IdColumn (PostgreSQL uuid,
+      # read back as its id type), never free text.
+      - name: Record-id column gate (empty allow-list)
+        run: defender/.venv/bin/python tooling/lint/lint_record_id_columns.py
+
       # Close single read (#991): the close reads and parses the investigation companion once, the
       # challenge gate reads nothing, and the one parse is guarded.
       - name: Close single-read fence (empty allow-list)

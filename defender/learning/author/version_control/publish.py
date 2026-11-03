@@ -134,14 +134,14 @@ def _publish_unrecorded(  # noqa: PLR0913 — `publish_for_run`'s work, its outc
     # Reads and sends nothing until its first token: a host secret file it cannot use is refused
     # in the network phase below, as `misconfigured`.
     credential = identity if identity is not None else forge_credential(
-        str(tenant.id), "publish", directory=directory, config=credential_config,
+        tenant.id, "publish", directory=directory, config=credential_config,
         transport=issuer_transport)
     timeout = CHILD_NETWORK_TIMEOUT if network_timeout is None else network_timeout
     repository: GitRepository | None = None
     try:
         with contextlib.ExitStack() as owned, _refusals():
             # Inside the refusals: records that cannot be read are an outage, classified below.
-            wiring = directory.forge_wiring(str(tenant.id))
+            wiring = directory.forge_wiring(tenant.id)
             if wiring is None:
                 return report(MISCONFIGURED, f"tenant {tenant.id} has no forge wiring recorded: its repository "
                                              "is not bound to a forge")

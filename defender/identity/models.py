@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import unicodedata
-import uuid
 from typing import Annotated, Literal, get_args
 
 from pydantic import AfterValidator
@@ -17,7 +16,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
-from defender.database import Base
+from defender.database import Base, IdColumn
+from defender.records.formats import MembershipId, TenantId, UserId
 # The memberships' foreign key names `tenancy.tenants`: its table must be on the metadata too.
 from defender.tenancy import models as _tenancy  # noqa: F401
 
@@ -47,10 +47,6 @@ MembershipStatus = Literal["invited", "active", "ended", "revoked"]
 _TIME = DateTime(timezone=True)
 
 
-def _new_id() -> str:
-    return str(uuid.uuid4())
-
-
 def _status_check(allowed: object) -> CheckConstraint:
     """The table's CHECK on `status`, spelled from the same Literal the model validates against."""
     return CheckConstraint(f"status IN ({', '.join(repr(s) for s in get_args(allowed))})", name="status")
@@ -73,7 +69,7 @@ class User(Base, kw_only=True):
         {"schema": SCHEMA},
     )
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default_factory=_new_id)
+    id: Mapped[UserId] = mapped_column(IdColumn(UserId), primary_key=True, default_factory=UserId.mint)
     email: Mapped[str] = mapped_column(Text)
     display_name: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[UserStatus] = mapped_column(Text, default="invited")
@@ -109,19 +105,19 @@ class Membership(Base, kw_only=True):
     __table_args__ = (
         _status_check(MembershipStatus),
         CheckConstraint("status <> 'active' OR accepted_at IS NOT NULL", name="active_is_accepted"),
-        CheckConstraint("status <> 'ended' OR (ended_at IS NOT NULL AND ended_by IS NOT NULL)",
-                        name="ended_is_ended"),
+        CheckConstraint("status <> 'ended' OR ended_at IS NOT NULL", name="ended_is_ended"),
         Index("memberships_one_live_row", "user_id", "tenant_id", unique=True,
               postgresql_where=text("status IN ('invited', 'active')")),
         Index("memberships_by_tenant", "tenant_id"),
         {"schema": SCHEMA},
     )
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default_factory=_new_id)
-    user_id: Mapped[str] = mapped_column(Text, ForeignKey(f"{SCHEMA}.users.id"))
-    tenant_id: Mapped[str] = mapped_column(Text, ForeignKey("tenancy.tenants.id"))
+    id: Mapped[MembershipId] = mapped_column(IdColumn(MembershipId), primary_key=True, default_factory=MembershipId.mint)
+    user_id: Mapped[UserId] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"))
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey("tenancy.tenants.id"))
     status: Mapped[MembershipStatus] = mapped_column(Text)
-    invited_by: Mapped[str] = mapped_column(Text)
+    #: The user who invited, or None for the system (#1382: the actor columns hold user ids only).
+    invited_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"))
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     notify_requested_seq: Mapped[int] = mapped_column(Integer, default=0)
     notify_sent_seq: Mapped[int] = mapped_column(Integer, default=0)
@@ -132,7 +128,8 @@ class Membership(Base, kw_only=True):
     expires_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     accepted_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     ended_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
-    ended_by: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The user who ended it, or None for the system (or while not ended).
+    ended_by: Mapped[UserId | None] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"), default=None)
 
     @validates("status")
     def _status(self, _key: str, value: str) -> str:
@@ -144,7 +141,7 @@ class Session(Base):
     __table_args__ = (Index("sessions_by_user", "user_id"), {"schema": SCHEMA})
 
     token_hash: Mapped[str] = mapped_column(Text, primary_key=True)
-    user_id: Mapped[str] = mapped_column(Text, ForeignKey(f"{SCHEMA}.users.id"))
+    user_id: Mapped[UserId] = mapped_column(IdColumn(UserId), ForeignKey(f"{SCHEMA}.users.id"))
     used_otp: Mapped[bool] = mapped_column(Boolean)
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     last_seen_at: Mapped[_dt.datetime] = mapped_column(_TIME)
