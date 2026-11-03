@@ -2,12 +2,8 @@
 `_run_id` so that module stays loadable without pydantic."""
 from __future__ import annotations
 
-from typing import Any
-
-from pydantic_core import core_schema
-
 from defender._shown import escaped
-from defender.records._run_id import mint_uuid, uuid_id_fault
+from defender.records._record_ids import UuidId
 
 
 class TenantRefused(Exception):
@@ -16,7 +12,9 @@ class TenantRefused(Exception):
     message names the value that was refused, and every entry catches THIS and surfaces it
     verbatim. An `Exception`, not a `ValueError` (#1067's `_model.py` convention): pydantic
     wraps a `ValueError` raised inside a validator into its own `ValidationError`, where an
-    `except TenantRefused` would silently miss it."""
+    `except TenantRefused` would silently miss it. A pydantic field typed `TenantId` checks the
+    UUID pattern first (#1382), so malformed input there is pydantic's `ValidationError` (the
+    API's 422), never this; `TenantId(raw)` called directly still raises this."""
 
     def __init__(self, message: object = "") -> None:
         # Escaped where it is built, as `RunRefused` is: a path or a value read off disk can
@@ -24,30 +22,14 @@ class TenantRefused(Exception):
         super().__init__(escaped(message))
 
 
-class TenantId(str):
+class TenantId(UuidId):
     """An opaque tenant id in canonical lowercase UUID text — the ONE place it is checked. Constructing one
     is the check: `TenantId(raw)` returns the id or raises `TenantRefused` naming `raw`, and a
     `TenantId` handed back in is returned as-is. It IS a `str` (paths, JSON, argv and log lines
     take it unchanged, and its repr is the string's), but a function that declares `TenantId`
     tells mypy a plain, unchecked `str` does not belong there. Entry points build one from the
-    request; records and rows build one as they parse."""
+    request; records and rows build one as they parse. One of the record id families (#1382)."""
 
     __slots__ = ()
-
-    def __new__(cls, raw: object) -> TenantId:
-        if isinstance(raw, TenantId):
-            return raw
-        fault = uuid_id_fault(raw, "tenant")
-        if fault is not None:
-            raise TenantRefused(fault)
-        assert isinstance(raw, str)
-        return super().__new__(cls, raw)
-
-    @classmethod
-    def mint(cls) -> TenantId:
-        """Mint a tenant UUID without creating a tenant or writing any state."""
-        return cls(mint_uuid())
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, _source: Any, _handler: Any) -> Any:
-        return core_schema.no_info_after_validator_function(cls, core_schema.str_schema())
+    domain = "tenant"
+    refused = TenantRefused

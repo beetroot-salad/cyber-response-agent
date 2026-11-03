@@ -13,10 +13,10 @@ import contextlib
 import dataclasses
 import datetime as _dt
 import threading
-import uuid
 from collections.abc import AsyncIterator, Collection, Mapping
-from typing import Any, Literal, TypeVar, overload
+from typing import Any, Literal, TypeVar, cast, overload
 
+from defender.records.formats import TenantId
 from defender.tenancy.models import ALLOWED_ACTIONS, ForgeWiring, Generation, PublishStatus, TenantRecord
 from defender.tenancy.repository import (
     KEEP,
@@ -67,8 +67,9 @@ class InMemoryTenantRepository:
         step_actor: str | None = None, failure: str | None = None,
     ) -> TenantRecord:
         """Seeder: a tenant row (and its forge wiring when `repo` is given) as written, not requested.
-        A state that requires a pending action gets its first step when none is named."""
-        tenant_id = str(tenant_id)
+        A state that requires a pending action gets its first step when none is named. The id is stored as given,
+        unchecked, so a case can plant one the entry points must refuse."""
+        tenant_id = cast(TenantId, tenant_id)
         if pending_action is None and state in _SEED_JOB:
             pending_action, step, step_actor = _SEED_JOB[state]
         _check_pair(state, pending_action)
@@ -86,7 +87,7 @@ class InMemoryTenantRepository:
 
     async def add_generation(self, tenant_id: str, **fields: Any) -> Generation:
         """Seeder: one generation row of an existing tenant, with the model's field names."""
-        row = Generation(tenant_id=str(tenant_id), **fields)
+        row = Generation(tenant_id=cast(TenantId, tenant_id), **fields)
         with self._mutex:
             self._insert_generation(row)
             return _detached(row)
@@ -99,81 +100,81 @@ class InMemoryTenantRepository:
         self._generations[(row.tenant_id, row.salt)] = row
         self._check_one_live(row.tenant_id)
 
-    def _check_one_live(self, tenant_id: str) -> None:
+    def _check_one_live(self, tenant_id: TenantId) -> None:
         live = [g for (t, _), g in self._generations.items() if t == tenant_id and g.status == "live"]
         if len(live) > 1:
             raise ValueError(f"tenant {tenant_id} would have two live generations")
 
-    def state_of(self, tenant_id: str) -> str | None:
+    def state_of(self, tenant_id: TenantId) -> str | None:
         """The tenant's state now, or None: synchronous, for the identity twin that shares this store."""
         with self._mutex:
-            row = self._tenants.get(str(tenant_id))
+            row = self._tenants.get(tenant_id)
             return None if row is None else row.state
 
     # --- reads ---------------------------------------------------------------------------------
-    async def tenant(self, tenant_id: str) -> TenantRecord | None:
+    async def tenant(self, tenant_id: TenantId) -> TenantRecord | None:
         with self._mutex:
-            return _detached(self._tenants.get(str(tenant_id)))
+            return _detached(self._tenants.get(tenant_id))
 
     async def tenants(self) -> list[TenantRecord]:
         with self._mutex:
             return [_detached(t) for t in sorted(self._tenants.values(), key=lambda t: (t.created_at, t.id))]
 
-    async def generations(self, tenant_id: str) -> list[Generation]:
+    async def generations(self, tenant_id: TenantId) -> list[Generation]:
         with self._mutex:
-            return [_detached(g) for (t, _), g in sorted(self._generations.items()) if t == str(tenant_id)]
+            return [_detached(g) for (t, _), g in sorted(self._generations.items()) if t == tenant_id]
 
-    async def forge_wiring(self, tenant_id: str) -> ForgeWiring | None:
+    async def forge_wiring(self, tenant_id: TenantId) -> ForgeWiring | None:
         with self._mutex:
-            return _detached(self._wiring.get(str(tenant_id)))
+            return _detached(self._wiring.get(tenant_id))
 
-    async def admission(self, tenant_id: str) -> tuple[str | None, ForgeWiring | None]:
+    async def admission(self, tenant_id: TenantId) -> tuple[str | None, ForgeWiring | None]:
         with self._mutex:
-            row = self._tenants.get(str(tenant_id))
-            return (None if row is None else row.state), _detached(self._wiring.get(str(tenant_id)))
+            row = self._tenants.get(tenant_id)
+            return (None if row is None else row.state), _detached(self._wiring.get(tenant_id))
 
-    async def publish_status(self, tenant_id: str) -> dict[str, str] | None:
+    async def publish_status(self, tenant_id: TenantId) -> dict[str, str] | None:
         with self._mutex:
-            row = self._publish.get(str(tenant_id))
+            row = self._publish.get(tenant_id)
             return None if row is None else row.as_dict()
 
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
-        row = TenantRecord(id=str(uuid.uuid4()), created_at=now, state="creating", pending_action="create",
+        row = TenantRecord(id=TenantId.mint(), created_at=now, state="creating", pending_action="create",
                            step="names", step_actor=SERVICE)
         with self._mutex:
             self._tenants[row.id] = row
             return _detached(row)
 
-    def _request(self, tenant_id: str, allowed: bool, refusal: str, **changes: Any) -> TenantRecord:
+    def _request(self, tenant_id: TenantId, allowed: bool, refusal: str, **changes: Any) -> TenantRecord:
         """Apply `changes` when `allowed` (read under the mutex with the row) else `Conflict`."""
-        row = self._tenants[str(tenant_id)]
+        row = self._tenants[tenant_id]
         if not allowed:
             raise Conflict(refusal)
         for name, value in changes.items():
             setattr(row, name, value)
         return _detached(row)
 
-    def _row(self, tenant_id: str) -> TenantRecord:
-        row = self._tenants.get(str(tenant_id))
+    def _row(self, tenant_id: TenantId) -> TenantRecord:
+        row = self._tenants.get(tenant_id)
         if row is None:
             raise NotFound(f"no tenant {tenant_id}")
         return row
 
-    async def request_resume(self, tenant_id: str) -> TenantRecord:
+    async def request_resume(self, tenant_id: TenantId) -> TenantRecord:
         with self._mutex:
             row = self._row(tenant_id)
             return self._request(
                 tenant_id, row.failure is not None, "nothing to resume", failure=None)
 
-    async def request_offboard(self, tenant_id: str, *, now: _dt.datetime) -> TenantRecord:
+    async def request_offboard(self, tenant_id: TenantId, *, now: _dt.datetime) -> TenantRecord:
         with self._mutex:
             row = self._row(tenant_id)
             return self._request(
                 tenant_id, row.state in ("creating", "active"), f"a tenant {row.state} cannot be offboarded",
                 state="offboarding", pending_action="offboard", step="offboard", step_actor=SERVICE, failure=None)
 
-    async def request_rotate(self, tenant_id: str) -> TenantRecord:
+    async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:
         with self._mutex:
             row = self._row(tenant_id)
             return self._request(
@@ -182,23 +183,22 @@ class InMemoryTenantRepository:
                 pending_action="rotate", step="names", step_actor=SERVICE)
 
     # --- host processes --------------------------------------------------------------------------
-    async def record_publish_status(self, tenant_id: str, line: str, *, by: str) -> None:
+    async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         published, refused, kind = publish_outcome(line)
         with self._mutex:
-            if str(tenant_id) not in self._tenants:
+            if tenant_id not in self._tenants:
                 raise ValueError(f"no tenant {tenant_id}")
-            self._publish[str(tenant_id)] = PublishStatus(
-                tenant_id=str(tenant_id), recorded_by=by, published=published, refused=refused, kind=kind)
+            self._publish[tenant_id] = PublishStatus(
+                tenant_id=tenant_id, recorded_by=by, published=published, refused=refused, kind=kind)
 
     # --- workers ---------------------------------------------------------------------------------
-    async def claimable(self, actor: str, *, now: _dt.datetime) -> list[str]:
+    async def claimable(self, actor: str, *, now: _dt.datetime) -> list[TenantId]:
         with self._mutex:
             return [t.id for t in sorted(self._tenants.values(), key=lambda t: (t.created_at, t.id))
                     if claimable_now(t, actor, now)]
 
     @contextlib.asynccontextmanager
-    async def lock(self, tenant_id: str) -> AsyncIterator[_Held | None]:
-        tenant_id = str(tenant_id)
+    async def lock(self, tenant_id: TenantId) -> AsyncIterator[_Held | None]:
         with self._mutex:
             taken = tenant_id in self._tenants and tenant_id not in self._locked
             if taken:

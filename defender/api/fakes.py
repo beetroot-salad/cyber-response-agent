@@ -11,6 +11,7 @@ from pydantic import AwareDatetime
 
 from defender._model import model
 from defender.records import formats
+from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId
 
 from .models import (
     Alert,
@@ -33,6 +34,7 @@ from .ports import (
 )
 
 T = TypeVar("T")
+_Id = TypeVar("_Id", bound=formats.UuidId)
 
 
 def _newest_after(rows: list[T], key: Callable[[T], TimePosition], after: TimePosition | None,
@@ -56,7 +58,7 @@ def _api_knowledge(record_text: str | None, *, stamp_names_source: bool) -> Inve
 class _Table(dict[tuple[str, str], T]):
     """One tenant-keyed table."""
 
-    def of(self, tenant_id: str) -> list[T]:
+    def of(self, tenant_id: TenantId) -> list[T]:
         return [v for (tenant, _), v in list(self.items()) if tenant == tenant_id]
 
 
@@ -64,7 +66,7 @@ class _Table(dict[tuple[str, str], T]):
 class AuditEvent:
     """One audited action, as the demo store keeps it."""
 
-    tenant_id: str
+    tenant_id: TenantId
     user_id: str
     action: str
     target: str
@@ -87,24 +89,26 @@ class InMemoryStore:
         self._lessons: _Table[Lesson] = _Table()
         self._systems: _Table[SystemSettings] = _Table()
 
-    def _mint(self, prefix: str) -> str:
-        return f"{prefix}-{next(self._ids):06d}"
+    def _mint(self, family: type[_Id]) -> _Id:
+        """The next id of `family`: canonical UUID text from a counter, so ids still sort in the order
+        they were minted, as the `prefix-000001` ids before #1382 did."""
+        return family(f"00000000-0000-4000-8000-{next(self._ids):012x}")
 
-    def transaction(self, tenant_id: str, actor: str) -> _InMemoryTransaction:
+    def transaction(self, tenant_id: TenantId, actor: str) -> _InMemoryTransaction:
         return _InMemoryTransaction(self, tenant_id, actor, self._clock)
 
     # --- seeding ------------------------------------------------------------------------
 
-    def add_alert(self, tenant_id: str, alert: Alert) -> Alert:
+    def add_alert(self, tenant_id: TenantId, alert: Alert) -> Alert:
         self._alerts[(tenant_id, alert.alert_id)] = alert
         return alert
 
-    def add_investigation(self, tenant_id: str, investigation: Investigation) -> Investigation:
+    def add_investigation(self, tenant_id: TenantId, investigation: Investigation) -> Investigation:
         self._investigations[(tenant_id, investigation.investigation_id)] = investigation
         return investigation
 
     def add_run_knowledge(
-        self, tenant_id: str, investigation_id: str, record_text: str | None, *,
+        self, tenant_id: TenantId, investigation_id: InvestigationId, record_text: str | None, *,
         stamp_knowledge_source: Mapping[str, Any] | None = None,
     ) -> Investigation:
         """Set an investigation's `knowledge` from its run's host-held knowledge record (its
@@ -117,15 +121,15 @@ class InMemoryStore:
         self._investigations[key] = updated
         return updated
 
-    def add_learning_job(self, tenant_id: str, job: LearningJob) -> LearningJob:
+    def add_learning_job(self, tenant_id: TenantId, job: LearningJob) -> LearningJob:
         self._learning_jobs[(tenant_id, job.learning_job_id)] = job
         return job
 
-    def add_lesson(self, tenant_id: str, lesson: Lesson) -> Lesson:
+    def add_lesson(self, tenant_id: TenantId, lesson: Lesson) -> Lesson:
         self._lessons[(tenant_id, lesson.lesson_id)] = lesson
         return lesson
 
-    def add_system(self, tenant_id: str, settings: SystemSettings) -> SystemSettings:
+    def add_system(self, tenant_id: TenantId, settings: SystemSettings) -> SystemSettings:
         self._systems[(tenant_id, settings.system_id)] = settings
         return settings
 
@@ -133,7 +137,7 @@ class InMemoryStore:
 
     async def list_alerts(
         self,
-        tenant_id: str,
+        tenant_id: TenantId,
         *,
         fired_after: _dt.datetime | None,
         fired_before: _dt.datetime | None,
@@ -148,25 +152,25 @@ class InMemoryStore:
         page = _newest_after(selected, lambda a: (a.fired_at, a.alert_id), after, limit)
         return [AlertSummary.model_validate(a.model_dump(exclude={"raw"})) for a in page]
 
-    async def get_alert(self, tenant_id: str, alert_id: str) -> Alert | None:
+    async def get_alert(self, tenant_id: TenantId, alert_id: AlertId) -> Alert | None:
         return self._alerts.get((tenant_id, alert_id))
 
     # --- InvestigationsRepository -------------------------------------------------------
 
     async def create_investigation(
-        self, tenant_id: str, alert_id: str, client_request_id: str
+        self, tenant_id: TenantId, alert_id: AlertId, client_request_id: str
     ) -> tuple[Investigation, bool]:
         """Always a new attempt 1 stamped with the request key: the replay rules are the store's."""
         if await self.get_alert(tenant_id, alert_id) is None:
             raise UnknownReference(f"no alert {alert_id!r}")
         investigation = Investigation(
-            investigation_id=self._mint("inv"), alert_id=alert_id, status="queued",
+            investigation_id=self._mint(formats.InvestigationId), alert_id=alert_id, status="queued",
             request_key=client_request_id, attempt=1, cost_usd=0.0, created_at=self._clock(),
         )
         return self.add_investigation(tenant_id, investigation), True
 
     async def list_investigations(
-        self, tenant_id: str, *, alert_id: str | None, after: TimePosition | None, limit: int
+        self, tenant_id: TenantId, *, alert_id: AlertId | None, after: TimePosition | None, limit: int
     ) -> list[Investigation]:
         found = [
             i for i in self._investigations.of(tenant_id)
@@ -174,16 +178,16 @@ class InMemoryStore:
         ]
         return _newest_after(found, lambda i: (i.created_at, i.investigation_id), after, limit)
 
-    async def get_investigation(self, tenant_id: str, investigation_id: str) -> Investigation | None:
+    async def get_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId) -> Investigation | None:
         return self._investigations.get((tenant_id, investigation_id))
 
-    async def _existing(self, tenant_id: str, investigation_id: str) -> Investigation:
+    async def _existing(self, tenant_id: TenantId, investigation_id: InvestigationId) -> Investigation:
         investigation = await self.get_investigation(tenant_id, investigation_id)
         if investigation is None:
             raise NotFound(f"no investigation {investigation_id!r}")
         return investigation
 
-    async def cancel_investigation(self, tenant_id: str, investigation_id: str) -> Investigation:
+    async def cancel_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId) -> Investigation:
         existing = await self._existing(tenant_id, investigation_id)
         if existing.status == "running":
             raise Conflict("cannot cancel a running investigation yet")
@@ -193,7 +197,7 @@ class InMemoryStore:
                                               "finished_at": self._clock()})
         return self.add_investigation(tenant_id, aborted)
 
-    async def delete_investigation(self, tenant_id: str, investigation_id: str) -> None:
+    async def delete_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId) -> None:
         existing = await self._existing(tenant_id, investigation_id)
         if existing.status in ("queued", "running"):
             raise Conflict("cannot delete an investigation that is queued or running")
@@ -202,20 +206,20 @@ class InMemoryStore:
     # --- LearningJobsRepository ---------------------------------------------------------
 
     async def create_learning_job(
-        self, tenant_id: str, investigation_id: str, client_request_id: str
+        self, tenant_id: TenantId, investigation_id: InvestigationId, client_request_id: str
     ) -> tuple[LearningJob, bool]:
         investigation = await self.get_investigation(tenant_id, investigation_id)
         if investigation is None:
             raise UnknownReference(f"no investigation {investigation_id!r}")
         job = LearningJob(
-            learning_job_id=self._mint("lj"), investigation_id=investigation_id,
+            learning_job_id=self._mint(formats.LearningJobId), investigation_id=investigation_id,
             alert_id=investigation.alert_id, status="queued", trigger="explicit",
             created_at=self._clock(),
         )
         return self.add_learning_job(tenant_id, job), True
 
     async def list_learning_jobs(
-        self, tenant_id: str, *, investigation_id: str | None, after: TimePosition | None,
+        self, tenant_id: TenantId, *, investigation_id: InvestigationId | None, after: TimePosition | None,
         limit: int,
     ) -> list[LearningJob]:
         found = [
@@ -224,26 +228,26 @@ class InMemoryStore:
         ]
         return _newest_after(found, lambda j: (j.created_at, j.learning_job_id), after, limit)
 
-    async def get_learning_job(self, tenant_id: str, learning_job_id: str) -> LearningJob | None:
+    async def get_learning_job(self, tenant_id: TenantId, learning_job_id: LearningJobId) -> LearningJob | None:
         return self._learning_jobs.get((tenant_id, learning_job_id))
 
     # --- LessonsRepository --------------------------------------------------------------
 
-    async def list_lessons(self, tenant_id: str, *, after: str | None, limit: int) -> list[Lesson]:
+    async def list_lessons(self, tenant_id: TenantId, *, after: str | None, limit: int) -> list[Lesson]:
         return _ids_after(self._lessons.of(tenant_id), lambda le: le.lesson_id, after, limit)
 
     # --- SystemsRepository --------------------------------------------------------------
 
     async def list_systems(
-        self, tenant_id: str, *, after: str | None, limit: int
+        self, tenant_id: TenantId, *, after: str | None, limit: int
     ) -> list[SystemSettings]:
         return _ids_after(self._systems.of(tenant_id), lambda s: s.system_id, after, limit)
 
-    async def get_system(self, tenant_id: str, system_id: str) -> SystemSettings | None:
+    async def get_system(self, tenant_id: TenantId, system_id: str) -> SystemSettings | None:
         return self._systems.get((tenant_id, system_id))
 
     async def put_system(
-        self, tenant_id: str, system_id: str, body: SystemPut
+        self, tenant_id: TenantId, system_id: str, body: SystemPut
     ) -> tuple[SystemSettings, bool]:
         created = (tenant_id, system_id) not in self._systems
         settings = self.add_system(tenant_id, SystemSettings(system_id=system_id, **body.model_dump()))
@@ -254,7 +258,7 @@ class _InMemoryTransaction:
     """A write transaction on `InMemoryStore` for one tenant and actor: writes apply at once,
     audit events are kept only if the block exits normally."""
 
-    def __init__(self, store: InMemoryStore, tenant_id: str, actor: str,
+    def __init__(self, store: InMemoryStore, tenant_id: TenantId, actor: str,
                  clock: Callable[[], _dt.datetime]) -> None:
         self._store = store
         self._clock = clock
@@ -269,16 +273,16 @@ class _InMemoryTransaction:
         if exc_type is None:
             self._store.audit_events.extend(self._pending)
 
-    async def create_investigation(self, alert_id: str, client_request_id: str) -> tuple[Investigation, bool]:
+    async def create_investigation(self, alert_id: AlertId, client_request_id: str) -> tuple[Investigation, bool]:
         return await self._store.create_investigation(self._tenant_id, alert_id, client_request_id)
 
-    async def cancel_investigation(self, investigation_id: str) -> Investigation:
+    async def cancel_investigation(self, investigation_id: InvestigationId) -> Investigation:
         return await self._store.cancel_investigation(self._tenant_id, investigation_id)
 
-    async def delete_investigation(self, investigation_id: str) -> None:
+    async def delete_investigation(self, investigation_id: InvestigationId) -> None:
         await self._store.delete_investigation(self._tenant_id, investigation_id)
 
-    async def create_learning_job(self, investigation_id: str, client_request_id: str) -> tuple[LearningJob, bool]:
+    async def create_learning_job(self, investigation_id: InvestigationId, client_request_id: str) -> tuple[LearningJob, bool]:
         return await self._store.create_learning_job(self._tenant_id, investigation_id, client_request_id)
 
     async def put_system(self, system_id: str, body: SystemPut) -> tuple[SystemSettings, bool]:
@@ -296,11 +300,11 @@ class InMemorySecrets:
         self._credentials: dict[tuple[str, str], dict[str, str]] = {}
 
     async def put_credentials(
-        self, tenant_id: str, system_id: str, kind: str, credentials: dict[str, str],
+        self, tenant_id: TenantId, system_id: str, kind: str, credentials: dict[str, str],
     ) -> None:
         self._credentials[(tenant_id, system_id)] = dict(credentials)
 
-    async def has_credentials(self, tenant_id: str, system_id: str) -> bool:
+    async def has_credentials(self, tenant_id: TenantId, system_id: str) -> bool:
         return (tenant_id, system_id) in self._credentials
 
 
@@ -308,7 +312,7 @@ class StubSystemChecker:
     """Answers from configuration alone; the real check calls the system through the
     credential proxy."""
 
-    async def check(self, tenant_id: str, system: System) -> SystemCheck:
+    async def check(self, tenant_id: TenantId, system: System) -> SystemCheck:
         if not system.enabled:
             return SystemCheck(ok=False, detail="the system is disabled")
         if not system.has_credentials:
@@ -321,5 +325,5 @@ class StubArtifactLinks:
 
     ORIGIN = "https://artifacts.invalid"
 
-    async def signed_url(self, tenant_id: str, investigation_id: str, key: str) -> str:
+    async def signed_url(self, tenant_id: TenantId, investigation_id: InvestigationId, key: str) -> str:
         return f"{self.ORIGIN}/{tenant_id}/{investigation_id}/{key}?signature=stub"

@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender.database import async_engine, sessions
+from defender.records.formats import MembershipId, TenantId, UserId
 from defender.tenancy.models import TenantRecord
 
 from .errors import DataRuleViolation
@@ -68,19 +69,19 @@ class PostgresIdentityRepository:
             return (await s.execute(statement)).first() is not None
 
     # --- tenants: read from `tenancy.tenants`, never written here (#1214) ----------------------
-    async def tenant_exists(self, tenant_id: str) -> bool:
-        return await self._one(select(exists().where(_active_tenant(str(tenant_id))))) is True
+    async def tenant_exists(self, tenant_id: TenantId) -> bool:
+        return await self._one(select(exists().where(_active_tenant(tenant_id)))) is True
 
-    async def active_tenants(self, tenant_ids: Collection[str]) -> set[str]:
-        wanted = {str(t) for t in tenant_ids}
+    async def active_tenants(self, tenant_ids: Collection[TenantId]) -> set[TenantId]:
+        wanted = {t for t in tenant_ids}
         if not wanted:
             return set()
         return set(await self._all(select(TenantRecord.id).where(
             TenantRecord.id.in_(wanted), TenantRecord.state == "active")))
 
-    async def tenant_has_active_members(self, tenant_id: str) -> bool:
+    async def tenant_has_active_members(self, tenant_id: TenantId) -> bool:
         return await self._one(select(exists().where(
-            Membership.tenant_id == str(tenant_id), Membership.status == "active"))) is True
+            Membership.tenant_id == tenant_id, Membership.status == "active"))) is True
 
     # --- users -------------------------------------------------------------------------------
     async def add_user(
@@ -109,7 +110,7 @@ class PostgresIdentityRepository:
         assert existing is not None
         return existing
 
-    async def user(self, user_id: str) -> User | None:
+    async def user(self, user_id: UserId) -> User | None:
         return await self._one(select(User).where(User.id == user_id))
 
     async def user_by_email(self, email: str) -> User | None:
@@ -121,7 +122,7 @@ class PostgresIdentityRepository:
     async def platform_admins(self) -> list[User]:
         return await self._all(select(User).where(User.is_platform_admin).order_by(User.created_at, User.id))
 
-    async def record_signin_account(self, user_id: str, account_id: str) -> bool:
+    async def record_signin_account(self, user_id: UserId, account_id: str) -> bool:
         try:
             return await self._applied(
                 update(User).where(User.id == user_id, User.signin_account_id.is_(None))
@@ -129,42 +130,41 @@ class PostgresIdentityRepository:
         except DataRuleViolation:
             return False
 
-    async def activate_user(self, user_id: str, *, display_name: str, now: _dt.datetime) -> bool:
+    async def activate_user(self, user_id: UserId, *, display_name: str, now: _dt.datetime) -> bool:
         return await self._applied(
             update(User).where(User.id == user_id, User.status == "invited")
             .values(status="active", activated_at=now, display_name=display_name, updated_at=now)
             .returning(User.id))
 
-    async def set_display_name(self, user_id: str, display_name: str, *, now: _dt.datetime) -> None:
+    async def set_display_name(self, user_id: UserId, display_name: str, *, now: _dt.datetime) -> None:
         async with self._tx() as s:
             await s.execute(update(User).where(User.id == user_id, User.display_name != display_name)
                             .values(display_name=display_name, updated_at=now))
 
-    async def set_platform_admin(self, user_id: str, flag: bool) -> None:
+    async def set_platform_admin(self, user_id: UserId, flag: bool) -> None:
         async with self._tx() as s:
             await s.execute(update(User).where(User.id == user_id).values(is_platform_admin=flag))
 
     # --- memberships -------------------------------------------------------------------------
     async def add_membership(  # noqa: PLR0913 — the pinned seeder signature
-        self, user_id: str, tenant_id: str, *, status: MembershipStatus, invited_by: str,
+        self, user_id: UserId, tenant_id: TenantId, *, status: MembershipStatus, invited_by: UserId | None,
         created_at: _dt.datetime, expires_at: _dt.datetime | None = None,
         accepted_at: _dt.datetime | None = None, ended_at: _dt.datetime | None = None,
-        ended_by: str | None = None,
+        ended_by: UserId | None = None,
     ) -> Membership:
         """Seeder."""
         check_membership_fields(status, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by)
         row = Membership(
-            user_id=user_id, tenant_id=str(tenant_id), status=status, invited_by=invited_by, created_at=created_at,
+            user_id=user_id, tenant_id=tenant_id, status=status, invited_by=invited_by, created_at=created_at,
             expires_at=expires_at, accepted_at=accepted_at, ended_at=ended_at, ended_by=ended_by)
         async with self._tx() as s:
             s.add(row)
         return row
 
     async def ensure_invitation(
-        self, user_id: str, tenant_id: str, *, invited_by: str, now: _dt.datetime,
+        self, user_id: UserId, tenant_id: TenantId, *, invited_by: UserId | None, now: _dt.datetime,
         expires_at: _dt.datetime | None = None,
     ) -> Membership | None:
-        tenant_id = str(tenant_id)
         async with self._tx() as s:
             locked = (await s.execute(select(User.id).where(User.id == user_id).with_for_update())).first()
             if locked is None:
@@ -180,7 +180,7 @@ class PostgresIdentityRepository:
             s.add(row)
         return row
 
-    async def accept_invitation(self, membership_id: str, *, now: _dt.datetime) -> bool:
+    async def accept_invitation(self, membership_id: MembershipId, *, now: _dt.datetime) -> bool:
         return await self._applied(
             update(Membership).where(
                 Membership.id == membership_id, Membership.status == "invited",
@@ -188,44 +188,44 @@ class PostgresIdentityRepository:
                 exists().where(_active_tenant(Membership.tenant_id)))
             .values(status="active", accepted_at=now).returning(Membership.id))
 
-    async def end_membership(self, membership_id: str, *, ended_by: str, now: _dt.datetime) -> bool:
+    async def end_membership(self, membership_id: MembershipId, *, ended_by: UserId | None, now: _dt.datetime) -> bool:
         return await self._applied(
             update(Membership).where(Membership.id == membership_id, Membership.status == "active")
             .values(status="ended", ended_at=now, ended_by=ended_by).returning(Membership.id))
 
-    async def revoke_invitation(self, membership_id: str) -> bool:
+    async def revoke_invitation(self, membership_id: MembershipId) -> bool:
         return await self._applied(
             update(Membership).where(Membership.id == membership_id, Membership.status == "invited")
             .values(status="revoked").returning(Membership.id))
 
-    async def membership(self, membership_id: str) -> Membership | None:
+    async def membership(self, membership_id: MembershipId) -> Membership | None:
         return await self._one(select(Membership).where(Membership.id == membership_id))
 
-    async def memberships_of_user(self, user_id: str) -> list[Membership]:
+    async def memberships_of_user(self, user_id: UserId) -> list[Membership]:
         return await self._all(select(Membership).where(Membership.user_id == user_id)
                                .order_by(Membership.created_at, Membership.id))
 
-    async def memberships_of_tenant(self, tenant_id: str) -> list[Membership]:
-        return await self._all(select(Membership).where(Membership.tenant_id == str(tenant_id))
+    async def memberships_of_tenant(self, tenant_id: TenantId) -> list[Membership]:
+        return await self._all(select(Membership).where(Membership.tenant_id == tenant_id)
                                .order_by(Membership.created_at, Membership.id))
 
     async def people_of_tenant(
-        self, tenant_id: str, status: MembershipStatus,
+        self, tenant_id: TenantId, status: MembershipStatus,
     ) -> list[tuple[Membership, User]]:
         async with self._tx() as s:
             rows = (await s.execute(
                 select(Membership, User).join(User, User.id == Membership.user_id)
-                .where(Membership.tenant_id == str(tenant_id), Membership.status == status)
+                .where(Membership.tenant_id == tenant_id, Membership.status == status)
                 .order_by(Membership.created_at, Membership.id))).all()
         return [(m, u) for m, u in rows]
 
-    async def active_membership(self, user_id: str, tenant_id: str) -> Membership | None:
+    async def active_membership(self, user_id: UserId, tenant_id: TenantId) -> Membership | None:
         return await self._one(select(Membership).where(
-            Membership.user_id == user_id, Membership.tenant_id == str(tenant_id),
+            Membership.user_id == user_id, Membership.tenant_id == tenant_id,
             Membership.status == "active"))
 
     # --- sends -------------------------------------------------------------------------------
-    async def request_set_password(self, user_id: str, *, now: _dt.datetime) -> int:
+    async def request_set_password(self, user_id: UserId, *, now: _dt.datetime) -> int:
         seq = await self._one(
             update(User).where(User.id == user_id)
             .values(set_password_requested_seq=User.set_password_requested_seq + 1, set_password_requested_at=now)
@@ -234,7 +234,7 @@ class PostgresIdentityRepository:
             raise DataRuleViolation(f"no user {user_id!r}")
         return int(seq)
 
-    async def request_notification(self, membership_id: str, *, now: _dt.datetime) -> int:
+    async def request_notification(self, membership_id: MembershipId, *, now: _dt.datetime) -> int:
         seq = await self._one(
             update(Membership).where(Membership.id == membership_id)
             .values(notify_requested_seq=Membership.notify_requested_seq + 1, notify_requested_at=now)
@@ -268,18 +268,18 @@ class PostgresIdentityRepository:
             .values(notify_next_try_at=hold_until)
             .returning(Membership).execution_options(synchronize_session=False))
 
-    async def defer_set_password(self, user_id: str, *, until: _dt.datetime) -> None:
+    async def defer_set_password(self, user_id: UserId, *, until: _dt.datetime) -> None:
         async with self._tx() as s:
             await s.execute(update(User).where(User.id == user_id).values(
                 set_password_attempts=User.set_password_attempts + 1, set_password_next_try_at=until))
 
-    async def defer_notification(self, membership_id: str, *, until: _dt.datetime) -> None:
+    async def defer_notification(self, membership_id: MembershipId, *, until: _dt.datetime) -> None:
         async with self._tx() as s:
             await s.execute(update(Membership).where(Membership.id == membership_id).values(
                 notify_attempts=Membership.notify_attempts + 1, notify_next_try_at=until))
 
     async def settle_set_password(
-        self, user_id: str, read_seq: int, *, sent_at: _dt.datetime | None = None,
+        self, user_id: UserId, read_seq: int, *, sent_at: _dt.datetime | None = None,
         expires_at: _dt.datetime | None = None,
     ) -> bool:
         values: dict[str, Any] = {
@@ -299,7 +299,7 @@ class PostgresIdentityRepository:
             return applied
 
     async def settle_notification(
-        self, membership_id: str, read_seq: int, *, sent_at: _dt.datetime | None = None,
+        self, membership_id: MembershipId, read_seq: int, *, sent_at: _dt.datetime | None = None,
         expires_at: _dt.datetime | None = None,
     ) -> bool:
         values: dict[str, Any] = {
@@ -317,7 +317,7 @@ class PostgresIdentityRepository:
 
     # --- sessions ----------------------------------------------------------------------------
     async def add_session(
-        self, value: str, user_id: str, *, now: _dt.datetime, expires_at: _dt.datetime,
+        self, value: str, user_id: UserId, *, now: _dt.datetime, expires_at: _dt.datetime,
         used_otp: bool = False,
     ) -> Session:
         row = Session(token_hash=session_hash(value), user_id=user_id, used_otp=used_otp,

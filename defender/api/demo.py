@@ -12,12 +12,14 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import logging
+import uuid
 from collections.abc import Callable, Sequence
 from functools import partial
+from typing import TypeVar
 
 from defender.records import RUN_LAYOUT
 from defender.tenancy import InMemoryTenantRepository, is_valid_tenant_id
-from defender.records.formats import TenantId
+from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId, UuidId
 
 from defender.identity import (
     Bootstrap,
@@ -35,6 +37,8 @@ from .fakes import (
 )
 from .models import Alert, Investigation, LearningJob, Lesson, SystemSettings
 from .ports import ApiDeps
+
+_Id = TypeVar("_Id", bound=UuidId)
 
 #: The users each tenant gets, each signed in as `<tenant>-<role>` (see `demo_sessions`).
 DEMO_ROLES = ("analyst", "engineer")
@@ -98,14 +102,15 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
         raise ValueError("name at least one tenant")
     if len(set(tenants)) != len(tenants):
         raise ValueError(f"tenants repeat: {list(tenants)}")
-    for tenant in tenants:
-        if not is_valid_tenant_id(tenant):
-            raise ValueError(f"not a tenant id: {tenant!r}")
+    for raw in tenants:
+        if not is_valid_tenant_id(raw):
+            raise ValueError(f"not a tenant id: {raw!r}")
+    tenant_ids = [TenantId(raw) for raw in tenants]
     secrets = InMemorySecrets()
     store = InMemoryStore(clock)
     now = clock()
-    await _seed(store, secrets, tenants[0], now)
-    for n, tenant in enumerate(tenants[1:], start=9):
+    await _seed(store, secrets, tenant_ids[0], now)
+    for n, tenant in enumerate(tenant_ids[1:], start=9):
         store.add_alert(tenant, _alert(
             tenant, n, fired=now - _dt.timedelta(hours=2), title=f"An alert of {tenant}'s",
             rule="misc",
@@ -113,12 +118,12 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
     # One store: the tenants are seeded `active` in the tenant twin, and identity reads them there.
     tenant_rows = InMemoryTenantRepository()
     people = InMemoryIdentityRepository(tenants=tenant_rows)
-    for tenant in tenants:
-        await tenant_rows.add_tenant(TenantId(tenant), created_at=now)
+    for tenant in tenant_ids:
+        await tenant_rows.add_tenant(tenant, created_at=now)
         for role in DEMO_ROLES:
             user = await people.add_user(f"{role}@{tenant}.example", created_at=now, status="active",
                                    display_name=role.title())
-            await people.add_membership(user.id, tenant, status="active", invited_by="system",
+            await people.add_membership(user.id, tenant, status="active", invited_by=None,
                                   created_at=now, accepted_at=now)
             await people.add_session(demo_sessions([tenant])[f"{tenant}-{role}"], user.id, now=now,
                                expires_at=now + _SESSION_LIFETIME)
@@ -141,10 +146,15 @@ async def demo_deps(tenants: Sequence[str], clock: Callable[[], _dt.datetime] = 
     )
 
 
-def _alert(tenant: str, n: int, *, fired: _dt.datetime, title: str, rule: str) -> Alert:
-    # Ids are global, as the store's primary keys will be, so each carries its tenant.
+def demo_id(family: type[_Id], tenant: str, name: str) -> _Id:
+    """The demo record `name` of `tenant`: a UUID derived from both, the same on every start."""
+    return family(str(uuid.uuid5(uuid.UUID(tenant), name)))
+
+
+def _alert(tenant: TenantId, n: int, *, fired: _dt.datetime, title: str, rule: str) -> Alert:
+    # Ids are global, as the store's primary keys are, so each derives from its tenant.
     return Alert(
-        alert_id=f"{tenant}-alert-{n:04d}",
+        alert_id=demo_id(AlertId, tenant, f"alert-{n:04d}"),
         vendor="demo-tickets",
         vendor_ticket_id=f"SEC-{1000 + n}",
         title=title,
@@ -156,7 +166,7 @@ def _alert(tenant: str, n: int, *, fired: _dt.datetime, title: str, rule: str) -
     )
 
 
-async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now: _dt.datetime) -> None:
+async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: TenantId, now: _dt.datetime) -> None:
     hour = _dt.timedelta(hours=1)
     brute = store.add_alert(tenant, _alert(
         tenant, 1, fired=now - 30 * hour, title="Repeated failed logins followed by success",
@@ -172,7 +182,7 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now
     ))
 
     done = store.add_investigation(tenant, Investigation(
-        investigation_id=f"{tenant}-inv-completed", alert_id=brute.alert_id, status="completed",
+        investigation_id=demo_id(InvestigationId, tenant, "inv-completed"), alert_id=brute.alert_id, status="completed",
         request_key="demo-request-1", attempt=1,
         disposition="benign", cost_usd=1.84, created_at=now - 29 * hour,
         started_at=now - 29 * hour, finished_at=now - 29 * hour + _dt.timedelta(minutes=11),
@@ -180,7 +190,7 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now
                    RUN_LAYOUT.runtime_html.name],
     ))
     running = store.add_investigation(tenant, Investigation(
-        investigation_id=f"{tenant}-inv-running", alert_id=shell.alert_id, status="running",
+        investigation_id=demo_id(InvestigationId, tenant, "inv-running"), alert_id=shell.alert_id, status="running",
         request_key="demo-request-2", attempt=1,
         cost_usd=0.0, created_at=now - 2 * hour, started_at=now - 2 * hour,
     ))
@@ -196,7 +206,7 @@ async def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now
             tenant, investigation.investigation_id, json.dumps(record),
             stamp_knowledge_source={k: record[k] for k in ("kind", "commit", "stale_kind")})
     store.add_learning_job(tenant, LearningJob(
-        learning_job_id=f"{tenant}-lj-auto", investigation_id=done.investigation_id,
+        learning_job_id=demo_id(LearningJobId, tenant, "lj-auto"), investigation_id=done.investigation_id,
         alert_id=done.alert_id, status="completed", trigger="auto", stage="judge",
         created_at=now if done.finished_at is None else done.finished_at, finished_at=now - 20 * hour,
     ))

@@ -41,10 +41,13 @@ def dsn_for(dsn: str, database: str) -> str:
 
 
 def execute(dsn: str, statement: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
-    """One autocommit statement on its own connection; the rows it returned, if any."""
+    """One autocommit statement on its own connection; the rows it returned, if any. A `uuid` value
+    reads back as its canonical text, as record ids are spelled everywhere else (#1382)."""
     import psycopg
+    from psycopg.types.string import TextLoader
 
     with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.adapters.register_loader("uuid", TextLoader)
         cur = conn.execute(statement, params or None)  # type: ignore[arg-type]
         return cur.fetchall() if cur.description else []
 

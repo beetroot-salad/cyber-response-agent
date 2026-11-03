@@ -325,16 +325,18 @@ def test_the_dev_command_without_a_database_refuses_loudly():
 
 
 def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
-    """The history is the baseline, `0002_tenancy`, `0003_sign_login`, then `0004_jobs` as head (#1342 O1; r6: tenants are
-    #1214's records; jobs follows #1163's revision, the last on main, so the history stays one line)."""
+    """The history is the baseline, `0002_tenancy`, `0003_sign_login`, `0004_jobs`, then #1382's `0005_uuid_ids` as head
+    (#1342 O1; r6: tenants are #1214's records; jobs follows #1163's revision, so the history stays one line)."""
     from defender.migrations import _scripts, head
 
     scripts = _scripts()
-    assert head() == "0004_jobs"
-    assert scripts.get_revision(head()).down_revision == "0003_sign_login"
+    assert head() == "0005_uuid_ids"
+    assert scripts.get_revision(head()).down_revision == "0004_jobs"
+    assert scripts.get_revision("0004_jobs").down_revision == "0003_sign_login"
     assert scripts.get_revision("0003_sign_login").down_revision == "0002_tenancy"
     assert scripts.get_revision("0002_tenancy").down_revision == "0001_baseline"
-    assert [r.revision for r in scripts.walk_revisions()] == ["0004_jobs", "0003_sign_login", "0002_tenancy", "0001_baseline"]
+    assert [r.revision for r in scripts.walk_revisions()] == ["0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy",
+                                                           "0001_baseline"]
 
 
 @pytest.mark.postgres
@@ -348,12 +350,12 @@ def test_upgrading_a_database_at_the_baseline_adds_jobs_and_keeps_the_tenant_in_
     config.attributes["dsn"] = empty_database
     command.upgrade(config, "0001_baseline")
     assert _tables(empty_database, "jobs") == set()
-    execute(empty_database, "INSERT INTO identity.tenants (id, created_at) VALUES ('t-1', now())")
+    execute(empty_database, "INSERT INTO identity.tenants (id, created_at) VALUES ('f1000000-0000-4000-8000-000000000001', now())")
 
     upgrade(empty_database)
     assert _recorded_revision(empty_database) == [head()]
     assert _tables(empty_database, "jobs") == JOBS_TABLES
-    assert execute(empty_database, "SELECT id FROM tenancy.tenants") == [("t-1",)]
+    assert execute(empty_database, "SELECT id FROM tenancy.tenants") == [("f1000000-0000-4000-8000-000000000001",)]
 
 
 def _jobs_columns(dsn: str, table: str) -> dict[str, tuple[str, bool, Any]]:

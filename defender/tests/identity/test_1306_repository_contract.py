@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from defender.identity import DataRuleViolation, InMemoryIdentityRepository
-from defender.records._tenant_id import TenantId
+from defender.records.formats import MembershipId, TenantId, UserId
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._pglocks1339 import (
     TIMEOUT,
@@ -38,6 +38,8 @@ HOLD = dt.timedelta(minutes=5)
 T1 = TenantId(fixture_uuid("tenant:t1"))
 T2 = TenantId(fixture_uuid("tenant:t2"))
 T_UNREGISTERED = TenantId(fixture_uuid("tenant:unregistered"))
+NO_SUCH_USER = UserId(fixture_uuid("user:no-such-user"))
+NO_SUCH_ROW = MembershipId(fixture_uuid("membership:no-such-row"))
 
 
 def insert_active_tenant(dsn: str, tenant: str, *, wiring: bool = False) -> None:
@@ -115,11 +117,11 @@ async def _user(repo, email="ann@x.org", **kw):
 
 
 async def _invited(repo, user, tenant=T1, **kw):
-    return await repo.ensure_invitation(user.id, tenant, invited_by="system", now=NOW, **kw)
+    return await repo.ensure_invitation(user.id, tenant, invited_by=None, now=NOW, **kw)
 
 
 async def _active(repo, user, tenant=T1):
-    return await repo.add_membership(user.id, tenant, status="active", invited_by="system", created_at=NOW, accepted_at=NOW)
+    return await repo.add_membership(user.id, tenant, status="active", invited_by=None, created_at=NOW, accepted_at=NOW)
 
 
 # --- tenants ---------------------------------------------------------------------------------
@@ -140,13 +142,13 @@ async def test_a_membership_in_an_unregistered_tenant_is_refused(seeded):
     with pytest.raises(DataRuleViolation):
         await _invited(seeded, u, T_UNREGISTERED)
     with pytest.raises(DataRuleViolation):
-        await seeded.add_membership(u.id, T_UNREGISTERED, status="invited", invited_by="system", created_at=NOW)
+        await seeded.add_membership(u.id, T_UNREGISTERED, status="invited", invited_by=None, created_at=NOW)
 
 
 async def test_a_membership_for_an_unknown_user_is_refused(seeded):
     """A membership row needs an existing user."""
     with pytest.raises(DataRuleViolation):
-        await seeded.ensure_invitation("no-such-user", T1, invited_by="system", now=NOW)
+        await seeded.ensure_invitation(NO_SUCH_USER, T1, invited_by=None, now=NOW)
 
 
 async def test_a_membership_row_outlives_revoke_and_end(seeded):
@@ -281,7 +283,7 @@ async def test_an_invitation_inserts_one_invited_row_with_no_expiry_yet(seeded):
     """Flow 1 step 2: a new invited row; expiry waits for the send (K6, DC-3)."""
     u = await _user(seeded)
     row = await _invited(seeded, u)
-    assert (row.user_id, row.tenant_id, row.status, row.invited_by) == (u.id, T1, "invited", "system")
+    assert (row.user_id, row.tenant_id, row.status, row.invited_by) == (u.id, T1, "invited", None)
     assert (row.created_at, row.expires_at, row.accepted_at) == (NOW, None, None)
 
 
@@ -291,7 +293,7 @@ async def test_inviting_twice_yields_one_row(seeded):
     first = await _invited(seeded, u)
     second = await seeded.ensure_invitation(u.id, T1, invited_by=u.id, now=NOW + dt.timedelta(days=1))
     assert second.id == first.id
-    assert second.invited_by == "system"
+    assert second.invited_by is None
     assert [m.id for m in await seeded.memberships_of_tenant(T1)] == [first.id]
 
 
@@ -301,7 +303,7 @@ async def test_an_invitation_can_carry_an_expiry_from_the_start(seeded):
     row = await _invited(seeded, u, expires_at=NOW + WEEK)
     assert row.expires_at == NOW + WEEK
     later = NOW + dt.timedelta(days=3)
-    again = await seeded.ensure_invitation(u.id, T1, invited_by="system", now=later, expires_at=later + WEEK)
+    again = await seeded.ensure_invitation(u.id, T1, invited_by=None, now=later, expires_at=later + WEEK)
     assert again.id == row.id
     assert (again.expires_at, (await seeded.membership(row.id)).expires_at) == (NOW + WEEK, NOW + WEEK)
 
@@ -310,9 +312,9 @@ async def test_inviting_an_active_member_reports_it_and_adds_no_row(seeded):
     """Flow 1 step 2: already an active member -> the repository reports it (409 above)."""
     u = await _user(seeded)
     active = await _active(seeded, u)
-    assert await seeded.ensure_invitation(u.id, T1, invited_by="system", now=NOW) is None
+    assert await seeded.ensure_invitation(u.id, T1, invited_by=None, now=NOW) is None
     assert [m.id for m in await seeded.memberships_of_tenant(T1)] == [active.id]
-    other = await seeded.ensure_invitation(u.id, T2, invited_by="system", now=NOW)  # control: another tenant
+    other = await seeded.ensure_invitation(u.id, T2, invited_by=None, now=NOW)  # control: another tenant
     assert other is not None
     assert other.status == "invited"
 
@@ -327,7 +329,7 @@ async def test_a_finished_row_is_never_reopened_a_new_invitation_adds_a_row(seed
     else:
         old = await _active(seeded, u)
         assert await seeded.end_membership(old.id, ended_by=u.id, now=NOW) is True
-    new = await seeded.ensure_invitation(u.id, T1, invited_by="system", now=NOW)
+    new = await seeded.ensure_invitation(u.id, T1, invited_by=None, now=NOW)
     assert new.id != old.id
     assert new.status == "invited"
     assert (await seeded.membership(old.id)).status == how
@@ -341,31 +343,30 @@ async def test_the_seeder_holds_one_live_row_per_user_and_tenant(seeded):
     first = await _invited(seeded, u)
     for status, extra in (("invited", {}), ("active", {"accepted_at": NOW})):
         with pytest.raises(DataRuleViolation):
-            await seeded.add_membership(u.id, T1, status=status, invited_by="system", created_at=NOW, **extra)
+            await seeded.add_membership(u.id, T1, status=status, invited_by=None, created_at=NOW, **extra)
     await seeded.revoke_invitation(first.id)
     await _active(seeded, u)  # control: allowed once the first is revoked
     with pytest.raises(DataRuleViolation):
-        await seeded.add_membership(u.id, T1, status="invited", invited_by="system", created_at=NOW)
+        await seeded.add_membership(u.id, T1, status="invited", invited_by=None, created_at=NOW)
     for _ in range(2):  # many finished rows are fine
         await seeded.add_membership(
-            u.id, T1, status="ended", invited_by="system", created_at=NOW, accepted_at=NOW, ended_at=NOW, ended_by="system"
+            u.id, T1, status="ended", invited_by=None, created_at=NOW, accepted_at=NOW, ended_at=NOW, ended_by=None
         )
-    await seeded.add_membership(u.id, T1, status="revoked", invited_by="system", created_at=NOW)
+    await seeded.add_membership(u.id, T1, status="revoked", invited_by=None, created_at=NOW)
 
 
 @pytest.mark.parametrize(
     "kw",
     [
         {"status": "active"},
-        {"status": "ended", "ended_at": NOW},
-        {"status": "ended", "ended_by": "system"},
+        {"status": "ended"},
     ],
 )
 async def test_a_status_without_its_timestamps_is_refused(seeded, kw):
-    """Data model CHECK: active => accepted_at; ended => ended_at and ended_by."""
+    """Data model CHECK: active => accepted_at; ended => ended_at (ended_by None is the system, #1382)."""
     u = await _user(seeded)
     with pytest.raises(DataRuleViolation):
-        await seeded.add_membership(u.id, T1, invited_by="system", created_at=NOW, **kw)
+        await seeded.add_membership(u.id, T1, invited_by=None, created_at=NOW, **kw)
 
 
 async def test_a_status_outside_the_model_is_refused_and_nothing_is_stored(seeded):
@@ -376,7 +377,7 @@ async def test_a_status_outside_the_model_is_refused_and_nothing_is_stored(seede
 
     u = await _user(seeded)
     with pytest.raises(DataRuleViolation):
-        await seeded.add_membership(u.id, T1, status="bogus", invited_by="system", created_at=NOW)
+        await seeded.add_membership(u.id, T1, status="bogus", invited_by=None, created_at=NOW)
     assert await seeded.memberships_of_tenant(T1) == []
 
 
@@ -403,7 +404,7 @@ async def test_accept_needs_an_unexpired_row_or_no_expiry(seeded):
     for label, expires_at, applies in cases:
         u = await _user(seeded, f"{label.replace(' ', '')}@x.org")
         row = await seeded.add_membership(
-            u.id, T1, status="invited", invited_by="system", created_at=NOW - WEEK, expires_at=expires_at
+            u.id, T1, status="invited", invited_by=None, created_at=NOW - WEEK, expires_at=expires_at
         )
         assert await seeded.accept_invitation(row.id, now=NOW) is applies, label
         assert (await seeded.membership(row.id)).status == ("active" if applies else "invited"), label
@@ -434,7 +435,7 @@ async def test_revoke_requires_invited(seeded):
     await seeded.end_membership(active.id, ended_by=b.id, now=NOW)
     assert await seeded.revoke_invitation(active.id) is False
     assert (await seeded.membership(active.id)).status == "ended"
-    assert await seeded.revoke_invitation("no-such-row") is False
+    assert await seeded.revoke_invitation(NO_SUCH_ROW) is False
 
 
 async def test_remove_requires_active_and_records_who_and_when(seeded):
@@ -451,7 +452,7 @@ async def test_remove_requires_active_and_records_who_and_when(seeded):
     assert await seeded.end_membership(active.id, ended_by=b.id, now=later) is False
     assert (await seeded.membership(active.id)).ended_by == a.id
     assert await seeded.active_membership(b.id, T1) is None
-    assert await seeded.end_membership("no-such-row", ended_by=a.id, now=NOW) is False
+    assert await seeded.end_membership(NO_SUCH_ROW, ended_by=a.id, now=NOW) is False
 
 
 async def test_membership_lookups_are_per_user_and_per_tenant(seeded):
@@ -475,7 +476,7 @@ async def test_people_of_a_tenant_are_its_rows_in_one_status_with_their_users(se
     assert [(m.id, u) for m, u in await seeded.people_of_tenant(T1, "invited")] == [(b1.id, await seeded.user(b.id))]
     assert [m.id for m, _ in await seeded.people_of_tenant(T1, "revoked")] == [gone.id]
     assert await seeded.active_membership(b.id, T1) is None
-    assert await seeded.membership("no-such-row") is None
+    assert await seeded.membership(NO_SUCH_ROW) is None
 
 
 # --- send counters (DC-3) --------------------------------------------------------------------
@@ -580,7 +581,7 @@ async def test_a_real_send_sets_the_expiry_of_the_users_invited_rows_only(seeded
     """Flow 1 step 4: expires_at = given time on the user's `invited` rows; revoked/active rows are untouched."""
     u = await _user(seeded)
     invited = await _invited(seeded, u, T1)
-    revoked_row = await seeded.add_membership(u.id, T1, status="revoked", invited_by="system", created_at=NOW)
+    revoked_row = await seeded.add_membership(u.id, T1, status="revoked", invited_by=None, created_at=NOW)
     active_row = await _active(seeded, u, T2)
     other = await _user(seeded, "o@x.org")
     others_row = await _invited(seeded, other, T1)
@@ -761,7 +762,7 @@ async def test_a_session_is_found_by_its_value_and_only_the_hash_is_kept(seeded)
 async def test_a_session_needs_an_existing_user(seeded):
     """sessions.user_id references users."""
     with pytest.raises(DataRuleViolation):
-        await seeded.add_session("v", "no-such-user", now=NOW, expires_at=NOW + WEEK)
+        await seeded.add_session("v", NO_SUCH_USER, now=NOW, expires_at=NOW + WEEK)
 
 
 async def test_purging_removes_exactly_the_sessions_sign_in_would_refuse_as_expired(seeded):
@@ -871,12 +872,12 @@ async def _stored(repo, refs: list[tuple[str, str]]) -> dict[tuple[str, str], di
 P4_CASES = {
     "add_user": lambda r, w: r.add_user("new@x.org", created_at=NOW),
     "add_membership": lambda r, w: r.add_membership(
-        w["bob"].id, T2, status="active", invited_by="system", created_at=NOW, accepted_at=NOW),
+        w["bob"].id, T2, status="active", invited_by=None, created_at=NOW, accepted_at=NOW),
     "add_session": lambda r, w: r.add_session("new-sess-v", w["bob"].id, now=NOW, expires_at=NOW + WEEK),
     "ensure_user_new": lambda r, w: r.ensure_user("fresh@x.org", now=NOW),
     "ensure_user_existing": lambda r, w: r.ensure_user("ANN@x.org", now=NOW),
-    "ensure_invitation_new": lambda r, w: r.ensure_invitation(w["ann"].id, T2, invited_by="system", now=NOW),
-    "ensure_invitation_existing": lambda r, w: r.ensure_invitation(w["ann"].id, T1, invited_by="system", now=NOW),
+    "ensure_invitation_new": lambda r, w: r.ensure_invitation(w["ann"].id, T2, invited_by=None, now=NOW),
+    "ensure_invitation_existing": lambda r, w: r.ensure_invitation(w["ann"].id, T1, invited_by=None, now=NOW),
     "user": lambda r, w: r.user(w["ann"].id),
     "user_by_email": lambda r, w: r.user_by_email("ann@x.org"),
     "user_by_signin_account": lambda r, w: r.user_by_signin_account("acct-ann"),
@@ -978,7 +979,7 @@ async def test_a_claim_skips_a_row_another_claimant_holds_and_does_not_wait(two_
         await first.request_set_password(u.id, now=NOW)
         claim, table, row_id = _claim_user, "users", u.id
     else:
-        row = await first.ensure_invitation(u.id, T1, invited_by="system", now=NOW)
+        row = await first.ensure_invitation(u.id, T1, invited_by=None, now=NOW)
         await first.request_notification(row.id, now=NOW)
         claim, table, row_id = _claim_row, "memberships", row.id
     async with holding_row(pg_dsn, table, row_id):
@@ -997,7 +998,7 @@ async def test_a_revoke_racing_an_accept_on_one_invitation_applies_exactly_one(t
     """O6d: with both waiting on the invited row, whichever is let through applies and the other reports not-applied."""
     first, second = two_repositories
     u = await first.add_user("race@x.org", created_at=NOW)
-    row = await first.ensure_invitation(u.id, T1, invited_by="system", now=NOW)
+    row = await first.ensure_invitation(u.id, T1, invited_by=None, now=NOW)
     operations = {"revoke": lambda: first.revoke_invitation(row.id), "accept": lambda: second.accept_invitation(row.id, now=NOW)}
     order = [started_first, "accept" if started_first == "revoke" else "revoke"]
     async with holding_row(pg_dsn, "memberships", row.id):
@@ -1036,7 +1037,7 @@ async def test_a_returned_datetime_is_utc_whatever_zone_the_database_defaults_to
     try:
         insert_active_tenant(pg_dsn, str(T1), wiring=False)
         ann = await repo.add_user("ann@x.org", created_at=NOW)
-        row = await repo.ensure_invitation(ann.id, T1, invited_by="system", now=NOW)
+        row = await repo.ensure_invitation(ann.id, T1, invited_by=None, now=NOW)
         await repo.accept_invitation(row.id, now=NOW)
         await repo.request_set_password(ann.id, now=NOW)
         models = _models([

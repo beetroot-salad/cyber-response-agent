@@ -19,7 +19,7 @@ from defender import identity as _identity
 from defender import tenancy as _tenancy
 from defender.identity import Authenticated, IdentityService, audit
 from defender.identity.service import SESSION_LIFETIME
-from defender.records.formats import TenantId, TenantRefused
+from defender.records.formats import AlertId, InvestigationId, LearningJobId, MembershipId, TenantId, UserId
 
 from .models import (
     RECORD_ID_PATTERN,
@@ -110,12 +110,13 @@ class _Membered(NamedTuple):
 
 
 async def _membered(
-    tenant_id: Annotated[str, Path(description="The tenant the request acts in.")],
+    tenant_id: Annotated[TenantId, Path(description="The tenant the request acts in.")],
     auth: Authed, deps: Annotated[ApiDeps, Depends(_deps)],
 ) -> _Membered:
     """The tenant is the path's and is checked against the caller's membership on every request;
-    a non-member, an unknown tenant and a malformed id are all the same 404 (P-D)."""
-    return _Membered(auth, TenantId(await deps.identity.member_of(auth, tenant_id)))
+    a non-member and an unknown tenant are the same 404 (P-D). A malformed id is a 422, after the
+    sign-in check (#1382): it says nothing of any tenant."""
+    return _Membered(auth, await deps.identity.member_of(auth, tenant_id))
 
 
 Membered = Annotated[_Membered, Depends(_membered)]
@@ -165,7 +166,8 @@ async def _no_unknown_query(request: Request) -> None:
 
 Limit = Annotated[int, Query(ge=1, le=MAX_PAGE)]
 Cursor = Annotated[str | None, Query(max_length=2048, description="`next_cursor` from the previous page.")]
-Id = Annotated[str, Path(pattern=RECORD_ID_PATTERN)]
+#: A system id: a name the tenant chose, not a minted id.
+SystemPath = Annotated[str, Path(pattern=RECORD_ID_PATTERN)]
 
 
 #: The problems any route can answer: no login, a request that fails validation (every route
@@ -203,8 +205,8 @@ def _not_found(what: str, record_id: str) -> HTTPException:
 
 def _created_at(request: Request, response: Response, route: str, tenant_id: str, **path: str) -> None:
     """201 and a `Location` the router builds from `route`'s path. Only a creation calls it: a
-    replay answers the default 200 and needs no URL. Every path value is a `RecordId`, whose
-    grammar is URL-safe, so the router never has to encode or refuse one."""
+    replay answers the default 200 and needs no URL. Every path value is a record id or a `RecordId`,
+    whose grammar is URL-safe, so the router never has to encode or refuse one."""
     response.status_code = status.HTTP_201_CREATED
     response.headers["Location"] = str(request.url_for(route, tenant_id=tenant_id, **path))
 
@@ -232,7 +234,7 @@ async def list_alerts(
 
 
 @alerts.get("/{alert_id}", responses=responses(404))
-async def get_alert(deps: Deps, caller: Caller, alert_id: Id) -> Alert:
+async def get_alert(deps: Deps, caller: Caller, alert_id: AlertId) -> Alert:
     alert = await deps.alerts.get_alert(caller.tenant_id, alert_id)
     if alert is None:
         raise _not_found("alert", alert_id)
@@ -266,7 +268,7 @@ async def start_investigation(
 
 @investigations.get("")
 async def list_investigations(
-    deps: Deps, caller: Caller, alert_id: Annotated[str | None, Query(pattern=RECORD_ID_PATTERN)] = None,
+    deps: Deps, caller: Caller, alert_id: Annotated[AlertId | None, Query()] = None,
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> Page[Investigation]:
@@ -279,7 +281,7 @@ async def list_investigations(
 
 
 @investigations.get("/{investigation_id}", responses=responses(404))
-async def get_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
+async def get_investigation(deps: Deps, caller: Caller, investigation_id: InvestigationId) -> Investigation:
     investigation = await deps.investigations.get_investigation(caller.tenant_id, investigation_id)
     if investigation is None:
         raise _not_found("investigation", investigation_id)
@@ -287,7 +289,7 @@ async def get_investigation(deps: Deps, caller: Caller, investigation_id: Id) ->
 
 
 @investigations.post("/{investigation_id}/cancel", responses=responses(404, 409))
-async def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> Investigation:
+async def cancel_investigation(deps: Deps, caller: Caller, investigation_id: InvestigationId) -> Investigation:
     async with _transaction(deps, caller) as tx:
         investigation = await tx.cancel_investigation(investigation_id)
         await tx.audit("investigation.cancel", investigation_id)
@@ -296,7 +298,7 @@ async def cancel_investigation(deps: Deps, caller: Caller, investigation_id: Id)
 
 @investigations.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT,
                         responses=responses(404, 409))
-async def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id) -> None:
+async def delete_investigation(deps: Deps, caller: Caller, investigation_id: InvestigationId) -> None:
     """Delete an investigation and every attempt of the request it belongs to. Its run folders
     stay: lessons cite runs. Refused while any attempt is queued or running."""
     async with _transaction(deps, caller) as tx:
@@ -310,7 +312,7 @@ async def delete_investigation(deps: Deps, caller: Caller, investigation_id: Id)
     response_class=RedirectResponse,
     responses=responses(404),
 )
-async def read_artifact(deps: Deps, caller: Caller, investigation_id: Id, key: str) -> RedirectResponse:
+async def read_artifact(deps: Deps, caller: Caller, investigation_id: InvestigationId, key: str) -> RedirectResponse:
     """Redirect to a short-lived signed link on the blob store's own origin. The bytes never
     pass through the API, and a run page never renders on the app's origin.
 
@@ -350,7 +352,7 @@ async def start_learning_job(
 @learning_jobs.get("")
 async def list_learning_jobs(
     deps: Deps, caller: Caller,
-    investigation_id: Annotated[str | None, Query(pattern=RECORD_ID_PATTERN)] = None,
+    investigation_id: Annotated[InvestigationId | None, Query()] = None,
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> Page[LearningJob]:
@@ -363,7 +365,7 @@ async def list_learning_jobs(
 
 
 @learning_jobs.get("/{learning_job_id}", responses=responses(404))
-async def get_learning_job(deps: Deps, caller: Caller, learning_job_id: Id) -> LearningJob:
+async def get_learning_job(deps: Deps, caller: Caller, learning_job_id: LearningJobId) -> LearningJob:
     job = await deps.learning_jobs.get_learning_job(caller.tenant_id, learning_job_id)
     if job is None:
         raise _not_found("learning job", learning_job_id)
@@ -417,7 +419,7 @@ async def _settings(deps: ApiDeps, caller: Principal, system_id: str) -> SystemS
 
 @systems.put("/{system_id}", responses={201: {"model": System}})
 async def put_system(
-    deps: Deps, caller: Caller, system_id: Id, body: SystemPut, request: Request, response: Response
+    deps: Deps, caller: Caller, system_id: SystemPath, body: SystemPut, request: Request, response: Response
 ) -> System:
     """Create or replace a connected system's settings. Credentials are set separately."""
     async with _transaction(deps, caller) as tx:
@@ -432,7 +434,7 @@ async def put_system(
 
 @systems.put("/{system_id}/credentials", status_code=status.HTTP_204_NO_CONTENT,
              responses=responses(404))
-async def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: CredentialsPut) -> None:
+async def put_credentials(deps: Deps, caller: Caller, system_id: SystemPath, body: CredentialsPut) -> None:
     """Replace the system's credentials. Write-only: no endpoint returns them."""
     await _settings(deps, caller, system_id)
     # The secret store is outside the transaction, so the audit event is written first and the
@@ -446,7 +448,7 @@ async def put_credentials(deps: Deps, caller: Caller, system_id: Id, body: Crede
 
 
 @systems.post("/{system_id}/check", responses=responses(404))
-async def check_system(deps: Deps, caller: Caller, system_id: Id) -> SystemCheck:
+async def check_system(deps: Deps, caller: Caller, system_id: SystemPath) -> SystemCheck:
     """Test the connection and a first query."""
     return await deps.checker.check(caller.tenant_id, await _served(deps, caller, await _settings(deps, caller, system_id)))
 
@@ -516,7 +518,7 @@ async def read_me(deps: Deps, caller: Authed) -> Me:
 
 
 @auth.post("/invitations/{invitation_id}/accept", responses={**_IDENTITY, **responses(404)})
-async def accept_invitation(deps: Deps, caller: Authed, invitation_id: str = Path(max_length=64)) -> TenantRef:
+async def accept_invitation(deps: Deps, caller: Authed, invitation_id: MembershipId) -> TenantRef:
     """Accept an invitation addressed to you, while signed in."""
     return TenantRef(tenant_id=await deps.identity.accept(caller, invitation_id))
 
@@ -536,7 +538,7 @@ async def list_members(deps: Deps, member: Membered) -> Page[Member]:
 
 
 @people.delete("/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_member(deps: Deps, member: Membered, user_id: str = Path(max_length=64)) -> None:
+async def remove_member(deps: Deps, member: Membered, user_id: UserId) -> None:
     """End a membership: yours, or another member's. Nothing else of that person changes."""
     await deps.identity.remove(member.auth, member.tenant_id, user_id)
 
@@ -555,23 +557,15 @@ async def invite(deps: Deps, member: Membered, body: InviteCreate) -> Invitation
 
 
 @people.delete("/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def revoke_invitation(deps: Deps, member: Membered, invitation_id: str = Path(max_length=64)) -> None:
+async def revoke_invitation(deps: Deps, member: Membered, invitation_id: MembershipId) -> None:
     await deps.identity.revoke(member.auth, member.tenant_id, invitation_id)
 
 
 admin = APIRouter(prefix="/admin", tags=["admin"], responses={**_IDENTITY, **responses(404)})
 
 
-async def _tenant_path(tenant_id: Annotated[str, Path(description="The tenant the request acts on.")]) -> str:
-    """The path's tenant id in canonical form; a malformed one is no tenant (404, as on the member routes),
-    so the repository never sees a value it cannot store or compare."""
-    try:
-        return str(TenantId(tenant_id))
-    except TenantRefused as e:
-        raise _tenancy.NotFound("no such tenant") from e
-
-
-AdminTenant = Annotated[str, Depends(_tenant_path)]
+#: An administrator's tenant path. A malformed id is a 422, after the administrator check (#1382).
+AdminTenant = Annotated[TenantId, Path(description="The tenant the request acts on.")]
 
 
 def _tenant_item(record: _tenancy.TenantRecord) -> TenantItem:
