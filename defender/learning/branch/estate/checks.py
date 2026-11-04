@@ -5,6 +5,7 @@ import difflib
 import hashlib
 import json
 import re
+from collections import Counter
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypeGuard
@@ -932,7 +933,27 @@ def cut_rows(live: Any, re_asked: Any) -> tuple[list[Any], list[Any]]:
     from the two kept answers wherever they are needed — the label, the verifier, the judge."""
     out = _Diff()
     _diff(live, re_asked, (), out, lambda _new, _names: True)
-    return [row for _path, row, _names in out.removed], [row for _path, row, _names in out.added]
+    dropped = [row for _path, row, _names in out.removed]
+    brought_in = [row for _path, row, _names in out.added]
+    # A row the re-ask only reorders reads as removed at one place and added at another: it is
+    # neither dropped nor brought in. Cancel each such pair, one for one (a multiset).
+    kept = Counter(canonical_json(row) for row in dropped)
+    kept &= Counter(canonical_json(row) for row in brought_in)
+    if not kept:
+        return dropped, brought_in
+    return _without(dropped, Counter(kept)), _without(brought_in, Counter(kept))
+
+
+def _without(rows: list[Any], cancel: Counter[str]) -> list[Any]:
+    """`rows` less the first `cancel[text]` rows of each canonical spelling, order kept."""
+    out: list[Any] = []
+    for row in rows:
+        text = canonical_json(row)
+        if cancel[text] > 0:
+            cancel[text] -= 1
+        else:
+            out.append(row)
+    return out
 
 
 def run_checks(base: Any, served: Any, claim: Any, *, world: Any, store: CheckStore,  # noqa: PLR0913 — the submission, its world and store, and the call it answers
