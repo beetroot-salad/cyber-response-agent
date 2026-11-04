@@ -27,6 +27,7 @@ import json
 import logging
 import math
 import re
+import ssl
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -40,8 +41,10 @@ from starlette.concurrency import run_in_threadpool
 
 from defender import _clock, _io, tenancy
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
-from defender.kit.access import HEADER, OAUTH_CLIENT_CREDENTIALS, PROXY_OVERHEAD_SEC, Auth
+from defender.kit.access import (
+    HEADER, OAUTH_CLIENT_CREDENTIALS, PROXY_OVERHEAD_SEC, AccessDeclaration, Auth)
 from defender.kit.faults import ConfigFault, TransportFault
+from defender.kit.tls import trust_of_ca
 from defender.kit.verbs import is_system_name
 from defender.records.formats import TenantRefused
 from defender.credential_proxy._audit import AUDIT_KEYS, AuditSink, FileAuditSink
@@ -100,7 +103,7 @@ class CredentialStore(Protocol):
 class ProxyDeps:
     """What the proxy runs over: the data root whose `<tenant id>/exports/` folders it reads (read
     only; it keeps no tenant list, A26), the credential store, the token verifier, the audit
-    sink, and the response cap and upstream timeout."""
+    sink, the response cap and upstream timeout, and the public trust's bundle."""
 
     data_root: Path
     store: CredentialStore
@@ -111,6 +114,8 @@ class ProxyDeps:
     #: Seconds allowed on top of a request's timeout for the proxy's own calls (token check,
     #: credential read); the shipped value is `PROXY_OVERHEAD_SEC`, which the caller's wait assumes.
     proxy_overhead_sec: float = PROXY_OVERHEAD_SEC
+    #: The PEM bundle a system without `ca` is verified against; None: the one httpx ships.
+    public_ca_file: Path | None = None
 
     def __post_init__(self) -> None:
         if (isinstance(self.max_response_bytes, bool) or not isinstance(self.max_response_bytes, int)
@@ -155,8 +160,11 @@ class _Trail:
         return {"time": _clock.now_iso(), **record, "fault": fault}
 
 
-def _refused_answer(fault: str, detail: str) -> dict[str, Any]:
-    return {"status": None, "headers": {}, "body": "", "fault": fault, "detail": detail}
+def _refused_answer(fault: str, detail: str, *, system_side: bool = False) -> dict[str, Any]:
+    """A refusal with no system status. `system_side` marks the one kind that is the target
+    system's (its call failed, #1404); unmarked, the refusal is the proxy's own."""
+    return {"status": None, "headers": {}, "body": "", "fault": fault, "detail": detail,
+            "system_side": system_side}
 
 
 class _Proxy:
@@ -169,8 +177,9 @@ class _Proxy:
         # The one conversion of the data root this proxy is handed (A26); a tenant's exports are
         # joined under it by tenancy, never spelled here.
         self._root = tenancy.data_root_from_path(deps.data_root)
-        self._trust = public_trust()
-        self.access_tokens = AccessTokens(self._trust)
+        ca_file = deps.public_ca_file
+        self._trust = public_trust(None if ca_file is None else str(ca_file))
+        self.access_tokens = AccessTokens()
 
     def handle(self, authorization: str | None, raw: bytes | None,
                arrived: float | None = None) -> dict[str, Any]:
@@ -181,7 +190,8 @@ class _Proxy:
             answer = self._proxied(authorization, raw, trail,
                                    time.monotonic() if arrived is None else arrived)
         except Refused as refused:
-            answer = _refused_answer(refused.fault, refused.detail)
+            answer = _refused_answer(refused.fault, refused.detail,
+                                     system_side=refused.system_side)
         except ConfigFault as fault:
             answer = _refused_answer(CONFIG, fault.detail)
         except TransportFault as fault:
@@ -230,10 +240,11 @@ class _Proxy:
             raise Refused(CONFIG, f"no credential set is stored for {asked.system}")
         check_fit(declaration.auth, creds, asked.system)
         secrets = secret_values(creds)
+        trust = self._trust_of(declaration)
         access_token = None
         if declaration.auth.scheme == OAUTH_CLIENT_CREDENTIALS:
             access_token = self.access_tokens.token(claims.tenant, asked.system, declaration,
-                                                    creds, deadline)
+                                                    creds, deadline, trust)
             secrets += (access_token,)
             headers["Authorization"] = f"Bearer {access_token}"
         else:
@@ -242,10 +253,16 @@ class _Proxy:
             # an upstream that echoes a Basic header back must not hand over its encoded form
             secrets += tuple(v.removeprefix("Basic ") for v in injected.values()
                              if v.startswith("Basic "))
-        answer = self._sent(asked, target, headers, secrets, trail, deadline)
+        answer = self._sent(asked, target, headers, secrets, trail, deadline, trust)
         if answer["status"] == 401 and access_token is not None:
             self.access_tokens.evict(claims.tenant, asked.system, access_token)
         return answer
+
+    def _trust_of(self, declaration: AccessDeclaration) -> ssl.SSLContext:
+        """The trust for every leg of `declaration` (#1391 O4, P4): its `ca` alone when it has
+        one, else the public bundle built at start. Runs on the request's worker thread, where the
+        `ca` context is built once per distinct text and cached."""
+        return self._trust if declaration.ca is None else trust_of_ca(declaration.ca)
 
     def _verified(self, authorization: str | None) -> Claims:
         scheme, _, token = (authorization or "").partition(" ")
@@ -279,22 +296,31 @@ class _Proxy:
 
     def _sent(self, asked: _Asked, target: Target,  # noqa: PLR0913 — one call's state
               headers: dict[str, str], secrets: tuple[str, ...],
-              trail: _Trail, deadline: Deadline) -> dict[str, Any]:
+              trail: _Trail, deadline: Deadline, trust: ssl.SSLContext) -> dict[str, Any]:
         cap = self.deps.max_response_bytes
         content = asked.body.encode("utf-8") if asked.body is not None else None
         what = f"calling {asked.system}"
         timeout = deadline.wait(what)
 
+        answered: list[int] = []
+
         def sent(status: int) -> None:
             trail.outcome = f"sent {status}"
+            answered.append(status)
 
         try:
             reply = deadline.run(what, lambda: capped_reply(
-                self._trust, asked.method, target.url, cap=cap, timeout=timeout,
-                on_status=sent, headers=headers, content=content))
+                trust, asked.method, target.url, cap=cap, timeout=timeout,
+                on_status=sent, headers=headers, content=content), system_side=True)
+        except Refused as cut:
+            if answered:
+                return _broken_reply(asked.system, answered[0], cut.detail)
+            raise
         except httpx.TransportError as e:
+            if answered:
+                return _broken_reply(asked.system, answered[0], type(e).__name__)
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
-                                     f"({type(e).__name__})") from None
+                                     f"({type(e).__name__})", system_side=True) from None
         status, withheld = reply.status, reply.withheld
         fault = _fault_of(status)
         if fault is None:
@@ -312,6 +338,13 @@ class _Proxy:
         return {"status": status, "headers": shown,
                 "body": scrub_secret_bytes(reply.body, secrets).decode("utf-8", "replace"),
                 "fault": fault, "detail": detail}
+
+
+def _broken_reply(system: str, status: int, why: str) -> dict[str, Any]:
+    """The system answered `status` and then its reply broke (#1404): the status stands, so a
+    write it accepted is not reported as never made; there is no body to hand on."""
+    return {"status": status, "headers": {}, "body": "", "fault": TRANSPORT,
+            "detail": f"{system} answered {status} but its reply did not arrive whole ({why})"}
 
 
 def _fault_of(status: int) -> str | None:

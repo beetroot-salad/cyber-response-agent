@@ -10,6 +10,7 @@ from typing import Any
 from defender.learning.branch.estate.registry import WorldRegistry
 from defender.tests.e2e._replay_harness import ReplayFn
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24
+from defender.tests.support.shared.filesystem._handoff import updating, write_whole
 
 ROW_COLUMNS = (
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command", "payload_path",
@@ -37,9 +38,10 @@ class OrderedEstate(S24.Estate):
     """Preserve adapter key order so byte comparisons detect reserialization."""
 
     def _put(self, key: str, entry: dict) -> None:
-        table = self._table()
-        table[key] = entry
-        (self.state / "answers.json").write_text(json.dumps(table), encoding="utf-8")
+        with updating(self.state / "answers.json"):
+            table = self._table()
+            table[key] = entry
+            write_whole(self.state / "answers.json", json.dumps(table))
 
 
 def ordered_estate(tmp_path: Path, **kw: Any) -> OrderedEstate:

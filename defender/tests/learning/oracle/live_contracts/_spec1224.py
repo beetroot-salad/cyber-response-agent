@@ -3,6 +3,7 @@ underscore-prefixed so pytest never collects it."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
+from defender.tests.support.shared.filesystem._handoff import updating, write_whole
 
 import contextlib
 import hashlib
@@ -348,10 +349,11 @@ class Estate:
         return json.loads((self.state / "answers.json").read_text(encoding="utf-8"))
 
     def _put(self, key: str, entry: dict) -> None:
-        table = self._table()
-        table[key] = entry
-        (self.state / "answers.json").write_text(json.dumps(table, sort_keys=True),
-                                                 encoding="utf-8")
+        # Locked across the read and the write: two answers scripted at once must both land.
+        with updating(self.state / "answers.json"):
+            table = self._table()
+            table[key] = entry
+            write_whole(self.state / "answers.json", json.dumps(table, sort_keys=True))
 
     def answer(self, system: str, verb: str, params: Mapping[str, Any] | None,
                payload: Any) -> Any:

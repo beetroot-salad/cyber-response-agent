@@ -88,12 +88,15 @@ class Route:
 @dataclass(frozen=True)
 class AccessDeclaration:
     """One system's merged declaration: its single base URL (A2), its auth, the non-GET reads
-    and the writes (default none)."""
+    and the writes (default none), and optionally the private CA its system is verified under."""
 
     base: str
     auth: Auth
     reads: tuple[Route, ...] = ()
     writes: tuple[Route, ...] = ()
+    #: PEM certificates that are the only trust for every leg of this declaration, its base and
+    #: its OAuth token URL alike (#1391 O4, P4); None: the public bundle.
+    ca: str | None = None
 
 
 __all__ = [

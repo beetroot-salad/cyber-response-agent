@@ -17,6 +17,7 @@ from defender.tests.integrations.credential_proxy_1163.test_run_start_tokens imp
     TABLE, RunAtHandedRecorder, _records)
 from defender.tests.tenancy.case_comment_1359 import _spec1359 as C
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
 
 STORE = "/store"
@@ -131,13 +132,16 @@ def _case_tenant(data_root, system: str, *, extra: str | None = None, **kw: Any)
     return folder
 
 
-def _drive_real_leg(tmp_path, data_root, **seams: Any):
+def _drive_real_leg(tmp_path, data_root, *, no_generation: bool = False, **seams: Any):
     """`run.main --update-ticket` with the REAL writer (the leg reaches only an unreachable proxy
-    address); returns (recorder, rc, refused)."""
+    address); returns (recorder, rc, refused). `no_generation` withholds the shared fixture's
+    default live generation (and so its sign login, #1391 _proxied1391)."""
     rec = RunAtHandedRecorder(tmp_path / "run")
+    argv = S.run_argv(C.plant_alert(tmp_path / "in"), data_root, update_ticket=True)
+    if no_generation:
+        seams["directory"] = directory_for_argv(argv, generations=())
     rc, refused = S.drive_run(
-        S.run_argv(C.plant_alert(tmp_path / "in"), data_root, update_ticket=True), rec,
-        visualize=rec.visualize, proxy_url="http://127.0.0.1:9", **seams)
+        argv, rec, visualize=rec.visualize, proxy_url="http://127.0.0.1:9", **seams)
     return rec, rc, refused
 
 
@@ -180,10 +184,11 @@ def test_no_write_back_token_is_minted_for_a_tenant_with_no_case_file(tmp_path, 
 @pytest.mark.parametrize("arm", ["no sign login", "signer config fault", "signer transport fault"])
 def test_r4_no_signing_access_mints_nothing_the_run_goes_on_and_the_leg_says_so(
         tmp_path, data_root, arm):
-    """The write-back token cannot be minted: nothing is minted, the run investigates as normal
-    (not refused), and the receipt says the write-back token could not be minted; no store is reached. R4, D-11."""
+    """With no signing access (no sign login, or a signer fault) nothing is minted, the run goes on and the
+    receipt says so; no store is reached. R4, D-11."""
     _case_tenant(data_root, C.CASE_SYSTEM_TICKET)
-    seams: dict[str, Any] = {}
+    witness = A.MarkedSigner()  # would mint if asked: the no-login arm must never ask
+    seams: dict[str, Any] = {"no_generation": True, "signer": witness}  # no live generation: no sign login (R4)
     if arm != "no sign login":
         seams = {"signer": A.RaisingSigner(ConfigFault("OpenBao is sealed") if "config" in arm
                                            else TransportFault("OpenBao is unreachable")),
@@ -198,6 +203,8 @@ def test_r4_no_signing_access_mints_nothing_the_run_goes_on_and_the_leg_says_so(
     assert got["url"] is None, got
     assert "write-back token" in got["reason"], got
     assert up.seen == []
+    if arm == "no sign login":
+        assert witness.payloads == [], "a mint was attempted with no sign login"
 
 
 @pytest.mark.parametrize("spoil", ["bad config.env", "bad case-record file"])

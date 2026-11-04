@@ -10,13 +10,13 @@ import re
 import shutil
 import subprocess
 import sys
-import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from defender.records import RunPaths
 from defender.investigation import orient
+from defender.tests.support.shared.filesystem._handoff import write_whole
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.tooling.layout_contracts import _spec1080 as S
 from defender.tests.tooling.layout_contracts._spec1080 import agent_root
@@ -124,12 +124,9 @@ def interp_bin(tmp: Path) -> Path:
     python loses its venv). Stands for the box image's interpreter on the box lane."""
     d = tmp / "interp-bin"
     py = d / "python3"
-    if not py.is_file():  # several threads may get here at once: write aside, rename in
+    if not py.is_file():  # several threads may get here at once
         d.mkdir(parents=True, exist_ok=True)
-        part = d / f".python3.{os.getpid()}.{threading.get_ident()}"
-        part.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
-        part.chmod(0o755)
-        os.replace(part, py)
+        write_whole(py, f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', mode=0o755)
     return d
 
 

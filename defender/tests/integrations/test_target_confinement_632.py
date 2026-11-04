@@ -11,7 +11,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
-from defender.integrations import elastic_adapter, host_state_adapter  # noqa: E402
+from defender.integrations import host_state_adapter  # noqa: E402
 from defender.integrations import identity_adapter  # noqa: E402
 from defender.integrations.confinement import (  # noqa: E402
     READ_ENDPOINT_ALLOWLIST,
@@ -60,19 +60,11 @@ REAL_STUB_ENDPOINTS = tuple(
 
 def _tree(root: Path, *, url: str = "http://127.0.0.1:1") -> Any:
     """The run's tenant record, resolved from a real tenant folder under `root` carrying only the
-    elastic and host-state config. The transport is unreachable on purpose: a `ConfinementFault`
-    (not a `TransportFault`) shows confinement refused before any transport was attempted."""
-    S.plant(root, configs={"elastic": (
-        f"ELASTICSEARCH_URL={url}\n"
-        f"KIBANA_URL={url}\n"
-        "ELASTIC_EVENTS_INDEX=logs-*\n"
-        "ELASTIC_ALERTS_INDEX=security-audit-*\n"
-        "ELASTIC_SSL_VERIFY=true\n"
-        "ELASTIC_TRANSPORT=docker-exec\n"
-        "ELASTIC_DOCKER_CONTEXT=no-such-context-632-test\n"
-        "ELASTIC_ES_CONTAINER=es-632\n"
-        "ELASTIC_KIBANA_CONTAINER=kibana-632\n"),
-        "host-state": ("HOST_STATE_TRANSPORT=docker-exec\n"
+    host-state config (elastic's Docker fixture retires with #1391 O3 D12; its confinement is
+    observed through the proxy in `credential_proxy_1163/test_query_flow.py`). The transport is
+    unreachable on purpose: a `ConfinementFault` (not a `TransportFault`) shows confinement refused
+    before any transport was attempted."""
+    S.plant(root, configs={"host-state": ("HOST_STATE_TRANSPORT=docker-exec\n"
                        "HOST_STATE_DOCKER_CONTEXT=no-such-context-632-test\n")})
     return S.resolve(root)
 
@@ -127,11 +119,7 @@ def test_an_index_expression_whose_reach_widens_refuses_the_whole_call(
     tmp_path: Path, widening: str,
 ):
     with pytest.raises(ConfinementFault):
-        confine_index(widening, CONFIGURED_PATTERNS)
-
-    ctx = _ctx(tmp_path)
-    with pytest.raises(ConfinementFault):
-        elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index=widening)
+        confine_index(widening, CONFIGURED_PATTERNS)  # the verb half: test_query_flow (#1391 O3 P3)
 
 
 @pytest.mark.parametrize("inside", [
@@ -147,33 +135,7 @@ def test_an_inventory_host_and_a_configured_index_still_run(tmp_path: Path, insi
 
     ctx = _ctx(tmp_path)
     with pytest.raises(TransportFault):
-        elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index=inside)
-    with pytest.raises(TransportFault):
         host_state_adapter.VERBS["proc-tree"](ctx, host="web-1")
-
-
-def test_the_transport_capture_seam_records_every_resolved_request(tmp_path: Path):
-    capture = TransportCapture()
-    ctx = VerbContext(defender_dir=tmp_path / "tree", tenant=_tree(tmp_path / "tree"),
-                      run_dir=tmp_path / "run", env={}, capture=capture)
-
-    with pytest.raises(TransportFault):
-        elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index="logs-*")
-
-    assert capture.requests, "the seam recorded nothing — the transport bypasses it"
-    request = capture.requests[-1]
-    assert request.system == "elastic"
-    assert normalize_endpoint(request.url) == "/logs-*/_search", \
-        "the seam records something other than the resolved request target"
-    assert request.method == "POST", (
-        "the seam records no HTTP method — the read allowlist keys on (path, method) pairs, "
-        "so a capture without the method leaves the rule's second half unobservable"
-    )
-
-    unobserved = VerbContext(defender_dir=tmp_path / "bare", tenant=_tree(tmp_path / "bare"),
-                             run_dir=tmp_path / "run2", env={})
-    with pytest.raises(TransportFault):
-        elastic_adapter.VERBS["query"](unobserved, native_query="FROM x", index="logs-*")
 
 
 def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Path):
@@ -195,22 +157,7 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
                 f"endpoint-only key cannot separate the ticket read from the ticket write"
             )
 
-    capture = TransportCapture()
-    ctx = VerbContext(defender_dir=tmp_path / "tree", tenant=_tree(tmp_path / "tree"),
-                      run_dir=tmp_path / "run", env={}, capture=capture)
-    for verb, kwargs in (("query", {"native_query": "FROM x", "index": "logs-*"}),
-                         ("alerts", {"native_query": "*", "index": "security-audit-*"}),
-                         ("esql", {"query": "FROM logs-* | LIMIT 1"}),
-                         ("health-check", {})):
-        with pytest.raises(TransportFault):
-            elastic_adapter.VERBS[verb](ctx, **kwargs)
-
-    assert len(capture.requests) >= 4, "some real elastic verb reached no captured endpoint"
-    for request in capture.requests:
-        assert request.method, "the capture seam records no method — the rule has no key"
-        confine_read_endpoint(request.system, request.url, method=request.method,
-                              verb_class="r")
-
+    # Elastic's captured requests are re-checked in test_query_flow (#1391 O3 F8, P3).
     for system, endpoint, method in REAL_STUB_ENDPOINTS:
         confine_read_endpoint(system, f"http://host{endpoint}", method=method, verb_class="r")
 

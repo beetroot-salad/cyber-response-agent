@@ -6,10 +6,13 @@ from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
+import contextlib
+import dataclasses
+import functools
 import json
 import re
 import shutil
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from typing import Any
@@ -23,6 +26,9 @@ from defender.tests.support.runtime.state import _1255_view as V
 from defender.tests.support.learning.branch._branch_947 import spec_at
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
+from defender.tests.integrations.credential_proxy_1163 import _harness as H1163
+from defender.tests.integrations.credential_proxy_1163 import _tenant as T1163
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S7
 from defender.tests.support.storage._store_owner import reread
 
@@ -149,41 +155,53 @@ def _run_with_turns(d: S.Drive) -> None:
     assert d.rc == 0, f"the run exited {d.rc!r} (refusal={d.refusal!r})"
 
 
-def _tenant_elastic_configs(tenant_id: str, *, events: str, alerts: str,
-                            url: str | None = None) -> dict[str, str]:
+def _tenant_elastic_configs(tenant_id: str, *, events: str, alerts: str) -> dict[str, str]:
     """The tenant's complete config files (`T6.config_texts`), its elastic one carrying the index
-    patterns given. `url=""` blanks `ELASTICSEARCH_URL`, so elastic's settings check fails and
-    elastic is down from run start. Any other missing key would also make elastic down at start,
-    so the real adapter is stopped short of real docker by `_docker_shim` instead."""
-    texts = T6.config_texts(tenant_id, events_index=events, alerts_index=alerts)
-    if url is not None:
-        texts["elastic"] = re.sub(r'(?m)^ELASTICSEARCH_URL=.*$', f'ELASTICSEARCH_URL="{url}"',
-                                  texts["elastic"])
-    return texts
+    patterns given."""
+    return T6.config_texts(tenant_id, events_index=events, alerts_index=alerts)
 
 
-#: An Elasticsearch `_search` answer with no hits, as the docker-exec'd curl prints it (the body,
-#: then curl's `-w` status line — `S7.answer`'s shape).
-ES_NO_HITS = S7.answer(json.dumps({"hits": {"total": {"value": 0}, "hits": []}}))
+#: An Elasticsearch `_search` answer with no hits.
+ES_NO_HITS = json.dumps({"hits": {"total": {"value": 0}, "hits": []}}).encode()
 
 
-def _docker_shim(where: Path, monkeypatch: Any) -> S7.DockerShim:
-    """A recording `docker` first on the PATH the run's verbs fork with, answering every call
-    with `ES_NO_HITS`. It replaces the docker CLI only — the real adapter's config reading,
-    confinement and request building all run — so a call the gate admits ends here, observably
-    (`.calls()`), and one it refuses never reaches it."""
-    shim = S7.DockerShim(where, [ES_NO_HITS])
-    monkeypatch.setenv("PATH", shim.path_value())
-    return shim
+@contextlib.contextmanager
+def _elastic_upstream(tenant_ids: Sequence[str], events: str) -> Iterator[tuple[H1163.Upstream, str]]:
+    """A recording Elasticsearch behind the REAL proxy (#1391 O3), holding a basic credential for
+    each of `tenant_ids`' elastic; yields it and the proxy's address. The proxy reads each
+    tenant's published declaration from the data root, so a tenant planted with the upstream's
+    address as its elastic base (`_declare_elastic`) reaches it."""
+    from defender.tests.integrations.credential_proxy_1163._target import proxy
+
+    with H1163.upstream() as up:
+        up.replies[f"/{events}/_search"] = (200, {"Content-Type": "application/json"}, ES_NO_HITS)
+        store = H1163.FakeStore({(t, "elastic"): T1163.basic_set() for t in tenant_ids})
+        with H1163.serve_asgi(proxy().create_app(T1163.deps(current_data_root(), store))) as url:
+            yield up, url
 
 
-def _registry_with_real_elastic(backend: S.Backend, *verbs: str) -> Any:
-    """`backend`'s registry with the named elastic verbs replaced by the REAL adapter's."""
+def _declare_elastic(planted: Any, tenant_id: str, base: str) -> None:
+    """The tenant's elastic declaration, rewritten to reach `base`."""
+    (planted.knowledge / "settings" / "systems" / "elastic" / "access.yaml").write_text(
+        T6.elastic_access_text(tenant_id, base=base), encoding="utf-8")
+
+
+def _registry_with_real_elastic(backend: S.Backend, proxy_url: str, token: str,
+                                *verbs: str) -> Any:
+    """`backend`'s registry with the named elastic verbs replaced by the REAL adapter's, called
+    with the proxy's address and a request token (what a run's lifecycle hands its verbs)."""
     reg = backend.registry()
     table = {system: dict(reg.verbs(system)) for system in reg.systems()}
     real = S.sym("integrations.elastic_adapter", "VERBS")
+
+    def through_proxy(fn: Any) -> Any:
+        @functools.wraps(fn)
+        def call(ctx: Any, **params: Any) -> Any:
+            return fn(dataclasses.replace(ctx, proxy_url=proxy_url, request_token=token), **params)
+        return call
+
     for verb in verbs:
-        table["elastic"][verb] = real[verb]
+        table["elastic"][verb] = through_proxy(real[verb])
     return H.FakeVerbs(table)
 
 
@@ -438,7 +456,7 @@ def _main_tool_returns(d: S.Drive) -> str:
     return "\n".join(t for seen in d.main.seen[1:] for t in seen.tool_returns)
 
 
-def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
+def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path):
     patterns = ("logs-*", ".internal.alerts-security.alerts-default-*")
     leads = {S.L3: [S.query("cmdb", "list-hosts", {}), S.text("CORR-P134: 2 hosts.")],
              "l-001": [S.query("elastic", "query", {"native_query": "host.name:office-ws-1"}),
@@ -449,37 +467,41 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
     alert = S.fixture_alert()
     alert.pop("signal_index")
     runs: dict[str, S.Drive] = {}
-    shims: dict[str, S7.DockerShim] = {}
-    for tenant_id, url in ((fixture_uuid("tenant:tfault1222"), ""), (fixture_uuid("tenant:tgood1222"), None)):
-        planted = S.plant_tenant(
-            tenant_id, alert_mapping=S.DEFAULT_MAPPING,
-            table=TABLE_ELASTIC_GATHER_CMDB_CORRELATION, lead_zero=S.LEAD_ZERO_NON_ELASTIC,
-            configs=_tenant_elastic_configs(tenant_id, events=patterns[0], alerts=patterns[1],
-                                            url=url))
-        shims[tenant_id] = _docker_shim(tmp_path / tenant_id / "docker", monkeypatch)
-        backend = S.Backend()
-        runs[tenant_id] = S.run_alert(tmp_path / tenant_id, alert=alert,
-                                      tenant=planted, backend=backend,
-                                      verbs=_registry_with_real_elastic(backend, "query"),
-                                      main=main, leads=leads)
-        _run_with_turns(runs[tenant_id])
-    faulted, healthy = runs[fixture_uuid("tenant:tfault1222")], runs[fixture_uuid("tenant:tgood1222")]
+    faulted_id, good_id = fixture_uuid("tenant:tfault1222"), fixture_uuid("tenant:tgood1222")
+    with _elastic_upstream([good_id], patterns[0]) as (up, proxy_url):
+        for tenant_id in (faulted_id, good_id):
+            planted = S.plant_tenant(
+                tenant_id, alert_mapping=S.DEFAULT_MAPPING,
+                table=TABLE_ELASTIC_GATHER_CMDB_CORRELATION, lead_zero=S.LEAD_ZERO_NON_ELASTIC,
+                configs=_tenant_elastic_configs(tenant_id, events=patterns[0], alerts=patterns[1]))
+            if tenant_id == faulted_id:  # the cause that survives the Docker keys: no declaration
+                S7.drop_access(planted.knowledge, "elastic")
+            else:
+                _declare_elastic(planted, tenant_id, up.url)
+            backend = S.Backend()
+            token = T1163.token(tenant_id, {("elastic", "r")})
+            runs[tenant_id] = S.run_alert(
+                tmp_path / tenant_id, alert=alert, tenant=planted, backend=backend,
+                verbs=_registry_with_real_elastic(backend, proxy_url, token, "query"),
+                main=main, leads=leads)
+            _run_with_turns(runs[tenant_id])
+    faulted, healthy = runs[faulted_id], runs[good_id]
 
-    # MAIN's opening names elastic as not configured, with the check's reason (the blank key).
-    opening = _opening(faulted, fixture_uuid("tenant:tfault1222"))
+    # MAIN's opening names elastic as not configured, with the check's reason (the missing declaration).
+    opening = _opening(faulted, faulted_id)
     assert _names_down_as_not_configured(opening, "elastic"), (
         "MAIN's opening message does not name elastic as not configured though its settings "
         "fail the start check")
-    assert "ELASTICSEARCH_URL" in opening, (
-        "MAIN's opening message names elastic down without the check's reason (the blank key)")
+    assert "access.yaml" in opening, (
+        "MAIN's opening message names elastic down without the check's reason (no access.yaml)")
 
     lead_saw = (_lead_tool_returns(faulted, "l-001") if faulted.router.dispatched("l-001")
                 else "")
     refused = _main_tool_returns(faulted) + "\n" + lead_saw
     assert "not configured" in refused.lower(), (
         f"MAIN's elastic lead was not refused as not configured: {refused[:2000]}")
-    assert "ELASTICSEARCH_URL" in refused, (
-        f"the refusal does not name the check's reason (the blank key): {refused[:2000]}")
+    assert "access.yaml" in refused, (
+        f"the refusal does not name the check's reason (no access.yaml): {refused[:2000]}")
     assert "tripped" not in refused.lower(), (
         f"a not-configured system was refused as a tripped breaker: {refused[:2000]}")
     assert faulted.rows_for("l-001") == [], (
@@ -496,15 +518,16 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
     _assert_summary_in_opening(faulted, "CORR-P134")
 
     # Control: the healthy tenant's opening names no down elastic; its same lead runs through the
-    # real verb to a row (one docker call); nothing it is told says "not configured".
-    healthy_opening = _opening(healthy, fixture_uuid("tenant:tgood1222"))
+    # real verb to a row (one request at the cluster); nothing it is told says "not configured".
+    healthy_opening = _opening(healthy, good_id)
     assert not _names_down_as_not_configured(healthy_opening, "elastic"), (
         f"a fully configured elastic is named not configured: "
         f"{_names_down_as_not_configured(healthy_opening, 'elastic')}")
-    assert "ELASTICSEARCH_URL" not in healthy_opening
+    assert "access.yaml" not in healthy_opening
     assert [r.get("exit_code") for r in healthy.rows_for("l-001")] == [0], (
         healthy.rows_for("l-001"))
-    assert len(shims[fixture_uuid("tenant:tgood1222")].calls()) == 1, shims[fixture_uuid("tenant:tgood1222")].calls()
+    assert [(s.method, s.path.split("?")[0]) for s in up.seen] == [
+        ("POST", f"/{patterns[0]}/_search")], up.seen
     assert "not configured" not in _main_tool_returns(healthy).lower()
     assert "L1-P134: the SIEM answered." in _main_tool_returns(healthy)
 

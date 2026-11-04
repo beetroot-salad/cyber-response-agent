@@ -208,22 +208,27 @@ def _confinement_gate(elastic: Any, ctx: Any, index: str) -> str:
     return "answered"
 
 
-def test_1224_elastic_confine_index_admits_the_same_indices_for_a_run_and_a_sibling(tmp_path):
+def test_1224_elastic_confine_index_admits_the_same_indices_for_a_run_and_a_sibling(
+        tmp_path, data_root):
     """elastic's index confinement admits and refuses exactly the same indices for an ordinary run and for a sibling."""
-    H = importlib.import_module("defender.tests.tenancy.tenant_1107_settings._spec1107")
-    root = tmp_path / "tree"
-    url = "http://127.0.0.1:1"
-    H.plant(root, configs={
-        "elastic": (f"ELASTICSEARCH_URL={url}\nKIBANA_URL={url}\nELASTIC_EVENTS_INDEX=logs-*\n"
-                    "ELASTIC_ALERTS_INDEX=security-audit-*\nELASTIC_SSL_VERIFY=true\n"
-                    "ELASTIC_TRANSPORT=docker-exec\n"
-                    "ELASTIC_DOCKER_CONTEXT=no-such-context-1224-test\n"
-                    "ELASTIC_ES_CONTAINER=es-1224\nELASTIC_KIBANA_CONTAINER=kibana-1224\n"),
-        "host-state": ("HOST_STATE_TRANSPORT=docker-exec\n"
-                       "HOST_STATE_DOCKER_CONTEXT=no-such-context-1224-test\n")})
+    A = importlib.import_module("defender.tests.integrations.credential_proxy_1163._adapter1163")
+    H = importlib.import_module("defender.tests.integrations.credential_proxy_1163._harness")
+    T = importlib.import_module("defender.tests.integrations.credential_proxy_1163._tenant")
+    published_tenant = importlib.import_module(
+        "defender.tests.tenancy.tenant_1108_p4._support").published_tenant
+    files = H.access_files("elastic", H.declaration(
+        "http://elastic.invalid:9200", scheme=H.basic_scheme(), reads=A.ELASTIC_READS),
+        env='ELASTIC_TRANSPORT="http-proxy"\nELASTIC_EVENTS_INDEX="logs-*"\n'
+            'ELASTIC_ALERTS_INDEX="security-audit-*"\n')
+    # An index the gate admits goes on to the transport: the proxy's address is a closed port.
+    with published_tenant(tmp_path / "forge", root=data_root, files=files) as t:
+        run_ctx = A.ctx_for(tmp_path, T.run_record(t), f"http://127.0.0.1:{H.free_port()}",
+                            T.token(t.tenant_id, {("elastic", "r")}))
+        _assert_gate_is_the_same_for_a_sibling(run_ctx)
+
+
+def _assert_gate_is_the_same_for_a_sibling(run_ctx: Any) -> None:
     VerbContext = S.sym(S.VERBS, "VerbContext")
-    run_ctx = VerbContext(defender_dir=root, tenant=H.resolve(root), run_dir=tmp_path / "run",
-                          env={})
     sibling = {}
     if "world_id" in {f.name for f in fields(VerbContext)}:
         sibling["world_id"] = S.fixture_world_id("b")

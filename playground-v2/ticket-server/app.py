@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 SEED_PATH = Path(os.environ.get("TICKET_SEED_PATH", "/app/seed/tickets.json"))
@@ -164,6 +164,100 @@ def add_comment(key: str, body: CommentIn):
     t.comments.append(c)
     t.updated = _now()
     return c
+
+
+# --- Kibana alert hook (#1400) ---------------------------------------------
+# Stands in for the customer's alert automation: the alert-ticket-watcher
+# service posts each new security alert here and each one gets an OPEN ticket
+# keyed by the alert's own id, so the ticket exists before any run comments on
+# it. Alerts arrive as stored in the alerts index (flat dotted keys); nested
+# objects are read too.
+#
+# Create-only: it never transitions or comments, so it gives nothing that can
+# reach this stub a way to move a ticket along its lifecycle.
+
+ALERT_HOOK_PATH = "/hooks/kibana-alerts"
+
+
+def _alert_field(alert: dict, dotted: str):
+    """Read a field from an alert in either shape Kibana hands to actions:
+    flat dotted keys (as stored in the alert index) or nested objects."""
+    if dotted in alert:
+        return alert[dotted]
+    node = alert
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
+def _scalar(value) -> Optional[str]:
+    if isinstance(value, list):  # a field Kibana expanded to a one-item list
+        value = value[0] if len(value) == 1 else None
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (str, int)):
+        text = str(value)
+        return text or None
+    return None
+
+
+def ticket_for_alert(alert: dict) -> Optional[TicketCreate]:
+    """The ticket an alert opens, or None when the alert carries no id to key it by.
+
+    The key is `kibana.alert.uuid`, the field the defender's alert.json records as
+    `alert_id` (and the playground tenant maps to `case_key`). Summary and labels
+    match what the defender's own open leg wrote before #1359: the rule description,
+    `sig:<rule_id>` and `evt:<alert time>`.
+    """
+    key = _scalar(_alert_field(alert, "kibana.alert.uuid")) or _scalar(alert.get("_id"))
+    if key is None:
+        return None
+    rule_id = _scalar(_alert_field(alert, "kibana.alert.rule.rule_id"))
+    summary = (
+        _scalar(_alert_field(alert, "kibana.alert.rule.description"))
+        or _scalar(_alert_field(alert, "kibana.alert.rule.name"))
+        or f"alert {key}"
+    )
+    event_time = _scalar(_alert_field(alert, "@timestamp")) or _scalar(
+        _alert_field(alert, "kibana.alert.original_time")
+    )
+    labels = []
+    if rule_id:
+        labels.append(f"sig:{rule_id}")
+    if event_time:
+        labels.append(f"evt:{event_time}")
+    return TicketCreate(
+        key=key,
+        summary=summary,
+        description=f"Auto-created from alert {key} (rule {rule_id or 'unknown'}).",
+        labels=labels,
+        reporter="alerting",
+        status="open",
+    )
+
+
+@app.post(ALERT_HOOK_PATH)
+def kibana_alert_hook(payload: dict | list = Body(...)):
+    # Body(...) explicitly: FastAPI reads a bare `dict | list` parameter as form data,
+    # which fails at import without python-multipart (not in the image).
+    """Body: `{"alerts": [...]}` (what the watcher sends) or a bare list."""
+    alerts = payload.get("alerts") if isinstance(payload, dict) else payload
+    if not isinstance(alerts, list):
+        raise HTTPException(status_code=422, detail="expected a list of alerts")
+    created, existing, skipped = [], [], 0
+    for alert in alerts:
+        body = ticket_for_alert(alert) if isinstance(alert, dict) else None
+        if body is None:
+            skipped += 1
+            continue
+        if body.key in STORE:  # a repeated delivery, or a re-fired alert
+            existing.append(body.key)
+            continue
+        STORE[body.key] = Ticket(**body.model_dump())
+        created.append(body.key)
+    return {"created": created, "existing": existing, "skipped": skipped}
 
 
 @app.post("/admin/reset")

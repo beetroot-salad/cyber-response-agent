@@ -4,6 +4,7 @@ the next request."""
 from __future__ import annotations
 
 import base64
+import functools
 import json
 import shutil
 from pathlib import Path
@@ -274,3 +275,104 @@ def test_d3_adapter_over_the_working_tree_reaches_nothing_the_merged_declaration
 
     assert merged["path"].endswith("/users/dev.dana")
     assert [s.path for s in r.up.seen] == [f"{T.BASE_PATH}/users/dev.dana"]
+
+
+ES = "https://es.corp.example/es"
+_OTHER_LABELS = ("PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "PUBLIC KEY", "X509 CRL",
+                 "TRUSTED CERTIFICATE", "CERTIFICATE REQUEST")
+
+
+def _relabeled(pem: bytes, label: str) -> bytes:
+    """Well-formed PEM of `pem`'s body under another block `label`."""
+    kind = pem.splitlines()[0].decode().removeprefix("-----BEGIN ").removesuffix("-----")
+    return pem.replace(kind.encode(), label.encode())
+
+
+@functools.cache
+def _pki():
+    from defender.tests.support.shared._tls_server import chain
+
+    return chain()
+
+
+@functools.cache
+def _ca_texts() -> dict[str, tuple[bytes, str]]:
+    pki = _pki()
+    texts = {
+        "root-on-https": (pki.root.cert, ES),
+        "root-and-intermediate": (pki.root.cert + pki.intermediate.cert, ES),
+        "not-pem": (b"-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----\n", ES),
+        "key-not-cert": (pki.root.key, ES),
+        "cert-and-key": (pki.root.cert + pki.root.key, ES),
+        "cert-then-junk": (pki.root.cert + b"junk after the certificate\n", ES),
+        "on-an-http-base": (pki.root.cert, "http://es.corp.example/es"),
+    }
+    for label in _OTHER_LABELS:
+        texts[f"cert-and-{label.lower().replace(' ', '-')}"] = (
+            pki.root.cert + _relabeled(pki.root.key, label), ES)
+    return texts
+
+
+@pytest.mark.parametrize("kind", sorted(_ca_texts()))
+def test_1391_o4_a_declarations_ca_is_judged_when_it_is_parsed(kind):
+    """`ca` of certificates only, on an https base, parses; anything else (not PEM, a key, a
+    certificate beside a non-certificate block or junk, an http base) is a ConfigFault. #1391 O4, F6."""
+    from defender.tenancy._access import parse_access
+
+    ca, base = _ca_texts()[kind]
+    text = H.declaration(base, scheme=H.basic_scheme(), ca=ca)
+    if kind in {"root-on-https", "root-and-intermediate"}:
+        assert parse_access(text, system="elastic").base == base
+    else:
+        with pytest.raises(ConfigFault) as refused:
+            parse_access(text, system="elastic")
+        key_body = _pki().root.key.splitlines()[1]  # a line of the base64 body, whatever the label
+        if key_body in ca:
+            assert key_body.decode() not in str(refused.value), (
+                "a pasted private key reached the fault text, so the run record")
+
+
+def test_1391_o4_a_server_certificate_as_ca_is_refused_as_not_a_ca():
+    """The server's own certificate pasted as `ca` (a valid certificate, not a CA) is refused
+    with that reason, not as an invalid certificate: the operator is pointed at the CA's
+    certificate. #1391 O4 (PR #1409 review)."""
+    from defender.tenancy._access import parse_access
+
+    text = H.declaration(ES, scheme=H.basic_scheme(), ca=_pki().leaf.cert)
+    with pytest.raises(ConfigFault) as refused:
+        parse_access(text, system="elastic")
+    assert "no CA certificate" in str(refused.value), refused.value
+    assert "not a valid certificate" not in str(refused.value), refused.value
+
+
+@pytest.mark.parametrize("where", ["nbsp-before", "line-separator-inside"])
+def test_1391_o4_a_ca_with_non_ascii_whitespace_is_a_settings_fault_not_a_crash(where):
+    """Non-ASCII whitespace around or inside valid PEM text is a ConfigFault, never a TypeError,
+    and the text is not echoed. #1391 O4, D13, F6."""
+    from defender.tenancy._access import parse_access
+
+    pem = _pki().root.cert.decode()
+    ca = "\u00a0" + pem if where == "nbsp-before" else pem.replace("\n", "\u2028", 1)
+    text = H.declaration(ES, scheme=H.basic_scheme(), ca=ca)
+    with pytest.raises(ConfigFault) as refused:
+        parse_access(text, system="elastic")
+    assert pem.splitlines()[1] not in str(refused.value), "the certificate text reached the fault"
+
+
+@pytest.mark.parametrize(("token_url", "ca", "fault"), [
+    pytest.param("https://idp.corp.example/token", True, None, id="https-control"),
+    pytest.param("http://idp.corp.example/token", False, None, id="http-without-ca"),
+    pytest.param("http://idp.corp.example/token", True, ConfigFault, id="http-with-ca"),
+])
+def test_1391_o4_a_ca_with_an_http_token_url_is_a_settings_fault(token_url, ca, fault):
+    """`ca` covers the token exchange, so it is refused beside an `http://` token URL. #1391 O4, D13, F6."""
+    from defender.tenancy._access import parse_access
+    from defender.tests.support.shared._tls_server import issue
+
+    text = H.declaration(ES, scheme=H.oauth_scheme(token_url),
+                         ca=issue("tenant private root", ca=True).cert if ca else None)
+    if fault is None:
+        assert parse_access(text, system="elastic").base == ES
+    else:
+        with pytest.raises(fault):
+            parse_access(text, system="elastic")

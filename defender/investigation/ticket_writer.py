@@ -131,8 +131,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
                                                    tenant.settings))
             return
         _post_comment(run, target, key, body, word,
-                      _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url),
-                      proxied=proxied)
+                      _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url))
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"record raised, ignored: {e!r}")
         # Only the exception's type reaches the receipt (and so the page): its text may carry a
@@ -147,21 +146,24 @@ def _leg_refused(run: Run, key: str, reason: str) -> None:
     _write_receipt(run, None, key, RECEIPT_ERROR, reason)
 
 
-def _fault_reason(fault: AdapterFault, *, tenant: RunTenant, system: str, proxied: bool) -> str:
-    """The receipt reason for a fault the case system's comment action raised (O5): chosen by the
-    fault's class and the route, from the fault's data rather than its text. The fault's own
-    detail follows, redacted."""
+def _fault_reason(fault: AdapterFault, *, tenant: RunTenant, system: str) -> str:
+    """The receipt reason for a fault the case system's comment action raised (O5): its subject
+    is the credential proxy when the fault is the proxy's own (`proxy_own`, #1404), else the
+    store or the settings, chosen by class; from the fault's data, never the route or its text.
+    The fault's own detail follows, redacted."""
     detail = redact_settings_path(fault.detail, tenant.settings)
+    if fault.proxy_own:
+        # It failed (perhaps after the store took the comment: no claim of non-delivery) or it
+        # refused the call (#1398).
+        if isinstance(fault, TransportFault):
+            return f"the credential proxy failed: {detail}"
+        return f"the credential proxy refused the call: {detail}"
     if isinstance(fault, UpstreamFault):
         status = fault.status
         shown = "" if status is None else f" (HTTP {status}{', not found' if status == 404 else ''})"
         return f"the store refused the comment{shown}: {detail}"
     if isinstance(fault, TransportFault):
         return f"the store could not be reached: {detail}"
-    if proxied:
-        # On the proxy route a configuration or confinement fault is the proxy's own refusal: the
-        # run's settings were judged before the call.
-        return f"the credential proxy refused the call: {detail}"
     if isinstance(fault, ConfigFault):
         return f"{config_pointer(system)}: {detail}"
     return f"the write was refused before it was sent: {detail}"
@@ -210,7 +212,6 @@ def _with_stale_sentence(run: Run, body: str) -> str:
 
 def _post_comment(  # noqa: PLR0913 — one call site's worth of context, threaded not re-derived
     run: Run, target: case_system.CaseTarget, key: str, body: str, word: str, ctx: VerbContext,
-    *, proxied: bool,
 ) -> None:
     """The one write the host makes to a case: one comment whose body opens with the agent tag
     naming this run (`case_ticket.posted_comment`, #1221 — here, so no comment kind can leave
@@ -221,7 +222,7 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     try:
         link = target.add_case_comment(ctx, key=key, body=posted)
     except AdapterFault as fault:
-        reason = _fault_reason(fault, tenant=ctx.tenant, system=target.system, proxied=proxied)
+        reason = _fault_reason(fault, tenant=ctx.tenant, system=target.system)
         _logger.warning(f"record {key}: {reason}")
         _write_receipt(run, None, key, RECEIPT_ERROR, reason)
         return

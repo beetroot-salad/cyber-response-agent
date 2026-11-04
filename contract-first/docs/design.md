@@ -69,7 +69,7 @@ flowchart LR
 | -------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | discuss-issue              | A design: behavior, scope, data models, flows, architecture, with probed facts and a code map; or a split into several issues | What to promise, how to split, and the consequential trade-offs |
 | write-tests                | A committed test contract and a map of which test enforces which promise                      | Only design amendments the tests expose           |
-| write-code-from-tests      | Code that passes the contract, attacked by wrong variants; a PR                               | Only design amendments the code exposes           |
+| write-code-from-tests      | Code that passes the contract, attacked by wrong variants (cold-reviewed if small); a PR      | Only design amendments the code exposes           |
 | finalize or `/code-review` | A reviewed, re-greened PR; follow-up issues; new attack-deck entries                          | Whether to merge                                  |
 
 ## Sketch and spike: finding the better way before it's expensive
@@ -92,21 +92,28 @@ A contract can fail in two ways, and each needs a different check:
 
 - **Fidelity:** does the suite demand the right behavior, nothing invented and nothing narrowed?
   That's a question about meaning, so a fresh reviewer _reads_ it, without the author's reasoning.
-- **Discrimination:** does the suite reject wrong code? Reading can't answer that. Suites that
-  readers had cleared still passed five to nineteen deliberately wrong implementations.
+- **Discrimination:** does the suite reject wrong code? Reading can't answer that. On large changes,
+  suites that readers had cleared still passed five to nineteen deliberately wrong implementations.
 
 Discrimination is tested by running. Once the honest implementation passes, two or three
 attackers, each focused on one risk area, try to keep the suite green with wrong variants of that
 code. Starting from working code is cheaper than each attacker building its own, and each exploit
 becomes a patch that the repaired test must be shown to catch.
 
+A small contract, one that stays inside one owner and one surface with no lifecycle, is the
+exception. There attacks found almost no code bugs and didn't converge, while a fresh cold review
+kept finding what neither they nor line mutants reach: the same rule decided at a sibling site, the
+mirror case across a boundary. So on a small contract a cold review stands in for the first attack,
+and the PR records why.
+
 Exploits aren't repaired one by one. An attacker can always find one more spelling, encoding or
 exception type, and a test per instance invites the next one: past runs went to seven repair rounds
-that way. So a fresh triage reader first drops findings that can't arise in deployment or that no
-honest implementer would write, then groups the rest by the design choice that made them possible.
-Each family gets one verdict: dissolve it with a design change, accept it as a recorded trade-off,
-close it with one test over the whole class, or fix the code. Another round runs only when a
-recheck finds a new family.
+that way. So the attack batch is sorted like any other batch of findings (below): irrelevant
+findings are dropped, the rest are grouped by the design choice that made them possible, and each
+family gets one verdict, such as closing it with one test over the whole class. Every repair is
+rechecked by replaying the saved exploits, which costs no agent; another attack runs only when that
+recheck finds a new family or the repair changes something the saved exploits can't speak for. Past
+re-attack rounds almost never found anything beyond more instances of families already decided.
 
 ```mermaid
 flowchart TD
@@ -114,7 +121,7 @@ flowchart TD
     A --> Q{Suite still green?}
     Q -->|no| N[Suite caught it]
     Q -->|yes| X[Exploits found]
-    X --> T[Triage: drop irrelevant,<br/>group into families]
+    X --> T[Sort: drop irrelevant,<br/>group into families]
     T --> D[Dissolve:<br/>design amendment]
     T --> K[Accept:<br/>recorded trade-off]
     T --> C[Close: one test<br/>over the family]
@@ -128,8 +135,21 @@ flowchart TD
 
 ## Where findings go
 
-Every stage can find a problem that belongs to an earlier one. Findings are grouped by cause first,
-since one model or flow change often dissolves several, then routed by kind:
+Every stage can find a problem that belongs to an earlier one. Before anyone acts on a batch of
+findings, one procedure sorts it, [`references/sort.md`](../references/sort.md), run by a fresh agent
+that produced neither the work nor the review. It drops findings that aren't real, groups the rest by
+the cause that made them possible, and gives each group one verdict: **dissolve** (a change to the
+model, owner, flow or rule removes the group), **local fix** (fixing it where it shows up is the cleaner answer),
+**close** (one test over the whole class), or **accept** (a recorded trade-off). For each group it
+asks the human's usual question: is there a change that dissolves these rather than patches them,
+and which leaves less code and fewer special cases?
+
+The author never sorts its own review. Authors who did kept their design and patched around it:
+across six long design histories, the agent proposed a dissolving change on its own twice, while
+the human asked for one dozens of times. A dissolve can also overreach and open more decisions than
+it settles, so it names the decisions it would open, and the stage's independent review reads it
+before the human does. The human sees a few groups with a recommendation, never one question per
+finding. Then each group is routed by kind:
 
 | Finding                                                      | Goes to                                                                                 |
 | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
@@ -149,7 +169,8 @@ inspectable by a person, and runnable headless as one command per stage.
 
 ## Rules state goals; applications are a cache
 
-For now this applies to write-tests and write-code-from-tests and their reference files. Each rule
+For now this applies to write-tests, write-code-from-tests, proven-fix, their reference files and
+the shared `references/sort.md`. Each rule
 states its goal and the principle behind it, never the list of cases it covers. How a rule applies to
 one context (the harness, the model generation, the project's toolchain, or what past runs found) is
 recorded separately, as a cache. Each of those files ends with a `Cache` section, and a project keeps
@@ -197,20 +218,26 @@ project, at `.claude/contract-first-attacks.md`; the plugin defines only its for
 ## Choosing a lane
 
 The full pipeline is for new or changed promises. Most changes don't need it, and you pick the lane;
-skills don't route themselves.
+skills don't route themselves. A small behavior change, one whose intent fits in a sentence and
+stays inside one owner and one surface with no lifecycle, goes through proven-fix. On such changes
+the full pipeline spent hours and many agents for almost no code bugs, while what did escape, a
+sibling site or a mirror case, needed a sweep and a cold review rather than attacks.
 
 ```mermaid
 flowchart TD
     S[A change] --> Q1{Does it add or change<br/>what the system promises?}
+    Q1 -->|"yes, small: intent in a sentence,<br/>one owner, one surface, no lifecycle"| PF
     Q1 -->|yes| P[discuss-issue → write-tests →<br/>write-code-from-tests → review]
     Q1 -->|no| Q2{Does code disagree with<br/>intent that's already settled?}
-    Q2 -->|"yes, and you can state it in a sentence"| PF[proven-fix:<br/>red test first, smallest fix, mutants]
+    Q2 -->|"yes, and you can state it in a sentence"| PF[proven-fix: intent recorded, sweep,<br/>red test first, smallest fix,<br/>mutants, cold review]
     Q2 -->|no| Q3{Does only structure change?}
     Q3 -->|yes| RF[refactor:<br/>existing suite unchanged, lint against regressions]
     Q3 -->|"unsure, or two readings of intent"| P
 ```
 
-The lighter lanes hand back rather than decide: they have nowhere to record a design decision.
+The lighter lanes hand back rather than decide. proven-fix records one decision, the human's
+one-sentence intent, in the issue or PR body; anything more, and anything in refactor, needs a
+design and goes to discuss-issue.
 
 ## Limitations
 

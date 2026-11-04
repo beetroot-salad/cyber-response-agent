@@ -30,12 +30,9 @@ Trust comments from `OWNER`, `MEMBER` or `COLLABORATOR`, and from the pipeline's
 
 Review the diff, then the code it touches or depends on; a bug outside the changed lines still counts. If the human already ran `/code-review --comment`, its findings are in the trail as a starting point, not the whole review.
 
-For each finding, yours or one from the trusted trail, including cleanups an earlier pass deferred and bugs it noted outside the diff, ask two questions before changing anything:
+Collect every finding, yours or one from the trusted trail, including cleanups an earlier pass deferred and bugs it noted outside the diff. You wrote this review, so you don't sort it: dispatch a fresh sorter on **../../references/sort.md** with the findings, the diff, the code and tests, the principles and project rules, and the accepted trade-offs' names. Give it nothing you skipped, so it reads cold too. Check its verdicts before acting, including the decisions each dissolve would open.
 
-- **Could it be dissolved or patched?** Dissolving removes the cause, so the whole class of bug can no longer happen: a simpler structure, one owner for a value, an input that can't be malformed. Patching handles this instance where it shows up. Group findings by cause first; one dissolve often settles several.
-- **Which is the cleaner solution?** Prefer the one that leaves less code and fewer special cases, not the one with the smaller diff. Say which you chose and why.
-
-Make the cleaner change when it fits this PR. A dissolve that changes what the design commits to is a design choice: leave it for the human with both options. File an issue for anything you don't resolve here, with the finding, its `file:line`, and the dissolve and patch options you saw.
+Make each local fix, and each dissolve that fits this PR, and say why it was the cleaner one. A dissolve that changes what the design commits to, or an accept, is a design choice: leave it for the human with both options. File an issue for anything you don't resolve here, with the finding, its `file:line`, and the dissolve and patch options you saw.
 
 Run the tests that cover what you changed, the relevant e2e replay, and CI's lint and type checks. Leave the full suite to CI. Never get green by weakening a test, suppressing a lint or type error, or baselining a finding this change introduced. A test that looks wrong is a finding to report, not a line to edit.
 

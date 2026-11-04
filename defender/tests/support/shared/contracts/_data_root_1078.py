@@ -46,7 +46,11 @@ def tenant_directory(root: Path, tenant_id: str, **keywords: Any) -> Any:
     `state`, `wiring`, `generations`: a minting call site seeds a generation, see `_active1214`); the origin defaults to the tenant clone's own `origin` remote when `<root>/<id>` is a
     clone, else `http://forge.test/tenants/<id>.git`."""
     from defender.tests.support.tenancy._active1214 import active_directory
+    from defender.tests.support.tenancy._proxied1391 import sign_generation
 
+    if keywords.get("wiring", True) and "generations" not in keywords:
+        # A fixture tenant's elastic is proxied (#1391 P1/D12): run start needs a sign login.
+        keywords["generations"] = [sign_generation(str(tenant_id))]
     return active_directory(Path(location_path(root)), str(tenant_id), **keywords)
 
 
