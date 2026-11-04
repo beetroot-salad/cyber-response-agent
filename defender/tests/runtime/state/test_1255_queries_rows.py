@@ -45,9 +45,11 @@ def _assert_no_call_id(rows: list[dict], where: str) -> None:
     assert not carrying, (
         f"{where}: {len(carrying)} query row(s) in the model's table carry `{W.CALL_ID}`: "
         f"{carrying[:2]}")
-    shaped = [tuple(r) for r in rows if tuple(r) != W.ROW_COLUMNS]
+    # An inherited row from a source recorded before #1385 has no `received_at` (readers
+    # tolerate its absence); anything else is the writer's full set.
+    shaped = [tuple(r) for r in rows if tuple(r) not in (W.ROW_COLUMNS, W.ROW_COLUMNS[:-1])]
     assert not shaped, (
-        f"{where}: query rows whose columns are not the writer's fourteen (a column carrying "
+        f"{where}: query rows whose columns are not the writer's columns (a column carrying "
         f"the id under another name is the same leak): {shaped[:2]}")
 
 

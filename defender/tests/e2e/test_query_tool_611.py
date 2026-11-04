@@ -764,6 +764,7 @@ ROW_KEYS = {
     "payload_path", "exit_code", "error_class", "payload_status", "payload_digest",
     "payload_sha256",
     "system_key",
+    "received_at",
 }
 
 
