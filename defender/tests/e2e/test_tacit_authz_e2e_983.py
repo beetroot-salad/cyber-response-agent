@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -51,7 +52,8 @@ def _run(tmp_path: Path, doc: str, disposition: str, *, run_id: str):
 
 def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
     """A gather registry whose `tacit-knowledge.lookup` IS the shipped adapter's, repointed at
-    the fixture tree under `root` and at `AS_OF`. The registry is the run's agent knowledge, so
+    the fixture tree under `root`, judged on the day of `AS_OF` (an adapter is handed no moment,
+    #1385 O1; the day is pinned on the adapter's own `_today`). The registry is the run's agent knowledge, so
     `root` is handed as the run tenant's agent root, not as `defender_dir`."""
     from defender.systems.verbs import VerbContext
     from defender.kit.verbs import declared_params
@@ -59,10 +61,11 @@ def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
 
     def lookup(ctx: VerbContext, *, actor: str, host: str, pattern: str) -> dict:
         rec.record(LOOKUP, ctx, {"actor": actor, "host": host, "pattern": pattern})
-        return tacit_knowledge_adapter.lookup(
-            replace(ctx, tenant=replace(ctx.tenant, agent_root=root), as_of=AS_OF),
-            actor=actor, host=host, pattern=pattern,
-        )
+        with patch.object(tacit_knowledge_adapter, "_today", return_value=AS_OF.date()):
+            return tacit_knowledge_adapter.lookup(
+                replace(ctx, tenant=replace(ctx.tenant, agent_root=root)),
+                actor=actor, host=host, pattern=pattern,
+            )
 
     assert declared_params(lookup) == declared_params(tacit_knowledge_adapter.lookup), (
         "the harness shim's params are not the shipped verb's"

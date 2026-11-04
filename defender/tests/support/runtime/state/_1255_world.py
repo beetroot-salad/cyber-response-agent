@@ -14,7 +14,7 @@ from defender.tests.learning.oracle.live_contracts import _spec1224 as S24
 ROW_COLUMNS = (
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command", "payload_path",
     "exit_code", "error_class", "payload_status", "payload_digest", "payload_sha256",
-    "system_key",
+    "system_key", "received_at",
 )
 
 #: The column name kept out of the model's table.
@@ -88,9 +88,13 @@ class ReturnsSeen(ReplayFn):
 _SALT = re.compile(r"run-[0-9a-f]+-untrusted")
 
 
+#: The platform's arrival-stamp line (#1385 A6): two runs' clocks differ by design.
+_STAMP = re.compile(r"^\[reply received [^\]\n]*\]\n?", re.M)
+
+
 def normalized(text: str, *run_dirs: Path) -> str:
-    """Normalize frame salts and run paths, replacing longer paths first."""
-    out = _SALT.sub("run-SALT-untrusted", text)
+    """Normalize frame salts, run paths and the arrival-stamp line, replacing longer paths first."""
+    out = _STAMP.sub("", _SALT.sub("run-SALT-untrusted", text))
     for run_dir in sorted({str(d) for d in run_dirs}, key=len, reverse=True):
         out = out.replace(run_dir, "<RUN>")
     return out

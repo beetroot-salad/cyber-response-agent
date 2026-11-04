@@ -96,7 +96,9 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
     def _comparable(text: str, run_dir: Path) -> str:
         # Salt and run dir both differ between the two runs (`query` echoes its `gather_raw`
         # path back in its tool text).
-        return _desalt(text).replace(str(run_dir), "<run-dir>")
+        # The arrival-stamp line is the platform's own clock (#1385 A6): it differs too.
+        return re.sub(r"^\[reply received [^\]\n]*\]\n?", "", _desalt(text).replace(
+            str(run_dir), "<run-dir>"), flags=re.M)
 
     assert _comparable(live_gather.dispatched.text("query"), live_dir) == _comparable(
         idle_gather.dispatched.text("query"), idle_dir), (
@@ -105,8 +107,12 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
     assert re.search(r"<run-[0-9a-f]+-untrusted>", live_gather.dispatched.text("query")), (
         "query's own rendering lost its frame, so the comparison above is over empty text"
     )
-    assert read_jsonl_rows(RunPaths(live_dir).executed_queries) == read_jsonl_rows(
-        RunPaths(idle_dir).executed_queries), "the queries table diverged between the two runs"
+    def _sans_arrival(run_dir: Path) -> list[dict]:
+        return [{k: v for k, v in row.items() if k != "received_at"}
+                for row in read_jsonl_rows(RunPaths(run_dir).executed_queries)]
+
+    assert _sans_arrival(live_dir) == _sans_arrival(idle_dir), (
+        "the queries table diverged between the two runs")
     assert framed_content(live_main.dispatched.text("fetch_rows")) == toons.dumps(
         _payload()), "no foreign substitution happened, so the inertness above proves nothing"
 

@@ -672,12 +672,13 @@ def test_a_failure_closing_the_oracle_mark_does_not_replace_the_unservable_abort
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(S.text_only("no.")),
                            verifier=S.passing_verifier(), retry_cap=1)
-    ctx = est.ctx(tmp_path / "inv", run_state=S.run_state(tmp_path / "inv"))
+    ctx = est.ctx(tmp_path / "inv")
+    state = S.run_state(tmp_path / "inv")
 
-    with pytest.raises(oracle_mod.OracleUnservable):
+    with S.run_state_carried(state), pytest.raises(oracle_mod.OracleUnservable):
         S.call(reg, "idp", "query", ctx, q="user:alice")
     assert closed, "the turn's close never ran, so its failure was not exercised"
-    assert all(c is ctx.run_state for c in closed), "the close was not the run's own clock"
+    assert all(c is state for c in closed), "the close was not the run's own clock"
 
 
 def test_an_unpriced_verifier_is_refused_before_the_oracles_first_request(tmp_path):
@@ -902,15 +903,17 @@ def test_a_failure_closing_the_clock_mark_leaves_no_row_for_the_answer_it_withhe
     ep = S.episode_v2(tmp_path)
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=1)
-    ctx = est.ctx(tmp_path / "inv", run_state=S.run_state(tmp_path / "inv"))
+    ctx = est.ctx(tmp_path / "inv")
+    state = S.run_state(tmp_path / "inv")
 
-    with pytest.raises(OSError, match="close failed"):
+    with S.run_state_carried(state), pytest.raises(OSError, match="close failed"):
         S.call(reg, "idp", "query", ctx, q="user:alice")
     assert closes, "the turn's close never ran, so its failure was not exercised"
-    assert closes[0] is ctx.run_state, "the close was not the run's own clock"
+    assert closes[0] is state, "the close was not the run's own clock"
     assert S.ledger_rows(ep, "b") == [], "a row records an answer the investigator never got"
 
-    assert S.call(reg, "idp", "query", ctx, q="user:alice") == ALICE_ROWS
+    with S.run_state_carried(state):
+        assert S.call(reg, "idp", "query", ctx, q="user:alice") == ALICE_ROWS
     assert len(S.ledger_rows(ep, "b")) == 1
     assert o.requests == 1, "the committed answer was not reused"
 

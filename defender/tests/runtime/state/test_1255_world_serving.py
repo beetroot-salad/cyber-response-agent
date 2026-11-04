@@ -227,8 +227,9 @@ def test_1255_the_control_world_answers_a_question_the_source_never_asked_throug
 
     served = S24.call(control, "idp", "query", ctx, **BOB)
     live = est.calls("idp", "query")[reads_before:]
-    assert [c["as_of"] for c in live] == [S24.AS_OF_DT.isoformat()], (
-        "the control's base read was not one live read bounded by the fork time")
+    assert [c["as_of"] for c in live] == [None], (
+        "the control's base read was not one live read with no branch point on it (#1385 O1: "
+        "the oracle cuts, not the adapter)")
     assert oracle.requests >= 1, (
         "the control world served a question the source never asked as a raw live read")
     inbound = oracle.all_seen()
@@ -258,8 +259,8 @@ def test_1255_the_control_world_serves_its_oracles_changed_answer_never_the_base
     control = S24.sandboxed_registry(ep, "a", est, oracle=oracle,
                                      verifier=S24.passing_verifier())
     arm_dir, arm = W.drive_lead(tmp_path / "arm", verbs=control, est=est, turns=list(turns))
-    assert [c["as_of"] for c in est.calls("idp", "query")[reads_before:]] == [
-        S24.AS_OF_DT.isoformat()], "fixture: the control's base was not one fork-time live read"
+    assert [c["as_of"] for c in est.calls("idp", "query")[reads_before:]] == [None], (
+        "fixture: the control's base was not one live read with no branch point on it (#1385 O1)")
     assert oracle.requests >= 1, "the control world's new question took no oracle turn"
 
     handed = "\n".join(arm.handed_back())
@@ -353,8 +354,8 @@ def test_1255_a_pre_fork_question_with_no_recording_is_reconstructed_at_the_fork
                     "only recorded answers unchanged")
 
     live = est.calls("siem-x", "lookup")[reads_before:]
-    assert [c["as_of"] for c in live] == [S24.AS_OF_DT.isoformat()], (
-        "the base was not one live read bounded by the fork time")
+    assert [c["as_of"] for c in live] == [None], (
+        "the base was not one live read with no branch point on it (#1385 O1)")
     assert oracle.requests >= 1, (
         f"world {label} served a pre-fork question with no recording as a raw live read")
     inbound = oracle.all_seen()

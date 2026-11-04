@@ -7,6 +7,7 @@ from dataclasses import replace as _with_live_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _live_run_1165
 
 import asyncio
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -214,6 +215,15 @@ def flat(messages: list) -> str:
     return "\n".join(out)
 
 
+def unstamped(content: object) -> str:
+    """A stop or refusal result less the platform's arrival-stamp line (#1385 O7, A6: every
+    result carries one, the stops included); fails when the line is not there."""
+    found = re.fullmatch(r"(?s)(.*)\n\[reply received \d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d[^\]]*\]",
+                         str(content))
+    assert found, f"the result carries no arrival stamp line: {content!r}"
+    return found.group(1)
+
+
 def failed(part: ToolReturnPart) -> bool:
     return part.outcome == "failed"
 
@@ -247,7 +257,7 @@ def test_the_tripping_call_is_answered_with_the_guards_reason_and_the_summary_fo
     closing = tool_returns(lead.model.last_inbound)[-1]
     assert failed(closing), "the guard's stop is not a FAILED tool result"
     assert "repeats the one already issued at seq 0" in str(closing.content)
-    assert str(closing.content).endswith(QUERY_DOOR_CLOSED)
+    assert unstamped(closing.content).endswith(QUERY_DOOR_CLOSED)
     assert INCOMPLETE_IDIOM not in flat(lead.model.last_inbound), \
         "main's idiom reached the gather model"
     assert lead.persisted == lead.out
@@ -405,7 +415,7 @@ def test_a_dead_end_met_before_the_ceiling_is_what_main_is_told(tmp_path):
     assert body == SUMMARY
     assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_DEAD_END)]
     last = lead.model.last_inbound
-    assert str(tool_returns(last)[-1].content).endswith(QUERY_DOOR_CLOSED)
+    assert unstamped(tool_returns(last)[-1].content).endswith(QUERY_DOOR_CLOSED)
     assert marked(last) == [len(last) - 1]
 
 
@@ -432,7 +442,7 @@ def test_querying_again_after_a_dead_end_is_refused_and_the_summary_still_arrive
     assert not any("i:7" in str(c) for c in lead.rec.calls), "the refused query ran"
     closing = tool_returns(lead.model.last_inbound)[-1]
     assert failed(closing)
-    assert str(closing.content) == QUERY_NOT_RUN
+    assert unstamped(closing.content) == QUERY_NOT_RUN
     assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_DEAD_END)]
 
 
