@@ -184,6 +184,23 @@ async def test_1345_d2_a_tenant_made_by_the_create_request_has_no_alert_mapping_
         await store.close()
 
 
+async def test_1345_m1_the_mapping_read_is_the_asked_tenants_own_when_another_tenant_has_saved_one(store):
+    """A has a saved mapping, B never saved one: B reads none and A reads exactly its own, on both repositories. (#1345 M1, O4)"""
+    from defender.tests.support.tenancy._mapping1345 import mapping_value, seed_postgres, seed_twin
+
+    mine = {"signature": "rule.id", "summary": "rule.description", "title": "t"}
+    await store.seed(T1)
+    await store.seed(T2)
+    if store.dsn is None:
+        seed_twin(store.twin, T1, mine)
+    else:
+        seed_postgres(store.dsn, T1, mine)
+
+    assert await store.repo.alert_mapping(T2) is None
+    assert await store.repo.alert_mapping(T1) == mapping_value(mine)
+    assert await store.repo.alert_mapping(ABSENT) is None
+
+
 async def test_two_create_requests_are_two_tenants(store):
     """Each create mints its own id and adds a row; `tenants()` lists both (RC-3)."""
     first, second = await store.repo.request_create(now=NOW), await store.repo.request_create(now=NOW)

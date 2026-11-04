@@ -133,3 +133,61 @@ def test_the_alert_mapping_file_takes_the_six_entries_and_a_four_entry_file_leav
         entry = bad.split(":")[0]
         with pytest.raises(A.AlertMappingFault, match=entry):
             A.parse_mapping(f"{MAPPING_TEXT}{bad}\n")
+
+
+#: Entry names the mapping takes, and others a lenient validator might let through.
+OTHER_NAMES = ["", "Title", "title ", "case-key", "extra", "alert_mapping", "0"]
+NON_TEXT = [0, 1, -1, True, False, 1.5, [], ["a"], {}, {"a": "b"}, b"a", ("a",), object]
+#: Whitespace by Python's own definition, every one: in front of, behind, around and inside an otherwise good path.
+WHITESPACE = [chr(c) for c in range(0x110000) if chr(c).isspace()]
+BAD_SEGMENTS = ["", ".", "..", ".a", "a.", "a..b", "a.b.", "..a", "a...b"]
+UNHOLDABLE = ["a\x00b", "\x00", "a.\x00", "\ud800", "a\udfffb", "a.\ud83d.b"]
+GOOD = ["a", "a.b", "rule.id", "a b", "x.y.z", "\u00e9.\U0001d4b7", "0", "a-b.c_d"]
+
+
+def _mapping_values() -> list[object]:
+    values: list[object] = [None, *NON_TEXT, *BAD_SEGMENTS, *UNHOLDABLE, *GOOD]
+    for space in WHITESPACE:
+        values += [f"{space}a.b", f"a.b{space}", f"{space}a.b{space}", f"a{space}b", f"a.{space}.b", space]
+    return values
+
+
+def _oracle_accepts(key: object, value: object) -> bool:
+    """The design's rule, written out: a known entry; unmapped, or text that is non-empty, not set in whitespace at either
+    end, with no empty dot-segment, and that PostgreSQL can hold (no NUL, no lone surrogate)."""
+    if key not in A.MAPPING_KEYS:
+        return False
+    if value is None:
+        return True
+    if not isinstance(value, str) or not value:
+        return False
+    if value[0].isspace() or value[-1].isspace():
+        return False
+    if any(part == "" for part in value.split(".")):
+        return False
+    return not any(c == "\x00" or 0xD800 <= ord(c) <= 0xDFFF for c in value)
+
+
+def test_the_mapping_check_accepts_exactly_the_rule_and_every_refusal_names_the_entry():
+    """Over every entry name, none included, with every value shape and every whitespace, NUL, lone-surrogate and
+    empty-segment path, `check_mapping` accepts what the rule does and names the entry in each refusal. (#1345 O1, M2)"""
+    wrong: list[str] = []
+    for key in [*A.MAPPING_KEYS, *OTHER_NAMES]:
+        for value in _mapping_values():
+            shown = f"{key!r}: {value!r}"[:80]
+            try:
+                got = A.check_mapping({key: value})
+            except A.AlertMappingFault as refusal:
+                if _oracle_accepts(key, value):
+                    wrong.append(f"refused {shown}")
+                elif key and key not in str(refusal):
+                    wrong.append(f"refusal for {shown} does not name the entry: {refusal}")
+                continue
+            except Exception as error:  # noqa: BLE001 — any other failure is a defect to name
+                wrong.append(f"{shown} raised {type(error).__name__}")
+                continue
+            if not _oracle_accepts(key, value):
+                wrong.append(f"accepted {shown}")
+            elif got.paths != ({} if value is None else {key: value}):
+                wrong.append(f"accepted {shown} but kept {dict(got.paths)!r}")
+    assert len(wrong) == 0, f"{len(wrong)} disagreements with the rule, first: {wrong[:5]}"

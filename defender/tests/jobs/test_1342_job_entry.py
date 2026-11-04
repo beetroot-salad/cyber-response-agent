@@ -1925,3 +1925,59 @@ def test_1345_m4_a_mapping_replaced_after_a_jobs_start_changes_that_job_not_its_
     assert scene.job_end(first_id) == SETTLED == scene.job_end(retry_id)
     assert _recorded_facts(scene.runs / first_id) == DB_FACTS
     assert _recorded_facts(scene.runs / retry_id) == EDITED_FACTS
+
+
+@pytest.fixture
+def empty_scene(tmp_path, monkeypatch, migrated_database):
+    """`scene` whose tenant saved the empty mapping through the store (#1345 M2): a mapping, not an absence."""
+    from defender.tests.support.jobs._jobs1342 import seed_alert_mapping
+
+    with _scene(tmp_path, monkeypatch, migrated_database, alert_mapping=None) as s:
+        seed_alert_mapping(s.dsn, s.t.tenant_id, {})
+        yield s
+
+
+def test_1345_m2_a_saved_empty_mapping_is_a_mapping_the_job_starts_and_records_no_facts(empty_scene):
+    """A tenant that saved `{}` is not refused at setup: the job runs and its record holds no fact. (#1345 M2, O3)"""
+    run_id = str(uuid.uuid4())
+    empty_scene.plant(run_id)
+
+    ran = run_job(empty_scene, run_id)
+
+    assert ran.raised is None, ran
+    assert empty_scene.job_end(run_id) == SETTLED, ran.message
+    assert _recorded_facts(empty_scene.runs / run_id) == dict.fromkeys(DB_FACTS)
+
+
+def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_before_any_setup_work(unmapped_scene):
+    """Unmapped: the publish, the knowledge copy, the preflight and the run's materialization are never called; with a
+    mapping saved, the same job calls each. (#1345 O4, M2)"""
+    from defender import run as run_py
+    from defender import run_common
+    from defender.tests.support.jobs._jobs1342 import seed_alert_mapping
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    scene = unmapped_scene
+
+    def preflight(*_a: Any, **_k: Any) -> int:
+        return 0
+
+    def watched(run_id: str) -> tuple[Ran, Any]:
+        ran = Ran()
+        with counting_calls(copy=run_py._copy_knowledge, preflight=preflight,  # noqa: SLF001
+                            materialize=run_common.materialize_run) as calls:
+            run_job(scene, run_id, preflight=preflight, ran=ran)
+        return ran, calls
+
+    refused_id = str(uuid.uuid4())
+    scene.plant(refused_id)
+    refused, calls = watched(refused_id)
+    assert scene.job_end(refused_id) == REFUSED, refused.message  # premise: it was refused for the missing mapping
+    assert (refused.calls["publish"], calls["copy"], calls["preflight"], calls["materialize"]) == (0, 0, 0, 0)
+
+    seed_alert_mapping(scene.dsn, scene.t.tenant_id, DB_MAPPING)
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    ran, calls = watched(run_id)
+    assert scene.job_end(run_id) == SETTLED, ran.message
+    assert (ran.calls["publish"], calls["copy"], calls["preflight"], calls["materialize"]) == (1, 1, 1, 1)
