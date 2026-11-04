@@ -19,8 +19,10 @@ CACHE_SIZE = 64
 #: `ca`) and strict checks; here the chain must end at a certificate in `ca` treated as a root.
 VERIFY_FLAGS = ssl.VERIFY_X509_TRUSTED_FIRST
 
-_BLOCK = r"-----BEGIN CERTIFICATE-----[A-Za-z0-9+/=\s]*?-----END CERTIFICATE-----"
-_ONLY_CERTIFICATES = re.compile(rf"\s*(?:{_BLOCK}\s*)+")
+# ASCII whitespace only: `\s` also matches U+00A0 and the like, which `cadata` rejects with a
+# `TypeError` that would escape as a crash instead of the settings fault.
+_BLOCK = r"-----BEGIN CERTIFICATE-----[A-Za-z0-9+/= \t\r\n]*?-----END CERTIFICATE-----"
+_ONLY_CERTIFICATES = re.compile(rf"[ \t\r\n]*(?:{_BLOCK}[ \t\r\n]*)+")
 
 _lock = threading.Lock()
 _built: OrderedDict[str, ssl.SSLContext] = OrderedDict()
