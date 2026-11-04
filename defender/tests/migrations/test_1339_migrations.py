@@ -387,7 +387,7 @@ def _jobs_indexes(dsn: str, table: str) -> list[str]:
 
 @pytest.mark.postgres
 def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated_database):
-    """Both tables hold exactly the designed columns; required ones are NOT NULL; `cost_usd` is a nullable float; `raw` is bytea; no defaults (#1342 M10, R3)."""
+    """Both tables hold exactly the designed columns; required ones are NOT NULL (an alert's title and description, derived by the store, are nullable, #1345); `cost_usd` is a nullable float; `raw` is bytea; no defaults (#1342 M10, R3)."""
     alerts = _jobs_columns(migrated_database, "alerts")
     investigations = _jobs_columns(migrated_database, "investigations")
     assert set(alerts) == {"id", "tenant_id", "vendor", "vendor_ticket_id", "fired_at", "changed_at",
@@ -395,7 +395,8 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
     assert set(investigations) == {"id", "tenant_id", "alert_id", "request_key", "attempt", "stage", "created_at",
                                    "started_at", "finished_at", "disposition", "cost_usd", "knowledge",
                                    "failure_reason", "failure_message"}
-    assert [n for n, (_, nullable, _) in alerts.items() if nullable] == []
+    # #1345 (data model): the store derives an alert's title and description from the tenant's mapping, so both are nullable.
+    assert {n for n, (_, nullable, _) in alerts.items() if nullable} == {"title", "description"}
     nullable = {n for n, (_, can_be_null, _) in investigations.items() if can_be_null}
     assert nullable == {"started_at", "finished_at", "disposition", "cost_usd", "knowledge", "failure_reason",
                         "failure_message"}
