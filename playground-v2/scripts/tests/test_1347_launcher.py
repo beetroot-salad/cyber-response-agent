@@ -642,8 +642,9 @@ def test_a_run_id_line_that_is_not_the_first_output_line_binds_no_row(tmp_path):
     assert rig.rows() == [] and "teardown" in rig.journal.ops()
 
 
+@pytest.mark.parametrize("reference", [False, True], ids=["scored", "reference"])
 @pytest.mark.parametrize("alert", [b'{"_id": "another-alert"}', None], ids=["other-bytes", "absent"])
-def test_a_case_whose_alert_is_not_the_one_its_freeze_names_is_refused(tmp_path, alert):
+def test_a_case_whose_alert_is_not_the_one_its_freeze_names_is_refused(tmp_path, alert, reference):
     """r6.2 (review #1353): the freeze names its alert by sha256; a case whose alert.json is
     another alert (or none) is refused before anything loads or runs: no row, lock released."""
     rig = Rig(tmp_path)
@@ -654,7 +655,7 @@ def test_a_case_whose_alert_is_not_the_one_its_freeze_names_is_refused(tmp_path,
     module = _module()
     rig.module = module
     with pytest.raises(module.LaunchRefused, match="alert"):
-        rig.launch()
+        rig.launch(reference=reference)
     assert {"load_frozen", "run"}.isdisjoint(rig.journal.ops()) and rig.rows() == []
     assert "frozen-engine" not in rig.store.records
 
@@ -697,3 +698,22 @@ def test_the_command_line_exits_non_zero_naming_a_failed_teardown_after_the_row(
                       "--parts-dir", str(rig.parts_dir)])
     assert rc == 5
     assert "teardown" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("exc", [OSError, KeyboardInterrupt])
+def test_a_row_that_cannot_be_written_still_tears_the_frozen_copy_down(tmp_path, exc):
+    """r6.2 (review): the row is written before teardown, so a failure writing it must still
+    tear the loaded copy down and release the lock, with the write's error surfacing."""
+    rig = Rig(tmp_path)
+    module = _module()
+    rig.module = module
+
+    def unwritable(*_a, **_k):
+        raise exc("index not writable")
+
+    module._append_row = unwritable
+    with pytest.raises(exc):
+        rig.launch()
+    assert "teardown" in rig.journal.ops(), "the frozen copy was left loaded"
+    assert "frozen-engine" not in rig.store.records
+    assert list(rig.work.iterdir()) == []

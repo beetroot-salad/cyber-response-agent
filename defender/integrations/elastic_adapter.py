@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import re
 import urllib.parse
 from typing import TYPE_CHECKING
 
@@ -17,7 +16,7 @@ from defender import _clock
 from defender.kit.settings import config_pointer
 from defender.kit.verbs import VerbContext, verb
 from defender.integrations import _stub_transport as transport
-from defender.integrations import esql_text
+from defender.integrations import esql_text, lucene_text
 from defender.integrations.confinement import confine_esql, confine_index, guard_outbound
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 
@@ -324,13 +323,6 @@ def _search(
     return docs, total_hits, truncated
 
 
-#: Elasticsearch date math anchored on the cluster's own clock, in a window bound (`now`,
-#: `now-24h`, `now/d`) — and the same inside a Lucene range or comparison in the query text.
-_NOW_BOUND = re.compile(r"now(?![\w.])", re.IGNORECASE)
-_LUCENE_PHRASE = re.compile(r'"(?:[^"\\]|\\.)*"')
-_LUCENE_CLOCK = re.compile(
-    r"[\[{][^\]}]*(?<![\w.])now(?![\w.])[^\]}]*[\]}]|:\s*[<>]=?\s*now(?![\w.])", re.IGNORECASE)
-
 _CLOCK_REFUSAL = (
     "{what} reads Elasticsearch's own clock (`now`), which is not this run's clock. Spell every "
     "time bound as an absolute ISO-8601 time (e.g. 2026-01-01T00:00:00Z); the run's clock gives "
@@ -350,10 +342,23 @@ def _refuse_clock_bounds(ctx: VerbContext, native_query: str,
     if not _frozen(ctx):
         return
     for label, bound in (("start", start), ("end", end)):
-        if isinstance(bound, str) and _NOW_BOUND.match(bound.strip()):
+        if isinstance(bound, str) and lucene_text.is_now_date_math(bound):
             raise UpstreamFault(_CLOCK_REFUSAL.format(what=f"the window's {label} {bound.strip()!r}"))
-    if _LUCENE_CLOCK.search(_LUCENE_PHRASE.sub('""', native_query or "")):
+    if any(map(lucene_text.is_now_date_math, lucene_text.lucene_bounds(native_query or ""))):
         raise UpstreamFault(_CLOCK_REFUSAL.format(what="a range in the query"))
+
+
+def _refuse_esql_clock(ctx: VerbContext, query: str) -> None:
+    """In a frozen run, refuse ES|QL that reads the cluster's clock: a `NOW()` call, or a range
+    on `now` inside the query text a `QSTR` / `KQL` call hands the cluster."""
+    if not _frozen(ctx):
+        return
+    if esql_text.calls_function(query, "now"):
+        raise UpstreamFault(_CLOCK_REFUSAL.format(what="`NOW()`"))
+    for fn, bounds_of in (("qstr", lucene_text.lucene_bounds), ("kql", lucene_text.kql_bounds)):
+        for text in esql_text.function_string_args(query, fn):
+            if any(map(lucene_text.is_now_date_math, bounds_of(text))):
+                raise UpstreamFault(_CLOCK_REFUSAL.format(what=f"a range in {fn.upper()}(…)"))
 
 
 def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one param each
@@ -534,8 +539,7 @@ def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the
     config = load_config(ctx)
     # Every index the query reads is confined, as a search's target is (#1347 O2a).
     confine_esql(query, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]))
-    if _frozen(ctx) and esql_text.calls_function(query, "now"):
-        raise UpstreamFault(_CLOCK_REFUSAL.format(what="`NOW()`"))
+    _refuse_esql_clock(ctx, query)
     url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
     status, resp = _http_json(ctx, "POST", url, config, body=_esql_body(ctx, query))
     _raise_on_es_error(status, resp, "ES|QL query")

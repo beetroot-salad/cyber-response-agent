@@ -180,12 +180,12 @@ def _commit(case_dir: Path, mine: Path, staging: Path, freeze: dict, alert: byte
     tmp = case_dir / ".freeze.yaml.tmp"
     alert_tmp = case_dir / ".alert.json.tmp"
     alert_file = case_dir / "alert.json"
-    tmp.write_text(yaml.safe_dump(freeze, sort_keys=False))
-    alert_tmp.write_bytes(alert)
-    earlier_alert = alert_file.read_bytes() if alert_file.is_file() else None
     old = None
     swapped = alert_swapped = False
     try:
+        tmp.write_text(yaml.safe_dump(freeze, sort_keys=False))
+        alert_tmp.write_bytes(alert)
+        earlier_alert = alert_file.read_bytes() if alert_file.is_file() else None
         if mine.exists():
             old = mine.with_name(f".{mine.name}.old")
             shutil.rmtree(old, ignore_errors=True)

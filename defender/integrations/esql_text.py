@@ -9,6 +9,7 @@ where vendor-named knowledge is allowed.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 COMMAND_SEP = "|"
@@ -158,22 +159,40 @@ def _tokens(query: str) -> list[_Token]:
     return out
 
 
+def _names_function(word: _Token, name: str) -> bool:
+    """Does the word token end in the function name `name` (case-insensitive)? `x>now` does;
+    `know` and `now_seen` do not."""
+    if word.kind != "word":
+        return False
+    text, wanted = word.text.lower(), name.lower()
+    if text == wanted:
+        return True
+    if not text.endswith(wanted):
+        return False
+    before = text[-len(wanted) - 1]
+    return not (before.isalnum() or before in "_.@")
+
+
 def calls_function(query: str, name: str) -> bool:
     """Does `query` call the function `name` (case-insensitive) outside strings, quoted names and
     comments? A call is the name, ending a word, followed by `(`: `now()`, `NOW ()` and
     `x>now()` call `now`; `know(1)`, `now_seen` and `"now()"` do not. A query the tokenizer cannot
     read raises `EsqlUnclassifiable`, as it does for confinement."""
     tokens = _tokens(query)
-    wanted = name.lower()
-    for word, after in zip(tokens, tokens[1:], strict=False):
-        if word.kind != "word" or after.kind != "(":
-            continue
-        text = word.text.lower()
-        if text == wanted or (text.endswith(wanted)
-                              and not (text[-len(wanted) - 1].isalnum()
-                                       or text[-len(wanted) - 1] in "_.@")):
-            return True
-    return False
+    return any(_names_function(word, name) and after.kind == "("
+               for word, after in zip(tokens, tokens[1:], strict=False))
+
+
+def function_string_args(query: str, name: str) -> list[str]:
+    """The string literal each call of `name` opens with (`QSTR("…")` → `…`), backslash escapes
+    undone: the query text a full-text function hands Elasticsearch. Calls whose first argument
+    is not a literal give none."""
+    tokens = _tokens(query)
+    out = []
+    for word, paren, arg in zip(tokens, tokens[1:], tokens[2:], strict=False):
+        if _names_function(word, name) and paren.kind == "(" and arg.kind == "string":
+            out.append(re.sub(r"\\(.)", r"\1", arg.text))
+    return out
 
 
 def _split_top(tokens: list[_Token], sep: str) -> list[list[_Token]]:

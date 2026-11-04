@@ -1338,6 +1338,19 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
         _logger.warning("the run page was not saved", exc_info=True)
 
 
+def _not_curated(started: _Started, *, no_learn: bool) -> str | None:
+    """Why this run is not enqueued for catalog curation, or `None` when it is. A sibling's
+    evidence was staged on purpose, and a run served as of another moment read a frozen lab
+    (#1347 r6.2): neither is today's evidence, so neither ever feeds the catalog."""
+    if started.world is not None:
+        return "--episode: a sibling world is not enqueued for curation"
+    if started.cut is not None:
+        return "--as-of: a frozen run is not enqueued for curation"
+    if no_learn:
+        return "--no-learn set; not enqueuing for curation"
+    return None
+
+
 def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     argv: list[str],
     *,
@@ -1435,15 +1448,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                             truncated_by=truncated_by, closed_before_cut=closed_before_cut,
                             case=started.case, **token)
 
-                    # A sibling's evidence was staged on purpose, so it must never feed the catalog.
-                    if world is not None:
-                        _logger.info("--episode: a sibling world is not enqueued for curation")
-                    elif started.cut is not None:
-                        # A run served as of another moment read a frozen lab (#1347 r6.2): its
-                        # evidence is not today's, so it never feeds the catalog.
-                        _logger.info("--as-of: a frozen run is not enqueued for curation")
-                    elif ns.no_learn:
-                        _logger.info("--no-learn set; not enqueuing for curation")
+                    skipped = _not_curated(started, no_learn=ns.no_learn)
+                    if skipped is not None:
+                        _logger.info(skipped)
                     elif enqueue_curation(run, started.alert, tenant=started.accepted,
                                           truncated_by=summary.get("truncated_by")):
                         _logger.info("enqueued for catalog curation")

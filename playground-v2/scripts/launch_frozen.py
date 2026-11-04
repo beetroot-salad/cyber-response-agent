@@ -220,15 +220,24 @@ def launch(case_dir: Path, *, index: Path, parts_dir: Path, lock_store: Any, ops
             if config is not None:
                 shutil.rmtree(config, ignore_errors=True)
         # The row depends only on the run and its fingerprint: written before teardown, so a
-        # cleanup failure never costs a finished run its row (r6.2).
-        verdict, reason = _verdict(freeze.get("fingerprint") or {}, fingerprint)
-        if reference:
-            print(f"run_id={run_id}")
-            print(f"reference run of {slug}: verdict {verdict}" + (f" ({reason})" if reason else ""))
-        else:
-            _append_row(index, {"slug": slug, "run_id": run_id, "freeze": digest,
-                                "verdict": verdict, "reason": reason, "verified_at": verified_at})
-            print(f"{slug}: run {run_id} verdict {verdict}" + (f" ({reason})" if reason else ""))
+        # cleanup failure never costs a finished run its row (r6.2). Teardown runs either way.
+        try:
+            verdict, reason = _verdict(freeze.get("fingerprint") or {}, fingerprint)
+            if reference:
+                print(f"run_id={run_id}")
+                print(f"reference run of {slug}: verdict {verdict}"
+                      + (f" ({reason})" if reason else ""))
+            else:
+                _append_row(index, {"slug": slug, "run_id": run_id, "freeze": digest,
+                                    "verdict": verdict, "reason": reason,
+                                    "verified_at": verified_at})
+                print(f"{slug}: run {run_id} verdict {verdict}" + (f" ({reason})" if reason else ""))
+        except BaseException:
+            try:
+                ops.teardown()
+            except Exception as exc:  # the first failure is the one to report
+                print(f"teardown after a failed row write also failed: {exc}", file=sys.stderr)
+            raise
         try:
             ops.teardown()
         except Exception as exc:

@@ -503,6 +503,12 @@ CLOCK_NATIVE = [
     pytest.param("event.action:ssh_login AND @timestamp:{now-1d TO *}", id="lucene-exclusive-range"),
     pytest.param("@timestamp:>=now-15m", id="lucene-comparison"),
     pytest.param("@timestamp:<now", id="lucene-less-than"),
+    pytest.param("@timestamp:[2026-10-01T00:00:00Z TO now]", id="lucene-range-ending-on-now"),
+    pytest.param('@timestamp:["now-1h" TO "now"]', id="lucene-range-quoted-bounds"),
+    pytest.param("@timestamp:(>=now-1h)", id="lucene-grouped-comparison"),
+    pytest.param("@timestamp:(>now-1h AND <now)", id="lucene-grouped-two-comparisons"),
+    pytest.param('@timestamp:>"now-1h"', id="lucene-comparison-quoted"),
+    pytest.param('a:\\"x AND @timestamp:[now-1h TO now] AND b:"y"', id="lucene-after-an-escaped-quote"),
 ]
 
 #: Searches that only mention the word: none reads the cluster's clock.
@@ -511,6 +517,9 @@ WORD_NOT_CLOCK = [
     pytest.param({"native_query": 'message:"shutdown -h now"'}, id="quoted-phrase"),
     pytest.param({"native_query": 'message:"[now TO later]"'}, id="range-syntax-inside-a-phrase"),
     pytest.param({"native_query": "user.name:now"}, id="bare-term"),
+    pytest.param({"native_query": "file.path:*\\[now\\]*"}, id="escaped-brackets-in-a-term"),
+    pytest.param({"native_query": "user.name:/[now]+/"}, id="regex-term"),
+    pytest.param({"native_query": "message:nowhere AND x:[1 TO 5]"}, id="word-starting-with-now"),
     pytest.param({"native_query": "event.action:x", "start": "2026-10-20T08:00:00Z||-1d"},
                  id="anchored-date-math"),
 ]
@@ -520,6 +529,9 @@ ESQL_CLOCK = [
     pytest.param("FROM logs-* | WHERE @timestamp>now() - 1 hour", id="glued-to-operator"),
     pytest.param("FROM logs-* | EVAL t = now ()", id="space-before-paren"),
     pytest.param("FROM logs-* | WHERE @timestamp > DATE_TRUNC(1 day, NOW())", id="nested-in-a-call"),
+    pytest.param('FROM logs-* | WHERE QSTR("@timestamp:[now-1h TO now]")', id="qstr-range"),
+    pytest.param('FROM logs-* | WHERE KQL("@timestamp >= now-1h")', id="kql-comparison"),
+    pytest.param('FROM logs-* | WHERE kql("@timestamp < \\"now\\"")', id="kql-quoted-bound"),
 ]
 
 ESQL_WORD_NOT_CLOCK = [
@@ -528,6 +540,8 @@ ESQL_WORD_NOT_CLOCK = [
     pytest.param("FROM logs-* | EVAL now_seen = 1 | LIMIT 1", id="identifier-prefix"),
     pytest.param("FROM logs-* | WHERE `now` == 1", id="backtick-field"),
     pytest.param("FROM logs-* | EVAL x = know(1)", id="other-function-ending-in-now"),
+    pytest.param('FROM logs-* | WHERE QSTR("process.command_line:*now*")', id="qstr-mention"),
+    pytest.param('FROM logs-* | WHERE KQL("message: now")', id="kql-mention"),
 ]
 
 
@@ -541,16 +555,18 @@ def test_a_frozen_search_bounded_on_the_clusters_clock_is_refused_before_any_req
     assert docker_calls(tmp_path) == [], "the refused read reached the cluster"
 
 
+@pytest.mark.parametrize("verb", ["query", "alerts"])
 @pytest.mark.parametrize("native", CLOCK_NATIVE)
-def test_a_frozen_search_whose_query_ranges_on_the_clusters_clock_is_refused(tmp_path, native):
+def test_a_frozen_search_whose_query_ranges_on_the_clusters_clock_is_refused(tmp_path, verb, native):
     with pytest.raises(UpstreamFault, match="absolute"):
-        elastic_adapter.query(_frozen(tmp_path), native_query=native)
+        elastic_adapter.VERBS[verb](_frozen(tmp_path), native_query=native)
     assert docker_calls(tmp_path) == []
 
 
+@pytest.mark.parametrize("verb", ["query", "alerts"])
 @pytest.mark.parametrize("params", WORD_NOT_CLOCK)
-def test_a_frozen_search_that_only_mentions_now_is_sent(tmp_path, params):
-    elastic_adapter.query(_frozen(tmp_path), **params)
+def test_a_frozen_search_that_only_mentions_now_is_sent(tmp_path, verb, params):
+    elastic_adapter.VERBS[verb](_frozen(tmp_path), **params)
     assert len(docker_calls(tmp_path)) == 1
 
 
