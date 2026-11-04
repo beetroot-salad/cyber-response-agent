@@ -5,9 +5,8 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-import types
-
 import time
+import types
 
 import pytest
 
@@ -31,6 +30,7 @@ from defender.tests.integrations.credential_proxy_1163.test_ticket_flow import (
     _published,
     _run,
 )
+from defender.tests.integrations.credential_proxy_1163.test_proxy_faults_proxy_side import _BrokenStore
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 
@@ -167,18 +167,6 @@ def test_t9_a_settings_fault_the_proxy_raises_is_still_a_proxy_refusal(tmp_path,
     assert config_pointer(SYSTEM) not in receipt["reason"], receipt
 
 
-class _Raising(H.FakeStore):
-    """The proxy's credential store raising `fault` on every read."""
-
-    def __init__(self, sets, fault: BaseException) -> None:
-        super().__init__(sets)
-        self.fault = fault
-
-    def read(self, tenant_id: str, system: str):
-        super().read(tenant_id, system)
-        raise self.fault
-
-
 class _Slow(H.FakeStore):
     """The proxy's credential store taking `seconds` to answer each read."""
 
@@ -213,9 +201,8 @@ def test_t11_a_failure_inside_the_proxy_is_the_proxys_not_the_stores(tmp_path, d
     unwritable): "the credential proxy failed: <cause>", never the store's wording. The audit case
     may follow a store that accepted the comment, so the subject claims no non-delivery."""
     stores = {
-        "openbao-unreachable": lambda sets: _Raising(
-            sets, TransportFault("OpenBao is unreachable for the credential read")),
-        "unforeseen": lambda sets: _Raising(sets, RuntimeError("nobody planned this")),
+        "openbao-unreachable": _DownOnce,
+        "unforeseen": _BrokenStore,
         "out-of-time-before-call": lambda sets: _Slow(sets, 0.5),
         "audit-unwritable": H.FakeStore,
     }
@@ -249,11 +236,14 @@ def test_t12_a_store_the_proxy_saw_fail_keeps_the_store_wording(tmp_path, data_r
         dead = H.declaration(f"http://127.0.0.1:{H.free_port()}{STORE}", writes=WRITES)
         receipt, tap, _up = _proxied_leg(tmp_path, data_root, H.FakeStore, decl=dead)
     else:
+        # Deadline 3.0s; the proxy's own read spends 1.0s, so the store call gets ~2.0s of its
+        # 2.5s budget and is cut there. The proxy's other steps would need another ~2s to spend
+        # the deadline before the call (t11's case) instead.
         def slow_store(up):
-            up.replies[COMMENT] = lambda _seen: (time.sleep(3), (201, {}, b"{}"))[1]
+            up.replies[COMMENT] = lambda _seen: (time.sleep(3.5), (201, {}, b"{}"))[1]
         receipt, tap, _up = _proxied_leg(
-            tmp_path, data_root, lambda sets: _Slow(sets, 0.6), before=slow_store,
-            upstream_timeout_sec=1.0, proxy_overhead_sec=0.2)
+            tmp_path, data_root, lambda sets: _Slow(sets, 1.0), before=slow_store,
+            upstream_timeout_sec=2.5, proxy_overhead_sec=0.5)
     assert tap.tokens, "positive control: the proxy was reached"
     assert receipt is not None, kind
     reason = receipt["reason"]

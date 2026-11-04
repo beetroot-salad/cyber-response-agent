@@ -295,12 +295,10 @@ class _Proxy:
         try:
             reply = deadline.run(what, lambda: capped_reply(
                 self._trust, asked.method, target.url, cap=cap, timeout=timeout,
-                on_status=sent, headers=headers, content=content))
+                on_status=sent, headers=headers, content=content), system_side=True)
         except httpx.TransportError as e:
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
                                      f"({type(e).__name__})", system_side=True) from None
-        except Refused as cut:  # the deadline cut the system's call: that call's failure (#1404)
-            raise Refused(cut.fault, cut.detail, system_side=True) from None
         status, withheld = reply.status, reply.withheld
         fault = _fault_of(status)
         if fault is None:

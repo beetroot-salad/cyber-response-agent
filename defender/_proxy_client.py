@@ -55,6 +55,7 @@ def _the_proxys_own() -> Iterator[None]:
         raise
 
 
+@_the_proxys_own()
 def proxy_call(  # noqa: PLR0913 — one request's per-call state
     proxy_url: str | None, token: str | None, *, system: str, method: str, url: str,
     headers: Mapping[str, str] | None = None, body: str | None = None, timeout_sec: int = 10,
@@ -63,15 +64,6 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
     runs the request inside (r7 A21); this call waits past the proxy's whole deadline.
     `TransportFault`, the proxy's own (`proxy_own`), when no address or token was handed to the
     caller, the proxy cannot be reached, or its answer is not the proxy's."""
-    with _the_proxys_own():
-        return _call(proxy_url, token, system=system, method=method, url=url, headers=headers,
-                     body=body, timeout_sec=timeout_sec)
-
-
-def _call(  # noqa: PLR0913 — one request's per-call state
-    proxy_url: str | None, token: str | None, *, system: str, method: str, url: str,
-    headers: Mapping[str, str] | None, body: str | None, timeout_sec: int,
-) -> ProxyAnswer:
     if not proxy_url or not token:
         raise TransportFault("no credential proxy address or request token was handed to this call")
     try:
