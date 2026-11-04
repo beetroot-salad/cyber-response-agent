@@ -218,8 +218,7 @@ def world_registry(
     """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`.
     `oracle_side` is `control_oracle(...)` for a test that serves a live read."""
     return build_registry(
-        read_roster(adapters), grant, world=world, ledger=fresh_ledger(ledger_path),
-        as_of=AS_OF, tenant=T1106.fixture_run_tenant(), **oracle_side,
+        read_roster(adapters), grant, world=world, ledger=fresh_ledger(ledger_path), tenant=T1106.fixture_run_tenant(), **oracle_side,
     )
 
 
@@ -466,8 +465,8 @@ def test_two_siblings_read_one_base_recording(tmp_path):
         "payload_text": payload_text({"host": "canary-1", "owner": "captured"}),
         "source": CAPTURED, "world_id": None}) + "\n", encoding="utf-8")
     ledger = fresh_ledger(ledger_path)
-    a = build_registry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=ledger, as_of=AS_OF)
-    b = build_registry(read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=ledger, as_of=AS_OF)
+    a = build_registry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=ledger)
+    b = build_registry(read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=ledger)
 
     from_a = a.verbs("cmdb")["get-host"](ctx, host="canary-1")
     from_b = b.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -481,12 +480,12 @@ def test_two_siblings_read_one_base_recording(tmp_path):
 def test_a_world_reopened_from_disk_replays_its_own_kept_base_read(tmp_path):
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    first = build_registry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
+    first = build_registry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path),
                            **control_oracle(estate_host("canary-1")))
     from_a = first.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     reopened = build_registry(
-        read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
+        read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path),
         **control_oracle(estate_host("canary-1")))
     again = reopened.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
@@ -494,7 +493,7 @@ def test_a_world_reopened_from_disk_replays_its_own_kept_base_read(tmp_path):
     assert len(adapter_calls(ctx, "get-host")) == 1
 
     other = build_registry(
-        read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
+        read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=fresh_ledger(ledger_path),
         **control_oracle(estate_host("canary-1", call=2)))
     other.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
@@ -561,7 +560,7 @@ def test_a_world_may_not_answer_to_the_family_tiers_key(tmp_path):
     with pytest.raises(EstateError):
         build_registry(
             read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=BaseWorld(),
-            ledger=fresh_ledger(ledger_path), as_of=AS_OF, oracle_dir=tmp_path / "unused-oracle")
+            ledger=fresh_ledger(ledger_path), oracle_dir=tmp_path / "unused-oracle")
 
     assert not ledger_path.exists(), "a refused world must not have written a row"
 
@@ -592,7 +591,7 @@ def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     reg = build_registry(
-        read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
+        read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path),
         **control_oracle(estate_host("canary-1")))
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")

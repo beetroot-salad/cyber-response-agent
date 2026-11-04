@@ -3,7 +3,6 @@ loopback and a recording upstream, over a non-root base (r5 A2)."""
 from __future__ import annotations
 
 import base64
-import datetime
 import inspect
 import json
 import logging
@@ -548,21 +547,19 @@ def test_1391_o3_alerts_keeps_its_output_shape_through_the_proxy(tmp_path, data_
                       "truncated": False, "hits": [alert]}
 
 
-def test_1391_o3_the_run_clock_rides_the_bodies_the_proxy_is_sent(tmp_path, data_root):
-    """With the run's clock set, the search body carries the cut at it and the ES|QL body the
-    `WHERE @timestamp <=` bound, while esql echoes the query as asked. #1391 O3, D1 (replaces the
-    `_http_json` source pin)."""
-    at = datetime.datetime(2026, 11, 3, 9, 0, 0, tzinfo=datetime.UTC)
-    stamp = "2026-11-03T09:00:00Z"
+def test_1391_o3_the_bodies_the_proxy_is_sent_are_the_queries_as_asked(tmp_path, data_root):
+    """The search body carries no cut and the ES|QL body no added bound: the cut at a branch
+    point is the oracle's (#1385 O1), and esql echoes the query it sent. #1391 O3, D1 (replaces
+    the `_http_json` source pin)."""
     q = f"FROM {A.ELASTIC_EVENTS} | KEEP user.name"
-    with H.upstream() as up, _elastic(tmp_path, data_root, up.url,
-                                      ctx_kw={"as_of": at}) as (ctx, _tap):
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
         up.replies[f"/{A.ELASTIC_EVENTS}/_search"] = (200, {}, b'{"hits": {"hits": []}}')
         up.replies["/_query"] = (200, {}, b'{"columns": [], "values": []}')
         elastic_adapter.VERBS["query"](ctx, native_query="*")
         echoed = elastic_adapter.VERBS["esql"](ctx, query=q)
 
     search, esql = (json.loads(s.body) for s in up.seen)
-    assert stamp in json.dumps(search["post_filter"])
-    assert f'| WHERE @timestamp <= "{stamp}"' in esql["query"]
+    assert "post_filter" not in search, search
+    assert search["query"]["bool"]["filter"] == [], search
+    assert esql == {"query": q}, esql
     assert echoed["query"] == q

@@ -1,32 +1,14 @@
 """ES|QL text mechanics — the small set of string facts about the query language.
 
 One home, so every caller treats a `|` inside a string literal as data: two copies of "split on
-`|`" is how one learns about quoting and the other does not. Callers are
-`evals/oracle_golden/controls.py` (placing a window clause) and the turn-N branch's corpus
-stager (retargeting a leading `FROM`). Lives beside the adapters, where vendor-named knowledge
-is allowed.
+`|`" is how one learns about quoting and the other does not. Its caller is
+`evaluations/oracle_golden/controls.py` (placing a window clause). Lives beside the adapters,
+where vendor-named knowledge is allowed.
 """
 
 from __future__ import annotations
 
-import re
-
 COMMAND_SEP = "|"
-
-#: The source command every time-bearing ES|QL query opens with. `ROW` and `SHOW` have no
-#: `@timestamp` to bound. A predicate only; `stagers/elastic._FROM` captures the clause's parts
-#: because it rewrites them.
-_OPENS_FROM = re.compile(r"\A\s*FROM\s", re.IGNORECASE)
-
-
-def opens_with_from(query: str) -> bool:
-    """Does this query open with the `FROM` source command?
-
-    Asked before adding a `@timestamp` stage: on any other source it would turn a working query
-    into an `Unknown column [@timestamp]` error.
-    """
-    return bool(_OPENS_FROM.match(split_first_command(query)[0]))
-
 
 def separator_offsets(query: str) -> list[int]:
     """Offsets of the `|` characters that actually separate commands.

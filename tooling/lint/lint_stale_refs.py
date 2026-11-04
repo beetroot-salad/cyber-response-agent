@@ -94,6 +94,10 @@ GENERIC_NAMES = {
     # A stdlib protocol method: deleting a test's `sys.meta_path` finder would otherwise
     # condemn every `importlib.util.find_spec(...)` call.
     "find_spec",
+    # A stdlib function read as `dataclasses.is_dataclass(...)` all over the tests: dropping the
+    # last `from dataclasses import is_dataclass` in the tree removes an import, not a symbol
+    # this repo defines, and every `dataclasses.`-qualified call would otherwise read as stale.
+    "is_dataclass",
 }
 
 # Trees holding frozen copies of things the live tree may have deleted: a name surviving only

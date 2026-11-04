@@ -68,6 +68,11 @@ _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
              ["entity", "field", "value"])),
     ("python", "Run Python in the oracle's sandboxed scratch box.",
      _schema({"code": {"type": "string"}}, ["code"])),
+    ("re_ask", "Re-ask a live call's own question bounded at the branch point; its answer "
+     "becomes this attempt's base.", _schema({"system": {"type": "string"},
+                                              "verb": {"type": "string"},
+                                              "params": {"type": "object"}},
+                                             ["system", "verb", "params"])),
     ("check", "Run the host checks on a draft submission.", _SERVED_SCHEMA),
 )
 

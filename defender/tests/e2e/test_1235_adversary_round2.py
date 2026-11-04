@@ -34,7 +34,7 @@ def test_the_correlation_leads_calls_ride_the_runs_one_state(tmp_path):
     assert len(mine) == 2
     assert len(busy.rows_for(S.L3)) == 2
     assert idle.has_sidecar(S.L3)
-    assert all(c.ctx.run_state is busy.run_state for c in mine)
+    assert all(c.run_state is busy.run_state for c in mine)
     assert list(busy.run_state.lead_rows(S.L3)) == busy.rows_for(S.L3)
     assert busy.budget["tool_calls"] - idle.budget["tool_calls"] == 2
 

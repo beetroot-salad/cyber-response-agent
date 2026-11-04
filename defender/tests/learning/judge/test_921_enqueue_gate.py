@@ -327,18 +327,25 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
         "the row already queued stopped draining because of a torn line written after it")
 
 
-def test_921_drift_reaches_the_judge_and_a_family_incoherent_finding_keeps_the_defender_lane_open(
+def test_921_archived_drift_reaches_the_judge_and_a_family_incoherent_finding_keeps_the_defender_lane_open(
         tmp_path):
+    from defender import _yaml
     from defender.records._episode_handle import Episode
     from defender.learning.branch.outcome import write_outcome
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     (ep / "outcome.yaml").unlink()
     with Episode.open(ep) as handle:
-        write_outcome(handle, "accepted", reason="", drift=[{
-            "system": "elastic", "verb": "esql",
-            "params": {"query": f"FROM {J.EVENTS_PATTERN} | LIMIT 5"},
-            "reason": "DRIFT-MARKER-921"}])
+        write_outcome(handle, "accepted", reason="")
+    # An archive from before #1385 (H6) still carries pre-flight's `drift`; the writer no longer
+    # does, so the old record is spelled out by hand.
+    path = ep / "outcome.yaml"
+    record = _yaml.safe_load(path.read_text(encoding="utf-8"))
+    record["drift"] = [{
+        "system": "elastic", "verb": "esql",
+        "params": {"query": f"FROM {J.EVENTS_PATTERN} | LIMIT 5"},
+        "reason": "DRIFT-MARKER-921"}]
+    path.write_text(_yaml.safe_dump(record), encoding="utf-8")
 
     judge = J.scripted_judge(family_default=J.as_reply_text(J.family_reply(
         findings=[J.finding_doc(subject="world", bucket="incoherent")])))

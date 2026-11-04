@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 
-import re
 
 import contextlib
 import dataclasses
@@ -21,7 +20,6 @@ pytest.importorskip("pydantic_ai")
 from defender import _clock  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
-from defender.learning.branch.estate.registry import EstateError  # noqa: E402
 from defender.tests.learning.oracle.live_contracts._spec1224 import build_registry  # noqa: E402
 from defender.systems.verbs import read_roster  # noqa: E402
 from defender.records._episode_handle import Episode  # noqa: E402
@@ -115,11 +113,9 @@ CALLS = "adapter-calls.jsonl"
 def _record(ctx: VerbContext, name: str, params: dict) -> None:
     log = Path(ctx.run_dir) / CALLS
     log.parent.mkdir(parents=True, exist_ok=True)
-    at = getattr(ctx, "as_of", None)
     with log.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
             "verb": name, "params": params,
-            "as_of": None if at is None else at.isoformat(),
         }) + "\\n")
 
 
@@ -206,8 +202,7 @@ def fake_docker(tmp_path: Path) -> Path:
     return bindir
 
 
-def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
-               defender_dir: Path | None = None,
+def docker_ctx(tmp_path: Path, *, defender_dir: Path | None = None,
                tenant: Any = None) -> VerbContext:
     """A `VerbContext` whose env is the whole world the transports fork into."""
     run_dir = tmp_path / "run"
@@ -224,7 +219,6 @@ def docker_ctx(tmp_path: Path, *, as_of: dt.datetime | None = None,
             "PATH": str(fake_docker(tmp_path)),
             "DOCKER_CALL_LOG": str(tmp_path / DOCKER_LOG),
         },
-        as_of=as_of,
     )
 
 
@@ -239,8 +233,7 @@ def _fixture_tenant(tmp_path: Path) -> Any:
 
 
 @contextlib.contextmanager
-def elastic_ctx(tmp_path: Path, data_root: Path, *,
-                as_of: dt.datetime | None = None) -> Iterator[tuple[VerbContext, Any]]:
+def elastic_ctx(tmp_path: Path, data_root: Path) -> Iterator[tuple[VerbContext, Any]]:
     """A `VerbContext` over the proxy channel (#1391 O3): elastic declared at a recording upstream
     behind the real proxy. Yields the context and the upstream, whose `seen` holds each request
     the cluster received; every search is answered with no hits."""
@@ -248,7 +241,7 @@ def elastic_ctx(tmp_path: Path, data_root: Path, *,
         for path in (f"/{A.ELASTIC_EVENTS}/_search", f"/{A.ELASTIC_ALERTS}/_search", "/_query"):
             up.replies[path] = (200, {"Content-Type": "application/json"},
                                 json.dumps({"hits": {"total": {"value": 0}, "hits": []}}).encode())
-        with A.elastic_proxied(tmp_path, data_root, up.url, ctx_kw={"as_of": as_of}) as (ctx, _tap):
+        with A.elastic_proxied(tmp_path, data_root, up.url) as (ctx, _tap):
             yield ctx, up
 
 
@@ -324,47 +317,29 @@ def tz_east_of_utc(monkeypatch):
         time.tzset()
 
 
-# 2. the seam: `VerbContext.as_of`, threaded unconditionally
+# 2. the seam: no adapter context carries the branch point (#1385 O1)
 
 
-def test_a_registry_served_host_state_capture_is_never_stamped_with_the_cut_off(tmp_path):
+def test_a_registry_served_host_state_capture_carries_no_time_of_its_own(tmp_path):
+    """Design O7: the capture holds no `captured_at` (the platform stamps the reply), served or
+    recorded."""
     ctx = docker_ctx(tmp_path)
     reg = build_registry(read_roster(REAL_ADAPTERS), _gather_grant(), world=World("w1"),
-                        ledger=primed_ledger(tmp_path), as_of=T0, **pass_through())
-    before = _clock.z_seconds(dt.datetime.now(dt.UTC))
+                        ledger=primed_ledger(tmp_path), **pass_through())
 
     payload = reg.verbs("host-state")["proc-tree"](ctx, host="web-1")
 
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(payload.get("captured_at"))), (
-        f"the served capture carries no `Z` stamp at all, so nothing below is observed: {payload}")
-    assert payload["captured_at"] != T0_Z, (
-        "the served capture is stamped with the world's cut-off T0, not the run clock")
-    assert before <= payload["captured_at"] <= _clock.z_seconds(dt.datetime.now(dt.UTC)), (
-        "a capture served outside any run is not stamped with the wall clock")
-    assert json.loads(served_rows(reg.ledger)[-1]["payload_text"])["captured_at"] == (
-        payload["captured_at"]), "the ledger recorded a different moment from the one served"
-
-
-def test_the_clock_rides_every_served_call_on_every_system(tmp_path):
-    """Every served call reaches its adapter body with `ctx.as_of` set, whichever system it addresses."""
-    ctx = docker_ctx(tmp_path)
-    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT,
-                        world=World("w1", ("elastic",)), ledger=primed_ledger(tmp_path),
-                        as_of=T0, **pass_through())
-
-    reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
-    reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
-
-    assert [(c["verb"], c["as_of"]) for c in adapter_calls(ctx)] == [
-        ("esql", T0.isoformat()),
-        ("get-host", T0.isoformat()),
-    ]
+    assert payload, "the served capture is empty, so nothing below is observed"
+    assert "captured_at" not in payload
+    recorded = json.loads(served_rows(reg.ledger)[-1]["payload_text"])
+    assert "captured_at" not in recorded
+    assert recorded == payload, "the ledger recorded something other than what was served"
 
 
 def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
     ctx = docker_ctx(tmp_path)
     reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("A", ("cmdb",)),
-                        ledger=primed_ledger(tmp_path, world_id=T.fixture_world_id("A")), as_of=T0, **pass_through())
+                        ledger=primed_ledger(tmp_path, world_id=T.fixture_world_id("A")), **pass_through())
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
@@ -391,7 +366,7 @@ def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
-                        ledger=primed_ledger(tmp_path), as_of=T0, **pass_through())
+                        ledger=primed_ledger(tmp_path), **pass_through())
 
     payload = reg.verbs("cmdb")["get-host"](
         ClocklessContext(defender_dir=tmp_path, run_dir=run_dir, env={}), host="canary-1")
@@ -402,28 +377,7 @@ def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
     assert [r["source"] for r in served_rows(reg.ledger)] == [PASSTHROUGH]
 
 
-@pytest.mark.parametrize("as_of", [
-    None,
-    "2026-05-25T15:30:45Z",
-    1748187045,
-    dt.datetime(2026, 5, 25, 15, 30, 45),
-    dt.datetime(2026, 5, 25, 17, 30, 45, tzinfo=dt.timezone(dt.timedelta(hours=2))),
-])
-def test_a_registry_refuses_a_clock_that_cannot_honestly_spell_z(tmp_path, as_of):
-    """A world registry is refused at construction unless its clock is an AWARE, ZERO-OFFSET datetime."""
-    with pytest.raises(EstateError):
-        build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
-                      ledger=primed_ledger(tmp_path), as_of=as_of)
-
-
-def test_a_registry_will_not_serve_without_being_told_which_moment_it_serves(tmp_path):
-    """`as_of` is REQUIRED and keyword-only"""
-    with pytest.raises(TypeError):
-        build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
-                      ledger=primed_ledger(tmp_path))
-
-
-# 3. the stamps: host-state's `captured_at`, elastic's open window
+# 3. no adapter stamps a time or cuts a window (#1385 O1, O7: the platform stamps, the oracle cuts)
 
 STAMPING_VERBS = [
     ("container-inspect", {"container_id": "abc123def456"}),
@@ -432,170 +386,67 @@ STAMPING_VERBS = [
     ("authorized-keys", {"host": "web-1"}),
     ("fim-checksum", {"host": "web-1", "path": "/etc/hosts"}),
     ("package-list", {"host": "web-1"}),
+    ("health-check", {}),
 ]
 
 
 @pytest.mark.parametrize(("verb", "params"), STAMPING_VERBS)
-def test_no_host_state_capture_is_stamped_with_the_cut_off(tmp_path, verb, params):
-    ctx = docker_ctx(tmp_path, as_of=T0)
-    before = _clock.z_seconds(dt.datetime.now(dt.UTC))
+def test_no_host_state_capture_carries_a_time_of_its_own(tmp_path, verb, params):
+    """Design O7: host-state's `captured_at` goes; the platform's arrival stamp replaces it."""
+    payload = host_state_adapter.VERBS[verb](docker_ctx(tmp_path), **params)
 
-    payload = host_state_adapter.VERBS[verb](ctx, **params)
-
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(payload.get("captured_at"))), (
-        f"{verb} carries no `Z` capture stamp: {payload}")
-    assert payload["captured_at"] != T0_Z, (
-        f"{verb}'s capture is stamped with the world's cut-off T0, not the run clock")
-    assert before <= payload["captured_at"] <= _clock.z_seconds(dt.datetime.now(dt.UTC)), (
-        f"{verb}'s capture outside any run is not stamped with the wall clock")
-
-
-@pytest.mark.parametrize(("verb", "params"), STAMPING_VERBS)
-def test_an_ordinary_run_still_stamps_the_wall_clock(tmp_path, verb, params):
-    ctx = docker_ctx(tmp_path, as_of=None)
-    before = _clock.z_seconds(dt.datetime.now(dt.UTC))
-
-    payload = host_state_adapter.VERBS[verb](ctx, **params)
-
-    assert before <= payload["captured_at"] <= _clock.z_seconds(dt.datetime.now(dt.UTC))
-
-
-def test_the_health_check_stamps_nothing_and_stays_that_way(tmp_path):
-    stamped = host_state_adapter.VERBS["health-check"](docker_ctx(tmp_path, as_of=T0))
-    plain = host_state_adapter.VERBS["health-check"](docker_ctx(tmp_path, as_of=None))
-
-    assert "captured_at" not in stamped
-    assert "captured_at" not in plain
+    assert payload, f"{verb} produced no capture, so nothing below is observed"
+    assert "captured_at" not in payload, f"{verb} still stamps a time of its own: {payload}"
 
 
 @pytest.mark.parametrize("verb", ["query", "alerts"])
-def test_an_unbounded_search_is_closed_at_the_runs_clock(tmp_path, data_root, verb):
-    """A search naming NEITHER bound is bounded at T0 on the wire — and only at T0."""
-    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
-        getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login")
+@pytest.mark.parametrize("end", [None, ""], ids=["absent", "empty-string"])
+def test_an_unbounded_search_is_sent_as_asked(tmp_path, data_root, verb, end):
+    """Design O1: no window end filled in, no cluster-side filter. The open end stays open."""
+    with elastic_ctx(tmp_path, data_root) as (ctx, up):
+        getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login", end=end)
 
-    assert range_filter(search_body(up)) == {"lte": T0_Z}, (
-        "the unbounded search did not close at the branch point's own moment")
-
-
-@pytest.mark.parametrize("verb", ["query", "alerts"])
-def test_an_empty_string_end_is_closed_at_the_runs_clock(tmp_path, data_root, verb):
-    """``end=""`` is the same open bound the body builder already treats as absent."""
-    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
-        getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login", end="")
-
-    assert range_filter(search_body(up)) == {"lte": T0_Z}
+    body = search_body(up)
+    assert range_filter(body) is None, "the adapter closed the open window"
+    assert "post_filter" not in body, "the adapter added a cluster-side cut"
 
 
 @pytest.mark.parametrize(("start", "end", "expected"), [
     (None, "2026-06-01T00:00:00Z", {"lte": "2026-06-01T00:00:00Z"}),
-    ("2026-05-01T00:00:00Z", None, {"gte": "2026-05-01T00:00:00Z", "lte": T0_Z}),
+    ("2026-05-01T00:00:00Z", None, {"gte": "2026-05-01T00:00:00Z"}),
     ("2026-05-01T00:00:00Z", "2026-06-01T00:00:00Z",
      {"gte": "2026-05-01T00:00:00Z", "lte": "2026-06-01T00:00:00Z"}),
 ])
-def test_a_search_that_names_its_own_end_is_never_rewritten(tmp_path, data_root, start, end, expected):
-    """A PRESENT `end` survives untouched — including one that runs past T0 — and an absent one is filled beside whatever `start` the caller gave."""
-    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
+def test_a_search_window_reaches_the_wire_exactly_as_the_caller_spelled_it(
+        tmp_path, data_root, start, end, expected):
+    """Design O1: the request is what an ordinary run would send for the same parameters."""
+    with elastic_ctx(tmp_path, data_root) as (ctx, up):
         elastic_adapter.query(ctx, native_query="event.action:ssh_login", start=start, end=end)
 
-    assert range_filter(search_body(up)) == expected
-
-
-@pytest.mark.parametrize("verb", ["query", "alerts"])
-def test_a_branched_search_bounds_its_hits_at_the_cluster_and_keeps_its_window(
-        tmp_path, data_root, verb):
-    """A branched search carries the clock as a `post_filter` beside the caller's own `query`
-    window, so the cluster drops hits past T0 without the window being rewritten."""
-    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
-        getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login",
-                                       start="2026-05-01T00:00:00Z", end="2026-06-01T00:00:00Z")
-
     body = search_body(up)
-    assert range_filter(body) == {"gte": "2026-05-01T00:00:00Z", "lte": "2026-06-01T00:00:00Z"}
-    bounds = [c["range"]["@timestamp"] for c in body["post_filter"]["bool"]["should"]
-              if "range" in c]
-    assert bounds == [{"lte": T0_Z}]
+    assert range_filter(body) == expected
+    assert "post_filter" not in body
 
 
-def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path, data_root):
-    """The window fill goes into a fresh local: a second search through the same context is
-    filled from T0 again, not from anything the first one left behind."""
-    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
-        elastic_adapter.query(ctx, native_query="a")
-        first = range_filter(search_body(up))
-        elastic_adapter.query(ctx, native_query="b", start="2026-05-01T00:00:00Z")
-        second = range_filter(search_body(up))
-
-    assert first == {"lte": T0_Z}
-    assert second == {"gte": "2026-05-01T00:00:00Z", "lte": T0_Z}
-
-
-# the ES|QL half of the window: a stage appended, never a predicate edited
-
-BOUND = f'| WHERE @timestamp <= "{T0_Z}"'
-
-
-def test_the_bound_lands_after_the_source_command_not_after_the_first_line(tmp_path):
-    """A whole pipeline written on ONE line still takes the bound immediately after its source command."""
-    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0),
-                                       "FROM logs-zeek.ssh-* | LIMIT 1")
-
-    assert out == f"FROM logs-zeek.ssh-*\n{BOUND}\n| LIMIT 1"
-
-
-def test_the_source_commands_own_suffix_stays_attached_to_it(tmp_path):
-    """A `METADATA` clause belongs to the source command, so the bound goes after it."""
-    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0),
-                                       "FROM logs-x-* METADATA _id | LIMIT 5")
-
-    assert out == f"FROM logs-x-* METADATA _id\n{BOUND}\n| LIMIT 5"
-
-
-def test_a_pipe_inside_a_quoted_name_is_not_a_stage_boundary(tmp_path):
-    """A `|` inside a quoted index name is part of the NAME, not the end of the source command."""
-    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0), 'FROM "logs|weird"')
-
-    assert out.splitlines() == ['FROM "logs|weird"', BOUND]
-
-
-def test_the_models_own_time_predicate_is_left_exactly_as_written(tmp_path):
-    """A query that already bounds `@timestamp` keeps that clause BYTE-IDENTICAL, with the run's bound alongside it."""
-    asked = ('FROM logs-system.auth-*\n'
-             '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
-             '| STATS events = COUNT(*) BY user = user.name')
-
-    out = elastic_adapter.bounded_esql(docker_ctx(tmp_path, as_of=T0), asked)
-
-    assert out == ('FROM logs-system.auth-*\n'
-                   f'{BOUND}\n'
-                   '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
-                   '| STATS events = COUNT(*) BY user = user.name')
-    assert asked.partition("\n")[2] in out, (
-        "the model's own predicate was edited — the clock reads no predicate and writes none")
-
-
-def test_the_bound_reaches_the_wire_and_stays_out_of_the_evidence(tmp_path, data_root):
-    """The BOUNDED query is what Elasticsearch runs; the payload records the query as asked."""
-    asked = "FROM logs-zeek.ssh-*\n| LIMIT 5"
-    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
+@pytest.mark.parametrize("asked", [
+    "FROM logs-zeek.ssh-* | LIMIT 1",
+    "FROM logs-x-* METADATA _id | LIMIT 5",
+    'FROM "logs|weird"',
+    ('FROM logs-system.auth-*\n'
+     '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
+     '| STATS events = COUNT(*) BY user = user.name'),
+    # Spellings the retired splice's own recognizer missed: it must still touch none of them.
+    "// note\nFROM logs-zeek.ssh-* | LIMIT 1",
+    "from logs-zeek.ssh-* | limit 1",
+])
+def test_an_esql_query_reaches_the_wire_and_the_payload_exactly_as_asked(
+        tmp_path, data_root, asked):
+    """Design O1: no ES|QL splice; `esql` echoes what was sent, which is now what was asked."""
+    with elastic_ctx(tmp_path, data_root) as (ctx, up):
         payload = elastic_adapter.esql(ctx, query=asked)
 
-    assert payload["query"] == asked, (
-        f"the payload records {payload['query']!r} — a clause the model never wrote is now in "
-        "the run's own record of the question it asked")
-    assert search_body(up)["query"] == f"FROM logs-zeek.ssh-*\n{BOUND}\n| LIMIT 5", (
-        "the query that reached the cluster carries no bound, so the episode reads the live "
-        "tail and cannot be replayed")
-
-
-def test_both_halves_of_the_window_include_the_branch_point_itself(tmp_path, data_root):
-    """The ES|QL clause and the search body close the window INCLUSIVELY, both of them."""
-    with elastic_ctx(tmp_path, data_root, as_of=T0) as (ctx, up):
-        clause = elastic_adapter.bounded_esql(ctx, "FROM logs-zeek.ssh-*")
-        elastic_adapter.query(ctx, native_query="event.action:ssh_login")
-
-    assert clause.splitlines()[-1] == f'| WHERE @timestamp <= "{T0_Z}"'
-    assert range_filter(search_body(up)) == {"lte": T0_Z}
+    assert payload["query"] == asked
+    assert search_body(up)["query"] == asked
 
 
 # 4. T0 itself: derived from the prefix, and pinned into the spec

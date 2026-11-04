@@ -111,30 +111,3 @@ def test_an_episode_id_carrying_upper_case_is_refused() -> None:
         refuse_bad_episode_id("Ep1")
 
 
-# the outbound-body type
-
-def test_the_wire_takes_only_a_body_that_went_past_the_clock() -> None:
-    """Both body mints return `OutboundBody` and take the clock's ctx; the wire half is observed
-    through the proxy (test_query_flow, #1391 O3 D2: `_http_json` retires)."""
-    import inspect
-
-    from defender.integrations import elastic_adapter as ea
-
-    for mint in (ea._search_body, ea._esql_body):
-        # The module is `from __future__ import annotations`, so signatures carry the NAME.
-        assert inspect.signature(mint).return_annotation == "OutboundBody"
-        first = next(iter(inspect.signature(mint).parameters))
-        assert first == "ctx", f"{mint.__name__} must take the ctx that carries the clock"
-
-
-def test_the_esql_mint_carries_the_bound_and_the_payload_does_not() -> None:
-    """The split the verb's own comment argues for: the bound rides the wire, the record keeps
-    what the model asked. Pinned together because they are one decision."""
-    from defender.integrations import elastic_adapter as ea
-
-    class _Ctx:
-        as_of = None
-
-    asked = "FROM logs-* | LIMIT 5"
-    assert ea._esql_body(_Ctx(), asked).payload == {"query": asked}
-    assert ea.esql_payload(asked, {"values": [], "columns": []})["query"] == asked

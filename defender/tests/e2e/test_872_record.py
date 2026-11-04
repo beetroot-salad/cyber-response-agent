@@ -253,8 +253,12 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
         gather=ReplayFn([q("elastic", "query", {"native_query": "FROM logs"}), DONE]),
         verbs=elastic_ok(rec))
 
-    gated_rows = read_jsonl_rows(RunPaths(gated_dir).executed_queries)
-    idle_rows = read_jsonl_rows(RunPaths(idle_dir).executed_queries)
+    def _sans_arrival(rows: list[dict]) -> list[dict]:
+        # `received_at` is the arrival's wall-clock reading (#1385 A6): it differs between two runs.
+        return [{k: v for k, v in row.items() if k != "received_at"} for row in rows]
+
+    gated_rows = _sans_arrival(read_jsonl_rows(RunPaths(gated_dir).executed_queries))
+    idle_rows = _sans_arrival(read_jsonl_rows(RunPaths(idle_dir).executed_queries))
     assert gated_rows, "the gated run wrote no queries row"
     assert idle_rows, "the idle run wrote no queries row"
     lanes = {r.get("lead_id") for r in gated_rows}

@@ -44,12 +44,12 @@ class OutcomeUnreadable(ValueError):
 
 def write_outcome(episode: Episode, outcome: str, *, reason: str,
                   unservable_worlds: Iterable[Mapping[str, Any]] = (),
-                  not_replayable: Iterable[Mapping[str, Any]] = (),
-                  drift: Iterable[Mapping[str, Any]] = ()) -> None:
+                  not_replayable: Iterable[Mapping[str, Any]] = ()) -> None:
     """Create the episode's outcome record, once.
 
     @owns outcome — the shipped `outcome.yaml` (`outcome`, `reason`, `unservable_worlds`,
-    `not_replayable`, `drift`) is produced here and nowhere else. The exclusive create refuses a
+    `not_replayable`) is produced here and nowhere else. An archived record may still carry a
+    `drift` list (#1385 H6 dropped the recorded-versus-live comparison); readers tolerate it. The exclusive create refuses a
     second write (`FileExistsError`), so the record pre-flight wrote is the one every sibling
     started under."""
     if outcome not in OUTCOMES:
@@ -58,7 +58,6 @@ def write_outcome(episode: Episode, outcome: str, *, reason: str,
         "outcome": outcome, "reason": reason,
         "unservable_worlds": [dict(u) for u in unservable_worlds],
         "not_replayable": [dict(n) for n in not_replayable],
-        "drift": [dict(d) for d in drift],
     }, sort_keys=False))
 
 

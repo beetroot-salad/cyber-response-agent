@@ -9,6 +9,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.records import RunPaths  # noqa: E402
 from defender.investigation.run_state import RunState  # noqa: E402
+from defender.systems.verbs import CALL_RUN_STATE  # noqa: E402
 from defender.kit.faults import TransportFault  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -91,7 +92,7 @@ def test_a_run_handed_no_state_resolves_its_own_at_the_boundary(tmp_path):
     carried: list = []
 
     def probe(ctx, *, native_query: str = "FROM hosts") -> list[dict]:
-        carried.append(ctx.run_state)
+        carried.append(CALL_RUN_STATE.get())
         return [{"host": "web-01", "q": native_query}]
 
     summary = driver_summary(run_dir, run_id="r3-own-state", main=_main(),
