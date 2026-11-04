@@ -25,7 +25,7 @@ def is_now_date_math(value: str) -> bool:
     return bool(_DATE_MATH_NOW.match(value.strip()))
 
 
-def _quoted(text: str, i: int) -> tuple[int, str]:
+def _phrase(text: str, i: int) -> tuple[int, str]:
     """`(index after, value)` of the phrase opening at `text[i] == '"'`; `\\` escapes. An
     unterminated phrase runs to the end."""
     j, out = i + 1, []
@@ -60,7 +60,7 @@ def _value(text: str, i: int) -> tuple[int, str]:
     while i < len(text) and text[i].isspace():
         i += 1
     if i < len(text) and text[i] == '"':
-        return _quoted(text, i)
+        return _phrase(text, i)
     return _term(text, i)
 
 
@@ -92,7 +92,7 @@ def lucene_bounds(text: str) -> list[str]:
         if ch == "\\":
             i += 2
         elif ch == '"':
-            i, _ = _quoted(text, i)
+            i, _ = _phrase(text, i)
         elif ch == "/" and _at_term_start(text, i):
             i = _regex_end(text, i)
         elif ch in "[{":
