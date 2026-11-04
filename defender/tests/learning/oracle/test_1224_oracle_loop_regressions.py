@@ -1410,3 +1410,26 @@ def test_a_frozen_row_records_only_collisions_with_real_identifiers():
                          store=store, real_data=real)
     found = frozen_id_collisions(checked, store=store, real_data=real)
     assert [(e["column"], e["value"]) for e in found] == [("user_id", "u-9")], found
+
+
+def test_a_pre_branch_call_with_a_live_base_is_told_so_and_is_never_re_asked(tmp_path):
+    """#1385: a pre-branch call whose base had to be read live is framed as both (served
+    unchanged, and read live), and its re-ask is refused before the host reads anything."""
+    from defender.learning.branch.ledger import request_key
+
+    bounded = {**ALICE, "end": S.AS_OF}
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, _PB_BASE)
+    est.answer("idp", "query", bounded, _PB_BASE)
+    o = S.oracle(S.re_ask(S.re_asked(system="idp", verb="query", params=bounded)),
+                 S.submit(_PB_BASE, S.EMPTY_CLAIM))
+    reg = S.world_registry(S.episode_v2(tmp_path, base_rows=None), "b", est, oracle=o,
+                           verifier=S.passing_verifier(),
+                           prebranch={request_key("idp", "query", ALICE)})
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), **ALICE) == _PB_BASE
+    assert "BEFORE the branch point" in o.seen[0], "the pre-branch framing is missing"
+    assert "read live" in o.seen[0], "the oracle was not told its base was read live"
+    assert "re_ask refused" in o.seen[1] and "before the branch point" in o.seen[1], o.seen[1]
+    assert not [c for c in est.calls("idp", "query") if c["params"] == bounded], (
+        "the host read a re-ask of a pre-branch call")

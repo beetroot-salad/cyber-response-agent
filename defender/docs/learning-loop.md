@@ -205,8 +205,10 @@ oracle applies the cut (#1385); a real error passes through as itself
 (`real-error`). A world with no facts is served its base (`passthrough`).
 Otherwise the world's **oracle** (`estate/oracle.py`, `AgentRole.ORACLE`) takes
 one turn, in which it serves the world as it stood at the branch point: for a system that takes a
-query it declares a **re-ask** (the call's own question, edited to end there), which the host
-re-reads, keeps as a base answer of the world and holds the claim against; for a system of record it
+query it makes a **re-ask** with its `re_ask` tool (the call's own question, edited to end there):
+the host refuses one that is not that question before reading anything, reads it, and from then on
+in the attempt its answer is the base the claim is held against; a committed re-ask is kept as a
+base answer of the world. For a system of record it
 undoes the source run's own later writes and edits the response to the world's facts. It sees the
 call, a handle to the base answer and the world's facts,
 may explore real examples through the same grant decision (rate-limited,

@@ -9,6 +9,7 @@ from typing import Any, NoReturn
 from pydantic import ValidationError
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities.abstract import AbstractCapability
+from pydantic_ai.messages import RetryPromptPart
 from pydantic_ai.exceptions import (
     ModelRetry,
     ToolFailed,
@@ -168,6 +169,17 @@ def _stamped(deps: Any, text: str) -> str:
     held = _ARRIVED.get()
     arrived = held[0] if held else run_state_of(deps).now_iso()
     return f"{text}\n{stamp_line(arrived)}"
+
+
+#: The line the framework closes every retry prompt with; it adds it again to our retry text.
+_RETRY_TAIL = "\n\nFix the errors and try again."
+
+
+def _validation_text(error: ValidationError, tool_name: str) -> str:
+    """A schema refusal as the framework itself words it to the model (its error list, without
+    documentation links or context), so the stamp line is the only addition."""
+    worded = RetryPromptPart.from_error(error, tool_name=tool_name).model_response()
+    return worded.removesuffix(_RETRY_TAIL)
 
 
 def _fault_exit(e: BaseException) -> int:
@@ -332,7 +344,8 @@ class QueryCapture(AbstractCapability[Any]):
         try:
             return await self._validated(ctx, call, args, handler)
         except (ValidationError, ModelRetry, ToolFailed) as refused:
-            text = refused.message if isinstance(refused, (ModelRetry, ToolFailed)) else str(refused)
+            text = (refused.message if isinstance(refused, (ModelRetry, ToolFailed))
+                    else _validation_text(refused, call.tool_name))
             raise (ToolFailed if isinstance(refused, ToolFailed) else ModelRetry)(
                 _stamped(ctx.deps, text)) from refused
         finally:

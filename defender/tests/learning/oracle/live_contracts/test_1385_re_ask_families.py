@@ -100,16 +100,15 @@ def _column_cases(rng: random.Random) -> list[tuple[str, Any, Any]]:
 
 
 def _refused_scene(tmp_path, base: Any, answer: Any, re_ask: Any, *, unreadable: bool = False):
-    """A live capped base, a real system that answers any other question with `answer`, and a
-    claim that declares `re_ask`: `(scene, oracle)`. The oracle submits the answer the declaration
-    would make true, then the base, both under the declaration, then the base honestly."""
+    """A live capped base, a real system that answers any other question with `answer`, and an
+    oracle that re-asks with `re_ask`: `(scene, oracle)`. The oracle then submits the answer the
+    re-ask would make its base, then the base honestly."""
     live = [("idp", "query", CAPPED, base)]
     sc = H._scene(tmp_path, live=live)
     sc.est.answer("idp", "query", None, answer)
     if unreadable:
         sc.est.fail("idp", "query", BOUNDED)
-    claim = {**S.EMPTY_CLAIM, "re_ask": re_ask}
-    o = S.oracle(S.submit(answer, claim), S.submit(base, claim), S.submit(base, S.EMPTY_CLAIM))
+    o = S.oracle(S.re_ask(re_ask), S.submit(answer, S.EMPTY_CLAIM), S.submit(base, S.EMPTY_CLAIM))
     return sc, o
 
 
@@ -117,7 +116,8 @@ def test_1385_a_re_ask_is_admitted_only_whole_and_readable_and_keeps_the_calls_c
     """A `re_ask` that is not exactly a string system, a string verb and a params mapping, an ES|QL
     re-ask whose answer lists other columns than the base's (in any order, count or name, whether
     or not the base has rows) and a re-ask the host cannot read are each refused at check 1,
-    whatever answer is served beside them; nothing of the refused re-ask is kept (T1, O4)."""
+    so the answer it would have made the base is not served; nothing of the refused re-ask is kept
+    (T1, O4)."""
     rng = random.Random(SEED)
     members: list[tuple[str, Any, Any, Any, bool]] = [
         (f"re_ask {name}", LIVE_BASE, H.AT_BRANCH, value, False)
@@ -133,12 +133,11 @@ def test_1385_a_re_ask_is_admitted_only_whole_and_readable_and_keeps_the_calls_c
         reg = sc.registry(o, retry_cap=4)
         got = sc.call(reg, "idp", "query", **CAPPED)
         taken = [params for r in sc.rows("base") if (params := r["params"]) != CAPPED]
-        for k in (1, 2):
-            try:
-                H._assert_verdict(o, k, "check 1")
-            except AssertionError:
-                wrong.append(f"{name}: submission {k} was not refused at check 1")
-        if got != base or o.submissions() != 3 or o.overrun:
+        try:
+            H._assert_re_ask_refused(o)
+        except AssertionError:
+            wrong.append(f"{name}: the re-ask was not refused")
+        if got != base or o.submissions() != 2 or o.overrun:
             wrong.append(f"{name}: served {got!r} after {o.submissions()} submission(s)")
         if taken:
             wrong.append(f"{name}: kept a base answer for {taken}")
@@ -150,7 +149,7 @@ def test_1385_a_re_ask_is_admitted_only_whole_and_readable_and_keeps_the_calls_c
     # answer, is admitted whole.
     sc = H._scene(tmp_path / "control", live=[("idp", "query", CAPPED, H.ES_CAPPED),
                                               ("idp", "query", BOUNDED, H.ES_BOUNDED)])
-    o = S.oracle(S.submit(H.ES_BOUNDED, S.claim(re_ask=_valid())))
+    o = S.oracle(S.re_ask(_valid()), S.submit(H.ES_BOUNDED, S.EMPTY_CLAIM))
     assert sc.call(sc.registry(o), "idp", "query", **CAPPED) == H.ES_BOUNDED
     H._spent(o)
     assert o.submissions() == 1, "positive control: a valid re-ask was refused"
@@ -190,12 +189,15 @@ def _text(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True)
 
 
-def _attempts_reusing_ids(rows: list[dict], base_rows: tuple, **claim_kw: Any) -> list[S.Move]:
-    """One attempt per real row: a forged row that reuses that row's id."""
+def _attempts_reusing_ids(rows: list[dict], base_rows: tuple,
+                          re_ask: dict | None = None) -> list[S.Move]:
+    """One attempt per real row, each re-asking first when `re_ask` is given: a forged row that
+    reuses that row's id."""
     out: list[S.Move] = []
     for i, real in enumerate(rows):
-        out += H._honest(f"fg-r{i}", row={**H.FORGED_ROW, "event_id": real["event_id"]},
-                         base_rows=base_rows, **claim_kw)
+        out += [*([S.re_ask(re_ask)] if re_ask else []),
+                *H._honest(f"fg-r{i}", row={**H.FORGED_ROW, "event_id": real["event_id"]},
+                           base_rows=base_rows)]
     return out
 
 
@@ -214,11 +216,12 @@ def test_1385_the_kept_re_asked_base_is_what_the_host_read_and_is_real_data_befo
                                   ("idp", "query", Q1, {"rows": r1}),
                                   ("idp", "query", Q2, {"rows": r2}),
                                   ("idp", "query", BOB_CAPPED, {"rows": [BOB_ROW]})])
-    ask = {"re_ask": S.re_asked(system="idp", verb="query", params=Q2)}
+    ask = S.re_asked(system="idp", verb="query", params=Q2)
     o = S.oracle(
-        S.submit({"rows": r1}, S.claim(re_ask=S.re_asked(system="idp", verb="query", params=Q1))),
-        *_attempts_reusing_ids(r2, tuple(r2), **ask),
-        *H._honest("fg-1", row=H.FORGED_ROW, base_rows=tuple(r2), **ask))
+        S.re_ask(S.re_asked(system="idp", verb="query", params=Q1)),
+        S.submit({"rows": r1}, S.EMPTY_CLAIM),
+        *_attempts_reusing_ids(r2, tuple(r2), ask),
+        S.re_ask(ask), *H._honest("fg-1", row=H.FORGED_ROW, base_rows=tuple(r2)))
     v = S.verifier(S.verdict(False, "the first re-ask drops what the question asked for"),
                    then=S.verdict(True))
     reg = sc.registry(o, v, retry_cap=len(r2) + 4)
@@ -299,8 +302,9 @@ def test_1385_a_re_ask_is_shown_wherever_a_served_call_is_read_and_its_dropped_r
     sc = H._scene(tmp_path, live=[("idp", "query", LIVE_ONLY, {"rows": [ROW_D, ROW_K]}),
                                   ("idp", "query", RE_ASK_Q, {"rows": [ROW_K, ROW_B]})])
     asked = S.re_asked(system="idp", verb="query", params=RE_ASK_Q)
-    o = S.oracle(S.submit(S.sym("learning.branch.estate._oracle_prompt", "BASE_HANDLE"),
-                          S.claim(re_ask=asked)))
+    o = S.oracle(S.re_ask(asked),
+                 S.submit(S.sym("learning.branch.estate._oracle_prompt", "BASE_HANDLE"),
+                          S.EMPTY_CLAIM))
     verifier = S.passing_verifier()
     reg = sc.registry(o, verifier)
 

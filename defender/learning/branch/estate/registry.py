@@ -49,7 +49,7 @@ from ..ledger import (
     LedgerError,
     ServedCall,
 )
-from .checks import RealData, canonical_json, cut_rows
+from .checks import RealData, canonical_json
 from .limiter import RateLimiter
 from .oracle import (
     DEFAULT_RESTART_AFTER,
@@ -110,18 +110,25 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
                   "base_digest": digest, "claim": claim, "verifier_verdict": verdict,
                   "attempts": attempts}
         if re_asked is not None:
-            # The re-asked answer is a base answer of this world under its own request key
-            # (A3): kept across resume, indexed as real data, and the rows the cut dropped are
-            # recomputed from it and the live base. Its question rides the answer for audit.
-            registry.store.keep_base(re_asked.system, re_asked.verb, re_asked.params,
-                                     payload_text_of(re_asked.answer))
+            # The question and the rows the cut dropped ride the answer for audit.
             answer["re_ask"] = {"system": re_asked.system, "verb": re_asked.verb,
-                                "params": re_asked.params,
-                                "dropped": cut_rows(base, re_asked.answer)[0]}
+                                "params": re_asked.params, "dropped": re_asked.dropped}
         registry.store.commit(forged=list(staged.forged.values()),
                               facts=[{"entity": e, "field": f, "value": v}
                                      for (e, f), v in staged.facts.items()],
                               answer=answer)
+        if re_asked is not None:
+            # Then the re-asked answer, as a base answer of this world under its own request key
+            # (A3): kept across resume and indexed as real data. After the commit, so a failed
+            # commit leaves no base behind for an answer that was never served. Best effort: the
+            # answer is committed and served either way; a base lost here costs a reload only
+            # its entry in the real-data index.
+            try:
+                registry.store.keep_base(re_asked.system, re_asked.verb, re_asked.params,
+                                         payload_text_of(re_asked.answer))
+            except OSError as unwritable:
+                _logger.warning(f"the re-asked base of {system}.{verb} could not be kept "
+                                f"({unwritable!r}); the answer is served")
         committed["answer"] = answer
 
     def unchanged(served: Any) -> str | None:
@@ -173,7 +180,7 @@ def served_label(base: Any, served: Any, claim: Mapping[str, Any], world_facts: 
     entities = fact_entities(world_facts)
     if not entities:
         return RECONSTRUCTED
-    dropped = cut_rows(base, re_asked.answer)[0] if re_asked is not None else []
+    dropped = re_asked.dropped if re_asked is not None else []
     shown = (bool(claim.get("added"))
              or any(isinstance(e.get("entity"), str) and e["entity"] in entities
                     for e in claim.get("changed") or ())

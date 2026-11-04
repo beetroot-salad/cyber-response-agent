@@ -21,7 +21,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.learning.branch.estate.checks import ReAsked  # noqa: E402
+from defender.learning.branch.estate.checks import ReAsked, re_asked as _re_asked  # noqa: E402
 from defender.learning.branch.estate.registry import served_label  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S  # noqa: E402
 
@@ -259,7 +259,8 @@ def _case(rng: random.Random, serial: int) -> _Case:  # noqa: C901 — one gener
         older.insert(rng.randint(0, len(older)), row)
     if cut:
         base = _page(esql, live)
-        re_asked = ReAsked("idp", "query", {"q": "bounded", "serial": serial}, _page(esql, older))
+        re_asked = _re_asked(base, "idp", "query", {"q": "bounded", "serial": serial},
+                             _page(esql, older))
         served = re_asked.answer
     else:
         dropped = []

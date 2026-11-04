@@ -520,11 +520,11 @@ def test_1385_a_cut_is_oracle_only_for_what_it_shows_of_the_worlds_facts(
     est.answer("idp", "query", _CAPPED, {"rows": [dropped, _KEPT]})
     at_branch = {"rows": [_KEPT, older]}
     est.answer("idp", "query", _BOUNDED, at_branch)
-    served, claim = at_branch, S.claim(re_ask=_RE_ASK)
-    moves = []
+    served, claim = at_branch, S.claim()
+    moves = [S.re_ask(_RE_ASK)]
     if forge:
         served = {"rows": [*at_branch["rows"], _FACT_ROW]}
-        claim = S.claim(added=[S.added("fg-1", "f1")], re_ask=_RE_ASK)
+        claim = S.claim(added=[S.added("fg-1", "f1")])
         moves.append(S.forge("fg-1", "f1", "idp", _FACT_ROW))
     ep = _episode(tmp_path, captured=[])
     oracle = S.oracle(*moves, S.submit(served, claim))

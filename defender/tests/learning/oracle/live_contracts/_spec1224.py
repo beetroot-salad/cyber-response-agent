@@ -72,6 +72,7 @@ COINED = {
     "tool.forge": "forge",
     "tool.record_fact": "record_fact",
     "tool.python": "python",
+    "tool.re_ask": "re_ask",
     "tool.check": "check",
     "tool.submit": "submit",
     "tool.verdict": "verdict",
@@ -531,6 +532,13 @@ def python(code: str) -> Move:
     return Move(COINED["tool.python"], {"code": code})
 
 
+def re_ask(spec: Any) -> Move:
+    """The oracle's `re_ask` call (#1385) with `spec` as its arguments: a `re_asked(...)` spec, or
+    any other value a test offers (a value that is no mapping is sent under an unknown key)."""
+    args = dict(spec) if isinstance(spec, Mapping) else {"re_ask": spec}
+    return Move(COINED["tool.re_ask"], args)
+
+
 def check(served: Any, claim_: Mapping[str, Any] | None = None) -> Move:
     return Move(COINED["tool.check"], {"served": served, "claim": dict(claim_ or claim())})
 
@@ -549,15 +557,11 @@ def text_only(text: str = "I could not decide what to serve.") -> Move:
 
 def claim(*, added: Iterable[Mapping] = (), removed: Iterable[Mapping] = (),
           changed: Iterable[Mapping] = (), counts: Iterable[Mapping] = (),
-          entity_refs: Iterable[Mapping] = (), re_ask: Mapping | None = None) -> dict:
-    """A claim document, as `check` and `submit` take it. `re_ask` (#1385, `re_asked`) is
-    carried only when given, so a claim without one is spelled as before."""
-    doc = {"added": [dict(a) for a in added], "removed": [dict(r) for r in removed],
-           "changed": [dict(c) for c in changed], "counts": [dict(c) for c in counts],
-           "entity_refs": [dict(e) for e in entity_refs]}
-    if re_ask is not None:
-        doc["re_ask"] = dict(re_ask)
-    return doc
+          entity_refs: Iterable[Mapping] = ()) -> dict:
+    """A claim document, as `check` and `submit` take it."""
+    return {"added": [dict(a) for a in added], "removed": [dict(r) for r in removed],
+            "changed": [dict(c) for c in changed], "counts": [dict(c) for c in counts],
+            "entity_refs": [dict(e) for e in entity_refs]}
 
 
 EMPTY_CLAIM = claim()
@@ -574,7 +578,8 @@ def removed(row: Mapping[str, Any], *, system: str, verb: str, params: Mapping[s
 
 
 def re_asked(*, system: str, verb: str, params: Mapping[str, Any]) -> dict:
-    """A claim's re-ask (#1385): the call's own question, bounded at the branch point."""
+    """A re-ask (#1385), as the `re_ask` tool takes it: the call's own question, bounded at the
+    branch point."""
     return {"system": system, "verb": verb, "params": dict(params)}
 
 

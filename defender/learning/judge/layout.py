@@ -330,7 +330,8 @@ def _claim_parts(claim: dict[str, Any]) -> list[Part]:
     """An `oracle` call's claim and verifier verdict, or the words saying either was never
     stored — a call with no stored claim is never presented as verified (N22)."""
     cut = claim.get("re_ask")
-    seen = [" — cut by a re-ask at the branch point ", _run(cut)] if isinstance(cut, dict) else []
+    seen = [" — cut by a re-ask at the branch point ", _run(_cut_shown(cut))] if isinstance(
+        cut, dict) else []
     if not isinstance(claim.get("claim"), dict):
         return [*seen, " — claim unavailable (none was stored for this call; it is not verified)"]
     if not isinstance(claim.get("verifier_verdict"), dict):
@@ -338,6 +339,20 @@ def _claim_parts(claim: dict[str, Any]) -> list[Part]:
                 "was stored; the claim is not verified)"]
     return [*seen, " — claim ", _run(claim["claim"]), "; verifier verdict ",
             _run(claim["verifier_verdict"])]
+
+
+#: How many of a re-ask's dropped rows a call line shows: VIEW 1 is never cut by the cap, so a
+#: cut that dropped a long page must not grow every line that names it.
+_DROPPED_SHOWN = 5
+
+
+def _cut_shown(cut: dict[str, Any]) -> dict[str, Any]:
+    """A stored re-ask as a call line shows it: its question, the first `_DROPPED_SHOWN` rows it
+    dropped, and how many it dropped in all."""
+    dropped = cut.get("dropped")
+    if not isinstance(dropped, list) or len(dropped) <= _DROPPED_SHOWN:
+        return cut
+    return {**cut, "dropped": dropped[:_DROPPED_SHOWN], "dropped_in_all": len(dropped)}
 
 
 def _focus_calls(run: RunView) -> list[Part]:
