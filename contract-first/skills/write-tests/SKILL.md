@@ -53,7 +53,7 @@ The design is settled by now, so this pass expands and corrects rather than inte
 
 Decide the cases from the design first, then survey the existing suite, fold the cases into it, and write last (**references/authoring.md**). New behavior belongs in the suite that already tests its neighbours, not in a parallel file per issue. Build toward what makes the contract trustworthy: real observations at real boundaries, variants and interactions where the design's properties call for them, positive controls beside negatives. Depth follows interpretive uncertainty, coupling and consequence of failure, not file counts. The case table becomes the compact **contract map**, from design obligations to the tests that enforce them; a map entry or a probe is not coverage. Docstrings state the promised outcome and its obligation in at most two lines.
 
-Report design gaps as they appear rather than at the end, and don't build assertions on top of an unresolved choice. A new preference is a proposal, not a requirement.
+Report design gaps to the orchestrator as they appear rather than at the end; they are findings, sorted with the rest (§5) before any reach the human, and don't build assertions on top of an unresolved choice. A new preference is a proposal, not a requirement.
 
 ## 4. Review the contract
 
@@ -63,7 +63,7 @@ Commit the candidate suite as a **candidate ref**. One fresh whole-contract revi
 
 ## 5. Reconcile, repair or dissolve
 
-Before acting on a design check or review, dispatch a fresh sorter on **../../references/sort.md** with its findings, the design and decisions, the principles and project rules, but not the author's reasoning; the orchestrator integrated the work, so it doesn't sort. Then route each group by its verdict and kind:
+Before acting on any batch of findings, whatever produced it (the design check, a review, or authors' design gaps), dispatch a fresh sorter on **../../references/sort.md** with its findings, the design and decisions, the principles and project rules, but not the author's reasoning; the orchestrator integrated the work, so it doesn't sort. Then route each group by its verdict and kind:
 
 - **A factual question:** probe it. The human does not choose what the code does.
 - **A contract defect** (tests omit, misstate or fail to enforce settled behavior): a fresh author repairs it, preserving intent. Recheck with fresh workers: the fidelity reviewer reads changed assertions. On a repair from the code stage, the brief names a family and its triage verdict (write-code-from-tests §4): write the one test that covers the family, not one per exploit. It must fail against every exploit in the family. The code stage rechecks it (write-code-from-tests §3): the kept exploit patches always, an attacker only when they can't speak for the change. These repairs follow the code stage's stopping rule, not §6's round limit.

@@ -102,7 +102,7 @@ repo already keeps for any agent:
   (for Python's Pyright, `extraPaths` under `[tool.pyright]`), so `symbol-refs` gets real answers.
 - **The project cache** (`.claude/contract-first-cache.md`) — how the skills' rules apply to this
   project in particular (ownership markers, threat-model examples, lint conventions), one grep-able
-  line per entry. write-tests, write-code-from-tests and proven-fix, and their reference files, end with
+  line per entry. write-tests, write-code-from-tests, proven-fix, their reference files and the shared `references/sort.md` end with
   their own cache of applications that hold for any project; the project file holds the rest. Skills grep it for their own name. One skill, `maintain-cache`, is
   its only writer, run in a fresh agent: write-tests, write-code-from-tests and finalize dispatch it at the end of their
   review steps, and it adds what the run had to work out, removes what it contradicted, and

@@ -18,7 +18,7 @@ Read the project's CLAUDE.md files for how tests run here and the traps that mak
 
 Write the one-sentence intent where a later reader finds it, the issue or the PR body, as the decision this change rests on. For a bug, cite where the intent was settled.
 
-Then find every other place that decides the same rule, using `symbol-refs` for a resolved census when the rule lives in a symbol. Each one is either covered by this change, with its own guarding case, or the rule has more than one owner and the work hands back. Don't leave a second copy deciding the old way.
+Then find every other place that decides the same rule, using `symbol-refs` for a resolved census when the rule lives in a symbol. Each one gets the same fix, with its own guarding case; merging the copies into one owner is design work, so if that is what the change needs, hand back. Don't leave a second copy deciding the old way.
 
 ## 2. Red first
 

@@ -22,15 +22,15 @@ Group the surviving findings by **the design choice or cause that let them exist
 ## 3. Give each group one verdict
 
 - **Dissolve.** A change to the model, owner, flow or rule removes the whole group: one owner, one location, one shape. Often it restates a rule written as a list of cases as its goal. Describe the change, the findings it removes, its cost, and **the open decisions it would itself create**. A dissolve can overreach and open more choices than it settles; the stage's independent review reads it before it reaches the human.
-- **Patch.** A local fix at the owning place is genuinely the cleaner answer. A local bug can deserve a local fix; dissolving is not an excuse to expand scope.
+- **Local fix.** A fix at the owning place is genuinely the cleaner answer. A local bug can deserve a local fix; dissolving is not an excuse to expand scope.
 - **Close.** The design is right and the tests miss the group. Name the **one** test that closes it: one whose input is the whole class, generated or defined only by membership. Never a list of the members found.
 - **Accept.** A deliberate trade-off: real, but not worth closing here. Say what closing it would cost and why it isn't worth it. Once the human agrees, it goes into the design's **accepted trade-offs**.
 
-Choose between dissolve and patch by which leaves less code and fewer special cases, counting migration and operational cost, not by which has the smaller diff. Two kinds of finding route without a verdict: a **code bug** (the code violates the settled design) goes to whoever owns the code, and a **factual question** goes to a probe, because the human doesn't decide what existing code does.
+Choose between dissolve and local fix by which leaves less code and fewer special cases, counting migration and operational cost, not by which has the smaller diff. Two kinds of finding route without a verdict: a **code bug** (the code violates the settled design) goes to whoever owns the code, and a **factual question** goes to a probe, because the human doesn't decide what existing code does.
 
 ## Return
 
-Per group: its cause in one sentence, the findings it covers, the verdict, and what it needs: the change and the decisions it opens for a dissolve, the fix for a patch, the single test for a close, the cost of closing for an accept. Then the routed findings, then the dropped ones, each with its reason. Keep it short: the human sees groups with a recommendation, never one question per finding.
+Per group: its cause in one sentence, the findings it covers, the verdict, and what it needs: the change and the decisions it opens for a dissolve, the fix for a local fix, the single test for a close, the cost of closing for an accept. Then the routed findings, then the dropped ones, each with its reason. Keep it short: the human sees groups with a recommendation, never one question per finding.
 
 ## Cache
 

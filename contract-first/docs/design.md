@@ -69,7 +69,7 @@ flowchart LR
 | -------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | discuss-issue              | A design: behavior, scope, data models, flows, architecture, with probed facts and a code map; or a split into several issues | What to promise, how to split, and the consequential trade-offs |
 | write-tests                | A committed test contract and a map of which test enforces which promise                      | Only design amendments the tests expose           |
-| write-code-from-tests      | Code that passes the contract, attacked by wrong variants; a PR                               | Only design amendments the code exposes           |
+| write-code-from-tests      | Code that passes the contract, attacked by wrong variants (cold-reviewed if small); a PR      | Only design amendments the code exposes           |
 | finalize or `/code-review` | A reviewed, re-greened PR; follow-up issues; new attack-deck entries                          | Whether to merge                                  |
 
 ## Sketch and spike: finding the better way before it's expensive
@@ -139,7 +139,7 @@ Every stage can find a problem that belongs to an earlier one. Before anyone act
 findings, one procedure sorts it, [`references/sort.md`](../references/sort.md), run by a fresh agent
 that produced neither the work nor the review. It drops findings that aren't real, groups the rest by
 the cause that made them possible, and gives each group one verdict: **dissolve** (a change to the
-model, owner, flow or rule removes the group), **patch** (a local fix is the cleaner answer),
+model, owner, flow or rule removes the group), **local fix** (fixing it where it shows up is the cleaner answer),
 **close** (one test over the whole class), or **accept** (a recorded trade-off). For each group it
 asks the human's usual question: is there a change that dissolves these rather than patches them,
 and which leaves less code and fewer special cases?

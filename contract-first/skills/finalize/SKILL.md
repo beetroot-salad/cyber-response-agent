@@ -32,7 +32,7 @@ Review the diff, then the code it touches or depends on; a bug outside the chang
 
 Collect every finding, yours or one from the trusted trail, including cleanups an earlier pass deferred and bugs it noted outside the diff. You wrote this review, so you don't sort it: dispatch a fresh sorter on **../../references/sort.md** with the findings, the diff, the code and tests, the principles and project rules, and the accepted trade-offs' names. Give it nothing you skipped, so it reads cold too. Check its verdicts before acting, including the decisions each dissolve would open.
 
-Make each patch, and each dissolve that fits this PR, and say why it was the cleaner one. A dissolve that changes what the design commits to, or an accept, is a design choice: leave it for the human with both options. File an issue for anything you don't resolve here, with the finding, its `file:line`, and the dissolve and patch options you saw.
+Make each local fix, and each dissolve that fits this PR, and say why it was the cleaner one. A dissolve that changes what the design commits to, or an accept, is a design choice: leave it for the human with both options. File an issue for anything you don't resolve here, with the finding, its `file:line`, and the dissolve and patch options you saw.
 
 Run the tests that cover what you changed, the relevant e2e replay, and CI's lint and type checks. Leave the full suite to CI. Never get green by weakening a test, suppressing a lint or type error, or baselining a finding this change introduced. A test that looks wrong is a finding to report, not a line to edit.
 

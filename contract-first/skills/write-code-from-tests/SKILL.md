@@ -59,7 +59,7 @@ The first attack is mandatory unless the change stays inside one owner and one s
 Route the verdicts:
 
 - **Code bug,** including an exploit that fails on the honest code too: fix it under the settled design.
-- **Patch:** make the local fix where it belongs, code here or a test through the repair author below.
+- **Local fix:** make it where it belongs, code here or a test through the repair author below.
 - **Close** (and other contract defects: a wrong test, a stale existing test, a gap real code exposes): write-tests' repair author fixes it on the contract-only branch (write-tests §5, **write-tests/references/contract.md**), writing one test per family, never one per exploit. The repaired test must fail against every exploit in the family, rechecked as §3 says. Name the contract-only branch and ref in the repair author's brief. Bring only the reviewed test changes into the implementation branch, run them against your code, and disclose if the repair author saw the implementation. An old clean attack doesn't certify changed tests; the recheck does. Don't ask the human to ratify each assertion repair.
 - **Dissolve, or a design defect or open choice:** use discuss-issue's amendment protocol, framed as a demonstrated bug and the trade-offs of fixing it; its independent review reads a dissolve before the human does. Bring every dissolve verdict to the human in one message, grouped by cause, with the accept verdicts beside them. Keep unaffected work; block only what depends on the choice.
 - **Accept:** once the human agrees, record the family in the design's **accepted trade-offs** (discuss-issue's design-doc format) with what closing it would cost. Attackers and finalize then treat it as decided.
