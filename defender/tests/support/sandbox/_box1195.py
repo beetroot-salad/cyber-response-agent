@@ -294,7 +294,7 @@ class FakeDaemon(AttachedStartSeam):
         self._fault("alias_allowed", True)
 
     def refuse_create(self) -> None:
-        """Every `docker run` fails (rc 125), as a daemon that cannot create the box does."""
+        """Every `docker run` or `docker create` fails (rc 125), as a daemon that cannot create the box does."""
         self._fault("create", True)
 
     def refuse_sentinel(self) -> None:

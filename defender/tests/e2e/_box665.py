@@ -100,7 +100,7 @@ class RecordingDocker(AttachedStartSeam):
         self.existing_token = existing_token
         # The container answers its state but the daemon fails the label read (rc 1, not "no such object").
         self.label_unreadable = label_unreadable
-        self.create = create            # DockerFault on `docker run` (create)
+        self.create = create            # DockerFault on `docker create` (the run box) or `docker run`
         self.sentinel = sentinel        # DockerFault on the sentinel exec readback
         self.reap = reap                # DockerFault on `docker rm -f`
         self._exec_replies = list(exec_replies or [])
@@ -227,7 +227,7 @@ class RecordingDocker(AttachedStartSeam):
             return self._exec(argv)
         return _cp(0)
 
-    # argv readers (parse the captured `docker run` argv)
+    # argv readers (parse the captured create argv)
     def _argv(self) -> list[str]:
         assert self.create_argv is not None, "docker create was never invoked"
         return self.create_argv
@@ -289,7 +289,7 @@ def reaped_after_create(calls) -> bool:
     create = next(
         (i for i, c in enumerate(calls) if len(c) > 1 and c[1] in ("run", "create")), None
     )
-    assert create is not None, "no `docker run` was issued — the fault fired before create"
+    assert create is not None, "no `docker create` was issued — the fault fired before create"
     argv = calls[create]
     name = argv[argv.index("--name") + 1]
     return ["docker", "rm", "-f", name] in calls[create + 1:]

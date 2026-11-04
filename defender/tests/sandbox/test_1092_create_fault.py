@@ -73,7 +73,7 @@ def test_a_no_such_image_create_fault_names_the_build_command_with_the_mounted_t
         box_mod.start_box(run_dir, defender_dir, docker=rec, tenant_id=TEST_TENANT)
     message = str(e.value)
     assert inspected_image(rec.calls) == expected, rec.calls
-    assert "run" not in subcommands(rec.calls), rec.calls
+    assert not {"run", "create", "start"} & set(subcommands(rec.calls)), rec.calls   # refused before any create (#1343 B10: the run box is `create`d, then started)
     assert f"No such image: {expected}" in message
     assert remedy_command(message) == [
         "python3", f"{defender_dir.parent.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",
@@ -141,7 +141,7 @@ def test_a_daemon_that_stopped_answering_is_reported_as_that_and_never_told_to_b
     with pytest.raises(BoxFault) as e:
         start(rec)
     message = str(e.value)
-    assert "run" not in subcommands(rec.calls), rec.calls
+    assert not {"run", "create", "start"} & set(subcommands(rec.calls)), rec.calls   # refused before any create (#1343 B10: the run box is `create`d, then started)
     assert "daemon" in message, message
     assert "failed to connect" in message, message
     assert remedy_command(message) is None, message
