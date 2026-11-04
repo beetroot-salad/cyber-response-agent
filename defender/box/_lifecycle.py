@@ -9,6 +9,8 @@ import contextlib
 import logging
 import os
 import stat
+import subprocess
+import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
@@ -38,10 +40,10 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
 from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from defender._model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
-from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, TENANT_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import BoxStartConflict, Create, DockerFn, START_TOKEN_LABEL, TENANT_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _container_status, _covered, _inspect_field, _daemon_source, run_docker, _reap_on_fault, _refuse_an_existing_container, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._host_env import provider_scrubbed_environ
-from ._spec import DEFAULT_SPEC, _HostTransport
+from ._spec import DEFAULT_SPEC, _HostTransport, _text
 from ._spec import _DockerTransport
 
 _logger = logging.getLogger(__name__)
@@ -160,7 +162,12 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
 ) -> Create:
     """The run box's create argv, its binds rendered from `lane`: the run lane's mount list
     (`_run_lane_mounts`) as `_start_boxed` built it for the publish-root check, so the argv
-    mounts exactly what was judged."""
+    mounts exactly what was judged.
+
+    The run box dies with the process that started it (#1343 B10): it is created with its input
+    open (`-i`) and removing itself once it stops (`--rm`), its main process `cat` reading that
+    input, and `_attach` starts it with the input a pipe the box executor holds. When the holder
+    ends, by any means, the pipe closes, `cat` ends, and the box stops and is removed."""
     # The uncovered-mount refusal runs before the image resolver: a topology fault must not be
     # masked by the resolver's file-read refusal on the same tree.
     for m in lane:
@@ -177,7 +184,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         env_pairs["DEFENDER_AGENT_DIR"] = str(MODEL_AGENT)
     _input_dir_source(run_dir)
     argv = [
-        "docker", "run", "--detach", "--name", name,
+        "docker", "create", "-i", "--rm", "--name", name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
         *_tenant_label(tenant_id),
         "--runtime", spec.runtime,
@@ -197,7 +204,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     for key in BOX_ENV_ALLOWLIST:
         if key in env_pairs:
             argv += ["--env", f"{key}={env_pairs[key]}"]
-    argv += [rootfs.image, "sleep", "infinity"]
+    argv += [rootfs.image, "cat"]
     return Create(argv, rootfs)
 
 
@@ -463,12 +470,133 @@ def _read_back_stage_token(staged_token: Path, docker: DockerFn, name: str) -> N
             "knowledge inside the box is not this run's copy")
 
 
+#: Seconds between the status reads that wait for a run box's attached start to land.
+_RUNNING_POLL = 0.05
+#: Seconds an ended attached start is given to exit and hand over its error text.
+_STARTER_END_WAIT = 5.0
+
+
+class _StarterExited(BoxFault):
+    """The run box's attached start exited before the box reported running. The box may have
+    run and removed itself (`--rm`) meanwhile, so the name may be another lane's by now: the
+    reap goes by the start token, as a create fault's does."""
+
+
+def _attach(docker: DockerFn, name: str) -> subprocess.Popen[bytes]:
+    """Start the created run box attached (#1343 B10): `docker start -a -i <name>`, its input a
+    pipe this process holds open for the run's life. Asked of the docker seam's own `.popen`
+    (r5 item 15): a seam without one is a plain `AttributeError`, never a `BoxFault` and never a
+    start through the real daemon around the seam."""
+    popen = docker.popen  # type: ignore[attr-defined]
+    try:
+        starter: subprocess.Popen[bytes] = popen(
+            ["docker", "start", "-a", "-i", name],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise BoxFault(f"could not start the box {name}: {e}") from e
+    return starter
+
+
+def _end_starter(starter: subprocess.Popen[bytes]) -> tuple[int | None, str]:
+    """End an attached start, best-effort: killed if it still runs, its input closed and its
+    exit awaited. Its return code and error text, for a start fault to report."""
+    if starter.poll() is None:
+        with contextlib.suppress(OSError):
+            starter.kill()
+    err: bytes | None = b""
+    with contextlib.suppress(OSError, ValueError, subprocess.SubprocessError):
+        _, err = starter.communicate(timeout=_STARTER_END_WAIT)
+    return starter.poll(), _text(err or b"").strip()
+
+
+def _await_running(
+    docker: DockerFn, name: str, starter: subprocess.Popen[bytes], running_wait: float,
+) -> None:
+    """Return once the box reports `running`, so no start-up probe runs into a box that is not
+    up. A start that exits first, or a box still not running after `running_wait` seconds, is a
+    start fault, the start ended and its return code and error text in the fault."""
+    deadline = time.monotonic() + running_wait
+    while True:
+        if starter.poll() is not None:
+            rc, err = _end_starter(starter)
+            raise _StarterExited(
+                f"could not start the box {name}: its attached start exited (rc={rc}) before the "
+                f"box ran: {err}")
+        if _inspect_field(docker, name, "{{.State.Status}}") == "running":
+            return
+        if time.monotonic() >= deadline:
+            rc, err = _end_starter(starter)
+            raise BoxFault(
+                f"could not start the box {name}: it did not report running within "
+                f"{running_wait:g}s of its attached start, which was ended (rc={rc}): {err}")
+        time.sleep(_RUNNING_POLL)
+
+
+def _probe_started(
+    run_dir: Path, spec: BoxSpec, docker: DockerFn, name: str, clock_file: Path,
+    staged_token: Path | None,
+) -> None:
+    """The start-up probes, through the running box: each tree it mounts is the host's."""
+    _plant_sentinel(run_dir, docker, name)
+    # A missing clock file makes libfaketime silently use the wall clock. Prove
+    # this separate bind maps the directory we prepared, just as for the run tree.
+    _probe_sentinel(
+        clock_file.parent, CLOCK_TARGET, docker, name,
+        f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
+    )
+    if staged_token is not None:
+        _read_back_stage_token(staged_token, docker, name)
+    _probe_alias_ban(docker, name, Path(MODEL_RUN), spec.runtime)
+
+
+@dataclass(frozen=True)
+class _Created:
+    """A run box the daemon created, and what its start's fault arms clean up after."""
+
+    run_dir: Path
+    name: str
+    clock_file: Path
+    start_token: str
+    write_verdict: Callable[[dict], None] | None
+
+
+def _start_created(
+    box: _Created, spec: BoxSpec, docker: DockerFn, staged_token: Path | None,
+    running_wait: float,
+) -> BoxExecutor:
+    """Start the created run box attached, wait until it runs, probe it, and hand back the
+    executor holding the attached start. Any fault on the way: the box is reaped (by its start
+    token when the start exited on its own, else as ours: the create succeeded and the box never
+    ran), the start ended, the clock removed and the did-not-run marker written."""
+    starter: subprocess.Popen[bytes] | None = None
+    try:
+        starter = _attach(docker, box.name)
+        _await_running(docker, box.name, starter, running_wait)
+        _probe_started(box.run_dir, spec, docker, box.name, box.clock_file, staged_token)
+    except BaseException as e:
+        # Best-effort reap and end, so neither can skip the marker or replace `e`.
+        owned = box.start_token if isinstance(e, _StarterExited) else None
+        _reap_on_fault(docker, box.name, owned_token=owned)
+        if starter is not None:
+            _end_starter(starter)
+        remove_clock(box.clock_file)
+        write_did_not_run(
+            box.run_dir, f"box startup faulted before the reap scan could run: {e}",
+            write_verdict=box.write_verdict
+        )
+        raise
+    return BoxExecutor(
+        spec=spec, transport=_DockerTransport(box.name, spec), name=box.name, docker=docker,
+        clock_file=box.clock_file, starter=starter,
+    )
+
+
 def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
     run_dir: Path, defender_dir: Path, spec: BoxSpec, docker: DockerFn,
     shared_mounts: SharedMountsFn = _shared_mounts, tenant_agent: Path | None = None,
     write_verdict: Callable[[dict], None] | None = None,
     staged_token: Path | None = None, tenant_id: str | None = None,
-    start_token: str | None = None,
+    start_token: str | None = None, running_wait: float = 30.0,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
@@ -503,9 +631,9 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
     created = _call(docker, create.argv)
     if created.returncode != 0:
         remove_clock(clock_file)
-        # `docker run --detach` is create-then-start, so a failure at task start can leave a
-        # `created` container behind; reap it if it carries our token. Marker and reap are
-        # best-effort and must not replace the create's stderr.
+        # A create that answered non-zero does not prove no container exists under the name
+        # (#884); reap it if it carries our token. Marker and reap are best-effort and must not
+        # replace the create's stderr.
         write_did_not_run(
             run_dir, f"box create faulted before the box was startable: "
                      f"{(created.stderr or '').strip()}", write_verdict=write_verdict
@@ -514,31 +642,8 @@ def _start_boxed(  # noqa: PLR0913 — the run's geography plus its staged token
         raise BoxFault(
             f"could not create the box {name}: {(created.stderr or '').strip()}"
         )
-    try:
-        _plant_sentinel(run_dir, docker, name)
-        # A missing clock file makes libfaketime silently use the wall clock. Prove
-        # this separate bind maps the directory we prepared, just as for the run tree.
-        _probe_sentinel(
-            clock_file.parent, CLOCK_TARGET, docker, name,
-            f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
-        )
-        if staged_token is not None:
-            _read_back_stage_token(staged_token, docker, name)
-        _probe_alias_ban(docker, name, Path(MODEL_RUN), spec.runtime)
-    except BaseException as e:
-        # The box is ours (create succeeded); the reap is best-effort so it cannot skip the
-        # marker or replace `e`.
-        _reap_on_fault(docker, name)
-        remove_clock(clock_file)
-        write_did_not_run(
-            run_dir, f"box startup faulted before the reap scan could run: {e}",
-            write_verdict=write_verdict
-        )
-        raise
-    return BoxExecutor(
-        spec=spec, transport=_DockerTransport(name, spec), name=name, docker=docker,
-        clock_file=clock_file,
-    )
+    return _start_created(_Created(run_dir, name, clock_file, start_token, write_verdict),
+                          spec, docker, staged_token, running_wait)
 
 
 def _render_argv(
@@ -704,6 +809,7 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     write_verdict: Callable[[dict], None] | None = None,
     tenant_id: TenantId | None = None, staged_token: Path | None = None,
     require_sandbox: bool = False, start_token: str | None = None,
+    running_wait: float = 30.0,
 ) -> BoxExecutor:
     """Start the run's box. `require_sandbox` refuses the unsandboxed opt-out whatever the
     environment says (#1342 R2: a job-lane run never degrades to host execution).
@@ -714,6 +820,8 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
     reaps by: a job's worker mints it and reaps the job's leftover by it (#1342 r5 C1); without
     one the box mints its own. `tenant_id` labels the run box's container `defender.tenant=<T>`,
     so the tenant's teardown stops it (#1214 O4; P2's in-box `.tenant-id` check stays retired).
+    `running_wait` bounds, in seconds, the run box's wait for its attached start to report the
+    box running (#1343 B10); a request's box is started detached and does not wait.
     The tenant arguments are illegal with a `BoxRequest`, which carries its own mounts (and its
     own `tenant_id`)."""
     if isinstance(run_dir_or_request, BoxRequest):
@@ -750,14 +858,14 @@ def start_box(  # noqa: PLR0913 — the run's geography, plus the job lane's san
 
     return _start_run_box(run_dir_or_request, defender_dir, spec, docker, tenant_agent,
                           staged_token, write_verdict, tenant_id, require_sandbox=require_sandbox,
-                          start_token=start_token)
+                          start_token=start_token, running_wait=running_wait)
 
 
 def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged token
     run_dir: Path, defender_dir: Path | None, spec: BoxSpec | None, docker: DockerFn,
     tenant_agent: Path | None, staged_token: Path | None,
     write_verdict: Callable[[dict], None] | None, tenant_id: str | None = None, *,
-    require_sandbox: bool = False, start_token: str | None = None,
+    require_sandbox: bool = False, start_token: str | None = None, running_wait: float = 30.0,
 ) -> BoxExecutor:
     if defender_dir is None:
         raise TypeError("start_box(run_dir, defender_dir, ...) needs defender_dir")
@@ -782,7 +890,7 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
         return _start_boxed(run_dir, defender_dir, spec, docker,
                             tenant_agent=tenant_agent, staged_token=staged_token,
                             write_verdict=write_verdict, tenant_id=tenant_id,
-                            start_token=start_token)
+                            start_token=start_token, running_wait=running_wait)
     except BoxFault as e:
         _opt_out_or_raise(e, require_sandbox=require_sandbox)
     # The host runs the bash lane in the model view too (#1255 "Every mode"): over a per-run
@@ -794,10 +902,20 @@ def _start_run_box(  # noqa: PLR0913 — the run's geography plus its staged tok
 
 def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
     """Remove the box's container. Through `docker` when one is given, else through the docker
-    the box was created with (#1195), so the whole lifecycle reaches one daemon."""
+    the box was created with (#1195), so the whole lifecycle reaches one daemon. A run box
+    removes itself once stopped (#1343 B10), so one already being removed, or gone, is torn
+    down; its attached start is then ended, whether or not the removal was proven (ending it
+    ends the box's input, so the box stops on its own)."""
     if not box.name:
         return
-    reason = _remove_container(docker or _carried_docker(box), box.name)
+    auto_removed = getattr(box, "auto_removed", False) is True
+    try:
+        reason = _remove_container(docker or _carried_docker(box), box.name,
+                                   auto_removed=auto_removed)
+    finally:
+        starter = getattr(box, "starter", None)
+        if starter is not None:
+            _end_starter(starter)
     if reason is not None:
         raise BoxFault(f"could not tear down the box {box.name}: {reason}")
     if box.clock_file is not None:
@@ -836,20 +954,35 @@ class BoxRuns:
             raise BoxFault(f"the sandboxed box {box!r} names no container")
         self._box: Any = box
         self._docker: DockerFn | None = _carried_docker(box) if sandboxed else None
+        #: The run box removes itself once stopped (#1343 B10): being removed, or gone, is
+        #: stopped for it alone. A stop/start box is removed only by its owner, so for it
+        #: either state is a box that did not stop as asked.
+        self._auto_removed = getattr(box, "auto_removed", False) is True
 
     def _status(self) -> str | None:
         assert self._docker is not None
         return _inspect_field(self._docker, self._name, "{{.State.Status}}")
 
+    def _stopped(self, status: str | None) -> bool:
+        if status in _STOPPED_STATES:
+            return True
+        if not self._auto_removed:
+            return False
+        assert self._docker is not None
+        # Gone is asked again of a daemon that must answer, so an unreachable one is no proof.
+        return status == "removing" or (
+            status is None and _container_status(self._docker, self._name) is None)
+
     def stop(self) -> None:
         """Stop the box, proven: `docker stop -t 0` kills every process in it, an agent's
-        leftovers included, and the box must then report `exited` or `dead`, else `BoxFault`."""
+        leftovers included, and the box must then report `exited` or `dead` (or, for the run box,
+        which removes itself, be being removed or gone), else `BoxFault`."""
         if self._docker is None:
             return
         name = self._name
         proc = _call(self._docker, ["docker", "stop", "-t", "0", name])
         status = self._status()
-        if status not in _STOPPED_STATES:
+        if not self._stopped(status):
             raise BoxFault(
                 f"could not stop the box {name} (stop rc={proc.returncode}: "
                 f"{(proc.stderr or '').strip()}; status {status!r})"

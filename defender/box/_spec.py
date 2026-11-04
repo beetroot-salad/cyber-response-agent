@@ -171,6 +171,18 @@ class BoxExecutor:
 
     _output_refused: bool = field(default=False, compare=False, repr=False)
 
+    #: The run box's attached `docker start -a -i` (#1343 B10), held here for the run's life: its
+    #: input pipe is the box's main process's input, so the box ends when the process holding the
+    #: executor ends, by any means. Only the teardown (or a start fault) ends it. `None` for every
+    #: other box: a request-lane box is started detached and removed explicitly.
+    starter: subprocess.Popen[bytes] | None = field(default=None, compare=False, repr=False)
+
+    @property
+    def auto_removed(self) -> bool:
+        """The box removes itself once it stops (the run box, `--rm`): one being removed, or
+        already gone, is a stopped box."""
+        return self.starter is not None
+
     def follow_clock(self, reading: Callable[[], datetime]) -> None:
         """Have the box's programs read the run's clock: before every command, the clock file is
         rewritten from `reading()` (the run clock moves against the wall — it pauses for an
