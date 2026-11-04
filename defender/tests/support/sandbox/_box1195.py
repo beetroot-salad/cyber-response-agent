@@ -256,9 +256,10 @@ class FakeDaemon:
     # -- state and faults ---------------------------------------------------------------
 
     def _edit(self, fn: Callable[[dict], object]) -> None:
-        state = daemon_mod.load(self.dir)
-        fn(state)
-        daemon_mod.save(self.dir, state)
+        with daemon_mod.locked(self.dir):
+            state = daemon_mod.load(self.dir)
+            fn(state)
+            daemon_mod.save(self.dir, state)
 
     def _fault(self, key: str, value: Any) -> None:
         self._edit(lambda s: s["faults"].__setitem__(key, value))

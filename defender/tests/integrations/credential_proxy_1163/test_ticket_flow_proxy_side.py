@@ -281,3 +281,70 @@ def test_t14_a_store_that_accepted_the_comment_and_then_dropped_the_reply_has_it
     assert tap.tokens, "positive control: the proxy was reached"
     assert receipt is not None
     assert (receipt["ok"], receipt["status"], receipt["key"]) == (True, "commented", KEY), receipt
+
+
+#: The fact a `TransportFault` carries (#1374 r2): may the request have reached the store?
+MAYBE_DELIVERED = "maybe_delivered"
+
+
+def _cannot_mint() -> str:
+    raise TransportFault("the token source could not mint a request token")
+
+
+def _write_fault(tmp_path, data_root, kind):
+    """The fault `ticket`'s comment write raises through the proxy in situation `kind`, and the
+    store calls the upstream saw."""
+    from defender.integrations import ticket_adapter
+
+    stores = {"openbao-unreachable": _DownOnce, "unforeseen": _BrokenStore,
+              "out-of-time-before-call": lambda sets: _Slow(sets, 0.5)}
+    deps_kw = {"out-of-time-before-call": {"upstream_timeout_sec": 0.2, "proxy_overhead_sec": 0.1},
+               "audit-unwritable": {"audit": H.FailingAudit()},
+               "store-cut-by-the-deadline": {"upstream_timeout_sec": 1.0,
+                                             "proxy_overhead_sec": 0.5}}.get(kind, {})
+    with H.upstream() as up:
+        decl = (H.declaration(f"http://127.0.0.1:{H.free_port()}{STORE}", writes=WRITES)
+                if kind == "store-not-listening" else _decl(up))
+        if kind == "store-cut-by-the-deadline":
+            up.replies[COMMENT] = lambda _seen: (time.sleep(3.0), (201, {}, b"{}"))[1]
+        elif kind == "store-503":
+            up.replies[COMMENT] = (503, {}, b'{"detail": "down"}')
+        else:
+            up.replies[COMMENT] = (201, {}, b"{}")
+        with _published(tmp_path / "forge", data_root, decl) as t:
+            store = stores.get(kind, H.FakeStore)({(t.tenant_id, SYSTEM): T.static_set()})
+            tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+            with A.proxy_for(t, store, **deps_kw) as (url, _tap):
+                if kind == "no-proxy-address":
+                    url = None
+                elif kind == "proxy-not-listening":
+                    url = f"http://127.0.0.1:{H.free_port()}"
+                kw = {}
+                if kind == "no-token-minted":
+                    tok, kw = None, {"token_source": _cannot_mint}
+                ctx = A.ctx_for(tmp_path / "ctx", T.run_record(t), url, tok, **kw)
+                with pytest.raises(TransportFault) as raised:
+                    ticket_adapter.add_case_comment(ctx, key=KEY, body="findings")
+        return raised.value, [s.path for s in up.seen]
+
+
+@pytest.mark.parametrize("kind", ["openbao-unreachable", "unforeseen", "out-of-time-before-call",
+                                  "store-not-listening", "no-proxy-address",
+                                  "proxy-not-listening", "no-token-minted"])
+def test_t15_a_write_that_never_reached_the_store_says_so(tmp_path, data_root, kind):
+    """#1374 r2: the proxy failing before it began the store call (its credential store down, an
+    unforeseen error, its deadline spent first), the store refusing the connection, or the run never
+    getting the request to the proxy: the fault says the write did not reach the store."""
+    fault, seen = _write_fault(tmp_path, data_root, kind)
+    assert seen == [], f"{kind}: the store was called"
+    assert getattr(fault, MAYBE_DELIVERED) is False, (kind, fault)
+
+
+@pytest.mark.parametrize("kind", ["audit-unwritable", "store-cut-by-the-deadline", "store-503"])
+def test_t16_a_write_that_may_have_reached_the_store_says_so(tmp_path, data_root, kind):
+    """#1374 r2, control for t15: once the proxy began the store call the write may have landed —
+    the answer withheld because the audit failed after the store took it, the store's reply cut by
+    the deadline, a 5xx — and the fault says so."""
+    fault, seen = _write_fault(tmp_path, data_root, kind)
+    assert seen == [COMMENT], f"positive control: {kind} called the store"
+    assert getattr(fault, MAYBE_DELIVERED) is True, (kind, fault)

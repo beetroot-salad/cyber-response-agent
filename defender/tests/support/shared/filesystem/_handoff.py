@@ -8,13 +8,19 @@ old file or the new one, never a part.
 
 A write that nothing reads until it completes (setup before the run starts, a record read after
 its writer exited) needs none of this; a plain write is fine there.
+
+Writing whole does not stop a lost update: two processes that each read a file, change it and
+write it back both start from the same old content, and the second write erases the first's
+change. `updating` holds a lock across the read and the write for that.
 """
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import os
 import threading
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 
@@ -38,3 +44,31 @@ def write_whole(path: str | os.PathLike[str], data: str | bytes, *, mode: int | 
             part.unlink()
         raise
     return path
+
+
+_held = threading.local()
+
+
+@contextlib.contextmanager
+def updating(path: str | os.PathLike[str]) -> Iterator[None]:
+    """Hold `path`'s update lock for the block: read it, change it and write it back inside, and
+    no other thread or process holding the same lock can interleave. The lock is a file beside
+    `path` (`.<name>.lock`), so it works across processes that share only the folder. Re-entrant
+    in one thread: a block that calls another holding the same lock does not deadlock."""
+    lock = Path(path).with_name(f".{Path(path).name}.lock")
+    key = os.path.abspath(lock)
+    depth: dict[str, int] = _held.__dict__.setdefault("depth", {})
+    if depth.get(key):
+        depth[key] += 1
+        try:
+            yield
+        finally:
+            depth[key] -= 1
+        return
+    with open(lock, "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)  # released when the handle closes
+        depth[key] = 1
+        try:
+            yield
+        finally:
+            del depth[key]
