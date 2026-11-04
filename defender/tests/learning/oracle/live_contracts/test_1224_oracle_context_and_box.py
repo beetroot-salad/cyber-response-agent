@@ -589,10 +589,10 @@ def test_1224_verifier_gets_call_base_served_facts_and_frozen_telemetry(tmp_path
         assert set(_tool_calls(msgs)) <= {"run_query", "verdict"}, _tool_calls(msgs)
     # The same grant door: the withheld verb reached the tenant from neither model ...
     assert est.calls("edr", "lookup") == []
-    # ... and the granted one did, bounded by the branch point (the stub logs as_of) ...
+    # ... and the granted one did, with no branch point on it (the stub logs as_of) ...
     lookups = [r for r in est.calls("idp", "lookup") if r["params"] == {"entity": "alice"}]
     assert lookups, lookups
-    assert all(r["as_of"] == S.AS_OF_DT.isoformat() for r in lookups), lookups
+    assert all(r["as_of"] is None for r in lookups), lookups
     # ... and the verifier's query is in the oracle-side ledger under its own actor.
     ledger = S.oracle_rows(ep, "b", "ledger")
     assert any(r.get("actor") == "verifier" and r.get("system") == "idp"

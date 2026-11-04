@@ -224,7 +224,7 @@ def test_1224_elastic_confine_index_admits_the_same_indices_for_a_run_and_a_sibl
     VerbContext = S.sym(S.VERBS, "VerbContext")
     run_ctx = VerbContext(defender_dir=root, tenant=H.resolve(root), run_dir=tmp_path / "run",
                           env={})
-    sibling = {"as_of": S.AS_OF_DT}
+    sibling = {}
     if "world_id" in {f.name for f in fields(VerbContext)}:
         sibling["world_id"] = S.fixture_world_id("b")
     sibling_ctx = replace(run_ctx, **sibling)
