@@ -33,11 +33,13 @@ from defender.integrations.host_state_adapter import (  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 CONFIGURED_PATTERNS = ("logs-*", "security-audit-*")
-TICKET_WRITER_SYSTEM = "case-history"
+#: Writes an agent-facing (read-class) request must never reach. #1359: the playground's one
+#: comment write is the host's, through the write-endpoint table (D-6, tests below); under the
+#: read class it is still refused, as are the ticket's other writes.
 WRITE_ENDPOINTS = (
-    (TICKET_WRITER_SYSTEM, "/tickets", "POST"),
-    (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/transitions", "POST"),
-    (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/comments", "POST"),
+    ("ticket", "/tickets", "POST"),
+    ("ticket", "/tickets/SOC-1/transitions", "POST"),
+    ("ticket", "/tickets/SOC-1/comments", "POST"),
     ("elastic", "/logs-2026.01.01/_update/1", "POST"),
 )
 TICKET_READ_PATH = "/tickets"
@@ -212,9 +214,9 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
     for system, endpoint, method in REAL_STUB_ENDPOINTS:
         confine_read_endpoint(system, f"http://host{endpoint}", method=method, verb_class="r")
 
-    assert TICKET_WRITER_SYSTEM not in READ_ENDPOINT_ALLOWLIST, (
-        f"the read allowlist declares read endpoints for {TICKET_WRITER_SYSTEM}, the ticket "
-        f"writer's system, so the write refusals below pass for another reason"
+    assert all(method == "GET" for _, method in READ_ENDPOINT_ALLOWLIST["ticket"]), (
+        "the ticket read allowlist holds a non-GET entry, so the write refusals below pass or "
+        "fail for another reason"
     )
 
     for system, endpoint, method in WRITE_ENDPOINTS:
@@ -368,3 +370,207 @@ def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_qu
     with pytest.raises(ConfinementFault):
         confine_read_endpoint("elastic", "http://es:9200/%5Flogs/../_update/1", method="POST",
                               verb_class="r")
+
+
+# ---- the host write entry and the write-endpoint table (#1359 D-6) ---------------------------------
+
+COMMENT_PATH = "/tickets/SOC-1/comments"
+
+
+#: The one place the host write entry's call shape is spelled (D-6/D-15: name and four arguments;
+#: house style adds the config and `system=`). `_host_write` and the planted adapter source below
+#: both use this text, with `ctx`, `cfg`, `method`, `path`, `payload` in scope; the code stage
+#: changes the shape here only.
+HTTP_WRITE_CALL = 'transport.http_write(ctx, cfg, method, path, payload, system="ticket")'
+
+
+def _host_write(ctx: VerbContext, cfg: dict[str, str], method: str, path: str,
+                body: dict | None = None) -> Any:
+    """The shared transport's host write entry, called as `HTTP_WRITE_CALL` spells it."""
+    from defender.integrations import _stub_transport as transport
+
+    return eval(HTTP_WRITE_CALL, {"transport": transport},  # noqa: S307 - a constant of this file
+                {"ctx": ctx, "cfg": cfg, "method": method, "path": path, "payload": body or {}})
+
+
+def _docker_ticket_ctx(tmp_path: Path, monkeypatch: Any) -> tuple[VerbContext, Any]:
+    """A run context over the playground tenant's `ticket` system on the docker route, its store
+    a fake `docker` that records every call."""
+    from defender.tests.support.runtime.engine import _spec767 as M
+
+    M.use_case_record(monkeypatch, tmp_path / "dfn")
+    store = M.FakeStore(tmp_path / "store")
+    return S.verb_context(M.current_record(), tmp_path / "run", store.env({})), store
+
+
+def _ticket_cfg(ctx: VerbContext) -> dict[str, str]:
+    from defender.integrations import _stub_transport as transport
+
+    return transport.load_config(ctx, "ticket", "TICKET", ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC"))
+
+
+def test_the_guard_admits_the_ticket_comment_as_a_write_and_the_retired_system_nowhere():
+    """What the guard admits, not how the table is stored (D-15): `ticket` may POST its comment
+    path at class `rw`; the retired `case-history` system is refused at every class, comment path
+    included; no create or transition path is admitted for `ticket`. O3, O2."""
+    confine_read_endpoint("ticket", f"http://host{COMMENT_PATH}", method="POST", verb_class="rw")
+    for verb_class in ("r", "rw"):
+        for method, path in (("POST", COMMENT_PATH), ("POST", "/tickets"), ("GET", "/tickets")):
+            with pytest.raises(ConfinementFault):
+                confine_read_endpoint("case-history", f"http://host{path}", method=method,
+                                      verb_class=verb_class)
+    for path in ("/tickets", "/tickets/SOC-1/transitions"):
+        with pytest.raises(ConfinementFault):
+            confine_read_endpoint("ticket", f"http://host{path}", method="POST", verb_class="rw")
+
+
+def test_the_write_class_admits_the_ticket_comment_and_refuses_every_other_write():
+    """The same guard, at class `rw`: `ticket` POST /tickets/*/comments passes; another method, a
+    create, a transition and another system's write are `ConfinementFault`s. Control: the same
+    comment path under the read class is refused. D-6."""
+    confine_read_endpoint("ticket", f"http://host{COMMENT_PATH}", method="POST", verb_class="rw")
+    for system, path, method in (
+        ("ticket", COMMENT_PATH, "PATCH"), ("ticket", COMMENT_PATH, "DELETE"),
+        ("ticket", "/tickets", "POST"), ("ticket", "/tickets/SOC-1/transitions", "POST"),
+        ("ticket", "/tickets/SOC-1", "PATCH"), ("cmdb", "/hosts", "POST"),
+        ("elastic", "/logs-2026.01.01/_update/1", "POST"),
+    ):
+        with pytest.raises(ConfinementFault):
+            confine_read_endpoint(system, f"http://host{path}", method=method, verb_class="rw")
+    with pytest.raises(ConfinementFault):
+        confine_read_endpoint("ticket", f"http://host{COMMENT_PATH}", method="POST",
+                              verb_class="r")
+
+
+def test_the_host_write_entry_reaches_the_allowed_comment_and_the_agent_entry_does_not(
+        tmp_path: Path, monkeypatch: Any):
+    """On the docker route `http_write` POSTs the one allowed path; the agent-facing `http_post`
+    on that same path stays refused before any docker child is forked. D-6, P2."""
+    from defender.integrations import _stub_transport as transport
+
+    ctx, store = _docker_ticket_ctx(tmp_path, monkeypatch)
+    cfg = _ticket_cfg(ctx)
+    with pytest.raises(ConfinementFault):
+        transport.http_post(ctx, cfg, COMMENT_PATH, {"body": "x"}, system="ticket")
+    assert store.calls == [], "the agent-facing POST reached the store"
+
+    _host_write(ctx, cfg, "POST", COMMENT_PATH, {"author": "a", "body": "x"})
+    assert [(c.method, c.path) for c in store.calls] == [("POST", COMMENT_PATH)]
+
+
+@pytest.mark.parametrize(("method", "path"), [
+    ("PATCH", COMMENT_PATH), ("POST", "/tickets"), ("POST", "/tickets/SOC-1/transitions"),
+    ("PATCH", "/tickets/SOC-1"), ("DELETE", "/tickets/SOC-1")])
+def test_a_host_write_the_table_does_not_allow_is_a_confinement_fault_before_any_request(
+        tmp_path: Path, monkeypatch: Any, method: str, path: str):
+    """The host write entry is confined too: a write outside the table raises `ConfinementFault`
+    and no docker child is forked (the request never reaches the store). D-6."""
+    ctx, store = _docker_ticket_ctx(tmp_path, monkeypatch)
+    cfg = _ticket_cfg(ctx)
+    with pytest.raises(ConfinementFault):
+        _host_write(ctx, cfg, method, path, {"body": "x"})
+    assert store.calls == [], f"{method} {path} reached the store"
+
+
+#: A planted `ticket_adapter.py`: the host's comment action exactly as the tenant's case-record
+#: file reaches it, but it writes where the call below says (the write-table-bypass shape).
+PLANTED_TICKET_ADAPTER = '''\
+from defender.integrations import _stub_transport as transport
+
+
+def check_settings(tenant):
+    return None
+
+
+def health_check(ctx):
+    return {{}}
+
+
+def add_case_comment(ctx, *, key, body):
+    cfg = transport.load_config(ctx, "ticket", "TICKET", ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC"))
+    method, path, payload = {method!r}, f"/tickets/{{key}}{suffix}", {{"body": body}}
+    {write_call}
+    return None
+
+
+VERBS = {verbs}
+'''
+
+#: The planted adapter's `VERBS` as a harmless adapter spells it, and the three ways a cold read
+#: refuses one that holds the comment action (r4 "Host-only, first layer").
+HARMLESS_VERBS = '{"health-check": health_check}'
+VERBS_HOLDING_THE_ACTION = {
+    "dash-spelled key": '{"health-check": health_check, "add-case-comment": health_check}',
+    "underscore-spelled key": '{"health-check": health_check, "add_case_comment": health_check}',
+    "bare-name value": '{"health-check": health_check, "note": add_case_comment}',
+}
+
+
+def _leg_over_planted_adapter(tmp_path: Path, monkeypatch: Any, *, method: str, suffix: str,
+                              verbs: str = HARMLESS_VERBS):
+    """The record leg with a planted case adapter, the store a fake `docker`: (store, receipt)."""
+    from defender import box as box_mod
+    from defender.investigation import ticket_writer
+    from defender.tests.support.runtime.engine import _spec767 as M
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+    M.use_case_record(monkeypatch, tmp_path / "dfn")
+    tree = tmp_path / "tree"
+    (tree / "integrations").mkdir(parents=True)
+    (tree / "integrations" / "ticket_adapter.py").write_text(
+        PLANTED_TICKET_ADAPTER.format(method=method, suffix=suffix, verbs=verbs,
+                                      write_call=HTTP_WRITE_CALL),
+        encoding="utf-8")
+    store = M.FakeStore(tmp_path / "store")
+    run_dir = M.make_run(tmp_path / "runs")
+    ticket_writer.record_case_ticket(
+        fixture_run(run_dir), tenant=M.current_record(), defender_dir=tree,
+        env=store.env(box_mod.run_env(S.DEFENDER, run_dir)))
+    return store, M.receipt(run_dir)
+
+
+def test_a_case_adapter_writing_outside_the_table_leaves_an_error_receipt_naming_the_write(
+        tmp_path: Path, monkeypatch: Any):
+    """Through the record leg, a case adapter whose write is not in the table yields an `error`
+    receipt naming the refused method and path, with `url` null, and no request reaches the
+    store. Control: the same planted adapter writing the allowed comment path is a `commented`
+    receipt. D-6, D-10, r4 receipt reasons."""
+    from defender.tests.support.runtime.engine import _spec767 as M
+
+    control_store, control = _leg_over_planted_adapter(
+        tmp_path / "control", monkeypatch, method="POST", suffix="/comments")
+    assert control["status"] == "commented", control
+    assert [(c.method, c.path) for c in control_store.calls] == [
+        ("POST", f"/tickets/{M.CASE_KEY}/comments")]
+
+    store, got = _leg_over_planted_adapter(tmp_path / "bad", monkeypatch, method="PATCH", suffix="")
+    assert store.calls == [], "a write outside the table reached the store"
+    assert got["status"] == "error", got
+    assert got["ok"] is False, got
+    assert got["url"] is None, got
+    assert "PATCH" in got["reason"], got
+    assert f"/tickets/{M.CASE_KEY}" in got["reason"], got
+
+
+@pytest.mark.parametrize("spelling", list(VERBS_HOLDING_THE_ACTION))
+def test_a_case_adapter_the_cold_read_refused_serves_no_comment(
+        tmp_path: Path, monkeypatch: Any, spelling: str):
+    """Through the record leg, a case adapter whose `VERBS` holds the comment action is refused by
+    the cold read and does not serve the host's comment either: no request reaches the store, an
+    `error` receipt (`url` null) names `settings/case-record.yaml` and says the adapter was
+    refused. Control: the same adapter without that `VERBS` entry comments. O4, D-7 amended."""
+    control_store, control = _leg_over_planted_adapter(
+        tmp_path / "control", monkeypatch, method="POST", suffix="/comments")
+    assert control["status"] == "commented", control
+    assert len(control_store.calls) == 1, "positive control: the harmless adapter commented once"
+
+    store, got = _leg_over_planted_adapter(
+        tmp_path / "bad", monkeypatch, method="POST", suffix="/comments",
+        verbs=VERBS_HOLDING_THE_ACTION[spelling])
+    assert store.calls == [], f"{spelling}: a refused adapter still served the comment"
+    assert (got["status"], got["ok"], got["url"]) == ("error", False, None), got
+    reason = got["reason"].lower()
+    assert "case-record.yaml" in reason, got
+    assert str(tmp_path).lower() not in reason, f"the reason carries a host path: {got}"
+    assert "adapter" in reason, got
+    assert "refused" in reason, got

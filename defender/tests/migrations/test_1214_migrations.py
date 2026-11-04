@@ -57,10 +57,10 @@ def _at_baseline(dsn: str, *, tenants: tuple[str, ...] = ()) -> None:
     if tenants:
         execute(dsn, """INSERT INTO identity.users (id, email, display_name, status, is_platform_admin,
                         set_password_requested_seq, set_password_sent_seq, set_password_attempts, created_at, updated_at)
-                        VALUES ('u1', 'ann@x.org', '', 'invited', false, 0, 0, 0, %s, %s)""", (CREATED, CREATED))
+                        VALUES ('d1000000-0000-4000-8000-000000000001', 'ann@x.org', '', 'invited', false, 0, 0, 0, %s, %s)""", (CREATED, CREATED))
         execute(dsn, """INSERT INTO identity.memberships (id, user_id, tenant_id, status, invited_by, created_at,
                         notify_requested_seq, notify_sent_seq, notify_attempts)
-                        VALUES ('m1', 'u1', %s, 'invited', 'system', %s, 0, 0, 0)""", (tenants[0], CREATED))
+                        VALUES ('e1000000-0000-4000-8000-000000000001', 'd1000000-0000-4000-8000-000000000001', %s, 'invited', 'system', %s, 0, 0, 0)""", (tenants[0], CREATED))
 
 
 def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
@@ -74,8 +74,8 @@ def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
 
 def test_the_history_is_the_baseline_and_four_revisions_on_it_in_a_line():
     """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11); #1163 adds one more, the six
-    sign columns of the generation record (A24/r8.4); #1342 puts its jobs revision on #1163's, and #1343 one on that: a single line
-    baseline -> #1214's -> #1163's -> #1342's -> #1343's, no branch. (#1343: one more revision; conflict updated)"""
+    sign columns of the generation record (A24/r8.4); #1342 puts its jobs revision on #1163's, and #1382 its uuid ids
+    revision on that: a single line baseline -> #1214's -> #1163's -> #1342's -> #1382's, no branch."""
     from alembic.script import ScriptDirectory
 
     from defender.migrations import _config
@@ -85,7 +85,6 @@ def test_the_history_is_the_baseline_and_four_revisions_on_it_in_a_line():
     assert len(chain) == 5
     [(head_revision, jobs), (jobs_revision, sign), (sign_revision, middle), (middle_revision, down), (base, base_down)] = chain
     assert (jobs, sign, middle, down, base, base_down) == (jobs_revision, sign_revision, middle_revision, BASELINE, BASELINE, None)
-    assert jobs_revision == "0004_jobs", "#1342's revision keeps its id"
     assert middle_revision == TENANCY, "#1214's revision keeps its id"
     assert sign_revision == SIGN_LOGIN, "#1163's revision keeps its id"
     assert len({head_revision, jobs_revision, sign_revision, middle_revision, BASELINE}) == 5
@@ -131,11 +130,11 @@ def test_set_schema_keeps_the_rows_the_memberships_and_the_foreign_keys_name(emp
     upgrade(empty_database)
     assert _fk_to_tenants(empty_database) == [(name, "tenancy.tenants")]
     assert {r[0] for r in execute(empty_database, "SELECT id FROM tenancy.tenants")} == {LAB, OTHER}
-    assert execute(empty_database, "SELECT id, tenant_id, status FROM identity.memberships") == [("m1", LAB, "invited")]
+    assert execute(empty_database, "SELECT id, tenant_id, status FROM identity.memberships") == [("e1000000-0000-4000-8000-000000000001", LAB, "invited")]
     with pytest.raises(psycopg.errors.ForeignKeyViolation):  # a membership of a tenant that is not there
         execute(empty_database, """INSERT INTO identity.memberships (id, user_id, tenant_id, status, invited_by, created_at,
                                    notify_requested_seq, notify_sent_seq, notify_attempts)
-                                   VALUES ('m2', 'u1', 'no-such-tenant', 'invited', 'system', %s, 0, 0, 0)""", (CREATED,))
+                                   VALUES ('e1000000-0000-4000-8000-000000000002', 'd1000000-0000-4000-8000-000000000001', 'f1000000-0000-4000-8000-000000000009', 'invited', NULL, %s, 0, 0, 0)""", (CREATED,))
     with pytest.raises(psycopg.errors.ForeignKeyViolation):  # a tenant with a membership cannot be deleted
         execute(empty_database, "DELETE FROM tenancy.tenants WHERE id = %s", (LAB,))
     execute(empty_database, "DELETE FROM tenancy.tenants WHERE id = %s", (OTHER,))  # control: one without can
@@ -189,7 +188,7 @@ def test_tenants_columns_are_the_data_models_and_only_the_identity_ones_are_requ
     assert {r[0] for r in rows if r[1] == "NO"} == NOT_NULL
     assert [r for r in rows if r[2] is not None] == []
     with pytest.raises(psycopg.errors.NotNullViolation):  # no default left to supply a state
-        execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at) VALUES ('x', now())")
+        execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at) VALUES ('f1000000-0000-4000-8000-000000000001', now())")
 
 
 # --- #1163's revision: the six sign columns (A24/r8.4) ------------------------------------------------------
@@ -288,7 +287,7 @@ def _tenant(dsn: str, state: str, action: str | None) -> bool:
 
     try:
         execute(dsn, """INSERT INTO tenancy.tenants (id, created_at, state, pending_action)
-                        VALUES (%s, now(), %s, %s)""", (f"t-{next(_ids)}", state, action))
+                        VALUES (%s, now(), %s, %s)""", (f"f2000000-0000-4000-8000-{next(_ids):012d}", state, action))
     except psycopg.errors.CheckViolation:
         return False
     return True
@@ -314,13 +313,13 @@ def test_at_most_one_live_generation_per_tenant(migrated_database):
     """A tenant has any number of pending/retiring/destroyed generations but one `live`; another tenant's live is separate (O11, P4)."""
     import psycopg.errors
 
-    for tenant in ("ta", "tb"):
+    for tenant in ("aa000000-0000-4000-8000-00000000000a", "aa000000-0000-4000-8000-00000000000b"):
         execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, now(), 'active')", (tenant,))
-    given = dict(tenant_id="ta")
+    given = dict(tenant_id="aa000000-0000-4000-8000-00000000000a")
     fill_row(migrated_database, "generations", salt="s1", status="live", **given)
     for salt, status in (("s2", "retiring"), ("s3", "pending"), ("s4", "destroyed"), ("s5", "destroyed")):
         fill_row(migrated_database, "generations", salt=salt, status=status, **given)
-    fill_row(migrated_database, "generations", tenant_id="tb", salt="s6", status="live")
+    fill_row(migrated_database, "generations", tenant_id="aa000000-0000-4000-8000-00000000000b", salt="s6", status="live")
     with pytest.raises(psycopg.errors.UniqueViolation):
         fill_row(migrated_database, "generations", salt="s7", status="live", **given)
     execute(migrated_database, "UPDATE tenancy.generations SET status = 'retiring' WHERE salt = 's1'")
@@ -332,10 +331,10 @@ def test_a_generation_status_outside_the_model_is_refused(migrated_database):
     """Generation status is one of pending|live|retiring|destroyed (O11)."""
     import psycopg.errors
 
-    execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES ('ta', now(), 'active')")
-    fill_row(migrated_database, "generations", tenant_id="ta", salt="s1", status="pending")  # control
+    execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES ('aa000000-0000-4000-8000-00000000000a', now(), 'active')")
+    fill_row(migrated_database, "generations", tenant_id="aa000000-0000-4000-8000-00000000000a", salt="s1", status="pending")  # control
     with pytest.raises(psycopg.errors.CheckViolation):
-        fill_row(migrated_database, "generations", tenant_id="ta", salt="s2", status="paused")
+        fill_row(migrated_database, "generations", tenant_id="aa000000-0000-4000-8000-00000000000a", salt="s2", status="paused")
 
 
 @pytest.mark.postgres
@@ -344,8 +343,8 @@ def test_each_lifecycle_table_belongs_to_a_tenant(table, migrated_database):
     """forge_wiring, generations and publish_status rows need an existing tenant (foreign keys, O11)."""
     import psycopg.errors
 
-    execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES ('ta', now(), 'active')")
+    execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES ('aa000000-0000-4000-8000-00000000000a', now(), 'active')")
     extra = {"salt": "s1", "status": "pending"} if table == "generations" else {}
-    fill_row(migrated_database, table, tenant_id="ta", **extra)  # control
+    fill_row(migrated_database, table, tenant_id="aa000000-0000-4000-8000-00000000000a", **extra)  # control
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
-        fill_row(migrated_database, table, tenant_id="nobody", **(extra | {"salt": "s2"} if extra else {}))
+        fill_row(migrated_database, table, tenant_id="f3000000-0000-4000-8000-000000000000", **(extra | {"salt": "s2"} if extra else {}))

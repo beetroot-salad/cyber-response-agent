@@ -10,18 +10,29 @@ from pydantic import (
 )
 
 from defender._clock import as_utc
+from defender._text import postgres_can_hold
 from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
+from defender.records.formats import AlertId, InvestigationId, LearningJobId, MembershipId, TenantId, UserId
 
 InvestigationStatus = Literal["queued", "running", "completed", "unparseable", "failed", "aborted"]
 
 LearningJobStatus = Literal["queued", "running", "completed", "failed", "skipped"]
 
-#: What a record id may be: the same grammar in a path segment and in a request body, and ASCII
-#: only, so an id is always safe to put back into a URL or a header.
+#: What a tenant-chosen name may be (a system id), and the lesson id and page cursor: the same
+#: grammar in a path segment and in a request body, and ASCII only, so it is always safe to put back
+#: into a URL or a header. An id the system mints is not one of these: it is its family's type
+#: (`TenantId`, `AlertId`, ...), whose grammar is canonical UUID text (#1382).
 RECORD_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 RecordId = Annotated[str, Field(pattern=RECORD_ID_PATTERN)]
+
+def _refuse_unstorable_id(value: str) -> str:
+    """Refuse text PostgreSQL cannot hold, here rather than at the store (#1379 O1a)."""
+    if not postgres_can_hold(value):
+        raise ValueError("it holds a NUL or a lone surrogate, which cannot be stored")
+    return value
+
 
 #: The id a caller mints once per user action, so a retried or double-clicked create
 #: returns the record the first attempt made.
@@ -30,7 +41,7 @@ ClientRequestId = Annotated[str, Field(
     description="Minted once per user action. Repeating the request with it answers the latest "
                 "attempt of the request this id started; a request answered with an investigation "
                 "already live started nothing, so repeating it is a new request.",
-)]
+), AfterValidator(_refuse_unstorable_id)]
 
 
 def _not_a_number(value: object) -> object:
@@ -62,7 +73,7 @@ class _Request(BaseModel):
 class AlertSummary(BaseModel):
     """An alert as listed. The raw alert is left out of lists; `GET /alerts/{id}` carries it."""
 
-    alert_id: RecordId
+    alert_id: AlertId
     vendor: str = Field(description="The ticket system the alert was pulled from.")
     vendor_ticket_id: str = Field(description="The vendor's own id; unique per tenant and vendor.")
     title: str
@@ -95,8 +106,8 @@ class InvestigationKnowledge(BaseModel):
 
 
 class Investigation(BaseModel):
-    investigation_id: RecordId
-    alert_id: RecordId
+    investigation_id: InvestigationId
+    alert_id: AlertId
     status: InvestigationStatus
     request_key: str = Field(
         description="The `client_request_id` of the request this investigation answers.")
@@ -139,14 +150,14 @@ class Investigation(BaseModel):
 
 
 class InvestigationCreate(_Request):
-    alert_id: RecordId
+    alert_id: AlertId
     client_request_id: ClientRequestId
 
 
 class LearningJob(BaseModel):
-    learning_job_id: RecordId
-    investigation_id: RecordId
-    alert_id: RecordId
+    learning_job_id: LearningJobId
+    investigation_id: InvestigationId
+    alert_id: AlertId
     status: LearningJobStatus
     trigger: Literal["auto", "explicit"] = Field(
         description="`auto` when the investigation's completion queued it; `explicit` for a re-learn."
@@ -158,7 +169,7 @@ class LearningJob(BaseModel):
 
 
 class LearningJobCreate(_Request):
-    investigation_id: RecordId
+    investigation_id: InvestigationId
     client_request_id: ClientRequestId
 
 
@@ -268,26 +279,26 @@ class InviteCreate(BaseModel):
 class Invitation(BaseModel):
     """An invitation as its inviters see it: only what they typed, its status and its date."""
 
-    id: str
+    id: MembershipId
     email: str
     status: Literal["invited"]
     created_at: Instant
 
 
 class Member(BaseModel):
-    user_id: str
+    user_id: UserId
     email: str
     display_name: str
 
 
 class MeUser(BaseModel):
-    id: str
+    id: UserId
     email: str
     display_name: str
 
 
 class TenantRef(BaseModel):
-    tenant_id: str
+    tenant_id: TenantId
 
 
 class TenantItem(BaseModel):
@@ -295,7 +306,7 @@ class TenantItem(BaseModel):
     the current step and whose it is, and the last failure (which names the step and the external
     answer, never a secret). Nothing pending means `pending_action`, `step` and `step_actor` are null."""
 
-    tenant_id: str
+    tenant_id: TenantId
     state: Literal["creating", "active", "offboarding", "offboarded"]
     pending_action: Literal["create", "rotate", "offboard", "delete_repo"] | None
     step: str | None
@@ -305,8 +316,8 @@ class TenantItem(BaseModel):
 
 
 class InvitationRef(BaseModel):
-    id: str
-    tenant_id: str
+    id: MembershipId
+    tenant_id: TenantId
 
 
 class Me(BaseModel):

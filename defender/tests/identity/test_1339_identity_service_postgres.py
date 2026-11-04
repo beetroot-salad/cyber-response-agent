@@ -214,7 +214,7 @@ async def test_concurrent_invitations_of_one_person_wait_on_the_user_row_and_ret
 async def test_concurrent_first_sign_ins_of_one_user_activate_exactly_once(stack):
     """O6b: two sign-ins reach the activation together; one `activate_user` applies, the other falls back to the name."""
     ann = await _invitee(stack, "ann@x.org", "acct-ann")
-    rows = [await stack.repo.ensure_invitation(ann.id, t, invited_by="system", now=NOW) for t in (T1, T2)]
+    rows = [await stack.repo.ensure_invitation(ann.id, t, invited_by=None, now=NOW) for t in (T1, T2)]
     stack.repo.calls.clear()
     async with holding_row(stack.dsn, "users", ann.id):
         tasks = [asyncio.ensure_future(_sign_in(stack, "acct-ann", name)) for name in ("Ann One", "Ann Two")]

@@ -1,22 +1,29 @@
-"""#1163 repair (proxy side): the ticket writer reports the case-history store's own refusal
-(its status and reason), as on the docker path, not as a transport failure."""
+"""#1163/#1359 (proxy side): the record leg reports the case system's own refusal by its status
+and the store's unreachability as such, as on the docker path."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
+import types
 
 import pytest
 
 from defender.box import run_env
-from defender.investigation import ticket_writer
-from defender.kit.faults import TransportFault
+from defender.integrations._stub_transport import raise_proxy_fault
+from defender.kit.faults import ConfigFault, TransportFault
+from defender.kit.settings import config_pointer
+from defender.systems import case_system
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163.test_ticket_flow import (
-    STORE,
+    COMMENT,
+    KEY,
     SYSTEM,
     _decl,
+    _leg,
+    _published,
     _run,
 )
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
@@ -25,64 +32,59 @@ from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 REASON = "store says no: duplicate-or-invalid"
 
 
-def _leg(tmp_path, data_root, status: int, leg: str, caplog):
-    """Run one ticket leg against a store answering `status` to its call; returns the receipt
-    after it (None when the leg wrote none) and the recording upstream."""
+def _comment_leg(tmp_path, data_root, status: int, caplog):
+    """The record leg against a store answering `status` to the comment; returns the receipt and
+    the recording upstream."""
     caplog.set_level(logging.INFO)
-    with H.upstream() as up, A.published(tmp_path / "forge", data_root, {SYSTEM: _decl(up)}) as t:
+    with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         rec, run = _run(tmp_path)
-        path = "/tickets" if leg == "open" else f"/tickets/{rec.run_dir_at.name}/comments"
-        up.replies[f"{STORE}{path}"] = (status, {"Content-Type": "application/json"},
-                                        json.dumps({"detail": REASON}).encode())
+        up.replies[COMMENT] = (status, {"Content-Type": "application/json"},
+                               json.dumps({"detail": REASON}).encode())
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
-        kw = dict(tenant=T.run_record(t), defender_dir=DEFENDER,
-                  env=run_env(DEFENDER, rec.run_dir_at),
-                  request_token=T.token(t.tenant_id, {(SYSTEM, "rw")}))
         with A.proxy_for(t, store) as (url, _tap):
-            if leg == "open":
-                ticket_writer.open_case_ticket(run, proxy_url=url, **kw)
-            else:
-                S.ticket_writer().record_case_ticket(run, proxy_url=url, **kw)
-        return S.receipt(rec.run_dir_at), up
+            receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw")}))
+        return receipt, up
 
 
-@pytest.mark.parametrize("status", [404, 422, 500])
-def test_t4_a_store_refusing_the_open_leg_is_reported_with_its_status_and_reason(
-        tmp_path, data_root, caplog, status):
-    """The store answering the case ticket with a 4xx or 5xx leaves an error receipt quoting
-    `HTTP <status>` and the store's reason, as the docker path does. O7, A9."""
-    receipt, up = _leg(tmp_path, data_root, status, "open", caplog)
+@pytest.mark.parametrize(("status", "words"), [
+    (403, ("the store refused", "403")),
+    (404, ("the store refused", "404", "not found")),
+    (409, ("the store refused", "409")),
+    (422, ("the store refused", "422")),
+    (500, ("the store could not be reached",)),
+    (503, ("the store could not be reached",)),
+])
+def test_t4_a_store_refusing_the_comment_is_reported_by_class_and_status(
+        tmp_path, data_root, caplog, status, words):
+    """A 4xx leaves an error receipt "the store refused" with the status (a 404 also "not found");
+    a 5xx is "the store could not be reached". O5, UpstreamFault status."""
+    receipt, up = _comment_leg(tmp_path, data_root, status, caplog)
 
     assert [s.method for s in up.seen] == ["POST"], "control: the store was asked"
     assert receipt is not None, "the refusal left no receipt"
-    assert receipt["ok"] is False
-    assert f"HTTP {status}" in receipt["reason"], receipt
-    assert REASON in receipt["reason"], receipt
+    assert (receipt["ok"], receipt["key"]) == (False, KEY)
+    assert all(w in receipt["reason"].lower() for w in words), receipt
     assert H.CANARY_KEY not in json.dumps(receipt)
 
 
-def test_t4_a_409_on_the_open_leg_is_the_case_already_existing(tmp_path, data_root, caplog):
-    """A 409 on the open leg is logged as the case already existing and leaves no error
-    receipt, so the record leg goes on. O7, A9."""
-    receipt, up = _leg(tmp_path, data_root, 409, "open", caplog)
+def test_t7_a_store_nothing_listens_at_is_reported_as_could_not_be_reached(tmp_path, data_root):
+    """The declared base has no listener behind the proxy: an error receipt saying the store could
+    not be reached (as a 5xx and the docker path's unreachable bastion do), not that the credential
+    proxy refused. O5."""
+    from defender.tests.integrations.credential_proxy_1163.test_ticket_flow import STORE, WRITES
 
-    assert [s.method for s in up.seen] == ["POST"], "control: the store was asked"
-    assert "already exists (409)" in caplog.text
-    assert receipt is None
-
-
-@pytest.mark.parametrize("status", [404, 409, 422, 500])
-def test_t4_a_store_refusing_the_record_comment_is_reported_with_its_status_and_reason(
-        tmp_path, data_root, caplog, status):
-    """The store answering the record comment with a 4xx or 5xx leaves an error receipt quoting
-    `HTTP <status>` and the store's reason. O7, A9."""
-    receipt, up = _leg(tmp_path, data_root, status, "record", caplog)
-
-    assert [s.method for s in up.seen] == ["POST"], "control: the store was asked"
-    assert receipt is not None, "the refusal left no receipt"
-    assert receipt["ok"] is False
-    assert f"HTTP {status}" in receipt["reason"], receipt
-    assert REASON in receipt["reason"], receipt
+    dead = H.declaration(f"http://127.0.0.1:{H.free_port()}{STORE}", writes=WRITES)
+    with _published(tmp_path / "forge", data_root, dead) as t:
+        rec, run = _run(tmp_path)
+        store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
+        with A.proxy_for(t, store) as (url, tap):
+            receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw")}))
+    assert tap.tokens, "control: the proxy was reached"
+    assert receipt is not None
+    assert (receipt["ok"], receipt["status"], receipt["key"]) == (False, "error", KEY), receipt
+    reason = receipt["reason"].lower()
+    assert "could not be reached" in reason, receipt
+    assert "the credential proxy refused" not in reason, receipt
 
 
 class _DownOnce(H.FakeStore):
@@ -96,21 +98,65 @@ class _DownOnce(H.FakeStore):
         return found
 
 
-def test_t5_an_open_leg_lost_to_a_proxy_blip_does_not_stop_the_record_leg(
+def test_t5_a_proxy_blip_loses_the_comment_not_the_run_and_the_next_one_posts(
         tmp_path, data_root, caplog):
-    """The proxy's store is down for the open leg only: that leg fails as a transport error,
-    and the record leg still posts its comment (r7 A18: only the operator's refusal stops it)."""
+    """The proxy's store is down for the first comment: an error receipt, no raise; the same leg
+    over a fresh run then posts. O5."""
     caplog.set_level(logging.INFO)
-    with H.upstream() as up, A.published(tmp_path / "forge", data_root, {SYSTEM: _decl(up)}) as t:
-        rec, run = _run(tmp_path)
-        comments = f"{STORE}/tickets/{rec.run_dir_at.name}/comments"
+    with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         store = _DownOnce({(t.tenant_id, SYSTEM): T.static_set()})
-        kw = dict(tenant=T.run_record(t), defender_dir=DEFENDER,
-                  env=run_env(DEFENDER, rec.run_dir_at),
-                  request_token=T.token(t.tenant_id, {(SYSTEM, "rw")}))
+        tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
         with A.proxy_for(t, store) as (url, _tap):
-            ticket_writer.open_case_ticket(run, proxy_url=url, **kw)
-            assert up.paths() == [], "the open leg was lost to the blip"
-            S.ticket_writer().record_case_ticket(run, proxy_url=url, **kw)
+            first_rec, first_run = _run(tmp_path / "a")
+            lost = _leg(t, first_run, first_rec, url, tok)
+            assert up.paths() == [], "the first comment was lost to the blip"
+            second_rec, second_run = _run(tmp_path / "b")
+            kept = _leg(t, second_run, second_rec, url, tok)
 
-    assert [s.path for s in up.seen] == [comments]
+    assert lost is not None
+    assert (lost["ok"], lost["status"]) == (False, "error"), lost
+    assert lost["reason"].strip()
+    assert [s.path for s in up.seen] == [COMMENT]
+    assert kept["ok"] is True, kept
+    assert S.receipt(second_rec.run_dir_at) == kept
+
+
+def _leg_with_adapter_raising(tmp_path, data_root, raises):
+    """The record leg on the proxied `ticket` system with its comment action replaced by `raises`
+    (the case seam run start uses); returns the receipt."""
+    with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
+        rec, run = _run(tmp_path)
+        tenant = T.run_record(t)
+        real = case_system.case_verdict(tenant, defender_dir=DEFENDER)
+        assert isinstance(real, case_system.CaseTarget), real
+        stub = dataclasses.replace(real, module=types.SimpleNamespace(add_case_comment=raises))
+        S.ticket_writer().record_case_ticket(
+            run, tenant=tenant, defender_dir=DEFENDER, env=run_env(DEFENDER, rec.run_dir_at),
+            request_token=T.token(t.tenant_id, {(SYSTEM, "rw")}), proxy_url=up.url, case=stub)
+        return S.receipt(rec.run_dir_at)
+
+
+def test_t8_a_settings_fault_the_adapter_raises_itself_points_at_config_not_the_proxy(
+        tmp_path, data_root):
+    """The adapter's own settings fault, raised before any request, on a system reached through
+    the proxy: the receipt names that system's `config.env`, not a proxy refusal. #1398."""
+    def own_settings_fault(*_a, **_k):
+        raise ConfigFault("TICKET_BASE_URL is blank")
+
+    receipt = _leg_with_adapter_raising(tmp_path, data_root, own_settings_fault)
+    assert receipt is not None
+    assert receipt["ok"] is False
+    assert config_pointer(SYSTEM) in receipt["reason"], receipt
+    assert "the credential proxy refused" not in receipt["reason"].lower(), receipt
+
+
+def test_t9_a_settings_fault_the_proxy_raises_is_still_a_proxy_refusal(tmp_path, data_root):
+    """Control for t8, from the other side: the same fault class arriving through the proxy's
+    answer (the way the transport raises it) is the proxy's refusal, not a `config.env` fault."""
+    def proxy_says_config(*_a, **_k):
+        raise_proxy_fault("ConfigFault", "the declaration holds no route for this call")
+
+    receipt = _leg_with_adapter_raising(tmp_path, data_root, proxy_says_config)
+    assert receipt is not None
+    assert "the credential proxy refused" in receipt["reason"].lower(), receipt
+    assert config_pointer(SYSTEM) not in receipt["reason"], receipt

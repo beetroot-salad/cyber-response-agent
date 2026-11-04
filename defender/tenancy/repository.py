@@ -51,6 +51,7 @@ from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
+    from defender.records.formats import TenantId
     from defender.tenancy.models import ForgeWiring, Generation, TenantRecord
 
 #: The first key of every tenant lock: a fixed int4 naming tenancy's advisory locks.
@@ -82,7 +83,7 @@ class HeldTenant(Protocol):
     """One tenant under its lock, for one worker. `record` is the row as re-read after locking
     (and as left by the last commit); writes go only through `commit` and `fail`."""
 
-    tenant_id: str
+    tenant_id: TenantId
     record: TenantRecord
 
     async def generations(self) -> list[Generation]:
@@ -121,16 +122,16 @@ class TenantRepository(Protocol):
         ...
 
     # --- reads
-    async def tenant(self, tenant_id: str) -> TenantRecord | None: ...
+    async def tenant(self, tenant_id: TenantId) -> TenantRecord | None: ...
     async def tenants(self) -> list[TenantRecord]:
         """Every tenant in every state, oldest first."""
         ...
-    async def generations(self, tenant_id: str) -> list[Generation]: ...
-    async def forge_wiring(self, tenant_id: str) -> ForgeWiring | None: ...
-    async def admission(self, tenant_id: str) -> tuple[str | None, ForgeWiring | None]:
+    async def generations(self, tenant_id: TenantId) -> list[Generation]: ...
+    async def forge_wiring(self, tenant_id: TenantId) -> ForgeWiring | None: ...
+    async def admission(self, tenant_id: TenantId) -> tuple[str | None, ForgeWiring | None]:
         """The tenant's state (None when unknown) and its forge wiring, in one read."""
         ...
-    async def publish_status(self, tenant_id: str) -> dict[str, str] | None:
+    async def publish_status(self, tenant_id: TenantId) -> dict[str, str] | None:
         """The last publish outcome, keyed as the old file: `by`, then `published` (the commit),
         or `refused` with `kind` (`transient` | `operator`); None when none is recorded."""
         ...
@@ -139,26 +140,26 @@ class TenantRepository(Protocol):
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
         """A new tenant with a minted UUID: `creating`, `create` pending at step `names` (service)."""
         ...
-    async def request_resume(self, tenant_id: str) -> TenantRecord:
+    async def request_resume(self, tenant_id: TenantId) -> TenantRecord:
         """Clear the failure, and nothing else; `Conflict` with no failure."""
         ...
-    async def request_offboard(self, tenant_id: str, *, now: _dt.datetime) -> TenantRecord:
+    async def request_offboard(self, tenant_id: TenantId, *, now: _dt.datetime) -> TenantRecord:
         """From `creating` or `active`: `offboarding`, `offboard` pending at step `offboard`
         (service), replacing any pending action and clearing the failure."""
         ...
-    async def request_rotate(self, tenant_id: str) -> TenantRecord:
+    async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:
         """Only `active` with nothing pending: `rotate` pending at step `names` (service)."""
         ...
 
     # --- host processes
-    async def record_publish_status(self, tenant_id: str, line: str, *, by: str) -> None:
+    async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         """Replace the tenant's publish outcome with what the report `line` states (`fresh <commit>`,
         `stale:transient <why>`, `stale:operator <why>`, `misconfigured <why>`)."""
         ...
 
     # --- workers
-    async def claimable(self, actor: str, *, now: _dt.datetime) -> list[str]: ...
-    def lock(self, tenant_id: str) -> AbstractAsyncContextManager[HeldTenant | None]: ...
+    async def claimable(self, actor: str, *, now: _dt.datetime) -> list[TenantId]: ...
+    def lock(self, tenant_id: TenantId) -> AbstractAsyncContextManager[HeldTenant | None]: ...
 
 
 def publish_outcome(line: str) -> tuple[str | None, str | None, str | None]:

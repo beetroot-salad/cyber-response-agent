@@ -1,6 +1,6 @@
 """The job store's tables and the records it hands out. Every value is set in Python (no server
 defaults). The alerts and investigations tables carry exactly the lean constraints of #1081's
-design; the migration (`0004_jobs`) is their one creation."""
+design; the migration `0004_jobs` creates them and `0005_uuid_ids` makes their ids `uuid` (#1382)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from defender._model import model
-from defender.database import Base
+from defender.database import Base, IdColumn
+from defender.records.formats import AlertId, InvestigationId, TenantId
 from defender.tenancy.models import SCHEMA as TENANCY_SCHEMA
 
 SCHEMA = "jobs"
@@ -40,8 +41,8 @@ class AlertRow(Base, kw_only=True):
         {"schema": SCHEMA},
     )
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(Text)
+    id: Mapped[AlertId] = mapped_column(IdColumn(AlertId), primary_key=True)
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId))
     vendor: Mapped[str] = mapped_column(Text)
     vendor_ticket_id: Mapped[str] = mapped_column(Text)
     fired_at: Mapped[_dt.datetime] = mapped_column(_TIME)
@@ -64,9 +65,9 @@ class InvestigationRow(Base, kw_only=True):
         {"schema": SCHEMA},
     )
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(Text)
-    alert_id: Mapped[str] = mapped_column(Text)
+    id: Mapped[InvestigationId] = mapped_column(IdColumn(InvestigationId), primary_key=True)
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId))
+    alert_id: Mapped[AlertId] = mapped_column(IdColumn(AlertId))
     request_key: Mapped[str] = mapped_column(Text)
     attempt: Mapped[int] = mapped_column(Integer)
     stage: Mapped[str] = mapped_column(Text)
@@ -90,8 +91,8 @@ class InvestigationRow(Base, kw_only=True):
 class StoredAlert:
     """An alert as read. `raw` is the exact bytes inserted."""
 
-    alert_id: str
-    tenant_id: str
+    alert_id: AlertId
+    tenant_id: TenantId
     vendor: str
     vendor_ticket_id: str
     fired_at: _dt.datetime
@@ -106,9 +107,9 @@ class StoredAlert:
 class InvestigationRecord:
     """An investigation as read: the wire model's fields, in the store's words."""
 
-    investigation_id: str
-    tenant_id: str
-    alert_id: str
+    investigation_id: InvestigationId
+    tenant_id: TenantId
+    alert_id: AlertId
     request_key: str
     attempt: int
     stage: str

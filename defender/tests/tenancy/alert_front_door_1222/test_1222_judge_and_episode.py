@@ -193,17 +193,18 @@ def _assert_names_record(text: str, what: str) -> None:
 # --- the launcher ----------------------------------------------------------------------------
 
 def _source(tmp_path: Path, raw: bytes, *, record: bool = True, signature: str | None = None, alert_mapping: Any = S.DEFAULT_MAPPING_GENERIC,
-            case_mapping: str | None = None) -> tuple[S.Planted, Path, Path]:
+            case_body: str = S.T6.COMMENT_BODY, case_key: str | None = None) -> tuple[S.Planted, Path, Path]:
     """A finished source run on tenant `TENANT`: `T.runs_base`'s stamped, branchable run (its
     capture, session and runs-base record), its alert replaced by `raw` at the run's alert
     place and (default) its record beside it. Returns (tenant, runs base, source run)."""
-    planted = S.plant_tenant(TENANT, alert_mapping=alert_mapping, case_mapping=case_mapping)
+    planted = S.plant_tenant(TENANT, alert_mapping=alert_mapping, case_body=case_body)
     base, src = location_path(T.runs_base)(tmp_path, tenant_id=TENANT)
     former = src / "alert.json"
     if former != S.alert_file(src):
         former.unlink()
     S.plant_run(base, src.name, alert=raw, record=record,
-                facts={"signature": signature} if signature is not None else {})
+                facts={**({"signature": signature} if signature is not None else {}),
+                       **({"case_key": case_key} if case_key is not None else {})})
     return planted, base, src
 
 
@@ -537,10 +538,9 @@ def test_p122_source_run_id_in_the_episode_record_names_a_diff(tmp_path):
 def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
     mapping = {"signature": "sig_field", "event_time": "detected_at",
                "summary": "rule.description"}
-    case_mapping = S.case_mapping_text(comment_body=S.SIGNED_COMMENT_BODY)
     raw = _alert("p062")
     planted, _base, src = _source(tmp_path, raw, signature="SIG-p062", alert_mapping=mapping,
-                                  case_mapping=case_mapping)
+                                  case_body=S.SIGNED_COMMENT_BODY, case_key=S.TICKET_KEY)
     ep = _launch(planted, src)
     T.write_family(ep, T.family_doc(source_run_dir=str(src), episode_id=ep.name))
     S.remap(planted, {**mapping, "signature": "user.login"})
@@ -549,11 +549,11 @@ def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
     assert S.recorded(sib, "signature") == "SIG-p062", (
         "the sibling's record is not the episode copy's (it was re-derived)")
 
-    store = S.TicketStore()
+    store = S.TicketStore(tmp_path)
     S.ticket_writer(store).record_case_ticket(
         _run_handle_1165(sib), tenant=planted.run_tenant(dispatches_lead_zero=False), defender_dir=S.DEFENDER,
         env={})
-    bodies = [str(c.get("body")) for c in store.comments()]
-    assert len(bodies) == 1, f"the record leg posted {len(bodies)} comments: {store.calls}"
-    assert "sig=SIG-p062" in bodies[0], (
-        f"the sibling's ticket comment does not carry the recorded signature: {bodies[0]!r}")
+    assert len(store.comment_payloads) == 1, (
+        f"the record leg posted {len(store.comment_payloads)} comments: {store.calls}")
+    assert "sig=SIG-p062" in store.comment_body(), (
+        f"the sibling's ticket comment does not carry the recorded signature: {store.wire_body()!r}")

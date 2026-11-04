@@ -349,12 +349,12 @@ def test_upgrading_a_database_at_the_baseline_adds_jobs_and_keeps_the_tenant_in_
     config.attributes["dsn"] = empty_database
     command.upgrade(config, "0001_baseline")
     assert _tables(empty_database, "jobs") == set()
-    execute(empty_database, "INSERT INTO identity.tenants (id, created_at) VALUES ('t-1', now())")
+    execute(empty_database, "INSERT INTO identity.tenants (id, created_at) VALUES ('f1000000-0000-4000-8000-000000000001', now())")
 
     upgrade(empty_database)
     assert _recorded_revision(empty_database) == [head()]
     assert _tables(empty_database, "jobs") == JOBS_TABLES
-    assert execute(empty_database, "SELECT id FROM tenancy.tenants") == [("t-1",)]
+    assert execute(empty_database, "SELECT id FROM tenancy.tenants") == [("f1000000-0000-4000-8000-000000000001",)]
 
 
 def _jobs_columns(dsn: str, table: str) -> dict[str, tuple[str, bool, Any]]:

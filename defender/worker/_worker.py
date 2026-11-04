@@ -107,6 +107,17 @@ def _ending_from(end: job_lane.JobEnd | None, returncode: int,
     return Ending(_FAILED, failure_reason=_NO_REPORT, failure_message=why)
 
 
+def _report_disposition_or_none(lane: job_lane.JobLane, inv: str) -> str | None:
+    """The committed report's disposition; a fault nobody planned for reads as none, so the run is
+    `unparseable` as with any unreadable disposition, never `worker_error` (#1396)."""
+    try:
+        return lane.report_disposition(inv)
+    except Exception:  # noqa: BLE001 — the stage is decided by the job-end record (#1396)
+        _logger.error("investigation %s: reading its report's disposition failed; it is unparseable",
+                      inv, exc_info=True)
+        return None
+
+
 async def _spawn_outcome(spawn: asyncio.Future[asyncio.subprocess.Process]) -> asyncio.subprocess.Process | None:
     """The child a cancelled row's spawn made, waiting for the spawn to finish however many
     further cancels arrive (r7 D-ac: a child made after the cancel is still this row's to end);
@@ -139,6 +150,7 @@ class Worker:
         containers: Containers | None = None, slots: int = 3,
         clock: Callable[[], _dt.datetime], stop_grace: float = 30,
         renewal_interval: float = 1.0, cost_interval: float = 15.0, takeover_interval: float = 5.0,
+        open_lane: Callable[[DataRoot, object], job_lane.JobLane] = job_lane.JobLane.open,
     ) -> None:
         if slots < 1:
             raise ValueError(f"a worker needs at least one slot, not {slots!r}")
@@ -152,6 +164,7 @@ class Worker:
         self._renewal_interval = renewal_interval
         self._cost_interval = cost_interval
         self._takeover_interval = takeover_interval
+        self._open_lane = open_lane  # the job lane's door; a test hands in one that faults
         self._tasks: set[asyncio.Task[None]] = set()
         self._held: dict[str, Held] = {}
         self._stopping = False
@@ -514,7 +527,7 @@ class Worker:
 
     def _write_launch_files(self, launch: job_lane.LaunchRecord, raw: bytes) -> None:
         try:
-            lane = job_lane.JobLane.open(self._data_root, launch.tenant_id)
+            lane = self._open_lane(self._data_root, launch.tenant_id)
         except job_lane.JobLaneRefused as refused:
             _logger.error("investigation %s: %s", launch.investigation_id, refused)
             raise _WorkerFault("the tenant's runs container cannot be used on this host") from None
@@ -553,21 +566,38 @@ class Worker:
         A cost that cannot be read is None, the final figure's own meaning (R2)."""
         inv = record.investigation_id
         try:
-            lane = job_lane.JobLane.open(self._data_root, record.tenant_id)
+            lane = self._open_lane(self._data_root, record.tenant_id)
         except job_lane.JobLaneRefused as refused:
             _logger.error("investigation %s: reading its records: %s", inv, refused)
             return (Ending(_FAILED, failure_reason=_WORKER_ERROR,
                            failure_message="the tenant's runs container could not be read after the run"),
                     None, None)
-        with lane:
-            ending = _ending_from(lane.read_job_end(inv), returncode, lambda: lane.report_disposition(inv))
+        try:
+            ending = _ending_from(lane.read_job_end(inv), returncode, lambda: _report_disposition_or_none(lane, inv))
+            # #1396: the ending is decided; from here no fault turns it into `worker_error`
             cost: float | None
             try:
                 cost = lane.cost(inv)
             except job_lane.CostUnreadable as unreadable:
                 _logger.warning("investigation %s: its cost is unknown: %s", inv, unreadable)
                 cost = None
-            return ending, cost, lane.knowledge(inv)
+            except Exception:  # noqa: BLE001 — the decided ending stands (#1396)
+                _logger.error("investigation %s: reading its cost failed; its %s ending stands and its "
+                              "cost is unknown", inv, ending.stage, exc_info=True)
+                cost = None
+            knowledge: dict | None
+            try:
+                knowledge = lane.knowledge(inv)
+            except Exception:  # noqa: BLE001 — the decided ending stands (#1396)
+                _logger.error("investigation %s: reading its knowledge failed; its %s ending stands and "
+                              "its knowledge is unreadable", inv, ending.stage, exc_info=True)
+                knowledge = job_lane.JobLane.unreadable_knowledge()
+        finally:
+            try:
+                lane.close()
+            except Exception:  # noqa: BLE001 — a fault before the ending still raises; one after keeps it (#1396)
+                _logger.error("investigation %s: closing its records failed", inv, exc_info=True)
+        return ending, cost, knowledge
 
     # -- the last write ---------------------------------------------------------------------------
 

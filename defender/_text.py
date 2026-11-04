@@ -33,6 +33,18 @@ def as_int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def postgres_can_hold(text: str) -> bool:
+    """Whether PostgreSQL text can hold `text`: no NUL, and no lone surrogate (not valid text).
+    The one rule every boundary in front of a PostgreSQL text column refuses by (#1379 O1c)."""
+    if "\x00" in text:
+        return False
+    try:
+        text.encode("utf-8")  # strict UTF-8 refuses exactly the surrogates
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def is_content_less(text: str) -> bool:
     """Whether `text` carries no visible character. Empty text is content-less."""
     return all(

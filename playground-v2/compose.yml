@@ -205,6 +205,7 @@ services:
     environment:
       - ELASTIC_PASSWORD=${V2_ELASTIC_PASSWORD}
       - KIBANA_PASSWORD=${V2_KIBANA_PASSWORD}
+      - WATCHER_PASSWORD=${V2_ALERT_WATCHER_PASSWORD:?set V2_ALERT_WATCHER_PASSWORD in .env}
     volumes:
       # Read-only: this one-shot only reads ca.crt, and the volume also holds
       # ca.key. `setup` is the sole writer.
@@ -225,6 +226,12 @@ services:
           sleep 5;
         done;
         [ "$$ok" = 1 ] || { echo "FAIL: kibana_system password not set after 5m - check V2_ELASTIC_PASSWORD against the elastic user stored in es_data"; exit 1; };
+        # The alert-ticket-watcher (#1400): read on the security alerts and nothing else.
+        # Both PUTs are upserts, so every `up` re-asserts them. Credentials ride curl config
+        # on stdin, never the command line, like the kibana_system call above.
+        echo "-> alert-ticket-watcher role + user";
+        printf "user = \"elastic:%s\"\ndata = {\"indices\":[{\"names\":[\".alerts-security.alerts-default*\",\".internal.alerts-security.alerts-default-*\"],\"privileges\":[\"read\"]}]}\n" "$${ELASTIC_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/role/alert_ticket_watcher | grep -q "\"role\"" || { echo "FAIL: alert_ticket_watcher role not written"; exit 1; };
+        printf "user = \"elastic:%s\"\ndata = {\"password\":\"%s\",\"roles\":[\"alert_ticket_watcher\"]}\n" "$${ELASTIC_PASSWORD}" "$${WATCHER_PASSWORD}" | curl -s -K - -X PUT --cacert config/certs/ca/ca.crt -H "Content-Type: application/json" https://elasticsearch:9200/_security/user/alert-ticket-watcher | grep -q "\"created\"" || { echo "FAIL: alert-ticket-watcher user not written"; exit 1; };
         echo "-> es-init complete";
       '
     restart: "no"
@@ -1057,6 +1064,31 @@ services:
       - "127.0.0.1:8004:8080"
     networks: *stub-networks
     healthcheck: *stub-health
+
+  alert-ticket-watcher:
+    # Opens each new security alert's ticket in ticket-server, keyed by the alert's
+    # id (#1400) — standing in for the customer's alert automation. Polls the alerts
+    # index as `alert-ticket-watcher`, a read-only user es-init creates. Not a Kibana
+    # rule action: the webhook connector needs a Gold licence and this stack is Basic.
+    build: ./alert-ticket-watcher
+    image: soc-playground/alert-ticket-watcher:local
+    container_name: alert-ticket-watcher
+    depends_on:
+      es-init:
+        condition: service_completed_successfully
+      ticket-server:
+        condition: service_healthy
+    environment:
+      - WATCHER_ES_PASSWORD=${V2_ALERT_WATCHER_PASSWORD:?set V2_ALERT_WATCHER_PASSWORD in .env}
+    volumes:
+      # Read-only, for ca.crt (same mount Kibana has).
+      - certs:/certs:ro
+    # `default` only: it reaches Elasticsearch and ticket-server there, and nothing
+    # needs to reach it.
+    networks:
+      - default
+    mem_limit: 64m
+    restart: unless-stopped
 
   identity:
     # Authz API over keycloak/realm.yaml × hosts/inventory.yaml. Root build

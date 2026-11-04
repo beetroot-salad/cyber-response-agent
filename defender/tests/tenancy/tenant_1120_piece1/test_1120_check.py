@@ -76,10 +76,10 @@ def _check_folder(folder: Path, **kw: Any):
 
 
 def _unparseable_mapping(folder: Path) -> Path:
-    """Break `folder`'s case-history mapping.yaml so it does not parse — a finding about the
+    """Break `folder`'s case-record.yaml (#1359) so it does not parse — a finding about the
     folder that needs no census. Returns the file."""
-    mapping = folder / "settings" / "systems" / "case-history" / "mapping.yaml"
-    mapping.write_text("fields: {unclosed: [\n", encoding="utf-8")
+    mapping = folder / "settings" / "case-record.yaml"
+    mapping.write_text("system: [unclosed\n", encoding="utf-8")
     return mapping
 
 
@@ -125,7 +125,7 @@ def test_1120_check_exits_zero_over_a_clean_tenant_and_a_clean_folder(tmp_path: 
 
 
 def _missing_required_setting(knowledge: Path) -> str:
-    target = knowledge / "settings" / "systems" / "case-history" / "mapping.yaml"
+    target = knowledge / "settings" / "lead-zero.yaml"  # #1359: the case mapping is no longer required
     target.unlink()
     return str(target)
 
@@ -190,9 +190,9 @@ def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import
              "names": (BROKEN_SYSTEM, str(checkout.resolve()))}
     _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None), **blind)
     _unparseable_mapping(folder)
-    # Acceptance refuses a mapping that does not parse before any census, naming the file.
+    # A case-record file that does not parse is a finding naming it (#1359 r4), census or not.
     H.assert_refused(H.run_script(script, "check", "--folder", str(folder), root=None),
-                     "systems/case-history/mapping.yaml")
+                     "settings/case-record.yaml")
 
 
 def test_1120_s6_defender_dir_env_names_another_tree(

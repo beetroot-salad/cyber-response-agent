@@ -1,167 +1,38 @@
 #!/usr/bin/env python3
+"""The host's one write to a case (#1359): at the end of a run started with `--update-ticket`, add
+one comment to the ticket the alert names, through the case system's adapter. The product decides
+what and when (exit class, body, agent tag, stale sentence, bound, receipt); the adapter decides
+how (request shape, text format, what a status means, the ticket's web link). Nothing is created
+or transitioned here, and nothing is called at run start."""
 from __future__ import annotations
 
 import json
 import logging
-import urllib.parse
-from collections.abc import Callable, Mapping
-from dataclasses import replace
+from collections.abc import Mapping
 from pathlib import Path
 
-from defender.records import formats
-from defender._model import model
-from defender.records import Run, RunPaths
-from defender.tenancy import case_ticket
-from defender.records import run_end
+from defender.kit.faults import AdapterFault, ConfigFault, TransportFault, UpstreamFault
+from defender.kit.settings import config_pointer
+from defender.records import Run, RunPaths, formats, run_end
+from defender.systems import case_system
 from defender.systems.run_tenant import RunTenant
-from defender.kit.settings import SETTINGS_POINTER
 from defender.systems.verbs import VerbContext, redact_settings_path
-from defender import _proxy_client, integrations
-from defender.kit.faults import AdapterFault, TransportFault
+from defender.tenancy import case_ticket
 
 _logger = logging.getLogger(__name__)
-
-SYSTEM = "case-history"
-PREFIX = "CASE_HISTORY"
-_CONFIG_KEYS = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
-_CONFIG_FILE = f"{SETTINGS_POINTER}systems/{SYSTEM}/config.env"
 
 
 def _verb_context(tenant: RunTenant, defender_dir: Path, run_dir: Path,
                   env: Mapping[str, str], request_token: str | None = None,
                   proxy_url: str | None = None) -> VerbContext:
-    """The transport's context, built wholly from what `run.py` handed this leg: the run's record
-    (its settings and the case-history entry resolved from them when the run began), the code
-    tree, the run dir and the run's environment. Nothing here finds its own location or reads the
-    process (#1107): the same record a lead-zero or query call reads is the one this writes by.
-    `request_token` and `proxy_url` are the write-back grant and the proxy's address for a store
-    reached through the credential proxy (#1163), handed by run.py for this leg."""
+    """The adapter's context, built wholly from what `run.py` handed this leg: the run's record
+    (its settings and the case-record file resolved from them when the run began), the code tree,
+    the run dir and the run's environment. Nothing here finds its own location or reads the
+    process (#1107). `request_token` and `proxy_url` are the write-back grant and the proxy's
+    address for a store reached through the credential proxy (#1163), handed by run.py."""
     return VerbContext(defender_dir=defender_dir, run_dir=run_dir, env=env, tenant=tenant,
                        request_token=request_token, proxy_url=proxy_url)
 
-
-def _request(
-    config: dict[str, str], method: str, path: str, body: dict | None = None,
-    *, ctx: VerbContext,
-) -> tuple[str | None, str]:
-    """One call to the store, over the context the caller built from the run's record."""
-    url = f"{config['URL_BASE'].rstrip('/')}{path}"
-    timeout = int(config.get("TIMEOUT_SEC", "10"))
-    if _proxy_client.uses_proxy(ctx.tenant, SYSTEM):
-        return _via_proxy(ctx, method, url, body, timeout)
-    bastion = config["BASTION_HOST"]
-    try:
-        rc, stdout, stderr = integrations.docker_exec_curl(
-            ctx, bastion, url, method=method, body=body, timeout_sec=timeout, system=SYSTEM,
-        )
-    except TransportFault as e:
-        return None, f"transport error: {e.detail}"
-    body_text, status = integrations.split_status(stdout)
-    if not status:
-        return None, f"no/malformed response (rc={rc}, stderr={stderr.strip()!r})"
-    return status, body_text
-
-
-def _via_proxy(ctx: VerbContext, method: str, url: str, body: dict | None,
-                   timeout: int) -> tuple[str | None, str]:
-    """`_request` for a store reached through the credential proxy: the same transport as a
-    query; a refusal or a transport failure is text, never raised."""
-    try:
-        answer = _proxy_client.proxy_exchange(ctx, system=SYSTEM, method=method, url=url,
-                                              body=body, timeout_sec=timeout)
-    except TransportFault as e:
-        return None, f"transport error: {e.detail}"
-    if answer.fault in _REFUSALS:
-        # A refused credential, or a call the declaration does not allow: the same for every
-        # attempt of the run (O7), so the record leg does not ask again.
-        return None, f"{PROXY_REFUSED} ({answer.fault}): {answer.detail}"
-    if answer.fault is not None and not answer.status:
-        return None, f"transport error: the credential proxy answered {answer.fault}: {answer.detail}"
-    # The store's own refusal (409, 422, 5xx) keeps its status and body, as on the docker path.
-    return str(answer.status), answer.body
-
-
-@model(frozen=True)
-class TicketWriterDeps:
-    #: The one seam: the call to the store. The store's address is read from the run's record, not
-    #: through a seam of its own (#1107), so a test steers WHERE the writer goes by the tenant's
-    #: `config.env`, and WHAT the store answers through this.
-    request: Callable[..., tuple[str | None, str]] = _request
-
-
-DEFAULT_DEPS = TicketWriterDeps()
-
-
-def _config_of(ctx: VerbContext) -> dict[str, str]:
-    """The case-history store's config from the run's record — `ConfigFault` (an `AdapterFault`)
-    when it is absent, on another access method, or missing or blank on a required key."""
-    return integrations.load_config(ctx, SYSTEM, PREFIX, _CONFIG_KEYS)
-
-
-def _reason_of(fault: BaseException, tenant: RunTenant) -> str:
-    """A failure's receipt reason: the fault's own text, the host's settings folder named by the
-    pointer instead of the path, and the file the fix lives in said up front — so the text names
-    the file even for a fault (a bad timeout) whose own wording does not."""
-    text = redact_settings_path(str(fault), tenant.settings)
-    return f"{_CONFIG_FILE}: {text}"
-
-
-def open_case_ticket(
-    run: Run, deps: TicketWriterDeps = DEFAULT_DEPS, *, tenant: RunTenant,
-    defender_dir: Path, env: Mapping[str, str], request_token: str | None = None,
-    proxy_url: str | None = None,
-) -> None:
-    """Open the case for this run. `tenant` is the run's record (#1107): the store's address
-    (`case-history/config.env`) and the payload's shape (`mapping.yaml`) are both that tenant's,
-    resolved once when the run began. `defender_dir` and `env` are run.py's — the code tree and
-    the run's environment — never found from the process. The open leg writes no receipt, on any
-    path: a store that cannot be reached is a warning here and an error receipt at the record."""
-    run_dir = run.run_dir
-    try:
-        ctx = _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url)
-        try:
-            config = _config_of(ctx)
-        except AdapterFault as e:
-            _logger.warning(f"open: {_reason_of(e, tenant)}; skipping ticket write")
-            return
-        # The open leg meets the run's RECORD alone: the facts were settled once at run start,
-        # and no byte of the alert is read here.
-        record = formats.parse_alert_record(run.facts.alert_record.read() or "")
-        if record is None:
-            _logger.warning(f"{run_dir.name} has no readable record of its alert; skipping open")
-            return
-        case_id = run_dir.name
-        payload = case_ticket.alert_to_open_payload(
-            record.facts, case_id, mapping=tenant.ticket_mapping)
-        # A receipt from an earlier attempt must not outlive this open: only a refusal below
-        # leaves one, for the record leg to carry on.
-        clear_receipt(run)
-        status, body = deps.request(config, "POST", "/tickets", payload, ctx=ctx)
-        if status is None:
-            _logger.warning(f"open {case_id}: {body}")
-            if body.startswith(PROXY_REFUSED):
-                _write_receipt(run, config, case_id, RECEIPT_ERROR,
-                               redact_settings_path(body, tenant.settings))
-        elif status == "409":
-            _logger.info(f"open {case_id}: already exists (409) — proceeding")
-        elif status.startswith("2"):
-            _logger.info(f"open {case_id}: created ({status})")
-        else:
-            _logger.warning(f"open {case_id}: HTTP {status}: {body}")
-            # A store that REFUSED the ticket is said so where the operator looks (the receipt
-            # and the run page), quoting the store's reason; the record leg keeps it.
-            _write_receipt(
-                run, config, case_id, RECEIPT_ERROR,
-                redact_settings_path(f"{OPEN_REFUSED}: HTTP {status}: {body}", tenant.settings))
-    except Exception as e:  # noqa: BLE001 — a post-step must never break the run
-        _logger.warning(f"open raised, ignored: {e!r}")
-
-
-#: What a failure text opens with when the credential proxy refused the call (`_REFUSALS`: a
-#: missing or rejected credential, an undeclared destination or route): not retried by the record leg.
-PROXY_REFUSED = "the credential proxy refused the call"
-#: The proxy's fault classes that refuse a call before it reaches the store.
-_REFUSALS = frozenset({"ConfigFault", "ConfinementFault"})
 
 #: The receipt words: `commented` (the record) and `escalated` (the cut-short note) are the two
 #: comments the host can make; `error` is a failed call. There is no `closed`: the host never
@@ -169,84 +40,131 @@ _REFUSALS = frozenset({"ConfigFault", "ConfinementFault"})
 RECEIPT_COMMENTED = "commented"
 RECEIPT_ESCALATED = "escalated"
 RECEIPT_ERROR = "error"
-#: What the open leg's refusal receipt opens with: the store would not take the case ticket.
-OPEN_REFUSED = "the store refused the case ticket"
 _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
 
+#: Receipt reasons whose wording the product owns (O5).
+REASON_NO_TICKET = (
+    "the alert names no ticket: the tenant's alert mapping maps no `case_key`, or the alert "
+    "holds none a ticket key can be made of")
+REASON_NO_TOKEN = (
+    "the write-back token could not be minted, so the comment was not sent (see the run log)")
 
-def _build_comment_payload(
-    run: Run, case_id: str, truncated_by: str | None, mapping: case_ticket.CaseMapping | case_ticket.CaseTicketError,
-) -> tuple[dict, str]:
-    """The outbound `{author, body}` for `record_case_ticket` and its receipt word.
+
+def _comment_body(
+    run: Run, truncated_by: str | None, settings: case_ticket.CaseRecordSettings,
+) -> tuple[str, str]:
+    """The comment text and its receipt word.
 
     An unreadable report (`ReportNotParsable`) gets the fixed unreadable-branch sentence — or,
     on a forced-close exit, the escalation note, since the host's own forced close failed and
-    there is no verdict. Any other `CaseTicketError` propagates to the caller's refusal branch
-    (no POST, a warning, an `error` receipt)."""
+    there is no verdict. Any other `CaseTicketError` (a template that does not render)
+    propagates to the caller's refusal branch (no call, a warning, an `error` receipt)."""
     try:
-        rec = replace(case_ticket.read_case_record(run, mapping=mapping), case_id=case_id)
+        rec = case_ticket.read_case_record(run)
     except case_ticket.ReportNotParsable:
         if truncated_by in run_end.FORCED_CLOSE_EXITS:
-            return (case_ticket.escalation_comment_payload(truncated_by, mapping=mapping),
-                    RECEIPT_ESCALATED)
-        return case_ticket.unreadable_comment_payload(mapping=mapping), RECEIPT_COMMENTED
-    return case_ticket.case_record_to_comment(rec, mapping=mapping), RECEIPT_COMMENTED
+            return case_ticket.escalation_comment_body(truncated_by), RECEIPT_ESCALATED
+        return case_ticket.unreadable_comment_body(), RECEIPT_COMMENTED
+    return case_ticket.case_record_to_comment(rec, settings=settings), RECEIPT_COMMENTED
+
+
+def _ticket_key(run: Run) -> str | None:
+    """The ticket the alert names: the `case_key` fact recorded from the alert when the run began
+    (#1359 P3), or `None`. Never read off the alert again."""
+    record = formats.parse_alert_record(run.facts.alert_record.read() or "")
+    return None if record is None else record.facts.case_key
+
+
+def comments_on(truncated_by: str | None, closed_before_cut: bool) -> bool:
+    """Does a run that ended this way comment on its case? Not a run cut short by its budget,
+    its store or its model provider before it reached a verdict: it leaves the case open and
+    writes no receipt. The one rule, read by the record step and by `run.py`, which signs no
+    write-back token for a run that will not comment."""
+    return closed_before_cut or run_end.normalized_truncated_by(truncated_by) not in (
+        run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE,
+        run_end.TRUNCATED_BY_PROVIDER_DOWN)
 
 
 def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exit record (#1047)
-    run: Run, deps: TicketWriterDeps = DEFAULT_DEPS, *, tenant: RunTenant,
-    defender_dir: Path, env: Mapping[str, str],
-    key: str | None = None, truncated_by: str | None = None, closed_before_cut: bool = False,
+    run: Run, *, tenant: RunTenant, defender_dir: Path, env: Mapping[str, str],
+    truncated_by: str | None = None, closed_before_cut: bool = False,
     request_token: str | None = None, proxy_url: str | None = None,
+    case: case_system.CaseTarget | case_system.CaseSettingsFault | None = None,
 ) -> None:
-    """Record the investigation into the case, never close it: at most one
-    `POST /tickets/{key}/comments`, no transition. Closing is a person's act, which is what lets
-    the store's `closed` mean "a person reviewed this"."""
+    """Record the investigation into the case, never close it: at most one comment on the ticket
+    the alert names, no transition. Closing is a person's act, which is what lets the store's
+    `closed` mean "a person reviewed this". Every path that meant to call out but did not leaves
+    a warning and an `error` receipt.
+
+    `case` is the case system's verdict run start made (`case_system.case_verdict`), the one the
+    write-back token was minted on; without it (a direct caller) the step judges the record."""
     run_dir = run.run_dir
-    case_id = key if key is not None else run_dir.name
+    key = ""
     try:
+        key = _ticket_key(run) or ""
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
-        if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE,
-                             run_end.TRUNCATED_BY_PROVIDER_DOWN)
-                and not closed_before_cut):
+        if not comments_on(truncated_by, closed_before_cut):
             clear_receipt(run)
-            _logger.info(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
+            _logger.info(f"{run_dir.name}: run ended ({truncated_by}) with no verdict; "
+                         "leaving ticket open")
             return
-        ctx = _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url)
-        refused = _prior_open_refusal(run, PROXY_REFUSED)
-        if refused is not None:
-            _logger.warning(f"record {case_id}: {refused}; not recording")
+        target = case if case is not None else case_system.case_verdict(
+            tenant, defender_dir=defender_dir)
+        if isinstance(target, case_system.CaseSettingsFault):
+            _leg_refused(run, key, redact_settings_path(str(target), tenant.settings))
             return
-        try:
-            config = _config_of(ctx)
-        except AdapterFault as e:
-            reason = _reason_of(e, tenant)
-            _logger.warning(f"record {case_id}: {reason}; not recording")
-            _write_receipt(run, None, case_id, RECEIPT_ERROR, reason)
+        if not key:
+            _leg_refused(run, key, REASON_NO_TICKET)
+            return
+        proxied = target.system in tenant.access  # reached through the credential proxy
+        if proxied and not request_token:
+            _leg_refused(run, key, REASON_NO_TOKEN)
             return
         try:
             if truncated_by == run_end.TRUNCATED_BY_ABORTED and not closed_before_cut:
-                payload, word = (
-                    case_ticket.escalation_comment_payload(
-                        truncated_by, mapping=tenant.ticket_mapping),
-                    RECEIPT_ESCALATED)
+                body, word = case_ticket.escalation_comment_body(truncated_by), RECEIPT_ESCALATED
             else:
-                payload, word = _build_comment_payload(
-                    run, case_id, truncated_by, tenant.ticket_mapping)
+                body, word = _comment_body(run, truncated_by, target.template)
         except case_ticket.CaseTicketError as e:
-            # The mapping (or a template in it) refused: no POST, but the receipt still says
-            # so — a WARN, a receipt and a return on every arm that meant to call out.
-            reason = redact_settings_path(str(e), tenant.settings)
-            _logger.warning(f"record {case_id}: {reason}; not recording")
-            _write_receipt(run, config, case_id, RECEIPT_ERROR, reason)
+            # The template refused: no call, but the receipt still says so.
+            _leg_refused(run, key, redact_settings_path(f"{case_system.CASE_RECORD_POINTER}: {e}",
+                                                   tenant.settings))
             return
-        _post_comment(run, deps, config, case_id, payload, word, ctx)
+        _post_comment(run, target, key, body, word,
+                      _verb_context(tenant, defender_dir, run_dir, env, request_token, proxy_url))
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"record raised, ignored: {e!r}")
         # Only the exception's type reaches the receipt (and so the page): its text may carry a
         # host path or a store's body; the log line above has it whole.
-        _write_receipt(run, None, case_id, RECEIPT_ERROR,
+        _write_receipt(run, None, key, RECEIPT_ERROR,
                        f"the record step failed unexpectedly ({type(e).__name__}); see the run log")
+
+
+def _leg_refused(run: Run, key: str, reason: str) -> None:
+    """No call was made: a warning and an `error` receipt carrying `reason`."""
+    _logger.warning(f"record {key or run.run_dir.name}: {reason}; not recording")
+    _write_receipt(run, None, key, RECEIPT_ERROR, reason)
+
+
+def _fault_reason(fault: AdapterFault, *, tenant: RunTenant, system: str) -> str:
+    """The receipt reason for a fault the case system's comment action raised (O5): chosen by the
+    fault's class and whether the proxy itself named it (`from_proxy`, #1398), never by the
+    route alone, and from the fault's data rather than its text. The fault's own
+    detail follows, redacted."""
+    detail = redact_settings_path(fault.detail, tenant.settings)
+    if isinstance(fault, UpstreamFault):
+        status = fault.status
+        shown = "" if status is None else f" (HTTP {status}{', not found' if status == 404 else ''})"
+        return f"the store refused the comment{shown}: {detail}"
+    if isinstance(fault, TransportFault):
+        return f"the store could not be reached: {detail}"
+    if fault.from_proxy:
+        # A configuration or confinement fault the proxy answered with is its own refusal. One the
+        # adapter raised itself on the same route is not: it falls through to its own wording.
+        return f"the credential proxy refused the call: {detail}"
+    if isinstance(fault, ConfigFault):
+        return f"{config_pointer(system)}: {detail}"
+    return f"the write was refused before it was sent: {detail}"
 
 
 #: The one sentence a stale run's every comment carries (#1108 P4, O-WARN): the kind in the
@@ -283,66 +201,45 @@ def stale_sentence(run_dir: Path) -> str | None:
         commit=status.commit)
 
 
-def _with_stale_sentence(run: Run, payload: dict) -> dict:
-    """`payload` with the stale sentence opening its body when the run's knowledge was stale.
-    First, so the wire bound — which cuts from the end — never takes it off a long verdict."""
+def _with_stale_sentence(run: Run, body: str) -> str:
+    """`body` with the stale sentence opening it when the run's knowledge was stale. First, so the
+    wire bound — which cuts from the end — never takes it off a long verdict."""
     sentence = stale_sentence(run.run_dir)
-    if sentence is None:
-        return payload
-    return {**payload, "body": f"{sentence}\n\n{payload['body']}"}
+    return body if sentence is None else f"{sentence}\n\n{body}"
 
 
 def _post_comment(  # noqa: PLR0913 — one call site's worth of context, threaded not re-derived
-    run: Run, deps: TicketWriterDeps, config: dict[str, str], case_id: str,
-    payload: dict, word: str, ctx: VerbContext,
+    run: Run, target: case_system.CaseTarget, key: str, body: str, word: str, ctx: VerbContext,
 ) -> None:
-    """The one write the host makes to a case: one `POST /tickets/{key}/comments` whose body
-    opens with the agent tag naming this run (`case_ticket.posted_comment`, #1221 — here, so no
-    comment kind can leave untagged), then the stale sentence when the run's knowledge was
-    stale (O-WARN, every branch alike), and a receipt either way. No read-back first: whether a
-    person has closed the case changes nothing, since every comment is served to later runs
-    and ours are tagged (#1221 A1)."""
-    quoted = urllib.parse.quote(case_id, safe="")
-    payload = case_ticket.posted_comment(_with_stale_sentence(run, payload), run_id=str(run.id))
-    status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload, ctx=ctx)
-    ok = status is not None and status.startswith("2")
-    if not ok:
-        reason = f"{'HTTP ' + status if status else 'transport error'}: {body}"
-        reason = redact_settings_path(reason, ctx.tenant.settings)
-        refused = _prior_open_refusal(run)
-        if refused is not None:
-            # The comment fell with the ticket: the cause worth reading is the refusal.
-            reason = f"{refused} (the record comment then failed: {reason})"
-        _logger.warning(f"record {case_id}: {reason}")
-    else:
-        reason = None
-        _logger.info(f"record {case_id}: comment posted ({status}, {word})")
-        _record_posted_comment(run, case_id, payload)
-    _write_receipt(run, config, case_id, word if ok else RECEIPT_ERROR, reason)
+    """The one write the host makes to a case: one comment whose body opens with the agent tag
+    naming this run (`case_ticket.posted_comment`, #1221 — here, so no comment kind can leave
+    untagged), then the stale sentence when the run's knowledge was stale (O-WARN, every branch
+    alike), and a receipt either way. No read-back first: whether a person has closed the case
+    changes nothing, since every comment is served to later runs and ours are tagged (#1221 A1)."""
+    posted = case_ticket.posted_comment(_with_stale_sentence(run, body), run_id=str(run.id))
+    try:
+        link = target.add_case_comment(ctx, key=key, body=posted)
+    except AdapterFault as fault:
+        reason = _fault_reason(fault, tenant=ctx.tenant, system=target.system)
+        _logger.warning(f"record {key}: {reason}")
+        _write_receipt(run, None, key, RECEIPT_ERROR, reason)
+        return
+    _logger.info(f"record {key}: comment posted ({word}); run_dir={run.run_dir}")
+    _record_posted_comment(run, key, posted)
+    _write_receipt(run, link if isinstance(link, str) and link else None, key, word, None)
 
 
-def _record_posted_comment(run: Run, case_id: str, payload: Mapping[str, object]) -> None:
+def _record_posted_comment(run: Run, key: str, body: str) -> None:
     """@owns ticket_comments — append the comment the store just accepted, `{key, body}`, to the
     run's host-only record of its writes to the world (`RunPaths.ticket_comments`, beside the
     run folder). A world branched from this run serves the case as it stood at the fork, so its
-    oracle is handed these writes (#1255 P5, O6; `case_ticket.read_posted_comments`).
-    Best-effort like every post-step: a failed append is a warning and never changes the receipt."""
+    oracle is handed these writes (#1255 P5, O6; `case_ticket.read_posted_comments`). `key` is the
+    ticket's. Best-effort like every post-step: a failed append is a warning and never changes
+    the receipt."""
     try:
-        run.observability.ticket_comments.append([{"key": case_id, "body": payload.get("body")}])
+        run.observability.ticket_comments.append([{"key": key, "body": body}])
     except OSError as e:
-        _logger.warning(f"record {case_id}: the posted comment could not be recorded: {e}")
-
-
-def _prior_open_refusal(run: Run, opening: str = OPEN_REFUSED) -> str | None:
-    """The open leg's failure text this attempt left in the receipt that starts `opening`, or
-    `None`."""
-    text = run.observability.ticket_write.read()
-    try:
-        prior = json.loads(text) if text is not None else None
-    except ValueError:
-        return None
-    reason = prior.get("reason") if isinstance(prior, dict) else None
-    return reason if isinstance(reason, str) and reason.startswith(opening) else None
+        _logger.warning(f"record {key}: the posted comment could not be recorded: {e}")
 
 
 def receipt_path(run_dir: Path) -> Path:
@@ -363,15 +260,16 @@ def clear_receipt(run: Run) -> None:
 
 
 def _write_receipt(
-    run: Run, config: dict[str, str] | None, case_id: str, status: str, reason: str | None,
+    run: Run, url: str | None, key: str, status: str, reason: str | None,
 ) -> None:
     """@owns ticket_write receipt — `{key, status, url, ok, reason}`, the one shape the page
-    reads. `url` is null when there was no usable config to name a store; `reason` is null on a
-    success and the redacted failing text on every other status."""
+    reads. `key` is the ticket's (empty when the alert names none); `url` is the ticket's web link
+    when the adapter gave one and null on every error receipt; `reason` is null on a success and
+    the redacted failing text on every other status."""
     receipt = {
-        "key": case_id,
+        "key": key,
         "status": status,
-        "url": (f"{config['URL_BASE'].rstrip('/')}/tickets/{case_id}" if config else None),
+        "url": url,
         "ok": status in _RECEIPT_OK,
         "reason": reason,
     }
@@ -382,7 +280,4 @@ def _write_receipt(
 
 
 # The path accessor remains the public read-side compatibility surface for run pages.
-__all__ = [
-    "TicketWriterDeps", "DEFAULT_DEPS", "open_case_ticket", "record_case_ticket",
-    "receipt_path", "clear_receipt",
-]
+__all__ = ["comments_on", "record_case_ticket", "receipt_path", "clear_receipt"]

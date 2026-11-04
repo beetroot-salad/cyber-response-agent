@@ -23,7 +23,6 @@ from __future__ import annotations
 import contextlib
 import datetime as _dt
 import logging
-import uuid
 from collections.abc import AsyncIterator, Collection, Mapping
 from typing import Any, Literal
 
@@ -34,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from defender.database import async_engine, url
+from defender.records.formats import TenantId
 from defender.tenancy.models import SCHEMA, ForgeWiring, Generation, PublishStatus, TenantRecord
 from defender.tenancy.repository import (
     ALL,
@@ -74,12 +74,6 @@ def _record(row: Any) -> TenantRecord:
     return TenantRecord(**row._mapping)
 
 
-def _cannot_exist(tenant_id: object) -> bool:
-    """A NUL byte cannot be stored in a PostgreSQL text value: such an id names no tenant, and asking the database
-    would raise a data error instead of answering "unknown"."""
-    return "\x00" in str(tenant_id)
-
-
 class PostgresTenantRepository:
     def __init__(self, dsn: str, *, max_connections: int = 10, lock_keepalive: int = LOCK_KEEPALIVE) -> None:
         if lock_keepalive <= 0:
@@ -99,58 +93,45 @@ class PostgresTenantRepository:
         async with self._engine.connect() as conn:
             return list(await conn.execute(statement))
 
-    async def tenant(self, tenant_id: str) -> TenantRecord | None:
-        if _cannot_exist(tenant_id):
-            return None
-        rows = await self._rows(select(_T).where(_T.c.id == str(tenant_id)))
+    async def tenant(self, tenant_id: TenantId) -> TenantRecord | None:
+        rows = await self._rows(select(_T).where(_T.c.id == tenant_id))
         return _record(rows[0]) if rows else None
 
     async def tenants(self) -> list[TenantRecord]:
         return [_record(r) for r in await self._rows(select(_T).order_by(_T.c.created_at, _T.c.id))]
 
-    async def generations(self, tenant_id: str) -> list[Generation]:
-        if _cannot_exist(tenant_id):
-            return []
-        rows = await self._rows(select(_G).where(_G.c.tenant_id == str(tenant_id)).order_by(_G.c.salt))
+    async def generations(self, tenant_id: TenantId) -> list[Generation]:
+        rows = await self._rows(select(_G).where(_G.c.tenant_id == tenant_id).order_by(_G.c.salt))
         return [Generation(**r._mapping) for r in rows]
 
-    async def forge_wiring(self, tenant_id: str) -> ForgeWiring | None:
-        if _cannot_exist(tenant_id):
-            return None
-        rows = await self._rows(select(_W).where(_W.c.tenant_id == str(tenant_id)))
+    async def forge_wiring(self, tenant_id: TenantId) -> ForgeWiring | None:
+        rows = await self._rows(select(_W).where(_W.c.tenant_id == tenant_id))
         return ForgeWiring(**rows[0]._mapping) if rows else None
 
-    async def admission(self, tenant_id: str) -> tuple[str | None, ForgeWiring | None]:
-        if _cannot_exist(tenant_id):
-            return None, None
+    async def admission(self, tenant_id: TenantId) -> tuple[str | None, ForgeWiring | None]:
         rows = await self._rows(
             select(_T.c.state, _W.c.repo, _W.c.origin).select_from(
-                _T.outerjoin(_W, _W.c.tenant_id == _T.c.id)).where(_T.c.id == str(tenant_id)))
+                _T.outerjoin(_W, _W.c.tenant_id == _T.c.id)).where(_T.c.id == tenant_id))
         if not rows:
             return None, None
         row = rows[0]
-        wiring = None if row.repo is None else ForgeWiring(tenant_id=str(tenant_id), repo=row.repo, origin=row.origin)
+        wiring = None if row.repo is None else ForgeWiring(tenant_id=tenant_id, repo=row.repo, origin=row.origin)
         return row.state, wiring
 
-    async def publish_status(self, tenant_id: str) -> dict[str, str] | None:
-        if _cannot_exist(tenant_id):
-            return None
-        rows = await self._rows(select(_P).where(_P.c.tenant_id == str(tenant_id)))
+    async def publish_status(self, tenant_id: TenantId) -> dict[str, str] | None:
+        rows = await self._rows(select(_P).where(_P.c.tenant_id == tenant_id))
         return PublishStatus(**rows[0]._mapping).as_dict() if rows else None
 
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
-        values = dict(id=str(uuid.uuid4()), created_at=now, state="creating", pending_action="create",
+        values = dict(id=TenantId.mint(), created_at=now, state="creating", pending_action="create",
                       step="names", step_actor=SERVICE)
         async with self._engine.begin() as conn:
             return _record((await conn.execute(insert(_T).values(**values).returning(*_T.c))).one())
 
-    async def _request(self, tenant_id: str, precondition: ColumnElement[bool], refusal: str,
+    async def _request(self, tenant_id: TenantId, precondition: ColumnElement[bool], refusal: str,
                        **values: Any) -> TenantRecord:
         """One conditional update; no row is `NotFound` for an absent tenant, else `Conflict`."""
-        tenant_id = str(tenant_id)
-        if _cannot_exist(tenant_id):
-            raise NotFound(f"no tenant {tenant_id!r}")
         async with self._engine.begin() as conn:
             done = (await conn.execute(update(_T).where(_T.c.id == tenant_id, precondition)
                                        .values(**values).returning(*_T.c))).first()
@@ -161,34 +142,34 @@ class PostgresTenantRepository:
             raise NotFound(f"no tenant {tenant_id}")
         raise Conflict(refusal)
 
-    async def request_resume(self, tenant_id: str) -> TenantRecord:
+    async def request_resume(self, tenant_id: TenantId) -> TenantRecord:
         return await self._request(
             tenant_id, _T.c.failure.is_not(None), "nothing to resume", failure=None)
 
-    async def request_offboard(self, tenant_id: str, *, now: _dt.datetime) -> TenantRecord:
+    async def request_offboard(self, tenant_id: TenantId, *, now: _dt.datetime) -> TenantRecord:
         return await self._request(
             tenant_id, _T.c.state.in_(("creating", "active")), "only a creating or active tenant can be offboarded",
             state="offboarding", pending_action="offboard", step="offboard", step_actor=SERVICE, failure=None)
 
-    async def request_rotate(self, tenant_id: str) -> TenantRecord:
+    async def request_rotate(self, tenant_id: TenantId) -> TenantRecord:
         return await self._request(
             tenant_id, (_T.c.state == "active") & _T.c.pending_action.is_(None),
             "only an active tenant with nothing pending can rotate",
             pending_action="rotate", step="names", step_actor=SERVICE)
 
     # --- host processes --------------------------------------------------------------------------
-    async def record_publish_status(self, tenant_id: str, line: str, *, by: str) -> None:
+    async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         published, refused, kind = publish_outcome(line)
         values = dict(recorded_by=by, published=published, refused=refused, kind=kind)
         try:
             async with self._engine.begin() as conn:
-                await conn.execute(insert(_P).values(tenant_id=str(tenant_id), **values)
+                await conn.execute(insert(_P).values(tenant_id=tenant_id, **values)
                                    .on_conflict_do_update(index_elements=[_P.c.tenant_id], set_=values))
         except IntegrityError as e:
             raise ValueError(f"no tenant {tenant_id}") from e
 
     # --- workers ---------------------------------------------------------------------------------
-    async def claimable(self, actor: str, *, now: _dt.datetime) -> list[str]:
+    async def claimable(self, actor: str, *, now: _dt.datetime) -> list[TenantId]:
         due = (_T.c.pending_action != "delete_repo") | (_T.c.repo_delete_after <= now)
         rows = await self._rows(
             select(_T.c.id).where(_T.c.pending_action.is_not(None), _T.c.step_actor == actor,
@@ -197,8 +178,7 @@ class PostgresTenantRepository:
         return [r[0] for r in rows]
 
     @contextlib.asynccontextmanager
-    async def lock(self, tenant_id: str) -> AsyncIterator[_Held | None]:
-        tenant_id = str(tenant_id)
+    async def lock(self, tenant_id: TenantId) -> AsyncIterator[_Held | None]:
         conn = await self._lock_engine.connect()
         held: _Held | None = None
         try:
@@ -324,7 +304,7 @@ class _Statement:
         self._seen = seen
         self._ctes: list[str] = []
         self._params: list[Any] = [
-            bindparam("ns", LOCK_NAMESPACE), bindparam("tid", seen.id),
+            bindparam("ns", LOCK_NAMESPACE), bindparam("tid", seen.id, type_=_T.c.id.type),
             bindparam("was_action", seen.pending_action, type_=_T.c.pending_action.type),
             bindparam("was_step", seen.step, type_=_T.c.step.type),
             bindparam("was_actor", seen.step_actor, type_=_T.c.step_actor.type)]

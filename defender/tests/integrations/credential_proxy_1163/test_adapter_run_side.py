@@ -71,19 +71,18 @@ def test_x1_a_refused_query_shows_neither_the_token_nor_its_signature(
 @pytest.mark.parametrize("kind", KINDS)
 def test_x2_a_refused_ticket_leg_leaves_a_receipt_without_the_token_or_its_signature(
         tmp_path, data_root, caplog, kind):
-    """The same three refusals at the ticket writer: an error receipt and logs that carry
+    """The same three refusals at the record leg: an error receipt and logs that carry
     neither the token nor its signature. O4, O7."""
     caplog.set_level(logging.DEBUG)
     lifetime, verdict, reachable = KINDS[kind]
-    with H.upstream() as up, A.published(tmp_path / "forge", data_root,
-                                         {K.SYSTEM: K._decl(up)}) as t:
+    with H.upstream() as up, K._published(tmp_path / "forge", data_root, K._decl(up)) as t:
         tok = T.token(t.tenant_id, {(K.SYSTEM, "rw")}, signer=A.MarkedSigner(),
                       expires_in=lifetime)
         store = H.FakeStore({(t.tenant_id, K.SYSTEM): T.static_set()})
         rec, run = K._run(tmp_path)
         with A.proxy_for(t, store, verifier=H.FakeVerifier(verdict)) as (url, tap):
             address = url if reachable else f"http://127.0.0.1:{H.free_port()}"
-            receipt = K._legs(tmp_path, t, run, rec, address, tok)
+            receipt = K._leg(t, run, rec, address, tok)
 
     assert receipt is not None, receipt
     assert receipt["ok"] is False, receipt
@@ -99,27 +98,22 @@ def test_x3_the_ticket_writer_takes_the_proxy_address_from_the_run_not_the_envir
     """An address in the writer's `env` is not used when the run handed none; the one the run
     handed in is. A9."""
     from defender.box import run_env
-    from defender.investigation import ticket_writer
     from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 
     shim = S.DockerShim(tmp_path / "shim")
-    with H.upstream() as up, A.published(tmp_path / "forge", data_root,
-                                         {K.SYSTEM: K._decl(up)}) as t:
-        up.replies[f"{K.STORE}/tickets"] = (201, {}, json.dumps({"key": "INC-1"}).encode())
+    with H.upstream() as up, K._published(tmp_path / "forge", data_root, K._decl(up)) as t:
+        up.replies[K.COMMENT] = (201, {}, json.dumps({"id": 1}).encode())
         store = H.FakeStore({(t.tenant_id, K.SYSTEM): T.static_set()})
         tok = T.token(t.tenant_id, {(K.SYSTEM, "rw")})
         with A.proxy_for(t, store) as (url, tap):
             rec, run = K._run(tmp_path / "env-only")
             env = shim.env(run_env(DEFENDER, rec.run_dir_at), **{A.DECOY_PROXY_ENV: url})
-            ticket_writer.open_case_ticket(run, tenant=T.run_record(t), defender_dir=DEFENDER,
-                                           env=env, request_token=tok, proxy_url=None)
-            S.ticket_writer().record_case_ticket(run, tenant=T.run_record(t),
-                                                 defender_dir=DEFENDER, env=env,
-                                                 request_token=tok, proxy_url=None)
+            S.ticket_writer().record_case_ticket(run, tenant=T.run_record(t), defender_dir=DEFENDER,
+                                                 env=env, request_token=tok, proxy_url=None)
             env_only = S.receipt(rec.run_dir_at)
             reached_by_env = list(tap.tokens)
             control_rec, control_run = K._run(tmp_path / "via-run")
-            control = K._legs(tmp_path, t, control_run, control_rec, url, tok)
+            control = K._leg(t, control_run, control_rec, url, tok)
 
     assert reached_by_env == [], "the writer reached the proxy through the environment's address"
     assert env_only is not None, env_only

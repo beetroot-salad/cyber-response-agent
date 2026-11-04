@@ -142,6 +142,16 @@ if TYPE_CHECKING:
         lead_dirs as lead_dirs,
         refuse_seeded_run_dir as refuse_seeded_run_dir,
     )
+    from defender.records._record_ids import (
+        UUID_PATTERN as UUID_PATTERN,
+        AlertId as AlertId,
+        IdRefused as IdRefused,
+        InvestigationId as InvestigationId,
+        LearningJobId as LearningJobId,
+        MembershipId as MembershipId,
+        UserId as UserId,
+        UuidId as UuidId,
+    )
     from defender.records._tenant_id import (
         TenantId as TenantId,
         TenantRefused as TenantRefused,
@@ -165,6 +175,8 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("OID", "RUN_ID_ALLOWED", "is_valid_run_id", "run_id_fault", "uuid_id_fault",), "_run_id"),
     **dict.fromkeys(("BranchError", "holds_content", "inherited_artifact_names", "lead_dirs", "refuse_seeded_run_dir",), "_seeded"),
     **dict.fromkeys(("TenantId", "TenantRefused",), "_tenant_id"),
+    **dict.fromkeys(("UUID_PATTERN", "AlertId", "IdRefused", "InvestigationId", "LearningJobId", "MembershipId", "UserId",
+                     "UuidId",), "_record_ids"),
     **dict.fromkeys(("wire_digest",), "_wire"),
 }
 

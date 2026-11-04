@@ -20,12 +20,12 @@ FIELDS = ("request_key", "attempt", "failure_reason", "failure_message")
 
 def _investigation(**extra):
     fields = {"cost_usd": 0.0, "request_key": "k1", "attempt": 1, **extra}
-    return models.Investigation(investigation_id="i-1", alert_id="a-1", status="failed",
+    return models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="failed",
                                 created_at=NOW, **fields)
 
 
 def _alert(**extra):
-    return dict(alert_id="a-1", vendor="elastic", vendor_ticket_id="T-1", title="t", description="d",
+    return dict(alert_id="a1000000-0000-4000-8000-000000000001", vendor="elastic", vendor_ticket_id="T-1", title="t", description="d",
                 fired_at=NOW, changed_at=NOW, received_at=NOW, **extra)
 
 
@@ -47,7 +47,7 @@ def test_o14_every_investigation_names_its_request_key_and_attempt(field):
     fields = {"cost_usd": 0.0, "request_key": "k1", "attempt": 1}
     del fields[field]
     with pytest.raises(ValidationError, match=field):
-        models.Investigation(investigation_id="i-1", alert_id="a-1", status="queued", created_at=NOW, **fields)
+        models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="queued", created_at=NOW, **fields)
 
 
 def test_o14_cost_is_nullable_and_described_as_so_far_while_live():
@@ -113,7 +113,7 @@ def test_o14_the_fake_stamps_a_created_investigation_with_its_request_key_and_at
     async def run():
         store = InMemoryStore(lambda: NOW)
         store.add_alert("t", models.Alert(**_alert(raw="{}")))
-        return await store.create_investigation("t", "a-1", "req-9")
+        return await store.create_investigation("t", "a1000000-0000-4000-8000-000000000001", "req-9")
 
     inv, created = anyio.run(run)
     assert created is True
@@ -125,10 +125,10 @@ def _cancel(status):
     async def run():
         store = InMemoryStore(lambda: NOW)
         store.add_investigation("t", models.Investigation(
-            investigation_id="i-1", alert_id="a-1", status=status, created_at=NOW,
+            investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status=status, created_at=NOW,
             cost_usd=0.0, request_key="k1", attempt=1))
         try:
-            return store, await store.cancel_investigation("t", "i-1")
+            return store, await store.cancel_investigation("t", "b1000000-0000-4000-8000-000000000001")
         except ports.Conflict as conflict:
             return store, conflict
 
@@ -146,7 +146,7 @@ def test_o9_the_fake_cancels_a_running_investigation_as_aborted_with_reason_canc
     store, got = _cancel("running")
     assert not isinstance(got, BaseException), got
     assert (got.status, got.failure_reason, got.finished_at) == ("aborted", "cancelled", NOW)
-    assert anyio.run(store.get_investigation, "t", "i-1").status == "aborted"
+    assert anyio.run(store.get_investigation, "t", "b1000000-0000-4000-8000-000000000001").status == "aborted"
 
 
 @pytest.mark.parametrize("status", ["completed", "unparseable", "failed", "aborted"])
@@ -155,7 +155,7 @@ def test_o9_the_fake_refuses_to_cancel_an_ended_investigation_and_leaves_it_as_i
     store, got = _cancel(status)
     assert isinstance(got, ports.Conflict), got
     assert "already ended" in str(got)
-    assert anyio.run(store.get_investigation, "t", "i-1").status == status
+    assert anyio.run(store.get_investigation, "t", "b1000000-0000-4000-8000-000000000001").status == status
 
 
 def test_m11_the_client_request_id_describes_the_latest_attempt():

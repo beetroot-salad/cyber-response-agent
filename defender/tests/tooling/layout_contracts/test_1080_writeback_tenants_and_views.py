@@ -61,8 +61,8 @@ def _text_digest(text: str) -> Any:
 
 def _outcome_of(fn: Callable[..., Any], *args: Any, view: Callable[[Any], Any] = S.canon,
                 **kw: Any) -> dict[str, Any]:
-    """`S.outcome` with a caller-chosen view of the return value (a `CaseMapping`'s repr carries
-    an address, so it is viewed through `.plain()`)."""
+    """`S.outcome` with a caller-chosen view of the return value (a settings record's repr can carry
+    an address, so it is viewed through a view function)."""
     try:
         value = fn(*args, **kw)
     except Exception as e:  # noqa: BLE001 — the exception IS the observed outcome

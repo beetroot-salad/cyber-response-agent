@@ -1381,18 +1381,56 @@ class _StoreWhoseAlertReadFails:
         return await self._store.get_alert(tenant_id, alert_id)
 
 
+class _LaneFailing:
+    """The real job lane, except that `method` raises `fault` for run `inv`; with `method="close"`,
+    closing the lane that read that run's ending raises, after it really closed."""
+
+    def __init__(self, lane, inv: str, method: str, fault: Exception) -> None:
+        self._lane, self._inv, self._method, self._fault = lane, inv, method, fault
+        self._read_inv = False
+
+    def __getattr__(self, name):
+        real = getattr(self._lane, name)
+        if not callable(real) or name == "close":
+            return real
+
+        def call(*args, **kwargs):
+            if args and str(args[0]) == self._inv:
+                self._read_inv = self._read_inv or name == "read_job_end"
+                if name == self._method:
+                    raise self._fault
+            return real(*args, **kwargs)
+        return call
+
+    def close(self) -> None:
+        self._lane.close()
+        if self._method == "close" and self._read_inv:
+            raise self._fault
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
+
+
+def _lanes_failing(inv: str, method: str, fault: Exception):
+    """A job-lane door whose lanes fault as `_LaneFailing` says."""
+    from defender.records import job_lane
+
+    return lambda root, tenant: _LaneFailing(job_lane.JobLane.open(root, tenant), inv, method, fault)
+
+
 class _NobodyPlannedThis(Exception):  # noqa: N818 — derives directly from Exception, in no list of expected faults
     """A fault type no handler in the worker can know by name."""
 
 
 @pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError, AttributeError,
                                         IndexError, _NobodyPlannedThis])
-@pytest.mark.parametrize("seam", ["child-argv", "store-read", "job-end-read", "lane-cost", "lane-knowledge"])
+@pytest.mark.parametrize("seam", ["child-argv", "store-read", "job-end-read"])
 async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and_the_worker_goes_on(
-        world, monkeypatch, seam, fault_type):
+        world, seam, fault_type):
     """A fault of any kind nobody planned for (not an OS error) in one row's task: that row `failed`/`worker_error`, another row still completes. (O6, design flows)"""
-    from defender.records import job_lane
-
     fault = fault_type("a seam fell over")
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
@@ -1400,6 +1438,7 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
         good = await _queued(store, ticket="T-2", key="k2")
         used = store
         argv = child
+        lanes = None
         if seam == "child-argv":
             def argv(launch):  # noqa: F811
                 if launch.investigation_id == bad:
@@ -1408,20 +1447,44 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
         elif seam == "store-read":
             used = _StoreWhoseAlertReadFails(store, (await store.get_investigation(T1, bad)).alert_id, fault)
         else:
-            method = {"job-end-read": "read_job_end", "lane-cost": "cost", "lane-knowledge": "knowledge"}[seam]
-            original = getattr(job_lane.JobLane, method)
-
-            def failing(self, run_id):
-                if run_id == bad:
-                    raise fault
-                return original(self, run_id)
-            monkeypatch.setattr(job_lane.JobLane, method, failing)  # lint-monkeypatch: ok — the lane is built inside the Worker and no seam injects a lane stand-in; this fails exactly one run's read
-        await _worker(world, used, argv).drain()
+            lanes = _lanes_failing(bad, "read_job_end", fault)
+        await _worker(world, used, argv, open_lane=lanes).drain()
 
     stored = row(world["dsn"], bad)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
     assert stored["failure_message"]
     assert stored["finished_at"] == NOW
+    assert row(world["dsn"], good)["stage"] == "completed", "one row's fault stopped the others"
+
+
+@pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError, AttributeError,
+                                        IndexError, _NobodyPlannedThis])
+@pytest.mark.parametrize("seam", ["report-disposition", "lane-cost", "lane-knowledge", "lane-close"])
+async def test_1396_an_unexpected_fault_after_the_ending_is_decided_keeps_that_ending(
+        world, caplog, seam, fault_type):
+    """A fault nobody planned for once the host committed a report and the scrub walked the tree:
+    reading the report's disposition ends the row `unparseable`, as an unreadable disposition
+    does; reading cost or knowledge, or closing the lane, keeps the decided stage and disposition,
+    and the value that could not be read is unknown (cost null; knowledge the unreadable shape,
+    never "no run"). Never `worker_error`; the fault is logged as an error, and another row still
+    completes. (#1396)"""
+    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
+    fault = fault_type("a seam fell over")
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        bad = await _queued(store, ticket="T-1", key="k1")
+        good = await _queued(store, ticket="T-2", key="k2")
+        method = {"report-disposition": "report_disposition", "lane-cost": "cost",
+                  "lane-knowledge": "knowledge", "lane-close": "close"}[seam]
+        await _worker(world, store, child, open_lane=_lanes_failing(bad, method, fault)).drain()
+
+    stored = row(world["dsn"], bad)
+    assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == (
+        ("unparseable", None, None) if seam == "report-disposition" else ("completed", "inconclusive", None))
+    assert stored["cost_usd"] == (None if seam == "lane-cost" else 0)
+    assert stored["knowledge"] == (STALE_OPERATOR if seam == "lane-knowledge" else _knowledge("current", COMMIT))
+    assert any(bad in r.getMessage() and r.levelno >= logging.ERROR for r in caplog.records
+               if r.name.startswith(WORKER_LOGGER)), "a fault nobody planned for was not logged as an error"
     assert row(world["dsn"], good)["stage"] == "completed", "one row's fault stopped the others"
 
 
@@ -1683,23 +1746,6 @@ async def test_m1_a_symlink_where_the_alert_file_goes_is_refused_not_written_thr
         assert target.read_bytes() == b"not ours", "the worker wrote through the alert-file link"
     else:
         assert not target.exists(), "the worker created the link's target"
-
-
-async def test_d_af_an_id_the_job_lane_refuses_ends_the_row_worker_error_with_its_own_message(world):
-    """An id the database holds (a text column) but the lane's run-id grammar refuses (upper-case uuid) ends the row `failed`/`worker_error`, cost 0.0, with a message that is not the generic crash text, and no child starts. (D-af)"""
-    inv = str(uuid.uuid4()).upper()
-    child = _child(world, files=_committed())
-    async with job_store(world["dsn"]) as store:
-        alert = await an_alert(store, T1)
-        plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
-        await _worker(world, store, child).drain()
-
-    stored = row(world["dsn"], inv)
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
-    assert stored["cost_usd"] == 0
-    assert stored["failure_message"]
-    assert stored["failure_message"] != "the worker failed while running the job", "a refused id fell to the generic handler"
-    assert child.seen() is None, "a child started for an id the lane refuses"
 
 
 async def test_o8_the_childs_stdout_and_stderr_are_the_workers_own_descriptors(world, capfd):

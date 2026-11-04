@@ -193,7 +193,8 @@ def plant_alert(where: Path) -> Path:
     where.mkdir(parents=True, exist_ok=True)
     path = where / "alert.json"
     path.write_text(json.dumps({"rule": {"id": "r-s-b", "description": "slice S-B fixture"},
-                                "alert_timestamp": "2026-10-20T00:00:00Z"}), encoding="utf-8")
+                                "alert_timestamp": "2026-10-20T00:00:00Z",
+                                "alert_id": "S-B-1"}), encoding="utf-8")  # names the ticket (#1359)
     return path
 
 

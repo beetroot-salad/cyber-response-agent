@@ -34,6 +34,13 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1382
+
+Record ids (tenant, user, membership, alert, investigation) are PostgreSQL `uuid`. Run migrations
+(revision `0005_uuid_ids`); it stops, changing nothing, on any row whose id is not UUID text: recreate
+such a development database. A membership's `invited_by`/`ended_by` hold a user id, or NULL for the
+system (they held `'system'`).
+
 ## Upgrade from before #1163
 
 Runs reach `http-proxy` systems through the credential proxy with a request token the run signs

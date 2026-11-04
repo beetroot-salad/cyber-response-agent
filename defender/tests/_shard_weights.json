@@ -742,7 +742,6 @@
  "tests/tooling/layout_contracts/test_1080_sql_engine.py": 13.8,
  "tests/tooling/layout_contracts/test_1080_venv.py": 16.6,
  "tests/tooling/layout_contracts/test_1080_writeback_tenants_and_views.py": 1.3,
- "tests/tooling/layout_contracts/test_1190_case_mapping_home.py": 3.3,
  "tests/tooling/test_shard_plan.py": 0.1,
  "tests/tooling/test_tmp_retention.py": 2.6
 }

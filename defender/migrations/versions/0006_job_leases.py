@@ -1,7 +1,7 @@
 """Leases and final accounting on investigations (#1343 piece B).
 
-Revision ID: 0005_job_leases
-Revises: 0004_jobs
+Revision ID: 0006_job_leases
+Revises: 0005_uuid_ids
 
 A running row's lease says who keeps it alive; the accounting mark says its holder is done with
 the host. Rows from before this revision: a running row gets an already-lapsed lease (no piece-A
@@ -11,8 +11,8 @@ its mark is its finish time. The revision holds no copy of the lease length.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0005_job_leases"
-down_revision = "0004_jobs"
+revision = "0006_job_leases"
+down_revision = "0005_uuid_ids"
 
 TABLE, SCHEMA = "investigations", "jobs"
 

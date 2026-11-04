@@ -296,7 +296,7 @@ def _preflight_access(source: Run, tenant: RunTenant, replayable: Sequence[Any],
         return None
     if directory is None:
         raise ConfigFault("no tenant records were handed to pre-flight to sign its read token with")
-    signer, address = signing_access(str(tenant.tenant_id), directory=directory, signer=signer,
+    signer, address = signing_access(tenant.tenant_id, directory=directory, signer=signer,
                                      proxy_url=proxy_url, transport=issuer_transport)
     token = mint_request_token(
         signer, tenant_id=str(tenant.tenant_id), investigation=source.run_dir.name,

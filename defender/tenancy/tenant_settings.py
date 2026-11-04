@@ -69,8 +69,8 @@ def read_plain_fd(fd: int) -> bytes:
     it was opened has 0 names and still qualifies, so a rotation by rename never refuses a
     reader), and at most `SETTINGS_MAX_BYTES` long. `_Refused` otherwise.
 
-    THE ONE READ every settings file goes through: the system configs and the case-history
-    mapping."""
+    THE ONE READ every settings file goes through: the system configs and the case-record
+    file."""
     if not is_plain_entry(os.fstat(fd)):
         raise _Refused(errno.EINVAL, "not a plain, single-linked regular file")
     chunks = []

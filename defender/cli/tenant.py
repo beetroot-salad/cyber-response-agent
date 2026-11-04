@@ -37,6 +37,8 @@ the checks that need no census still run. Every refusal is printed as `[tenant.p
 from __future__ import annotations
 
 import argparse
+import dataclasses
+from collections.abc import Mapping
 import os
 import subprocess
 import sys
@@ -77,7 +79,7 @@ from defender._io import read_plain_bytes  # noqa: E402
 from defender.tenancy import SETTINGS_HALF, TENANT_ID_FILE  # noqa: E402
 from defender.systems import run_tenant  # noqa: E402
 from defender.systems.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
-from defender.tenancy import case_ticket  # noqa: E402
+from defender.systems import case_system  # noqa: E402
 from defender.records.formats import TenantRefused
 
 #: How long one git call of `check`'s committed read may take: each is a local lookup of one
@@ -92,15 +94,38 @@ def _say(message: object) -> None:
     print(f"[tenant.py] {message}", file=sys.stderr)
 
 
-def _settings_files_parse(settings: Path) -> None:
-    """The folder rule run start does not apply before a run: the case-history mapping parses
-    (the grant table and the lead-zero config are run start's own, in its readiness
-    function)."""
-    try:
-        case_ticket.check_mapping(settings)
-    except case_ticket.CaseTicketError as bad:
-        raise TenantRefused(str(bad)) from bad
+@dataclasses.dataclass(frozen=True)
+class _FolderRecord:
+    """A settings folder read the way run start reads a tenant's (`run_tenant.folder_settings`):
+    what the case system's own checks are asked over, with no accepted tenant to name."""
 
+    systems: Mapping[str, Any]
+    access: Mapping[str, Any]
+    case_record: Any
+    agent: Path
+
+
+def _case_findings(knowledge: Path) -> list[str]:
+    """What run start does not apply before a run: the case system the tenant names. A tenant with
+    no case-record file needs none. With one, the very judgement the record step makes at run end
+    (`case_system.judge_case_system`, D-17) must pass: the system on the roster, its adapter
+    accepted and exporting the comment action, its settings sound, and — through the credential
+    proxy — a declared write route. A folder still holding the retired case system folder is told
+    to move to the new file."""
+    settings = knowledge / SETTINGS_HALF
+    findings: list[str] = []
+    legacy = case_system.legacy_folder_finding(settings)
+    if legacy is not None:
+        findings.append(legacy)
+    record = _FolderRecord(agent=knowledge / "agent", **{
+        k: v for k, v in run_tenant.folder_settings(settings).items()})
+    if record.case_record is None:
+        return findings
+    try:
+        case_system.judge_case_system(record, defender_dir=_DEFENDER_DIR)
+    except case_system.CaseSettingsFault as fault:
+        findings.append(str(fault))
+    return findings
 
 
 # ==========================================================================================
@@ -275,10 +300,7 @@ def _findings(knowledge: Path) -> list[str]:
     table went unchecked and why, and every other rule still runs."""
     settings = knowledge / SETTINGS_HALF
     findings: list[str] = []
-    try:
-        _settings_files_parse(settings)
-    except TenantRefused as bad:
-        findings.append(str(bad))
+    findings += _case_findings(knowledge)
     # Here, not at the top: the census reaches the lead-author's whole extraction stack, which
     # only `check` uses — `update` and `propose` start without paying for it.
     from defender.cli import _tenant_census

@@ -426,7 +426,7 @@ def fd_identity(fd: int) -> list[int]:
 
 def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], *,
                 containers: Any = None, slots: int = 3, stop_grace: float | None = None,
-                **knobs: Any) -> Any:
+                open_lane: Any = None, **knobs: Any) -> Any:
     """`knobs` (#1343 sketch, unratified): `renewal_interval`, `cost_interval`, `takeover_interval`
     in seconds."""
     from defender.worker import Worker
@@ -441,6 +441,8 @@ def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], 
             raise ValueError(f"make_worker: {data_root} is not under the temp directory; pass containers=StandInContainers(tmp_path / ...)")
         containers = StandInContainers(beside / "containers")
     extra = {**knobs, **({} if stop_grace is None else {"stop_grace": stop_grace})}
+    if open_lane is not None:
+        extra["open_lane"] = open_lane
     return Worker(store, data_root=data_root, child_argv=child,
                   containers=containers,
                   slots=slots, clock=fixed_clock, **extra)

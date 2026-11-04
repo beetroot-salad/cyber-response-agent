@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from defender.api import fakes as fakes_module, ports as ports_module  # noqa: E402
 from defender.api.app import MAX_PAGE, create_app  # noqa: E402
-from defender.api.demo import DEMO_ROLES, demo_deps, demo_sessions  # noqa: E402
+from defender.api.demo import DEMO_ROLES, demo_deps, demo_id, demo_sessions  # noqa: E402
 from defender.api.fakes import (  # noqa: E402
     InMemorySecrets,
     InMemoryStore,
@@ -58,7 +58,9 @@ from defender.identity import (  # noqa: E402
     InMemoryIdentityRepository,
 )
 from defender.tenancy import InMemoryTenantRepository  # noqa: E402
-from defender.records._tenant_id import TenantId, TenantRefused  # noqa: E402
+from defender.records._tenant_id import TenantId  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
+from defender.records.formats import AlertId  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
@@ -67,7 +69,7 @@ A = fixture_uuid("tenant:tenant-a")
 DEMO_ONE = fixture_uuid("tenant:t-one")
 DEMO_TWO = fixture_uuid("tenant:t-two")
 B = fixture_uuid("tenant:tenant-b")
-USER = "user-ann"
+USER = fixture_uuid("user:ann")
 #: The tenant is the path's `T`; the caller is a session seeded through the identity repository,
 #: sent as the `__Host-defender_session` cookie plus the configured `Origin`.
 T = f"/tenants/{A}"
@@ -84,12 +86,12 @@ AUTH_AB = {"Cookie": f"{SESSION_COOKIE}={SESSION_AB}", "Origin": ORIGIN}
 BASE = "https://testserver"
 
 ALERT = Alert(
-    alert_id="al-1", vendor="tickets", vendor_ticket_id="T-1", title="t", description="d",
-    fired_at=NOW, changed_at=NOW, received_at=NOW, raw='{"id": "al-1"}',
+    alert_id="a1000000-0000-4000-8000-000000000001", vendor="tickets", vendor_ticket_id="T-1", title="t", description="d",
+    fired_at=NOW, changed_at=NOW, received_at=NOW, raw='{"id": "a1000000-0000-4000-8000-000000000001"}',
 )
 SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
 INV = Investigation(
-    investigation_id="inv-1", alert_id="al-1", status="completed", disposition="benign",
+    investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="completed", disposition="benign",
     request_key="req-1", attempt=1,
     cost_usd=1.5, created_at=NOW, artifacts=["report.md", "gather_raw/L1/0.json"],
     # The knowledge revision the run used (`current` = the run record's `fresh`).
@@ -97,7 +99,7 @@ INV = Investigation(
                "stale_kind": None},
 )
 JOB = LearningJob(
-    learning_job_id="lj-1", investigation_id="inv-1", alert_id="al-1", status="queued",
+    learning_job_id="c1000000-0000-4000-8000-000000000001", investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="queued",
     trigger="explicit", created_at=NOW,
 )
 LESSON = Lesson(lesson_id="le-1", title="t", description="d", status="live")
@@ -151,23 +153,23 @@ PUBLIC_ROUTES = EXISTING_ROUTES | IDENTITY_ROUTES
 #: One successful call per route: (route, concrete path, body, the port answers it needs).
 HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] = [
     (("GET", "/tenants/{tenant_id}/alerts"), f"{T}/alerts", None, {"list_alerts": [SUMMARY]}),
-    (("GET", "/tenants/{tenant_id}/alerts/{alert_id}"), f"{T}/alerts/al-1", None, {"get_alert": ALERT}),
+    (("GET", "/tenants/{tenant_id}/alerts/{alert_id}"), f"{T}/alerts/a1000000-0000-4000-8000-000000000001", None, {"get_alert": ALERT}),
     (("POST", "/tenants/{tenant_id}/investigations"), f"{T}/investigations",
-     {"alert_id": "al-1", "client_request_id": "r1"}, {"create_investigation": (INV, True)}),
+     {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r1"}, {"create_investigation": (INV, True)}),
     (("GET", "/tenants/{tenant_id}/investigations"), f"{T}/investigations", None, {"list_investigations": [INV]}),
-    (("GET", "/tenants/{tenant_id}/investigations/{investigation_id}"), f"{T}/investigations/inv-1", None,
+    (("GET", "/tenants/{tenant_id}/investigations/{investigation_id}"), f"{T}/investigations/b1000000-0000-4000-8000-000000000001", None,
      {"get_investigation": INV}),
-    (("POST", "/tenants/{tenant_id}/investigations/{investigation_id}/cancel"), f"{T}/investigations/inv-1/cancel", None,
+    (("POST", "/tenants/{tenant_id}/investigations/{investigation_id}/cancel"), f"{T}/investigations/b1000000-0000-4000-8000-000000000001/cancel", None,
      {"cancel_investigation": INV}),
-    (("DELETE", "/tenants/{tenant_id}/investigations/{investigation_id}"), f"{T}/investigations/inv-1", None,
+    (("DELETE", "/tenants/{tenant_id}/investigations/{investigation_id}"), f"{T}/investigations/b1000000-0000-4000-8000-000000000001", None,
      {"delete_investigation": None}),
     (("GET", "/tenants/{tenant_id}/investigations/{investigation_id}/artifacts/{key}"),
-     f"{T}/investigations/inv-1/artifacts/report.md", None,
+     f"{T}/investigations/b1000000-0000-4000-8000-000000000001/artifacts/report.md", None,
      {"get_investigation": INV, "signed_url": SIGNED}),
     (("POST", "/tenants/{tenant_id}/learning-jobs"), f"{T}/learning-jobs",
-     {"investigation_id": "inv-1", "client_request_id": "r1"}, {"create_learning_job": (JOB, True)}),
+     {"investigation_id": "b1000000-0000-4000-8000-000000000001", "client_request_id": "r1"}, {"create_learning_job": (JOB, True)}),
     (("GET", "/tenants/{tenant_id}/learning-jobs"), f"{T}/learning-jobs", None, {"list_learning_jobs": [JOB]}),
-    (("GET", "/tenants/{tenant_id}/learning-jobs/{learning_job_id}"), f"{T}/learning-jobs/lj-1", None,
+    (("GET", "/tenants/{tenant_id}/learning-jobs/{learning_job_id}"), f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001", None,
      {"get_learning_job": JOB}),
     (("GET", "/tenants/{tenant_id}/lessons"), f"{T}/lessons", None, {"list_lessons": [LESSON]}),
     (("GET", "/tenants/{tenant_id}/systems"), f"{T}/systems", None,
@@ -265,13 +267,13 @@ async def _seed_identity() -> tuple[IdentityService, dict[str, str], InMemoryTen
     users: dict[str, str] = {}
     for email, tenant, session in (("ann@a.example", A, SESSION_A), ("bob@b.example", B, SESSION_B)):
         user = await repo.add_user(email, created_at=NOW, status="active", display_name=email)
-        await repo.add_membership(user.id, TenantId(tenant), status="active", invited_by="system",
+        await repo.add_membership(user.id, TenantId(tenant), status="active", invited_by=None,
                             created_at=NOW, accepted_at=NOW)
         await repo.add_session(session, user.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
         users[session] = user.id
     cy = await repo.add_user("cy@c.example", created_at=NOW, status="active", display_name="cy")
     for tenant in (A, B):
-        await repo.add_membership(cy.id, TenantId(tenant), status="active", invited_by="system",
+        await repo.add_membership(cy.id, TenantId(tenant), status="active", invited_by=None,
                             created_at=NOW, accepted_at=NOW)
     await repo.add_session(SESSION_AB, cy.id, now=NOW, expires_at=NOW + _dt.timedelta(days=7))
     users[SESSION_AB] = cy.id
@@ -449,18 +451,18 @@ def test_every_state_changing_route_refuses_a_valid_session_without_the_frontend
                               follow_redirects=False).status_code < 400
 
 
-@pytest.mark.parametrize("claim", ["Acme_Corp", "org_2NxAbCdEf", ""])
-def test_a_path_tenant_that_fails_the_grammar_is_a_404_not_a_500(claim: str) -> None:
-    """A malformed T in the path is a 404."""
+@pytest.mark.parametrize(("claim", "code"), [("Acme_Corp", 422), ("org_2NxAbCdEf", 422), ("", 404)])
+def test_a_path_tenant_that_fails_the_grammar_is_refused_not_a_500(claim: str, code: int) -> None:
+    """A malformed T in the path is a 422 (#1382); an empty one matches no route (404)."""
     api = Api()
     response = api.lenient().get(f"/tenants/{claim}/alerts", headers=AUTH)
-    assert response.status_code == 404
+    assert response.status_code == code
     assert api.ports.calls == []
 
 
 @pytest.mark.parametrize(("path", "body"), [
-    (f"{T}/investigations", {"alert_id": "al-1", "client_request_id": "r", "tenant_id": A}),
-    (f"{T}/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r", "tenant_id": A}),
+    (f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r", "tenant_id": A}),
+    (f"{T}/learning-jobs", {"investigation_id": "b1000000-0000-4000-8000-000000000001", "client_request_id": "r", "tenant_id": A}),
 ])
 def test_a_body_cannot_name_a_tenant(path: str, body: dict[str, str]) -> None:
     """The tenant comes only from the prefixed path, never from a body."""
@@ -469,14 +471,32 @@ def test_a_body_cannot_name_a_tenant(path: str, body: dict[str, str]) -> None:
     assert api.ports.calls == []
 
 
+@pytest.mark.parametrize("bad", ["r\x00", "r\ud800"], ids=["NUL", "lone surrogate"])
+@pytest.mark.parametrize(("path", "body"), [
+    (f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001"}),
+    (f"{T}/learning-jobs", {"investigation_id": "b1000000-0000-4000-8000-000000000001"}),
+])
+def test_1379_a_client_request_id_postgresql_cannot_hold_is_a_422_naming_it(
+    path: str, body: dict[str, str], bad: str,
+) -> None:
+    """Refused at the API's model, naming the field, reaching no store. (#1379 O1a)"""
+    api = Api()
+    # `json.dumps` escapes the surrogate as `\\ud800`, as a client's JSON would carry it.
+    response = api.client.post(path, headers={**AUTH, "content-type": "application/json"},
+                               content=json.dumps({**body, "client_request_id": bad}))
+    assert response.status_code == 422, response.text
+    assert [e["loc"] for e in response.json()["errors"]] == [["body", "client_request_id"]]
+    assert api.ports.calls == []
+
+
 # --- creates: 201 or replay ----------------------------------------------------------------
 
 
 @pytest.mark.parametrize(("path", "body", "port", "record", "location", "audit"), [
-    (f"{T}/investigations", {"alert_id": "al-1", "client_request_id": "r1"}, "create_investigation",
-     INV, f"{T}/investigations/inv-1", ("investigation.start", "inv-1", "alert al-1")),
-    (f"{T}/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r1"},
-     "create_learning_job", JOB, f"{T}/learning-jobs/lj-1", ("learning_job.start", "lj-1", "investigation inv-1")),
+    (f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r1"}, "create_investigation",
+     INV, f"{T}/investigations/b1000000-0000-4000-8000-000000000001", ("investigation.start", "b1000000-0000-4000-8000-000000000001", "alert a1000000-0000-4000-8000-000000000001")),
+    (f"{T}/learning-jobs", {"investigation_id": "b1000000-0000-4000-8000-000000000001", "client_request_id": "r1"},
+     "create_learning_job", JOB, f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001", ("learning_job.start", "c1000000-0000-4000-8000-000000000001", "investigation b1000000-0000-4000-8000-000000000001")),
 ])
 def test_a_create_is_a_201_with_location_only_when_the_store_created(
     path: str, body: dict[str, str], port: str, record: Any, location: str,
@@ -501,8 +521,8 @@ def test_a_create_is_a_201_with_location_only_when_the_store_created(
 
 
 @pytest.mark.parametrize(("path", "body", "port", "record"), [
-    (f"{T}/investigations", {"alert_id": "al-OTHER", "client_request_id": "r1"}, "create_investigation", INV),
-    (f"{T}/learning-jobs", {"investigation_id": "inv-OTHER", "client_request_id": "r1"},
+    (f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-0000000000ff", "client_request_id": "r1"}, "create_investigation", INV),
+    (f"{T}/learning-jobs", {"investigation_id": "b1000000-0000-4000-8000-0000000000ff", "client_request_id": "r1"},
      "create_learning_job", JOB),
 ])
 @pytest.mark.parametrize("created", [True, False])
@@ -519,7 +539,7 @@ def test_a_create_answered_for_another_target_is_a_500_and_commits_nothing(
 def test_a_create_whose_audit_write_fails_commits_nothing() -> None:
     api = Api(create_investigation=(INV, True), audit=RuntimeError("audit down"))
     response = api.lenient().post(f"{T}/investigations", headers=AUTH,
-                                  json={"alert_id": "al-1", "client_request_id": "r1"})
+                                  json={"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r1"})
     assert response.status_code == 500
     assert api.audited() == []
 
@@ -554,27 +574,27 @@ def test_put_system_without_a_field_is_refused(missing: str) -> None:
 
 
 @pytest.mark.parametrize(("method", "path", "port", "answer", "action"), [
-    ("POST", f"{T}/investigations/inv-1/cancel", "cancel_investigation", INV, "investigation.cancel"),
-    ("DELETE", f"{T}/investigations/inv-1", "delete_investigation", None, "investigation.delete"),
+    ("POST", f"{T}/investigations/b1000000-0000-4000-8000-000000000001/cancel", "cancel_investigation", INV, "investigation.cancel"),
+    ("DELETE", f"{T}/investigations/b1000000-0000-4000-8000-000000000001", "delete_investigation", None, "investigation.delete"),
 ])
 def test_a_write_is_audited_in_its_own_transaction(
     method: str, path: str, port: str, answer: Any, action: str,
 ) -> None:
     api = Api(**{port: answer})
     assert api.client.request(method, path, headers=AUTH).status_code < 400
-    assert api.ports.called(port) == [(("inv-1",), {})]
+    assert api.ports.called(port) == [(("b1000000-0000-4000-8000-000000000001",), {})]
     assert api.ports.transactions == [(A, api.user)]
-    assert api.audited() == [(action, "inv-1", "")]
+    assert api.audited() == [(action, "b1000000-0000-4000-8000-000000000001", "")]
 
 
 # --- refusals ------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(("path", "port"), [
-    (f"{T}/alerts/al-1", "get_alert"),
-    (f"{T}/investigations/inv-1", "get_investigation"),
-    (f"{T}/investigations/inv-1/artifacts/report.md", "get_investigation"),
-    (f"{T}/learning-jobs/lj-1", "get_learning_job"),
+    (f"{T}/alerts/a1000000-0000-4000-8000-000000000001", "get_alert"),
+    (f"{T}/investigations/b1000000-0000-4000-8000-000000000001", "get_investigation"),
+    (f"{T}/investigations/b1000000-0000-4000-8000-000000000001/artifacts/report.md", "get_investigation"),
+    (f"{T}/learning-jobs/c1000000-0000-4000-8000-000000000001", "get_learning_job"),
 ])
 def test_a_read_the_store_answers_none_is_a_404(path: str, port: str) -> None:
     api = Api(**{port: None})
@@ -583,22 +603,22 @@ def test_a_read_the_store_answers_none_is_a_404(path: str, port: str) -> None:
 
 
 @pytest.mark.parametrize(("method", "path", "body", "port", "error", "code"), [
-    ("POST", f"{T}/investigations/inv-1/cancel", None, "cancel_investigation", NotFound("x"), 404),
-    ("POST", f"{T}/investigations/inv-1/cancel", None, "cancel_investigation", Conflict("x"), 409),
-    ("DELETE", f"{T}/investigations/inv-1", None, "delete_investigation", NotFound("x"), 404),
-    ("DELETE", f"{T}/investigations/inv-1", None, "delete_investigation", Conflict("x"), 409),
-    ("POST", f"{T}/investigations", {"alert_id": "al-1", "client_request_id": "r"},
+    ("POST", f"{T}/investigations/b1000000-0000-4000-8000-000000000001/cancel", None, "cancel_investigation", NotFound("x"), 404),
+    ("POST", f"{T}/investigations/b1000000-0000-4000-8000-000000000001/cancel", None, "cancel_investigation", Conflict("x"), 409),
+    ("DELETE", f"{T}/investigations/b1000000-0000-4000-8000-000000000001", None, "delete_investigation", NotFound("x"), 404),
+    ("DELETE", f"{T}/investigations/b1000000-0000-4000-8000-000000000001", None, "delete_investigation", Conflict("x"), 409),
+    ("POST", f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r"},
      "create_investigation", UnknownReference("x"), 422),
-    ("POST", f"{T}/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r"},
+    ("POST", f"{T}/learning-jobs", {"investigation_id": "b1000000-0000-4000-8000-000000000001", "client_request_id": "r"},
      "create_learning_job", UnknownReference("x"), 422),
-    ("POST", f"{T}/learning-jobs", {"investigation_id": "inv-1", "client_request_id": "r"},
+    ("POST", f"{T}/learning-jobs", {"investigation_id": "b1000000-0000-4000-8000-000000000001", "client_request_id": "r"},
      "create_learning_job", Conflict("x"), 409),
     # the job store's own refusals, as the store raises them (#1342): nothing maps them to the API's
-    ("POST", f"{T}/investigations/inv-1/cancel", None, "cancel_investigation", store_errors.NotFound("x"), 404),
-    ("POST", f"{T}/investigations/inv-1/cancel", None, "cancel_investigation", store_errors.Conflict("x"), 409),
-    ("DELETE", f"{T}/investigations/inv-1", None, "delete_investigation", store_errors.NotFound("x"), 404),
-    ("DELETE", f"{T}/investigations/inv-1", None, "delete_investigation", store_errors.Conflict("x"), 409),
-    ("POST", f"{T}/investigations", {"alert_id": "al-1", "client_request_id": "r"},
+    ("POST", f"{T}/investigations/b1000000-0000-4000-8000-000000000001/cancel", None, "cancel_investigation", store_errors.NotFound("x"), 404),
+    ("POST", f"{T}/investigations/b1000000-0000-4000-8000-000000000001/cancel", None, "cancel_investigation", store_errors.Conflict("x"), 409),
+    ("DELETE", f"{T}/investigations/b1000000-0000-4000-8000-000000000001", None, "delete_investigation", store_errors.NotFound("x"), 404),
+    ("DELETE", f"{T}/investigations/b1000000-0000-4000-8000-000000000001", None, "delete_investigation", store_errors.Conflict("x"), 409),
+    ("POST", f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r"},
      "create_investigation", store_errors.UnknownReference("x"), 422),
 ])
 def test_a_store_refusal_maps_to_its_status_and_audits_nothing(
@@ -619,18 +639,18 @@ def test_a_store_refusal_maps_to_its_status_and_audits_nothing(
 @pytest.mark.parametrize("key", ["report.md", "gather_raw/L1/0.json"])
 def test_an_artifact_read_redirects_to_the_signed_link_and_is_audited(key: str) -> None:
     api = Api(get_investigation=INV, signed_url=SIGNED)
-    response = api.client.get(f"{T}/investigations/inv-1/artifacts/{key}", headers=AUTH,
+    response = api.client.get(f"{T}/investigations/b1000000-0000-4000-8000-000000000001/artifacts/{key}", headers=AUTH,
                               follow_redirects=False)
     assert response.status_code == 307
     assert response.headers["Location"] == SIGNED
     assert response.headers["Cache-Control"] == "no-store"
-    assert api.ports.called("signed_url") == [((A, "inv-1", key), {})]
-    assert api.audited() == [("artifact.read", "inv-1", key)]
+    assert api.ports.called("signed_url") == [((A, "b1000000-0000-4000-8000-000000000001", key), {})]
+    assert api.audited() == [("artifact.read", "b1000000-0000-4000-8000-000000000001", key)]
 
 
 def test_an_artifact_read_whose_link_fails_is_not_audited() -> None:
     api = Api(get_investigation=INV, signed_url=RuntimeError("signer down"))
-    response = api.lenient().get(f"{T}/investigations/inv-1/artifacts/report.md", headers=AUTH,
+    response = api.lenient().get(f"{T}/investigations/b1000000-0000-4000-8000-000000000001/artifacts/report.md", headers=AUTH,
                                  follow_redirects=False)
     assert response.status_code == 500
     assert api.ports.transactions == []
@@ -639,7 +659,7 @@ def test_an_artifact_read_whose_link_fails_is_not_audited() -> None:
 
 def test_an_artifact_link_is_not_handed_out_unless_its_read_is_audited() -> None:
     api = Api(get_investigation=INV, signed_url=SIGNED, audit=RuntimeError("audit down"))
-    response = api.lenient().get(f"{T}/investigations/inv-1/artifacts/report.md", headers=AUTH,
+    response = api.lenient().get(f"{T}/investigations/b1000000-0000-4000-8000-000000000001/artifacts/report.md", headers=AUTH,
                                  follow_redirects=False)
     assert response.status_code == 500
     assert SIGNED not in response.text
@@ -650,7 +670,7 @@ def test_an_artifact_link_is_not_handed_out_unless_its_read_is_audited() -> None
                                  "other/report.md"])
 def test_only_keys_the_investigation_lists_are_answered(key: str) -> None:
     api = Api(get_investigation=INV)
-    response = api.client.get(f"{T}/investigations/inv-1/artifacts/{key}", headers=AUTH,
+    response = api.client.get(f"{T}/investigations/b1000000-0000-4000-8000-000000000001/artifacts/{key}", headers=AUTH,
                               follow_redirects=False)
     assert response.status_code == 404
     assert response.json()["detail"].startswith("no artifact"), "refused by the route's own list"
@@ -783,11 +803,11 @@ PROBLEM_KEYS = {"type", "title", "status", "detail"}
 @pytest.mark.parametrize(("method", "path", "body", "headers", "answers", "code"), [
     ("GET", f"{T}/alerts", None, {"Origin": ORIGIN}, {}, 401),
     ("GET", f"{TB}/alerts", None, AUTH, {}, 404),
-    ("GET", f"{T}/alerts/al-1", None, AUTH, {"get_alert": None}, 404),
+    ("GET", f"{T}/alerts/a1000000-0000-4000-8000-000000000001", None, AUTH, {"get_alert": None}, 404),
     ("GET", "/nowhere", None, AUTH, {}, 404),
     ("POST", f"{T}/alerts", None, AUTH, {}, 405),
-    ("POST", f"{T}/investigations/inv-1/cancel", None, AUTH, {"cancel_investigation": Conflict("ended")}, 409),
-    ("POST", f"{T}/investigations", {"alert_id": "al-1", "client_request_id": "r"}, AUTH,
+    ("POST", f"{T}/investigations/b1000000-0000-4000-8000-000000000001/cancel", None, AUTH, {"cancel_investigation": Conflict("ended")}, 409),
+    ("POST", f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r"}, AUTH,
      {"create_investigation": UnknownReference("no alert")}, 422),
     ("GET", f"{T}/alerts?cursor=zz", None, AUTH, {}, 422),
     ("GET", f"{T}/alerts?limit=0", None, AUTH, {}, 422),
@@ -893,7 +913,7 @@ def test_an_aware_time_reaches_the_store_as_the_same_instant_in_utc() -> None:
 _UNKNOWN_QUERY_ROUTES = [
     ("GET", f"{T}/alerts?severity=high"),
     ("GET", f"{T}/alerts?limit=5&nonsense=1"),
-    ("GET", f"{T}/alerts/al-1?extra=1"),
+    ("GET", f"{T}/alerts/a1000000-0000-4000-8000-000000000001?extra=1"),
     ("GET", f"{T}/investigations?bogus=x"),
     ("POST", f"{T}/investigations?bogus=x"),
     ("GET", f"{T}/learning-jobs?bogus=x"),
@@ -909,7 +929,7 @@ def test_r7_2_a_query_parameter_the_route_does_not_declare_is_a_422_problem_befo
     """An undeclared query parameter is a 422 problem with one `extra_forbidden` entry at `["query", name]`; no port is called. (R7-2)"""
     api = Api()
     name = path.split("?", 1)[1].split("&")[-1].split("=")[0]
-    response = api.lenient().request(method, path, headers=AUTH, json={"alert_id": "al-1", "client_request_id": "r"}
+    response = api.lenient().request(method, path, headers=AUTH, json={"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": "r"}
                                   if method == "POST" else None)
     assert response.status_code == 422, response.text
     assert response.headers["Content-Type"] == "application/problem+json"
@@ -940,8 +960,8 @@ def test_r7_2_every_unknown_query_parameter_gets_its_own_entry() -> None:
 
 @pytest.mark.parametrize(("path", "answers"), [
     (f"{T}/alerts?limit=5&fired_after=2026-09-28T08:00:00Z", {"list_alerts": [SUMMARY]}),
-    (f"{T}/investigations?alert_id=al-1&limit=5", {"list_investigations": [INV]}),
-    (f"{T}/learning-jobs?investigation_id=i-1&limit=5", {"list_learning_jobs": []}),
+    (f"{T}/investigations?alert_id=a1000000-0000-4000-8000-000000000001&limit=5", {"list_investigations": [INV]}),
+    (f"{T}/learning-jobs?investigation_id=b1000000-0000-4000-8000-000000000001&limit=5", {"list_learning_jobs": []}),
     (f"{T}/lessons?limit=5", {"list_lessons": [LESSON]}),
 ])
 def test_r7_2_control_declared_query_parameters_are_served_as_before(path: str, answers: dict[str, Any]) -> None:
@@ -993,7 +1013,7 @@ def test_a_page_size_out_of_range_is_refused(path: str, limit: int) -> None:
 def test_a_blank_client_request_id_is_refused() -> None:
     api = Api()
     assert api.client.post(f"{T}/investigations", headers=AUTH,
-                           json={"alert_id": "al-1", "client_request_id": ""}).status_code == 422
+                           json={"alert_id": "a1000000-0000-4000-8000-000000000001", "client_request_id": ""}).status_code == 422
     assert api.ports.calls == []
 
 
@@ -1013,8 +1033,8 @@ def test_an_id_outside_the_grammar_cannot_be_served(bad: str) -> None:
 
 @pytest.mark.parametrize("legacy", ["Not_A_Tenant", "acme", "playground", "tenant-a", "blue"])
 def test_a_principal_carries_a_checked_tenant(legacy) -> None:
-    """`Principal`'s tenant is grammar-checked."""
-    with pytest.raises(TenantRefused):
+    """`Principal`'s tenant is grammar-checked (#1382: as pydantic's own pattern error)."""
+    with pytest.raises(ValidationError):
         Principal(tenant_id=legacy, user_id=USER)
 
 
@@ -1027,18 +1047,18 @@ def test_a_naive_time_cannot_be_served() -> None:
 # --- pagination ----------------------------------------------------------------------------
 
 LATER = NOW + _dt.timedelta(hours=1)
-INV_2 = INV.model_copy(update={"investigation_id": "inv-2", "created_at": LATER})
-JOB_2 = JOB.model_copy(update={"learning_job_id": "lj-2", "created_at": LATER})
-SUMMARY_2 = SUMMARY.model_copy(update={"alert_id": "al-2", "fired_at": LATER})
+INV_2 = INV.model_copy(update={"investigation_id": "b1000000-0000-4000-8000-000000000002", "created_at": LATER})
+JOB_2 = JOB.model_copy(update={"learning_job_id": "c1000000-0000-4000-8000-000000000002", "created_at": LATER})
+SUMMARY_2 = SUMMARY.model_copy(update={"alert_id": "a1000000-0000-4000-8000-000000000002", "fired_at": LATER})
 LESSON_2 = LESSON.model_copy(update={"lesson_id": "le-2"})
 SETTINGS_2 = SETTINGS.model_copy(update={"system_id": "tiy"})
 
 #: (path, port, the store's first two rows in the list's order, the position the second page
 #: must start after — the first row's, as the port's order names it).
 LISTS = [
-    (f"{T}/alerts", "list_alerts", [SUMMARY_2, SUMMARY], (LATER, "al-2")),
-    (f"{T}/investigations", "list_investigations", [INV_2, INV], (LATER, "inv-2")),
-    (f"{T}/learning-jobs", "list_learning_jobs", [JOB_2, JOB], (LATER, "lj-2")),
+    (f"{T}/alerts", "list_alerts", [SUMMARY_2, SUMMARY], (LATER, "a1000000-0000-4000-8000-000000000002")),
+    (f"{T}/investigations", "list_investigations", [INV_2, INV], (LATER, "b1000000-0000-4000-8000-000000000002")),
+    (f"{T}/learning-jobs", "list_learning_jobs", [JOB_2, JOB], (LATER, "c1000000-0000-4000-8000-000000000002")),
     (f"{T}/lessons", "list_lessons", [LESSON, LESSON_2], "le-1"),
     (f"{T}/systems", "list_systems", [SETTINGS, SETTINGS_2], "tix"),
 ]
@@ -1068,17 +1088,18 @@ def test_every_list_pages_by_cursor_from_the_last_row_served(
 
 
 def test_a_cursor_stays_short_whatever_the_filters_and_is_accepted_back() -> None:
-    # #1342: alerts keep only moment filters, so the longest admitted filter is the investigations list's alert id.
-    alert_id = "a" * 128
+    # #1342: alerts keep only moment filters, so the longest admitted filter is the investigations list's alert id
+    # (#1382: a UUID, so every one is as long).
+    alert_id = "a1000000-0000-4000-8000-000000000001"
     api = Api(list_investigations=_rows_after([INV_2, INV]))
     cursor = _cursor(api, f"{T}/investigations", {"alert_id": alert_id})
     assert len(cursor) < 400
-    short = _cursor(Api(list_investigations=_rows_after([INV_2, INV])), f"{T}/investigations", {"alert_id": "a"})
+    short = _cursor(Api(list_investigations=_rows_after([INV_2, INV])), f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000002"})
     assert len(cursor) == len(short), "the cursor grows with the filter: it carries it, not a digest"
     page = api.client.get(f"{T}/investigations", headers=AUTH,
                           params={"limit": 1, "alert_id": alert_id, "cursor": cursor})
     assert page.status_code == 200, page.text
-    assert [i["investigation_id"] for i in page.json()["items"]] == ["inv-1"]
+    assert [i["investigation_id"] for i in page.json()["items"]] == ["b1000000-0000-4000-8000-000000000001"]
 
 
 def _edited(cursor: str, **changes: Any) -> str:
@@ -1185,12 +1206,12 @@ def test_a_cursor_this_api_did_not_issue_is_refused_before_the_store(cursor: str
 
 def test_a_cursor_is_bound_to_its_list_its_tenant_and_its_filters() -> None:
     issuer = Api(list_investigations=[INV_2, INV], list_lessons=[LESSON, LESSON_2])
-    by_alert = _cursor(issuer, f"{T}/investigations", {"alert_id": "al-1"})
+    by_alert = _cursor(issuer, f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001"})
     lessons = _cursor(issuer, f"{T}/lessons")
 
     api = Api()
     refusals = [
-        api.client.get(f"{T}/investigations", headers=AUTH, params={"cursor": by_alert, "alert_id": "al-2"}),
+        api.client.get(f"{T}/investigations", headers=AUTH, params={"cursor": by_alert, "alert_id": "a1000000-0000-4000-8000-000000000002"}),
         api.client.get(f"{T}/investigations", headers=AUTH, params={"cursor": by_alert}),
         api.client.get(f"{T}/systems", headers=AUTH, params={"cursor": lessons}),
         api.client.get(f"{TB}/lessons", headers=AUTH_B, params={"cursor": lessons}),
@@ -1218,7 +1239,7 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
     store = InMemoryStore(lambda: NOW)
     fired = [NOW, NOW, NOW, LATER, NOW - _dt.timedelta(hours=1)]
     for n, at in enumerate(fired):
-        store.add_alert(A, ALERT.model_copy(update={"alert_id": f"al-{n}", "fired_at": at}))
+        store.add_alert(A, ALERT.model_copy(update={"alert_id": f"a1000000-0000-4000-8000-{n:012d}", "fired_at": at}))
     identity, _, tenants = _identity()
     client = TestClient(create_app(ApiDeps(
         identity=identity, tenants=tenants, frontend_origin=ORIGIN,
@@ -1234,7 +1255,7 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
         if page["next_cursor"] is None:
             break
         params = {"limit": 2, "cursor": page["next_cursor"]}
-    assert seen == ["al-3", "al-2", "al-1", "al-0", "al-4"]
+    assert seen == ["a1000000-0000-4000-8000-000000000003", "a1000000-0000-4000-8000-000000000002", "a1000000-0000-4000-8000-000000000001", "a1000000-0000-4000-8000-000000000000", "a1000000-0000-4000-8000-000000000004"]
 
 
 
@@ -1373,7 +1394,7 @@ def test_the_demo_store_keeps_the_audit_events_a_transaction_commits() -> None:
     auth = _session(demo_sessions((DEMO_ONE,))[f"{DEMO_ONE}-analyst"], deps.frontend_origin)
     user_id = client.get("/me", headers=auth).json()["user"]["id"]
     created = client.post(f"/tenants/{DEMO_ONE}/investigations", headers=auth,
-                          json={"alert_id": f"{DEMO_ONE}-alert-0003", "client_request_id": "r1"})
+                          json={"alert_id": demo_id(AlertId, DEMO_ONE, "alert-0003"), "client_request_id": "r1"})
     assert created.status_code == 201, created.text
     events = deps.writes.audit_events  # type: ignore[attr-defined]
     assert [(e.tenant_id, e.user_id, e.action, e.target) for e in events] == [
@@ -1384,7 +1405,7 @@ def test_the_demo_store_keys_records_by_tenant() -> None:
     store = InMemoryStore(lambda: NOW)
     store.add_alert(DEMO_ONE, ALERT)
     store.add_alert(DEMO_TWO, ALERT.model_copy(update={"title": "two's"}))
-    one, two = anyio.run(store.get_alert, DEMO_ONE, "al-1"), anyio.run(store.get_alert, DEMO_TWO, "al-1")
+    one, two = anyio.run(store.get_alert, DEMO_ONE, "a1000000-0000-4000-8000-000000000001"), anyio.run(store.get_alert, DEMO_TWO, "a1000000-0000-4000-8000-000000000001")
     assert one is not None
     assert two is not None
     assert (one.title, two.title) == ("t", "two's")

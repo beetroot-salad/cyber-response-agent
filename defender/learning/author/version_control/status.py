@@ -37,6 +37,7 @@ from defender.tenancy import (
 )
 
 if TYPE_CHECKING:
+    from defender.records.formats import TenantId
     from defender.tenancy import TenantDirectory
 
 from .auth import CredentialMisconfigured
@@ -98,7 +99,7 @@ def _fault_kind(error: BaseException) -> str:
     return OPERATOR
 
 
-def record_refused(directory: TenantDirectory | None, tenant_id: object, error: BaseException, *,
+def record_refused(directory: TenantDirectory | None, tenant_id: TenantId, error: BaseException, *,
                    by: str) -> None:
     """A publish by `by` was refused (the lock busy is not a refusal, and is not recorded)."""
     if isinstance(error, LockBusy):
@@ -108,7 +109,7 @@ def record_refused(directory: TenantDirectory | None, tenant_id: object, error: 
 
 
 @contextlib.contextmanager
-def recording(directory: TenantDirectory | None, tenant_id: object, *, by: str) -> Iterator[None]:
+def recording(directory: TenantDirectory | None, tenant_id: TenantId, *, by: str) -> Iterator[None]:
     """Record a refusal raised inside as `by`'s publish refusal of `tenant_id` (through
     `directory`, the host's tenant records; none: nothing is recorded), and re-raise it."""
     try:

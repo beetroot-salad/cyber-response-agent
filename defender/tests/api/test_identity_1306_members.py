@@ -154,11 +154,11 @@ def test_the_member_list_shows_active_members_only_never_an_invitee() -> None:
 
 
 def test_a_membership_records_who_invited_it_and_who_ended_it() -> None:
-    """`invited_by` is the inviting member (`system` for the bootstrap); `ended_by` is whoever removed it (data model, O4)."""
+    """`invited_by` is the inviting member (None, the system, for the bootstrap); `ended_by` is whoever removed it (data model, O4)."""
     world, ann, bob = two_tenants()
     ann_id, bob_id = user_id(ann), user_id(bob)
     [ann_row] = world.call(world.repo.memberships_of_user, ann_id)
-    assert ann_row.invited_by == "system"
+    assert ann_row.invited_by is None
     nina_row = world.invite(ann, T1, NINA).json()["id"]
     assert world.call(world.repo.membership, nina_row).invited_by == ann_id
     world.send_pending()

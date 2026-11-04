@@ -11,7 +11,6 @@ from __future__ import annotations
 import dataclasses
 import datetime as _dt
 import logging
-import uuid
 from collections.abc import AsyncIterator, Callable, Collection, Mapping
 from contextlib import asynccontextmanager
 from typing import Any
@@ -20,11 +19,12 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from defender._text import postgres_can_hold
 from defender.database import async_engine, sessions
-from defender.records.formats import admit
+from defender.records.formats import AlertId, InvestigationId, TenantId, admit
 
 from .audit import SYSTEM, announce
-from .errors import Conflict, NotFound, UnknownReference
+from .errors import Conflict, NotFound, UnknownReference, UnstorableText
 from defender.tenancy.models import TenantRecord
 
 from .models import (
@@ -69,16 +69,11 @@ class _Refused(Exception):
         self.sqlstate = sqlstate
 
 
-def _postgres_can_hold(text: str) -> bool:
-    """Whether PostgreSQL can hold `text`. An id it cannot hold names nothing, so it is looked up
-    as an unknown one rather than crashing the query."""
-    if "\x00" in text:
-        return False
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return True
+def _refuse_unstorable_text(**fields: str) -> None:
+    """`UnstorableText` naming the first field PostgreSQL text cannot hold, before any query."""
+    for name, text in fields.items():
+        if not postgres_can_hold(text):
+            raise UnstorableText(f"{name} holds a NUL or a lone surrogate, which PostgreSQL text cannot hold")
 
 
 class JobStore:
@@ -109,14 +104,17 @@ class JobStore:
     # --- alerts -------------------------------------------------------------------------
 
     async def insert_alert(  # noqa: PLR0913 — the ratified signature
-        self, tenant_id: str, *, vendor: str, vendor_ticket_id: str, fired_at: _dt.datetime,
+        self, tenant_id: TenantId, *, vendor: str, vendor_ticket_id: str, fired_at: _dt.datetime,
         changed_at: _dt.datetime, received_at: _dt.datetime, title: str, description: str, raw: bytes,
     ) -> StoredAlert:
         """Store an alert's exact bytes. `AlertRefused` for anything alert admission refuses; `Conflict`
-        for a second alert with this vendor's ticket id; `UnknownReference` for a tenant with no row."""
+        for a second alert with this vendor's ticket id; `UnknownReference` for a tenant with no row;
+        `UnstorableText` for a text field PostgreSQL cannot hold."""
+        _refuse_unstorable_text(vendor=vendor, vendor_ticket_id=vendor_ticket_id, title=title,
+                                description=description)
         admit(raw)
         row = AlertRow(
-            id=str(uuid.uuid4()), tenant_id=tenant_id, vendor=vendor, vendor_ticket_id=vendor_ticket_id,
+            id=AlertId.mint(), tenant_id=tenant_id, vendor=vendor, vendor_ticket_id=vendor_ticket_id,
             fired_at=fired_at, changed_at=changed_at, received_at=received_at, title=title,
             description=description, raw=raw)
         try:
@@ -130,9 +128,7 @@ class JobStore:
             raise
         return stored_alert(row)
 
-    async def get_alert(self, tenant_id: str, alert_id: str) -> StoredAlert | None:
-        if not _postgres_can_hold(alert_id):
-            return None
+    async def get_alert(self, tenant_id: TenantId, alert_id: AlertId) -> StoredAlert | None:
         async with self._tx() as s:
             row = (await s.execute(select(AlertRow).where(
                 AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id))).scalars().first()
@@ -140,15 +136,13 @@ class JobStore:
 
     # --- reads --------------------------------------------------------------------------
 
-    async def get_investigation(self, tenant_id: str, investigation_id: str) -> InvestigationRecord | None:
-        if not _postgres_can_hold(investigation_id):
-            return None
+    async def get_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId) -> InvestigationRecord | None:
         async with self._tx() as s:
             row = await self._row(s, tenant_id, investigation_id)
         return None if row is None else investigation_record(row)
 
     @staticmethod
-    async def _row(s: AsyncSession, tenant_id: str, investigation_id: str) -> InvestigationRow | None:
+    async def _row(s: AsyncSession, tenant_id: TenantId, investigation_id: InvestigationId) -> InvestigationRow | None:
         return (await s.execute(select(InvestigationRow).where(
             InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == investigation_id))
         ).scalars().first()
@@ -156,16 +150,13 @@ class JobStore:
     # --- create -------------------------------------------------------------------------
 
     async def create_investigation(
-        self, tenant_id: str, alert_id: str, request_key: str, *, actor: str,
+        self, tenant_id: TenantId, alert_id: AlertId, request_key: str, *, actor: str,
     ) -> tuple[InvestigationRecord, bool]:
         """Start an investigation of the alert, or answer the one this request already has (#1081
         §4.1): the latest attempt under the key; else the alert's live investigation, without
         recording this key; else a new attempt 1. `created` only when this call inserted the row.
         `UnknownReference` for an alert this tenant lacks."""
-        if not _postgres_can_hold(alert_id):
-            raise UnknownReference(f"no alert {alert_id!r}")
-        if not _postgres_can_hold(request_key):
-            raise ValueError("the request key cannot be stored")
+        _refuse_unstorable_text(request_key=request_key)
         async with self._tx() as s:
             locked = (await s.execute(select(AlertRow.id).where(
                 AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id).with_for_update())).first()
@@ -183,7 +174,7 @@ class JobStore:
             if live is not None:
                 return investigation_record(live), False
             row = InvestigationRow(
-                id=str(uuid.uuid4()), tenant_id=tenant_id, alert_id=alert_id, request_key=request_key,
+                id=InvestigationId.mint(), tenant_id=tenant_id, alert_id=alert_id, request_key=request_key,
                 attempt=1, stage="queued", created_at=self._clock(), cost_usd=0.0)
             s.add(row)
             record = investigation_record(row)
@@ -221,13 +212,11 @@ class JobStore:
     # --- cancel -------------------------------------------------------------------------
 
     async def cancel_investigation(
-        self, tenant_id: str, investigation_id: str, *, actor: str,
+        self, tenant_id: TenantId, investigation_id: InvestigationId, *, actor: str,
     ) -> InvestigationRecord:
         """Abort a queued or running investigation (`aborted`, reason `cancelled`); a running one's
         worker ends its child at its next renewal (B3, B9). `NotFound`; `Conflict` for an ended one,
         naming the live retry when the ended attempt has one."""
-        if not _postgres_can_hold(investigation_id):
-            raise NotFound(f"no investigation {investigation_id!r}")
         async with self._tx() as s:
             row = (await s.execute(
                 update(InvestigationRow).where(
@@ -253,11 +242,9 @@ class JobStore:
 
     # --- delete -------------------------------------------------------------------------
 
-    async def delete_investigation(self, tenant_id: str, investigation_id: str, *, actor: str) -> None:
+    async def delete_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId, *, actor: str) -> None:
         """Remove every attempt under the named investigation's request key. `NotFound`; `Conflict`
         while any of them is queued or running. Takes the alert lock, so it serializes with create."""
-        if not _postgres_can_hold(investigation_id):
-            raise NotFound(f"no investigation {investigation_id!r}")
         async with self._tx() as s:
             named = await self._row(s, tenant_id, investigation_id)
             if named is None:
@@ -279,7 +266,7 @@ class JobStore:
     # --- the worker's write -------------------------------------------------------------
 
     async def finish(
-        self, tenant_id: str, investigation_id: str, *, stage: str, disposition: str | None = None,
+        self, tenant_id: TenantId, investigation_id: InvestigationId, *, stage: str, disposition: str | None = None,
         cost_usd: float | None = None, knowledge: dict[str, Any] | None = None,
         failure_reason: str | None = None, failure_message: str | None = None,
     ) -> InvestigationRecord | None:
@@ -290,8 +277,6 @@ class JobStore:
         final accounting instead (`write_accounting`)."""
         if stage not in TERMINAL:
             raise ValueError(f"{stage!r} is not a terminal stage")
-        if not _postgres_can_hold(investigation_id):
-            return None
         async with self._tx() as s:
             row = (await s.execute(
                 update(InvestigationRow).where(
@@ -316,7 +301,7 @@ class JobStore:
         cancelled, taken over or deleted (B3). `costs` copies a cost-so-far figure onto the rows it
         names (B2); a covered row without a figure keeps its cost. Late renewals of a lapsed row
         nobody took over succeed (B1)."""
-        ids = {i for i in held if _postgres_can_hold(i)}
+        ids = set(held)
         if not ids:
             return []
         figures = {i: c for i, c in (costs or {}).items() if i in ids}
@@ -337,8 +322,6 @@ class JobStore:
         """The holder's final cost and knowledge on a row someone else already ended (cancel,
         take-over): written once, changing no stage or failure detail (B-P2, B4). `None` when the
         row is not an ended one of this tenant, or its mark is already set."""
-        if not _postgres_can_hold(investigation_id):
-            return None
         async with self._tx() as s:
             row = (await s.execute(
                 update(InvestigationRow).where(
@@ -354,8 +337,6 @@ class JobStore:
         """A stopping worker gives a running row back: its lease lapses at once, so any worker takes
         it over within seconds, and its final cost and knowledge and the mark are written (B11).
         `None` when the row is not a running, unmarked one of this tenant."""
-        if not _postgres_can_hold(investigation_id):
-            return None
         async with self._tx() as s:
             row = (await s.execute(
                 update(InvestigationRow).where(
@@ -410,7 +391,7 @@ class JobStore:
                 lapsed.finished_at = self._clock()
                 retry_id = None
                 if not capped:
-                    retry_id = str(uuid.uuid4())
+                    retry_id = InvestigationId.mint()
                     await s.flush()  # the old row leaves `running` before the retry takes its place in the index
                     s.add(InvestigationRow(
                         id=retry_id, tenant_id=lapsed.tenant_id, alert_id=lapsed.alert_id,

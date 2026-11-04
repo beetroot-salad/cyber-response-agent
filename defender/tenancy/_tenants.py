@@ -11,7 +11,6 @@ from pathlib import Path
 REQUIRED_SETTINGS: tuple[str, ...] = (
     "verb-grants.yaml",
     "lead-zero.yaml",
-    "systems/case-history/mapping.yaml",
 )
 
 SETTINGS_HALF = "settings"

@@ -3,7 +3,7 @@
 context's `env`, in the code that addresses a tenant's systems (#1107 O7).
 
 A tenant's settings are its `settings/` folder, resolved ONCE when a run begins into the run's
-record (`RunTenant`). An adapter, the estate, the case-history writer and lead-zero take what a
+record (`RunTenant`). An adapter, the estate, the case-comment writer and lead-zero take what a
 system's address, container, docker context or secret is from that record — never from whatever
 the process happens to have exported, which differs between the shell that launched the run, the
 box and the CI job, and which a model-writable tree can influence. This lint is the net under
