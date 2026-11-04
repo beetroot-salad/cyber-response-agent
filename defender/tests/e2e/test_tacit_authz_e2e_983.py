@@ -331,3 +331,101 @@ def test_exhausted_contract_is_not_looped_back_but_still_escalates(tmp_path):
     assert frontier_from_text(produced).contracts == (), (
         "a contract no registry here can answer is still handed back for another retrieval loop"
     )
+
+
+# ---------------------------------------------------------------- #1390: the platform-served lookup
+
+
+def _spec() -> object:
+    from defender.tests.learning.oracle.live_contracts import _spec1224
+
+    return _spec1224
+
+
+def _current_entry(**overrides: str) -> dict:
+    """A well-formed entry in force on the day the suite runs (a live run's clock)."""
+    today = dt.datetime.now(dt.UTC).date()
+    return scene.registry_entry(added_at=str(today - dt.timedelta(days=10)),
+                                review_by=str(today + dt.timedelta(days=30)), **overrides)
+
+
+def _gather_lookups(tmp_path: Path, est, *turns) -> tuple[Path, list[dict]]:
+    """One live investigation whose gather lead on `tacit-knowledge` runs `turns`, over the
+    estate's real gather registry; returns the run dir and the lead's tacit-knowledge rows."""
+    S = _spec()
+    run_dir, _gather = S.drive_gather(
+        tmp_path / "run", verbs=S.plain_registry(est), tenant=est.place(), system=SYSTEM,
+        gather_turns=[*turns, S.done_turn()])
+    return run_dir, [r for r in S.lead_rows(run_dir) if r["system"] == SYSTEM]
+
+
+def _payload(run_dir: Path, row: dict) -> dict:
+    return json.loads((run_dir / row["payload_path"]).read_text(encoding="utf-8"))
+
+
+def test_1390_a_granted_lookup_runs_through_the_query_tool_and_is_recorded(tmp_path):
+    """Granted: the lookup is one queries row with the registry's answer, and `list_verbs` describes it. O4."""
+    from defender.investigation.query_catalog import _tool_list_verbs
+
+    S = _spec()
+    est = S.TacitEstate(tmp_path / "estate")
+    entry = _current_entry()
+    est.write_registry(json.dumps({"entries": [entry]}))
+
+    run_dir, rows = _gather_lookups(tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS))
+
+    assert [(r["verb"], r["params"], r["exit_code"]) for r in rows] == [
+        (LOOKUP, LOOKUP_PARAMS, 0)]
+    assert _payload(run_dir, rows[0]) == {"matched": entry}
+    listed = _tool_list_verbs(S.plain_registry(est), SYSTEM)
+    for needle in ("the 2 verb(s) your grant admits", "lookup", "health-check",
+                   "actor", "host", "pattern"):
+        assert needle in listed, f"list_verbs does not describe {needle!r}:\n{listed}"
+
+
+def test_1390_a_withheld_lookup_is_refused_and_recorded_as_denied(tmp_path):
+    """A table row granting `lookup` to no role refuses the call through the query tool's grant check, recorded as a denial. O4."""
+    from defender.systems.circuit_breaker import DENIED_EXIT_CODE
+
+    S = _spec()
+    est = S.TacitEstate(tmp_path / "estate",
+                        tacit_roles=(("lookup", ()), ("health-check", ("gather",))))
+    est.write_registry(json.dumps({"entries": [_current_entry()]}))
+
+    _run_dir, rows = _gather_lookups(tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS))
+
+    assert [(r["verb"], r["exit_code"]) for r in rows] == [(LOOKUP, DENIED_EXIT_CODE)]
+
+
+def test_1390_deleted_rows_withhold_both_verbs(tmp_path):
+    """A table with no `tacit-knowledge` rows withholds the lookup: never run, and `list_verbs` offers nothing. O10."""
+    from defender.investigation.query_catalog import _tool_list_verbs
+
+    S = _spec()
+    est = S.TacitEstate(tmp_path / "estate", tacit_roles=())
+    est.write_registry(json.dumps({"entries": [_current_entry()]}))
+
+    _run_dir, rows = _gather_lookups(tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS))
+
+    assert [r for r in rows if r["exit_code"] == 0] == [], f"a lookup with no grant row ran: {rows}"
+    assert "your grant reaches no verb" in _tool_list_verbs(S.plain_registry(est), SYSTEM)
+
+
+def test_1390_a_broken_registry_is_a_miss_whose_reason_is_on_the_call(tmp_path):
+    """A registry with no `entries:` list answers a miss, and its whole-file refusal is on the lookup's queries row and in `health-check`. O9."""
+    S = _spec()
+    est = S.TacitEstate(tmp_path / "estate")
+    est.write_registry("sanctions:\n  - id: tk-misfiled\n")
+    reason = "declares no `entries:` list"
+
+    run_dir, rows = _gather_lookups(
+        tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS),
+        S.query_turn(SYSTEM, "health-check", {}))
+
+    assert [(r["verb"], r["exit_code"]) for r in rows] == [(LOOKUP, 0), ("health-check", 0)]
+    assert _payload(run_dir, rows[0]) == {"matched": None}
+    assert reason in json.dumps(rows[0]), f"the lookup's queries row does not carry the refusal: {rows[0]}"
+    health = _payload(run_dir, rows[1])
+    assert reason in json.dumps(health), f"health-check does not report the refusal: {health}"
+    assert not str(health.get("registry", "")).startswith("/"), (
+        "health-check names the registry by a host path")

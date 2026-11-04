@@ -250,3 +250,29 @@ def test_the_commit_gate_refuses_an_id_that_disagrees_with_its_directory(tmp_pat
         lead_author._skills_path_rule(
             _root(lane), "A ", "agent/skills/gather/queries/SCHEMA.md", systems=DECLARED,
             tree_for=_tree_for(lane))
+
+
+#: The tacit-knowledge registry as a tenant repo carries it (#1390): data beside a markdown page.
+TACIT_REGISTRY_REL = "agent/skills/tacit-knowledge/registry.yaml"
+
+
+def test_1390_the_lane_cannot_commit_a_change_to_the_tacit_knowledge_registry(tmp_path):
+    """The lead-author lane's commit gate refuses an edited `registry.yaml`; an entry lands only by a human merge. Lead-author lane."""
+    files = {**_gate_files(),
+             "skills/tacit-knowledge/SKILL.md": _skill("tacit-knowledge"),
+             "skills/tacit-knowledge/registry.yaml": "entries: []\n"}
+    control = C.draft_lane(tmp_path / "control", lanes=C.LEAD_LANES, files=files)
+    _write(control, "agent/skills/elastic/SKILL.md", _skill("elastic") + "edited by the lane\n")
+    assert _composed(control, DECLARED | {"tacit-knowledge"}) == ["agent/skills/elastic/SKILL.md"], (
+        "positive control: the same lane admits an edited system skill")
+
+    lane = C.draft_lane(tmp_path / "lane", lanes=C.LEAD_LANES, files=files)
+    _write(lane, TACIT_REGISTRY_REL, (
+        "entries:\n  - id: tk-lane-forged\n    pattern: ssh-root-login\n"
+        "    actor_scope: svc-deploy-01\n    host_scope: db-1.corp\n    added_by: agent\n"
+        "    added_at: '2026-11-01'\n    review_by: '2026-12-01'\n    justification: seen often\n"))
+
+    with pytest.raises(LeadAuthorError) as refused:
+        _composed(lane, DECLARED | {"tacit-knowledge"})
+    assert TACIT_REGISTRY_REL in str(refused.value)
+    assert lane.landed() == []

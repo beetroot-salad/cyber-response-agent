@@ -714,3 +714,13 @@ def test_1224_question_writer_prompt_when_configured_and_granted_systems_differ(
     assert samples is not None, "no samples.yaml was written"
     assert set(samples) == set(served), (
         f"samples.yaml keys {sorted(samples)} do not follow served_systems {served}")
+
+
+def test_1390_a_platform_served_system_is_never_a_served_system():
+    """The question-writer's served systems leave out `tacit-knowledge`, and a grant of only it serves no branch. O5."""
+    from defender.learning.branch.questioner_launch import served_systems
+    from defender.systems.verb_grant import VerbGrant
+
+    tacit = (("tacit-knowledge", "lookup", "r"), ("tacit-knowledge", "health-check", "r"))
+    assert served_systems(VerbGrant("gather", (*tacit, ("idp", "query", "r")))) == ["idp"]
+    assert served_systems(VerbGrant("gather", tacit)) == []

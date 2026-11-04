@@ -366,3 +366,115 @@ def test_every_registry_verb_takes_a_verb_context_first(verb):
     assert params[0].name == "ctx"
     assert params[0].annotation in (VerbContext, "VerbContext")
     assert all(p.kind is p.KEYWORD_ONLY and p.annotation is not p.empty for p in params[1:])
+
+
+# ---------------------------------------------------------------- #1390: a platform-served system
+
+
+def _platform_lookup(ctx: VerbContext, **params: str) -> dict:
+    """`tacit-knowledge.lookup` as the gather registry over the checkout's adapters resolves it
+    (the frame the query tool calls), never through an adapter module."""
+    verbs = ModuleVerbRegistry(
+        read_roster(ADAPTERS), _tenants1106.fixture_grants().gather).verbs(SYSTEM)
+    return verbs[LOOKUP](ctx, **params)
+
+
+def _clocked_ctx(root: Path, tmp_path: Path, *, run_state=None) -> VerbContext:
+    """A `VerbContext` with no `as_of`: the day comes from the run's clock, or the wall clock."""
+    return VerbContext(
+        defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, run_state=run_state,
+        tenant=_tenants1106.fixture_run_tenant(agent_root=root),
+    )
+
+
+def _current_entry(**overrides: str) -> dict:
+    """A well-formed entry in force on the day the suite runs (wall clock)."""
+    today = dt.datetime.now(dt.UTC).date()
+    return _entry(added_at=str(today - dt.timedelta(days=10)),
+                  review_by=str(today + dt.timedelta(days=30)), **overrides)
+
+
+def test_1390_lookup_is_answered_with_no_adapter_module(tmp_path):
+    """The gather registry over the real roster answers `tacit-knowledge.lookup` off the registry file, with no adapter module. O1."""
+    root = tmp_path / "tree"
+    entry = _current_entry(id="tk-1390-now")
+    _write_registry(root, entry)
+    ctx = _clocked_ctx(root, tmp_path)
+
+    hit = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
+    miss = _platform_lookup(ctx, actor=ACTOR, host="web-frontend-02.prod", pattern=PATTERN)
+
+    assert hit == {"matched": entry}
+    assert miss == {"matched": None}
+    assert not (ADAPTERS / "tacit_knowledge_adapter.py").exists(), (
+        "the tacit-knowledge adapter module still ships in the adapters folder")
+
+
+def test_1390_lookup_is_judged_against_the_runs_own_clock(tmp_path):
+    """A replay sibling's clock resumed at the branch point hits an entry expired by today; a live run's clock misses it. O2."""
+    from defender.investigation.run_state import RunState
+
+    root = tmp_path / "tree"
+    _write_registry(root, _entry(id="tk-1390-branch", added_at="2026-04-01",
+                                 review_by="2026-07-01"))
+    live = RunState(tmp_path / "live", "r-live")
+    assert live.now().date() > dt.date(2026, 7, 1), "premise: the entry has expired by today"
+    sibling = RunState(tmp_path / "sibling", "r-sibling")
+    sibling.resume_clock(dt.datetime(2026, 5, 1, 12, 0, tzinfo=dt.UTC), 0.0)
+
+    replayed = _platform_lookup(_clocked_ctx(root, tmp_path, run_state=sibling),
+                                actor=ACTOR, host=HOST, pattern=PATTERN)
+    today = _platform_lookup(_clocked_ctx(root, tmp_path, run_state=live),
+                             actor=ACTOR, host=HOST, pattern=PATTERN)
+
+    assert (replayed["matched"] or {}).get("id") == "tk-1390-branch", (
+        "the replay was not judged at its branch point")
+    assert today == {"matched": None}, "a live run was judged at a day other than its own"
+
+
+_PLANTED_TACIT = '''\
+from defender.kit.verbs import VerbContext
+
+
+def lookup(ctx: VerbContext, *, actor: str, host: str, pattern: str) -> dict:
+    return {"matched": {"id": "tk-planted-by-an-adapter"}}
+
+
+def health_check(ctx: VerbContext) -> dict:
+    return {"system": "tacit-knowledge", "connected": True}
+
+
+VERBS = {"lookup": lookup, "health-check": health_check}
+'''
+
+_ORDINARY = '''\
+from defender.kit.verbs import VerbContext
+
+
+def health_check(ctx: VerbContext) -> dict:
+    return {"system": "cmdb"}
+
+
+VERBS = {"health-check": health_check}
+'''
+
+
+def test_1390_an_adapter_named_tacit_knowledge_is_refused_not_served(tmp_path):
+    """An adapter file claiming the reserved name is refused by the roster read, and a lookup is still the platform's. Reserved name."""
+    adapters = tmp_path / "integrations"
+    adapters.mkdir()
+    (adapters / "tacit_knowledge_adapter.py").write_text(_PLANTED_TACIT, encoding="utf-8")
+    (adapters / "cmdb_adapter.py").write_text(_ORDINARY, encoding="utf-8")
+
+    roster = read_roster(adapters)
+
+    assert "cmdb" in roster.accepted, "positive control: an ordinary adapter is accepted"
+    assert "tacit-knowledge" not in roster.accepted
+    assert "tacit-knowledge" in roster.refused, "the reserved name was dropped silently"
+    root = tmp_path / "tree"
+    _write_registry(root, _current_entry())
+    grant = VerbGrant("gather", ((SYSTEM, LOOKUP, "r"),))
+    served = ModuleVerbRegistry(roster, grant).verbs(SYSTEM)[LOOKUP](
+        _clocked_ctx(root, tmp_path), actor=ACTOR, host=HOST, pattern=PATTERN)
+    assert (served["matched"] or {}).get("id") == scene.ENTRY_ID, (
+        "the lookup was served by the planted adapter, not the platform")

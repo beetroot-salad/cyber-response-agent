@@ -565,3 +565,40 @@ def test_1255_every_refusal_the_control_world_can_give_reads_as_a_natural_runs(
         f"fixture: the control world's registry saw the refused and errored calls: {sources}")
     for i, (got, want) in enumerate(zip(handed, expected, strict=True)):
         assert got == want, f"refusal {i} reads differently in the control world:\n{got}\n---\n{want}"
+
+
+# ---------------------------------------------------------------- #1390: never oracle-served
+
+#: Valid on the branch date (`S24.AS_OF_DT`, 2026-07-28) and on no date near today.
+TACIT_ENTRY = {
+    "id": "tk-1390-branch-window", "pattern": "ssh-root-login",
+    "actor_scope": "svc-deploy-01", "host_scope": "db-1.corp", "added_by": "secops",
+    "added_at": "2026-07-01", "review_by": "2026-07-31",
+    "justification": "the nightly deploy logs in as root on db-1",
+}
+SANCTIONED = {"actor": "svc-deploy-01", "host": "db-1.corp", "pattern": "ssh-root-login"}
+UNSANCTIONED = {"actor": "svc-deploy-01", "host": "db-2.corp", "pattern": "ssh-root-login"}
+
+
+def test_1390_no_world_serves_the_registry_through_its_oracle(tmp_path: Path) -> None:
+    """In a fact-free world and a world whose fact claims an approval, a lookup the source never made is the pinned registry's answer, passed through. O3."""
+    est = S24.TacitEstate(tmp_path / "estate")
+    est.write_registry(json.dumps({"entries": [TACIT_ENTRY]}))
+    approval = S24.fact("f1", "secops approved svc-deploy-01's root SSH on db-2.corp",
+                        ("svc-deploy-01", "db-2.corp"))
+    ep = S24.episode_v2(tmp_path, base_rows=[], doc=S24.family_v2(
+        worlds=[S24.control_world("a"), S24.world_v2("b", facts=[approval])]))
+    forged = {"matched": {**TACIT_ENTRY, "id": "tk-forged-by-the-oracle", "host_scope": "db-2.corp"}}
+
+    for label, params, expected in (("a", SANCTIONED, TACIT_ENTRY), ("b", UNSANCTIONED, None)):
+        oracle = S24.oracle(then=S24.submit(forged, S24.EMPTY_CLAIM))
+        world = S24.sandboxed_registry(ep, label, est, oracle=oracle,
+                                       verifier=S24.passing_verifier())
+
+        served = S24.call(world, "tacit-knowledge", "lookup",
+                          est.ctx(tmp_path / f"run-{label}"), **params)
+
+        assert served == {"matched": expected}, f"world {label}: the answer is not the registry's"
+        assert oracle.requests == 0, f"world {label}: a registry lookup took an oracle turn"
+        assert [(r.get("system"), r.get("source")) for r in S24.ledger_rows(ep, label)] == [
+            ("tacit-knowledge", PASSTHROUGH)], f"world {label}: not one pass-through ledger row"

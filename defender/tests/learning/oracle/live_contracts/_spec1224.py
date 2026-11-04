@@ -439,6 +439,36 @@ def estate(tmp_path: Path, **kw: Any) -> Estate:
     return Estate(tmp_path / "estate", **kw)
 
 
+#: The platform-served system (#1390): granted through the table, with no adapter planted.
+TACIT = "tacit-knowledge"
+
+
+@dataclass
+class TacitEstate(Estate):
+    """The estate whose grant table also carries `tacit-knowledge` rows, with no adapter for it
+    planted. `tacit_roles`: `(verb, roles)` per row written (empty roles: withheld; a verb left
+    out: no row at all)."""
+
+    tacit_roles: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("lookup", ("gather",)), ("health-check", ("gather",)))
+
+    def table(self) -> str:
+        lines = [super().table().rstrip("\n")]
+        if self.tacit_roles:
+            lines.append(f"  {TACIT}:")
+        for verb, roles in self.tacit_roles:
+            why = "" if roles else ', reason: "withheld by the #1390 fixture on purpose"'
+            lines.append(f"    {verb}: {{roles: [{', '.join(roles)}]{why}}}")
+        return "\n".join(lines) + "\n"
+
+    def write_registry(self, text: str) -> Path:
+        """`text` as the placed tenant's registry (`agent/skills/tacit-knowledge/registry.yaml`)."""
+        path = Path(self.run_tenant().agent) / "skills" / TACIT / "registry.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+
 # --------------------------------------------------------------------------------------
 # The estate's tenant is published for real, and the stamps name its commit.
 # --------------------------------------------------------------------------------------

@@ -633,3 +633,58 @@ def test_1159_check_says_this_machines_git_failed_and_exits_1(
             f"the unverified-id line does not give git's reason ({unverified_reason!r}):\n{text}")
 
     H.assert_clean(_check_folder(folder))
+
+
+# ---------------------------------------------------------------- #1390: the tacit-knowledge registry
+
+TACIT = "tacit-knowledge"
+TACIT_REGISTRY_REL = ("agent", "skills", TACIT, "registry.yaml")
+
+
+def _without_tacit_rows(folder: Path, *verbs: str) -> None:
+    """Delete the `tacit-knowledge` rows named (the whole system when none are left)."""
+    settings = folder / "settings"
+    doc = _table(settings)
+    rows = doc["dispositions"][TACIT]
+    for verb in verbs:
+        del rows[verb]
+    if not rows:
+        del doc["dispositions"][TACIT]
+    _write_table(settings, doc)
+
+
+def test_1390_check_folder_refuses_a_registry_with_a_dropped_entry(tmp_path: Path) -> None:
+    """A registry entry whose span breaks the 180-day bound fails `check --folder`, naming the entry and the rule. O7."""
+    from defender.tests.support.shared.contracts import _tacit983 as scene
+
+    H.assert_clean(_check_folder(_folder(tmp_path, "control")))
+    folder = _folder(tmp_path, "tenant")
+    scene.write_registry(folder / "agent", scene.registry_entry(
+        id="tk-1390-200-days", added_at="2026-03-01", review_by="2026-09-17"))
+
+    H.assert_refused(_check_folder(folder), "tk-1390-200-days", "review_by", "200 days", "180")
+
+
+def test_1390_no_tacit_rows_and_no_registry_is_clean(tmp_path: Path) -> None:
+    """A tenant that deleted both `tacit-knowledge` rows and holds no registry gets no census finding for it. O10."""
+    folder = _folder(tmp_path, "tenant")
+    _without_tacit_rows(folder, "lookup", "health-check")
+    folder.joinpath(*TACIT_REGISTRY_REL).unlink()
+
+    out = H.assert_clean(_check_folder(folder))
+    assert TACIT not in out, f"check reported on a system the tenant chose not to grant:\n{out}"
+
+
+def test_1390_a_registry_with_lookup_ungranted_is_warned_about(tmp_path: Path) -> None:
+    """A registry file present while `lookup` is not granted to gather draws a warning naming both. O10."""
+    control = H.assert_clean(_check_folder(_folder(tmp_path, "control")))
+    assert "registry.yaml" not in control, "positive control: a granted lookup draws no warning"
+    folder = _folder(tmp_path, "tenant")
+    _without_tacit_rows(folder, "lookup")
+
+    proc = _check_folder(folder)
+
+    H.assert_ran(proc)
+    out = H.output(proc)
+    for needle in ("registry.yaml", "lookup", "gather"):
+        assert needle in out, f"the warning does not name {needle!r}:\n{out}"
