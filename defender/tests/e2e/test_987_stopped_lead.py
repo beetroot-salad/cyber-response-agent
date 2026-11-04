@@ -276,7 +276,7 @@ def test_a_schema_refused_repeat_is_answered_from_the_validate_hook(tmp_path):
     last = lead.model.last_inbound
     closing = tool_returns(last)[-1]
     assert failed(closing)
-    assert str(closing.content).endswith(QUERY_DOOR_CLOSED)
+    assert unstamped(closing.content).endswith(QUERY_DOOR_CLOSED)
     assert "try again" not in str(closing.content).lower(), \
         "the stop went out as a retry prompt — the model is told to try again and to stop"
     assert len(retry_prompts(last)) == 2, "the first two refusals are still corrections"

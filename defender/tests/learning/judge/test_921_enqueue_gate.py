@@ -327,7 +327,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
         "the row already queued stopped draining because of a torn line written after it")
 
 
-def test_921_drift_reaches_the_judge_and_a_family_incoherent_finding_keeps_the_defender_lane_open(
+def test_921_archived_drift_reaches_the_judge_and_a_family_incoherent_finding_keeps_the_defender_lane_open(
         tmp_path):
     from defender import _yaml
     from defender.records._episode_handle import Episode

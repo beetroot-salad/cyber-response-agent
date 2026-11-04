@@ -92,8 +92,13 @@ _SALT = re.compile(r"run-[0-9a-f]+-untrusted")
 _STAMP = re.compile(r"^\[reply received [^\]\n]*\]\n?", re.M)
 
 
-def normalized(text: str, *run_dirs: Path) -> str:
-    """Normalize frame salts, run paths and the arrival-stamp line, replacing longer paths first."""
+def normalized(text: str, *run_dirs: Path, stamps: int | None = 1) -> str:
+    """Normalize frame salts, run paths and the arrival-stamp line, replacing longer paths first.
+    A result carries exactly `stamps` stamp lines (one unless the caller says otherwise; `None`
+    for a text that may hold any number, such as a refusal that has its own stamp line)."""
+    found = len(_STAMP.findall(text))
+    assert stamps is None or found == stamps, (
+        f"expected {stamps} arrival-stamp line(s) in the result, found {found}: {text[:200]!r}")
     out = _STAMP.sub("", _SALT.sub("run-SALT-untrusted", text))
     for run_dir in sorted({str(d) for d in run_dirs}, key=len, reverse=True):
         out = out.replace(run_dir, "<RUN>")

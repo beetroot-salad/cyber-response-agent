@@ -220,9 +220,7 @@ def check_settings(*_a, **_k):
 
 
 def _answer(ctx: VerbContext, name: str, params: dict):
-    as_of = getattr(ctx, "as_of", None)
     row = {{"system": SYSTEM, "verb": name, "params": params,
-           "as_of": None if as_of is None else as_of.isoformat(),
            "world_id": getattr(ctx, "world_id", None),
            "run_dir": str(getattr(ctx, "run_dir", "")), "t": time.time()}}
     with (_STATE / "calls.jsonl").open("a", encoding="utf-8") as fh:
@@ -555,6 +553,24 @@ def test_1385_a_changed_entry_is_oracle_only_on_a_fact_entity(tmp_path, entity, 
     assert S.call(reg, "siem-x", "lookup", est.ctx(tmp_path / "run"), entity=entity) == served
     assert oracle.submissions() == 1, "the change was refused"
     assert _decisions(ep, "b") == [expected]
+
+
+def test_1385_a_fact_the_oracle_records_on_an_undeclared_entity_does_not_make_a_change_oracle(
+        tmp_path):
+    """The label reads the family's declared facts: a `record_fact` on `bob`, a name no fact
+    declares, and a `changed` entry on him leave the answer `reconstructed` (A1)."""
+    est = S.estate(tmp_path)
+    record = {"entity": "bob", "risk": "low", "record_id": "r-0001"}
+    est.answer("siem-x", "lookup", {"entity": "bob"}, record)
+    served = {**record, "risk": "high"}
+    ep = _episode(tmp_path, captured=[])
+    oracle = S.oracle(S.record_fact("bob", "risk", "high"),
+                      S.submit(served, S.claim(changed=[S.changed("bob", "risk", "low", "high")])))
+    reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
+
+    assert S.call(reg, "siem-x", "lookup", est.ctx(tmp_path / "run"), entity="bob") == served
+    assert oracle.submissions() == 1, "the change was refused"
+    assert _decisions(ep, "b") == ["reconstructed"]
 
 
 def test_1224_served_answer_is_recorded_and_screened_as_real_data(tmp_path):
