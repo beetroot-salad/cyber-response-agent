@@ -34,23 +34,6 @@ DEFAULT_LIMIT = RETURNED_DOC_CAP
 REQUEST_TIMEOUT_SEC = 30
 
 
-class OutboundBody:
-    """A request body minted by `_search_body` or `_esql_body`, the one door a request body leaves by."""
-
-    payload: dict
-    __slots__ = ("payload",)
-
-    def __init__(self, payload: dict) -> None:
-        object.__setattr__(self, "payload", payload)
-
-    def __setattr__(self, name: str, value: object) -> None:
-        raise AttributeError(
-            f"OutboundBody is immutable (tried to set {name!r}) — mint a new one through "
-            f"_search_body or _esql_body")
-
-
-
-
 PREFIX = "ELASTIC"
 #: The Elasticsearch container every request execs into — required.
 ES_CONTAINER_KEY = "ELASTIC_ES_CONTAINER"
@@ -138,19 +121,18 @@ def _unreachable(ctx: VerbContext, target: str, exc: BaseException) -> Transport
 
 
 def _http_json(  # noqa: PLR0913 — one request's per-call state
-    ctx, method, url, config, headers=None, body: OutboundBody | None = None, timeout=None,
+    ctx, method, url, config, headers=None, body: dict | None = None, timeout=None,
     *, kibana: bool = False,
 ):
     """The one door to Elasticsearch — and, with `kibana=True`, to Kibana. The caller says which
     service it addresses; the container is never guessed from the URL (an Elasticsearch URL that
-    happens to start with KIBANA_URL is still Elasticsearch's). `body` is typed rather than a
-    bare dict for the reason `OutboundBody` gives."""
+    happens to start with KIBANA_URL is still Elasticsearch's)."""
     guard_outbound(ctx, SYSTEM, url, method=method)
     container = _kibana_container(ctx) if kibana else _es_container(ctx)
     secs = int(timeout or REQUEST_TIMEOUT_SEC)
     rc, stdout, stderr = transport.docker_exec_curl(
         ctx, container, url, method=method, headers=headers,
-        body=None if body is None else body.payload,
+        body=body,
         timeout_sec=secs, insecure=True, auth="elastic:${ELASTIC_PASSWORD}", system=SYSTEM,
     )
     body_text, status_str = transport.split_status(stdout)
@@ -239,19 +221,8 @@ def _build_search_body(query_string, time_start, time_end, time_field, limit, so
     }
 
 
-def _search_body(  # noqa: PLR0913 — one search body's parameters, threaded whole
-    ctx: VerbContext, *, query_string: str, time_start: str | None, time_end: str | None,
-    time_field: str, limit: int, sort: str,
-) -> OutboundBody:
-    """The search body, as the caller asked it. The adapter knows only its target system: a
-    branched run's cut at the branch point is the oracle's (#1385), so nothing here depends on
-    the run or its clock."""
-    return OutboundBody(_build_search_body(
-        query_string, time_start, time_end, time_field, limit, sort))
-
-
 def _search(
-    ctx, config, index_pattern: str, body: OutboundBody,
+    ctx, config, index_pattern: str, body: dict,
 ) -> tuple[list[dict], int, bool]:
     url = (
         f"{config['ELASTICSEARCH_URL'].rstrip('/')}/"
@@ -280,10 +251,7 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
         resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]))
     docs, total, truncated = _search(
         ctx, config, resolved,
-        _search_body(
-            ctx, query_string=native_query, time_start=start, time_end=end,
-            time_field="@timestamp", limit=limit, sort=sort,
-        ),
+        _build_search_body(native_query, start, end, "@timestamp", limit, sort),
     )
     return search_envelope(resolved, docs, total, truncated, sort)
 
@@ -392,16 +360,11 @@ def esql_payload(query: str, resp: dict) -> dict:
     }
 
 
-def _esql_body(ctx: VerbContext, query: str) -> OutboundBody:
-    """The ES|QL request body: the query as asked (the counterpart of `_search_body`)."""
-    return OutboundBody({"query": query})
-
-
 @verb(engine="esql", body_param="query")
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
     config = load_config(ctx)
     url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
-    status, resp = _http_json(ctx, "POST", url, config, body=_esql_body(ctx, query))
+    status, resp = _http_json(ctx, "POST", url, config, body={"query": query})
     _raise_on_es_error(status, resp, "ES|QL query")
     return esql_payload(query, resp)
 
