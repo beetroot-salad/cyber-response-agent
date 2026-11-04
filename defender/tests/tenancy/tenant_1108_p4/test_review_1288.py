@@ -375,9 +375,12 @@ def test_what_the_child_left_running_dies_with_it(p4_tenant, tmp_path):
             os.kill(left, 0)
         except ProcessLookupError:
             break
-        with open(f"/proc/{left}/stat", encoding="utf-8") as stat:
-            if stat.read().split(")")[-1].split()[0] == "Z":
-                break
+        try:
+            with open(f"/proc/{left}/stat", encoding="utf-8") as stat:
+                if stat.read().split(")")[-1].split()[0] == "Z":
+                    break
+        except FileNotFoundError:
+            break  # reaped between the two checks: gone, as wanted
         time.sleep(0.05)
     else:
         raise AssertionError("a process the child started outlived the publish")
