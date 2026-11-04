@@ -67,7 +67,7 @@ def _write_files(checkout: Path, files: Files | None) -> None:
     for rel, content in (files or {}).items():
         path = Path(checkout) / rel
         if content is None:
-            path.unlink(missing_ok=True)
+            path.unlink()
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content.encode("utf-8") if isinstance(content, str) else content)
