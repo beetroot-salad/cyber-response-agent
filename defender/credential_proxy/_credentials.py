@@ -145,10 +145,10 @@ class AccessTokens:
     the whole declaration it was issued for (A8, #1364 O2). A changed version or declaration, or a
     token within `REFRESH_MARGIN_SEC` of expiry, means a fresh exchange; one at a time per system,
     a request waiting its turn no longer than its own deadline (#1364 O1). Each exchange verifies
-    the token endpoint with `trust`, built once by the caller (#1375 O1)."""
+    the token endpoint with the `trust` its caller passes: the declaration's own (#1391 O4), built
+    by the caller and never here (#1375 O1)."""
 
-    def __init__(self, trust: ssl.SSLContext) -> None:
-        self._trust = trust
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         self._gates: dict[tuple[str, str], threading.Lock] = {}
         self._held: dict[tuple[str, str], _Held] = {}
@@ -161,7 +161,7 @@ class AccessTokens:
             return self._gates.setdefault(key, threading.Lock())
 
     def token(self, tenant_id: str, system: str, declaration: AccessDeclaration,
-              creds: CredentialSet, deadline: Deadline) -> str:
+              creds: CredentialSet, deadline: Deadline, trust: ssl.SSLContext) -> str:
         """An access token for `creds` under `declaration`'s auth: the held one if still good,
         else a new exchange (whose failure is `Refused`, never retried)."""
         key, digest = (tenant_id, system), _declaration_digest(declaration)
@@ -176,8 +176,7 @@ class AccessTokens:
                 return held.token
             self._held.pop(key, None)
             asked_at = time.monotonic()
-            token, lifetime = _token_exchange(declaration.auth, creds, system, deadline,
-                                              self._trust)
+            token, lifetime = _token_exchange(declaration.auth, creds, system, deadline, trust)
             if lifetime is not None and lifetime > REFRESH_MARGIN_SEC:
                 self._held[key] = _Held(creds.version, digest, token,
                                         asked_at + lifetime - REFRESH_MARGIN_SEC)

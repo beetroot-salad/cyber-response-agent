@@ -2,19 +2,28 @@
 loopback and a recording upstream, over a non-root base (r5 A2)."""
 from __future__ import annotations
 
+import base64
+import datetime
 import inspect
 import json
 import logging
+from urllib.parse import urlsplit
 
 import pytest
 
 from defender.integrations import _stub_transport as transport
-from defender.integrations import identity_adapter
-from defender.integrations.confinement import ConfinementFault
+from defender.integrations import elastic_adapter, identity_adapter
+from defender.integrations.confinement import (
+    ConfinementFault,
+    TransportCapture,
+    confine_read_endpoint,
+)
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault, UpstreamFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.support.shared._tls_server import chain, tls_server
+from defender.tests.tenancy.tenant_1108_p4._support import export_dir, published_tenant
 
 GRANT = {("identity", "r")}
 API = "/api/v2"
@@ -212,3 +221,348 @@ def test_q5_a_record_is_read_once_and_the_declaration_file_is_not_read_again(
                 identity_adapter.get_user(ctx, user="dev.dana")
             targets.append(capture.requests[-1].url)
     assert targets == [f"{old.url}{API}/users/dev.dana", f"{new.url}{API}/users/dev.dana"]
+
+
+# --- #1391 O3: Elastic through the proxy --------------------------------------------------------
+
+ES_BASIC = "Basic " + base64.b64encode(f"svc-reader:{H.CANARY_KEY}".encode()).decode()
+HIT = {"@timestamp": "2026-11-03T10:00:00Z", "user": {"name": "root"}}
+
+
+_elastic = A.elastic_proxied
+
+
+def test_1391_o3_query_is_a_search_of_the_events_index_with_basic_auth_added_by_the_proxy(
+        tmp_path, data_root):
+    """`query` sends one POST <base>/<events index>/_search, Basic auth added by the proxy,
+    and returns the hits in the verb's envelope. #1391 O3."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, tap):
+        up.replies[f"/{A.ELASTIC_EVENTS}/_search"] = (200, {"Content-Type": "application/json"},
+            json.dumps({"hits": {"total": {"value": 1}, "hits": [{"_source": HIT}]}}).encode())
+        result = elastic_adapter.VERBS["query"](ctx, native_query="user.name:root")
+
+    assert [(s.method, s.path) for s in up.seen] == [
+        ("POST", f"/{A.ELASTIC_EVENTS}/_search?ignore_unavailable=true")]
+    assert up.seen[0].header("Authorization") == ES_BASIC
+    assert json.loads(up.seen[0].body)["query"]["bool"]["must"] == [
+        {"query_string": {"query": "user.name:root"}}]
+    assert len(tap.tokens) == 1
+    assert result == {"index": A.ELASTIC_EVENTS, "total": 1, "returned": 1, "sort": "desc",
+                      "truncated": False, "hits": [HIT]}
+
+
+def test_1391_o3_health_check_reads_elasticsearch_under_its_private_ca_and_reports_no_kibana(
+        tmp_path, data_root):
+    """Over https with the declaration's `ca`, settings with no URL/Kibana/container key pass
+    and `health-check` is one GET /_cluster/health reported without Kibana. #1391 O3, O4, D2, P5."""
+    pki = chain("lab")
+    health = json.dumps({"status": "green", "number_of_nodes": 3}).encode()
+    with (tls_server(tmp_path, lambda *_: (200, health), served=pki.served()) as server,
+          _elastic(tmp_path, data_root, server.url, ca=pki.root.cert) as (ctx, _tap)):
+        assert elastic_adapter.check_settings(ctx.tenant) is None
+        result = elastic_adapter.VERBS["health-check"](ctx)
+
+    assert [(m, p) for m, p, _ in server.seen] == [("GET", "/_cluster/health")]
+    assert server.seen[0][2].get("authorization") == ES_BASIC
+    assert result == {"system": "elastic", "connected": True, "elasticsearch": "green",
+                      "nodes": 3}
+
+
+def test_1391_o3_under_a_base_with_a_path_esql_and_health_reach_it_relative_to_the_base(
+        tmp_path, data_root):
+    """Base `<host>/es`: the adapter's allowlist admits `/_query` and `/_cluster/health` relative
+    to the base; both reach `/es/...` and esql returns its rows. #1391 O3."""
+    rows = {"columns": [{"name": "user.name", "type": "keyword"}], "values": [["root"]]}
+    q = f"FROM {A.ELASTIC_EVENTS} | KEEP user.name | LIMIT 1"
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url + "/es") as (ctx, _tap):
+        up.replies["/es/_query"] = (200, {}, json.dumps(rows).encode())
+        up.replies["/es/_cluster/health"] = (200, {}, b'{"status": "yellow", "number_of_nodes": 1}')
+        got = elastic_adapter.VERBS["esql"](ctx, query=q)
+        health = elastic_adapter.VERBS["health-check"](ctx)
+
+    assert [(s.method, s.path) for s in up.seen] == [
+        ("POST", "/es/_query?format=json"), ("GET", "/es/_cluster/health")]
+    assert json.loads(up.seen[0].body) == {"query": q}
+    assert got == {"query": q, "columns": rows["columns"], "row_count": 1, "values": [["root"]]}
+    assert health["elasticsearch"] == "yellow"
+
+
+@pytest.mark.parametrize("index", [".security-7", "*", "logs-*,alerts-*,.security-7", "-logs-*"])
+def test_1391_o3_an_index_outside_the_configured_patterns_never_reaches_the_proxy(
+        tmp_path, data_root, index):
+    """`query` on an index whose reach widens is a ConfinementFault before the proxy is asked;
+    control: an index under the events pattern is sent. #1391 O3, P3."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, tap):
+        with pytest.raises(ConfinementFault):
+            elastic_adapter.VERBS["query"](ctx, native_query="*", index=index)
+        assert (tap.tokens, up.seen) == ([], [])
+        elastic_adapter.VERBS["query"](ctx, native_query="*", index="logs-2026.11.03")
+
+    assert [s.path.split("?")[0] for s in up.seen] == ["/logs-2026.11.03/_search"]
+
+
+@pytest.mark.parametrize("base_path", ["", "/es"], ids=["root-base", "path-base"])
+@pytest.mark.parametrize("index", ["logs-/..", "logs-/../.."])
+def test_1391_o3_an_index_that_resolves_to_an_unlisted_endpoint_is_refused_before_the_proxy(
+        tmp_path, data_root, base_path, index):
+    """An index inside the events pattern whose path resolves to `/_search` is a ConfinementFault
+    with nothing sent, at the root and at a base with a path; the listed read passes on the same
+    channel. #1391 O3, P3, F5."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url + base_path) as (ctx, tap):
+        with pytest.raises(ConfinementFault):
+            elastic_adapter.VERBS["query"](ctx, native_query="*", index=index)
+        refused = (list(tap.tokens), list(up.seen))  # a snapshot: the control call below appends
+        elastic_adapter.VERBS["query"](ctx, native_query="*", index="logs-2026.11.03")
+
+    assert refused == ([], [])
+    assert [s.path.split("?")[0] for s in up.seen] == [f"{base_path}/logs-2026.11.03/_search"]
+
+
+def _answered(status: int) -> tuple[int, dict, bytes]:
+    return status, {"Content-Type": "application/json"}, b'{"error": {"reason": "no privilege"}}'
+
+
+@pytest.mark.parametrize(("verb", "kw", "path", "status", "fault"), [
+    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 401, ConfigFault,
+                 id="esql-401"),
+    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 403, UpstreamFault,
+                 id="esql-403-role-lacks-the-index"),
+    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 503, TransportFault,
+                 id="esql-503"),
+    pytest.param("query", {"native_query": "*"}, f"/{A.ELASTIC_EVENTS}/_search", 403,
+                 ConfigFault, id="query-403"),
+    pytest.param("alerts", {"native_query": "*"}, f"/{A.ELASTIC_ALERTS}/_search", 403,
+                 ConfigFault, id="alerts-403"),
+    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 403,
+                 UpstreamFault, id="esql-403"),
+])
+def test_1391_o3_elastic_faults_follow_the_proxys_classification(
+        tmp_path, data_root, verb, kw, path, status, fault):
+    """ES|QL `FROM .security-7` passes the adapter and is sent; 401 and 5xx come back as
+    ConfigFault and TransportFault. A 403 on `query`/`alerts` (whose index is confined to the
+    configured ones) is a setup fault (ConfigFault); on `esql`, which names its own indexes, it
+    is the agent's (UpstreamFault). #1391 O3, D8, D11; PR #1409 review (human decision)."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
+        up.replies[path] = _answered(status)
+        with pytest.raises(AdapterFault) as raised:
+            elastic_adapter.VERBS[verb](ctx, **kw)
+
+    assert type(raised.value) is fault, raised.value
+    if status == 403 and fault is ConfigFault:
+        assert "`read`" in str(raised.value), "the setup fault does not name the missing privilege"
+    assert [s.path.split("?")[0] for s in up.seen] == [path]
+
+
+@pytest.mark.parametrize(("verb", "kw", "path"), [
+    pytest.param("query", {"native_query": "*"}, f"/{A.ELASTIC_EVENTS}/_search", id="query"),
+    pytest.param("esql", {"query": f"FROM {A.ELASTIC_EVENTS} | LIMIT 1"}, "/_query", id="esql"),
+])
+def test_1391_elastic_query_errors_reach_the_agent_as_their_root_cause(
+        tmp_path, data_root, verb, kw, path):
+    """A 400 in Elasticsearch's error shape reaches the agent as its root cause's type and reason,
+    not the whole nested error document (shard lists, stack of causes). PR #1409 review."""
+    filler = [{"shard": n, "index": "logs", "reason": {"type": "x", "reason": "y" * 200}}
+              for n in range(50)]
+    body = json.dumps({"error": {
+        "root_cause": [{"type": "query_shard_exception", "reason": "Failed to parse query [a:(]"}],
+        "type": "search_phase_execution_exception", "reason": "all shards failed",
+        "failed_shards": filler}, "status": 400}).encode()
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
+        up.replies[path] = (400, {"Content-Type": "application/json"}, body)
+        with pytest.raises(UpstreamFault) as raised:
+            elastic_adapter.VERBS[verb](ctx, **kw)
+
+    text = str(raised.value)
+    assert "query_shard_exception: Failed to parse query [a:(]" in text, text
+    assert "failed_shards" not in text, text
+    assert len(text) < 500, text
+
+
+def test_1391_an_elastic_error_given_as_text_reaches_the_agent_as_that_text(tmp_path, data_root):
+    """Elasticsearch's plain error form (`{"error": "<text>", "status": 400}`) reaches the agent
+    as the text itself. PR #1409 review."""
+    body = json.dumps({"error": "no handler found for uri [/x] and method [POST]",
+                       "status": 400}).encode()
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
+        up.replies["/_query"] = (400, {"Content-Type": "application/json"}, body)
+        with pytest.raises(UpstreamFault) as raised:
+            elastic_adapter.VERBS["esql"](ctx, query=f"FROM {A.ELASTIC_EVENTS} | LIMIT 1")
+
+    assert str(raised.value).endswith(": no handler found for uri [/x] and method [POST]"), (
+        raised.value)
+
+
+@pytest.mark.parametrize(("status", "fault", "names"), [
+    pytest.param(401, ConfigFault, None, id="401"),
+    pytest.param(403, ConfigFault, "monitor", id="403-names-the-monitor-privilege"),
+    pytest.param(503, TransportFault, None, id="503"),
+])
+def test_1391_o3_health_check_faults_by_the_reply_and_a_403_names_the_monitor_privilege(
+        tmp_path, data_root, status, fault, names):
+    """`health-check` maps 401 to ConfigFault, 5xx to TransportFault, and 403 to a ConfigFault
+    naming the cluster `monitor` privilege (a setup mistake). #1391 O3, D11."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
+        up.replies["/_cluster/health"] = _answered(status)
+        with pytest.raises(AdapterFault) as raised:
+            elastic_adapter.VERBS["health-check"](ctx)
+
+    assert type(raised.value) is fault, raised.value
+    if names:
+        assert names in str(raised.value), raised.value
+    assert [s.path for s in up.seen] == ["/_cluster/health"], "the request was never sent"
+
+
+@pytest.mark.parametrize("transport", [
+    pytest.param(None, id="missing"),
+    pytest.param("docker-exec", id="docker-exec"),
+    pytest.param("", id="blank"),
+    pytest.param("http-proxy", id="control"),
+])
+def test_1391_o3_elastic_without_the_http_proxy_method_is_a_settings_fault_naming_the_key(
+        tmp_path, data_root, transport):
+    """Until #1391 O1/O2 retire this: `ELASTIC_TRANSPORT` missing or not `http-proxy` is a
+    ConfigFault naming it at the settings check and at a verb, nothing sent; `http-proxy` passes.
+    #1391 O3, D12 (retired by #1391 O1/O2)."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url,
+                                      transport=transport) as (ctx, tap):
+        if transport == "http-proxy":
+            assert elastic_adapter.check_settings(ctx.tenant) is None
+            return
+        with pytest.raises(ConfigFault, match="ELASTIC_TRANSPORT"):
+            elastic_adapter.check_settings(ctx.tenant)
+        with pytest.raises(ConfigFault, match="ELASTIC_TRANSPORT"):
+            elastic_adapter.VERBS["query"](ctx, native_query="*")
+
+    assert (tap.tokens, up.seen) == ([], [])
+
+
+def test_1391_o3_elastic_on_the_http_proxy_method_with_no_access_yaml_is_a_settings_fault(
+        tmp_path, data_root):
+    """`ELASTIC_TRANSPORT=http-proxy` beside no `access.yaml` is a ConfigFault naming it at the
+    settings check and at a verb, nothing sent. #1391 O3, P1, D12."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url,
+                                      declared=False) as (ctx, tap):
+        with pytest.raises(ConfigFault, match="access.yaml"):
+            elastic_adapter.check_settings(ctx.tenant)
+        with pytest.raises(ConfigFault, match="access.yaml"):
+            elastic_adapter.VERBS["query"](ctx, native_query="*")
+
+    assert (tap.tokens, up.seen) == ([], [])
+
+
+@pytest.mark.parametrize("leftover", ["ELASTICSEARCH_URL", "KIBANA_URL"])
+def test_1391_o3_a_leftover_base_key_beside_the_declaration_is_refused_by_name(
+        tmp_path, data_root, leftover):
+    """`ELASTICSEARCH_URL`/`KIBANA_URL` in config.env beside a declaration is a ConfigFault naming
+    it at the settings check and at a verb, nothing sent. #1391 O3, F4."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url,
+                                      env_extra=f'{leftover}="https://old.example:9200"\n') as (ctx, tap):
+        with pytest.raises(ConfigFault, match=leftover):
+            elastic_adapter.check_settings(ctx.tenant)
+        with pytest.raises(ConfigFault, match=leftover):
+            elastic_adapter.VERBS["query"](ctx, native_query="*")
+
+    assert (tap.tokens, up.seen) == ([], [])
+
+
+def test_1391_o3_each_elastic_request_is_captured_once_and_reaches_the_proxy_once(
+        tmp_path, data_root):
+    """Every Elastic verb records exactly one capture and makes one proxy call (one upstream
+    request); each capture passes the endpoint allowlist at the root base. #1391 O3, F8, P3."""
+    capture = TransportCapture()
+    hits = json.dumps({"hits": {"total": {"value": 0}, "hits": []}}).encode()
+    verbs = (("query", {"native_query": "*"}, "POST"), ("alerts", {"native_query": "*"}, "POST"),
+             ("esql", {"query": f"FROM {A.ELASTIC_EVENTS} | LIMIT 1"}, "POST"),
+             ("health-check", {}, "GET"))
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url,
+                                      ctx_kw={"capture": capture}) as (ctx, tap):
+        up.replies[f"/{A.ELASTIC_EVENTS}/_search"] = (200, {}, hits)
+        up.replies[f"/{A.ELASTIC_ALERTS}/_search"] = (200, {}, hits)
+        up.replies["/_query"] = (200, {}, b'{"columns": [], "values": []}')
+        up.replies["/_cluster/health"] = (200, {}, b'{"status": "green", "number_of_nodes": 1}')
+        for verb, kw, _method in verbs:
+            before = (len(capture.requests), len(tap.tokens), len(up.seen))
+            elastic_adapter.VERBS[verb](ctx, **kw)
+            after = (len(capture.requests), len(tap.tokens), len(up.seen))
+            assert tuple(a - b for a, b in zip(after, before, strict=True)) == (1, 1, 1), verb
+
+    assert [(r.system, r.method) for r in capture.requests] == [
+        ("elastic", method) for _verb, _kw, method in verbs]
+    sent = [urlsplit(r.url)[:3] for r in capture.requests]
+    assert sent == [urlsplit(up.url)._replace(path=s.path.split("?")[0])[:3] for s in up.seen], (
+        "a capture names a URL other than the one sent")
+    for request in capture.requests:
+        confine_read_endpoint(request.system, request.url, method=request.method, verb_class="r")
+
+
+@pytest.mark.parametrize(("verb", "kw", "timeout"), [
+    pytest.param("query", {"native_query": "*"}, 30, id="query"),
+    pytest.param("alerts", {"native_query": "*"}, 30, id="alerts"),
+    pytest.param("esql", {"query": f"FROM {A.ELASTIC_EVENTS} | LIMIT 1"}, 30, id="esql"),
+    pytest.param("health-check", {}, 10, id="health-check"),
+])
+def test_1391_o3_each_verb_asks_the_proxy_for_its_constant_timeout(
+        tmp_path, data_root, verb, kw, timeout):
+    """The adapter's constants ride the proxy call as `timeout_sec`: 30 s for query, alerts and
+    esql, 10 s for health-check (no timeout key). #1391 O3, F8."""
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, tap):
+        for path in (f"/{A.ELASTIC_EVENTS}/_search", f"/{A.ELASTIC_ALERTS}/_search"):
+            up.replies[path] = (200, {}, b'{"hits": {"hits": []}}')
+        up.replies["/_query"] = (200, {}, b'{"columns": [], "values": []}')
+        up.replies["/_cluster/health"] = (200, {}, b'{"status": "green", "number_of_nodes": 1}')
+        elastic_adapter.VERBS[verb](ctx, **kw)
+
+    assert [json.loads(b)["timeout_sec"] for b in tap.bodies] == [timeout]
+
+
+def test_1391_o3_an_index_edit_after_resolve_does_not_reach_the_wire(tmp_path, data_root):
+    """The run's record is parsed once: an events-index edit made to the settings after resolve
+    changes nothing a verb sends, while a record resolved after it sends the edit. #1391 O3
+    (restores the elastic half of `test_o2_adapter_config_snapshot`)."""
+    with H.upstream() as up, published_tenant(
+            tmp_path / "forge", root=data_root, files=A.elastic_files(up.url)) as t:
+        store = H.FakeStore({(t.tenant_id, "elastic"): T.basic_set()})
+        record = T.run_record(t)
+        config = export_dir(t.tenant, t.commit) / "settings/systems/elastic/config.env"
+        config.write_text(config.read_text(encoding="utf-8").replace(
+            f'"{A.ELASTIC_EVENTS}"', '"edited-*"'), encoding="utf-8")
+        with A.proxy_for(t, store) as (url, _tap):
+            token = T.token(t.tenant_id, {("elastic", "r")})
+            elastic_adapter.query(A.ctx_for(tmp_path, record, url, token), native_query="*")
+            elastic_adapter.query(A.ctx_for(tmp_path / "later", T.run_record(t), url, token),
+                                  native_query="*")
+
+    assert [s.path.split("?")[0] for s in up.seen] == [
+        f"/{A.ELASTIC_EVENTS}/_search", "/edited-*/_search"]
+
+
+def test_1391_o3_alerts_keeps_its_output_shape_through_the_proxy(tmp_path, data_root):
+    """`alerts` returns the search envelope over the alerts index, as before. #1391 O3, P5."""
+    alert = {"@timestamp": "2026-11-03T10:00:00Z", "rule": {"name": "ssh brute force"}}
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
+        up.replies[f"/{A.ELASTIC_ALERTS}/_search"] = (200, {}, json.dumps(
+            {"hits": {"total": {"value": 1}, "hits": [{"_source": alert}]}}).encode())
+        result = elastic_adapter.VERBS["alerts"](ctx, native_query="rule.name:ssh*")
+
+    assert result == {"index": A.ELASTIC_ALERTS, "total": 1, "returned": 1, "sort": "desc",
+                      "truncated": False, "hits": [alert]}
+
+
+def test_1391_o3_the_run_clock_rides_the_bodies_the_proxy_is_sent(tmp_path, data_root):
+    """With the run's clock set, the search body carries the cut at it and the ES|QL body the
+    `WHERE @timestamp <=` bound, while esql echoes the query as asked. #1391 O3, D1 (replaces the
+    `_http_json` source pin)."""
+    at = datetime.datetime(2026, 11, 3, 9, 0, 0, tzinfo=datetime.UTC)
+    stamp = "2026-11-03T09:00:00Z"
+    q = f"FROM {A.ELASTIC_EVENTS} | KEEP user.name"
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url,
+                                      ctx_kw={"as_of": at}) as (ctx, _tap):
+        up.replies[f"/{A.ELASTIC_EVENTS}/_search"] = (200, {}, b'{"hits": {"hits": []}}')
+        up.replies["/_query"] = (200, {}, b'{"columns": [], "values": []}')
+        elastic_adapter.VERBS["query"](ctx, native_query="*")
+        echoed = elastic_adapter.VERBS["esql"](ctx, query=q)
+
+    search, esql = (json.loads(s.body) for s in up.seen)
+    assert stamp in json.dumps(search["post_filter"])
+    assert f'| WHERE @timestamp <= "{stamp}"' in esql["query"]
+    assert echoed["query"] == q

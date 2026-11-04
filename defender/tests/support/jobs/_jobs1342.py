@@ -58,17 +58,29 @@ DESCRIPTION = "Three failures then a success from one source."
 
 
 def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: bool = True,
-                    data_root: Path | None = None) -> None:
-    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6)."""
-    from defender.tests.support.tenancy._active1214 import insert_active_tenant
+                    data_root: Path | None = None, generations: Any = None) -> None:
+    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6).
 
-    insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
+    An active tenant gets one live generation with a sign login (the fixture tenant's elastic is proxied,
+    #1391 P1/D12: run start signs request tokens), unless `generations` says otherwise (`()` for none)."""
+    from defender.tests.support.tenancy._active1214 import insert_active_tenant
+    from defender.tests.support.tenancy._proxied1391 import sign_generation
+
+    if generations is None:
+        generations = [sign_generation(tenant_id)] if state == "active" else ()
+    insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root, generations=generations)
+
+
+def drop_tenant(dsn: str, tenant_id: str) -> None:
+    """Delete `tenant_id`'s record and the tenancy rows that reference it (generations, publish status, forge wiring)."""
+    for table in ("generations", "publish_status", "forge_wiring"):
+        execute(dsn, f'DELETE FROM tenancy."{table}" WHERE tenant_id = %s', (tenant_id,))  # noqa: S608
+    execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
 
 
 def restate_tenant(dsn: str, tenant_id: str, *, state: str, wiring: bool = True, data_root: Path | None = None) -> None:
     """Replace `tenant_id`'s record by one in `state` (a case's premise: do it before any alert names the tenant)."""
-    execute(dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant_id,))
-    execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
+    drop_tenant(dsn, tenant_id)
     register_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
 
 

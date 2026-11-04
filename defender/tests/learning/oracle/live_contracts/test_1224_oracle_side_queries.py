@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from defender.tests.support.learning.judge import _judge_921 as J
 
+import contextlib
 import dataclasses
 import gc
 import importlib
 import json
 import math
-import sys
+import re
 import threading
 import types
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +23,9 @@ from defender import _yaml
 from defender.systems.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
 from defender.kit import faults
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
-from defender.tests.tenancy.tenant_1107_settings import _spec1107 as T1107
 
 
 #: A rate no scenario outside the rate demands comes near, so their timing is not the limiter's.
@@ -280,93 +282,74 @@ JUST_AFTER = "2026-07-28T16:18:46Z"
 LATE = "2026-08-15T09:00:00Z"
 INDEXED = (EARLY, JUST_AFTER, LATE)
 
-_ES_SHIM = r'''
-import datetime as dt
-import json
-import re
-import sys
-
-DOCS = [{"@timestamp": t, "user.name": "alice", "event.action": "logon"}
-        for t in json.loads(@INDEXED@)]
-UNITS = {"y": 365 * 86400, "M": 30 * 86400, "w": 7 * 86400, "d": 86400, "h": 3600,
-         "H": 3600, "m": 60, "s": 1}
-OPS = {"gte": lambda t, b: t >= b, "gt": lambda t, b: t > b,
-       "lte": lambda t, b: t <= b, "lt": lambda t, b: t < b}
-SQL = {">=": "gte", ">": "gt", "<=": "lte", "<": "lt"}
+_UNITS = {"y": 365 * 86400, "M": 30 * 86400, "w": 7 * 86400, "d": 86400, "h": 3600,
+          "H": 3600, "m": 60, "s": 1}
+_OPS = {"gte": lambda t, b: t >= b, "gt": lambda t, b: t > b,
+        "lte": lambda t, b: t <= b, "lt": lambda t, b: t < b}
+_SQL = {">=": "gte", ">": "gt", "<=": "lte", "<": "lt"}
 
 
-def moment(value):
+def _bound_moment(value: Any) -> datetime | None:
+    """A range bound as the cluster reads it: epoch millis, ISO, or date math off `now`."""
     if isinstance(value, (int, float)):
-        return dt.datetime.fromtimestamp(value / 1000, dt.UTC)
+        return datetime.fromtimestamp(value / 1000, UTC)
     text = str(value).strip()
     if text.isdigit():
-        return dt.datetime.fromtimestamp(int(text) / 1000, dt.UTC)
-    anchor, _, math = text.partition("||")
+        return datetime.fromtimestamp(int(text) / 1000, UTC)
+    anchor, _, math_part = text.partition("||")
     if anchor.startswith("now"):
-        base, math = dt.datetime.now(dt.UTC), anchor[3:]
+        base, math_part = datetime.now(UTC), anchor[3:]
     else:
         try:
-            base = dt.datetime.fromisoformat(anchor.replace("Z", "+00:00"))
+            base = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
         except ValueError:
             return None
         if base.tzinfo is None:
-            base = base.replace(tzinfo=dt.UTC)
-    for sign, n, unit in re.findall(r"([+-])(\d+)([yMwdhHms])", math.split("/")[0]):
-        base += dt.timedelta(seconds=(1 if sign == "+" else -1) * int(n) * UNITS[unit])
+            base = base.replace(tzinfo=UTC)
+    for sign, n, unit in re.findall(r"([+-])(\d+)([yMwdhHms])", math_part.split("/")[0]):
+        base += timedelta(seconds=(1 if sign == "+" else -1) * int(n) * _UNITS[unit])
     return base
 
 
-def kept(bounds):
-    return [d for d in DOCS if all(b is None or OPS[op](moment(d["@timestamp"]), b)
-                                   for op, b in bounds)]
+def _kept(bounds: list) -> list[dict]:
+    return [d for d in ({"@timestamp": t, "user.name": "alice", "event.action": "logon"}
+                        for t in INDEXED)
+            if all(b is None or _OPS[op](_moment(d["@timestamp"]), b) for op, b in bounds)]
 
 
-argv = sys.argv[1:]
-with open(@LOG@, "a", encoding="utf-8") as log:
-    log.write(json.dumps(argv) + "\n")
-body = json.loads(argv[argv.index("-d") + 1]) if "-d" in argv else {}
-if "/_query" in argv[-1]:
-    text = re.sub(r"//[^\n]*|/\*.*?\*/", " ", body.get("query", ""), flags=re.S)
-    if not re.match(r"\s*from\s", text, re.I):
-        sys.stdout.write(json.dumps({"error": {"reason": "no FROM source"}}) + "\n400")
-        sys.exit(0)
-    bounds = [(SQL[op], moment(v)) for op, v in re.findall(
-        r'@timestamp\s*(<=|>=|<|>)\s*(?:to_datetime\s*\(\s*)?"([^"]+)"', text, re.I)]
-    sys.stdout.write(json.dumps({
-        "columns": [{"name": "@timestamp", "type": "date"},
-                    {"name": "user.name", "type": "keyword"}],
-        "values": [[d["@timestamp"], d["user.name"]] for d in kept(bounds)]}))
-else:
-    bounds = [(op, moment(v))
+def _es_reply(seen: Any) -> tuple[int, dict[str, str], bytes]:
+    """The cluster's answer to one request it is sent: the documents of `INDEXED` that its
+    `@timestamp` bounds keep (a search body's range filter, or an ES|QL `WHERE`)."""
+    body = json.loads(seen.body or "{}")
+    headers = {"Content-Type": "application/json"}
+    if seen.path.startswith("/_query"):
+        text = re.sub(r"//[^\n]*|/\*.*?\*/", " ", body.get("query", ""), flags=re.S)
+        if not re.match(r"\s*from\s", text, re.I):
+            return 400, headers, json.dumps({"error": {"reason": "no FROM source"}}).encode()
+        bounds = [(_SQL[op], _bound_moment(v)) for op, v in re.findall(
+            r'@timestamp\s*(<=|>=|<|>)\s*(?:to_datetime\s*\(\s*)?"([^"]+)"', text, re.I)]
+        return 200, headers, json.dumps({
+            "columns": [{"name": "@timestamp", "type": "date"},
+                        {"name": "user.name", "type": "keyword"}],
+            "values": [[d["@timestamp"], d["user.name"]] for d in _kept(bounds)]}).encode()
+    bounds = [(op, _bound_moment(v))
               for f in body.get("query", {}).get("bool", {}).get("filter", [])
-              for op, v in f.get("range", {}).get("@timestamp", {}).items() if op in OPS]
-    hits = [{"_source": d} for d in kept(bounds)]
-    sys.stdout.write(json.dumps({"hits": {"total": {"value": len(hits)}, "hits": hits}}))
-sys.stdout.write("\n200")
-'''
+              for op, v in f.get("range", {}).get("@timestamp", {}).items() if op in _OPS]
+    hits = [{"_source": d} for d in _kept(bounds)]
+    return 200, headers, json.dumps({"hits": {"total": {"value": len(hits)}, "hits": hits}}).encode()
 
 
-def _es_ctx(tmp_path: Path) -> VerbContext:
-    """A run context carrying the family's branch-point clock, over a tenant whose elastic
-    system reaches `_ES_SHIM` as its `docker` (the shebang is the running interpreter: the
-    child's PATH holds the shim's directory alone)."""
-    bindir = tmp_path / "es-bin"
-    bindir.mkdir(parents=True, exist_ok=True)
-    shim = bindir / "docker"
-    shim.write_text(f"#!{sys.executable}\n"
-                    + _ES_SHIM.replace("@INDEXED@", repr(json.dumps(INDEXED)))
-                    .replace("@LOG@", repr(str(_es_log(tmp_path)))),
-                    encoding="utf-8")
-    shim.chmod(0o755)
-    root = tmp_path / "es-tenants"
-    texts = T1107.config_texts("spec1224", events_index="logs-*",
-                               alerts_index=".alerts-security.alerts-*")
-    folder = T1107.plant(root, marker="spec1224", configs=texts)
-    T1107.set_key(folder, "elastic", "ELASTIC_DOCKER_CONTEXT", "spec-1224")
-    run_dir = tmp_path / "es-run"
-    run_dir.mkdir(parents=True, exist_ok=True)
-    return T1107.verb_context(T1107.resolve(root), run_dir, {"PATH": str(bindir)},
-                              as_of=S.AS_OF_DT)
+@contextlib.contextmanager
+def _es_ctx(tmp_path: Path, data_root: Path) -> Iterator[tuple[VerbContext, Any]]:
+    """A run context carrying the family's branch-point clock, over elastic declared at a
+    recording upstream behind the real proxy (#1391 O3); yields it and the upstream, whose
+    `seen` holds every request the cluster was sent."""
+    with H.upstream() as up:
+        for path in ("/logs-*/_search", "/alerts-*/_search", "/_query"):
+            up.replies[path] = _es_reply
+        with A.elastic_proxied(tmp_path, data_root, up.url,
+                               ctx_kw={"as_of": S.AS_OF_DT}) as (ctx, _tap):
+            yield ctx, up
 
 
 def _elastic_read(adapter: Any, ctx: VerbContext, verb: str, **params: Any) -> list[str] | None:
@@ -390,28 +373,11 @@ def _moment(stamp: str) -> datetime:
     return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
 
-def _es_log(tmp_path: Path) -> Path:
-    """Where `_es_ctx`'s cluster records every request it is handed."""
-    return tmp_path / "es-bin" / "requests.jsonl"
-
-
-def _es_requests(tmp_path: Path) -> list[list[str]]:
-    """Every request (its argv) `_es_ctx`'s cluster was handed, in order."""
-    log = _es_log(tmp_path)
-    if not log.is_file():
-        return []
-    return [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines() if ln]
-
-
-def _wire_window(tmp_path: Path) -> dict | None:
-    """The `@timestamp` range the LAST search request put on the wire, read off the argv the
-    transport handed the cluster (as `test_947_clock.search_body` reads it), or None when it
-    carried no range at all."""
-    requests = _es_requests(tmp_path)
-    assert requests, "no request reached the cluster"
-    argv = requests[-1]
-    body = json.loads(argv[argv.index("-d") + 1])
-    for entry in body["query"]["bool"]["filter"]:
+def _wire_window(up: Any) -> dict | None:
+    """The `@timestamp` range the LAST search request put on the wire (read off the body the
+    cluster received), or None when it carried no range at all."""
+    assert up.seen, "no request reached the cluster"
+    for entry in json.loads(up.seen[-1].body)["query"]["bool"]["filter"]:
         if "range" in entry:
             return entry["range"]["@timestamp"]
     return None
@@ -625,26 +591,24 @@ def test_1224_sibling_query_tool_via_decides_each_call_and_carries_as_of(tmp_pat
     assert not oracle.overrun
 
 
-def test_p083_call_window_extends_past_the_branch_point(tmp_path):
+def test_p083_call_window_extends_past_the_branch_point(tmp_path, data_root):
     """However the end is spelled, the adapter sends the caller's own end and returns no row past it."""
     assert datetime.now(UTC) > _moment(LATE), "premise: the later row is already indexed"
-    where = tmp_path / "elastic"
-    ctx = _es_ctx(where)
     elastic_adapter = S.mod("integrations.elastic_adapter")
-    assert _elastic_read(elastic_adapter, ctx, "query", native_query="*") == [EARLY], (
-        "an open window did not read the row before the branch point")
     spellings = [None, "", "2099-01-01T00:00:00Z", "2099-01-01", "now", "now+1d",
                  "4102444800000", "2026-08-20T01:00:00+05:00", JUST_AFTER]
     escaped, rewritten = {}, {}
-    for end in spellings:
-        sent = len(_es_requests(where))
-        stamps = _elastic_read(elastic_adapter, ctx, "query", native_query="*", end=end)
-        window = (_wire_window(where) if len(_es_requests(where)) > sent
-                  else "no request reached the cluster")
-        if window != {"lte": end if end else AS_OF_Z}:
-            rewritten[end] = window
-        if _after_branch(stamps):
-            escaped[end] = _after_branch(stamps)
+    with _es_ctx(tmp_path / "elastic", data_root) as (ctx, up):
+        assert _elastic_read(elastic_adapter, ctx, "query", native_query="*") == [EARLY], (
+            "an open window did not read the row before the branch point")
+        for end in spellings:
+            sent = len(up.seen)
+            stamps = _elastic_read(elastic_adapter, ctx, "query", native_query="*", end=end)
+            window = _wire_window(up) if len(up.seen) > sent else "no request reached the cluster"
+            if window != {"lte": end if end else AS_OF_Z}:
+                rewritten[end] = window
+            if _after_branch(stamps):
+                escaped[end] = _after_branch(stamps)
     assert rewritten == {}, (
         f"window ends the request to the cluster did not carry as the caller spelled them (an "
         f"absent end filled at the clock): {rewritten}")
@@ -666,13 +630,10 @@ def test_p083_call_window_extends_past_the_branch_point(tmp_path):
     assert [r["as_of"] for r in tenant_adapter] == [WHEN] * len(tenant_adapter)
 
 
-def test_p084_native_query_form_that_escapes_the_time_bound(tmp_path):
+def test_p084_native_query_form_that_escapes_the_time_bound(tmp_path, data_root):
     """Comment prefixes and a lowercase source with its own window still return no row past the clock."""
-    ctx = _es_ctx(tmp_path)
     elastic_adapter = S.mod("integrations.elastic_adapter")
     plain = "FROM logs-* | KEEP @timestamp, user.name"
-    assert _elastic_read(elastic_adapter, ctx, "esql", query=plain) == [EARLY], (
-        "a plain ES|QL read did not return the row before the branch point")
     escapes = [
         "// the analyst wants everything\nFROM logs-* | KEEP @timestamp, user.name",
         "/* widen */ FROM logs-* | KEEP @timestamp, user.name",
@@ -680,10 +641,13 @@ def test_p084_native_query_form_that_escapes_the_time_bound(tmp_path):
         "\n\n   FROM logs-* METADATA _index | LIMIT 5",
     ]
     escaped = {}
-    for query in escapes:
-        stamps = _elastic_read(elastic_adapter, ctx, "esql", query=query)
-        if _after_branch(stamps):
-            escaped[query] = _after_branch(stamps)
+    with _es_ctx(tmp_path, data_root) as (ctx, _up):
+        assert _elastic_read(elastic_adapter, ctx, "esql", query=plain) == [EARLY], (
+            "a plain ES|QL read did not return the row before the branch point")
+        for query in escapes:
+            stamps = _elastic_read(elastic_adapter, ctx, "esql", query=query)
+            if _after_branch(stamps):
+                escaped[query] = _after_branch(stamps)
     assert escaped == {}, f"ES|QL reads that returned rows after the branch point: {escaped}"
 
 

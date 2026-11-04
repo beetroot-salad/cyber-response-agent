@@ -1,9 +1,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
-import json
 import urllib.parse
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import sys as _sys
@@ -13,10 +14,9 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender import _clock
-from defender.kit.settings import config_pointer
 from defender.kit.verbs import VerbContext, verb
 from defender.integrations import _stub_transport as transport
-from defender.integrations.confinement import confine_index, guard_outbound
+from defender.integrations.confinement import confine_index, confine_read_endpoint
 from defender.integrations.esql_text import opens_with_from, split_first_command
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 
@@ -25,16 +25,18 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 
 SYSTEM = "elastic"
 
-REQUIRED_CONFIG_KEYS = [
-    "ELASTICSEARCH_URL",
-    "KIBANA_URL",
-    "ELASTIC_EVENTS_INDEX",
-    "ELASTIC_ALERTS_INDEX",
-]
+#: The keys of `systems/elastic/config.env` this adapter requires (prefix stripped).
+REQUIRED_CONFIG_KEYS = ("EVENTS_INDEX", "ALERTS_INDEX")
+
+#: Base keys that no longer exist: the base lives in the access declaration alone (#1391 F4).
+RETIRED_BASE_KEYS = ("ELASTICSEARCH_URL", "KIBANA_URL")
 
 RETURNED_DOC_CAP = 20
 DEFAULT_LIMIT = RETURNED_DOC_CAP
+#: How long the proxy gives one request (`health-check` gets its own); constants, not settings.
 REQUEST_TIMEOUT_SEC = 30
+HEALTH_TIMEOUT_SEC = 10
+HTTP_FORBIDDEN = 403
 
 
 class OutboundBody:
@@ -55,10 +57,6 @@ class OutboundBody:
 
 
 PREFIX = "ELASTIC"
-#: The Elasticsearch container every request execs into — required.
-ES_CONTAINER_KEY = "ELASTIC_ES_CONTAINER"
-#: The Kibana container `health-check` alone reads — optional (MF-7 c).
-KIBANA_CONTAINER_KEY = "ELASTIC_KIBANA_CONTAINER"
 
 
 def load_config(ctx: VerbContext) -> dict[str, str]:
@@ -67,124 +65,38 @@ def load_config(ctx: VerbContext) -> dict[str, str]:
 
 
 def _record_config(tenant: TenantRecord) -> dict[str, str]:
-    """This deployment's elastic config from the run's record (#1107): the keys of
-    `systems/elastic/config.env` as written, prefix included. A missing or unusable file, an
-    unimplemented access method, or a blank required key is a `ConfigFault` — Elasticsearch is
-    not configured for this run (`check_settings` raises it at run start, so elastic is down from
-    the start, #1256). The record's `elastic` view judges the
-    keys platform code reads; this reader judges the ones IT needs, so each reports its own view
-    (MF-7 c)."""
-    entry = transport.record_entry(tenant, SYSTEM)
-    transport.record_access_context(tenant, SYSTEM)
-    config = dict(entry)
-    missing = [k for k in REQUIRED_CONFIG_KEYS if not (config.get(k) or "").strip()]
-    if missing:
-        raise ConfigFault(
-            f"missing required config keys in {config_pointer(SYSTEM)}: {', '.join(missing)}")
-    return config
+    """This deployment's elastic config from the run's record (#1107), by the shared rules for a
+    proxied system: the two index keys (prefix stripped) and `URL_BASE`, the base of the access
+    declaration (which holds the only one, #1391 F4). Elasticsearch is reached only through the
+    credential proxy (#1391 O3), so another access method, a retired base key, no declaration, or
+    a blank index key is a `ConfigFault` — Elasticsearch is not configured for this run
+    (`check_settings` raises it at run start, so elastic is down from the start, #1256)."""
+    return transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS,
+                                   retired=RETIRED_BASE_KEYS, proxy_only=True)
 
 
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """Elastic's settings check (#1256 O-5): every `ConfigFault` a verb here can raise, over the
-    run's record — `load_config`'s (the file, the access method, the four keys), then the
-    Elasticsearch container every request execs into (`_http_json` → `_es_container`), which
-    `load_config` does not judge. The Kibana container is NOT judged: only `health-check` reads
-    it, asks first, and answers its absence as a result (MF-7 c), so an Elasticsearch-only
-    tenant's elastic is usable. None when the system is usable."""
+    run's record — the file, the access method, the access declaration, the two index keys. None
+    when the system is usable."""
     _record_config(tenant)
-    _record_container(tenant, ES_CONTAINER_KEY)
-
-
-def _configured(ctx: VerbContext, key: str) -> str | None:
-    """The container named by `key` in the tenant's file, or None when it is absent or blank."""
-    return _record_configured(ctx.tenant, key)
-
-
-def _record_configured(tenant: TenantRecord, key: str) -> str | None:
-    value = transport.record_entry(tenant, SYSTEM).get(key)
-    return None if value is None or not value.strip() else value
-
-
-def _record_container(tenant: TenantRecord, key: str) -> str:
-    """The container named by `key` (`ELASTIC_ES_CONTAINER` / `ELASTIC_KIBANA_CONTAINER`) in the
-    tenant's file — `ConfigFault` naming it when absent or blank. There is no default: a built-in
-    `elasticsearch` or `kibana` would address whatever container the host happens to hold of that
-    name."""
-    value = _record_configured(tenant, key)
-    if value is None:
-        raise ConfigFault(
-            f"{key} is not set — name the container this system is reached through in its "
-            "config.env; there is no default")
-    return value
-
-
-def _es_container(ctx: VerbContext) -> str:
-    return _record_container(ctx.tenant, ES_CONTAINER_KEY)
-
-
-def _kibana_container(ctx: VerbContext) -> str:
-    return _record_container(ctx.tenant, KIBANA_CONTAINER_KEY)
-
-
-def _unreachable(ctx: VerbContext, target: str, exc: BaseException) -> TransportFault:
-    context = transport.docker_context(ctx, SYSTEM)
-    entry = transport.system_entry(ctx, SYSTEM)
-    containers = "|".join(
-        entry[k] for k in (ES_CONTAINER_KEY, KIBANA_CONTAINER_KEY) if k in entry)
-    return TransportFault(
-        f"{target} unreachable: {exc} — the stack is reached via "
-        f"`docker --context {context} exec`; confirm it is up: "
-        f"docker --context {context} ps | grep -E '{containers}'"
-    )
-
-
 
 
 def _http_json(  # noqa: PLR0913 — one request's per-call state
-    ctx, method, url, config, headers=None, body: OutboundBody | None = None, timeout=None,
-    *, kibana: bool = False,
-):
-    """The one door to Elasticsearch — and, with `kibana=True`, to Kibana. The caller says which
-    service it addresses; the container is never guessed from the URL (an Elasticsearch URL that
-    happens to start with KIBANA_URL is still Elasticsearch's). `body` is typed rather than a
-    bare dict for the reason `OutboundBody` gives."""
-    guard_outbound(ctx, SYSTEM, url, method=method)
-    container = _kibana_container(ctx) if kibana else _es_container(ctx)
-    secs = int(timeout or REQUEST_TIMEOUT_SEC)
-    rc, stdout, stderr = transport.docker_exec_curl(
-        ctx, container, url, method=method, headers=headers,
-        body=None if body is None else body.payload,
-        timeout_sec=secs, insecure=True, auth="elastic:${ELASTIC_PASSWORD}", system=SYSTEM,
-    )
-    body_text, status_str = transport.split_status(stdout)
-    try:
-        status = int(status_str)
-    except ValueError as e:
-        detail = stderr.strip() or f"docker exec rc={rc}, no output"
-        raise _unreachable(ctx, "Elasticsearch", TransportFault(detail)) from e
-    if status == 0:
-        detail = stderr.strip() or f"curl reported HTTP 000 (no response; rc={rc})"
-        raise _unreachable(ctx, "Elasticsearch", TransportFault(detail))
-
-    try:
-        parsed = json.loads(body_text) if body_text else {}
-    except json.JSONDecodeError:
-        parsed = {"error": body_text[:500]}
-    return status, parsed
-
-
-def _raise_on_es_error(status: int, resp: dict, what: str) -> None:
-    if status == 200:
-        return
-    err = resp.get("error", resp)
-    msg = err.get("reason") if isinstance(err, dict) else str(err)
-    if status in (401, 403):
-        raise TransportFault(f"Elasticsearch auth failed (HTTP {status}): {msg}")
-    if status >= 500:
-        raise TransportFault(f"Elasticsearch server error (HTTP {status}): {msg}")
-    raise UpstreamFault(f"{what} failed (HTTP {status}): {msg}")
-
-
+    ctx, method: str, config: dict[str, str], path: str, body: OutboundBody | None = None,
+    timeout_sec: int = REQUEST_TIMEOUT_SEC,
+) -> dict:
+    """The one door to Elasticsearch: its own confinement first (P3: the endpoint allowlist,
+    matched against `path` relative to the declared base as the proxy's routes are, before it is
+    joined to the base), then the shared send, capture and fault mapping. `body` is typed rather
+    than a bare dict for the reason `OutboundBody` gives."""
+    confine_read_endpoint(SYSTEM, path, method=method, verb_class="r")
+    answer = transport.http_timed(ctx, config, method, path,
+                                  None if body is None else body.payload,
+                                  system=SYSTEM, timeout_sec=timeout_sec)
+    if not isinstance(answer, dict):
+        raise TransportFault("non-object JSON response from elastic")
+    return answer
 
 
 SORT_NEWEST_FIRST = "desc"
@@ -276,13 +188,12 @@ def _before_clock(time_field: str, at: _dt.datetime) -> dict:
 def _search(
     ctx, config, index_pattern: str, body: OutboundBody,
 ) -> tuple[list[dict], int, bool]:
-    url = (
-        f"{config['ELASTICSEARCH_URL'].rstrip('/')}/"
-        f"{urllib.parse.quote(index_pattern, safe='-*,.')}/_search"
-        f"?ignore_unavailable=true"
-    )
-    status, resp = _http_json(ctx, "POST", url, config, body=body)
-    _raise_on_es_error(status, resp, "Elasticsearch query")
+    path = f"/{urllib.parse.quote(index_pattern, safe='-*,.')}/_search?ignore_unavailable=true"
+    # The index is confined to the configured patterns (`confine_index`), so a 403 is the user
+    # lacking `read` on one of them: setup, not the agent's (PR #1409 review).
+    with _a_403_is_setup(f"the search of {index_pattern}",
+                         "`read` on the configured events and alerts indexes"):
+        resp = _http_json(ctx, "POST", config, path, body=body)
 
     hits_block = resp.get("hits", {})
     total = hits_block.get("total", {})
@@ -300,7 +211,7 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
     config = load_config(ctx)
     resolved = index or config[index_key]
     resolved = confine_index(
-        resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]))
+        resolved, (config["EVENTS_INDEX"], config["ALERTS_INDEX"]))
     docs, total, truncated = _search(
         ctx, config, resolved,
         _search_body(
@@ -365,39 +276,34 @@ def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: s
 
 
 
-def health_check(ctx: VerbContext) -> dict:
-    config = load_config(ctx)
-    es_url = config["ELASTICSEARCH_URL"].rstrip("/") + "/_cluster/health"
-    status, body = _http_json(ctx, "GET", es_url, config, timeout=10)
-    _raise_on_es_error(status, body, "Elasticsearch health")
+@contextlib.contextmanager
+def _a_403_is_setup(what: str, needs: str) -> Iterator[None]:
+    """A 403 inside is the read-only user lacking `needs`: a setup mistake, so a `ConfigFault`
+    naming it rather than the agent's `UpstreamFault` (D11). Every other reply follows the
+    proxy's classification. Only for a request whose target the agent cannot widen: `esql` names
+    its own indexes, so its 403 stays the agent's."""
+    try:
+        yield
+    except UpstreamFault as e:
+        if e.status != HTTP_FORBIDDEN:
+            raise
+        raise ConfigFault(
+            f"Elasticsearch refused {what} (HTTP 403): the user defender reads it as needs "
+            f"{needs} — a setup mistake, not the agent's") from e
 
-    out = {
+
+def health_check(ctx: VerbContext) -> dict:
+    """Elasticsearch's cluster health, and nothing else (Kibana is not probed, #1391 D2). A 403 is
+    the read-only user lacking the cluster `monitor` privilege (`_a_403_is_setup`)."""
+    config = load_config(ctx)
+    with _a_403_is_setup("the health check", "the cluster `monitor` privilege"):
+        body = _http_json(ctx, "GET", config, "/_cluster/health", timeout_sec=HEALTH_TIMEOUT_SEC)
+    return {
         "system": SYSTEM,
         "connected": True,
         "elasticsearch": body.get("status", "unknown"),
         "nodes": body.get("number_of_nodes"),
     }
-
-    # Kibana is optional to this adapter (MF-7 c: an Elasticsearch-only tenant keeps answering),
-    # so a missing container is a RESULT here — asked before the call, never a ConfigFault that
-    # would discard the Elasticsearch answer above and charge the breaker.
-    if _configured(ctx, KIBANA_CONTAINER_KEY) is None:
-        out["kibana"] = "not configured (ELASTIC_KIBANA_CONTAINER is not set)"
-        return out
-    kb_url = config["KIBANA_URL"].rstrip("/") + "/api/status"
-    try:
-        kb_status, kb_body = _http_json(
-            ctx, "GET", kb_url, config, headers={"kbn-xsrf": "true"}, timeout=10, kibana=True,
-        )
-    except TransportFault as e:
-        out["kibana"] = f"unreachable ({e.detail})"
-        return out
-
-    if kb_status == 200 and isinstance(kb_body, dict):
-        out["kibana"] = kb_body.get("status", {}).get("overall", {}).get("level", "unknown")
-    else:
-        out["kibana"] = f"HTTP {kb_status}"
-    return out
 
 
 @verb(engine="lucene", body_param="native_query")
@@ -412,7 +318,7 @@ def query(
     sort: str = DEFAULT_SORT,
 ) -> dict:
     return _search_verb(
-        ctx, index_key="ELASTIC_EVENTS_INDEX", native_query=native_query,
+        ctx, index_key="EVENTS_INDEX", native_query=native_query,
         start=start, end=end, limit=limit, index=index, sort=sort,
     )
 
@@ -429,7 +335,7 @@ def alerts(
     sort: str = DEFAULT_SORT,
 ) -> dict:
     return _search_verb(
-        ctx, index_key="ELASTIC_ALERTS_INDEX", native_query=native_query,
+        ctx, index_key="ALERTS_INDEX", native_query=native_query,
         start=start, end=end, limit=limit, index=index, sort=sort,
     )
 
@@ -471,12 +377,10 @@ def _esql_body(ctx: VerbContext, query: str) -> OutboundBody:
 @verb(engine="esql", body_param="query")
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
     config = load_config(ctx)
-    url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
     # The bounded query is sent, but the payload echoes the query as asked: the harness's bound
     # stays out of the run's record, and branched payloads stay byte-comparable with the
     # capture (`stagers/elastic.restore` only repairs the corpus identity in the echo).
-    status, resp = _http_json(ctx, "POST", url, config, body=_esql_body(ctx, query))
-    _raise_on_es_error(status, resp, "ES|QL query")
+    resp = _http_json(ctx, "POST", config, "/_query?format=json", body=_esql_body(ctx, query))
     return esql_payload(query, _esql_within_clock(ctx, resp))
 
 

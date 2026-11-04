@@ -1,6 +1,8 @@
 """#1106 — the per-tenant knowledge folder: shared fixtures for the spec and the migrated suites."""
 from __future__ import annotations
 
+import re
+
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -231,24 +233,27 @@ def context_name(marker: str, system: str) -> str:
     return f"ctx-{marker}-{system}"
 
 
-def es_container(marker: str) -> str:
-    return f"es-{marker}"
-
-
-def kibana_container(marker: str) -> str:
-    return f"kibana-{marker}"
-
-
 def access_lines(marker: str, system: str) -> str:
-    """`system`'s access method and docker context lines (and elastic's two containers):
+    """`system`'s access method and docker context lines (elastic: the proxy method alone):
     without them its settings check fails and the system starts down (#1256)."""
     prefix = PREFIX[system]
-    text = (f'{prefix}_TRANSPORT="{DOCKER_EXEC}"\n'
+    if system == "elastic":  # #1391 O3 D12: proxy only; its base, `ca` and credential are the declaration's
+        return f'{prefix}_TRANSPORT="http-proxy"\n'
+    return (f'{prefix}_TRANSPORT="{DOCKER_EXEC}"\n'
             f'{prefix}_DOCKER_CONTEXT="{context_name(marker, system)}"\n')
-    if system == "elastic":
-        text += (f'ELASTIC_ES_CONTAINER="{es_container(marker)}"\n'
-                 f'ELASTIC_KIBANA_CONTAINER="{kibana_container(marker)}"\n')
-    return text
+
+
+def elastic_access_text(marker: str, *, base: str | None = None) -> str:
+    """The elastic declaration every fixture tenant carries (#1391 O3 P1/D12): basic auth at
+    `base` (default: a made-up one carrying `marker`), with the two POST reads (JSON is YAML)."""
+    import json
+    return json.dumps({
+        "access": "http-proxy",
+        "base": base or f"http://elastic-{marker}:9200",
+        "auth": {"scheme": "basic"},
+        "reads": [{"method": "POST", "path": "/*/_search"}, {"method": "POST", "path": "/_query"}],
+        "writes": [],
+    }, indent=2) + "\n"
 
 
 def config_texts(marker: str, *, events_index: str | None = None,
@@ -277,11 +282,8 @@ def config_texts(marker: str, *, events_index: str | None = None,
             f'TICKET_KEY_PATTERN="{marker.upper()}-[0-9]+"\n'
         ),
         "elastic": (
-            f'ELASTICSEARCH_URL="https://es-{marker}:9200"\n'
-            f'KIBANA_URL="http://kibana-{marker}:5601"\n'
             f'ELASTIC_EVENTS_INDEX="{events}"\n'
             f'ELASTIC_ALERTS_INDEX="{alerts}"\n'
-            'ELASTIC_SSL_VERIFY="true"\n'
         ),
         "change-mgmt": (
             f'CHANGE_MGMT_URL_BASE="http://change-mgmt-{marker}:8080"\n'
@@ -375,6 +377,9 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     system_configs = configs if configs is not None else config_texts(marker or tenant_id)
     for system, text in system_configs.items():
         files[f"systems/{system}/config.env"] = text
+    if "elastic" in system_configs and re.search(
+            r"""^ELASTIC_TRANSPORT\s*=\s*["']?http-proxy["']?\s*$""", system_configs["elastic"], re.M):
+        files["systems/elastic/access.yaml"] = elastic_access_text(marker or tenant_id)
     for rel, text in files.items():
         if rel in omit:
             continue
@@ -572,6 +577,7 @@ __all__ = [
     "TEMPLATE_DIR",
     "TEMPLATE_SETTINGS",
     "config_texts",
+    "elastic_access_text",
     "lead_zero_text",
     "case_record_text",
     "CASE_RECORD_REL",

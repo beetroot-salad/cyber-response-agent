@@ -101,8 +101,6 @@ def settings_pointer() -> str:
 PREFIX = T1106.PREFIX
 
 context_name = T1106.context_name
-es_container = T1106.es_container
-kibana_container = T1106.kibana_container
 
 
 def config_texts(marker: str, *, events_index: str | None = None,
@@ -188,6 +186,14 @@ def drop_key(folder: Path, system: str, key: str) -> Path:
     path.write_text(
         "\n".join(ln for ln in lines if ln.split("=", 1)[0].strip() != key) + "\n",
         encoding="utf-8")
+    return path
+
+
+def drop_access(folder: Path, system: str) -> Path:
+    """Remove `system`'s access declaration (`access.yaml`): a proxied system with none (#1391 P1/D12)."""
+    path = settings_of(folder) / "systems" / system / "access.yaml"
+    assert path.is_file(), f"premise: {system} carries no access.yaml to drop"
+    path.unlink()
     return path
 
 

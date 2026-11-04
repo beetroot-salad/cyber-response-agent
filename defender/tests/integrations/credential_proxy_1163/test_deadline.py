@@ -341,10 +341,9 @@ def test_o1_the_proxys_allowance_cannot_exceed_what_the_caller_waits_for(tmp_pat
 # --- #1375 O1: no network leg builds a TLS context ----------------------------------------------
 
 def test_1375_o1_a_request_builds_no_tls_context_on_any_leg(tmp_path, data_root):
-    """#1375 O1: building a TLS context loads a trust store and blocks the event loop every leg
-    runs on, so the proxy builds its contexts once, with the app and its OpenBao adapters, and a
-    request (the first included) builds none, on any of its four legs: the token check and the
-    credential read at OpenBao, the token exchange and the upstream call."""
+    """#1375 O1, amended by #1391 O4 (F2): a declaration without `ca` builds no TLS context on any
+    request, the first included, on any of its four legs: the token check and the credential read
+    at OpenBao, the token exchange and the upstream call (public contexts are built with the app)."""
     import ssl
 
     from defender.tests.support.tenancy._host1214 import counting_calls
@@ -368,14 +367,81 @@ def test_1375_o1_a_request_builds_no_tls_context_on_any_leg(tmp_path, data_root)
         # Counted on every thread the request runs on: the TestClient, not entered as a context
         # manager, starts a fresh event-loop thread per request, inside this block. Every route to a
         # context today (httpx's, httpcore's default, `tls_trust`) passes `create_default_context`.
-        with counting_calls(context=ssl.create_default_context) as calls:
+        # `SSLContext.__new__` is every context however built (a new route past `create_default_context`
+        # included), as the #1391 O4 build counts read it.
+        with counting_calls(context=ssl.create_default_context, built=ssl.SSLContext.__new__) as calls:
             answer = T.ask(client, r.tok(), "identity", "GET", f"{r.up.url}{API}/users/x",
                            None, None, 5)
 
     assert answer["fault"] is None, answer
     assert (len(bao.seen), len(issued), r.up.paths()) == (2, 1, [f"{API}/users/x"]), \
         "control: every leg ran"
-    assert calls["context"] == 0, f"a request built {calls['context']} TLS contexts"
+    assert (calls["context"], calls["built"]) == (0, 0), (
+        f"a request built {calls['context']} default and {calls['built']} TLS contexts")
+
+
+def test_1391_o4_a_second_request_under_the_same_ca_builds_no_tls_context(tmp_path, data_root):
+    """Contexts are cached by `ca` content: once a request has used a declaration's `ca`, the next
+    one builds no TLS context on any route. #1391 O4 (T1: the first one is not pinned)."""
+    import ssl
+
+    from defender.tests.support.shared._tls_server import chain, tls_server
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    pki = chain()
+    with tls_server(tmp_path, lambda *_: (200, b"{}"), served=pki.served()) as server:
+        url = f"{server.url}{API}/users/x"
+        with T.rig(tmp_path / "forge", data_root, lambda _u: H.declaration(
+                server.url + API, ca=pki.root.cert)) as r:
+            first = r.ask(url=url)
+            # SSLContext.__new__ is every route to a context: create_default_context included.
+            with counting_calls(context=ssl.SSLContext.__new__) as calls:
+                second = r.ask(url=url)
+
+    assert (first["fault"], second["fault"]) == (None, None), (first, second)
+    assert len(server.seen) == 2, "control: both requests reached the server"
+    assert calls["context"] == 0, f"the second request built {calls['context']} TLS contexts"
+
+
+def test_1391_o4_a_ca_context_is_built_once_per_distinct_ca_and_never_on_the_event_loop(
+        tmp_path, data_root):
+    """A declaration's `ca` is built into a context at most once per distinct PEM, on a worker
+    thread: a repeat, and a second system with the same PEM, build none; a different PEM builds one.
+    #1391 O4, F2."""
+    import ssl
+
+    from defender.tests.support.shared._tls_server import chain, tls_server
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    pki = chain()
+    other_pem = pki.root.cert + pki.intermediate.cert
+    crm = {("crm", "r")}
+    with tls_server(tmp_path, lambda *_: (200, b"{}"), served=pki.served()) as server:
+        base = server.url + API
+        with T.rig(tmp_path / "forge", data_root, lambda _u: H.declaration(
+                base, ca=pki.root.cert)) as r:
+            r.store.sets[(r.t.tenant_id, "crm")] = T.static_set()
+            r.t.merge(H.access_files("crm", H.declaration(base, ca=pki.root.cert),
+                                     env=H.http_proxy_env("crm")), "a second system, same ca")
+            r.t.publish()
+            built = []
+            for system, grant in (("identity", None), ("identity", None), ("crm", crm)):
+                with counting_calls(context=ssl.SSLContext.__new__) as calls:
+                    answer = r.ask(system=system, grant=grant, url=f"{base}/users/x")
+                assert answer["fault"] is None, answer
+                built.append(calls["context"])
+                on_loop = calls.on_loop["context"]
+                assert not any(on_loop), f"{system}: a context was built on the event loop"
+            r.t.merge({H.ACCESS_FILE.format(system="identity"): H.declaration(
+                base, ca=other_pem)}, "another ca text")
+            r.t.publish()
+            with counting_calls(context=ssl.SSLContext.__new__) as calls:
+                answer = r.ask(url=f"{base}/users/x")
+            assert answer["fault"] is None, answer
+            assert not any(calls.on_loop["context"]), "a context was built on the event loop"
+
+    assert built == [1, 0, 0], "first use builds one; a repeat and a same-PEM system build none"
+    assert calls["context"] == 1, f"a different PEM built {calls['context']} contexts"
 
 
 TENANT_1384 = "11111111-1111-4111-8111-111111111111"

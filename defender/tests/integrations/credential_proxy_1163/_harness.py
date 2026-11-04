@@ -242,9 +242,9 @@ def claims_of(token: str) -> dict[str, Any]:
 
 def declaration(base: str, *, scheme: Mapping[str, Any] | None = None,
                 reads: tuple[tuple[str, str], ...] = (),
-                writes: tuple[tuple[str, str], ...] = ()) -> str:
-    """An access declaration's text: one base (r5 A2); key names are the contract's choice.
-    Data only: nothing here reads or judges one."""
+                writes: tuple[tuple[str, str], ...] = (), ca: str | bytes | None = None) -> str:
+    """An access declaration's text: one base (r5 A2); key names are the contract's choice;
+    `ca` (PEM, #1391 O4) is written inline when given. Data only: nothing here reads or judges one."""
     doc = {
         "access": "http-proxy",
         "base": base,
@@ -252,6 +252,8 @@ def declaration(base: str, *, scheme: Mapping[str, Any] | None = None,
         "reads": [{"method": m, "path": p} for m, p in reads],
         "writes": [{"method": m, "path": p} for m, p in writes],
     }
+    if ca is not None:
+        doc["ca"] = ca.decode() if isinstance(ca, bytes) else ca
     return json.dumps(doc, indent=2) + "\n"  # JSON is YAML; keeps the fixture free of a dumper
 
 
