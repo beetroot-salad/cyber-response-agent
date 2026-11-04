@@ -1539,7 +1539,7 @@ async def test_1345_o4_create_for_a_tenant_without_a_mapping_is_a_conflict_namin
         await store.put_alert_mapping(T2, mapping_value({}))  # the same tenant, once it has saved one
         after_put = await store.create_investigation(T2, theirs.alert_id, "k1", actor="u-1")
 
-    assert (created, after_put) == (True, True)
+    assert (created[1], after_put[1]) == (True, True)  # `create_investigation` answers `(record, created)`
     # The one wording `records` owns, beside `MAPPING_KEYS` (design-implied name; r5.1 O4): the store's refusal is exactly it, and it names the verb
     # and the route (so the equality is not true of an empty constant).
     assert str(refused.value) == ALERT_MAPPING_MISSING

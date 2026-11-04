@@ -500,7 +500,10 @@ def test_1345_o6_the_verb_emits_no_alert_mapping_audit_event(verb, caplog):
     with caplog.at_level(logging.DEBUG):
         rc, _, err = verb.run(SIX_FILE)
 
-    assert (rc, err) == (0, ""), "control: the replace happened"
+    # Control: the replace happened. stderr is not pinned empty: at DEBUG, acceptance's own alembic and asyncio log lines
+    # reach it; a refusal would be a `[tenant.py]` line and a non-zero exit.
+    assert rc == 0, err
+    assert "[tenant.py]" not in err, err
     assert verb.stored() == dict(FIXTURE_ALERT_MAPPING), "control: the replace happened"
     audit = [r for r in caplog.records if hasattr(r, "action") or r.name.rsplit(".", 1)[-1] == "audit"]
     assert [r for r in audit if "alert_mapping" in str(getattr(r, "action", "")) + r.getMessage()] == []

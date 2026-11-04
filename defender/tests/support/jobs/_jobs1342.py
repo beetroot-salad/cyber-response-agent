@@ -76,10 +76,18 @@ def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: 
 
 
 def restate_tenant(dsn: str, tenant_id: str, *, state: str, wiring: bool = True, data_root: Path | None = None) -> None:
-    """Replace `tenant_id`'s record by one in `state` (a case's premise: do it before any alert names the tenant)."""
+    """Replace `tenant_id`'s record by one in `state` (a case's premise: do it before any alert names the tenant).
+    The tenant's alert mapping is not part of the record being replaced: it is read first, taken away with the row it
+    refers to, and saved again as it was (no mapping stays none), so a restate neither fails on the mapping's foreign
+    key nor changes whether the tenant has one. (#1345 repair)"""
+    entries = tuple(FIXTURE_ALERT_MAPPING)
+    saved = execute(dsn, f"SELECT {', '.join(entries)} FROM tenancy.alert_mappings WHERE tenant_id = %s",  # noqa: S608
+                    (tenant_id,))
+    execute(dsn, "DELETE FROM tenancy.alert_mappings WHERE tenant_id = %s", (tenant_id,))
     execute(dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant_id,))
     execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
-    register_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
+    register_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root,
+                    alert_mapping=dict(zip(entries, saved[0], strict=True)) if saved else None)
 
 
 def move_tenant(dsn: str, tenant_id: str, *, state: str) -> None:

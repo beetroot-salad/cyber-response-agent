@@ -490,6 +490,7 @@ def test_m1_a_tenant_acceptance_refusal_is_recorded_as_setup_refused(scene, monk
     if record == "records unreachable":
         monkeypatch.setenv("DEFENDER_DATABASE_DSN", "postgresql://nobody@127.0.0.1:1/none?connect_timeout=2")
     elif record == "no record":
+        execute(scene.dsn, "DELETE FROM tenancy.alert_mappings WHERE tenant_id = %s", (scene.t.tenant_id,))
         execute(scene.dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (scene.t.tenant_id,))
         execute(scene.dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (scene.t.tenant_id,))
     else:
@@ -1862,7 +1863,9 @@ def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_at_setup_naming_th
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == REFUSED
     assert not (scene.runs / run_id).exists(), "the mapping is read before the run folder is made"
-    assert ALERT_MAPPING_MISSING in " ".join(ran.err.split()), ran.message  # on the child's stderr (O4)
+    # The child's refusal text: a `SystemExit` message reaches a real child's stderr; the in-process harness keeps it in
+    # `ran.message` (exit code and stderr together). (O4)
+    assert ALERT_MAPPING_MISSING in " ".join(ran.message.split()), ran.message
 
 
 #: A leftover file the retired parser refuses: a run that read it could not start.
