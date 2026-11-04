@@ -608,7 +608,13 @@ def test_1224_two_worlds_asking_one_call_get_their_own_served_answers(tmp_path):
 def test_1224_fact_names_an_entity_no_real_answer_contains(tmp_path):
     """An invented entity reads the same on every system: each call takes a verified turn; check 4 refuses a contradiction."""
     est = S.estate(tmp_path)
-    ep = _episode(tmp_path, captured=[])
+    # The world's fact names the invented entity: a `changed` entry on it is shown (#1385 A1).
+    doc = S.family_v2(worlds=[
+        S.control_world("a"),
+        S.world_v2("b", facts=[S.fact("f1", "ghost-7 exists on every system", ("ghost-7",))]),
+        S.world_v2("c", role="C", facts=[S.fact("f2", "bob reset carol's password from 10.0.0.9",
+                                                ("bob", "carol", "10.0.0.9"))])])
+    ep = _episode(tmp_path, doc=doc, captured=[])
     ghost = {"entity": "ghost-7"}
     est.answer("idp", "lookup", ghost, {"entity": "ghost-7", "found": False})
     est.answer("edr", "lookup", ghost, {"entity": "ghost-7", "found": False})
