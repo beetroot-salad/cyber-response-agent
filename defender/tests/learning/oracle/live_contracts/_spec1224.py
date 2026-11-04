@@ -12,7 +12,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1284,13 +1284,25 @@ def run_state(run_dir: Path, run_id: str = RUN_ID) -> Any:
     return sym("investigation.run_state", "RunState")(Path(run_dir), run_id)
 
 
+@contextlib.contextmanager
+def run_state_carried(state: Any) -> Iterator[None]:
+    """Hold `state` as the call-scoped run state (`CALL_RUN_STATE`, #1385) the way the query tool
+    does around an investigator's call, so a registry called directly pauses `state`'s clock."""
+    carrier = sym(VERBS, "CALL_RUN_STATE")
+    token = carrier.set(state)
+    try:
+        yield
+    finally:
+        carrier.reset(token)
+
+
 def tap_run_states(registry: Any) -> list[Any]:
     """Every `RunState` the investigator's calls through `registry` carried
-    (`VerbContext.run_state`), in call order.
+    (`CALL_RUN_STATE`, #1385 O8), in call order.
 
     For a driven run that ends by RAISING (an escaped `OracleUnservable`), `drive()` returns
-    nothing, so its `["run_state"]` is out of reach; the verb context is the production carry
-    the state rides on, and this reads it there. Installed on the registry INSTANCE (its public
+    nothing, so its `["run_state"]` is out of reach; the call-scoped value is the production
+    carry the state rides on (the verb context carries none), and this reads it there. Installed on the registry INSTANCE (its public
     `verbs` lookup, through which the query tool and lead-0 resolve every callable), each verb
     wrapped with `functools.wraps` so the query tool still validates the real signature."""
     import functools
@@ -1302,7 +1314,7 @@ def tap_run_states(registry: Any) -> list[Any]:
         def tap(fn: Any) -> Any:
             @functools.wraps(fn)
             def carried(ctx: Any, **params: Any) -> Any:
-                seen.append(getattr(ctx, "run_state", None))
+                seen.append(sym(VERBS, "CALL_RUN_STATE").get())
                 return fn(ctx, **params)
 
             return carried
@@ -1524,6 +1536,7 @@ def questioner_for(doc: dict | None = None) -> FakeAgent:
 
 
 def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
+           after_source: Callable[[Path], None] | None = None,
            spawn: Any = None, argv_extra: Iterable[str] = (),
            oracle: ScriptedModel | None = None, verifier: ScriptedModel | None = None,
            **seams: Any) -> Launch:
@@ -1531,7 +1544,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     (`rc`, `message` — the `sys.exit` text of a refusal, else "" —, `spawn`, `ep`). Every seam
     not named defaults to a recording double; the role preflight is neutralised
     (`no_preflight`) for every scenario not about it."""
-    _base, src = source_run(tmp_path, est, calls=calls)
+    _base, src = source_run(tmp_path, est, calls=calls, after_source=after_source)
     spawn = spawn if spawn is not None else FakeSpawn()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
     seams.setdefault("questioner", questioner_for())
     seams.setdefault("preflight", no_preflight)
