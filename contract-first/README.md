@@ -15,7 +15,7 @@ Then, in a Claude Code session, pick the command that matches your change:
 | Your change | Run |
 |---|---|
 | New or changed behavior | `/contract-first:discuss-issue <issue#>`, then each stage tells you the next |
-| A bug against behavior that's already settled | `/contract-first:proven-fix <issue#>` |
+| A bug against behavior that's already settled, or a small behavior change you can state in a sentence | `/contract-first:proven-fix <issue#>` |
 | A restructure with no behavior change | `/contract-first:refactor <issue#>` |
 | Not sure, or picking up a run | `/contract-first:guide <issue#>` |
 
@@ -25,8 +25,8 @@ The design records intended behavior, scope, data models, flows, architecture an
 **The tests are the executable contract between that design and code.** They are written before
 implementation and reviewed for fidelity. Then the code is written against them, and attackers try
 deliberately wrong variants of that code to find intent violations the tests let through. Findings
-can improve the design, the contract or the code; they are grouped by cause before anything is
-patched. A green suite still does not prove complete intent.
+can improve the design, the contract or the code; a fresh agent sorts them by cause before anything
+is patched. A green suite still does not prove complete intent.
 
 ```
 issue → discuss-issue → write-tests → write-code-from-tests → finalize or /code-review → human merge
@@ -42,15 +42,15 @@ and is too heavy for most fixes. Ask what the change does to what the system pro
 | The change | Lane | What guards it |
 |---|---|---|
 | Adds or changes a promise: new behavior, a changed flow or model, a new surface | `discuss-issue` → `write-tests` → `write-code-from-tests` → `finalize` or `/code-review` | A committed, reviewed and attacked test contract |
-| Code disagrees with intent that is already settled (a bug) | `proven-fix` | A test written red first, plus mutants of the fix's lines |
+| Code disagrees with intent that is already settled (a bug), or a small behavior change: one owner, one surface, no lifecycle | `proven-fix` | The intent recorded in a sentence, every site of the same rule covered, a test written red first, mutants of the fix's lines, a cold review |
 | Structure changes, behavior doesn't (a refactor) | `refactor` | The existing suite, unchanged; a lint when a removed pattern could return |
 
 Soft guardrails, which the lighter lanes also enforce:
 
-- **If you can't state the intended behavior in a sentence, it isn't a bug fix.** Two reasonable readings of the intent is a design question.
+- **If you can't state the intended behavior in a sentence, it isn't a proven-fix.** Two reasonable readings of the intent is a design question.
 - **A refactor that needs an assertion changed is a behavior change.** The refactor skill stops there and asks.
-- **Lighter lanes hand back rather than decide.** When proven-fix or refactor hits a design question, it stops and says so, and you re-route to `discuss-issue`. Neither has anywhere to record a decision.
-- **Size isn't the test.** A one-line change to what a refusal says is a promise change. A thousand-line move with no behavior change is a refactor.
+- **Lighter lanes hand back rather than decide.** When proven-fix or refactor hits a design question, it stops and says so, and you re-route to `discuss-issue`. proven-fix records only the one-sentence intent; neither records a design.
+- **Line count isn't the test.** A one-line change to what a refusal says adds to a model-visible surface, so it takes the full pipeline. A thousand-line move with no behavior change is a refactor.
 
 The last review is either `finalize` or Claude Code's built-in `/code-review`. `finalize` also
 traces escaped bugs back to the stage that missed them and feeds the attack deck; `/code-review`
@@ -68,7 +68,7 @@ with diagrams, see [docs/design.md](docs/design.md).
 | `/contract-first:write-tests` | Sketches the contract, spikes a throwaway implementation to settle the design, authors tests with Sonnet and reviews their fidelity with Opus. Commits the tests before any implementation, with a compact coverage and review record. |
 | `/contract-first:write-code-from-tests` | Implements against the committed contract, then has two or three Sonnet attackers try to keep it green with wrong variants of that code. Reconciles findings, ships, and repairs CI. |
 | `/contract-first:finalize` | Reviews the shipped PR **cold**, settles each finding by its cleaner resolution (dissolve or patch) or files it, traces escaped bugs back to the stage that should have caught them, and re-greens the PR. |
-| `/contract-first:proven-fix` | Fixes a bug against settled intent: a test written red first, the smallest fix, then up to five hand-written mutants of the fix's deciding lines. |
+| `/contract-first:proven-fix` | Fixes a bug against settled intent, or makes a small behavior change stated in a sentence: records the intent, covers every site that decides the same rule, writes the test red first, makes the smallest fix, mutates its deciding lines, and has a fresh agent review the diff cold. |
 | `/contract-first:refactor` | Restructures without behavior change; tests change only mechanically, and a lint is added when a removed pattern could return. |
 | `/contract-first:ship` | Branch, commit, push, open a PR. Used by the stages above; useful on its own. |
 | `/contract-first:guide` | Answers which lane fits a change, where a run stands and what comes next, and why the pipeline works as it does. Runs only when you type it. |
@@ -102,7 +102,7 @@ repo already keeps for any agent:
   (for Python's Pyright, `extraPaths` under `[tool.pyright]`), so `symbol-refs` gets real answers.
 - **The project cache** (`.claude/contract-first-cache.md`) — how the skills' rules apply to this
   project in particular (ownership markers, threat-model examples, lint conventions), one grep-able
-  line per entry. write-tests and write-code-from-tests, and their reference files, end with
+  line per entry. write-tests, write-code-from-tests and proven-fix, and their reference files, end with
   their own cache of applications that hold for any project; the project file holds the rest. Skills grep it for their own name. One skill, `maintain-cache`, is
   its only writer, run in a fresh agent: write-tests, write-code-from-tests and finalize dispatch it at the end of their
   review steps, and it adds what the run had to work out, removes what it contradicted, and

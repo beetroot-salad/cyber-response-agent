@@ -48,19 +48,20 @@ For a named risk, an optional claims check can test what the new docstrings and 
 
 Whether a suite rejects wrong code is shown by running wrong code against it, not by reading it. Once the implementation passes the contract's tests locally, commit it in the worktree and dispatch a few attackers on **references/adversary.md**, each with its own lens: a risk area chosen for where this design is most likely to go wrong. Each gets its own worktree detached at that commit, the project's principles document and project rules, and tries to keep the suite green with deliberately wrong variants of your code, under conditions that can arise where the system is deployed.
 
-This is mandatory even for a small contract. Keep each exploit as a patch: a repaired test proves itself by failing with the exploit applied and passing on the honest code. If it fails on the honest code too, the hole was hiding a real bug, so fix the code. An attacker blocked before running anything, including by a platform refusal, leaves its lens **incomplete**, not clean.
+The first attack is mandatory unless the change stays inside one owner and one surface with no lifecycle, the boundary proven-fix uses. In that case one fresh agent reviews the diff cold instead, and the PR records why. Keep each exploit as a patch: a repaired test proves itself by failing with the exploit applied and passing on the honest code. If it fails on the honest code too, the hole was hiding a real bug, so fix the code. An attacker blocked before running anything, including by a platform refusal, leaves its lens **incomplete**, not clean.
 
-**Don't spawn attackers after a small change.** The first attack on an implementation is mandatory; later small changes are not re-attacked. Recheck them yourself instead: apply each kept exploit patch for the affected family and confirm the changed tests fail with it and pass on the honest code.
+**Don't spawn attackers after a small change.** Later small changes are not re-attacked. Recheck them yourself instead: apply each kept exploit patch for the affected family and confirm the changed tests fail with it and pass on the honest code.
 
 ## 4. Triage, then reconcile
 
-**No test is repaired exploit by exploit.** Repairing each hole closes the instances an attacker sampled and leaves their family open, so the next round finds the next instance. Before any repair, dispatch one fresh triage reader on **references/triage.md**, with the whole attack batch, the design, the principles and the project rules. It drops findings with no deployment path or no plausible honest mistake, groups the rest by the design choice that made them possible, and gives each family one verdict: **dissolve** (a design change makes the family impossible), **accept** (a deliberate trade-off), **close** (one test covers the whole family), or **code bug**. Triage the first batch, unless it is too thin to show families; then repair it and triage the next.
+**No test is repaired exploit by exploit.** Before any repair, triage the attack batch: dispatch one fresh sorter on **../../references/sort.md** with the whole batch, the exploit patches, the contract map, the implementation commit, the design, the principles and the project rules. Each family it returns gets one verdict. If the first batch is too thin to show families, repair it and triage the next.
 
 Route the verdicts:
 
-- **Code bug:** fix it under the settled design.
+- **Code bug,** including an exploit that fails on the honest code too: fix it under the settled design.
+- **Patch:** make the local fix where it belongs, code here or a test through the repair author below.
 - **Close** (and other contract defects: a wrong test, a stale existing test, a gap real code exposes): write-tests' repair author fixes it on the contract-only branch (write-tests §5, **write-tests/references/contract.md**), writing one test per family, never one per exploit. The repaired test must fail against every exploit in the family, rechecked as §3 says: by you with the kept patches when the repair is small, by the affected attacker otherwise. Bring only the reviewed test changes into the implementation branch, run them against your code, and disclose if the repair author saw the implementation. An old clean attack doesn't certify changed tests; the recheck does. Don't ask the human to ratify each assertion repair.
-- **Dissolve, or a design defect or open choice:** use discuss-issue's amendment protocol, framed as a demonstrated bug and the trade-offs of fixing it. Bring every dissolve verdict to the human in one message, grouped by cause, with the accept verdicts beside them. Keep unaffected work; block only what depends on the choice.
+- **Dissolve, or a design defect or open choice:** use discuss-issue's amendment protocol, framed as a demonstrated bug and the trade-offs of fixing it; its independent review reads a dissolve before the human does. Bring every dissolve verdict to the human in one message, grouped by cause, with the accept verdicts beside them. Keep unaffected work; block only what depends on the choice.
 - **Accept:** once the human agrees, record the family in the design's **accepted trade-offs** (discuss-issue's design-doc format) with what closing it would cost. Attackers and finalize then treat it as decided.
 - **Factual question:** probe it. The human doesn't decide what existing code does.
 
@@ -70,7 +71,7 @@ Route the verdicts:
 
 ## 5. Ship and watch CI
 
-Ship when the implementation reconciles with the current design and contract, every attacker lens is complete on the current revision with every family decided and the closed ones rechecked, owed checks are closed, blockers are resolved, and local test, lint and type checks pass at the revision being shipped. Use `ship` for the mechanics. Tests-first ancestry is pinned, so don't rebase or rewrite history. If the branch must be updated, keep the refs and revalidate whatever the update touches.
+Ship when the implementation reconciles with the current design and contract, every attacker lens, or the cold review standing in for them, is complete on the current revision with every family decided and the closed ones rechecked, owed checks are closed, blockers are resolved, and local test, lint and type checks pass at the revision being shipped. Use `ship` for the mechanics. Tests-first ancestry is pinned, so don't rebase or rewrite history. If the branch must be updated, keep the refs and revalidate whatever the update touches.
 
 The PR links the issue, design revision, original and current contract refs, and the coverage record. It declares approved mechanism deviations, links write-tests' review record and this stage's attack ledgers, and lists any contract repairs made here with their rechecks. It also records deferred-verification results and any claims check, and names the next review step. Report the PR number on failure as well as success.
 
@@ -91,8 +92,8 @@ One entry per line: `<skill>[/<file>] §<section> <rule> | ctx: <tags> | <applic
 - write-code-from-tests §2 guard-invariant | ctx: past-runs | `resolve(operand)` stays within `resolve(root)`.
 - write-code-from-tests §3 attackers | ctx: models=claude-5 | two or three, Sonnet at high effort.
 - write-code-from-tests §3 attacker-lenses | ctx: past-runs | lifecycle and recovery, input boundaries, compatibility, cross-surface effects.
-- write-code-from-tests §3 running-beats-reading | ctx: past-runs | suites a reading review had cleared still passed 5–19 wrong implementations.
-- write-code-from-tests §4 triage-reader | ctx: models=claude-5 | Opus at high effort.
-- write-code-from-tests §4 too-thin-for-families | ctx: past-runs | one or two findings.
+- write-code-from-tests §3 running-beats-reading | ctx: past-runs | suites a reading review had cleared still passed 5–19 wrong implementations; all three sources were large changes (24, 91 and 231 files).
+- write-code-from-tests §3 small-contract | ctx: past-runs | on small changes (2 and 8 files) attacks found 0 and 1 code bugs and didn't converge; the boundary's hand-back list is proven-fix's Cache.
+- write-code-from-tests §3 cold-review-instead | ctx: harness=claude-code | a fresh agent running `/code-review high` on the diff.
 - write-code-from-tests §5 watch-ci | ctx: github | `gh pr checks --watch`; on red, `gh run view <run-id> --log-failed`.
 - write-code-from-tests §5 fix-rounds-without-progress | ctx: past-runs | two CI fix rounds without progress.

@@ -55,7 +55,7 @@ The review checks:
 
 A finding names **evidence or a concrete scenario → affected promise/property → underlying cause → recommended resolution and trade-offs**. Separate demonstrated defects, unresolved choices, and speculative concerns. Edge cases are useful when they expose a consequential choice or challenge a promised property; reject unbounded hypothetical completeness as a review goal.
 
-Reconcile findings before showing them to the human. Confirm defects and distinguish deliberate exclusions. Group findings by cause; ask which model, ownership rule, flow, or principle would dissolve the group. Compare that change with local patches, including migration, operational cost, and new complexity. A local bug can deserve a local fix; dissolution is not an excuse to expand scope.
+**Sort before you revise.** After each independent review, dispatch a fresh sorter on **../../references/sort.md** with the review's findings, the candidate design and decisions, the grounding evidence and the principles, but not your reasoning. You wrote the design, so you don't sort its review. Apply its patches, probe its factual questions, and treat a dissolve as a revision: the next independent review reads it, with the decisions it would open, before it reaches the human.
 
 Apply corrections already determined by the agreed design. Bring unresolved consequential choices to §4. Re-probe changed factual assumptions and review the consequences of material revisions, using a fresh reader when independence matters. Recheck affected portions rather than restarting the whole analysis. Do not discard unaffected grounding, but refresh a census when new mechanisms, callers, or base changes invalidate its scope.
 

@@ -41,7 +41,7 @@ Settle the design before the tests that enforce it are written in depth.
 
 **Design check** — one fresh reader reads the design, sketch, spike diff and log, without the author's or implementer's reasoning, and asks: is this the right behavior, and where is the design unsettled, contradictory, or a poor fit for the code it lands in? A spike finding counts only when it names the design choice it conflicts with.
 
-Resolve what it finds (§5) before thorough authoring. Mechanism changes it accepts are written into the design so the implementer does not rediscover them. Sketch cases carry forward where their design survived.
+Sort and resolve what it finds (§5) before thorough authoring. Mechanism changes it accepts are written into the design so the implementer does not rediscover them. Sketch cases carry forward where their design survived.
 
 Skip sketch and spike for a small change whose design leaves nothing consequential open; skip only the spike when the change touches no existing owner, flow or shared mechanism. Record why. A skip never shrinks §4.
 
@@ -63,11 +63,11 @@ Commit the candidate suite as a **candidate ref**. One fresh whole-contract revi
 
 ## 5. Reconcile, repair or dissolve
 
-Group findings by cause before acting; one cause usually explains several. Then route by what kind of problem it is:
+Before acting on a design check or review, dispatch a fresh sorter on **../../references/sort.md** with its findings, the design and decisions, the principles and project rules, but not the author's reasoning; the orchestrator integrated the work, so it doesn't sort. Then route each group by its verdict and kind:
 
 - **A factual question:** probe it. The human does not choose what the code does.
 - **A contract defect** (tests omit, misstate or fail to enforce settled behavior): a fresh author repairs it, preserving intent. Recheck with fresh workers: the fidelity reviewer reads changed assertions. On a repair from the code stage, the brief names a family and its triage verdict (write-code-from-tests §4): write the one test that covers the family, not one per exploit. It must fail against every exploit in the family. A small repair is rechecked by applying the kept exploit patches, without spawning an attacker; a larger one goes back to the affected attacker (write-code-from-tests §3). These repairs follow the code stage's stopping rule, not §6's round limit.
-- **A design defect or open choice:** propose the change that dissolves the whole family, through discuss-issue's amendment protocol. A proposal is not adopted until the human rules on it.
+- **A dissolve, or a design defect or open choice:** take it through discuss-issue's amendment protocol, whose independent review reads the dissolve and the decisions it would open before the human does. A proposal is not adopted until the human rules on it.
 - **An implementation defect, on a repair run:** return it to the code stage; don't bend the design around it.
 
 **Stale existing tests (only when the code stage returns them).** The fold reaches existing tests near the new cases. A test elsewhere that pins behavior the design replaced shows up only when real code makes it fail, and letting it fail is the reliable census: reading cannot prove which tests encoded the old behavior. The code stage returns these reds in one batch, each with its quoted failure. A fresh author decides each from the design and the test, not from the implementation:
@@ -79,7 +79,7 @@ Group findings by cause before acting; one cause usually explains several. Then 
 
 Updates and retirements are contract repairs: they get map rows, land on the contract-only branch, and the fidelity reviewer checks that each traces to a design change and drops nothing that survives. The batch is an expected census, not a defect finding, so it doesn't count toward §6's repair rounds; a fix that the stale-test review itself sends back does.
 
-Test mechanics and local technical choices stay with agents when settled intent decides them. Bring the human only consequential choices, consolidated: **"This is a bug; here are the trade-offs of fixing it,"** with a recommendation and real alternatives. Never a question per edge case, never "do you want this correct", never reopening approved intent. Record rulings with their scope. After an amendment, repair what it touched and invalidate the reviews whose inputs changed; keep the rest.
+Test mechanics and local technical choices stay with agents when settled intent decides them. Bring the human only consequential choices, and only once the sorter has grouped them by cause: **"This is a bug; here are the trade-offs of fixing it,"** with a recommendation and real alternatives. Never a question per edge case, never "do you want this correct", never reopening approved intent. Record rulings with their scope. After an amendment, repair what it touched and invalidate the reviews whose inputs changed; keep the rest.
 
 ## 6. Readiness
 
