@@ -25,13 +25,13 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from defender import _log
 from defender.box import Reaped, container_name
 from defender.execution import kill_group
 from defender.records import job_facts, job_lane
-from defender.records.formats import DataRoot, api_knowledge, digest_of, knowledge_status
+from defender.records.formats import DataRoot, digest_of
 from defender.tenancy import data_root_for_child, data_root_from_path
 
 from ._containers import Containers, DockerContainers
@@ -84,7 +84,6 @@ class _Ending:
 # The ending a row's task decided, with its cost and knowledge. Where a task may write nothing
 # (D3), its result is `_Decided | None`.
 _Decided = tuple[_Ending, float | None, dict | None]
-_T = TypeVar("_T")
 
 
 def _exit_words(returncode: int) -> str:
@@ -115,33 +114,6 @@ def _ending_from(end: job_lane.JobEnd | None, returncode: int,
     else:
         why = "the scrub did not verify the run folder after the box stopped"
     return _Ending(_FAILED, failure_reason=_NO_REPORT, failure_message=why)
-
-
-def _knowledge_unreadable() -> dict[str, str | None] | None:
-    """A run's knowledge when its record could not be read (OD22'): stale, operator kind, no commit."""
-    return api_knowledge(knowledge_status(None, stamp_names_source=True))
-
-
-def _cost_or_unknown(lane: job_lane.JobLane, inv: str) -> float | None:
-    """The run's cost, or `None` (unknown, logged) when its records say it cannot be read."""
-    try:
-        return lane.cost(inv)
-    except job_lane.CostUnreadable as unreadable:
-        _logger.warning("investigation %s: its cost is unknown: %s", inv, unreadable)
-        return None
-
-
-def _read_after_ending(inv: str, ending: _Ending, what: str, read: Callable[[], _T],
-                       unknown: Callable[[], _T]) -> _T:
-    """`read()` once the ending is decided (#1396): a fault nobody planned for leaves the value
-    `unknown()`, logged as an error, and never reaches `_run_row`'s catch-all, which would record
-    `worker_error` over the ending."""
-    try:
-        return read()
-    except Exception:  # noqa: BLE001 — the decided ending stands (#1396)
-        _logger.error("investigation %s: reading its %s failed; its %s ending stands and its %s is "
-                      "unknown", inv, what, ending.stage, what, exc_info=True)
-        return unknown()
 
 
 async def _spawn_outcome(spawn: asyncio.Future[asyncio.subprocess.Process]) -> asyncio.subprocess.Process | None:
@@ -479,21 +451,31 @@ class Worker:
             return (_Ending(_FAILED, failure_reason=_WORKER_ERROR,
                             failure_message="the tenant's runs container could not be read after the run"),
                     None, None)
-        ending: _Ending | None = None
-        cost: float | None = None
-        knowledge: dict | None = None
         try:
-            with lane:
-                ending = _ending_from(lane.read_job_end(inv), returncode, lambda: lane.report_disposition(inv))
-                # #1396: the ending is decided; from here no fault turns it into `worker_error`
-                cost = _read_after_ending(inv, ending, "cost", lambda: _cost_or_unknown(lane, inv), lambda: None)
-                knowledge = _read_after_ending(inv, ending, "knowledge", lambda: lane.knowledge(inv),
-                                               _knowledge_unreadable)
-        except Exception:
-            if ending is None:
-                raise
-            _logger.error("investigation %s: closing its records failed; its %s ending stands",
-                          inv, ending.stage, exc_info=True)
+            ending = _ending_from(lane.read_job_end(inv), returncode, lambda: lane.report_disposition(inv))
+            # #1396: the ending is decided; from here no fault turns it into `worker_error`
+            cost: float | None
+            try:
+                cost = lane.cost(inv)
+            except job_lane.CostUnreadable as unreadable:
+                _logger.warning("investigation %s: its cost is unknown: %s", inv, unreadable)
+                cost = None
+            except Exception:  # noqa: BLE001 — the decided ending stands (#1396)
+                _logger.error("investigation %s: reading its cost failed; its %s ending stands and its "
+                              "cost is unknown", inv, ending.stage, exc_info=True)
+                cost = None
+            knowledge: dict | None
+            try:
+                knowledge = lane.knowledge(inv)
+            except Exception:  # noqa: BLE001 — the decided ending stands (#1396)
+                _logger.error("investigation %s: reading its knowledge failed; its %s ending stands and "
+                              "its knowledge is unreadable", inv, ending.stage, exc_info=True)
+                knowledge = job_lane.JobLane.unreadable_knowledge()
+        finally:
+            try:
+                lane.close()
+            except Exception:  # noqa: BLE001 — a fault before the ending still raises; one after keeps it (#1396)
+                _logger.error("investigation %s: closing its records failed", inv, exc_info=True)
         return ending, cost, knowledge
 
     async def _finish(self, record: Any, ending: _Ending, *, cost: float | None,

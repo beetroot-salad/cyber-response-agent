@@ -1415,7 +1415,7 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
         elif seam == "store-read":
             used = _StoreWhoseAlertReadFails(store, (await store.get_investigation(T1, bad)).alert_id, fault)
         else:
-            method = {"job-end-read": "read_job_end", "lane-cost": "cost", "lane-knowledge": "knowledge"}[seam]
+            method = "read_job_end"
             original = getattr(job_lane.JobLane, method)
 
             def failing(self, run_id):
@@ -1477,7 +1477,8 @@ async def test_1396_an_unexpected_fault_after_the_ending_is_decided_keeps_that_e
     assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("completed", "inconclusive", None)
     assert stored["cost_usd"] == (None if seam == "lane-cost" else 0)
     assert stored["knowledge"] == (STALE_OPERATOR if seam == "lane-knowledge" else _knowledge("current", COMMIT))
-    assert _warned(caplog, bad), "the fault was not logged"
+    assert any(bad in r.getMessage() and r.levelno >= logging.ERROR for r in caplog.records
+               if r.name.startswith(WORKER_LOGGER)), "a fault nobody planned for was not logged as an error"
     assert row(world["dsn"], good)["stage"] == "completed", "one row's fault stopped the others"
 
 
