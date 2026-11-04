@@ -3241,17 +3241,25 @@ async def test_b5_b2_a_transient_fault_is_waited_out_and_the_worker_ends_as_it_w
                              "the cost to move past the frozen figure while the child runs", timeout=5)
                 assert row(dsn, inv)["stage"] == "running"
             elif schedule == "the end write fails eleven times":
-                store.finish_fails = 11
+                store.finish_fails = 11  # more than any bounded retry the design replaced or a cap of 5 or 10 would make
             else:
                 store.renew_down = True
+                await _until(lambda: store.renews_failed >= 2, "two renewals to fail while the child runs", timeout=10)
             for step in (0, 1):
                 (marks / f"go-{step}").touch()
-            await _until(lambda: row(dsn, inv)["stage"] == "completed", "the row to end as the reader decided", timeout=30)
+            await _until(lambda: row(dsn, inv)["stage"] == "completed", "the row to end as the reader decided", timeout=45)
             store.renew_down = False  # the faults are over
             assert store.finish_fails == 0
+            later_marks = [marks / f"go-{step}" for step in (0, 1)]
+            renewed_before = store.renews_ok
+            for mark in later_marks:  # the next row waits for us, so a renewal has a row to cover
+                mark.unlink()
             later = await _queued(inner, ticket="T-2", key="k2")
-            await _until(lambda: row(dsn, later)["stage"] == "completed", "the row queued after the faults to be claimed and run",
-                         timeout=20)
+            await _until(lambda: child.seen(later), "the row queued after the faults to be claimed", timeout=20)
+            await _until(lambda: store.renews_ok > renewed_before, "a renewal to succeed once the fault is over", timeout=10)
+            for mark in later_marks:
+                mark.touch()
+            await _until(lambda: row(dsn, later)["stage"] == "completed", "the row queued after the faults to run", timeout=20)
         finally:
             for step in (0, 1):
                 (marks / f"go-{step}").touch()
@@ -3729,7 +3737,7 @@ class _Landing:
 @pytest.mark.parametrize("event", ["stop", "fence"])
 async def test_b3_b11_a_stop_or_fence_between_the_claim_and_the_childs_existence_hands_back_or_ends_the_row_and_leaves_no_child(
         world, monkeypatch, event, moment):
-    """A stop lands: the row is handed back (cost 0, no knowledge). A fence lands: final accounting, cost 0, no knowledge. Landed before the spawn: it never happens; else the child is gone within a renewal tick. (B3, B11, r4 item 4, r5 item 5)"""
+    """A stop lands: the row is handed back (cost 0, no knowledge). A fence lands: final accounting, cost 0, no knowledge. Landed before the spawn: it never happens; else the spawned child is gone within 1 s of the spawn returning. (B3, B11, r4 item 4, r5 item 5)"""
     release = world["tmp"] / "release"
     child = _child(world, files=_committed(), wait_for=release)
     dsn = world["dsn"]
@@ -3824,7 +3832,7 @@ async def test_b11_a_stopped_childs_row_is_finished_when_the_reader_says_complet
 
 
 async def test_b11_a_stop_is_bounded_by_one_stop_grace_however_many_children_ignore_sigterm(world):
-    """Three children ignore SIGTERM: the stop returns in under two stop graces (not three), every row handed back. (B11, D3)"""
+    """Three children ignore SIGTERM: the stop returns in about one stop grace (under two, not three), every child gone, every row handed back. (R3 the stop timeout rests on one grace; B11)"""
     grace = 1.5
     release = world["tmp"] / "release"
     child = _child(world, files=_committed(), wait_for=release, term="ignore")
@@ -3845,4 +3853,5 @@ async def test_b11_a_stop_is_bounded_by_one_stop_grace_however_many_children_ign
             await _stop_all(serving)
     assert took < 2 * grace, f"the stop took {took:.1f} s for children each given {grace} s"
     for i in invs:
+        assert _gone(child.seen(i)["pid"]), "a stop handed a row back but left its child running"
         _handed_back(dsn, i)

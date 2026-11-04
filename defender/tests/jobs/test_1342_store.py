@@ -2070,6 +2070,7 @@ async def test_b9_a_cancel_never_names_a_live_higher_attempt_that_differs_in_ten
 
     chain = _plant_alert(dsn, ticket="E")
     ended = _plant_investigation(dsn, tenant=T1, alert_id=chain, key="k", attempt=1, stage="failed")
+    # (the "tenant" variant necessarily differs in alert too: a tenant's alert belongs to it)
     # a tenant's alert belongs to it, so the other tenant's row necessarily stands on an alert of its own
     live = {"tenant": lambda: _plant_running(dsn, alert_id=_plant_alert(dsn, tenant=T2, ticket="X"), key="k", attempt=2,
                                              lapsed=False, tenant=T2),
@@ -2117,7 +2118,7 @@ async def test_b1_b11_every_store_write_dates_its_lease_by_the_database_clock_an
         assert 25 < lease_left(dsn, claimed) < 31, "a claim's lease is not 30 s from the database's now()"
         assert row(dsn, claimed)["started_at"] == instant
 
-        assert await store.renew({renewed}) == [renewed]
+        assert set(await store.renew({renewed})) == {renewed}
         assert 25 < lease_left(dsn, renewed) < 31, "a renewal's lease is not 30 s from the database's now()"
 
         assert await store.hand_back(T1, handed, cost_usd=1.0, knowledge=None) is not None
@@ -2125,7 +2126,8 @@ async def test_b1_b11_every_store_write_dates_its_lease_by_the_database_clock_an
         assert accounting_written(dsn, handed) == instant
         assert row(dsn, handed)["finished_at"] is None
 
-        assert await store.take_over(held={handed}) == [lapsed]  # the handed-back row's lease is lapsed too
+        await store.take_over(held={handed})  # the handed-back row's lease is lapsed too
+        assert row(dsn, lapsed)["stage"] == "failed"
         assert row(dsn, lapsed)["finished_at"] == instant
         [retry] = _retries_of(dsn, lapsed)
         assert _created_at(dsn, retry) == instant, "a retry's created_at is not the clock"

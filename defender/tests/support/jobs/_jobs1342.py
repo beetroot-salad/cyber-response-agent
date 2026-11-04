@@ -421,7 +421,8 @@ class FaultyContainers(StandInContainers):
 class FaultableStore:
     """The real store, except for faults the test switches on: `renew_down` makes every renewal raise
     a connection error, `finish_fails` makes that many `finish` calls raise one (counted in
-    `finish_tries`). Notes the held ids each renewal that succeeded left out (`omitted`, and
+    `finish_tries`). Counts renewals that raised (`renews_failed`) and that answered (`renews_ok`).
+    Notes the held ids each renewal that succeeded left out (`omitted`, and
     `omitted_event` for a thread that waits for the worker to see a fence)."""
 
     def __init__(self, store: Any) -> None:
@@ -431,6 +432,8 @@ class FaultableStore:
         self.renew_down = False
         self.finish_fails = 0
         self.finish_tries = 0
+        self.renews_failed = 0
+        self.renews_ok = 0
         self.omitted: set[str] = set()
         self.omitted_event = threading.Event()
 
@@ -439,8 +442,10 @@ class FaultableStore:
 
     async def renew(self, held: Any, **kw: Any) -> Any:
         if self.renew_down:
+            self.renews_failed += 1
             raise ConnectionError("the database is gone")
         covered = await self._store.renew(held, **kw)
+        self.renews_ok += 1
         left_out = set(held) - set(covered)
         if left_out:
             self.omitted |= left_out
