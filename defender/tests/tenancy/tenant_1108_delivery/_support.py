@@ -27,6 +27,7 @@ import httpx
 import pytest
 
 from defender.tests.support.tenancy import _tenants1106 as tenants
+from defender.tests.support.shared.filesystem._handoff import write_whole
 
 ORIGIN = "http://forge.invalid:3000/tenants/blue.git"
 from ._identity import TOKEN, identity as fixture_identity
@@ -140,9 +141,8 @@ def forge_pulls(remote):
 
 
 def _save_pulls(remote, rows):
-    path = Path(remote) / _PULLS
-    path.with_suffix(".tmp").write_text(json.dumps(rows), encoding="utf-8")
-    os.replace(path.with_suffix(".tmp"), path)
+    # The test and an owner process it launched may save at once: each stages its own part.
+    write_whole(Path(remote) / _PULLS, json.dumps(rows))
 
 
 def _remote_tip(remote, branch):
