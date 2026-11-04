@@ -11,8 +11,7 @@ import logging
 from collections.abc import Mapping
 from pathlib import Path
 
-from defender.kit.faults import (
-    AdapterFault, ConfigFault, ProxyUnreachableFault, ProxyUnwiredFault, TransportFault, UpstreamFault)
+from defender.kit.faults import AdapterFault, ConfigFault, TransportFault, UpstreamFault
 from defender.kit.settings import config_pointer
 from defender.records import Run, RunPaths, formats, run_end
 from defender.systems import case_system
@@ -148,26 +147,23 @@ def _leg_refused(run: Run, key: str, reason: str) -> None:
 
 
 def _fault_reason(fault: AdapterFault, *, tenant: RunTenant, system: str) -> str:
-    """The receipt reason for a fault the case system's comment action raised (O5): chosen by the
-    fault's class and whether the proxy itself named it (`from_proxy`, #1398), never by the
-    route alone, and from the fault's data rather than its text. The fault's own
-    detail follows, redacted."""
+    """The receipt reason for a fault the case system's comment action raised (O5): its subject
+    is the credential proxy when the fault is the proxy's own (`proxy_own`, #1404), else the
+    store or the settings, chosen by class; from the fault's data, never the route or its text.
+    The fault's own detail follows, redacted."""
     detail = redact_settings_path(fault.detail, tenant.settings)
+    if fault.proxy_own:
+        # It failed (perhaps after the store took the comment: no claim of non-delivery) or it
+        # refused the call (#1398).
+        if isinstance(fault, TransportFault):
+            return f"the credential proxy failed: {detail}"
+        return f"the credential proxy refused the call: {detail}"
     if isinstance(fault, UpstreamFault):
         status = fault.status
         shown = "" if status is None else f" (HTTP {status}{', not found' if status == 404 else ''})"
         return f"the store refused the comment{shown}: {detail}"
-    if isinstance(fault, ProxyUnwiredFault):
-        return ("the run was not given the credential proxy's address or token; check the host's "
-                f"proxy settings: {detail}")
-    if isinstance(fault, ProxyUnreachableFault):
-        return f"the credential proxy could not be reached; check that it is running: {detail}"
     if isinstance(fault, TransportFault):
         return f"the store could not be reached: {detail}"
-    if fault.from_proxy:
-        # A configuration or confinement fault the proxy answered with is its own refusal. One the
-        # adapter raised itself on the same route is not: it falls through to its own wording.
-        return f"the credential proxy refused the call: {detail}"
     if isinstance(fault, ConfigFault):
         return f"{config_pointer(system)}: {detail}"
     return f"the write was refused before it was sent: {detail}"

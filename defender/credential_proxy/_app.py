@@ -155,8 +155,11 @@ class _Trail:
         return {"time": _clock.now_iso(), **record, "fault": fault}
 
 
-def _refused_answer(fault: str, detail: str) -> dict[str, Any]:
-    return {"status": None, "headers": {}, "body": "", "fault": fault, "detail": detail}
+def _refused_answer(fault: str, detail: str, *, system_side: bool = False) -> dict[str, Any]:
+    """A refusal with no system status. `system_side` marks the one kind that is the target
+    system's (its call failed, #1404); unmarked, the refusal is the proxy's own."""
+    return {"status": None, "headers": {}, "body": "", "fault": fault, "detail": detail,
+            "system_side": system_side}
 
 
 class _Proxy:
@@ -181,7 +184,8 @@ class _Proxy:
             answer = self._proxied(authorization, raw, trail,
                                    time.monotonic() if arrived is None else arrived)
         except Refused as refused:
-            answer = _refused_answer(refused.fault, refused.detail)
+            answer = _refused_answer(refused.fault, refused.detail,
+                                     system_side=refused.system_side)
         except ConfigFault as fault:
             answer = _refused_answer(CONFIG, fault.detail)
         except TransportFault as fault:
@@ -294,7 +298,9 @@ class _Proxy:
                 on_status=sent, headers=headers, content=content))
         except httpx.TransportError as e:
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
-                                     f"({type(e).__name__})") from None
+                                     f"({type(e).__name__})", system_side=True) from None
+        except Refused as cut:  # the deadline cut the system's call: that call's failure (#1404)
+            raise Refused(cut.fault, cut.detail, system_side=True) from None
         status, withheld = reply.status, reply.withheld
         fault = _fault_of(status)
         if fault is None:

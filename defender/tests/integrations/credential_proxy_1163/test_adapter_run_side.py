@@ -12,7 +12,7 @@ import pytest
 
 from defender.integrations import _stub_transport as transport
 from defender.integrations import identity_adapter
-from defender.kit.faults import AdapterFault, ConfigFault, ProxyUnreachableFault, TransportFault
+from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
@@ -57,7 +57,7 @@ def test_x1_a_refused_query_shows_neither_the_token_nor_its_signature(
             direct = httpx.post(url + PROXY_PATH, headers={"Authorization": f"Bearer {tok}"},
                                 json=body).text if reachable else ""
 
-    assert type(raised.value) is (ConfigFault if reachable else ProxyUnreachableFault), raised.value
+    assert type(raised.value) is (ConfigFault if reachable else TransportFault), raised.value
     assert str(raised.value).strip(), "positive control: the fault has a text"
     if reachable:
         assert tap.tokens == [tok, tok], "positive control: the proxy was sent the token"
@@ -209,3 +209,34 @@ def test_the_run_reaches_the_proxy_directly_never_through_a_web_proxy_from_the_e
         _proxy_client._client.cache_clear()  # noqa: SLF001
     assert got, "the request reached the proxy address itself"
     assert json.loads(got[0])["system"] == "identity"
+
+
+def test_x7_a_fault_is_the_proxys_own_only_when_the_system_neither_answered_nor_was_seen_failing(
+        tmp_path, data_root):
+    """#1404 P1, on the read path: the system answering 401 through a healthy proxy is the
+    system's (`proxy_own` false); the proxy refusing an expired token, with no system status, is
+    the proxy's; a token source that cannot mint, before the proxy is asked, is the proxy's too."""
+    def cannot_mint() -> str:
+        raise TransportFault("the token source could not mint a request token")
+
+    with H.upstream() as up, Q._published(tmp_path, data_root, up) as t:
+        up.replies[f"{Q.API}/users/dev.dana"] = (401, {}, b'{"detail": "who are you"}')
+        live = T.token(t.tenant_id, GRANT)
+        expired = T.token(t.tenant_id, GRANT, expires_in=EXPIRED)
+        seen = {}
+        with A.proxy_for(t, Q._store(t)) as (url, tap):
+            for name, kw in {"system-401": {"token": live},
+                             "proxy-refuses": {"token": expired},
+                             "no-token-minted": {"token": None, "token_source": cannot_mint}}.items():
+                token = kw.pop("token")
+                ctx = A.ctx_for(tmp_path / name, T.run_record(t), url, token, **kw)
+                with pytest.raises(AdapterFault) as raised:
+                    identity_adapter.get_user(ctx, user="dev.dana")
+                seen[name] = raised.value
+    assert [s.path.split("?")[0] for s in up.seen] == [f"{Q.API}/users/dev.dana"], (
+        "positive control: only the live token's call reached the system")
+    assert tap.tokens == [live, expired], "the minting failure still asked the proxy"
+    assert seen["system-401"].proxy_own is False, seen["system-401"]
+    assert seen["proxy-refuses"].proxy_own is True, seen["proxy-refuses"]
+    assert seen["no-token-minted"].proxy_own is True, seen["no-token-minted"]
+    assert isinstance(seen["no-token-minted"], TransportFault), seen["no-token-minted"]
