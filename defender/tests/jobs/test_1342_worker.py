@@ -1394,7 +1394,7 @@ class _NobodyPlannedThis(Exception):  # noqa: N818 — derives directly from Exc
 
 @pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError, AttributeError,
                                         IndexError, _NobodyPlannedThis])
-@pytest.mark.parametrize("seam", ["child-argv", "store-read", "job-end-read", "lane-cost", "lane-knowledge"])
+@pytest.mark.parametrize("seam", ["child-argv", "store-read", "job-end-read"])
 async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and_the_worker_goes_on(
         world, monkeypatch, seam, fault_type):
     """A fault of any kind nobody planned for (not an OS error) in one row's task: that row `failed`/`worker_error`, another row still completes. (O6, design flows)"""
@@ -1429,6 +1429,55 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
     assert stored["failure_message"]
     assert stored["finished_at"] == NOW
+    assert row(world["dsn"], good)["stage"] == "completed", "one row's fault stopped the others"
+
+
+@pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError, AttributeError,
+                                        IndexError, _NobodyPlannedThis])
+@pytest.mark.parametrize("seam", ["lane-cost", "lane-knowledge", "lane-close"])
+async def test_1396_an_unexpected_fault_after_the_ending_is_decided_keeps_that_ending(
+        world, monkeypatch, caplog, seam, fault_type):
+    """A fault nobody planned for while reading cost or knowledge, or closing the lane, once the
+    ending is decided: the row keeps its decided stage and disposition, the value that could not be
+    read is unknown (cost null; knowledge the unreadable shape, never "no run"), the fault is
+    logged, and another row still completes. (#1396)"""
+    from defender.records import job_lane
+
+    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
+    fault = fault_type("a seam fell over")
+    child = _child(world, files=_committed())
+    async with job_store(world["dsn"]) as store:
+        bad = await _queued(store, ticket="T-1", key="k1")
+        good = await _queued(store, ticket="T-2", key="k2")
+        if seam == "lane-close":
+            knowledge, close = job_lane.JobLane.knowledge, job_lane.JobLane.close
+
+            def noting(self, run_id):
+                self._last_read = run_id
+                return knowledge(self, run_id)
+
+            def failing_close(self):
+                close(self)
+                if getattr(self, "_last_read", None) == bad:
+                    raise fault
+            monkeypatch.setattr(job_lane.JobLane, "knowledge", noting)  # lint-monkeypatch: ok — the lane is built inside the Worker; this notes which run the lane last read
+            monkeypatch.setattr(job_lane.JobLane, "close", failing_close)  # lint-monkeypatch: ok — fails closing only the lane that read the bad run's ending
+        else:
+            method = {"lane-cost": "cost", "lane-knowledge": "knowledge"}[seam]
+            original = getattr(job_lane.JobLane, method)
+
+            def failing(self, run_id):
+                if run_id == bad:
+                    raise fault
+                return original(self, run_id)
+            monkeypatch.setattr(job_lane.JobLane, method, failing)  # lint-monkeypatch: ok — the lane is built inside the Worker and no seam injects a lane stand-in; this fails exactly one run's read
+        await _worker(world, store, child).drain()
+
+    stored = row(world["dsn"], bad)
+    assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("completed", "inconclusive", None)
+    assert stored["cost_usd"] == (None if seam == "lane-cost" else 0)
+    assert stored["knowledge"] == (STALE_OPERATOR if seam == "lane-knowledge" else _knowledge("current", COMMIT))
+    assert _warned(caplog, bad), "the fault was not logged"
     assert row(world["dsn"], good)["stage"] == "completed", "one row's fault stopped the others"
 
 

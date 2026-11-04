@@ -31,7 +31,7 @@ from defender import _log
 from defender.box import Reaped, container_name
 from defender.execution import kill_group
 from defender.records import job_facts, job_lane
-from defender.records.formats import DataRoot, digest_of
+from defender.records.formats import DataRoot, api_knowledge, digest_of, knowledge_status
 from defender.tenancy import data_root_for_child, data_root_from_path
 
 from ._containers import Containers, DockerContainers
@@ -114,6 +114,23 @@ def _ending_from(end: job_lane.JobEnd | None, returncode: int,
     else:
         why = "the scrub did not verify the run folder after the box stopped"
     return _Ending(_FAILED, failure_reason=_NO_REPORT, failure_message=why)
+
+
+#: A run's knowledge when its record could not be read (OD22'): stale, operator kind, no commit.
+_KNOWLEDGE_UNREADABLE = api_knowledge(knowledge_status(None, stamp_names_source=True))
+
+
+def _read_after_ending(inv: str, ending: _Ending, what: str, read: Callable[[], Any], unknown: Any) -> Any:
+    """`read()` once the ending is decided (#1396): any fault leaves the value `unknown`, logged,
+    and never reaches `_run_row`'s catch-all, which would record `worker_error` over the ending."""
+    try:
+        return read()
+    except job_lane.CostUnreadable as unreadable:
+        _logger.warning("investigation %s: its %s is unknown: %s", inv, what, unreadable)
+    except Exception:  # noqa: BLE001 — the decided ending stands (#1396)
+        _logger.warning("investigation %s: reading its %s failed; its %s ending stands and its %s is "
+                        "unknown", inv, what, ending.stage, what, exc_info=True)
+    return unknown
 
 
 async def _spawn_outcome(spawn: asyncio.Future[asyncio.subprocess.Process]) -> asyncio.subprocess.Process | None:
@@ -451,15 +468,21 @@ class Worker:
             return (_Ending(_FAILED, failure_reason=_WORKER_ERROR,
                             failure_message="the tenant's runs container could not be read after the run"),
                     None, None)
-        with lane:
+        try:
             ending = _ending_from(lane.read_job_end(inv), returncode, lambda: lane.report_disposition(inv))
-            cost: float | None
-            try:
-                cost = lane.cost(inv)
-            except job_lane.CostUnreadable as unreadable:
-                _logger.warning("investigation %s: its cost is unknown: %s", inv, unreadable)
-                cost = None
-            return ending, cost, lane.knowledge(inv)
+            # #1396: the ending is decided; from here no fault turns it into `worker_error`
+            cost = _read_after_ending(inv, ending, "cost", lambda: lane.cost(inv), None)
+            knowledge = _read_after_ending(inv, ending, "knowledge", lambda: lane.knowledge(inv),
+                                           _KNOWLEDGE_UNREADABLE)
+        except BaseException:
+            lane.close()
+            raise
+        try:
+            lane.close()
+        except Exception:  # noqa: BLE001 — the decided ending stands (#1396)
+            _logger.warning("investigation %s: closing its records failed; its %s ending stands",
+                            inv, ending.stage, exc_info=True)
+        return ending, cost, knowledge
 
     async def _finish(self, record: Any, ending: _Ending, *, cost: float | None,
                       knowledge: dict | None) -> None:
