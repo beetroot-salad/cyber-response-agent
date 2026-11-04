@@ -373,7 +373,8 @@ def fd_identity(fd: int) -> list[int]:
 
 
 def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], *,
-                containers: Any = None, slots: int = 3, stop_grace: float | None = None) -> Any:
+                containers: Any = None, slots: int = 3, stop_grace: float | None = None,
+                open_lane: Any = None) -> Any:
     from defender.worker import Worker
 
     if containers is None:
@@ -385,7 +386,9 @@ def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], 
         if not beside.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()):
             raise ValueError(f"make_worker: {data_root} is not under the temp directory; pass containers=StandInContainers(tmp_path / ...)")
         containers = StandInContainers(beside / "containers")
-    extra = {} if stop_grace is None else {"stop_grace": stop_grace}
+    extra: dict[str, Any] = {} if stop_grace is None else {"stop_grace": stop_grace}
+    if open_lane is not None:
+        extra["open_lane"] = open_lane
     return Worker(store, data_root=data_root, child_argv=child,
                   containers=containers,
                   slots=slots, clock=fixed_clock, **extra)
