@@ -1565,7 +1565,8 @@ async def test_1345_o2_insert_alert_takes_no_display_fields(dsn):
 #: (not a bool) as its decimal text; an empty string, bool, float, null, list or object is no value; text PostgreSQL
 #: cannot hold (a NUL) is none.
 TEXT_RULE = [
-    ('"plain"', "plain"), ('"  padded "', "  padded "), ('"\\u00e9"', "é"), ("42", "42"), ("-7", "-7"), ("0", "0"),
+    ('"plain"', "plain"), ('"  padded "', "  padded "), ('"\\u00e9"', "é"),
+    ('"\\u00fcn\\u00ef \\n \\u65e5\\u672c \'q\' \\"q\\" %s"', 'ünï \n 日本 \'q\' "q" %s'), ("42", "42"), ("-7", "-7"), ("0", "0"),
     ("123456789012345678901234567890", "123456789012345678901234567890"),
     ('""', None), ("true", None), ("false", None), ("1.5", None), ("2.0", None), ("1e3", None), ("null", None),
     ("[1]", None), ('["x"]', None), ('{"s": "x"}', None), ('{}', None), ('"x\\u0000y"', None), ('"\\u0000"', None),

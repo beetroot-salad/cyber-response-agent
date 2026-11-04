@@ -85,8 +85,8 @@ def seed_postgres(dsn: str, tenant: str, entries: Mapping[str, str | None] | Non
 
 
 def remove_postgres_mapping(dsn: str, tenant: str) -> None:
-    """Take `tenant`'s mapping row away (a job queued before the upgrade; a tenant whose mapping is gone), whatever the
-    table is called: the one place a test reaches under the store for it (the product never deletes a mapping)."""
+    """Take `tenant`'s mapping row away (a job queued before the upgrade; a tenant whose mapping is gone), the one
+    deletion a test makes under the store (the product never deletes a mapping); migration and verb tests also spell the table."""
     from defender.tests.support.shared._postgres1339 import execute
 
     execute(dsn, "DELETE FROM tenancy.alert_mappings WHERE tenant_id = %s", (str(tenant),))

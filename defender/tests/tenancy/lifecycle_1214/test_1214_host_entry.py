@@ -268,7 +268,11 @@ def test_run_start_refuses_a_tenant_being_offboarded_through_the_api(tmp_path, d
     world = LifecycleWorld(tmp_path, data_root)
     try:
         tenant = world.active_tenant()
-        # #1345 D2/r5.1: a tenant the product created has no mapping; the run that is admitted below needs one.
+        # #1345 D2/r5.1: a tenant the product took through its whole lifecycle to `active` still has no mapping,
+        # so its run start is refused naming it; the run admitted below needs one saved.
+        from defender.records.formats import ALERT_MAPPING_MISSING
+        unmapped = _run_start(tenant, tmp_path, world.directory())
+        assert ALERT_MAPPING_MISSING in " ".join(unmapped.split()), unmapped
         seed_twin(world.tenants, tenant, FIXTURE_ALERT_MAPPING)
         assert _admits(_run_start(tenant, tmp_path, world.directory()))
         assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
