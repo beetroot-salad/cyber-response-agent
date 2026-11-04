@@ -258,7 +258,7 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_served_systems(
     manifest = Path(made[0]) / "family.yaml"
     doc = T.mod("_yaml").safe_load(manifest.read_text(encoding="utf-8"))
     assert doc["served_systems"] == served, doc["served_systems"]
-    assert {c["system"] for c in est.calls()} == {"idp", "edr"}, est.calls()
+    assert est.calls() == [], "pre-flight read a recorded call live (#1385 H6)"
 
 
 def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any_sibling(
