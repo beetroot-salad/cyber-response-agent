@@ -2757,6 +2757,8 @@ async def test_d3_a_row_claimed_while_the_stop_lands_is_handed_back_with_nothing
 # (`_StoreOutage` fails whatever is not on the stable read/admission list; `_StoreWhoseFinishFails` fails `finish`).
 
 from defender.tests.support.jobs._jobs1342 import (  # noqa: E402
+    FaultableStore,
+    LaneLanding,
     accounting_written,
     lapse_lease,
     lease_left,
@@ -2768,9 +2770,10 @@ _FAST = {"renewal_interval": 0.2, "cost_interval": 0.3, "takeover_interval": 0.1
 _SPEND = [(SONNET, {"input_tokens": 1_000_000})]  # priced SONNET_IN = 3.0 USD
 
 
-def _spending(world: dict, steps: list[tuple[str, dict]], *, released: bool = False, **kw) -> tuple[ScriptedChild, Path]:
+def _spending(world: dict, steps: list[tuple[str, dict]], *, released: bool = False, marks_name: str = "marks",
+              **kw) -> tuple[ScriptedChild, Path]:
     """A child that holds its session database open and appends one priced response per step, then waits for `marks/go-<n>` (`released`: they exist already)."""
-    marks = world["tmp"] / "marks"
+    marks = world["tmp"] / marks_name
     if released:
         marks.mkdir(exist_ok=True)
         for n in range(len(steps)):
@@ -3210,6 +3213,59 @@ async def test_b5_a_final_accounting_write_that_hits_an_outage_is_retried_until_
     assert (final["stage"], final["failure_reason"], final["cost_usd"]) == ("aborted", "cancelled", pytest.approx(SONNET_IN))
 
 
+_TWO_STEPS = [(SONNET, {"input_tokens": 1_000_000}), (SONNET, {"output_tokens": 1_000_000})]  # 3.0 USD, then 15.0 more
+
+
+@pytest.mark.parametrize("schedule", ["renewals fail until the end write has landed", "the end write fails eleven times",
+                                      "one cost read fails"])
+async def test_b5_b2_a_transient_fault_is_waited_out_and_the_worker_ends_as_it_would_have_with_none(world, schedule):
+    """Whatever the fault schedule, once it clears the row ends as the reader decided, no retry exists, a row queued afterwards runs, and a live row's cost moves on. (B5, B2, r5 items 7, 13, 14)"""
+    child, marks = _spending(world, _TWO_STEPS, files=_committed())
+    dsn = world["dsn"]
+    async with job_store(dsn) as inner:
+        store = FaultableStore(inner)
+        inv = await _queued(inner, ticket="T-1", key="k1")
+        serving = asyncio.create_task(_worker(world, store, child, **_FAST).serve())
+        try:
+            await _until(lambda: (marks / "wrote-0").exists(), "the child's first spend")
+            await _until(lambda: row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN), "the first copy", timeout=5)
+            pointer = world["runs"] / f"{inv}.session-pointer.json"
+            if schedule == "one cost read fails":
+                good = pointer.read_text(encoding="utf-8")
+                pointer.write_text("not json", encoding="utf-8")
+                await asyncio.sleep(1.0)  # three cost ticks: the read fails and the cost stays at the last good figure
+                assert row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN)
+                pointer.write_text(good, encoding="utf-8")
+                (marks / "go-0").touch()  # the live child spends again: the cost moves past its frozen value
+                await _until(lambda: row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN + SONNET_OUT),
+                             "the cost to move past the frozen figure while the child runs", timeout=5)
+                assert row(dsn, inv)["stage"] == "running"
+            elif schedule == "the end write fails eleven times":
+                store.finish_fails = 11
+            else:
+                store.renew_down = True
+            for step in (0, 1):
+                (marks / f"go-{step}").touch()
+            await _until(lambda: row(dsn, inv)["stage"] == "completed", "the row to end as the reader decided", timeout=30)
+            store.renew_down = False  # the faults are over
+            assert store.finish_fails == 0
+            later = await _queued(inner, ticket="T-2", key="k2")
+            await _until(lambda: row(dsn, later)["stage"] == "completed", "the row queued after the faults to be claimed and run",
+                         timeout=20)
+        finally:
+            for step in (0, 1):
+                (marks / f"go-{step}").touch()
+            if not serving.done():
+                os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+
+    final = row(dsn, inv)
+    assert (final["stage"], final["disposition"], final["failure_reason"]) == ("completed", "inconclusive", None)
+    assert final["cost_usd"] == pytest.approx(SONNET_IN + SONNET_OUT)
+    assert accounting_written(dsn, inv) is not None
+    assert execute(dsn, "SELECT count(*) FROM jobs.investigations WHERE request_key = 'k1'") == [(1,)], "a retry was made"
+
+
 # --- B7: take-over ---------------------------------------------------------------------------------------
 
 async def test_b_p3_b6_b3_a_worker_never_takes_over_a_row_it_holds_another_does_and_the_holder_ends_its_child_and_records_its_spend(world):
@@ -3236,6 +3292,8 @@ async def test_b_p3_b6_b3_a_worker_never_takes_over_a_row_it_holds_another_does_
             b = asyncio.create_task(_worker(world, store_b, child, slots=1, renewal_interval=1.0,
                                             takeover_interval=0.1).serve())
             await _until(lambda: row(dsn, held)["failure_reason"] == "lease_lapsed", "B to take the row over", timeout=5)
+            # read now: A's 0.5 s lease (renewed every 2 s) lets B take over any retry A itself claims later
+            attempts = execute(dsn, "SELECT attempt FROM jobs.investigations WHERE request_key = 'k1' ORDER BY attempt")
             await _until(lambda: _termed(world, held), "A to end its child", timeout=5)
             await _until(lambda: accounting_written(dsn, held) is not None, "A's final accounting", timeout=5)
         finally:
@@ -3245,7 +3303,7 @@ async def test_b_p3_b6_b3_a_worker_never_takes_over_a_row_it_holds_another_does_
     old = row(dsn, held)
     assert old["stage"] == "failed", "the holder's final accounting changed the stage"
     assert old["cost_usd"] == pytest.approx(SONNET_IN), "the cut-off holder's spend was not recorded on its own row"
-    assert execute(dsn, "SELECT attempt FROM jobs.investigations WHERE request_key = 'k1' ORDER BY attempt") == [(1,), (2,)]
+    assert attempts == [(1,), (2,)]
 
 
 async def test_b7_b5_a_worker_takes_a_lapsed_row_over_though_its_own_end_write_keeps_failing_but_claims_nothing(world):
@@ -3634,3 +3692,157 @@ async def test_b11_a_child_that_failed_on_its_own_before_the_stop_signalled_it_e
         await store.take_over(held=frozenset())
         assert await store.claim() is None, "a run that failed by itself was retried"
     assert execute(dsn, "SELECT count(*) FROM jobs.investigations WHERE request_key = 'k1'") == [(1,)]
+
+
+# --- repair round (attack): a stop or a fence before the child exists; what a stopped child's row ends with; the stop's bound ---
+
+def _cancel_in_sql(dsn: str, inv: str) -> None:
+    """What `cancel_investigation` writes, by SQL (a thread cannot await the store)."""
+    execute(dsn, "UPDATE jobs.investigations SET stage = 'aborted', failure_reason = 'cancelled', finished_at = now() "
+                 "WHERE id = %s AND stage IN ('queued', 'running')", (inv,))
+
+
+class _Landing:
+    """An event (a deliberate stop, or the row's cancel seen by a renewal) that the test lands at a chosen point, from the worker's thread (`thread`) or from inside the spawn (`spawn`)."""
+
+    def __init__(self, event: str, dsn: str, store: FaultableStore, inv: str) -> None:
+        self.event, self.dsn, self.store, self.inv = event, dsn, store, inv
+
+    def thread(self) -> None:
+        if self.event == "stop":
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(0.5)  # the idle loop acts on it meanwhile
+        else:
+            _cancel_in_sql(self.dsn, self.inv)
+            assert self.store.omitted_event.wait(10), "premise: the worker never saw the fence"
+
+    async def spawn(self) -> None:
+        if self.event == "stop":
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.sleep(0.5)
+        else:
+            _cancel_in_sql(self.dsn, self.inv)
+            await _until(self.store.omitted_event.is_set, "the worker to see the fence", timeout=10)
+
+
+@pytest.mark.parametrize("moment", ["during write_launch", "after write_launch", "inside the spawn"])
+@pytest.mark.parametrize("event", ["stop", "fence"])
+async def test_b3_b11_a_stop_or_fence_between_the_claim_and_the_childs_existence_hands_back_or_ends_the_row_and_leaves_no_child(
+        world, monkeypatch, event, moment):
+    """A stop lands: the row is handed back (cost 0, no knowledge). A fence lands: final accounting, cost 0, no knowledge. Landed before the spawn: it never happens; else the child is gone within a renewal tick. (B3, B11, r4 item 4, r5 item 5)"""
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release)
+    dsn = world["dsn"]
+    spawned: list[int] = []
+    real_spawn = asyncio.create_subprocess_exec
+    landing: list[_Landing] = []
+
+    async def spawn(*argv, **kw):
+        if moment == "inside the spawn":
+            await landing[0].spawn()
+        proc = await real_spawn(*argv, **kw)
+        spawned.append(proc.pid)
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)  # lint-monkeypatch: ok — the only point where an event can land inside the spawn call; the real spawn runs
+    lanes = LaneLanding(lambda: landing[0].thread(), "during" if moment == "during write_launch" else "after")
+    async with job_store(dsn) as inner:
+        store = FaultableStore(inner)
+        inv = await _queued(inner)
+        landing.append(_Landing(event, dsn, store, inv))
+        serving = asyncio.create_task(_worker(world, store, child, open_lane=None if moment == "inside the spawn" else lanes,
+                                              **_FAST).serve())
+        try:
+            if event == "stop":
+                await asyncio.wait_for(asyncio.shield(serving), timeout=60)
+            else:
+                await _until(lambda: accounting_written(dsn, inv) is not None, "the fenced row's final accounting", timeout=30)
+            if moment == "inside the spawn":
+                assert len(spawned) == 1, "premise: the spawn was not reached"
+                await _until(lambda: _gone(spawned[0]), "the child that was spawned as the event landed to be gone", timeout=1.0)
+            else:
+                assert lanes.landed, "premise: the event never landed"
+                assert spawned == [], "a child was spawned after the event had landed"
+                assert child.seen() is None
+        finally:
+            release.touch()
+            for pid in spawned:
+                if not _gone(pid):
+                    os.killpg(pid, signal.SIGKILL)
+            if not serving.done():
+                os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+
+    if event == "stop":
+        _handed_back(dsn, inv, cost=0, knowledge=None)
+    else:
+        final = row(dsn, inv)
+        assert (final["stage"], final["failure_reason"], final["cost_usd"], final["knowledge"]) == ("aborted", "cancelled", 0, None)
+        assert accounting_written(dsn, inv) is not None
+
+
+def _stopped_endings() -> dict[str, str]:
+    """One case of `CASES` per ending the reader can give (stage, reason, disposition), and an unparseable one whose fault is in reading the report and a failed one that read its knowledge."""
+    first: dict[tuple, str] = {}
+    for name, plan in CASES.items():
+        first.setdefault(tuple(plan["expect"]), name)
+    return {name: name for name in [*first.values(), "4-report-not-utf8", "5-tree-not-verified"]}
+
+
+@pytest.mark.parametrize("case", list(_stopped_endings()))
+async def test_b11_a_stopped_childs_row_is_finished_when_the_reader_says_completed_else_handed_back_with_what_the_reader_read(world, case):
+    """The run is left alone once, and stopped once: completed ends as it did alone, any other ending is handed back with the cost and knowledge the reader gave alone. (B11, r5 item 3, R1)"""
+    plan = CASES[case]
+    dsn = world["dsn"]
+    alone, alone_marks = _spending(world, _SPEND, released=True, exit=plan["exit"], **plan["spec"])
+    async with job_store(dsn) as store:
+        control = await _queued(store, ticket="T-1", key="k1")
+        await _worker(world, store, alone, **_FAST).drain()
+        ended = row(dsn, control)
+        assert ended["cost_usd"] == pytest.approx(SONNET_IN), "premise: the run alone read no cost"
+        if "{id}.knowledge-source.json" in plan["spec"].get("files", {}):
+            assert ended["knowledge"] is not None, "premise: the run alone read no knowledge"
+        stopped, marks = _spending(world, _SPEND, marks_name="marks-stopped", term="finish", term_mark=_term_mark(world),
+                                   **plan["spec"])
+        inv = await _queued(store, ticket="T-2", key="k2")
+        serving = asyncio.create_task(_worker(world, store, stopped, **_FAST).serve())
+        try:
+            await _until(lambda: (marks / "wrote-0").exists(), "the child's spend")
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+        finally:
+            (marks / "go-0").touch()
+            await _stop_all(serving)
+    assert _termed(world, inv), "premise: the stop signalled the child"
+    if plan["expect"][0] == "completed":
+        got, want = row(dsn, inv), ended
+        assert {k: got[k] for k in ("stage", "disposition", "failure_reason", "cost_usd", "knowledge")} == {
+            k: want[k] for k in ("stage", "disposition", "failure_reason", "cost_usd", "knowledge")}
+        assert accounting_written(dsn, inv) is not None
+    else:
+        _handed_back(dsn, inv, cost=ended["cost_usd"], knowledge=ended["knowledge"])
+
+
+async def test_b11_a_stop_is_bounded_by_one_stop_grace_however_many_children_ignore_sigterm(world):
+    """Three children ignore SIGTERM: the stop returns in under two stop graces (not three), every row handed back. (B11, D3)"""
+    grace = 1.5
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release, term="ignore")
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        invs = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(3)]
+        serving = asyncio.create_task(_worker(world, store, child, slots=3, stop_grace=grace, **_FAST).serve())
+        try:
+            await _until(lambda: all(child.seen(i) for i in invs), "all three children")
+            began = time.monotonic()
+            os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+            took = time.monotonic() - began
+        finally:
+            release.touch()
+            for i in invs:
+                _kill_whatever_remains(child.seen(i))
+            await _stop_all(serving)
+    assert took < 2 * grace, f"the stop took {took:.1f} s for children each given {grace} s"
+    for i in invs:
+        _handed_back(dsn, i)

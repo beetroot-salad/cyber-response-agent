@@ -2061,3 +2061,85 @@ async def test_b9_a_cancel_names_a_retry_only_when_one_is_live_under_the_same_re
             assert "already ended" in text
             assert live is None or live not in text
     assert row(dsn, third)["stage"] == "running", "the refused cancels touched the live retry"
+
+
+@pytest.mark.parametrize("differs", ["tenant", "alert", "request key"])
+async def test_b9_a_cancel_never_names_a_live_higher_attempt_that_differs_in_tenant_alert_or_request_key(dsn, differs):
+    """A live higher attempt differing from the ended one in that field alone is not named ("already ended"); the control matching all three is. (B9, r5 item 11)"""
+    from defender.jobs import Conflict
+
+    chain = _plant_alert(dsn, ticket="E")
+    ended = _plant_investigation(dsn, tenant=T1, alert_id=chain, key="k", attempt=1, stage="failed")
+    # a tenant's alert belongs to it, so the other tenant's row necessarily stands on an alert of its own
+    live = {"tenant": lambda: _plant_running(dsn, alert_id=_plant_alert(dsn, tenant=T2, ticket="X"), key="k", attempt=2,
+                                             lapsed=False, tenant=T2),
+            "alert": lambda: _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="Y"), key="k", attempt=2, lapsed=False),
+            "request key": lambda: _plant_running(dsn, alert_id=chain, key="other", attempt=2, lapsed=False)}[differs]()
+    control_chain = _plant_alert(dsn, ticket="C")
+    control_ended = _plant_investigation(dsn, tenant=T1, alert_id=control_chain, key="k", attempt=1, stage="failed")
+    control = _plant_running(dsn, alert_id=control_chain, key="k", attempt=2, lapsed=False)
+    async with job_store(dsn) as store:
+        with pytest.raises(Conflict) as refused:
+            await store.cancel_investigation(T1, ended, actor="u-1")
+        with pytest.raises(Conflict) as named:
+            await store.cancel_investigation(T1, control_ended, actor="u-1")
+    assert "already ended" in str(refused.value)
+    assert live not in str(refused.value), f"named a live row differing in {differs}"
+    assert control in str(named.value), "premise: the matching live retry was not named"
+    assert row(dsn, live)["stage"] == "running", "the refused cancel touched the live row"
+
+
+_FAR_PAST = dt.datetime(2001, 2, 3, 4, 5, 6, 123456, tzinfo=dt.UTC)
+_FAR_FUTURE = dt.datetime(2100, 2, 3, 4, 5, 6, 123456, tzinfo=dt.UTC)
+
+
+def _created_at(dsn: str, investigation_id: str) -> dt.datetime:
+    return execute(dsn, "SELECT created_at FROM jobs.investigations WHERE id = %s", (investigation_id,))[0][0]
+
+
+@pytest.mark.parametrize("instant", [_FAR_PAST, _FAR_FUTURE], ids=["clock-in-the-past", "clock-in-the-future"])
+async def test_b1_b11_every_store_write_dates_its_lease_by_the_database_clock_and_every_other_stamp_by_the_injected_one(dsn, instant):
+    """With the injected clock far from the planted rows and the database's now(): leases follow now() (a hand-back's is already lapsed), created_at, finished_at and the mark follow the clock. (B1, B11, B Clock)"""
+    clock = Clock(instant)
+    queued = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket="Q"), key="k", attempt=1, stage="queued")
+    renewed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="R"), key="k", attempt=1, lapsed=False)
+    execute(dsn, "UPDATE jobs.investigations SET lease_expires_at = now() + interval '5 seconds' WHERE id = %s", (renewed,))
+    handed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="H"), key="k", attempt=1, lapsed=False)
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="L"), key="k", attempt=1, lapsed=True)
+    cancelled = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="C"), key="k", attempt=1, lapsed=False)
+    finished = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="F"), key="k", attempt=1, lapsed=False)
+    accounted = _ended_with_cost(dsn, "failed", "A")
+    created_alert = _plant_alert(dsn, ticket="N")
+
+    async with store_with(dsn, clock) as store:
+        claimed = (await store.claim()).record.investigation_id
+        assert claimed == queued
+        assert 25 < lease_left(dsn, claimed) < 31, "a claim's lease is not 30 s from the database's now()"
+        assert row(dsn, claimed)["started_at"] == instant
+
+        assert await store.renew({renewed}) == [renewed]
+        assert 25 < lease_left(dsn, renewed) < 31, "a renewal's lease is not 30 s from the database's now()"
+
+        assert await store.hand_back(T1, handed, cost_usd=1.0, knowledge=None) is not None
+        assert lease_left(dsn, handed) < 0, "a hand-back's lease is not already lapsed by the database's clock"
+        assert accounting_written(dsn, handed) == instant
+        assert row(dsn, handed)["finished_at"] is None
+
+        assert await store.take_over(held={handed}) == [lapsed]  # the handed-back row's lease is lapsed too
+        assert row(dsn, lapsed)["finished_at"] == instant
+        [retry] = _retries_of(dsn, lapsed)
+        assert _created_at(dsn, retry) == instant, "a retry's created_at is not the clock"
+
+        await store.cancel_investigation(T1, cancelled, actor="u-1")
+        assert row(dsn, cancelled)["finished_at"] == instant
+
+        assert await store.finish(T1, finished, stage="completed", disposition="benign", cost_usd=1.0) is not None
+        assert row(dsn, finished)["finished_at"] == instant
+        assert accounting_written(dsn, finished) == instant
+
+        assert await store.write_accounting(T1, accounted, cost_usd=2.0, knowledge=None) is not None
+        assert accounting_written(dsn, accounted) == instant
+        assert row(dsn, accounted)["finished_at"] == NOW, "a final accounting restamped the end"
+
+        created, _ = await store.create_investigation(T1, created_alert, "k-new", actor="u-1")
+        assert _created_at(dsn, created.investigation_id) == instant

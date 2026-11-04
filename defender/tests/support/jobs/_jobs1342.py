@@ -418,6 +418,87 @@ class FaultyContainers(StandInContainers):
         raise RuntimeError("the container daemon cannot be asked")
 
 
+class FaultableStore:
+    """The real store, except for faults the test switches on: `renew_down` makes every renewal raise
+    a connection error, `finish_fails` makes that many `finish` calls raise one (counted in
+    `finish_tries`). Notes the held ids each renewal that succeeded left out (`omitted`, and
+    `omitted_event` for a thread that waits for the worker to see a fence)."""
+
+    def __init__(self, store: Any) -> None:
+        import threading
+
+        self._store = store
+        self.renew_down = False
+        self.finish_fails = 0
+        self.finish_tries = 0
+        self.omitted: set[str] = set()
+        self.omitted_event = threading.Event()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+    async def renew(self, held: Any, **kw: Any) -> Any:
+        if self.renew_down:
+            raise ConnectionError("the database is gone")
+        covered = await self._store.renew(held, **kw)
+        left_out = set(held) - set(covered)
+        if left_out:
+            self.omitted |= left_out
+            self.omitted_event.set()
+        return covered
+
+    async def finish(self, *args: Any, **kw: Any) -> Any:
+        self.finish_tries += 1
+        if self.finish_fails > 0:
+            self.finish_fails -= 1
+            raise ConnectionError("the database is gone")
+        return await self._store.finish(*args, **kw)
+
+
+class LaneLanding:
+    """A job-lane door whose lanes are the real ones, except that the first launch write of the
+    worker runs `land()` (in the worker's thread): `moment="during"` just before the real
+    `write_launch`, `"after"` once it has returned and the lane closes. Nothing else changes."""
+
+    def __init__(self, land: Callable[[], None], moment: str) -> None:
+        assert moment in ("during", "after")
+        self._land, self._moment, self.landed = land, moment, False
+
+    def __call__(self, root: Any, tenant: str) -> Any:
+        from defender.records import job_lane
+
+        door = self
+        lane = job_lane.JobLane.open(root, tenant)
+
+        class _Lane:
+            wrote = False
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(lane, name)
+
+            def write_launch(self, launch: Any, raw: bytes) -> Any:
+                if door._moment == "during" and not door.landed:
+                    door.landed = True
+                    door._land()
+                done = lane.write_launch(launch, raw)
+                self.wrote = True
+                return done
+
+            def close(self) -> None:
+                lane.close()
+                if door._moment == "after" and self.wrote and not door.landed:
+                    door.landed = True
+                    door._land()
+
+            def __enter__(self) -> Any:
+                return self
+
+            def __exit__(self, *_exc: Any) -> None:
+                self.close()
+
+        return _Lane()
+
+
 def fd_identity(fd: int) -> list[int]:
     """`[device, inode]` of what `fd` is open on, comparable with a child's `seen()["stdio"]`."""
     found = os.fstat(fd)
