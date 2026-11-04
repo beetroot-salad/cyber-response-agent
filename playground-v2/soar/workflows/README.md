@@ -17,8 +17,10 @@ serve — check `<stub>:8080/openapi.json` if you need the exact shapes.
 3. **`GET /hosts/{name}`** on `cmdb` — asset context: role, owner, criticality.
 4. **`GET /changes/active`** on `change-mgmt` — is there a change request
    covering this host right now?
-5. **`POST /tickets`** then **`POST /tickets/{key}/comments`** on
-   `ticket-server` — record the verdict.
+5. **`POST /tickets/{key}/comments`** on `ticket-server` — record the verdict.
+   The ticket already exists, keyed by the alert's `kibana.alert.uuid`: the
+   `alert-ticket-watcher` opened it when the alert fired (#1400).
+   A `POST /tickets` here would get 409.
 
 `identity`'s `GET /users/{username}/can_access` is the natural sixth step for
 any alert that names a user; it is left out of the reference so the shape stays
@@ -64,8 +66,12 @@ in-cluster because Kibana is dual-homed onto the `soar` network.
 
 In Kibana: **Stack Management → Connectors → Create connector → Webhook**, POST
 to that URL, no auth. Then add it as an action on the detection rule you want to
-drive. The webhook connector is GA on the Basic licence this stack runs — unlike
-Elastic's own endpoint response actions, which are Enterprise-gated.
+drive. **This does not work on the Basic licence this stack runs:** the webhook
+connector needs Gold (`GET /api/actions/connector_types` reports
+`.webhook` `enabled_in_license: false`). Kibana accepts the connector and the
+rule action, then logs "skipped scheduling action … because it is disabled" on
+every fire (seen live, #1400). Without a licence change, drive Shuffle the way
+`alert-ticket-watcher/` drives the ticket-server: poll the alerts index.
 
 Fold the connector back into the repo the same way as the workflow, so it
 survives a reset.

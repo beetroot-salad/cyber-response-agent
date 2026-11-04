@@ -471,6 +471,24 @@ def test_a_body_cannot_name_a_tenant(path: str, body: dict[str, str]) -> None:
     assert api.ports.calls == []
 
 
+@pytest.mark.parametrize("bad", ["r\x00", "r\ud800"], ids=["NUL", "lone surrogate"])
+@pytest.mark.parametrize(("path", "body"), [
+    (f"{T}/investigations", {"alert_id": "a1000000-0000-4000-8000-000000000001"}),
+    (f"{T}/learning-jobs", {"investigation_id": "b1000000-0000-4000-8000-000000000001"}),
+])
+def test_1379_a_client_request_id_postgresql_cannot_hold_is_a_422_naming_it(
+    path: str, body: dict[str, str], bad: str,
+) -> None:
+    """Refused at the API's model, naming the field, reaching no store. (#1379 O1a)"""
+    api = Api()
+    # `json.dumps` escapes the surrogate as `\\ud800`, as a client's JSON would carry it.
+    response = api.client.post(path, headers={**AUTH, "content-type": "application/json"},
+                               content=json.dumps({**body, "client_request_id": bad}))
+    assert response.status_code == 422, response.text
+    assert [e["loc"] for e in response.json()["errors"]] == [["body", "client_request_id"]]
+    assert api.ports.calls == []
+
+
 # --- creates: 201 or replay ----------------------------------------------------------------
 
 

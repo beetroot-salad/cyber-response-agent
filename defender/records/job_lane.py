@@ -26,7 +26,7 @@ from defender.records._id import RunId
 from defender.records.job_facts import (
     BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED, SETUP_CRASHED, SETUP_DONE, SETUP_REFUSED,
 )
-from defender.records._knowledge_status import api_knowledge, knowledge_status
+from defender.records._knowledge_status import UNREADABLE, api_knowledge, knowledge_status
 from defender.records._layout import RUN_LAYOUT, RunPaths, SessionPaths
 from defender.records._locations import DataRoot, RunsBase, unwrap_data_root
 from defender.records._store_errors import StoreError
@@ -259,6 +259,13 @@ class JobLane:
             return None
         read = self._held.view().read(self._paths(run_id).knowledge_source().name)
         return api_knowledge(knowledge_status(read.text, stamp_names_source=True))
+
+    @staticmethod
+    def unreadable_knowledge() -> dict[str, str | None] | None:
+        """A started run's knowledge when its record cannot be read (OD22'), in the API's shape:
+        stale, operator kind, no commit. What `knowledge` gives for a missing or garbled record, and
+        what the worker records when the read itself faults (#1396)."""
+        return api_knowledge(UNREADABLE)
 
     def report_disposition(self, run_id: object) -> str | None:
         """The disposition of the run's `report.md`, read no-follow and size-limited, or `None`

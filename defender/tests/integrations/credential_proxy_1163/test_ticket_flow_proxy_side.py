@@ -2,12 +2,18 @@
 and the store's unreachability as such, as on the docker path."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
+import types
 
 import pytest
 
-from defender.kit.faults import TransportFault
+from defender.box import run_env
+from defender.integrations._stub_transport import raise_proxy_fault
+from defender.kit.faults import ConfigFault, TransportFault
+from defender.kit.settings import config_pointer
+from defender.systems import case_system
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
@@ -21,6 +27,7 @@ from defender.tests.integrations.credential_proxy_1163.test_ticket_flow import (
     _run,
 )
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
+from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 
 REASON = "store says no: duplicate-or-invalid"
 
@@ -112,3 +119,44 @@ def test_t5_a_proxy_blip_loses_the_comment_not_the_run_and_the_next_one_posts(
     assert [s.path for s in up.seen] == [COMMENT]
     assert kept["ok"] is True, kept
     assert S.receipt(second_rec.run_dir_at) == kept
+
+
+def _leg_with_adapter_raising(tmp_path, data_root, raises):
+    """The record leg on the proxied `ticket` system with its comment action replaced by `raises`
+    (the case seam run start uses); returns the receipt."""
+    with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
+        rec, run = _run(tmp_path)
+        tenant = T.run_record(t)
+        real = case_system.case_verdict(tenant, defender_dir=DEFENDER)
+        assert isinstance(real, case_system.CaseTarget), real
+        stub = dataclasses.replace(real, module=types.SimpleNamespace(add_case_comment=raises))
+        S.ticket_writer().record_case_ticket(
+            run, tenant=tenant, defender_dir=DEFENDER, env=run_env(DEFENDER, rec.run_dir_at),
+            request_token=T.token(t.tenant_id, {(SYSTEM, "rw")}), proxy_url=up.url, case=stub)
+        return S.receipt(rec.run_dir_at)
+
+
+def test_t8_a_settings_fault_the_adapter_raises_itself_points_at_config_not_the_proxy(
+        tmp_path, data_root):
+    """The adapter's own settings fault, raised before any request, on a system reached through
+    the proxy: the receipt names that system's `config.env`, not a proxy refusal. #1398."""
+    def own_settings_fault(*_a, **_k):
+        raise ConfigFault("TICKET_BASE_URL is blank")
+
+    receipt = _leg_with_adapter_raising(tmp_path, data_root, own_settings_fault)
+    assert receipt is not None
+    assert receipt["ok"] is False
+    assert config_pointer(SYSTEM) in receipt["reason"], receipt
+    assert "the credential proxy refused" not in receipt["reason"].lower(), receipt
+
+
+def test_t9_a_settings_fault_the_proxy_raises_is_still_a_proxy_refusal(tmp_path, data_root):
+    """Control for t8, from the other side: the same fault class arriving through the proxy's
+    answer (the way the transport raises it) is the proxy's refusal, not a `config.env` fault."""
+    def proxy_says_config(*_a, **_k):
+        raise_proxy_fault("ConfigFault", "the declaration holds no route for this call")
+
+    receipt = _leg_with_adapter_raising(tmp_path, data_root, proxy_says_config)
+    assert receipt is not None
+    assert "the credential proxy refused" in receipt["reason"].lower(), receipt
+    assert config_pointer(SYSTEM) not in receipt["reason"], receipt

@@ -733,9 +733,11 @@ def _publish_report(
 @contextlib.contextmanager
 def _stopped_by_sigterm() -> Iterator[None]:
     """While the launch-time publish runs, a SIGTERM (teardown stopping this run) unwinds this
-    process as `SystemExit(128 + SIGTERM)`, so the launcher's `finally` kills the publish child's
-    process group (its own session, which no signal to this process reaches) before the run ends;
-    the handler found is put back after. Only in the main thread, the one a handler runs in."""
+    process as `SystemExit(128 + SIGTERM)`, so the run never goes on past its publish. The real
+    launcher holds the signal back while its child runs: it stops the child by its one rule (a
+    child that took the tenant lock is waited for, never signalled), kills its process group (its own session, which
+    no signal to this process reaches) and only then delivers the signal here (#1379 r3). The
+    handler found is put back after. Only in the main thread, the one a handler runs in."""
     if threading.current_thread() is not threading.main_thread():
         yield
         return
