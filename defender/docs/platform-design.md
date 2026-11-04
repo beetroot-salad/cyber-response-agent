@@ -134,7 +134,7 @@ alerts(alert_id PK, tenant_id, source_vendor, remote_alert_id NOT NULL, signatur
 investigations(investigation_id PK, tenant_id, alert_id FK, request_key, attempt,
        job_status, failure_reason, failure_message,
        defender_image_digest, defender_git_sha, lessons_corpus_version,
-       container_kind, container_handle, claimed_by_worker, lease_expires_at, last_heartbeat_at, cost_so_far,
+       container_kind, container_handle, lease_expires_at, accounting_written_at, cost_usd,
        disposition, confidence, cost, artifact_manifest, status_detail,
        created_at, started_at, finished_at, ...)
 
@@ -167,13 +167,13 @@ learning_jobs(learning_job_id PK, tenant_id, alert_id FK, investigation_id FK, c
   and a short message from our own code, never text from the run.
 - `job_status` — the execution **lifecycle** (§2.3), the only progress axis tracked. **No `phase` field** —
   within-run phase is inferred from `investigation.md` headers and that inference is fragile, so the live
-  view is heartbeat-based (§4.5).
-- `cost` — final cost at completion; live `cost_so_far` is updated on the same row by the heartbeat.
+  view is lease- and cost-based (§4.5).
+- `cost` — final cost at completion; the live figure is `cost_usd` "so far", copied onto the same row about every 15 s by the holding worker.
 - **Infra is on the row, one run per investigation.** The `investigations` row carries both durable
   data and the playground-v2/infra/liveness of its run (`container_kind`, `container_handle`,
-  `claimed_by_worker`, lease, heartbeat, `cost_so_far`). There is **no attempts table and no queue table**:
+  `lease_expires_at`, `cost_usd`). There is **no attempts table and no queue table**:
   a retry is a new investigation row under the same request key, linked by `attempt`, so no run is ever
-  overwritten and the run folder name is the investigation id. Mechanism — fencing, reconciler,
+  overwritten and the run folder name is the investigation id. Mechanism — lease, fencing,
   take-over — in §4.1. A `runs` history table graduates only for per-run forensics (§6).
 
 **The alert table is a thin index, not a system-of-record.** Be **loose** on SIEM-owned fields (store the
@@ -401,22 +401,22 @@ sequenceDiagram
     API-->>FE: 202 with alert_id, investigation_id
 
     Note over WK,DB: DB-as-queue — the worker polls, the DB never pushes
-    WK->>DB: claim queued investigation SKIP LOCKED, bump claim_epoch, set lease, job_status running
-    WK->>CT: spawn, label investigation_id and claim_epoch, inject alert, epoch, scoped creds
-    WK->>DB: patch container_handle (fenced on claim_epoch)
+    WK->>DB: claim queued investigation SKIP LOCKED, set the 30 s lease by the database clock, job_status running
+    WK->>CT: spawn, label investigation_id, inject alert, scoped creds
+    WK->>DB: patch container_handle (conditional on the row still being running)
 
-    loop every ~30s until exit
-        CT->>DB: heartbeat last_heartbeat_at and cost_so_far, renew lease (fenced on claim_epoch)
+    loop every ~1s until exit
+        WK->>DB: renew the lease of every held row in one statement (a held row missing from the answer is fenced: its child is ended); about every 15s also copy cost so far
         FE->>API: GET investigation detail
-        API->>DB: read job_status and heartbeat from the investigation row
-        API-->>FE: coarse state — job_status, heartbeat age, cost
+        API->>DB: read job_status and cost so far from the investigation row
+        API-->>FE: coarse state — job_status, cost so far
     end
 
     Note right of CT: commit point 2 — completion, blobs first then flip
     CT->>BLOB: upload artifact manifest
-    CT->>DB: tx — mark completed (fenced on claim_epoch), update alert projection, insert learning_jobs outbox
+    CT->>DB: tx — mark completed (conditional on the row still being running), update alert projection, insert learning_jobs outbox
     Note over CT,DB: container exits; terminal investigation_id never reused
-    Note over DB: a non-terminal stale lease is recovered in place by the reconciler (claim_epoch bump), §4.1.<br/>learning worker later drains the outbox, §4.3
+    Note over DB: a lapsed lease is taken over by any worker (the row ends failed, a retry row is queued), §4.1.<br/>learning worker later drains the outbox, §4.3
 ```
 
 **Completion is the commit point.** A local dir is atomically "there"; blob + DB is a two-phase write, so:
@@ -658,13 +658,13 @@ Four layers, four answers — not a single per-tool-vs-per-completion choice:
 
 | Layer                 | Granularity                    | Mechanism                                                                                                          |
 | --------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| **Progress metadata** | ~30s heartbeat                 | update the investigation row (`last_heartbeat_at`, `cost_so_far`, `job_status`), fenced on `claim_epoch`. HOT update (no indexed columns) → no churn. |
+| **Progress metadata** | ~1s lease renewal, ~15s cost | update the investigation row (`lease_expires_at`, `cost_usd`), conditional on the row being `running`. HOT update (no indexed columns) → no churn. |
 | **DB metadata row**   | lifecycle checkpoints          | write on state transitions (`queued→running`, terminal). Per-tool writes here are pure churn.                     |
 | **Trace artifact**    | local per tool, uploaded once  | `tool_trace.jsonl` is the append-only local trace; upload at completion. No per-event PUT, no streaming sink.     |
 | **Bulk artifacts**    | once, at completion            | build `runtime.html`, `lead_sequence.yaml`, etc.; PUT as the `→completed` commit (blobs first, then flip).        |
 
 **Polling-first.** The detail endpoint exposes coarse DB state only: `job_status`, timestamps,
-`last_heartbeat_at`, server-computed heartbeat age, elapsed, `cost_so_far`, optional token/tool counts
+`lease_expires_at`, elapsed, `cost_usd` (so far), optional token/tool counts
 (on the heartbeat), `status_detail`, artifact availability. No within-run `phase` (fragile to infer). The
 manifest appears only after completion.
 
