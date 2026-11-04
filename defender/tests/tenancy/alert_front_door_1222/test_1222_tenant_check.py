@@ -8,7 +8,6 @@ import contextlib
 import json
 import os
 import re
-import stat
 import threading
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
@@ -17,7 +16,6 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from typing import Any
 
 import pytest
-import yaml
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
@@ -45,11 +43,6 @@ FIFO_GRACE_S = 10.0
 
 SITES = ("acceptance", "check-folder", "run-start", "branch-launch", "sibling-resume",
          "policy-cli")
-
-#: The alert mapping's fault shapes, `unreadable` only where the kernel can say so (non-root).
-FAULT_PARAMS = [pytest.param(s, marks=S.needs_non_root) if s in S.ROOT_BLIND_SHAPES else s
-                for s in S.MAPPING_FAULT_SHAPES]
-
 
 def _shape_params(shapes: Iterable[str]) -> list[Any]:
     return [pytest.param(s, marks=S.needs_non_root) if s in S.ROOT_BLIND_SHAPES else s
@@ -361,99 +354,6 @@ def assert_no_run(v: Verdict) -> None:
     assert not d.router.leads(), "a lead's model was asked on a refused tenant"
 
 
-def normalized(text: str, folders: Iterable[Path]) -> str:
-    for folder in folders:
-        text = text.replace(str(folder), "<knowledge>")
-    return text
-
-
-def assert_same_reasons(vs: dict[str, Verdict], *, reference: str = "check-folder",
-                        folders: Iterable[Path] = ()) -> list[str]:
-    """Every site carries the check's reasons — `reference`'s lines naming a mapping file —
-    verbatim and in that order, and names no mapping file more often than they do. `folders`
-    are knowledge folders spelled `<knowledge>` before comparing (one tenant repo checked in
-    two places)."""
-    folders = tuple(folders)
-    ref = [normalized(r, folders) for r in mapping_lines(vs[reference].text)]
-    assert ref, f"{reference} named no mapping file: {vs[reference].text!r}"
-    for site, v in vs.items():
-        if site == reference:
-            continue
-        text = normalized(v.text, folders)
-        pos = 0
-        for reason in ref:
-            at = text.find(reason, pos)
-            assert at >= 0, (
-                f"{site} does not carry the check's reason {reason!r} (in the check's order); "
-                f"{site} said {v.text!r}, the check said {vs[reference].text!r}")
-            pos = at + len(reason)
-        for name in MAPPING_NAMES:
-            want = sum(r.count(name) for r in ref)
-            assert text.count(name) == want, (
-                f"{site} names {name} {text.count(name)}x where the check's reasons name it "
-                f"{want}x — a reason the check does not give, or one it gives that {site} drops: "
-                f"{v.text!r}")
-    return ref
-
-
-def first_named(text: str) -> tuple[str, ...]:
-    """The mapping files `text` names, in the order it first names them."""
-    found = [(text.find(n), n) for n in MAPPING_NAMES if n in text]
-    return tuple(n for _at, n in sorted(found))
-
-
-def parser_text(path: Path) -> list[str]:
-    """What the UTF-8 decoder and the YAML parser THEMSELVES say about the bytes at `path` — the
-    text a fixed reason must not carry. Empty for a file they both accept or cannot be handed
-    (a link, a directory, a FIFO — never opened here — or a file this user cannot read)."""
-    try:
-        if not stat.S_ISREG(os.lstat(path).st_mode):
-            return []
-        raw = path.read_bytes()
-    except OSError:
-        return []
-    try:
-        decoded = raw.decode("utf-8")
-    except UnicodeDecodeError as bad:
-        return [bad.reason, "codec can't decode"]
-    try:
-        yaml.safe_load(decoded)
-    except yaml.MarkedYAMLError as bad:
-        out = [s for s in (bad.problem, bad.context) if s]
-        if bad.problem_mark is not None:
-            mark = bad.problem_mark
-            out.append(f"line {mark.line + 1}, column {mark.column + 1}")
-        return out
-    return []
-
-
-def assert_no_parser_text(v: Verdict, fragments: Iterable[str]) -> None:
-    for fragment in fragments:
-        assert fragment not in v.text, (
-            f"{v.site}'s refusal carries the parser's own text {fragment!r}: {v.text!r}")
-
-
-@pytest.mark.parametrize("shape", FAULT_PARAMS)
-def test_bad_alert_mapping_is_refused_by_the_tenant_check(tmp_path: Path, capsys: Any,
-                                                          shape: str) -> None:
-    w = world(tmp_path, capsys)
-    # Positive control: the same tenant with its valid mapping is accepted and its run starts.
-    for v in verdicts(w, ("acceptance", "run-start")).values():
-        assert_passed(v)
-    try:
-        oracle = parser_text(w.alert_shape(shape))
-        vs = verdicts(w, ("acceptance", "run-start"))
-        for v in vs.values():
-            assert_refused(v, ALERT_MAPPING)
-            assert_no_parser_text(v, oracle)
-        assert_no_run(vs["run-start"])
-        assert vs["acceptance"].text in vs["run-start"].text, (
-            "run start does not give the tenant check's own reason: "
-            f"{vs['run-start'].text!r} vs {vs['acceptance'].text!r}")
-    finally:
-        S.restore_modes(w.planted.root)
-
-
 #: What a legacy tenant (#1359) still holds at the retired mapping, as the bytes written.
 LEGACY_RECORD = "settings/case-record.yaml"
 
@@ -480,62 +380,56 @@ def test_a_legacy_case_history_folder_is_a_check_finding_naming_the_new_file(
         S.restore_modes(w.planted.root)
 
 
-@pytest.mark.parametrize("entry", ["case_key: ticket.key", "case_key: alert_id"])
-def test_a_case_key_entry_is_an_alert_mapping_fact_at_every_site(
-        tmp_path: Path, capsys: Any, entry: str) -> None:
-    """A dotted `case_key` path passes every site; an unusable one is refused naming the alert mapping like any fact. #1359."""
-    w = world(tmp_path, capsys, alert_mapping=(
-        "signature: rule.id\nevent_time: detected_at\n" + entry + "\n"))
-    for v in verdicts(w, ("acceptance", "check-folder", "run-start")).values():
-        assert_passed(v)
-    for bad in ('case_key: ""', "case_key: ticket..key", "case_key: 42"):
-        w.planted.alert_mapping.write_text(
-            "signature: rule.id\nevent_time: detected_at\n" + bad + "\n", encoding="utf-8")
-        for v in verdicts(w, ("acceptance", "check-folder", "run-start")).values():
-            assert_refused(v, ALERT_MAPPING)
-
-
 # A5 — one tenant check at every entry point
 
-A5_FAULTS: dict[str, tuple[str | None, str | None, tuple[str, ...]]] = {
-    # label: (alert-mapping shape, case-mapping source shape, files the refusal names)
-    "alert-mapping-missing": ("missing_file", None, (ALERT_MAPPING,)),
-    "alert-mapping-unparseable": ("unparseable_yaml", None, (ALERT_MAPPING,)),
-    "alert-mapping-unknown-key": ("unknown_key", None, (ALERT_MAPPING,)),
-}
+#: A leftover `settings/alert-mapping.yaml` as bytes the retired rule refused (#1222 A5), each a regular file; or none.
+#: A link, directory or FIFO at the name is the link walk's refusal, unchanged by #1345 and not a mapping finding.
+LEFTOVER_SHAPES = ("missing_file", "valid", "empty_file", "comment_only", "explicit_null", "unparseable_yaml",
+                   "non_utf8", "unknown_key", "misspelled_key", "null_entry", "empty_entry", "number_entry",
+                   "list_entry", "empty_segment")
+#: `unreadable` cannot be published (`git add` reads it), so only the sites that do not publish judge it.
+UNPUBLISHED_SITES = ("acceptance", "check-folder", "policy-cli")
 
 
-@pytest.mark.parametrize("fault", sorted(A5_FAULTS))
-def test_a5_every_entry_point_gives_the_same_tenant_verdict(tmp_path: Path, capsys: Any,
-                                                            fault: str) -> None:
+@pytest.mark.parametrize("shape", [*LEFTOVER_SHAPES, pytest.param("unreadable", marks=S.needs_non_root)])
+def test_1345_o5_a_leftover_alert_mapping_file_is_inert_at_every_entry_point(tmp_path: Path, capsys: Any,
+                                                                             shape: str) -> None:
+    """Whatever bytes (or none) `settings/alert-mapping.yaml` holds, every site gives the same pass and names no mapping
+    file: nothing requires or parses it. (#1345 O5, M1; retires #1222 A5's alert-mapping rows)"""
     w = world(tmp_path, capsys, launchable=True)
-    # Positive control: the valid tenant passes every one of the seven.
     for v in verdicts(w).values():
-        assert_passed(v)
-    alert_shape, case_shape, names = A5_FAULTS[fault]
-    if alert_shape is not None:
-        w.alert_shape(alert_shape)
-    if case_shape is not None:
-        w.case_source(case_shape)
-    vs = verdicts(w)
-    for v in vs.values():
-        assert_refused(v, *names)
-    assert_same_reasons(vs)
-    assert_no_run(vs["run-start"])
-    assert not vs["branch-launch"].detail.launches, "a sibling was spawned on a refused tenant"
+        assert_passed(v)  # control: the tenant passes every one of the seven sites
+    try:
+        w.alert_shape(shape)
+        sites = UNPUBLISHED_SITES if shape == "unreadable" else SITES
+        vs = verdicts(w, sites)
+        for v in vs.values():
+            assert_passed(v)
+            assert mapping_lines(v.text) == [], f"{v.site} names a mapping file: {v.text!r}"
+    finally:
+        S.restore_modes(w.planted.root)
+
+
+def test_1345_o5_the_run_settings_check_neither_requires_nor_parses_the_alert_mapping_file(tmp_path: Path,
+                                                                                         capsys: Any) -> None:
+    """`check_run_settings` over a run's settings copy passes with the file absent or malformed, and still refuses a
+    settings folder missing a required file. (#1345 O5)"""
+    w = world(tmp_path, capsys)
+    check, refused = S.sym("tenancy._tenant", "check_run_settings"), S.sym("tenancy._tenant", "TenantRefused")
+    w.alert_shape("missing_file")
+    check(w.planted.settings)
+    w.alert_shape("unparseable_yaml")
+    check(w.planted.settings)
+    (w.planted.settings / "verb-grants.yaml").unlink()  # control: the check still looks at what it requires
+    with pytest.raises(refused, match="verb-grants.yaml"):
+        check(w.planted.settings)
 
 
 # Further cases
 
-#: The fault shapes p102 runs through the run's own channels — one of each kind.
-P102_SHAPES = ("missing_file", "empty_file", "unparseable_yaml", "non_utf8", "directory",
-               "unknown_key", "null_entry", "empty_segment", "unreadable")
-
-
-@pytest.mark.parametrize("shape", _shape_params(P102_SHAPES))
-def test_p102_run_starts_with_a_faulted_alert_mapping(tmp_path: Path, capsys: Any,
-                                                      shape: str) -> None:
-    """A run never starts on a faulted mapping, and the refusal names the file."""
+def test_p102_a_run_with_no_alert_mapping_starts_nothing(tmp_path: Path, capsys: Any) -> None:
+    """A run for a tenant with no mapping saved is refused and reaches neither the ticket leg nor the curation enqueue;
+    with its mapping both happen. (#1345 O4; was #1222 p102 over a faulted file)"""
     w = world(tmp_path, capsys)
     enqueued: list[Any] = []
 
@@ -552,16 +446,37 @@ def test_p102_run_starts_with_a_faulted_alert_mapping(tmp_path: Path, capsys: An
     assert_passed(ok)
     assert enqueued, "a started run was not enqueued for curation"
     assert store.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], store.calls
-    try:
-        w.alert_shape(shape)
-        store = S.TicketStore(w.tmp)
-        enqueued.clear()
-        v = at_run_start(w, alert=S.ticketed_alert(), tickets=S.ticket_writer(store),
-                         update_ticket=True, enqueue=enqueue)
-        assert_refused(v, ALERT_MAPPING)
-        assert_no_run(v)
-        assert store.calls == [], f"a ticket leg ran for a refused run: {store.calls!r}"
-        assert not enqueued, "a refused run was enqueued for curation"
-        assert not v.detail.enqueued, "a refused run reached the curation enqueue"
-    finally:
-        S.restore_modes(w.planted.root)
+    from defender.records.formats import ALERT_MAPPING_MISSING
+
+    S.remap(w.planted, None)
+    store = S.TicketStore(w.tmp)
+    enqueued.clear()
+    v = at_run_start(w, alert=S.ticketed_alert(), tickets=S.ticket_writer(store),
+                     update_ticket=True, enqueue=enqueue)
+    assert v.refused, v.text
+    assert not v.passed, v.text
+    assert " ".join(ALERT_MAPPING_MISSING.split()) in " ".join(v.text.split()), v.text
+    assert_no_run(v)
+    assert store.calls == [], f"a ticket leg ran for a refused run: {store.calls!r}"
+    assert not enqueued, "a refused run was enqueued for curation"
+    assert not v.detail.enqueued, "a refused run reached the curation enqueue"
+
+
+# #1345 O5 — the file is retired: the tenant check neither requires nor parses it
+
+
+def test_1345_a_knowledge_folder_without_an_alert_mapping_file_is_accepted(tmp_path: Path, capsys: Any) -> None:
+    """No `settings/alert-mapping.yaml`: acceptance admits the tenant and `tenant.py check --folder` passes it,
+    naming no mapping file. (#1345 O5)"""
+    w = world(tmp_path, capsys)
+    assert not w.planted.alert_mapping.exists()  # premise: the planted tenant carries no mapping file (#1345 O5)
+
+    assert_passed(at_acceptance(w))
+    rc, err = tenant_py(capsys, "check", "--folder", str(w.planted.knowledge))
+    assert mapping_lines(err) == [], err  # not `rc == 0`: other findings (no `settings/systems/`) may fail the check
+
+
+@pytest.mark.parametrize("template", ["tenant-fixture", "tenant-template"])
+def test_1345_the_committed_tenants_carry_no_alert_mapping_file(template: str) -> None:
+    """The shipped template and fixture drop the file (#1345 O5); the mapping lives in the database."""
+    assert not (S.REPO_ROOT / "knowledge" / template / "settings" / ALERT_MAPPING).exists()

@@ -1,5 +1,6 @@
 """Run-record repository: name rules, bounded reads, escaped refusals, runs-folder link handling."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -155,7 +156,7 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
     alert.parent.mkdir()
     alert.write_text('{"alert": 1}', encoding="utf-8")
     with pytest.raises(TenantRefused) as setup:
-        run_common.materialize_run(alert, tenant=t)
+        run_common.materialize_run(alert, mapping=planted_mapping(), tenant=t)
     with pytest.raises(TenantRefused) as lookup:
         t.runs_repository().list()
     assert str(setup.value) == str(lookup.value), (str(setup.value), str(lookup.value))

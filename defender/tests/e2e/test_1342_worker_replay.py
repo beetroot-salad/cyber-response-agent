@@ -23,7 +23,7 @@ from defender.tests.support.jobs._jobs1342 import (
     register_tenant,
     row,
 )
-from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.e2e]
 
@@ -139,3 +139,43 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
         assert (end["setup"], end["box"]) == ("done", "started"), end
         assert end["report_committed"] is True, end
         assert row.stage == "completed", "both facts held, so rule 4 reads the committed report (r5 C2, D-h superseded)"
+
+
+async def test_1345_o4_a_queued_job_whose_tenant_has_no_mapping_ends_failed_setup_refused_with_the_reason_on_stderr(
+        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+    """The real worker and child over a tenant whose mapping row is gone (a job queued before the upgrade): the row ends
+    `failed`/`setup_refused`/"run setup refused the job", no run folder, and the child's stderr carries
+    `ALERT_MAPPING_MISSING`. The mapped replay above is the control. (#1345 O4, M2)"""
+    from defender.records.formats import ALERT_MAPPING_MISSING
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    root = tmp_path / "data"
+    root.mkdir()
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    err_file = tmp_path / "child.stderr"
+    golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
+    with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        (root / t.tenant_id / "runs").mkdir(exist_ok=True)
+
+        def child(launch) -> list[str]:
+            return ["/bin/sh", "-c", 'exec "$@" 2>>"$0"', str(err_file), sys.executable, str(ENTRY), "replay", t.commit,
+                    str(tmp_path / "marks"), "--job", launch.investigation_id, "--tenant", launch.tenant_id,
+                    "--parent-pid", str(launch.parent_pid)]
+
+        async with job_store(migrated_database) as store:
+            alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
+            inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
+            execute(migrated_database, "DELETE FROM tenancy.alert_mappings WHERE tenant_id = %s", (t.tenant_id,))
+            assert execute(migrated_database, "SELECT count(*) FROM tenancy.alert_mappings WHERE tenant_id = %s",
+                           (t.tenant_id,)) == [(0,)]
+            worker = make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers"))
+            await worker.drain()
+
+        stored = row(migrated_database, inv.investigation_id)
+        assert (stored["stage"], stored["failure_reason"], stored["failure_message"]) == (
+            "failed", "setup_refused", "run setup refused the job"), stored
+        assert not (root / t.tenant_id / "runs" / inv.investigation_id).exists(), "a run folder was made"
+        assert " ".join(ALERT_MAPPING_MISSING.split()) in " ".join(err_file.read_text(encoding="utf-8").split())

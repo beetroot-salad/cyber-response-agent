@@ -1,5 +1,6 @@
 """#947: the archive, its two derived readers, and where a sibling's artifacts may live."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -260,7 +261,7 @@ def test_947_a_runs_base_walk_still_finds_an_ordinary_run(tmp_path, monkeypatch)
     # The source's tenant, read off its location `<root>/<T>/runs/<id>`.
     tenant_id = src.parent.parent.name
     ordinary = T.mod("run_common").materialize_run(
-        RunPaths(src).alert,
+        RunPaths(src).alert, mapping=planted_mapping(),
         tenant=T1106.accept(current_data_root(), tenant_id)).run_dir
     assert ordinary.parent == base
     found = sorted(p.parent.name for p in base.rglob("provenance.json"))

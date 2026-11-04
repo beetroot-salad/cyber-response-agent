@@ -257,16 +257,17 @@ class _Lifecycle:
         return {"output": "done", "requests": 1, "truncated_by": None}
 
 
-def _resume_sibling(ep: Path) -> Path:
+def _resume_sibling(ep: Path, **directory: Any) -> Path:
     """World `b`'s sibling through the REAL `run.main --resume`; returns its run folder. The
-    episode is found under `--tenant`'s own `<T>/episodes/`."""
+    episode is found under `--tenant`'s own `<T>/episodes/`. `directory` are the tenant records' own
+    keywords (`alert_mapping=`: the mapping they hold, default today's; #1345)."""
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
 
     life = _Lifecycle()
     # Plus the in-process launch-time publish.
     argv = ["--episode", ep.name, "--world", "b", "--tenant", TENANT, "--no-learn"]
     rc = S.sym(RUN, "main")(
-        argv, directory=directory_for_argv(argv), lifecycle=life, visualize=lambda *_a, **_k: None, preflight=lambda *_a, **_k: 0,
+        argv, directory=directory_for_argv(argv, **directory), lifecycle=life, visualize=lambda *_a, **_k: None, preflight=lambda *_a, **_k: 0,
         ticket_writer=S.NoTicket(), publish=in_process_publish())
     assert life.run_dir is not None, f"the sibling never reached its run (rc={rc!r})"
     return life.run_dir
@@ -545,7 +546,7 @@ def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
     T.write_family(ep, T.family_doc(source_run_dir=str(src), episode_id=ep.name))
     S.remap(planted, {**mapping, "signature": "user.login"})
 
-    sib = _resume_sibling(ep)
+    sib = _resume_sibling(ep, alert_mapping=S.current_mapping(planted))  # the records now hold the edited mapping
     assert S.recorded(sib, "signature") == "SIG-p062", (
         "the sibling's record is not the episode copy's (it was re-derived)")
 
@@ -557,3 +558,20 @@ def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
         f"the record leg posted {len(store.comment_payloads)} comments: {store.calls}")
     assert "sig=SIG-p062" in store.comment_body(), (
         f"the sibling's ticket comment does not carry the recorded signature: {store.wire_body()!r}")
+
+
+# #1345 O3 — a sibling carries its source's record and never reads a mapping
+
+def test_1345_o3_a_sibling_of_a_tenant_with_no_mapping_still_runs_with_its_sources_record(tmp_path):
+    """The records hold no mapping for the tenant: the sibling resumes all the same and its record is the episode's copy,
+    byte for byte. (#1345 O3)"""
+    raw = _alert("o3")
+    planted, _base, src = _source(tmp_path, raw, signature="SIG-o3")
+    ep = _launch(planted, src)
+    T.write_family(ep, T.family_doc(source_run_dir=str(src), episode_id=ep.name))
+    record_bytes = S.episode_record_file(ep).read_bytes()
+
+    sib = _resume_sibling(ep, alert_mapping=None)
+
+    assert S.record_file(sib).read_bytes() == record_bytes
+    assert S.recorded(sib, "signature") == "SIG-o3"

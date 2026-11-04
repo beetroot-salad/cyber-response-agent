@@ -511,3 +511,158 @@ def test_p181_negative_zero_padded_and_string_versus_integer_i(tmp_path: Path) -
     assert negative.recorded("signature") is None
     assert padded.recorded("signature") == "05710"
     assert as_text.recorded("signature") == as_int.recorded("signature") == "5710"
+
+
+# #1345: the facts come from the tenant's mapping in the tenant records, read once at start
+
+#: A tenant mapping whose paths a leftover file, a default or a re-read would not guess.
+DB_MAPPING: Mapping[str, str] = {"signature": "detection.key", "event_time": "detection.seen",
+                                 "summary": "detection.title"}
+DETECTION = {"key": "DK-7731", "seen": "2026-09-30T08:20:00Z", "title": "Odd beacon cadence"}
+#: What the alert yields under `DB_MAPPING` and under `SHIPPED`, written out by hand.
+DB_FACTS = {"signature": "DK-7731", "event_time": "2026-09-30T08:20:00Z", "summary": "Odd beacon cadence"}
+SHIPPED_FACTS = {"signature": DECOY, "event_time": DETECTED_AT, "summary": DESCRIPTION}
+#: A mapping saved later (M4): another field for every fact, and a `case_key` that names no ticket.
+EDITED: Mapping[str, str] = {"signature": "user.login", "event_time": "detected_at", "summary": "host.hostname",
+                             "case_key": "destination.ip"}
+EDITED_FACTS = {"signature": "svc-batch", "event_time": DETECTED_AT, "summary": "app-7"}
+
+
+class _Records:
+    """The tenant records `planted.directory` reads, with `alert_mapping` answered as the test says: `entries` (a dict of
+    the mapped paths), None (none saved) or `fault` (raised, a database that went away). Every other read is the twin's."""
+
+    def __init__(self, planted: S.Planted, entries: Mapping[str, str] | None, fault: BaseException | None = None) -> None:
+        from defender.tests.support.tenancy._active1214 import active_repository
+
+        self._twin = active_repository(Path(location_path(planted.root)), planted.tenant_id, alert_mapping=None)
+        self.entries, self.fault, self.reads = entries, fault, 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._twin, name)
+
+    async def alert_mapping(self, tenant_id: Any) -> Any:
+        from defender.tests.support.tenancy._mapping1345 import mapping_value
+
+        self.reads += 1
+        if self.fault is not None:
+            raise self.fault
+        return None if self.entries is None else mapping_value(self.entries)
+
+    def directory(self) -> Any:
+        from defender.tenancy import TenantDirectory
+
+        return TenantDirectory(lambda: self)
+
+
+def _started(tmp_path: Path, planted: S.Planted, alert: Mapping[str, Any], **run: Any) -> S.Drive:
+    """One alert through `run.main`, closing its report; the run must have gone past setup."""
+    d = S.run_alert(tmp_path, alert=alert, tenant=planted, main=S.closing_main_turns(), **run)
+    ran = d.raised is None and d.refusal is None and d.rc == 0 and d.run_dir is not None
+    assert ran, f"the run did not run: rc={d.rc!r} refusal={d.refusal!r} raised={d.raised!r}"
+    return d
+
+
+def _facts(d: S.Drive) -> dict[str, str | None]:
+    return {f: d.recorded(f) for f in ("signature", "event_time", "summary")}
+
+
+def test_1345_o3_the_facts_come_from_the_tenants_mapping_never_a_leftover_file(tmp_path: Path) -> None:
+    """The record carries the facts the tenant's mapping yields; a leftover file mapping other fields is ignored,
+    and another mapping yields other facts. (#1345 O3, M1)"""
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=DB_MAPPING)
+    planted.alert_mapping.write_text(S.alert_mapping_text(SHIPPED), encoding="utf-8")  # leftover: maps the decoy fields
+    alert = _alert(detection=DETECTION)
+
+    mapped = _started(tmp_path / "db", planted, alert)
+    S.remap(planted, SHIPPED)
+    other = _started(tmp_path / "other", planted, alert)
+
+    assert _facts(mapped) == DB_FACTS
+    assert _facts(other) == SHIPPED_FACTS  # positive control: the database row is what changed the facts
+
+
+def test_1345_m4_a_mapping_replaced_after_the_start_changes_nothing_that_run_recorded_or_wrote(tmp_path: Path) -> None:
+    """Replacing the tenant's mapping while a run is under way changes neither its recorded facts nor the ticket comment
+    later written from them; a new run derives from the new mapping. (#1345 M4)"""
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"))
+    S.ticket_the_tenant(planted, SHIPPED)
+    records = _Records(planted, S.current_mapping(planted))
+
+    def replace(_run_dir: Path) -> None:
+        records.entries = EDITED
+
+    store = S.TicketStore(tmp_path)
+    first = S.run_alert(tmp_path / "first", alert=S.ticketed_alert(_alert()), tenant=planted, main=S.closing_main_turns(),
+                        tickets=S.ticket_writer(store), update_ticket=True, before=replace, directory=records.directory())
+    assert first.raised is None, first.raised
+    assert first.refusal is None, first.refusal
+    assert first.run_dir is not None
+    assert records.entries == EDITED, "premise: the replace happened while the run was under way"
+
+    assert _facts(first) == SHIPPED_FACTS
+    assert store.paths(S.COMMENTS_SUFFIX) == [f"/tickets/{S.TICKET_KEY}/comments"], store.calls
+    assert S.COMMENT_SIGNATURE.search(store.comment_body()).group(1) == DECOY  # type: ignore[union-attr]
+    retry = _started(tmp_path / "retry", planted, _alert(), directory=records.directory())
+    assert _facts(retry) == EDITED_FACTS
+
+
+def test_1345_o4_a_run_for_a_tenant_with_no_mapping_is_refused_at_setup_before_any_copy_or_folder(tmp_path: Path) -> None:
+    """No mapping saved: the run is refused with `ALERT_MAPPING_MISSING`, before the knowledge copy, setup or any run
+    folder; the same tenant with a mapping runs. (#1345 O4, M2)"""
+    from defender import run as run_py
+    from defender import run_common
+    from defender.records.formats import ALERT_MAPPING_MISSING
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    assert "set-alert-mapping" in ALERT_MAPPING_MISSING
+    assert "/alert-mapping" in ALERT_MAPPING_MISSING
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
+    control = _started(tmp_path / "control", planted, _alert())  # control: with its mapping the run starts
+    before = control.runs_base_entries()
+    assert len(before) >= 1
+
+    S.remap(planted, None)
+    with counting_calls(copy=run_py._copy_knowledge, materialize=run_common.materialize_run) as calls:  # noqa: SLF001
+        refused = S.run_alert(tmp_path / "none", alert=_alert(), tenant=planted, main=S.closing_main_turns())
+
+    assert refused.raised is None, refused.raised
+    assert " ".join((refused.refusal or "").split()).count(" ".join(ALERT_MAPPING_MISSING.split())) == 1, refused.refusal
+    assert not refused.lifecycle_calls
+    assert refused.main.requests == 0
+    assert (calls["copy"], calls["materialize"]) == (0, 0)
+    assert refused.run_dir is None
+    assert refused.runs_base_entries() == before, "a refused run left a run folder"
+
+
+def test_1345_o4_a_database_that_goes_away_at_the_mapping_read_is_a_setup_refusal(tmp_path: Path) -> None:
+    """The records answer tenant acceptance and then cannot be reached at the mapping read: run start refuses on one
+    line saying so, with no traceback, before any copy or run folder; the same records answering run. (#1345 O4)"""
+    import sqlalchemy.exc
+
+    from defender import run as run_py
+    from defender import run_common
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
+    gone = _Records(planted, SHIPPED, fault=sqlalchemy.exc.OperationalError(
+        "SELECT", {}, Exception("connection failed: no route to host")))
+    live = _Records(planted, SHIPPED)
+    _started(tmp_path / "control", planted, _alert(), directory=live.directory())
+    assert live.reads == 1, "premise: run start reads the mapping from the directory's records"
+
+    with counting_calls(copy=run_py._copy_knowledge, materialize=run_common.materialize_run) as calls:  # noqa: SLF001
+        refused = S.run_alert(tmp_path / "gone", alert=_alert(), tenant=planted, main=S.closing_main_turns(),
+                              directory=gone.directory())
+
+    assert refused.raised is None, refused.raised
+    text = refused.refusal or ""
+    assert "could not be reached" in text, text
+    assert "no route to host" in text, text
+    assert len(text.splitlines()) == 1, text
+    assert "OperationalError" not in text, text
+    assert "Traceback" not in text, text
+    assert gone.reads == 1
+    assert (calls["copy"], calls["materialize"]) == (0, 0)
+    assert refused.run_dir is None
+    assert not refused.lifecycle_calls

@@ -19,8 +19,10 @@ from defender.tests.support.shared._postgres1339 import VERSION_TABLE, database,
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
 IDENTITY_TABLES = {"users", "memberships", "sessions"}  # #1214: `tenants` moved to `tenancy`
-JOBS_TABLES = {"alerts", "investigations"}  # #1342
+JOBS_TABLES = {"alerts", "investigations"}  # #1342 (#1345 r5: the mapping table is a tenant record, in `tenancy`)
 UNKNOWN_REVISION = "f00dfeedbeef"
+#: #1345 r5 Upgrade: the migration after `0005_uuid_ids`. r5 names no id: this one is DESIGN-IMPLIED for the code stage.
+ALERT_MAPPING_REVISION = "0006_alert_mapping"
 ROOT = Path(__file__).resolve().parents[3]  # the checkout under test, put first on the child's path
 
 
@@ -325,17 +327,19 @@ def test_the_dev_command_without_a_database_refuses_loudly():
 
 
 def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
-    """The history is the baseline, `0002_tenancy`, `0003_sign_login`, `0004_jobs`, then #1382's `0005_uuid_ids` as head
-    (#1342 O1; r6: tenants are #1214's records; jobs follows #1163's revision, so the history stays one line)."""
+    """The history is the baseline, `0002_tenancy`, `0003_sign_login`, `0004_jobs`, #1382's `0005_uuid_ids`, then #1345's
+    `0006_alert_mapping` as head (#1342 O1; r6: tenants are #1214's records; jobs follows #1163's revision, so the history
+    stays one line; #1345 r5 Upgrade: the revision id is design-implied, `ALERT_MAPPING_REVISION`)."""
     from defender.migrations import _scripts, head
 
     scripts = _scripts()
-    assert head() == "0005_uuid_ids"
-    assert scripts.get_revision(head()).down_revision == "0004_jobs"
+    assert head() == ALERT_MAPPING_REVISION
+    assert scripts.get_revision(head()).down_revision == "0005_uuid_ids"
+    assert scripts.get_revision("0005_uuid_ids").down_revision == "0004_jobs"
     assert scripts.get_revision("0004_jobs").down_revision == "0003_sign_login"
     assert scripts.get_revision("0003_sign_login").down_revision == "0002_tenancy"
     assert scripts.get_revision("0002_tenancy").down_revision == "0001_baseline"
-    assert [r.revision for r in scripts.walk_revisions()] == ["0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy",
+    assert [r.revision for r in scripts.walk_revisions()] == [ALERT_MAPPING_REVISION, "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy",
                                                            "0001_baseline"]
 
 

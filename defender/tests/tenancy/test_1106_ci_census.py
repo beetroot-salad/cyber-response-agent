@@ -95,6 +95,24 @@ def test_a_fixture_with_no_case_file_keeps_the_gate_green(tmp_path):
     assert rc == 0, out
 
 
+@pytest.mark.parametrize("folder", ["tenant-fixture", "tenant-template"])
+def test_1345_a_leftover_malformed_alert_mapping_file_keeps_the_gate_green(tmp_path, folder):
+    """The folders hold no `settings/alert-mapping.yaml` and the gate is green; a malformed one left in either is not
+    read, so it stays green. (#1345 O5; the template used to be refused without it)"""
+    repo = _repo(tmp_path)
+    leftover = repo / "knowledge" / folder / "settings" / "alert-mapping.yaml"
+    assert not leftover.exists()  # premise: the planted folders carry none
+    rc, out = _gate(repo)
+    assert rc == 0, out
+    leftover.write_text("summary: [unclosed\nsignature: {\n", encoding="utf-8")
+    seed_repo(repo, add="-A", message="a leftover file")
+
+    rc, out = _gate(repo)
+
+    assert rc == 0, out
+    assert "alert-mapping" not in out, out
+
+
 def test_a_row_missing_from_the_template_turns_the_gate_red_naming_the_template(tmp_path):
     rc, out = _gate(_repo(tmp_path, template=_without(ROWS_TEMPLATE, ("alpha", "health-check"))))
     assert rc != 0, out

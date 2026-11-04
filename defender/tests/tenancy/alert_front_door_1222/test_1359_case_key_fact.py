@@ -111,11 +111,25 @@ def test_older_records_carry_no_case_key_and_still_read():
 
 
 def test_the_alert_mapping_accepts_the_fourth_fact_and_holds_it_to_the_path_rules():
-    """`case_key` is a mapping key like the others: a dotted path is accepted, a malformed path or an unknown key is not. Fact case_key."""
+    """`case_key` is a mapping key like the others: a dotted path is accepted, a malformed path or an unknown key is not.
+    Fact case_key. (r5: `parse_mapping` is now the file format of `tenant.py set-alert-mapping`, O6; the refusals name the entry, not the retired file.)"""
     assert A.parse_mapping(MAPPING_TEXT).path_of(CASE_KEY) == "ticket.key"
     for bad in ('case_key: ""', "case_key: 42", "case_key: ticket..key", "case_key: [ticket.key]",
                 "case_key: ' ticket.key'"):
-        with pytest.raises(A.AlertMappingFault, match="alert-mapping.yaml"):
+        with pytest.raises(A.AlertMappingFault, match="case_key"):
             A.parse_mapping(f"signature: rule.id\n{bad}\n")
-    with pytest.raises(A.AlertMappingFault, match="alert-mapping.yaml"):
+    with pytest.raises(A.AlertMappingFault):
         A.parse_mapping(f"{MAPPING_TEXT}severity: rule.severity\n")
+
+
+def test_the_alert_mapping_file_takes_the_six_entries_and_a_four_entry_file_leaves_the_new_two_unmapped():
+    """r5 O6: `title` and `description` are file entries too (same path rules); a file without them, today's format, maps
+    only what it names. (#1345 O6, D3)"""
+    six = A.parse_mapping(f"{MAPPING_TEXT}title: rule.description\ndescription: rule.id\n")
+    assert (six.path_of("title"), six.path_of("description")) == ("rule.description", "rule.id")
+    four = A.parse_mapping(MAPPING_TEXT)
+    assert (four.path_of("title"), four.path_of("description")) == (None, None)
+    for bad in ("title: a..b", "description: ' x'", "title: 7", "description: ''"):
+        entry = bad.split(":")[0]
+        with pytest.raises(A.AlertMappingFault, match=entry):
+            A.parse_mapping(f"{MAPPING_TEXT}{bad}\n")

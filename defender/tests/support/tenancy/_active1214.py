@@ -53,6 +53,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, seed_postgres, seed_twin
+
 if TYPE_CHECKING:
     from defender.tenancy import TenantDirectory
 
@@ -93,8 +95,11 @@ def active_directory(data_root: Path, tenant: str, **keywords: Any) -> TenantDir
 
 def active_repository(data_root: Path, tenant: str, *, state: str = "active", repo: str | None = None,
                       origin: str | None = None, wiring: bool = True,
-                      generations: Sequence[Mapping[str, Any]] = ()) -> Any:
-    """The in-memory tenant repository behind `active_directory` (for a test that reads it back directly)."""
+                      generations: Sequence[Mapping[str, Any]] = (),
+                      alert_mapping: Mapping[str, str | None] | None = PLANTED_ALERT_MAPPING) -> Any:
+    """The in-memory tenant repository behind `active_directory` (for a test that reads it back directly).
+    #1345: it holds today's alert mapping (`_mapping1345.PLANTED_ALERT_MAPPING`) for the tenant; a test of absence
+    passes `alert_mapping=None`, another mapping passes its six entries."""
     from defender.tenancy import InMemoryTenantRepository
 
     twin: Any = InMemoryTenantRepository()
@@ -106,6 +111,7 @@ def active_repository(data_root: Path, tenant: str, *, state: str = "active", re
         run_sync(_await(added))
     for fields in generations:
         _seed_generation(twin, str(tenant), fields)
+    seed_twin(twin, str(tenant), alert_mapping)
     return twin
 
 
@@ -147,9 +153,12 @@ def active_tenant_directory(data_root: Path) -> Callable[..., TenantDirectory]:
 _JOB = {"creating": ("create", "names", "service"), "offboarding": ("offboard", "offboard", "service")}
 
 
-def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: str | None = None,
+def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: str | None = None,  # noqa: PLR0913
                          origin: str | None = None, wiring: bool = True,
-                         data_root: Path | None = None, generations: Sequence[Mapping[str, Any]] = ()) -> None:
+                         data_root: Path | None = None, generations: Sequence[Mapping[str, Any]] = (),
+                         alert_mapping: Mapping[str, str | None] | None = None) -> None:
+    """#1345: `alert_mapping` (six entries) is saved through the store after the rows; the default saves none
+    (lifecycle and identity tests do not start runs). `_jobs1342.register_tenant` defaults it to `FIXTURE_ALERT_MAPPING`."""
     from defender.tests.support.shared._postgres1339 import execute
 
     action, step, actor = _JOB.get(state, (None, None, None))
@@ -160,6 +169,7 @@ def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: 
                 (tenant, repo or f"tenants/{tenant}", _origin_of(data_root or Path("/nonexistent"), tenant, origin)))
     for fields in generations:
         insert_generation(dsn, tenant, fields)
+    seed_postgres(dsn, tenant, alert_mapping)
 
 
 def insert_generation(dsn: str, tenant: str, fields: Mapping[str, Any]) -> None:

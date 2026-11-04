@@ -30,7 +30,6 @@ JIRA_WRITE = ("POST", "/rest/api/3/issue/*/comment")
 def _files(system: str, decl: str, *, env_extra: str = "") -> dict[str, str]:
     files = A.system_files(system, decl, env_extra=env_extra)
     files[f"settings/{C.CASE_RECORD_REL}"] = C.case_record_text(system)
-    files["settings/alert-mapping.yaml"] = C.alert_mapping_text()
     return files
 
 

@@ -1,5 +1,6 @@
 """`run_common.materialize_run`: the runs base follows from the accepted tenant; an unplaced tenant refuses and nothing is created; a sibling lands in its episode."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -22,10 +23,10 @@ X = fixture_uuid("case-x")
 
 def _materialize(alert: Path, tenant_id: str, **kw):
     """The entry's pipeline: resolve the data root and accept `tenant_id` there (the knowledge-folder check),
-    then `materialize_run(tenant=...)`. Setup takes no run id: it mints one, or is handed the
+    then `materialize_run(mapping=planted_mapping(), tenant=...)`. Setup takes no run id: it mints one, or is handed the
     arm's run (`run=`, made from its roster id by the episode view)."""
     tenant = H.accept(H.resolve_data_root(), tenant_id)
-    return H.run_common().materialize_run(alert, tenant=tenant, **kw).run_dir
+    return H.run_common().materialize_run(alert, mapping=planted_mapping(), tenant=tenant, **kw).run_dir
 
 
 def _refused(fn) -> str:

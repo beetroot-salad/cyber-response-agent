@@ -1,5 +1,6 @@
 """Every salted frame in a driven run carries its own salt, absent from the content it delimits; run-dir file set parity."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 import re
 from pathlib import Path
@@ -48,7 +49,7 @@ def build(tmp_path, monkeypatch, golden: Path = GOLDEN):
     # The fixture tenant: `drive` runs the run under the tenant it sets up in this same data
     # root, and a data root holds one tenant.
     tenant = set_up_tenant(data_root)
-    return run_common.materialize_run(golden / "alert.json", tenant=tenant).run_dir
+    return run_common.materialize_run(golden / "alert.json", mapping=planted_mapping(), tenant=tenant).run_dir
 
 
 def tokens(*transcripts: str) -> set[str]:

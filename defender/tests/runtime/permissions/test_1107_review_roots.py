@@ -79,16 +79,6 @@ def test_settings_faults_name_no_host_path(tmp_path):
         "elastic key": str(_raised(elastic_adapter.query, ctx, native_query="*")),
         "no folder": str(_raised(transport.system_entry, ctx, "no-such-system")),
     }
-    # An unreadable alert mapping is refused by the tenant check (#1222), which names the file by
-    # its settings-relative path. (The case-record file is not refused by acceptance: D-12.)
-    from defender.records._tenant_id import TenantRefused
-
-    bad_root, bad_folder = _tenant(tmp_path, "pth2")
-    (S.settings_of(bad_folder) / "alert-mapping.yaml").write_text("- not\n- a mapping\n", encoding="utf-8")
-    with pytest.raises(TenantRefused) as refused:
-        S.resolve(bad_root)
-    assert "alert-mapping.yaml" in str(refused.value)
-    assert str(tmp_path) not in str(refused.value)
     host = str(tmp_path)
     for arm, text in texts.items():
         assert host not in text, f"{arm}: the fault names the host path: {text!r}"

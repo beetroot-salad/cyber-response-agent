@@ -72,22 +72,25 @@ def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
 # --- one revision, the version check ----------------------------------------------------------------
 
 
-def test_the_history_is_the_baseline_and_four_revisions_on_it_in_a_line():
+def test_the_history_is_the_baseline_and_five_revisions_on_it_in_a_line():
     """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11); #1163 adds one more, the six
     sign columns of the generation record (A24/r8.4); #1342 puts its jobs revision on #1163's, and #1382 its uuid ids
-    revision on that: a single line baseline -> #1214's -> #1163's -> #1342's -> #1382's, no branch."""
+    revision on that, and #1345's mapping revision on that (r5 Upgrade): a single line baseline -> #1214's -> #1163's ->
+    #1342's -> #1382's -> #1345's, no branch."""
     from alembic.script import ScriptDirectory
 
     from defender.migrations import _config
 
     script = ScriptDirectory.from_config(_config())
     chain = [(r.revision, r.down_revision) for r in script.walk_revisions()]  # newest first
-    assert len(chain) == 5
-    [(head_revision, jobs), (jobs_revision, sign), (sign_revision, middle), (middle_revision, down), (base, base_down)] = chain
-    assert (jobs, sign, middle, down, base, base_down) == (jobs_revision, sign_revision, middle_revision, BASELINE, BASELINE, None)
+    assert len(chain) == 6
+    [(head_revision, uuid_ids), (uuid_revision, jobs), (jobs_revision, sign), (sign_revision, middle), (middle_revision, down),
+     (base, base_down)] = chain
+    assert (uuid_ids, jobs, sign, middle, down, base, base_down) == (
+        uuid_revision, jobs_revision, sign_revision, middle_revision, BASELINE, BASELINE, None)
     assert middle_revision == TENANCY, "#1214's revision keeps its id"
     assert sign_revision == SIGN_LOGIN, "#1163's revision keeps its id"
-    assert len({head_revision, jobs_revision, sign_revision, middle_revision, BASELINE}) == 5
+    assert len({head_revision, uuid_revision, jobs_revision, sign_revision, middle_revision, BASELINE}) == 6
     assert script.get_heads() == [head_revision], "the history branches"
 
 @pytest.mark.postgres
@@ -112,7 +115,8 @@ def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_datab
 @pytest.mark.postgres
 def test_the_revision_moves_tenants_and_adds_the_lifecycle_tables(migrated_database):
     """At head `tenancy` holds tenants and the new tables, `identity` no tenants, and memberships reference `tenancy.tenants` (O11)."""
-    assert _tables(migrated_database, "tenancy") == {"tenants", "forge_wiring", "generations", "publish_status"}
+    assert _tables(migrated_database, "tenancy") == {"tenants", "forge_wiring", "generations", "publish_status",
+                                                     "alert_mappings"}  # #1345 r5: the mapping is a tenant record
     assert "tenants" not in _tables(migrated_database, "identity")
     assert [target for _, target in _fk_to_tenants(migrated_database)] == ["tenancy.tenants"]
 
@@ -247,7 +251,7 @@ def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_si
                      bot_login=f"bot-{tenant}-{status}", role_id=f"role-{status}")
 
     def rows() -> dict[str, list[dict[str, object]]]:
-        tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version"})
+        tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version", "alert_mappings"})  # #1345: a table the head adds
         return {t: sorted((r[0] for r in execute(empty_database, f"SELECT to_jsonb(x) FROM tenancy.{t} x")),  # noqa: S608
                           key=lambda row: json.dumps(row, sort_keys=True)) for t in tables}
     before = rows()
