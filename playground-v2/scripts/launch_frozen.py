@@ -42,7 +42,7 @@ for _path in (HERE, HERE.parent, REPO):
 
 from chaos import lock  # noqa: E402
 from evaluations import held_out  # noqa: E402
-from lab_ops import LabOps, sha256_file  # noqa: E402
+from lab_ops import LabOps, sha256_file, stamp  # noqa: E402
 
 PLAYGROUND_CONTEXT = "soc-playground"
 
@@ -74,10 +74,6 @@ def freeze_digest(parsed: Any) -> str:
         return held_out.freeze_digest(parsed)
     except (TypeError, ValueError) as exc:
         raise LaunchRefused(f"freeze.yaml holds a value canonical JSON cannot carry: {exc}") from exc
-
-
-def _iso(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _check_alert(freeze: dict, alert: Path) -> None:
@@ -213,7 +209,7 @@ def launch(case_dir: Path, *, index: Path, parts_dir: Path, lock_store: Any, ops
                 raise RunDied(f"{slug}: the agent exited rc={rc} without announcing a run id; "
                               "no row written, re-launch")
             fingerprint = fingerprint_of(freeze["window"], as_of, arrived_by)
-            verified_at = _iso(clock.now())
+            verified_at = stamp(clock.now())
         except BaseException:
             try:
                 ops.teardown()

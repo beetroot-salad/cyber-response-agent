@@ -1438,6 +1438,10 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                     # A sibling's evidence was staged on purpose, so it must never feed the catalog.
                     if world is not None:
                         _logger.info("--episode: a sibling world is not enqueued for curation")
+                    elif started.cut is not None:
+                        # A run served as of another moment read a frozen lab (#1347 r6.2): its
+                        # evidence is not today's, so it never feeds the catalog.
+                        _logger.info("--as-of: a frozen run is not enqueued for curation")
                     elif ns.no_learn:
                         _logger.info("--no-learn set; not enqueuing for curation")
                     elif enqueue_curation(run, started.alert, tenant=started.accepted,

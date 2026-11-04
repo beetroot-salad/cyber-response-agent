@@ -45,7 +45,7 @@ for _path in (HERE, HERE.parent):
         sys.path.insert(0, str(_path))
 
 from chaos import lock  # noqa: E402
-from lab_ops import LabOps, sha256_file  # noqa: E402
+from lab_ops import LabOps, sha256_file, stamp, utc  # noqa: E402
 
 GRACE = timedelta(hours=1)  # D11: as_of = alert_at + grace
 HISTORY = timedelta(days=31)  # D1: the guaranteed window reaches back at most 31 days
@@ -62,18 +62,6 @@ class WallClock:
     def sleep_until(self, moment: datetime) -> None:
         while (left := (moment - self.now()).total_seconds()) > 0:
             time.sleep(min(left, 60.0))
-
-
-def _utc(value: Any) -> datetime:
-    if isinstance(value, datetime):
-        dt = value
-    else:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
-
-
-def _iso(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _report(slug: str, window: list[str], fingerprint: dict, parts: dict) -> str:
@@ -117,7 +105,7 @@ def capture(case_dir: Path, *, scenario: str, rule: str, chaos: str, ops: Any, l
         fired = ops.fire(scenario, seed, token)
         # The case's alert is its rule's, never another alert on the same host.
         alert = ops.wait_alert({**fired, "rule_id": rule})
-        alert_at = _utc(alert["@timestamp"])
+        alert_at = utc(alert["@timestamp"])
         as_of = alert_at + GRACE
         clock.sleep_until(as_of)
 
@@ -140,10 +128,10 @@ def capture(case_dir: Path, *, scenario: str, rule: str, chaos: str, ops: Any, l
             live = None
 
         clock.sleep(settle_s)
-        captured_at = _utc(es_now())
+        captured_at = utc(es_now())
         refresh()
-        lower = max(_utc(history_start), alert_at - HISTORY)
-        window = [_iso(lower), _iso(as_of)]
+        lower = max(utc(history_start), alert_at - HISTORY)
+        window = [stamp(lower), stamp(as_of)]
         fingerprint = fingerprint_of([lower, as_of], as_of, captured_at)
 
         parts = {name: "sha256:" + sha256_file(staging / name) for name in names}
@@ -151,11 +139,11 @@ def capture(case_dir: Path, *, scenario: str, rule: str, chaos: str, ops: Any, l
         # so a re-captured case never keeps an earlier alert beside a freeze built around another.
         alert_bytes = (json.dumps(alert, indent=2) + "\n").encode("utf-8")
         freeze = {
-            "alert_at": _iso(alert_at),
+            "alert_at": stamp(alert_at),
             "alert": "sha256:" + hashlib.sha256(alert_bytes).hexdigest(),
-            "as_of": _iso(as_of),
+            "as_of": stamp(as_of),
             "window": window,
-            "captured_at": _iso(captured_at),
+            "captured_at": stamp(captured_at),
             "fingerprint": {k: [int(x) for x in v] for k, v in sorted(fingerprint.items())},
             "parts": parts,
             "chaos": None if not chaos or chaos == "none" else

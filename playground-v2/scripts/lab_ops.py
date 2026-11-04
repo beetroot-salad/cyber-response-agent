@@ -76,7 +76,9 @@ class LabOpsError(RuntimeError):
     """A lab command failed, or Elasticsearch answered with an error."""
 
 
-def _utc(value: Any) -> datetime:
+def utc(value: Any) -> datetime:
+    """`value` (a datetime, or ISO-8601 text) as aware UTC; naive is read as UTC. The one reader
+    of freeze and fingerprint moments, shared by capture and the launcher."""
     if isinstance(value, datetime):
         dt = value
     else:
@@ -84,7 +86,9 @@ def _utc(value: Any) -> datetime:
     return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
 
 
-def _stamp(dt: datetime) -> str:
+def stamp(dt: datetime) -> str:
+    """`dt` as `YYYY-MM-DDTHH:MM:SS.mmmZ`: the one spelling of every freeze and fingerprint
+    moment, so the freeze and the post-run check can never disagree on one."""
     return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
@@ -184,8 +188,8 @@ class LabOps:
         """Per backing index x hour inside `[window[0], as_of]`: COUNT(*) and SUM(_version), with
         the read path's cut clause as the request filter. Paged by day so no page nears the row
         cap; a full page is refused rather than trusted (r6.1)."""
-        lower, upper = _utc(window[0]), _utc(as_of)
-        flt = _cut_clause(upper, _utc(arrived_by) if arrived_by is not None else None)
+        lower, upper = utc(window[0]), utc(as_of)
+        flt = _cut_clause(upper, utc(arrived_by) if arrived_by is not None else None)
         out: dict[str, list[int]] = {}
         # Page boundaries after the first sit on whole hours, so each hour bucket belongs to
         # exactly one page: [floor_hour(start), end), the last page closed at as_of.
@@ -197,20 +201,20 @@ class LabOps:
                 last = end == upper
                 query = (
                     f"FROM {pattern} METADATA _index, _version\n"
-                    f'| WHERE @timestamp >= TO_DATETIME("{_stamp(start)}") '
-                    f'AND @timestamp {"<=" if last else "<"} TO_DATETIME("{_stamp(end)}")\n'
+                    f'| WHERE @timestamp >= TO_DATETIME("{stamp(start)}") '
+                    f'AND @timestamp {"<=" if last else "<"} TO_DATETIME("{stamp(end)}")\n'
                     "| EVAL hour = DATE_TRUNC(1 hour, @timestamp)\n"
                     "| STATS docs = COUNT(*), versions = SUM(_version) BY _index, hour\n"
                     f"| LIMIT {PAGE_LIMIT}"
                 )
                 rows = self._esql(query, flt)
                 if len(rows) >= PAGE_LIMIT:
-                    raise LabOpsError(f"fingerprint page {_stamp(start)}..{_stamp(end)} of "
+                    raise LabOpsError(f"fingerprint page {stamp(start)}..{stamp(end)} of "
                                       f"{pattern} came back with {len(rows)} rows (the cap): "
                                       "it may be truncated; refusing")
                 owned_from = start.replace(minute=0, second=0, microsecond=0)
                 for count, versions, index, hour in rows:
-                    bucket = _utc(hour)
+                    bucket = utc(hour)
                     # A bucket outside the page that owns it is not this page's to count.
                     if not (owned_from <= bucket and (bucket <= end if last else bucket < end)):
                         continue
@@ -240,7 +244,7 @@ class LabOps:
         started = datetime.now(timezone.utc)
         run_id, _, _ = runner.run_scenario(
             catalog[scenario], seed, {}, False, lock_store=store, lock_token=lock_token)
-        return {"run_id": run_id, "started_at": _stamp(started),
+        return {"run_id": run_id, "started_at": stamp(started),
                 "target_host": catalog[scenario]["target_host"]}
 
     def wait_alert(self, fired: dict) -> dict:
@@ -353,7 +357,7 @@ class LabOps:
 
     def load_frozen(self, parts_dir: Path, as_of: Any) -> dict:
         """A fresh frozen copy from the parts in `parts_dir`, pinned at `as_of`."""
-        as_of_text = _stamp(_utc(as_of))
+        as_of_text = stamp(utc(as_of))
         self._start_engine()
         host = self._engine_host
         assert host is not None

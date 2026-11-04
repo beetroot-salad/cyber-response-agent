@@ -78,7 +78,7 @@ def recording_registry(seen: Seen) -> type:
 
 
 def launch(tmp_path: Path, flags: list[str], *, system: str = "elastic", verb: str = "query",
-           params: dict | None = None):
+           params: dict | None = None, enqueue: Any = None, learn: bool = False):
     """A natural run through `run.main` that makes one gathered call, with `flags` added."""
     _base, seed = T.runs_base(tmp_path)
     tenant_id = T.current_tenant().id
@@ -88,8 +88,12 @@ def launch(tmp_path: Path, flags: list[str], *, system: str = "elastic", verb: s
     gather = C.script(clock, (0, C.query(system, verb, params or {"native_query": "event.action:*"})),
                       (0, C.H.Turn(text="Summary: one query.")))
     seen = Seen()
-    out = C.run_main([*C.natural_argv(RunPaths(seed).alert, tenant_id), *flags], clock=clock,
-                     main=main, gather=gather, registry_cls=recording_registry(seen))
+    argv = C.natural_argv(RunPaths(seed).alert, tenant_id)
+    if learn:
+        argv.remove("--no-learn")
+    out = C.run_main([*argv, *flags], clock=clock,
+                     main=main, gather=gather, registry_cls=recording_registry(seen),
+                     enqueue=enqueue)
     return out, seen, clock
 
 
@@ -392,3 +396,19 @@ def test_a_direct_drive_with_a_cut_and_a_world_is_refused_before_anything_is_rea
             alert_path=tmp_path / "alert.json", run=None, defender_dir=tmp_path,
             model_name="m", model_override=None, box=None, tenant=None,
             world=object(), cut=ReadCut(AS_OF))
+
+
+@pytest.mark.parametrize("flags", [*EITHER_CUT, pytest.param([], id="ordinary")])
+def test_a_frozen_run_is_never_enqueued_for_curation_even_without_no_learn(tmp_path, flags):
+    """r6.2 (review #1353): a run served as of another moment never feeds learning, as a sibling
+    world never does; `--no-learn` is not needed for it. Control: an ordinary run is enqueued."""
+    asked: list[Any] = []
+
+    def enqueue(*args: Any, **kwargs: Any) -> bool:
+        asked.append(args)
+        return True
+
+    out, _seen, _clock = launch(tmp_path, flags, enqueue=enqueue, learn=True)
+
+    assert out.exit == 0, f"refusal={out.refusal}"
+    assert len(asked) == (0 if flags else 1), asked

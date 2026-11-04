@@ -15,7 +15,7 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _io
+from defender import _clock, _io
 from defender.records import formats
 from defender import tenancy  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
@@ -70,7 +70,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     if world is not None and run is None:
         raise TypeError("materialize_run(world=…) needs the arm's handle (`run=`): an arm is made "
                         "only from its episode's roster")
-    started = _started_at() if started_at is None else _z_seconds(started_at)
+    started = _started_at() if started_at is None else _clock.z_seconds(started_at)
     if settings is None:
         settings = tenancy.clone_halves(tenant)[1]
     front_door = _admit_input(alert, settings=settings, world=world,
@@ -111,11 +111,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
 
 def _started_at() -> str:
     """When run setup started this run, as ISO-8601 UTC text to the second (#1187 O7)."""
-    return _z_seconds(_dt.datetime.now(_dt.UTC))
-
-
-def _z_seconds(moment: _dt.datetime) -> str:
-    return moment.astimezone(_dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return _clock.z_seconds(_dt.datetime.now(_dt.UTC))
 
 
 @_dataclasses.dataclass(frozen=True)
