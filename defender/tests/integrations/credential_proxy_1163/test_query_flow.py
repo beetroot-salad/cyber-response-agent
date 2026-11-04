@@ -348,6 +348,45 @@ def test_1391_o3_elastic_faults_follow_the_proxys_classification(
     assert [s.path.split("?")[0] for s in up.seen] == [path]
 
 
+@pytest.mark.parametrize(("verb", "kw", "path"), [
+    pytest.param("query", {"native_query": "*"}, f"/{A.ELASTIC_EVENTS}/_search", id="query"),
+    pytest.param("esql", {"query": f"FROM {A.ELASTIC_EVENTS} | LIMIT 1"}, "/_query", id="esql"),
+])
+def test_1391_elastic_query_errors_reach_the_agent_as_their_root_cause(
+        tmp_path, data_root, verb, kw, path):
+    """A 400 in Elasticsearch's error shape reaches the agent as its root cause's type and reason,
+    not the whole nested error document (shard lists, stack of causes). PR #1409 review."""
+    filler = [{"shard": n, "index": "logs", "reason": {"type": "x", "reason": "y" * 200}}
+              for n in range(50)]
+    body = json.dumps({"error": {
+        "root_cause": [{"type": "query_shard_exception", "reason": "Failed to parse query [a:(]"}],
+        "type": "search_phase_execution_exception", "reason": "all shards failed",
+        "failed_shards": filler}, "status": 400}).encode()
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
+        up.replies[path] = (400, {"Content-Type": "application/json"}, body)
+        with pytest.raises(UpstreamFault) as raised:
+            elastic_adapter.VERBS[verb](ctx, **kw)
+
+    text = str(raised.value)
+    assert "query_shard_exception: Failed to parse query [a:(]" in text, text
+    assert "failed_shards" not in text, text
+    assert len(text) < 500, text
+
+
+def test_1391_an_elastic_error_given_as_text_reaches_the_agent_as_that_text(tmp_path, data_root):
+    """Elasticsearch's plain error form (`{"error": "<text>", "status": 400}`) reaches the agent
+    as the text itself. PR #1409 review."""
+    body = json.dumps({"error": "no handler found for uri [/x] and method [POST]",
+                       "status": 400}).encode()
+    with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
+        up.replies["/_query"] = (400, {"Content-Type": "application/json"}, body)
+        with pytest.raises(UpstreamFault) as raised:
+            elastic_adapter.VERBS["esql"](ctx, query=f"FROM {A.ELASTIC_EVENTS} | LIMIT 1")
+
+    assert str(raised.value).endswith(": no handler found for uri [/x] and method [POST]"), (
+        raised.value)
+
+
 @pytest.mark.parametrize(("status", "fault", "names"), [
     pytest.param(401, ConfigFault, None, id="401"),
     pytest.param(403, ConfigFault, "monitor", id="403-names-the-monitor-privilege"),

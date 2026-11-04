@@ -404,11 +404,13 @@ def _ok(*_: object) -> tuple[int, bytes]:
     return 200, b"{}"
 
 
-def _ca_rig(tmp_path, data_root, base: str, ca: bytes, *, scheme=None):
-    """A rig whose identity declaration is `base` with `ca` (an OAuth set stored with `scheme`)."""
+def _ca_rig(tmp_path, data_root, base: str, ca: bytes, *, scheme=None, public_ca=None):
+    """A rig whose identity declaration is `base` with `ca` (an OAuth set stored with `scheme`);
+    `public_ca` is the proxy's public bundle (default: the shipped one)."""
     return T.rig(tmp_path / "forge", data_root,
                  lambda _u: H.declaration(base, ca=ca, scheme=scheme),
-                 **({"creds": T.oauth_set()} if scheme is not None else {}))
+                 **({"creds": T.oauth_set()} if scheme is not None else {}),
+                 **({"public_ca_file": public_ca} if public_ca is not None else {}))
 
 
 def test_1391_o4_a_declared_ca_reaches_its_private_upstream_and_dropping_it_refuses_it(
@@ -452,35 +454,14 @@ def test_1391_o4_a_ca_naming_another_root_refuses_even_what_the_environment_trus
     assert len(server.seen) == 1, "the refused request reached the server"
 
 
-@pytest.fixture
-def defaults_of_python_313(monkeypatch):
-    """`ssl.create_default_context` as Python 3.13 builds it: partial-chain and strict verification on."""
-    import ssl
-
-    real = ssl.create_default_context
-
-    def with_313_flags(*args, **kwargs):
-        context = real(*args, **kwargs)
-        context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN | ssl.VERIFY_X509_STRICT
-        return context
-
-    monkeypatch.setattr(ssl, "create_default_context", with_313_flags)  # lint-monkeypatch: ok — the 3.13 default cannot be had on 3.11 and the stdlib offers no seam
-
-
-@pytest.mark.parametrize("flags", [
-    pytest.param(False, id="runtime-defaults"),
-    pytest.param(True, id="python-3.13-defaults"),
-])
 @pytest.mark.parametrize(("trusted", "fault"), [
     pytest.param("root", None, id="root-control"),
     pytest.param("intermediate", "TransportFault", id="intermediate-only"),
 ])
-def test_1391_o4_the_chain_must_end_at_a_root_in_ca(tmp_path, data_root, request, trusted, fault,
-                                                    flags):
+def test_1391_o4_the_chain_must_end_at_a_root_in_ca(tmp_path, data_root, trusted, fault):
     """A server presenting leaf+intermediate is reached when `ca` holds the root, refused unsent
-    when it holds only the intermediate, also under 3.13 partial-chain defaults. #1391 O4, F7."""
-    if flags:
-        request.getfixturevalue("defaults_of_python_313")
+    when it holds only the intermediate. The context handed to the leg carries no partial-chain
+    flag, whatever Python's own defaults are (the context is not built from them). #1391 O4, F7."""
     import httpx
 
     pki = chain()
@@ -502,17 +483,40 @@ def test_1391_o4_the_chain_must_end_at_a_root_in_ca(tmp_path, data_root, request
         "not an exact named set (F7)")
 
 
-def test_1391_o4_ca_adds_nothing_from_the_public_bundle_and_a_system_without_one_keeps_it(
-        tmp_path, data_root, monkeypatch):
-    """With the public bundle (`certifi.where()`) holding the server's CA: a `ca` naming another
-    root refuses the server unsent, and the same system without `ca` reaches it. #1391 O4, P4, F8."""
-    import certifi
+@pytest.mark.parametrize("with_ca", [pytest.param(True, id="ca"), pytest.param(False, id="public")])
+def test_1391_o4_no_context_writes_session_keys_where_the_environment_says(
+        tmp_path, data_root, monkeypatch, with_ca):
+    """`SSLKEYLOGFILE` set when the proxy starts: no context handed to a leg, the `ca` one or the
+    public one, writes the session keys there, so the injected credential cannot be read from a
+    capture. Python's default context honours that variable; the proxy's are not built from it."""
+    import httpx
 
+    monkeypatch.setenv("SSLKEYLOGFILE", str(tmp_path / "keys.log"))
+    with (tls_server(tmp_path, _ok) as server,
+          _ca_rig(tmp_path, data_root, server.url + BASE,
+                  server.ca.read_bytes() if with_ca else None,
+                  public_ca=None if with_ca else server.ca) as r,
+          counting_calls(client=httpx.AsyncClient.__init__,
+                         transport=httpx.AsyncHTTPTransport.__init__) as calls):
+        answer = r.ask(url=server.url + PATH)
+
+    assert (answer["fault"], answer["status"]) == (None, 200), answer
+    handed = [c["verify"] for c in calls.locals["client"] + calls.locals["transport"]
+              if isinstance(c.get("verify"), ssl.SSLContext)]
+    assert handed, "no TLS context was handed to a client or transport: the key log cannot be judged"
+    assert [c.keylog_filename for c in handed] == [None] * len(handed), (
+        "a context handed to a leg writes its session keys to the file the environment names")
+    assert not (tmp_path / "keys.log").exists()
+
+
+def test_1391_o4_ca_adds_nothing_from_the_public_bundle_and_a_system_without_one_keeps_it(
+        tmp_path, data_root):
+    """With the public bundle holding the server's CA: a `ca` naming another root refuses the
+    server unsent, and the same system without `ca` reaches it. #1391 O4, P4, F8."""
     other = issue("another private root", ca=True)
     with tls_server(tmp_path, _ok) as server:
-        monkeypatch.setattr(certifi, "where", lambda: str(server.ca))  # lint-monkeypatch: ok — the bundle path is a third-party function; the proxy builds its public context from it at start
         base = server.url + BASE
-        with _ca_rig(tmp_path, data_root, base, other.cert) as r:
+        with _ca_rig(tmp_path, data_root, base, other.cert, public_ca=server.ca) as r:
             pinned = r.ask(url=server.url + PATH)
             reached_pinned = len(server.seen)
             r.t.merge({ACCESS: H.declaration(base)}, "drop the ca")
@@ -544,28 +548,24 @@ def test_1391_o4_the_token_exchange_of_a_declaration_with_ca_trusts_that_ca(tmp_
 
 
 def test_1391_o4_the_token_exchange_of_a_declaration_with_ca_does_not_trust_the_public_bundle(
-        tmp_path, data_root, monkeypatch):
+        tmp_path, data_root):
     """OAuth with a `ca` naming another root: the token endpoint (signed by the public bundle here)
     is refused and the API is never called; the same declaration without `ca` reaches it. #1391 O4, D13."""
-    import certifi
-
     other = issue("another private root", ca=True)
     token_reply = json.dumps({"access_token": "AT-1391", "expires_in": 3600}).encode()
     control_dir = tmp_path / "control"
     control_dir.mkdir()
-    with tls_server(control_dir, lambda *_: (200, token_reply)) as control:
-        monkeypatch.setattr(certifi, "where", lambda: str(control.ca))  # lint-monkeypatch: ok — same as above
-        with _ca_rig(control_dir, data_root, control.url + BASE, None,
-                     scheme=H.oauth_scheme(control.url + "/token")) as r:
-            reached = r.ask(url=control.url + PATH)
+    with (tls_server(control_dir, lambda *_: (200, token_reply)) as control,
+          _ca_rig(control_dir, data_root, control.url + BASE, None,
+                  scheme=H.oauth_scheme(control.url + "/token"), public_ca=control.ca) as r):
+        reached = r.ask(url=control.url + PATH)
     assert reached["fault"] is None, f"control: without `ca` the bundle's server is refused: {reached}"
     assert [(m, p) for m, p, _ in control.seen] == [("POST", "/token"), ("GET", PATH)]
 
-    with tls_server(tmp_path, lambda *_: (200, token_reply)) as server:
-        monkeypatch.setattr(certifi, "where", lambda: str(server.ca))  # lint-monkeypatch: ok — same as above
-        with _ca_rig(tmp_path, data_root, server.url + BASE, other.cert,
-                     scheme=H.oauth_scheme(server.url + "/token")) as r:
-            got = r.ask(url=server.url + PATH)
+    with (tls_server(tmp_path, lambda *_: (200, token_reply)) as server,
+          _ca_rig(tmp_path, data_root, server.url + BASE, other.cert,
+                  scheme=H.oauth_scheme(server.url + "/token"), public_ca=server.ca) as r):
+        got = r.ask(url=server.url + PATH)
 
     assert got["fault"] == "TransportFault", got
     assert server.seen == [], "the token endpoint or the API was reached"

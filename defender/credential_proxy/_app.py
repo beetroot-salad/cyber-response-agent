@@ -103,7 +103,7 @@ class CredentialStore(Protocol):
 class ProxyDeps:
     """What the proxy runs over: the data root whose `<tenant id>/exports/` folders it reads (read
     only; it keeps no tenant list, A26), the credential store, the token verifier, the audit
-    sink, and the response cap and upstream timeout."""
+    sink, the response cap and upstream timeout, and the public trust's bundle."""
 
     data_root: Path
     store: CredentialStore
@@ -114,6 +114,8 @@ class ProxyDeps:
     #: Seconds allowed on top of a request's timeout for the proxy's own calls (token check,
     #: credential read); the shipped value is `PROXY_OVERHEAD_SEC`, which the caller's wait assumes.
     proxy_overhead_sec: float = PROXY_OVERHEAD_SEC
+    #: The PEM bundle a system without `ca` is verified against; None: the one httpx ships.
+    public_ca_file: Path | None = None
 
     def __post_init__(self) -> None:
         if (isinstance(self.max_response_bytes, bool) or not isinstance(self.max_response_bytes, int)
@@ -175,7 +177,8 @@ class _Proxy:
         # The one conversion of the data root this proxy is handed (A26); a tenant's exports are
         # joined under it by tenancy, never spelled here.
         self._root = tenancy.data_root_from_path(deps.data_root)
-        self._trust = public_trust()
+        ca_file = deps.public_ca_file
+        self._trust = public_trust(None if ca_file is None else str(ca_file))
         self.access_tokens = AccessTokens()
 
     def handle(self, authorization: str | None, raw: bytes | None,

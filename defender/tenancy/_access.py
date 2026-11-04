@@ -117,9 +117,10 @@ def _ca(shown: str, value: object, base: str, auth: Auth) -> str | None:
         raise ConfigFault(f"{shown}: `ca` needs an https `auth.token_url`")
     try:
         trust_of_ca(value)
-    except (ValueError, ssl.SSLError):
-        raise ConfigFault(f"{shown}: `ca` must be PEM certificate blocks and nothing else "
-                          "(no key, no other text), each a valid certificate") from None
+    except ValueError as e:
+        raise ConfigFault(f"{shown}: `ca` {e}") from None
+    except ssl.SSLError:
+        raise ConfigFault(f"{shown}: `ca` has a block that is not a valid certificate") from None
     return value
 
 

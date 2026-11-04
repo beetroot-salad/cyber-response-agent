@@ -332,6 +332,19 @@ def test_1391_o4_a_declarations_ca_is_judged_when_it_is_parsed(kind):
                 "a pasted private key reached the fault text, so the run record")
 
 
+def test_1391_o4_a_server_certificate_as_ca_is_refused_as_not_a_ca():
+    """The server's own certificate pasted as `ca` (a valid certificate, not a CA) is refused
+    with that reason, not as an invalid certificate: the operator is pointed at the CA's
+    certificate. #1391 O4 (PR #1409 review)."""
+    from defender.tenancy._access import parse_access
+
+    text = H.declaration(ES, scheme=H.basic_scheme(), ca=_pki().leaf.cert)
+    with pytest.raises(ConfigFault) as refused:
+        parse_access(text, system="elastic")
+    assert "no CA certificate" in str(refused.value), refused.value
+    assert "not a valid certificate" not in str(refused.value), refused.value
+
+
 @pytest.mark.parametrize("where", ["nbsp-before", "line-separator-inside"])
 def test_1391_o4_a_ca_with_non_ascii_whitespace_is_a_settings_fault_not_a_crash(where):
     """Non-ASCII whitespace around or inside valid PEM text is a ConfigFault, never a TypeError,

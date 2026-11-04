@@ -12,11 +12,9 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender import _clock
-from defender.kit.access import HTTP_PROXY
-from defender.kit.settings import config_pointer
 from defender.kit.verbs import VerbContext, verb
 from defender.integrations import _stub_transport as transport
-from defender.integrations.confinement import confine_index, confine_read_endpoint, record_outbound
+from defender.integrations.confinement import confine_index, confine_read_endpoint
 from defender.integrations.esql_text import opens_with_from, split_first_command
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 
@@ -25,11 +23,8 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 
 SYSTEM = "elastic"
 
-#: The keys of `systems/elastic/config.env` this adapter requires (prefix included).
-REQUIRED_CONFIG_KEYS = [
-    "ELASTIC_EVENTS_INDEX",
-    "ELASTIC_ALERTS_INDEX",
-]
+#: The keys of `systems/elastic/config.env` this adapter requires (prefix stripped).
+REQUIRED_CONFIG_KEYS = ("EVENTS_INDEX", "ALERTS_INDEX")
 
 #: Base keys that no longer exist: the base lives in the access declaration alone (#1391 F4).
 RETIRED_BASE_KEYS = ("ELASTICSEARCH_URL", "KIBANA_URL")
@@ -60,7 +55,6 @@ class OutboundBody:
 
 
 PREFIX = "ELASTIC"
-TRANSPORT_KEY = f"{PREFIX}_TRANSPORT"
 
 
 def load_config(ctx: VerbContext) -> dict[str, str]:
@@ -69,32 +63,14 @@ def load_config(ctx: VerbContext) -> dict[str, str]:
 
 
 def _record_config(tenant: TenantRecord) -> dict[str, str]:
-    """This deployment's elastic config from the run's record (#1107): the keys of
-    `systems/elastic/config.env` as written, prefix included, plus `URL_BASE`, the base of the
-    system's access declaration (which holds the only one, #1391 F4). Elasticsearch is reached
-    only through the credential proxy (#1391 O3), so a file that does not say so, a base key left
-    in it, no declaration, or a blank required key is a `ConfigFault` — Elasticsearch is not
-    configured for this run (`check_settings` raises it at run start, so elastic is down from
-    the start, #1256)."""
-    entry = transport.record_entry(tenant, SYSTEM)
-    method = entry.get(TRANSPORT_KEY)
-    if method != HTTP_PROXY:
-        raise ConfigFault(
-            f"{TRANSPORT_KEY}={method!r} in {config_pointer(SYSTEM)}: elastic is reached only "
-            f"through the credential proxy — set {TRANSPORT_KEY} to {HTTP_PROXY!r}")
-    leftover = [k for k in RETIRED_BASE_KEYS if k in entry]
-    if leftover:
-        raise ConfigFault(
-            f"{leftover[0]} is set in {config_pointer(SYSTEM)}, but elastic's base is declared in "
-            "its access.yaml alone: remove it")
-    declaration = transport.record_access(tenant, SYSTEM)
-    config = dict(entry)
-    missing = [k for k in REQUIRED_CONFIG_KEYS if not (config.get(k) or "").strip()]
-    if missing:
-        raise ConfigFault(
-            f"missing required config keys in {config_pointer(SYSTEM)}: {', '.join(missing)}")
-    config["URL_BASE"] = declaration.base
-    return config
+    """This deployment's elastic config from the run's record (#1107), by the shared rules for a
+    proxied system: the two index keys (prefix stripped) and `URL_BASE`, the base of the access
+    declaration (which holds the only one, #1391 F4). Elasticsearch is reached only through the
+    credential proxy (#1391 O3), so another access method, a retired base key, no declaration, or
+    a blank index key is a `ConfigFault` — Elasticsearch is not configured for this run
+    (`check_settings` raises it at run start, so elastic is down from the start, #1256)."""
+    return transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_CONFIG_KEYS,
+                                   retired=RETIRED_BASE_KEYS, proxy_only=True)
 
 
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
@@ -108,16 +84,14 @@ def _http_json(  # noqa: PLR0913 — one request's per-call state
     ctx, method: str, config: dict[str, str], path: str, body: OutboundBody | None = None,
     timeout_sec: int = REQUEST_TIMEOUT_SEC,
 ) -> dict:
-    """The one door to Elasticsearch: its own confinement (P3: the endpoint allowlist, matched
-    against `path` relative to the declared base as the proxy's routes are, before it is joined
-    to the base), the capture of the request, then the credential proxy. `body` is typed rather
+    """The one door to Elasticsearch: its own confinement first (P3: the endpoint allowlist,
+    matched against `path` relative to the declared base as the proxy's routes are, before it is
+    joined to the base), then the shared send, capture and fault mapping. `body` is typed rather
     than a bare dict for the reason `OutboundBody` gives."""
     confine_read_endpoint(SYSTEM, path, method=method, verb_class="r")
-    url = config["URL_BASE"].rstrip("/") + path
-    record_outbound(ctx, SYSTEM, url, method=method)
-    answer = transport.proxy_request(
-        ctx, url, system=SYSTEM, method=method,
-        body=None if body is None else body.payload, timeout_sec=timeout_sec)
+    answer = transport.http_timed(ctx, config, method, path,
+                                  None if body is None else body.payload,
+                                  system=SYSTEM, timeout_sec=timeout_sec)
     if not isinstance(answer, dict):
         raise TransportFault("non-object JSON response from elastic")
     return answer
@@ -231,7 +205,7 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
     config = load_config(ctx)
     resolved = index or config[index_key]
     resolved = confine_index(
-        resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]))
+        resolved, (config["EVENTS_INDEX"], config["ALERTS_INDEX"]))
     docs, total, truncated = _search(
         ctx, config, resolved,
         _search_body(
@@ -330,7 +304,7 @@ def query(
     sort: str = DEFAULT_SORT,
 ) -> dict:
     return _search_verb(
-        ctx, index_key="ELASTIC_EVENTS_INDEX", native_query=native_query,
+        ctx, index_key="EVENTS_INDEX", native_query=native_query,
         start=start, end=end, limit=limit, index=index, sort=sort,
     )
 
@@ -347,7 +321,7 @@ def alerts(
     sort: str = DEFAULT_SORT,
 ) -> dict:
     return _search_verb(
-        ctx, index_key="ELASTIC_ALERTS_INDEX", native_query=native_query,
+        ctx, index_key="ALERTS_INDEX", native_query=native_query,
         start=start, end=end, limit=limit, index=index, sort=sort,
     )
 

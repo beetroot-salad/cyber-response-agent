@@ -11,14 +11,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+import certifi
 import httpx
 
+from defender.kit.tls import client_trust
 
-def public_trust() -> ssl.SSLContext:
-    """The context a tenant's system is verified with: httpx's own bundle, the environment
-    ignored (no `SSL_CERT_FILE`/`SSL_CERT_DIR`), as a client built with `trust_env=False` has
-    always used (#1375 O2)."""
-    return httpx.create_ssl_context(trust_env=False)
+
+def public_trust(cafile: str | None = None) -> ssl.SSLContext:
+    """The context a system without `ca` is verified with: the PEM bundle at `cafile`, by default
+    the one httpx ships (certifi's). The environment is ignored (no `SSL_CERT_FILE`/`SSL_CERT_DIR`,
+    no `SSLKEYLOGFILE`, #1375 O2), and nothing is inherited from Python's defaults (`client_trust`)."""
+    return client_trust(cafile=cafile if cafile is not None else certifi.where())
 
 
 @dataclass(frozen=True)
