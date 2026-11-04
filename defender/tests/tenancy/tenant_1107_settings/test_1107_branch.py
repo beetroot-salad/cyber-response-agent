@@ -156,8 +156,7 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
             reached.append(scope["path"])
         raise RuntimeError("the faulted call must not reach the proxy")
 
-    with credential_harness.serve_asgi(proxy_app) as proxy_url:
-        with pytest.raises(S.config_fault()):
-            elastic_adapter.query(S.verb_context(record, run_dir, shim.env(), proxy_url=proxy_url,
-                                                 request_token="tok"), native_query="*")
+    with (credential_harness.serve_asgi(proxy_app) as proxy_url, pytest.raises(S.config_fault())):
+        elastic_adapter.query(S.verb_context(record, run_dir, shim.env(), proxy_url=proxy_url,
+                                             request_token="tok"), native_query="*")
     assert reached == [], f"a faulted Elastic call reached the proxy: {reached}"  # elastic never uses docker (O3)

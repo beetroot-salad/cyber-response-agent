@@ -311,7 +311,7 @@ def test_1391_o3_an_index_that_resolves_to_an_unlisted_endpoint_is_refused_befor
     with H.upstream() as up, _elastic(tmp_path, data_root, up.url + base_path) as (ctx, tap):
         with pytest.raises(ConfinementFault):
             elastic_adapter.VERBS["query"](ctx, native_query="*", index=index)
-        refused = (tap.tokens, up.seen)
+        refused = (list(tap.tokens), list(up.seen))  # a snapshot: the control call below appends
         elastic_adapter.VERBS["query"](ctx, native_query="*", index="logs-2026.11.03")
 
     assert refused == ([], [])

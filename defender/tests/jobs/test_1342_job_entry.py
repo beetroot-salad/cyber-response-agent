@@ -1662,6 +1662,11 @@ def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path, spe
 
 PROXY_ADDRESS = "http://proxy.invalid"
 SIGN_ROLE, SIGN_SECRET = "role-1342-sign", "secret-1342-sign"
+ELASTIC_NOT_PROXIED = (
+    'ELASTICSEARCH_URL="https://localhost:9200"\nKIBANA_URL="http://localhost:5601"\n'
+    'ELASTIC_EVENTS_INDEX="logs-*"\nELASTIC_ALERTS_INDEX=".internal.alerts-security.alerts-default-*"\n'
+    'ELASTIC_TRANSPORT="docker-exec"\nELASTIC_DOCKER_CONTEXT="soc-playground"\n'
+    'ELASTIC_ES_CONTAINER="elasticsearch"\nELASTIC_KIBANA_CONTAINER="kibana"\n')
 
 
 @pytest.fixture
@@ -1688,7 +1693,12 @@ def proxied_scene(tmp_path, monkeypatch, migrated_database):
         else:
             monkeypatch.delenv(PROXY_URL_ENV, raising=False)
         systems = {"identity": H.declaration("http://x.invalid/api")} if proxied else {}
-        t = stack.enter_context(A.published(tmp_path / "forge", root, systems))
+        # The committed fixture tenant's elastic is itself `http-proxy` (#1391 D12): "no http-proxy system"
+        # takes elastic back to a non-proxied method (no declaration, no proxy method).
+        unproxied = None if proxied else {
+            "settings/systems/elastic/access.yaml": None,
+            "settings/systems/elastic/config.env": ELASTIC_NOT_PROXIED}
+        t = stack.enter_context(A.published(tmp_path / "forge", root, systems, extra_files=unproxied))
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         if sign:
             insert_generation(migrated_database, t.tenant_id, A.generation(

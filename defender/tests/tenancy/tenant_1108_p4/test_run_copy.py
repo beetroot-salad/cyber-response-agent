@@ -347,9 +347,9 @@ _ORPHAN_SCRIPT = textwrap.dedent("""
     from defender import run as run_py
 
     alert, tenant_id, commit, ready, data_root, origin = sys.argv[1:7]
-    from defender.tests.support.tenancy._active1214 import active_directory
+    from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
 
-    directory = active_directory(Path(data_root), tenant_id, origin=origin)  # #1214 Flow 4
+    directory = tenant_directory(Path(data_root), tenant_id, origin=origin)  # #1214 Flow 4, with a sign login (#1391 D12)
 
     def lifecycle(**kw):
         Path(ready).write_text(str(kw["run"].run_dir), encoding="utf-8")
