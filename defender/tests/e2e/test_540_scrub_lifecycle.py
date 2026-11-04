@@ -787,7 +787,8 @@ def test_a_colliding_run_id_refuses_rather_than_reaping_a_live_sibling(tmp_path)
         start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT)
     assert name in str(e.value) or run.name in str(e.value)
     # The name is held, so the refusal is the pre-create name check's, with or without the create's own fault.
-    assert "create" not in docker.verbs and "start" not in docker.verbs, docker.verbs
+    assert "create" not in docker.verbs, docker.verbs
+    assert "start" not in docker.verbs, docker.verbs
     for call in docker.calls:
         assert not (call.verb in ("rm", "kill") and name in call.argv), \
             "a live sibling's box was reaped instead of refusing the colliding run"
