@@ -1753,11 +1753,9 @@ def _plant_many(dsn: str, rows: list[tuple[str, str, str]], raw: bytes) -> None:
 
 
 async def test_1345_m3_a_replace_re_derives_a_tenants_alerts_beyond_the_recompute_batch_and_touches_no_other_tenants(dsn):
-    """Over two full batches and one more of T1's alerts, interleaved by id with T2's, every T1 alert is re-derived and
-    none of T2's changes. (#1345 O2, M3)"""
-    from defender.jobs.store import _RECOMPUTE_BATCH
-
-    count = 2 * _RECOMPUTE_BATCH + 1
+    """With 1001 of T1's alerts (far past any one read a recompute makes), interleaved by id with T2's, every T1 alert is
+    re-derived and none of T2's changes. (#1345 O2, M3: \"every alert of the tenant\"; no batch size is pinned)"""
+    count = 1001
     rows = [(str(uuid.UUID(int=2 * n + offset + 1)), tenant, f"P-{n}")
             for n in range(count) for offset, tenant in enumerate((T1, T2))]
     _plant_many(dsn, rows, ALERT_BYTES)
