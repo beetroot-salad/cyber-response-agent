@@ -74,3 +74,24 @@ def test_1385_each_call_is_shown_the_reading_of_its_own_row_when_calls_run_toget
         stamps = [stamp for m, stamp in owned if m == mark]
         assert len(set(stamps)) == len(stamps), (
             f"a repeat of {mark} was given the reading of its earlier ask: {owned}")
+
+
+def test_1385_the_framework_still_closes_a_retry_prompt_with_the_tail_the_query_tool_strips():
+    """A schema refusal is the framework's own wording less its closing line, then the stamp
+    (`query_tool._validation_text`). If a pydantic-ai upgrade rewords that line, stripping it
+    silently stops and the model is told to fix its errors twice: fail here instead."""
+    from pydantic import BaseModel, ValidationError
+    from pydantic_ai.messages import RetryPromptPart
+
+    from defender.investigation import query_tool
+
+    class _Args(BaseModel):
+        system: str
+
+    try:
+        _Args.model_validate({})
+    except ValidationError as refused:
+        worded = RetryPromptPart.from_error(refused, tool_name="query").model_response()
+        text = query_tool._validation_text(refused, "query")
+    assert worded.endswith(query_tool._RETRY_TAIL), worded
+    assert query_tool._RETRY_TAIL.strip() not in text, text

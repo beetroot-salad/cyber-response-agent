@@ -202,6 +202,7 @@ class ServedCall:
             value = getattr(self, name)
             if value is not None:
                 row[name] = value
+        # Not in the loop above: written by name here, so vulture sees the field read.
         if self.re_ask is not None:
             row["re_ask"] = self.re_ask
         return row

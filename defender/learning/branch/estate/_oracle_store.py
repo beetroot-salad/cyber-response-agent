@@ -259,8 +259,9 @@ class LimiterWaits:
 
 @dataclass
 class QueryDoor:
-    """Grant-decided (read verbs only), at the branch-point clock, rate-limited, recorded in
-    the world's oracle-side ledger and nowhere else."""
+    """Grant-decided (read verbs only), rate-limited, recorded in the world's oracle-side ledger
+    and nowhere else. Reads are live: nothing cuts them at the branch point (#1385), so a host
+    check's or the verifier's side query can return rows after it."""
 
     decide: Callable[[str, str], Any]
     real_verbs: Callable[[str], Mapping[str, Any]]

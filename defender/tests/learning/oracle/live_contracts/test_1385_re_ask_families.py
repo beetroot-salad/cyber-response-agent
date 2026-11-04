@@ -411,3 +411,24 @@ def test_1385_review_a_ledger_row_keeps_a_bounded_cut_and_the_store_the_whole(
     assert cut["dropped"] == dropped[:shown], cut
     assert cut["dropped_in_all"] == len(dropped), cut
     assert cut["params"] == RE_ASK_Q, cut
+
+
+def test_1385_review_a_re_asked_esql_answer_echoes_the_calls_own_query(tmp_path):
+    """An ES|QL answer echoes the query it ran. Served as `$BASE`, the re-asked answer echoes the
+    investigator's query, never the bounded one (which names the branch point); the verifier is
+    still shown the re-ask's question."""
+    echo, bounded_echo = "FROM logs-* | LIMIT 2", f'FROM logs-* | WHERE @timestamp <= "{S.AS_OF}"'
+    asked, bounded = CAPPED, BOUNDED
+    sc = H._scene(tmp_path, live=[("idp", "query", asked, {"query": echo, **H.ES_CAPPED}),
+                                  ("idp", "query", bounded, {"query": bounded_echo, **H.ES_BOUNDED})])
+    o = S.oracle(S.re_ask(S.re_asked(system="idp", verb="query", params=bounded)),
+                 S.submit(S.sym("learning.branch.estate._oracle_prompt", "BASE_HANDLE"),
+                          S.EMPTY_CLAIM))
+    verifier = S.passing_verifier()
+
+    served = sc.call(sc.registry(o, verifier), "idp", "query", **asked)
+    assert served == {"query": echo, **H.ES_BOUNDED}, served
+    H._spent(o)
+    assert S.AS_OF not in json.dumps(served), "the served answer names the branch point"
+    question = _section(verifier.all_seen(), "The re-ask's question")
+    assert json.dumps(S.AS_OF) in question, f"the verifier lost the bounded question: {question!r}"

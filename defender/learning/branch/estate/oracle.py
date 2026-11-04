@@ -911,9 +911,9 @@ class Oracle:
     def _re_ask(self, args: dict, run: _Run) -> str:
         """The `re_ask` tool (#1385): the host reads the call's own question bounded at the branch
         point and makes its answer the attempt's base. Every rule that can refuse a re-ask is
-        decided before the read, so a refused one costs nothing; the read is a real one, kept
-        with the world's other reads (`explored`, which the real-data index takes in under its
-        own lock)."""
+        decided before the read, so a refused one costs nothing, except the ES|QL column check,
+        which needs the answer. The read is a real one, kept with the world's other reads
+        (`explored`, which the real-data index takes in under its own lock)."""
         system, verb, params = args.get("system"), args.get("verb"), args.get("params")
         if not (set(args) == {"system", "verb", "params"} and isinstance(system, str)
                 and isinstance(verb, str) and isinstance(params, Mapping)):
@@ -933,6 +933,12 @@ class Oracle:
         names = esql_names(run.base)
         if names is not None and esql_names(answer) != names:
             raise _ArgumentRefused("it changes the ES|QL column set of the call's answer")
+        if (names is not None and isinstance(answer, dict) and isinstance(run.base, Mapping)
+                and "query" in answer and "query" in run.base):
+            # An ES|QL answer echoes the query it ran: the re-asked answer keeps the call's own,
+            # so a served `$BASE` never shows the investigator the bounded query (and with it
+            # the branch point). The verifier still sees the re-ask's question.
+            answer = {**answer, "query": run.base.get("query")}
         self.explored.append((system, answer))
         run.attempt.re_asked = re_asked(run.base, system, verb, params, answer)
         return (_framed("The re-asked answer, this attempt's base from now on", answer)

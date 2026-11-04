@@ -105,7 +105,8 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
         # A re-ask stays with the answer only when the answer it served is not the live base:
         # served unchanged, the cut it read showed nowhere.
         re_asked = staged.re_asked if changed else None
-        decision = served_label(base, served, claim, registry.world_facts, re_asked)
+        decision = served_label(base, served, claim, registry.world_facts, re_asked,
+                                changed=changed)
         answer = {"system": system, "verb": verb, "params": asked,
                   "served": json.loads(payload_text_of(served if changed else base)),
                   "decision": decision,
@@ -169,16 +170,17 @@ def names_an_entity(value: Any, entities: Collection[str]) -> bool:
     return False
 
 
-def served_label(base: Any, served: Any, claim: Mapping[str, Any], world_facts: Collection[Any],
-                 re_asked: Any = None) -> str:
+def served_label(base: Any, served: Any, claim: Mapping[str, Any],  # noqa: PLR0913 — the answer, its claim and what decides its label
+                 world_facts: Collection[Any], re_asked: Any = None, *,
+                 changed: bool | None = None) -> str:
     """The ledger label of a verified answer (#1385 A1): decided by the difference, not by
     whether the answer changed. Unchanged from the live base is `passthrough`. A changed answer
     is `oracle` ("showed the world's difference") when it carries a forged row, a `changed`
     entry on an entity a fact names, or a removal or dropped row (the cut: the live base against
     the re-asked answer) with a string value equal to such an entity; otherwise `reconstructed`.
     Rows the cut brings in never count. A world without facts names no entity, so it is never
-    `oracle`."""
-    if not changes_base(served, base):
+    `oracle`. `changed`: `changes_base(served, base)` when the caller has it already."""
+    if not (changes_base(served, base) if changed is None else changed):
         return PASSTHROUGH
     entities = fact_entities(world_facts)
     if not entities:
@@ -213,6 +215,14 @@ def ledger_cut(re_ask: Any) -> Any:
             break
         shown.append(row)
     return {**re_ask, "dropped": shown, "dropped_in_all": len(dropped)}
+
+
+def fixed_call(key: str, *, recorded: bool, prebranch: Collection[str],
+               unrecorded: Collection[str]) -> bool:
+    """M01=A's one rule, for pre-flight and the sibling alike: a call is a fixed pre-branch answer
+    when the source made it before the branch point (`prebranch`), the recording holds its answer
+    (`recorded`), and the primer did not record it unanswered (`unrecorded`, #1255 D6)."""
+    return recorded and key in prebranch and key not in unrecorded
 
 
 def changes_base(served: Any, base: Any) -> bool:
@@ -395,7 +405,8 @@ class WorldRegistry(ModuleVerbRegistry):
         pre-branch call without one is served like the primer's unanswered calls (#1255 D6):
         its base is a live read, which can hold rows after the branch point, so it is re-asked
         rather than served unchanged — whether or not the primer's skip record names it."""
-        return recorded and key in self.prebranch and key not in self.unrecorded
+        return fixed_call(key, recorded=recorded, prebranch=self.prebranch,
+                          unrecorded=self.unrecorded)
 
     @property
     def call_run(self) -> str:
