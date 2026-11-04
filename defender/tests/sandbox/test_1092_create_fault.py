@@ -167,13 +167,16 @@ def test_a_missing_image_raises_and_no_docker_build_is_ever_attempted(tmp_path, 
     assert "build" not in subs, subs
     assert "pull" not in subs, subs
     assert "run" not in subs, subs
+    assert "create" not in subs, subs   # #1343 B10: the run box is created, not run
+    assert "start" not in subs, subs
 
     held = RecordingDocker()
     box_mod.start_box(run_dir, defender_dir, docker=held, tenant_id=TEST_TENANT)
     subs = subcommands(held.calls)
     assert "build" not in subs, subs
     assert "pull" not in subs, subs
-    assert subs.count("run") == 1, subs
+    assert subs.count("create") == 1, subs   # #1343 B10 (r5 item 8a): `docker create`, then an attached start
+    assert "run" not in subs, subs
     assert (held.create_argv or []).count("--pull=never") == 1, held.create_argv
     assert "--pull" not in (held.create_argv or []), "the two-token spelling"
 

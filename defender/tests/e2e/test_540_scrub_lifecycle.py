@@ -658,8 +658,11 @@ def test_startup_attempts_a_box_rather_than_detecting_a_binary(tmp_path):
     ok = FakeDocker()
     box = start_box(run, DEFENDER, docker=ok, tenant_id=TEST_TENANT)
     assert box is not None
-    assert "run" in ok.verbs
-    assert "exec" in ok.verbs
+    # #1343 B10 (r5 item 8a): the run box is created (`docker create -i --rm`), then started by an
+    # attached `docker start`, and only then probed from inside; never a detached `docker run`.
+    verbs = ok.verbs
+    assert "run" not in verbs, verbs
+    assert verbs.index("create") < verbs.index("start") < verbs.index("exec"), verbs
 
 
 def test_path_identity_sentinel_fails_closed(tmp_path):
@@ -741,13 +744,22 @@ def test_no_box_failure_path_executes_in_process(tmp_path, gate_env):
     assert secret not in str(e.value)
 
 
+def _refused_at_create(docker: FakeDocker) -> None:
+    """The refusal came from the create itself (#1343 B10: the run box is `docker create`d): the box was
+    never started. A start that reached its later probes and failed there is another fault."""
+    assert "create" in docker.verbs, docker.verbs
+    assert "start" not in docker.verbs, f"the start went on past a refused create: {docker.verbs}"
+
+
 def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, capsys):
     run = _clean_run_dir(tmp_path)
-    broken = lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", "")  # noqa: E731
+    broken = lambda verb: C43B_NAME_COLLISION if verb == "create" else (0, "", "")  # noqa: E731
 
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    refused = FakeDocker(broken)
     with pytest.raises(BoxFault):
-        start_box(run, DEFENDER, docker=FakeDocker(broken), tenant_id=TEST_TENANT)
+        start_box(run, DEFENDER, docker=refused, tenant_id=TEST_TENANT)
+    _refused_at_create(refused)
 
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     box = start_box(run, DEFENDER, docker=FakeDocker(broken), tenant_id=TEST_TENANT)
@@ -756,8 +768,10 @@ def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, capsy
 
     for spelling in ("0", "true", "yes", "", "01"):
         monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", spelling)
+        refused = FakeDocker(broken)
         with pytest.raises(BoxFault):
-            start_box(run, DEFENDER, docker=FakeDocker(broken), tenant_id=TEST_TENANT)
+            start_box(run, DEFENDER, docker=refused, tenant_id=TEST_TENANT)
+        _refused_at_create(refused)
 
 
 def test_a_colliding_run_id_refuses_rather_than_reaping_a_live_sibling(tmp_path):
@@ -766,12 +780,14 @@ def test_a_colliding_run_id_refuses_rather_than_reaping_a_live_sibling(tmp_path)
     name = container_name(run.name)
 
     docker = FakeDocker(
-        lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", ""),
+        lambda verb: C43B_NAME_COLLISION if verb == "create" else (0, "", ""),
         existing="running",
     )
     with pytest.raises(BoxFault) as e:
         start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT)
     assert name in str(e.value) or run.name in str(e.value)
+    # The name is held, so the refusal is the pre-create name check's, with or without the create's own fault.
+    assert "create" not in docker.verbs and "start" not in docker.verbs, docker.verbs
     for call in docker.calls:
         assert not (call.verb in ("rm", "kill") and name in call.argv), \
             "a live sibling's box was reaped instead of refusing the colliding run"

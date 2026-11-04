@@ -79,7 +79,7 @@ def _copy_root(t, out: B.Launch) -> Path:
 
 
 class _StageSnapshotDocker(RecordingDocker):
-    """`RecordingDocker` that, at `docker run` (create), lists every run copy's root and its
+    """`RecordingDocker` that, at `docker create` (the run box's create, #1343 B10), lists every run copy's root and its
     `stage/` — what the box is handed, as the daemon would see it. It judges nothing."""
 
     def __init__(self, copies: Path) -> None:
@@ -89,7 +89,7 @@ class _StageSnapshotDocker(RecordingDocker):
 
     def __call__(self, argv, **kw):
         argv = list(argv)
-        if len(argv) > 1 and argv[1] == "run" and self.copies.is_dir():
+        if len(argv) > 1 and argv[1] == "create" and self.copies.is_dir():
             for root in self.copies.iterdir():
                 stage = root / "stage"
                 self.at_create[root.name] = {

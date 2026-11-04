@@ -192,7 +192,9 @@ def _inspect(here: Path, state: dict, argv: list[str]) -> tuple[int, str, str]:
     return 0, _field(box, argv[argv.index("-f") + 1]), ""
 
 
-def _create(here: Path, state: dict, argv: list[str]) -> tuple[int, str, str]:
+def _create(here: Path, state: dict, argv: list[str], status: str = "running") -> tuple[int, str, str]:
+    """`docker run` (the request lane's box, up at once) or, with `status="created"`, `docker create`
+    (the run box, #1343 B10: inert until its attached start lands)."""
     containers = state["containers"]
     name = argv[argv.index("--name") + 1]
     if state["faults"]["create"]:
@@ -200,10 +202,20 @@ def _create(here: Path, state: dict, argv: list[str]) -> tuple[int, str, str]:
     if name in containers:
         return 125, "", (f'docker: Error response from daemon: Conflict. The container '
                          f'name "/{name}" is already in use\n')
-    containers[name] = {"status": "running", "token": _label(argv, "defender.start-token") or "",
+    containers[name] = {"status": status, "token": _label(argv, "defender.start-token") or "",
                         "binds": _binds(argv)}
     save(here, state)
     return 0, "f" * 64 + "\n", ""
+
+
+def attach(here: Path, argv: list[str]) -> None:
+    """The landing of a held `docker start -a -i <name>`: a created box now runs. Not logged here."""
+    state = load(here)
+    box = state["containers"].get(argv[-1])
+    if box is not None and box["status"] == "created":
+        box["status"] = "running"
+        state["counts"]["boot"] += 1
+        save(here, state)
 
 
 def handle(here: Path, argv: list[str]) -> tuple[int, str, str]:  # noqa: PLR0911 — one daemon, one arm per verb
@@ -219,8 +231,8 @@ def handle(here: Path, argv: list[str]) -> tuple[int, str, str]:  # noqa: PLR091
         return 0, "sha256:fake1195\n", ""
     if verb == "inspect":
         return _inspect(here, state, argv)
-    if verb == "run":
-        return _create(here, state, argv)
+    if verb in ("run", "create"):
+        return _create(here, state, argv, "created" if verb == "create" else "running")
     if verb == "exec":
         return _exec(state, argv)
     if verb in ("start", "stop"):
