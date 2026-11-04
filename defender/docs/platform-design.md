@@ -193,11 +193,11 @@ owns, replacing the dev-era FS-presence heuristic). **`disposition`** is the out
 | `job_status`  | Meaning                                                                                                      |
 | ------------- | ----------------------------------------------------------------------------------------------------------- |
 | `queued`      | Row exists; no container started.                                                                            |
-| `running`     | A container owns the investigation and should be heartbeating.                                               |
+| `running`     | A worker holds the investigation and renews its lease (30 s) every second; a lapsed lease is taken over (§4.1). |
 | `completed`   | Terminal success: blobs uploaded, frontmatter parsed, metadata committed.                                    |
 | `unparseable` | Terminal: container exited cleanly but `report.md` frontmatter failed to parse — null disposition + note, artifacts kept. **Blocks learning**; recovery is a fresh investigation (§4.6). |
 | `failed`      | Terminal playground-v2/infra/runtime failure, including a lapsed lease taken over by a retry; retry is a new investigation (a new attempt under the same request key). |
-| `aborted`     | Terminal intentional stop/cancel or timeout. Supersession by a retry is `failed`, not `aborted`.             |
+| `aborted`     | Terminal intentional stop/cancel or timeout; cancelling a running investigation aborts it at once and its worker ends the run within about a second. Supersession by a retry is `failed`, not `aborted`. |
 
 **`disposition`** (`malicious` / `benign` / `inconclusive`) is the outcome. Defender's `report.md`
 frontmatter is exactly `{case_id, disposition, confidence}` — free-form YAML with **no write-time
@@ -518,10 +518,16 @@ UPDATE investigations SET job_status = 'completed', disposition = …, cost = �
 WHERE investigation_id = :id AND job_status = 'running';           -- 0 rows ⇒ superseded ⇒ log and stop
 ```
 
-**Reconciler.** Lists containers labeled by `investigation_id`: a container whose row is no longer
-`running` is a zombie → kill; a `running` row with a stale lease and no live container → fail it and
-queue its retry. `cost_so_far` belongs to the run that wrote it; the dead run's partial blobs are orphans
-the GC sweeps.
+**Take-over (#1343).** Ownership is the lease: a row belongs to whichever worker keeps renewing it, and
+nothing in the database names a worker or a machine. Every worker runs take-over every few seconds: a
+`running` row whose lease (database clock) has lapsed and that the worker does not itself hold is failed
+(`lease_lapsed`) and its retry queued in the same transaction (attempt + 1; at attempt 3, `retry_cap` and
+no retry). Take-over reads no disk and reaches no machine: everything a run starts dies with the process
+that started it (worker → child → box), so there is nothing to stop or clean up. A holder keeps its row
+until its last write lands: it writes the terminal stage, or — if cancel or a take-over already ended the
+row — its own final cost and knowledge, once. `cost_usd` is cost so far (copied about every 15 s) until
+then. A stopping worker hands its rows back (lease lapsed, final cost) so they are retried within seconds.
+A cancelled or taken-over row's worker finds out at its next renewal and ends its child.
 
 > **A repeat is unconditionally safe here: defender is recommend-only.** No `act` verbs → no external
 > side-effect to double-apply. _If act-mode graduates, recovery safety must be revisited — a

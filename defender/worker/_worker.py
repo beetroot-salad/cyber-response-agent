@@ -433,7 +433,7 @@ class Worker:
         proc = await self._run_child(held, token, Launch(inv, tenant, os.getpid()))
         if isinstance(proc, End):
             return proc
-        returncode = proc.returncode
+        returncode = await proc.wait()
         _logger.info("investigation %s: child %d %s after %s", inv, proc.pid,
                      _exit_words(returncode), self._clock() - started)
         ending, cost, knowledge = await asyncio.to_thread(self._read_ending, record, returncode)
