@@ -297,7 +297,11 @@ class ScriptedChild:
         }
 
     def __call__(self, launch: Any) -> list[str]:
-        self.spec.write_text(json.dumps(self.spec_dict()), encoding="utf-8")
+        # Written whole, then renamed into place: a child launched a moment ago (another worker's,
+        # in the same test) may be reading the spec right now, and must never see it half-written.
+        part = self.spec.with_name(self.spec.name + ".part")
+        part.write_text(json.dumps(self.spec_dict()), encoding="utf-8")
+        os.replace(part, self.spec)
         return [sys.executable, str(self.script), str(self.spec), "--job", launch.investigation_id,
                 "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 
