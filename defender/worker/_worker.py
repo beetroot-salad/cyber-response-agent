@@ -116,6 +116,17 @@ def _ending_from(end: job_lane.JobEnd | None, returncode: int,
     return _Ending(_FAILED, failure_reason=_NO_REPORT, failure_message=why)
 
 
+def _report_disposition_or_none(lane: job_lane.JobLane, inv: str) -> str | None:
+    """The committed report's disposition; a fault nobody planned for reads as none, so the run is
+    `unparseable` as with any unreadable disposition, never `worker_error` (#1396)."""
+    try:
+        return lane.report_disposition(inv)
+    except Exception:  # noqa: BLE001 — the stage is decided by the job-end record (#1396)
+        _logger.error("investigation %s: reading its report's disposition failed; it is unparseable",
+                      inv, exc_info=True)
+        return None
+
+
 async def _spawn_outcome(spawn: asyncio.Future[asyncio.subprocess.Process]) -> asyncio.subprocess.Process | None:
     """The child a cancelled row's spawn made, waiting for the spawn to finish however many
     further cancels arrive (r7 D-ac: a child made after the cancel is still this row's to end);
@@ -144,6 +155,7 @@ class Worker:
         child_argv: Callable[[Launch], list[str]] = run_argv,
         containers: Containers | None = None, slots: int = 3,
         clock: Callable[[], _dt.datetime], stop_grace: float = 30,
+        open_lane: Callable[[DataRoot, object], job_lane.JobLane] = job_lane.JobLane.open,
     ) -> None:
         if slots < 1:
             raise ValueError(f"a worker needs at least one slot, not {slots!r}")
@@ -154,6 +166,7 @@ class Worker:
         self._slots = slots
         self._clock = clock
         self._stop_grace = stop_grace
+        self._open_lane = open_lane  # the job lane's door; a test hands in one that faults
         self._tasks: set[asyncio.Task[None]] = set()
         self._children: dict[str, asyncio.subprocess.Process] = {}
         self._stopping = False
@@ -407,7 +420,7 @@ class Worker:
 
     def _write_launch_files(self, launch: job_lane.LaunchRecord, raw: bytes) -> None:
         try:
-            lane = job_lane.JobLane.open(self._data_root, launch.tenant_id)
+            lane = self._open_lane(self._data_root, launch.tenant_id)
         except job_lane.JobLaneRefused as refused:
             _logger.error("investigation %s: %s", launch.investigation_id, refused)
             raise _WorkerFault("the tenant's runs container cannot be used on this host") from None
@@ -445,14 +458,14 @@ class Worker:
         """The stage, cost and knowledge from the host records, through the job lane (in a thread)."""
         inv = record.investigation_id
         try:
-            lane = job_lane.JobLane.open(self._data_root, record.tenant_id)
+            lane = self._open_lane(self._data_root, record.tenant_id)
         except job_lane.JobLaneRefused as refused:
             _logger.error("investigation %s: reading its records: %s", inv, refused)
             return (_Ending(_FAILED, failure_reason=_WORKER_ERROR,
                             failure_message="the tenant's runs container could not be read after the run"),
                     None, None)
         try:
-            ending = _ending_from(lane.read_job_end(inv), returncode, lambda: lane.report_disposition(inv))
+            ending = _ending_from(lane.read_job_end(inv), returncode, lambda: _report_disposition_or_none(lane, inv))
             # #1396: the ending is decided; from here no fault turns it into `worker_error`
             cost: float | None
             try:
