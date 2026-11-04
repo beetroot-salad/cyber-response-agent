@@ -126,8 +126,8 @@ done
 python3 -m evaluations.held_out "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```
 
-Only rows bound to a case's current freeze count. A case with no such row, whose newest row is
-stale, or whose newest run read Elasticsearch's own clock is listed with its reason and makes the
+Only rows bound to a case's current freeze count. A case with no such row, or whose newest row is
+stale, is listed with its reason and makes the
 set **incomplete** (non-zero exit); launch it again. A run that crashes before announcing its id leaves no row, and the slug's older row for the same
 freeze (if any) is scored instead. `held_out.py` reports aggregate accuracy plus per-class recall and counts runs
 that crashed or produced no parseable `report.md` as **wrong** against the ground-truth class

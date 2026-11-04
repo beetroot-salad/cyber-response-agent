@@ -49,8 +49,9 @@ defender/.venv/bin/python playground-v2/scripts/launch_frozen.py \
     --parts-dir <lab disk path> --knowledge-commit K
 # Primary: score against ground truth. It walks fixtures/held_out/ and scores each case from
 # the newest row in F (outside every runs and episodes tree) bound to its current freeze. A
-# case with no such row, a stale verdict, or a run that read Elasticsearch's own clock is
-# listed with its reason; the set is then INCOMPLETE and the exit is non-zero.
+# case with no such row or a stale verdict is listed with its reason; the set is then
+# INCOMPLETE and the exit is non-zero. (A frozen run cannot read Elasticsearch's own clock:
+# its search bounds and ES|QL are refused on `now`, so there is nothing to drop.)
 defender/.venv/bin/python -m evaluations.held_out "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```
 

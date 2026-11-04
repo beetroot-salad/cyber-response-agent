@@ -36,8 +36,9 @@ SLUG = "m05-lsass-access"
 RUN_ID = "5b0d1f2e-3c4d-4e5f-8a6b-7c8d9e0f1a2b"
 PARTS = {"proc-tree.txt": b"tree", "stubs.tar": b"stubs"}
 FROZEN_HOST = "tcp://10.9.8.7:2375"
+ALERT = b"{}"
 FREEZE = {
-    "alert_at": "2026-10-20T08:00:00Z", "as_of": "2026-10-20T09:00:00Z",
+    "alert_at": "2026-10-20T08:00:00Z", "alert": "sha256:" + sha(ALERT), "as_of": "2026-10-20T09:00:00Z",
     "window": ["2026-09-19T08:00:00Z", "2026-10-20T09:00:00Z"],
     "captured_at": "2026-10-20T09:03:17Z", "fingerprint": FINGERPRINT,
     "parts": {n: "sha256:" + sha(b) for n, b in PARTS.items()}, "chaos": None,
@@ -95,7 +96,7 @@ class Rig:
         self.clock = FakeClock(self.journal)
         self.case_dir = tmp_path / "held-out" / SLUG
         self.case_dir.mkdir(parents=True)
-        (self.case_dir / "alert.json").write_text("{}")
+        (self.case_dir / "alert.json").write_bytes(ALERT)
         (self.case_dir / "freeze.yaml").write_text(yaml.safe_dump(freeze, sort_keys=False))
         self.parts_dir = tmp_path / "parts"
         (self.parts_dir / SLUG).mkdir(parents=True)
@@ -183,8 +184,9 @@ def test_the_run_sees_a_docker_config_with_only_the_playground_context_repointed
 
 def test_the_row_binds_the_run_to_the_freeze_and_is_appended_after_the_fingerprint(tmp_path):
     """O9/O6: one row with exactly the six keys, run id from the agent's first stdout line,
-    freeze digest of the parsed freeze.yaml, verdict valid; appended after fingerprint and
-    teardown, before the lock is released."""
+    freeze digest of the parsed freeze.yaml, verdict valid; appended after the fingerprint and
+    before teardown (r6.2: a cleanup failure never costs a finished run its row), before the
+    lock is released."""
     rig = Rig(tmp_path)
     older = {"slug": SLUG, "run_id": "older-run", "freeze": DIGEST, "verdict": "valid",
              "reason": "", "verified_at": "2026-10-20T11:00:00Z"}
@@ -199,7 +201,7 @@ def test_the_row_binds_the_run_to_the_freeze_and_is_appended_after_the_fingerpri
     assert isinstance(row["reason"], str)
     ops = rig.journal.ops()
     assert ops.index("run") < ops.index("fingerprint") < ops.index("teardown") < ops.index("lock.delete")
-    assert json.loads(rig.ops.index_at_teardown.splitlines()[-1]) == older
+    assert json.loads(rig.ops.index_at_teardown.splitlines()[-1]) == row
     assert len(rig.index_at_release.splitlines()) == 2
     kw = rig.ops.fp_kwargs
     assert [instant(x) for x in kw["window"]] == [instant(x) for x in FREEZE["window"]]
@@ -282,9 +284,9 @@ def test_a_missing_or_altered_part_refuses_the_run_and_names_it(tmp_path, damage
     assert rig.rows() == [] and "frozen-engine" not in rig.store.records
 
 
-@pytest.mark.parametrize("stage", ["load", "run", "fingerprint", "teardown"])
+@pytest.mark.parametrize("stage", ["load", "run", "fingerprint"])
 def test_a_launch_that_dies_leaves_no_row_and_frees_the_engine(tmp_path, stage):
-    """O9: failing at load, run, fingerprint or teardown appends nothing, tears down any loaded
+    """O9: failing at load, run or fingerprint appends nothing, tears down any loaded
     or half-loaded copy, removes the config copy and releases the lock; an older row for the same freeze is untouched."""
     rig = Rig(tmp_path, fail_at=stage)
     older = json.dumps({"slug": SLUG, "run_id": "x", "freeze": DIGEST, "verdict": "valid",
@@ -638,3 +640,60 @@ def test_a_run_id_line_that_is_not_the_first_output_line_binds_no_row(tmp_path):
     with pytest.raises(Exception):  # noqa: B017 - the refusal's type is the implementation's choice
         rig.launch()
     assert rig.rows() == [] and "teardown" in rig.journal.ops()
+
+
+@pytest.mark.parametrize("alert", [b'{"_id": "another-alert"}', None], ids=["other-bytes", "absent"])
+def test_a_case_whose_alert_is_not_the_one_its_freeze_names_is_refused(tmp_path, alert):
+    """r6.2 (review #1353): the freeze names its alert by sha256; a case whose alert.json is
+    another alert (or none) is refused before anything loads or runs: no row, lock released."""
+    rig = Rig(tmp_path)
+    if alert is None:
+        (rig.case_dir / "alert.json").unlink()
+    else:
+        (rig.case_dir / "alert.json").write_bytes(alert)
+    module = _module()
+    rig.module = module
+    with pytest.raises(module.LaunchRefused, match="alert"):
+        rig.launch()
+    assert {"load_frozen", "run"}.isdisjoint(rig.journal.ops()) and rig.rows() == []
+    assert "frozen-engine" not in rig.store.records
+
+
+def test_a_freeze_that_names_no_alert_is_refused(tmp_path):
+    """r6.2: a freeze captured before the alert was bound names none; it is captured again."""
+    rig = Rig(tmp_path, freeze={k: v for k, v in FREEZE.items() if k != "alert"})
+    module = _module()
+    rig.module = module
+    with pytest.raises(module.LaunchRefused, match="alert"):
+        rig.launch()
+    assert {"load_frozen", "run"}.isdisjoint(rig.journal.ops()) and rig.rows() == []
+
+
+def test_a_teardown_that_fails_after_a_finished_run_keeps_its_row_and_says_so(tmp_path):
+    """r6.2 (review #1353): the run finished and was fingerprinted, so its row is written; the
+    teardown failure after it surfaces as its own error naming the run, and the config copy is
+    removed and the lock released as on any other end."""
+    rig = Rig(tmp_path, fail_at="teardown")
+    module = _module()
+    rig.module = module
+    with pytest.raises(module.TeardownFailed, match=RUN_ID):
+        rig.launch()
+    (row,) = rig.rows()
+    assert (row["run_id"], row["verdict"]) == (RUN_ID, "valid")
+    assert "frozen-engine" not in rig.store.records
+    assert list(rig.work.iterdir()) == []
+
+
+def test_the_command_line_exits_non_zero_naming_a_failed_teardown_after_the_row(tmp_path, capsys):
+    """r6.2: `main` reports a teardown failure after a written row (no traceback) and exits 5."""
+    rig = Rig(tmp_path, fail_at="teardown")
+    module = _module()
+
+    def failing(*_a, **_k):
+        raise module.TeardownFailed(f"{SLUG}: run {RUN_ID} recorded; teardown failed")
+
+    module.launch = failing
+    rc = module.main([str(rig.case_dir), "--tenant", "t", "--index", str(rig.index),
+                      "--parts-dir", str(rig.parts_dir)])
+    assert rc == 5
+    assert "teardown" in capsys.readouterr().err

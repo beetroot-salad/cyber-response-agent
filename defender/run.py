@@ -187,7 +187,7 @@ def _aware_moment(text: str) -> datetime:
 
 def _read_cut(ns: argparse.Namespace) -> ReadCut | None:
     """The run's read cut from `--as-of` / `--arrived-by`, or `None` for an ordinary run."""
-    return None if ns.as_of is None else ReadCut(ns.as_of, ns.arrived_by)
+    return None if ns.as_of is None else ReadCut(ns.as_of, ns.arrived_by, frozen=True)
 
 
 def _source_one_provider_key(prov: providers.Provider) -> int:

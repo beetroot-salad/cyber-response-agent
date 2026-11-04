@@ -29,9 +29,8 @@ Score (an evaluation tool outside the application: it takes no tenant and never 
 
 Every case carries a confirmed ``freeze.yaml`` beside ``ground_truth.yaml`` (one without refuses
 the set). Only rows whose ``freeze`` is the case's current freeze digest count; the newest of
-them names the run scored, opened by id under the runs dir. A case with no such row, a stale
-verdict, a run that read Elasticsearch's ``now`` (to re-run) or three such runs in a row
-(unscorable) is listed with its reason, left out of the accuracy, and makes the report
+them names the run scored, opened by id under the runs dir. A case with no such row or a stale
+verdict is listed with its reason, left out of the accuracy, and makes the report
 incomplete and the exit non-zero. A slug whose
 newest row names a run that is absent, or has no alert record, counts as **wrong** ("launched,
 no run record"), as does a run without a parseable ``report.md`` (missing, bad frontmatter,
@@ -45,7 +44,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import stat
 import sys
 from collections import defaultdict
@@ -79,17 +77,6 @@ LABELS: tuple[str, ...] = tuple(d for d in DISPOSITION_VALUES if d != HOST_ONLY_
 
 #: The index verdicts a row may carry (#1347): the post-run fingerprint check's answer.
 VERDICTS: tuple[str, ...] = ("valid", "stale")
-
-#: Consecutive dropped rows of one slug and freeze after which the case is unscorable (#1347 D13).
-UNSCORABLE_AFTER = 3
-
-#: Elasticsearch's own clock in recorded query text (#1347 D4): `now()` in ES|QL; `now` date math
-#: (`now`, `now-1h`, `now/d`) elsewhere. Case-insensitive and wide: a false drop costs a re-run,
-#: a missed clock read scores a run whose window slid.
-_NOW_CALL = re.compile(r"(?<![\w.])now\s*\(", re.IGNORECASE)
-_NOW_MATH = re.compile(r"(?<![\w.\-])now(?!\w)", re.IGNORECASE)
-_ELASTIC = "elastic"
-_ESQL = "esql"
 
 
 class FixturesRefused(Exception):  # noqa: N818 — named for its refusal, as `IndexRefused` is
@@ -248,12 +235,10 @@ def read_index(index: Path, runs_dir: Path) -> list[IndexRow]:
 
 
 #: Why a case is listed unscored (#1347 O11), with the heading its section carries.
-NOT_RUN, STALE, RERUN, UNSCORABLE = "not run", "stale", "re-run", "unscorable"
+NOT_RUN, STALE = "not run", "stale"
 _UNSCORED_HEADINGS = {
     NOT_RUN: "Not run (no index row for the case's current freeze; excluded from accuracy)",
     STALE: "Stale (the post-run check found the frozen telemetry changed; excluded from accuracy)",
-    RERUN: "Re-run needed (the run read Elasticsearch's clock; dropped, excluded from accuracy)",
-    UNSCORABLE: f"Unscorable ({UNSCORABLE_AFTER} dropped runs in a row; excluded from accuracy)",
 }
 
 
@@ -288,45 +273,13 @@ def _unrecorded(run_dir: Path) -> str | None:
     return None
 
 
-def _strings(value: object):
-    """Every string inside a JSON value."""
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for v in value.values():
-            yield from _strings(v)
-    elif isinstance(value, list):
-        for v in value:
-            yield from _strings(v)
-
-
-def reads_the_clock(run_dir: Path) -> bool:
-    """Whether the run's recorded Elasticsearch queries use its own `now` (#1347 D4): `now(` in
-    ES|QL, `now` date math in any other Elasticsearch call's params (a search's start, end or
-    query string). Other systems' params are not scanned. No queries file, or a run dir that is
-    a link, has nothing to scan; a file too large to read counts as a read (errs wide)."""
-    if run_dir.is_symlink():
-        return False
-    try:
-        rows, _ = _io.read_jsonl_rows_report(RunPaths(run_dir).executed_queries)
-    except OSError:
-        return True
-    for row in rows:
-        if row.get("system") != _ELASTIC:
-            continue
-        pattern = _NOW_CALL if row.get("verb") == _ESQL else _NOW_MATH
-        if any(pattern.search(text) for text in _strings(row.get("params"))):
-            return True
-    return False
-
-
 def score(fixtures: list[HeldOutAlert], runs_dir: Path,
           rows: list[IndexRow]) -> Scored:
     """Score each fixture from the newest index row bound to its current freeze, the run it
     names opened by id under `runs_dir`. Rows for another freeze, or with none, are set aside
-    first. A case is left unscored, with its reason, when it has no such row, the newest says
-    stale, the newest run read Elasticsearch's clock (dropped, to be re-run — even if it also
-    crashed) or `UNSCORABLE_AFTER` dropped rows in a row end the history."""
+    first. A case is left unscored, with its reason, when it has no such row or the newest says
+    stale. A frozen run cannot read Elasticsearch's own clock (its adapter refuses that read,
+    #1347 r6.2), so no recorded query is read here."""
     by_class: dict[str, list[tuple[str, str | None, str]]] = defaultdict(list)
     failures: list[tuple[str, str]] = []
     unscored: list[tuple[str, str, str]] = []
@@ -338,17 +291,6 @@ def score(fixtures: list[HeldOutAlert], runs_dir: Path,
         newest = bound[-1]
         if newest.verdict == "stale":
             unscored.append((fx.slug, STALE, newest.reason or "the post-run check found it stale"))
-            continue
-        if reads_the_clock(runs_dir / newest.run_id):
-            streak = 0
-            for r in reversed(bound):
-                if r.verdict == "stale" or not reads_the_clock(runs_dir / r.run_id):
-                    break
-                streak += 1
-            if streak >= UNSCORABLE_AFTER:
-                unscored.append((fx.slug, UNSCORABLE, f"{streak} dropped runs in a row"))
-            else:
-                unscored.append((fx.slug, RERUN, f"run {newest.run_id} read Elasticsearch's now"))
             continue
         true_disp = str(fx.ground_truth.get("disposition") or "?")
         run_dir = runs_dir / newest.run_id

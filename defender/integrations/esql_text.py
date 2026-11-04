@@ -158,6 +158,24 @@ def _tokens(query: str) -> list[_Token]:
     return out
 
 
+def calls_function(query: str, name: str) -> bool:
+    """Does `query` call the function `name` (case-insensitive) outside strings, quoted names and
+    comments? A call is the name, ending a word, followed by `(`: `now()`, `NOW ()` and
+    `x>now()` call `now`; `know(1)`, `now_seen` and `"now()"` do not. A query the tokenizer cannot
+    read raises `EsqlUnclassifiable`, as it does for confinement."""
+    tokens = _tokens(query)
+    wanted = name.lower()
+    for word, after in zip(tokens, tokens[1:], strict=False):
+        if word.kind != "word" or after.kind != "(":
+            continue
+        text = word.text.lower()
+        if text == wanted or (text.endswith(wanted)
+                              and not (text[-len(wanted) - 1].isalnum()
+                                       or text[-len(wanted) - 1] in "_.@")):
+            return True
+    return False
+
+
 def _split_top(tokens: list[_Token], sep: str) -> list[list[_Token]]:
     """`tokens` split on `sep` outside parentheses; an unbalanced parenthesis is unclassifiable."""
     parts: list[list[_Token]] = [[]]

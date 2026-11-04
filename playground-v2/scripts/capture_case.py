@@ -26,6 +26,7 @@ labelling against a reference run (`launch_frozen.py --reference`).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -104,12 +105,16 @@ def capture(case_dir: Path, *, scenario: str, rule: str, chaos: str, ops: Any, l
 
     token = lock.take(lock_store, lock.CAPTURE)
     keep_lock = False
-    ledger_ref = None
-    revert_tried = reverted = False
+    # The activated fault's ledger ref (recorded in the freeze), and the same ref while the fault
+    # may still be live. Activation comes first and alone, so capture holds the ref before
+    # anything else can fail, and is the only place the fault is undone (r6.2).
+    ledger_ref: str | None = None
+    live: str | None = None
     staging: Path | None = None
     try:
-        fired = ops.fire(scenario, chaos, seed, token)
-        ledger_ref = fired.get("ledger_ref")
+        if chaos and chaos != "none":
+            ledger_ref = live = ops.activate(chaos, seed, token)
+        fired = ops.fire(scenario, seed, token)
         # The case's alert is its rule's, never another alert on the same host.
         alert = ops.wait_alert({**fired, "rule_id": rule})
         alert_at = _utc(alert["@timestamp"])
@@ -126,10 +131,13 @@ def capture(case_dir: Path, *, scenario: str, rule: str, chaos: str, ops: Any, l
         names += ops.commit_hosts(staging, as_of)
         names += ops.copy_volumes(staging)
 
-        if ledger_ref is not None:
-            revert_tried = True
-            ops.revert(ledger_ref)
-            reverted = True
+        if live is not None:
+            try:
+                ops.revert(live)
+            except BaseException:
+                keep_lock = True
+                raise
+            live = None
 
         clock.sleep(settle_s)
         captured_at = _utc(es_now())
@@ -139,8 +147,12 @@ def capture(case_dir: Path, *, scenario: str, rule: str, chaos: str, ops: Any, l
         fingerprint = fingerprint_of([lower, as_of], as_of, captured_at)
 
         parts = {name: "sha256:" + sha256_file(staging / name) for name in names}
+        # The case's alert, bound into the freeze by its bytes (r6.2): every capture writes it,
+        # so a re-captured case never keeps an earlier alert beside a freeze built around another.
+        alert_bytes = (json.dumps(alert, indent=2) + "\n").encode("utf-8")
         freeze = {
             "alert_at": _iso(alert_at),
+            "alert": "sha256:" + hashlib.sha256(alert_bytes).hexdigest(),
             "as_of": _iso(as_of),
             "window": window,
             "captured_at": _iso(captured_at),
@@ -150,22 +162,19 @@ def capture(case_dir: Path, *, scenario: str, rule: str, chaos: str, ops: Any, l
             {"profile": chaos, "seed": seed, "ledger_ref": ledger_ref},
             "confirmed": {},
         }
-        _commit(case_dir, parts_dir / slug, staging, freeze, alert)
+        _commit(case_dir, parts_dir / slug, staging, freeze, alert_bytes)
         staging = None
     except BaseException:
         if staging is not None:
             shutil.rmtree(staging, ignore_errors=True)
-        if ledger_ref is not None and not revert_tried:
+        if live is not None and not keep_lock:
             try:
-                ops.revert(ledger_ref)
-            except Exception as revert_exc:
+                ops.revert(live)
+            except BaseException:
                 keep_lock = True
-                print(f"revert of {ledger_ref} failed ({revert_exc}); the capture lock stays "
-                      "held: revert the fault, then clear the lock", file=sys.stderr)
-        elif revert_tried and not reverted:
-            keep_lock = True
-            print(f"revert of {ledger_ref} failed; the capture lock stays held: revert the "
-                  "fault, then clear the lock", file=sys.stderr)
+        if keep_lock:
+            print(f"revert of {live} failed; the capture lock stays held: revert the fault, "
+                  "then clear the lock", file=sys.stderr)
         raise
     finally:
         if not keep_lock:
@@ -176,13 +185,18 @@ def capture(case_dir: Path, *, scenario: str, rule: str, chaos: str, ops: Any, l
     return {"freeze": freeze, "report": report}
 
 
-def _commit(case_dir: Path, mine: Path, staging: Path, freeze: dict, alert: dict) -> None:
-    """Swap the staged parts in and write freeze.yaml (and alert.json when the case has none).
-    The freeze file is written to a temporary name first and renamed last."""
+def _commit(case_dir: Path, mine: Path, staging: Path, freeze: dict, alert: bytes) -> None:
+    """Swap the staged parts in, then write alert.json and freeze.yaml, the freeze last. Both
+    files are written to temporary names first; on a failure the earlier parts and the earlier
+    alert go back, so a case is never left with new parts or a new alert under an old freeze."""
     tmp = case_dir / ".freeze.yaml.tmp"
+    alert_tmp = case_dir / ".alert.json.tmp"
+    alert_file = case_dir / "alert.json"
     tmp.write_text(yaml.safe_dump(freeze, sort_keys=False))
+    alert_tmp.write_bytes(alert)
+    earlier_alert = alert_file.read_bytes() if alert_file.is_file() else None
     old = None
-    swapped = False
+    swapped = alert_swapped = False
     try:
         if mine.exists():
             old = mine.with_name(f".{mine.name}.old")
@@ -190,12 +204,16 @@ def _commit(case_dir: Path, mine: Path, staging: Path, freeze: dict, alert: dict
             mine.rename(old)
         staging.rename(mine)
         swapped = True
-        alert_file = case_dir / "alert.json"
-        if not alert_file.exists():
-            alert_file.write_text(json.dumps(alert, indent=2) + "\n")
+        os.replace(alert_tmp, alert_file)
+        alert_swapped = True
         os.replace(tmp, case_dir / "freeze.yaml")
     except BaseException:
-        # The earlier parts go back under the earlier freeze: never new parts under an old one.
+        # The earlier parts and alert go back under the earlier freeze.
+        if alert_swapped:
+            if earlier_alert is None:
+                alert_file.unlink(missing_ok=True)
+            else:
+                alert_file.write_bytes(earlier_alert)
         if swapped:
             shutil.rmtree(mine, ignore_errors=True)
         if old is not None:
@@ -203,6 +221,7 @@ def _commit(case_dir: Path, mine: Path, staging: Path, freeze: dict, alert: dict
         raise
     finally:
         tmp.unlink(missing_ok=True)
+        alert_tmp.unlink(missing_ok=True)
     if old is not None:
         shutil.rmtree(old, ignore_errors=True)
 

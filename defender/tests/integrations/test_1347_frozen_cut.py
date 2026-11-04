@@ -331,6 +331,8 @@ def _record(ctx: VerbContext, name: str) -> dict:
     row = {"verb": name,
            "as_of": None if ctx.as_of is None else ctx.as_of.isoformat(),
            "arrived_by": None if ctx.arrived_by is None else ctx.arrived_by.isoformat()}
+    if getattr(ctx, "frozen", False):
+        row["frozen"] = True
     with (Path(ctx.run_dir) / "seen.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row) + "\\n")
     return {"ok": True}
@@ -460,3 +462,145 @@ def test_a_cut_registry_hands_out_the_same_verb_callable_on_every_lookup(tmp_pat
     registry = _registry(tmp_path, ReadCut(AS_OF, ARRIVED_BY))
 
     assert registry.verbs("cmdb")["get-host"] is registry.verbs("cmdb")["get-host"]
+
+
+# a frozen run never asks Elasticsearch for its own present time (#1347 r6.2, replaces D4/D13)
+#
+# Elasticsearch's `now` is the real present, not the run's clock: in a run served as of another
+# moment a bound on it slides past the cut and the read comes back empty. A frozen run (one
+# started with `--as-of`) refuses such a bound before any request, as a fault the agent can
+# correct; a branched world and an ordinary run send the same read unchanged.
+
+from defender.kit.faults import UpstreamFault  # noqa: E402
+from defender.tests.learning.branch.test_947_clock import docker_calls  # noqa: E402
+
+
+def _frozen(tmp_path: Path) -> Any:
+    """A call context as a frozen run's registry hands it to the adapter."""
+    return ReadCut(AS_OF, ARRIVED_BY, frozen=True).applied(cut_ctx(tmp_path, as_of=None, arrived_by=None))
+
+
+def _not_frozen(tmp_path: Path) -> dict[str, Any]:
+    return {
+        "branched": ReadCut(AS_OF).applied(cut_ctx(tmp_path, as_of=None, arrived_by=None)),
+        "cut-but-not-frozen": ReadCut(AS_OF, ARRIVED_BY).applied(
+            cut_ctx(tmp_path, as_of=None, arrived_by=None)),
+        "ordinary": cut_ctx(tmp_path, as_of=None, arrived_by=None),
+    }
+
+
+CLOCK_BOUNDS = [
+    pytest.param({"start": "now-24h"}, id="start-now-minus"),
+    pytest.param({"start": "now"}, id="start-bare-now"),
+    pytest.param({"start": "2026-10-01T00:00:00Z", "end": "now"}, id="end-now"),
+    pytest.param({"start": "now/d"}, id="start-rounded"),
+    pytest.param({"start": " NOW-1h "}, id="start-uppercase-padded"),
+    pytest.param({"start": "now-1h/h", "end": "now+5m"}, id="both"),
+]
+
+CLOCK_NATIVE = [
+    pytest.param("@timestamp:[now-1h TO now]", id="lucene-range"),
+    pytest.param("event.action:ssh_login AND @timestamp:{now-1d TO *}", id="lucene-exclusive-range"),
+    pytest.param("@timestamp:>=now-15m", id="lucene-comparison"),
+    pytest.param("@timestamp:<now", id="lucene-less-than"),
+]
+
+#: Searches that only mention the word: none reads the cluster's clock.
+WORD_NOT_CLOCK = [
+    pytest.param({"native_query": "process.command_line:*now*"}, id="wildcard-term"),
+    pytest.param({"native_query": 'message:"shutdown -h now"'}, id="quoted-phrase"),
+    pytest.param({"native_query": 'message:"[now TO later]"'}, id="range-syntax-inside-a-phrase"),
+    pytest.param({"native_query": "user.name:now"}, id="bare-term"),
+    pytest.param({"native_query": "event.action:x", "start": "2026-10-20T08:00:00Z||-1d"},
+                 id="anchored-date-math"),
+]
+
+ESQL_CLOCK = [
+    pytest.param("FROM logs-* | WHERE @timestamp > NOW() - 1 hour", id="upper"),
+    pytest.param("FROM logs-* | WHERE @timestamp>now() - 1 hour", id="glued-to-operator"),
+    pytest.param("FROM logs-* | EVAL t = now ()", id="space-before-paren"),
+    pytest.param("FROM logs-* | WHERE @timestamp > DATE_TRUNC(1 day, NOW())", id="nested-in-a-call"),
+]
+
+ESQL_WORD_NOT_CLOCK = [
+    pytest.param('FROM logs-* | WHERE message == "now()"', id="in-a-string"),
+    pytest.param("// now()\nFROM logs-* | LIMIT 1", id="in-a-comment"),
+    pytest.param("FROM logs-* | EVAL now_seen = 1 | LIMIT 1", id="identifier-prefix"),
+    pytest.param("FROM logs-* | WHERE `now` == 1", id="backtick-field"),
+    pytest.param("FROM logs-* | EVAL x = know(1)", id="other-function-ending-in-now"),
+]
+
+
+@pytest.mark.parametrize("verb", ["query", "alerts"])
+@pytest.mark.parametrize("bounds", CLOCK_BOUNDS)
+def test_a_frozen_search_bounded_on_the_clusters_clock_is_refused_before_any_request(
+    tmp_path, verb, bounds,
+):
+    with pytest.raises(UpstreamFault, match="absolute"):
+        elastic_adapter.VERBS[verb](_frozen(tmp_path), native_query="event.action:x", **bounds)
+    assert docker_calls(tmp_path) == [], "the refused read reached the cluster"
+
+
+@pytest.mark.parametrize("native", CLOCK_NATIVE)
+def test_a_frozen_search_whose_query_ranges_on_the_clusters_clock_is_refused(tmp_path, native):
+    with pytest.raises(UpstreamFault, match="absolute"):
+        elastic_adapter.query(_frozen(tmp_path), native_query=native)
+    assert docker_calls(tmp_path) == []
+
+
+@pytest.mark.parametrize("params", WORD_NOT_CLOCK)
+def test_a_frozen_search_that_only_mentions_now_is_sent(tmp_path, params):
+    elastic_adapter.query(_frozen(tmp_path), **params)
+    assert len(docker_calls(tmp_path)) == 1
+
+
+@pytest.mark.parametrize("asked", ESQL_CLOCK)
+def test_a_frozen_esql_calling_now_is_refused_before_any_request(tmp_path, asked):
+    with pytest.raises(UpstreamFault, match="absolute"):
+        elastic_adapter.esql(_frozen(tmp_path), query=asked)
+    assert docker_calls(tmp_path) == []
+
+
+@pytest.mark.parametrize("asked", ESQL_WORD_NOT_CLOCK)
+def test_a_frozen_esql_that_only_mentions_now_is_sent(tmp_path, asked):
+    elastic_adapter.esql(_frozen(tmp_path), query=asked)
+    assert len(docker_calls(tmp_path)) == 1
+
+
+@pytest.mark.parametrize("kind", ["branched", "cut-but-not-frozen", "ordinary"])
+def test_a_run_that_is_not_frozen_sends_the_same_clock_reads_unchanged(tmp_path, kind):
+    """Control: only a frozen run refuses; every refused read above is sent by the others."""
+    for i, bounds in enumerate([p.values[0] for p in CLOCK_BOUNDS]):
+        sub = tmp_path / f"b{i}"
+        elastic_adapter.query(_not_frozen(sub)[kind], native_query="event.action:x", **bounds)
+        assert len(docker_calls(sub)) == 1, bounds
+    for i, native in enumerate([p.values[0] for p in CLOCK_NATIVE]):
+        sub = tmp_path / f"n{i}"
+        elastic_adapter.query(_not_frozen(sub)[kind], native_query=native)
+        assert len(docker_calls(sub)) == 1, native
+    for i, asked in enumerate([p.values[0] for p in ESQL_CLOCK]):
+        sub = tmp_path / f"e{i}"
+        elastic_adapter.esql(_not_frozen(sub)[kind], query=asked)
+        assert len(docker_calls(sub)) == 1, asked
+
+
+def test_the_refusal_names_no_harness_and_points_at_the_runs_clock(tmp_path):
+    """The agent is told how to correct the read, not that the run is frozen or evaluated."""
+    with pytest.raises(UpstreamFault) as refused:
+        elastic_adapter.query(_frozen(tmp_path), native_query="x", start="now-1h")
+    text = str(refused.value).lower()
+    for tell in ("frozen", "freeze", "held-out", "eval", "as_of", "as-of"):
+        assert tell not in text, f"the refusal says {tell!r}"
+    assert "now" in text
+
+
+def test_a_frozen_cut_survives_the_registry_and_a_branched_cut_is_never_frozen(tmp_path):
+    """The mark travels with the cut through the registry; a world's cut never carries it."""
+    from defender.learning.branch.estate.registry import ReadCut as WorldCut  # same class
+
+    frozen = _registry(tmp_path, ReadCut(AS_OF, ARRIVED_BY, frozen=True))
+    assert WorldCut is ReadCut
+    assert ReadCut(AS_OF).frozen is False
+    assert ReadCut(AS_OF, ARRIVED_BY).frozen is False
+    frozen.verbs("cmdb")["get-host"](cut_ctx(tmp_path, as_of=None, arrived_by=None), host="h")
+    assert [row.get("frozen") for row in read_jsonl_rows(tmp_path / "run" / "seen.jsonl")] == [True]

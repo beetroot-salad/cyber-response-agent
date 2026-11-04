@@ -136,6 +136,9 @@ class VerbContext:
     #: adapter knows its own arrival stamp). `None` asks nothing about arrival; set only beside
     #: `as_of`, from the same `ReadCut`. Never a capture stamp, like `as_of`.
     arrived_by: datetime | None = None
+    #: A frozen run's call (#1347 r6.2, `ReadCut.frozen`): the adapter refuses a read that asks
+    #: its system for the system's own present time. Set only beside `as_of`, from the same cut.
+    frozen: bool = False
     #: The credential proxy's address and the request token this call presents to it (#1163),
     #: handed in by whoever builds the context. The token is a bearer value: out of every repr.
     proxy_url: str | None = None
@@ -591,10 +594,15 @@ class ReadCut:
     optionally, `arrived_by` (arrival time). One value, applied by the registry to every call's
     context (`ModuleVerbRegistry`), so no verb path — an oracle's real read included — can be
     served uncut. A branched world's is its branch point; a run started with `--as-of` has its
-    own. Both moments are held as aware UTC."""
+    own. Both moments are held as aware UTC.
+
+    `frozen` marks a run started with `--as-of` (#1347 r6.2): the systems it reads are served as
+    they were at `as_of`, so a read that asks a system for its own present time is refused by the
+    adapter that knows how that system spells it. A branched world's cut is never frozen."""
 
     as_of: datetime
     arrived_by: datetime | None = None
+    frozen: bool = False
 
     def __post_init__(self) -> None:
         for name in ("as_of", "arrived_by"):
@@ -617,7 +625,7 @@ class ReadCut:
         if not is_dataclass(ctx) or isinstance(ctx, type):
             return ctx
         declared = {f.name for f in fields(ctx) if f.init}
-        values = {"as_of": self.as_of, "arrived_by": self.arrived_by}
+        values = {"as_of": self.as_of, "arrived_by": self.arrived_by, "frozen": self.frozen}
         settable = {name: value for name, value in values.items() if name in declared}
         return replace(ctx, **settable) if settable else ctx
 

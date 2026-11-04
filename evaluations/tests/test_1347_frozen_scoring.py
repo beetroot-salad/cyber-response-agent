@@ -36,7 +36,6 @@ def _search(**params: Any) -> dict:
 
 
 CLEAN = [_esql('FROM logs-* | WHERE @timestamp >= "2026-10-20T07:00:00Z" | LIMIT 1')]
-NOW_ESQL = [_esql("FROM logs-* | WHERE @timestamp > now() - 1 hour | LIMIT 5")]
 
 
 def _cases(tmp_path: Path) -> tuple[Path, Path]:
@@ -46,10 +45,6 @@ def _cases(tmp_path: Path) -> tuple[Path, Path]:
 
 def _ok(runs: Path, says: str = "benign") -> str:
     return _run(runs, says=says, queries=CLEAN).name
-
-
-def _dropped(runs: Path, says: str = "malicious") -> str:
-    return _run(runs, says=says, queries=NOW_ESQL).name
 
 
 def _why(text: str, slug: str) -> str:
@@ -224,54 +219,6 @@ def test_the_newest_current_freeze_row_decides_between_stale_and_valid(tmp_path)
     assert (rc, _verdicts(recovered)) == (0, {GOOD: "OK", OTHER: "OK"}), recovered
 
 
-@pytest.mark.parametrize("queries", [
-    [_esql("FROM logs-* | WHERE @timestamp > now() - 1 hour | LIMIT 5")],
-    [_esql("FROM logs-* | EVAL t = NOW()")],
-    [_esql("FROM logs-* | EVAL t = Now ()")],
-    [_search(native_query="user.name:root", start="now-1d")],
-    [_search(native_query="user.name:root", end="now")],
-    [_search(native_query="@timestamp:[now-1h TO *]")],
-    [_esql("FROM logs-* | LIMIT 1"), _search(native_query="@timestamp:[now-1h TO *]")],
-], ids=["now()", "NOW()", "Now ()", "start", "end", "query-string", "second-row"])
-def test_a_run_that_uses_elasticsearchs_now_is_dropped_and_listed_for_rerun(tmp_path, queries):
-    """D4/O5: now() in ES|QL, or `now` date math in a search's start, end or query string, drops
-    the run: not scored, listed as needing a re-run, set incomplete."""
-    fixtures, runs = _cases(tmp_path)
-    clock_read = _run(runs, says="malicious", queries=queries).name
-
-    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, clock_read))
-
-    assert _verdicts(said) == {GOOD: "OK"}, said
-    assert "re-run" in _why(said, OTHER), said
-    assert rc != 0, said
-    assert "incomplete" in said.lower(), said
-
-
-def test_absolute_times_in_recorded_queries_are_not_a_clock_read(tmp_path):
-    """D4 (positive control): ISO start/end and absolute ES|QL bounds score normally."""
-    fixtures, runs = _cases(tmp_path)
-    queries = [_search(native_query="user.name:root", start="2026-10-20T07:00:00Z",
-                       end="2026-10-20T09:00:00Z"), *CLEAN]
-
-    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _run(runs, says="benign", queries=queries).name),
-                          (OTHER, _ok(runs, "malicious")))
-
-    assert (rc, _verdicts(said)) == (0, {GOOD: "OK", OTHER: "OK"}), said
-
-
-def test_a_dropped_run_that_also_crashed_is_dropped_not_scored_wrong(tmp_path):
-    """D4: a run that read `now` and has no report is a harness artifact: listed for re-run,
-    absent from the wrong answers and the failure bucket."""
-    fixtures, runs = _cases(tmp_path)
-    crashed = _run(runs, says=None, queries=NOW_ESQL).name
-
-    _rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, crashed))
-
-    assert "re-run" in _why(said, OTHER), said
-    assert OTHER not in _verdicts(said), said
-    assert "no parseable report" not in said, said
-
-
 def test_a_crashed_or_unparseable_run_with_clean_queries_still_scores_wrong(tmp_path):
     """O11 (as today): a clean current-freeze run without a parseable report scores WRONG, and
     that complete set exits 0."""
@@ -284,61 +231,15 @@ def test_a_crashed_or_unparseable_run_with_clean_queries_still_scores_wrong(tmp_
     assert (rc, "incomplete" in said.lower()) == (0, False), said
 
 
-def _unscorable_after(tmp_path: Path, sequence: str) -> tuple[int, str]:
-    """Score OTHER from rows `sequence`, oldest first: `d` a dropped row, `c` a clean row, `s` a
-    stale-verdict row (clean queries), `x` a stale-verdict row whose run read `now`; an uppercase letter is the same row bound to another
-    freeze. GOOD scores from one clean row."""
-    fixtures, runs = _cases(tmp_path)
-    rows: list[Any] = []
-    for ch in sequence:
-        run = _dropped(runs) if ch.lower() in "dx" else _ok(runs, "malicious")
-        extra: dict[str, Any] = {"freeze": "f" * 64} if ch.isupper() else {}
-        if ch.lower() in "sx":
-            extra["verdict"] = "stale"
-        rows.append(_row(fixtures, OTHER, run, **extra))
-    return _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), *rows)
-
-
-@pytest.mark.parametrize("sequence", ["ddd", "dddd", "cddd", "dDdd", "ddCd", "dDDddD"])
-def test_three_consecutive_dropped_rows_make_the_case_unscorable(tmp_path, sequence):
-    """D13: rows for another freeze are filtered out first; three consecutive dropped
-    current-freeze rows remain (`dDdd` is `ddd`) and make it unscorable, not another re-run."""
-    rc, said = _unscorable_after(tmp_path, sequence)
-
-    assert "unscorable" in _why(said, OTHER), said
-    assert "re-run" not in _why(said, OTHER), said
-    assert (rc != 0, "incomplete" in said.lower()) == (True, True), said
-
-
-@pytest.mark.parametrize("sequence", ["dd", "ddcd", "dcdd", "dDd", "dDDd", "ddsd", "dsdd", "dxdd", "ddxd"])
-def test_fewer_than_three_consecutive_drops_stay_a_rerun(tmp_path, sequence):
-    """D13: with other-freeze rows filtered out, a clean or stale current-freeze row breaks the
-    run of drops; the newest row is a drop, so these stay at a re-run."""
-    _rc, said = _unscorable_after(tmp_path, sequence)
-
-    assert "re-run" in _why(said, OTHER), said
-    assert "unscorable" not in _why(said, OTHER), said
-
-
-def test_a_clean_row_after_three_drops_resets_and_scores(tmp_path):
-    """D13: dropped x3 then a clean row: the clean newest row scores, set complete, exit 0."""
-    rc, said = _unscorable_after(tmp_path, "dddc")
-
-    assert (rc, _verdicts(said)) == (0, {GOOD: "OK", OTHER: "OK"}), said
-
-
 def test_every_case_not_scored_is_listed_with_its_reason_and_the_set_is_incomplete(tmp_path):
-    """O11: one scored, one not run, one stale, one needing a re-run, one unscorable: each is
-    listed with its reason; the report says incomplete, exits non-zero, scores only the first."""
+    """O11: one scored, one not run, one stale: each unscored case is listed with its reason; the
+    report says incomplete, exits non-zero, scores only the first."""
     fixtures = _fixture_set(tmp_path / "held-out", {
-        "a-scored": "benign", "b-not-run": "benign", "c-stale": "benign",
-        "d-rerun": "malicious", "e-unscorable": "malicious"})
+        "a-scored": "benign", "b-not-run": "benign", "c-stale": "benign"})
     runs = tmp_path / "runs"
     rows: list[Any] = [
         ("a-scored", _ok(runs)),
         _row(fixtures, "c-stale", _ok(runs), verdict="stale"),
-        ("d-rerun", _dropped(runs)),
-        *(("e-unscorable", _dropped(runs)) for _ in range(3)),
     ]
 
     rc, said = _scored_rc(tmp_path, runs, fixtures, *rows)
@@ -349,9 +250,7 @@ def test_every_case_not_scored_is_listed_with_its_reason_and_the_set_is_incomple
     assert {s: any(w in why for w in words) for s, why, words in [
         ("b-not-run", listed.get("b-not-run", ""), ["not run"]),
         ("c-stale", listed.get("c-stale", ""), ["stale"]),
-        ("d-rerun", listed.get("d-rerun", ""), ["re-run"]),
-        ("e-unscorable", listed.get("e-unscorable", ""), ["unscorable"]),
-    ]} == dict.fromkeys(["b-not-run", "c-stale", "d-rerun", "e-unscorable"], True), said
+    ]} == dict.fromkeys(["b-not-run", "c-stale"], True), said
     assert "Aggregate accuracy: 1/1" in said, said
     assert rc != 0, said
     assert "incomplete" in said.lower(), said
@@ -370,38 +269,6 @@ def test_an_index_row_without_a_valid_or_stale_verdict_refuses_the_whole_index(t
 
     assert rc == 2, said
     assert _verdicts(said) == {}, said
-
-
-def _host_row(system: str, verb: str, query_id: str, params: dict, raw: str) -> dict:
-    return {"lead_id": "l-002", "seq": 1, "system": system, "verb": verb, "query_id": query_id,
-            "params": params, "raw_command": raw, "payload_path": "gather_raw/l-002/1.json",
-            "exit_code": 0, "error_class": None, "payload_status": "ok"}
-
-
-NOT_ELASTIC = [
-    _host_row("host-state", "fim-checksum", "host-state.entrypoint-checksum",
-              {"host": "db-1", "path": "/var/log/now(1).log"},
-              "host-state fim-checksum host=db-1 path=/var/log/now(1).log"),
-    _host_row("change-mgmt", "active-changes", "change-mgmt.active-changes",
-              {"host": "db-1", "at": "now-1d"}, "change-mgmt active-changes host=db-1 at=now-1d"),
-    _host_row("cmdb", "get-host", "cmdb.host-trust-edges",
-              {"host": "now(host"}, "cmdb get-host host=now(host"),
-]
-
-
-def test_now_text_in_non_elasticsearch_recorded_params_does_not_drop_the_run(tmp_path):
-    """FR8/r6.1: the `now` scan covers Elasticsearch verbs only: `now(` / `now-1d` in host-state,
-    change-mgmt or CMDB params score normally; the same text in an Elastic esql drops (control)."""
-    fixtures, runs = _cases(tmp_path)
-    quiet = _run(runs, says="malicious", queries=[*CLEAN, *NOT_ELASTIC]).name
-    loud = _run(runs, says="malicious", queries=[*NOT_ELASTIC, *NOW_ESQL]).name
-
-    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, quiet))
-    assert (rc, _verdicts(said)) == (0, {GOOD: "OK", OTHER: "OK"}), said
-
-    _rc, dropped = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, loud))
-    assert "re-run" in _why(dropped, OTHER), dropped
-    assert OTHER not in _verdicts(dropped), dropped
 
 
 def test_a_freeze_value_canonical_json_cannot_carry_refuses_the_whole_set(tmp_path):
@@ -434,53 +301,6 @@ def test_a_row_whose_freeze_differs_from_the_cases_only_in_its_tail_does_not_bin
 
     assert _verdicts(said) == {OTHER: "OK"}, said
     assert "not run" in _why(said, GOOD), said
-
-
-@pytest.mark.parametrize("position", [19, 20, 40], ids=["20th", "21st", "41st"])
-def test_a_now_read_late_in_the_recorded_queries_is_found(tmp_path, position):
-    """D4/O5: the whole recorded query list is scanned; `now()` in a late query still drops the
-    run, not scored, listed for re-run."""
-    fixtures, runs = _cases(tmp_path)
-    queries = [*CLEAN * position, *NOW_ESQL, *CLEAN * 3]
-    late = _run(runs, says="malicious", queries=queries).name
-
-    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, late))
-
-    assert _verdicts(said) == {GOOD: "OK"}, said
-    assert "re-run" in _why(said, OTHER), said
-    assert rc != 0, said
-
-
-@pytest.mark.parametrize("params", [
-    {"native_query": "user.name:root", "start": "now-1d"},
-    {"native_query": "user.name:root", "end": "now"},
-    {"native_query": "@timestamp:[now-1h TO *]"},
-], ids=["start", "end", "query-string"])
-def test_an_alerts_call_that_uses_now_date_math_is_dropped_like_a_search(tmp_path, params):
-    """D4/O5: every Elasticsearch verb is scanned; `now` date math in an `alerts` call's start,
-    end or query string drops the run, as it does for `query`."""
-    fixtures, runs = _cases(tmp_path)
-    alerts = {**_search(**params), "verb": "alerts", "query_id": "elastic.alerts"}
-    read = _run(runs, says="malicious", queries=[*CLEAN, alerts]).name
-
-    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, read))
-
-    assert _verdicts(said) == {GOOD: "OK"}, said
-    assert "re-run" in _why(said, OTHER), said
-    assert rc != 0, said
-
-
-def test_a_stale_row_whose_run_also_read_now_is_listed_stale_not_for_rerun(tmp_path):
-    """Verdict/D4: a stale newest row is listed stale before the run's queries are read; a
-    `now` in that run does not turn it into a re-run."""
-    fixtures, runs = _cases(tmp_path)
-    stale = _row(fixtures, OTHER, _dropped(runs), verdict="stale", reason="fingerprint differs")
-
-    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), stale)
-
-    assert "stale" in _why(said, OTHER), said
-    assert "re-run" not in _why(said, OTHER), said
-    assert (rc != 0, "incomplete" in said.lower()) == (True, True), said
 
 
 @pytest.mark.parametrize("freeze", [123, ["a"], {"a": 1}, True], ids=["number", "list", "object", "bool"])
@@ -540,19 +360,21 @@ def test_an_uppercase_hex_freeze_digest_in_a_row_does_not_bind(tmp_path):
     assert "not run" in _why(said, GOOD), said
 
 
-def test_a_queries_file_that_cannot_be_read_errs_wide_to_a_rerun(tmp_path):
-    """D4/O5 (errs wide): a run whose recorded queries are too large to read counts as having read
-    `now`: listed for re-run, not scored."""
-    from defender import _io
-    from defender.records import RunPaths
 
+
+@pytest.mark.parametrize("queries", [
+    [_esql("FROM logs-* | WHERE @timestamp > now() - 1 hour | LIMIT 5")],
+    [_search(native_query="process.command_line:*now*", start="now-1d")],
+], ids=["esql-now", "search-now"])
+def test_the_scorer_scores_a_run_by_its_report_whatever_its_recorded_queries_say(tmp_path, queries):
+    """r6.2 (replaces D4/D13): a frozen run's adapter refuses Elasticsearch's own clock before
+    any request, so the scorer reads no queries file: a current-freeze `valid` row scores from
+    the run's report, and there is no re-run or unscorable state."""
     fixtures, runs = _cases(tmp_path)
-    unreadable = _run(runs, says="malicious", queries=CLEAN)
-    with RunPaths(unreadable).executed_queries.open("r+b") as f:
-        f.truncate(_io.READ_LIMIT + 1)  # sparse; reading it raises OSError
+    said_now = _run(runs, says="malicious", queries=queries).name
 
-    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, unreadable.name))
+    rc, said = _scored_rc(tmp_path, runs, fixtures, (GOOD, _ok(runs)), (OTHER, said_now))
 
-    assert "re-run" in _why(said, OTHER), said
-    assert OTHER not in _verdicts(said), said
-    assert rc != 0, said
+    assert (rc, _verdicts(said)) == (0, {GOOD: "OK", OTHER: "OK"}), said
+    assert "re-run" not in said.lower(), said
+    assert "unscorable" not in said.lower(), said

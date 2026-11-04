@@ -320,21 +320,23 @@ def _fire_rig(monkeypatch, fail_run=False):
     return calls, ops_module.LabOps(run=Lab())
 
 
-def test_fire_passes_the_capture_lock_token_to_the_activation_and_the_scenario(monkeypatch):
+def test_activate_and_fire_pass_the_capture_lock_token_to_the_activation_and_the_scenario(monkeypatch):
     """O10/D14: the token capture holds reaches both ctl.activate and the scenario run."""
     calls, ops = _fire_rig(monkeypatch)
-    fired = ops.fire("scn", "stale-cmdb", 7, "tok-123")
+    assert ops.activate("stale-cmdb", 7, "tok-123") == "chaos-9"
+    fired = ops.fire("scn", 7, "tok-123")
     assert [c.get("lock_token") for c in calls["activate"]] == ["tok-123"]
     assert [c.get("lock_token") for c in calls["run"]] == ["tok-123"]
-    assert fired["ledger_ref"] == "chaos-9" and calls["revert"] == []
+    assert fired["target_host"] == "web-1" and calls["revert"] == []
 
 
-def test_a_failing_scenario_reverts_the_fault_fire_activated(monkeypatch):
-    """O1: if the scenario fails after the fault was activated, the fault is reverted and the error surfaces."""
+def test_a_failing_scenario_leaves_the_fault_to_capture_the_one_reverter(monkeypatch):
+    """r6.2: fire never touches the fault — no activation, no revert — so capture, which holds
+    the ledger ref from before the scenario ran, is the only place it is undone."""
     calls, ops = _fire_rig(monkeypatch, fail_run=True)
     with pytest.raises(RuntimeError, match="scenario failed"):
-        ops.fire("scn", "stale-cmdb", 7, "tok-123")
-    assert calls["revert"] == ["chaos-9"]
+        ops.fire("scn", 7, "tok-123")
+    assert calls["activate"] == [] and calls["revert"] == []
 
 
 def test_wait_alert_takes_only_the_rules_alert_on_the_host_since_the_scenario_start():

@@ -2,8 +2,10 @@
 
 Entry point bound by this contract: `playground-v2/scripts/capture_case.py::capture(case_dir,
 *, scenario, rule, chaos, ops, lock_store, parts_dir, clock, history_start, seed=42, settle_s=...)`.
-The lab operations are `ops` methods: fire(scenario, chaos, seed, lock_token) -> {"ledger_ref"};
-wait_alert(fired + {"rule_id": rule}) -> alert doc; proc_tree(dest), stub_dumps(dest), commit_hosts(dest, as_of),
+The lab operations are `ops` methods: activate(chaos, seed, lock_token) -> ledger_ref, called
+only for a chaos profile, before anything else touches the lab, and undone by capture alone
+(r6.2: the one owner of a live fault); fire(scenario, seed, lock_token) -> fired, which never
+touches the fault; wait_alert(fired + {"rule_id": rule}) -> alert doc; proc_tree(dest), stub_dumps(dest), commit_hosts(dest, as_of),
 copy_volumes(dest) each write part files under `dest` and return their names; revert(ledger_ref);
 es_now(); refresh(); fingerprint(window, as_of, arrived_by). `clock` offers sleep_until(moment)
 and sleep(seconds). The lock is taken through `chaos.lock` on `lock_store`; parts go under
@@ -22,6 +24,7 @@ the name of each stored part. The exact format is unpinned.
 from __future__ import annotations
 
 import importlib.util
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -34,7 +37,7 @@ CAPTURE = Path(__file__).resolve().parents[1] / "capture_case.py"
 SLUG = "m05-lsass-access"
 HISTORY_START = "2026-08-01T00:00:00Z"
 RULE = "v2-lsass-access"
-STAGES = ["fire", "wait_alert", "wait_as_of", "proc_tree", "stub_dumps", "commit_hosts",
+STAGES = ["activate", "fire", "wait_alert", "wait_as_of", "proc_tree", "stub_dumps", "commit_hosts",
           "copy_volumes", "revert", "settle", "es_now", "refresh", "fingerprint"]
 
 
@@ -92,7 +95,7 @@ def test_capture_runs_its_steps_in_the_designed_order(tmp_path):
     rig = Rig(tmp_path)
     rig.run()
     ops = rig.journal.ops()
-    order = ["lock.create", "fire", "wait_alert", "clock.sleep_until"]
+    order = ["lock.create", "activate", "fire", "wait_alert", "clock.sleep_until"]
     snaps_first, snaps_then = ["proc_tree", "stub_dumps"], ["commit_hosts", "copy_volumes"]
     tail = ["revert", "clock.sleep", "es_now", "refresh", "fingerprint", "lock.delete"]
     firsts = [ops.index(o) for o in order]
@@ -112,7 +115,7 @@ def test_capture_waits_for_as_of_and_fires_under_the_lock_token(tmp_path):
     assert [instant(w) for w in waited] == [instant(ALERT_AT) + timedelta(hours=1)]
     token = rig.ops.fire_kwargs["lock_token"]
     assert token and rig.record_at_fire and token in rig.record_at_fire, "not fired under the lock"
-    assert rig.ops.fire_kwargs["chaos"] == "stale-cmdb"
+    assert rig.ops.activate_kwargs == {"chaos": "stale-cmdb", "seed": 42, "lock_token": token}
     assert "capture" not in rig.store.records, "the lock was not released"
 
 
@@ -171,6 +174,29 @@ def test_parts_are_named_by_sha256_and_their_bytes_sit_under_the_parts_dir(tmp_p
         assert (rig.parts_dir / SLUG / name).read_bytes() == data
 
 
+def test_the_freeze_binds_the_alert_it_was_built_around(tmp_path):
+    """r6.2 (review #1353): alert.json is the alert capture waited for, and the freeze names its
+    bytes by sha256 (so the freeze digest every row binds to covers the alert too)."""
+    rig = Rig(tmp_path)
+    rig.run()
+    written = (rig.case_dir / "alert.json").read_bytes()
+    assert json.loads(written) == rig.ops.alert_doc
+    assert rig.freeze["alert"] == "sha256:" + sha(written)
+
+
+def test_a_recapture_writes_the_new_alert_beside_the_new_freeze(tmp_path):
+    """r6.2 (review #1353): a case captured again carries the new capture's alert, never the
+    earlier one beside a freeze built around another alert."""
+    rig = Rig(tmp_path)
+    (rig.case_dir / "alert.json").write_text(json.dumps({"@timestamp": "2026-09-01T00:00:00Z",
+                                                         "_id": "earlier-alert"}))
+    rig.ops.alert_doc = {"@timestamp": ALERT_AT, "_id": "alert-2"}
+    rig.run()
+    written = (rig.case_dir / "alert.json").read_bytes()
+    assert json.loads(written)["_id"] == "alert-2"
+    assert rig.freeze["alert"] == "sha256:" + sha(written)
+
+
 def test_capture_leaves_confirmation_empty_and_records_the_chaos_ledger_ref(tmp_path):
     """Confirmation/O7: `confirmed` is present and empty; chaos carries profile, seed, ledger ref."""
     rig = Rig(tmp_path)
@@ -192,7 +218,7 @@ def test_a_failure_at_any_stage_reverts_releases_and_writes_nothing(tmp_path, st
     assert not mine.exists() or not [p for p in mine.rglob("*") if p.is_file()]
     assert [p.name for p in rig.parts_dir.iterdir() if p.name not in ("other-case", SLUG)] == []
     assert (rig.parts_dir / "other-case" / "keep.bin").read_bytes() == b"keep"
-    if stage == "fire":
+    if stage == "activate":
         assert "revert" not in rig.journal.ops()  # no ledger ref was ever returned
     else:
         assert rig.ops.revert_refs == ["chaos-abc123"]
@@ -208,7 +234,7 @@ def _stored(rig: Rig, slug: str = SLUG) -> dict[str, bytes]:
     return {str(p.relative_to(mine)): p.read_bytes() for p in sorted(mine.rglob("*")) if p.is_file()}
 
 
-@pytest.mark.parametrize("stage", ["wait_alert", "wait_as_of", "copy_volumes"])
+@pytest.mark.parametrize("stage", ["fire", "wait_alert", "wait_as_of", "copy_volumes"])
 def test_an_interrupt_at_any_stage_still_reverts_and_cleans_up(tmp_path, stage):
     """O1: Ctrl-C (a BaseException) while the fault is live reverts it once, frees the lock and
     leaves no part, staging directory or freeze.yaml."""
@@ -221,18 +247,20 @@ def test_an_interrupt_at_any_stage_still_reverts_and_cleans_up(tmp_path, stage):
     assert [p.name for p in rig.parts_dir.iterdir()] == ["other-case"]
 
 
-def test_a_failed_cleanup_revert_keeps_the_lock_held(tmp_path):
+@pytest.mark.parametrize("stage", ["fire", "wait_alert", "copy_volumes"])
+def test_a_failed_cleanup_revert_keeps_the_lock_held(tmp_path, stage):
     """O1/D9: when the stage failed and the cleanup revert fails too, the fault may be live: an
-    error surfaces (the stage's or the revert's) and the capture lock stays held."""
-    rig = Rig(tmp_path, fail_at=("copy_volumes", "revert"))
-    with pytest.raises(RuntimeError, match="copy_volumes failed|revert failed"):
+    error surfaces (the stage's or the revert's) and the capture lock stays held — the scenario
+    failing right after activation included (review #1353)."""
+    rig = Rig(tmp_path, fail_at=(stage, "revert"))
+    with pytest.raises(RuntimeError, match=f"{stage} failed|revert failed"):
         rig.run()
     assert rig.ops.revert_refs == ["chaos-abc123"]
     assert "capture" in rig.store.records, "the lock was released with the fault possibly live"
     assert not (rig.case_dir / "freeze.yaml").exists()
 
 
-@pytest.mark.parametrize("stage", ["wait_alert", "copy_volumes", "fingerprint"])
+@pytest.mark.parametrize("stage", ["fire", "wait_alert", "copy_volumes", "fingerprint"])
 def test_the_lock_is_still_held_when_the_fault_is_reverted(tmp_path, stage):
     """O1/D9: every revert call, including the cleanup one after a failure, happens under the lock."""
     rig = Rig(tmp_path, fail_at=stage)
@@ -243,17 +271,21 @@ def test_the_lock_is_still_held_when_the_fault_is_reverted(tmp_path, stage):
 
 @pytest.mark.parametrize("stage", ["proc_tree", "fingerprint", "revert"])
 def test_a_failed_recapture_leaves_the_earlier_capture_of_the_case_intact(tmp_path, stage):
-    """O1/D8: an earlier capture's parts and freeze.yaml survive a failed re-capture of the case."""
+    """O1/D8: an earlier capture's parts, freeze.yaml and alert.json survive a failed re-capture
+    of the case, even though the re-capture waited for a different alert."""
     rig = Rig(tmp_path)
     rig.run()
     parts, freeze_text = _stored(rig), (rig.case_dir / "freeze.yaml").read_text()
+    alert_text = (rig.case_dir / "alert.json").read_text()
     assert parts
     again = Rig(tmp_path / "again", fail_at=stage)
+    again.ops.alert_doc = {"@timestamp": ALERT_AT, "_id": "alert-2"}
     again.case_dir, again.parts_dir = rig.case_dir, rig.parts_dir
     with pytest.raises(RuntimeError, match=f"{stage} failed"):
         again.run()
     assert _stored(rig) == parts
     assert (rig.case_dir / "freeze.yaml").read_text() == freeze_text
+    assert (rig.case_dir / "alert.json").read_text() == alert_text
     assert [p.name for p in rig.parts_dir.iterdir() if p.name not in ("other-case", SLUG)] == []
 
 
@@ -264,12 +296,14 @@ def test_a_freeze_yaml_that_cannot_be_written_leaves_the_earlier_parts_in_place(
     mine = rig.parts_dir / SLUG
     mine.mkdir()
     (mine / "old.bin").write_bytes(b"earlier capture")
+    (rig.case_dir / "alert.json").write_text('{"_id": "earlier-alert"}')
     blocker = rig.case_dir / "freeze.yaml"
     blocker.mkdir()
     (blocker / "x").write_text("x")
     with pytest.raises(OSError):
         rig.run()
     assert _stored(rig) == {"old.bin": b"earlier capture"}
+    assert (rig.case_dir / "alert.json").read_text() == '{"_id": "earlier-alert"}'
     assert [p.name for p in rig.parts_dir.iterdir() if p.name not in ("other-case", SLUG)] == []
     assert not rig.ops.fault_live and "capture" not in rig.store.records
 
@@ -443,10 +477,12 @@ def _main(tmp_path, monkeypatch, *flags, hold=False):
 
 
 def test_the_command_line_forwards_chaos_seed_and_settle_to_capture(tmp_path, monkeypatch):
-    """O1/O7: `--chaos P --seed N --settle-s S` reach the fire call, the freeze and the settle sleep."""
+    """O1/O7: `--chaos P --seed N --settle-s S` reach the activation and the fire call, the
+    freeze and the settle sleep."""
     rig, rc = _main(tmp_path, monkeypatch, "--chaos", "stale-cmdb", "--seed", "7", "--settle-s", "5")
     assert rc == 0
-    assert rig.ops.fire_kwargs["chaos"] == "stale-cmdb" and rig.ops.fire_kwargs["seed"] == 7
+    assert rig.ops.activate_kwargs["chaos"] == "stale-cmdb" and rig.ops.activate_kwargs["seed"] == 7
+    assert rig.ops.fire_kwargs["seed"] == 7
     assert rig.freeze["chaos"]["seed"] == 7
     assert [d for op, d in rig.journal if op == "clock.sleep"] == [5.0]
 

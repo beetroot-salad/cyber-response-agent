@@ -122,6 +122,9 @@ class FakeCaptureOps:
         self.fail_at = (fail_at,) if isinstance(fail_at, str) else tuple(fail_at or ())
         self.fault_live = False
         self.fire_kwargs: dict[str, Any] = {}
+        self.activate_kwargs: dict[str, Any] = {}
+        #: The alert document `wait_alert` returns (the case's alert as the cluster holds it).
+        self.alert_doc: dict[str, Any] = {"@timestamp": ALERT_AT, "_id": "alert-1"}
         self.fingerprint_kwargs: dict[str, Any] = {}
         self.revert_refs: list[str] = []
 
@@ -132,17 +135,22 @@ class FakeCaptureOps:
         if name in self.fail_at:
             raise self.exc(f"{name} failed")
 
-    def fire(self, scenario: str, chaos: str, seed: int, lock_token: str) -> dict:
-        self.fire_kwargs = {"scenario": scenario, "chaos": chaos, "seed": seed,
-                            "lock_token": lock_token}
+    def activate(self, chaos: str, seed: int, lock_token: str) -> str:
+        self.activate_kwargs = {"chaos": chaos, "seed": seed, "lock_token": lock_token}
+        self._step("activate", dict(self.activate_kwargs))
+        assert self.ledger_ref is not None, "the rig activated a fault it has no ledger ref for"
+        self.fault_live = True
+        return self.ledger_ref
+
+    def fire(self, scenario: str, seed: int, lock_token: str) -> dict:
+        self.fire_kwargs = {"scenario": scenario, "seed": seed, "lock_token": lock_token}
         self._step("fire", dict(self.fire_kwargs))
-        self.fault_live = self.ledger_ref is not None
-        return {"ledger_ref": self.ledger_ref}
+        return {"run_id": "attack-run-1", "target_host": "web-1"}
 
     def wait_alert(self, fired: dict) -> dict:
         self.waited_for = dict(fired)
         self._step("wait_alert")
-        return {"@timestamp": ALERT_AT}
+        return dict(self.alert_doc)
 
     def _snapshot(self, name: str, dest: Path) -> list[str]:
         self._step(name, dest)

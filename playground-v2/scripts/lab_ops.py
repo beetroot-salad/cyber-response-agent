@@ -220,28 +220,28 @@ class LabOps:
 
     # -- capture: fire, alert, snapshot, revert ----------------------------------------------
 
-    def fire(self, scenario: str, chaos: str, seed: int, lock_token: str) -> dict:
-        """Hold the fault (no revert at the end of the steps) and fire the scenario under the
-        capture's token. A scenario that fails reverts the fault it activated before raising."""
+    def activate(self, chaos: str, seed: int, lock_token: str) -> str:
+        """Activate the chaos profile under the capture's token and return its ledger ref. The
+        fault stays live until capture reverts it: capture is its only reverter (r6.2)."""
+        from chaos import lock
+
+        store = lock.DockerLockStore(context=self.context)
+        record = _chaos_ctl().activate(chaos, seed=seed, lock_store=store, lock_token=lock_token)
+        return record["ledger_ref"]
+
+    def fire(self, scenario: str, seed: int, lock_token: str) -> dict:
+        """Fire the scenario under the capture's token. Never touches a fault: one that fails
+        raises with whatever capture activated still live, for capture to revert."""
         runner = _load_runner()
-        ctl = _chaos_ctl()
         from chaos import lock
 
         store = lock.DockerLockStore(context=self.context)
         catalog = runner.load_catalog()
-        record = None
-        if chaos and chaos != "none":
-            record = ctl.activate(chaos, seed=seed, lock_store=store, lock_token=lock_token)
         started = datetime.now(timezone.utc)
-        try:
-            run_id, _, _ = runner.run_scenario(
-                catalog[scenario], seed, {}, False, lock_store=store, lock_token=lock_token)
-        except BaseException:
-            if record is not None:
-                ctl.revert(record["ledger_ref"])
-            raise
-        return {"ledger_ref": record["ledger_ref"] if record else None, "run_id": run_id,
-                "started_at": _stamp(started), "target_host": catalog[scenario]["target_host"]}
+        run_id, _, _ = runner.run_scenario(
+            catalog[scenario], seed, {}, False, lock_store=store, lock_token=lock_token)
+        return {"run_id": run_id, "started_at": _stamp(started),
+                "target_host": catalog[scenario]["target_host"]}
 
     def wait_alert(self, fired: dict) -> dict:
         """The first alert of the case's rule (`fired["rule_id"]`) at or after the scenario fired,

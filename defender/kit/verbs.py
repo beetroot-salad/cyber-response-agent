@@ -100,6 +100,9 @@ class VerbContext(Protocol):
     def arrived_by(self) -> datetime | None: ...
 
     @property
+    def frozen(self) -> bool: ...
+
+    @property
     def proxy_url(self) -> str | None:
         """The credential proxy's address, handed in by the run (never read from `env`)."""
         ...

@@ -178,13 +178,14 @@ def test_a_cut_keeps_the_milliseconds_it_was_given(tmp_path):
 
 
 @pytest.mark.parametrize(("flags", "cut"), [
-    pytest.param(CUT_FLAGS, ReadCut(AS_OF, ARRIVED_BY), id="as-of-and-arrived-by"),
-    pytest.param(["--as-of", AS_OF_Z], ReadCut(AS_OF), id="as-of-alone"),
+    pytest.param(CUT_FLAGS, ReadCut(AS_OF, ARRIVED_BY, frozen=True), id="as-of-and-arrived-by"),
+    pytest.param(["--as-of", AS_OF_Z], ReadCut(AS_OF, frozen=True), id="as-of-alone"),
     pytest.param([], None, id="no-cut"),
 ])
 def test_the_run_serves_its_calls_through_a_registry_built_over_its_cut(tmp_path, flags, cut):
     """Product-side cut: the flags become the one read cut the run's verb registry applies to
-    every call (None for an ordinary run)."""
+    every call (None for an ordinary run). A run started with `--as-of` is frozen whichever
+    flags it has (r6.2): its adapters refuse a read of a system's own present time."""
     out, seen, _clock = launch(tmp_path, flags)
 
     assert out.exit == 0, f"refusal={out.refusal}"

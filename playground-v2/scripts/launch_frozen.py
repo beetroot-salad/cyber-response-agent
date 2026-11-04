@@ -47,6 +47,11 @@ from lab_ops import LabOps, sha256_file  # noqa: E402
 PLAYGROUND_CONTEXT = "soc-playground"
 
 
+class TeardownFailed(RuntimeError):
+    """The run finished and its row (if any) is written, but tearing the frozen copy down then
+    failed: the message names the run; remove the frozen engine before the next launch."""
+
+
 class LaunchRefused(RuntimeError):
     """The case cannot be served as frozen: a part is missing or altered, or the freeze is not
     ready. Nothing ran and no row was written."""
@@ -73,6 +78,20 @@ def freeze_digest(parsed: Any) -> str:
 
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _check_alert(freeze: dict, alert: Path) -> None:
+    """The case's alert.json is the alert its freeze was built around (r6.2): the freeze names
+    its bytes by sha256, so a case re-captured, hand-edited or captured before the binding is
+    refused rather than run against a window and parts made for another alert."""
+    named = freeze.get("alert")
+    if not isinstance(named, str) or not named.startswith("sha256:"):
+        raise LaunchRefused("freeze.yaml names no alert digest; capture the case again")
+    if not alert.is_file():
+        raise LaunchRefused(f"the case has no alert.json ({alert}); capture the case again")
+    if sha256_file(alert) != named.removeprefix("sha256:"):
+        raise LaunchRefused(f"alert.json is not the alert its freeze names ({alert}); capture "
+                            "the case again")
 
 
 def _check_parts(freeze: dict, mine: Path) -> None:
@@ -169,6 +188,7 @@ def launch(case_dir: Path, *, index: Path, parts_dir: Path, lock_store: Any, ops
         if not reference and not freeze.get("confirmed"):
             raise LaunchRefused(f"{slug}: freeze.yaml is not confirmed yet; label it against a "
                                 "--reference run first")
+        _check_alert(freeze, alert)
         _check_parts(freeze, parts_dir / slug)
         as_of, arrived_by = freeze["as_of"], freeze["captured_at"]
         # The post-run check is the production fingerprint unless `ops` brings its own.
@@ -203,16 +223,23 @@ def launch(case_dir: Path, *, index: Path, parts_dir: Path, lock_store: Any, ops
         finally:
             if config is not None:
                 shutil.rmtree(config, ignore_errors=True)
-        ops.teardown()
-
+        # The row depends only on the run and its fingerprint: written before teardown, so a
+        # cleanup failure never costs a finished run its row (r6.2).
         verdict, reason = _verdict(freeze.get("fingerprint") or {}, fingerprint)
         if reference:
             print(f"run_id={run_id}")
             print(f"reference run of {slug}: verdict {verdict}" + (f" ({reason})" if reason else ""))
-            return run_id
-        _append_row(index, {"slug": slug, "run_id": run_id, "freeze": digest, "verdict": verdict,
-                            "reason": reason, "verified_at": verified_at})
-        print(f"{slug}: run {run_id} verdict {verdict}" + (f" ({reason})" if reason else ""))
+        else:
+            _append_row(index, {"slug": slug, "run_id": run_id, "freeze": digest,
+                                "verdict": verdict, "reason": reason, "verified_at": verified_at})
+            print(f"{slug}: run {run_id} verdict {verdict}" + (f" ({reason})" if reason else ""))
+        try:
+            ops.teardown()
+        except Exception as exc:
+            done = "finished (reference, no row)" if reference else "recorded in the index"
+            raise TeardownFailed(f"{slug}: run {run_id} {done}; tearing the frozen copy down "
+                                 f"then failed ({exc}): remove the frozen engine before the next "
+                                 "launch") from exc
         return run_id
     finally:
         lock.release(lock_store, lock.FROZEN_ENGINE, token)
@@ -243,6 +270,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     except (lock.LockError, LaunchRefused, RunDied) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 4
+    except TeardownFailed as exc:
+        print(f"teardown failed: {exc}", file=sys.stderr)
+        return 5
     return 0
 
 
