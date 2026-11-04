@@ -22,6 +22,7 @@ from defender.identity.service import SESSION_LIFETIME
 from defender.records.formats import AlertId, InvestigationId, LearningJobId, MembershipId, TenantId, UserId
 
 from .models import (
+    AlertMapping,
     RECORD_ID_PATTERN,
     Alert,
     AlertSummary,
@@ -671,6 +672,32 @@ async def _start_identity(identity: IdentityService) -> None:
         raise
 
 
+alert_mapping = APIRouter(prefix="/alert-mapping", tags=["alert mapping"], responses=_EVERY_ROUTE)
+
+
+@alert_mapping.get("")
+async def get_alert_mapping(deps: Deps, caller: Caller) -> AlertMapping:
+    """The tenant's alert mapping: all six entries, unmapped ones null. Not found until one is saved."""
+    mapping = await deps.systems.get_alert_mapping(caller.tenant_id)
+    if mapping is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "this tenant has no alert mapping yet")
+    return mapping
+
+
+@alert_mapping.put("", responses={201: {"model": AlertMapping}})
+async def put_alert_mapping(
+    deps: Deps, caller: Caller, body: AlertMapping, request: Request, response: Response
+) -> AlertMapping:
+    """Replace the tenant's alert mapping whole: all six entries, each a dotted path or null. Its alerts' title
+    and description are re-derived through it before this answers."""
+    async with _transaction(deps, caller) as tx:
+        mapping, created = await tx.put_alert_mapping(body)
+        await tx.audit("alert_mapping.update", caller.tenant_id)
+    if created:
+        _created_at(request, response, "put_alert_mapping", caller.tenant_id)
+    return mapping
+
+
 def create_app(deps: ApiDeps) -> FastAPI:
     app = FastAPI(
         title="Defender platform API",
@@ -682,7 +709,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.state.deps = deps
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
     in_tenant = APIRouter(prefix="/tenants/{tenant_id}", responses=responses(404))
-    for router in (alerts, investigations, learning_jobs, lessons, systems, people):
+    for router in (alerts, investigations, learning_jobs, lessons, systems, alert_mapping, people):
         in_tenant.include_router(router)
     for router in (auth, in_tenant, admin):
         app.include_router(router)

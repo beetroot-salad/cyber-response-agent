@@ -16,8 +16,8 @@ import threading
 from collections.abc import AsyncIterator, Collection, Mapping
 from typing import Any, Literal, TypeVar, cast, overload
 
-from defender.records.formats import TenantId
-from defender.tenancy.models import ALLOWED_ACTIONS, ForgeWiring, Generation, PublishStatus, TenantRecord
+from defender.records.formats import AlertMapping, TenantId
+from defender.tenancy.models import ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, PublishStatus, TenantRecord
 from defender.tenancy.repository import (
     KEEP,
     SERVICE,
@@ -31,7 +31,7 @@ from defender.tenancy.repository import (
 #: The job a seeded row in a state that requires one gets when the seeder names none.
 _SEED_JOB = {"creating": ("create", "names", SERVICE), "offboarding": ("offboard", "offboard", SERVICE)}
 
-_Row = TypeVar("_Row", TenantRecord, Generation, ForgeWiring, PublishStatus)
+_Row = TypeVar("_Row", TenantRecord, Generation, ForgeWiring, PublishStatus, AlertMappingRow)
 
 
 @overload
@@ -55,6 +55,7 @@ class InMemoryTenantRepository:
         self._generations: dict[tuple[str, str], Generation] = {}
         self._wiring: dict[str, ForgeWiring] = {}
         self._publish: dict[str, PublishStatus] = {}
+        self._mappings: dict[str, AlertMappingRow] = {}
         self._locked: set[str] = set()
 
     async def close(self) -> None:
@@ -91,6 +92,16 @@ class InMemoryTenantRepository:
         with self._mutex:
             self._insert_generation(row)
             return _detached(row)
+
+    async def add_alert_mapping(self, tenant_id: str, mapping: AlertMapping) -> AlertMapping:
+        """Seeder: the tenant's alert mapping as saved. Test support and the demo, not a product writer: the one
+        writer is the jobs store's replace (#1345 M1), which this twin does not stand in for."""
+        if tenant_id not in self._tenants:
+            raise ValueError(f"no tenant {tenant_id}")
+        row = AlertMappingRow.of(cast(TenantId, tenant_id), mapping)
+        with self._mutex:
+            self._mappings[tenant_id] = row
+        return row.as_mapping()
 
     def _insert_generation(self, row: Generation) -> None:
         if row.tenant_id not in self._tenants:
@@ -137,6 +148,11 @@ class InMemoryTenantRepository:
         with self._mutex:
             row = self._publish.get(tenant_id)
             return None if row is None else row.as_dict()
+
+    async def alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
+        with self._mutex:
+            row = self._mappings.get(tenant_id)
+            return None if row is None else row.as_mapping()
 
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:

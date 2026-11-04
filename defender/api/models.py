@@ -14,7 +14,9 @@ from defender._text import postgres_can_hold
 from defender.kit.access import secret_fields
 from defender._vocab import DISPOSITION_VALUES, normalized_disposition
 from defender.identity.models import Email
-from defender.records.formats import AlertId, InvestigationId, LearningJobId, MembershipId, TenantId, UserId
+from defender.records.formats import (
+    AlertId, AlertMappingFault, InvestigationId, LearningJobId, MembershipId, TenantId, UserId, check_mapping,
+)
 
 InvestigationStatus = Literal["queued", "running", "completed", "unparseable", "failed", "aborted"]
 
@@ -76,8 +78,8 @@ class AlertSummary(BaseModel):
     alert_id: AlertId
     vendor: str = Field(description="The ticket system the alert was pulled from.")
     vendor_ticket_id: str = Field(description="The vendor's own id; unique per tenant and vendor.")
-    title: str
-    description: str
+    title: str | None = Field(description="Derived from the raw alert through the tenant's alert mapping; null when unmapped or unusable.")
+    description: str | None = Field(description="As `title`.")
     fired_at: Instant = Field(description="When the vendor says the alert fired.")
     changed_at: Instant = Field(description="When the vendor last changed the ticket.")
     received_at: Instant = Field(description="When we pulled it; our own clock.")
@@ -207,6 +209,27 @@ class SystemPut(_Request):
     display_name: str = Field(min_length=1)
     enabled: bool
     settings: dict[str, SettingValue]
+
+
+class AlertMapping(_Request):
+    """The tenant's alert mapping, as a PUT names it and a GET answers it (#1345): the dotted path in the raw alert
+    where each fact lives, or null for an entry the tenant leaves unmapped. A PUT replaces the whole mapping, so NO
+    entry has a default (D4): it names all six. The entries and the path rule are `records`' (`check_mapping`)."""
+
+    signature: str | None
+    event_time: str | None
+    summary: str | None
+    case_key: str | None
+    title: str | None
+    description: str | None
+
+    @model_validator(mode="after")
+    def _paths_are_valid(self) -> AlertMapping:
+        try:
+            check_mapping(self.model_dump())
+        except AlertMappingFault as fault:
+            raise ValueError(str(fault)) from None
+        return self
 
 
 #: The shortest a secret credential value may be (#1163 A4): a typed-in placeholder is refused

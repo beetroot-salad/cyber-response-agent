@@ -25,7 +25,7 @@ takes precedence over the ambient value.
 
 from __future__ import annotations
 
-from defender.records.formats import DataRoot, RunsBase, TenantId
+from defender.records.formats import ALERT_MAPPING_MISSING, AlertMapping, DataRoot, RunsBase, TenantId
 
 import logging
 import json
@@ -958,7 +958,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
 
 def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     alert: Path, *, tenant: tenancy.Tenant, model: str | None, run: Run | None = None,
-    world: Any = None, settings: Path | None = None,
+    world: Any = None, mapping: AlertMapping | None = None,
     knowledge: run_knowledge.KnowledgeSource | None = None, launch: Launched | None = None,
 ) -> Run:
     """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
@@ -971,7 +971,7 @@ def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     """
     try:
         run = _run.materialize_run(alert, run=run, tenant=tenant, model=model, world=world,
-                                   settings=settings, knowledge=knowledge, launch=launch)
+                                   mapping=mapping, knowledge=knowledge, launch=launch)
     except TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
@@ -1102,6 +1102,18 @@ def _acceptance_args(ns: argparse.Namespace, data_root: DataRoot) -> dict[str, A
             "clone_tree": False}
 
 
+def _read_alert_mapping(records: Any, tenant_id: Any) -> AlertMapping:
+    """The tenant's alert mapping from its records, or a `[run.py]` refusal: none saved (the wording `records` owns,
+    naming how to set one) or the records could not be reached (#1345 O4)."""
+    try:
+        mapping = records.alert_mapping(tenant_id)
+    except TenantRefused as refused:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+    if mapping is None:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {ALERT_MAPPING_MISSING}")
+    return mapping
+
+
 @contextlib.contextmanager
 def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its lane and the seams setup reaches
     ns: argparse.Namespace, data_root: DataRoot, admitted: Admitted, *,
@@ -1152,6 +1164,10 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
                                else episode_runs.arm_ids)
         source = (None if world is None
                   else _open_world_source(accepted.runs_repository(), world))
+        # A fresh run derives its facts through the tenant's alert mapping, read from the tenant records once,
+        # here: before the knowledge copy and the run folder, so a tenant with none (or records that cannot be
+        # reached) is refused with nothing made (#1345 O3, O4). A sibling carries its source's record.
+        mapping = None if world is not None else _read_alert_mapping(records, accepted.id)
 
         # The one refusal knowable without the run's knowledge, made before the launch-time
         # publish spends up to its budget on the issuer and the forge: an ordinary run's alert
@@ -1212,16 +1228,16 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             alert = _case_input(ns, world, episode_runs, launch=launch)
 
             # The handle, not just its directory: the post-run step saves the run page through it.
-            # The alert mapping is the run copy's, and the stamp records the export copied (O-B).
+            # The stamp records the export copied (O-B).
             if world is not None:
                 run = materialize(alert, run=early, tenant=accepted, model=model, world=world,
-                                  settings=copy.settings, knowledge=knowledge)
+                                  knowledge=knowledge)
             elif launch is not None:
                 run = materialize(alert, run=early, tenant=accepted, model=model,
-                                  settings=copy.settings, knowledge=knowledge, launch=launch)
+                                  mapping=mapping, knowledge=knowledge, launch=launch)
             else:
                 run = materialize(alert, run=early, tenant=accepted, model=model,
-                                  settings=copy.settings, knowledge=knowledge)
+                                  mapping=mapping, knowledge=knowledge)
             run_dir = run.run_dir
             # The run's id, announced as the first line of stdout (#1279 O5), before the ticket
             # or the box exists.

@@ -19,7 +19,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from defender.records.formats import TenantId, TenantRefused
+from defender.records.formats import AlertMapping, TenantId, TenantRefused
 
 if TYPE_CHECKING:
     from defender.tenancy.models import ForgeWiring, Generation
@@ -74,6 +74,12 @@ class TenantDirectory:
         host's forge credential provider reads on every mint (P4)."""
         async def read(repository: Any) -> list[Generation]:
             return await repository.generations(tenant_id)
+        return self._call(read)
+
+    def alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
+        """The tenant's alert mapping (#1345), None until one is saved: what run start derives the facts through."""
+        async def read(repository: Any) -> AlertMapping | None:
+            return await repository.alert_mapping(tenant_id)
         return self._call(read)
 
     def _call(self, read: Callable[[Any], Awaitable[_R]]) -> _R:

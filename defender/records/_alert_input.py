@@ -13,12 +13,15 @@ from typing import Any
 import yaml
 
 from defender import _io, _yaml
+from defender._text import postgres_can_hold
 
-#: The alert mapping's name under a tenant's `settings/`.
-ALERT_MAPPING_REL = "alert-mapping.yaml"
-
-#: The four facts, in the design's words; also the mapping's only keys and the record's keys.
+#: The four facts, in the design's words; also the record's keys.
 FACT_KEYS = ("signature", "event_time", "summary", "case_key")
+#: What a tenant also maps for the alert list (#1345): the alert's title and description.
+DISPLAY_KEYS = ("title", "description")
+#: The alert mapping's only entries (#1345): the four facts and the two display fields. The one owner of the names;
+#: the table's columns and the API's wire model are necessary copies, pinned by tests.
+MAPPING_KEYS = FACT_KEYS + DISPLAY_KEYS
 #: What a case key IS (#1359 P3): one URL path segment of at most 128 printable ASCII characters,
 #: with no `/`, `\\`, `;` (the credential proxy refuses any `;` in a decoded path) or whitespace, and
 #: not made only of dots (curl collapses `.` and `..` segments, so the request would go elsewhere).
@@ -132,105 +135,73 @@ def admit(raw: bytes) -> Admitted:
 
 
 # =============================================================================================
-# The alert mapping (A5) and the one tenant check's reasons
+# The alert mapping (A5; stored in the database since #1345)
 # =============================================================================================
 
-_ALERT_FILE = f"settings/{ALERT_MAPPING_REL}"
+#: What a run or an investigation is refused with while its tenant has saved no mapping (#1345 O4): the one
+#: wording, used by the store and by run start alike. It names the missing mapping, the command-line verb and the API route.
+ALERT_MAPPING_MISSING = (
+    "the tenant has no alert mapping: save one with `tenant.py set-alert-mapping <tenant-id> <file>` "
+    "or `PUT /tenants/<tenant-id>/alert-mapping`")
 
 
 def _reasons(kind: str) -> str:
     return {
-        "missing": f"{_ALERT_FILE} is missing: every tenant maps its alerts' signature, "
-                   "event_time, summary and case_key there",
-        "unreadable": f"{_ALERT_FILE} cannot be read: it must be a plain file this user can read",
-        "encoding": f"{_ALERT_FILE} is not UTF-8 text",
-        "yaml": f"{_ALERT_FILE} is not valid YAML",
-        "shape": f"{_ALERT_FILE} must be a YAML mapping of fact names (signature, event_time, "
-                 "summary, case_key) to dotted alert paths",
-        "key": f"{_ALERT_FILE} names a key that is not one of signature, event_time, summary, case_key",
+        "yaml": "the alert mapping is not valid YAML",
+        "shape": "the alert mapping must be a YAML mapping of entry names (" + ", ".join(MAPPING_KEYS)
+                 + ") to dotted alert paths",
     }[kind]
 
 
-def _entry_reason(fact: str) -> str:
-    return (f"{_ALERT_FILE}: the entry for {fact} must be a dotted alert path (a non-empty "
-            "string of non-empty segments); leave the key out to map nothing")
+def _unknown_entry_reason(entry: object) -> str:
+    shown = repr(entry)[:60]
+    return f"the alert mapping names {shown}, which is not one of " + ", ".join(MAPPING_KEYS)
+
+
+def _entry_reason(entry: str) -> str:
+    return (f"the alert mapping's entry for {entry} must be a dotted alert path (a non-empty "
+            "string of non-empty segments with no surrounding whitespace); leave it unmapped to map nothing")
 
 
 @dataclasses.dataclass(frozen=True)
 class AlertMapping:
-    """A tenant's alert mapping: for each fact it maps, the dotted path into the alert."""
+    """A tenant's alert mapping: for each entry it maps, the dotted path into the alert."""
 
     paths: Mapping[str, str]
 
-    def path_of(self, fact: str) -> str | None:
-        return self.paths.get(fact)
+    def path_of(self, entry: str) -> str | None:
+        return self.paths.get(entry)
 
 
-def _check_mapping_doc(doc: object) -> AlertMapping:
-    """The parsed file, or `AlertMappingFault`."""
+def check_mapping(doc: object) -> AlertMapping:
+    """@owns alert mapping rules — the mapping in `doc` (entry name -> dotted path, or `None` for an unmapped
+    entry; an entry left out is unmapped too), or `AlertMappingFault` naming the entry. The one validator: the
+    file parser, the API's wire model and the store's re-check all go through it."""
     if not isinstance(doc, dict):
         raise AlertMappingFault(_reasons("shape"))
-    paths: dict[str, str] = {}
     for key in doc:
-        if key not in FACT_KEYS:
-            raise AlertMappingFault(_reasons("key"))
-    for fact in FACT_KEYS:
-        if fact not in doc:
+        if key not in MAPPING_KEYS:
+            raise AlertMappingFault(_unknown_entry_reason(key))
+    paths: dict[str, str] = {}
+    for entry in MAPPING_KEYS:
+        value = doc.get(entry)
+        if value is None:
             continue
-        value = doc[fact]
         if (not isinstance(value, str) or not value or value != value.strip()
                 or any(not segment for segment in value.split("."))):
-            raise AlertMappingFault(_entry_reason(fact))
-        paths[fact] = value
+            raise AlertMappingFault(_entry_reason(entry))
+        paths[entry] = value
     return AlertMapping(paths=paths)
 
 
 def parse_mapping(text: str) -> AlertMapping:
-    """The alert mapping in `text`, or `AlertMappingFault` carrying a fixed reason."""
+    """The alert mapping in `text` (the file format of `tenant.py set-alert-mapping`: YAML, an entry left out or
+    `null` is unmapped), or `AlertMappingFault` carrying a fixed reason."""
     try:
         doc: object = _yaml.safe_load(text)
     except (yaml.YAMLError, RecursionError):
         raise AlertMappingFault(_reasons("yaml")) from None
-    if not isinstance(doc, dict):
-        raise AlertMappingFault(_reasons("shape"))
-    return _check_mapping_doc(doc)
-
-
-def _read_setting(settings: _io.Bound, rel: str) -> tuple[str | None, str | None]:
-    """A settings file's text, or `(None, kind)` — `kind` one of missing / unreadable /
-    encoding."""
-    found = settings.read(rel)
-    if found.absent:
-        return None, "missing"
-    if found.text is None:
-        return None, "encoding" if found.refused_by == _io.REFUSED_UNDECODABLE else "unreadable"
-    return found.text, None
-
-
-def settings_reasons(settings: _io.Bound) -> list[str]:
-    """The one tenant check's reasons about the alert mapping of the `settings/` folder
-    `settings` is bound to: every fault, one fixed reason each, alert mapping first. Empty when
-    it stands."""
-    reasons: list[str] = []
-    text, kind = _read_setting(settings, ALERT_MAPPING_REL)
-    if text is None:
-        reasons.append(_reasons(kind or "unreadable"))
-    else:
-        try:
-            parse_mapping(text)
-        except AlertMappingFault as fault:
-            reasons.append(str(fault))
-    return reasons
-
-
-def load_alert_mapping(settings: Path) -> AlertMapping:
-    """The tenant's alert mapping off its `settings/` folder, read once at run start, or
-    `AlertMappingFault`."""
-    with _io.bind(Path(settings)) as bound:
-        text, kind = _read_setting(bound, ALERT_MAPPING_REL)
-    if text is None:
-        raise AlertMappingFault(_reasons(kind or "unreadable"))
-    return parse_mapping(text)
+    return check_mapping(doc)
 
 
 # =============================================================================================
@@ -307,6 +278,31 @@ def derive_facts(document: Mapping[str, Any], mapping: AlertMapping) -> AlertFac
         summary=_scalar_text(at("summary")),
         case_key=case_key_of(at("case_key")),
     )
+
+
+def derive_display(document: Mapping[str, Any], mapping: AlertMapping) -> tuple[str | None, str | None]:
+    """@owns title @owns description — the alert's `(title, description)` through the tenant's mapping (#1345 M3): the
+    fact text rule over the same path walk, and `None` for what PostgreSQL text cannot hold, so a store never
+    writes a value its column refuses."""
+    def at(entry: str) -> str | None:
+        path = mapping.path_of(entry)
+        text = None if path is None else _scalar_text(_walk(document, path))
+        return text if text is not None and postgres_can_hold(text) else None
+
+    return at("title"), at("description")
+
+
+def derive_display_of_stored(raw: bytes, mapping: AlertMapping | None) -> tuple[str | None, str | None]:
+    """`derive_display` over an alert's stored bytes, for a recompute (#1345 M3): the bytes are parsed as JSON only
+    and admission is not re-run (its rules may have tightened since the alert was stored). Bytes that do not parse
+    as one JSON object, or no mapping at all, give `(None, None)`."""
+    if mapping is None:
+        return None, None
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError):
+        return None, None
+    return derive_display(document, mapping) if isinstance(document, dict) else (None, None)
 
 
 # =============================================================================================

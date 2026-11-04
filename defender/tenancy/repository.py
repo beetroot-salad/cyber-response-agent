@@ -51,7 +51,7 @@ from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
-    from defender.records.formats import TenantId
+    from defender.records.formats import AlertMapping, TenantId
     from defender.tenancy.models import ForgeWiring, Generation, TenantRecord
 
 #: The first key of every tenant lock: a fixed int4 naming tenancy's advisory locks.
@@ -134,6 +134,10 @@ class TenantRepository(Protocol):
     async def publish_status(self, tenant_id: TenantId) -> dict[str, str] | None:
         """The last publish outcome, keyed as the old file: `by`, then `published` (the commit),
         or `refused` with `kind` (`transient` | `operator`); None when none is recorded."""
+        ...
+    async def alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
+        """The tenant's alert mapping (#1345), None until one is saved. Read here, written only by the jobs
+        store's replace, which re-derives the tenant's alerts in the same transaction."""
         ...
 
     # --- requests (the API)
