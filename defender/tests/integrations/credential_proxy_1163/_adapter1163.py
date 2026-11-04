@@ -34,6 +34,7 @@ from defender.systems.verbs import VerbContext
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, PublishedTenant, published_tenant
+from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, seed_twin
 
 #: A signature no honest token can lose: a census looks for it in every channel.
 SIGNATURE_CANARY = "CANARY-REQUEST-SIGNATURE-1163"
@@ -259,7 +260,10 @@ class Records:
     folder is planted (the wiring's origin is read from the folder's clone). The mutators change
     the live generation as the lifecycle would (a rotation, an offboarding) while a run is on."""
 
-    def __init__(self, data_root: Path, tenants: Mapping[str, Sequence[Mapping[str, Any]]]) -> None:
+    def __init__(self, data_root: Path, tenants: Mapping[str, Sequence[Mapping[str, Any]]], *,
+                 alert_mapping: Mapping[str, str | None] | None = PLANTED_ALERT_MAPPING) -> None:
+        """#1345: each tenant also holds `alert_mapping` (today's planted mapping), which a run needs to start (O4);
+        `None` seeds none, for a test of absence."""
         from defender.tenancy import InMemoryTenantRepository, TenantDirectory
         from defender.tests.support.tenancy import _active1214 as active
 
@@ -271,6 +275,7 @@ class Records:
                 origin=active._origin_of(Path(data_root), tenant, None)))  # noqa: SLF001
             for fields in generations:
                 active.run_sync(self.twin.add_generation(tenant, **fields))
+            seed_twin(self.twin, tenant, alert_mapping)
         self.directory = TenantDirectory(lambda: self.twin)
 
     def rotate(self, tenant: str, fields: Mapping[str, Any]) -> None:
