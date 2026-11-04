@@ -57,11 +57,17 @@ DESCRIPTION = "Three failures then a success from one source."
 
 
 def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: bool = True,
-                    data_root: Path | None = None) -> None:
-    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6)."""
-    from defender.tests.support.tenancy._active1214 import insert_active_tenant
+                    data_root: Path | None = None, generations: Any = None) -> None:
+    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6).
 
-    insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
+    An active tenant gets one live generation with a sign login (the fixture tenant's elastic is proxied,
+    #1391 P1/D12: run start signs request tokens), unless `generations` says otherwise (`()` for none)."""
+    from defender.tests.support.tenancy._active1214 import insert_active_tenant
+    from defender.tests.support.tenancy._proxied1391 import sign_generation
+
+    if generations is None:
+        generations = [sign_generation(tenant_id)] if state == "active" else ()
+    insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root, generations=generations)
 
 
 def restate_tenant(dsn: str, tenant_id: str, *, state: str, wiring: bool = True, data_root: Path | None = None) -> None:

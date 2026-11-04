@@ -1699,7 +1699,7 @@ def proxied_scene(tmp_path, monkeypatch, migrated_database):
             "settings/systems/elastic/access.yaml": None,
             "settings/systems/elastic/config.env": ELASTIC_NOT_PROXIED}
         t = stack.enter_context(A.published(tmp_path / "forge", root, systems, extra_files=unproxied))
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        register_tenant(migrated_database, t.tenant_id, data_root=root, generations=())  # the case's own, below
         if sign:
             insert_generation(migrated_database, t.tenant_id, A.generation(
                 t.tenant_id, tmp_path / "secrets", sign_role_id=SIGN_ROLE, sign_secret=SIGN_SECRET))
