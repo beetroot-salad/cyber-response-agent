@@ -7,11 +7,12 @@ USAGE_EXIT_CODE = 64
 class AdapterFault(Exception):
 
     exit_code: int = 1
-    #: True when the credential proxy itself named this fault class in its answer
-    #: (`raise_proxy_fault`, #1398), so a caller can tell the proxy's refusal from a fault the
-    #: adapter raised itself on the same route. Not set for every fault on the proxy route: a
-    #: status the proxy relays, an unreadable answer, or failing to reach the proxy leave it False.
-    from_proxy: bool = False
+    #: True when the fault is the credential proxy's own (#1404): the proxy refused or failed, or
+    #: could not be used at all (unreachable, an unusable answer, no address handed to the call, or
+    #: no request token produced for it).
+    #: False for a fault that never touched the proxy and for one where the proxy saw the target
+    #: system's own call fail or answer, so a reader names the proxy only for its own faults.
+    proxy_own: bool = False
 
     def __init__(self, detail: str):
         super().__init__(detail)

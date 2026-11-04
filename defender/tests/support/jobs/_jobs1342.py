@@ -190,13 +190,17 @@ CHILD_SCRIPT = textwrap.dedent("""
         grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"]).pid
     seen_dir = Path(spec["seen_dir"])
     seen_dir.mkdir(parents=True, exist_ok=True)
-    (seen_dir / f"{run_id}.json").write_text(json.dumps({
+    # Written whole, then renamed into place: `seen_all` polls this folder and must never read
+    # a half-written record.
+    part = seen_dir / f"{run_id}.json.part"
+    part.write_text(json.dumps({
         "argv": argv, "pid": os.getpid(), "pgid": os.getpgid(0), "sid": os.getsid(0),
         "data_root": os.environ.get("DEFENDER_DATA_ROOT"), "grandchild": grandchild,
         "launch_at_start": (runs / f"{run_id}.launch.json").is_file(),
         "alert_at_start": (runs / f"{run_id}.alert.json").is_file(),
         "stdio": [[os.fstat(fd).st_dev, os.fstat(fd).st_ino] for fd in (1, 2)],
     }), encoding="utf-8")
+    os.replace(part, seen_dir / f"{run_id}.json")
     event("start")
     if spec.get("print"):
         print(spec["print"]); print(spec["print"], file=sys.stderr)
@@ -293,7 +297,11 @@ class ScriptedChild:
         }
 
     def __call__(self, launch: Any) -> list[str]:
-        self.spec.write_text(json.dumps(self.spec_dict()), encoding="utf-8")
+        # Written whole, then renamed into place: a child launched a moment ago (another worker's,
+        # in the same test) may be reading the spec right now, and must never see it half-written.
+        part = self.spec.with_name(self.spec.name + ".part")
+        part.write_text(json.dumps(self.spec_dict()), encoding="utf-8")
+        os.replace(part, self.spec)
         return [sys.executable, str(self.script), str(self.spec), "--job", launch.investigation_id,
                 "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 

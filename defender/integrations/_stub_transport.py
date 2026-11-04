@@ -446,9 +446,11 @@ def _perform(  # noqa: PLR0913 — one request's per-call state
         raise TransportFault(f"non-JSON response from {url}: {e} (body: {body_text!r})") from e
 
 
-def raise_proxy_fault(fault: str, detail: str, status: int | None = None) -> None:
-    """Raise the fault class the proxy named, with its detail (A9), marked `from_proxy`; an
-    `UpstreamFault` carries the store's `status` when the proxy relayed one."""
+def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
+                      from_system: bool = False) -> None:
+    """Raise the fault class the proxy named, with its detail (A9); an `UpstreamFault` carries
+    the store's `status` when the proxy relayed one. The proxy's own (`proxy_own`) unless the
+    system answered (`status`) or the proxy saw its call fail (`from_system`, #1404)."""
     raised: AdapterFault
     if fault == "UpstreamFault":
         raised = UpstreamFault(detail or fault, status=status or None)
@@ -456,7 +458,7 @@ def raise_proxy_fault(fault: str, detail: str, status: int | None = None) -> Non
         classes = {"ConfigFault": ConfigFault, "ConfinementFault": ConfinementFault,
                    "TransportFault": TransportFault}
         raised = classes.get(fault, TransportFault)(detail or fault)
-    raised.from_proxy = True
+    raised.proxy_own = not (from_system or status)
     raise raised
 
 
@@ -471,15 +473,17 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
             # The store answered: its status alone decides, whatever the proxy made of the body.
             _judge_write(answer.status, answer.body, system)
             return {}
-        raise_proxy_fault(answer.fault or "TransportFault", answer.detail)
+        raise_proxy_fault(answer.fault or "TransportFault", answer.detail,
+                          from_system=answer.from_system)
     if answer.fault in ("UpstreamFault", "TransportFault") and answer.status:
         # The system answered: its own reason (scrubbed by the proxy) reaches the model and
         # curation, as on the docker path (`_raise_on_http_error`).
-        raise_proxy_fault(answer.fault,
-                          f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
-                          answer.status)
+        # With no body to hand on (withheld, or the reply broke) the proxy's reason says why.
+        why = _vendor_detail(answer.body) if answer.body else answer.detail
+        raise_proxy_fault(answer.fault, f"HTTP {answer.status} from {system}: {why}",
+                          answer.status, from_system=True)
     if answer.fault is not None:
-        raise_proxy_fault(answer.fault, answer.detail)
+        raise_proxy_fault(answer.fault, answer.detail, from_system=answer.from_system)
     if answer.status >= 400:
         raise UpstreamFault(f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
                             status=answer.status)

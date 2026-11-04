@@ -5,13 +5,14 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import time
 import types
 
 import pytest
 
 from defender.box import run_env
 from defender.integrations._stub_transport import raise_proxy_fault
-from defender.kit.faults import ConfigFault, TransportFault
+from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.kit.settings import config_pointer
 from defender.systems import case_system
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
@@ -20,12 +21,16 @@ from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163.test_ticket_flow import (
     COMMENT,
     KEY,
+    PROXY_FAILED,
+    STORE,
+    WRITES,
     SYSTEM,
     _decl,
     _leg,
     _published,
     _run,
 )
+from defender.tests.integrations.credential_proxy_1163.test_proxy_faults_proxy_side import _BrokenStore
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 
@@ -160,3 +165,119 @@ def test_t9_a_settings_fault_the_proxy_raises_is_still_a_proxy_refusal(tmp_path,
     assert receipt is not None
     assert "the credential proxy refused" in receipt["reason"].lower(), receipt
     assert config_pointer(SYSTEM) not in receipt["reason"], receipt
+
+
+class _Slow(H.FakeStore):
+    """The proxy's credential store taking `seconds` to answer each read."""
+
+    def __init__(self, sets, seconds: float) -> None:
+        super().__init__(sets)
+        self.seconds = seconds
+
+    def read(self, tenant_id: str, system: str):
+        time.sleep(self.seconds)
+        return super().read(tenant_id, system)
+
+
+def _proxied_leg(tmp_path, data_root, make_store, *, decl=None, before=None, **deps_kw):
+    """The record leg through the real proxy built with `make_store(sets)` and `deps_kw`; returns
+    (receipt, proxy tap, recording store upstream)."""
+    with H.upstream() as up, _published(tmp_path / "forge", data_root,
+                                        decl if decl is not None else _decl(up)) as t:
+        if before is not None:
+            before(up)
+        rec, run = _run(tmp_path)
+        store = make_store({(t.tenant_id, SYSTEM): T.static_set()})
+        with A.proxy_for(t, store, **deps_kw) as (url, tap):
+            receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw")}))
+        return receipt, tap, up
+
+
+@pytest.mark.parametrize("kind", ["openbao-unreachable", "unforeseen", "out-of-time-before-call",
+                                  "audit-unwritable"])
+def test_t11_a_failure_inside_the_proxy_is_the_proxys_not_the_stores(tmp_path, data_root, kind):
+    """#1404 O1: the proxy is reached but fails itself (its credential store unreachable, an
+    exception nobody foresaw, its deadline spent before the store is called, its audit record
+    unwritable): "the credential proxy failed: <cause>", never the store's wording. The audit case
+    may follow a store that accepted the comment, so the subject claims no non-delivery."""
+    stores = {
+        "openbao-unreachable": _DownOnce,
+        "unforeseen": _BrokenStore,
+        "out-of-time-before-call": lambda sets: _Slow(sets, 0.5),
+        "audit-unwritable": H.FakeStore,
+    }
+    deps_kw = {"out-of-time-before-call": {"upstream_timeout_sec": 0.2, "proxy_overhead_sec": 0.1},
+               "audit-unwritable": {"audit": H.FailingAudit()}}.get(kind, {})
+    causes = {"openbao-unreachable": "OpenBao is unreachable",
+              "unforeseen": "could not be processed",
+              "out-of-time-before-call": "ran out of time before calling",
+              "audit-unwritable": "audit could not be written"}
+    receipt, tap, up = _proxied_leg(tmp_path, data_root, stores[kind], **deps_kw)
+    assert tap.tokens, "positive control: the proxy was reached"
+    assert receipt is not None, kind
+    assert (receipt["ok"], receipt["status"]) == (False, "error"), receipt
+    reason = receipt["reason"]
+    assert reason.startswith(PROXY_FAILED), (kind, reason)
+    assert causes[kind] in reason, (kind, reason)
+    assert not reason.startswith("the store"), (kind, reason)
+    if kind == "audit-unwritable":
+        assert [s.path for s in up.seen] == [COMMENT], "positive control: the store was called"
+    else:
+        assert up.seen == [], f"{kind}: the store was called"
+
+
+@pytest.mark.parametrize("kind", ["store-not-listening", "store-cut-by-the-deadline"])
+def test_t12_a_store_the_proxy_saw_fail_keeps_the_store_wording(tmp_path, data_root, kind):
+    """#1404 O2, control for t11: where the proxy's call to the store itself failed (nothing
+    listening; the deadline cutting the call after the proxy's own legs spent part of it) the
+    receipt's subject is the store and the proxy is not blamed. The subject is checked, not a
+    substring the cause could carry."""
+    if kind == "store-not-listening":
+        dead = H.declaration(f"http://127.0.0.1:{H.free_port()}{STORE}", writes=WRITES)
+        receipt, tap, _up = _proxied_leg(tmp_path, data_root, H.FakeStore, decl=dead)
+    else:
+        # Deadline 3.0s; the proxy's own read spends 1.0s, so the store call gets ~2.0s of its
+        # 2.5s budget and is cut there. The proxy's other steps would need another ~2s to spend
+        # the deadline before the call (t11's case) instead.
+        def slow_store(up):
+            up.replies[COMMENT] = lambda _seen: (time.sleep(3.5), (201, {}, b"{}"))[1]
+        receipt, tap, _up = _proxied_leg(
+            tmp_path, data_root, lambda sets: _Slow(sets, 1.0), before=slow_store,
+            upstream_timeout_sec=2.5, proxy_overhead_sec=0.5)
+    assert tap.tokens, "positive control: the proxy was reached"
+    assert receipt is not None, kind
+    reason = receipt["reason"]
+    assert reason.startswith("the store could not be reached: "), (kind, reason)
+    assert "credential proxy" not in reason, (kind, reason)
+
+
+def test_t13_a_relayed_status_is_the_systems_however_the_fault_is_raised():
+    """#1404 P1: a fault carrying the system's status is the system's even when the caller does
+    not say so; one with neither a status nor the system mark is the proxy's."""
+    with pytest.raises(AdapterFault) as relayed:
+        raise_proxy_fault("UpstreamFault", "HTTP 409 from ticket: duplicate", 409)
+    with pytest.raises(AdapterFault) as unmarked:
+        raise_proxy_fault("TransportFault", "the proxy's audit could not be written")
+    assert relayed.value.proxy_own is False, relayed.value
+    assert unmarked.value.proxy_own is True, unmarked.value
+
+
+@pytest.mark.parametrize("how", ["connection-closed", "cut-by-the-deadline"])
+def test_t14_a_store_that_accepted_the_comment_and_then_dropped_the_reply_has_it_posted(
+        tmp_path, data_root, how):
+    """The store answers 201 and its body never arrives whole (the connection closes, or the
+    request's deadline cuts a body still trickling in): the store's status decides the write
+    (#1359), so the receipt says the comment was posted, not that the store could not be
+    reached (#1404)."""
+    trickle = how == "cut-by-the-deadline"
+    deps_kw = {"upstream_timeout_sec": 1.0, "proxy_overhead_sec": 0.5} if trickle else {}
+    with H.breaks_after_status(201, trickle=trickle) as base:
+        decl = H.declaration(base + STORE, writes=WRITES)
+        with _published(tmp_path / "forge", data_root, decl) as t:
+            rec, run = _run(tmp_path)
+            store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
+            with A.proxy_for(t, store, **deps_kw) as (url, tap):
+                receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw")}))
+    assert tap.tokens, "positive control: the proxy was reached"
+    assert receipt is not None
+    assert (receipt["ok"], receipt["status"], receipt["key"]) == (True, "commented", KEY), receipt
