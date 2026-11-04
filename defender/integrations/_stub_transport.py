@@ -43,6 +43,7 @@ __all__ = [
     "http_get_obj",
     "http_post",
     "load_config",
+    "proxy_request",
     "raise_proxy_fault",
     "record_access",
     "record_access_context",
@@ -420,8 +421,8 @@ def _perform(  # noqa: PLR0913 — one request's per-call state
     if uses_proxy(ctx.tenant, system):
         # The proxy's route check is the only guard for this system (A6); the capture is kept.
         record_outbound(ctx, system, url, method=method)
-        return _proxy_request(ctx, config, url, system=system, method=method, body=body,
-                              write=write)
+        return proxy_request(ctx, url, system=system, method=method, body=body, write=write,
+                             timeout_sec=int(config.get("TIMEOUT_SEC", "10")))
     # Confinement before any transport; every HTTP stub funnels through here.
     guard_outbound(ctx, system, url, method=method, verb_class=WRITE_CLASS if write else "r")
 
@@ -456,12 +457,14 @@ def raise_proxy_fault(fault: str, detail: str, status: int | None = None) -> Non
     raise classes.get(fault, TransportFault)(detail or fault)
 
 
-def _proxy_request(  # noqa: PLR0913 — one request's per-call state
-    ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
-    body: dict | None, write: bool = False,
+def proxy_request(  # noqa: PLR0913 — one request's per-call state
+    ctx: VerbContext, url: str, *, system: str, method: str, body: dict | None,
+    timeout_sec: int, write: bool = False,
 ) -> dict | list:
+    """One request through the proxy, its faults raised as the proxy classified them. The guard
+    and the capture are the caller's: the stubs' (`_perform`) and Elastic's own."""
     answer = proxy_exchange(ctx, system=system, method=method, url=url, body=body,
-                            timeout_sec=int(config.get("TIMEOUT_SEC", "10")))
+                            timeout_sec=timeout_sec)
     if write:
         if answer.status:
             # The store answered: its status alone decides, whatever the proxy made of the body.

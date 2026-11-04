@@ -5,6 +5,7 @@ file. The declaration type is `kit.access`."""
 from __future__ import annotations
 
 import re
+import ssl
 from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -25,10 +26,11 @@ from defender.kit.access import (
 )
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import NOT_CONFIGURED, pointer_to
+from defender.kit.tls import trust_of_ca
 from defender.kit.verbs import is_system_name
 
 ACCESS_FILE = "access.yaml"
-_KNOWN = ("access", "base", "auth", "reads", "writes")
+_KNOWN = ("access", "base", "auth", "reads", "writes", "ca")
 #: The credential-set field names a scheme may name (the API's `CredentialKey` pattern).
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
 _METHOD = re.compile(r"[A-Z]{3,10}")
@@ -91,12 +93,34 @@ def parse_access(text: str, *, system: str) -> AccessDeclaration:  # noqa: C901 
     _yaml.reject_unread_keys(shown, data, _KNOWN, error=ConfigFault)
     if data.get("access") != HTTP_PROXY:
         raise ConfigFault(f"{shown}: `access` must be {HTTP_PROXY!r}")
+    base = _base(shown, data.get("base"), "base")
+    auth = _auth(shown, data.get("auth"))
     return AccessDeclaration(
-        base=_base(shown, data.get("base"), "base"),
-        auth=_auth(shown, data.get("auth")),
+        base=base, auth=auth,
         reads=_routes(shown, data.get("reads", []), "reads"),
         writes=_routes(shown, data.get("writes", []), "writes"),
+        ca=_ca(shown, data.get("ca"), base, auth),
     )
+
+
+def _ca(shown: str, value: object, base: str, auth: Auth) -> str | None:
+    """The declaration's private CA (#1391 O4): certificates only, judged now so a bad one is a
+    settings fault and never a failure at the first request. It covers every leg, so no leg may
+    be plain `http://`. The text is never echoed: a pasted private key must not reach a record."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ConfigFault(f"{shown}: `ca` must be PEM certificates as one string")
+    if urlsplit(base).scheme != "https":
+        raise ConfigFault(f"{shown}: `ca` needs an https `base`")
+    if auth.token_url is not None and urlsplit(auth.token_url).scheme != "https":
+        raise ConfigFault(f"{shown}: `ca` needs an https `auth.token_url`")
+    try:
+        trust_of_ca(value)
+    except (ValueError, ssl.SSLError):
+        raise ConfigFault(f"{shown}: `ca` must be PEM certificate blocks and nothing else "
+                          "(no key, no other text), each a valid certificate") from None
+    return value
 
 
 def _base(shown: str, value: object, key: str) -> str:

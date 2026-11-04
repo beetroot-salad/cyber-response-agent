@@ -1,0 +1,12 @@
+# How the credential proxy reaches Elasticsearch for this tenant (#1391 O3, O4).
+# The proxy adds the basic-auth credential of the read-only defender user; the agent never holds it.
+# The lab's Elasticsearch answers under a private CA: the operator adds that CA as a `ca:` block
+# (PEM certificates, inline) when the lab moves to the proxy — see the upgrade procedure in
+# defender/CLAUDE.md. Without `ca` the proxy verifies against the public bundle.
+access: http-proxy
+base: https://elasticsearch:9200
+auth:
+  scheme: basic
+reads:
+  - {method: POST, path: "/*/_search"}
+  - {method: POST, path: "/_query"}
