@@ -449,8 +449,8 @@ def _perform(  # noqa: PLR0913 — one request's per-call state
 def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
                       from_system: bool = False) -> None:
     """Raise the fault class the proxy named, with its detail (A9); an `UpstreamFault` carries
-    the store's `status` when the proxy relayed one. The proxy's own (`proxy_own`) unless
-    `from_system`: the system answered or the proxy saw its call fail (#1404)."""
+    the store's `status` when the proxy relayed one. The proxy's own (`proxy_own`) unless the
+    system answered (`status`) or the proxy saw its call fail (`from_system`, #1404)."""
     raised: AdapterFault
     if fault == "UpstreamFault":
         raised = UpstreamFault(detail or fault, status=status or None)
@@ -458,7 +458,7 @@ def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
         classes = {"ConfigFault": ConfigFault, "ConfinementFault": ConfinementFault,
                    "TransportFault": TransportFault}
         raised = classes.get(fault, TransportFault)(detail or fault)
-    raised.proxy_own = not from_system
+    raised.proxy_own = not (from_system or status)
     raise raised
 
 

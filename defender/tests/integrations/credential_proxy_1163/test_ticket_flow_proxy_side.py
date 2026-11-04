@@ -12,7 +12,7 @@ import pytest
 
 from defender.box import run_env
 from defender.integrations._stub_transport import raise_proxy_fault
-from defender.kit.faults import ConfigFault, TransportFault
+from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.kit.settings import config_pointer
 from defender.systems import case_system
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
@@ -249,3 +249,14 @@ def test_t12_a_store_the_proxy_saw_fail_keeps_the_store_wording(tmp_path, data_r
     reason = receipt["reason"]
     assert reason.startswith("the store could not be reached: "), (kind, reason)
     assert "credential proxy" not in reason, (kind, reason)
+
+
+def test_t13_a_relayed_status_is_the_systems_however_the_fault_is_raised():
+    """#1404 P1: a fault carrying the system's status is the system's even when the caller does
+    not say so; one with neither a status nor the system mark is the proxy's."""
+    with pytest.raises(AdapterFault) as relayed:
+        raise_proxy_fault("UpstreamFault", "HTTP 409 from ticket: duplicate", 409)
+    with pytest.raises(AdapterFault) as unmarked:
+        raise_proxy_fault("TransportFault", "the proxy's audit could not be written")
+    assert relayed.value.proxy_own is False, relayed.value
+    assert unmarked.value.proxy_own is True, unmarked.value

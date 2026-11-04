@@ -8,7 +8,8 @@ class AdapterFault(Exception):
 
     exit_code: int = 1
     #: True when the fault is the credential proxy's own (#1404): the proxy refused or failed, or
-    #: could not be used at all (unreachable, an unusable answer, no address handed to the call).
+    #: could not be used at all (unreachable, an unusable answer, no address handed to the call, or
+    #: no request token produced for it).
     #: False for a fault that never touched the proxy and for one where the proxy saw the target
     #: system's own call fail or answer, so a reader names the proxy only for its own faults.
     proxy_own: bool = False
