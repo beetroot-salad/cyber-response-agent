@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 
-import re
 
 import contextlib
 import dataclasses
@@ -112,11 +111,9 @@ CALLS = "adapter-calls.jsonl"
 def _record(ctx: VerbContext, name: str, params: dict) -> None:
     log = Path(ctx.run_dir) / CALLS
     log.parent.mkdir(parents=True, exist_ok=True)
-    at = getattr(ctx, "as_of", None)
     with log.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
             "verb": name, "params": params,
-            "as_of": None if at is None else at.isoformat(),
         }) + "\\n")
 
 
@@ -332,25 +329,11 @@ def test_a_registry_served_host_state_capture_carries_no_time_of_its_own(tmp_pat
 
     payload = reg.verbs("host-state")["proc-tree"](ctx, host="web-1")
 
-    assert payload and "captured_at" not in payload
-    assert "captured_at" not in json.loads(served_rows(reg.ledger)[-1]["payload_text"])
-
-
-def test_the_clock_rides_no_served_call_to_any_system(tmp_path):
-    """Design O1: no served call reaches its adapter body with a branch point on `ctx`, whichever
-    system it addresses."""
-    ctx = docker_ctx(tmp_path)
-    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT,
-                        world=World("w1", ("elastic",)), ledger=primed_ledger(tmp_path),
-                        as_of=T0, **pass_through())
-
-    reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
-    reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
-
-    assert [(c["verb"], c["as_of"]) for c in adapter_calls(ctx)] == [
-        ("esql", None),
-        ("get-host", None),
-    ]
+    assert payload, "the served capture is empty, so nothing below is observed"
+    assert "captured_at" not in payload
+    recorded = json.loads(served_rows(reg.ledger)[-1]["payload_text"])
+    assert "captured_at" not in recorded
+    assert recorded == payload, "the ledger recorded something other than what was served"
 
 
 def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
@@ -433,6 +416,7 @@ def test_no_host_state_capture_carries_a_time_of_its_own(tmp_path, verb, params)
     """Design O7: host-state's `captured_at` goes; the platform's arrival stamp replaces it."""
     payload = host_state_adapter.VERBS[verb](docker_ctx(tmp_path), **params)
 
+    assert payload, f"{verb} produced no capture, so nothing below is observed"
     assert "captured_at" not in payload, f"{verb} still stamps a time of its own: {payload}"
 
 
@@ -474,6 +458,9 @@ def test_a_search_window_reaches_the_wire_exactly_as_the_caller_spelled_it(
     ('FROM logs-system.auth-*\n'
      '| WHERE @timestamp >= "2026-05-01T00:00:00Z" AND @timestamp < "2026-06-01T00:00:00Z"\n'
      '| STATS events = COUNT(*) BY user = user.name'),
+    # Spellings the retired splice's own recognizer missed: it must still touch none of them.
+    "// note\nFROM logs-zeek.ssh-* | LIMIT 1",
+    "from logs-zeek.ssh-* | limit 1",
 ])
 def test_an_esql_query_reaches_the_wire_and_the_payload_exactly_as_asked(tmp_path, asked):
     """Design O1: no ES|QL splice; `esql` echoes what was sent, which is now what was asked."""

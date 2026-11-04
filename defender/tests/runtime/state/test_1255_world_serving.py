@@ -227,9 +227,8 @@ def test_1255_the_control_world_answers_a_question_the_source_never_asked_throug
 
     served = S24.call(control, "idp", "query", ctx, **BOB)
     live = est.calls("idp", "query")[reads_before:]
-    assert [c["as_of"] for c in live] == [None], (
-        "the control's base read was not one live read with no branch point on it (#1385 O1: "
-        "the oracle cuts, not the adapter)")
+    assert len(live) == 1, (
+        "the control's base read was not one live read (#1385 O1: the oracle cuts, not the adapter)")
     assert oracle.requests >= 1, (
         "the control world served a question the source never asked as a raw live read")
     inbound = oracle.all_seen()
@@ -259,8 +258,8 @@ def test_1255_the_control_world_serves_its_oracles_changed_answer_never_the_base
     control = S24.sandboxed_registry(ep, "a", est, oracle=oracle,
                                      verifier=S24.passing_verifier())
     arm_dir, arm = W.drive_lead(tmp_path / "arm", verbs=control, est=est, turns=list(turns))
-    assert [c["as_of"] for c in est.calls("idp", "query")[reads_before:]] == [None], (
-        "fixture: the control's base was not one live read with no branch point on it (#1385 O1)")
+    assert len(est.calls("idp", "query")[reads_before:]) == 1, (
+        "fixture: the control's base was not one live read (#1385 O1)")
     assert oracle.requests >= 1, "the control world's new question took no oracle turn"
 
     handed = "\n".join(arm.handed_back())
@@ -354,8 +353,7 @@ def test_1255_a_pre_fork_question_with_no_recording_is_reconstructed_at_the_fork
                     "only recorded answers unchanged")
 
     live = est.calls("siem-x", "lookup")[reads_before:]
-    assert [c["as_of"] for c in live] == [None], (
-        "the base was not one live read with no branch point on it (#1385 O1)")
+    assert len(live) == 1, "the base was not one live read (#1385 O1)"
     assert oracle.requests >= 1, (
         f"world {label} served a pre-fork question with no recording as a raw live read")
     inbound = oracle.all_seen()
@@ -602,8 +600,8 @@ def test_1255_every_refusal_the_control_world_can_give_reads_as_a_natural_runs(
                                      verifier=S24.passing_verifier())
     arm_dir, arm = W.drive_lead(tmp_path / "arm", verbs=control, est=est, turns=list(turns))
 
-    expected = [_without_stamp(W.normalized(t, natural_dir)) for t in natural.handed_back()]
-    handed = [_without_stamp(W.normalized(t, arm_dir)) for t in arm.handed_back()]
+    expected = [_without_stamp(W.normalized(t, natural_dir, stamps=None)) for t in natural.handed_back()]
+    handed = [_without_stamp(W.normalized(t, arm_dir, stamps=None)) for t in arm.handed_back()]
     assert len(expected) == 6, f"fixture: six refusals reached the natural run's model: {expected}"
     assert all(t.strip() for t in expected), f"fixture: a refusal text was empty: {expected}"
     assert len(set(expected)) == 6, "fixture: the six refusal classes read alike"

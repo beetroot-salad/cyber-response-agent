@@ -40,14 +40,16 @@ def _assert_only_listed_files(run_dir: Path, where: str) -> None:
     RR.assert_only_run_records(run_dir, where, rows)
 
 
-def _assert_no_call_id(rows: list[dict], where: str) -> None:
+def _assert_no_call_id(rows: list[dict], where: str, *, seeded: int = 0) -> None:
     carrying = [r for r in rows if W.CALL_ID in r]
     assert not carrying, (
         f"{where}: {len(carrying)} query row(s) in the model's table carry `{W.CALL_ID}`: "
         f"{carrying[:2]}")
-    # An inherited row from a source recorded before #1385 has no `received_at` (readers
-    # tolerate its absence); anything else is the writer's full set.
-    shaped = [tuple(r) for r in rows if tuple(r) not in (W.ROW_COLUMNS, W.ROW_COLUMNS[:-1])]
+    # An inherited row (the first `seeded`) from a source recorded before #1385 has no
+    # `received_at` (readers tolerate its absence); every row the run wrote is the writer's full set.
+    legacy = W.ROW_COLUMNS[:-1]
+    shaped = [tuple(r) for i, r in enumerate(rows)
+              if tuple(r) != W.ROW_COLUMNS and not (i < seeded and tuple(r) == legacy)]
     assert not shaped, (
         f"{where}: query rows whose columns are not the writer's columns (a column carrying "
         f"the id under another name is the same leak): {shaped[:2]}")
@@ -147,7 +149,7 @@ def test_1255_every_siblings_table_seeded_and_own_carries_no_call_id_or_arm_iden
         assert W.identities_in(json.dumps(ledger), identities), (
             f"positive control: world {label}'s ledger names it")
         for where, rows in (("archived", archived), ("run folder", live)):
-            _assert_no_call_id(rows, f"world {label} ({where})")
+            _assert_no_call_id(rows, f"world {label} ({where})", seeded=seeded)
             leaked = W.identities_in(json.dumps(rows), identities)
             assert not leaked, f"world {label}'s {where} query table names the arm: {leaked}"
 

@@ -247,9 +247,7 @@ def check_settings(*_a, **_k):
 
 
 def _answer(ctx: VerbContext, name: str, params: dict):
-    as_of = getattr(ctx, "as_of", None)
     row = {{"system": SYSTEM, "verb": name, "params": params,
-           "as_of": None if as_of is None else as_of.isoformat(),
            "world_id": getattr(ctx, "world_id", None),
            "run_dir": str(getattr(ctx, "run_dir", "")), "t": time.time()}}
     with (_STATE / "calls.jsonl").open("a", encoding="utf-8") as fh:

@@ -264,10 +264,9 @@ def test_1224_answer_differing_exactly_by_its_claim_is_served_as_oracle(tmp_path
         recorded = row.get("claim") or {}
         for key, value in claim_.items():
             assert recorded.get(key) == value, (key, recorded)
-    # The removal's side query reached the tenant through the oracle-side door, with no clock on it.
+    # The removal's side query reached the tenant through the oracle-side door.
     side_calls = [c for c in sc.est.calls("idp", "query") if c["params"] == side]
     assert side_calls, "check 5 re-ran the removal's side query against the real system"
-    assert all(c["as_of"] is None for c in side_calls), side_calls
     assert _has_row(sc.rows("ledger"), actor="host-check", system="idp", verb="query",
                     params=side), sc.rows("ledger")
     # Committed with the verified answer: the forged row and both stored answers.
@@ -559,7 +558,6 @@ def test_1224_wrong_count_or_unreproducible_removal_fails_check_5(tmp_path):
     reruns = [c for c in sc.est.calls("idp", "query") if c["params"] in (loose, tight)]
     assert {json.dumps(c["params"], sort_keys=True) for c in reruns} == {
         json.dumps(loose, sort_keys=True), json.dumps(tight, sort_keys=True)}, reruns
-    assert all(c["as_of"] is None for c in reruns), reruns
     oracle_ledger = sc.rows("ledger")
     assert _has_row(oracle_ledger, actor="host-check", params=loose), oracle_ledger
     ledger = sc.ledger()

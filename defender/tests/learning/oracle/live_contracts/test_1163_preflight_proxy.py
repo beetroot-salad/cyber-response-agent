@@ -183,6 +183,7 @@ def test_p2_a_working_tree_base_that_differs_from_current_is_refused_and_sent_no
     run, outcome, bao, tap, merged, wt = _preflight(
         tmp_path, monkeypatch, data_root, working_tree_edit=True)
     assert outcome is not None, run.message  # the outcome is written before any sibling
+    assert outcome["unservable_worlds"] == [], "the failed live read made a world unservable"
     assert tap.tokens, "positive control: the proxy was asked"
     assert merged.seen == []
     assert wt.seen == []
