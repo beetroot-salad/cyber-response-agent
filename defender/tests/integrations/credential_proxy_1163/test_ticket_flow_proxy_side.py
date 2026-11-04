@@ -260,3 +260,24 @@ def test_t13_a_relayed_status_is_the_systems_however_the_fault_is_raised():
         raise_proxy_fault("TransportFault", "the proxy's audit could not be written")
     assert relayed.value.proxy_own is False, relayed.value
     assert unmarked.value.proxy_own is True, unmarked.value
+
+
+@pytest.mark.parametrize("how", ["connection-closed", "cut-by-the-deadline"])
+def test_t14_a_store_that_accepted_the_comment_and_then_dropped_the_reply_has_it_posted(
+        tmp_path, data_root, how):
+    """The store answers 201 and its body never arrives whole (the connection closes, or the
+    request's deadline cuts a body still trickling in): the store's status decides the write
+    (#1359), so the receipt says the comment was posted, not that the store could not be
+    reached (#1404)."""
+    trickle = how == "cut-by-the-deadline"
+    deps_kw = {"upstream_timeout_sec": 1.0, "proxy_overhead_sec": 0.5} if trickle else {}
+    with H.breaks_after_status(201, trickle=trickle) as base:
+        decl = H.declaration(base + STORE, writes=WRITES)
+        with _published(tmp_path / "forge", data_root, decl) as t:
+            rec, run = _run(tmp_path)
+            store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
+            with A.proxy_for(t, store, **deps_kw) as (url, tap):
+                receipt = _leg(t, run, rec, url, T.token(t.tenant_id, {(SYSTEM, "rw")}))
+    assert tap.tokens, "positive control: the proxy was reached"
+    assert receipt is not None
+    assert (receipt["ok"], receipt["status"], receipt["key"]) == (True, "commented", KEY), receipt

@@ -289,14 +289,23 @@ class _Proxy:
         what = f"calling {asked.system}"
         timeout = deadline.wait(what)
 
+        answered: list[int] = []
+
         def sent(status: int) -> None:
             trail.outcome = f"sent {status}"
+            answered.append(status)
 
         try:
             reply = deadline.run(what, lambda: capped_reply(
                 self._trust, asked.method, target.url, cap=cap, timeout=timeout,
                 on_status=sent, headers=headers, content=content), system_side=True)
+        except Refused as cut:
+            if answered:
+                return _broken_reply(asked.system, answered[0], cut.detail)
+            raise
         except httpx.TransportError as e:
+            if answered:
+                return _broken_reply(asked.system, answered[0], type(e).__name__)
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
                                      f"({type(e).__name__})", system_side=True) from None
         status, withheld = reply.status, reply.withheld
@@ -316,6 +325,13 @@ class _Proxy:
         return {"status": status, "headers": shown,
                 "body": scrub_secret_bytes(reply.body, secrets).decode("utf-8", "replace"),
                 "fault": fault, "detail": detail}
+
+
+def _broken_reply(system: str, status: int, why: str) -> dict[str, Any]:
+    """The system answered `status` and then its reply broke (#1404): the status stands, so a
+    write it accepted is not reported as never made; there is no body to hand on."""
+    return {"status": status, "headers": {}, "body": "", "fault": TRANSPORT,
+            "detail": f"{system} answered {status} but its reply did not arrive whole ({why})"}
 
 
 def _fault_of(status: int) -> str | None:

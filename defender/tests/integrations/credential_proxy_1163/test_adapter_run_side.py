@@ -240,3 +240,34 @@ def test_x7_a_fault_is_the_proxys_own_only_when_the_system_neither_answered_nor_
     assert seen["proxy-refuses"].proxy_own is True, seen["proxy-refuses"]
     assert seen["no-token-minted"].proxy_own is True, seen["no-token-minted"]
     assert isinstance(seen["no-token-minted"], TransportFault), seen["no-token-minted"]
+
+
+def test_x8_a_system_answer_the_proxy_could_not_hand_on_keeps_the_proxys_reason(
+        tmp_path, data_root):
+    """#1404 follow-up, read path: a status that arrived with no body to hand on (the reply broke
+    after its status; a body withheld as too large) is the system's (`proxy_own` false) and the
+    fault's detail is the proxy's reason, not an empty vendor body ("{}")."""
+    import types
+
+    seen = {}
+    with H.breaks_after_status(200) as base, Q._published(
+            tmp_path, data_root, types.SimpleNamespace(url=base)) as t:
+        tok = T.token(t.tenant_id, GRANT)
+        with A.proxy_for(t, Q._store(t)) as (url, _tap):
+            with pytest.raises(AdapterFault) as raised:
+                identity_adapter.get_user(A.ctx_for(tmp_path / "broke", T.run_record(t), url, tok),
+                                          user="dev.dana")
+            seen["broke"] = raised.value
+    with H.upstream() as up, Q._published(tmp_path / "big", data_root, up) as t:
+        tok = T.token(t.tenant_id, GRANT)
+        with A.proxy_for(t, Q._store(t), max_response_bytes=8) as (url, _tap):
+            with pytest.raises(AdapterFault) as raised:
+                identity_adapter.get_user(A.ctx_for(tmp_path / "big", T.run_record(t), url, tok),
+                                          user="dev.dana")
+            seen["withheld"] = raised.value
+        assert up.seen, "positive control: the system was asked"
+    for name, why in (("broke", "did not arrive whole"), ("withheld", "more than 8 bytes")):
+        fault = seen[name]
+        assert fault.proxy_own is False, (name, fault)
+        assert why in fault.detail, (name, fault.detail)
+        assert not fault.detail.endswith("{}"), (name, fault.detail)
