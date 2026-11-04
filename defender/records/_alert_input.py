@@ -160,7 +160,7 @@ def _unknown_entry_reason(entry: object) -> str:
 
 def _entry_reason(entry: str) -> str:
     return (f"the alert mapping's entry for {entry} must be a dotted alert path (a non-empty "
-            "string of non-empty segments with no surrounding whitespace); leave it unmapped to map nothing")
+            "string of non-empty segments with no surrounding whitespace, in text the database can hold); leave it unmapped to map nothing")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -188,7 +188,7 @@ def check_mapping(doc: object) -> AlertMapping:
         if value is None:
             continue
         if (not isinstance(value, str) or not value or value != value.strip()
-                or any(not segment for segment in value.split("."))):
+                or any(not segment for segment in value.split(".")) or not postgres_can_hold(value)):
             raise AlertMappingFault(_entry_reason(entry))
         paths[entry] = value
     return AlertMapping(paths=paths)
