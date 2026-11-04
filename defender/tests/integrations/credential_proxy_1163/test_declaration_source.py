@@ -332,6 +332,20 @@ def test_1391_o4_a_declarations_ca_is_judged_when_it_is_parsed(kind):
                 "a pasted private key reached the fault text, so the run record")
 
 
+@pytest.mark.parametrize("where", ["nbsp-before", "line-separator-inside"])
+def test_1391_o4_a_ca_with_non_ascii_whitespace_is_a_settings_fault_not_a_crash(where):
+    """Non-ASCII whitespace around or inside valid PEM text is a ConfigFault, never a TypeError,
+    and the text is not echoed. #1391 O4, D13, F6."""
+    from defender.tenancy._access import parse_access
+
+    pem = _pki().root.cert.decode()
+    ca = "\u00a0" + pem if where == "nbsp-before" else pem.replace("\n", "\u2028", 1)
+    text = H.declaration(ES, scheme=H.basic_scheme(), ca=ca)
+    with pytest.raises(ConfigFault) as refused:
+        parse_access(text, system="elastic")
+    assert pem.splitlines()[1] not in str(refused.value), "the certificate text reached the fault"
+
+
 @pytest.mark.parametrize(("token_url", "ca", "fault"), [
     pytest.param("https://idp.corp.example/token", True, None, id="https-control"),
     pytest.param("http://idp.corp.example/token", False, None, id="http-without-ca"),
