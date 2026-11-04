@@ -52,7 +52,7 @@ import sys
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
-from _astlib import ModuleEnv, callee, module_env, origin
+from _astlib import ModuleEnv, callee, module_env, origin, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -76,10 +76,12 @@ _ADAPTER_TREES = ("integrations/", "skills/connect/examples/")
 
 def _python_files(root: Path, prefix: str) -> Iterator[tuple[str, Path]]:
     """`(relative path, file)` for each module under `root/prefix`, tests excluded."""
-    for path in sorted((root / prefix).rglob("*.py")):
-        rel = path.relative_to(root).as_posix()
-        if "tests" not in path.relative_to(root).parts:
-            yield rel, path
+    base = root / prefix
+    if not base.is_dir():
+        return
+    for found in source_files(base, {"tests"}):
+        path = base / found
+        yield path.relative_to(root).as_posix(), path
 
 
 def _parsed(path: Path, rel: str) -> ast.Module:
