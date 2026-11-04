@@ -487,13 +487,16 @@ def test_1391_o4_the_chain_must_end_at_a_root_in_ca(tmp_path, data_root, request
     ca = pki.root.cert if trusted == "root" else pki.intermediate.cert
     with (tls_server(tmp_path, _ok, served=pki.served()) as server,
           _ca_rig(tmp_path, data_root, server.url + BASE, ca) as r,
-          counting_calls(client=httpx.AsyncClient.__init__) as calls):
+          counting_calls(client=httpx.AsyncClient.__init__,
+                         transport=httpx.AsyncHTTPTransport.__init__) as calls):
         answer = r.ask(url=server.url + PATH)
 
     assert answer["fault"] == fault, answer
     assert len(server.seen) == (1 if fault is None else 0)
-    handed = [c["verify"] for c in calls.locals["client"] if isinstance(c["verify"], ssl.SSLContext)]
-    assert handed, "no TLS context was handed to a client: the verify flags cannot be judged"
+    # httpx takes the context as `verify=` on the client or on its transport: either route counts.
+    handed = [c["verify"] for c in calls.locals["client"] + calls.locals["transport"]
+              if isinstance(c.get("verify"), ssl.SSLContext)]
+    assert handed, "no TLS context was handed to a client or transport: the verify flags cannot be judged"
     assert not [c for c in handed if c.verify_flags & ssl.VERIFY_X509_PARTIAL_CHAIN], (
         "a context handed to the ca leg accepts a partial chain: the verify flags are inherited, "
         "not an exact named set (F7)")

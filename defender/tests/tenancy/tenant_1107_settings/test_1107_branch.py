@@ -16,6 +16,7 @@ from defender.cli.learning import branch as branch_entry
 from defender.systems import run_tenant
 from defender.integrations import elastic_adapter
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.integrations.credential_proxy_1163 import _harness as credential_harness
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
@@ -148,6 +149,15 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
         f"the sibling's own record does not see the edit: {record.systems['elastic']!r}"
     # Its Elastic calls fault.
     run_dir = tmp_path / "sibling-run"
-    with pytest.raises(S.config_fault()):
-        elastic_adapter.query(S.verb_context(record, run_dir, shim.env()), native_query="*")
-    assert shim.calls() == [], f"a faulted Elastic call reached docker: {shim.calls()}"
+    reached: list[str] = []
+
+    async def proxy_app(scope: Any, receive: Any, send: Any) -> None:  # records what reaches the proxy; answers nothing
+        if scope["type"] == "http":
+            reached.append(scope["path"])
+        raise RuntimeError("the faulted call must not reach the proxy")
+
+    with credential_harness.serve_asgi(proxy_app) as proxy_url:
+        with pytest.raises(S.config_fault()):
+            elastic_adapter.query(S.verb_context(record, run_dir, shim.env(), proxy_url=proxy_url,
+                                                 request_token="tok"), native_query="*")
+    assert reached == [], f"a faulted Elastic call reached the proxy: {reached}"  # elastic never uses docker (O3)

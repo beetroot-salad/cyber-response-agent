@@ -183,7 +183,8 @@ def test_o6_lead_on_an_unconfigured_system_ends_before_its_claim_naming_the_caus
 
 
 def test_o6_every_start_time_settings_fault_is_down_at_start(tmp_path: Path) -> None:
-    """No config.env at all, or no access.yaml (which `load_config` never checks): either way l-00c ends down at start naming 'not configured', with nothing run or charged."""
+    """No config.env at all, or no access.yaml (elastic's base comes from the declaration `load_config` reads): either way l-00c ends down at start naming 'not configured'.
+    Nothing is run or charged."""
     scene = _Scene(tmp_path)
     control = scene.control()
     no_file = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-no-file"), omit_systems=("elastic",))
@@ -622,7 +623,8 @@ def _drop_present(scene: _Scene, system: str, key: str) -> None:
 
 
 def test_o8_all_down_through_settings_load_config_never_reads(tmp_path: Path) -> None:
-    """Every granted system down for a key no `load_config` reads (cmdb's docker context, elastic's access.yaml) is refused at start naming each key: the refusal comes from the adapters' declared checks, not a `load_config` pre-check. Repairing cmdb lets the tenant run."""
+    """Every granted system down, elastic through its declaration on the `load_config` path and cmdb through CMDB_DOCKER_CONTEXT, beyond `load_config`, is refused at start naming each key,
+    from the adapters' declared checks, not a pre-check. Repairing cmdb lets the tenant run."""
     repaired = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-access-repaired"))
     _no_access(repaired, "elastic")
     ran = repaired.run("cmdb-repaired")

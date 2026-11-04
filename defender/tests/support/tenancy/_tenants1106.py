@@ -1,6 +1,8 @@
 """#1106 — the per-tenant knowledge folder: shared fixtures for the spec and the migrated suites."""
 from __future__ import annotations
 
+import re
+
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -375,7 +377,8 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     system_configs = configs if configs is not None else config_texts(marker or tenant_id)
     for system, text in system_configs.items():
         files[f"systems/{system}/config.env"] = text
-    if "elastic" in system_configs and "ELASTIC_TRANSPORT" in system_configs["elastic"]:
+    if "elastic" in system_configs and re.search(
+            r"""^ELASTIC_TRANSPORT\s*=\s*["']?http-proxy["']?\s*$""", system_configs["elastic"], re.M):
         files["systems/elastic/access.yaml"] = elastic_access_text(marker or tenant_id)
     for rel, text in files.items():
         if rel in omit:
