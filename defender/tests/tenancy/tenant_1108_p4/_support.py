@@ -67,7 +67,7 @@ def _write_files(checkout: Path, files: Files | None) -> None:
     for rel, content in (files or {}).items():
         path = Path(checkout) / rel
         if content is None:
-            path.unlink()
+            path.unlink(missing_ok=True)
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content.encode("utf-8") if isinstance(content, str) else content)
@@ -146,7 +146,14 @@ class PublishedTenant:
         if origin is not None:
             bound["origin"] = origin
         bound.setdefault("origin", self.origin)
-        return active_repository(self.data_root, self.tenant_id, repo=repo, **{**bound, **keywords})
+        merged = {**bound, **keywords}
+        if merged.get("wiring", True) and "generations" not in merged:
+            # The fixture tenant's elastic is proxied (#1391 P1/D12): run start needs a live generation with a
+            # sign login. A test whose premise is "none" passes `generations=()`.
+            from defender.tests.support.tenancy._proxied1391 import sign_generation
+
+            merged["generations"] = [sign_generation(self.tenant_id)]
+        return active_repository(self.data_root, self.tenant_id, repo=repo, **merged)
 
     def directory_with(self, **keywords: Any) -> Any:
         """A fresh `TenantDirectory` over `repository_with(**keywords)`."""
@@ -315,9 +322,10 @@ def bind_forge(t: PublishedTenant, *, origin: str | None = None,
     #1214 O6: nothing is written to the tenant folder; `issuer_role`/`issuer_config`/`audience` are not facts of the
     wiring: the provider derives them from the live generation and its host secret file."""
     from defender.tests.support.tenancy._active1214 import generation_fields
+    from defender.tests.support.tenancy._proxied1391 import with_sign_login
 
-    if generations is None:
-        generations = [generation_fields(t.tenant_id, default_secrets_dir(t))]
+    if generations is None:  # with a sign login: the fixture tenant's elastic is proxied (#1391 P1/D12)
+        generations = [with_sign_login(t.tenant_id, generation_fields(t.tenant_id, default_secrets_dir(t)))]
     bound = {"origin": t.origin if origin is None else origin, "generations": list(generations)}
     object.__setattr__(t, "_bound", bound)
     object.__setattr__(t, "_dir", None)
@@ -368,7 +376,10 @@ def minting(t: PublishedTenant, tmp_path: Path, *, purpose: str = "drain") -> Mi
                               headers={"X-Vault-Token": bao.management_token})
     fields = provision_generation(management, t.tenant_id, tmp_path / "secrets")
     secret = Path(fields["host_secret_file"]).read_text(encoding="utf-8").strip()
-    bind_forge(t, generations=[fields])
+    from defender.tests.support.tenancy._proxied1391 import with_sign_login
+
+    # With a sign login: the fixture tenant's elastic is proxied (#1391 P1/D12), so a run of it signs request tokens.
+    bind_forge(t, generations=[with_sign_login(t.tenant_id, fields)])
 
     def part(doc: dict[str, Any]) -> str:
         return base64.urlsafe_b64encode(json.dumps(doc).encode()).decode().rstrip("=")

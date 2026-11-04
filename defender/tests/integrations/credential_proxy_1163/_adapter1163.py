@@ -66,18 +66,19 @@ ELASTIC_ALERTS = "alerts-*"
 
 def elastic_files(base: str, *, ca: str | bytes | None = None, transport: str | None = "http-proxy",
                   env_extra: str = "", scheme: dict[str, object] | None = None,
-                  declared: bool = True) -> dict[str, str]:
+                  declared: bool = True) -> dict[str, str | None]:
     """Repo files making `elastic` a proxied system at `base`: a basic-auth declaration with
     `ELASTIC_READS` (and `ca` when given), and a config.env holding the access method (`transport`;
     None writes none), the two index keys and `env_extra` (no URL, Kibana or container key);
-    `declared=False` leaves the declaration out."""
+    `declared=False` deletes the declaration from the placed fixture (the shipped
+    fixture tenant carries one, #1391 D12), as a `None` entry `files` applies after placement."""
     decl = H.declaration(base, scheme=scheme or H.basic_scheme(), reads=ELASTIC_READS, ca=ca)
     method = "" if transport is None else f'ELASTIC_TRANSPORT="{transport}"\n'
     env = (f'{method}ELASTIC_EVENTS_INDEX="{ELASTIC_EVENTS}"\n'
            f'ELASTIC_ALERTS_INDEX="{ELASTIC_ALERTS}"\n{env_extra}')
-    files = H.access_files("elastic", decl, env=env)
+    files: dict[str, str | None] = dict(H.access_files("elastic", decl, env=env))
     if not declared:
-        files.pop(ACCESS_FILE.format(system="elastic"))
+        files[ACCESS_FILE.format(system="elastic")] = None
     return files
 
 
@@ -100,13 +101,15 @@ def system_files(system: str, decl: str, *, env_extra: str = "") -> dict[str, st
 
 
 @contextlib.contextmanager
-def published(scratch: Path, root: Path, systems: Mapping[str, str],
+def published(scratch: Path, root: Path, systems: Mapping[str, str], *,
+              extra_files: Mapping[str, str | None] | None = None,
               **kw: Any) -> Iterator[PublishedTenant]:
     """The fixture tenant published once with every `{system: declaration}` of `systems` on
-    `http-proxy`."""
-    files: dict[str, str] = {}
+    `http-proxy`, and `extra_files` (repo path to content, `None` deletes) applied after."""
+    files: dict[str, str | None] = {}
     for system, decl in systems.items():
         files.update(system_files(system, decl))
+    files.update(extra_files or {})
     with published_tenant(scratch, root=root, files=files, **kw) as t:
         yield t
 
