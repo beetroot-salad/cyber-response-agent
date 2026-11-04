@@ -47,6 +47,7 @@ import ctypes  # noqa: E402
 import dataclasses  # noqa: E402
 import functools  # noqa: E402
 import inspect  # noqa: E402
+import re  # noqa: E402
 import signal  # noqa: E402
 import threading  # noqa: E402
 from collections.abc import Callable, Collection, Iterator, Mapping  # noqa: E402
@@ -55,7 +56,7 @@ from typing import Any, Literal, Protocol  # noqa: E402
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _log  # noqa: E402
+from defender import _clock, _log  # noqa: E402
 from defender.records import formats  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
@@ -83,6 +84,7 @@ from defender.kit.faults import AdapterFault, ConfigFault  # noqa: E402
 from defender.systems.verb_grant import GrantError  # noqa: E402
 from defender.systems.verbs import (  # noqa: E402
     ModuleVerbRegistry,
+    ReadCut,
     RegistryError,
     RosterRead,
     ServingAbort,
@@ -135,7 +137,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="the tenant this run belongs to; required on every run, --episode "
                         "included (there is no default). On --episode the episode is looked "
                         "up under this tenant's folder, and its arm roster must name --world")
+    p.add_argument("--as-of", default=None, type=_aware_moment, metavar="T",
+                   help="serve the run as of T (ISO-8601 with an offset or Z): the run clock "
+                        "starts at T and every read is cut at event time T")
+    p.add_argument("--arrived-by", default=None, type=_aware_moment, metavar="A",
+                   help="also cut every read at arrival time A (needs --as-of)")
     ns = p.parse_args(argv)
+    # A cut run's refusals, before any run dir or episode is looked up (#1347).
+    if ns.arrived_by is not None and ns.as_of is None:
+        p.error("--arrived-by needs --as-of: an arrival cut is only ever beside an event-time cut")
+    if ns.as_of is not None and (ns.episode is not None or ns.world is not None):
+        p.error("--as-of is not available with --episode/--world: a sibling's clock and cut are "
+                "its branch point's")
+    if ns.as_of is not None and ns.update_ticket:
+        p.error("--update-ticket is not available with --as-of: a run served as of another "
+                "moment is not a live investigation, and its ticket row would enter the case "
+                "history as one")
     if ns.episode is not None and ns.alert is not None:
         p.error(
             "the positional alert is illegal with --episode: the manifest already names the "
@@ -147,6 +164,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         p.error("--episode needs --world: a manifest declares a family, and a process is one "
                 "arm")
     return ns
+
+
+#: The offset an `--as-of` / `--arrived-by` value must end with.
+_SPELLED_OFFSET = re.compile(r"(Z|[+-]\d\d:?\d\d)\Z")
+
+
+def _aware_moment(text: str) -> datetime:
+    """An `--as-of` / `--arrived-by` value: ISO-8601 carrying its offset (or `Z`), as aware UTC.
+    A time with no offset is refused rather than read as UTC: the operator says which instant."""
+    text = text.strip()
+    if not _SPELLED_OFFSET.search(text):
+        raise argparse.ArgumentTypeError(f"{text!r} names no offset; spell it with Z or +HH:MM")
+    moment = _clock.parse_iso_utc(text)
+    if moment is None:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an ISO-8601 time")
+    try:
+        return moment.astimezone(UTC)
+    except OverflowError:
+        raise argparse.ArgumentTypeError(f"{text!r} is outside the years a run can be served") from None
+
+
+def _read_cut(ns: argparse.Namespace) -> ReadCut | None:
+    """The run's read cut from `--as-of` / `--arrived-by`, or `None` for an ordinary run."""
+    return None if ns.as_of is None else ReadCut(ns.as_of, ns.arrived_by, frozen=True)
 
 
 def _source_one_provider_key(prov: providers.Provider) -> int:
@@ -305,7 +346,8 @@ class _Investigate(Protocol):
         self, *, alert_path: Path, run: Run, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
-        source: Run | None = None, job_facts: _JobEndFacts | None = None,
+        source: Run | None = None, cut: ReadCut | None = None,
+        job_facts: _JobEndFacts | None = None,
         access: RequestAccess | None = None,
     ) -> dict[str, Any]: ...
 
@@ -345,6 +387,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     #: judged once. `None` (a direct caller with no `main` before it): the roster is
     #: `defender_dir`'s, read here, and the driver judges it.
     systems: RunSystems | None = None,
+    #: The run's read cut (`--as-of` / `--arrived-by`, #1347): set on every call by the
+    #: registry, and its `as_of` is the run clock's origin. `None` on an ordinary run and on a
+    #: world, whose cut is its branch point.
+    cut: ReadCut | None = None,
     #: A job's facts holder (#1342 r5 C2): the driver keeps its review state in the holder's
     #: dict, so the job entry reads the close however the run ends. `None` off the job lane.
     job_facts: _JobEndFacts | None = None,
@@ -363,6 +409,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     would route uncaptured keys to real adapters. The two registries are built in separate
     arms of one `if` so both can never exist.
     """
+    # First: the world arm below returns without reading `cut`, so a pair would drop it.
+    if cut is not None and world is not None:
+        raise TypeError("_drive_investigation(cut=…) is refused with world=…: a world's cut is "
+                        "its branch point")
     # The roster `main` judged, handed down to the registry and `run_investigation` with its
     # verdict; read here only for a direct caller, whose run the driver judges.
     roster = systems.roster if systems is not None else read_roster(adapters_under(defender_dir))
@@ -415,11 +465,15 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             )
         finally:
             verbs.close()
-    verbs = registry_cls(roster, tenant.grants.gather, grant_home=tenant.table_pointer)
+    # Passed only when set, so an ordinary run calls its seams exactly as before the cut existed.
+    cut_kw: dict[str, Any] = {} if cut is None else {"cut": cut}
+    clock_kw: dict[str, Any] = {} if cut is None else {"clock_origin": cut.as_of}
+    verbs = registry_cls(roster, tenant.grants.gather, grant_home=tenant.table_pointer, **cut_kw)
     return investigate(
         alert_path=alert_path, run=run, defender_dir=defender_dir,
         model_name=model_name, model_override=model_override, box=box, verbs=verbs,
-        roster=roster, systems=systems, tenant=tenant, **held, **_access_kwargs(access),
+        roster=roster, systems=systems, tenant=tenant, **clock_kw, **held,
+        **_access_kwargs(access),
     )
 
 
@@ -466,6 +520,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     #: holds that verdict (`None`: the drive reads `defender_dir`'s roster and the driver
     #: judges it, as for a direct caller).
     systems: RunSystems | None = None,
+    #: The run's read cut (#1347), threaded to the drive; `None` on an ordinary run.
+    cut: ReadCut | None = None,
     #: The credential proxy's address and the run's read token (#1163), signed at run start.
     access: RequestAccess | None = None,
     investigate: _Investigate = _drive_investigation,
@@ -515,10 +571,12 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     if job_facts is not None:
         job_facts.box = _BOX_STARTED
     drive = _judged(investigate, systems)
-    # The job's facts holder (#1342) and the run's request access (#1163), each only when the run
-    # has one: a seam that predates either is not handed a keyword it has no use for.
+    # The job's facts holder (#1342), the run's request access (#1163) and its read cut
+    # (#1347), each only when the run has one: a seam that predates one is not handed a keyword
+    # it has no use for.
     keywords: dict[str, Any] = {} if job_facts is None else {"job_facts": job_facts}
     keywords |= _access_kwargs(access)
+    keywords |= {} if cut is None else {"cut": cut}
     investigation_ok = False
     try:
         summary = drive(
@@ -960,6 +1018,7 @@ def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     alert: Path, *, tenant: tenancy.Tenant, model: str | None, run: Run | None = None,
     world: Any = None, settings: Path | None = None,
     knowledge: run_knowledge.KnowledgeSource | None = None, launch: Launched | None = None,
+    started_at: datetime | None = None,
 ) -> Run:
     """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
     handle, stamped with code, model, the request's tenant and (for a sibling) the manifest's
@@ -971,7 +1030,8 @@ def _materialize_run(  # noqa: PLR0913 — the builder's whole call
     """
     try:
         run = _run.materialize_run(alert, run=run, tenant=tenant, model=model, world=world,
-                                   settings=settings, knowledge=knowledge, launch=launch)
+                                   settings=settings, knowledge=knowledge, launch=launch,
+                                   started_at=started_at)
     except TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
@@ -1082,12 +1142,16 @@ class _Started:
     #: The case system's verdict, judged once at setup when the run records its case
     #: (`--update-ticket`); `None` otherwise.
     case: case_system.CaseTarget | case_system.CaseSettingsFault | None = None
+    #: The run's read cut (`--as-of` / `--arrived-by`, #1347); `None` on an ordinary run.
+    cut: ReadCut | None = None
 
     def lifecycle_kwargs(self, ns: argparse.Namespace) -> dict[str, Any]:
+        # The cut only when set, so a lifecycle seam that predates it is called as before.
+        cut_kw: dict[str, Any] = {} if self.cut is None else {"cut": self.cut}
         return {"run": self.run, "model": self.model, "model_override": ns.model,
                 "defender_dir": DEFENDER_DIR, "tenant": self.tenant, "world": self.world,
                 "episode": self.episode, "systems": self.systems,
-                **self.minting.access_kwargs(), **self.seams}
+                **self.minting.access_kwargs(), **self.seams, **cut_kw}
 
 
 def _acceptance_args(ns: argparse.Namespace, data_root: DataRoot) -> dict[str, Any]:
@@ -1115,6 +1179,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
     signer: Any = None,
     proxy_url: str | None = None,
     issuer_transport: Any = None,
+    cut: ReadCut | None = None,
 ) -> Iterator[_Started]:
     """Run setup, shared by the operator run and the job entry (#1342 M3), for the tenant the
     entry's own host acceptance admitted (`admitted`, r6 R6-3: the entry holds it and releases
@@ -1128,7 +1193,10 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
     and there is no operator alert path to look at.
 
     `signer`, `proxy_url` and `issuer_transport` are the credential proxy's seams (#1163), the
-    operator's; the job entry passes none and signs with the production defaults (#1342 R6-8)."""
+    operator's; the job entry passes none and signs with the production defaults (#1342 R6-8).
+
+    `cut` is the operator run's read cut (`--as-of` / `--arrived-by`, #1347): the run's recorded
+    start is its `as_of`, and the started run carries it to the lifecycle. The job entry has none."""
     records = admitted.directory
     accepted = admitted.tenant
     pin = _knowledge_pin(ns)
@@ -1219,6 +1287,13 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             elif launch is not None:
                 run = materialize(alert, run=early, tenant=accepted, model=model,
                                   settings=copy.settings, knowledge=knowledge, launch=launch)
+            elif cut is not None:
+                # A cut run's recorded start is its run clock's origin, never the wall time
+                # (#1347 O5); named only on a cut run, so a seam that predates the cut is
+                # called as before.
+                run = materialize(alert, run=early, tenant=accepted, model=model,
+                                  settings=copy.settings, knowledge=knowledge,
+                                  started_at=cut.as_of)
             else:
                 run = materialize(alert, run=early, tenant=accepted, model=model,
                                   settings=copy.settings, knowledge=knowledge)
@@ -1229,7 +1304,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             _write_knowledge_record(run_dir, knowledge)
             yield _Started(accepted=accepted, tenant=tenant, run=run, model=model, world=world,
                            episode=episode, systems=systems, seams=seams, alert=alert,
-                           minting=minting, case=case)
+                           minting=minting, case=case, cut=cut)
         finally:
             copy.remove()
 
@@ -1270,6 +1345,19 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
         visualize(run, tenant=started.accepted, update_ticket=update_ticket)
     except _run.VisualizeFailed:
         _logger.warning("the run page was not saved", exc_info=True)
+
+
+def _not_curated(started: _Started, *, no_learn: bool) -> str | None:
+    """Why this run is not enqueued for catalog curation, or `None` when it is. A sibling's
+    evidence was staged on purpose, and a run served as of another moment read a frozen lab
+    (#1347 r6.2): neither is today's evidence, so neither ever feeds the catalog."""
+    if started.world is not None:
+        return "--episode: a sibling world is not enqueued for curation"
+    if started.cut is not None:
+        return "--as-of: a frozen run is not enqueued for curation"
+    if no_learn:
+        return "--no-learn set; not enqueuing for curation"
+    return None
 
 
 def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
@@ -1330,7 +1418,8 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
         with admitted, _set_up(ns, data_root, admitted, launch=None, preflight=preflight,
                                materialize=materialize, oracle=oracle, verifier=verifier,
                                roster=roster, publish=publish, signer=signer, proxy_url=proxy_url,
-                               issuer_transport=issuer_transport) as started:
+                               issuer_transport=issuer_transport,
+                               cut=_read_cut(ns)) as started:
             run, tenant, world, episode = started.run, started.tenant, started.world, started.episode
             run_dir = run.run_dir
             # Every log line from here on, the crash included, names this run and the tenant this
@@ -1368,11 +1457,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
                             truncated_by=truncated_by, closed_before_cut=closed_before_cut,
                             case=started.case, **token)
 
-                    # A sibling's evidence was staged on purpose, so it must never feed the catalog.
-                    if world is not None:
-                        _logger.info("--episode: a sibling world is not enqueued for curation")
-                    elif ns.no_learn:
-                        _logger.info("--no-learn set; not enqueuing for curation")
+                    skipped = _not_curated(started, no_learn=ns.no_learn)
+                    if skipped is not None:
+                        _logger.info(skipped)
                     elif enqueue_curation(run, started.alert, tenant=started.accepted,
                                           truncated_by=summary.get("truncated_by")):
                         _logger.info("enqueued for catalog curation")

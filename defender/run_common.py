@@ -15,7 +15,7 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _io
+from defender import _clock, _io
 from defender.records import formats
 from defender import tenancy  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
@@ -43,6 +43,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     alert: Path, *, tenant: tenancy.Tenant, run: Run | None = None, model: str | None = None,
     world: ResumeWorld | None = None,
     settings: Path | None = None, knowledge: KnowledgeSource | None = None,
+    started_at: _dt.datetime | None = None,
     launch: Launched | None = None,
 ) -> Run:
     """Build the run directory of a fresh run and return the tenant-bound handle the run's later
@@ -60,13 +61,16 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
 
     `launch` is a job's checked launch record (#1342 O6, M5): `alert` is then its alert file, the
     bytes admitted are compared to the record's digest (one read, as a sibling's are to its
-    record), and the stamp's label is the record's (the alert's title), not the file's name."""
+    record), and the stamp's label is the record's (the alert's title), not the file's name.
+
+    `started_at` is the start the stamp records when the run's clock does not start now (a run
+    served as of another moment, #1347 O5: its run clock's origin); `None` is the wall time."""
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     if world is not None and run is None:
         raise TypeError("materialize_run(world=…) needs the arm's handle (`run=`): an arm is made "
                         "only from its episode's roster")
-    started_at = _started_at()
+    started = _started_at() if started_at is None else _clock.z_seconds(started_at)
     if settings is None:
         settings = tenancy.clone_halves(tenant)[1]
     front_door = _admit_input(alert, settings=settings, world=world,
@@ -99,7 +103,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     _stamp(
         run, knowledge=knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
-        started_at=started_at,
+        started_at=started,
         alert_label=_alert_label(alert) if launch is None else launch.record.label,
     )
     return run
@@ -107,7 +111,7 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
 
 def _started_at() -> str:
     """When run setup started this run, as ISO-8601 UTC text to the second (#1187 O7)."""
-    return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return _clock.z_seconds(_dt.datetime.now(_dt.UTC))
 
 
 @_dataclasses.dataclass(frozen=True)

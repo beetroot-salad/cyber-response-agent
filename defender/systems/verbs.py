@@ -4,6 +4,8 @@ from __future__ import annotations
 import ast
 import contextvars
 import dataclasses
+import functools
+from dataclasses import fields, is_dataclass, replace
 import importlib.util
 import inspect
 import os
@@ -12,7 +14,7 @@ import types
 import typing
 from collections.abc import Callable, Mapping
 from defender._model import model
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
@@ -125,10 +127,18 @@ class VerbContext:
     #: included, carries the branch point's moment. It bounds what is read and never stamps a
     #: capture (#1255: capture stamps are the run clock's, `run_state`).
     #:
-    #: Set by the estate registry on every call. A `datetime` rather than a string
+    #: Set on every call from the registry's `ReadCut` (a branched world's, or a run started
+    #: with `--as-of`). A `datetime` rather than a string
     #: because systems format timestamps differently; not a callable because a function as a
     #: dataclass default would bind `ctx` as its first argument when called.
     as_of: datetime | None = None
+    #: The arrival cut (#1347): only what the system had received by this moment is read (each
+    #: adapter knows its own arrival stamp). `None` asks nothing about arrival; set only beside
+    #: `as_of`, from the same `ReadCut`. Never a capture stamp, like `as_of`.
+    arrived_by: datetime | None = None
+    #: A frozen run's call (#1347 r6.2, `ReadCut.frozen`): the adapter refuses a read that asks
+    #: its system for the system's own present time. Set only beside `as_of`, from the same cut.
+    frozen: bool = False
     #: The credential proxy's address and the request token this call presents to it (#1163),
     #: handed in by whoever builds the context. The token is a bearer value: out of every repr.
     proxy_url: str | None = None
@@ -578,10 +588,57 @@ class VerbRegistry:
         return self.resolve(system, verb) if decision.outcome == GRANTED else decision
 
 
+@dataclasses.dataclass(frozen=True)
+class ReadCut:
+    """What every read of a run is cut at: `as_of` (event time; an open window ends here) and,
+    optionally, `arrived_by` (arrival time). One value, applied by the registry to every call's
+    context (`ModuleVerbRegistry`), so no verb path — an oracle's real read included — can be
+    served uncut. A branched world's is its branch point; a run started with `--as-of` has its
+    own. Both moments are held as aware UTC.
+
+    `frozen` marks a run started with `--as-of` (#1347 r6.2): the systems it reads are served as
+    they were at `as_of`, so a read that asks a system for its own present time is refused by the
+    adapter that knows how that system spells it. A branched world's cut is never frozen."""
+
+    as_of: datetime
+    arrived_by: datetime | None = None
+    frozen: bool = False
+
+    def __post_init__(self) -> None:
+        for name in ("as_of", "arrived_by"):
+            moment = getattr(self, name)
+            if moment is None and name == "arrived_by":
+                continue
+            if not isinstance(moment, datetime) or moment.utcoffset() is None:
+                raise ValueError(f"a read cut's {name} must be an aware datetime, got {moment!r}")
+            object.__setattr__(self, name, moment.astimezone(UTC))
+
+    def applied(self, ctx: Any) -> Any:
+        """`ctx` carrying this cut on the fields it declares, or `ctx` untouched.
+
+        A ctx that cannot carry a field (a test stub; the real seam builds `VerbContext`) is
+        returned untouched, because `replace` raising `TypeError` inside a verb call would be
+        filed as an infra fault. `fields()` rather than `__dataclass_fields__`, which also holds
+        `ClassVar` and `InitVar` pseudo-fields; `f.init` excludes `init=False` fields, on which
+        `replace` raises `ValueError`.
+        """
+        if not is_dataclass(ctx) or isinstance(ctx, type):
+            return ctx
+        declared = {f.name for f in fields(ctx) if f.init}
+        values = {"as_of": self.as_of, "arrived_by": self.arrived_by, "frozen": self.frozen}
+        settable = {name: value for name, value in values.items() if name in declared}
+        return replace(ctx, **settable) if settable else ctx
+
+
 class ModuleVerbRegistry(VerbRegistry):
 
-    def __init__(self, roster: RosterRead, grant: VerbGrant, *, grant_home: str = TABLE_POINTER):
+    def __init__(self, roster: RosterRead, grant: VerbGrant, *, grant_home: str = TABLE_POINTER,
+                 cut: ReadCut | None = None):
+        """`cut` is the run's read cut, set on every call's context by `verbs`; `None` (an
+        ordinary run) leaves each context as the caller built it."""
         super().__init__(grant)
+        self.cut = cut
+        self._cut_verbs: dict[str, dict[str, Verb]] = {}
         # Takes the roster value `read_roster` produced at process start, never a directory:
         # an unreadable tree then fails there as `RegistryError`, not here as a grant mismatch.
         # All later questions are answered from the snapshot; the adapters tree is assumed not
@@ -633,7 +690,28 @@ class ModuleVerbRegistry(VerbRegistry):
             # same refusal by identity, for a table whose literal hides it (an alias, a table
             # filled in after its literal): none of the adapter's verbs is served (#1359 O4).
             return {}
-        return dict(verbs)
+        cut = self.cut
+        if cut is None:
+            return dict(verbs)
+        # Wrapped once per system (the adapter module is loaded once per process), so every
+        # call of a verb reaches the same callable; `setdefault` keeps the first of two racing
+        # wraps.
+        wrapped = self._cut_verbs.get(system)
+        if wrapped is None:
+            wrapped = self._cut_verbs.setdefault(
+                system, {name: _cut_applied(cut, fn) for name, fn in verbs.items()})
+        return dict(wrapped)
+
+
+def _cut_applied(cut: ReadCut, fn: Verb) -> Verb:
+    """`fn` with `cut` set on every context it is called with. `functools.wraps`, so the verb's
+    declarations (engine, class, wrapper-only params) and signature still read as `fn`'s."""
+
+    @functools.wraps(fn)
+    def cut_call(ctx: Any, /, **params: Any) -> Any:
+        return fn(cut.applied(ctx), **params)
+
+    return cut_call
 
 
 __all__ = [
@@ -645,6 +723,7 @@ __all__ = [
     "SYSTEM_PATTERN",
     "UNDECLARED",
     "ModuleVerbRegistry",
+    "ReadCut",
     "RegistryError",
     "CALL_DELIVERY",
     "CALL_ID",

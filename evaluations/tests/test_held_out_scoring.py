@@ -1,6 +1,7 @@
 """Held-out scoring through an explicit fixture-to-run index."""
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -9,72 +10,142 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
+import yaml
 
 from evaluations.held_out import (
     load_held_out_fixtures,
-    score,
     warn_if_outside_the_net,
 )
+from defender.records import RunPaths
 from defender.run_common import HELD_OUT_FIXTURES, _alert_label
 from defender.tests.support.storage._alert_plant import plant_alert
 
 SLUG = "m05-lsass-access"
+GOOD_UNTIL = "2026-10-20T09:00:00Z"
 
 
-def _fixture_set(root: Path, truths: dict[str, str]) -> Path:
+def freeze_doc(**override) -> dict:
+    """A #1347 r6 `freeze.yaml` document, confirmed; `override` replaces top-level keys (a
+    value of `None` drops the key)."""
+    doc = {
+        "alert_at": "2026-10-20T08:00:00Z", "as_of": GOOD_UNTIL,
+        "window": ["2026-09-19T08:00:00Z", GOOD_UNTIL],
+        "captured_at": "2026-10-20T09:03:17Z",
+        "fingerprint": {"logs-system.auth-2026.10.20|2026-10-20T08": [1200, 1200]},
+        "parts": {}, "chaos": None,
+        "confirmed": {"by": "operator", "at": "2026-10-20T10:00:00Z",
+                      "reference_run": "11111111-1111-4111-8111-111111111111"},
+    }
+    doc.update(override)
+    return {k: v for k, v in doc.items() if v is not None or k == "chaos"}
+
+
+def write_freeze(member: Path, **override) -> None:
+    (member / "freeze.yaml").write_text(
+        yaml.safe_dump(freeze_doc(**override), sort_keys=False), encoding="utf-8")
+
+
+def freeze_digest(member: Path) -> str:
+    """The freeze digest D13/O9 define: sha256 of the parsed freeze.yaml as sorted-key compact
+    JSON (bare hex; the design does not fix a `sha256:` prefix — see the design-gap note)."""
+    doc = yaml.safe_load((member / "freeze.yaml").read_text(encoding="utf-8"))
+    return hashlib.sha256(
+        json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _fixture_set(root: Path, truths: dict[str, str], *, frozen: bool = True) -> Path:
+    """Held-out fixtures; each carries a confirmed `freeze.yaml` (O9) unless `frozen=False`."""
     for slug, disposition in truths.items():
         member = root / slug
         member.mkdir(parents=True)
         (member / "alert.json").write_text("{}", encoding="utf-8")
         (member / "ground_truth.yaml").write_text(
             f"held_out: true\ndisposition: {disposition}\n", encoding="utf-8")
+        if frozen:
+            write_freeze(member)
     return root
 
 
-def _run(runs: Path, name: str | None = None, *, says: str | None = None) -> Path:
+def _run(runs: Path, name: str | None = None, *, says: str | None = None,
+         queries: list[dict] | None = None) -> Path:
     """A recorded run folder `<runs>/<name>` (a fresh UUID by default), with a `report.md`
-    carrying `says` when given."""
+    carrying `says` when given and an `executed_queries.jsonl` of `queries` when given."""
     run_dir = runs / (name or str(uuid.uuid4()))
     run_dir.mkdir(parents=True)
     plant_alert(run_dir)
     if says is not None:
         (run_dir / "report.md").write_text(
             f"---\ndisposition: {says}\noutcome: stands\n---\nbody\n", encoding="utf-8")
+    if queries is not None:
+        RunPaths(run_dir).executed_queries.write_text(
+            "".join(json.dumps(q) + "\n" for q in queries), encoding="utf-8")
     return run_dir
 
 
-def _scored(tmp_path: Path, runs: Path, fixtures: Path,
-            *rows: tuple[str, str]) -> tuple[dict[str, str], list[str], str]:
-    """Score `runs` through `held_out.main` with an index holding `rows` (`(slug, run_id)`,
-    oldest first) in the operator's folder. Returns `({slug: "OK" | "WRONG"}, not-run slugs,
-    stdout)`."""
+def _row(fixtures: Path, slug: str, run_id: str, **override) -> dict:
+    """An r6 index row for `run_id` bound to the case's CURRENT freeze, verdict valid;
+    `override` replaces fields (a value of `None` drops the field)."""
+    row = {"slug": slug, "run_id": run_id, "freeze": freeze_digest(fixtures / slug),
+           "verdict": "valid", "reason": "", "verified_at": "2026-10-20T11:00:00Z"}
+    row.update(override)
+    return {k: v for k, v in row.items() if v is not None}
+
+
+def _scored_rc(tmp_path: Path, runs: Path, fixtures: Path, *rows) -> tuple[int, str]:
+    """`held_out.main` over an index of `rows`, oldest first: a `(slug, run_id)` pair becomes a
+    `_row` for the case's current freeze; a dict is written verbatim. Returns (exit code,
+    stdout + stderr)."""
     from evaluations import held_out
 
     index = tmp_path / "ops" / "held-out-index.jsonl"
     index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text("".join(json.dumps({"slug": s, "run_id": r}) + "\n" for s, r in rows),
-                     encoding="utf-8")
+    lines = [r if isinstance(r, dict) else _row(fixtures, *r) for r in rows]
+    index.write_text("".join(json.dumps(r) + "\n" for r in lines), encoding="utf-8")
     out, err = io.StringIO(), io.StringIO()
+    rc = 0
     try:
         with redirect_stdout(out), redirect_stderr(err):
-            held_out.main([str(runs), "--index", str(index), "--fixtures-dir", str(fixtures)])
-    except SystemExit:
-        pass
-    text = out.getvalue()
+            rc = held_out.main([str(runs), "--index", str(index), "--fixtures-dir", str(fixtures)])
+    except SystemExit as e:
+        rc = e.code if isinstance(e.code, int) else 1
+    return rc, f"{out.getvalue()}\n{err.getvalue()}"
+
+
+def _verdicts(text: str) -> dict[str, str]:
     verdicts: dict[str, str] = {}
     for line in text.splitlines():
         parts = line.split()
         if len(parts) >= 2 and parts[0] in ("OK", "WRONG") and parts[1].endswith(":"):
             verdicts[parts[1][:-1]] = parts[0]
-    lines = text.splitlines()
-    not_run: list[str] = []
-    for i, line in enumerate(lines):
-        if line.startswith("## Not run"):
-            for ln in lines[i + 1:]:
-                if not ln.strip() or ln.startswith("#"):
-                    break
-                not_run.append(ln.strip())
-    return verdicts, not_run, f"{text}\n{err.getvalue()}"
+    return verdicts
+
+
+def unscored(text: str, slugs) -> dict[str, str]:
+    """`{slug: lowercased heading + line}` for each slug the report lists outside a verdict line
+    and outside the failure bucket (O11: not scored, with its reason). Either a per-reason
+    heading or a reason on the line satisfies a caller's keyword check."""
+    listed: dict[str, str] = {}
+    heading = None
+    for line in text.splitlines():
+        if line.startswith("## "):
+            heading = line.lower()
+            continue
+        if heading is None or "class=" in heading or "failure" in heading:
+            continue
+        token = line.split()[0].rstrip(":") if line.split() else ""
+        if token in slugs:
+            listed[token] = f"{heading} {line}".lower()
+    return listed
+
+
+def _scored(tmp_path: Path, runs: Path, fixtures: Path,
+            *rows) -> tuple[dict[str, str], list[str], str]:
+    """Score `runs` through `held_out.main` (see `_scored_rc`). Returns `({slug: "OK" |
+    "WRONG"}, slugs listed as not run, stdout + stderr)`."""
+    _rc, text = _scored_rc(tmp_path, runs, fixtures, *rows)
+    slugs = {p.name for p in fixtures.iterdir()}
+    not_run = [s for s, why in unscored(text, slugs).items() if "not run" in why]
+    return _verdicts(text), not_run, text
 
 
 def test_secondary_harness_run_dirs_are_not_claimed_by_the_primary_metric(tmp_path: Path):
@@ -166,14 +237,17 @@ def test_labeled_fixture_with_no_alert_is_excluded_loudly(tmp_path: Path, capsys
     assert "alert.json" in err
 
 
-def test_un_run_fixtures_are_surfaced_not_scored(tmp_path: Path):
-    """The denominator counts only what was actually investigated."""
-    fixtures_dir = _fixture_set(tmp_path / "held-out", {"b01-case": "benign", "m01-case": "malicious"})
-    fixtures = load_held_out_fixtures(fixtures_dir)
-    assert len(fixtures) == 2, "both labeled members must load"
-    scored = score(fixtures, tmp_path / "empty-runs", {})
-    assert scored.total == 0
-    assert len(scored.not_run) == len(fixtures)
+def test_un_run_fixtures_are_surfaced_not_scored_and_make_the_set_incomplete(tmp_path: Path):
+    """The denominator counts only what was investigated (O11): un-run cases are listed as not
+    run, the report says incomplete and exits non-zero. CONFLICT-UPDATED: was exit 0 / `score()`."""
+    fixtures = _fixture_set(tmp_path / "held-out", {"b01-case": "benign", "m01-case": "malicious"})
+    runs = tmp_path / "empty-runs"
+    runs.mkdir()
+    verdicts, not_run, said = _scored(tmp_path, runs, fixtures)
+    assert verdicts == {}
+    assert sorted(not_run) == ["b01-case", "m01-case"], said
+    assert "incomplete" in said.lower(), said
+    assert _scored_rc(tmp_path, runs, fixtures)[0] != 0
 
 
 def test_divergent_fixture_set_warns_that_it_was_never_netted(tmp_path: Path, capsys):

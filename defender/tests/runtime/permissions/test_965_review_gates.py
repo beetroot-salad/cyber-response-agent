@@ -133,6 +133,7 @@ def test_the_esql_mint_carries_the_bound_and_the_payload_does_not() -> None:
 
     class _Ctx:
         as_of = None
+        arrived_by = None
 
     asked = "FROM logs-* | LIMIT 5"
     assert ea._esql_body(_Ctx(), asked).payload == {"query": asked}

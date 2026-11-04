@@ -34,15 +34,25 @@ identity migration in
 
 Run every tool here as a module from the repository root (`defender/.venv/bin/python -m evaluations.held_out ...`); by filename it fails with `No module named 'defender'`.
 
+Every held-out case is frozen (#1347): it carries a confirmed `freeze.yaml`, and every scored
+run of it is launched by the held-out launcher, which serves the run the lab as of the freeze,
+checks the freeze afterwards and appends the run's row to the index. Rows are never written by
+hand; a row without the launcher's `freeze` digest and `verdict` never counts.
+`playground-v2/docs/runbook.md` §Frozen held-out cases has capture and labelling.
+
 ```bash
-# Primary: score against ground truth. It walks fixtures/held_out/ and finds each
-# fixture's run through the held-out index F you name (outside every runs and episodes
-# tree), one {"slug", "run_id"} row per run, which you append yourself. run.py's first
-# stdout line names the run id: run_id=<uuid>. A run that crashes before it leaves no row,
-# and the slug's older row (if any) is scored instead. Pin every run of one index to one
-# knowledge revision (--knowledge-commit K, #1108 P4) so its scores are comparable.
-python3 defender/run.py evaluations/fixtures/held_out/<slug>/alert.json --tenant "$TENANT_ID" --no-learn --knowledge-commit K
-python3 -m evaluations.held_out "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
+# Launch each case against its freeze (on a machine with the lab's docker context). Pin every
+# run of one index to one knowledge revision (--knowledge-commit K, #1108 P4) so its scores are
+# comparable. A run that dies before announcing its run id leaves no row: launch it again.
+defender/.venv/bin/python playground-v2/scripts/launch_frozen.py \
+    evaluations/fixtures/held_out/<slug> --tenant "$TENANT_ID" --index F \
+    --parts-dir <lab disk path> --knowledge-commit K
+# Primary: score against ground truth. It walks fixtures/held_out/ and scores each case from
+# the newest row in F (outside every runs and episodes tree) bound to its current freeze. A
+# case with no such row or a stale verdict is listed with its reason; the set is then
+# INCOMPLETE and the exit is non-zero. (A frozen run cannot read Elasticsearch's own clock:
+# its search bounds and ES|QL are refused on `now`, so there is nothing to drop.)
+defender/.venv/bin/python -m evaluations.held_out "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```
 
 **There used to be a second metric here.** `secondary.py` scored a *frozen-actor

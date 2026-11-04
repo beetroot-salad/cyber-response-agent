@@ -16,8 +16,8 @@ from defender import _clock
 from defender.kit.settings import config_pointer
 from defender.kit.verbs import VerbContext, verb
 from defender.integrations import _stub_transport as transport
-from defender.integrations.confinement import confine_index, guard_outbound
-from defender.integrations.esql_text import opens_with_from, split_first_command
+from defender.integrations import esql_text, lucene_text
+from defender.integrations.confinement import confine_esql, confine_index, guard_outbound
 from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -49,7 +49,7 @@ class OutboundBody:
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError(
             f"OutboundBody is immutable (tried to set {name!r}) — mint a new one through "
-            f"_search_body or _esql_body, which is what puts the run's clock on it")
+            f"_search_body or _esql_body, which is what puts the call's cut on it")
 
 
 
@@ -251,26 +251,56 @@ def _search_body(  # noqa: PLR0913 — one search body's parameters, threaded wh
     """The search body, with the window's open end closed at the run's clock.
 
     The clock is consulted here, where every search body is built, rather than at call sites.
-    `_bounded_end` decides what the bound is. A branched read also carries the clock as a
-    `post_filter` (`_before_clock`): the caller's own window stays in `query` exactly as spelled
+    `_bounded_end` decides what the bound is. A cut read also carries the call's cut
+    (`_cut_of`) as a `post_filter`: the caller's own window stays in `query` exactly as spelled
     (R-10=A), and the cluster drops the later hits before it sorts, pages and counts — so a
-    page is never emptied, nor its total inflated, by rows past the branch point.
+    page is never emptied, nor its total inflated, by rows past the cut.
     """
     body = _build_search_body(
         query_string, time_start, _bounded_end(ctx, time_end), time_field, limit, sort)
-    at = getattr(ctx, "as_of", None)
-    if at is not None:
-        body["post_filter"] = _before_clock(time_field, at)
+    cut = _cut_of(ctx)
+    if cut is not None:
+        body["post_filter"] = cut
     return OutboundBody(body)
 
 
-def _before_clock(time_field: str, at: _dt.datetime) -> dict:
-    """Hits dated at or before `at`, and undated ones (as `_after_clock` keeps them). Spelled as
-    `_bounded_end` and `bounded_esql` spell the clock, so every path cuts at the same moment."""
+#: The event-time field the cut reads, and the arrival-time field (set at ingest).
+EVENT_TIME_FIELD = "@timestamp"
+ARRIVAL_TIME_FIELD = "event.ingested"
+
+
+def _ms_z(moment: _dt.datetime) -> str:
+    """`moment` as `YYYY-MM-DDTHH:MM:SS.mmmZ` (UTC, milliseconds truncated)."""
+    return _clock.as_utc(moment).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _at_or_before(field: str, moment: _dt.datetime) -> dict:
+    """Documents whose `field` is at or before `moment`, and those without the field."""
     return {"bool": {"minimum_should_match": 1, "should": [
-        {"range": {time_field: {"lte": _clock.z_seconds(at)}}},
-        {"bool": {"must_not": {"exists": {"field": time_field}}}},
+        {"range": {field: {"lte": _ms_z(moment)}}},
+        {"bool": {"must_not": {"exists": {"field": field}}}},
     ]}}
+
+
+def cut_clause(as_of: _dt.datetime, arrived_by: _dt.datetime | None = None) -> dict:
+    """The one Query DSL clause that cuts a read (#1347 O2, D12): documents dated at or before
+    `as_of` (event time), and — when `arrived_by` is given — that arrived at or before it
+    (`event.ingested`). A document without the field passes that cut. Both cuts are inclusive
+    to the millisecond, spelled in UTC `Z` whatever offset the caller's datetimes carry.
+
+    Pure and public: the search `post_filter`, the ES|QL request `filter` and any reader that
+    must see what a cut run saw build it here, so every consumer cuts through the same clause."""
+    event = _at_or_before(EVENT_TIME_FIELD, as_of)
+    if arrived_by is None:
+        return event
+    return {"bool": {"filter": [event, _at_or_before(ARRIVAL_TIME_FIELD, arrived_by)]}}
+
+
+def _cut_of(ctx: VerbContext) -> dict | None:
+    """The call's cut clause, or `None` for an uncut call (no `as_of`). `getattr` because
+    duck-typed contexts reach this adapter."""
+    at = getattr(ctx, "as_of", None)
+    return None if at is None else cut_clause(at, getattr(ctx, "arrived_by", None))
 
 
 def _search(
@@ -293,10 +323,49 @@ def _search(
     return docs, total_hits, truncated
 
 
+_CLOCK_REFUSAL = (
+    "{what} reads Elasticsearch's own clock (`now`), which is not this run's clock. Spell every "
+    "time bound as an absolute ISO-8601 time (e.g. 2026-01-01T00:00:00Z); the run's clock gives "
+    "the current time.")
+
+
+def _frozen(ctx: VerbContext) -> bool:
+    """Is this a frozen run's call (#1347 r6.2)? `getattr`: duck-typed contexts reach here."""
+    return getattr(ctx, "frozen", False) is True
+
+
+def _refuse_clock_bounds(ctx: VerbContext, native_query: str,
+                         start: str | None, end: str | None) -> None:
+    """In a frozen run, refuse a search whose window bounds or query ranges use `now` date math:
+    the cluster resolves it against the real present, past the run's cut, and the read comes
+    back empty. Words in the query that are not range bounds are data and pass."""
+    if not _frozen(ctx):
+        return
+    for label, bound in (("start", start), ("end", end)):
+        if isinstance(bound, str) and lucene_text.is_now_date_math(bound):
+            raise UpstreamFault(_CLOCK_REFUSAL.format(what=f"the window's {label} {bound.strip()!r}"))
+    if any(map(lucene_text.is_now_date_math, lucene_text.lucene_bounds(native_query or ""))):
+        raise UpstreamFault(_CLOCK_REFUSAL.format(what="a range in the query"))
+
+
+def _refuse_esql_clock(ctx: VerbContext, query: str) -> None:
+    """In a frozen run, refuse ES|QL that reads the cluster's clock: a `NOW()` call, or a range
+    on `now` inside the query text a `QSTR` / `KQL` call hands the cluster."""
+    if not _frozen(ctx):
+        return
+    if esql_text.calls_function(query, "now"):
+        raise UpstreamFault(_CLOCK_REFUSAL.format(what="`NOW()`"))
+    for fn, bounds_of in (("qstr", lucene_text.lucene_bounds), ("kql", lucene_text.kql_bounds)):
+        for text in esql_text.function_string_args(query, fn):
+            if any(map(lucene_text.is_now_date_math, bounds_of(text))):
+                raise UpstreamFault(_CLOCK_REFUSAL.format(what=f"a range in {fn.upper()}(…)"))
+
+
 def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one param each
     ctx: VerbContext, *, index_key: str, native_query: str,
     start: str | None, end: str | None, limit: int, index: str | None, sort: str,
 ) -> dict:
+    _refuse_clock_bounds(ctx, native_query, start, end)
     config = load_config(ctx)
     resolved = index or config[index_key]
     resolved = confine_index(
@@ -308,8 +377,8 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
             time_field="@timestamp", limit=limit, sort=sort,
         ),
     )
-    # The cluster already dropped later hits (`post_filter`); this is the backstop for one that
-    # did not, and finds nothing to drop against Elasticsearch itself.
+    # The cluster already dropped later hits (`post_filter`); this is the backstop (event time
+    # only) for one that did not, and finds nothing to drop against Elasticsearch itself.
     kept = [d for d in docs if not _after_clock(ctx, d.get("@timestamp"))]
     return search_envelope(resolved, kept, total - (len(docs) - len(kept)), truncated, sort)
 
@@ -346,7 +415,8 @@ def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
     Returns a new value rather than editing `params`, so the caller's params stay as asked.
     """
     at = getattr(ctx, "as_of", None)
-    return end if _bound_set(end) or at is None else _clock.z_seconds(at)
+    # Spelled as the cut clause spells it (`_ms_z`), so the window ends where the cut does.
+    return end if _bound_set(end) or at is None else _ms_z(at)
 
 
 def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: str) -> dict:
@@ -453,28 +523,24 @@ def esql_payload(query: str, resp: dict) -> dict:
     }
 
 
-def bounded_esql(ctx: VerbContext, query: str) -> str:
-    """`query` with the run's clock as an upper bound, when the run has one."""
-    at = getattr(ctx, "as_of", None)
-    if at is None or not opens_with_from(query):
-        return query
-    head, tail = split_first_command(query)
-    return f'{head.rstrip()}\n| WHERE @timestamp <= "{_clock.z_seconds(at)}"\n{tail.lstrip()}'
-
-
 def _esql_body(ctx: VerbContext, query: str) -> OutboundBody:
-    """The ES|QL request body, with the run's clock spliced in (the counterpart of
-    `_search_body`)."""
-    return OutboundBody({"query": bounded_esql(ctx, query)})
+    """The ES|QL request body (the counterpart of `_search_body`): the query exactly as the
+    caller wrote it, and on a cut call the cut (`_cut_of`) as the request's `filter` — never a
+    clause spliced into the text, so the query's own errors read as they would live (O2)."""
+    body: dict = {"query": query}
+    cut = _cut_of(ctx)
+    if cut is not None:
+        body["filter"] = cut
+    return OutboundBody(body)
 
 
 @verb(engine="esql", body_param="query")
 def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the `query` verb by design
     config = load_config(ctx)
+    # Every index the query reads is confined, as a search's target is (#1347 O2a).
+    confine_esql(query, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]))
+    _refuse_esql_clock(ctx, query)
     url = f"{config['ELASTICSEARCH_URL'].rstrip('/')}/_query?format=json"
-    # The bounded query is sent, but the payload echoes the query as asked: the harness's bound
-    # stays out of the run's record, and branched payloads stay byte-comparable with the
-    # capture (`stagers/elastic.restore` only repairs the corpus identity in the echo).
     status, resp = _http_json(ctx, "POST", url, config, body=_esql_body(ctx, query))
     _raise_on_es_error(status, resp, "ES|QL query")
     return esql_payload(query, _esql_within_clock(ctx, resp))
@@ -482,8 +548,7 @@ def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the
 
 def _esql_within_clock(ctx: VerbContext, resp: dict) -> dict:
     """`resp` with every row whose `@timestamp` column is dated after the run's clock dropped
-    (R-10=A): the spliced bound covers only a query opening with `FROM`, this covers any
-    source command."""
+    (R-10=A): the backstop for a row the request `filter` let through (event time only)."""
     columns = resp.get("columns") or []
     names = [c.get("name") if isinstance(c, dict) else None for c in columns]
     if getattr(ctx, "as_of", None) is None or "@timestamp" not in names:

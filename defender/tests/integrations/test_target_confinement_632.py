@@ -1,4 +1,4 @@
-"""#632 target fidelity: a verb cannot be aimed outside the system it is declared under. Host-state refuses hosts outside its inventory; elastic refuses indices outside the configured patterns; every outbound request is confined to a declared (path, method) read endpoint, observed through the transport capture seam. Not covered: `elastic.esql` selects its target inside the FROM clause, which the verb-level check does not reach."""
+"""#632 target fidelity: a verb cannot be aimed outside the system it is declared under. Host-state refuses hosts outside its inventory; elastic refuses indices outside the configured patterns; every outbound request is confined to a declared (path, method) read endpoint, observed through the transport capture seam. `elastic.esql` selects its targets inside the query text, so a parser confines every source it reads (FROM lists, LOOKUP JOIN, TS, subqueries, ENRICH) to the same patterns and refuses what it cannot classify (#1347 O2a). Not covered: the transport, which is unreachable on purpose here."""
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -58,7 +58,8 @@ REAL_STUB_ENDPOINTS = tuple(
 )
 
 
-def _tree(root: Path, *, url: str = "http://127.0.0.1:1") -> Any:
+def _tree(root: Path, *, url: str = "http://127.0.0.1:1",
+          alerts: str = "security-audit-*") -> Any:
     """The run's tenant record, resolved from a real tenant folder under `root` carrying only the
     elastic and host-state config. The transport is unreachable on purpose: a `ConfinementFault`
     (not a `TransportFault`) shows confinement refused before any transport was attempted."""
@@ -66,7 +67,7 @@ def _tree(root: Path, *, url: str = "http://127.0.0.1:1") -> Any:
         f"ELASTICSEARCH_URL={url}\n"
         f"KIBANA_URL={url}\n"
         "ELASTIC_EVENTS_INDEX=logs-*\n"
-        "ELASTIC_ALERTS_INDEX=security-audit-*\n"
+        f"ELASTIC_ALERTS_INDEX={alerts}\n"
         "ELASTIC_SSL_VERIFY=true\n"
         "ELASTIC_TRANSPORT=docker-exec\n"
         "ELASTIC_DOCKER_CONTEXT=no-such-context-632-test\n"
@@ -77,8 +78,8 @@ def _tree(root: Path, *, url: str = "http://127.0.0.1:1") -> Any:
     return S.resolve(root)
 
 
-def _ctx(tmp_path: Path) -> VerbContext:
-    return VerbContext(defender_dir=tmp_path / "tree", tenant=_tree(tmp_path / "tree"),
+def _ctx(tmp_path: Path, **tree: Any) -> VerbContext:
+    return VerbContext(defender_dir=tmp_path / "tree", tenant=_tree(tmp_path / "tree", **tree),
                        run_dir=tmp_path / "run", env={})
 
 
@@ -370,6 +371,199 @@ def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_qu
     with pytest.raises(ConfinementFault):
         confine_read_endpoint("elastic", "http://es:9200/%5Flogs/../_update/1", method="POST",
                               verb_class="r")
+
+
+ESQL_OUTSIDE = [
+    pytest.param("FROM .security-7 | LIMIT 1", id="from-outside"),
+    pytest.param("from .security-7", id="lowercase-from"),
+    pytest.param('FROM ".security-7"', id="quoted-source"),
+    pytest.param("FROM logs-*, .security-7", id="list-tail-outside"),
+    pytest.param("FROM .security-7, logs-*", id="list-head-outside"),
+    pytest.param("FROM logs-*,security-audit-*,.security-7 | LIMIT 1", id="list-no-spaces"),
+    pytest.param('FROM "logs-*", ".security-7"', id="quoted-list"),
+    pytest.param("FROM *", id="whole-cluster"),
+    pytest.param("FROM logs-*,*", id="wildcard-in-list"),
+    pytest.param("FROM remote:logs-*", id="cross-cluster-prefix"),
+    # Colon forms that a pattern match alone would admit: `logs-*` matches all of these.
+    pytest.param("FROM logs-x:.security-7", id="remote-named-like-a-log-stream"),
+    pytest.param("FROM logs-*:foo", id="remote-wildcard-cluster"),
+    pytest.param('FROM "remote:logs-*"', id="quoted-cross-cluster"),
+    pytest.param("FROM logs-*::failures", id="selector-double-colon"),
+    pytest.param("FROM logs-*, logs-x:.security-7", id="cross-cluster-in-list-tail"),
+    pytest.param("FROM .ds-security-7-000001", id="backing-index-of-an-outside-stream"),
+    pytest.param("FROM .ds-*", id="every-backing-index"),
+    pytest.param("FROM logs-*, .ds-security-7-000001", id="outside-backing-index-in-list"),
+    pytest.param("FROM logs-*, .security-7, logs-*", id="outside-in-the-middle-of-a-list"),
+    pytest.param("FROM logs-*, .security-7, security-audit-*, logs-*",
+                 id="outside-between-four-sources"),
+    pytest.param("FROM logs-* | LOOKUP JOIN logs-lookup ON a | LOOKUP JOIN .security-7 ON b",
+                 id="second-lookup-join-outside"),
+    pytest.param("FROM logs-* | LOOKUP JOIN .security-7 ON a | LOOKUP JOIN logs-lookup ON b",
+                 id="first-lookup-join-outside"),
+    pytest.param('FROM logs-* | LOOKUP JOIN ".security-7" ON a', id="quoted-lookup-join-target"),
+    pytest.param('FROM logs-* | LOOKUP JOIN """.security-7""" ON a',
+                 id="triple-quoted-lookup-join-target"),
+    pytest.param("FROM logs-* | FORK (WHERE a == 1 | LOOKUP JOIN .security-7 ON x) (LIMIT 1)",
+                 id="fork-branch-lookup-join-outside"),
+    pytest.param("FROM logs-* | FORK (LIMIT 1) (WHERE a == 1 | LOOKUP JOIN .security-7 ON x)",
+                 id="fork-second-branch-lookup-join-outside"),
+    pytest.param("FROM logs-* | FORK (WHERE a == 1) (FORK (LIMIT 1) (LOOKUP JOIN .security-7 ON x))",
+                 id="nested-fork-lookup-join-outside"),
+    pytest.param("FROM logs-*, (FROM security-audit-*), (FROM .security-7)",
+                 id="second-subquery-outside"),
+    pytest.param("FROM (FROM logs-*), .security-7", id="source-after-a-subquery-outside"),
+    pytest.param("FROM logs-* | LOOKUP JOIN .security-7 ON host.name", id="lookup-join"),
+    pytest.param("FROM logs-* METADATA _index\n| LOOKUP JOIN .security-7 ON host.name",
+                 id="lookup-join-after-metadata"),
+    pytest.param("TS .security-7", id="ts-source"),
+    pytest.param("TS .security-7 | LIMIT 1", id="ts-source-piped"),
+    pytest.param("// c\nFROM .security-7", id="line-comment-before-source"),
+    pytest.param("/* x */ FROM .security-7", id="block-comment-before-source"),
+    pytest.param("FROM logs-*, // note\n .security-7", id="comment-inside-list"),
+    pytest.param("FROM logs-*, (FROM .security-7)", id="subquery-source"),
+    pytest.param("FROM (FROM .security-7)", id="only-a-subquery"),
+    pytest.param("FROM logs-*, (FROM security-audit-*, (FROM .security-7))", id="nested-subquery"),
+    pytest.param("ROW a = 1 | LOOKUP JOIN .security-7 ON a", id="row-does-not-exempt-later-sources"),
+    pytest.param("FROM logs-* | ENRICH some-policy ON host.name", id="enrich"),
+    pytest.param("FROM logs-* | WHERE x == 1 // c\n| LOOKUP JOIN .security-7 ON y",
+                 id="lookup-after-trailing-comment"),
+    pytest.param('FROM logs-*, "metadata", .security-7', id="quoted-metadata-is-a-source-not-the-keyword"),
+    pytest.param("FROM (ROW a=1 | LOOKUP JOIN .security-7 ON a)", id="subquery-lookup-join-outside"),
+    pytest.param("FROM (FROM logs-* | LOOKUP JOIN .security-7 ON a)", id="subquery-after-from-lookup-join-outside"),
+    pytest.param("FROM logs-*, (FROM logs-* | WHERE x == 1 | LOOKUP JOIN .security-7 ON a)",
+                 id="subquery-in-a-list-lookup-join-outside"),
+    pytest.param('FROM "logs-*,.security-7"', id="quoted-comma-list-names-outside"),
+    pytest.param("SHOW INFO | LOOKUP JOIN .security-7 ON a", id="show-does-not-exempt-later-sources"),
+    pytest.param("FROM logs-* /* a */ | LOOKUP JOIN .security-7 ON x /* b */",
+                 id="two-block-comments-do-not-swallow-the-join"),
+    pytest.param('FROM logs-* | EVAL `x"` = 1 | LOOKUP JOIN .security-7 ON y | EVAL `z"` = 2',
+                 id="backtick-name-with-a-quote-then-outside-join"),
+    pytest.param("FROM logs-* | EVAL `a//b` = 1 | LOOKUP JOIN .security-7 ON y",
+                 id="backtick-name-with-line-comment-opener-then-outside-join"),
+    pytest.param("FROM logs-* | EVAL `a/*b` = 1 | LOOKUP JOIN .security-7 ON y",
+                 id="backtick-name-with-block-comment-opener-then-outside-join"),
+    pytest.param("FROM logs-* // c\r| LOOKUP JOIN .security-7 ON a", id="lone-cr-ends-a-line-comment"),
+]
+
+ESQL_UNCLASSIFIABLE = [
+    pytest.param("", id="empty"),
+    pytest.param("lorem ipsum", id="not-a-query"),
+    pytest.param("FROM", id="from-without-target"),
+    # Every named index is INSIDE the patterns: only "unclassifiable" can refuse these.
+    pytest.param("METRICS logs-*", id="unknown-source-command"),
+    pytest.param("EXPLAIN (FROM logs-*)", id="unknown-wrapper"),
+    pytest.param("FROM logs-* | MYSTERY x", id="unknown-command-after-from"),
+    pytest.param("FROM logs-* | WHERE a == 1 | METRICS logs-*", id="unknown-command-late"),
+    pytest.param("FROM logs-* | FORK (WHERE a == 1) (MYSTERY x)", id="unknown-command-in-fork"),
+    pytest.param("FROM logs-* | LOOKUP JOIN", id="lookup-join-without-target"),
+    pytest.param("FROM logs-* | LOOKUP x logs-lookup", id="lookup-without-join"),
+    pytest.param("FROM logs-* /* FROM .security-7", id="unterminated-block-comment"),
+    pytest.param("FROM logs-* | WHERE message == \"abc", id="unterminated-string"),
+    pytest.param('FROM logs-* | WHERE message == """abc', id="unterminated-triple-quoted-string"),
+    pytest.param("FROM logs-* | FROM logs-*", id="second-source-command"),
+]
+
+ESQL_INSIDE = [
+    pytest.param("FROM logs-system.auth-* | LIMIT 1", id="from-inside"),
+    pytest.param("FROM logs-*, security-audit-* | LIMIT 1", id="both-patterns"),
+    pytest.param("FROM logs-system.auth-*,logs-system.syslog-* METADATA _index, _version",
+                 id="list-with-metadata"),
+    pytest.param("// c\nFROM logs-*", id="leading-line-comment"),
+    pytest.param("/* x */ FROM logs-*", id="leading-block-comment"),
+    pytest.param("FROM logs-* // FROM .security-7\n| LIMIT 1", id="comment-names-outside"),
+    pytest.param("FROM logs-* /* , .security-7 */ | LIMIT 1", id="block-comment-in-list"),
+    pytest.param('FROM logs-* | WHERE message == "x | FROM .security-7"', id="string-is-data"),
+    pytest.param('FROM logs-* | WHERE message LIKE "FROM .security-7*"', id="like-string-is-data"),
+    pytest.param("FROM logs-* | LOOKUP JOIN logs-lookup ON host.name", id="lookup-join-inside"),
+    pytest.param("TS logs-metrics-* | LIMIT 1", id="ts-inside"),
+    pytest.param("FROM logs-*, (FROM security-audit-* | LIMIT 1)", id="subquery-inside"),
+    pytest.param("ROW a = 1", id="row-reads-no-index"),
+    pytest.param("SHOW INFO", id="show-reads-no-index"),
+    pytest.param("FROM logs-*, (FROM security-audit-*), (FROM logs-system.auth-*)",
+                 id="two-subqueries-inside"),
+    pytest.param("FROM logs-* | LOOKUP JOIN logs-a ON x | LOOKUP JOIN logs-b ON y",
+                 id="two-lookup-joins-inside"),
+    pytest.param("FROM .ds-logs-system.auth-* | LIMIT 1", id="backing-index-of-a-configured-stream"),
+    pytest.param("FROM logs-* | WHERE a == 1 /* unterminated-looking: */ | LIMIT 1",
+                 id="terminated-comment-is-fine"),
+    pytest.param('FROM logs-* | EVAL `x"` = 1 | LOOKUP JOIN logs-lookup ON y | EVAL `z"` = 2',
+                 id="backtick-name-with-a-quote"),
+    pytest.param("FROM logs-* | EVAL `a//b` = 1 | LOOKUP JOIN logs-lookup ON y | LIMIT 1",
+                 id="backtick-name-with-line-comment-opener"),
+    pytest.param("FROM logs-* | EVAL `a/*b` = 1 | LOOKUP JOIN logs-lookup ON y | LIMIT 1",
+                 id="backtick-name-with-block-comment-opener"),
+    pytest.param("FROM logs-* | EVAL `.security-7` = 1 | LIMIT 1", id="backtick-name-is-not-a-source"),
+    pytest.param("FROM logs-* // c\r| LOOKUP JOIN logs-lookup ON a", id="lone-cr-ends-a-comment-inside"),
+]
+
+
+@pytest.mark.parametrize("query", [*ESQL_OUTSIDE, *ESQL_UNCLASSIFIABLE])
+def test_an_esql_with_a_source_outside_the_patterns_or_unclassifiable_is_refused(
+    tmp_path: Path, query: str,
+):
+    """#1347 O2a: every source an ES|QL reads is confined; what cannot be classified is refused
+    before any transport is attempted."""
+    with pytest.raises(ConfinementFault):
+        elastic_adapter.VERBS["esql"](_ctx(tmp_path), query=query)
+
+
+@pytest.mark.parametrize("query", ESQL_INSIDE)
+def test_an_esql_whose_every_source_is_inside_the_patterns_still_runs(tmp_path: Path, query: str):
+    """#1347 O2a control: reaching the (unreachable) transport shows confinement admitted it."""
+    with pytest.raises(TransportFault):
+        elastic_adapter.VERBS["esql"](_ctx(tmp_path), query=query)
+
+
+@pytest.mark.parametrize("query", [
+    "FROM logs-falco.alerts-*\n| WHERE @timestamp >= \"2026-05-25T13:45:00Z\" | LIMIT 1",
+    "FROM logs-system.auth-* | WHERE host.name == \"office-ws-1\" | LIMIT 1",
+    "FROM logs-* | LIMIT 20",
+    "FROM logs-system.syslog-* | LIMIT 1",
+    "FROM .internal.alerts-security.alerts-default-*\n| STATS alerts = COUNT(*)",
+    # A configured stream's own backing indexes hold the same, fingerprinted documents.
+    "FROM logs-falco.alerts-*, .ds-logs-falco.alerts-* | LIMIT 5",
+])
+def test_the_recorded_real_esql_targets_are_not_refused(tmp_path: Path, query: str):
+    """#1347 O2a/C21: targets seen in recorded runs, under the fixture tenant's real patterns."""
+    ctx = _ctx(tmp_path, alerts=".internal.alerts-security.alerts-default-*")
+
+    with pytest.raises(TransportFault):
+        elastic_adapter.VERBS["esql"](ctx, query=query)
+
+
+@pytest.mark.parametrize("query", ["FROM .security-7 | LIMIT 1", "// c\nFROM .security-7",
+                                   "FROM logs-* | MYSTERY x"])
+@pytest.mark.parametrize(("as_of", "arrived_by"), [
+    pytest.param(True, True, id="as-of-and-arrived-by"),
+    pytest.param(True, False, id="as-of-alone-a-branched-run"),
+    pytest.param(False, False, id="no-cut"),
+])
+def test_a_cut_run_confines_esql_exactly_as_an_ordinary_run_does(
+    tmp_path: Path, query: str, as_of: bool, arrived_by: bool,
+):
+    """#1347 O2a: confinement is every run: with both cuts, as_of alone, or none."""
+    import datetime as dt
+
+    cut = dt.datetime(2026, 10, 20, 9, 0, 0, tzinfo=dt.UTC)
+    ctx = _ctx(tmp_path)
+    ctx = VerbContext(defender_dir=ctx.defender_dir, tenant=ctx.tenant, run_dir=ctx.run_dir,
+                      env={}, as_of=cut if as_of else None, arrived_by=cut if arrived_by else None)
+
+    with pytest.raises(ConfinementFault):
+        elastic_adapter.VERBS["esql"](ctx, query=query)
+    with pytest.raises(TransportFault):
+        elastic_adapter.VERBS["esql"](ctx, query="FROM logs-system.auth-* | LIMIT 1")
+
+
+@pytest.mark.parametrize("query", [
+    pytest.param('FROM "metadata", .security-7', id="quoted-metadata-first"),
+    pytest.param('FROM logs-*, "metadata", .security-7', id="quoted-metadata-in-the-middle"),
+    pytest.param('FROM logs-*, .security-7, "metadata"', id="quoted-metadata-last"),
+])
+def test_a_quoted_metadata_is_an_index_name_confined_like_any_other(tmp_path: Path, query: str):
+    """#1347 O2a: a quoted `"metadata"` does not end the source list; it is refused as an outside index, not as unreadable."""
+    with pytest.raises(ConfinementFault, match="falls outside the configured patterns"):
+        elastic_adapter.VERBS["esql"](_ctx(tmp_path), query=query)
 
 
 # ---- the host write entry and the write-endpoint table (#1359 D-6) ---------------------------------

@@ -18,6 +18,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender._model import model
+from defender.integrations.esql_text import EsqlUnclassifiable, esql_sources
 from defender.kit.faults import AdapterFault
 
 
@@ -239,6 +240,31 @@ def confine_index(index: str, configured_patterns: Iterable[str]) -> str:
     raise ConfinementFault(f"index {index!r} falls outside the configured patterns {patterns}")
 
 
+#: A data stream's backing indexes are named this prefix plus the stream's name.
+BACKING_INDEX_PREFIX = ".ds-"
+
+
+def confine_esql(query: str, configured_patterns: Iterable[str]) -> str:
+    """Refuse an ES|QL query any of whose sources (`esql_sources`: every `FROM` / `TS` entry,
+    subquery and `LOOKUP JOIN` target) falls outside every configured pattern, names another
+    cluster (`remote:`), or cannot be classified (#1347 O2a) — every run, cut or not. A
+    configured stream's own backing indexes (`.ds-<pattern>`) are inside: they hold the same
+    documents. Returns the query unchanged."""
+    patterns = tuple(configured_patterns)
+    try:
+        sources = esql_sources(query)
+    except EsqlUnclassifiable as unclassified:
+        raise ConfinementFault(
+            f"ES|QL query refused: its sources cannot be classified ({unclassified})"
+        ) from unclassified
+    inside = (*patterns, *(BACKING_INDEX_PREFIX + p for p in patterns))
+    for source in sources:
+        if ":" in source:
+            raise ConfinementFault(f"ES|QL source {source!r} names another cluster — refused")
+        confine_index(source, inside)
+    return query
+
+
 __all__ = [
     "READ_ENDPOINT_ALLOWLIST",
     "WRITE_CLASS",
@@ -248,6 +274,7 @@ __all__ = [
     "ConfinementFault",
     "ReadEndpointAllowlist",
     "TransportCapture",
+    "confine_esql",
     "confine_index",
     "confine_read_endpoint",
     "guard_outbound",

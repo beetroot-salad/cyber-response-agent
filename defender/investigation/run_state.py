@@ -142,6 +142,12 @@ class RunState:
         """`now()` as ISO-8601 text, whole seconds (the `_clock.now_iso` spelling)."""
         return self.now().isoformat(timespec="seconds")
 
+    def on_run_clock(self, wall: datetime) -> datetime:
+        """A wall-clock moment (`wall`, aware) as this run clock reads it: moved by the clock's
+        present distance from the wall. For the stamps the run's libraries take from the wall
+        (a model message's), on a run whose clock does not read the wall (#1347 O5)."""
+        return wall + (self.now() - datetime.now(UTC))
+
     # -- read accessors ----------------------------------------------------------------------
 
     def budget_snapshot(self) -> dict:
