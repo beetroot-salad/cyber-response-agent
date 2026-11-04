@@ -158,8 +158,11 @@ class _Trail:
         return {"time": _clock.now_iso(), **record, "fault": fault}
 
 
-def _refused_answer(fault: str, detail: str) -> dict[str, Any]:
-    return {"status": None, "headers": {}, "body": "", "fault": fault, "detail": detail}
+def _refused_answer(fault: str, detail: str, *, system_side: bool = False) -> dict[str, Any]:
+    """A refusal with no system status. `system_side` marks the one kind that is the target
+    system's (its call failed, #1404); unmarked, the refusal is the proxy's own."""
+    return {"status": None, "headers": {}, "body": "", "fault": fault, "detail": detail,
+            "system_side": system_side}
 
 
 class _Proxy:
@@ -184,7 +187,8 @@ class _Proxy:
             answer = self._proxied(authorization, raw, trail,
                                    time.monotonic() if arrived is None else arrived)
         except Refused as refused:
-            answer = _refused_answer(refused.fault, refused.detail)
+            answer = _refused_answer(refused.fault, refused.detail,
+                                     system_side=refused.system_side)
         except ConfigFault as fault:
             answer = _refused_answer(CONFIG, fault.detail)
         except TransportFault as fault:
@@ -295,16 +299,25 @@ class _Proxy:
         what = f"calling {asked.system}"
         timeout = deadline.wait(what)
 
+        answered: list[int] = []
+
         def sent(status: int) -> None:
             trail.outcome = f"sent {status}"
+            answered.append(status)
 
         try:
             reply = deadline.run(what, lambda: capped_reply(
                 trust, asked.method, target.url, cap=cap, timeout=timeout,
-                on_status=sent, headers=headers, content=content))
+                on_status=sent, headers=headers, content=content), system_side=True)
+        except Refused as cut:
+            if answered:
+                return _broken_reply(asked.system, answered[0], cut.detail)
+            raise
         except httpx.TransportError as e:
+            if answered:
+                return _broken_reply(asked.system, answered[0], type(e).__name__)
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
-                                     f"({type(e).__name__})") from None
+                                     f"({type(e).__name__})", system_side=True) from None
         status, withheld = reply.status, reply.withheld
         fault = _fault_of(status)
         if fault is None:
@@ -322,6 +335,13 @@ class _Proxy:
         return {"status": status, "headers": shown,
                 "body": scrub_secret_bytes(reply.body, secrets).decode("utf-8", "replace"),
                 "fault": fault, "detail": detail}
+
+
+def _broken_reply(system: str, status: int, why: str) -> dict[str, Any]:
+    """The system answered `status` and then its reply broke (#1404): the status stands, so a
+    write it accepted is not reported as never made; there is no body to hand on."""
+    return {"status": status, "headers": {}, "body": "", "fault": TRANSPORT,
+            "detail": f"{system} answered {status} but its reply did not arrive whole ({why})"}
 
 
 def _fault_of(status: int) -> str | None:

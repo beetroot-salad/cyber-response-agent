@@ -325,3 +325,38 @@ def text_under(root: Path) -> str:
         if path.is_file() and not path.is_symlink():
             parts.append(path.read_bytes().decode("utf-8", "replace"))
     return "\n".join(parts)
+
+
+@contextlib.contextmanager
+def breaks_after_status(status: int = 201, *, trickle: bool = False) -> Iterator[str]:
+    """A loopback HTTP server that answers every request with `status` and a body it promises but
+    never finishes, after the status has arrived: the connection closes mid-body, or with
+    `trickle` the body arrives a byte at a time, never stalling a read, until the server stops
+    (so only a whole-request deadline can cut it). Yields its base URL."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    stop = threading.Event()
+
+    def serve() -> None:
+        while not stop.is_set():
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            with conn:
+                try:
+                    conn.recv(65536)
+                    conn.sendall(b"HTTP/1.1 %d OK\r\nContent-Type: application/json\r\n"
+                                 b"Content-Length: 64\r\n\r\n{\"id\": " % status)
+                    while trickle and not stop.wait(0.1):
+                        conn.sendall(b" ")
+                except OSError:
+                    pass
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.getsockname()[1]}"
+    finally:
+        stop.set()
+        srv.close()

@@ -20,6 +20,8 @@ SYSTEM = "ticket"
 KEY = "a-1107"  # `S.plant_alert`'s `alert_id`: the ticket the fixture tenant's mapping names
 KEY_PATTERN = 'TICKET_KEY_PATTERN="[A-Za-z0-9-]+"\n'
 COMMENT = f"{STORE}/tickets/{KEY}/comments"
+#: The receipt's subject for a fault the credential proxy itself caused (#1404 r2, O1).
+PROXY_FAILED = "the credential proxy failed: "
 
 
 def _decl(up, writes=WRITES):
@@ -123,8 +125,9 @@ def test_t3_failures_are_text_in_the_receipt_and_carry_no_credential(tmp_path, d
                 assert "the store refused" in reason
                 assert "401" in reason
             elif name == "proxy-down":
-                # O5 (r4): an unreachable proxy is "could not be reached", not a refusal.
-                assert "could not be reached" in reason, (name, reason)
+                # O5 (r4), amended by #1404 r2: an unreachable proxy is the proxy's failure, not
+                # a refusal, and never the store's.
+                assert reason.startswith(PROXY_FAILED), (name, reason)
                 assert "the credential proxy refused" not in reason, (name, reason)
             elif name in ("no-credential", "read-only-token"):
                 assert "the credential proxy refused" in reason, (name, reason)
@@ -173,3 +176,37 @@ def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport
     assert "access.yaml" not in reason, reason
     assert tap.tokens == [tok]
     assert up.seen == []
+
+
+def test_t10_a_proxy_the_leg_cannot_use_is_the_proxys_failure_not_the_stores(tmp_path, data_root):
+    """#1404 O1: a proxy that is down, answers a non-200 status (readable or not), or whose
+    address was never handed to the call leaves "the credential proxy failed: <cause>", never the
+    store's wording, and the cause is said once. Controls for the store side are in
+    `test_ticket_flow_proxy_side.py` (t7, t12)."""
+    with H.upstream() as up, H.upstream() as broken, _published(
+            tmp_path / "forge", data_root, _decl(up)) as t:
+        tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+        cases = {
+            "proxy-down": (lambda: None, f"http://127.0.0.1:{H.free_port()}", "unreachable"),
+            "proxy-502-unreadable": (
+                lambda: broken.replies.update({"/v1/request": (502, {}, b"bad gateway")}),
+                broken.url, "HTTP 502"),
+            "proxy-503-readable": (
+                lambda: broken.replies.update({"/v1/request": (
+                    503, {"Content-Type": "application/json"},
+                    json.dumps({"status": 0, "headers": {}, "body": "", "fault": None,
+                                "detail": ""}).encode())}),
+                broken.url, "HTTP 503"),
+            "no-address": (lambda: None, None, "no credential proxy address"),
+        }
+        for name, (arrange, url, cause) in cases.items():
+            arrange()
+            rec, run = _run(tmp_path / name)
+            receipt = _leg(t, run, rec, url, tok)
+            assert receipt is not None, name
+            assert (receipt["ok"], receipt["status"]) == (False, "error"), (name, receipt)
+            reason = receipt.get("reason") or ""
+            assert reason.startswith(PROXY_FAILED), (name, reason)
+            assert cause in reason, (name, reason)
+            assert "store" not in reason, (name, reason)
+        assert len(broken.seen) == 2, "positive control: the broken proxy was called twice"

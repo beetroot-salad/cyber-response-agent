@@ -472,3 +472,35 @@ def test_1384_the_secret_writers_async_calls_go_through_its_injected_transport()
 
     assert asyncio.run(both()) is True
     assert [method for method, _ in seen] == ["POST", "GET"], seen
+
+
+@pytest.mark.parametrize("leg", ["system call", "token endpoint", "openbao token verify",
+                                 "openbao credential read"])
+def test_1404_a_deadline_cut_is_the_systems_only_on_the_systems_own_call(tmp_path, data_root, leg):
+    """#1404 P1: the deadline cutting the target system's call marks the refusal system-side;
+    cutting one of the proxy's own legs (the token exchange, its OpenBao calls) leaves it the
+    proxy's. Each leg is the one the O1 tests above cut."""
+    if leg == "system call":
+        with _trickler() as slow, T.rig(tmp_path / "forge", data_root, lambda _u: H.declaration(
+                slow + API), proxy_overhead_sec=OVERHEAD_SEC) as r:
+            answer, took = _timed(lambda: r.ask(url=f"{slow}{API}/users/x", timeout_sec=1))
+    elif leg == "token endpoint":
+        with _trickler(json.dumps({"access_token": "AT", "expires_in": 3600}).encode()) as slow, \
+                T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+                    u + API, scheme=H.oauth_scheme(slow + "/token")), creds=T.oauth_set(),
+                    proxy_overhead_sec=OVERHEAD_SEC) as r:
+            answer, took = _timed(lambda: r.ask(timeout_sec=1))
+    else:
+        openbao = proxy()
+        reading = leg == "openbao credential read"
+        with _trickler(_KV_REPLY if reading else _VERIFY_REPLY) as slow, \
+                T.rig(tmp_path / "forge", data_root) as r:
+            store = openbao.OpenBaoStore(addr=slow, token="t", mount="secret") if reading else r.store
+            verifier = r.verifier if reading else openbao.TransitVerifier(addr=slow, token="t")
+            client = T.client_of(T.deps(r.data_root, store, verifier=verifier, audit=r.audit,
+                                        proxy_overhead_sec=OVERHEAD_SEC))
+            answer, took = _timed(lambda: T.ask(client, r.tok(), "identity", "GET",
+                                                f"{r.up.url}{API}/users/x", None, None, 1))
+    _on_time(answer, took)
+    assert "during" in answer["detail"], ("positive control: the leg itself was cut", answer)
+    assert answer["system_side"] is (leg == "system call"), (leg, answer)
