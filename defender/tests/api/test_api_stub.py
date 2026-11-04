@@ -61,6 +61,7 @@ from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from defender.records.formats import AlertId  # noqa: E402
+from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
@@ -156,8 +157,8 @@ EXISTING_ROUTES = {
     ("PUT", "/tenants/{tenant_id}/systems/{system_id}/credentials"),
     ("POST", "/tenants/{tenant_id}/systems/{system_id}/check"),
     # #1345 O1: the tenant's alert mapping, read and replaced whole (sketch: invented path)
-    ("GET", "/tenants/{tenant_id}/alert-mapping"),
-    ("PUT", "/tenants/{tenant_id}/alert-mapping"),
+    ("GET", ALERT_MAPPING_ROUTE),
+    ("PUT", ALERT_MAPPING_ROUTE),
 }
 #: What #1306 adds (design "Endpoints"; param names pinned by this suite).
 IDENTITY_ROUTES = {
@@ -214,9 +215,9 @@ HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] 
     (("POST", "/tenants/{tenant_id}/systems/{system_id}/check"), f"{T}/systems/tix/check", None,
      {"get_system": SETTINGS, "has_credentials": True,
       "check": SystemCheck(ok=True, detail="fine")}),
-    (("GET", "/tenants/{tenant_id}/alert-mapping"), f"{T}/alert-mapping", None,
+    (("GET", ALERT_MAPPING_ROUTE), alert_mapping_url(A), None,
      {"get_alert_mapping": _Answer("saved mapping", lambda _tenant: _alert_mapping_wire(MAPPING_BODY))}),
-    (("PUT", "/tenants/{tenant_id}/alert-mapping"), f"{T}/alert-mapping", MAPPING_BODY,
+    (("PUT", ALERT_MAPPING_ROUTE), alert_mapping_url(A), MAPPING_BODY,
      {"put_alert_mapping": _Answer("created from the body", lambda body: (body, True))}),
 ]
 
@@ -615,14 +616,14 @@ def test_1345_put_alert_mapping_is_201_at_its_own_url_then_200_and_each_is_audit
     """The first save creates (201, Location), a later one replaces (200); the port gets the body as sent; the
     answer has all six entries, unmapped ones null; one `alert_mapping.update` event each. (#1345 O1)"""
     created = Api(put_alert_mapping=lambda body: (body, True))
-    response = created.client.put(f"{T}/alert-mapping", headers=AUTH, json=MAPPING_BODY)
-    assert (response.status_code, response.headers["Location"]) == (201, BASE + f"{T}/alert-mapping")
+    response = created.client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
+    assert (response.status_code, response.headers["Location"]) == (201, BASE + alert_mapping_url(A))
     assert response.json() == {entry: MAPPING_BODY.get(entry) for entry in MAPPING_ENTRIES}
     ((sent,), kwargs), = created.ports.called("put_alert_mapping")
     assert (sent.model_dump(), kwargs) == (MAPPING_BODY, {})  # r5: the port gets the validated wire model's `model_dump()`
 
     replaced = Api(put_alert_mapping=lambda body: (body, False))
-    response = replaced.client.put(f"{T}/alert-mapping", headers=AUTH, json=MAPPING_BODY)
+    response = replaced.client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
     assert response.status_code == 200
     assert "Location" not in response.headers
     # r5 O1: the action `alert_mapping.update`, target the tenant id.
@@ -639,12 +640,12 @@ def test_1345_the_audit_vocabulary_has_the_mapping_update() -> None:
 def test_1345_get_alert_mapping_answers_all_six_entries_or_404_when_none_was_saved() -> None:
     """A saved mapping reads with every entry, unmapped ones null; a tenant with none is a not-found problem. (#1345 O1)"""
     saved = Api(get_alert_mapping=lambda _tenant: _alert_mapping_wire(MAPPING_BODY))
-    response = saved.client.get(f"{T}/alert-mapping", headers=AUTH)
+    response = saved.client.get(alert_mapping_url(A), headers=AUTH)
     assert response.status_code == 200
     assert response.json() == {entry: MAPPING_BODY.get(entry) for entry in MAPPING_ENTRIES}
 
     none = Api(get_alert_mapping=None)
-    response = none.client.get(f"{T}/alert-mapping", headers=AUTH)
+    response = none.client.get(alert_mapping_url(A), headers=AUTH)
     assert response.status_code == 404
     assert response.headers["Content-Type"] == "application/problem+json"
 
@@ -659,7 +660,7 @@ def test_1345_an_invalid_or_incomplete_mapping_is_a_422_naming_the_entry_before_
     """The wire model refuses it (r5: validated through `records`' `check_mapping`; D4: all six named): 422 naming the
     entry, no port call, no audit. (#1345 O1, M2)"""
     api = Api()
-    response = api.client.put(f"{T}/alert-mapping", headers=AUTH, json=body)
+    response = api.client.put(alert_mapping_url(A), headers=AUTH, json=body)
     assert response.status_code == 422, response.text
     assert entry in response.text
     assert (api.ports.calls, api.ports.audits) == ([], [])
@@ -681,16 +682,16 @@ def test_1345_over_the_fake_a_mapping_is_404_then_201_then_200_and_reads_back_as
     """GET is 404 until the first PUT (201, Location); a later PUT replaces whole (200); GET answers exactly the six
     entries the PUT named; each save is audited `alert_mapping.update` for the tenant. (#1345 O1)"""
     client, store = _over_the_fake()
-    assert client.get(f"{T}/alert-mapping", headers=AUTH).status_code == 404
+    assert client.get(alert_mapping_url(A), headers=AUTH).status_code == 404
 
-    first = client.put(f"{T}/alert-mapping", headers=AUTH, json=MAPPING_BODY)
-    assert (first.status_code, first.headers["Location"]) == (201, BASE + f"{T}/alert-mapping")
-    assert client.get(f"{T}/alert-mapping", headers=AUTH).json() == MAPPING_BODY
+    first = client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
+    assert (first.status_code, first.headers["Location"]) == (201, BASE + alert_mapping_url(A))
+    assert client.get(alert_mapping_url(A), headers=AUTH).json() == MAPPING_BODY
 
     other = {**dict.fromkeys(MAPPING_ENTRIES), "case_key": "ticket.key"}
-    second = client.put(f"{T}/alert-mapping", headers=AUTH, json=other)
+    second = client.put(alert_mapping_url(A), headers=AUTH, json=other)
     assert (second.status_code, "Location" in second.headers) == (200, False)
-    assert client.get(f"{T}/alert-mapping", headers=AUTH).json() == other, "a replace is whole: the earlier entries are gone"
+    assert client.get(alert_mapping_url(A), headers=AUTH).json() == other, "a replace is whole: the earlier entries are gone"
     assert [(e.action, e.tenant_id, e.target) for e in store.audit_events] == [("alert_mapping.update", A, A)] * 2
 
 
@@ -709,19 +710,19 @@ def test_1345_over_the_fake_an_invalid_or_incomplete_mapping_is_refused_alike_an
     the entry, no audit, the saved mapping untouched; a valid PUT right after is 201 (control). (#1345 O1, M2)"""
     client, store = _over_the_fake()
     scripted = Api()
-    refused = client.put(f"{T}/alert-mapping", headers=AUTH, json=body)
+    refused = client.put(alert_mapping_url(A), headers=AUTH, json=body)
     assert refused.status_code == 422, refused.text
     assert entry in refused.text, refused.text
-    assert (scripted.client.put(f"{T}/alert-mapping", headers=AUTH, json=body).json()
+    assert (scripted.client.put(alert_mapping_url(A), headers=AUTH, json=body).json()
             == refused.json()), "the fake and the scripted ports must give one 422"
-    assert client.get(f"{T}/alert-mapping", headers=AUTH).status_code == 404
+    assert client.get(alert_mapping_url(A), headers=AUTH).status_code == 404
     assert store.audit_events == []
 
-    assert client.put(f"{T}/alert-mapping", headers=AUTH, json=MAPPING_BODY).status_code == 201
+    assert client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY).status_code == 201
     saved = {**MAPPING_BODY, "title": "data.title"}
-    assert client.put(f"{T}/alert-mapping", headers=AUTH, json=saved).status_code == 200
-    assert client.put(f"{T}/alert-mapping", headers=AUTH, json={**saved, "title": "a..b"}).status_code == 422
-    assert client.get(f"{T}/alert-mapping", headers=AUTH).json() == saved, "a refused replace left the saved mapping"
+    assert client.put(alert_mapping_url(A), headers=AUTH, json=saved).status_code == 200
+    assert client.put(alert_mapping_url(A), headers=AUTH, json={**saved, "title": "a..b"}).status_code == 422
+    assert client.get(alert_mapping_url(A), headers=AUTH).json() == saved, "a refused replace left the saved mapping"
 
 
 def test_1345_an_alert_with_no_title_or_description_is_served_with_nulls() -> None:
@@ -731,6 +732,17 @@ def test_1345_an_alert_with_no_title_or_description_is_served_with_nulls() -> No
     api = Api(list_alerts=[untitled, SUMMARY])
     items = api.client.get(f"{T}/alerts", headers=AUTH).json()["items"]
     assert [(i["title"], i["description"]) for i in items] == [(None, None), ("t", "d")]
+
+
+def test_1345_the_wire_alert_validates_with_null_title_and_description() -> None:
+    """Constructing (so validating; `model_copy` above skips validation) an `AlertSummary` with null title and description
+    is accepted and keeps them null; the fields stay required (r5.1: required, may be null). (#1345 O2, r5.1)"""
+    fields = SUMMARY.model_dump()
+    built = AlertSummary(**{**fields, "title": None, "description": None})
+    assert (built.title, built.description) == (None, None)
+    for field in ("title", "description"):
+        with pytest.raises(ValidationError):
+            AlertSummary(**{k: v for k, v in fields.items() if k != field})
 
 
 def test_1345_the_mapping_body_names_exactly_the_records_entries_all_required() -> None:

@@ -13,6 +13,9 @@ test of absence opts out by passing `alert_mapping=None` (a parameter, never a m
 - `seed_twin(twin, tenant, entries)`: through the in-memory twin's seeder, DESIGN-IMPLIED PRODUCTION NAME
   `InMemoryTenantRepository.add_alert_mapping(tenant_id, mapping)` (async, like `add_generation`; r5 "Where it
   lives"). It does not exist at base: tests that reach it are red until the code stage writes it.
+- `ALERT_MAPPING_ROUTE` / `alert_mapping_url(tenant)`: the one spelling of the API route (r5.1); the refusal-wording
+  checks (`assert_missing_wording_names_verb_and_route`) take the route's tail from it.
+- `remove_postgres_mapping(dsn, tenant)`: the one raw-SQL deletion of a mapping row (r5.1 repair 13).
 - `seed_postgres(dsn, tenant, entries)`: through `JobStore.put_alert_mapping(tenant_id, mapping) -> created`.
 """
 from __future__ import annotations
@@ -27,6 +30,15 @@ PLANTED_ALERT_MAPPING: Mapping[str, str | None] = MappingProxyType({
     "signature": "rule.id", "event_time": "timestamp", "summary": "rule.description", "case_key": "alert_id",
     "title": "rule.description", "description": "rule.id"})
 FIXTURE_ALERT_MAPPING: Mapping[str, str | None] = MappingProxyType({**PLANTED_ALERT_MAPPING, "event_time": "alert_timestamp"})
+#: The API route (r5.1: "tests spell it in one place"): the template as the routes table lists it, and its `{tenant_id}` filled.
+ALERT_MAPPING_ROUTE = "/tenants/{tenant_id}/alert-mapping"
+
+
+def alert_mapping_url(tenant_id: str) -> str:
+    """The route for `tenant_id` (no host)."""
+    return ALERT_MAPPING_ROUTE.format(tenant_id=tenant_id)
+
+
 #: What the title and description paths derive from `_jobs1342.ALERT_BYTES`.
 ALERT_BYTES_TITLE, ALERT_BYTES_DESCRIPTION = "sketch", "r-1342"
 
@@ -38,17 +50,20 @@ def mapping_value(entries: Mapping[str, str | None]) -> Any:
     return AlertMapping(paths={k: v for k, v in entries.items() if v is not None})
 
 
+def assert_missing_wording_names_verb_and_route(wording: str) -> None:
+    """`ALERT_MAPPING_MISSING` names the command-line verb and the API route (r5 O4; route spelled in `ALERT_MAPPING_ROUTE`)."""
+    assert "set-alert-mapping" in wording
+    assert ALERT_MAPPING_ROUTE.split("{tenant_id}")[1] in wording, wording
+
+
 def seed_twin(twin: Any, tenant: str, entries: Mapping[str, str | None] | None) -> None:
     """Give the in-memory tenant repository `twin` a mapping for `tenant`; `None` seeds nothing."""
     if entries is None:
         return
-    import inspect
-
     from defender.tests.support.tenancy._active1214 import _await, run_sync
 
-    added = twin.add_alert_mapping(str(tenant), mapping_value(entries))  # design-implied seeder (r5); not at base
-    if inspect.isawaitable(added):
-        run_sync(_await(added))
+    # One shape (r5.1: async, like `add_generation`): awaited here, and by `_identity1306.World._add_tenant`.
+    run_sync(_await(twin.add_alert_mapping(str(tenant), mapping_value(entries))))  # design-implied seeder; not at base
 
 
 def seed_postgres(dsn: str, tenant: str, entries: Mapping[str, str | None] | None) -> None:
@@ -67,6 +82,15 @@ def seed_postgres(dsn: str, tenant: str, entries: Mapping[str, str | None] | Non
             await store.close()
 
     run_sync(put())
+
+
+def remove_postgres_mapping(dsn: str, tenant: str) -> None:
+    """Take `tenant`'s mapping row away (a job queued before the upgrade; a tenant whose mapping is gone), whatever the
+    table is called: the one place a test reaches under the store for it (the product never deletes a mapping)."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    execute(dsn, "DELETE FROM tenancy.alert_mappings WHERE tenant_id = %s", (str(tenant),))
+    assert execute(dsn, "SELECT count(*) FROM tenancy.alert_mappings WHERE tenant_id = %s", (str(tenant),)) == [(0,)]
 
 
 def planted_mapping() -> Any:

@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
+from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, assert_missing_wording_names_verb_and_route
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     AWKWARD_ALERT_BYTES,
@@ -1852,8 +1852,7 @@ def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_at_setup_naming_th
     from defender.records.formats import ALERT_MAPPING_MISSING  # design-implied name: the one refusal wording `records` owns (r5.1)
 
     scene = unmapped_scene
-    assert "set-alert-mapping" in ALERT_MAPPING_MISSING
-    assert "/alert-mapping" in ALERT_MAPPING_MISSING
+    assert_missing_wording_names_verb_and_route(ALERT_MAPPING_MISSING)
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
 

@@ -159,6 +159,31 @@ async def test_a_create_request_inserts_a_creating_tenant_at_the_names_step(stor
     assert await store.repo.generations(record.id) == []  # the pending generation is the names step's, not the request's
 
 
+@pytest.mark.postgres
+async def test_1345_d2_a_tenant_made_by_the_create_request_has_no_alert_mapping_and_no_investigation_can_start(pg_store):
+    """No mapping is made with a tenant (D2): a tenant from the product's `request_create` reads no mapping through the
+    records or the jobs store, and creating an investigation for its alert is `Conflict` with `ALERT_MAPPING_MISSING`;
+    the same tenant after a mapping is saved creates (control). (#1345 D2, O4)"""
+    from defender.jobs import Conflict, JobStore
+    from defender.records.formats import ALERT_MAPPING_MISSING
+    from defender.tests.support.jobs._jobs1342 import an_alert
+    from defender.tests.support.tenancy._mapping1345 import mapping_value
+
+    tenant = (await pg_store.repo.request_create(now=NOW)).id
+    store = JobStore(pg_store.dsn, clock=lambda: NOW)
+    try:
+        assert await pg_store.repo.alert_mapping(tenant) is None
+        assert await store.get_alert_mapping(tenant) is None
+        alert = await an_alert(store, tenant)
+        with pytest.raises(Conflict) as refused:
+            await store.create_investigation(tenant, alert.alert_id, "k1", actor="u-1")
+        assert str(refused.value) == ALERT_MAPPING_MISSING
+        await store.put_alert_mapping(tenant, mapping_value({}))
+        await store.create_investigation(tenant, alert.alert_id, "k1", actor="u-1")  # control: a saved mapping lets it through
+    finally:
+        await store.close()
+
+
 async def test_two_create_requests_are_two_tenants(store):
     """Each create mints its own id and adds a row; `tenants()` lists both (RC-3)."""
     first, second = await store.repo.request_create(now=NOW), await store.repo.request_create(now=NOW)

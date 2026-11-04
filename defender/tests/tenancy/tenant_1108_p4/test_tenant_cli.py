@@ -16,7 +16,6 @@ import uuid
 from typing import Any
 
 import pytest
-import yaml
 
 from defender.tests.support.jobs._jobs1342 import (
     an_alert,
@@ -341,11 +340,10 @@ def test_1345_o6_the_verb_stores_a_six_entry_file_prints_it_and_re_derives_the_t
 
 
 @pytest.mark.postgres
-def test_1345_o6_a_four_entry_file_loads_with_title_and_description_unmapped_but_an_api_put_missing_them_is_422(verb):
-    """Today's four-entry file loads (what the file leaves out is unmapped, titles go null); the same four entries as an
-    API PUT body are 422 naming the missing ones (D4: the API names all six). (#1345 O6, D3, D4)"""
-    from defender.tests.api.test_api_stub import AUTH, T, Api
-
+def test_1345_o6_a_four_entry_file_loads_with_title_and_description_unmapped(verb):
+    """Today's four-entry file loads: what the file leaves out is unmapped and the titles go null. (#1345 O6, D3)
+    D4's counterpart (the same four entries as an API PUT body are 422) is pinned in the API suite:
+    `test_api_stub.py::test_1345_an_invalid_or_incomplete_mapping_is_a_422_naming_the_entry_before_any_port_call` (round 1 repair 12; the API half left this test)."""
     seed_alert_mapping(verb.dsn, verb.tid, FIXTURE_ALERT_MAPPING)
     verb.alert("T-1")
     assert verb.display() == [("sketch", "r-1342")], "control: the six-entry mapping derived a title"
@@ -356,11 +354,6 @@ def test_1345_o6_a_four_entry_file_loads_with_title_and_description_unmapped_but
     assert verb.stored() == {"signature": "rule.id", "event_time": "timestamp", "summary": "rule.description",
                              "case_key": "alert_id"}
     assert verb.display() == [(None, None)]
-    api = Api()
-    response = api.client.put(f"{T}/alert-mapping", headers=AUTH, json=yaml.safe_load(ALERT_MAPPING_TEXT))
-    assert response.status_code == 422
-    assert "title" in response.text
-    assert (api.ports.calls, api.ports.audits) == ([], [])
 
 
 @pytest.mark.postgres
@@ -379,13 +372,15 @@ def test_1345_o6_an_empty_mapping_file_is_a_valid_choice_that_unmaps_everything(
 @pytest.mark.parametrize(("content", "names"), [
     ("signature: [unclosed\n", None),                  # not YAML
     ("- signature\n- title\n", None),                  # not a mapping of entries
-    ("signature: rule.id\nseverity: rule.level\n", None),  # an entry that is not one of the six
+    ("signature: rule.id\nseverity: rule.level\n", "severity"),  # an entry that is not one of the six: named, as the API does (r5.1 O6)
+    ("", None),                                         # empty file: not a YAML mapping (r5.1 O6 file syntax)
+    ("  \n\t\n  ", None),                               # whitespace only: likewise
     ("title: rule..description\n", "title"),            # an empty segment
     ("case_key: ' alert_id'\n", "case_key"),            # surrounding whitespace
     ("description: 42\n", "description"),               # not a path
     ("summary: ''\n", "summary"),                       # an empty path
     (b"\xff\xfe\x00 not utf-8", None),
-], ids=["not-yaml", "not-a-mapping", "unknown-entry", "empty-segment", "whitespace", "not-a-path", "empty-path", "not-utf8"])
+], ids=["not-yaml", "not-a-mapping", "unknown-entry", "empty-file", "whitespace-only-file", "empty-segment", "whitespace", "not-a-path", "empty-path", "not-utf8"])
 def test_1345_o6_a_malformed_file_or_invalid_entry_is_refused_and_writes_nothing(verb, content, names):
     """The refusal is `[tenant.py] ...` on stderr, exit 1, nothing printed as stored; the mapping and the display
     stay as they were (the valid file in the first case is the control). (#1345 O6, M2)"""
@@ -402,6 +397,22 @@ def test_1345_o6_a_malformed_file_or_invalid_entry_is_refused_and_writes_nothing
     if names:
         assert names in err
     assert (verb.stored(), verb.display()) == before
+
+
+@pytest.mark.postgres
+def test_1345_o6_an_entry_given_as_null_in_the_file_is_unmapped_like_one_left_out(verb):
+    """`description: null` is stored as unmapped (absent from the stored paths) and the display is re-derived with no
+    description, while the mapped `title` still derives; with a path in its place the description derives (control, the six-entry
+    test above). (r5.1 O6 file syntax)"""
+    seed_alert_mapping(verb.dsn, verb.tid, FIXTURE_ALERT_MAPPING)
+    verb.alert("T-1")
+    assert verb.display() == [("sketch", "r-1342")], "control: with a path the description derives"
+
+    rc, _, err = verb.run("signature: rule.id\ntitle: rule.description\ndescription: null\ncase_key: ~\n")
+
+    assert (rc, err) == (0, "")
+    assert verb.stored() == {"signature": "rule.id", "title": "rule.description"}
+    assert verb.display() == [("sketch", None)]
 
 
 @pytest.mark.postgres
@@ -483,11 +494,12 @@ def test_1345_o6_without_a_database_address_the_verb_is_refused_not_crashed(p4_t
 
 @pytest.mark.postgres
 def test_1345_o6_the_verb_emits_no_alert_mapping_audit_event(verb, caplog):
-    """The API's `alert_mapping.update` event is the API's: a verb run logs none, on any logger (the run did store). (#1345 O6, O1)"""
+    """The API's `alert_mapping.update` event is the API's: a verb run emits no audit record (a record carrying an `action`,
+    or from an audit logger); the run did store. (#1345 O6, O1; narrowed in round 1 repair 9)"""
     with caplog.at_level(logging.DEBUG):
         rc, _, err = verb.run(SIX_FILE)
 
     assert (rc, err) == (0, ""), "control: the replace happened"
     assert verb.stored() == dict(FIXTURE_ALERT_MAPPING), "control: the replace happened"
-    assert [r for r in caplog.records
-            if "alert_mapping" in str(getattr(r, "action", "")) or "alert_mapping" in r.getMessage()] == []
+    audit = [r for r in caplog.records if hasattr(r, "action") or r.name.rsplit(".", 1)[-1] == "audit"]
+    assert [r for r in audit if "alert_mapping" in str(getattr(r, "action", "")) + r.getMessage()] == []

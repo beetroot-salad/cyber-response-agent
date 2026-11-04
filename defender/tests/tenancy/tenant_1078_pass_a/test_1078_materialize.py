@@ -169,6 +169,32 @@ def test_d2_sibling_runs_base(tenant_root):
         [src.name, RunPaths(src).session_pointer().name])
 
 
+def test_1345_flow4_a_fresh_run_must_be_handed_its_mapping_and_the_settings_half_is_gone_but_a_sibling_needs_neither(
+        tmp_path, tenant_root):
+    """`materialize_run(mapping=)` is required for a non-sibling: without it, and with the retired `settings=`, the call is a
+    `TypeError` and creates nothing; the same call with `mapping=` runs (control), and a sibling (`world=`, `run=`, no
+    `mapping=`) runs. Placed here, not in test_1105_run_setup.py, for the sibling world built below. (#1345 flow 4, O3)"""
+    tenant = H.accept(H.resolve_data_root(), T_ID)
+    src, ep, world = _sibling_world(tenant_root, "b")
+    alert = RunPaths(src).alert
+    materialize = H.run_common().materialize_run
+    before = H.entries(tenant_root / T_ID / "runs")
+
+    with pytest.raises(TypeError):
+        materialize(alert, tenant=tenant)
+    with pytest.raises(TypeError):
+        materialize(alert, tenant=tenant, settings=tmp_path)
+    with pytest.raises(TypeError):
+        materialize(alert, tenant=tenant, settings=tmp_path, mapping=planted_mapping())
+    assert H.entries(tenant_root / T_ID / "runs") == before, "a refused call created a run"
+
+    assert Path(materialize(alert, tenant=tenant, mapping=planted_mapping()).run_dir).is_dir(), "control: with mapping= it runs"
+    with Episode.open(ep) as episode:
+        view = tenant.runs_repository().episode(ep.name, held=episode)
+        sibling = materialize(alert, tenant=tenant, world=world, run=view.create(view.arm_id(world.world_id)))
+    assert Path(sibling.run_dir).is_dir(), "control: a sibling needs no mapping="
+
+
 @pytest.mark.parametrize("state_location", ["root", "inside", "ancestor", "disjoint"])
 def test_1186_sibling_ignores_legacy_state_override(
         tmp_path, monkeypatch, tenant_root, state_location):

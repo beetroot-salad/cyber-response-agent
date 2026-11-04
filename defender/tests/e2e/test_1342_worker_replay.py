@@ -23,7 +23,8 @@ from defender.tests.support.jobs._jobs1342 import (
     register_tenant,
     row,
 )
-from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
+from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, remove_postgres_mapping, seed_postgres
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.e2e]
 
@@ -168,9 +169,7 @@ async def test_1345_o4_a_queued_job_whose_tenant_has_no_mapping_ends_failed_setu
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
             inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
-            execute(migrated_database, "DELETE FROM tenancy.alert_mappings WHERE tenant_id = %s", (t.tenant_id,))
-            assert execute(migrated_database, "SELECT count(*) FROM tenancy.alert_mappings WHERE tenant_id = %s",
-                           (t.tenant_id,)) == [(0,)]
+            remove_postgres_mapping(migrated_database, t.tenant_id)
             worker = make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers"))
             await worker.drain()
 
@@ -179,3 +178,42 @@ async def test_1345_o4_a_queued_job_whose_tenant_has_no_mapping_ends_failed_setu
             "failed", "setup_refused", "run setup refused the job"), stored
         assert not (root / t.tenant_id / "runs" / inv.investigation_id).exists(), "a run folder was made"
         assert " ".join(ALERT_MAPPING_MISSING.split()) in " ".join(err_file.read_text(encoding="utf-8").split())
+
+
+async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_runs_stamped_label_as_launched(
+        migrated_database, tmp_path, monkeypatch):  # noqa: F811
+    """The real worker and child complete a run labelled with the alert's title at launch (the golden's `rule.description`
+    under the default mapping); the tenant then replaces its mapping so the alert's title is something else, and the run's
+    provenance stamp and launch record still say the title it launched with. (#1345 Design "Alerts": the label is fixed
+    at launch in the run's stamp; round 1 repair 11)"""
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    root = tmp_path / "data"
+    root.mkdir()
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
+    document = json.loads((golden / "alert.json").read_bytes())
+    launched_with, later = document["rule"]["description"], document["rule"]["id"]
+    assert launched_with != later, "premise: the two titles differ"
+    with B.run_tenant(tmp_path, root) as t:
+        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        (root / t.tenant_id / "runs").mkdir(exist_ok=True)
+
+        def child(launch) -> list[str]:
+            return [sys.executable, str(ENTRY), "replay", t.commit, str(tmp_path / "marks"), "--job", launch.investigation_id,
+                    "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
+
+        async with job_store(migrated_database) as store:
+            alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
+            inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
+            await make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers")).drain()
+            assert row(migrated_database, inv.investigation_id)["stage"] == "completed", "premise: the run completed"
+            seed_postgres(migrated_database, t.tenant_id, {**FIXTURE_ALERT_MAPPING, "title": "rule.id"})
+            assert (await store.get_alert(t.tenant_id, alert.alert_id)).title == later, "premise: the edit retitled the alert"
+
+        runs = root / t.tenant_id / "runs"
+        launch = json.loads((runs / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
+        stamp = json.loads((runs / inv.investigation_id / "provenance.json").read_text(encoding="utf-8"))
+        assert (launch["label"], stamp["alert_label"]) == (launched_with, launched_with)

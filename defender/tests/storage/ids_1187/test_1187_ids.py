@@ -12,6 +12,7 @@ import pytest
 
 from defender.tests.support.shared.contracts import _by_path
 from defender.tests.support.learning.branch import _triplet_947 as T947
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
@@ -288,7 +289,7 @@ def test_1279_o8_natural_setup_proceeds_beside_other_ids_sidecars(tmp_path, data
 
     from defender import run_common
 
-    run = run_common.materialize_run(alert, tenant=t)
+    run = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=t)
 
     assert run.run_dir.parent == runs
     assert run.run_dir.is_dir()

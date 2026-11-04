@@ -33,7 +33,7 @@ from defender.tests.support.jobs._jobs1342 import (
 )
 from defender.tests.support.shared._pglocks1339 import until_blocked
 from defender.tests.support.shared._postgres1339 import execute
-from defender.tests.support.tenancy._mapping1345 import mapping_value
+from defender.tests.support.tenancy._mapping1345 import assert_missing_wording_names_verb_and_route, mapping_value
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -307,14 +307,16 @@ async def test_o2_an_admitted_alert_round_trips_its_exact_bytes(dsn, name):
     assert execute(dsn, "SELECT length(raw) FROM jobs.alerts WHERE id = %s", (inserted.alert_id,)) == [(len(raw),)]
 
 
-async def test_o2_title_and_description_are_the_callers_and_the_rest_of_the_row_is_read_back(dsn):
-    """Display fields and times come from the caller, untouched; the read row carries all of them. (O2)"""
-    title, description = "ünï \n 日本 'quoted' \"q\" %s", "line1\nline2 \t end"
+async def test_o2_the_display_is_what_the_default_mapping_derives_and_the_rest_of_the_row_is_read_back(dsn):
+    """Vendor, ticket id and times come from the caller, untouched; the display is not the caller's but the one the
+    seeded default mapping derives from `ALERT_BYTES` (hand-written literal). Rewritten in round 1 (repair 1):
+    `insert_alert` no longer takes title/description (design O2, M3). (O2)"""
+    title, description = "sketch", "r-1342"  # rule.description and rule.id of ALERT_BYTES, under the default mapping
     changed = NOW + HOUR
     async with job_store(dsn) as store:
         inserted = await store.insert_alert(
             T1, vendor="splunk", vendor_ticket_id="SPL-9", fired_at=NOW, changed_at=changed,
-            received_at=NOW + 2 * HOUR, title=title, description=description, raw=ALERT_BYTES)
+            received_at=NOW + 2 * HOUR, raw=ALERT_BYTES)
         read = await store.get_alert(T1, inserted.alert_id)
 
     assert (read.alert_id, read.vendor, read.vendor_ticket_id) == (inserted.alert_id, "splunk", "SPL-9")
@@ -385,11 +387,13 @@ UNSTORABLE = {"NUL": "a\x00b", "lone surrogate": "a\ud800b"}
 
 
 @pytest.mark.parametrize("text", list(UNSTORABLE.values()), ids=list(UNSTORABLE))
-@pytest.mark.parametrize("field", ["vendor", "vendor_ticket_id", "title", "description"])
+@pytest.mark.parametrize("field", ["vendor", "vendor_ticket_id"])
 async def test_1379_an_alert_field_postgresql_cannot_hold_is_refused_by_name_and_nothing_is_stored(
         dsn, field, text):
-    """The store's own typed refusal, naming the field, before any query; a good alert still goes in. (#1379 O1b)"""
-    fields = {"vendor": "splunk", "vendor_ticket_id": "SPL-9", "title": "t", "description": "d", field: text}
+    """The store's own typed refusal, naming the field, before any query; a good alert still goes in. (#1379 O1b)
+    The `title`/`description` cases are retired: the store derives them, and derived text it cannot hold becomes null
+    (design M3; pinned by the 1345 M3 tests below)."""
+    fields = {"vendor": "splunk", "vendor_ticket_id": "SPL-9", field: text}
     async with job_store(dsn) as store:
         with pytest.raises(ValueError, match=rf"\b{field}\b") as refused:
             await store.insert_alert(T1, fired_at=NOW, changed_at=NOW, received_at=NOW, raw=ALERT_BYTES,
@@ -1517,8 +1521,8 @@ async def test_1345_m3_a_replace_held_mid_recompute_does_not_hold_up_another_ten
 
 
 async def test_1345_o4_create_for_a_tenant_without_a_mapping_is_a_conflict_naming_the_route(unmapped_dsn):
-    """T2 never saved a mapping: create is `Conflict`, naming the mapping and the route that sets it,
-    and inserts nothing; T1, with one, creates (control). (#1345 O4, M2)"""
+    """T2 never saved a mapping: create is `Conflict` carrying the wording `records` owns (`ALERT_MAPPING_MISSING`, r5.1:
+    not `jobs`), which names the mapping and the route that sets it, and inserts nothing; T1, with one, creates (control). (#1345 O4, M2)"""
     from defender.jobs import Conflict
     from defender.records.formats import ALERT_MAPPING_MISSING
 
@@ -1536,11 +1540,10 @@ async def test_1345_o4_create_for_a_tenant_without_a_mapping_is_a_conflict_namin
         after_put = await store.create_investigation(T2, theirs.alert_id, "k1", actor="u-1")
 
     assert (created, after_put) == (True, True)
-    # The one wording `jobs` owns (design-implied name; r5 O4): the store's refusal is exactly it, and it names the verb
+    # The one wording `records` owns, beside `MAPPING_KEYS` (design-implied name; r5.1 O4): the store's refusal is exactly it, and it names the verb
     # and the route (so the equality is not true of an empty constant).
     assert str(refused.value) == ALERT_MAPPING_MISSING
-    assert "set-alert-mapping" in ALERT_MAPPING_MISSING
-    assert "/alert-mapping" in ALERT_MAPPING_MISSING
+    assert_missing_wording_names_verb_and_route(ALERT_MAPPING_MISSING)
 
 
 async def test_1345_o2_insert_alert_takes_no_display_fields(dsn):

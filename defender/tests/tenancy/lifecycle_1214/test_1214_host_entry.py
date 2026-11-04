@@ -26,6 +26,7 @@ from defender.tests.support.tenancy._active1214 import (
     insert_active_tenant,
 )
 from defender.tests.support.tenancy import _host1214 as H
+from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, seed_twin
 from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
@@ -247,7 +248,9 @@ def test_the_publish_child_reports_an_unreachable_database_as_transient(data_roo
 @pytest.mark.postgres
 def test_run_start_builds_its_directory_from_the_database_address(tmp_path, data_root, monkeypatch, migrated_database):  # noqa: F811
     """Same channel as the refusal above, address set: an active row passes the check, an offboarding one is refused (Flow 4)."""
-    insert_active_tenant(migrated_database, TENANT, data_root=data_root)
+    # #1345 D2/r5.1: a tenant has no mapping until one is saved and a run for one is refused, so the tenant that is
+    # admitted and goes on to start its run is seeded with the mapping it needs; the offboarding one is refused earlier.
+    insert_active_tenant(migrated_database, TENANT, data_root=data_root, alert_mapping=FIXTURE_ALERT_MAPPING)
     insert_active_tenant(migrated_database, OTHER, state="offboarding", data_root=data_root)
     for name, value in database_env(migrated_database).items():
         monkeypatch.setenv(name, value)
@@ -265,6 +268,8 @@ def test_run_start_refuses_a_tenant_being_offboarded_through_the_api(tmp_path, d
     world = LifecycleWorld(tmp_path, data_root)
     try:
         tenant = world.active_tenant()
+        # #1345 D2/r5.1: a tenant the product created has no mapping; the run that is admitted below needs one.
+        seed_twin(world.tenants, tenant, FIXTURE_ALERT_MAPPING)
         assert _admits(_run_start(tenant, tmp_path, world.directory()))
         assert world.ops.post(f"/admin/tenants/{tenant}/offboard").status_code == 202
         refused = _run_start(tenant, tmp_path, world.directory())

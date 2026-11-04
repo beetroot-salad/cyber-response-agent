@@ -12,6 +12,7 @@ from typing import Any
 
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy._mapping1345 import assert_missing_wording_names_verb_and_route
 
 
 # Inputs
@@ -615,8 +616,7 @@ def test_1345_o4_a_run_for_a_tenant_with_no_mapping_is_refused_at_setup_before_a
     from defender.records.formats import ALERT_MAPPING_MISSING
     from defender.tests.support.tenancy._host1214 import counting_calls
 
-    assert "set-alert-mapping" in ALERT_MAPPING_MISSING
-    assert "/alert-mapping" in ALERT_MAPPING_MISSING
+    assert_missing_wording_names_verb_and_route(ALERT_MAPPING_MISSING)
     planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     control = _started(tmp_path / "control", planted, _alert())  # control: with its mapping the run starts
     before = control.runs_base_entries()
