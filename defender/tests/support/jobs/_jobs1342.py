@@ -70,10 +70,16 @@ def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: 
     insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root, generations=generations)
 
 
+def drop_tenant(dsn: str, tenant_id: str) -> None:
+    """Delete `tenant_id`'s record and the tenancy rows that reference it (generations, publish status, forge wiring)."""
+    for table in ("generations", "publish_status", "forge_wiring"):
+        execute(dsn, f'DELETE FROM tenancy."{table}" WHERE tenant_id = %s', (tenant_id,))  # noqa: S608
+    execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
+
+
 def restate_tenant(dsn: str, tenant_id: str, *, state: str, wiring: bool = True, data_root: Path | None = None) -> None:
     """Replace `tenant_id`'s record by one in `state` (a case's premise: do it before any alert names the tenant)."""
-    execute(dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant_id,))
-    execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
+    drop_tenant(dsn, tenant_id)
     register_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
 
 

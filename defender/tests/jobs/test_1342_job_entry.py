@@ -38,6 +38,7 @@ from defender.tests.support.jobs._jobs1342 import (
     TITLE,
     WORKTREE,
     register_tenant,
+    drop_tenant,
     restate_tenant,
     tree,
 )
@@ -473,8 +474,7 @@ def test_m1_a_tenant_acceptance_refusal_is_recorded_as_setup_refused(scene, monk
     if record == "records unreachable":
         monkeypatch.setenv("DEFENDER_DATABASE_DSN", "postgresql://nobody@127.0.0.1:1/none?connect_timeout=2")
     elif record == "no record":
-        execute(scene.dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (scene.t.tenant_id,))
-        execute(scene.dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (scene.t.tenant_id,))
+        drop_tenant(scene.dsn, scene.t.tenant_id)
     else:
         restate_tenant(scene.dsn, scene.t.tenant_id, state="active" if record == "no wiring" else record,
                        wiring=record != "no wiring", data_root=scene.root)
