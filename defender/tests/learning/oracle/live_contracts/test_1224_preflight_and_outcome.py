@@ -6,7 +6,6 @@ import json
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -313,16 +312,6 @@ def _worlds(entries: Iterable[Mapping[str, Any]]) -> set[str]:
     return {e["world"] for e in entries}
 
 
-def _as_dt(value: Any) -> datetime:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
-    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-
-
-def _manifest(ep: Path) -> dict:
-    return _yaml.safe_load((Path(ep) / "family.yaml").read_text(encoding="utf-8"))
-
-
 def _text(answer: Any) -> str:
     """An investigator-side answer as bytes-comparable text."""
     if isinstance(answer, str):
@@ -534,25 +523,23 @@ def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp
     assert caught.value.reason == S.REASON_BUDGET
 
 
-def test_1224_preflight_records_original_calls_whose_live_base_answer_drifted(tmp_path):
-    """pre-flight reads every recorded call live at as_of and lists as drift exactly the calls whose live answer differs."""
+def test_1224_preflight_reads_no_recorded_call_live_and_records_no_drift(tmp_path):
+    """Design H6 (#1385): a recorded call is the source's own answer, so pre-flight does not
+    read it live and compares nothing; the outcome record has no `drift`."""
     est = S.estate(tmp_path)
     run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(),
                   after_source=lambda _src: est.answer("edr", "query", _Q2, _DRIFTED))
 
     outcome = S.read_outcome(run.ep)
     assert outcome is not None
-    assert _keys(outcome["drift"]) == {_key("edr", "query", _Q2)}
-    assert all(d["status"] == "drifted" for d in outcome["drift"])
-    as_of = _as_dt(_manifest(run.ep)["as_of"])
+    assert "drift" not in outcome
     for c in _calls():
-        live = [r for r in est.calls(c.system, c.verb) if r["params"] == c.params]
-        assert live, f"pre-flight never read {c.system} {c.verb} live"
-        assert all(r["as_of"] is not None and _as_dt(r["as_of"]) == as_of for r in live)
+        assert not [r for r in est.calls(c.system, c.verb) if r["params"] == c.params], (
+            f"pre-flight read {c.system} {c.verb} live though the capture recorded it")
 
 
 @pytest.mark.parametrize("word", ["accepted", "unusable", "refused"])
-def test_1224_outcome_record_holds_outcome_reason_unservable_worlds_and_drift(
+def test_1224_outcome_record_holds_outcome_reason_and_unservable_worlds(
         tmp_path, monkeypatch, episodes_root, word):
     """Written once, before any sibling, with every field; a later failure goes in the world's own record."""
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
@@ -569,10 +556,11 @@ def test_1224_outcome_record_holds_outcome_reason_unservable_worlds_and_drift(
     text = _outcome_text(run.ep)
     assert text is not None
     record = _yaml.safe_load(text)
-    assert {"outcome", "reason", "unservable_worlds", "not_replayable", "drift"} <= set(record)
+    assert {"outcome", "reason", "unservable_worlds", "not_replayable"} <= set(record)
+    assert "drift" not in record, "design H6: the recorded-versus-live comparison is gone"
     assert record["outcome"] == word
     assert isinstance(record["reason"], str)
-    for name in ("unservable_worlds", "not_replayable", "drift"):
+    for name in ("unservable_worlds", "not_replayable"):
         assert isinstance(record[name], list), name
     originals = {_key(c.system, c.verb, c.params) for c in _calls()}
     for entry in record["unservable_worlds"]:
@@ -667,16 +655,16 @@ def test_a_sibling_exiting_2_at_start_with_no_record_is_recorded_did_not_finish(
     assert record["reason"] != S.REASON_UNSERVABLE
 
 
-def test_1224_preflight_live_drift_read_and_the_siblings_base_answer(tmp_path):
-    """the sibling's base for an original call is the family's recording, not pre-flight's live drift read, which lands only in the drift record."""
+def test_1224_the_siblings_base_answer_is_the_recording_not_a_live_answer(tmp_path):
+    """the sibling's base for an original call is the family's recording; a live answer that
+    moved after the source run is read by no one (design H6: no drift read)."""
     est = S.estate(tmp_path)
     run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(),
                   after_source=lambda _src: est.answer("idp", "query", _Q1, _DRIFTED))
 
     outcome_text = _outcome_text(run.ep)
     assert outcome_text is not None
-    assert _key("idp", "query", _Q1) in _keys(S.read_outcome(run.ep)["drift"],
-                                              status="drifted")
+    assert "drift" not in S.read_outcome(run.ep)
     base_text = (run.ep / "served" / "base.jsonl").read_text(encoding="utf-8")
     assert "e-100" in base_text
     assert "e-drift-77" not in base_text
@@ -737,7 +725,7 @@ def test_preflight_the_original_run_made_no_calls(tmp_path):
     assert outcome["outcome"] == "refused"
     assert any(w in outcome["reason"].lower() for w in ("call", "replay")), outcome["reason"]
     assert outcome["unservable_worlds"] == []
-    assert outcome["drift"] == []
+    assert "drift" not in outcome
     assert oracle.requests == 0
     assert verifier.requests == 0
     assert run.spawn.launches == []
@@ -767,8 +755,8 @@ def test_1224_original_run_with_no_replayable_call(tmp_path):
 
 @pytest.mark.parametrize("live", ["still-errors", "now-answers"])
 def test_preflight_original_call_was_itself_an_error(tmp_path, live):
-    """A captured failure is read live: still erroring, it passes through as `real-error`,
-    never unservable; now answering, it is calibrated and recorded as drift."""
+    """A captured failure has no recording, so it is read live: still erroring, it passes through
+    as `real-error`, never unservable; now answering, it is calibrated like any live base."""
     params = {"entity": "svc-err"}
     est = S.estate(tmp_path)
 
@@ -792,7 +780,6 @@ def test_preflight_original_call_was_itself_an_error(tmp_path, live):
     assert est.calls("edr", "lookup"), "the captured failure is read live"
     if live == "now-answers":
         assert "svc-err" in oracle.all_seen(), "calibrated like any call"
-        assert _key("edr", "lookup", params) in _keys(outcome["drift"], status="drifted")
         return
     assert "svc-err" not in oracle.all_seen(), "an error is not the oracle's to serve"
     faults = S.mod("kit.faults")
@@ -820,7 +807,6 @@ def test_input_original_run_repeats_a_call(tmp_path):
     idp_rows = [r for r in S.base_rows(run.ep) if r["system"] == "idp"]
     assert len(idp_rows) == 1
     assert "e-100" in idp_rows[0]["payload_text"]
-    assert _key("idp", "query", _Q1) in _keys(S.read_outcome(run.ep)["drift"], status="drifted")
 
     sib = S.oracle(S.submit(_BASE, S.EMPTY_CLAIM))
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=S.passing_verifier())
@@ -853,10 +839,8 @@ def test_1224_original_calls_that_never_reached_a_system(tmp_path):
         assert [r for r in est.calls(system, verb) if r["params"] == params] == []
     for marker in ("sent-1", "sent-2", "sent-3"):
         assert marker not in oracle.all_seen()
-    assert est.calls("idp", "query")
+    assert not est.calls("idp", "query"), "a recorded call is read live by no one (design H6)"
     assert _MARK["idp"] in oracle.all_seen()
-    sentinel_keys = {_key(s, v, p) for s, v, p, _ in sentinels}
-    assert not sentinel_keys & _keys(S.read_outcome(run.ep)["drift"])
 
 
 def test_preflight_runs_out_of_oracle_budget_midway(tmp_path, monkeypatch):
@@ -875,53 +859,6 @@ def test_preflight_runs_out_of_oracle_budget_midway(tmp_path, monkeypatch):
     assert sorted(run.spawn.worlds) == ["a", "c"]
     for w in S.WORLDS:
         assert S.ledger_rows(run.ep, w) == []
-
-
-def test_preflight_drift_read_fails_on_the_real_system(tmp_path):
-    """a drift read the real system errors on is recorded as drift-unknown, goes through the grant and as_of, and makes no world unservable."""
-    est = S.estate(tmp_path)
-    oracle = _passing()
-    run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier(),
-                  after_source=lambda _src: est.fail("edr", "query", _Q2,
-                                                     fault="TransportFault"))
-
-    outcome = S.read_outcome(run.ep)
-    assert outcome is not None
-    assert outcome["outcome"] == "accepted"
-    assert outcome["unservable_worlds"] == []
-    unknown = [d for d in outcome["drift"] if _key(d["system"], d["verb"], d["params"])
-               == _key("edr", "query", _Q2)]
-    assert unknown
-    assert all(d["status"] == "unknown" for d in unknown)
-    as_of = _as_dt(_manifest(run.ep)["as_of"])
-    reads = [r for r in est.calls("edr", "query") if r["params"] == _Q2]
-    assert reads
-    assert all(_as_dt(r["as_of"]) == as_of for r in reads)
-    assert _MARK["edr"] in oracle.all_seen(), "the call is calibrated against its recording"
-
-
-def test_input_drift_differs_only_in_volatile_fields(tmp_path):
-    """Drift uses check 1's comparator: a timing field or row-order change is drift, an identical answer is not."""
-    est = S.estate(tmp_path)
-    rows = [_ROW, {**_ROW, "event_id": "e-101"}]
-    recorded = {"took_ms": 5, "rows": rows}
-    calls = [S.Call("idp", "query", _Q1, recorded), S.Call("edr", "query", _Q2, recorded),
-             S.Call("siem-x", "lookup", _L3, recorded)]
-
-    def move(_src: Path) -> None:
-        est.answer("edr", "query", _Q2, {"took_ms": 9, "rows": rows})
-        est.answer("siem-x", "lookup", _L3, {"took_ms": 5, "rows": rows[::-1]})
-
-    run = _launch(tmp_path, est, calls=calls, after_source=move,
-                  oracle=S.oracle(then=S.submit(recorded, S.EMPTY_CLAIM)),
-                  verifier=S.passing_verifier())
-
-    outcome = S.read_outcome(run.ep)
-    assert outcome is not None
-    assert _keys(outcome["drift"], status="drifted") == {
-        _key("edr", "query", _Q2), _key("siem-x", "lookup", _L3)}
-    assert _key("idp", "query", _Q1) not in _keys(outcome["drift"])
-    assert all({"system", "verb", "params", "status"} <= set(d) for d in outcome["drift"])
 
 
 @pytest.mark.parametrize("status", [S.OUTAGE, 401], ids=["outage-503", "rejected-key-401"])
