@@ -293,7 +293,11 @@ class ScriptedChild:
         }
 
     def __call__(self, launch: Any) -> list[str]:
-        self.spec.write_text(json.dumps(self.spec_dict()), encoding="utf-8")
+        # Replaced whole, never rewritten in place: two workers share one child, and a child
+        # starting while another launch rewrites the spec must never read it half-written.
+        staged = self.spec.with_name(f".{self.spec.name}.{os.getpid()}.{launch.investigation_id}")
+        staged.write_text(json.dumps(self.spec_dict()), encoding="utf-8")
+        os.replace(staged, self.spec)
         return [sys.executable, str(self.script), str(self.spec), "--job", launch.investigation_id,
                 "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 
