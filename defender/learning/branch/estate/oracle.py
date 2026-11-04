@@ -249,7 +249,7 @@ _PREBRANCH_LINE = ("This call was made by the source run BEFORE the branch point
 
 
 def _branch_point(family: Any) -> str:
-    """The family's branch-point clock (`as_of`, the one every branching read is bounded by)
+    """The family's branch-point clock (`as_of`, the moment the oracle cuts each answer at)
     as an ISO-8601 `Z` time, or "" when the family carries none."""
     as_of = getattr(family, "as_of", None)
     if as_of is None or not hasattr(as_of, "isoformat"):
@@ -636,11 +636,9 @@ class Oracle:
         from pydantic_ai.messages import UserPromptPart
 
         system, verb, params = call
-        # A pre-branch call is served unchanged (no re-ask), but the oracle is still told what
-        # kind of base it holds.
-        framing = [*([_PREBRANCH_LINE] if fixed else []),
-                   _LIVE_ANSWER_LINE if fixed and live else _LIVE_BASE_LINE if live
-                   else _RECORDED_BASE_LINE]
+        # A pre-branch call is fixed only over its recorded answer (`WorldRegistry.fixes`), so
+        # it is told only to serve it unchanged; any other call is told what kind of base it holds.
+        framing = [_PREBRANCH_LINE] if fixed else [_LIVE_BASE_LINE if live else _RECORDED_BASE_LINE]
         turn = UserPromptPart(content="\n".join([
             "A new call to serve.", *framing, _call_text(system, verb, params),
             _base_text(base)]))
@@ -929,7 +927,7 @@ class Oracle:
         if (system, verb) != (run.call[0], run.call[1]):
             raise _ArgumentRefused("it must ask the call's own system and verb")
         try:
-            answer = self._rerun(run, system, verb, dict(params))
+            answer = self._re_read(run, system, verb, dict(params))
         except Refused as unread:
             raise _ArgumentRefused(f"it could not be read: {unread}") from None
         names = esql_names(run.base)
@@ -974,6 +972,13 @@ class Oracle:
         if key not in run.reruns:
             run.reruns[key] = self.door.run("host-check", system, verb, params, waits=run.waits)
         return run.reruns[key]
+
+    def _re_read(self, run: _Run, system: str, verb: str, params: dict) -> Any:
+        """A re-ask's answer: always read, and logged as the re-ask's own read. A host check of
+        the same question later in the attempt is handed this answer rather than reading again."""
+        answer = self.door.run("re-ask", system, verb, params, waits=run.waits)
+        run.reruns[request_key(system, verb, params)] = answer
+        return answer
 
     # -- submission ---------------------------------------------------------------------------
 

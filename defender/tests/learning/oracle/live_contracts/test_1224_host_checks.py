@@ -78,7 +78,7 @@ class _Scene:
         rt = self.est.run_tenant()
         world, ledger = S.load_world(self.ep, label), S.world_ledger(self.ep, label)
         return S.sym(S.REGISTRY, "WorldRegistry")(
-            self.est.roster(), rt.grants.gather, world=world, ledger=ledger, as_of=S.AS_OF_DT,
+            self.est.roster(), rt.grants.gather, world=world, ledger=ledger,
             tenant=rt, grant_home=rt.table_pointer, source_run=_run_handle_1165(self.source_run_dir),
             **S.registry_seams(world, ledger, oracle=o.model, verifier=verifier.model, box=box,
                                oracle_dir=S.oracle_dir(self.ep, label), **knobs))

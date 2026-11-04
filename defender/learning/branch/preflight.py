@@ -404,9 +404,10 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
                 continue
         else:
             base_text = recorded
-        # D6 (#1255): a pre-branch call the primer recorded unanswered is never fixed.
+        # D6 (#1255): a pre-branch call is fixed only over its recorded answer; one the primer
+        # recorded unanswered, or whose answer the recording lacks, is read live and re-askable.
         key = request_key(call.system, call.verb, call.params)
-        fixed = key in prebranch and key not in unrecorded
+        fixed = recorded is not None and key in prebranch and key not in unrecorded
         calibrated.append((call, json.loads(base_text), fixed, recorded is None))
 
     stop = threading.Event()
@@ -438,7 +439,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
         serving = oracle_serving(settings, oracle=oracle, verifier=verifier, box=box,
                                  tenant_id=str(tenant.tenant_id), restart_after=restart_after)
         registry = WorldRegistry(
-            roster, tenant.grants.gather, world=world, ledger=ledger, as_of=family.as_of,
+            roster, tenant.grants.gather, world=world, ledger=ledger,
             serving=serving, oracle_dir=default_oracle_dir(world, ledger), limiter=limiter,
             tenant=tenant, grant_home=tenant.table_pointer, family_answers=family_answers,
             source_run=source)

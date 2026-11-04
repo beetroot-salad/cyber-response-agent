@@ -146,10 +146,11 @@ class ServedCall:
     claim: dict | None = None
     verifier_verdict: dict | None = None
     attempts: int | None = None
-    #: The re-ask a query system's answer was cut by (#1385): `{system, verb, params, dropped}`,
-    #: the question asked bounded at the branch point and the rows it dropped from the live
-    #: answer. Kept on the row so audit and the judge see how the answer was cut, `reconstructed`
-    #: or `oracle`.
+    #: The re-ask a query system's answer was cut by (#1385): `{system, verb, params, dropped,
+    #: dropped_in_all}`, the question asked bounded at the branch point, the first rows it
+    #: dropped from the live answer and how many it dropped in all (`registry.ledger_cut`; the
+    #: oracle's answer store keeps the whole cut). Kept on the row so audit and the judge see how
+    #: the answer was cut, `reconstructed` or `oracle`.
     re_ask: dict | None = None
     #: The call's host-written id (`record_query.next_call_id`, A12): the query tool's, the
     #: same id the run's call join pairs with the call's query-table row (#1255 G6). `None` for a call no query tool allocated
@@ -197,10 +198,12 @@ class ServedCall:
             # is decided by `judge/family._grade_world` alone.
             row["differs_from_base"] = self.differs_from_base
             row["base_pattern_digest"] = self.base_pattern_digest
-        for name in ("base_digest", "claim", "verifier_verdict", "attempts", "re_ask", "call_id"):
+        for name in ("base_digest", "claim", "verifier_verdict", "attempts", "call_id"):
             value = getattr(self, name)
             if value is not None:
                 row[name] = value
+        if self.re_ask is not None:
+            row["re_ask"] = self.re_ask
         return row
 
 

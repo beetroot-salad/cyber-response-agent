@@ -164,5 +164,5 @@ def world_registry_with_source(ep: Path, label: str, est: Any, *, source_run: An
     seams = S24.registry_seams(world, ledger, oracle_dir=S24.oracle_dir(ep, label),
                                oracle=oracle.model, verifier=verifier.model, box=box, **knobs)
     return WorldRegistry(
-        est.roster(), rt.grants.gather, world=world, ledger=ledger, as_of=S24.AS_OF_DT,
+        est.roster(), rt.grants.gather, world=world, ledger=ledger,
         tenant=rt, grant_home=rt.table_pointer, source_run=source_run, **seams)

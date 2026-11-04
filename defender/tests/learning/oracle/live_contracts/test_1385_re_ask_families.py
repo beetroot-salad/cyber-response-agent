@@ -367,3 +367,47 @@ def test_1385_a_re_ask_is_shown_wherever_a_served_call_is_read_and_its_dropped_r
         assert Q_TAG in body, f"the judge's call line lost the question: {body!r}"
         assert D_ID in body, f"the judge's call line lost the dropped row: {body!r}"
         assert B_ID not in body, f"the judge's call line shows an older row as dropped: {body!r}"
+
+
+def _served_after_re_ask(tmp_path: Any, live: list[dict], re_asked_rows: list[dict]) -> Any:
+    """World b serving the dan call over a live base of `live`, re-asked to `re_asked_rows` and
+    served as the re-asked answer (`$BASE`)."""
+    sc = H._scene(tmp_path, live=[("idp", "query", LIVE_ONLY, {"rows": live}),
+                                  ("idp", "query", RE_ASK_Q, {"rows": re_asked_rows})])
+    o = S.oracle(S.re_ask(S.re_asked(system="idp", verb="query", params=RE_ASK_Q)),
+                 S.submit(S.sym("learning.branch.estate._oracle_prompt", "BASE_HANDLE"),
+                          S.EMPTY_CLAIM))
+    assert sc.call(sc.registry(o, S.passing_verifier()), "idp", "query", **LIVE_ONLY) == {
+        "rows": re_asked_rows}
+    H._spent(o)
+    return sc
+
+
+def test_1385_review_an_answer_served_as_the_live_base_carries_no_re_ask(tmp_path):
+    """A re-ask that cut nothing leaves the served answer the live base (`passthrough`): no cut
+    is stored or shown for it. The re-ask's read is logged as the re-ask's own."""
+    sc = _served_after_re_ask(tmp_path, [ROW_K], [ROW_K])
+
+    committed = sc.rows("answers")
+    assert [r["decision"] for r in committed] == ["passthrough"], committed
+    assert "re_ask" not in committed[0], committed[0]
+    assert sc.ledger()[0].get("re_ask") is None, sc.ledger()
+    assert H._has_row(sc.rows("ledger"), actor="re-ask", params=RE_ASK_Q), sc.rows("ledger")
+
+
+@pytest.mark.parametrize(("dropped", "shown"), [
+    pytest.param([_dan(f"e-late-{i}", "2026-07-28T17:05:00Z") for i in range(7)], 5,
+                 id="seven-rows"),
+    pytest.param([{**ROW_D, "detail": "x" * 5000}, ROW_D], 0, id="one-oversized-row"),
+])
+def test_1385_review_a_ledger_row_keeps_a_bounded_cut_and_the_store_the_whole(
+        tmp_path, dropped, shown):
+    """The answer store keeps every dropped row once; each ledger row (the judge's call list
+    prints it whole) keeps the first rows that fit, and how many were dropped in all."""
+    sc = _served_after_re_ask(tmp_path, [*dropped, ROW_K], [ROW_K])
+
+    assert sc.rows("answers")[0]["re_ask"]["dropped"] == dropped
+    cut = sc.ledger()[0]["re_ask"]
+    assert cut["dropped"] == dropped[:shown], cut
+    assert cut["dropped_in_all"] == len(dropped), cut
+    assert cut["params"] == RE_ASK_Q, cut

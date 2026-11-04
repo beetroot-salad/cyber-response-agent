@@ -791,7 +791,7 @@ def test_p083_call_window_extends_past_the_branch_point(tmp_path):
 
 
 def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path, monkeypatch):
-    """a sibling started months after the branch point, and the same sibling resumed, hold the clock the manifest recorded on the registry, and send adapters none (design O1): an adapter that records everything its call is handed (its whole context, nested, and its params) is shown neither the branch point nor the run clock, in a sibling's call, in the oracle's and the verifier's reads, and in pre-flight's."""
+    """a sibling started months after the branch point, and the same sibling resumed, hold the clock the manifest recorded, and send adapters none (design O1): an adapter that records everything its call is handed (its whole context, nested, and its params) is shown neither the branch point nor the run clock, in a sibling's call, in the oracle's and the verifier's reads, and in pre-flight's."""
     assert datetime.now(UTC).date() != BRANCH_SENTINEL.date(), "premise: the siblings start later"
     est = _capturing_estate(tmp_path)
     est.answer("idp", "query", None, BASE)
@@ -804,7 +804,7 @@ def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path, monk
                       S.submit("$BASE", S.EMPTY_CLAIM))
     verifier = S.verifier(S.run_query("siem-x", "lookup", VERIFY), S.verdict(True),
                           S.run_query(CAPTURING, "query", {"q": "verifier-side"}), S.verdict(True))
-    _e, _p, reg = _scene(tmp_path, oracle, verifier, est=est, ep=ep, as_of=first.as_of)
+    _e, _p, reg = _scene(tmp_path, oracle, verifier, est=est, ep=ep)
     _ask(reg, est, tmp_path / "run")
     # An investigator's call through the query tool, which holds the run's clock at the sentinel.
     S.drive_gather_run(tmp_path / "drive", verbs=reg, tenant=est.place(), system=CAPTURING,
@@ -818,7 +818,7 @@ def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path, monk
     resumed = S.load_world(ep, "b")
     again = S.oracle(S.run_query("edr", "query", S.query_params("host:db-2")), S.submit(BASE))
     est.answer("edr", "query", S.query_params("host:db-2"), {"events": []})
-    _e, _p, reg2 = _scene(tmp_path, again, est=est, ep=ep, as_of=resumed.as_of)
+    _e, _p, reg2 = _scene(tmp_path, again, est=est, ep=ep)
     _ask(reg2, est, tmp_path / "run", q="user:alice", limit=20)
 
     assert first.as_of == resumed.as_of == BRANCH_SENTINEL

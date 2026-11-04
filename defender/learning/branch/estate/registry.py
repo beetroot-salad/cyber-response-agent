@@ -9,7 +9,6 @@ import json
 import logging
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -87,7 +86,8 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
         hit = registry.store.answers.get(key)
         if hit is None:
             hit = _served_in_turn(registry, system, verb, asked, base_text,
-                                  fixed=registry.fixes(key), live=not recorded)
+                                  fixed=registry.fixes(key, recorded=recorded),
+                                  live=not recorded)
     return registry._record_answer(system, verb, asked, hit)
 
 
@@ -102,7 +102,9 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
 
     def commit(served: Any, claim: dict, verdict: dict, attempts: int, staged: Any) -> None:
         changed = changes_base(served, base)
-        re_asked = staged.re_asked
+        # A re-ask stays with the answer only when the answer it served is not the live base:
+        # served unchanged, the cut it read showed nowhere.
+        re_asked = staged.re_asked if changed else None
         decision = served_label(base, served, claim, registry.world_facts, re_asked)
         answer = {"system": system, "verb": verb, "params": asked,
                   "served": json.loads(payload_text_of(served if changed else base)),
@@ -122,10 +124,11 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
             # (A3): kept across resume and indexed as real data. After the commit, so a failed
             # commit leaves no base behind for an answer that was never served. Best effort: the
             # answer is committed and served either way; a base lost here costs a reload only
-            # its entry in the real-data index.
+            # its entry in the real-data index. The oracle's read already indexed it in this
+            # process (`explored`), so only a resume indexes the kept text.
             try:
                 registry.store.keep_base(re_asked.system, re_asked.verb, re_asked.params,
-                                         payload_text_of(re_asked.answer))
+                                         payload_text_of(re_asked.answer), indexed=True)
             except OSError as unwritable:
                 _logger.warning(f"the re-asked base of {system}.{verb} could not be kept "
                                 f"({unwritable!r}); the answer is served")
@@ -187,6 +190,29 @@ def served_label(base: Any, served: Any, claim: Mapping[str, Any], world_facts: 
              or any(names_an_entity(e.get("row"), entities) for e in claim.get("removed") or ())
              or any(names_an_entity(row, entities) for row in dropped))
     return ORACLE if shown else RECONSTRUCTED
+
+
+#: How many of a re-ask's dropped rows its ledger rows keep, and the most text they may take:
+#: the answer store keeps the whole cut once, and every delivery of the answer (each repeat
+#: included) writes a ledger row the judge's call list prints whole.
+LEDGER_DROPPED_ROWS = 5
+LEDGER_DROPPED_CHARS = 4000
+
+
+def ledger_cut(re_ask: Any) -> Any:
+    """A stored re-ask as a ledger row carries it: its question, the first dropped rows that
+    fit `LEDGER_DROPPED_ROWS` and `LEDGER_DROPPED_CHARS`, and how many it dropped in all."""
+    if not isinstance(re_ask, dict) or not isinstance(re_ask.get("dropped"), list):
+        return re_ask
+    dropped = re_ask["dropped"]
+    shown: list[Any] = []
+    room = LEDGER_DROPPED_CHARS
+    for row in dropped[:LEDGER_DROPPED_ROWS]:
+        room -= len(canonical_json(row))
+        if room < 0:
+            break
+        shown.append(row)
+    return {**re_ask, "dropped": shown, "dropped_in_all": len(dropped)}
 
 
 def changes_base(served: Any, base: Any) -> bool:
@@ -295,7 +321,7 @@ def oracle_serving(settings: OracleSettings, *, tenant_id: str, oracle: Any = No
 class WorldRegistry(ModuleVerbRegistry):
     """A `ModuleVerbRegistry` whose verbs answer as the world's live oracle serves them."""
 
-    def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity, its tenant and its settled oracle side
+    def __init__(self, roster, grant, *, world: Any, ledger: Ledger,  # noqa: PLR0913 — a world's whole serving identity, its tenant and its settled oracle side
                  serving: OracleServing, oracle_dir: Path, limiter: RateLimiter,
                  tenant: Any = None, grant_home: str = TABLE_POINTER,
                  family_answers: Sequence[FamilyAnswer] | None = None,
@@ -312,22 +338,6 @@ class WorldRegistry(ModuleVerbRegistry):
         (#1105 PR 2: never the manifest's recorded path); its alert is the oracle's view of the
         case, and `None` serves none."""
         super().__init__(roster, grant, grant_home=grant_home)
-        # Validate the clock here, once: every query this world issues, the oracle's own
-        # included, carries it, so no oracle-side context is ever built without it (O-31).
-        #
-        # `utcoffset() == timedelta(0)`, not `tzinfo is not None`: an aware non-UTC datetime
-        # would format a trailing `Z` that is wrong by its offset.
-        if not isinstance(as_of, datetime):
-            raise EstateError(
-                f"a world needs the moment it is being served as of, got {as_of!r} — without it "
-                "every read a sibling or its oracle makes is the afternoon it executed rather "
-                "than the branch point it resumed into, and the episode cannot be replayed")
-        if as_of.tzinfo is None or as_of.utcoffset() != timedelta(0):
-            raise EstateError(
-                f"as_of must be an aware UTC datetime, got {as_of!r} (offset "
-                f"{as_of.utcoffset()!r}) — a naive or offset moment formats a `Z` that lies by "
-                "that offset")
-        self.as_of = as_of
         world_id = getattr(world, "world_id", None)
         if (fault := uuid_id_fault(world_id, "world")) is not None:
             raise EstateError(fault)
@@ -379,10 +389,13 @@ class WorldRegistry(ModuleVerbRegistry):
             self.oracle.unservable = recorded
         self._wrapped: dict[str, dict[str, Any]] = {}
 
-    def fixes(self, key: str) -> bool:
+    def fixes(self, key: str, *, recorded: bool) -> bool:
         """Whether the call keyed `key` is a fixed pre-branch answer (M01=A): one the source
-        made before the branch point, unless the primer recorded it unanswered (#1255 D6)."""
-        return key in self.prebranch and key not in self.unrecorded
+        made before the branch point and whose answer the recording holds (`recorded`). A
+        pre-branch call without one is served like the primer's unanswered calls (#1255 D6):
+        its base is a live read, which can hold rows after the branch point, so it is re-asked
+        rather than served unchanged — whether or not the primer's skip record names it."""
+        return recorded and key in self.prebranch and key not in self.unrecorded
 
     @property
     def call_run(self) -> str:
@@ -488,7 +501,7 @@ class WorldRegistry(ModuleVerbRegistry):
             source=answer.get("decision") or ORACLE, world_id=self.world.world_id,
             base_digest=answer.get("base_digest"), claim=answer.get("claim"),
             verifier_verdict=answer.get("verifier_verdict"), attempts=answer.get("attempts"),
-            re_ask=answer.get("re_ask"),
+            re_ask=ledger_cut(answer.get("re_ask")),
             # This call's id, never the stored answer's: a repeat is its own call (A12).
             call_id=CALL_ID.get()))
 

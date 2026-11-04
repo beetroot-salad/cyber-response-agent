@@ -1228,7 +1228,7 @@ def registry_seams(world: Any, ledger: Any, *, oracle_dir: Path | None = None,
     }
 
 
-def build_registry(roster: Any, grant: Any, *, world: Any, ledger: Any, as_of: Any,
+def build_registry(roster: Any, grant: Any, *, world: Any, ledger: Any,
                    tenant: Any = None, grant_home: str | None = None, **knobs: Any) -> Any:
     """`WorldRegistry(roster, grant, ...)` with its settled oracle side from
     `registry_seams(world, ledger, **knobs)` — the constructor as a test that does not care
@@ -1238,7 +1238,7 @@ def build_registry(roster: Any, grant: Any, *, world: Any, ledger: Any, as_of: A
     if "prebranch" in knobs:
         extra["prebranch"] = knobs.pop("prebranch")
     return sym(REGISTRY, "WorldRegistry")(
-        roster, grant, world=world, ledger=ledger, as_of=as_of, tenant=tenant,
+        roster, grant, world=world, ledger=ledger, tenant=tenant,
         **registry_seams(world, ledger, **knobs), **extra)
 
 
@@ -1248,13 +1248,12 @@ def world_registry(ep: Path, label: str, est: Estate, *, oracle: ScriptedModel |
     """`WorldRegistry` for world `label` of episode `ep`, over the fixture estate's roster and
     gather grant, with the doubles injected through its seams. `knobs` are the oracle
     keywords (`retry_cap=`, `turn_deadline=`, `budget=`, `rate=`, `restart_after=`,
-    `limiter=`), settled by `registry_seams`, and `as_of=` (the branch point by default)."""
+    `limiter=`), settled by `registry_seams`."""
     rt = tenant if tenant is not None else est.run_tenant()
     served = world if world is not None else load_world(ep, label)
     ledger = world_ledger(ep, label)
-    as_of = knobs.pop("as_of", AS_OF_DT)
     return build_registry(
-        est.roster(), rt.grants.gather, world=served, ledger=ledger, as_of=as_of,
+        est.roster(), rt.grants.gather, world=served, ledger=ledger,
         tenant=rt, grant_home=rt.table_pointer,
         oracle=None if oracle is None else oracle.model,
         verifier=None if verifier is None else verifier.model, box=box,
