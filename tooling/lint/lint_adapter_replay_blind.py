@@ -52,6 +52,8 @@ import sys
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
+from _astlib import ModuleEnv, callee, module_env, origin
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: The attributes that carry a replay input to an adapter.
@@ -150,52 +152,42 @@ def _declared_names(cls: ast.ClassDef) -> Iterator[tuple[str, int]]:
                         yield name.id, stmt.lineno
 
 
-def _import_aliases(tree: ast.AST) -> dict[str, str]:
-    """The dotted name each imported local name stands for: `import a.b as c` gives `c: a.b`,
-    `import a.b` gives `a: a`, `from a import b as c` gives `c: a.b`."""
-    out: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                out[alias.asname or alias.name.split(".")[0]] = (
-                    alias.name if alias.asname else alias.name.split(".")[0])
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            for alias in node.names:
-                out[alias.asname or alias.name] = f"{node.module}.{alias.name}"
-    return out
-
-
-def _qualname(node: ast.AST, aliases: dict[str, str]) -> str | None:
-    """`node` as a dotted name with its root resolved through the import aliases, else None."""
+def _spelled(node: ast.AST, env: ModuleEnv) -> str | None:
+    """`node` as a dotted name: its import origin where the scope binds its root to an import (so
+    `import typing as t` gives `t.Protocol` as `typing.Protocol`), else the name as written (a
+    class of this module); None for anything but a `Name.attr` chain."""
+    resolved = origin(node, env) if isinstance(node, ast.expr) else None
+    if resolved is not None:
+        return resolved
     if isinstance(node, ast.Name):
-        return aliases.get(node.id, node.id)
+        return node.id
     if isinstance(node, ast.Attribute):
-        base = _qualname(node.value, aliases)
+        base = _spelled(node.value, env)
         return None if base is None else f"{base}.{node.attr}"
     return None
 
 
-def _is_protocol(cls: ast.ClassDef, aliases: dict[str, str], local: frozenset[str] = frozenset()
+def _is_protocol(cls: ast.ClassDef, env: ModuleEnv, local: frozenset[str] = frozenset()
                  ) -> bool:
     """A `Protocol` subclass: `Protocol`, `typing.Protocol`, `typing_extensions.Protocol`,
     subscripted or imported under another name, or a subclass of a protocol in this module."""
     for base in cls.bases:
         node = base.value if isinstance(base, ast.Subscript) else base
-        qual = _qualname(node, aliases)
+        qual = _spelled(node, env)
         if qual is not None and (qual.split(".")[-1] == "Protocol" or qual in local):
             return True
     return False
 
 
 def _protocols(tree: ast.AST) -> list[ast.ClassDef]:
-    aliases = _import_aliases(tree)
+    env = module_env(tree)
     classes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
     local: set[str] = set()
     grew = True
     while grew:
         grew = False
         for cls in classes:
-            if cls.name not in local and _is_protocol(cls, aliases, frozenset(local)):
+            if cls.name not in local and _is_protocol(cls, env, frozenset(local)):
                 local.add(cls.name)
                 grew = True
     return [cls for cls in classes if cls.name in local]
@@ -226,7 +218,7 @@ class _Clock:
     module's import aliases and the names it binds to one (`f = dt.datetime.now`)."""
 
     def __init__(self, tree: ast.AST) -> None:
-        self.aliases = _import_aliases(tree)
+        self.env = module_env(tree)
         #: local name -> the `(root, last)` clock reader it is bound to.
         self.bound: dict[str, tuple[str | None, str]] = {}
         grew = True
@@ -259,14 +251,14 @@ class _Clock:
     def _reader(self, node: ast.AST) -> tuple[str | None, str] | None:
         """`(root module, reader name)` of the clock reader `node` is, uncalled, else None."""
         if isinstance(node, ast.Call):  # functools.partial(<reader>, ...)
-            qual = _qualname(node.func, self.aliases)
+            qual = callee(node, self.env)
             if qual is not None and qual.split(".")[-1] == "partial" and node.args:
                 return self._reader(node.args[0])
             return None
         if isinstance(node, ast.Name):
             if node.id in self.bound:
                 return self.bound[node.id]
-            qual = self.aliases.get(node.id)
+            qual = origin(node, self.env)
             if qual is None or "." not in qual:
                 return None
             root, last = qual.split(".")[0], qual.split(".")[-1]
@@ -276,7 +268,7 @@ class _Clock:
                 return root, last
             return None
         if isinstance(node, ast.Attribute):
-            qual = _qualname(node, self.aliases)
+            qual = origin(node, self.env)
             if qual == "datetime.time":  # the time-of-day class, not a read
                 return None
             base = qual.split(".")[0] if qual is not None else None
@@ -323,7 +315,7 @@ def _bound_names(target: ast.AST) -> Iterator[str]:
         yield from _bound_names(target.value)
 
 
-def _assigned(stmt: ast.AST) -> tuple[list[str], list[ast.AST]]:  # noqa: C901 — one arm per binding form
+def _assigned(stmt: ast.AST, env: ModuleEnv) -> tuple[list[str], list[ast.AST]]:  # noqa: C901 — one arm per binding form
     """`(names bound, the expressions their values come from)` of a binding node, else
     `([], [])`: assignments, loop and `with` targets, comprehension targets, walrus, and a call
     that puts its arguments into a name (`xs.append(v)`, `d.update(v)`, `d.setdefault(k, v)`)."""
@@ -337,8 +329,9 @@ def _assigned(stmt: ast.AST) -> tuple[list[str], list[ast.AST]]:  # noqa: C901 �
         return list(_bound_names(stmt.target)), [stmt.iter]
     if isinstance(stmt, ast.withitem) and stmt.optional_vars is not None:
         return list(_bound_names(stmt.optional_vars)), [stmt.context_expr]
+    # a method on a value, not a function an import names (`callee` is None for the former)
     if (isinstance(stmt, ast.Call) and isinstance(stmt.func, ast.Attribute)
-            and stmt.func.attr in _MUTATORS):
+            and callee(stmt, env) is None and stmt.func.attr in _MUTATORS):
         return list(_bound_names(stmt.func.value)), [*stmt.args, *(k.value for k in stmt.keywords)]
     return [], []
 
@@ -347,7 +340,7 @@ def _origins(nodes: Iterable[ast.AST], clock: _Clock,
              seed: dict[str, set[int]]) -> dict[str, set[int]]:
     """For each name, the lines of the clock reads that may reach it, propagated to a fixpoint over
     every binding in `nodes` — in any statement order, inside any `try`/`with`/`if`."""
-    binds = [(names, deps) for names, deps in map(_assigned, nodes) if names]
+    binds = [(names, deps) for names, deps in (_assigned(n, clock.env) for n in nodes) if names]
     origins = {name: set(lines) for name, lines in seed.items()}
     grew = True
     while grew:

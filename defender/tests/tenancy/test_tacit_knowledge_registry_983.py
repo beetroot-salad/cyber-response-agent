@@ -178,7 +178,7 @@ def test_expired_entry_is_not_a_hit_at_lookup(tmp_path):
 
 def _ctx(root: Path, tmp_path: Path) -> VerbContext:
     """A `VerbContext` pointing at a throwaway tree (no moment: an adapter is handed none, #1385
-    O1; the day the lookup judges against is pinned with `_on`). The registry is the
+    O1; the adapter judges against today, so a test dates its entries around `_today`). The registry is the
     run's agent knowledge (`<agent root>/skills/tacit-knowledge/registry.yaml`), so the
     throwaway tree is the run tenant's agent root — never `defender_dir`, which holds none."""
     return VerbContext(
@@ -187,17 +187,18 @@ def _ctx(root: Path, tmp_path: Path) -> VerbContext:
     )
 
 
-def _on(monkeypatch, day: dt.date) -> None:
-    """Pin the day the lookup judges against (the adapter judges against today, #1385 H5)."""
-    monkeypatch.setattr(registry(), "_today", lambda: day)
+def _around_today(*, added: int, review: int) -> dict[str, str]:
+    """The `added_at` and `review_by` of an entry dated `added` and `review` days from today (the
+    day the adapter judges against, #1385 H5), so the test needs no pinned clock."""
+    today = dt.datetime.now(dt.UTC).date()
+    return {"added_at": (today + dt.timedelta(days=added)).isoformat(),
+            "review_by": (today + dt.timedelta(days=review)).isoformat()}
 
 
-def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path, monkeypatch):
+def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
     root = tmp_path / "tree"
-    _write_registry(root, _entry(id="tk-fixture-only", added_at="2026-03-01",
-                                 review_by="2026-06-01"))
+    _write_registry(root, _entry(id="tk-fixture-only", **_around_today(added=-30, review=30)))
     ctx = _ctx(root, tmp_path)
-    _on(monkeypatch, dt.date(2026, 5, 5))
 
     hit = registry().lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
     assert isinstance(hit, dict)
@@ -219,7 +220,7 @@ def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path, monkeypatch
         "authorizes the whole estate through one verb call"
     )
 
-    _on(monkeypatch, dt.date(2026, 7, 1))
+    _write_registry(root, _entry(id="tk-fixture-only", **_around_today(added=-60, review=-30)))
     expired = registry().lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
     assert expired["matched"] is None, (
         "the entry answered past its own `review_by` — expiry is applied by `find_entry` and "
