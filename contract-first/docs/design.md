@@ -110,8 +110,10 @@ Exploits aren't repaired one by one. An attacker can always find one more spelli
 exception type, and a test per instance invites the next one: past runs went to seven repair rounds
 that way. So the attack batch is sorted like any other batch of findings (below): irrelevant
 findings are dropped, the rest are grouped by the design choice that made them possible, and each
-family gets one verdict, such as closing it with one test over the whole class. Another round runs
-only when a recheck finds a new family.
+family gets one verdict, such as closing it with one test over the whole class. Every repair is
+rechecked by replaying the saved exploits, which costs no agent; another attack runs only when that
+recheck finds a new family or the repair changes something the saved exploits can't speak for. Past
+re-attack rounds almost never found anything beyond more instances of families already decided.
 
 ```mermaid
 flowchart TD
