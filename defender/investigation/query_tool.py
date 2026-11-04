@@ -326,6 +326,19 @@ class QueryCapture(AbstractCapability[Any]):
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
+        # A schema refusal is a result too (#1385 A6): it reaches the model with the stamp of the
+        # row `_reject` wrote, as a retry text, since a validation error cannot carry a line.
+        arrival = _ARRIVED.set([])
+        try:
+            return await self._validated(ctx, call, args, handler)
+        except (ValidationError, ModelRetry, ToolFailed) as refused:
+            text = refused.message if isinstance(refused, (ModelRetry, ToolFailed)) else str(refused)
+            raise (ToolFailed if isinstance(refused, ToolFailed) else ModelRetry)(
+                _stamped(ctx.deps, text)) from refused
+        finally:
+            _ARRIVED.reset(arrival)
+
+    async def _validated(self, ctx, call, args, handler):  # noqa: ANN001
         # Too deep to store is a schema rejection, decided before pydantic parses anything;
         # judged on the call as sent, since text too deep to decode would read as `{}` once
         # decoded.
