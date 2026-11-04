@@ -20,6 +20,7 @@ from typing import Any
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.shared.filesystem._handoff import write_whole
 
 WORKTREE = Path(__file__).resolve().parents[4]
 DEFENDER = WORKTREE / "defender"
@@ -297,11 +298,9 @@ class ScriptedChild:
         }
 
     def __call__(self, launch: Any) -> list[str]:
-        # Written whole, then renamed into place: a child launched a moment ago (another worker's,
-        # in the same test) may be reading the spec right now, and must never see it half-written.
-        part = self.spec.with_name(self.spec.name + ".part")
-        part.write_text(json.dumps(self.spec_dict()), encoding="utf-8")
-        os.replace(part, self.spec)
+        # A child launched a moment ago (another worker's, in the same test) may be reading the
+        # spec right now, and must never see it half-written.
+        write_whole(self.spec, json.dumps(self.spec_dict()))
         return [sys.executable, str(self.script), str(self.spec), "--job", launch.investigation_id,
                 "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 

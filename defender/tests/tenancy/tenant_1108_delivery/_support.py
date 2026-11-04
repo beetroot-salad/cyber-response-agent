@@ -141,7 +141,7 @@ def forge_pulls(remote):
 
 
 def _save_pulls(remote, rows):
-    # The test and an owner process it launched may save at once: each stages its own part.
+    # Staged under a name of its own: a test and a process it launches share this fake forge.
     write_whole(Path(remote) / _PULLS, json.dumps(rows))
 
 

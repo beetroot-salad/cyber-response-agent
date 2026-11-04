@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import shutil
 import threading
@@ -17,6 +16,7 @@ from defender import _yaml
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.branch import _world_1007 as W
+from defender.tests.support.shared.filesystem._handoff import write_whole
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.tenancy._tenants1106 import FIXTURE_AGENT
 
@@ -518,9 +518,7 @@ def test_a_lesson_is_committed_while_the_question_writer_selects_lessons(tmp_pat
     def writer() -> None:
         n = 0
         while not stop.is_set():
-            staged = corpus / ".growing.md.partial"
-            staged.write_text(version_idp if n % 2 else version_cmdb, encoding="utf-8")
-            os.replace(staged, growing)
+            write_whole(growing, version_idp if n % 2 else version_cmdb)
             n += 1
 
     thread = threading.Thread(target=writer, daemon=True)
