@@ -1678,3 +1678,130 @@ async def test_1345_o2_the_wire_alert_reads_the_stored_display_fields_nullable(u
         await store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE))
         after = await store.get_alert(T1, alert.alert_id)
     assert ((before.title, before.description), (after.title, after.description)) == ((None, None), ("sketch", "r-1342"))
+
+
+# --- #1345 repairs: the lock's namespace, the first-save race, the recompute's whole range, stored content classes -----------------
+
+@asynccontextmanager
+async def holding_lifecycle_lock(dsn: str, tenant: str) -> AsyncIterator[None]:
+    """The lifecycle's per-tenant lock, `pg_advisory_lock(LOCK_NAMESPACE, hashtext(tenant))`, held on a connection of its own."""
+    import psycopg
+
+    from defender.tenancy.repository import LOCK_NAMESPACE
+
+    async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
+        await conn.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (LOCK_NAMESPACE, tenant))
+        try:
+            yield
+        finally:
+            await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", (LOCK_NAMESPACE, tenant))
+
+
+async def test_1345_m3_the_mapping_lock_and_the_lifecycles_lock_do_not_hold_each_other_up(dsn):
+    """With the lifecycle's tenant lock held, an alert insert and a mapping replace for that tenant still complete; while a
+    replace is held mid-recompute, the lifecycle can take its lock. (#1345 M3)"""
+    import psycopg
+
+    from defender.tenancy.repository import LOCK_NAMESPACE
+
+    async with store_with(dsn, Clock()) as store, store_with(dsn, Clock()) as other:
+        async with holding_lifecycle_lock(dsn, T1):
+            alert = await asyncio.wait_for(_insert(store, T1, ticket="T-1"), 5)
+            created = await asyncio.wait_for(store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE)), 5)
+        assert created is False  # the default seed was there
+        assert _display(dsn, alert.alert_id) == ("sketch", "r-1342")
+
+        async with holding_alert(dsn, alert.alert_id):
+            replace = asyncio.ensure_future(other.put_alert_mapping(T1, mapping_value(TITLE_ON_A)))
+            await until_blocked(dsn, 1)  # mid-recompute, holding whatever lock the replace takes
+            async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
+                cur = await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s))", (LOCK_NAMESPACE, T1))
+                [(got,)] = await cur.fetchall()
+                if got:
+                    await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", (LOCK_NAMESPACE, T1))
+            assert not replace.done(), "control: the replace was still held when the lifecycle's lock was tried"
+        await asyncio.wait_for(replace, 10)
+    assert got, "a replace in flight held the lifecycle's per-tenant lock"
+
+
+async def test_1345_m3_two_first_saves_for_one_tenant_both_return_and_exactly_one_creates(unmapped_dsn):
+    """Two first-save replaces race (the first held mid-recompute so the second starts under it): both return, the first
+    created and the second not, and the second's mapping stands. (#1345 M3, O1)"""
+    dsn = unmapped_dsn
+    async with store_with(dsn, Clock()) as first, store_with(dsn, Clock()) as second:
+        alert = await _insert(first, T1, ticket="T-1")  # unmapped: null display, so the first save has a row to update
+        async with holding_alert(dsn, alert.alert_id):
+            one = asyncio.ensure_future(first.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE)))
+            await until_blocked(dsn, 1)
+            two = asyncio.ensure_future(second.put_alert_mapping(T1, mapping_value(TITLE_ON_A)))
+            await until_blocked(dsn, 2)  # the second waits on the first, whatever it waits on
+        results = await asyncio.wait_for(asyncio.gather(one, two, return_exceptions=True), 10)
+        assert results == [True, False]
+        assert (await first.get_alert_mapping(T1)).paths == TITLE_ON_A
+    assert _display(dsn, alert.alert_id) == ("é", None)
+
+
+def _plant_many(dsn: str, rows: list[tuple[str, str, str]], raw: bytes) -> None:
+    """Alerts with the given (id, tenant, ticket) and `raw`, titles 'old', put in by SQL in one transaction."""
+    import psycopg
+
+    with psycopg.connect(dsn) as conn:
+        conn.cursor().executemany(
+            "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, "
+            "title, description, raw) VALUES (%s, %s, 'elastic', %s, %s, %s, %s, 'old', 'old', %s)",
+            [(i, t, k, NOW, NOW, NOW, raw) for i, t, k in rows])
+
+
+async def test_1345_m3_a_replace_re_derives_a_tenants_alerts_beyond_the_recompute_batch_and_touches_no_other_tenants(dsn):
+    """Over two full batches and one more of T1's alerts, interleaved by id with T2's, every T1 alert is re-derived and
+    none of T2's changes. (#1345 O2, M3)"""
+    from defender.jobs.store import _RECOMPUTE_BATCH
+
+    count = 2 * _RECOMPUTE_BATCH + 1
+    rows = [(str(uuid.UUID(int=2 * n + offset + 1)), tenant, f"P-{n}")
+            for n in range(count) for offset, tenant in enumerate((T1, T2))]
+    _plant_many(dsn, rows, ALERT_BYTES)
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value(TITLE_ON_A))
+
+    shown = execute(dsn, "SELECT tenant_id, title, description, count(*) FROM jobs.alerts "
+                         "GROUP BY tenant_id, title, description")
+    assert sorted(shown) == sorted([(T1, "é", None, count), (T2, "old", "old", count)])
+
+
+#: The stored content a replace must survive beside a good alert (M3): text PostgreSQL cannot hold, bytes that are not
+#: JSON, and nesting at the JSON parser's limit (admission refuses it; stored bytes may predate tighter rules).
+UNHOLDABLE_TEXT = ["x\\u0000y", "\\u0000", "\\ud800", "ok\\udfffok", "\\ud83d"]
+NOT_JSON = [b"", b"\xff\xfe", b"not json", b'{"title": ', b"\x00"]
+DEEP = 100_000
+NESTED = [b"[" * DEEP + b"]" * DEEP, b'{"a":' * DEEP + b"1" + b"}" * DEEP, b'{"title":' + b"[" * DEEP + b"]" * DEEP + b"}"]
+
+
+async def test_1345_m3_a_replace_never_fails_on_one_alerts_stored_content_and_derives_the_good_alert_beside_it(dsn):
+    """For each display entry: unholdable text in it, non-JSON bytes and over-deep nesting stored beside a good alert: the
+    replace commits, the bad content reads null in that entry, the good alert derives. (#1345 M3, O2)"""
+    from defender.records._alert_input import FACT_KEYS, MAPPING_KEYS
+
+    entries = [key for key in MAPPING_KEYS if key not in FACT_KEYS]
+    assert len(entries) == 2, "premise: the display entries are the mapping's six less its four facts"
+
+    def document(**over: str) -> bytes:
+        return ("{" + ", ".join(f'"{e}": "{over.get(e, "ok-" + e)}"' for e in entries) + "}").encode()
+
+    planted: dict[str, tuple[bytes, dict[str, str | None]]] = {
+        "good": (document(), {e: f"ok-{e}" for e in entries})}
+    for entry in entries:
+        for n, text in enumerate(UNHOLDABLE_TEXT):
+            planted[f"{entry}-text-{n}"] = (document(**{entry: text}),
+                                            {e: None if e == entry else f"ok-{e}" for e in entries})
+    for n, raw in enumerate(NOT_JSON):
+        planted[f"not-json-{n}"] = (raw, dict.fromkeys(entries))
+    for n, raw in enumerate(NESTED):
+        planted[f"nested-{n}"] = (raw, dict.fromkeys(entries))
+    ids = {name: _plant_raw(dsn, T1, name, raw) for name, (raw, _) in planted.items()}
+
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value({e: e for e in entries}))
+
+    got = {name: dict(zip(("title", "description"), _display(dsn, ids[name]), strict=True)) for name in planted}
+    assert {name: {e: got[name][e] for e in entries} for name in planted} == {name: want for name, (_, want) in planted.items()}
