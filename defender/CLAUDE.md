@@ -51,7 +51,9 @@ A tenant's `systems/elastic/` needs, in one commit: <!-- lint-shippable: ok — 
    the cluster `monitor` privilege (without it `health-check` answers a settings fault naming it).
 
 `health-check` no longer reports Kibana. Fault classes now follow the proxy's: 401 settings, 403
-the agent's (health-check's 403 is a settings fault), 5xx transport.
+the agent's, 5xx transport. The exceptions: a 403 on `health-check`, `query` or `alerts` is a
+settings fault naming the missing privilege (`monitor`, or `read` on the configured indexes); only
+`esql`, which names its own indexes, keeps a 403 as the agent's.
 
 ## Upgrade from before #1382
 

@@ -330,21 +330,26 @@ def _answered(status: int) -> tuple[int, dict, bytes]:
     pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 503, TransportFault,
                  id="esql-503"),
     pytest.param("query", {"native_query": "*"}, f"/{A.ELASTIC_EVENTS}/_search", 403,
-                 UpstreamFault, id="query-403"),
+                 ConfigFault, id="query-403"),
     pytest.param("alerts", {"native_query": "*"}, f"/{A.ELASTIC_ALERTS}/_search", 403,
-                 UpstreamFault, id="alerts-403"),
+                 ConfigFault, id="alerts-403"),
+    pytest.param("esql", {"query": "FROM .security-7 | LIMIT 1"}, "/_query", 403,
+                 UpstreamFault, id="esql-403"),
 ])
 def test_1391_o3_elastic_faults_follow_the_proxys_classification(
         tmp_path, data_root, verb, kw, path, status, fault):
-    """ES|QL `FROM .security-7` passes the adapter and is sent; 401/403/5xx come back as
-    ConfigFault/UpstreamFault/TransportFault, and a 403 on `query` is the agent's (UpstreamFault).
-    #1391 O3, D8, D11."""
+    """ES|QL `FROM .security-7` passes the adapter and is sent; 401 and 5xx come back as
+    ConfigFault and TransportFault. A 403 on `query`/`alerts` (whose index is confined to the
+    configured ones) is a setup fault (ConfigFault); on `esql`, which names its own indexes, it
+    is the agent's (UpstreamFault). #1391 O3, D8, D11; PR #1409 review (human decision)."""
     with H.upstream() as up, _elastic(tmp_path, data_root, up.url) as (ctx, _tap):
         up.replies[path] = _answered(status)
         with pytest.raises(AdapterFault) as raised:
             elastic_adapter.VERBS[verb](ctx, **kw)
 
     assert type(raised.value) is fault, raised.value
+    if status == 403 and fault is ConfigFault:
+        assert "`read`" in str(raised.value), "the setup fault does not name the missing privilege"
     assert [s.path.split("?")[0] for s in up.seen] == [path]
 
 

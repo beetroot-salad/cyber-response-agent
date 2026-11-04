@@ -1,8 +1,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import urllib.parse
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import sys as _sys
@@ -187,7 +189,11 @@ def _search(
     ctx, config, index_pattern: str, body: OutboundBody,
 ) -> tuple[list[dict], int, bool]:
     path = f"/{urllib.parse.quote(index_pattern, safe='-*,.')}/_search?ignore_unavailable=true"
-    resp = _http_json(ctx, "POST", config, path, body=body)
+    # The index is confined to the configured patterns (`confine_index`), so a 403 is the user
+    # lacking `read` on one of them: setup, not the agent's (PR #1409 review).
+    with _a_403_is_setup(f"the search of {index_pattern}",
+                         "`read` on the configured events and alerts indexes"):
+        resp = _http_json(ctx, "POST", config, path, body=body)
 
     hits_block = resp.get("hits", {})
     total = hits_block.get("total", {})
@@ -270,20 +276,28 @@ def search_envelope(index: str, docs: list, total: int, truncated: bool, sort: s
 
 
 
-def health_check(ctx: VerbContext) -> dict:
-    """Elasticsearch's cluster health, and nothing else (Kibana is not probed, #1391 D2). A 403 is
-    the read-only user lacking the cluster `monitor` privilege: a setup mistake, so it is the
-    settings' fault and not the agent's (D11); every other reply follows the proxy's
-    classification."""
-    config = load_config(ctx)
+@contextlib.contextmanager
+def _a_403_is_setup(what: str, needs: str) -> Iterator[None]:
+    """A 403 inside is the read-only user lacking `needs`: a setup mistake, so a `ConfigFault`
+    naming it rather than the agent's `UpstreamFault` (D11). Every other reply follows the
+    proxy's classification. Only for a request whose target the agent cannot widen: `esql` names
+    its own indexes, so its 403 stays the agent's."""
     try:
-        body = _http_json(ctx, "GET", config, "/_cluster/health", timeout_sec=HEALTH_TIMEOUT_SEC)
+        yield
     except UpstreamFault as e:
         if e.status != HTTP_FORBIDDEN:
             raise
         raise ConfigFault(
-            "Elasticsearch refused the health check (HTTP 403): the user defender reads it as "
-            "needs the cluster `monitor` privilege — a setup mistake, not the agent's") from e
+            f"Elasticsearch refused {what} (HTTP 403): the user defender reads it as needs "
+            f"{needs} — a setup mistake, not the agent's") from e
+
+
+def health_check(ctx: VerbContext) -> dict:
+    """Elasticsearch's cluster health, and nothing else (Kibana is not probed, #1391 D2). A 403 is
+    the read-only user lacking the cluster `monitor` privilege (`_a_403_is_setup`)."""
+    config = load_config(ctx)
+    with _a_403_is_setup("the health check", "the cluster `monitor` privilege"):
+        body = _http_json(ctx, "GET", config, "/_cluster/health", timeout_sec=HEALTH_TIMEOUT_SEC)
     return {
         "system": SYSTEM,
         "connected": True,
