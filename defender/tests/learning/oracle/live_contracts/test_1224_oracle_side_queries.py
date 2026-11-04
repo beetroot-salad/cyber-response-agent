@@ -27,6 +27,7 @@ from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.learning.oracle.live_contracts.test_1224_preflight_and_outcome import (
     _capture_row,
 )
+from defender.tests.support.runtime.state import _1255_clock as C
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as T1107
 
 
@@ -185,6 +186,110 @@ def _tacit_estate(tmp_path: Path) -> S.Estate:
     registry.parent.mkdir(parents=True, exist_ok=True)
     registry.write_text(_yaml.safe_dump({"entries": [TACIT_ENTRY]}), encoding="utf-8")
     return est
+
+
+#: Instants no other text of these scenes holds: the branch point a world is set at, and the
+#: reading the run's clock stands at when a sibling's call is made.
+BRANCH_SENTINEL = datetime(2029, 9, 17, 3, 42, 19, tzinfo=UTC)
+RUN_CLOCK_SENTINEL = datetime(2033, 11, 22, 14, 55, 31, tzinfo=UTC)
+CAPTURING = "capsys"
+CAPTURED_ANSWER = {"rows": [{"user": "alice", "event_id": "cap-1"}]}
+
+#: An adapter that writes down everything a call hands it: the whole context, every nested value
+#: and attribute (env included), and the call's params.
+_CAPTURING_ADAPTER = '''\
+"""Recording adapter planted by the #1385 O1 test."""
+from __future__ import annotations
+
+import dataclasses
+import datetime
+import json
+from collections.abc import Mapping
+from pathlib import Path
+
+from defender.kit.verbs import VerbContext, verb
+
+_STATE = Path({state!r})
+SYSTEM = "capsys"
+
+
+def check_settings(*_a, **_k):
+    return None
+
+
+def _dump(value, depth=0):
+    if depth > 12:
+        return "<deep>"
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {{f.name: _dump(getattr(value, f.name, None), depth + 1)
+                for f in dataclasses.fields(value)}}
+    if isinstance(value, Mapping):
+        return {{str(k): _dump(v, depth + 1) for k, v in value.items()}}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_dump(v, depth + 1) for v in value]
+    members = getattr(value, "__dict__", None)
+    if members is not None:
+        return {{k: _dump(v, depth + 1) for k, v in vars(value).items()}}
+    return repr(value)
+
+
+def _attributes(ctx):
+    """Every public non-callable attribute of the context, fields or not."""
+    out = {{}}
+    for name in dir(ctx):
+        if name.startswith("_"):
+            continue
+        try:
+            got = getattr(ctx, name)
+        except Exception as e:  # noqa: BLE001
+            got = repr(e)
+        if not callable(got):
+            out[name] = _dump(got)
+    return out
+
+
+@verb()
+def query(ctx: VerbContext, *, q: str = "*") -> dict:
+    row = {{"verb": "query", "params": {{"q": q}}, "context": _dump(ctx),
+           "attributes": _attributes(ctx)}}
+    with (_STATE / "contexts.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, sort_keys=True, default=str) + "\\n")
+    return {{"rows": [{{"user": "alice", "event_id": "cap-1"}}]}}
+
+
+@verb()
+def health_check(ctx: VerbContext) -> dict:
+    return {{"ok": True}}
+
+
+VERBS = {{"query": query, "health-check": health_check}}
+'''
+
+
+def _capturing_estate(tmp_path: Path) -> _Estate:
+    """The fixture estate plus the recording adapter, granted to gather."""
+    state = tmp_path / "estate" / "_estate"
+    return _estate(tmp_path, extra=((CAPTURING, _CAPTURING_ADAPTER.format(state=str(state)),
+                                     ("query", "health-check")),))
+
+
+def _recorded_by_the_capturing_adapter(est: S.Estate) -> list[dict]:
+    return S.read_jsonl(est.state / "contexts.jsonl")
+
+
+def _renderings(moment: datetime) -> list[str]:
+    """The spellings of an instant that would tell an adapter when it is: ISO with a `T` or a
+    space, the date, the time of day, epoch seconds and milliseconds, the compact form."""
+    epoch = int(moment.timestamp())
+    return [moment.strftime("%Y-%m-%dT%H:%M:%S"), moment.strftime("%Y-%m-%d %H:%M:%S"),
+            moment.strftime("%Y-%m-%d"), moment.strftime("%H:%M:%S"), str(epoch),
+            str(epoch * 1000), moment.strftime("%Y%m%dT%H%M%S")]
 
 
 def _narrow(est: S.Estate, withheld: Iterable[tuple[str, str]]) -> Any:
@@ -685,17 +790,27 @@ def test_p083_call_window_extends_past_the_branch_point(tmp_path):
     assert _hits(tenant_adapter, "idp", "query", now)
 
 
-def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path):
-    """a sibling started months after the branch point, and the same sibling resumed, hold the clock the manifest recorded on the registry, and send adapters none (design O1)."""
-    assert datetime.now(UTC).date() != S.AS_OF_DT.date(), "premise: the siblings start later"
-    est = _estate(tmp_path)
+def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path, monkeypatch):
+    """a sibling started months after the branch point, and the same sibling resumed, hold the clock the manifest recorded on the registry, and send adapters none (design O1): an adapter that records everything its call is handed (its whole context, nested, and its params) is shown neither the branch point nor the run clock, in a sibling's call, in the oracle's and the verifier's reads, and in pre-flight's."""
+    assert datetime.now(UTC).date() != BRANCH_SENTINEL.date(), "premise: the siblings start later"
+    est = _capturing_estate(tmp_path)
     est.answer("idp", "query", None, BASE)
-    ep = S.episode_v2(tmp_path, base_rows=[])
+    doc = S.family_v2(as_of=BRANCH_SENTINEL.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                      served_systems=(*S.SYSTEMS, CAPTURING))
+    ep = S.episode_v2(tmp_path, doc=doc, base_rows=[])
     first = S.load_world(ep, "b")
-    oracle = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit(BASE))
-    verifier = S.verifier(S.run_query("siem-x", "lookup", VERIFY), S.verdict(True))
+    oracle = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit(BASE),
+                      S.run_query(CAPTURING, "query", {"q": "oracle-side"}),
+                      S.submit("$BASE", S.EMPTY_CLAIM))
+    verifier = S.verifier(S.run_query("siem-x", "lookup", VERIFY), S.verdict(True),
+                          S.run_query(CAPTURING, "query", {"q": "verifier-side"}), S.verdict(True))
     _e, _p, reg = _scene(tmp_path, oracle, verifier, est=est, ep=ep, as_of=first.as_of)
     _ask(reg, est, tmp_path / "run")
+    # An investigator's call through the query tool, which holds the run's clock at the sentinel.
+    S.drive_gather_run(tmp_path / "drive", verbs=reg, tenant=est.place(), system=CAPTURING,
+                       clock=C.FakeClock(RUN_CLOCK_SENTINEL),
+                       gather_turns=[S.query_turn(CAPTURING, "query", {"q": "sibling"}),
+                                     S.done_turn()])
     started = len(est.calls())
     del reg  # the sibling stops; its resume builds the world afresh
     gc.collect()
@@ -706,10 +821,27 @@ def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path):
     _e, _p, reg2 = _scene(tmp_path, again, est=est, ep=ep, as_of=resumed.as_of)
     _ask(reg2, est, tmp_path / "run", q="user:alice", limit=20)
 
-    assert first.as_of == resumed.as_of == S.AS_OF_DT
+    assert first.as_of == resumed.as_of == BRANCH_SENTINEL
     tenant_adapter = est.calls()
     assert started >= 3
     assert len(tenant_adapter) > started
+
+    # Pre-flight reads a call the source run failed live, and the oracle reads beside it.
+    preflight = S.Call(CAPTURING, "query", {"q": "preflight"}, CAPTURED_ANSWER)
+    _launch(tmp_path / "launch", est, monkeypatch, calls=[CALL_IDP],
+            after_source=_failed(est, preflight),
+            oracle=S.oracle(S.run_query(CAPTURING, "query", {"q": "preflight-oracle-side"}),
+                            then=S.submit("$BASE", S.EMPTY_CLAIM)))
+
+    seen = _recorded_by_the_capturing_adapter(est)
+    reached = {row["params"].get("q") for row in seen}
+    assert reached >= {"sibling", "oracle-side", "verifier-side", "preflight",
+                       "preflight-oracle-side"}, f"a read never reached the adapter: {reached}"
+    text = json.dumps(seen, sort_keys=True)
+    for name, moment in (("the branch point", BRANCH_SENTINEL), ("the run clock", RUN_CLOCK_SENTINEL),
+                         ("pre-flight's branch point", S.AS_OF_DT)):
+        shown = [needle for needle in _renderings(moment) if needle in text]
+        assert not shown, f"an adapter was handed {name} ({shown}): {text}"
 
 
 def test_1224_tacit_knowledge_run_query_reaches_the_real_adapter_on_the_day_it_judges(
