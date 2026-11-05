@@ -40,7 +40,7 @@ Real code makes some checks possible for the first time. These are this stage's 
 
 Fix causes, never tests. A test that looks wrong goes back as a finding with evidence.
 
-**Stale existing tests.** An existing test outside the contract map that goes red may pin behavior the design replaced. Never edit it. First rule out your own mistake: the failure must follow from a change the design makes. Collect every such red, then return them in one batch, each failure quoted, to write-tests' stale-test repair (write-tests §5), before the attack, since attackers must aim at the suite that ships. A stale red that first appears in CI takes the same route. A bug found in review or CI gets a regression test, through write-tests' repair role, that fails without the fix.
+**Stale existing tests.** An existing test outside the contract map that goes red may pin behavior the design replaced, or a detail nobody decided. Never edit it. First rule out your own mistake: the failure must follow from something your change does on purpose, whether the design calls for it or you chose it to fill a gap. Say which. Don't bend the code to satisfy a test you believe is arbitrary; return it. Collect every such red, then return them in one batch, each failure quoted, to write-tests' stale-test repair (write-tests §5), before the attack, since attackers must aim at the suite that ships. A stale red that first appears in CI takes the same route. A bug found in review or CI gets a regression test, through write-tests' repair role, that fails without the fix.
 
 For a named risk, an optional claims check can test what the new docstrings and comments promise, using **references/claims-adversary.md**. False prose gets corrected; code that breaks an intended guarantee gets fixed.
 
@@ -73,9 +73,9 @@ Route the verdicts:
 
 Ship when the implementation reconciles with the current design and contract, every attacker lens, or the cold review standing in for them, is complete on the current revision with every family decided and the closed ones rechecked, owed checks are closed, blockers are resolved, and local test, lint and type checks pass at the revision being shipped. Use `ship` for the mechanics. Tests-first ancestry is pinned, so don't rebase or rewrite history. If the branch must be updated, keep the refs and revalidate whatever the update touches.
 
-The PR links the issue, design revision, original and current contract refs, and the coverage record. It declares approved mechanism deviations, links write-tests' review record and this stage's attack ledgers, and lists any contract repairs made here with their rechecks. It also records deferred-verification results and any claims check, and names the next review step. Report the PR number on failure as well as success.
+The PR links the issue, design revision, original and current contract refs, and the coverage record. It declares approved mechanism deviations, links write-tests' review record and this stage's attack ledgers, and lists any contract repairs made here with their rechecks, naming every incidental verdict. It also records deferred-verification results and any claims check, and names the next review step. Report the PR number on failure as well as success.
 
-Watch CI until it settles. On red, read the failing log, fix the cause, push and watch again. Never weaken a test, suppress a new lint or type defect, or baseline a finding to get green. Test and design problems route through §4. When fix rounds stop making progress, stop and report the next action. A failed or unavailable required check stays blocked.
+Watch CI until it settles. On red, read the failing log, fix the cause, push and watch again. Never weaken a test yourself, suppress a new lint or type defect, or baseline a finding to get green. Test and design problems route through §4. When fix rounds stop making progress, stop and report the next action. A failed or unavailable required check stays blocked.
 
 ## 6. Exit
 
