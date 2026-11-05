@@ -526,7 +526,10 @@ no retry). Take-over reads no disk and reaches no machine: everything a run star
 that started it (worker → child → box), so there is nothing to stop or clean up. A holder keeps its row
 until its last write lands: it writes the terminal stage, or — if cancel or a take-over already ended the
 row — its own final cost and knowledge, once. `cost_usd` is cost so far (copied about every 15 s) until
-then. A stopping worker hands its rows back (lease lapsed, final cost) so they are retried within seconds.
+then. A stopping worker hands its rows back (lease lapsed, final cost) so they are retried within seconds,
+except a row whose run had already decided its ending (a report committed, or setup refused): that ending
+is recorded. A last write the database refuses outright is written again with less (the knowledge as
+unreadable, then a bare `worker_error`), never dropped into a re-run.
 A cancelled or taken-over row's worker finds out at its next renewal and ends its child.
 
 > **A repeat is unconditionally safe here: defender is recommend-only.** No `act` verbs → no external

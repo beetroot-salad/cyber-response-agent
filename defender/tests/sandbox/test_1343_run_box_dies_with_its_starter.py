@@ -7,6 +7,7 @@ import inspect
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import textwrap
@@ -320,6 +321,75 @@ def test_b10_the_output_limit_stop_of_a_stop_start_box_still_reports_an_unconfir
     assert any("could not confirm the box stopped" in n for n in getattr(overflow, "__notes__", [])), \
         "an unconfirmed stop/start box was read as stopped"
 
+
+
+# ---- review follow-ups: the attached start's error output, and removal of a box removing itself ----
+
+def test_b10_the_attached_starts_error_output_is_a_file_never_an_unread_pipe(tmp_path: Path):
+    """`docker start -a` forwards the box's main-process error output whatever the flags, so a pipe nobody reads for the run's life could fill and stall the box: it goes to a file. (#1343 review, B10)"""
+    rec = RecordingDocker()
+    box = _start(rec, make_run_dir(tmp_path))
+    try:
+        [ask] = rec.asks
+        err = ask.kwargs.get("stderr")
+        assert err is not subprocess.PIPE, "the attached start's error output is a pipe nobody reads"
+        assert hasattr(err, "fileno"), f"the attached start's error output is not a file: {err!r}"
+        assert stat.S_ISREG(os.fstat(err.fileno()).st_mode), f"the attached start's error output is not a file: {err!r}"
+    finally:
+        box_mod.stop_box(box)
+
+
+def test_b10_a_start_fault_still_reports_the_attached_starts_own_error_text_from_its_file():
+    """Through a real process: the start's error text, written to its file, reaches the fault's text, and the file is closed after. (#1343 review, B10)"""
+    from defender.box import _lifecycle
+
+    class ShellStart:
+        def popen(self, argv, **kw):  # noqa: ANN001
+            return subprocess.Popen(["sh", "-c", "echo the start was refused >&2; exit 3"], **kw)
+
+    starter = _lifecycle._attach(ShellStart(), "box-x")  # type: ignore[arg-type]
+    starter.wait(timeout=10)
+    held = _lifecycle._STARTER_ERRS.get(starter)
+    assert held is not None, "the start's error file is not kept for its fault"
+    rc, err = _lifecycle._end_starter(starter)
+    assert (rc, err) == (3, "the start was refused")
+    assert held.closed, "the start's error file was left open"
+
+
+class _RemovingItself:
+    """A daemon holding one owned container that is removing itself (`--rm`): every `rm -f` answers that
+    the removal is already in progress, and its status reads `removing` until the daemon finishes."""
+
+    def __init__(self, name: str, token: str) -> None:
+        self.name, self.token, self.calls = name, token, []
+        self.status = "running"
+
+    def __call__(self, argv, **_kw):  # noqa: ANN001
+        argv = list(argv)
+        self.calls.append(argv)
+        ok = lambda out="": subprocess.CompletedProcess(argv, 0, out, "")  # noqa: E731
+        if argv[:2] == ["docker", "inspect"]:
+            fmt = argv[argv.index("-f") + 1]
+            return ok(f"{self.status}\n" if "State.Status" in fmt else f"{self.token}\n")
+        if argv[:2] == ["docker", "ps"]:
+            return ok(f"{self.name}\n")
+        if argv[:3] == ["docker", "rm", "-f"]:
+            self.status = "removing"
+            return subprocess.CompletedProcess(
+                argv, 1, "", "Error response from daemon: removal of container is already in progress\n")
+        if argv[:2] == ["docker", "wait"]:
+            return ok("0\n")
+        return ok()
+
+
+def test_a_container_already_removing_itself_counts_as_removed_for_the_worker_backstop_and_the_tenant_teardown():
+    """Every removal site, not only the run box's teardown, reads a container the daemon is already removing as gone: the worker's token reap removes it, the tenant teardown reports nothing left. (#1343 review, B10)"""
+    from defender.box._docker import Reaped, reap_if_owned, remove_tenant_containers
+
+    daemon = _RemovingItself("defender-run-x", "tok")
+    assert reap_if_owned(daemon, daemon.name, "tok") == Reaped.REMOVED
+    assert any(c[:3] == ["docker", "rm", "-f"] for c in daemon.calls), "premise: the reap tried to remove it"
+    assert remove_tenant_containers("t", docker=_RemovingItself("defender-run-y", "tok")) is None
 
 # ---- real daemon: the run box dies with its starter (runc here; CI's shards run it under runsc) ----
 

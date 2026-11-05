@@ -386,8 +386,11 @@ class JobStore:
                 capped = lapsed.attempt >= MAX_ATTEMPTS
                 reason = "retry_cap" if capped else "lease_lapsed"
                 lapsed.stage, lapsed.failure_reason = "failed", reason
-                lapsed.failure_message = ("its worker stopped renewing its lease"
-                                          + ("; the request used all its attempts" if capped else "; it is retried"))
+                # A handed-back row already carries its holder's final accounting (B11); a lost
+                # worker's row never does, so the message tells the two apart.
+                why = ("its worker stopped and handed it back" if lapsed.accounting_written_at is not None
+                       else "its worker stopped renewing its lease")
+                lapsed.failure_message = why + ("; the request used all its attempts" if capped else "; it is retried")
                 lapsed.finished_at = self._clock()
                 retry_id = None
                 if not capped:

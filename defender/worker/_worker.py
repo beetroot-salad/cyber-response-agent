@@ -91,13 +91,14 @@ def _ending_from(end: job_lane.JobEnd | None, returncode: int,
                        failure_message=f"the run left no job-end record; the child {_exit_words(returncode)}")
     if end.setup == job_facts.SETUP_REFUSED:
         return Ending(_FAILED, failure_reason=_SETUP_REFUSED,
-                       failure_message="run setup refused the job")
+                       failure_message="run setup refused the job", decided_by_run=True)
     if end.box == job_facts.BOX_START_FAILED:
         return Ending(_FAILED, failure_reason=_WORKER_ERROR,
                        failure_message="the run's box did not start")
     if end.report_committed and end.scrub_verified:
         found = disposition()
-        return Ending(_COMPLETED, disposition=found) if found is not None else Ending(_UNPARSEABLE)
+        return (Ending(_COMPLETED, disposition=found, decided_by_run=True) if found is not None
+                else Ending(_UNPARSEABLE, decided_by_run=True))
     if end.setup != job_facts.SETUP_DONE:
         why = "run setup crashed"
     elif not end.report_committed:
@@ -180,7 +181,7 @@ class Worker:
         """Claim while a slot is free until nothing is queued, then wait until every held row's
         last write has landed. Renews its rows but takes nothing over (r5 item 10). A store fault
         in the claim ends it (raised) and, like a cancellation, stops as a deliberate stop does
-        (`_abandon`)."""
+        (`_leave`)."""
         await self._claim_loop(stop=None)
 
     async def serve(self) -> None:
@@ -209,7 +210,7 @@ class Worker:
         Draining (`stop` is None), the loop ends once a claim finds nothing queued, then waits
         for every task; a store fault is raised. Serving, a store fault is logged and retried,
         and the stop is the deliberate one (`_stop`). However the loop leaves by an exception
-        (a store fault, a cancellation), it stops as a deliberate stop does (`_abandon`). The
+        (a store fault, a cancellation), it stops as a deliberate stop does (`_leave`). The
         renewal (and, serving, the take-over) run beside the loop until every row's last write
         has landed."""
         services = self._start_services(takeover=stop is not None)
@@ -218,7 +219,7 @@ class Worker:
             try:
                 await self._claim_until_done(stop, wake)
             except BaseException:
-                await self._abandon()
+                await self._leave()
                 raise
         finally:
             await _end_tasks(services)
@@ -304,9 +305,22 @@ class Worker:
         if self._tasks:
             await asyncio.wait(set(self._tasks))
 
-    async def _abandon(self) -> None:
-        """The loop is leaving by an exception: it stops as a deliberate stop does (r5 item 3)."""
-        await self._stop()
+    async def _leave(self) -> None:
+        """The loop is leaving by an exception: it stops as a deliberate stop does (r5 item 3). A
+        cancel that lands during that stop's wait means leave now: every child's group is killed
+        at once, so no child outlives its row's lease, and each row task is cancelled (a cancelled
+        row writes nothing; its lease lapses into a take-over)."""
+        try:
+            await self._stop()
+        except asyncio.CancelledError:
+            _logger.warning("the worker was cancelled again while stopping; killing %d child(ren)",
+                            len(self._children()))
+            for held in self._children():
+                if held.proc is not None:
+                    kill_group(held.proc.pid)
+            for task in self._tasks:
+                task.cancel()
+            raise
 
     async def _end_child(self, held: Held, *, by_stop: bool = False) -> None:
         """SIGTERM, then after `stop_grace` SIGKILL to the child's whole group (its own session,
@@ -343,8 +357,7 @@ class Worker:
             return
         costs = self._costs_due(held)
         try:
-            covered = set(await self._store.renew(set(held), costs=costs) if costs is not None
-                          else await self._store.renew(set(held)))
+            covered = set(await self._store.renew(set(held), costs=costs))
         except Exception:  # noqa: BLE001 — a failed renewal is waited out, never ends the worker
             self._renewal_failing = True
             _logger.warning("the worker could not renew its leases; retrying", exc_info=True)
@@ -366,8 +379,8 @@ class Worker:
         """A renewal that succeeded no longer covers the row (cancelled, taken over or deleted,
         B3): its child is ended at once; the row's one end path runs as for any child exit. A row
         fenced before its child exists is never launched (`_run_claimed`)."""
-        if held.fenced:
-            return
+        if held.fenced or (held.proc is not None and held.proc.returncode is not None):
+            return  # already fenced, or its child already exited: the row is writing its own end
         held.fenced = True
         _logger.warning("investigation %s: it was cancelled, taken over or deleted; ending its child", inv)
         held.enders.append(asyncio.create_task(self._end_child(held)))
@@ -395,7 +408,7 @@ class Worker:
                 _logger.debug("investigation %s: its cost so far could not be read", inv, exc_info=True)
 
     def _cost_so_far(self, record: Any) -> float:
-        with job_lane.JobLane.open(self._data_root, record.tenant_id) as lane:
+        with self._open_lane(self._data_root, record.tenant_id) as lane:
             return lane.cost(record.investigation_id)
 
     # -- one row ----------------------------------------------------------------------------------
@@ -450,7 +463,7 @@ class Worker:
         _logger.info("investigation %s: child %d %s after %s", inv, proc.pid,
                      _exit_words(returncode), self._clock() - started)
         ending, cost, knowledge = await asyncio.to_thread(self._read_ending, record, returncode)
-        if held.signalled and ending.stage != _COMPLETED:  # R1: a finished report wins over the stop
+        if held.signalled and not ending.decided_by_run:  # R1: an ending the run itself decided wins over the stop
             return End(None, cost, knowledge)
         return End(ending, cost, knowledge)
 
@@ -603,28 +616,36 @@ class Worker:
 
     async def _write_end(self, held: Held, end: End) -> None:
         """The row's one end write (B4), made until it lands or there is nothing left to write.
-        A failure that is an outage is retried each second while claims wait (B5); any other
-        failure is logged loudly and the row dropped, its lease lapsing into a take-over. During a
-        deliberate stop a write gets one try: the stop gives up on a failure (B11)."""
+        A failure that is an outage is retried each second while claims wait (B5). A write the
+        store refuses outright never drops the decided ending, since a dropped one would lapse into
+        a take-over that re-runs the job: it is written again with less (`_lesser_ends`), and only
+        when even the barest end is refused is the row left to lapse. During a deliberate stop an
+        outage gets one try: the stop gives up on it (B11)."""
         inv = held.record.investigation_id
-        while True:
-            tried_stopping = self._stopping
-            try:
-                await self._end_once(held, end)
-                return
-            except Exception as fault:  # noqa: BLE001 — classified below
-                if not is_outage(fault):
-                    _logger.exception("investigation %s: its end could not be recorded and is dropped; its "
-                                      "lease will lapse and it will be taken over", inv)
+        for attempt in _lesser_ends(end):
+            if attempt is not end:
+                _logger.error("investigation %s: the store refused its end; writing it with less: %s",
+                              inv, _what_end(attempt))
+            while True:
+                tried_stopping = self._stopping
+                try:
+                    await self._end_once(held, attempt)
                     return
-                if tried_stopping:
-                    _logger.warning("investigation %s: its end could not be recorded while stopping; "
-                                    "its lease will lapse on its own", inv, exc_info=True)
-                    return
-                self._end_failing.add(inv)
-                _logger.warning("investigation %s: its end could not be recorded (%s); retrying", inv, fault)
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._stop_signal.wait(), timeout=END_RETRY_DELAY)
+                except Exception as fault:  # noqa: BLE001 — classified below
+                    if not is_outage(fault):
+                        _logger.error("investigation %s: the store refused its end (%s)", inv, _what_end(attempt),
+                                      exc_info=True)
+                        break
+                    if tried_stopping:
+                        _logger.warning("investigation %s: its end could not be recorded while stopping; "
+                                        "its lease will lapse on its own", inv, exc_info=True)
+                        return
+                    self._end_failing.add(inv)
+                    _logger.warning("investigation %s: its end could not be recorded (%s); retrying", inv, fault)
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(self._stop_signal.wait(), timeout=END_RETRY_DELAY)
+        _logger.error("investigation %s: the store refused even its barest end; it is dropped, and its "
+                      "lease will lapse and it will be taken over", inv)
 
     async def _end_once(self, held: Held, end: End) -> None:
         """One try: the terminal stage (or hand-back) if the row is still `running`, else the
@@ -650,6 +671,29 @@ class Worker:
             _logger.info("investigation %s: the row had already ended; its final cost and knowledge are recorded", inv)
         else:
             _logger.info("investigation %s: the row is gone or already accounted for; nothing to write", inv)
+
+
+def _lesser_ends(end: End) -> list[End]:
+    """The end writes to try in turn when the store refuses one outright (#1343 review): the end
+    as decided; then with its knowledge replaced by the unreadable-knowledge marker, a value the
+    store is known to take; then the barest end, with no cost or knowledge, and for a decided
+    ending `worker_error`, naming the refusal (a hand-back stays a hand-back)."""
+    marker = job_lane.JobLane.unreadable_knowledge()
+    ends = [end]
+    if end.knowledge is not None and end.knowledge != marker:
+        ends.append(End(end.ending, end.cost, marker))
+    barest = End(None if end.ending is None else Ending(
+        _FAILED, failure_reason=_WORKER_ERROR, failure_message="the store refused the job's ending as decided"),
+        None, None)
+    if barest != ends[-1]:
+        ends.append(barest)
+    return ends
+
+
+def _what_end(end: End) -> str:
+    what = "a hand-back" if end.ending is None else end.ending.stage + (
+        f" ({end.ending.failure_reason})" if end.ending.failure_reason else "")
+    return f"{what}, cost {end.cost}, knowledge {'kept' if end.knowledge is not None else 'none'}"
 
 
 async def _end_tasks(tasks: list[asyncio.Task[None]]) -> None:

@@ -1583,10 +1583,45 @@ async def test_o6_a_decided_ending_whose_write_keeps_failing_as_an_outage_is_ret
     assert (row(world["dsn"], bad)["stage"], row(world["dsn"], good)["stage"]) == ("completed", "completed")
 
 
-@pytest.mark.parametrize("kind", ["runtime", "unplanned", "data", "integrity", "programming"])
-async def test_o6_a_decided_ending_whose_write_fails_with_a_non_outage_error_is_logged_dropped_and_the_row_lapses_into_a_retry(
+_REFUSALS = ["runtime", "unplanned", "data", "integrity", "programming"]
+
+
+@pytest.mark.parametrize("kind", _REFUSALS)
+async def test_o6_a_decided_ending_whose_write_is_refused_is_written_again_with_the_unreadable_knowledge_marker_and_stands(
         world, caplog, kind):
-    """A fault that is not a connection fault is tried once and logged loudly; the row leaves the held set, its lease lapses, a take-over fails it `lease_lapsed` and its retry runs. (B5, r5 item 7)"""
+    """CONFLICT-UPDATED (#1343 review; was: dropped into a retry): a refusal that is not an outage never drops the decided ending: the next try carries the unreadable-knowledge marker in place of the knowledge, lands, and nothing is retried. (B4, B5)"""
+    from defender.records import job_lane
+
+    bad, _, used = await _run_with_failing_finish(world, _data_fault(kind), fails=1)
+
+    tries = [kw for i, kw in used.finishes if i == bad]
+    assert [(t["stage"], t["failure_reason"]) for t in tries] == [("completed", None)] * 2, "the decided ending was replaced"
+    assert tries[0]["knowledge"] != job_lane.JobLane.unreadable_knowledge(), "premise: the first try carried the run's knowledge"
+    assert tries[1]["knowledge"] == job_lane.JobLane.unreadable_knowledge()
+    assert tries[1]["cost_usd"] == tries[0]["cost_usd"], "the second try lost the cost"
+    final = row(world["dsn"], bad)
+    assert (final["stage"], final["knowledge"]) == ("completed", job_lane.JobLane.unreadable_knowledge())
+    assert execute(world["dsn"], "SELECT count(*) FROM jobs.investigations WHERE request_key = 'k1'") == [(1,)], \
+        "a refused write re-ran the job"
+    assert any(r.levelno >= logging.ERROR and bad in r.getMessage() for r in caplog.records
+               if r.name.startswith(WORKER_LOGGER)), "the refusal was not logged loudly"
+
+
+async def test_o6_a_decided_ending_refused_with_and_without_its_knowledge_ends_worker_error_with_no_payload_and_is_not_retried(world):
+    """Refused twice (with the knowledge, then with the marker): the barest end lands, `failed`/`worker_error` with no cost or knowledge, and no retry exists. (#1343 review, B4)"""
+    bad, _, used = await _run_with_failing_finish(world, _data_fault("data"), fails=2)
+
+    assert [t[:2] for t in used.tries(bad)] == [("completed", None), ("completed", None), ("failed", "worker_error")]
+    final = row(world["dsn"], bad)
+    assert (final["stage"], final["failure_reason"], final["cost_usd"], final["knowledge"]) == (
+        "failed", "worker_error", None, None)
+    assert execute(world["dsn"], "SELECT count(*) FROM jobs.investigations WHERE request_key = 'k1'") == [(1,)]
+
+
+@pytest.mark.parametrize("kind", _REFUSALS)
+async def test_o6_an_ending_whose_every_lesser_write_is_refused_is_logged_dropped_and_the_row_lapses_into_a_retry(
+        world, caplog, kind):
+    """CONFLICT-UPDATED (#1343 review; was: one try): every write refused, down to the barest end: each is tried once, the drop is logged loudly, the row's lease lapses, a take-over fails it `lease_lapsed` and its retry runs. (B5, r5 item 7)"""
     child = _child(world, files=_committed())
     dsn = world["dsn"]
     async with job_store(dsn, lease=1.0) as store:
@@ -1603,9 +1638,9 @@ async def test_o6_a_decided_ending_whose_write_fails_with_a_non_outage_error_is_
                 os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
 
-    assert [t[0] for t in used.tries(bad)] == ["completed"], "a non-outage fault was retried"
-    assert any(r.levelno >= logging.ERROR and bad in r.getMessage() for r in caplog.records
-               if r.name.startswith(WORKER_LOGGER)), "the dropped ending was not logged loudly"
+    assert [t[0] for t in used.tries(bad)] == ["completed", "completed", "failed"], "a refused write was retried as is"
+    assert any(r.levelno >= logging.ERROR and bad in r.getMessage() and "dropped" in r.getMessage()
+               for r in caplog.records if r.name.startswith(WORKER_LOGGER)), "the dropped ending was not logged loudly"
 
 
 async def test_o6_a_decided_ending_that_committed_but_lost_its_answer_is_not_changed_by_the_retry(world):
@@ -3799,7 +3834,7 @@ def _stopped_endings() -> dict[str, str]:
 
 @pytest.mark.parametrize("case", list(_stopped_endings()))
 async def test_b11_a_stopped_childs_row_is_finished_when_the_reader_says_completed_else_handed_back_with_what_the_reader_read(world, case):
-    """The run is left alone once, and stopped once: completed ends as it did alone, any other ending is handed back with the cost and knowledge the reader gave alone. (B11, r5 item 3, R1)"""
+    """CONFLICT-UPDATED (#1343 review; was: only completed stands): the run is left alone once, and stopped once: an ending the run's own record decided (completed, unparseable, setup_refused) ends as it did alone, any other is handed back with the cost and knowledge the reader gave alone. (B11, r5 item 3, R1)"""
     plan = CASES[case]
     dsn = world["dsn"]
     alone, alone_marks = _spending(world, _SPEND, released=True, exit=plan["exit"], **plan["spec"])
@@ -3822,7 +3857,7 @@ async def test_b11_a_stopped_childs_row_is_finished_when_the_reader_says_complet
             (marks / "go-0").touch()
             await _stop_all(serving)
     assert _termed(world, inv), "premise: the stop signalled the child"
-    if plan["expect"][0] == "completed":
+    if plan["expect"][0] in ("completed", "unparseable") or plan["expect"][1] == "setup_refused":
         got, want = row(dsn, inv), ended
         assert {k: got[k] for k in ("stage", "disposition", "failure_reason", "cost_usd", "knowledge")} == {
             k: want[k] for k in ("stage", "disposition", "failure_reason", "cost_usd", "knowledge")}
@@ -3855,3 +3890,83 @@ async def test_b11_a_stop_is_bounded_by_one_stop_grace_however_many_children_ign
     for i in invs:
         assert _gone(child.seen(i)["pid"]), "a stop handed a row back but left its child running"
         _handed_back(dsn, i)
+
+
+# --- #1343 review: a second cancel while stopping, and a renewal that races a row's own end ---------------------
+
+async def test_b11_a_second_cancel_while_the_worker_stops_kills_every_child_at_once_and_leaves_none_behind(world):
+    """Cancelled once, the worker stops as a deliberate stop does and waits out the grace for a child that ignores SIGTERM; cancelled again during that wait, it kills the child's group at once and leaves, cancelled, well inside the grace. (#1343 review, r5 item 3)"""
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release, term="ignore")
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        draining = asyncio.create_task(_worker(world, store, child, stop_grace=30, **_FAST).drain())
+        try:
+            await _until(lambda: child.seen(inv), "the child")
+            pid = child.seen(inv)["pid"]
+            draining.cancel()
+            await asyncio.sleep(0.5)
+            assert not draining.done(), "premise: the first cancel waits out the grace"
+            assert not _gone(pid), "premise: the child ignored SIGTERM"
+            began = time.monotonic()
+            draining.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(draining, timeout=10)
+            took = time.monotonic() - began
+            await _until(lambda: _gone(pid), "the child to die after the second cancel", timeout=5)
+        finally:
+            release.touch()
+            _kill_whatever_remains(child.seen(inv))
+            await _stop_all(draining)
+    assert took < 5, f"the second cancel took {took:.1f} s to leave"
+
+
+class _RenewalRacingAnEnd:
+    """The real store, except that the first renewal covering `inv` answers only after that row's finish
+    committed, and its answer omits the row: a renewal whose snapshot of the held rows predates the row's own end."""
+
+    def __init__(self, store, inv: str) -> None:
+        self._store, self._inv = store, inv
+        self._finished = asyncio.Event()
+        self.raced = False
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def finish(self, tenant_id, investigation_id, **kw):
+        got = await self._store.finish(tenant_id, investigation_id, **kw)
+        if investigation_id == self._inv:
+            self._finished.set()
+        return got
+
+    async def renew(self, held, **kw):
+        covered = await self._store.renew(held, **kw)
+        if self._inv in held and not self.raced:
+            await asyncio.wait_for(self._finished.wait(), timeout=20)
+            self.raced = True
+            return [i for i in covered if i != self._inv]
+        return covered
+
+
+async def test_b3_a_renewal_that_misses_a_row_which_ended_on_its_own_meanwhile_fences_nothing_and_says_nothing_of_a_cancel(world, caplog):
+    """The row's own finish commits while a renewal that snapshotted it is in flight; the renewal's answer omits it. That is the row's own end, not a cancel or take-over: nothing is fenced and no such warning is logged. (#1343 review, B3)"""
+    release = world["tmp"] / "release"
+    child = _child(world, files=_committed(), wait_for=release)
+    dsn = world["dsn"]
+    async with job_store(dsn) as store:
+        inv = await _queued(store)
+        used = _RenewalRacingAnEnd(store, inv)
+        serving = asyncio.create_task(_worker(world, used, child, **_FAST).serve())
+        try:
+            await _until(lambda: child.seen(inv), "the child")
+            await asyncio.sleep(0.5)  # a renewal snapshots the row while its child runs, and waits
+            release.touch()
+            await _until(lambda: used.raced, "the racing renewal to answer", timeout=30)
+            await asyncio.sleep(0.5)  # the answer is acted on
+        finally:
+            if not serving.done():
+                os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+    assert row(dsn, inv)["stage"] == "completed"
+    assert not [r for r in caplog.records if r.name.startswith(WORKER_LOGGER) and inv in r.getMessage()
+                and "cancelled, taken over or deleted" in r.getMessage()], "a row that ended on its own was fenced"

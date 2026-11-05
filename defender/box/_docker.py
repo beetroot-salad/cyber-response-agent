@@ -242,15 +242,15 @@ def _start_token(docker: DockerFn, name: str) -> str | None:
     return None if not token or token == _NO_LABEL else token
 
 
-def _remove_container(docker: DockerFn, name: str, *, auto_removed: bool = False) -> str | None:
+def _remove_container(docker: DockerFn, name: str) -> str | None:
     """Remove the container `name`, paused or not: `None` once it is gone, else why not.
 
     Under runsc a PAUSED container's `rm -f` kills it but answers "PID … is zombie and can not
     be killed" and leaves it behind (#1202). `docker wait` then proves it exited, and a second
     `rm -f` removes it. Never thaws the box to remove it (#1178). The one removal step every
-    site uses: `stop_box` and both reaps. `auto_removed`: the container removes itself once it
-    stops (the run box, `--rm`, #1343 B10), so one the daemon is already removing is stopped,
-    and its removal its own."""
+    site uses: `stop_box` and both reaps. A container the daemon is already removing counts as
+    gone, for every caller: its removal is under way (a run box, `--rm`, removing itself once it
+    stopped, #1343 B10, or a teardown racing a backstop), and a second `rm` cannot hasten it."""
     argv = ["docker", "rm", "-f", name]
     first = _call(docker, argv)
     if first.returncode == 0:
@@ -262,7 +262,7 @@ def _remove_container(docker: DockerFn, name: str, *, auto_removed: bool = False
     # Removed by someone else meanwhile (a teardown racing a worker's backstop): it is gone.
     with contextlib.suppress(BoxFault):
         status = _container_status(docker, name)
-        if status is None or (auto_removed and status == "removing"):
+        if status in (None, "removing"):
             return None
     return f"{(first.stderr or '').strip()}; after waiting: {(second.stderr or '').strip()}"
 

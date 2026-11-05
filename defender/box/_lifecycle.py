@@ -10,8 +10,10 @@ import logging
 import os
 import stat
 import subprocess
+import tempfile
 import time
 import uuid
+import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 from dataclasses import dataclass
@@ -474,6 +476,13 @@ def _read_back_stage_token(staged_token: Path, docker: DockerFn, name: str) -> N
 _RUNNING_POLL = 0.05
 #: Seconds an ended attached start is given to exit and hand over its error text.
 _STARTER_END_WAIT = 5.0
+#: Bytes of an attached start's error output a start fault reports.
+_STARTER_ERR_KEPT = 8192
+
+#: Each live attached start's error output: a file, never a pipe. `docker start -a` forwards the
+#: box's main-process error output to its own (every flag combination does), and a pipe nobody
+#: reads for the run's life would stall the box once it filled.
+_STARTER_ERRS: weakref.WeakKeyDictionary[Any, Any] = weakref.WeakKeyDictionary()
 
 
 class _StarterExited(BoxFault):
@@ -488,12 +497,19 @@ def _attach(docker: DockerFn, name: str) -> subprocess.Popen[bytes]:
     (r5 item 15): a seam without one is a plain `AttributeError`, never a `BoxFault` and never a
     start through the real daemon around the seam."""
     popen = docker.popen  # type: ignore[attr-defined]
+    # The file grows with whatever the box's main process writes to its error output, for the
+    # run's life (the box's file-size limit does not cover a stream): the price of never stalling.
+    err = tempfile.TemporaryFile()  # noqa: SIM115 — closed by `_end_starter`, or with the starter
     try:
         starter: subprocess.Popen[bytes] = popen(
             ["docker", "start", "-a", "-i", name],
-            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    except (OSError, subprocess.SubprocessError) as e:
-        raise BoxFault(f"could not start the box {name}: {e}") from e
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err)
+    except BaseException as e:
+        err.close()
+        if isinstance(e, OSError | subprocess.SubprocessError):
+            raise BoxFault(f"could not start the box {name}: {e}") from e
+        raise
+    _STARTER_ERRS[starter] = err
     return starter
 
 
@@ -506,6 +522,12 @@ def _end_starter(starter: subprocess.Popen[bytes]) -> tuple[int | None, str]:
     err: bytes | None = b""
     with contextlib.suppress(OSError, ValueError, subprocess.SubprocessError):
         _, err = starter.communicate(timeout=_STARTER_END_WAIT)
+    kept = _STARTER_ERRS.pop(starter, None)
+    if kept is not None:
+        with contextlib.suppress(OSError, ValueError):
+            kept.seek(0)
+            err = (err or b"") + kept.read(_STARTER_ERR_KEPT)
+        kept.close()
     return starter.poll(), _text(err or b"").strip()
 
 
@@ -908,10 +930,8 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
     ends the box's input, so the box stops on its own)."""
     if not box.name:
         return
-    auto_removed = getattr(box, "auto_removed", False) is True
     try:
-        reason = _remove_container(docker or _carried_docker(box), box.name,
-                                   auto_removed=auto_removed)
+        reason = _remove_container(docker or _carried_docker(box), box.name)
     finally:
         starter = getattr(box, "starter", None)
         if starter is not None:

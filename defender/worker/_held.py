@@ -16,7 +16,7 @@ def is_outage(fault: BaseException) -> bool:
     never cures it."""
     if isinstance(fault, DBAPIError) and fault.connection_invalidated:
         return True
-    return isinstance(fault, OperationalError | InterfaceError | PoolTimeout | OSError | ConnectionError)
+    return isinstance(fault, OperationalError | InterfaceError | PoolTimeout | OSError)
 
 
 @dataclass
@@ -32,6 +32,7 @@ class Held:
     fenced: bool = False
     signalled: bool = False
     cost_so_far: float | None = None
+    #: The fence's ender tasks, held so the event loop's weak reference is not their only one.
     enders: list[asyncio.Task[None]] = field(default_factory=list)
 
 
@@ -43,6 +44,9 @@ class Ending:
     disposition: str | None = None
     failure_reason: str | None = None
     failure_message: str | None = None
+    #: The run's own job-end record decided this ending (a report committed and scrubbed, or setup
+    #: refused): a stop that lands meanwhile cannot have caused it, so it is recorded, not handed back.
+    decided_by_run: bool = False
 
 
 @dataclass(frozen=True)

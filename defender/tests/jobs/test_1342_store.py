@@ -1682,6 +1682,22 @@ async def test_b11_a_handed_back_row_is_not_renewed_not_reclaimed_and_is_taken_o
     assert (row(dsn, retry)["stage"], row(dsn, retry)["attempt"]) == ("queued", 2)
 
 
+
+@pytest.mark.parametrize("attempt", [1, 3], ids=["retried", "capped"])
+async def test_b11_take_over_tells_a_handed_back_row_from_a_lost_workers_in_its_message(dsn, attempt):
+    """A handed-back row's take-over message says its worker stopped and handed it back; a lapsed row beside it, whose worker was lost, says its worker stopped renewing. Reasons are unchanged. (#1343 review, B6, B11)"""
+    handed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="H"), key="kh", attempt=attempt, lapsed=False)
+    lost = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="L"), key="kl", attempt=attempt, lapsed=True)
+    async with job_store(dsn) as store:
+        await store.hand_back(T1, handed, cost_usd=1.0, knowledge=None)
+        await store.take_over(held=frozenset())
+    reason = "lease_lapsed" if attempt == 1 else "retry_cap"
+    got_handed, got_lost = row(dsn, handed), row(dsn, lost)
+    assert (got_handed["failure_reason"], got_lost["failure_reason"]) == (reason, reason)
+    assert "handed it back" in got_handed["failure_message"], got_handed["failure_message"]
+    assert "stopped renewing" not in got_handed["failure_message"]
+    assert "stopped renewing its lease" in got_lost["failure_message"], got_lost["failure_message"]
+
 # --- B6/B7/B8: take-over -------------------------------------------------------------------------------------------
 
 async def test_b6_a_lapsed_running_row_is_failed_and_retried_in_one_take_over_and_audited(dsn, caplog):
