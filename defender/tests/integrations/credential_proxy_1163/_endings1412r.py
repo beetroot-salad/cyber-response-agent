@@ -61,11 +61,13 @@ def _deadline_after(status: int) -> Script:
 
 
 def _deadline_before(_status: int) -> Script:
+    """The status line itself trickles in fragments, each inside the read timeout, and is not
+    complete until well past the deadline: no status has arrived when the request is cut."""
     def script(conn: socket.socket) -> None:
-        pieces = [b"HTTP/1.1 200 OK\r\n"] + [b"X-Slow: %d\r\n" % i for i in range(10)]
+        pieces = [b"HT", b"TP", b"/1.1 ", b"200 ", b"OK\r\n"] + [b"X-Slow: %d\r\n" % i for i in range(10)]
         for piece in pieces:
-            time.sleep(GAP_SEC)
             conn.sendall(piece)
+            time.sleep(GAP_SEC)
     return script
 
 
