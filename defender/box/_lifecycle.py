@@ -60,6 +60,17 @@ _BOX_ULIMITS: tuple[str, ...] = (
 )
 
 
+def _resource_limits(spec: BoxSpec) -> tuple[str, ...]:
+    """The box's share of the host. `--memory-swap` equal to `--memory` grants no swap: left
+    out, docker adds twice the memory cap again as swap."""
+    return (
+        "--memory", spec.memory,
+        "--memory-swap", spec.memory,
+        "--cpus", spec.cpus,
+        "--pids-limit", str(spec.pids_limit),
+    )
+
+
 def _input_dir_source(run_dir: Path) -> Path:
     """The run's input directory (the alert and its record), checked to be a real, populated
     directory before it is bound read-only over the writable run folder. A missing, empty or
@@ -201,6 +212,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
         *_BOX_ULIMITS,
+        *_resource_limits(spec),
     ]
     for m in lane:
         bind = f"type=bind,source={_daemon_source(m.source, mounts)},target={m.target}"
@@ -668,6 +680,7 @@ def _render_argv(
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
         *_BOX_ULIMITS,
+        *_resource_limits(request.spec),
     ]
     for m in request.mounts:
         if mounts and not _covered(Path(m.source), mounts):

@@ -22,6 +22,14 @@ EXIT_NO_RUNTIME = 69
 
 _MAX_OBJECT_SIZE = 1 << 30
 
+
+def _object_size_for(payload_bytes: int) -> int:
+    """The engine's `maximum_object_size` for a payload this long. The engine reserves buffers
+    of twice this up front and counts them against its memory limit, used or not, so a fixed
+    1 GiB refuses even a tiny payload in a box capped below about 5 GiB. No object in a
+    payload is longer than the payload."""
+    return min(payload_bytes + 1, _MAX_OBJECT_SIZE)
+
 #: The form that binds `h` to the unnested struct on the search-hits shape, shared by
 #: `--help`'s epilog and the query-error hint.
 _HITS_FROM = "FROM (SELECT unnest(hits) h FROM data)"
@@ -504,7 +512,7 @@ def _load_rows(con, rows: list, names: list[str], types: list[tuple[str, bool]],
     columns = "{" + ", ".join(f"'c{k}': '{typ}'" for k, (typ, _) in enumerate(types)) + "}"
     con.execute(
         "CREATE TABLE _rows AS SELECT * FROM read_json(?, format='newline_delimited', "
-        f"columns={columns}, maximum_object_size={_MAX_OBJECT_SIZE})",
+        f"columns={columns}, maximum_object_size={_object_size_for(os.path.getsize(ndjson))})",
         [ndjson],
     )
     _lock(con)
@@ -523,9 +531,13 @@ def _inferred_load(con, raw: bytes, scratch: str) -> None:
     try:
         con.execute(
             "CREATE TABLE data AS SELECT * FROM "
-            f"read_json_auto(?, maximum_object_size={_MAX_OBJECT_SIZE})",
+            f"read_json_auto(?, maximum_object_size={_object_size_for(len(raw))})",
             [payload_path],
         )
+    except duckdb.OutOfMemoryException as exc:
+        raise _Refused(f"the payload is too large to load: it does not fit in this "
+                       f"box's memory; narrow the query that produced it: {exc}",
+                       EXIT_INPUT_ERROR) from None
     except duckdb.Error as exc:
         raise _Refused(f"stdin is not valid JSON or NDJSON: {exc}", EXIT_INPUT_ERROR) from None
     _lock(con)

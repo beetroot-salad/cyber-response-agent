@@ -49,6 +49,12 @@ class BoxSpec:
     rootfs: str | None = None
     lifecycle: str = "per_run"
     tmpfs_size: str = "64m"
+    #: What one box may take from the host, so a command the model runs cannot starve the other
+    #: tenants' runs. Sized on `defender-sql` over the largest payload a box can hold
+    #: (`READ_LIMIT`): a full select of one peaks near 700 MiB, and `/tmp` counts against this.
+    memory: str = "2g"
+    cpus: str = "2"
+    pids_limit: int = 256
 
     ENV_VAR: ClassVar[str] = "DEFENDER_BOX_RUNTIME"
     RUNTIMES: ClassVar[tuple[str, ...]] = ("runsc", "runc")
