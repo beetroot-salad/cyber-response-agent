@@ -441,3 +441,33 @@ def test_o9_a_reply_in_any_other_content_type_is_the_proxys_own_fault():
             assert "-1412" not in str(raised.value), "a body reached the fault's text"
         fake.replies[PROXY_PATH] = (200, {"Content-Type": W.fmt().REPLY_CONTENT_TYPE}, frames)
         assert W.call(fake.url, "tok", target).body == "NEW-1412"
+
+
+def test_o9_only_a_200_in_exactly_the_proxys_content_type_is_its_reply():
+    """Valid frames under another status, or a content type that merely extends the proxy's (a
+    prefix or suffix of it, or containing it), are the proxy's own `TransportFault`, naming a
+    non-200 status; the real type with parameters or in another case is accepted. O9."""
+    real = W.fmt().REPLY_CONTENT_TYPE
+    frames = _reply(b"NEW-1412")
+    wrong_types = [real + "-v2", real + "+json", real + "2", real + ".x", "x" + real,
+                   "application/vnd.acme." + real.split("/")[1] + ".v3", "vendor/" + real,
+                   "Application/JSON", "TEXT/PLAIN; charset=utf-8", "application/json; q=1",
+                   "text/html", real.split("/")[0], real.split("/")[0] + "/", "application/x-" + real]
+    wrong_statuses = [201, 202, 204, 206, 299, 301, 400, 401, 404, 429, 500, 503]
+    accepted = [real, real + "; charset=utf-8", real.upper(), real.title() + " ;x=y"]
+    cases = [(200, t) for t in wrong_types] + [(s, real) for s in wrong_statuses] + [
+        (s, t) for s, t in ((201, real + "-v2"), (404, "text/html"), (500, real + "+json"))]
+    with H.upstream() as fake:
+        target = f"{fake.url}/x"
+        for status, kind in cases:
+            fake.replies[PROXY_PATH] = (status, {"Content-Type": kind}, frames)
+            with pytest.raises(TransportFault) as raised:
+                W.call(fake.url, "tok", target)
+            assert raised.value.proxy_own is True, (status, kind)
+            assert getattr(raised.value, "status", None) is None, (status, kind)
+            assert "-1412" not in str(raised.value), "a body reached the fault's text"
+            if status != 200:
+                assert str(status) in raised.value.detail, (status, kind, raised.value.detail)
+        for kind in accepted:
+            fake.replies[PROXY_PATH] = (200, {"Content-Type": kind}, frames)
+            assert W.call(fake.url, "tok", target).body == "NEW-1412", kind
