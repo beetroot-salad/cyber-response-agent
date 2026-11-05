@@ -495,6 +495,25 @@ def test_1345_o6_without_a_database_address_the_verb_is_refused_not_crashed(p4_t
 
 
 @pytest.mark.postgres
+def test_1345_o4_check_reports_a_tenant_with_no_mapping_until_one_is_saved(verb, capsys):
+    """Every run of a tenant with no mapping is refused, so the readiness command says so, in the refusal's own words;
+    saving one clears the finding. (#1345 O4)"""
+    from defender.records.formats import ALERT_MAPPING_MISSING
+
+    capsys.readouterr()
+    rc = _cli().main(["check", verb.tid])
+    said = capsys.readouterr()
+    assert rc == 1
+    assert ALERT_MAPPING_MISSING in said.out + said.err
+
+    assert verb.run(SIX_FILE)[0] == 0
+    capsys.readouterr()
+    _cli().main(["check", verb.tid])
+    said = capsys.readouterr()
+    assert ALERT_MAPPING_MISSING not in said.out + said.err
+
+
+@pytest.mark.postgres
 def test_1345_o6_the_verb_records_who_replaced_the_mapping_on_the_job_stores_audit_log_only(verb, caplog):
     """The store's replace announces itself, so a verb run leaves one job-store audit event naming the verb and the
     tenant. The API's own audit sink stays the API's: no other audit logger hears of it. (#1345 O6, O1)"""

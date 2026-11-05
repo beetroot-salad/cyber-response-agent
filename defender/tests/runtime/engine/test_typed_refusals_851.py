@@ -207,7 +207,9 @@ from defender.tests.support.storage._alert_plant import plant_alert  # noqa: E40
 
 def _sig(rule_id):
     """The signature the front door records for an alert carrying `rule_id`."""
-    mapping = _alert_input.parse_mapping("signature: rule.id\n")
+    from defender.records._alert_mapping_file import parse_mapping
+
+    mapping = parse_mapping("signature: rule.id\n")
     return _alert_input.derive_facts({"rule": {"id": rule_id}}, mapping).signature
 
 

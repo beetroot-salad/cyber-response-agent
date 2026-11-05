@@ -35,8 +35,8 @@ publish. Then the tenant is `active`. Nothing is cloned or set up by hand, and t
 
 An `active` tenant has no alert mapping, and its investigations and runs are refused until one is saved with
 `python3 defender/cli/tenant.py set-alert-mapping <id> <file>` (the entries are described at the top of that command's
-file), or `PUT /tenants/<id>/alert-mapping` once the API is wired to the real store (#1083). `tenant.py check` does not
-report a missing mapping.
+file), or `PUT /tenants/<id>/alert-mapping` once the API is wired to the real store (#1083). `tenant.py check` reports
+a missing mapping as a finding.
 
 - `GET /admin/tenants/<id>` shows the state, the pending action, the step and the actor, and the
   failure of a failed step; `POST /admin/tenants/<id>/resume` retries it.

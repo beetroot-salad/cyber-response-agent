@@ -156,7 +156,14 @@ def check_tenant(admitted: run_tenant.Admitted) -> int:
     """`check <id>`, for the tenant `main`'s host acceptance admitted: every finding about its
     settings, its repo and its last publish, all reported."""
     tenant, records = admitted.tenant, admitted.directory
-    return _report([*_findings(tenant.knowledge), *_publish_findings(tenant, records)])
+    return _report([*_findings(tenant.knowledge), *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
+
+
+def _mapping_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:
+    """Every run and new investigation of a tenant with no saved alert mapping is refused (#1345 O4), so it is not ready."""
+    from defender.records.formats import ALERT_MAPPING_MISSING
+
+    return [] if records.alert_mapping(tenant.id) is not None else [ALERT_MAPPING_MISSING]
 
 
 def _publish_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:

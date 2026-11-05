@@ -10,7 +10,7 @@ FACTS = SIX[:4]
 
 def test_the_default_mappings_name_the_six_entries_and_keep_the_planted_files_four_facts() -> None:
     """The seeded default means what the planted `alert-mapping.yaml` meant (its text parsed by the file parser). (#1345 Test notes)"""
-    from defender.records._alert_input import parse_mapping
+    from defender.records._alert_mapping_file import parse_mapping
 
     assert tuple(PLANTED_ALERT_MAPPING) == tuple(FIXTURE_ALERT_MAPPING) == SIX
     assert {k: PLANTED_ALERT_MAPPING[k] for k in FACTS} == dict(parse_mapping(ALERT_MAPPING_TEXT).paths)

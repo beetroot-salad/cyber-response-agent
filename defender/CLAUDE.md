@@ -41,7 +41,8 @@ The tenant's alert mapping lives in the database; nothing reads `settings/alert-
 
 1. Add `title` and `description` to the tenant's `settings/alert-mapping.yaml`, if its alerts should have them: the file
    does not name them, and an entry left out is unmapped, so its alerts would list with neither.
-2. `python3 defender/cli/tenant.py set-alert-mapping <tenant-id> <that file>`. The top of that file describes the six entries.
+2. `python3 defender/cli/tenant.py set-alert-mapping <tenant-id> <that file>`. The top of `defender/cli/tenant.py`
+   describes the six entries.
 3. Delete the file from the tenant's repository.
 
 ## Upgrade from before #1391

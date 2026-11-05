@@ -10,9 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path, PurePath
 from typing import Any
 
-import yaml
-
-from defender import _io, _yaml
+from defender import _io
 from defender._text import postgres_can_hold
 
 #: The four facts, in the design's words; also the record's keys.
@@ -30,6 +28,11 @@ DISPLAY_CAPS = {"title": 256, "description": 4096}
 #: not made only of dots (curl collapses `.` and `..` segments, so the request would go elsewhere).
 CASE_KEY_RE = re.compile(r"[\x21-\x7e]{1,128}")
 _CASE_KEY_FORBIDDEN = frozenset("/\\;")
+#: What a dotted alert path IS (#1345): non-empty segments with no control character and no whitespace at either end,
+#: so `rule. id` and a stray newline are refused. A key may hold a space inside it (`Source IP`).
+_PATH_SEGMENT = r"[^\s.\x00-\x1f\x7f](?:[^.\x00-\x1f\x7f]*[^\s.\x00-\x1f\x7f])?"
+ALERT_PATH_RE = re.compile(rf"{_PATH_SEGMENT}(?:\.{_PATH_SEGMENT})*")
+ALERT_PATH_MAX = 512
 #: The record's digest key.
 DIGEST_KEY = "digest"
 
@@ -162,8 +165,9 @@ def _unknown_entry_reason(entry: object) -> str:
 
 
 def _entry_reason(entry: str) -> str:
-    return (f"the alert mapping's entry for {entry} must be a dotted alert path (a non-empty "
-            "string of non-empty segments with no surrounding whitespace, in text the database can hold); leave it unmapped to map nothing")
+    return (f"the alert mapping's entry for {entry} must be a dotted alert path (at most {ALERT_PATH_MAX} characters of "
+            "non-empty segments with no whitespace around them and no control characters, in text the database can "
+            "hold); leave it unmapped to map nothing")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -190,22 +194,11 @@ def check_mapping(doc: object) -> AlertMapping:
         value = doc.get(entry)
         if value is None:
             continue
-        if (not isinstance(value, str) or not value or value != value.strip()
-                or any(not segment for segment in value.split(".")) or not postgres_can_hold(value)):
+        if (not isinstance(value, str) or len(value) > ALERT_PATH_MAX or ALERT_PATH_RE.fullmatch(value) is None
+                or not postgres_can_hold(value)):
             raise AlertMappingFault(_entry_reason(entry))
         paths[entry] = value
     return AlertMapping(paths=paths)
-
-
-def parse_mapping(text: str) -> AlertMapping:
-    """The alert mapping in `text` (the file format of `tenant.py set-alert-mapping`: YAML, an entry left out or
-    `null` is unmapped), or `AlertMappingFault` carrying a fixed reason."""
-    try:
-        loaded: object = _yaml.safe_load(text)
-    except (yaml.YAMLError, RecursionError):
-        raise AlertMappingFault(_reasons("yaml")) from None
-    mapping: AlertMapping = check_mapping(loaded)
-    return mapping
 
 
 # =============================================================================================
@@ -238,13 +231,13 @@ def _walk(document: Mapping[str, Any], dotted: str) -> Any:
 
 def _scalar_text(value: Any) -> str | None:
     """A string as it is, an integer as its decimal text; anything else (float, bool, null,
-    list, object) is no fact. Empty text is no fact."""
+    list, object) is no fact. Empty or whitespace-only text is no fact."""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
         return str(value)
     if isinstance(value, str):
-        return value or None
+        return value if value.strip() else None
     return None
 
 
