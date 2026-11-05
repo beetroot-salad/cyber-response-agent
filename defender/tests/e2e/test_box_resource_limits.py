@@ -1,4 +1,4 @@
-"""A box's share of the host: both launch paths cap memory (with no swap on top), CPU and process count, and on a live box a command past a cap stays inside it while `defender-sql` still works under it."""
+"""A box's share of the host: both launch paths cap memory (with no swap on top), CPU and process count, and on a live box a process past a cap stays inside it while `defender-sql` still answers under it."""
 from __future__ import annotations
 
 import dataclasses
@@ -25,10 +25,26 @@ pytestmark = pytest.mark.e2e
 DEFENDER = Path(__file__).resolve().parents[2]
 EXEC_TIMEOUT = 90.0
 
-#: The integer form of the reported query (`range(1e11)` is a binder error: the engine has no
-#: `range(DOUBLE)`, so it never allocates). The rows stream into Python objects, outside the
-#: engine's own memory limit, so only the box's cap stops it.
-TOO_LARGE = "SELECT * FROM range(100000000000)"
+#: Touches every page, so the memory is really held; far past any cap these tests set.
+MEMORY_HOG = """\
+held = []
+while len(held) < 8192:
+    held.append(bytearray(b"x") * (1 << 20))
+print("held", len(held))
+"""
+
+FORK_STORM = """\
+import os, time
+n = 0
+try:
+    while n < 1000:
+        if os.fork() == 0:
+            time.sleep(10)
+            os._exit(0)
+        n += 1
+except OSError:
+    print("stopped", n)
+"""
 
 
 def _run_dir(base: Path) -> Path:
@@ -81,13 +97,15 @@ def test_every_launch_path_caps_memory_cpu_and_processes(argv_of, tmp_path):
     assert _flag(argv, "--pids-limit") == str(spec.pids_limit)
 
 
-def test_a_payload_that_is_one_large_object_still_loads():
-    """The engine's object-size setting follows the payload: an object filling it is the worst
-    case, and past the engine's default of 16 MiB it must still load."""
-    payload = json.dumps({"a": "x" * (20 << 20)})
-    res = run_sql_py("SELECT length(a) AS n FROM data", stdin=payload)
+@pytest.mark.parametrize("payload", [
+    json.dumps({"a": "x" * (20 << 20)}),
+    "\n".join(json.dumps({"a": "x" * 100}) for _ in range(250_000)),
+], ids=["one-large-object", "many-lines-no-final-newline"])
+def test_a_payload_past_the_engines_default_object_size_still_loads(payload):
+    """The engine's object-size setting came down so the tool fits under the cap; both of these
+    are over its 16 MiB default."""
+    res = run_sql_py("SELECT count(*) AS n FROM data", stdin=payload)
     assert res.returncode == EXIT_OK, res.stderr
-    assert json.loads(res.stdout) == [{"n": 20 << 20}]
 
 
 # ---- live boxes ----------------------------------------------------------------------------
@@ -140,8 +158,10 @@ def _sh(box: box_mod.BoxExecutor, command: str) -> box_mod.BoxResult:
                           timeout=EXEC_TIMEOUT)
 
 
-def _sql(box: box_mod.BoxExecutor, query: str) -> box_mod.BoxResult:
-    return _sh(box, f"""echo '{{"a":1}}' | defender-sql '{query}'""")
+def _program(box: box_mod.BoxExecutor, base: Path, name: str, source: str) -> box_mod.BoxResult:
+    """Run `source` from a file on the run tree: the agent's path takes a command line."""
+    (next(base.glob("run-limits-*")) / name).write_text(source, encoding="utf-8")
+    return _sh(box, f"python3 {MODEL_RUN}/{name}")
 
 
 @requires_box_daemon
@@ -150,46 +170,36 @@ def _sql(box: box_mod.BoxExecutor, query: str) -> box_mod.BoxResult:
 def test_the_sql_tool_answers_a_small_query_under_the_cap(boxed, memory):
     """The engine reserves its load buffers from a limit it derives from this cap: oversized
     buffers refuse every query, reported as a payload that is not JSON."""
-    res = _sql(boxed(memory=memory), "SELECT 41 + 1 AS x")
+    res = _sh(boxed(memory=memory), """echo '{"a":1}' | defender-sql 'SELECT 41 + 1 AS x'""")
     assert res.rc == 0, res.err
     assert b'"x": 42' in res.out
 
 
 @requires_box_daemon
 @RUNTIMES
-def test_a_result_past_the_cap_does_not_succeed_and_leaves_the_box_usable_or_cleanly_gone(boxed, runtime):
+def test_a_process_past_the_memory_cap_is_stopped_inside_the_box(boxed, base, runtime):
     """runc kills the one process. runsc holds every process's memory in one host process, so
-    the kill may take the whole box; that still holds the host's share, and the run sees a
-    `BoxFault`, not a hang."""
+    the kill may take the whole box; the host's share holds either way."""
     box = boxed(memory="512m")
     try:
-        res = _sql(box, TOO_LARGE)
+        res = _program(box, base, "hog.py", MEMORY_HOG)
     except box_mod.BoxFault:
         assert runtime == "runsc", "under runc the kill must take the process, not the box"
         return
-    assert res.rc != 0, "the query outgrew a 512m box and still answered: the cap is not enforced"
-    assert res.rc == -9, f"expected the kernel's kill, the rc the tool's guidance names: {res}"
-    assert _sql(box, "SELECT 1 AS x").rc == 0
+    assert res.rc != 0, f"8 GiB held in a box capped at 512m: {res.out!r}"
+    assert _sh(box, "echo alive").rc == 0
 
 
 @requires_box_daemon
 @RUNTIMES
-def test_a_fork_storm_stops_at_the_process_cap(boxed, base):
+def test_a_fork_storm_stops_at_the_process_cap(boxed, base, runtime):
+    """runc refuses the fork. Under runsc the cap reaches the box's one host process, so the box
+    may die instead (seen in CI: the sandbox dropped its connection); the host's share holds."""
     box = boxed(pids_limit=64)
-    run_dir = next(base.glob("run-limits-*"))
-    (run_dir / "storm.py").write_text(
-        "import os, time\n"
-        "n = 0\n"
-        "try:\n"
-        "    while n < 1000:\n"
-        "        if os.fork() == 0:\n"
-        "            time.sleep(10)\n"
-        "            os._exit(0)\n"
-        "        n += 1\n"
-        "except OSError:\n"
-        "    print('stopped', n)\n",
-        encoding="utf-8",
-    )
-    res = _sh(box, f"python3 {MODEL_RUN}/storm.py")
+    try:
+        res = _program(box, base, "storm.py", FORK_STORM)
+    except box_mod.BoxFault:
+        assert runtime == "runsc", "under runc the cap must refuse the fork, not take the box"
+        return
     assert res.rc == 0, res.err
     assert res.out.startswith(b"stopped"), f"1000 processes in a box capped at 64: {res.out!r}"

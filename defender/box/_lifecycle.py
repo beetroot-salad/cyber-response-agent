@@ -62,7 +62,7 @@ _BOX_ULIMITS: tuple[str, ...] = (
 
 def _resource_limits(spec: BoxSpec) -> tuple[str, ...]:
     """The box's share of the host. `--memory-swap` equal to `--memory` grants no swap: left
-    out, docker adds twice the memory cap again as swap."""
+    out, docker adds the memory cap again as swap."""
     return (
         "--memory", spec.memory,
         "--memory-swap", spec.memory,

@@ -21,8 +21,7 @@ the tool prints the columns plus the idiom for that shape.
 **Its exit codes are its own, not the `query` tool's:** `1` = query error, fix the
 SQL — or a wrong `--rows`/`--names` declaration, fix that; `2` = the payload never
 arrived or is not JSON. A `2` here is *not* the data-source outage
-`failure-modes.md` sends you to escalate. A `-9` is the box's memory cap killing a
-result too large to hold: aggregate or `LIMIT` it, rather than retrying the same query.
+`failure-modes.md` sends you to escalate.
 
 ## The binding each shape needs
 
