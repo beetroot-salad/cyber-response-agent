@@ -15,6 +15,7 @@ from defender.integrations import identity_adapter
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
+from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163 import test_query_flow as Q
 from defender.tests.integrations.credential_proxy_1163 import test_ticket_flow as K
@@ -55,16 +56,18 @@ def test_x1_a_refused_query_shows_neither_the_token_nor_its_signature(
             body = {"system": "identity", "method": "GET",
                     "url": f"{up.url}{Q.API}/users/dev.dana", "headers": {}, "body": None}
             direct = httpx.post(url + PROXY_PATH, headers={"Authorization": f"Bearer {tok}"},
-                                json=body).text if reachable else ""
+                                json=body).content if reachable else b""
 
     assert type(raised.value) is (ConfigFault if reachable else TransportFault), raised.value
     assert str(raised.value).strip(), "positive control: the fault has a text"
     if reachable:
         assert tap.tokens == [tok, tok], "positive control: the proxy was sent the token"
-        assert json.loads(direct)["fault"] == "ConfigFault", direct
-        assert json.loads(direct)["detail"].strip(), "positive control: the answer has a detail"
+        refusal = T.answer_of(direct)
+        assert refusal["fault"] == "ConfigFault", refusal
+        assert refusal["detail"].strip(), "positive control: the answer has a detail"
     assert up.seen == []
-    for text in (str(raised.value), repr(raised.value), direct, caplog.text, repr(audit.records)):
+    for text in (str(raised.value), repr(raised.value), direct.decode("latin-1"), caplog.text,
+                 repr(audit.records)):
         assert not _carries(text, tok), "the request token or its signature shows in a text"
 
 
@@ -193,7 +196,8 @@ def test_x9_a_read_token_that_cannot_be_minted_is_the_calls_transport_fault(
 
 def test_the_run_reaches_the_proxy_directly_never_through_a_web_proxy_from_the_environment(tls_issuer, monkeypatch):  # noqa: F811
     """A run's request (and its bearer token) goes straight to the proxy address it was handed, even when the
-    environment names a web proxy (P-1: the token reaches no third party)."""
+    environment names a web proxy (P-1: the token reaches no third party). The stand-in's reply is not the
+    proxy's format, so the call is refused as the proxy's own (#1412 O9)."""
     from defender import _proxy_client
     port, got, folder = tls_issuer
     monkeypatch.delenv("SSL_CERT_DIR", raising=False)
@@ -202,13 +206,14 @@ def test_the_run_reaches_the_proxy_directly_never_through_a_web_proxy_from_the_e
         monkeypatch.setenv(name, "http://127.0.0.1:9")
     _proxy_client._client.cache_clear()  # noqa: SLF001 — the pooled client reads trust once per process
     try:
-        with pytest.raises(TransportFault, match="no usable answer"):
+        with pytest.raises(TransportFault) as refused:
             _proxy_client.proxy_call(f"https://localhost:{port}", "tok", system="identity", method="GET",
                                      url="https://idp.example/users")
     finally:
         _proxy_client._client.cache_clear()  # noqa: SLF001
     assert got, "the request reached the proxy address itself"
     assert json.loads(got[0])["system"] == "identity"
+    assert refused.value.proxy_own is True
 
 
 def test_x7_a_fault_is_the_proxys_own_only_when_the_system_neither_answered_nor_was_seen_failing(
@@ -271,3 +276,131 @@ def test_x8_a_system_answer_the_proxy_could_not_hand_on_keeps_the_proxys_reason(
         assert fault.proxy_own is False, (name, fault)
         assert why in fault.detail, (name, fault.detail)
         assert not fault.detail.endswith("{}"), (name, fault.detail)
+    assert "narrow" in seen["withheld"].detail, "a 2xx too large for the limit says to narrow it (#1412 O3)"
+    assert "narrow" not in seen["broke"].detail
+
+
+# --- #1412 the run reads the proxy's framed reply whole, then decodes it once ------------------
+
+PARTIAL = b"PARTIAL-BODY-1412"
+
+
+def _reply(body: bytes = PARTIAL, **over) -> bytes:
+    f = W.fmt()
+    return f.encode_body(body) + f.encode_final(W.final_record(**over))
+
+
+def _refused_as_broken(payload: bytes, *, ended: bool) -> None:
+    with W.fake_proxy(payload, ended=ended) as url, pytest.raises(TransportFault) as raised:
+        W.call(url, "tok", f"{url}/x")
+
+    assert raised.value.proxy_own is True
+    assert "unreachable" not in raised.value.detail
+    assert "broke" in raised.value.detail
+    assert PARTIAL.decode() not in str(raised.value)
+
+
+@pytest.mark.parametrize(("build", "ended"), [
+    pytest.param(lambda f: f.encode_body(PARTIAL) + f.encode_body(PARTIAL)[:4], False, id="cut-inside-a-frame"),
+    pytest.param(lambda f: f.encode_body(PARTIAL), True, id="ended-with-no-final-frame"),
+    pytest.param(lambda f: f.encode_body(PARTIAL), False, id="cut-between-frames"),
+    pytest.param(lambda f: f.encode_body(PARTIAL) + f.encode_final(W.final_record()) + b"x", True,
+                 id="bytes-after-the-final-frame"),
+    pytest.param(lambda f: f.encode_body(PARTIAL) + f.encode_final(W.final_record()) * 2, True,
+                 id="two-final-frames"),
+    pytest.param(lambda f: f.encode_final(W.final_record()) + f.encode_body(PARTIAL), True,
+                 id="a-body-frame-after-the-final"),
+    pytest.param(lambda f: f.encode_body(PARTIAL) + f.encode_final(W.final_record()), False,
+                 id="final-frame-then-cut"),
+])
+def test_o2_a_broken_stream_is_the_proxys_own_fault_with_no_answer(build, ended):
+    """A reply that breaks anywhere is `TransportFault`, the proxy's own, saying it broke, with no
+    partial body even in its detail. O2."""
+    _refused_as_broken(build(W.fmt()), ended=ended)
+
+
+def test_o2_a_reply_cut_at_every_byte_is_refused_and_the_whole_reply_is_the_answer():
+    """Cut at each byte of a complete reply, whether or not HTTP ends cleanly there, is
+    `TransportFault`; the uncut reply on the same stand-in is the answer. O2."""
+    whole = _reply()
+    with W.fake_proxy(whole, ended=True) as url:
+        answer = W.call(url, "tok", f"{url}/x")
+    assert (answer.status, answer.body, answer.fault) == (200, PARTIAL.decode(), None)
+    for cut in range(len(whole)):
+        for ended in (True, False):
+            _refused_as_broken(whole[:cut], ended=ended)
+
+
+def test_o2_a_proxy_that_closes_before_its_head_is_unreachable_not_broken():
+    """No response head at all keeps today's wording. O2."""
+    with W.scripted(lambda _conn: None) as proxy, pytest.raises(TransportFault) as raised:
+        W.call(proxy.url, "tok", f"{proxy.url}/x")
+
+    assert raised.value.proxy_own is True
+    assert "unreachable" in raised.value.detail
+
+
+@pytest.mark.parametrize(("over", "kept"), [
+    pytest.param({}, True, id="whole"),
+    pytest.param({"status": 500, "fault": "TransportFault", "detail": "d", "body_whole": False}, False,
+                 id="not-whole"),
+    pytest.param({"status": None, "fault": "TransportFault", "detail": "withheld", "body_whole": False}, False,
+                 id="refused"),
+])
+def test_o2_body_bytes_reach_the_caller_only_when_the_final_record_says_they_count(over, kept):
+    """Body frames followed by a record that does not call the body whole leave the answer's body
+    empty, with the record's status, fault and detail. O2."""
+    with W.fake_proxy(_reply(**over), ended=True) as url:
+        answer = W.call(url, "tok", f"{url}/x")
+
+    assert answer.body == (PARTIAL.decode() if kept else "")
+    assert (answer.status, answer.fault, answer.detail) == (
+        over.get("status", 200) or 0, over.get("fault"), over.get("detail") or "")
+
+
+def test_o2_a_write_accepted_then_dropped_keeps_its_status_and_no_body(tmp_path, data_root):
+    """A 201 whose reply breaks mid-body: the status stands, the bytes already forwarded are not
+    returned. O2, O8 (#1404)."""
+    with H.breaks_after_status(201) as base, T.rig(
+            tmp_path / "forge", data_root,
+            lambda _u: H.declaration(base + T.BASE_PATH, writes=(("POST", "/tickets"),))) as r, \
+            A.proxy_for(r.t, r.store) as (url, _tap):
+        answer = W.call(url, r.tok({("identity", "rw")}), f"{base}{T.BASE_PATH}/tickets", method="POST")
+
+    assert (answer.status, answer.fault, answer.body) == (201, "TransportFault", "")
+    assert answer.from_system is True
+
+
+@pytest.mark.parametrize(("pieces", "text"), [
+    pytest.param([b"caf\xe9"], "caf\ufffd", id="not-utf8"),
+    pytest.param([b"\xe2\x98", b"\x83"], "\u2603", id="character-split-across-frames"),
+])
+def test_o8_the_body_is_decoded_once_with_replacement_characters(pieces, text):
+    """Non-UTF-8 bytes become replacement characters on the run side; a character split between
+    two frames is whole. O8."""
+    f = W.fmt()
+    payload = b"".join(f.encode_body(piece) for piece in pieces) + f.encode_final(W.final_record())
+    with W.fake_proxy(payload, ended=True) as url:
+        answer = W.call(url, "tok", f"{url}/x")
+
+    assert answer.body == text
+
+
+def test_o9_a_reply_in_any_other_content_type_is_the_proxys_own_fault():
+    """The old proxy's JSON answer, and the new frames under another content type, are refused as
+    `TransportFault`, the proxy's own; the same frames under the right type are the answer. O9."""
+    old = json.dumps({"status": 200, "headers": {}, "body": "OLD-1412", "fault": None,
+                      "detail": None}).encode()
+    frames = _reply(b"NEW-1412")
+    with H.upstream() as fake:
+        target = f"{fake.url}/x"
+        for reply in ((200, {"Content-Type": "application/json"}, old),
+                      (200, {"Content-Type": "application/json"}, frames),
+                      (200, {"Content-Type": "text/plain"}, frames), (200, {}, frames)):
+            fake.replies[PROXY_PATH] = reply
+            with pytest.raises(TransportFault) as raised:
+                W.call(fake.url, "tok", target)
+            assert raised.value.proxy_own is True, reply
+            assert "-1412" not in str(raised.value), "a body reached the fault's text"
+        fake.replies[PROXY_PATH] = (200, {"Content-Type": W.fmt().REPLY_CONTENT_TYPE}, frames)
+        assert W.call(fake.url, "tok", target).body == "NEW-1412"

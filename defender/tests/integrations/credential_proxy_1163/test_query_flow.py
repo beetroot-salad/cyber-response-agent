@@ -37,10 +37,10 @@ def _store(t, **kw):
     return H.FakeStore({} if kw.get("empty") else {(t.tenant_id, "identity"): T.static_set()})
 
 
-def test_q1_a_query_reaches_the_upstream_with_the_key_and_returns_it_scrubbed(
+def test_q1_a_query_reaches_the_upstream_with_the_key_and_returns_the_echo_unaltered(
         tmp_path, data_root, caplog):
-    """Adapter -> transport -> proxy -> upstream under a non-root base: the key is injected,
-    the echo comes back without it, and the run sees none. O2, O4, A2."""
+    """Adapter -> transport -> proxy -> upstream under a non-root base: the key is injected and
+    the upstream's echo of it comes back as sent. O2, A2, #1412 O7."""
     caplog.set_level(logging.DEBUG)
     with H.upstream() as up, _published(tmp_path, data_root, up) as t:
         tok = T.token(t.tenant_id, GRANT)
@@ -56,8 +56,7 @@ def test_q1_a_query_reaches_the_upstream_with_the_key_and_returns_it_scrubbed(
     assert tap.tokens == [tok], "positive control: the proxy was sent the token"
     assert result["path"] == f"{API}/users/dev.dana"
     assert result["authorization"].startswith("Bearer ")
-    assert H.CANARY_KEY not in json.dumps(result)
-    assert H.CANARY_KEY not in caplog.text
+    assert result["authorization"] == f"Bearer {H.CANARY_KEY}"
     assert tok not in caplog.text
     (entry,) = audit.records  # the path is relative to the base (A2, A4), never the base's own
     assert {k: entry.get(k) for k in ("tenant", "system", "investigation", "commit", "method",
@@ -146,6 +145,28 @@ def test_q2c_a_systems_error_reaches_the_model_with_the_systems_own_reason(tmp_p
                 identity_adapter.get_user(ctx, user="dev.dana")
     assert type(raised.value) is fault, raised.value
     assert "field user.name unknown" in str(raised.value)
+
+
+def test_q2d_a_large_reply_arrives_whole_and_one_over_the_limit_tells_the_model_to_narrow(
+        tmp_path, data_root):
+    """A 3 MiB reply comes back through adapter, transport and proxy as today's parsed answer; a
+    200 over the limit raises the agent-fixable `UpstreamFault` saying to narrow the query.
+    #1412 O2, O3."""
+    document = {"user": "dev.dana", "pad": "x" * (3 << 20)}
+    with H.upstream() as up, _published(tmp_path, data_root, up) as t:
+        up.replies[f"{API}/users/dev.dana"] = (200, {"Content-Type": "application/json"},
+                                               json.dumps(document).encode())
+        tok = T.token(t.tenant_id, GRANT)
+        with A.proxy_for(t, _store(t)) as (url, _tap):
+            whole = identity_adapter.get_user(A.ctx_for(tmp_path, T.run_record(t), url, tok), user="dev.dana")
+        with A.proxy_for(t, _store(t), max_response_bytes=1 << 20) as (url, _tap), \
+                pytest.raises(AdapterFault) as raised:
+            identity_adapter.get_user(A.ctx_for(tmp_path, T.run_record(t), url, tok), user="dev.dana")
+
+    assert whole == document
+    assert type(raised.value) is UpstreamFault
+    assert (raised.value.exit_code, raised.value.proxy_own) == (1, False)
+    assert "narrow" in str(raised.value)
 
 
 def test_q2b_requests_the_declaration_does_not_allow_are_refused_unsent(tmp_path, data_root):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import dataclasses
 import json
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -118,14 +119,23 @@ def post(client: Any, tok: str, system: str, method: str, url: str,
     return response
 
 
+def fields_of(final: Any) -> dict[str, Any]:
+    """A `FinalRecord`'s six fields by name, whether it is a dataclass, a named tuple or a
+    mapping (the design leaves its access style to the implementer)."""
+    if dataclasses.is_dataclass(final):
+        return dataclasses.asdict(final)
+    return final._asdict() if hasattr(final, "_asdict") else dict(final)
+
+
 def answer_of(raw: bytes) -> dict[str, Any]:
-    """The final frame of the proxy's framed reply `raw`, with `body` added as the run reads it:
-    the body frames' text when the final frame says the body counts, else empty (#1412)."""
+    """The final record of the proxy's framed reply `raw` as a dict, with `body` added as the run
+    reads it: the body frames' text when the record says the body counts, else empty (#1412)."""
     from defender._proxy_client import decode_reply
 
     reply = decode_reply(raw)
-    whole = reply.final["body_whole"] is True
-    return {**reply.final, "body": b"".join(reply.chunks).decode("utf-8", "replace") if whole else ""}
+    final = fields_of(reply.final)
+    whole = final["body_whole"] is True
+    return {**final, "body": b"".join(reply.chunks).decode("utf-8", "replace") if whole else ""}
 
 
 def ask(client: Any, tok: str, system: str, method: str, url: str,

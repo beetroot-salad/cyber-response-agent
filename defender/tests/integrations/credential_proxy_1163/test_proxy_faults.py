@@ -114,9 +114,9 @@ def test_f2_a_system_outside_the_token_grant_is_a_config_fault_unsent(tmp_path, 
     assert (refused["fault"], r.up.seen, r.store.reads) == ("ConfigFault", [], [])
 
 
-def _oauth_rig(tmp_path, data_root, token_url):
+def _oauth_rig(tmp_path, data_root, token_url, **deps_kw):
     return T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
-        u + BASE, scheme=H.oauth_scheme(token_url)), creds=T.oauth_set())
+        u + BASE, scheme=H.oauth_scheme(token_url)), creds=T.oauth_set(), **deps_kw)
 
 
 @pytest.mark.parametrize(("status", "body", "fault"), [
@@ -180,6 +180,26 @@ def test_f3_a_401_on_the_access_token_evicts_it_without_a_retry(tmp_path, data_r
     assert [s.header("Authorization") for s in r.up.seen] == [f"Bearer {a}" for a in issued]
 
 
+def test_f3_a_401_with_a_body_over_the_limit_still_evicts_the_access_token(tmp_path, data_root):
+    """The upstream refusing the cached token with a body past the limit is still a `ConfigFault`
+    after one send, and the next request exchanges afresh and succeeds. #1412 O8."""
+    issued: list[str] = []
+    with H.upstream() as auth:
+        auth.replies["/token"] = H.token_endpoint(issued)
+        with T.rig(tmp_path / "forge", data_root, lambda u: H.declaration(
+                u + BASE, scheme=H.oauth_scheme(auth.url + "/token")),
+                creds=T.oauth_set(), max_response_bytes=64) as r:
+            r.up.replies[PATH] = lambda s: (
+                (401, {}, b"x" * 200) if len(r.up.seen) == 1 else (200, {}, b"{}"))
+            first = r.ask()
+            second = r.ask()
+
+    assert (first["status"], first["fault"], first["body_whole"]) == (401, "ConfigFault", False)
+    assert second["fault"] is None
+    assert len(auth.seen) == 2
+    assert [s.header("Authorization") for s in r.up.seen] == [f"Bearer {a}" for a in issued]
+
+
 # --- #1375 O2/O3: trust and the token reply's cap, unchanged by building contexts once ----------
 
 @pytest.mark.parametrize("leg", ["upstream", "token exchange"])
@@ -215,19 +235,23 @@ def test_1375_o2_a_system_is_trusted_by_the_bundle_not_the_environment(
     assert server.got == [], "the request reached a server the proxy should not trust"
 
 
-@pytest.mark.parametrize(("size", "fault"), [(65536, None), (65537, "ConfigFault")])
+@pytest.mark.parametrize(("size", "fault", "limit"), [
+    pytest.param(65536, None, 8 << 20, id="at-the-cap"),
+    pytest.param(65537, "ConfigFault", 8 << 20, id="over-the-cap"),
+    pytest.param(65536, None, 1024, id="above-a-smaller-reply-limit"),
+])
 def test_1375_o3_a_token_reply_over_the_cap_is_a_config_fault_unsent(
-        tmp_path, data_root, size, fault):
+        tmp_path, data_root, size, fault, limit):
     """#1375 O3: the token endpoint's reply is read up to `TOKEN_REPLY_CAP` (64 KiB): a reply of
     exactly the cap is used, one byte more is `ConfigFault` saying so, and the API request is never
-    sent."""
+    sent. The cap is its own, not `max_response_bytes` (#1412 O3)."""
     head = json.dumps({"access_token": "AT-cap", "expires_in": 3600, "pad": ""}).encode()
     body = head[:-2] + b"x" * (size - len(head)) + head[-2:]
     assert len(body) == size
     assert json.loads(body)["access_token"] == "AT-cap"
     with H.upstream() as auth:
         auth.replies["/token"] = (200, {"Content-Type": "application/json"}, body)
-        with _oauth_rig(tmp_path, data_root, auth.url + "/token") as r:
+        with _oauth_rig(tmp_path, data_root, auth.url + "/token", max_response_bytes=limit) as r:
             answer = r.ask()
 
     assert answer["fault"] == fault, answer
@@ -371,15 +395,20 @@ def test_1383_a_compression_bomb_is_never_inflated(tmp_path, data_root):
 def test_1383_an_oversized_reply_keeps_its_status_fault_and_headers(
         tmp_path, data_root, status, fault):
     """#1383 review: a body over the cap is withheld like a compressed one: the status still
-    decides the fault (a 2xx is the upstream's), and the headers still arrive."""
+    decides the fault (a 2xx is the upstream's), and the headers still arrive. Only a 2xx says
+    to narrow the query (#1412 O3)."""
     with T.rig(tmp_path / "forge", data_root, max_response_bytes=1024) as r:
         r.up.replies[PATH] = (status, {"Retry-After": "30"}, b"a" * 1025)
         answer = r.ask()
 
     assert answer["fault"] == fault, answer
-    assert answer["detail"] == ("identity answered more than 1024 bytes" if status == 200 else
-                                f"identity answered {status} with more than 1024 bytes, "
-                                "withheld"), answer
+    if status == 200:
+        assert "more than 1024 bytes" in answer["detail"], answer
+        assert "narrow" in answer["detail"], answer
+    else:
+        assert answer["detail"] == (f"identity answered {status} with more than 1024 bytes, "
+                                    "withheld"), answer
+    assert (answer["status"], answer["body_whole"]) == (status, False)
     assert (answer["body"], answer["headers"].get("retry-after")) == ("", "30"), answer
 
 
