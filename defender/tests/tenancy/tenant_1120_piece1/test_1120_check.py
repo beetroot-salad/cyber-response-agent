@@ -761,15 +761,20 @@ def test_1390_a_tenant_with_no_registry_file_is_clean(tmp_path: Path) -> None:
     H.assert_clean(_check_folder(folder))
 
 
-@pytest.mark.parametrize("how", ["rows-deleted", "lookup-withheld", "both-rows-withheld"])
+@pytest.mark.parametrize("how", [
+    "rows-deleted", "lookup-withheld", "both-rows-withheld", "lookup-row-deleted", "health-check-row-deleted"])
 def test_1390_a_registry_the_grant_table_does_not_reach_is_no_finding(tmp_path: Path, how: str) -> None:
-    """With the registry file present and `lookup` unreached by the table (rows deleted or withheld), `check --folder` exits 0 with no tacit line. H7, O10."""
+    """With the registry file present and `lookup` unreached by the table (any row, or all, deleted or `roles: []`), `check --folder` exits 0 with no tacit line. H7, O10, A3."""
     control = H.assert_clean(_check_folder(_folder(tmp_path, "control")))
     assert "registry.yaml" not in control, "positive control: a granted lookup draws no warning"
     folder = _folder(tmp_path, "tenant")
     assert folder.joinpath(*TACIT_REGISTRY_REL).is_file(), "premise: the registry file is kept"
     if how == "rows-deleted":
         _without_tacit_rows(folder, "lookup", "health-check")
+    elif how == "lookup-row-deleted":
+        _without_tacit_rows(folder, "lookup")
+    elif how == "health-check-row-deleted":
+        _without_tacit_rows(folder, "health-check")
     elif how == "lookup-withheld":
         _withhold_tacit(folder, "lookup")
     else:
@@ -808,3 +813,50 @@ def test_1390_check_names_a_reserved_adapter_name_with_its_reason_and_keeps_the_
     assert TACIT in out and "reserved" in out, f"the refusal is not named with its reason:\n{out}"
     assert "anomalous adapter name" not in out, f"the refusal reads as a malformed name:\n{out}"
     assert CENSUS_NOT_TAKEN not in out, f"the other adapters' census was lost:\n{out}"
+
+
+def test_1390_check_still_judges_the_tacit_rows_that_are_present(tmp_path: Path) -> None:
+    """A row for a verb the registry does not declare is a phantom finding, and a `roles: []` row with no reason is a finding; a reasoned withheld row is clean. H4, A3."""
+    folder = _folder(tmp_path, "control")
+    _withhold_tacit(folder, "lookup", "health-check")
+    H.assert_clean(_check_folder(folder))
+
+    phantom = _folder(tmp_path, "phantom")
+    doc = _table(phantom / "settings")
+    doc["dispositions"][TACIT]["wipe"] = {"roles": ["gather"]}
+    _write_table(phantom / "settings", doc)
+    H.assert_refused(_check_folder(phantom), f"{TACIT}.wipe")
+
+    bare = _folder(tmp_path, "unreasoned")
+    doc = _table(bare / "settings")
+    doc["dispositions"][TACIT]["lookup"] = {"roles": []}
+    _write_table(bare / "settings", doc)
+    H.assert_refused(_check_folder(bare), f"{TACIT}.lookup", "reason")
+
+
+@pytest.mark.parametrize("kind", ["dropped-entry", "refused-whole"])
+def test_1390_plain_check_by_tenant_id_fails_on_a_broken_registry_too(tmp_path: Path, kind: str) -> None:
+    """`tenant check <id>` over a placed tenant (not `--folder`) fails on a dropped entry or a refused file, and is clean without one. O7, A10."""
+    root = tmp_path / "data"
+    H.adopted(root)
+    H.assert_clean(_check_id(root))
+    _plant_registry_fault(H.knowledge_dir(root), kind)
+
+    text = H.assert_refused(_check_id(root), TACIT)
+
+    for reason in _cli_failures(H.agent_dir(root)):
+        assert reason in text, f"`check <id>` does not carry the CLI's reason {reason!r}:\n{text}"
+
+
+def test_1390_plain_check_by_tenant_id_names_a_reserved_adapter_name_with_its_reason(tmp_path: Path) -> None:
+    """With a reserved-name adapter in the checkout, `tenant check <id>` fails naming `tacit-knowledge` and the reserved reason, not an anomalous name. A11."""
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    root = tmp_path / "data"
+    H.adopted(root)
+    H.assert_clean(H.checkout_tenant_py(checkout, "check", H.TID, root=root))
+
+    H.add_adapter(checkout, TACIT, RESERVED_ADAPTER)
+    out = H.assert_refused(H.checkout_tenant_py(checkout, "check", H.TID, root=root), TACIT)
+
+    assert "reserved" in out, f"the refusal gives no reason:\n{out}"
+    assert "anomalous adapter name" not in out, f"the refusal reads as a malformed name:\n{out}"

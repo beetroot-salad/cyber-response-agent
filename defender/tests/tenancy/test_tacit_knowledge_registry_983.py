@@ -569,6 +569,25 @@ def test_1390_health_check_carries_the_same_registry_problems(tmp_path):
         "positive control: a clean registry reports no problems")
 
 
+def test_1390_health_check_says_an_existing_registry_is_unused_until_lookup_is_granted(tmp_path):
+    """`health-check`'s visible text, for a registry that exists, tells the lead it is unused until `lookup` is granted. H7."""
+    root = tmp_path / "tree"
+    _write_registry(root, _current_entry())
+
+    health = _verbs()["health-check"](_clocked_ctx(root, tmp_path))
+
+    text = json.dumps(health).lower()
+    assert "lookup" in text and "grant" in text, f"health-check does not say lookup must be granted: {health}"
+
+
+def test_1390_the_connect_page_no_longer_says_the_registry_is_already_connected_and_says_lookup_needs_a_grant():
+    """`skills/connect/tacit.md` says the registry is unused until `lookup` is granted and drops "already connected". H7."""
+    text = " ".join((DEFENDER / "skills" / "connect" / "tacit.md").read_text(encoding="utf-8").lower().split())
+
+    assert "already connected" not in text, "the page still presents the registry as a connected system"
+    assert "lookup" in text and "grant" in text, "the page does not say lookup must be granted"
+
+
 _PLANTED_TACIT = '''\
 from defender.kit.verbs import VerbContext
 
@@ -613,7 +632,8 @@ def test_1390_an_adapter_named_tacit_knowledge_is_refused_with_its_reason_and_no
         f"the refusal does not say why: {roster.refused[SYSTEM]!r}")
     root = tmp_path / "tree"
     _write_registry(root, _current_entry())
-    served = _verbs(roster)[LOOKUP](
+    only_lookup = VerbGrant("gather", ((SYSTEM, LOOKUP, "r"),))
+    served = ModuleVerbRegistry(roster, only_lookup).verbs(SYSTEM)[LOOKUP](
         _clocked_ctx(root, tmp_path), actor=ACTOR, host=HOST, pattern=PATTERN)
     assert (served["matched"] or {}).get("id") == scene.ENTRY_ID, (
         "the lookup was served by the planted adapter, not the platform")

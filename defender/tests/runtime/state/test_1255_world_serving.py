@@ -641,3 +641,26 @@ def test_1390_a_lookup_the_source_run_recorded_is_rerun_against_the_pinned_regis
     assert oracle.requests == 0, "a recorded registry lookup took an oracle turn"
     assert [(r.get("system"), r.get("source")) for r in S24.ledger_rows(ep, "a")] == [
         ("idp", PASSTHROUGH), ("tacit-knowledge", PASSTHROUGH), ("tacit-knowledge", PASSTHROUGH)]
+
+
+def test_1390_health_check_of_the_registry_is_never_oracle_served_either(tmp_path: Path) -> None:
+    """In a fact-free and a fact world, `tacit-knowledge.health-check` is the pinned registry's own answer, one pass-through row, no oracle turn. O3."""
+    est = S24.TacitEstate(tmp_path / "estate")
+    est.write_registry(json.dumps({"entries": [TACIT_ENTRY]}))
+    approval = S24.fact("f1", "secops approved svc-deploy-01's root SSH on db-2.corp",
+                        ("svc-deploy-01", "db-2.corp"))
+    ep = S24.episode_v2(tmp_path, base_rows=[], doc=S24.family_v2(
+        worlds=[S24.control_world("a"), S24.world_v2("b", facts=[approval])]))
+    forged = {"system": "tacit-knowledge", "connected": True, "entries": 99}
+
+    for label in ("a", "b"):
+        oracle = S24.oracle(then=S24.submit(forged, S24.EMPTY_CLAIM))
+        world = S24.sandboxed_registry(ep, label, est, oracle=oracle,
+                                       verifier=S24.passing_verifier())
+
+        served = S24.call(world, "tacit-knowledge", "health-check", est.ctx(tmp_path / f"run-{label}"))
+
+        assert served.get("entries") == 1, f"world {label}: the answer is not the registry's: {served}"
+        assert oracle.requests == 0, f"world {label}: a registry health-check took an oracle turn"
+        assert [(r.get("system"), r.get("source")) for r in S24.ledger_rows(ep, label)] == [
+            ("tacit-knowledge", PASSTHROUGH)], f"world {label}: not one pass-through ledger row"

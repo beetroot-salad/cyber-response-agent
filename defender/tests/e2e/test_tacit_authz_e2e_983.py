@@ -355,17 +355,17 @@ def _current_entry(**overrides: str) -> dict:
                                 review_by=str(today + dt.timedelta(days=30)), **overrides)
 
 
-def _gather_lookups(tmp_path: Path, est, *turns, system: str = SYSTEM) -> tuple[Path, list[dict], object]:
+def _gather_lookups(tmp_path: Path, est, *turns, system: str = SYSTEM, **drive) -> tuple[Path, list[dict], object]:
     """One live investigation whose gather lead (on `system`) runs `turns`, over the estate's real
     registry; returns the run dir, the lead's `tacit-knowledge` rows and the gather replay."""
     S = _spec()
     run_dir, gather = S.drive_gather(
         tmp_path / "run", verbs=S.plain_registry(est), tenant=est.place(), system=system,
-        gather_turns=[*turns, S.done_turn()])
+        gather_turns=[*turns, S.done_turn()], **drive)
     return run_dir, [r for r in S.lead_rows(run_dir) if r["system"] == SYSTEM], gather
 
 
-def _payload(run_dir: Path, row: dict) -> dict:
+def _stored_answer(run_dir: Path, row: dict) -> dict:
     return json.loads((run_dir / row["payload_path"]).read_text(encoding="utf-8"))
 
 
@@ -382,17 +382,17 @@ def test_1390_a_granted_lookup_runs_through_the_query_tool_and_is_recorded(tmp_p
 
     assert [(r["verb"], r["params"], r["exit_code"]) for r in rows] == [
         (LOOKUP, LOOKUP_PARAMS, 0)]
-    assert _payload(run_dir, rows[0]) == {"matched": entry}
+    assert _stored_answer(run_dir, rows[0]) == {"matched": entry}
     listed = _tool_list_verbs(S.plain_registry(est), SYSTEM)
     for needle in ("the 2 verb(s) your grant admits", "lookup", "health-check",
                    "actor", "host", "pattern"):
         assert needle in listed, f"list_verbs does not describe {needle!r}:\n{listed}"
 
 
-def _lookup_after_a_witness(tmp_path: Path, est) -> tuple[Path, list[dict], list[dict], list[dict], str]:
-    """A lead on `idp` that first reads idp (the witness that the lead is live and asking), then
-    asks `tacit-knowledge.lookup`. Returns the run dir, the idp rows, the tacit rows, the lookup's denial records and what the
-    investigator was told after the lookup."""
+def _asks_after_a_witness(tmp_path: Path, est, *verbs: str) -> tuple[list[dict], list[dict], list[dict], str]:
+    """A lead on `idp` that reads idp first (the witness that it is live and asking), then asks each of
+    `verbs` on `tacit-knowledge`. Returns the idp rows, the tacit rows, the tacit denial records and
+    what the investigator was told after the last call."""
     from defender.records import RunPaths
     from defender._io import read_jsonl_rows
 
@@ -401,32 +401,42 @@ def _lookup_after_a_witness(tmp_path: Path, est) -> tuple[Path, list[dict], list
     est.answer("idp", "query", asked, {"rows": []})
     run_dir, tacit, gather = _gather_lookups(
         tmp_path, est, S.query_turn("idp", "query", asked),
-        S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS), system="idp")
+        *[S.query_turn(SYSTEM, v, LOOKUP_PARAMS if v == LOOKUP else {}) for v in verbs], system="idp")
     idp = [r for r in S.lead_rows(run_dir) if r["system"] == "idp"]
     paths = RunPaths(run_dir)
     denials = [d for d in read_jsonl_rows(paths.policy_denials)
-               if (d.get("system"), d.get("verb")) == (SYSTEM, LOOKUP)] if paths.policy_denials.is_file() else []
-    return run_dir, idp, tacit, denials, gather.seen[-1]
+               if d.get("system") == SYSTEM] if paths.policy_denials.is_file() else []
+    return idp, tacit, denials, gather.seen[-1]
 
 
-@pytest.mark.parametrize("rows", [
-    pytest.param((("lookup", ()), ("health-check", ("gather",))), id="row-with-no-role"),
-    pytest.param((), id="rows-deleted"),
+def _row(verb: str, roles: tuple[str, ...] = ("gather",)) -> tuple[str, tuple[str, ...]]:
+    return (verb, roles)
+
+
+@pytest.mark.parametrize(("rows", "denied", "control"), [
+    pytest.param((_row(LOOKUP, ()), _row("health-check")), LOOKUP, "health-check", id="row-with-no-role"),
+    pytest.param((_row(LOOKUP, ()), _row("health-check", ())), LOOKUP, None, id="both-roles-empty-lookup"),
+    pytest.param((_row(LOOKUP, ()), _row("health-check", ())), "health-check", None, id="both-roles-empty-health-check"),
+    pytest.param((_row("health-check"),), LOOKUP, "health-check", id="lookup-row-deleted"),
+    pytest.param((_row(LOOKUP),), "health-check", LOOKUP, id="health-check-row-deleted"),
+    pytest.param((), LOOKUP, None, id="rows-deleted"),
 ])
-def test_1390_a_withheld_or_row_less_lookup_is_denied_and_recorded_not_undeclared(tmp_path, rows):
-    """Whether the table withholds `lookup` or has no `tacit-knowledge` rows, the lead's call is denied with a denial record and wording that does not send the model to add rows. O4, A3, O10."""
+def test_1390_a_withheld_or_row_less_call_is_denied_and_recorded_not_undeclared(tmp_path, rows, denied, control):
+    """Whether the table withholds the verb, deleted its row or deleted every row, the call is denied with a denial record and wording that does not send the model to add rows; a granted verb on the same system still works. O4, A3, O10."""
     from defender.systems.circuit_breaker import DENIED_EXIT_CODE
 
     S = _spec()
     est = S.TacitEstate(tmp_path / "estate", tacit_roles=rows)
     est.write_registry(json.dumps({"entries": [_current_entry()]}))
 
-    _run_dir, idp, tacit, denials, told = _lookup_after_a_witness(tmp_path, est)
+    idp, tacit, denials, told = _asks_after_a_witness(tmp_path, est, *([control] if control else []), denied)
 
     assert [r["exit_code"] for r in idp] == [0], "witness: the lead really asked, and idp answered"
-    assert [(r["verb"], r["exit_code"]) for r in tacit] == [(LOOKUP, DENIED_EXIT_CODE)], (
-        f"the lookup was not recorded as a denial: {tacit}")
-    assert len(denials) == 1, f"a denial leaves one policy-denial record, found {denials}"
+    assert [(r["verb"], r["exit_code"]) for r in tacit] == [
+        *([(control, 0)] if control else []), (denied, DENIED_EXIT_CODE)], (
+        f"the calls were not recorded as a granted answer and a denial: {tacit}")
+    assert [d.get("verb") for d in denials] == [denied], (
+        f"a denial leaves one policy-denial record for the withheld verb, found {denials}")
     assert "withheld" in told.lower(), f"the refusal does not say the verb is withheld:\n{told}"
     for add_rows in ("needs rows", "just connected"):
         assert add_rows not in told.lower(), (
@@ -462,8 +472,8 @@ def test_1390_a_registry_refused_whole_is_a_miss_whose_reason_is_in_the_stored_a
 
     assert [(r["verb"], r["exit_code"]) for r in rows] == [(LOOKUP, 0), ("health-check", 0)]
     visible = reason.replace(str(path), "skills/tacit-knowledge/registry.yaml")
-    assert _payload(run_dir, rows[0]) == {"matched": None, "registry_problems": [visible]}
-    health = _payload(run_dir, rows[1])
+    assert _stored_answer(run_dir, rows[0]) == {"matched": None, "registry_problems": [visible]}
+    health = _stored_answer(run_dir, rows[1])
     assert health["registry_problems"] == [visible]
     assert not str(health["registry"]).startswith("/"), "health-check names the registry by a host path"
 
@@ -482,4 +492,62 @@ def test_1390_a_dropped_entry_rides_a_hit_in_the_stored_answer(tmp_path):
 
     run_dir, rows, _g = _gather_lookups(tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS))
 
-    assert _payload(run_dir, rows[0]) == {"matched": good, "registry_problems": dropped}
+    assert _stored_answer(run_dir, rows[0]) == {"matched": good, "registry_problems": dropped}
+
+
+def test_1390_the_repeat_guard_applies_to_the_registry(tmp_path):
+    """The third identical lookup in one lead is stopped by the repeat guard and never reaches the registry; the first two are answered. O4."""
+    from defender.investigation.record_query import REPEAT_ESCAPE
+
+    S = _spec()
+    est = S.TacitEstate(tmp_path / "estate")
+    est.write_registry(json.dumps({"entries": [_current_entry()]}))
+    ask = S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS)
+
+    _run_dir, rows, gather = _gather_lookups(tmp_path, est, ask, ask, ask)
+
+    codes = [r["exit_code"] for r in rows]
+    assert codes[:2] == [0, 0] and len(codes) == 3 and codes[2] != 0, (
+        f"the third identical lookup was not stopped: {codes}")
+    assert REPEAT_ESCAPE in gather.seen[-1], f"the lead was not told to move on:\n{gather.seen[-1]}"
+
+
+def test_1390_a_tripped_circuit_breaker_refuses_a_lead_on_the_registry(tmp_path):
+    """With the run's breaker tripped for `tacit-knowledge` (a platform verb has no infra failure to charge, so it is charged directly), no lead on it runs a lookup; untripped, one does. O4."""
+    from defender.systems import circuit_breaker
+
+    S = _spec()
+    est = S.TacitEstate(tmp_path / "estate")
+    est.write_registry(json.dumps({"entries": [_current_entry()]}))
+    ask = S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS)
+    _d, control, _g = _gather_lookups(tmp_path / "control", est, ask)
+    assert [r["exit_code"] for r in control] == [0], "positive control: the untripped lead is answered"
+    state = S.run_state(tmp_path / "breaker-run")
+    for _ in range(circuit_breaker.PER_SYSTEM_FAIL_LIMIT):
+        circuit_breaker.record_outcome(state, SYSTEM, 124)
+    assert circuit_breaker.is_tripped(state, SYSTEM), "premise: the breaker is tripped"
+
+    _d, rows, gather = _gather_lookups(tmp_path / "tripped", est, ask, run_state=state)
+
+    assert rows == [] and gather.seen == [], f"a lead on a tripped registry ran: {rows}"
+
+
+def test_1390_a_resumed_run_clock_is_the_day_a_lookup_through_the_query_tool_is_judged_against(tmp_path):
+    """A run state whose clock resumed at a past reading hits an entry expired by today; a fresh run state misses it. O2."""
+    S = _spec()
+    est = S.TacitEstate(tmp_path / "estate")
+    entry = scene.registry_entry(added_at="2026-04-01", review_by="2026-07-01")
+    est.write_registry(json.dumps({"entries": [entry]}))
+    assert dt.datetime.now(dt.UTC).date() > dt.date(2026, 7, 1), "premise: the entry has expired by today"
+    sibling = S.run_state(tmp_path / "sibling-clock")
+    sibling.resume_clock(dt.datetime(2026, 5, 1, 12, tzinfo=dt.UTC), 0.0)
+    live = S.run_state(tmp_path / "live-clock")
+
+    answers = []
+    for name, state in (("sibling", sibling), ("live", live)):
+        run_dir, rows, _g = _gather_lookups(
+            tmp_path / name, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS), run_state=state)
+        answers.append(_stored_answer(run_dir, rows[0]))
+
+    assert answers == [{"matched": entry}, {"matched": None}], (
+        f"the query tool did not judge the lookup against the run's own clock: {answers}")

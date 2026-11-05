@@ -275,6 +275,9 @@ def test_1390_judge_run_never_marks_the_platform_served_registry_down(
     record = S.resolve(root)
     assert "tacit-knowledge" in record.grants.gather.systems, "premise: the tenant grants the registry"
     assert "tacit-knowledge" not in checkout_roster.adapter_files, "premise: no file serves it"
+    if label == "own-folder-not-utf8":
+        assert isinstance(record.systems.get("tacit-knowledge"), ConfigFault), (
+            f"premise: the record holds the stored fault: {record.systems.get('tacit-knowledge')!r}")
 
     judged = system_status.judge_run(checkout_roster, record, defender_dir=S.DEFENDER)
 
@@ -282,6 +285,34 @@ def test_1390_judge_run_never_marks_the_platform_served_registry_down(
         f"the registry is down at the start ({label}): {judged.down.get('tacit-knowledge')!r}")
     if label == "no-system-configured":
         assert judged.down, "positive control: settings that break adapters take them down"
+
+
+def test_1390_the_platform_verbs_answer_over_a_record_holding_a_stored_config_fault(tmp_path, checkout_roster):
+    """With the record holding a stored ConfigFault for `tacit-knowledge`, neither `lookup` nor `health-check` raises one, and `health-check` answers. A4."""
+    from defender.systems.verbs import ModuleVerbRegistry
+
+    root = tmp_path / "tenants"
+    folder = S.plant(root, marker="tkn", table=T6.TABLE_A + (
+        "  tacit-knowledge:\n    health-check: {roles: [gather]}\n    lookup: {roles: [gather]}\n"))
+    _own_folder_broken(folder, "tacit-knowledge")
+    record = S.resolve(root)
+    assert isinstance(record.systems.get("tacit-knowledge"), ConfigFault), (
+        f"premise: the record holds the stored fault: {record.systems.get('tacit-knowledge')!r}")
+    shim = S.DockerShim(tmp_path / "shim")
+    verbs = ModuleVerbRegistry(checkout_roster, record.grants.gather).verbs("tacit-knowledge")
+    ctx = _ctx(record, tmp_path, shim)
+
+    outcomes: dict[str, Any] = {}
+    for name, params in (("lookup", {"actor": "a", "host": "h", "pattern": "p"}), ("health-check", {})):
+        try:
+            outcomes[name] = verbs[name](ctx, **params)
+        except Exception as exc:  # noqa: BLE001 — the test reads whatever the verb raised
+            outcomes[name] = exc
+
+    assert not [e for e in outcomes.values() if isinstance(e, ConfigFault)], (
+        f"a platform verb raised the stored ConfigFault: {outcomes}")
+    assert isinstance(outcomes["health-check"], dict), (
+        f"health-check did not answer over the faulted record: {outcomes['health-check']!r}")
 
 
 #: Not mirrored into the planted tree: nothing a run reads (and the first two are large).
