@@ -186,6 +186,7 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_runs_stamped_l
     under the default mapping); the tenant then replaces its mapping so the alert's title is something else, and the run's
     provenance stamp and launch record still say the title it launched with. (#1345 Design "Alerts": the label is fixed
     at launch in the run's stamp; round 1 repair 11)"""
+    from defender.records.formats import DISPLAY_CAPS
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     root = tmp_path / "data"
@@ -195,7 +196,8 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_runs_stamped_l
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     document = json.loads((golden / "alert.json").read_bytes())
-    launched_with, later = document["rule"]["description"], document["rule"]["id"]
+    # The title as launched: the mapped text, cut (#1345 O2).
+    launched_with, later = document["rule"]["description"][:DISPLAY_CAPS["title"]], document["rule"]["id"]
     assert launched_with != later, "premise: the two titles differ"
     with B.run_tenant(tmp_path, root) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)

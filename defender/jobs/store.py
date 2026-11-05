@@ -24,7 +24,6 @@ from defender.records.formats import (
     ALERT_MAPPING_MISSING,
     AlertId,
     AlertMapping,
-    MAPPING_KEYS,
     InvestigationId,
     TenantId,
     admit,
@@ -148,7 +147,7 @@ class JobStore:
         async with self._tx() as s:
             return await self._mapping_in(s, tenant_id)
 
-    async def put_alert_mapping(self, tenant_id: TenantId, mapping: AlertMapping) -> bool:
+    async def put_alert_mapping(self, tenant_id: TenantId, mapping: AlertMapping, *, actor: str) -> bool:
         """Replace the tenant's alert mapping whole and re-derive the title and description of every alert of the
         tenant in the same transaction (M1, M3): the one writer. `created` when this is the tenant's first save.
         `AlertMappingFault` naming the entry for an invalid mapping (a re-check for callers that are not the API),
@@ -157,21 +156,16 @@ class JobStore:
         try:
             async with self._tx() as s:
                 await self._lock_mappings_of(s, tenant_id)
-                existing = (await s.execute(select(AlertMappingRow).where(
-                    AlertMappingRow.tenant_id == tenant_id))).scalars().first()
-                row = AlertMappingRow.of(tenant_id, mapping)
-                if existing is None:
-                    s.add(row)
-                    await s.flush()
-                else:
-                    await s.execute(update(AlertMappingRow).where(AlertMappingRow.tenant_id == tenant_id).values(
-                        **{k: getattr(row, k) for k in MAPPING_KEYS}))
+                created = await s.get(AlertMappingRow, tenant_id) is None
+                await s.merge(AlertMappingRow.of(tenant_id, mapping))
+                await s.flush()
                 await self._re_derive(s, tenant_id, mapping)
         except _Refused as refused:
             if refused.sqlstate == _FOREIGN_KEY_VIOLATION:
                 raise UnknownReference(f"no tenant {tenant_id!r}") from None
             raise
-        return existing is None
+        announce("alert_mapping.update", actor=actor, tenant_id=tenant_id, target=tenant_id)
+        return created
 
     @staticmethod
     async def _re_derive(s: AsyncSession, tenant_id: TenantId, mapping: AlertMapping) -> None:
@@ -214,15 +208,14 @@ class JobStore:
         """Start an investigation of the alert, or answer the one this request already has (#1081
         §4.1): the latest attempt under the key; else the alert's live investigation, without
         recording this key; else a new attempt 1. `created` only when this call inserted the row.
-        `UnknownReference` for an alert this tenant lacks."""
+        `UnknownReference` for an alert this tenant lacks; `Conflict` naming the missing mapping when a new attempt is
+        due and the tenant has saved no alert mapping (#1345 O4)."""
         _refuse_unstorable_text(request_key=request_key)
         async with self._tx() as s:
             locked = (await s.execute(select(AlertRow.id).where(
                 AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id).with_for_update())).first()
             if locked is None:
                 raise UnknownReference(f"no alert {alert_id!r}")
-            if await self._mapping_in(s, tenant_id) is None:  # never deleted, so no lock (#1345 O4)
-                raise Conflict(ALERT_MAPPING_MISSING)
             replay = (await s.execute(select(InvestigationRow).where(
                 InvestigationRow.tenant_id == tenant_id, InvestigationRow.alert_id == alert_id,
                 InvestigationRow.request_key == request_key)
@@ -234,6 +227,8 @@ class JobStore:
                 InvestigationRow.stage.in_(LIVE)))).scalars().first()
             if live is not None:
                 return investigation_record(live), False
+            if await self._mapping_in(s, tenant_id) is None:  # never deleted, so no lock (#1345 O4)
+                raise Conflict(ALERT_MAPPING_MISSING)
             row = InvestigationRow(
                 id=InvestigationId.mint(), tenant_id=tenant_id, alert_id=alert_id, request_key=request_key,
                 attempt=1, stage="queued", created_at=self._clock(), cost_usd=0.0)

@@ -286,7 +286,8 @@ class _Verb:
         self.capsys.readouterr()
         rc = _cli().main(["set-alert-mapping", tid or self.tid, str(file)])
         said = self.capsys.readouterr()
-        return rc, said.out, said.err
+        # The store's audit event reaches the process log, which is stderr; everything else there is still pinned.
+        return rc, said.out, "".join(line for line in said.err.splitlines(True) if " defender.jobs.audit " not in line)
 
     def stored(self, tid: str | None = None) -> dict[str, str] | None:
         async def read() -> dict[str, str] | None:
@@ -494,9 +495,9 @@ def test_1345_o6_without_a_database_address_the_verb_is_refused_not_crashed(p4_t
 
 
 @pytest.mark.postgres
-def test_1345_o6_the_verb_emits_no_alert_mapping_audit_event(verb, caplog):
-    """The API's `alert_mapping.update` event is the API's: a verb run emits no audit record (a record carrying an `action`,
-    or from an audit logger); the run did store. (#1345 O6, O1; narrowed in round 1 repair 9)"""
+def test_1345_o6_the_verb_records_who_replaced_the_mapping_on_the_job_stores_audit_log_only(verb, caplog):
+    """The store's replace announces itself, so a verb run leaves one job-store audit event naming the verb and the
+    tenant. The API's own audit sink stays the API's: no other audit logger hears of it. (#1345 O6, O1)"""
     with caplog.at_level(logging.DEBUG):
         rc, _, err = verb.run(SIX_FILE)
 
@@ -506,4 +507,6 @@ def test_1345_o6_the_verb_emits_no_alert_mapping_audit_event(verb, caplog):
     assert "[tenant.py]" not in err, err
     assert verb.stored() == dict(FIXTURE_ALERT_MAPPING), "control: the replace happened"
     audit = [r for r in caplog.records if hasattr(r, "action") or r.name.rsplit(".", 1)[-1] == "audit"]
-    assert [r for r in audit if "alert_mapping" in str(getattr(r, "action", "")) + r.getMessage()] == []
+    about = [r for r in audit if "alert_mapping" in str(getattr(r, "action", "")) + r.getMessage()]
+    assert [(r.name, r.action, r.actor, r.tenant_id, r.target) for r in about] == [
+        ("defender.jobs.audit", "alert_mapping.update", "tenant.py set-alert-mapping", verb.tid, verb.tid)]

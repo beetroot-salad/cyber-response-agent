@@ -35,7 +35,20 @@ only `agent/` is touched.
 YAML naming each of the six entries (signature, event_time, summary, case_key, title, description) with a dotted path
 into the raw alert; an entry left out, or `null`, is unmapped. It is validated by the rules the API's `PUT` applies and
 stored by the same operation, which re-derives every stored alert's title and description. It is the production writer
-until the API is wired to the real store, and the upgrade path from `settings/alert-mapping.yaml`.
+until the API is wired to the real store, and the upgrade path from `settings/alert-mapping.yaml`. The entries:
+
+    signature    the rule key lessons and the corpus are matched on: ASCII letters, digits and . _ : / @ + = - (no leading
+                 dash, at most 128 characters), a JSON string or an integer. Anything else records no signature.
+    event_time   when the activity happened; carried as it is, never parsed.
+    summary      one line of what fired.
+    case_key     the ticket a run started with --update-ticket comments on: a field the alerting system sets, never one
+                 copied from the logged activity. At most 128 printable ASCII characters, no / \\ ; or whitespace, not
+                 only dots; anything else records no key and the run leaves an error receipt.
+    title        the alert's name in the alert list and on its runs, cut to 256 characters.
+    description  the alert's longer text in the alert list, cut to 4096 characters.
+
+The first four are read once, when a run starts, and recorded beside its alert. Title and description are text or an
+integer's decimal text, and otherwise null.
 
 Exit status: 0 clean, 1 a finding or a refusal, 2 a usage error. A check that could not judge (the
 grant census not taken, `.tenant-id` unverifiable) is one more finding, not a separate code, and
@@ -236,8 +249,8 @@ def _stored_text(tenant_id: str, mapping: Any, created: bool) -> str:
 
 def set_alert_mapping(admitted: run_tenant.Admitted, mapping: Any) -> int:
     """`set-alert-mapping <id> <file>` for the admitted tenant: the validated `mapping` replaces the tenant's
-    through the job store's replace, the one writer (same lock, recompute and outcome as the API's `PUT`; no API audit
-    event), over `DEFENDER_DATABASE_DSN`. Refusals print `[tenant.py] ...`, exit 1."""
+    through the job store's replace, the one writer (same lock, recompute, outcome and job-store audit event as the
+    API's `PUT`; no API audit event), over `DEFENDER_DATABASE_DSN`. Refusals print `[tenant.py] ...`, exit 1."""
     import asyncio
     import datetime as _dt
 
@@ -255,7 +268,7 @@ def set_alert_mapping(admitted: run_tenant.Admitted, mapping: Any) -> int:
     async def put() -> bool:
         store = JobStore(dsn, clock=lambda: _dt.datetime.now(_dt.UTC))
         try:
-            return await store.put_alert_mapping(tenant_id, mapping)
+            return await store.put_alert_mapping(tenant_id, mapping, actor="tenant.py set-alert-mapping")
         finally:
             await store.close()
 

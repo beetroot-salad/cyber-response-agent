@@ -60,7 +60,7 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
     VerifiedSignIn,
 )
 from defender.tenancy import InMemoryTenantRepository
-from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, mapping_value
+from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, add_to_twin, mapping_value
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 T0 = _dt.datetime(2026, 10, 26, 9, 0, tzinfo=_dt.UTC)
@@ -651,7 +651,7 @@ class World:
         if inspect.isawaitable(added):  # GAP-0-1: the seeder's sync/async shape is not pinned
             await added
         if self.alert_mapping is not None:  # design-implied twin seeder (r5), see `_mapping1345.seed_twin`
-            await self.tenants.add_alert_mapping(tenant, mapping_value(self.alert_mapping))
+            await add_to_twin(self.tenants, tenant, mapping_value(self.alert_mapping))
 
     async def _seed_first_members(self, tenant: str, emails: Sequence[str]) -> None:
         repo, now = self.raw_repo, self.clock()

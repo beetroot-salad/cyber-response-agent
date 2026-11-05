@@ -21,6 +21,7 @@ if TYPE_CHECKING:
         MAPPING_KEYS as MAPPING_KEYS,
         admit as admit,
         check_mapping as check_mapping,
+        DISPLAY_CAPS as DISPLAY_CAPS,
         derive_display as derive_display,
         derive_display_of_stored as derive_display_of_stored,
         derive_facts as derive_facts,
@@ -167,7 +168,7 @@ if TYPE_CHECKING:
 
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
-    **dict.fromkeys(("ALERT_BYTE_CAP", "ALERT_MAPPING_MISSING", "AlertFacts", "AlertMapping", "AlertMappingFault", "AlertRecord", "AlertRefused", "AlertReplaced", "MAPPING_KEYS", "admit", "check_mapping", "derive_display", "derive_display_of_stored", "derive_facts", "digest_of", "parse_alert_record", "parse_mapping", "read_operator_alert", "read_record", "record_beside", "record_text", "verified_alert", "verified_document", "verified_input", "verify_input_bytes", "REFUSE_SIZE",), "_alert_input"),  # lint-run-records: ok — the submodule `records/_alert_input.py`, not the run folder of that name
+    **dict.fromkeys(("ALERT_BYTE_CAP", "ALERT_MAPPING_MISSING", "DISPLAY_CAPS", "AlertFacts", "AlertMapping", "AlertMappingFault", "AlertRecord", "AlertRefused", "AlertReplaced", "MAPPING_KEYS", "admit", "check_mapping", "derive_display", "derive_display_of_stored", "derive_facts", "digest_of", "parse_alert_record", "parse_mapping", "read_operator_alert", "read_record", "record_beside", "record_text", "verified_alert", "verified_document", "verified_input", "verify_input_bytes", "REFUSE_SIZE",), "_alert_input"),  # lint-run-records: ok — the submodule `records/_alert_input.py`, not the run folder of that name
     **dict.fromkeys(("REPORT_CLOSE_DELIMITER", "UNCHANGED_LEAD", "UNCHANGED_NOTICE", "artifact_names", "committed_investigation_reason", "encodable_or_reason", "needs_baseline", "register_invlang_validator", "render_diagnostic", "utf8_len", "validate_artifact", "validate_report",), "_artifact_schema"),
     **dict.fromkeys(("AppendRecord", "Episode", "EpisodeRefused", "refuse_bad_episode_id",), "_episode_handle"),
     **dict.fromkeys(("EpisodePaths", "LAYOUT", "OracleStorePaths", "WORLD_LEAVES", "WorldPaths",), "_episode_paths"),

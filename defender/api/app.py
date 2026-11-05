@@ -254,7 +254,8 @@ async def start_investigation(
 
     Repeating a request with its `client_request_id` returns the investigation that request
     started (200). A request answered with an investigation that was already live started
-    nothing, so repeating it later is a new request."""
+    nothing, so repeating it later is a new request. A new investigation for a tenant with no
+    saved alert mapping is refused (409), naming how to save one."""
     async with _transaction(deps, caller) as tx:
         investigation, created = await tx.create_investigation(body.alert_id, body.client_request_id)
         _answered_for("alert", body.alert_id, investigation.alert_id)

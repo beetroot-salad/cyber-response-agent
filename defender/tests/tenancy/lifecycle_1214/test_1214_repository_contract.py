@@ -178,7 +178,7 @@ async def test_1345_d2_a_tenant_made_by_the_create_request_has_no_alert_mapping_
         with pytest.raises(Conflict) as refused:
             await store.create_investigation(tenant, alert.alert_id, "k1", actor="u-1")
         assert str(refused.value) == ALERT_MAPPING_MISSING
-        await store.put_alert_mapping(tenant, mapping_value({}))
+        await store.put_alert_mapping(tenant, mapping_value({}), actor="u-1")
         await store.create_investigation(tenant, alert.alert_id, "k1", actor="u-1")  # control: a saved mapping lets it through
     finally:
         await store.close()

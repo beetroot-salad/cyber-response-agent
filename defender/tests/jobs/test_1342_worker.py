@@ -301,7 +301,7 @@ async def test_1345_o2_the_label_is_the_title_at_launch_not_at_queueing(world):
     alert as it then is. (#1345 O2, M3)"""
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
-        await store.put_alert_mapping(T1, mapping_value({"title": "a"}))
+        await store.put_alert_mapping(T1, mapping_value({"title": "a"}), actor="u-1")
         await _worker(world, store, _child(world)).drain()
 
     launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))

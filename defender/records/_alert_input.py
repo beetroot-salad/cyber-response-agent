@@ -22,6 +22,9 @@ DISPLAY_KEYS = ("title", "description")
 #: The alert mapping's only entries (#1345): the four facts and the two display fields. The one owner of the names;
 #: the table's columns and the API's wire model are necessary copies, pinned by tests.
 MAPPING_KEYS = FACT_KEYS + DISPLAY_KEYS
+#: What a display field IS (#1345): the mapped text cut to at most this many characters. It is copied into the launch
+#: record, the run's stamp and the alert list, none of which should grow with the alert.
+DISPLAY_CAPS = {"title": 256, "description": 4096}
 #: What a case key IS (#1359 P3): one URL path segment of at most 128 printable ASCII characters,
 #: with no `/`, `\\`, `;` (the credential proxy refuses any `;` in a decoded path) or whitespace, and
 #: not made only of dots (curl collapses `.` and `..` segments, so the request would go elsewhere).
@@ -283,22 +286,23 @@ def derive_facts(document: Mapping[str, Any], mapping: AlertMapping) -> AlertFac
 
 def derive_display(document: Mapping[str, Any], mapping: AlertMapping) -> tuple[str | None, str | None]:
     """@owns title @owns description — the alert's `(title, description)` through the tenant's mapping (#1345 M3): the
-    fact text rule over the same path walk, and `None` for what PostgreSQL text cannot hold, so a store never
-    writes a value its column refuses."""
+    fact text rule over the same path walk, cut to `DISPLAY_CAPS`, and `None` for what PostgreSQL text cannot hold, so
+    a store never writes a value its column refuses."""
     def at(entry: str) -> str | None:
         path = mapping.path_of(entry)
         text = None if path is None else _scalar_text(_walk(document, path))
-        return text if text is not None and postgres_can_hold(text) else None
+        if text is None:
+            return None
+        kept = text[:DISPLAY_CAPS[entry]]
+        return kept if postgres_can_hold(kept) else None
 
     return at("title"), at("description")
 
 
-def derive_display_of_stored(raw: bytes, mapping: AlertMapping | None) -> tuple[str | None, str | None]:
+def derive_display_of_stored(raw: bytes, mapping: AlertMapping) -> tuple[str | None, str | None]:
     """`derive_display` over an alert's stored bytes, for a recompute (#1345 M3): the bytes are parsed as JSON only
     and admission is not re-run (its rules may have tightened since the alert was stored). Bytes that do not parse
-    as one JSON object, or no mapping at all, give `(None, None)`."""
-    if mapping is None:
-        return None, None
+    as one JSON object give `(None, None)`."""
     try:
         document = json.loads(raw.decode("utf-8"))
     except (ValueError, RecursionError):

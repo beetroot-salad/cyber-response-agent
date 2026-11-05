@@ -149,7 +149,9 @@ class WriteTransaction(Protocol):
         """Start an investigation of `alert_id`, or answer the one this request already has —
         the rules are §4.1's (the latest attempt of a repeated request, one live investigation
         per alert). Returns `(investigation, created)`, `created` only when this call inserted
-        the row. `UnknownReference` for an alert this tenant does not have."""
+        the row. `UnknownReference` for an alert this tenant does not have; `Conflict` naming the
+        missing mapping when a new investigation is due and the tenant has saved no alert mapping
+        (#1345 O4)."""
         ...
 
     async def cancel_investigation(self, investigation_id: InvestigationId) -> Investigation:
