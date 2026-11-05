@@ -535,8 +535,11 @@ class _Records:
 
     def __init__(self, planted: S.Planted, entries: Mapping[str, str] | None, fault: BaseException | None = None) -> None:
         from defender.tests.support.tenancy._active1214 import active_repository
+        from defender.tests.support.tenancy._proxied1391 import sign_generation
 
-        self._twin = active_repository(Path(location_path(planted.root)), planted.tenant_id, alert_mapping=None)
+        # A fixture tenant's elastic is proxied (#1391 P1/D12): run start needs a sign login, as `tenant_directory` seeds.
+        self._twin = active_repository(Path(location_path(planted.root)), planted.tenant_id, alert_mapping=None,
+                                       generations=[sign_generation(planted.tenant_id)])
         self.entries, self.fault, self.reads = entries, fault, 0
 
     def __getattr__(self, name: str) -> Any:
