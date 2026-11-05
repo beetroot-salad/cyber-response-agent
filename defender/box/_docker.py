@@ -11,7 +11,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import shlex
 
@@ -49,8 +49,8 @@ class Rootfs(NamedTuple):
 
 
 class Create(NamedTuple):
-    """A rendered `docker run`: the argv, plus the rootfs by name so no caller reads it off
-    an argv position."""
+    """A rendered `docker run` (the run box's: `docker create`): the argv, plus the rootfs by
+    name so no caller reads it off an argv position."""
 
     argv: list[str]
     rootfs: Rootfs
@@ -159,12 +159,25 @@ def _render_env(request_env: Mapping[str, str], workdir: Path, *, defender_dir: 
     return merged
 
 
-def run_docker(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        argv, capture_output=True, text=True, check=False, timeout=120,
-        encoding="utf-8",
-        errors="replace",
-    )
+class _RealDocker:
+    """The real docker CLI. Called: one command, run to completion. `.popen`: a docker process
+    left running, the run box's attached start (#1343 B10), which the box executor holds for the
+    run's life. The run box's start asks for it of the docker object it was handed (r5 item 15),
+    so a docker double carries its own and the real daemon is never reached around it."""
+
+    def __call__(self, argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            argv, capture_output=True, text=True, check=False, timeout=120,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    @staticmethod
+    def popen(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        return subprocess.Popen(argv, **kwargs)
+
+
+run_docker = _RealDocker()
 
 
 DockerFn = Callable[..., subprocess.CompletedProcess]
@@ -235,7 +248,9 @@ def _remove_container(docker: DockerFn, name: str) -> str | None:
     Under runsc a PAUSED container's `rm -f` kills it but answers "PID … is zombie and can not
     be killed" and leaves it behind (#1202). `docker wait` then proves it exited, and a second
     `rm -f` removes it. Never thaws the box to remove it (#1178). The one removal step every
-    site uses: `stop_box` and both reaps."""
+    site uses: `stop_box` and both reaps. A container the daemon is already removing counts as
+    gone, for every caller: its removal is under way (a run box, `--rm`, removing itself once it
+    stopped, #1343 B10, or a teardown racing a backstop), and a second `rm` cannot hasten it."""
     argv = ["docker", "rm", "-f", name]
     first = _call(docker, argv)
     if first.returncode == 0:
@@ -246,7 +261,8 @@ def _remove_container(docker: DockerFn, name: str) -> str | None:
         return None
     # Removed by someone else meanwhile (a teardown racing a worker's backstop): it is gone.
     with contextlib.suppress(BoxFault):
-        if _container_status(docker, name) is None:
+        status = _container_status(docker, name)
+        if status in (None, "removing"):
             return None
     return f"{(first.stderr or '').strip()}; after waiting: {(second.stderr or '').strip()}"
 

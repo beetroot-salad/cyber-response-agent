@@ -23,6 +23,7 @@ from defender.box import (
     Mount,
     _DockerTransport,
 )
+from defender.tests.support.sandbox._box1343 import AttachedStartSeam
 from defender.tests.support.shared.contracts import _daemon1195 as daemon_mod
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
@@ -169,11 +170,14 @@ def caught(fn: Callable[[], object]) -> BaseException | None:
 _DOCKER_STEPS = frozenset({"create", "rm", "status", "start", "stop", "inspect", "exec"})
 
 def _step_of(argv: list[str]) -> str:
-    """A docker call's name in `FakeDaemon.steps`: its verb, `create` for `docker run`, and
-    `status` for an inspect of the status."""
+    """A docker call's name in `FakeDaemon.steps`: its verb, `create` for `docker run` or `docker
+    create`, `attach` for the run box's held `docker start -a -i` (#1343 B10; not a batch start, so
+    no run window opens on it), and `status` for an inspect of the status."""
     verb = argv[1] if len(argv) > 1 else ""
-    if verb == "run":
+    if verb in ("run", "create"):
         return "create"
+    if verb == "start" and "-a" in argv:
+        return "attach"
     if verb == "inspect" and "-f" in argv and "State.Status" in argv[argv.index("-f") + 1]:
         return "status"
     return verb
@@ -186,7 +190,7 @@ runpy.run_path({module!r}, run_name="__main__")
 '''
 
 
-class FakeDaemon:
+class FakeDaemon(AttachedStartSeam):
     """`_daemon1195` over `<tmp>/daemon1195`: called in process as a `docker=` seam, and, once
     `install`ed, as the `docker` program first on `PATH`, over the same containers."""
 
@@ -199,6 +203,7 @@ class FakeDaemon:
         self._seam_faults: list[dict[str, Any]] = []
         self._seam_counts: dict[str, int] = {}
         self.seam_raised: list[str] = []
+        self._attached_state()
 
     # -- the seams -------------------------------------------------------------------
 
@@ -207,6 +212,14 @@ class FakeDaemon:
         self._seam_fault(argv)
         rc, out, err = daemon_mod.handle(self.dir, argv)
         return subprocess.CompletedProcess(argv, rc, out, err)
+
+    def _record(self, argv: list[str]) -> None:
+        """The held attached start (#1343 B10) reaches the daemon's log like any other call."""
+        self._seam_fault(argv)
+        daemon_mod.log(self.dir, argv)
+
+    def _landed(self, argv: list[str]) -> None:
+        daemon_mod.attach(self.dir, argv)
 
     def _seam_fault(self, argv: list[str]) -> None:
         """Raise instead of answering, when a `seam_raises` fault is due at this call."""
@@ -282,7 +295,7 @@ class FakeDaemon:
         self._fault("alias_allowed", True)
 
     def refuse_create(self) -> None:
-        """Every `docker run` fails (rc 125), as a daemon that cannot create the box does."""
+        """Every `docker run` or `docker create` fails (rc 125), as a daemon that cannot create the box does."""
         self._fault("create", True)
 
     def refuse_sentinel(self) -> None:
@@ -419,8 +432,8 @@ class FakeDaemon:
         return calls[calls.index("stop"):] if "stop" in calls else calls
 
     def created(self) -> list[str]:
-        """The name of every container a `docker run` asked for, in order."""
-        return [a[a.index("--name") + 1] for a in self.calls() if a[:2] == ["docker", "run"]]
+        """The name of every container a `docker run` or `docker create` asked for, in order."""
+        return [a[a.index("--name") + 1] for a in self.calls() if a[:2] in (["docker", "run"], ["docker", "create"])]
 
     def windows(self) -> list[list[str]]:
         """The marks inside each run window: from a `docker start` to the next `docker stop`."""
