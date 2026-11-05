@@ -532,22 +532,26 @@ def _endless_8_mib(conn: socket.socket) -> None:
 @contextlib.contextmanager
 def _stalled_exchange(tmp_path: Path, data_root: Path) -> Iterator[tuple[httpx.Response, H.AuditRecorder, W.Scripted]]:
     """An 8 MiB reply (past the socket buffers) to a reader that reads nothing, under a deadline
-    2 s away: yields the unread response once the audit record is written."""
+    2 s away: yields the unread response once the audit record is written. One worker thread is
+    lent out while the exchange is stalled and none once the record is written, final send pending."""
     audit = H.AuditRecorder()
     with W.scripted(_endless_8_mib) as up, T.rig(
             tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + API)) as r, \
             A.proxy_for(r.t, r.store, audit=audit, proxy_overhead_sec=1) as (url, _tap), \
             W.unread(url, r.tok(), W.doc(f"{up.url}{API}/users/x", timeout_sec=1)) as response:
+        assert W.until(lambda: W.borrowed(url) == 1, 1.5), "no worker thread held for the exchange"
         assert W.until(lambda: audit.records, 3.5), "no record by the deadline"
+        assert W.until(lambda: W.borrowed(url) == 0, 1), "the worker thread is held while the final frame is sent"
         yield response, audit, up
 
 
 def test_o6_a_reader_stalled_past_the_deadline_is_cut_and_gets_todays_answer_within_the_grace(
         tmp_path, data_root):
-    """A reader stalled past the deadline and back within the grace: the upstream was released at
-    the cut, one record says sent, and the reply is the status with no whole body. #1412 O6."""
+    """A reader stalled past the deadline, back one second inside the grace: the upstream was
+    released at the cut, one record says sent, the reply is the status, no whole body. #1412 O6."""
     with _stalled_exchange(tmp_path, data_root) as (response, audit, up):
         assert up.hung_up.wait(1), "the upstream connection outlived the deadline"
+        time.sleep(CALLER_GRACE_SEC - 1)
         forwarded, final = W.decoded(b"".join(response.iter_raw()))
 
     assert (final["status"], final["fault"], final["body_whole"], final["system_side"]) == (
@@ -562,7 +566,7 @@ def test_o6_a_reader_stalled_past_the_grace_gets_the_connection_closed_unfinishe
     resumes, and the audit still says the call was sent. #1412 O6."""
     with _stalled_exchange(tmp_path, data_root) as (response, audit, _up):
         time.sleep(CALLER_GRACE_SEC + 1)
-        with pytest.raises(httpx.TransportError):
+        with pytest.raises(httpx.RemoteProtocolError):
             for _chunk in response.iter_raw():
                 pass
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
+import os
 import subprocess
 import sys
 import threading
@@ -14,6 +15,7 @@ from pathlib import Path
 
 import httpx
 
+from defender._git import REPO_ROOT
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
@@ -45,7 +47,8 @@ def _proxy_process(data_root: Path, tenant: str, *, trace: bool) -> Iterator[_Pr
     port = H.free_port()
     process = subprocess.Popen(
         [sys.executable, "-m", "defender.tests.integrations.credential_proxy_1163._proxy_process_1412",
-         str(data_root), tenant, str(port), "trace" if trace else "plain"])
+         str(data_root), tenant, str(port), "trace" if trace else "plain"],
+        cwd=REPO_ROOT, env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT)})
     running = _ProxyProcess(process, f"http://127.0.0.1:{port}")
 
     def up() -> bool:
@@ -54,7 +57,9 @@ def _proxy_process(data_root: Path, tenant: str, *, trace: bool) -> Iterator[_Pr
         return False
 
     try:
-        assert W.until(up, 30), "the proxy process did not start"
+        W.until(lambda: process.poll() is not None or up(), 30)
+        assert process.poll() is None, f"the proxy process exited with {process.returncode}"
+        assert up(), "the proxy process did not start"
         yield running
     finally:
         process.kill()
@@ -85,8 +90,8 @@ def test_o1_a_stalled_reader_of_an_8_mib_reply_costs_under_2_mib_of_allocations(
 
 
 def test_o1_forty_8_mib_replies_at_once_keep_the_process_under_256_mib(tmp_path, data_root):
-    """40 overlapping 8 MiB replies leave the process's peak resident memory under the container's
-    256 MiB. The process is killed as soon as it passes that, so a failure stays cheap. O1."""
+    """40 overlapping 8 MiB replies, one worker thread each, keep peak resident memory under 256 MiB
+    (killed once past it, so a failure stays cheap). O1, P3."""
     limit = 256 * W.MIB
     with T.rig(tmp_path / "forge", data_root) as r, \
             _proxy_process(data_root, r.t.tenant_id, trace=False) as proxy:
@@ -118,6 +123,7 @@ def test_o1_forty_8_mib_replies_at_once_keep_the_process_under_256_mib(tmp_path,
         gauge = proxy.gauge()
 
     assert gauge["live_peak"] == 40, gauge
+    assert gauge["borrowed_peak"] == 40, f"worker threads lent out at the peak: {gauge}"
     assert gauge["audited"] == 40, gauge
     assert all(size > W.DEFAULT_LIMIT for size in sizes), sizes
 

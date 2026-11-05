@@ -86,7 +86,8 @@ def _pieces(sizes: list[int]) -> list[bytes]:
 def test_f1_a_chunked_reply_is_whole_at_the_limit_and_withheld_past_it(
         tmp_path, data_root, sizes, over):
     """At the limit a chunked reply (no Content-Length) is complete; one byte past, nothing past the
-    limit is forwarded, the status stands, `UpstreamFault` says to narrow the query. #1412 O3."""
+    limit is forwarded, a chunk crossing it not at all, the status stands, `UpstreamFault` says to
+    narrow the query. #1412 O3."""
     chunks = _pieces(sizes)
     with _chunked_upstream(chunks, pause=0.02) as base, T.rig(
             tmp_path / "forge", data_root, lambda _u: H.declaration(base + BASE),
@@ -98,7 +99,8 @@ def test_f1_a_chunked_reply_is_whole_at_the_limit_and_withheld_past_it(
     if over:
         assert (final["fault"], final["body_whole"]) == ("UpstreamFault", False)
         assert "narrow" in final["detail"]
-        assert len(forwarded) <= CAP
+        whole_chunks = {sum(sizes[:k]) for k in range(len(sizes) + 1) if sum(sizes[:k]) <= CAP}
+        assert len(forwarded) in whole_chunks, f"{len(forwarded)} bytes is not a run of whole chunks"
         assert sent.startswith(forwarded)
     else:
         assert (final["fault"], final["body_whole"], forwarded) == (None, True, sent)
@@ -598,19 +600,18 @@ def test_o9_every_reply_carries_the_formats_content_type_and_is_no_old_json(tmp_
         assert W.fmt().decode_reply(response.content) is not None
 
 
-def test_p3_the_route_alone_reaches_the_pipeline():
-    """Nothing in the proxy but its one route refers to `handle`, so no path runs the pipeline
-    without the route's send (no buffered mode). #1412 P3."""
-    import ast
-    from pathlib import Path
+def test_p3_the_pipeline_cannot_run_without_the_routes_send(tmp_path, data_root):
+    """`handle` called with no send function raises `TypeError` before anything is sent or
+    audited, while the route answers the same request. #1412 P3."""
+    from defender.credential_proxy._app import _Proxy
 
-    import defender.credential_proxy as package
+    with T.rig(tmp_path / "forge", data_root) as r:
+        proxy = _Proxy(T.deps(r.data_root, r.store, verifier=r.verifier, audit=r.audit))
+        request = json.dumps({"system": "identity", "method": "GET", "url": f"{r.up.url}{PATH}",
+                              "headers": {}, "body": None}).encode()
+        assert r.ask()["fault"] is None, "positive control: the route answers it"
+        before = (len(r.up.seen), len(r.audit.records))
+        with pytest.raises(TypeError):
+            proxy.handle(f"Bearer {r.tok()}", request)
 
-    uses = {}
-    for source in sorted(Path(package.__file__).parent.glob("*.py")):
-        tree = ast.parse(source.read_text(encoding="utf-8"))
-        count = sum(isinstance(node, ast.Attribute) and node.attr == "handle" for node in ast.walk(tree))
-        if count:
-            uses[source.name] = count
-
-    assert uses == {"_app.py": 1}
+    assert (len(r.up.seen), len(r.audit.records)) == before

@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from defender._proxy_client import proxy_call
+from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH
 
@@ -40,6 +41,12 @@ def decoded(raw: bytes) -> tuple[bytes, dict[str, Any]]:
     """(the body frames joined, the final record's fields) of the framed reply `raw`."""
     reply = fmt().decode_reply(raw)
     return b"".join(reply.chunks), T.fields_of(reply.final)
+
+
+def borrowed(url: str) -> int:
+    """Worker threads the served proxy has lent out right now (`H.GAUGE_PATH`)."""
+    with httpx.Client(trust_env=False, timeout=30) as client:
+        return client.get(url + H.GAUGE_PATH).json()["borrowed"]
 
 
 def doc(target: str, *, method: str = "GET", timeout_sec: float | None = None) -> dict[str, Any]:
@@ -80,25 +87,33 @@ class Scripted:
     def __init__(self, script: Callable[[socket.socket], None]) -> None:
         self.hung_up = threading.Event()
         self._script = script
+        self._conns: list[tuple[socket.socket, threading.Thread]] = []
         self._srv = socket.socket()
         self._srv.bind(("127.0.0.1", 0))
         self._srv.listen(8)
         self.url = f"http://127.0.0.1:{self._srv.getsockname()[1]}"
-        threading.Thread(target=self._serve, daemon=True).start()
+        self._acceptor = threading.Thread(target=self._serve, daemon=True)
+        self._acceptor.start()
 
     def _serve(self) -> None:
         with contextlib.suppress(OSError):
             while True:
                 conn, _ = self._srv.accept()
-                threading.Thread(target=self._one, args=(conn,), daemon=True).start()
+                handler = threading.Thread(target=self._one, args=(conn,), daemon=True)
+                self._conns.append((conn, handler))
+                handler.start()
 
     def _one(self, conn: socket.socket) -> None:
         with conn:
             head = b""
             try:
                 while b"\r\n\r\n" not in head:
-                    head += conn.recv(65536)
-                self._script(conn)
+                    more = conn.recv(65536)
+                    if not more:
+                        break
+                    head += more
+                else:
+                    self._script(conn)
                 while conn.recv(65536):  # the request's body, then the peer's close
                     pass
                 self.hung_up.set()
@@ -106,7 +121,15 @@ class Scripted:
                 self.hung_up.set()
 
     def close(self) -> None:
+        """Stop accepting, end every connection and join every thread this server started."""
+        with contextlib.suppress(OSError):
+            self._srv.shutdown(socket.SHUT_RDWR)  # wakes the blocked accept
         self._srv.close()
+        self._acceptor.join(5)
+        for conn, handler in self._conns:
+            with contextlib.suppress(OSError):
+                conn.shutdown(socket.SHUT_RDWR)
+            handler.join(5)
 
 
 @contextlib.contextmanager
@@ -129,14 +152,18 @@ def chunked(*pieces: bytes) -> bytes:
     return b"".join(b"%x\r\n%s\r\n" % (len(piece), piece) for piece in pieces)
 
 
+def reply_head(content_type: str | None = None) -> bytes:
+    """The head of a chunked 200 in the reply format's content type (or `content_type`)."""
+    kind = fmt().REPLY_CONTENT_TYPE if content_type is None else content_type
+    return b"HTTP/1.1 200 OK\r\nContent-Type: %s\r\nTransfer-Encoding: chunked\r\n\r\n" % kind.encode()
+
+
 @contextlib.contextmanager
 def fake_proxy(payload: bytes, *, ended: bool, content_type: str | None = None) -> Iterator[str]:
     """A proxy stand-in answering with `payload` in the reply format's content type as one HTTP
     chunk, then either ending the HTTP body (`ended`) or closing with the body unfinished."""
     def script(conn: socket.socket) -> None:
-        kind = fmt().REPLY_CONTENT_TYPE if content_type is None else content_type
-        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: %s\r\nTransfer-Encoding: chunked\r\n\r\n"
-                     % kind.encode())
+        conn.sendall(reply_head(content_type))
         if payload:
             conn.sendall(chunked(payload))
         if ended:

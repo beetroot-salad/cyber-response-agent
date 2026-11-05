@@ -222,7 +222,7 @@ class _HeldAudit(H.AuditRecorder):
 
 def test_o4_the_body_arrives_before_the_record_and_the_final_frame_after_it(tmp_path, data_root):
     """While the record is being written the reader holds the body and no final frame; once it is
-    written the reply completes. #1412 O4, P1."""
+    written the reply completes; the worker thread is held until then. #1412 O4, P1, P3."""
     audit, arrived = _HeldAudit(), bytearray()
     marker = b"BODY-BEFORE-THE-RECORD"
     with T.rig(tmp_path / "forge", data_root) as r, A.proxy_for(r.t, r.store, audit=audit) as (url, _tap):
@@ -238,12 +238,14 @@ def test_o4_the_body_arrives_before_the_record_and_the_final_frame_after_it(tmp_
         reader.start()
         try:
             assert audit.entered.wait(10), "no audit record was started"
-            time.sleep(0.3)
+            assert W.until(lambda: marker in bytes(arrived), 5), "the body never arrived"
             before = bytes(arrived)
+            lent = W.borrowed(url)
         finally:
             audit.release.set()
             reader.join(20)
 
+    assert lent == 1, "the worker thread was not held until the record was written"
     assert marker in before, "the body had not been forwarded when the record was written"
     with pytest.raises(ValueError):  # noqa: PT011 — the one error type the design names
         W.fmt().decode_reply(before)

@@ -120,9 +120,9 @@ def test_c2_an_echoed_static_credential_reaches_the_run_unaltered(
     _assert_unaltered(answer, secret)
 
 
-@pytest.mark.parametrize("status", [403, 500])
+@pytest.mark.parametrize(("status", "fault"), [(403, "UpstreamFault"), (500, "TransportFault")])
 def test_c2_an_error_reply_echoing_the_key_passes_through_but_never_the_proxys_detail(
-        tmp_path, data_root, status):
+        tmp_path, data_root, status, fault):
     """An error reply's echo of the key reaches the run as sent; the proxy's own detail on it
     holds no credential. #1412 O7."""
     with T.rig(tmp_path / "forge", data_root) as r:
@@ -130,7 +130,7 @@ def test_c2_an_error_reply_echoing_the_key_passes_through_but_never_the_proxys_d
             status, {"X-Why": f"key {H.CANARY_KEY} refused"}, f"bad {H.CANARY_KEY}".encode())
         answer = r.ask()
 
-    assert answer["fault"] in ("UpstreamFault", "TransportFault"), answer
+    assert answer["fault"] == fault, answer
     assert answer["body"] == f"bad {H.CANARY_KEY}"
     assert answer["headers"]["x-why"] == f"key {H.CANARY_KEY} refused"
     assert answer["detail"].strip(), "positive control: the reply has a detail"

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import dataclasses
 import json
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -119,12 +118,12 @@ def post(client: Any, tok: str, system: str, method: str, url: str,
     return response
 
 
+FINAL_FIELDS = ("status", "headers", "fault", "detail", "system_side", "body_whole")
+
+
 def fields_of(final: Any) -> dict[str, Any]:
-    """A `FinalRecord`'s six fields by name, whether it is a dataclass, a named tuple or a
-    mapping (the design leaves its access style to the implementer)."""
-    if dataclasses.is_dataclass(final):
-        return dataclasses.asdict(final)
-    return final._asdict() if hasattr(final, "_asdict") else dict(final)
+    """A `FinalRecord`'s six fields, read by attribute as the design says."""
+    return {name: getattr(final, name) for name in FINAL_FIELDS}
 
 
 def answer_of(raw: bytes) -> dict[str, Any]:

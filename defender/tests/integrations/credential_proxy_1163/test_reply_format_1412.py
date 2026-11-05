@@ -10,9 +10,9 @@ from typing import Any
 import pytest
 
 from defender.tests.integrations.credential_proxy_1163._stream1412 import MIB, decoded, final_record, fmt
-from defender.tests.integrations.credential_proxy_1163._tenant import fields_of
+from defender.tests.integrations.credential_proxy_1163._tenant import FINAL_FIELDS, fields_of
 
-FIELDS = ("status", "headers", "fault", "detail", "system_side", "body_whole")
+FIELDS = FINAL_FIELDS
 TEXT = ['"', "\\", "{", "}", "\n", "é", "☃", "\x00", "a", "b", " ", ":", ","]
 
 
@@ -135,6 +135,15 @@ def test_a_final_record_cannot_be_built_without_all_six_fields(name):
     del given[name]
     with pytest.raises(TypeError):
         fmt().FinalRecord(**given)
+
+
+def test_a_final_record_is_read_by_attribute_and_cannot_be_changed():
+    """A decoded final record is frozen and read by attribute. O2."""
+    record = fmt().decode_reply(fmt().encode_final(final_record(201))).final
+    assert record.status == 201
+    with pytest.raises(AttributeError):  # frozen dataclasses raise FrozenInstanceError, a subclass
+        record.status = 500
+    assert record.status == 201
 
 
 def test_the_reply_content_type_is_its_own():

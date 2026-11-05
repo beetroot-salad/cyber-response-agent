@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
+import time
 from datetime import timedelta
 
 import httpx
@@ -332,12 +334,36 @@ def test_o2_a_reply_cut_at_every_byte_is_refused_and_the_whole_reply_is_the_answ
 
 
 def test_o2_a_proxy_that_closes_before_its_head_is_unreachable_not_broken():
-    """No response head at all keeps today's wording. O2."""
-    with W.scripted(lambda _conn: None) as proxy, pytest.raises(TransportFault) as raised:
+    """No response head at all keeps today's wording, reached by the close and not by a timeout. O2."""
+    started = time.monotonic()
+    with W.scripted(lambda conn: conn.shutdown(socket.SHUT_RDWR)) as proxy, \
+            pytest.raises(TransportFault) as raised:
         W.call(proxy.url, "tok", f"{proxy.url}/x")
 
+    assert time.monotonic() - started < 10, "the close was not what ended the wait"
     assert raised.value.proxy_own is True
     assert "unreachable" in raised.value.detail
+
+
+def test_o2_a_proxy_that_goes_silent_after_its_head_is_broken_not_unreachable():
+    """Head received, then nothing until the caller's wait runs out (about 26 s): "broke". O2."""
+    with W.scripted(lambda conn: conn.sendall(W.reply_head())) as proxy, \
+            pytest.raises(TransportFault) as raised:
+        W.call(proxy.url, "tok", f"{proxy.url}/x", timeout_sec=1)
+
+    assert raised.value.proxy_own is True
+    assert "broke" in raised.value.detail
+    assert "unreachable" not in raised.value.detail
+
+
+def test_o3_the_run_adds_no_limit_to_a_reply_of_exactly_the_proxys_limit():
+    """A whole body of exactly 8 MiB, the proxy's default limit, is the answer. O3."""
+    body = b"x" * W.DEFAULT_LIMIT
+    f = W.fmt()
+    with W.fake_proxy(f.encode_body(body) + f.encode_final(W.final_record()), ended=True) as url:
+        answer = W.call(url, "tok", f"{url}/x")
+
+    assert (answer.status, answer.fault, len(answer.body)) == (200, None, W.DEFAULT_LIMIT)
 
 
 @pytest.mark.parametrize(("over", "kept"), [

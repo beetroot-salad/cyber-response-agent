@@ -348,8 +348,8 @@ def grant_of(claims: Mapping[str, Any]) -> list[tuple[str, str]]:
 
 class Tap:
     """An ASGI wrapper that records every `Authorization` header value the proxy is sent and
-    each request body (`bodies`: the adapter's call, `timeout_sec` included). It forwards
-    unchanged and decides nothing."""
+    each request body (`bodies`: the adapter's call, `timeout_sec` included), and answers
+    `H.GAUGE_PATH` with the worker threads lent out. It forwards the rest unchanged."""
 
     def __init__(self, app: Any) -> None:
         self.app = app
@@ -359,6 +359,8 @@ class Tap:
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
+        if scope["path"] == H.GAUGE_PATH:
+            return await H.answer_gauge(send, {"borrowed": H.borrowed_threads()})
         for key, value in scope["headers"]:
             if key == b"authorization":
                 self.tokens.append(value.decode().removeprefix("Bearer "))
