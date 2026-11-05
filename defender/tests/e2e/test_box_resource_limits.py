@@ -75,7 +75,7 @@ def _flag(argv: list[str], name: str) -> str:
     """The one value of `name`, which sits in option position, before the image."""
     at = [i for i, word in enumerate(argv) if word == name]
     assert len(at) == 1, f"{name} appears {len(at)} times in {argv}"
-    assert at[0] + 1 < len(argv) - 3, f"{name} is not an option of `docker run`: {argv}"
+    assert at[0] + 1 < len(argv) - 4, f"{name} is not an option of `docker run`: {argv}"
     return argv[at[0] + 1]
 
 
@@ -112,7 +112,10 @@ def test_every_launch_path_caps_memory_cpu_and_processes(argv_of, tmp_path):
     assert _flag(argv, "--memory-swap") == spec.memory, "swap on top of the memory cap"
     assert _flag(argv, "--cpus") == spec.cpus
     assert _flag(argv, "--pids-limit") == str(spec.pids_limit)
-    assert "--init" in argv[:-3], "orphans would hold the box at its process limit"
+    assert argv[-3:-1] == ["sh", "-c"], argv[-3:]
+    assert argv[-1].endswith("; :"), (
+        f"the shell must stay PID 1 to reap orphans, which would hold the box at its limit: {argv[-1]}")
+    assert "--init" not in argv, "docker's init has the attached stream as its output"
 
 
 @pytest.mark.parametrize("payload", [
