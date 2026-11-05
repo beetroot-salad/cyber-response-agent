@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 from defender import box as box_mod
+from defender.box import _lifecycle
 from defender.box._docker import resolve_rootfs
 from defender.box._spec import _DockerTransport
 from defender.tests.e2e._box665 import DEFENDER, RecordingDocker, reaped_after_create
@@ -60,12 +61,12 @@ def _index(calls: list[list[str]], pred: Callable[[list[str]], bool]) -> int:
 
 
 def test_b10_the_run_box_is_created_for_an_attached_start_with_its_hardening_unchanged(tmp_path: Path):
-    """CONFLICT-UPDATED (#1343 review; was a bare `cat`): run-box create = `docker create -i --rm … <image> sh -c 'exec cat >/dev/null 2>&1'`, same name, labels, runtime and limits. (B10, r5 8a)"""
+    """CONFLICT-UPDATED (#1343 review; was a bare `cat`): run-box create = `docker create -i --rm … <image> sh -c <the reaping `cat`>`, same name, labels, runtime and limits. (B10, r5 8a)"""
     rec = RecordingDocker()
     _start(rec, make_run_dir(tmp_path))
     argv = rec.create_argv or []
     assert argv[:2] == ["docker", "create"], argv[:3]
-    assert argv[-3:] == ["sh", "-c", "exec cat >/dev/null 2>&1"], argv[-4:]
+    assert argv[-3:] == ["sh", "-c", _lifecycle._RUN_BOX_MAIN], argv[-4:]
     assert "sleep" not in argv, argv[-4:]
     assert "--detach" not in argv, argv[-4:]
     image_at = len(argv) - 4
@@ -276,12 +277,12 @@ def _stop_start_box(tmp_path: Path, rec: RecordingDocker) -> Any:
 
 
 def test_b10_a_stop_start_box_is_still_started_detached_forever_and_removed_explicitly(tmp_path: Path):
-    """A request-lane (learning drain / oracle) box: `docker run --detach … sleep infinity`, no -i/--rm, no attached start. (B10 scope)"""
+    """A request-lane (learning drain / oracle) box: `docker run --detach … sh -c <the reaping sleep>`, no -i/--rm, no attached start. (B10 scope)"""
     rec = _StopsInto("exited")
     box = _stop_start_box(tmp_path, rec)
     argv = rec.create_argv or []
     assert argv[:3] == ["docker", "run", "--detach"], argv
-    assert argv[-2:] == ["sleep", "infinity"], argv
+    assert argv[-3:] == ["sh", "-c", _lifecycle._LANE_BOX_MAIN], argv
     assert "--rm" not in argv
     assert "-i" not in argv
     assert not [c for c in rec.calls if c[:2] == ["docker", "start"]], "a stop/start box was started at its start"
@@ -501,8 +502,6 @@ def test_b10_commands_run_one_at_a_time_and_the_normal_teardown_still_stops_then
 @pytest.mark.box
 def test_b10_what_a_program_writes_to_the_main_processs_output_never_reaches_the_host(live: tuple[Any, Path]):
     """A program in the box writes 2 MB into PID 1's output, more than an unread pipe holds: it goes nowhere, the box stays up, and the attached start's error output stays empty. (#1343 review, B10)"""
-    from defender.box import _lifecycle
-
     box, _ = live
     wrote = box_mod.run_docker(["docker", "exec", box.name, "sh", "-c",
                                 "head -c 2000000 /dev/zero > /proc/1/fd/2 && head -c 2000000 /dev/zero > /proc/1/fd/1"])
