@@ -327,6 +327,30 @@ def test_1224_oracle_latency_trips_no_investigator_time_limit(tmp_path, monkeypa
         "above proves nothing")
 
 
+@pytest.mark.parametrize("delay", [0.0, 1.5], ids=["quick-oracle", "slow-oracle"])
+def test_1385_an_oracle_turn_pauses_the_runs_own_clock_through_the_query_tool(tmp_path, delay):
+    """A real run's clock is held for as long as its oracle answers, whatever carries the run
+    state to the registry (T3, O8)."""
+    from defender.hooks import budget_enforcer as be
+
+    est = S.estate(tmp_path)
+    ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]})])
+    oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW]),
+                      fault=S.Fault(delay=delay))
+    reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
+                           retry_cap=3)
+    _run_dir, _gather, state = S.drive_gather_run(
+        tmp_path, verbs=reg, tenant=est.place(), gather_turns=[_q(ALICE), S.done_turn()])
+
+    assert oracle.submissions() == 1, "no oracle turn was taken"
+    held = be.oracle_held(state)
+    if delay:
+        assert held >= delay * 0.9, f"the run's clock ran on through a {delay}s oracle turn: {held}"
+    else:
+        assert held < 1.35, f"positive control: a quick turn held the clock {held}s"
+    assert state.oracle_opened is None, "the turn's pause outlived the turn"
+
+
 def test_conc_12_queue_wait_behind_another_leads_turn(tmp_path, monkeypatch):
     monkeypatch.setenv(ENFORCE, "true")
     est = S.estate(tmp_path)

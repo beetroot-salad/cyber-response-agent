@@ -74,7 +74,10 @@ visible. Budget constraints do not weaken tenant authorization or isolation.
   and resources without credentials, administration sockets, or network access.
   Select the isolation backend explicitly; an unavailable backend refuses visibly.
 - **V4 — Execution ownership:** job claims, cancellation, completion, and cleanup
-  have trusted owners. An expired lease alone cannot authorize an overlapping run.
+  have trusted owners. An expired lease alone cannot authorize an overlapping run:
+  everything a run starts on a machine dies with the process that started it (a
+  worker's child dies with the worker, a run's box with the child), so a lapsed
+  lease is taken over in the database without reaching any machine (#1343).
 - **V5 — Economical operation:** support a small application host and a separately
   stoppable execution host without requiring Redis or a cluster orchestrator.
 - **V6 — Safe presentation:** show model-controlled transcripts as data in the app;
@@ -296,15 +299,33 @@ permit deleting authoritative learning state or retained branch commits.
 Local scratch paths belong to the execution host, not the API.
 
 Fenced writes reject stale claims, but do not stop model spend or adapter calls.
-Before retrying, establish that the old attempt is stopped or otherwise prevented
-from continuing those actions. When a host is unreachable, surface uncertainty
-rather than assuming lease expiry proves termination. Cancellation must stop the
-brain and its executors, not merely update a row.
+A run's processes are tied to the worker that started them: a worker's child
+ends when the worker does, and a run's box ends when its starter does (its main
+process reads an input the starter holds open; the box is removed when it stops).
+So a lease that lapses because a worker died means the old run is gone or ends
+within seconds, and the database step that takes the row over needs nothing from
+the machine. A worker that is alive but cannot reach the database keeps its child
+running, however long that lasts, and uses no attempt. If another worker takes the
+row over meanwhile, the old child runs beside the retry until its next renewal
+lands or it ends. Cancellation updates the row; the holder's
+next renewal (within about a second) tells the child to stop, and the child has
+ended within `stop_grace` (30 s) of that.
 
-The supervisor cleans up on completion/failure/cancel and reconciles owned work
-on process or host restart. For Docker executors, dynamic containers are siblings
-of Compose services; worker limits and `compose down` do not cover them. Label
-ownership by deployment/job/start identity and reconcile only owned resources.
+Workers are not tied to hosts: any number run on any number of machines, and
+nothing in the database names a worker or machine. There is no restart
+reconcile and no per-machine cleanup; the one container that can outlive its
+starter is a box created but never started (the starter died between the two
+steps), which is inert and removed at tenant offboarding. A stopping worker hands
+its rows back so they are retried within seconds; each redeploy during an
+investigation uses one of its three attempts.
+
+**Worker container stop timeout: 45 s.** A stopping worker gives its children
+`stop_grace` (30 s) to end, then writes each row's last figures. The Compose
+service for the worker sets `stop_grace_period: 45s` (more than `stop_grace` plus
+the writes); a shorter timeout kills the worker mid-stop and the rows lapse on
+their own instead of being handed back. Drain the old (piece A) workers before
+the migration that adds leases.
+
 The exact fencing, retry, cancellation, and termination protocol remains a
 contract to settle, not an exactly-once guarantee.
 

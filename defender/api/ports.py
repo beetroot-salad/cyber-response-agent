@@ -17,6 +17,7 @@ from defender.records.formats import AlertId, InvestigationId, LearningJobId, Te
 
 from .models import (
     Alert,
+    AlertMapping,
     AlertSummary,
     Investigation,
     LearningJob,
@@ -117,6 +118,10 @@ class SystemsRepository(Protocol):
 
     async def get_system(self, tenant_id: TenantId, system_id: str) -> SystemSettings | None: ...
 
+    async def get_alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
+        """The tenant's alert mapping (#1345), `None` until one is saved."""
+        ...
+
 
 AuditAction = Literal[
     "investigation.start",
@@ -124,10 +129,13 @@ AuditAction = Literal[
     "investigation.delete",
     "investigation.claim",
     "investigation.finish",
+    "investigation.takeover",
+    "investigation.retry",
     "artifact.read",
     "learning_job.start",
     "system.update",
     "system.credentials",
+    "alert_mapping.update",
 ]
 
 
@@ -143,12 +151,17 @@ class WriteTransaction(Protocol):
         """Start an investigation of `alert_id`, or answer the one this request already has —
         the rules are §4.1's (the latest attempt of a repeated request, one live investigation
         per alert). Returns `(investigation, created)`, `created` only when this call inserted
-        the row. `UnknownReference` for an alert this tenant does not have."""
+        the row. `UnknownReference` for an alert this tenant does not have; `Conflict` naming the
+        missing mapping when a new investigation is due and the tenant has saved no alert mapping
+        (#1345 O4)."""
         ...
 
     async def cancel_investigation(self, investigation_id: InvestigationId) -> Investigation:
-        """Abort a queued investigation. `NotFound`; `Conflict` if it is running (not supported
-        yet) or already ended."""
+        """Abort an investigation that is queued or running (`aborted`, reason `cancelled`); a
+        running one's worker tells its run to stop within about a second, and the run has ended within
+        the worker's stop grace (30 s) of that. `NotFound`; `Conflict` if it
+        already ended — and when it ended because its worker was lost and a retry of it is live,
+        the message names that retry's id."""
         ...
 
     async def delete_investigation(self, investigation_id: InvestigationId) -> None:
@@ -168,6 +181,11 @@ class WriteTransaction(Protocol):
 
     async def put_system(self, system_id: str, body: SystemPut) -> tuple[SystemSettings, bool]:
         """Create or replace a system's settings. Returns `(settings, created)`."""
+        ...
+
+    async def put_alert_mapping(self, body: AlertMapping) -> tuple[AlertMapping, bool]:
+        """Replace the tenant's alert mapping whole, re-deriving its alerts' title and description in the same
+        transaction (#1345). Returns `(mapping, created)`, `created` only for the tenant's first save."""
         ...
 
     async def audit(self, action: AuditAction, target: str, detail: str = "") -> None:

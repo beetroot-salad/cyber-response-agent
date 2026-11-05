@@ -334,8 +334,8 @@ def render_family_text(record: dict[str, Any] | None,
                        failed: dict[str, dict[str, Any]]) -> list[Any]:
     """Pre-flight's record of the family and every failed world as an explicit entry (N22):
     each world that could not be judged by its label, its reason word and the investigator's
-    call it failed on; the calls pre-flight could not replay; and the calls whose live answer
-    drifted from the capture. Host text, every string the record holds framed in place
+    call it failed on; and the calls pre-flight could not replay (and, on an archive written
+    before #1385, the calls whose live answer drifted from the capture). Host text, every string the record holds framed in place
     (`RunText`, A10)."""
     if record is None:
         parts: list[Any] = ["No pre-flight outcome record is readable for this episode.\n"]
@@ -356,7 +356,9 @@ def render_family_text(record: dict[str, Any] | None,
                       ("drift", "calls whose live answer drifted from the capture")):
         entries = (record or {}).get(key) or []
         if not entries:
-            parts.append(f"{what}: none\n")
+            # Pre-flight no longer measures drift: only an archive's record can carry any.
+            if key != "drift":
+                parts.append(f"{what}: none\n")
             continue
         parts.append(f"{what}:\n")
         for entry in entries:
@@ -628,8 +630,8 @@ class RunView:
     report_text: str
     #: Call number -> the answer its ledger partner records (`payload_text`; `None`: none).
     answers: dict[int, Any] = field(default_factory=dict)
-    #: Call number -> an `oracle` partner's `claim` and `verifier_verdict` (each `None` when the
-    #: row stores none).
+    #: Call number -> an `oracle` partner's (or a re-asked one's) `claim`, `verifier_verdict` and
+    #: `re_ask` (each `None` when the row stores none).
     claims: dict[int, dict[str, Any]] = field(default_factory=dict)
 
 
@@ -646,9 +648,11 @@ def run_view(doc: dict[str, Any], runs: RunSet, label: str) -> RunView:
         if partner is None:
             continue
         answers[n] = partner.get("payload_text")
-        if partner.get("source") == ORACLE:
+        # A re-ask shows for any answer it cut, `reconstructed` as well as `oracle` (#1385 O4).
+        if partner.get("source") == ORACLE or partner.get("re_ask") is not None:
             claims[n] = {"claim": partner.get("claim"),
-                         "verifier_verdict": partner.get("verifier_verdict")}
+                         "verifier_verdict": partner.get("verifier_verdict"),
+                         "re_ask": partner.get("re_ask")}
     return RunView(
         label=label, world_id=run.token, role=entry.get("role"), story=entry.get("story"), axis=entry.get("axis"),
         declared=entry.get("disposition_declared"), label_basis=entry.get("label_basis"),

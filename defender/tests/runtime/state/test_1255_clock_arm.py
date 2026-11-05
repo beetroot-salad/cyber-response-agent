@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-from defender import _clock
 from defender._io import read_jsonl_rows
 from defender.learning.branch.estate.oracle import BASE_HANDLE
 from defender.tests.support.runtime.state import _1255_clock as C
@@ -151,7 +150,7 @@ def _new_host_state_question(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     return out, oracle, source
 
 
-def test_a4_an_arms_host_state_capture_is_stamped_with_its_run_clock(tmp_path, monkeypatch):
+def test_a4_an_arms_host_state_capture_is_stamped_by_the_platform_with_its_run_clock(tmp_path, monkeypatch):
     out, oracle, _source = _new_host_state_question(tmp_path, monkeypatch)
 
     rows = [r for r in read_jsonl_rows(out.run_dir / "executed_queries.jsonl")
@@ -162,9 +161,10 @@ def test_a4_an_arms_host_state_capture_is_stamped_with_its_run_clock(tmp_path, m
     assert oracle.submissions() == 1, (
         f"the control world's new question took {oracle.submissions()} oracle turns, not one")
     payload = json.loads((out.run_dir / rows[0]["payload_path"]).read_text(encoding="utf-8"))
-    assert payload.get("captured_at") == _clock.z_seconds(C.at(R, 30)), (
-        "the arm's host-state capture is not stamped with its run clock's reading at the call "
-        f"({_clock.z_seconds(C.at(R, 30))}): {payload.get('captured_at')!r}")
+    assert "captured_at" not in payload, f"the adapter stamped a time of its own: {payload}"
+    assert C.instant(rows[0].get("received_at")) == C.at(R, 30), (
+        "the arm's host-state reply is not stamped by the platform with its run clock's reading "
+        f"at the call ({C.at(R, 30)}): {rows[0].get('received_at')!r}")
 
 
 def test_a5_the_oracle_is_handed_the_snapshots_run_clock_reading_as_the_fork_time(

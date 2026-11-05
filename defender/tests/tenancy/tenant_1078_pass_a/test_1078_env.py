@@ -1,5 +1,6 @@
 """The environment a run hands its children: DEFENDER_RUNS_BASE is derived from the run's runs base, and the prior-run corpus is scoped to the tenant."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 import json
 import subprocess
@@ -22,7 +23,7 @@ def _fresh_run(root: Path) -> Path:
         H.make_tenant(root, TENANT)
     alert = H.plant_alert(root.parent / f"alert-{TENANT}")
     tenant = H.accept(H.resolve_data_root(), TENANT)
-    return H.run_common().materialize_run(alert, tenant=tenant).run_dir
+    return H.run_common().materialize_run(alert, mapping=planted_mapping(), tenant=tenant).run_dir
 
 
 def _corpus_paths(corpus_root: str | Path) -> set[Path]:

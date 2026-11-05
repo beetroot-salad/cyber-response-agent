@@ -1,5 +1,6 @@
 """Run setup checks: minted ids, sidecar-like alert names, linked runs folders, one-line stderr refusals."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import mapping_value, planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -19,13 +20,13 @@ from defender.records._tenant_id import TenantRefused
 
 def _setup(alert: Path, t, **kw):
     """Run setup itself (the function `run.py` calls): `materialize_run`."""
-    return run_common.materialize_run(alert, tenant=t, **kw)
+    return run_common.materialize_run(alert, mapping=planted_mapping(), tenant=t, **kw)
 
 
 def _via_run_py(alert: Path, t, **kw):
     """Run setup through `run.py`'s single call site, which surfaces a `TenantRefused` as
     `sys.exit("[run.py] …")`."""
-    return run_py._materialize_run(alert, tenant=t, model=None, **kw)
+    return run_py._materialize_run(alert, mapping=planted_mapping(), tenant=t, model=None, **kw)
 
 
 def _one_line_exit(err: BaseException | None) -> bool:
@@ -262,3 +263,33 @@ def test_1279_o8_natural_setup_refuses_any_entry_at_its_minted_ids_sidecar_name(
     run = _setup(alert, t)
     assert run.run_dir == runs / fixed, "positive control: without the entry setup goes on"
     assert run.run_dir.is_dir(), "positive control: without the entry setup goes on"
+
+
+#: An alert whose fields every mapping below reads (the integer `id9` is recorded as its decimal text).
+_ALERT = b'{"rule": {"id": "R-1105", "description": "Beacon"}, "seen": "2026-10-30T10:00:00Z", "ticket": {"key": "SOC-11"}, "id9": 4471}\n'
+
+
+@pytest.mark.parametrize(("entries", "facts"), [
+    ({"signature": "rule.id", "event_time": "seen", "summary": "rule.description", "case_key": "ticket.key"},
+     {"signature": "R-1105", "event_time": "2026-10-30T10:00:00Z", "summary": "Beacon", "case_key": "SOC-11"}),
+    ({"signature": "id9", "summary": "rule.id"},
+     {"signature": "4471", "event_time": None, "summary": "R-1105", "case_key": None}),
+    ({}, {"signature": None, "event_time": None, "summary": None, "case_key": None}),
+], ids=["all four", "other paths, two unmapped", "nothing mapped"])
+def test_1345_o3_run_setup_records_the_facts_the_given_mapping_yields(tmp_path, data_root, entries, facts):
+    """`materialize_run(mapping=)` derives the four facts from that mapping and records them in the run's `record.json`; no
+    file of the tenant is read. (#1345 O3)"""
+    from defender.records import RunPaths
+    from defender.records.formats import read_record
+
+    alert = H.alert_file(tmp_path / "in")
+    alert.write_bytes(_ALERT)
+    t = H.tenant(data_root, H.T_ID)
+
+    run = run_common.materialize_run(alert, mapping=mapping_value(entries), tenant=t)
+
+    record = read_record(RunPaths(run.run_dir).alert_record)
+    assert record is not None
+    got = record.facts
+    assert {"signature": got.signature, "event_time": got.event_time, "summary": got.summary,
+            "case_key": got.case_key} == facts

@@ -1,6 +1,6 @@
 # The tenant's case-record settings (#1359): which system records the run's findings as a
 # comment on the alert's case, and the comment's body. The run only ever adds one comment, to the
-# ticket the alert names (`case_key` in alert-mapping.yaml); it never creates a ticket or changes
+# ticket the alert names (the alert mapping's `case_key`); it never creates a ticket or changes
 # its fields or status. A tenant with no case system leaves this file out.
 #
 # `system`        the system folder (under systems/) whose adapter adds the comment.

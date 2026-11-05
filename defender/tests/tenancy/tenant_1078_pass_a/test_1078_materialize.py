@@ -1,5 +1,6 @@
 """`run_common.materialize_run`: the runs base follows from the accepted tenant; an unplaced tenant refuses and nothing is created; a sibling lands in its episode."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -22,10 +23,10 @@ X = fixture_uuid("case-x")
 
 def _materialize(alert: Path, tenant_id: str, **kw):
     """The entry's pipeline: resolve the data root and accept `tenant_id` there (the knowledge-folder check),
-    then `materialize_run(tenant=...)`. Setup takes no run id: it mints one, or is handed the
+    then `materialize_run(mapping=planted_mapping(), tenant=...)`. Setup takes no run id: it mints one, or is handed the
     arm's run (`run=`, made from its roster id by the episode view)."""
     tenant = H.accept(H.resolve_data_root(), tenant_id)
-    return H.run_common().materialize_run(alert, tenant=tenant, **kw).run_dir
+    return H.run_common().materialize_run(alert, mapping=planted_mapping(), tenant=tenant, **kw).run_dir
 
 
 def _refused(fn) -> str:
@@ -166,6 +167,32 @@ def test_d2_sibling_runs_base(tenant_root):
     assert not (ep / "runs" / H.RECORD_NAME).exists()
     assert H.entries(tenant_root / T_ID / "runs") == sorted(
         [src.name, RunPaths(src).session_pointer().name])
+
+
+def test_1345_flow4_a_fresh_run_must_be_handed_its_mapping_and_the_settings_half_is_gone_but_a_sibling_needs_neither(
+        tmp_path, tenant_root):
+    """`materialize_run(mapping=)` is required for a non-sibling: without it, and with the retired `settings=`, the call is a
+    `TypeError` and creates nothing; the same call with `mapping=` runs (control), and a sibling (`world=`, `run=`, no
+    `mapping=`) runs. Placed here, not in test_1105_run_setup.py, for the sibling world built below. (#1345 flow 4, O3)"""
+    tenant = H.accept(H.resolve_data_root(), T_ID)
+    src, ep, world = _sibling_world(tenant_root, "b")
+    alert = RunPaths(src).alert
+    materialize = H.run_common().materialize_run
+    before = H.entries(tenant_root / T_ID / "runs")
+
+    with pytest.raises(TypeError):
+        materialize(alert, tenant=tenant)
+    with pytest.raises(TypeError):
+        materialize(alert, tenant=tenant, settings=tmp_path)
+    with pytest.raises(TypeError):
+        materialize(alert, tenant=tenant, settings=tmp_path, mapping=planted_mapping())
+    assert H.entries(tenant_root / T_ID / "runs") == before, "a refused call created a run"
+
+    assert Path(materialize(alert, tenant=tenant, mapping=planted_mapping()).run_dir).is_dir(), "control: with mapping= it runs"
+    with Episode.open(ep) as episode:
+        view = tenant.runs_repository().episode(ep.name, held=episode)
+        sibling = materialize(alert, tenant=tenant, world=world, run=view.create(view.arm_id(world.world_id)))
+    assert Path(sibling.run_dir).is_dir(), "control: a sibling needs no mapping="
 
 
 @pytest.mark.parametrize("state_location", ["root", "inside", "ancestor", "disjoint"])

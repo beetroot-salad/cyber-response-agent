@@ -5,6 +5,7 @@ lifecycle's operator command once the lifecycle became a service).
     python3 defender/cli/tenant.py check <tenant-id> | --folder <path>
     python3 defender/cli/tenant.py update <tenant-id>
     python3 defender/cli/tenant.py propose <tenant-id> <staged dir>
+    python3 defender/cli/tenant.py set-alert-mapping <tenant-id> <mapping file>
 
 Tenants are created, rotated and offboarded by platform administrators through the API; the
 tenant management service and the execution host's actor do the work (the repo from the template,
@@ -29,6 +30,25 @@ issuer or a refused merge is visible (O-SEE). `propose` hands a staged directory
 tenant's `agent/` root (connect's tenant half: a system skill, seed queries, tacit entries) to the
 commit-maker as one PR on the tenant forge; files are added or replaced, nothing is deleted, and
 only `agent/` is touched.
+
+`set-alert-mapping` (#1345) replaces the tenant's alert mapping, which lives in the database: the file is
+YAML naming each of the six entries (signature, event_time, summary, case_key, title, description) with a dotted path
+into the raw alert; an entry left out, or `null`, is unmapped. It is validated by the rules the API's `PUT` applies and
+stored by the same operation, which re-derives every stored alert's title and description. It is the production writer
+until the API is wired to the real store, and the upgrade path from `settings/alert-mapping.yaml`. The entries:
+
+    signature    the rule key lessons and the corpus are matched on: ASCII letters, digits and . _ : / @ + = - (no leading
+                 dash, at most 128 characters), a JSON string or an integer. Anything else records no signature.
+    event_time   when the activity happened; carried as it is, never parsed.
+    summary      one line of what fired.
+    case_key     the ticket a run started with --update-ticket comments on: a field the alerting system sets, never one
+                 copied from the logged activity. At most 128 printable ASCII characters, no / \\ ; or whitespace, not
+                 only dots; anything else records no key and the run leaves an error receipt.
+    title        the alert's name in the alert list and on its runs, cut to 256 characters.
+    description  the alert's longer text in the alert list, cut to 4096 characters.
+
+The first four are read once, when a run starts, and recorded beside its alert. Title and description are text or an
+integer's decimal text, and otherwise null.
 
 Exit status: 0 clean, 1 a finding or a refusal, 2 a usage error. A check that could not judge (the
 grant census not taken, `.tenant-id` unverifiable) is one more finding, not a separate code, and
@@ -138,7 +158,14 @@ def check_tenant(admitted: run_tenant.Admitted) -> int:
     """`check <id>`, for the tenant `main`'s host acceptance admitted: every finding about its
     settings, its repo and its last publish, all reported."""
     tenant, records = admitted.tenant, admitted.directory
-    return _report([*_findings(tenant.knowledge), *_publish_findings(tenant, records)])
+    return _report([*_findings(tenant.knowledge), *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
+
+
+def _mapping_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:
+    """Every run and new investigation of a tenant with no saved alert mapping is refused (#1345 O4), so it is not ready."""
+    from defender.records.formats import ALERT_MAPPING_MISSING
+
+    return [] if records.alert_mapping(tenant.id) is not None else [ALERT_MAPPING_MISSING]
 
 
 def _publish_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:
@@ -218,6 +245,69 @@ def _publish(tenant: tenancy.Tenant, records: tenancy.TenantDirectory, *, by: st
         return 1
     print(f"published {export.commit} as tenant {tenant.id}'s current knowledge")
     return 0
+
+
+def _stored_text(tenant_id: str, mapping: Any, created: bool) -> str:
+    """What `set-alert-mapping` prints: the stored mapping, one line per entry."""
+    from defender.records.formats import MAPPING_KEYS
+
+    lines = [f"{'saved' if created else 'replaced'} the alert mapping of tenant {tenant_id}:"]
+    lines += [f"  {entry}: {mapping.path_of(entry) or '(unmapped)'}" for entry in MAPPING_KEYS]
+    return "\n".join(lines)
+
+
+def set_alert_mapping(admitted: run_tenant.Admitted, mapping: Any) -> int:
+    """`set-alert-mapping <id> <file>` for the admitted tenant: the validated `mapping` replaces the tenant's
+    through the job store's replace, the one writer (same lock, recompute, outcome and job-store audit event as the
+    API's `PUT`; no API audit event), over `DEFENDER_DATABASE_DSN`. Refusals print `[tenant.py] ...`, exit 1."""
+    import asyncio
+    import datetime as _dt
+
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from defender.jobs import JobStore, UnknownReference
+    from defender.records.formats import AlertMappingFault
+
+    dsn = os.environ.get(tenancy.database_address_variable(), "")
+    if not dsn:
+        _say(f"{tenancy.database_address_variable()} is not set: the alert mapping is stored in the database")
+        return 1
+    tenant_id = admitted.tenant.id
+
+    async def put() -> bool:
+        store = JobStore(dsn, clock=lambda: _dt.datetime.now(_dt.UTC))
+        try:
+            return await store.put_alert_mapping(tenant_id, mapping, actor="tenant.py set-alert-mapping")
+        finally:
+            await store.close()
+
+    try:
+        created = asyncio.run(put())
+    except (AlertMappingFault, UnknownReference) as refused:
+        _say(refused)
+        return 1
+    except (OSError, SQLAlchemyError) as fault:
+        _say(f"the alert mapping could not be stored: {type(fault).__name__}")
+        return 1
+    print(_stored_text(str(tenant_id), mapping, created))
+    return 0
+
+
+def _mapping_of_file(file: Path) -> Any:
+    """The mapping in `file`, or a printed refusal and `None`."""
+    from defender.records.formats import AlertMappingFault, parse_mapping
+
+    try:
+        raw = read_plain_bytes(file)
+        text = raw.decode("utf-8")
+    except (OSError, UnicodeDecodeError, ValueError) as fault:
+        _say(f"{file} cannot be read as UTF-8 text: {type(fault).__name__}")
+        return None
+    try:
+        return parse_mapping(text)
+    except AlertMappingFault as fault:
+        _say(f"{file}: {fault}")
+        return None
 
 
 def update(admitted: run_tenant.Admitted, *, client=None, identity=None, credential_config=None) -> int:
@@ -433,7 +523,16 @@ def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
         "propose", help="propose a staged agent/-shaped directory as one PR on the tenant forge")
     propose_p.add_argument("tenant_id")
     propose_p.add_argument("staged", type=Path)
+    mapping_p = sub.add_parser(
+        "set-alert-mapping", help="replace the tenant's alert mapping (stored in the database) from a YAML file")
+    mapping_p.add_argument("tenant_id")
+    mapping_p.add_argument("file", type=Path)
     ns = p.parse_args(argv)
+    mapping = None
+    if ns.command == "set-alert-mapping":
+        mapping = _mapping_of_file(ns.file)
+        if mapping is None:
+            return 1
     if ns.command == "check":
         if (ns.tenant_id is None) == (ns.folder is None):
             check_p.error("give exactly one of <tenant-id> and --folder")
@@ -448,6 +547,8 @@ def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
     with admitted:
         if ns.command == "update":
             return update(admitted, client=client, identity=identity, credential_config=credential_config)
+        if ns.command == "set-alert-mapping":
+            return set_alert_mapping(admitted, mapping)
         if ns.command == "propose":
             return propose(admitted, ns.staged, client=client, identity=identity,
                            credential_config=credential_config)

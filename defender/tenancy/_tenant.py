@@ -29,7 +29,6 @@ from defender.records.formats import (
     unwrap_runs_base,
     unwrap_episodes_root,
 )
-from defender.records import formats
 from defender.records import RecordTenant
 from defender.records.formats import TenantId, TenantRefused
 from defender import _io as _real_io
@@ -537,12 +536,6 @@ def _check_knowledge(
     for rel in REQUIRED_SETTINGS:
         _required_setting(_real_io.stat_entry(bound, f"{SETTINGS_HALF}/{rel}"),
                           folder / SETTINGS_HALF / rel)
-    # The two mapping files (#1222 A5): every fault, one fixed reason each, in one refusal. Asked
-    # before the link walk, so a link or FIFO at a mapping's name is that mapping's reason (the
-    # reader refuses it without opening it), not the walk's first-found refusal alone.
-    mapping_faults = formats.settings_reasons(bound.under(SETTINGS_HALF))
-    if mapping_faults:
-        raise TenantRefused("; ".join(mapping_faults))
     for name in (SETTINGS_HALF, AGENT_HALF):
         _refuse_links_and_special_files(bound, folder, name)
     # After the link walk: each table is read no-follow, but a link at its name is the walk's.
@@ -561,16 +554,13 @@ def _check_knowledge(
 
 def check_run_settings(settings: Path) -> None:
     """The settings rules a run holds its copy of an export's `settings/` to (#1108 P4): the
-    `REQUIRED_SETTINGS` are plain files and the two mapping files stand — the refusals
-    acceptance gives a tenant's own folder, each naming what to fix. `TenantRefused` at the
-    first rule that fails. Reads only."""
+    `REQUIRED_SETTINGS` are plain files — the refusals acceptance gives a tenant's own
+    folder, each naming what to fix. `TenantRefused` at the first rule that fails. Reads only.
+    The alert mapping is not among them: it lives in the database (#1345 O5)."""
     settings = Path(settings)
     with _real_io.bind(settings) as bound:
         for rel in REQUIRED_SETTINGS:
             _required_setting(_real_io.stat_entry(bound, rel), settings / rel)
-        mapping_faults = formats.settings_reasons(bound)
-    if mapping_faults:
-        raise TenantRefused("; ".join(mapping_faults))
 
 
 def _required_setting(found: _real_io.StatRead, path: Path) -> None:

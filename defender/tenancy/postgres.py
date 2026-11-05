@@ -33,8 +33,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from defender.database import async_engine, url
-from defender.records.formats import TenantId
-from defender.tenancy.models import SCHEMA, ForgeWiring, Generation, PublishStatus, TenantRecord
+from defender.records.formats import AlertMapping, TenantId
+from defender.tenancy.models import SCHEMA, AlertMappingRow, ForgeWiring, Generation, PublishStatus, TenantRecord
 from defender.tenancy.repository import (
     ALL,
     KEEP,
@@ -52,6 +52,7 @@ _T: Table = TenantRecord.__table__  # type: ignore[assignment]
 _G: Table = Generation.__table__  # type: ignore[assignment]
 _W: Table = ForgeWiring.__table__  # type: ignore[assignment]
 _P: Table = PublishStatus.__table__  # type: ignore[assignment]
+_M: Table = AlertMappingRow.__table__  # type: ignore[assignment]
 
 #: The lock connection's keepalive bound, in seconds, when the caller states none.
 LOCK_KEEPALIVE = 30
@@ -121,6 +122,10 @@ class PostgresTenantRepository:
     async def publish_status(self, tenant_id: TenantId) -> dict[str, str] | None:
         rows = await self._rows(select(_P).where(_P.c.tenant_id == tenant_id))
         return PublishStatus(**rows[0]._mapping).as_dict() if rows else None
+
+    async def alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
+        rows = await self._rows(select(_M).where(_M.c.tenant_id == tenant_id))
+        return AlertMappingRow(**rows[0]._mapping).as_mapping() if rows else None
 
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime) -> TenantRecord:

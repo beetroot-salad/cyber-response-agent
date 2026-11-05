@@ -280,15 +280,17 @@ def find_entry(
 
 def _day(ctx: VerbContext) -> dt.date:
     """The day this call is judged against (P2): the run's own clock where the run has one (a
-    replay sibling's resumes at the branch point), else the world's host-side `as_of` (pre-flight
-    calibration and the oracle's own side queries have no run), else wall time (the CLI).
+    replay sibling's resumes at the branch point), else the branch point of the world serving the
+    call (pre-flight calibration and the oracle's own side queries have no run; amendment 4),
+    else wall time (the CLI). Both are call-scoped, set by the platform: an adapter's context
+    carries neither (#1385 O1)."""
+    from defender.systems.verbs import CALL_BRANCH_POINT, CALL_RUN_STATE  # verbs imports this module
 
-    `getattr` because duck-typed contexts reach a verb body, and an `AttributeError` there is
-    filed as an infra fault."""
-    state = getattr(ctx, "run_state", None)
+    del ctx  # the day is never read off the context
+    state = CALL_RUN_STATE.get()
     if state is not None:
         return state.now().date()
-    at = getattr(ctx, "as_of", None)
+    at = CALL_BRANCH_POINT.get()
     return (dt.datetime.now(dt.UTC) if at is None else at).date()
 
 

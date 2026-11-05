@@ -23,6 +23,7 @@ pytest.importorskip("httpx")
 
 from defender.tests.support.shared._postgres1339 import empty_database  # noqa: E402,F401 — fixture
 from defender.tests.support.tenancy._active1214 import DSN_ENV, insert_active_tenant  # noqa: E402
+from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import openbao_failing  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import REPO_WINDOW, LifecycleWorld  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214.test_1214_host_entry import (  # noqa: E402
@@ -62,7 +63,8 @@ def test_a_host_process_refuses_a_database_behind_naming_both_revisions(entry, e
     monkeypatch.setenv(DSN_ENV, empty_database)
     _has(start(), BASELINE, head())
     upgrade(empty_database)
-    insert_active_tenant(empty_database, TENANT, data_root=data_root)
+    # #1345 D2/r5.1: the "run start" entry goes on to read the tenant's mapping, so the admitted tenant holds one.
+    insert_active_tenant(empty_database, TENANT, data_root=data_root, alert_mapping=FIXTURE_ALERT_MAPPING)
     assert _admits(start())
 
 

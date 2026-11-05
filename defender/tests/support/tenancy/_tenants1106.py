@@ -6,6 +6,7 @@ import re
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING
 
 import dataclasses
 import importlib
@@ -198,8 +199,10 @@ def lead_zero_text(template_id: str = SHIPPED_CORRELATION_TEMPLATE) -> str:
     return f"correlation_template: {template_id}\n"
 
 
-#: The tenant's alert mapping (#1222; `case_key` #1359): the file every planted tenant carries.
-#: `case_key` is on the alert's own id, a field the alerting system sets (#1359 P3).
+#: The tenant's alert mapping in the retired file format (#1222; `case_key` #1359). #1345 O5: no planted tenant
+#: carries this file any more; the mapping is a database row seeded with the tenant's directory
+#: (`_mapping1345.PLANTED_ALERT_MAPPING`, whose four facts are these). The text stays as a sample of the file
+#: format `tenant.py set-alert-mapping` (O6) reads. `case_key` is on the alert's own id (#1359 P3).
 ALERT_MAPPING_TEXT = ("signature: rule.id\nevent_time: timestamp\nsummary: rule.description\n"
                       "case_key: alert_id\n")
 
@@ -370,7 +373,6 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     files: dict[str, str] = {
         "verb-grants.yaml": table,
         "lead-zero.yaml": lead_zero if lead_zero is not None else lead_zero_text(),
-        "alert-mapping.yaml": ALERT_MAPPING_TEXT,
     }
     if case_system is not None:
         files[CASE_RECORD_REL] = case_record_text(case_system, body=case_body)
@@ -414,21 +416,25 @@ def system_skill_text(system: str) -> str:
             f"environment.\n")
 
 
-def place_tenant(root: Path, tenant_id: str, **kw: Any) -> Path:
+def place_tenant(root: Path, tenant_id: str, *, alert_mapping: Any = PLANTED_ALERT_MAPPING, **kw: Any) -> Path:
     """A set-up tenant under `root`: `plant_tenant`'s folder as `root/<tenant_id>/knowledge/`,
     `agent/.tenant-id` naming it (no row: O6; one root can hold several tenants). Returns the
     knowledge folder; `accept(root, tenant_id)` accepts it.
 
     The returned folder (a `KnowledgeFolder`, equal to the plain path) carries `.directory` (#1214): a
     `TenantDirectory` holding the tenant active with its forge wiring, for `directory=` at a migrated call
-    site; it is the only record that the tenant exists, and `accept(root, tenant_id)` accepts the folder."""
+    site; it is the only record that the tenant exists, and `accept(root, tenant_id)` accepts the folder.
+    #1345: that directory holds the default alert mapping as a seeded row (`PLANTED_ALERT_MAPPING`); `alert_mapping=None`
+    plants a tenant with none (a test of absence), a dict of the entries one of its own."""
     folder = Path(root) / tenant_id
     defaults = {"marker": tenant_id, "agent_files": {"AGENT.md": f"agent half of {tenant_id}\n"}}
     knowledge = plant_tenant(folder, "knowledge", **{**defaults, **kw})
     (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
     from defender.tests.support.shared.contracts._data_root_1078 import KnowledgeFolder
 
-    return KnowledgeFolder(knowledge)
+    placed = KnowledgeFolder(knowledge)
+    placed.alert_mapping = alert_mapping
+    return placed
 
 
 #: The lead-zero id a planted census repo's folders name, and the template carrying it: the CI
@@ -478,8 +484,7 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
                               else rows)):
         folder = repo / "knowledge" / name
         files = {"lead-zero.yaml": lead_zero_text(CENSUS_LEAD_ZERO_ID),
-                 CASE_RECORD_REL: case_record_text(),
-                 "alert-mapping.yaml": ALERT_MAPPING_TEXT}
+                 CASE_RECORD_REL: case_record_text()}
         for rel, text in files.items():
             (folder / "settings" / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / "settings" / rel).write_text(text, encoding="utf-8")

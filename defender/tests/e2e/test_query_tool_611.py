@@ -208,6 +208,96 @@ def test_query_return_wrap_mints_its_own_salt(tmp_path):
             f"the frame salt {tag!r} occurs inside its own body — gather can close its frame"
 
 
+def _outside_untrusted(text: str) -> str:
+    """`text` with every `<run-…-untrusted>` span cut out: what the platform itself wrote."""
+    return re.sub(r"<run-([0-9a-f]+)-untrusted>.*?</run-\1-untrusted>", "", text, flags=re.S)
+
+
+def test_1385_the_model_sees_the_run_clocks_stamp_beside_each_reply(tmp_path):
+    """Each query reply is shown with the run clock's reading at its arrival, outside the
+    payload's bytes and its untrusted frame (T4, O7)."""
+    from defender.tests.support.runtime.state import _1255_clock as C
+
+    start = C.SOURCE_START
+    clock = C.FakeClock(start)
+    main = C.script(clock, (10, Turn(tool_calls=[("gather", {
+        "lead_id": LEAD, "system": "elastic", "goal": "measure this lead",
+        "what_to_summarize": ["auth events"]})])), (0, Turn(text="Investigation complete.")))
+    gather = C.script(clock, (7, q("elastic", "query", {"native_query": "FROM logs | LIMIT 1"})),
+                      (5, q("elastic", "query", {"native_query": "FROM logs | LIMIT 2"})),
+                      (0, DONE))
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="q1385")
+    drive(run_dir, run_id="q1385", main=main, gather=gather, verbs=elastic_ok(VerbRecorder()),
+          clock=clock)
+    r = _Run(run_dir, main, gather)
+
+    first, second = C.at(start, 17), C.at(start, 22)
+    assert len(gather.seen) >= 3, f"the gather lead made {len(gather.seen)} request(s), not 3"
+    assert C.mentions(_outside_untrusted(gather.seen[1]), first), (
+        "the first reply reached the model without the run clock's stamp beside it")
+    assert C.mentions(_outside_untrusted(gather.seen[2]), second), (
+        "the second reply reached the model without its own arrival stamp")
+    for seq, moment in ((0, first), (1, second)):
+        assert not C.mentions(r.payload(seq), moment), "the stamp was written into the payload"
+    for row, shown, moment in zip(r.own_rows, (gather.seen[1], gather.seen[2]), (first, second),
+                                  strict=True):
+        assert C.instant(row.get("received_at")) == moment, (
+            f"the queries row's received_at is not the arrival reading: {row.get('received_at')!r}")
+        assert C.mentions(_outside_untrusted(shown), C.instant(row["received_at"])), (
+            "the stamp shown to the model is not the stored received_at")
+
+
+def test_1385_a_failed_call_and_a_refused_call_each_get_the_stamp_too(tmp_path):
+    """A success, an error and a refusal each show the run clock's arrival reading outside the
+    frame, equal to their own row's `received_at` (T4, O7, A6)."""
+    from defender.tests.support.runtime.state import _1255_clock as C
+
+    def ok(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:
+        clock.advance(2)
+        return PAYLOAD
+
+    def down(ctx: VerbContext, *, native_query: str = "FROM logs") -> list[dict]:
+        raise UpstreamFault("shard 3 is down")
+
+    start = C.SOURCE_START
+    clock = C.FakeClock(start)
+    main = C.script(clock, (10, Turn(tool_calls=[("gather", {
+        "lead_id": LEAD, "system": "elastic", "goal": "measure this lead",
+        "what_to_summarize": ["auth events"]})])), (0, Turn(text="Investigation complete.")))
+    gather = C.script(clock, (4, q("elastic", "query", {"native_query": "FROM logs"})),
+                      (6, q("elastic", "probe", {})), (3, q("elastic", "no_such_verb", {})),
+                      (0, DONE))
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="q1385e")
+    drive(run_dir, run_id="q1385e", main=main, gather=gather,
+          verbs=FakeVerbs({"elastic": {"query": ok, "probe": down}}), clock=clock)
+    r = _Run(run_dir, main, gather)
+
+    request_at, ok_at = C.at(start, 14), C.at(start, 16)
+    error_at, refused_at = C.at(start, 22), C.at(start, 25)
+    assert len(gather.seen) >= 4, f"the gather lead made {len(gather.seen)} request(s), not 4"
+    assert "shard 3 is down" in gather.seen[2], "fixture: the error result did not reach the model"
+    assert "no_such_verb" in gather.seen[3], "fixture: the refusal did not reach the model"
+    assert C.mentions(_outside_untrusted(gather.seen[1]), ok_at), (
+        "positive control: the success carried no arrival stamp")
+    assert not C.mentions(_outside_untrusted(gather.seen[1]), request_at), (
+        "the success was stamped with the request's reading, not its arrival's")
+    assert C.mentions(_outside_untrusted(gather.seen[2]), error_at), (
+        "the error result reached the model without the run clock's stamp")
+    assert C.mentions(_outside_untrusted(gather.seen[3]), refused_at), (
+        "the refusal reached the model without the run clock's stamp")
+    rows = r.own_rows
+    assert len(rows) == 3, rows
+    assert rows[0].get("exit_code") == 0, rows
+    failed = rows[1:]
+    assert all(row.get("exit_code") != 0 for row in failed), rows
+    for row, shown, moment in zip(failed, (gather.seen[2], gather.seen[3]),
+                                  (error_at, refused_at), strict=True):
+        assert C.instant(row.get("received_at")) == moment, row
+        assert C.mentions(_outside_untrusted(shown), C.instant(row["received_at"])), (
+            "the stamp shown to the model is not that row's stored received_at")
+    assert C.instant(rows[0].get("received_at")) == ok_at, rows[0]
+
+
 def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
@@ -674,6 +764,7 @@ ROW_KEYS = {
     "payload_path", "exit_code", "error_class", "payload_status", "payload_digest",
     "payload_sha256",
     "system_key",
+    "received_at",
 }
 
 

@@ -193,7 +193,7 @@ def test_a_primed_key_is_served_without_the_estate_being_asked(tmp_path):
 
     with Episode.open(root) as ep:
         reg = build_registry(read_roster(fake_estate(tmp_path)), LIVE_GRANT, world=World(),
-                            ledger=Ledger.for_world(ep, T.fixture_world_id("w1")), as_of=T0)
+                            ledger=Ledger.for_world(ep, T.fixture_world_id("w1")))
         ctx = run_ctx(tmp_path)
 
         payload = reg.verbs("cmdb")["get-host"](ctx, host="canary-1")

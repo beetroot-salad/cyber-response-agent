@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -52,7 +53,8 @@ def _run(tmp_path: Path, doc: str, disposition: str, *, run_id: str):
 def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
     """A gather registry whose `tacit-knowledge.lookup` IS the platform's (the one a real run's
     registry serves, #1390), repointed at the fixture tree under `root` and at `AS_OF`: the
-    shim drops the run state so the alerted instant, not the suite's wall time, is the day. The
+    shim masks the run clock and holds `AS_OF` as the call's branch point (the call-scoped day,
+    #1390 amendment 4), so the alerted instant, not the suite's wall time, is the day. The
     registry is the run's agent knowledge, so `root` is handed as the run tenant's agent root."""
     from defender._git import REPO_ROOT
     from defender.kit.verbs import declared_params
@@ -65,10 +67,11 @@ def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
 
     def lookup(ctx: VerbContext, *, actor: str, host: str, pattern: str) -> dict:
         rec.record(LOOKUP, ctx, {"actor": actor, "host": host, "pattern": pattern})
-        return shipped(
-            replace(ctx, tenant=replace(ctx.tenant, agent_root=root), as_of=AS_OF, run_state=None),
-            actor=actor, host=host, pattern=pattern,
-        )
+        with scene.judged_on(branch_point=AS_OF):
+            return shipped(
+                replace(ctx, tenant=replace(ctx.tenant, agent_root=root)),
+                actor=actor, host=host, pattern=pattern,
+            )
 
     assert declared_params(lookup) == declared_params(shipped), (
         "the harness shim's params are not the shipped verb's"

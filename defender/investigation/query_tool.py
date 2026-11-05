@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 from pathlib import Path
 from typing import Any, NoReturn
@@ -8,6 +9,7 @@ from typing import Any, NoReturn
 from pydantic import ValidationError
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities.abstract import AbstractCapability
+from pydantic_ai.messages import RetryPromptPart
 from pydantic_ai.exceptions import (
     ModelRetry,
     ToolFailed,
@@ -61,6 +63,7 @@ from .run_state import run_state_of, run_time_iso
 from defender.systems.verbs import (
     CALL_DELIVERY,
     CALL_ID,
+    CALL_RUN_STATE,
     DENIED,
     GRANTED,
     CallDelivery,
@@ -145,6 +148,39 @@ PARAMS_TOO_DEEP = (
 #: What a refused too-deep call's arguments become in the lead's history. Host text, shallow,
 #: and still an argument object, as every provider requires of a tool call.
 _REFUSED_ARGS = {"refused": "arguments nested too deep to keep; see the retry that follows"}
+
+#: The call in flight's arrival reading (#1385 A6): the run clock's reading at the first row the
+#: call writes, which the model's stamp line is rendered from, so the line and the row's
+#: `received_at` are one reading. Empty until a row is written; a result that wrote none (a closed
+#: door) is stamped with a reading taken as it leaves.
+_ARRIVED: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "query_call_arrived", default=None)
+
+
+def stamp_line(arrived_at: str) -> str:
+    """The platform's fixed line beside every reply (#1385 O7): when the reply arrived, on the
+    run clock. It is the platform's own text, so it is never inside the untrusted frame."""
+    return f"[reply received {arrived_at}]"
+
+
+def _stamped(deps: Any, text: str) -> str:
+    """`text` with the call's stamp line after it: the reading of the row the call wrote, or a
+    fresh one when it wrote none."""
+    held = _ARRIVED.get()
+    arrived = held[0] if held else run_state_of(deps).now_iso()
+    return f"{text}\n{stamp_line(arrived)}"
+
+
+#: The line the framework closes every retry prompt with; it adds it again to our retry text.
+_RETRY_TAIL = "\n\nFix the errors and try again."
+
+
+def _validation_text(error: ValidationError, tool_name: str) -> str:
+    """A schema refusal as the framework itself words it to the model (its error list, without
+    documentation links or context), so the stamp line is the only addition."""
+    worded = RetryPromptPart.from_error(error, tool_name=tool_name).model_response()
+    return worded.removesuffix(_RETRY_TAIL)
+
 
 def _fault_exit(e: BaseException) -> int:
     if isinstance(e, SystemExit) and isinstance(e.code, int) and e.code != 0:
@@ -302,6 +338,20 @@ class QueryCapture(AbstractCapability[Any]):
     async def wrap_tool_validate(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
+        # A schema refusal is a result too (#1385 A6): it reaches the model with the stamp of the
+        # row `_reject` wrote, as a retry text, since a validation error cannot carry a line.
+        arrival = _ARRIVED.set([])
+        try:
+            return await self._validated(ctx, call, args, handler)
+        except (ValidationError, ModelRetry, ToolFailed) as refused:
+            text = (refused.message if isinstance(refused, (ModelRetry, ToolFailed))
+                    else _validation_text(refused, call.tool_name))
+            raise (ToolFailed if isinstance(refused, ToolFailed) else ModelRetry)(
+                _stamped(ctx.deps, text)) from refused
+        finally:
+            _ARRIVED.reset(arrival)
+
+    async def _validated(self, ctx, call, args, handler):  # noqa: ANN001
         # Too deep to store is a schema rejection, decided before pydantic parses anything;
         # judged on the call as sent, since text too deep to decode would read as `{}` once
         # decoded.
@@ -527,14 +577,20 @@ class QueryCapture(AbstractCapability[Any]):
         if call_args_too_deep(args):
             raise ParamsTooDeep(field="the call's arguments")
         token = CALL_ID.set(next_call_id(run_state_of(ctx.deps)))
+        arrival = _ARRIVED.set([])
         try:
-            return await self._execute(ctx, args, handler)
-        except GatherDeadEnd as e:
-            failed = self._stop(ctx, e)
-            if failed is e:
-                raise
-            raise failed from e
+            try:
+                return _stamped(ctx.deps, await self._execute(ctx, args, handler))
+            except GatherDeadEnd as e:
+                failed = self._stop(ctx, e)
+                if failed is e:
+                    raise
+                raise failed from e
+        except (ModelRetry, ToolFailed) as refused:
+            # A refusal or a stop reaches the model as its own result: it carries the stamp too.
+            raise type(refused)(_stamped(ctx.deps, refused.message)) from refused
         finally:
+            _ARRIVED.reset(arrival)
             CALL_ID.reset(token)
 
     async def _execute(self, ctx, args, handler):  # noqa: ANN001
@@ -656,6 +712,9 @@ class QueryCapture(AbstractCapability[Any]):
                 system_key=system_key,
                 call_id=CALL_ID.get(),
             )
+            held = _ARRIVED.get()
+            if held is not None and not held:
+                held.append(row["received_at"])
         finally:
             if charged:
                 circuit_breaker.record_outcome(
@@ -705,11 +764,14 @@ def register_query_tool(agent, registry) -> None:
         fn = registry.verbs(system)[verb]
         vctx = VerbContext(
             defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
-            tenant=deps.tenant, run_state=deps.run_state,
+            tenant=deps.tenant,
             **_proxy_access(deps.run_state),
         )
         delivery = CallDelivery()
         token = CALL_DELIVERY.set(delivery)
+        # The run's state rides beside the call, never on the adapter's context (#1385 O1/O8): only
+        # the platform's world registry reads it, to hold the run clock for an oracle turn.
+        state_token = CALL_RUN_STATE.set(deps.run_state)
         try:
             return await asyncio.to_thread(fn, vctx, **params)
         except asyncio.CancelledError:
@@ -717,6 +779,7 @@ def register_query_tool(agent, registry) -> None:
             delivery.abandoned = True
             raise
         finally:
+            CALL_RUN_STATE.reset(state_token)
             CALL_DELIVERY.reset(token)
 
 

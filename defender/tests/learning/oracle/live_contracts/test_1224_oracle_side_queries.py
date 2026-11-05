@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import gc
 import importlib
+import inspect
 import json
 import math
 import re
@@ -23,9 +24,13 @@ from defender import _yaml
 from defender.systems.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
 from defender.kit import faults
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.learning.oracle.live_contracts import _spec1224 as S
+from defender.tests.learning.oracle.live_contracts.test_1224_preflight_and_outcome import (
+    _capture_row,
+)
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
-from defender.tests.learning.oracle.live_contracts import _spec1224 as S
+from defender.tests.support.runtime.state import _1255_clock as C
 
 
 #: A rate no scenario outside the rate demands comes near, so their timing is not the limiter's.
@@ -48,12 +53,33 @@ VERIFY_ANSWER = {"entity": "alice", "risk": "low", "record_id": "r-0001",
 #: A forged idp row for world b's fact f1: the source's real columns, an id no real answer holds.
 FORGED = {"user": "alice", "event_id": "e-901", "action": "logon", "host": "db-1",
           "ts": "2026-07-28T15:22:00Z"}
-#: How the stub adapters log the family's clock (`as_of.isoformat()`).
-WHEN = S.AS_OF_DT.isoformat()
 #: A system whose adapter is planted but which the tenant's table never mentions.
 UNGRANTED = "ndr"
 UNGRANTED_CALL = S.Call(UNGRANTED, "query", S.query_params("src:10.0.0.9"), {"flows": []})
 WRITE_CALL = S.Call("idp", S.WRITE_VERB, {"host": "web-1"}, {"isolated": "web-1"})
+#: A granted idp call the source run made and failed: unlike a recorded call (served from its
+#: recording, never sent, design H6) pre-flight reads it live, through the tenant's grant.
+#: It answers the source's rows, so the one scripted submission is true of it as well.
+FAILED_IDP = S.Call("idp", "query", {"q": "user:bob"}, BASE)
+
+
+def _failed_reads(rows_or_est: Any) -> list[dict]:
+    """The adapter calls that read `FAILED_IDP` (the adapter logs its defaulted params too)."""
+    rows = rows_or_est.calls() if isinstance(rows_or_est, S.Estate) else rows_or_est
+    return [r for r in rows if (r["system"], r["verb"]) == (FAILED_IDP.system, FAILED_IDP.verb)
+            and r["params"].get("q") == FAILED_IDP.params["q"]]
+
+
+def _failed(est: S.Estate, *calls: S.Call):
+    """`after_source` planting each call as a captured failure (a row `exit_code=1`) that the live
+    estate would answer: the one shape of source call pre-flight reads live, so the grant is
+    the only thing standing between it and the tenant's adapter."""
+    def plant(src: Path) -> None:
+        for i, c in enumerate(calls):
+            est.answer(c.system, c.verb, c.params, c.payload)
+            _capture_row(src, system=c.system, verb=c.verb, params=c.params, seq=60 + i,
+                         exit_code=1, payload={"error": "upstream said no"})
+    return plant
 
 
 _CONFINED_ADAPTER = '''\
@@ -75,9 +101,7 @@ CONFINE_PATTERNS = ("logs-*",)
 @verb()
 def search(ctx: VerbContext, *, index: str = "logs-*", q: str = "*") -> dict:
     resolved = confine_index(index, CONFINE_PATTERNS)
-    as_of = getattr(ctx, "as_of", None)
     row = {{"system": SYSTEM, "verb": "search", "params": {{"index": index, "q": q}},
-           "as_of": None if as_of is None else as_of.isoformat(),
            "world_id": getattr(ctx, "world_id", None),
            "run_dir": str(getattr(ctx, "run_dir", "")), "t": time.time()}}
     with (_STATE / "calls.jsonl").open("a", encoding="utf-8") as fh:
@@ -163,6 +187,110 @@ def _tacit_estate(tmp_path: Path) -> S.Estate:
     return est
 
 
+#: Instants no other text of these scenes holds: the branch point a world is set at, and the
+#: reading the run's clock stands at when a sibling's call is made.
+BRANCH_SENTINEL = datetime(2029, 9, 17, 3, 42, 19, tzinfo=UTC)
+RUN_CLOCK_SENTINEL = datetime(2033, 11, 22, 14, 55, 31, tzinfo=UTC)
+CAPTURING = "capsys"
+CAPTURED_ANSWER = {"rows": [{"user": "alice", "event_id": "cap-1"}]}
+
+#: An adapter that writes down everything a call hands it: the whole context, every nested value
+#: and attribute (env included), and the call's params.
+_CAPTURING_ADAPTER = '''\
+"""Recording adapter planted by the #1385 O1 test."""
+from __future__ import annotations
+
+import dataclasses
+import datetime
+import json
+from collections.abc import Mapping
+from pathlib import Path
+
+from defender.kit.verbs import VerbContext, verb
+
+_STATE = Path({state!r})
+SYSTEM = "capsys"
+
+
+def check_settings(*_a, **_k):
+    return None
+
+
+def _dump(value, depth=0):
+    if depth > 12:
+        return "<deep>"
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {{f.name: _dump(getattr(value, f.name, None), depth + 1)
+                for f in dataclasses.fields(value)}}
+    if isinstance(value, Mapping):
+        return {{str(k): _dump(v, depth + 1) for k, v in value.items()}}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_dump(v, depth + 1) for v in value]
+    members = getattr(value, "__dict__", None)
+    if members is not None:
+        return {{k: _dump(v, depth + 1) for k, v in vars(value).items()}}
+    return repr(value)
+
+
+def _attributes(ctx):
+    """Every public non-callable attribute of the context, fields or not."""
+    out = {{}}
+    for name in dir(ctx):
+        if name.startswith("_"):
+            continue
+        try:
+            got = getattr(ctx, name)
+        except Exception as e:  # noqa: BLE001
+            got = repr(e)
+        if not callable(got):
+            out[name] = _dump(got)
+    return out
+
+
+@verb()
+def query(ctx: VerbContext, *, q: str = "*") -> dict:
+    row = {{"verb": "query", "params": {{"q": q}}, "context": _dump(ctx),
+           "attributes": _attributes(ctx)}}
+    with (_STATE / "contexts.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, sort_keys=True, default=str) + "\\n")
+    return {{"rows": [{{"user": "alice", "event_id": "cap-1"}}]}}
+
+
+@verb()
+def health_check(ctx: VerbContext) -> dict:
+    return {{"ok": True}}
+
+
+VERBS = {{"query": query, "health-check": health_check}}
+'''
+
+
+def _capturing_estate(tmp_path: Path) -> _Estate:
+    """The fixture estate plus the recording adapter, granted to gather."""
+    state = tmp_path / "estate" / "_estate"
+    return _estate(tmp_path, extra=((CAPTURING, _CAPTURING_ADAPTER.format(state=str(state)),
+                                     ("query", "health-check")),))
+
+
+def _recorded_by_the_capturing_adapter(est: S.Estate) -> list[dict]:
+    return S.read_jsonl(est.state / "contexts.jsonl")
+
+
+def _renderings(moment: datetime) -> list[str]:
+    """The spellings of an instant that would tell an adapter when it is: ISO with a `T` or a
+    space, the date, the time of day, epoch seconds and milliseconds, the compact form."""
+    epoch = int(moment.timestamp())
+    return [moment.strftime("%Y-%m-%dT%H:%M:%S"), moment.strftime("%Y-%m-%d %H:%M:%S"),
+            moment.strftime("%Y-%m-%d"), moment.strftime("%H:%M:%S"), str(epoch),
+            str(epoch * 1000), moment.strftime("%Y%m%dT%H%M%S")]
+
+
 def _narrow(est: S.Estate, withheld: Iterable[tuple[str, str]]) -> Any:
     """Rewrite the PLACED tenant's verb-grants table to withhold `withheld` and return the
     tenant's `RunTenant` read afresh (`resolve_run_tenant` re-reads the table per call)."""
@@ -205,12 +333,13 @@ def _ask(reg: Any, est: S.Estate, run_dir: Path, system: str = "idp", verb: str 
 
 def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.ScriptedModel,
             verifier: S.ScriptedModel | None = None, calls: Iterable[S.Call] = (CALL_IDP,),
-            rate: float = FAST) -> S.Launch:
+            rate: float = FAST, after_source: Any = None) -> S.Launch:
     """`S.launch` over the fixture tenant with the episode rate `rate`."""
     monkeypatch.setenv(S.KNOB_RATE, f"{rate:g}")
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "2")
     verifier = verifier if verifier is not None else S.passing_verifier()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
-    return S.launch(tmp_path, est, calls=list(calls), oracle=oracle, verifier=verifier)
+    return S.launch(tmp_path, est, calls=list(calls), oracle=oracle, verifier=verifier,
+                    after_source=after_source)
 
 
 def _gather(tmp_path: Path, reg: Any, est: S.Estate, *turns: Any) -> tuple[Path, Any]:
@@ -338,14 +467,13 @@ def _es_reply(seen: Any) -> tuple[int, dict[str, str], bytes]:
 
 @contextlib.contextmanager
 def _es_ctx(tmp_path: Path, data_root: Path) -> Iterator[tuple[VerbContext, Any]]:
-    """A run context carrying the family's branch-point clock, over elastic declared at a
-    recording upstream behind the real proxy (#1391 O3); yields it and the upstream, whose
-    `seen` holds every request the cluster was sent."""
+    """A run context (no branch point on it, #1385 O1), over elastic declared at a recording
+    upstream behind the real proxy (#1391 O3); yields it and the upstream, whose `seen` holds
+    every request the cluster was sent."""
     with H.upstream() as up:
         for path in ("/logs-*/_search", "/alerts-*/_search", "/_query"):
             up.replies[path] = _es_reply
-        with A.elastic_proxied(tmp_path, data_root, up.url,
-                               ctx_kw={"as_of": S.AS_OF_DT}) as (ctx, _tap):
+        with A.elastic_proxied(tmp_path, data_root, up.url) as (ctx, _tap):
             yield ctx, up
 
 
@@ -361,11 +489,6 @@ def _elastic_read(adapter: Any, ctx: VerbContext, verb: str, **params: Any) -> l
     return [doc["@timestamp"] for doc in payload["hits"]]
 
 
-def _after_branch(stamps: Iterable[str] | None) -> list[str]:
-    """The stamps dated after the family's branch-point clock."""
-    return [s for s in stamps or () if _moment(s) > S.AS_OF_DT]
-
-
 def _moment(stamp: str) -> datetime:
     return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
@@ -378,10 +501,6 @@ def _wire_window(up: Any) -> dict | None:
         if "range" in entry:
             return entry["range"]["@timestamp"]
     return None
-
-
-#: The family's clock as the elastic adapter spells a filled window end (`_clock.z_seconds`).
-AS_OF_Z = S.AS_OF_DT.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class _Clock:
@@ -490,16 +609,23 @@ def test_1224_oracle_verifier_and_preflight_queries_share_one_grant_door(tmp_pat
 
     _ask(reg, est, tmp_path / "run")
     sibling = est.calls()
-    preflight = _launch(tmp_path / "launch", est, monkeypatch,
-                        oracle=S.oracle(then=S.submit(BASE)),
-                        calls=[CALL_IDP, S.Call("edr", "lookup", denied, {"entity": "db-1"})])
+    replay_oracle = S.oracle(then=S.submit(BASE))
+    denied_call = S.Call("edr", "lookup", denied, {"entity": "db-1"})
+    preflight = _launch(tmp_path / "launch", est, monkeypatch, oracle=replay_oracle,
+                        calls=[CALL_IDP],
+                        after_source=_failed(est, FAILED_IDP, denied_call))
     replayed = est.calls()[len(sibling):]
 
     assert est.calls("edr", "lookup") == [], (
         "the withheld verb reached the tenant through one of the oracle-side doors")
     assert _hits(sibling, "edr", "query", EXPLORE), "positive control: oracle's granted read"
     assert _hits(sibling, "siem-x", "lookup", VERIFY), "positive control: verifier's granted read"
-    assert _hits(replayed, "idp", "query", ALICE), "positive control: pre-flight's granted replay"
+    assert [(r["system"], r["verb"]) for r in replayed] == [("idp", "query")], (
+        "pre-flight read something other than the granted captured failure live: the withheld "
+        "verb was sent (design H6)")
+    assert _failed_reads(replayed), "positive control: the granted captured failure was not read"
+    assert "user:alice" in replay_oracle.all_seen(), (
+        "positive control: pre-flight calibrated the granted call")
     assert _newly_named(oracle, 3, "check 5"), (
         "check 5 passed a removal whose side query the grant refuses to re-run")
     outcome = S.read_outcome(preflight.ep) or {}
@@ -513,16 +639,19 @@ def test_1224_preflight_reader_refuses_a_denied_verb_and_an_undeclared_system(
     """Neither is sent; both are listed as not replayable."""
     est = _estate(tmp_path, systems=(*S.SYSTEMS, UNGRANTED), ungranted=(UNGRANTED,))
 
-    launched = _launch(tmp_path, est, monkeypatch, oracle=S.oracle(then=S.submit(BASE)),
-                       calls=[CALL_IDP, WRITE_CALL, UNGRANTED_CALL])
+    replay_oracle = S.oracle(then=S.submit(BASE))
+    launched = _launch(tmp_path, est, monkeypatch, oracle=replay_oracle, calls=[CALL_IDP],
+                       after_source=_failed(est, FAILED_IDP, WRITE_CALL, UNGRANTED_CALL))
 
     tenant_adapter = est.calls()
+    assert _failed_reads(tenant_adapter), (
+        "positive control: the granted captured failure was read live through the grant")
     assert [r for r in tenant_adapter if r["verb"] == S.WRITE_VERB] == [], (
         "pre-flight replayed the DENIED write verb")
     assert [r for r in tenant_adapter if r["system"] == UNGRANTED] == [], (
         "pre-flight replayed a call to an UNDECLARED system")
-    assert _hits(tenant_adapter, "idp", "query", ALICE), (
-        "positive control: the granted call was replayed")
+    assert "user:alice" in replay_oracle.all_seen(), (
+        "positive control: the recorded granted call was calibrated")
     outcome = S.read_outcome(launched.ep) or {}
     listed = {(n["system"], n["verb"]) for n in outcome.get("not_replayable", [])}
     assert {("idp", S.WRITE_VERB), (UNGRANTED, "query")} <= listed, (
@@ -532,7 +661,8 @@ def test_1224_preflight_reader_refuses_a_denied_verb_and_an_undeclared_system(
 def test_1224_preflight_reader_cannot_be_built_without_a_gather_grant(tmp_path):
     """`GrantError` before any call is sent; with the grant, the granted replay is sent."""
     est = _estate(tmp_path)
-    _base, src = S.source_run(tmp_path, est, calls=[CALL_IDP])
+    _base, src = S.source_run(tmp_path, est, calls=[CALL_IDP],
+                              after_source=_failed(est, FAILED_IDP))
     ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)),
                       base_rows=[S.captured("idp", "query", ALICE, BASE)])
     rt = est.run_tenant()
@@ -550,14 +680,16 @@ def test_1224_preflight_reader_cannot_be_built_without_a_gather_grant(tmp_path):
                          verifier=S.passing_verifier().model)
     assert est.calls() == [], "a reader with no gather grant sent a call"
 
+    granted = S.oracle(then=S.submit(BASE))
     with J.walked_view(ep) as view:
         preflight_replay(view.episode, source=T.open_source(src), roster=est.roster(), tenant=rt,
-                         oracle=S.oracle(then=S.submit(BASE)).model,
-                         verifier=S.passing_verifier().model)
-    assert _hits(est, "idp", "query", ALICE), "positive control: the granted replay was sent"
+                         oracle=granted.model, verifier=S.passing_verifier().model)
+    assert "user:alice" in granted.all_seen(), "positive control: the granted call was calibrated"
+    assert len(_failed_reads(est)) == 1, (
+        "positive control: with the grant the captured failure was actually read live")
 
 
-def test_1224_sibling_query_tool_via_decides_each_call_and_carries_as_of(tmp_path):
+def test_1224_sibling_query_tool_via_decides_each_call(tmp_path):
     """A withheld verb and a confined index are refused as a real run refuses them, before serving."""
     est = _confined_estate(tmp_path, withheld=(("idp", "lookup"),))
     turns = [S.query_turn("idp", "lookup", {"entity": "alice"}),
@@ -579,8 +711,8 @@ def test_1224_sibling_query_tool_via_decides_each_call_and_carries_as_of(tmp_pat
         "a real run")
     assert est.calls("idp", "lookup") == []
     assert est.calls(CONFINED) == []
-    assert [r["as_of"] for r in _hits(est, "idp", "query", ALICE)] == [None, WHEN], (
-        "the sibling's granted read did not carry the family's clock (the real run's carries none)")
+    assert len(_hits(est, "idp", "query", ALICE)) == 2, (
+        "the sibling's granted read did not reach the adapter once, as a real run's does")
     world_ledger = S.ledger_rows(ep, "b")
     assert any(r["source"] == S.REFUSED and r["verb"] == "lookup" for r in world_ledger), (
         "the grant decision's refusal left no refused row")
@@ -589,27 +721,24 @@ def test_1224_sibling_query_tool_via_decides_each_call_and_carries_as_of(tmp_pat
 
 
 def test_p083_call_window_extends_past_the_branch_point(tmp_path, data_root):
-    """However the end is spelled, the adapter sends the caller's own end and returns no row past it."""
-    assert datetime.now(UTC) > _moment(LATE), "premise: the later row is already indexed"
+    """However the end is spelled, the adapter sends the caller's own end, fills no absent one
+    and cuts nothing: the cut at the branch point is the oracle's (design O1, H3)."""
     elastic_adapter = S.mod("integrations.elastic_adapter")
     spellings = [None, "", "2099-01-01T00:00:00Z", "2099-01-01", "now", "now+1d",
                  "4102444800000", "2026-08-20T01:00:00+05:00", JUST_AFTER]
-    escaped, rewritten = {}, {}
+    rewritten = {}
     with _es_ctx(tmp_path / "elastic", data_root) as (ctx, up):
-        assert _elastic_read(elastic_adapter, ctx, "query", native_query="*") == [EARLY], (
-            "an open window did not read the row before the branch point")
+        assert sorted(_elastic_read(elastic_adapter, ctx, "query", native_query="*") or []) == (
+            sorted(INDEXED)), "an open window did not return every indexed row"
         for end in spellings:
             sent = len(up.seen)
-            stamps = _elastic_read(elastic_adapter, ctx, "query", native_query="*", end=end)
+            _elastic_read(elastic_adapter, ctx, "query", native_query="*", end=end)
             window = _wire_window(up) if len(up.seen) > sent else "no request reached the cluster"
-            if window != {"lte": end if end else AS_OF_Z}:
+            if window != ({"lte": end} if end else None):
                 rewritten[end] = window
-            if _after_branch(stamps):
-                escaped[end] = _after_branch(stamps)
     assert rewritten == {}, (
         f"window ends the request to the cluster did not carry as the caller spelled them (an "
-        f"absent end filled at the clock): {rewritten}")
-    assert escaped == {}, f"window ends whose read returned rows after the branch point: {escaped}"
+        f"absent end must stay open): {rewritten}")
 
     est = _estate(tmp_path)
     late = S.query_params("host:db-1", end="2099-01-01T00:00:00Z")
@@ -624,41 +753,29 @@ def test_p083_call_window_extends_past_the_branch_point(tmp_path, data_root):
     # The oracle's and the verifier's own later ends reach the adapter as they spelled them.
     assert _hits(tenant_adapter, "edr", "query", late)
     assert _hits(tenant_adapter, "idp", "query", now)
-    assert [r["as_of"] for r in tenant_adapter] == [WHEN] * len(tenant_adapter)
 
 
-def test_p084_native_query_form_that_escapes_the_time_bound(tmp_path, data_root):
-    """Comment prefixes and a lowercase source with its own window still return no row past the clock."""
-    elastic_adapter = S.mod("integrations.elastic_adapter")
-    plain = "FROM logs-* | KEEP @timestamp, user.name"
-    escapes = [
-        "// the analyst wants everything\nFROM logs-* | KEEP @timestamp, user.name",
-        "/* widen */ FROM logs-* | KEEP @timestamp, user.name",
-        'from logs-* | WHERE @timestamp >= "2026-07-01T00:00:00Z"',
-        "\n\n   FROM logs-* METADATA _index | LIMIT 5",
-    ]
-    escaped = {}
-    with _es_ctx(tmp_path, data_root) as (ctx, _up):
-        assert _elastic_read(elastic_adapter, ctx, "esql", query=plain) == [EARLY], (
-            "a plain ES|QL read did not return the row before the branch point")
-        for query in escapes:
-            stamps = _elastic_read(elastic_adapter, ctx, "esql", query=query)
-            if _after_branch(stamps):
-                escaped[query] = _after_branch(stamps)
-    assert escaped == {}, f"ES|QL reads that returned rows after the branch point: {escaped}"
-
-
-def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path):
-    """a sibling started months after the branch point, and the same sibling resumed, read with the clock the manifest recorded, never the day they run."""
-    assert datetime.now(UTC).date() != S.AS_OF_DT.date(), "premise: the siblings start later"
-    est = _estate(tmp_path)
+def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path, monkeypatch):
+    """a sibling started months after the branch point, and the same sibling resumed, hold the clock the manifest recorded, and send adapters none (design O1): an adapter that records everything its call is handed (its whole context, nested, and its params) is shown neither the branch point nor the run clock, in a sibling's call, in the oracle's and the verifier's reads, and in pre-flight's."""
+    assert datetime.now(UTC).date() != BRANCH_SENTINEL.date(), "premise: the siblings start later"
+    est = _capturing_estate(tmp_path)
     est.answer("idp", "query", None, BASE)
-    ep = S.episode_v2(tmp_path, base_rows=[])
+    doc = S.family_v2(as_of=BRANCH_SENTINEL.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                      served_systems=(*S.SYSTEMS, CAPTURING))
+    ep = S.episode_v2(tmp_path, doc=doc, base_rows=[])
     first = S.load_world(ep, "b")
-    oracle = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit(BASE))
-    verifier = S.verifier(S.run_query("siem-x", "lookup", VERIFY), S.verdict(True))
-    _e, _p, reg = _scene(tmp_path, oracle, verifier, est=est, ep=ep, as_of=first.as_of)
+    oracle = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit(BASE),
+                      S.run_query(CAPTURING, "query", {"q": "oracle-side"}),
+                      S.submit("$BASE", S.EMPTY_CLAIM))
+    verifier = S.verifier(S.run_query("siem-x", "lookup", VERIFY), S.verdict(True),
+                          S.run_query(CAPTURING, "query", {"q": "verifier-side"}), S.verdict(True))
+    _e, _p, reg = _scene(tmp_path, oracle, verifier, est=est, ep=ep)
     _ask(reg, est, tmp_path / "run")
+    # An investigator's call through the query tool, which holds the run's clock at the sentinel.
+    S.drive_gather_run(tmp_path / "drive", verbs=reg, tenant=est.place(), system=CAPTURING,
+                       clock=C.FakeClock(RUN_CLOCK_SENTINEL),
+                       gather_turns=[S.query_turn(CAPTURING, "query", {"q": "sibling"}),
+                                     S.done_turn()])
     started = len(est.calls())
     del reg  # the sibling stops; its resume builds the world afresh
     gc.collect()
@@ -666,35 +783,50 @@ def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path):
     resumed = S.load_world(ep, "b")
     again = S.oracle(S.run_query("edr", "query", S.query_params("host:db-2")), S.submit(BASE))
     est.answer("edr", "query", S.query_params("host:db-2"), {"events": []})
-    _e, _p, reg2 = _scene(tmp_path, again, est=est, ep=ep, as_of=resumed.as_of)
+    _e, _p, reg2 = _scene(tmp_path, again, est=est, ep=ep)
     _ask(reg2, est, tmp_path / "run", q="user:alice", limit=20)
 
-    assert first.as_of == resumed.as_of == S.AS_OF_DT
+    assert first.as_of == resumed.as_of == BRANCH_SENTINEL
     tenant_adapter = est.calls()
     assert started >= 3
     assert len(tenant_adapter) > started
-    assert [r["as_of"] for r in tenant_adapter] == [WHEN] * len(tenant_adapter)
+
+    # Pre-flight reads a call the source run failed live, and the oracle reads beside it.
+    preflight = S.Call(CAPTURING, "query", {"q": "preflight"}, CAPTURED_ANSWER)
+    _launch(tmp_path / "launch", est, monkeypatch, calls=[CALL_IDP],
+            after_source=_failed(est, preflight),
+            oracle=S.oracle(S.run_query(CAPTURING, "query", {"q": "preflight-oracle-side"}),
+                            then=S.submit("$BASE", S.EMPTY_CLAIM)))
+
+    seen = _recorded_by_the_capturing_adapter(est)
+    reached = {row["params"].get("q") for row in seen}
+    assert reached >= {"sibling", "oracle-side", "verifier-side", "preflight",
+                       "preflight-oracle-side"}, f"a read never reached the adapter: {reached}"
+    text = json.dumps(seen, sort_keys=True)
+    for name, moment in (("the branch point", BRANCH_SENTINEL), ("the run clock", RUN_CLOCK_SENTINEL),
+                         ("pre-flight's branch point", S.AS_OF_DT)):
+        shown = [needle for needle in _renderings(moment) if needle in text]
+        assert not shown, f"an adapter was handed {name} ({shown}): {text}"
 
 
 def test_1224_tacit_knowledge_run_query_reads_the_state_at_the_branch_date(tmp_path):
-    """the oracle's own side query on tacit-knowledge (no run clock, a host-side as_of) answers with the registry as it stood on the branch date: valid then, expired now, matches. O2."""
+    """the oracle's own side query on tacit-knowledge (no run clock, the world's branch point held call-scoped) answers with the registry as it stood on the branch date: valid then, expired now, matches. O2."""
     est = _tacit_estate(tmp_path)
     tacit_verbs = _plain_registry(est).verbs("tacit-knowledge")
-    today: VerbContext = est.ctx(tmp_path / "today")
-    branch: VerbContext = est.ctx(tmp_path / "branch", as_of=S.AS_OF_DT)
-    unbranched = tacit_verbs["lookup"](today, **TACIT_LOOKUP)
-    at_branch = tacit_verbs["lookup"](branch, **TACIT_LOOKUP)
-    assert today.as_of is None
+    ctx: VerbContext = est.ctx(tmp_path / "plain")
+    unbranched = tacit_verbs["lookup"](ctx, **TACIT_LOOKUP)
+    with S.branch_point_carried(S.AS_OF_DT):
+        at_branch = tacit_verbs["lookup"](ctx, **TACIT_LOOKUP)
     assert unbranched == {"matched": None}, "premise: the entry has expired by today"
     assert (at_branch["matched"] or {}).get("id") == TACIT_ENTRY["id"], (
-        "premise: the lookup reads the registry as of the `as_of` it is handed when the call has no run clock")
+        "premise: the lookup reads the registry as of the branch point held when the call has no run clock")
     oracle = S.oracle(S.run_query("tacit-knowledge", "lookup", TACIT_LOOKUP), S.submit(BASE))
     _e, _ep, reg = _scene(tmp_path, oracle, est=est)
 
     _ask(reg, est, tmp_path / "run")
 
     assert TACIT_ENTRY["id"] in _returned(oracle, 1), (
-        "the oracle was not answered with the registry's state on the branch date")
+        "the oracle's run_query did not reach the real tacit adapter's answer")
 
 
 def test_1224_oracle_side_queries_land_in_no_sibling_record(tmp_path):
@@ -723,7 +855,7 @@ def test_1224_oracle_side_queries_land_in_no_sibling_record(tmp_path):
 
 
 def test_1224_host_rerun_of_a_removal_side_query(tmp_path):
-    """It goes through the gather grant at the clock, within the rate slice, and leaves no sibling record."""
+    """It goes through the gather grant, with no clock on it, within the rate slice, and leaves no sibling record."""
     rate = 3
     est = _estate(tmp_path, withheld=(("edr", "lookup"),))
     kept = BASE_ROW
@@ -751,7 +883,6 @@ def test_1224_host_rerun_of_a_removal_side_query(tmp_path):
     assert _newly_named(oracle, 1, "check 5"), "check 5 passed a side query it could not re-run"
     rerun = _hits(est, "idp", "query", side)
     assert rerun, "check 5 never re-ran the granted side query"
-    assert all(r["as_of"] == WHEN for r in rerun), "the re-run did not carry the clock"
     oracle_side = rerun + [r for r in est.calls("edr") if r["params"] in reads]
     assert _densest(_stamps(oracle_side), 1.0 - SLACK) <= rate, (
         "the re-run and the oracle's queries together exceeded the sibling's slice")
@@ -764,7 +895,7 @@ def test_1224_host_rerun_of_a_removal_side_query(tmp_path):
 
 
 def test_p046_removal_side_query_built_from_a_payload_value_with_query_metacharacters(tmp_path):
-    """It is re-run verbatim through a read verb at the clock; its count mismatch fails check 5."""
+    """It is re-run verbatim through a read verb; its count mismatch fails check 5."""
     est = _estate(tmp_path)
     nasty = 'web-2",x*|y'
     row = {"user": "bob", "event_id": "e-103", "action": "logon", "host": nasty,
@@ -783,7 +914,6 @@ def test_p046_removal_side_query_built_from_a_payload_value_with_query_metachara
 
     rerun = _hits(est, "idp", "query", side)
     assert rerun, "the side query was not re-run verbatim (its metacharacters were rewritten)"
-    assert all(r["as_of"] == WHEN for r in rerun)
     assert est.calls(verb=S.WRITE_VERB) == []
     assert all(r["verb"] in S.READ_VERBS for r in est.calls())
     assert _newly_named(oracle, 1, "check 5"), (

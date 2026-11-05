@@ -17,6 +17,8 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING as _PLANTED_ALERT_MAPPING
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFENDER = REPO_ROOT / "defender"
 KNOWLEDGE_ROOT = REPO_ROOT / "knowledge"
@@ -391,20 +393,27 @@ def tenant_py(module: Any, *args: str, root: Path | str | None, seed: list[str] 
 
 #: Runs a COPIED checkout's own `defender.cli.tenant.main` with a directory holding the given tenants active (the
 #: test-side launcher is a test module and a copy carries no `tests/`): the copy's `defender` package is first on
-#: the path, the way its script puts its checkout first.
+#: the path, the way its script puts its checkout first. Each seeded tenant gets the launcher's
+#: planted alert mapping (#1345: `check` refuses a tenant with none), spelled with the copy's own
+#: production types, as `_mapping1345.add_to_twin` spells it for the launcher.
 _COPY_DRIVER = """
-import asyncio, datetime, inspect, sys
+import asyncio, datetime, inspect, json, sys
 from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+from defender.tenancy.models import AlertMappingRow
+from defender.records._alert_input import AlertMapping
 from defender.cli import tenant
 seeded, argv = sys.argv[1].split(","), sys.argv[2:]
+mapping = AlertMapping(paths={k: v for k, v in json.loads(%r).items() if v is not None})
 twin = InMemoryTenantRepository()
 for name in filter(None, seeded):
     added = twin.add_tenant(name, created_at=datetime.datetime(2026, 10, 26, 9, tzinfo=datetime.timezone.utc),
                             state="active", repo="tenants/" + name, origin="http://forge.test/tenants/" + name + ".git")
     if inspect.isawaitable(added):
         asyncio.run(added)
+    with twin._mutex:
+        twin._mappings[name] = AlertMappingRow.of(name, mapping)
 sys.exit(tenant.main(argv, directory=TenantDirectory(lambda: twin)))
-"""
+""" % json.dumps(dict(_PLANTED_ALERT_MAPPING))
 
 
 def checkout_tenant_py(checkout: Path, *args: str, root: Path | str | None, seed: list[str] | None = None,

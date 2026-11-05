@@ -15,7 +15,7 @@ from defender.tests.support.shared.filesystem._handoff import updating, write_wh
 ROW_COLUMNS = (
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command", "payload_path",
     "exit_code", "error_class", "payload_status", "payload_digest", "payload_sha256",
-    "system_key",
+    "system_key", "received_at",
 )
 
 #: The column name kept out of the model's table.
@@ -90,9 +90,18 @@ class ReturnsSeen(ReplayFn):
 _SALT = re.compile(r"run-[0-9a-f]+-untrusted")
 
 
-def normalized(text: str, *run_dirs: Path) -> str:
-    """Normalize frame salts and run paths, replacing longer paths first."""
-    out = _SALT.sub("run-SALT-untrusted", text)
+#: The platform's arrival-stamp line (#1385 A6): two runs' clocks differ by design.
+_STAMP = re.compile(r"^\[reply received [^\]\n]*\]\n?", re.M)
+
+
+def normalized(text: str, *run_dirs: Path, stamps: int | None = 1) -> str:
+    """Normalize frame salts, run paths and the arrival-stamp line, replacing longer paths first.
+    A result carries exactly `stamps` stamp lines (one unless the caller says otherwise; `None`
+    for a text that may hold any number, such as a refusal that has its own stamp line)."""
+    found = len(_STAMP.findall(text))
+    assert stamps is None or found == stamps, (
+        f"expected {stamps} arrival-stamp line(s) in the result, found {found}: {text[:200]!r}")
+    out = _STAMP.sub("", _SALT.sub("run-SALT-untrusted", text))
     for run_dir in sorted({str(d) for d in run_dirs}, key=len, reverse=True):
         out = out.replace(run_dir, "<RUN>")
     return out
@@ -157,5 +166,5 @@ def world_registry_with_source(ep: Path, label: str, est: Any, *, source_run: An
     seams = S24.registry_seams(world, ledger, oracle_dir=S24.oracle_dir(ep, label),
                                oracle=oracle.model, verifier=verifier.model, box=box, **knobs)
     return WorldRegistry(
-        est.roster(), rt.grants.gather, world=world, ledger=ledger, as_of=S24.AS_OF_DT,
+        est.roster(), rt.grants.gather, world=world, ledger=ledger,
         tenant=rt, grant_home=rt.table_pointer, source_run=source_run, **seams)

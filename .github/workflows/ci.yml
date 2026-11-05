@@ -709,6 +709,12 @@ jobs:
       - name: Tenant-settings env-read gate (empty allow-list)
         run: defender/.venv/bin/python tooling/lint/lint_tenant_env_reads.py
 
+      # Adapters know only their target system: none (nor the kit's interface) reads the branch
+      # point, the run state or the run clock, and host-state stamps no time of its own. The
+      # oracle applies a replay's cut and the platform stamps each reply (#1385). No baseline.
+      - name: Replay-blind adapter gate (no baseline)
+        run: defender/.venv/bin/python tooling/lint/lint_adapter_replay_blind.py
+
       # Every defender program sets up logging, or says on its __main__ line why not (a model
       # tool whose stderr the model reads). Without it INFO lines vanish and nothing is JSON.
       - name: Log-setup gate (every program configures logging)

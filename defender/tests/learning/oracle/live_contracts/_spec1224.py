@@ -13,7 +13,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,6 +73,7 @@ COINED = {
     "tool.forge": "forge",
     "tool.record_fact": "record_fact",
     "tool.python": "python",
+    "tool.re_ask": "re_ask",
     "tool.check": "check",
     "tool.submit": "submit",
     "tool.verdict": "verdict",
@@ -248,9 +249,7 @@ def check_settings(*_a, **_k):
 
 
 def _answer(ctx: VerbContext, name: str, params: dict):
-    as_of = getattr(ctx, "as_of", None)
     row = {{"system": SYSTEM, "verb": name, "params": params,
-           "as_of": None if as_of is None else as_of.isoformat(),
            "world_id": getattr(ctx, "world_id", None),
            "run_dir": str(getattr(ctx, "run_dir", "")), "t": time.time()}}
     with (_STATE / "calls.jsonl").open("a", encoding="utf-8") as fh:
@@ -565,6 +564,13 @@ def python(code: str) -> Move:
     return Move(COINED["tool.python"], {"code": code})
 
 
+def re_ask(spec: Any) -> Move:
+    """The oracle's `re_ask` call (#1385) with `spec` as its arguments: a `re_asked(...)` spec, or
+    any other value a test offers (a value that is no mapping is sent under an unknown key)."""
+    args = dict(spec) if isinstance(spec, Mapping) else {"re_ask": spec}
+    return Move(COINED["tool.re_ask"], args)
+
+
 def check(served: Any, claim_: Mapping[str, Any] | None = None) -> Move:
     return Move(COINED["tool.check"], {"served": served, "claim": dict(claim_ or claim())})
 
@@ -601,6 +607,12 @@ def removed(row: Mapping[str, Any], *, system: str, verb: str, params: Mapping[s
             count: int) -> dict:
     return {"row": dict(row), "side_query": {"system": system, "verb": verb,
                                              "params": dict(params)}, "count": count}
+
+
+def re_asked(*, system: str, verb: str, params: Mapping[str, Any]) -> dict:
+    """A re-ask (#1385), as the `re_ask` tool takes it: the call's own question, bounded at the
+    branch point."""
+    return {"system": system, "verb": verb, "params": dict(params)}
 
 
 def changed(entity: str, field_: str, old: Any, new: Any) -> dict:
@@ -1248,7 +1260,7 @@ def registry_seams(world: Any, ledger: Any, *, oracle_dir: Path | None = None,
     }
 
 
-def build_registry(roster: Any, grant: Any, *, world: Any, ledger: Any, as_of: Any,
+def build_registry(roster: Any, grant: Any, *, world: Any, ledger: Any,
                    tenant: Any = None, grant_home: str | None = None, **knobs: Any) -> Any:
     """`WorldRegistry(roster, grant, ...)` with its settled oracle side from
     `registry_seams(world, ledger, **knobs)` — the constructor as a test that does not care
@@ -1258,7 +1270,7 @@ def build_registry(roster: Any, grant: Any, *, world: Any, ledger: Any, as_of: A
     if "prebranch" in knobs:
         extra["prebranch"] = knobs.pop("prebranch")
     return sym(REGISTRY, "WorldRegistry")(
-        roster, grant, world=world, ledger=ledger, as_of=as_of, tenant=tenant,
+        roster, grant, world=world, ledger=ledger, tenant=tenant,
         **registry_seams(world, ledger, **knobs), **extra)
 
 
@@ -1268,13 +1280,12 @@ def world_registry(ep: Path, label: str, est: Estate, *, oracle: ScriptedModel |
     """`WorldRegistry` for world `label` of episode `ep`, over the fixture estate's roster and
     gather grant, with the doubles injected through its seams. `knobs` are the oracle
     keywords (`retry_cap=`, `turn_deadline=`, `budget=`, `rate=`, `restart_after=`,
-    `limiter=`), settled by `registry_seams`, and `as_of=` (the branch point by default)."""
+    `limiter=`), settled by `registry_seams`."""
     rt = tenant if tenant is not None else est.run_tenant()
     served = world if world is not None else load_world(ep, label)
     ledger = world_ledger(ep, label)
-    as_of = knobs.pop("as_of", AS_OF_DT)
     return build_registry(
-        est.roster(), rt.grants.gather, world=served, ledger=ledger, as_of=as_of,
+        est.roster(), rt.grants.gather, world=served, ledger=ledger,
         tenant=rt, grant_home=rt.table_pointer,
         oracle=None if oracle is None else oracle.model,
         verifier=None if verifier is None else verifier.model, box=box,
@@ -1307,13 +1318,39 @@ def run_state(run_dir: Path, run_id: str = RUN_ID) -> Any:
     return sym("investigation.run_state", "RunState")(Path(run_dir), run_id)
 
 
+@contextlib.contextmanager
+def run_state_carried(state: Any) -> Iterator[None]:
+    """Hold `state` as the call-scoped run state (`CALL_RUN_STATE`, #1385) the way the query tool
+    does around an investigator's call, so a registry called directly pauses `state`'s clock."""
+    carrier = sym(VERBS, "CALL_RUN_STATE")
+    token = carrier.set(state)
+    try:
+        yield
+    finally:
+        carrier.reset(token)
+
+
+@contextlib.contextmanager
+def branch_point_carried(at: Any) -> Iterator[None]:
+    """Hold `at` as the call-scoped branch point (`CALL_BRANCH_POINT`, #1390 amendment 4) the way
+    a world's registry does around a platform-served verb and an oracle turn, with no run state
+    held, so a platform verb called directly is judged on `at`."""
+    carrier = sym(VERBS, "CALL_BRANCH_POINT")
+    token = carrier.set(at)
+    try:
+        with run_state_carried(None):
+            yield
+    finally:
+        carrier.reset(token)
+
+
 def tap_run_states(registry: Any) -> list[Any]:
     """Every `RunState` the investigator's calls through `registry` carried
-    (`VerbContext.run_state`), in call order.
+    (`CALL_RUN_STATE`, #1385 O8), in call order.
 
     For a driven run that ends by RAISING (an escaped `OracleUnservable`), `drive()` returns
-    nothing, so its `["run_state"]` is out of reach; the verb context is the production carry
-    the state rides on, and this reads it there. Installed on the registry INSTANCE (its public
+    nothing, so its `["run_state"]` is out of reach; the call-scoped value is the production
+    carry the state rides on (the verb context carries none), and this reads it there. Installed on the registry INSTANCE (its public
     `verbs` lookup, through which the query tool and lead-0 resolve every callable), each verb
     wrapped with `functools.wraps` so the query tool still validates the real signature."""
     import functools
@@ -1325,7 +1362,7 @@ def tap_run_states(registry: Any) -> list[Any]:
         def tap(fn: Any) -> Any:
             @functools.wraps(fn)
             def carried(ctx: Any, **params: Any) -> Any:
-                seen.append(getattr(ctx, "run_state", None))
+                seen.append(sym(VERBS, "CALL_RUN_STATE").get())
                 return fn(ctx, **params)
 
             return carried
@@ -1547,6 +1584,7 @@ def questioner_for(doc: dict | None = None) -> FakeAgent:
 
 
 def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
+           after_source: Callable[[Path], None] | None = None,
            spawn: Any = None, argv_extra: Iterable[str] = (),
            oracle: ScriptedModel | None = None, verifier: ScriptedModel | None = None,
            **seams: Any) -> Launch:
@@ -1554,7 +1592,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     (`rc`, `message` — the `sys.exit` text of a refusal, else "" —, `spawn`, `ep`). Every seam
     not named defaults to a recording double; the role preflight is neutralised
     (`no_preflight`) for every scenario not about it."""
-    _base, src = source_run(tmp_path, est, calls=calls)
+    _base, src = source_run(tmp_path, est, calls=calls, after_source=after_source)
     spawn = spawn if spawn is not None else FakeSpawn()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
     seams.setdefault("questioner", questioner_for())
     seams.setdefault("preflight", no_preflight)

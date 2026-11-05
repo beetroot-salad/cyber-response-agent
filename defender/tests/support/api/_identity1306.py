@@ -20,7 +20,7 @@ administrator invite path is `World.member(admin_browser, tenant, email)` (a wor
 that wants the r9 route uses it). Seeding is idempotent.
 
 Interface: `World(administrators=, tenants=, start=, failing_sends=, send_interval=, send_deadline=,
-failing_writes=, tenant_repo=None)`; `world.tenants` (the twin), `world.repo` (identity repository,
+failing_writes=, tenant_repo=None, alert_mapping=PLANTED_ALERT_MAPPING)`; `world.tenants` (the twin), `world.repo` (identity repository,
 failure-wrapped if `failing_writes`), `world.raw_repo` (never wrapped); `world.register(T, *, state="active")`;
 `world.seed_first_members(T, emails)`; `world.restart(administrators=, tenants=)`."""
 from __future__ import annotations
@@ -60,6 +60,7 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
     VerifiedSignIn,
 )
 from defender.tenancy import InMemoryTenantRepository
+from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, add_to_twin, mapping_value
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 T0 = _dt.datetime(2026, 10, 26, 9, 0, tzinfo=_dt.UTC)
@@ -563,11 +564,14 @@ class World:
     Rule for the cases: no browser is reused after more than 12 hours idle or 7 days since its
     sign-in (O6). After a clock jump, `sign_in` again (it always opens a new browser)."""
 
-    def __init__(self, *, administrators: Sequence[str] = (),
+    def __init__(self, *, administrators: Sequence[str] = (),  # noqa: PLR0913
                  tenants: Mapping[str, Sequence[str]] | None = None, start: bool = True,
                  failing_sends: int = 0, send_interval: _dt.timedelta | None = None,
                  send_deadline: _dt.timedelta | None = None, failing_writes: bool = False,
-                 tenant_repo: Any = None) -> None:
+                 tenant_repo: Any = None,
+                 alert_mapping: Mapping[str, str | None] | None = PLANTED_ALERT_MAPPING) -> None:
+        #: #1345: the mapping each seeded tenant holds in the twin (`None`: none), see `_mapping1345`.
+        self.alert_mapping = alert_mapping
         self.clock = Clock()
         self.store = InMemoryStore(self.clock)
         #: The one tenant twin, shared with the identity repository and the API (r9 DC-7).
@@ -646,6 +650,8 @@ class World:
         added = self.tenants.add_tenant(tenant, created_at=self.clock(), state=state)
         if inspect.isawaitable(added):  # GAP-0-1: the seeder's sync/async shape is not pinned
             await added
+        if self.alert_mapping is not None:  # design-implied twin seeder (r5), see `_mapping1345.seed_twin`
+            await add_to_twin(self.tenants, tenant, mapping_value(self.alert_mapping))
 
     async def _seed_first_members(self, tenant: str, emails: Sequence[str]) -> None:
         repo, now = self.raw_repo, self.clock()

@@ -10,7 +10,6 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Callable, Mapping
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -72,12 +71,6 @@ class Capture(Protocol):
     def record(self, *, system: str, url: str, method: str) -> None: ...
 
 
-class RunClock(Protocol):
-    """The run clock an adapter stamps a capture with."""
-
-    def now(self) -> datetime: ...
-
-
 class VerbContext(Protocol):
     """The call context a verb receives, as an adapter sees it."""
 
@@ -89,12 +82,6 @@ class VerbContext(Protocol):
 
     @property
     def capture(self) -> Capture | None: ...
-
-    @property
-    def run_state(self) -> RunClock | None: ...
-
-    @property
-    def as_of(self) -> datetime | None: ...
 
     @property
     def proxy_url(self) -> str | None:
@@ -211,7 +198,6 @@ def model_facing_params(fn: Verb) -> dict[str, inspect.Parameter]:
 
 __all__ = [
     "Capture",
-    "RunClock",
     "SYSTEM_MAX_LEN",
     "SYSTEM_PATTERN",
     "TenantRecord",

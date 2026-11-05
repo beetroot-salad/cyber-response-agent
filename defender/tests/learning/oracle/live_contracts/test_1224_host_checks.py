@@ -78,7 +78,7 @@ class _Scene:
         rt = self.est.run_tenant()
         world, ledger = S.load_world(self.ep, label), S.world_ledger(self.ep, label)
         return S.sym(S.REGISTRY, "WorldRegistry")(
-            self.est.roster(), rt.grants.gather, world=world, ledger=ledger, as_of=S.AS_OF_DT,
+            self.est.roster(), rt.grants.gather, world=world, ledger=ledger,
             tenant=rt, grant_home=rt.table_pointer, source_run=_run_handle_1165(self.source_run_dir),
             **S.registry_seams(world, ledger, oracle=o.model, verifier=verifier.model, box=box,
                                oracle_dir=S.oracle_dir(self.ep, label), **knobs))
@@ -153,6 +153,14 @@ def _assert_verdict(o: S.ScriptedModel, k: int, what: str) -> str:
     assert S.verdict_names(text, what), (
         f"submission #{k} should have failed naming {what!r}, and that verdict should be in "
         f"the oracle's next request; the host appended: {text!r}")
+    return text
+
+
+def _assert_re_ask_refused(o: S.ScriptedModel, k: int = 1) -> str:
+    """The k-th `re_ask` was refused, and the refusal reached the oracle's next request."""
+    text = _after(o, S.COINED["tool.re_ask"], k)
+    assert "re_ask refused" in text, (
+        f"re-ask #{k} should have been refused; the host appended: {text!r}")
     return text
 
 
@@ -264,10 +272,9 @@ def test_1224_answer_differing_exactly_by_its_claim_is_served_as_oracle(tmp_path
         recorded = row.get("claim") or {}
         for key, value in claim_.items():
             assert recorded.get(key) == value, (key, recorded)
-    # The removal's side query reached the tenant through the oracle-side door, at the clock.
+    # The removal's side query reached the tenant through the oracle-side door.
     side_calls = [c for c in sc.est.calls("idp", "query") if c["params"] == side]
     assert side_calls, "check 5 re-ran the removal's side query against the real system"
-    assert all(c["as_of"] == S.AS_OF_DT.isoformat() for c in side_calls), side_calls
     assert _has_row(sc.rows("ledger"), actor="host-check", system="idp", verb="query",
                     params=side), sc.rows("ledger")
     # Committed with the verified answer: the forged row and both stored answers.
@@ -380,6 +387,147 @@ def test_1224_undeclared_added_row_fails_check_1_and_is_not_served(tmp_path):
     assert "e-bad1" not in json.dumps(row), row
 
 
+#: #1385: a live base capped at two rows, one dated after the branch point (S.AS_OF); its
+#: re-ask bounded there brings in an older real row the capped page had pushed out.
+POST_ROW = {"user": "alice", "event_id": "e-300", "action": "logon", "host": "web-1",
+            "ts": "2026-07-28T17:05:00Z"}
+OLDER_ROW = {"user": "alice", "event_id": "e-099", "action": "logon", "host": "web-1",
+             "ts": "2026-07-28T14:00:00Z"}
+CAPPED = S.query_params("user:alice", limit=2)
+BOUNDED = S.query_params("user:alice", end=S.AS_OF, limit=2)
+AT_BRANCH = {"rows": [BASE_ROW, OLDER_ROW]}
+
+
+def test_1385_older_real_rows_pass_check_1_only_after_a_re_ask(tmp_path):
+    """Rows a bounded re-ask brings in are no unclaimed addition; without one they are (T1)."""
+    sc = _scene(tmp_path, live=[("idp", "query", CAPPED, {"rows": [POST_ROW, BASE_ROW]}),
+                                ("idp", "query", BOUNDED, AT_BRANCH)])
+    re_ask = S.re_asked(system="idp", verb="query", params=BOUNDED)
+    o = S.oracle(S.submit(AT_BRANCH, S.EMPTY_CLAIM), S.re_ask(re_ask), S.submit(AT_BRANCH, S.EMPTY_CLAIM))
+    reg = sc.registry(o)
+
+    assert sc.call(reg, "idp", "query", **CAPPED) == AT_BRANCH
+    _assert_verdict(o, 1, "check 1")
+    _spent(o)
+    assert o.submissions() == 2, "the re-asked answer was not served on the second attempt"
+    reruns = [c for c in sc.est.calls("idp", "query") if c["params"] == BOUNDED]
+    assert reruns, "the host never re-read the declared re-ask against the real system"
+    ledger = sc.ledger()
+    assert len(ledger) == 1, ledger
+    assert _payload(ledger[0]) == AT_BRANCH, ledger
+    assert ledger[0].get("attempts") == 2, ledger
+    kept = [r for r in sc.rows("base") if r["params"] == BOUNDED]
+    assert [(r["system"], r["verb"], json.loads(r["payload_text"])) for r in kept] == [
+        ("idp", "query", AT_BRANCH)], "the re-asked answer was not kept as a base answer (A3)"
+
+
+def test_1385_a_claim_that_carries_a_re_ask_fails_check_1(tmp_path):
+    """A re-ask is made with the `re_ask` tool, never declared in a claim: a claim carrying one is
+    a claim the host cannot read, and nothing is read for it."""
+    sc = _scene(tmp_path, live=[("idp", "query", CAPPED, {"rows": [POST_ROW, BASE_ROW]}),
+                                ("idp", "query", BOUNDED, AT_BRANCH)])
+    spec = S.re_asked(system="idp", verb="query", params=BOUNDED)
+    o = S.oracle(S.submit(AT_BRANCH, {**S.EMPTY_CLAIM, "re_ask": spec}),
+                 S.submit({"rows": [POST_ROW, BASE_ROW]}, S.EMPTY_CLAIM))
+    assert sc.call(sc.registry(o), "idp", "query", **CAPPED) == {"rows": [POST_ROW, BASE_ROW]}
+    _assert_verdict(o, 1, "check 1")
+    _spent(o)
+    assert not [c for c in sc.est.calls("idp", "query") if c["params"] == BOUNDED], (
+        "the host read a re-ask a claim declared")
+
+
+#: Rows no claim covers: one after the branch point, one real older row the re-ask never returned.
+STRAY_ROW = {"user": "alice", "event_id": "e-050", "action": "logon", "host": "web-2",
+             "ts": "2026-07-28T13:00:00Z"}
+
+
+@pytest.mark.parametrize("extra", [POST_ROW, STRAY_ROW], ids=["post-branch-row", "unclaimed-row"])
+def test_1385_a_re_ask_does_not_excuse_a_row_beyond_its_answer(tmp_path, extra):
+    """A served answer of the re-asked answer plus another unclaimed row fails check 1; the
+    re-asked answer alone passes (T1, O4)."""
+    live = [("idp", "query", CAPPED, {"rows": [POST_ROW, BASE_ROW]}),
+            ("idp", "query", BOUNDED, AT_BRANCH)]
+    re_ask = S.re_asked(system="idp", verb="query", params=BOUNDED)
+    padded = {"rows": [*AT_BRANCH["rows"], extra]}
+    sc = _scene(tmp_path / "flawed", live=live)
+    o = S.oracle(S.re_ask(re_ask), S.submit(padded, S.EMPTY_CLAIM),
+                 S.re_ask(re_ask), S.submit(AT_BRANCH, S.EMPTY_CLAIM))
+    assert sc.call(sc.registry(o), "idp", "query", **CAPPED) == AT_BRANCH
+    _assert_verdict(o, 1, "check 1")
+    _spent(o)
+    assert o.submissions() == 2, "the padded answer was served"
+
+    ctl = _scene(tmp_path / "control", live=live)
+    o = S.oracle(S.re_ask(re_ask), S.submit(AT_BRANCH, S.EMPTY_CLAIM))
+    assert ctl.call(ctl.registry(o), "idp", "query", **CAPPED) == AT_BRANCH
+    _spent(o)
+    assert o.submissions() == 1, "positive control: the re-asked answer alone was refused"
+
+
+def _col(name: str) -> dict:
+    return {"name": name, "type": "keyword"}
+
+
+#: ES|QL-shaped answers: the capped page, its bounded re-ask, and one projecting fewer columns.
+ES_CAPPED = {"columns": [_col("event_id"), _col("ts")],
+             "values": [["e-300", "2026-07-28T17:05:00Z"], ["e-100", TS_BASE]]}
+ES_BOUNDED = {"columns": [_col("event_id"), _col("ts")],
+              "values": [["e-100", TS_BASE], ["e-099", "2026-07-28T14:00:00Z"]]}
+ES_NARROW = {"columns": [_col("event_id")], "values": [["e-100"], ["e-099"]]}
+
+
+def _re_ask_scene(tmp_path: Path, case: str, *, flawed: bool):
+    """`(scene, base, served, re_ask)`: a capped live (or, for `recorded`, recorded) base and a
+    submission whose re-ask has the one flaw `case` names, or none."""
+    live = [("idp", "query", BOUNDED, AT_BRANCH)]
+    recorded: tuple = ()
+    base, served = {"rows": [POST_ROW, BASE_ROW]}, AT_BRANCH
+    re_ask = S.re_asked(system="idp", verb="query", params=BOUNDED)
+    if case == "esql-columns":
+        base, served = ES_CAPPED, ES_BOUNDED
+        live = [("idp", "query", BOUNDED, ES_NARROW if flawed else ES_BOUNDED)]
+        if flawed:
+            served = ES_NARROW
+    elif flawed and case == "other-system":
+        live.append(("siem-x", "query", BOUNDED, AT_BRANCH))
+        re_ask = S.re_asked(system="siem-x", verb="query", params=BOUNDED)
+    elif flawed and case == "other-verb":
+        live.append(("idp", "lookup", BOUNDED, AT_BRANCH))
+        re_ask = S.re_asked(system="idp", verb="lookup", params=BOUNDED)
+    if case == "recorded-base" and flawed:
+        recorded = (("idp", "query", CAPPED, base),)
+    else:
+        live.append(("idp", "query", CAPPED, base))
+    return _scene(tmp_path, live=live, recorded=recorded), base, served, re_ask
+
+
+@pytest.mark.parametrize("case", ["recorded-base", "other-system", "other-verb", "esql-columns"])
+def test_1385_the_host_refuses_a_re_ask_that_is_not_the_calls_own_question_bounded(tmp_path, case):
+    """A re-ask on a recorded base, on another system or verb, or changing an ES|QL column set is
+    refused, and the attempt's base stays the call's own; without that flaw it is served (T1, O4).
+    Every flaw but the ES|QL columns is refused before the host reads anything."""
+    sc, base, served, re_ask = _re_ask_scene(tmp_path / "flawed", case, flawed=True)
+    o = S.oracle(S.re_ask(re_ask), S.submit(served, S.EMPTY_CLAIM), S.submit(base, S.EMPTY_CLAIM))
+    assert sc.call(sc.registry(o), "idp", "query", **CAPPED) == base
+    _assert_re_ask_refused(o)
+    _assert_some_check(o, 1)
+    _spent(o)
+    assert o.submissions() == 2, "the flawed re-ask's answer was served"
+    if case != "esql-columns":
+        read = [c for c in sc.est.calls(re_ask["system"], re_ask["verb"])
+                if c["params"] == re_ask["params"]]
+        assert not read, f"the host read a re-ask it refuses: {read}"
+    assert not [r for r in sc.rows("base") if r["params"] == re_ask["params"]
+                and r["verb"] == re_ask["verb"] and r["system"] == re_ask["system"]], (
+        "a refused re-ask was kept as a base answer")
+
+    ctl, base, served, re_ask = _re_ask_scene(tmp_path / "control", case, flawed=False)
+    o = S.oracle(S.re_ask(re_ask), S.submit(served, S.EMPTY_CLAIM))
+    assert ctl.call(ctl.registry(o), "idp", "query", **CAPPED) == served
+    _spent(o)
+    assert o.submissions() == 1, "positive control: the same re-ask without the flaw was refused"
+
+
 def test_1224_silent_edit_of_a_base_row_fails_check_1(tmp_path):
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE)])
     edited = {**BASE_ROW, "host": "db-9"}
@@ -439,7 +587,6 @@ def test_1224_wrong_count_or_unreproducible_removal_fails_check_5(tmp_path):
     reruns = [c for c in sc.est.calls("idp", "query") if c["params"] in (loose, tight)]
     assert {json.dumps(c["params"], sort_keys=True) for c in reruns} == {
         json.dumps(loose, sort_keys=True), json.dumps(tight, sort_keys=True)}, reruns
-    assert all(c["as_of"] == S.AS_OF_DT.isoformat() for c in reruns), reruns
     oracle_ledger = sc.rows("ledger")
     assert _has_row(oracle_ledger, actor="host-check", params=loose), oracle_ledger
     ledger = sc.ledger()

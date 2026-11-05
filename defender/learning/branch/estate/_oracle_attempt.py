@@ -57,6 +57,10 @@ class _Attempt:
 
     forged: dict[str, dict] = field(default_factory=dict)
     facts: dict[tuple[str, str], Any] = field(default_factory=dict)
+    #: The re-ask this attempt made and the host read (`checks.ReAsked`, the `re_ask` tool), or
+    #: `None`: its answer is the attempt's base from then on, and the registry keeps it as a base
+    #: answer of the world when the attempt commits (#1385 A3).
+    re_asked: Any = None
 
 
 
@@ -137,12 +141,24 @@ class _Run:
     began: float = field(default_factory=time.monotonic)
     #: This attempt's limiter waits; the verifier's run shares its attempt's.
     waits: LimiterWaits = field(default_factory=LimiterWaits)
+    #: Whether the call's base is a live read, as opposed to the source's recording: a re-ask is
+    #: allowed only on a live base (#1385).
+    live: bool = False
+    #: Whether the call is a recorded pre-branch call, served unchanged: never re-asked.
+    fixed: bool = False
     #: The oracle attempt's python box (`None` for the verifier, which runs no python).
     box: _AttemptBox | None = None
     #: Asked of a submission before its checks (`Oracle.serve`'s `gate`).
     gate: Callable[[Any], str | None] | None = None
     #: Python workers are owned by the attempt even when its tool coroutine is cancelled.
     _box_workers: list[asyncio.Task[Any]] = field(default_factory=list, repr=False)
+
+    @property
+    def against(self) -> Any:
+        """The answer this attempt's claim is made against: its re-ask's answer once it has
+        made one, else the call's base."""
+        re_asked = self.attempt.re_asked
+        return self.base if re_asked is None else re_asked.answer
 
     def remaining(self) -> float:
         return self.deadline - (time.monotonic() - self.began - self.waits.excluded())

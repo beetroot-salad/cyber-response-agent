@@ -165,7 +165,7 @@ def request_lane(base: Path) -> RequestLane:
 
 def bound_sources(calls: list[list[str]]) -> list[Path]:
     """The bind sources on the (first) `docker run` among `calls`; none when nothing was created."""
-    run = next((c for c in calls if len(c) > 1 and c[1] == "run"), None)
+    run = next((c for c in calls if len(c) > 1 and c[1] in ("run", "create")), None)
     out: list[Path] = []
     for i, token in enumerate(run or []):
         if token == "--mount":
@@ -175,7 +175,7 @@ def bound_sources(calls: list[list[str]]) -> list[Path]:
 
 
 def created(calls: list[list[str]]) -> bool:
-    return any(len(c) > 1 and c[1] == "run" for c in calls)
+    return any(len(c) > 1 and c[1] in ("run", "create") for c in calls)
 
 
 def removed(calls: list[list[str]]) -> bool:

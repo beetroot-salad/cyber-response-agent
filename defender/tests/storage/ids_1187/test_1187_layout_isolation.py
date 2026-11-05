@@ -1,5 +1,6 @@
 """Tenant-scoped episode walks refuse aliases and preserve filesystem isolation."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
@@ -121,11 +122,11 @@ def test_run_setup_writes_no_tenant_record_for_a_minted_run(
     runs_dir = S.natural_runs(data_root, A_ID)
     alert = H5.alert_file(tmp_path / "in")
 
-    first = run_common.materialize_run(alert, tenant=t)
+    first = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=t)
     assert Path(first.run_dir).parent == runs_dir
     assert _records_under(runs_dir) == [], "run setup wrote a _tenant.json"
 
-    second = run_common.materialize_run(alert, tenant=t)
+    second = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=t)
     assert Path(second.run_dir).parent == runs_dir
     assert _records_under(S.tenant_dir(data_root, A_ID)) == [], "run setup wrote a _tenant.json"
     assert sorted(p.name for p in runs_dir.iterdir() if p.is_dir()) == sorted(

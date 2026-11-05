@@ -178,21 +178,31 @@ def test_expired_entry_is_not_a_hit_at_lookup(tmp_path):
     )
 
 
-def _ctx(root: Path, tmp_path: Path, *, as_of: dt.datetime) -> VerbContext:
-    """A `VerbContext` pointing at a throwaway tree and a fixed moment. The registry is the
+def _ctx(root: Path, tmp_path: Path) -> VerbContext:
+    """A `VerbContext` pointing at a throwaway tree (no moment: an adapter is handed none, #1385
+    O1; with no run clock or branch point held, the lookup judges against today's wall time, so a
+    test dates its entries around today, `_around_today`). The registry is the
     run's agent knowledge (`<agent root>/skills/tacit-knowledge/registry.yaml`), so the
     throwaway tree is the run tenant's agent root — never `defender_dir`, which holds none."""
     return VerbContext(
-        defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, as_of=as_of,
+        defender_dir=DEFENDER, run_dir=tmp_path / "run", env={},
         tenant=_tenants1106.fixture_run_tenant(agent_root=root),
     )
 
 
+def _around_today(*, added: int, review: int) -> dict[str, str]:
+    """The `added_at` and `review_by` of an entry dated `added` and `review` days from today (the
+    day a lookup with no call-scoped clock judges against, #1390 amendment 4), so the test needs no
+    pinned clock."""
+    today = dt.datetime.now(dt.UTC).date()
+    return {"added_at": (today + dt.timedelta(days=added)).isoformat(),
+            "review_by": (today + dt.timedelta(days=review)).isoformat()}
+
+
 def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
     root = tmp_path / "tree"
-    _write_registry(root, _entry(id="tk-fixture-only", added_at="2026-03-01",
-                                 review_by="2026-06-01"))
-    ctx = _ctx(root, tmp_path, as_of=dt.datetime(2026, 5, 5, 3, 42, 11, tzinfo=dt.UTC))
+    _write_registry(root, _entry(id="tk-fixture-only", **_around_today(added=-30, review=30)))
+    ctx = _ctx(root, tmp_path)
 
     hit = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
     assert isinstance(hit, dict)
@@ -214,10 +224,8 @@ def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
         "authorizes the whole estate through one verb call"
     )
 
-    expired = _platform_lookup(
-        _ctx(root, tmp_path, as_of=dt.datetime(2026, 7, 1, tzinfo=dt.UTC)),
-        actor=ACTOR, host=HOST, pattern=PATTERN,
-    )
+    _write_registry(root, _entry(id="tk-fixture-only", **_around_today(added=-60, review=-30)))
+    expired = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
     assert expired["matched"] is None, (
         "the entry answered past its own `review_by` — expiry is applied by `find_entry` and "
         "the verb is not going through it"
@@ -387,10 +395,11 @@ def _platform_lookup(ctx: VerbContext, **params: str) -> dict:
     return _verbs()[LOOKUP](ctx, **params)
 
 
-def _clocked_ctx(root: Path, tmp_path: Path, *, run_state=None, as_of=None) -> VerbContext:
-    """A `VerbContext` over the throwaway agent root `root`; the day comes from what it carries."""
+def _clocked_ctx(root: Path, tmp_path: Path) -> VerbContext:
+    """A `VerbContext` over the throwaway agent root `root`. It carries no day (#1385 O1): the
+    day comes from the call-scoped run clock and branch point (`scene.judged_on`)."""
     return VerbContext(
-        defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, run_state=run_state, as_of=as_of,
+        defender_dir=DEFENDER, run_dir=tmp_path / "run", env={},
         tenant=_tenants1106.fixture_run_tenant(agent_root=root),
     )
 
@@ -455,12 +464,14 @@ _OUT_OF_WINDOW = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.UTC)
 
 
 def _ask(root: Path, tmp_path: Path, **clock) -> dict | None:
-    return _platform_lookup(_clocked_ctx(root, tmp_path, **clock),
-                            actor=ACTOR, host=HOST, pattern=PATTERN)["matched"]
+    """The lookup's match with the call-scoped clock `clock` (`run_state=`, `branch_point=`) held."""
+    with scene.judged_on(**clock):
+        return _platform_lookup(_clocked_ctx(root, tmp_path),
+                                actor=ACTOR, host=HOST, pattern=PATTERN)["matched"]
 
 
 def test_1390_lookup_is_judged_against_the_runs_own_clock_whatever_as_of_says(tmp_path):
-    """A replay sibling's clock (resumed at the branch point) hits and a live run's clock misses, each against a contradicting `as_of`. O2."""
+    """A replay sibling's clock (resumed at the branch point) hits and a live run's clock misses, each against a contradicting world branch point (`CALL_BRANCH_POINT`, the world's `as_of`). O2."""
     from defender.investigation.run_state import RunState
 
     root = tmp_path / "tree"
@@ -470,22 +481,22 @@ def test_1390_lookup_is_judged_against_the_runs_own_clock_whatever_as_of_says(tm
     sibling = RunState(tmp_path / "sibling", "r-sibling")
     sibling.resume_clock(_IN_WINDOW, 0.0)
 
-    hit = _ask(root, tmp_path, run_state=sibling, as_of=_OUT_OF_WINDOW)
-    miss = _ask(root, tmp_path, run_state=live, as_of=_IN_WINDOW)
+    hit = _ask(root, tmp_path, run_state=sibling, branch_point=_OUT_OF_WINDOW)
+    miss = _ask(root, tmp_path, run_state=live, branch_point=_IN_WINDOW)
 
     assert (hit or {}).get("id") == "tk-1390-branch", (
-        "the replay was judged at the `as_of` it carried, not at its own clock")
-    assert miss is None, "a live run was judged at the `as_of` it carried, not at its own clock"
+        "the replay was judged at the branch point held, not at its own clock")
+    assert miss is None, "a live run was judged at the branch point held, not at its own clock"
 
 
 def test_1390_without_a_run_state_the_worlds_as_of_is_the_day_and_without_either_wall_time(tmp_path):
-    """No run state: `as_of` decides (pre-flight, the oracle's side queries); neither: today's wall time. O2."""
+    """No run state: the serving world's branch point (`CALL_BRANCH_POINT`, its `as_of`) decides (pre-flight, the oracle's side queries); neither: today's wall time. O2."""
     root = tmp_path / "tree"
     _write_registry(root, _entry(**_BRANCH_ENTRY))
     assert dt.datetime.now(dt.UTC).date() > dt.date(2026, 7, 1), "premise: expired by today"
 
-    assert (_ask(root, tmp_path, as_of=_IN_WINDOW) or {}).get("id") == "tk-1390-branch"
-    assert _ask(root, tmp_path, as_of=_OUT_OF_WINDOW) is None
+    assert (_ask(root, tmp_path, branch_point=_IN_WINDOW) or {}).get("id") == "tk-1390-branch"
+    assert _ask(root, tmp_path, branch_point=_OUT_OF_WINDOW) is None
     assert _ask(root, tmp_path) is None, "with no clock at all the entry was not judged by today"
 
     _write_registry(root, _current_entry(id="tk-1390-today"))

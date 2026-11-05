@@ -110,6 +110,7 @@ def directory_for_root(root: Path | str | None = None, *, also: Any = ()) -> Any
                                 origin=_active1214._origin_of(root, tenant, None))
         if inspect.isawaitable(added):
             _active1214.run_sync(_active1214._await(added))
+        _active1214.seed_twin(twin, tenant, _active1214.PLANTED_ALERT_MAPPING)  # #1345: today's mapping
     return TenantDirectory(lambda: twin)
 
 

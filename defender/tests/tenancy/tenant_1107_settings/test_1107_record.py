@@ -7,7 +7,6 @@ from defender.tests.support.shared._locations_1210 import fixture_data_root
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import contextlib
-from datetime import UTC, datetime
 import json
 import os
 import subprocess
@@ -436,12 +435,9 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
     root = tmp_path / "tenants"
     S.plant(root, marker="mf11")
     rec = _resolve(root)
-    registry = S.mod("learning.branch.estate.registry")
-    ctx = _ctx(rec, tmp_path)
-    moment = datetime(2026, 7, 28, 16, 18, 45, tzinfo=UTC)
-    carried = registry._carrying(ctx, as_of=moment)  # the world registry's VerbContext copy
-    assert carried is not ctx
-    assert carried.as_of == moment
+    # The world registry no longer copies the context to carry a branch point (#1385 O1): the
+    # adapter is handed the investigator's own.
+    carried = _ctx(rec, tmp_path)
 
     # One consumer edits each part in place; the edit raises or lands on its own copy.
     for attempt in (

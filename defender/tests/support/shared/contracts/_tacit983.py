@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 #: The alerted event's own timestamp. A `:R consultations` window is judged against this:
 #: a baseline that does not END before the alert began is a pattern that starts with the
@@ -349,3 +352,21 @@ def authorized_rows(
     return consult_block(*consultations) + authz_block(
         authz_row(anchor_id=ENTRY_ID if cited_id is None else cited_id, **authz_kwargs)
     )
+
+
+@contextlib.contextmanager
+def judged_on(*, run_state: Any = None, branch_point: Any = None) -> Iterator[None]:
+    """Hold the day a platform `tacit-knowledge.lookup` is judged on, through the call-scoped
+    carriers the platform sets (#1390 amendment 4; neither rides the verb context, #1385 O1):
+    `run_state` as `CALL_RUN_STATE` (the run's own clock, as the query tool holds it) and
+    `branch_point` as `CALL_BRANCH_POINT` (the serving world's branch point, as its registry
+    holds it). Both are set for the block, so an outer value of either is masked by `None`."""
+    from defender.systems.verbs import CALL_BRANCH_POINT, CALL_RUN_STATE
+
+    run_token = CALL_RUN_STATE.set(run_state)
+    branch_token = CALL_BRANCH_POINT.set(branch_point)
+    try:
+        yield
+    finally:
+        CALL_BRANCH_POINT.reset(branch_token)
+        CALL_RUN_STATE.reset(run_token)

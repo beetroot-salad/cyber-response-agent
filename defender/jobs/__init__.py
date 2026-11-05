@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from .errors import Conflict, NotFound, UnknownReference, UnstorableText
 from .models import Claim, InvestigationRecord, StoredAlert
-from .store import JobStore
+from .store import JobStore, is_outage, is_refusal
 
 __all__ = ["Claim", "Conflict", "InvestigationRecord", "JobStore", "NotFound", "StoredAlert", "UnknownReference",
-           "UnstorableText"]
+           "UnstorableText", "is_outage", "is_refusal"]

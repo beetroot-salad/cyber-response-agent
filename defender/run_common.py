@@ -28,6 +28,7 @@ from defender.records.formats import TenantId, TenantRefused
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from defender.records.formats import AlertMapping
     from defender.records.job_lane import Launched
     from defender.records.formats import ResumeWorld
     from defender.tenancy.run_knowledge import KnowledgeSource
@@ -42,7 +43,7 @@ def _alert_label(alert: Path) -> str:
 def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the knowledge it reads
     alert: Path, *, tenant: tenancy.Tenant, run: Run | None = None, model: str | None = None,
     world: ResumeWorld | None = None,
-    settings: Path | None = None, knowledge: KnowledgeSource | None = None,
+    mapping: AlertMapping | None = None, knowledge: KnowledgeSource | None = None,
     launch: Launched | None = None,
 ) -> Run:
     """Build the run directory of a fresh run and return the tenant-bound handle the run's later
@@ -53,10 +54,11 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     tenant; an arm (`world`) always comes as its handle. A run dir or sidecar already at that id
     is refused; there is no resume (O8).
 
-    `settings` is the settings half the run reads (its run copy's, #1108 P4: the alert mapping
-    comes from it) and `knowledge` the source of the knowledge it reads, whose commit the stamp
-    records (O-B: the export copied, never a clone's HEAD). Both default to what a caller that
-    names no run copy has: the tenant's own folder, and a stamp that says nothing of knowledge.
+    `mapping` is the tenant's alert mapping, read from the database by run start (#1345 O3): the
+    four facts are derived through it, once. A fresh run must be handed it; a sibling (`world`)
+    carries its source's record and needs none. `knowledge` is the source of the knowledge it
+    reads, whose commit the stamp records (O-B: the export copied, never a clone's HEAD); it
+    defaults to a stamp that says nothing of knowledge.
 
     `launch` is a job's checked launch record (#1342 O6, M5): `alert` is then its alert file, the
     bytes admitted are compared to the record's digest (one read, as a sibling's are to its
@@ -66,10 +68,10 @@ def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the kn
     if world is not None and run is None:
         raise TypeError("materialize_run(world=…) needs the arm's handle (`run=`): an arm is made "
                         "only from its episode's roster")
+    if world is None and mapping is None:
+        raise TypeError("materialize_run needs the tenant's alert mapping (`mapping=`) for a fresh run")
     started_at = _started_at()
-    if settings is None:
-        settings = tenancy.clone_halves(tenant)[1]
-    front_door = _admit_input(alert, settings=settings, world=world,
+    front_door = _admit_input(alert, mapping=mapping, world=world,
                               digest=None if launch is None else launch.record.digest)
     world_id: str | None = None
     if run is None:
@@ -119,11 +121,10 @@ class _FrontDoor:
     record: str
 
 
-def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None,
+def _admit_input(alert: Path, *, mapping: AlertMapping | None, world: ResumeWorld | None,
                  digest: str | None = None) -> _FrontDoor:
-    """Admit the operator's alert (A8) and settle its facts through the alert mapping of the
-    run's `settings`, read once (A1) — or exit with the fixed reason, before a run folder
-    exists. A sibling's input
+    """Admit the operator's alert (A8) and settle its facts through the tenant's alert `mapping`,
+    read once (A1) — or exit with the fixed reason, before a run folder exists. A sibling's input
     is its episode's copy of the source run's alert, carried with the record launch copied
     beside it; neither is derived again. A job's alert (`digest`, its launch record's) must be
     the bytes its worker recorded."""
@@ -148,10 +149,7 @@ def _admit_input(alert: Path, *, settings: Path, world: ResumeWorld | None,
                      f"match the record beside it "
                      f"({reason or 'the record is missing, malformed or for another alert'})")
         return _FrontDoor(raw=raw, record=text)
-    try:
-        mapping = formats.load_alert_mapping(settings)
-    except formats.AlertMappingFault as fault:
-        sys.exit(f"[run.py] this run's tenant cannot be used: {fault}")
+    assert mapping is not None  # materialize_run: a fresh run is handed it
     facts = formats.derive_facts(admitted.document, mapping)
     return _FrontDoor(raw=raw, record=formats.record_text(admitted.digest, facts))
 

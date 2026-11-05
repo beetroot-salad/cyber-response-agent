@@ -12,13 +12,11 @@ import types
 import typing
 from collections.abc import Callable, Mapping
 from defender._model import model
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
 from pydantic import SkipValidation, field_validator
 
-from defender.systems._state import SystemsState
 from . import tacit_registry
 from .verb_grant import GrantError, VerbGrant
 from defender._io import read_bytes_capped
@@ -75,6 +73,25 @@ CALL_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "verb_call_id", default=None)
 
 
+#: The run's one live state (#1235), set by the query tool around each call beside the call id and
+#: delivery. It carries the run clock, which only the platform reads: the world registry pauses it
+#: for as long as an oracle turn holds the call (#1385 O8). It is not on the adapter's context
+#: (O1): an adapter receives neither the run clock nor the branch point, and the adapter lint
+#: refuses any reference to this name under `integrations/`. `None` outside a query-tool call.
+#: Typed `Any`: the platform reader (the world registry) needs the run's whole state, which sits
+#: above `systems` (`RunState`), not the slice `systems` names (`SystemsState`).
+CALL_RUN_STATE: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "verb_call_run_state", default=None)
+
+
+#: The branch point of the world serving a call (#1390 amendment 4): set by the world's registry
+#: around a platform-served verb and around an oracle turn, so a pre-flight replay's and an
+#: oracle-side read are judged on the branch day (a run has its own clock, `CALL_RUN_STATE`).
+#: Not on the verb's context (#1385 O1); `None` outside a world.
+CALL_BRANCH_POINT: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "verb_call_branch_point", default=None)
+
+
 class ServingAbort(Exception):
     """A served verb that will not answer at all: the registry serving it has given up on the
     world it serves (#1224: `estate.oracle.OracleUnservable`). The query tool re-raises it as
@@ -124,21 +141,6 @@ class VerbContext:
     #: imported here (see the import note above); `_tenant_given` still refuses `None`.
     tenant: Annotated[_RunTenant, SkipValidation]
     capture: Any = None
-    #: The run's one live state (#1235), set by the query tool and lead-0 from the deps they
-    #: run under. It carries the run clock (#1255): an adapter stamps a capture with its reading
-    #: (`RunState.now`), and the world registry pauses it for as long as an oracle turn holds
-    #: the call. A context with none (pre-flight's replay, the ticket writer) belongs to no run
-    #: and has no run clock: it stamps the wall clock. `SkipValidation`: the run's object itself, never a copy.
-    run_state: Annotated[SystemsState | None, SkipValidation] = None
-    #: The moment a branched-world call is served as of — the world's CUT-OFF (an unbounded
-    #: window ends here); `None` for the ordinary run. Every world of a family, the base
-    #: included, carries the branch point's moment. It bounds what is read and never stamps a
-    #: capture (#1255: capture stamps are the run clock's, `run_state`).
-    #:
-    #: Set by the estate registry on every call. A `datetime` rather than a string
-    #: because systems format timestamps differently; not a callable because a function as a
-    #: dataclass default would bind `ctx` as its first argument when called.
-    as_of: datetime | None = None
     #: The credential proxy's address and the request token this call presents to it (#1163),
     #: handed in by whoever builds the context. The token is a bearer value: out of every repr.
     proxy_url: str | None = None

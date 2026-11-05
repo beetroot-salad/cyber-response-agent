@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, assert_missing_wording_names_verb_and_route
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     AWKWARD_ALERT_BYTES,
@@ -100,18 +101,34 @@ class Scene:
                 "--parent-pid", str(os.getppid() if parent is None else parent)]
 
 
-@pytest.fixture
-def scene(tmp_path, monkeypatch, migrated_database):
+@contextlib.contextmanager
+def _scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, files: dict[str, Any] | None = None,
+           alert_mapping: Any = FIXTURE_ALERT_MAPPING) -> Any:
+    """The published fixture tenant (`files` written over it), active in `dsn`, with its runs container and #1345's
+    default alert mapping saved (`alert_mapping=None`: none saved, for a test of absence)."""
     root = tmp_path / "data"
     root.mkdir()
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
-    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)  # the entry reads tenant records here (R6-2)
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)  # the entry reads tenant records here (R6-2)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
-    with B.run_tenant(tmp_path, root) as t:
-        register_tenant(migrated_database, t.tenant_id, data_root=root)  # active, wired to the fixture's own origin
+    with B.run_tenant(tmp_path, root, files=files) as t:
+        register_tenant(dsn, t.tenant_id, data_root=root, alert_mapping=alert_mapping)  # active, wired to the fixture's own origin
         runs = root / t.tenant_id / "runs"
         runs.mkdir(exist_ok=True)
-        yield Scene(root, t, runs, dsn=migrated_database)
+        yield Scene(root, t, runs, dsn=dsn)
+
+
+@pytest.fixture
+def scene(tmp_path, monkeypatch, migrated_database):
+    with _scene(tmp_path, monkeypatch, migrated_database) as s:
+        yield s
+
+
+@pytest.fixture
+def unmapped_scene(tmp_path, monkeypatch, migrated_database):
+    """`scene` with NO alert mapping saved for the tenant (#1345 D2): a run for it is refused."""
+    with _scene(tmp_path, monkeypatch, migrated_database, alert_mapping=None) as s:
+        yield s
 
 
 @dataclass
@@ -1799,3 +1816,177 @@ def test_r6_8_a_job_whose_tenant_has_no_http_proxy_system_is_handed_no_access_an
     assert len(seen) == 1, seen
     assert not seen[0], seen  # no access to sign with, and the job was not refused
     assert (bao.requests, bao.logins, bao.signs) == ([], [], []), "the signer was contacted"
+
+
+# --- #1345: run start reads the tenant's alert mapping from the database (O3, O4, O5) -------------------------
+#
+# The mapping row is saved through the store's own replace (`seed_alert_mapping`, r5's `JobStore.put_alert_mapping`).
+# Over `ALERT_BYTES`: `rule.id` "r-1342", `rule.description` "sketch", `a` "é", `alert_timestamp` "2026-10-29T00:00:00Z".
+# The scene already holds the default mapping (`FIXTURE_ALERT_MAPPING`, `summary` on `rule.description`), which a case
+# replaces whole.
+
+#: A database mapping whose `summary` differs from what any file in the fixture says.
+DB_MAPPING = {"signature": "rule.id", "event_time": "alert_timestamp", "summary": "a"}
+#: The record it yields: four facts as the record file spells them (no `case_key`: unmapped).
+DB_FACTS = {"signature": "r-1342", "event_time": "2026-10-29T00:00:00Z", "summary": "é", "case_key": None}
+
+
+def _recorded_facts(run_dir: Path) -> dict[str, Any]:
+    from defender.records import RunPaths
+    from defender.records.formats import read_record
+
+    record = read_record(RunPaths(run_dir).alert_record)
+    assert record is not None, "the run has no alert record"
+    f = record.facts
+    return {"signature": f.signature, "event_time": f.event_time, "summary": f.summary, "case_key": f.case_key}
+
+
+def test_1345_o3_a_job_derives_its_facts_from_the_tenants_database_mapping(scene):
+    """The job's record carries the facts the database mapping yields, not the knowledge's `settings/`. (#1345 O3, M4)"""
+    from defender.tests.support.jobs._jobs1342 import seed_alert_mapping
+
+    seed_alert_mapping(scene.dsn, scene.t.tenant_id, DB_MAPPING)
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+
+    ran = run_job(scene, run_id)
+
+    assert ran.raised is None, ran
+    assert scene.job_end(run_id) == SETTLED, ran.message
+    assert _recorded_facts(scene.runs / run_id) == DB_FACTS
+
+
+def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_at_setup_naming_the_route(unmapped_scene):
+    """No mapping row: setup refused (the job-end record the worker turns into `failed`/`setup_refused`), no
+    lifecycle, no run folder; the child's own output carries `records.formats.ALERT_MAPPING_MISSING`. (#1345 O4, M2)"""
+    from defender.records.formats import ALERT_MAPPING_MISSING  # design-implied name: the one refusal wording `records` owns (r5.1)
+
+    scene = unmapped_scene
+    assert_missing_wording_names_verb_and_route(ALERT_MAPPING_MISSING)
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+
+    ran = run_job(scene, run_id)
+
+    assert ran.raised is None, f"a refusal was a crash: {ran.raised!r}"
+    assert ran.calls["lifecycle"] == 0
+    assert scene.job_end(run_id) == REFUSED
+    assert not (scene.runs / run_id).exists(), "the mapping is read before the run folder is made"
+    # The child's refusal text: a `SystemExit` message reaches a real child's stderr; the in-process harness keeps it in
+    # `ran.message` (exit code and stderr together). (O4)
+    assert ALERT_MAPPING_MISSING in " ".join(ran.message.split()), ran.message
+
+
+#: A leftover file the retired parser refuses: a run that read it could not start.
+LEFTOVER = "summary: [unclosed\n"
+
+
+@pytest.fixture
+def leftover_scene(tmp_path, monkeypatch, migrated_database):
+    with _scene(tmp_path, monkeypatch, migrated_database,
+                files={"settings/alert-mapping.yaml": LEFTOVER}) as s:
+        yield s
+
+
+def test_1345_o5_a_leftover_mapping_file_in_the_knowledge_is_inert(leftover_scene):
+    """The published knowledge still holds `settings/alert-mapping.yaml`, malformed: the job runs, its facts are
+    the database mapping's. (#1345 O5, M1, scenario 6)"""
+    from defender.tests.support.jobs._jobs1342 import seed_alert_mapping
+
+    s = leftover_scene
+    seed_alert_mapping(s.dsn, s.t.tenant_id, DB_MAPPING)
+    run_id = str(uuid.uuid4())
+    s.plant(run_id)
+
+    ran = run_job(s, run_id)
+
+    assert ran.raised is None, ran
+    assert s.job_end(run_id) == SETTLED, ran.message
+    assert _recorded_facts(s.runs / run_id) == DB_FACTS
+
+
+#: A mapping saved after a job's start: other paths for the facts the scene's `DB_MAPPING` maps.
+EDITED_MAPPING = {"signature": "rule.description", "event_time": "alert_timestamp", "summary": "rule.id"}
+EDITED_FACTS = {"signature": "sketch", "event_time": "2026-10-29T00:00:00Z", "summary": "r-1342", "case_key": None}
+
+
+def test_1345_m4_a_mapping_replaced_after_a_jobs_start_changes_that_job_not_its_retry(scene):
+    """The mapping is replaced while the job's lifecycle runs: that job's recorded facts stay the ones it started with, and
+    a later job for the tenant derives from the new mapping. (#1345 M4, O3)"""
+    from defender.tests.support.jobs._jobs1342 import seed_alert_mapping
+
+    seed_alert_mapping(scene.dsn, scene.t.tenant_id, DB_MAPPING)
+    first_id, retry_id = str(uuid.uuid4()), str(uuid.uuid4())
+    scene.plant(first_id)
+    scene.plant(retry_id)
+    inside: Ran = Ran()
+    real = verified_lifecycle(inside)
+
+    def replacing(**kw: Any) -> dict[str, Any]:
+        seed_alert_mapping(scene.dsn, scene.t.tenant_id, EDITED_MAPPING)  # the edit lands after the run's start
+        return real(**kw)
+
+    first = run_job(scene, first_id, lifecycle=replacing, ran=inside)
+    retry = run_job(scene, retry_id)
+
+    assert first.raised is None, first
+    assert retry.raised is None, retry
+    assert scene.job_end(first_id) == SETTLED == scene.job_end(retry_id)
+    assert _recorded_facts(scene.runs / first_id) == DB_FACTS
+    assert _recorded_facts(scene.runs / retry_id) == EDITED_FACTS
+
+
+@pytest.fixture
+def empty_scene(tmp_path, monkeypatch, migrated_database):
+    """`scene` whose tenant saved the empty mapping through the store (#1345 M2): a mapping, not an absence."""
+    from defender.tests.support.jobs._jobs1342 import seed_alert_mapping
+
+    with _scene(tmp_path, monkeypatch, migrated_database, alert_mapping=None) as s:
+        seed_alert_mapping(s.dsn, s.t.tenant_id, {})
+        yield s
+
+
+def test_1345_m2_a_saved_empty_mapping_is_a_mapping_the_job_starts_and_records_no_facts(empty_scene):
+    """A tenant that saved `{}` is not refused at setup: the job runs and its record holds no fact. (#1345 M2, O3)"""
+    run_id = str(uuid.uuid4())
+    empty_scene.plant(run_id)
+
+    ran = run_job(empty_scene, run_id)
+
+    assert ran.raised is None, ran
+    assert empty_scene.job_end(run_id) == SETTLED, ran.message
+    assert _recorded_facts(empty_scene.runs / run_id) == dict.fromkeys(DB_FACTS)
+
+
+def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_before_any_setup_work(unmapped_scene):
+    """Unmapped: the publish, the knowledge copy, the preflight and the run's materialization are never called; with a
+    mapping saved, the same job calls each. (#1345 O4, M2)"""
+    from defender import run as run_py
+    from defender import run_common
+    from defender.tests.support.jobs._jobs1342 import seed_alert_mapping
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    scene = unmapped_scene
+
+    def preflight(*_a: Any, **_k: Any) -> int:
+        return 0
+
+    def watched(run_id: str) -> tuple[Ran, Any]:
+        ran = Ran()
+        with counting_calls(copy=run_py._copy_knowledge, preflight=preflight,  # noqa: SLF001
+                            materialize=run_common.materialize_run) as calls:
+            run_job(scene, run_id, preflight=preflight, ran=ran)
+        return ran, calls
+
+    refused_id = str(uuid.uuid4())
+    scene.plant(refused_id)
+    refused, calls = watched(refused_id)
+    assert scene.job_end(refused_id) == REFUSED, refused.message  # premise: it was refused for the missing mapping
+    assert (refused.calls["publish"], calls["copy"], calls["preflight"], calls["materialize"]) == (0, 0, 0, 0)
+
+    seed_alert_mapping(scene.dsn, scene.t.tenant_id, DB_MAPPING)
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    ran, calls = watched(run_id)
+    assert scene.job_end(run_id) == SETTLED, ran.message
+    assert (ran.calls["publish"], calls["copy"], calls["preflight"], calls["materialize"]) == (1, 1, 1, 1)

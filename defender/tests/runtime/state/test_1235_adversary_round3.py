@@ -150,9 +150,9 @@ def test_production_path_carries_one_state_to_lead_zero_and_the_gather_lead(tmp_
     lead_zero = [c for c in rec.calls if c not in mine]
     assert mine, f"the gather lead's call was never made: {rec.verbs}"
     assert lead_zero, f"lead-0 made no call, so nothing is observed: {rec.verbs}"
-    state = mine[0].ctx.run_state
+    state = mine[0].run_state
     assert isinstance(state, RunState)
-    assert all(c.ctx.run_state is state for c in lead_zero), \
+    assert all(c.run_state is state for c in lead_zero), \
         "lead-0's verb contexts carried a state other than the run's"
     assert state.row_count("l-00c") >= 1, "the run's state does not hold lead-0's rows"
     assert state.row_count(LEAD) == 1, "the run's state does not hold the gather lead's row"
