@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote
 
 import pytest
 
-from defender.kit.faults import ConfigFault
+from defender.kit.faults import ConfigFault, TransportFault, UpstreamFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _ready_made1359 as R
 from defender.tests.integrations.credential_proxy_1163._ready_made1359 import (
@@ -233,3 +233,179 @@ def test_o6_a_ticket_the_store_does_not_know_leaves_a_not_found_receipt(
     if vendor is SERVICENOW:
         assert "sys_id" in reason, gone
     assert paths == [vendor.base_path + vendor.route(k) for k in (KEY, missing)]
+
+
+# ======================================================================================
+# #1374: the ready-made adapters read a case's comments, for the host's read-back.
+# ======================================================================================
+
+JOURNAL_PATH = "/sn/api/now/table/sys_journal_field"
+OK_HEADERS = {"Content-Type": "application/json"}
+readers = pytest.mark.parametrize("vendor", VENDORS, ids=lambda v: v.id)
+
+
+def _serve(rig: Any, vendor: Vendor, page: Any, status: int = 200) -> None:
+    """`page` as the answer to `vendor`'s read of `KEY`."""
+    path = JOURNAL_PATH if vendor is SERVICENOW else vendor.base_path + vendor.route(KEY)
+    rig.up.replies[path] = (status, OK_HEADERS, json.dumps(page).encode())
+
+
+def _adf_comment(*paragraphs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"id": "1", "body": {"type": "doc", "version": 1, "content": [
+        {"type": "paragraph", "content": p} for p in paragraphs]}}
+
+
+def _text(value: str) -> dict[str, Any]:
+    return {"type": "text", "text": value}
+
+
+def _page(vendor: Vendor, *texts: str) -> dict[str, Any]:
+    """A page holding `texts` as `vendor` sends comments."""
+    if vendor is JIRA_NO:
+        return {"startAt": 0, "maxResults": 100, "total": len(texts), "comments": [
+            _adf_comment(*[[_text(line)] if line else [] for line in t.split("\n")]) for t in texts]}
+    if vendor is JIRA_YES:
+        return {"start": 0, "limit": 100, "size": len(texts), "isLastPage": True,
+                "values": [{"id": "1", "body": t} for t in texts]}
+    return {"result": [{"value": t} for t in texts]}
+
+
+@readers
+def test_1374_the_read_is_one_get_that_returns_each_comment_as_text(
+        vendor, tmp_path, data_root, checkout_roster):
+    """One GET with the bounded page the vendor's API takes, newest first where it can sort, and
+    each comment as text with its line breaks; never a write. Jira's link is the issue's."""
+    with R.planted(tmp_path, data_root, vendor) as rig:
+        _serve(rig, vendor, _page(vendor, "a note", "[tag]\nthe verdict"))
+        got = rig.read(checkout_roster, KEY)
+        (seen,) = rig.sent()
+        base = vendor.declared_base(rig.up)
+
+    assert seen.method == "GET", seen
+    path, _, query = seen.path.partition("?")
+    asked = {k: v[0] for k, v in parse_qs(query).items()}
+    if vendor is JIRA_NO:
+        assert path == "/jira" + vendor.route(KEY)
+        assert asked == {"startAt": "0", "maxResults": "100", "orderBy": "-created"}, asked
+    elif vendor is JIRA_YES:
+        assert path == "/jira" + vendor.route(KEY)
+        assert asked == {"start": "0", "limit": "100"}, asked
+    else:
+        assert path == JOURNAL_PATH
+        assert asked == {
+            "sysparm_query": f"element_id={KEY}^element=work_notes^ORDERBYDESCsys_created_on",
+            "sysparm_fields": "value", "sysparm_limit": "100"}, asked
+    assert got.texts == ("a note", "[tag]\nthe verdict"), got
+    assert got.link == vendor.link(base, KEY), got
+
+
+def test_1374_jira_cloud_reads_its_document_format_as_lines(tmp_path, data_root, checkout_roster):
+    """Paragraphs and hard breaks are line breaks, text split by marks rejoins, and a nested block
+    keeps its text: the tag line stays a line whatever the store did to the rest."""
+    comment = _adf_comment(
+        [_text("[defender "), {**_text("agent]"), "marks": [{"type": "strong"}]}],
+        [_text("first"), {"type": "hardBreak"}, _text("second")], [])
+    comment["body"]["content"].append({"type": "bulletList", "content": [
+        {"type": "listItem", "content": [{"type": "paragraph", "content": [_text("item")]}]}]})
+    with R.planted(tmp_path, data_root, JIRA_NO) as rig:
+        _serve(rig, JIRA_NO, {"startAt": 0, "total": 1, "comments": [comment]})
+        got = rig.read(checkout_roster, KEY)
+    (text,) = got.texts
+    assert text.splitlines() == ["[defender agent]", "first", "second", "", "item"], text
+
+
+@pytest.mark.parametrize(("vendor", "page"), [
+    (JIRA_NO, {"startAt": 0}), (JIRA_YES, {"start": 0}), (SERVICENOW, {}),
+], ids=["cloud", "desk", "journal"])
+def test_1374_a_reply_with_no_comment_list_raises(vendor, page, tmp_path, data_root, checkout_roster):
+    """A reply that is not a list of comments at all is a failed read, so it is reported as one."""
+    with R.planted(tmp_path, data_root, vendor) as rig:
+        _serve(rig, vendor, page)
+        with pytest.raises(TransportFault):
+            rig.read(checkout_roster, KEY)
+
+
+@pytest.mark.parametrize(("vendor", "page"), [
+    (JIRA_NO, {"comments": [{"id": "1", "body": "plain"}, {"id": "2"}, "not a comment",
+                            _adf_comment([_text("good")])]}),
+    (JIRA_YES, {"values": [{"id": "1", "body": {"x": 1}}, {"id": "2"}, "not a comment",
+                           {"id": "3", "body": "good"}]}),
+    (SERVICENOW, {"result": [{"value": None}, {}, "not a note", {"value": "good"}]}),
+], ids=["cloud", "desk", "journal"])
+def test_1374_a_comment_it_cannot_read_is_left_out(vendor, page, tmp_path, data_root, checkout_roster):
+    """One unreadable comment from anyone must not hide this run's comment. Leaving it out cannot
+    cause a wrong outcome, because a read only ever proves a comment is there (r4)."""
+    with R.planted(tmp_path, data_root, vendor) as rig:
+        _serve(rig, vendor, page)
+        got = rig.read(checkout_roster, KEY)
+    assert got.texts == ("good",), got
+
+
+def test_1374_a_damaged_document_keeps_the_lines_it_can_read(tmp_path, data_root, checkout_roster):
+    """Damage inside a Jira document costs only the damaged part."""
+    body = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text"}]},
+        {"type": "paragraph", "content": [_text("good")]},
+        {"type": "panel", "content": 5},
+        "not a node"]}
+    with R.planted(tmp_path, data_root, JIRA_NO) as rig:
+        _serve(rig, JIRA_NO, {"comments": [{"id": "1", "body": body}]})
+        got = rig.read(checkout_roster, KEY)
+    (text,) = got.texts
+    assert "good" in text.splitlines(), text
+
+
+@readers
+def test_1374_a_refused_read_raises(vendor, tmp_path, data_root, checkout_roster):
+    """A 403 on the read (ServiceNow's journal is often closed to integration accounts) is a fault."""
+    with R.planted(tmp_path, data_root, vendor) as rig:
+        _serve(rig, vendor, {"error": "no"}, status=403)
+        with pytest.raises(UpstreamFault) as raised:
+            rig.read(checkout_roster, KEY)
+    assert raised.value.status == 403, raised.value
+
+
+def test_1374_a_servicenow_key_cannot_reshape_the_journal_query(tmp_path, data_root, checkout_roster):
+    """The key goes into an encoded query there, where `^` starts a new condition, so a key holding
+    it is refused before any request: nothing else's work notes can be read as this case's."""
+    with R.planted(tmp_path, data_root, SERVICENOW) as rig:
+        with pytest.raises(TransportFault):
+            rig.read(checkout_roster, "abc^NQactive=true")
+        assert rig.sent() == []
+
+
+def _lost_write_then(rig: Any, vendor: Vendor, read: Any) -> None:
+    """The write answers 503, so it may have landed; the read answers `read`."""
+    path = vendor.base_path + vendor.route(KEY)
+    write_lost = (503, OK_HEADERS, b'{"error": "busy"}')
+    answer = (200, OK_HEADERS, json.dumps(read).encode())
+    if vendor is SERVICENOW:
+        rig.up.replies[path] = write_lost
+        rig.up.replies[JOURNAL_PATH] = answer
+    else:
+        rig.up.replies[path] = lambda seen: write_lost if seen.method == vendor.method else answer
+
+
+@pytest.mark.parametrize(("vendor", "found", "status"), [
+    (JIRA_NO, True, C.COMMENTED), (JIRA_NO, False, C.UNKNOWN),
+    (JIRA_YES, True, C.COMMENTED), (JIRA_YES, False, C.UNKNOWN),
+    (SERVICENOW, True, C.COMMENTED), (SERVICENOW, False, C.UNKNOWN),
+], ids=["cloud-found", "cloud-absent", "desk-found", "desk-absent", "journal-found", "journal-none"])
+def test_1374_a_lost_answer_is_settled_through_the_real_proxy(
+        vendor, found, status, tmp_path, data_root):
+    """The record leg on a write that may have landed: one write and one read through the real
+    proxy with the write-back token, settled from this run's tag line. None found is `unknown` on
+    every vendor: a read cannot prove a comment will not appear (r4)."""
+    from defender.tenancy.case_ticket import agent_comment_tag
+
+    with R.planted(tmp_path, data_root, vendor, leg=True) as rig:
+        tag = agent_comment_tag(C.CaseRunRecorder(tmp_path / "run").run_dir_at.name)
+        _lost_write_then(rig, vendor, _page(vendor, "a note", *([f"{tag}\nverdict"] if found else [])))
+        receipt = rig.leg("run")
+        methods = [s.method for s in rig.sent()]
+        base = vendor.declared_base(rig.up)
+
+    assert receipt is not None, "no receipt"
+    assert receipt["status"] == status, receipt
+    assert methods == [vendor.method, "GET"], methods
+    assert receipt["url"] == (vendor.link(base, KEY) if found else None), receipt

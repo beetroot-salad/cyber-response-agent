@@ -22,7 +22,7 @@ from defender._io import read_bytes_capped
 from defender._paths import name_roots, root_spellings
 from defender.kit.settings import SETTINGS_POINTER
 from defender.kit.verbs import (
-    COMMENT_ACTION,
+    HOST_ACTIONS,
     SYSTEM_MAX_LEN,
     SYSTEM_PATTERN,
     Verb,
@@ -304,18 +304,19 @@ def _adapter_path_under(root: Path, system: str) -> Path | None:
     return path
 
 
-_ACTION_SPELLINGS = frozenset({COMMENT_ACTION, COMMENT_ACTION.replace("_", "-")})
+_ACTION_SPELLINGS = {spelling: action for action in HOST_ACTIONS
+                     for spelling in (action, action.replace("_", "-"))}
 
 
-def _exposes_comment_action(table: ast.Dict) -> bool:
-    """Does this `VERBS` literal hand the host-only comment action to the agent (#1359 O4)? A key
-    spelling it either way, or a value that is the bare name."""
+def _exposed_host_action(table: ast.Dict) -> str | None:
+    """The host-only action this `VERBS` literal hands to the agent (#1359 O4, #1374), or None. A
+    key spelling one either way, or a value that is its bare name."""
     for key, value in zip(table.keys, table.values, strict=True):
         if isinstance(key, ast.Constant) and key.value in _ACTION_SPELLINGS:
-            return True
-        if isinstance(value, ast.Name) and value.id == COMMENT_ACTION:
-            return True
-    return False
+            return _ACTION_SPELLINGS[key.value]
+        if isinstance(value, ast.Name) and value.id in HOST_ACTIONS:
+            return value.id
+    return None
 
 
 def _verb_names_in(source: bytes, path: Path) -> tuple[frozenset[str], str | None, bool]:
@@ -341,10 +342,11 @@ def _verb_names_in(source: bytes, path: Path) -> tuple[frozenset[str], str | Non
         if not any(isinstance(t, ast.Name) and t.id == "VERBS" for t in node.targets):
             continue
         literal = True
-        if _exposes_comment_action(node.value):
+        exposed = _exposed_host_action(node.value)
+        if exposed is not None:
             return frozenset(), (
-                f"its VERBS exposes the host-only comment action `{COMMENT_ACTION}`: that "
-                "function takes the host's comment and is never a verb an agent may be granted"
+                f"its VERBS exposes the host-only action `{exposed}`: that function is the "
+                "host's own call to the case and is never a verb an agent may be granted"
             ), False
         for key in node.value.keys:
             if isinstance(key, ast.Constant) and isinstance(key.value, str):
@@ -621,9 +623,9 @@ class ModuleVerbRegistry(VerbRegistry):
         verbs = getattr(module, "VERBS", None)
         if not isinstance(verbs, Mapping):
             return {}
-        action = getattr(module, COMMENT_ACTION, None)
-        if action is not None and any(fn is action for fn in verbs.values()):
-            # The cold read refuses a table that names the host-only comment action; this is the
+        actions = [a for a in (getattr(module, n, None) for n in HOST_ACTIONS) if a is not None]
+        if any(fn is a for fn in verbs.values() for a in actions):
+            # The cold read refuses a table that names a host-only action; this is the
             # same refusal by identity, for a table whose literal hides it (an alias, a table
             # filled in after its literal): none of the adapter's verbs is served (#1359 O4).
             return {}

@@ -2,11 +2,14 @@
 
 `POST /v1/request` with `Authorization: Bearer <request token>` and the JSON body
 `{system, method, url, headers, body}` (`headers` a name -> value object, `body` text or null).
-The answer is always HTTP 200 with the JSON body `{status, headers, body, fault, detail}`:
-`status` is the upstream's status (null when nothing was sent), `body` its body as text and
+The answer is always HTTP 200 with the JSON body
+`{status, headers, body, fault, detail, system_side, sent}`:
+`status` is the upstream's status (null when it gave none), `body` its body as text and
 `headers` its headers, both with every secret value used replaced by a marker; `fault` is null or
 the fault class the adapter raises (`ConfigFault`, `ConfinementFault`, `UpstreamFault`,
-`TransportFault`); `detail` says why and never holds a secret value.
+`TransportFault`); `detail` says why and never holds a secret value; `system_side` marks a
+status-less failure of the system's own call (#1404); `sent` is false only when the proxy never
+began the system's call or never connected to it, so the request cannot have reached it (#1374).
 
 For each request (design "Proxy", in order, nothing sent or read before its check passes):
 1. verify the token with the key of the tenant it names, and its expiry (O1, O8, A11); a tenant
@@ -153,6 +156,9 @@ class _Trail:
     method: str | None = None
     path: str | None = None
     outcome: str | None = None
+    #: The proxy began the target system's call and did not see its connect fail: the request may
+    #: have reached the system (#1374). Not audited; stamped on every answer as `sent`.
+    sent: bool = False
 
     def entry(self, fault: str | None) -> dict[str, Any]:
         record = {key: getattr(self, key) for key in AUDIT_KEYS}
@@ -205,9 +211,10 @@ class _Proxy:
         except Exception as e:  # noqa: BLE001 — A13: any failure to audit fails the request closed
             _logger.error("the audit record could not be written (%s: %s); the answer is "
                           "withheld", type(e).__name__, e)
-            return _refused_answer(TRANSPORT, "the proxy's audit could not be written; the "
-                                              "answer is withheld")
-        return answer
+            answer = _refused_answer(TRANSPORT, "the proxy's audit could not be written; the "
+                                                "answer is withheld")
+        # Decided once, at the one send boundary (`_sent`), whatever answer follows (#1374).
+        return {**answer, "sent": trail.sent}
 
     def _proxied(self, authorization: str | None, raw: bytes | None,
                  trail: _Trail, began: float) -> dict[str, Any]:
@@ -308,10 +315,14 @@ class _Proxy:
             trail.outcome = f"sent {status}"
             answered.append(status)
 
-        try:
-            reply = deadline.run(what, lambda: capped_reply(
+        async def call() -> Any:
+            trail.sent = True  # here, past the deadline's own check before the leg
+            return await capped_reply(
                 trust, asked.method, target.url, cap=cap, timeout=timeout,
-                on_status=sent, headers=headers, content=content), system_side=True)
+                on_status=sent, headers=headers, content=content)
+
+        try:
+            reply = deadline.run(what, call, system_side=True)
         except Refused as cut:
             if answered:
                 return _broken_reply(asked.system, answered[0], cut.detail)
@@ -319,6 +330,8 @@ class _Proxy:
         except httpx.TransportError as e:
             if answered:
                 return _broken_reply(asked.system, answered[0], type(e).__name__)
+            # Never connected: nothing reached the system.
+            trail.sent = not isinstance(e, httpx.ConnectError | httpx.ConnectTimeout)
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
                                      f"({type(e).__name__})", system_side=True) from None
         status, withheld = reply.status, reply.withheld

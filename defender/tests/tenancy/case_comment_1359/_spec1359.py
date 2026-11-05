@@ -22,6 +22,8 @@ CASE_KEY = "case_key"
 #: The receipt's words and shape (O5, unchanged).
 RECEIPT_KEYS = {"key", "status", "url", "ok", "reason"}
 COMMENTED, ESCALATED, ERROR = "commented", "escalated", "error"
+#: A comment whose outcome the read-back could not settle (#1374 O4).
+UNKNOWN = "unknown"
 #: The retired system and its settings prefix (O2 census).
 RETIRED_SYSTEM = "case-history"
 RETIRED_PREFIX = "CASE_HISTORY"
@@ -33,6 +35,8 @@ RETIRED_MAPPING_REL = f"{T1106.RETIRED_CASE_FOLDER}/mapping.yaml"
 
 #: The adapter's literally named comment function (design: "one literally named function").
 COMMENT_ACTION = "add_case_comment"
+#: The optional read beside it (#1374): the case's comments, for the host's read-back.
+READBACK_ACTION = "read_case_comments"
 #: The tenant case-record settings file under `settings/` (r4 Data).
 CASE_RECORD_REL = "case-record.yaml"
 #: The ready-made adapters' system names (module `<system>_adapter.py`, prefix `<SYSTEM>_`).

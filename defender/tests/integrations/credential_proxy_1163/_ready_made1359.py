@@ -116,6 +116,11 @@ class Rig:
         ctx = A.ctx_for(self.tmp, self.record(), self.url, self.token())
         return self.module(roster).add_case_comment(ctx, key=key, body=body)
 
+    def read(self, roster: Any, key: str) -> Any:
+        """The adapter's read of a case's comments called straight, as the record leg calls it."""
+        ctx = A.ctx_for(self.tmp, self.record(), self.url, self.token())
+        return getattr(self.module(roster), C.READBACK_ACTION)(ctx, key=key)
+
     def leg(self, name: str, key: str | None = C.TICKET_KEY) -> dict[str, Any] | None:
         """The record leg at run end over a run whose record names `key`; its receipt."""
         rec = C.CaseRunRecorder(self.tmp / name)

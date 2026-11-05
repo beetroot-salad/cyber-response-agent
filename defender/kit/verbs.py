@@ -7,6 +7,7 @@ serves adapters stays in `systems.verbs`; so does the engine table (`engine_for`
 one and never import the runtime."""
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import re
 from collections.abc import Callable, Mapping
@@ -22,6 +23,23 @@ from defender.kit.settings import SystemConfig
 #: verb, so no grant, query tool or model can reach it. `systems.verbs` refuses an adapter whose
 #: `VERBS` exposes it in either spelling.
 COMMENT_ACTION = "add_case_comment"
+#: The optional read beside it (#1374): `read_case_comments(ctx, *, key)` answers `CaseComments`,
+#: or raises `AdapterFault` when the reply as a whole cannot be read. The host decides from that answer. A host
+#: action too, never a verb.
+READBACK_ACTION = "read_case_comments"
+#: Every host-only action an adapter may export; `systems.verbs` refuses a `VERBS` holding any.
+HOST_ACTIONS = (COMMENT_ACTION, READBACK_ACTION)
+
+
+@dataclasses.dataclass(frozen=True)
+class CaseComments:
+    """What one read of a case's comments saw (#1374). `texts` is each comment it could read, as
+    plain text with its line breaks; a comment it cannot read is left out, since a read only ever
+    proves a comment is there. `link` is the ticket's web link, as `add_case_comment` returns it."""
+
+    texts: tuple[str, ...]
+    link: str | None = None
+
 
 #: The alphabet of a system name, unanchored, for scanners that find a name inside text. A
 #: fragment rather than a compiled pattern so nobody matches with it and skips the length bound
