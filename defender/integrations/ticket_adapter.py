@@ -21,7 +21,7 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
-from defender.kit.verbs import VerbContext, verb
+from defender.kit.verbs import CaseComments, VerbContext, verb
 from defender.integrations import _stub_transport as transport
 from defender.kit.faults import TransportFault, UpstreamFault
 
@@ -141,6 +141,10 @@ def get_ticket(ctx: VerbContext, *, key: str, require_closed: bool = False) -> d
 COMMENT_AUTHOR = "defender"
 
 
+def _ticket_link(config: dict[str, str], key: str) -> str:
+    return f"{config['URL_BASE'].rstrip('/')}/tickets/{urllib.parse.quote(key, safe='')}"
+
+
 def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  # lint-dup: ok — every case-recording adapter exports the host's comment action under this one name (#1359)
     """The host's one write to a case (#1359): add the plain-text `body` as a comment on ticket
     `key`, and return the ticket's web link. Not a verb (never in `VERBS`): no role or query tool
@@ -150,25 +154,20 @@ def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  #
     quoted = urllib.parse.quote(key, safe="")
     transport.http_write(ctx, config, "POST", f"/tickets/{quoted}/comments",
                          {"author": COMMENT_AUTHOR, "body": body}, system=SYSTEM)
-    return f"{config['URL_BASE'].rstrip('/')}/tickets/{quoted}"
+    return _ticket_link(config, key)
 
 
-def find_case_comment(ctx: VerbContext, *, key: str, tag: str) -> tuple[bool, str | None]:  # lint-dup: ok — every case-recording adapter's read-back goes by this one name (#1374)
-    """The host's read-back after a comment whose answer was lost (#1374): is a comment whose
-    lines include `tag` (the run's tag line) on ticket `key`? `(True, link)` or `(False, None)`.
-    The lab store's ticket read holds every comment, so a read that lacks the tag saw them all.
-    Not a verb (never in `VERBS`). A read with no comment list is a `TransportFault`: it cannot
-    tell."""
-    config = _config(ctx)
-    quoted = urllib.parse.quote(key, safe="")
-    payload = transport.http_get_obj(ctx, config, f"/tickets/{quoted}", system=SYSTEM)
-    comments = payload.get("comments")
+def read_case_comments(ctx: VerbContext, *, key: str) -> CaseComments:  # lint-dup: ok — every case-recording adapter's read goes by this one name (#1374)
+    """The case's comments, for the host's read-back after a comment whose answer was lost. Not a
+    verb (never in `VERBS`). The lab store's ticket read holds every comment, so it is complete.
+    A read with no comment list, or with a comment it cannot read, is a `TransportFault`."""
+    comments = get_ticket(ctx, key=key).get("comments")
     if not isinstance(comments, list):
         raise TransportFault(f"ticket {key}'s read carries no comment list")
-    found = any(isinstance(c, dict) and isinstance(c.get("body"), str)
-                and tag in (line.strip() for line in c["body"].splitlines())
-                for c in comments)
-    return found, (f"{config['URL_BASE'].rstrip('/')}/tickets/{quoted}" if found else None)
+    if not all(isinstance(c, dict) and isinstance(c.get("body"), str) for c in comments):
+        raise TransportFault(f"ticket {key}'s read holds a comment with no readable body")
+    return CaseComments(texts=tuple(c["body"] for c in comments), complete=True,
+                        link=_ticket_link(_config(ctx), key))
 
 
 VERBS = {

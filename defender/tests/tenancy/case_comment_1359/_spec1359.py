@@ -35,8 +35,8 @@ RETIRED_MAPPING_REL = f"{T1106.RETIRED_CASE_FOLDER}/mapping.yaml"
 
 #: The adapter's literally named comment function (design: "one literally named function").
 COMMENT_ACTION = "add_case_comment"
-#: The optional read-back beside it (#1374): finds this run's tagged comment on the case.
-READBACK_ACTION = "find_case_comment"
+#: The optional read beside it (#1374): the case's comments, for the host's read-back.
+READBACK_ACTION = "read_case_comments"
 #: The tenant case-record settings file under `settings/` (r4 Data).
 CASE_RECORD_REL = "case-record.yaml"
 #: The ready-made adapters' system names (module `<system>_adapter.py`, prefix `<SYSTEM>_`).

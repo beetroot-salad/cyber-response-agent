@@ -21,7 +21,7 @@ from defender._paths import adapters_under
 from defender.kit.access import AccessDeclaration
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import config_pointer, pointer_to
-from defender.kit.verbs import COMMENT_ACTION, HOST_ACTIONS, READBACK_ACTION
+from defender.kit.verbs import COMMENT_ACTION, HOST_ACTIONS, READBACK_ACTION, CaseComments
 from defender.systems.run_tenant import RunTenant
 from defender.systems.system_status import AdapterBroken, NotConfigured, ReasonScope, judge_adapter
 from defender.systems.verbs import RegistryError, RosterRead, fresh_adapter_module, read_roster
@@ -60,8 +60,8 @@ class CaseTarget:
         return getattr(self.module, COMMENT_ACTION)
 
     @property
-    def find_case_comment(self) -> Callable[..., tuple[bool, str | None]] | None:
-        """The adapter's optional read-back (#1374), or None when it exports none."""
+    def read_case_comments(self) -> Callable[..., CaseComments] | None:
+        """The adapter's optional read of a case's comments (#1374), or None when it has none."""
         action = getattr(self.module, READBACK_ACTION, None)
         return action if callable(action) else None
 

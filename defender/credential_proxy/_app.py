@@ -315,11 +315,14 @@ class _Proxy:
             trail.outcome = f"sent {status}"
             answered.append(status)
 
-        trail.sent = True
-        try:
-            reply = deadline.run(what, lambda: capped_reply(
+        async def call() -> Any:
+            trail.sent = True  # here, past the deadline's own check before the leg
+            return await capped_reply(
                 trust, asked.method, target.url, cap=cap, timeout=timeout,
-                on_status=sent, headers=headers, content=content), system_side=True)
+                on_status=sent, headers=headers, content=content)
+
+        try:
+            reply = deadline.run(what, call, system_side=True)
         except Refused as cut:
             if answered:
                 return _broken_reply(asked.system, answered[0], cut.detail)
@@ -327,8 +330,8 @@ class _Proxy:
         except httpx.TransportError as e:
             if answered:
                 return _broken_reply(asked.system, answered[0], type(e).__name__)
-            if isinstance(e, httpx.ConnectError | httpx.ConnectTimeout):
-                trail.sent = False  # never connected: nothing reached the system
+            # Never connected: nothing reached the system.
+            trail.sent = not isinstance(e, httpx.ConnectError | httpx.ConnectTimeout)
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
                                      f"({type(e).__name__})", system_side=True) from None
         status, withheld = reply.status, reply.withheld

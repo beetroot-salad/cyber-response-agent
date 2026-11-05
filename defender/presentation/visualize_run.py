@@ -374,8 +374,6 @@ def _render_policy_denials_section(run_dir: Path) -> str:
 
 
 RECEIPT_UNREADABLE = "receipt unreadable"
-#: = ticket_writer.RECEIPT_UNKNOWN: a comment whose outcome the read-back could not settle (#1374).
-RECEIPT_UNKNOWN = "unknown"
 
 
 def render_ticket_line(run_dir: Path) -> str:
@@ -398,6 +396,8 @@ def render_ticket_line(run_dir: Path) -> str:
     )
     if not well_formed or not isinstance(receipt, dict):
         return f'<p class="ticket-line ticket-unreadable">ticket: {esc(RECEIPT_UNREADABLE)}</p>'
+    from defender.investigation.ticket_writer import RECEIPT_UNKNOWN
+
     if receipt["ok"]:
         cls = "ticket-ok"
     elif receipt["status"] == RECEIPT_UNKNOWN:

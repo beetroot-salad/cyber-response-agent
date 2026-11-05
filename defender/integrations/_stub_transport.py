@@ -356,6 +356,8 @@ def http_get_obj(
 #: curl's exits for a connection never made (6: the host did not resolve; 7: it refused):
 #: nothing was sent (#1374).
 _CURL_NEVER_CONNECTED = frozenset({6, 7})
+#: `docker exec`'s own exits: 1 (no such container, not running), 125-127 (it could not start the command).
+_DOCKER_OWN_FAILURES = frozenset({1, 125, 126, 127})
 
 
 def _raise_on_transport_failure(
@@ -369,11 +371,13 @@ def _raise_on_transport_failure(
     no request completed, so an empty-stdout check would let an outage return `{}` as success.
 
     `maybe_delivered` (#1374) is decided from data: false when curl never connected
-    (`_CURL_NEVER_CONNECTED`) or never ran (docker failed before it: no status line on stdout,
-    which curl's own failures always print)."""
+    (`_CURL_NEVER_CONNECTED`) or docker failed before running it: one of docker's own exit codes
+    with no status line on stdout, which curl's own failures always print. A curl killed part way
+    (137, 143) prints no status line either, and may have sent."""
     if rc == 0:
         return
-    never_sent = rc in _CURL_NEVER_CONNECTED or not split_status(stdout)[1]
+    never_sent = rc in _CURL_NEVER_CONNECTED or (
+        rc in _DOCKER_OWN_FAILURES and not split_status(stdout)[1])
     hint = stderr.strip() or "no stderr"
     if "No such container" in hint or "is not running" in hint:
         raise TransportFault(

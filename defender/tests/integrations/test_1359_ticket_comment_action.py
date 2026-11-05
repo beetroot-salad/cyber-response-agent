@@ -90,8 +90,9 @@ MAYBE_DELIVERED = "maybe_delivered"
     (S.answer("", "000", rc=52, stderr="curl: (52) Empty reply from server"), True),
     (S.answer("", "000", rc=56, stderr="curl: (56) Recv failure: Connection reset by peer"), True),
     (S.answer(json.dumps({"detail": "down"}), "503"), True),
+    (S.answer("", None, rc=137), True),
 ], ids=["refused", "dns", "no-container", "container-stopped", "timeout", "empty-reply", "reset",
-        "store-503"])
+        "store-503", "curl-killed-with-no-status-line"])
 def test_1374_a_curl_route_write_fault_says_whether_it_may_have_reached_the_store(
         tmp_path, monkeypatch, answer, maybe):
     """#1374 P1/P2 on the docker route: "did not reach the store" only where proven from data —

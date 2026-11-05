@@ -187,8 +187,8 @@ READBACK_HOLDING = {
 
 def _readback_source(verbs_body: str, *, tail: str = "") -> str:
     head, table = _source(verbs_body).rsplit("\n\nVERBS = ", 1)
-    return (head + f"\n\ndef {READBACK}(ctx: VerbContext, *, key: str, tag: str):\n"
-            "    return False, None\n\n\nVERBS = " + table + tail)
+    return (head + f"\n\ndef {READBACK}(ctx: VerbContext, *, key: str):\n"
+            "    return None\n\n\nVERBS = " + table + tail)
 
 
 def test_1374_the_read_back_action_is_never_a_verb(tmp_path):

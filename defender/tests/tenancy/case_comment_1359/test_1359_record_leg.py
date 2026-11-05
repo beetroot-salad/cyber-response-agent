@@ -270,6 +270,11 @@ OTHER_RUN = "[defender agent comment, run 00000000-0000-4000-8000-000000000000]"
     ("absent", lambda ours: _ticket("an analyst's note", f"{OTHER_RUN}\nan earlier run's verdict"),
      C.ERROR, False, 0),
     ("read fails", lambda ours: S.curl_timed_out(), C.UNKNOWN, False, 0),
+    ("no comment list", lambda ours: S.answer(json.dumps({"key": C.TICKET_KEY}), "200"),
+     C.UNKNOWN, False, 0),
+    ("an entry it cannot read", lambda ours: S.answer(json.dumps({"comments": [
+        {"author": "someone", "body": "a note"}, {"author": "someone", "text": "changed shape"},
+    ]}), "200"), C.UNKNOWN, False, 0),
 ])
 def test_1374_a_lost_answer_is_settled_by_one_read_back(
         tmp_path, monkeypatch, label, read, status, ok, rows):
@@ -302,7 +307,10 @@ def test_1374_a_lost_answer_is_settled_by_one_read_back(
         assert "lost" in reason, (label, reason)
     if label == "absent":
         assert "no comment from this run" in reason, reason
-    if label == "read fails":
+        assert "not posted" not in reason, f"a late commit can still land (T1): {reason}"
+    if label == "no comment list":
+        assert "no comment list" in reason, reason
+    if status == C.UNKNOWN:
         assert C.TICKET_KEY in reason, reason
         assert ours in reason, reason
 
@@ -347,11 +355,15 @@ def _case_adapter(tmp_path: Path, read_back: str | None) -> Any:
 @pytest.mark.parametrize(("label", "read_back", "why"), [
     ("no read-back", None, "cannot read the case back"),
     ("read-back crashes",
-     f"def {C.READBACK_ACTION}(ctx, *, key, tag):\n    raise RuntimeError('odd reply')\n",
+     f"def {C.READBACK_ACTION}(ctx, *, key):\n    raise RuntimeError('odd reply')\n",
      "RuntimeError"),
-    ("read-back answers no verdict",
-     f"def {C.READBACK_ACTION}(ctx, *, key, tag):\n    return 'yes', None\n",
+    ("read-back answers no comments",
+     f"def {C.READBACK_ACTION}(ctx, *, key):\n    return 'yes'\n",
      "TypeError"),
+    ("the proxy fails the read",
+     f"def {C.READBACK_ACTION}(ctx, *, key):\n"
+     "    fault = TransportFault('proxy down')\n    fault.proxy_own = True\n    raise fault\n",
+     "the credential proxy failed: proxy down"),
 ])
 def test_1374_an_unsettled_outcome_is_unknown_and_not_recorded(tmp_path, monkeypatch, label,
                                                                 read_back, why):
@@ -372,6 +384,56 @@ def test_1374_an_unsettled_outcome_is_unknown_and_not_recorded(tmp_path, monkeyp
     assert C.TICKET_KEY in reason, (label, reason)
     assert _tag(tmp_path) in reason, (label, reason)
     assert S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(rec.run_dir_at)) == []
+
+
+def _read_answering(texts: str, complete: bool) -> str:
+    return (f"def {C.READBACK_ACTION}(ctx, *, key):\n"
+            "    from defender.kit.verbs import CaseComments\n"
+            f"    return CaseComments(texts={texts}, complete={complete}, link='http://store/t')\n")
+
+
+@pytest.mark.parametrize(("label", "text", "complete", "status", "rows"), [
+    ("found in a partial read", "{tag}\nthe verdict", False, C.COMMENTED, 1),
+    ("none in a whole read", "a note", True, C.ERROR, 0),
+    ("none in a partial read", "a note", False, C.UNKNOWN, 0),
+    ("the tag quoted in a sentence is not ours", "see {tag} above", True, C.ERROR, 0),
+])
+def test_1374_the_host_decides_from_what_the_connector_read(
+        tmp_path, monkeypatch, label, text, complete, status, rows):
+    """The connector only reads; the host applies the rules, so every connector inherits them. A
+    comment whose own line is this run's tag is found whatever else the read missed (P3); no such
+    comment is absent only when the read covered every comment (T2), else `unknown`."""
+    root, _folder, alert = _world(tmp_path, case_system="casesys")
+    _shim(tmp_path, monkeypatch)
+    tag = _tag(tmp_path)
+    texts = repr((text.replace("{tag}", tag),))
+    rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
+    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec,
+                              visualize=rec.visualize,
+                              roster=_case_adapter(tmp_path, _read_answering(texts, complete)))
+    assert (refused, rc) == (None, 0), (refused, rc)
+    got = S.receipt(rec.run_dir_at)
+    assert got is not None, label
+    assert got["status"] == status, (label, got)
+    assert got["url"] == ("http://store/t" if rows else None), (label, got)
+    posted = S.mod("tenancy.case_ticket").read_posted_comments(fixture_run(rec.run_dir_at))
+    assert len(posted) == rows, (label, posted)
+
+
+def test_1374_a_read_fault_reaches_the_receipt_cut_short(tmp_path, monkeypatch):
+    """A failed read's detail can carry the store's whole reply (other people's comments): the
+    receipt holds a bounded part of it, and still names the ticket and the tag."""
+    root, _folder, alert = _world(tmp_path, case_system="casesys")
+    _shim(tmp_path, monkeypatch)
+    long = f"def {C.READBACK_ACTION}(ctx, *, key):\n    raise TransportFault('x' * 5000)\n"
+    rec = C.CaseRunRecorder(tmp_path / "runs" / "r1359")
+    S.drive_run(S.run_argv(alert, root, update_ticket=True), rec, visualize=rec.visualize,
+                roster=_case_adapter(tmp_path, long))
+    got = S.receipt(rec.run_dir_at)
+    assert got["status"] == C.UNKNOWN, got
+    assert "x" * 100 in got["reason"], "positive control: the detail reached the receipt"
+    assert "x" * 1000 not in got["reason"], len(got["reason"])
+    assert _tag(tmp_path) in got["reason"], got
 
 
 def test_1374_the_page_shows_unknown_apart_from_success_and_error(tmp_path):

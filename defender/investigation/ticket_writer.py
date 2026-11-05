@@ -13,6 +13,7 @@ from pathlib import Path
 
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault, UpstreamFault
 from defender.kit.settings import config_pointer
+from defender.kit.verbs import CaseComments
 from defender.records import Run, RunPaths, formats, run_end
 from defender.systems import case_system
 from defender.systems.run_tenant import RunTenant
@@ -43,6 +44,8 @@ RECEIPT_ESCALATED = "escalated"
 RECEIPT_ERROR = "error"
 RECEIPT_UNKNOWN = "unknown"
 _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
+#: How much of a failed read-back's detail the receipt keeps.
+_READ_DETAIL_CAP = 300
 
 #: Receipt reasons whose wording the product owns (O5).
 REASON_NO_TICKET = (
@@ -241,27 +244,38 @@ def _commented(run: Run, key: str, posted: str, word: str, link: object) -> None
     _write_receipt(run, link if isinstance(link, str) and link else None, key, word, None)
 
 
+def _read_fault_reason(fault: AdapterFault, tenant: RunTenant) -> str:
+    """Why the read-back failed: the proxy named when the fault is its own (#1404), and a bounded
+    part of the detail, which can carry the store's whole reply and so other people's comments."""
+    detail = redact_settings_path(fault.detail, tenant.settings)
+    if len(detail) > _READ_DETAIL_CAP:
+        detail = detail[:_READ_DETAIL_CAP] + " [cut]"
+    return f"the credential proxy failed: {detail}" if fault.proxy_own else detail
+
+
 def _settle_lost_answer(  # noqa: PLR0913 — the write's own context, threaded not re-derived
     run: Run, target: case_system.CaseTarget, key: str, posted: str, word: str, ctx: VerbContext,
     lost: str,
 ) -> None:
     """The comment's answer was lost after it may have reached the store (#1374 P1): read the case
-    back once (P4) and decide from this run's tag line (P3). Found is a success; a read that saw
-    no such comment is an error; anything else (no read-back, any exception) is `unknown`, which
-    names the ticket and the tag to look for. Never a second write."""
-    tag = case_ticket.agent_comment_tag(str(run.id))
+    back once (P4) and decide here, for every connector, from what it read. This run's tagged
+    comment (P3) is a success. None in a read of every comment is an error. Anything else (no
+    read, a partial read, any exception) is `unknown`, which names the ticket and the tag to look
+    for. Never a second write."""
+    run_id = str(run.id)
     lost = f"the store's answer to the comment was lost ({lost})"
-    look = f"check ticket {key} for a comment tagged {tag}"
-    read_back = target.find_case_comment
+    look = f"check ticket {key} for a comment tagged {case_ticket.agent_comment_tag(run_id)}"
+    read_back = target.read_case_comments
     if read_back is None:
         _unknown(run, key, f"{lost}, and {target.system}'s connector cannot read the case back: {look}")
         return
     try:
-        found, link = read_back(ctx, key=key, tag=tag)
-        if not isinstance(found, bool):
-            raise TypeError(f"the read-back answered {type(found).__name__}, not a bool")
+        read = read_back(ctx, key=key)
+        if not isinstance(read, CaseComments):
+            raise TypeError(f"the read answered {type(read).__name__}, not CaseComments")
+        found = any(case_ticket.carries_agent_tag(text, run_id) for text in read.texts)
     except AdapterFault as fault:
-        why = redact_settings_path(fault.detail, ctx.tenant.settings)
+        why = _read_fault_reason(fault, ctx.tenant)
         _unknown(run, key, f"{lost}, and reading the case back failed ({why}): {look}")
         return
     except Exception as e:  # noqa: BLE001 — once the write may have landed, only a completed read decides
@@ -271,9 +285,13 @@ def _settle_lost_answer(  # noqa: PLR0913 — the write's own context, threaded 
         return
     if found:
         _logger.info(f"record {key}: the answer was lost; the read-back found the comment ({word})")
-        _commented(run, key, posted, word, link)
+        _commented(run, key, posted, word, read.link)
         return
-    reason = f"{lost}, and reading the case back found no comment from this run: it was not posted"
+    if read.complete is not True:
+        _unknown(run, key, f"{lost}, and reading the case back did not reach every comment: {look}")
+        return
+    # Not "it was not posted": a store still applying the write can commit it later (T1).
+    reason = f"{lost}, and reading the case back found no comment from this run"
     _logger.warning(f"record {key}: {reason}")
     _write_receipt(run, None, key, RECEIPT_ERROR, reason)
 
