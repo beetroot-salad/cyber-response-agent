@@ -6,6 +6,7 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -14,6 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
+import pytest
 
 from defender._git import REPO_ROOT
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
@@ -66,16 +68,38 @@ def _proxy_process(data_root: Path, tenant: str, *, trace: bool) -> Iterator[_Pr
         process.wait()
 
 
-def test_o1_a_stalled_reader_of_an_8_mib_reply_costs_under_2_mib_of_allocations(tmp_path, data_root):
+def _ending(how: str, body: bytes):
+    """An upstream script sending `body` as a reply that ends the way `how` says (RFC 9112 6.3):
+    a declared Content-Length, chunked framing, or the connection closing."""
+    plain = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+
+    def script(conn: socket.socket) -> None:
+        if how == "content-length":
+            conn.sendall(W.head(200, len(body)))
+            conn.sendall(body)
+        elif how == "chunked":
+            conn.sendall(plain + b"Transfer-Encoding: chunked\r\n\r\n")
+            for at in range(0, len(body), 64 * 1024):
+                conn.sendall(W.chunked(body[at:at + 64 * 1024]))
+            conn.sendall(b"0\r\n\r\n")
+        else:
+            conn.sendall(plain + b"Connection: close\r\n\r\n")
+            conn.sendall(body)
+        conn.shutdown(socket.SHUT_WR)
+    return script
+
+
+@pytest.mark.parametrize("how", ["content-length", "chunked", "close-delimited"])
+def test_o1_a_stalled_reader_of_an_8_mib_reply_costs_under_2_mib_of_allocations(tmp_path, data_root, how):
     """The proxy's Python allocation peak above its idle level stays under 2 MiB for one 8 MiB
-    reply whose reader stalls, and the reader still gets all of it. O1."""
+    reply whose reader stalls, however the reply's body ends, and the reader gets all of it. O1."""
     body = b"x" * W.DEFAULT_LIMIT
-    with T.rig(tmp_path / "forge", data_root) as r, \
+    with W.scripted(_ending(how, body)) as up, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + BASE)) as r, \
             _proxy_process(data_root, r.t.tenant_id, trace=True) as proxy:
-        r.up.replies[f"{BASE}/big"] = (200, W.JSON, body)
-        W.raw_post(proxy.url, r.tok(), W.doc(f"{r.up.url}{PATH}"))  # lazy imports land before the measure
+        W.raw_post(proxy.url, r.tok(), W.doc(f"{up.url}{PATH}"))  # lazy imports land before the measure
         idle = proxy.gauge("?reset")["traced_now"]
-        with W.unread(proxy.url, r.tok(), W.doc(f"{r.up.url}{BASE}/big")) as response:
+        with W.unread(proxy.url, r.tok(), W.doc(f"{up.url}{BASE}/big")) as response:
             stream = response.iter_raw(64 * 1024)
             raw = bytearray(next(stream))
             time.sleep(2)

@@ -571,3 +571,32 @@ def test_o6_a_reader_stalled_past_the_grace_gets_the_connection_closed_unfinishe
                 pass
 
     assert [record["outcome"] for record in audit.records] == ["sent 200"]
+
+
+def test_o6_a_reader_making_steady_progress_is_still_cut_at_the_deadline(tmp_path, data_root):
+    """A reader taking an 8 MiB reply in steady small reads, every gap far under the per-send wait
+    but the total past the deadline, is cut at it: status stands, `TransportFault`, no whole
+    body, upstream released and worker thread freed while it still reads. #1412 O6."""
+    audit = H.AuditRecorder()
+    raw: list[bytes] = []
+    with W.scripted(_endless_8_mib) as up, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + API)) as r, \
+            A.proxy_for(r.t, r.store, audit=audit, proxy_overhead_sec=1) as (url, _tap), \
+            W.unread(url, r.tok(), W.doc(f"{up.url}{API}/users/x", timeout_sec=1)) as response:
+        def read() -> None:
+            for chunk in response.iter_raw(64 * 1024):
+                raw.append(chunk)
+                time.sleep(0.04)  # 128 reads: 5 s in all, a deadline of 2 s
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        assert W.until(lambda: audit.records, 4), "no record near the deadline"
+        assert W.until(lambda: W.borrowed(url) == 0, 5), "the worker thread is held past the cut"
+        assert up.hung_up.wait(5), "the upstream connection outlived the deadline"
+        reader.join(60)
+        forwarded, final = W.decoded(b"".join(raw))
+
+    assert (final["status"], final["fault"], final["body_whole"], final["system_side"]) == (
+        200, "TransportFault", False, False)
+    assert len(forwarded) < W.DEFAULT_LIMIT, "the moving reader was never cut"
+    assert [record["outcome"] for record in audit.records] == ["sent 200"]
