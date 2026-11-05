@@ -93,3 +93,6 @@ this run's tag line on a comment is a success and is recorded; none in a read of
 `error`; a partial read, a failed read or a connector with no read is `unknown` (`ok` false, `url`
 null, not recorded), and the reason names the ticket and tag to check. A store still applying the
 write can commit it after the read, so `error` here does not prove the comment never lands.
+Jira claims a complete read from the first page's own count or last-page mark. ServiceNow never
+does: an account without journal access reportedly gets an empty list and no refusal, so a note
+not found there stays `unknown`.
