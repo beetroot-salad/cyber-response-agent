@@ -18,14 +18,16 @@ def test_1390_name_consumers_see_the_registry_and_file_consumers_do_not():
     roster = read_roster(ADAPTERS)
     registry = ModuleVerbRegistry(roster, _tenants1106.fixture_grants().gather)
 
-    assert "cmdb" in roster.adapter_files and "cmdb" in roster.verbs, "positive control: an adapter"
+    assert "cmdb" in roster.adapter_files, "positive control: an adapter"
+    assert "cmdb" in roster.verbs, "positive control: an adapter"
     assert SYSTEM in roster.verbs
     assert SYSTEM not in roster.adapter_files
     assert not (ADAPTERS / "tacit_knowledge_adapter.py").exists()
-    assert "cmdb" in registry.systems() and SYSTEM in registry.systems()
+    assert "cmdb" in registry.systems()
+    assert SYSTEM in registry.systems()
     declared = declared_systems(REPO_ROOT)
-    assert "cmdb" in declared and SYSTEM in declared, (
-        "the lead-author lane's declared systems leave out the platform-served registry")
+    assert "cmdb" in declared, "the lead-author lane's declared systems leave out the platform-served registry"
+    assert SYSTEM in declared, "the lead-author lane's declared systems leave out the platform-served registry"
 
 
 def test_1390_the_opening_prompt_lists_the_registry_among_the_systems_and_not_as_down(tmp_path):
@@ -58,7 +60,8 @@ def test_1390_a_case_record_naming_the_registry_is_refused_as_having_no_adapter(
 
     assert "has no adapter" not in refusal("cmdb"), "control: an adapter without the comment action is refused another way"
     said = refusal(SYSTEM)
-    assert "has no adapter" in said and SYSTEM in said, f"refused for another reason: {said}"
+    assert "has no adapter" in said, f"refused for another reason: {said}"
+    assert SYSTEM in said, f"refused for another reason: {said}"
 
 
 def test_1390_the_ceiling_gate_knows_the_registry_and_only_its_two_verbs():
@@ -120,5 +123,6 @@ def test_1390_connect_check_registry_names_the_reserved_adapter_with_its_reason(
 
     assert failures("casesys") == [], "positive control: an ordinary adapter passes"
     said = " ".join(failures(SYSTEM))
-    assert "reserved" in said and SYSTEM in said, f"the reserved name is not refused with its reason: {said!r}"
+    assert "reserved" in said, f"the reserved name is not refused with its reason: {said!r}"
+    assert SYSTEM in said, f"the reserved name is not refused with its reason: {said!r}"
     assert "anomalous adapter name" not in said, f"the refusal reads as a malformed name: {said!r}"

@@ -810,7 +810,8 @@ def test_1390_check_names_a_reserved_adapter_name_with_its_reason_and_keeps_the_
     H.add_adapter(checkout, TACIT, RESERVED_ADAPTER)
     out = H.assert_refused(H.run_script(script, "check", "--folder", str(folder), root=None), TACIT)
 
-    assert TACIT in out and "reserved" in out, f"the refusal is not named with its reason:\n{out}"
+    assert TACIT in out, f"the refusal is not named with its reason:\n{out}"
+    assert "reserved" in out, f"the refusal is not named with its reason:\n{out}"
     assert "anomalous adapter name" not in out, f"the refusal reads as a malformed name:\n{out}"
     assert CENSUS_NOT_TAKEN not in out, f"the other adapters' census was lost:\n{out}"
 

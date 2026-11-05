@@ -403,7 +403,7 @@ from defender.tenancy.models import AlertMappingRow
 from defender.records._alert_input import AlertMapping
 from defender.cli import tenant
 seeded, argv = sys.argv[1].split(","), sys.argv[2:]
-mapping = AlertMapping(paths={k: v for k, v in json.loads(%r).items() if v is not None})
+mapping = AlertMapping(paths={k: v for k, v in json.loads(@@MAPPING@@).items() if v is not None})
 twin = InMemoryTenantRepository()
 for name in filter(None, seeded):
     added = twin.add_tenant(name, created_at=datetime.datetime(2026, 10, 26, 9, tzinfo=datetime.timezone.utc),
@@ -413,7 +413,7 @@ for name in filter(None, seeded):
     with twin._mutex:
         twin._mappings[name] = AlertMappingRow.of(name, mapping)
 sys.exit(tenant.main(argv, directory=TenantDirectory(lambda: twin)))
-""" % json.dumps(dict(_PLANTED_ALERT_MAPPING))
+""".replace("@@MAPPING@@", repr(json.dumps(dict(_PLANTED_ALERT_MAPPING))))
 
 
 def checkout_tenant_py(checkout: Path, *args: str, root: Path | str | None, seed: list[str] | None = None,

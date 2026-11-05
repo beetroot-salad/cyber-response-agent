@@ -481,7 +481,8 @@ def test_1390_a_registry_refused_whole_is_a_miss_whose_reason_is_in_the_stored_a
     est = S.TacitEstate(tmp_path / "estate")
     path = est.write_registry("sanctions:\n  - id: tk-misfiled\n")
     reason = tacit_registry.read_registry(path).fatal
-    assert reason and "entries:" in reason, f"premise: the reader refuses the file whole: {reason!r}"
+    assert reason, f"premise: the reader refuses the file whole: {reason!r}"
+    assert "entries:" in reason, f"premise: the reader refuses the file whole: {reason!r}"
 
     run_dir, rows, _g = _gather_lookups(
         tmp_path, est, _spec().query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS),
@@ -524,8 +525,9 @@ def test_1390_the_repeat_guard_applies_to_the_registry(tmp_path):
     _run_dir, rows, _gather = _gather_lookups(tmp_path, est, ask, ask, ask)
 
     codes = [r["exit_code"] for r in rows]
-    assert codes[:2] == [0, 0] and len(codes) == 3 and codes[2] != 0, (
-        f"the third identical lookup was not stopped: {codes}")
+    assert codes[:2] == [0, 0], f"the third identical lookup was not stopped: {codes}"
+    assert len(codes) == 3, f"the third identical lookup was not stopped: {codes}"
+    assert codes[2] != 0, f"the third identical lookup was not stopped: {codes}"
     assert rows[2]["query_id"] == REPEAT_TRIP_QUERY_ID, f"the stop is not the repeat guard's: {rows[2]}"
 
 
@@ -546,7 +548,8 @@ def test_1390_a_tripped_circuit_breaker_refuses_a_lead_on_the_registry(tmp_path)
 
     _d, rows, gather = _gather_lookups(tmp_path / "tripped", est, ask, run_state=state)
 
-    assert rows == [] and gather.seen == [], f"a lead on a tripped registry ran: {rows}"
+    assert rows == [], f"a lead on a tripped registry ran: {rows}"
+    assert gather.seen == [], f"a lead on a tripped registry ran: {rows}"
 
 
 def test_1390_a_resumed_run_clock_is_the_day_a_lookup_through_the_query_tool_is_judged_against(tmp_path):

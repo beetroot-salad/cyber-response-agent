@@ -742,5 +742,5 @@ def test_1390_the_launcher_records_no_platform_served_system_and_refuses_a_tenan
     only = S.TacitEstate(where / "estate",
                          withheld=tuple((s, v) for s in S.SYSTEMS for v in S.READ_VERBS))
     refused = _launch(where, monkeypatch, only)
-    assert refused.rc != 0 and "serves no system" in refused.message, (
-        f"a tenant granting only the registry was not refused as unservable: {refused}")
+    assert refused.rc != 0, f"a tenant granting only the registry was not refused as unservable: {refused}"
+    assert "serves no system" in refused.message, f"a tenant granting only the registry was not refused as unservable: {refused}"

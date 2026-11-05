@@ -526,7 +526,8 @@ def test_1390_a_registry_refused_whole_answers_a_miss_carrying_the_readers_reaso
     path.parent.mkdir(parents=True)
     path.write_bytes(_WHOLE_FILE_FAULTS[fault])
     reason = registry().read_registry(path).fatal
-    assert reason and str(path) in reason, f"premise: the reader refuses a {fault} file whole, naming it"
+    assert reason, f"premise: the reader refuses a {fault} file whole, naming it"
+    assert str(path) in reason, f"premise: the reader refuses a {fault} file whole, naming it"
 
     answer = _platform_lookup(_clocked_ctx(root, tmp_path), actor=ACTOR, host=HOST, pattern=PATTERN)
 
@@ -542,8 +543,8 @@ def test_1390_dropped_entries_ride_the_answer_beside_a_hit_and_a_miss(tmp_path):
     root = tmp_path / "tree"
     _write_registry(root, good, blanket)
     dropped = list(registry().read_registry(registry().registry_path(root)).refusals)
-    assert len(dropped) == 1 and "tk-1390-blanket" in dropped[0], (
-        f"premise: the reader drops exactly the blanket entry: {dropped}")
+    assert len(dropped) == 1, f"premise: the reader drops exactly the blanket entry: {dropped}"
+    assert "tk-1390-blanket" in dropped[0], f"premise: the reader drops exactly the blanket entry: {dropped}"
     ctx = _clocked_ctx(root, tmp_path)
 
     hit = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
@@ -591,7 +592,8 @@ def test_1390_health_check_says_an_existing_registry_is_unused_until_lookup_is_g
     health = _verbs()["health-check"](_clocked_ctx(root, tmp_path))
 
     text = json.dumps(health).lower()
-    assert "lookup" in text and "grant" in text, f"health-check does not say lookup must be granted: {health}"
+    assert "lookup" in text, f"health-check does not say lookup must be granted: {health}"
+    assert "grant" in text, f"health-check does not say lookup must be granted: {health}"
 
 
 def test_1390_the_connect_page_no_longer_says_the_registry_is_already_connected_and_says_lookup_needs_a_grant():
@@ -639,7 +641,8 @@ def test_1390_an_adapter_named_tacit_knowledge_is_refused_with_its_reason_and_no
     roster = read_roster(adapters)
 
     assert "cmdb" in roster.adapter_files, "positive control: an ordinary adapter is accepted"
-    assert "cmdb" in roster.verbs and "cmdb" not in roster.refused
+    assert "cmdb" in roster.verbs
+    assert "cmdb" not in roster.refused
     assert SYSTEM not in roster.adapter_files, "the reserved name was dispatched from a file"
     assert SYSTEM in roster.refused, "the reserved name was dropped silently"
     assert "reserved" in roster.refused[SYSTEM], (
@@ -670,8 +673,10 @@ def test_1390_a_non_regular_thing_at_the_registry_path_is_refused_whole_in_both_
     lookup = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
     health = _verbs()["health-check"](ctx)
 
-    assert lookup["matched"] is None and lookup.get("registry_problems"), f"not refused: {lookup}"
-    assert health.get("registry_problems") and health["connected"] is True, f"not refused: {health}"
+    assert lookup["matched"] is None, f"not refused: {lookup}"
+    assert lookup.get("registry_problems"), f"not refused: {lookup}"
+    assert health.get("registry_problems"), f"not refused: {health}"
+    assert health["connected"] is True, f"not refused: {health}"
     assert str(root) not in str(lookup) + str(health), "a model-visible answer names a host path"
 
 
