@@ -449,14 +449,18 @@ def test_1390_a_withheld_or_row_less_call_is_denied_and_recorded_not_undeclared(
             f"the refusal tells the model to add table rows ({add_rows!r}):\n{told}")
 
 
-def test_1390_with_no_rows_list_verbs_offers_the_lead_nothing_on_the_registry(tmp_path):
+def test_1390_with_no_rows_list_verbs_offers_the_lead_nothing_on_the_registry(tmp_path, monkeypatch):
     """A table with no `tacit-knowledge` rows leaves `list_verbs` offering no verb on it, and the same registry with rows offers both. O10."""
     from defender.investigation.query_catalog import _tool_list_verbs
 
     S = _spec()
+    # Each estate is placed under its OWN data root: `Estate.place` copies nothing into a root that
+    # already holds the tenant, so a shared root would hand the bare estate the granted table.
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(tmp_path / "granted-root"))
     granted = S.TacitEstate(tmp_path / "granted")
     assert "the 2 verb(s) your grant admits" in _tool_list_verbs(S.plain_registry(granted), SYSTEM), (
         "positive control: with rows the registry's verbs are listed")
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(tmp_path / "bare-root"))
     bare = S.TacitEstate(tmp_path / "bare", tacit_roles=())
 
     assert "your grant reaches no verb" in _tool_list_verbs(S.plain_registry(bare), SYSTEM)
