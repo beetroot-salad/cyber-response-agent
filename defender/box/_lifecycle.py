@@ -60,14 +60,23 @@ _BOX_ULIMITS: tuple[str, ...] = (
 )
 
 
-def _resource_limits(spec: BoxSpec) -> tuple[str, ...]:
-    """The box's share of the host. `--memory-swap` equal to `--memory` grants no swap: left
-    out, docker adds the memory cap again as swap."""
+def _box_flags(spec: BoxSpec) -> tuple[str, ...]:
+    """What confines every box, whichever path starts it. `--memory-swap` equal to `--memory`
+    grants no swap: left out, docker adds the memory cap again as swap. `--init` gives the box a
+    PID 1 that reaps orphans: `sleep` would leave them as zombies, which count against
+    `--pids-limit`, and a box at its limit can never run another command."""
     return (
+        "--runtime", spec.runtime,
+        "--network", "none",
+        "--read-only",
+        "--pull=never",
+        "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
+        *_BOX_ULIMITS,
         "--memory", spec.memory,
         "--memory-swap", spec.memory,
         "--cpus", spec.cpus,
         "--pids-limit", str(spec.pids_limit),
+        "--init",
     )
 
 
@@ -206,13 +215,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "docker", "create", "-i", "--rm", "--name", name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
         *_tenant_label(tenant_id),
-        "--runtime", spec.runtime,
-        "--network", "none",
-        "--read-only",
-        "--pull=never",
-        "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
-        *_BOX_ULIMITS,
-        *_resource_limits(spec),
+        *_box_flags(spec),
     ]
     for m in lane:
         bind = f"type=bind,source={_daemon_source(m.source, mounts)},target={m.target}"
@@ -674,13 +677,7 @@ def _render_argv(
         "docker", "run", "--detach", "--name", request.name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
         *_tenant_label(request.tenant_id),
-        "--runtime", request.spec.runtime,
-        "--network", "none",
-        "--read-only",
-        "--pull=never",
-        "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
-        *_BOX_ULIMITS,
-        *_resource_limits(request.spec),
+        *_box_flags(request.spec),
     ]
     for m in request.mounts:
         if mounts and not _covered(Path(m.source), mounts):

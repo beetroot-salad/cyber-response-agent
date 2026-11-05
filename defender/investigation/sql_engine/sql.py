@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unicodedata
 
-from defender._io import json_safe, use_utf8_stdio
+from defender._io import READ_LIMIT, json_safe, use_utf8_stdio
 
 EXIT_OK = 0
 EXIT_QUERY_ERROR = 1
@@ -24,8 +24,9 @@ _MAX_OBJECT_SIZE = 1 << 30
 
 #: The engine's `maximum_object_size`. It reserves buffers of twice this up front and counts them
 #: against a memory limit it derives from the box's cap, used or not, so 1 GiB here refuses every
-#: query in a capped box, however small the payload. 64 MiB is the most a box can write to a file.
-_ENGINE_OBJECT_SIZE = 64 << 20
+#: query in a capped box, however small the payload. `READ_LIMIT` is the most a box can write to
+#: a file.
+_ENGINE_OBJECT_SIZE = READ_LIMIT
 
 #: The form that binds `h` to the unnested struct on the search-hits shape, shared by
 #: `--help`'s epilog and the query-error hint.

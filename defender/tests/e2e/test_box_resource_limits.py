@@ -5,6 +5,7 @@ import dataclasses
 import json
 import os
 import shutil
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -25,21 +26,37 @@ pytestmark = pytest.mark.e2e
 DEFENDER = Path(__file__).resolve().parents[2]
 EXEC_TIMEOUT = 90.0
 
-#: Touches every page, so the memory is really held; far past any cap these tests set.
-MEMORY_HOG = """\
+#: How much the hog will hold at most: past the cap its test sets, and small enough that a cap
+#: that stopped applying fails the test rather than exhausting the machine running it.
+HOG_CEILING_MIB = 1024
+HOG_CAP = "512m"
+#: Above the cap by what the interpreter and the last step can account for.
+HOG_MOST_MIB = 600
+#: Well into the cap: below this, the hog failed for some other reason than memory.
+HOG_LEAST_MIB = 256
+
+#: Touches every page, so the memory is really held. Records its progress on the run tree, which
+#: outlives the box, so the host can read how far it got even if the kill takes the whole box.
+MEMORY_HOG = f"""\
+import os
 held = []
-while len(held) < 8192:
-    held.append(bytearray(b"x") * (1 << 20))
-print("held", len(held))
+while len(held) < {HOG_CEILING_MIB // 16}:
+    held.append(bytearray(b"x") * (16 << 20))
+    with open("hog.progress", "w") as out:
+        out.write(str(len(held) * 16))
+        out.flush()
+        os.fsync(out.fileno())
 """
 
-FORK_STORM = """\
+#: Children outlive the parent, so they end as orphans the box's PID 1 must reap.
+FORK_STORM_CHILD_SECONDS = 2
+FORK_STORM = f"""\
 import os, time
 n = 0
 try:
     while n < 1000:
         if os.fork() == 0:
-            time.sleep(10)
+            time.sleep({FORK_STORM_CHILD_SECONDS})
             os._exit(0)
         n += 1
 except OSError:
@@ -95,6 +112,7 @@ def test_every_launch_path_caps_memory_cpu_and_processes(argv_of, tmp_path):
     assert _flag(argv, "--memory-swap") == spec.memory, "swap on top of the memory cap"
     assert _flag(argv, "--cpus") == spec.cpus
     assert _flag(argv, "--pids-limit") == str(spec.pids_limit)
+    assert "--init" in argv[:-3], "orphans would hold the box at its process limit"
 
 
 @pytest.mark.parametrize("payload", [
@@ -177,29 +195,44 @@ def test_the_sql_tool_answers_a_small_query_under_the_cap(boxed, memory):
 
 @requires_box_daemon
 @RUNTIMES
-def test_a_process_past_the_memory_cap_is_stopped_inside_the_box(boxed, base, runtime):
-    """runc kills the one process. runsc holds every process's memory in one host process, so
-    the kill may take the whole box; the host's share holds either way."""
-    box = boxed(memory="512m")
+def test_a_process_past_the_memory_cap_is_stopped_at_the_cap(boxed, base, runtime):
+    """Judged by how much the hog held, on either runtime. runc kills the one process and the
+    box carries on. runsc holds every process's memory in one host process, so the kill may take
+    the whole box."""
+    box = boxed(memory=HOG_CAP)
+    res = None
     try:
         res = _program(box, base, "hog.py", MEMORY_HOG)
     except box_mod.BoxFault:
         assert runtime == "runsc", "under runc the kill must take the process, not the box"
-        return
-    assert res.rc != 0, f"8 GiB held in a box capped at 512m: {res.out!r}"
-    assert _sh(box, "echo alive").rc == 0
+    progress = next(base.glob("run-limits-*")) / "hog.progress"
+    assert progress.exists(), f"the hog never held its first step, so it proves nothing: {res}"
+    held = int(progress.read_text(encoding="utf-8"))
+    assert held >= HOG_LEAST_MIB, f"stopped at {held} MiB, well short of the cap: {res}"
+    assert held <= HOG_MOST_MIB, f"held {held} MiB in a box capped at {HOG_CAP}: {res}"
+    if runtime == "runc":
+        assert res is not None
+        assert res.rc == -9, f"expected the kernel's kill: {res}"
+        assert _sh(box, "echo alive").rc == 0
 
 
 @requires_box_daemon
 @RUNTIMES
-def test_a_fork_storm_stops_at_the_process_cap(boxed, base, runtime):
-    """runc refuses the fork. Under runsc the cap reaches the box's one host process, so the box
+def test_a_fork_storm_stops_at_the_process_cap_and_its_slots_come_back(boxed, base, runtime):
+    """runc refuses the fork, and the box's PID 1 reaps the orphans; unreaped, they hold the box
+    at its limit for good. A second storm measures that: one small command can still fit between
+    the zombies and the cap. Under runsc the cap reaches the box's one host process, so the box
     may die instead (seen in CI: the sandbox dropped its connection); the host's share holds."""
     box = boxed(pids_limit=64)
     try:
-        res = _program(box, base, "storm.py", FORK_STORM)
+        first = _program(box, base, "storm.py", FORK_STORM)
+        assert first.rc == 0, first.err
+        assert first.out.startswith(b"stopped"), f"1000 processes in a box capped at 64: {first.out!r}"
+        time.sleep(FORK_STORM_CHILD_SECONDS + 1)
+        second = _program(box, base, "storm.py", FORK_STORM)
     except box_mod.BoxFault:
         assert runtime == "runsc", "under runc the cap must refuse the fork, not take the box"
         return
-    assert res.rc == 0, res.err
-    assert res.out.startswith(b"stopped"), f"1000 processes in a box capped at 64: {res.out!r}"
+    assert second.rc == 0, f"the box is stuck at its process limit: {second}"
+    forks = int(second.out.split()[1])
+    assert forks >= 32, f"only {forks} of 64 slots came back: the orphans were not reaped"
