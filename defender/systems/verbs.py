@@ -415,9 +415,14 @@ def _cannot_read(adapters_dir: Path, e: BaseException, *, blame_entry: bool = Tr
     return text
 
 
+def is_platform_served(system: str) -> bool:
+    """Whether `system` is served by the platform itself (reserved name, in every roster)."""
+    return system in PLATFORM_SERVED
+
+
 def _refusal_of(name: str, path: Path | None) -> str | None:
     """Why the dispatch seam would not resolve the adapter file named for `name`, or `None`."""
-    if name in PLATFORM_SERVED:
+    if is_platform_served(name):
         return RESERVED_REASON
     return ANOMALOUS_REASON if path is None else None
 
@@ -444,6 +449,7 @@ def read_roster(adapters_dir: Path) -> RosterRead:
             if (why := _refusal_of(name, path)) is not None:
                 refused[name] = why
             else:
+                assert path is not None  # a refusal covers the anomalous (None) path
                 accepted[name] = path
                 sources[name] = read_bytes_capped(path)
     except (OSError, RuntimeError) as e:
@@ -675,6 +681,7 @@ class ModuleVerbRegistry(VerbRegistry):
 __all__ = [
     "ADAPTER_SUFFIX",
     "PLATFORM_SERVED",
+    "is_platform_served",
     "fresh_adapter_module",
     "DENIED",
     "GRANTED",

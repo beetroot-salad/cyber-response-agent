@@ -29,7 +29,7 @@ from defender.systems.verbs import (
     CALL_ID,
     CALL_RUN_STATE,
     DENIED,
-    PLATFORM_SERVED,
+    is_platform_served,
     TABLE_POINTER,
     ModuleVerbRegistry,
     VerbDecision,
@@ -74,7 +74,7 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
     """Serve one investigator call for `registry`'s world: the single definition of the serve
     order (#1224, #1255 D3/D5/D6)."""
     asked = dict(params)
-    if system in PLATFORM_SERVED:
+    if is_platform_served(system):
         return _serve_platform(registry, system, verb, fn, ctx, asked)
     key = request_key(system, verb, asked)
     hit = registry.store.answers.get(key)

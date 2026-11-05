@@ -98,7 +98,7 @@ from defender import tenancy  # noqa: E402
 from defender._io import read_plain_bytes  # noqa: E402
 from defender.tenancy import AGENT_HALF, SETTINGS_HALF, TENANT_ID_FILE  # noqa: E402
 from defender.systems import tacit_registry  # noqa: E402
-from defender.systems.verbs import PLATFORM_SERVED  # noqa: E402
+from defender.systems.verbs import is_platform_served  # noqa: E402
 from defender.systems import run_tenant  # noqa: E402
 from defender.systems.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
 from defender.systems import case_system  # noqa: E402
@@ -410,7 +410,7 @@ def _findings(knowledge: Path) -> list[str]:
             f"decides, or rows no adapter declares): the grant census could not be taken — {blind}")
     if census is not None:
         findings += [f"adapter `{name}` refused: {why}" for name, why in census.refused.items()
-                     if name in PLATFORM_SERVED]
+                     if is_platform_served(name)]
     findings += _registry_findings(knowledge)
     try:
         findings += (_tenant_census.table_findings(settings, census).lines(table)

@@ -33,7 +33,7 @@ from defender.systems.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
     VerbContext,
     fresh_adapter_module,
-    PLATFORM_SERVED,
+    is_platform_served,
     RESERVED_REASON,
     read_roster,
 )
@@ -86,7 +86,7 @@ def check_registry(report: Report, defender: Path, system: str):
     through).
     """
     adapter = defender / "integrations" / f"{system.replace('-', '_')}{ADAPTER_SUFFIX}"
-    if system in PLATFORM_SERVED:
+    if is_platform_served(system):
         # The platform serves this name itself (#1390); an adapter file claiming it is refused.
         report.add(FAIL, f"adapter module {adapter.name}: system {system!r} is {RESERVED_REASON}")
         return None

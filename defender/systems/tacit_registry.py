@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from fnmatch import fnmatchcase
+from collections.abc import Callable
 from typing import Any, NamedTuple
 
 from pathlib import Path
@@ -356,7 +357,7 @@ def lookup(  # lint-dup: ok — a verb name addressed as `<system>.lookup`; `thr
 
 
 #: The verbs the platform serves for this system, declared here and read by the roster.
-PLATFORM_VERBS = {
+PLATFORM_VERBS: dict[str, Callable[..., Any]] = {
     "health-check": health_check,
     "lookup": lookup,
 }

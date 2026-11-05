@@ -74,11 +74,11 @@ def served_systems(grant: Any) -> list[str]:
     at query time (M21); this list governs the judge, lessons and the question-writer.
     A platform-served system (#1390) is never one: a replay cannot vary what it answers."""
     from defender.systems.verb_dispositions import HEALTH_CHECK
-    from defender.systems.verbs import PLATFORM_SERVED
+    from defender.systems.verbs import is_platform_served
 
     return sorted({system for system, verb, verb_class in grant.entries
                    if verb_class == "r" and verb != HEALTH_CHECK
-                   and system not in PLATFORM_SERVED})
+                   and not is_platform_served(system)})
 
 
 
