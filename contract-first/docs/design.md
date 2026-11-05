@@ -159,6 +159,8 @@ finding. Then each group is routed by kind:
 | An existing test goes red because it pins replaced behavior  | write-tests' stale-test repair: update, retire, rewrite as incidental, or route as a design gap                 |
 | The design is wrong or leaves a consequential choice open    | discuss-issue's amendment, put to the human as "this is a bug; here are the trade-offs" |
 
+In the code stage, test repairs wait for one dispatch over whatever gaps remain at the end, not one per finding.
+
 Human attention goes to consequential design choices, never to one question per edge case.
 
 ## Why each stage starts cold
