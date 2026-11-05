@@ -374,8 +374,8 @@ class Worker:
         costs = self._costs_due(held)
         began = time.monotonic()
         try:
-            covered = set(await asyncio.wait_for(self._store.renew(set(held), costs=costs),
-                                                 timeout=self._store_call_limit))
+            async with asyncio.timeout(self._store_call_limit):  # not `wait_for`: on 3.11 it can lose a cancel
+                covered = set(await self._store.renew(set(held), costs=costs))
         except Exception as fault:  # noqa: BLE001 — a failed renewal is waited out, never ends the worker
             self._renewal_failing = True
             self._note_store_fault(fault)
@@ -429,8 +429,8 @@ class Worker:
         while True:
             if self._store_settled():
                 try:
-                    await asyncio.wait_for(self._store.take_over(held=frozenset(self._held)),
-                                           timeout=self._store_call_limit)
+                    async with asyncio.timeout(self._store_call_limit):  # not `wait_for`: on 3.11 it can lose a cancel
+                        await self._store.take_over(held=frozenset(self._held))
                 except Exception as fault:  # noqa: BLE001 — one failed pass never ends the task
                     self._note_store_fault(fault)
                     _logger.exception("the worker's take-over pass failed; retrying")

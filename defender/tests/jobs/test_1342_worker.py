@@ -4142,3 +4142,50 @@ async def test_b11_a_fault_reading_a_stopped_runs_ending_still_hands_the_row_bac
             _kill_whatever_remains(child.seen(inv))
             await _stop_all(serving)
     _handed_back(dsn, inv)
+
+
+class _CallFinishingAsItIsCancelled:
+    """The real store, except that a renewal or take-over waits until the test releases it, so it can finish in the very tick its service task is cancelled."""
+
+    def __init__(self, store) -> None:
+        self._store = store
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    async def _held_up(self) -> list:
+        self.entered.set()
+        await self.release.wait()
+        return []
+
+    async def renew(self, held, **kw):
+        return await self._held_up()
+
+    async def take_over(self, **kw):
+        return await self._held_up()
+
+
+@pytest.mark.parametrize("service", ["renewal", "take-over"])
+async def test_b11_a_service_cancelled_as_its_store_call_finishes_still_ends_so_a_stop_cannot_hang(world, service):
+    """The cancel that ends a service lands in the tick its store call finishes: the service ends all the same. A lost cancel would leave its loop running and the worker's stop waiting forever. (#1343 review, B11)"""
+    from types import SimpleNamespace
+
+    from defender.worker._held import Held
+
+    async with job_store(world["dsn"]) as inner:
+        store = _CallFinishingAsItIsCancelled(inner)
+        worker = _worker(world, store, _child(world))
+        worker._held["x"] = Held(SimpleNamespace(investigation_id="x"), lease_until=time.monotonic() + 30)
+        task = asyncio.create_task(worker._renewal_loop() if service == "renewal" else worker._takeover_loop())
+        await asyncio.wait_for(store.entered.wait(), timeout=10)
+        store.release.set()
+        task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=5)
+        leftover = not done
+        if leftover:
+            task.cancel()
+            await asyncio.wait({task}, timeout=5)
+    assert not leftover, f"the {service} service survived its cancel"
+    assert task.cancelled()
