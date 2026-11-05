@@ -60,6 +60,7 @@ class InvestigationRow(Base, kw_only=True):
         ForeignKeyConstraint(["tenant_id", "alert_id"], [f"{SCHEMA}.alerts.tenant_id", f"{SCHEMA}.alerts.id"]),
         UniqueConstraint("tenant_id", "alert_id", "request_key", "attempt"),
         CheckConstraint(f"stage IN ({_quoted(STAGES)})", name="stage"),
+        CheckConstraint("stage <> 'running' OR lease_expires_at IS NOT NULL", name="running_has_a_lease"),
         Index("investigations_one_live_per_alert", "tenant_id", "alert_id", unique=True,
               postgresql_where=text(f"stage IN ({_quoted(LIVE)})")),
         {"schema": SCHEMA},
@@ -81,6 +82,10 @@ class InvestigationRow(Base, kw_only=True):
     knowledge: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), default=None)
     failure_reason: Mapped[str | None] = mapped_column(Text, default=None)
     failure_message: Mapped[str | None] = mapped_column(Text, default=None)
+    #: When the holder's claim lapses (by the database's clock); a running row always has one (#1343 B1).
+    lease_expires_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: When the holder wrote its final cost and knowledge: internal, written once (#1343 B-P2).
+    accounting_written_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
 
 
 @model(frozen=True)

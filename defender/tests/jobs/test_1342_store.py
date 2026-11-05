@@ -8,6 +8,7 @@ SQL, as B and the worker would leave them. Column names used in SQL are the sket
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import datetime as dt
 import inspect
@@ -27,8 +28,11 @@ from defender.tests.support.jobs._jobs1342 import (
     T2,
     JobsAudit,
     VisibleAtEmit,
+    accounting_written,
     an_alert,
     job_store,
+    lapse_lease,
+    lease_left,
     register_tenant,
     row,
 )
@@ -73,14 +77,17 @@ def _plant_alert(dsn: str, *, tenant: str = T1, ticket: str = "P-1", vendor: str
 def _plant_investigation(dsn: str, *, tenant: str, alert_id: str, key: str, attempt: int, stage: str,
                          created_at: dt.datetime = NOW) -> str:
     investigation_id = str(uuid.uuid4())
+    lease = "now() + interval '30 seconds'" if stage == "running" else "NULL"  # #1343: a running row has a lease
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, "
-                 "stage, created_at, cost_usd) VALUES (%s, %s, %s, %s, %s, %s, %s, 0)",
+                 f"stage, created_at, cost_usd, lease_expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, {lease})",  # noqa: S608
             (investigation_id, tenant, alert_id, key, attempt, stage, created_at))
     return investigation_id
 
 
 def _set_stage(dsn: str, investigation_id: str, stage: str) -> None:
-    execute(dsn, "UPDATE jobs.investigations SET stage = %s WHERE id = %s", (stage, investigation_id))
+    execute(dsn, "UPDATE jobs.investigations SET stage = %s, lease_expires_at = CASE WHEN %s = 'running' "
+                 "THEN now() + interval '30 seconds' ELSE lease_expires_at END WHERE id = %s",  # #1343: running ⇒ lease
+            (stage, stage, investigation_id))
 
 
 def _count(dsn: str, table: str, where: str = "true") -> int:
@@ -768,8 +775,8 @@ async def test_o4_a_claim_audits_with_the_system_actor_once_per_winner(dsn, capl
 
 # --- O9: cancel ----------------------------------------------------------------------------------------------------
 
-async def test_o9_cancel_aborts_queued_and_refuses_running_and_ended(dsn):
-    """queued → `aborted`/`cancelled`; running → "not yet"; terminal → "already ended". (O9)"""
+async def test_o9_cancel_aborts_queued_and_running_and_refuses_ended(dsn):
+    """queued and running → `aborted`/`cancelled`; terminal → "already ended"; "not yet" is gone. (O9, B9: conflict updated)"""
     from defender.jobs import Conflict
 
     async with job_store(dsn) as store:
@@ -780,17 +787,19 @@ async def test_o9_cancel_aborts_queued_and_refuses_running_and_ended(dsn):
         _set_stage(dsn, running.investigation_id, "running")
 
         cancelled = await store.cancel_investigation(T1, queued.investigation_id, actor="u-1")
-        with pytest.raises(Conflict, match="cannot cancel a running investigation yet"):
-            await store.cancel_investigation(T1, running.investigation_id, actor="u-1")
-        with pytest.raises(Conflict, match="already ended"):
-            await store.cancel_investigation(T1, queued.investigation_id, actor="u-1")
+        stopped = await store.cancel_investigation(T1, running.investigation_id, actor="u-1")
+        for again in (queued, running):
+            with pytest.raises(Conflict, match="already ended"):
+                await store.cancel_investigation(T1, again.investigation_id, actor="u-1")
 
     assert (cancelled.stage, cancelled.failure_reason) == ("aborted", "cancelled")
     stored = row(dsn, queued.investigation_id)
     assert (stored["stage"], stored["failure_reason"], stored["finished_at"]) == ("aborted", "cancelled", NOW)
     assert (stored["started_at"], stored["disposition"]) == (None, None)
     assert (cancelled.cost_usd, stored["cost_usd"]) == (0, 0), "a cancelled row reads cost 0 (D-n)"
-    assert row(dsn, running.investigation_id)["stage"] == "running"
+    assert (stopped.stage, stopped.failure_reason) == ("aborted", "cancelled")
+    stored = row(dsn, running.investigation_id)
+    assert (stored["stage"], stored["failure_reason"], stored["finished_at"]) == ("aborted", "cancelled", NOW)
 
 
 @pytest.mark.parametrize("stage", TERMINAL)
@@ -837,24 +846,24 @@ async def test_o9_a_cancelled_alert_can_be_investigated_again(dsn):
     assert (replay.investigation_id, replay.stage, replayed_created) == (first.investigation_id, "aborted", False)
 
 
-async def test_o9_cancel_loses_to_a_claim_committed_while_it_waits(dsn):
-    """A claim committing under cancel's feet wins: cancel says "not yet" and does not overwrite `running`. (O9, scenario)"""
+async def test_o9_cancel_waits_for_a_claim_committing_and_then_aborts_the_running_row(dsn):
+    """A claim committing under cancel's feet is followed by the cancel, which aborts the now-running row. (O9, B9: conflict updated)"""
     import psycopg
-    from defender.jobs import Conflict
 
     async with job_store(dsn) as store:
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
         async with await psycopg.AsyncConnection.connect(dsn) as conn:
-            await conn.execute("UPDATE jobs.investigations SET stage = 'running', started_at = %s WHERE id = %s",
+            await conn.execute("UPDATE jobs.investigations SET stage = 'running', started_at = %s, "
+                               "lease_expires_at = now() + interval '30 seconds' WHERE id = %s",
                                (NOW, inv.investigation_id))
             pending = asyncio.ensure_future(store.cancel_investigation(T1, inv.investigation_id, actor="u-1"))
             await until_blocked(dsn, 1)
             await conn.commit()
-        with pytest.raises(Conflict, match="cannot cancel a running investigation yet"):
-            await asyncio.wait_for(pending, 10)
+        got = await asyncio.wait_for(pending, 10)
     stored = row(dsn, inv.investigation_id)
-    assert (stored["stage"], stored["failure_reason"]) == ("running", None)
+    assert (got.stage, stored["stage"], stored["failure_reason"], stored["started_at"]) == (
+        "aborted", "aborted", "cancelled", NOW), "the claim's start was lost or the cancel did not follow it"
 
 
 async def test_o9_a_claim_skips_a_row_whose_cancel_is_uncommitted_and_never_claims_it_after(dsn):
@@ -873,30 +882,27 @@ async def test_o9_a_claim_skips_a_row_whose_cancel_is_uncommitted_and_never_clai
     assert row(dsn, inv.investigation_id)["stage"] == "aborted"
 
 
-async def test_o9_cancel_and_claim_racing_for_one_row_have_exactly_one_winner(dsn):
-    """Twenty rounds of cancel against claim: claim won ⇒ cancel refused "not yet", `running`; else `aborted`, claim nothing. (O9, scenario)"""
-    from defender.jobs import Conflict
-
+async def test_o9_cancel_and_claim_racing_for_one_row_always_end_it_aborted(dsn):
+    """Twenty rounds of cancel against claim: whichever commits first, the row ends `aborted`/`cancelled`; a claim that won saw it `running`. (O9, B9: conflict updated)"""
     outcomes = set()
     async with job_store(dsn) as setup, job_store(dsn) as a, job_store(dsn) as b:
         for n in range(20):
             alert = await an_alert(setup, T1, ticket=f"R-{n}")
             inv, _ = await setup.create_investigation(T1, alert.alert_id, f"k{n}", actor="u-1")
             cancelled, claimed = await asyncio.gather(
-                a.cancel_investigation(T1, inv.investigation_id, actor="u-1"), b.claim(),
-                return_exceptions=True)
-            stage = row(dsn, inv.investigation_id)["stage"]
+                a.cancel_investigation(T1, inv.investigation_id, actor="u-1"), b.claim(), return_exceptions=True)
+            assert not isinstance(cancelled, BaseException), cancelled
+            assert not isinstance(claimed, BaseException), claimed
+            stored = row(dsn, inv.investigation_id)
+            assert (cancelled.stage, stored["stage"], stored["failure_reason"]) == ("aborted", "aborted", "cancelled")
             if claimed is None:
-                assert not isinstance(cancelled, BaseException), cancelled
-                assert (cancelled.stage, stage) == ("aborted", "aborted")
-                outcomes.add("cancel")
+                assert stored["started_at"] is None
+                outcomes.add("cancel first")
             else:
                 assert claimed.record.investigation_id == inv.investigation_id
-                assert isinstance(cancelled, Conflict)
-                assert "running" in str(cancelled)
-                assert stage == "running"
-                outcomes.add("claim")
-    assert outcomes <= {"cancel", "claim"}
+                assert stored["started_at"] == NOW
+                outcomes.add("claim first")
+    assert outcomes <= {"cancel first", "claim first"}
 
 
 # --- O10: delete ---------------------------------------------------------------------------------------------------
@@ -1140,7 +1146,7 @@ async def test_o13_a_claim_is_audited_only_after_its_commit(dsn, caplog):
     assert audit.events()[-1].target == inv.investigation_id
 
 
-@pytest.mark.parametrize("refusal", ["unknown alert", "cancel of a running row", "delete of a live row",
+@pytest.mark.parametrize("refusal", ["unknown alert", "cancel of an ended row", "delete of a live row",
                                      "cancel of an unknown id"])
 async def test_o13_a_refused_call_emits_nothing(dsn, caplog, refusal):
     """No commit, no event: each class of refusal leaves the audit log as it was. (O13)"""
@@ -1151,12 +1157,13 @@ async def test_o13_a_refused_call_emits_nothing(dsn, caplog, refusal):
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
         _set_stage(dsn, inv.investigation_id, "running")
+        ended = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket="E"), key="e", attempt=1,
+                                     stage="failed")
         before = audit.events()
         calls = {
             "unknown alert": (UnknownReference,
                               lambda: store.create_investigation(T1, str(uuid.uuid4()), "k2", actor="u-1")),
-            "cancel of a running row": (Conflict,
-                                        lambda: store.cancel_investigation(T1, inv.investigation_id, actor="u-1")),
+            "cancel of an ended row": (Conflict, lambda: store.cancel_investigation(T1, ended, actor="u-1")),
             "delete of a live row": (Conflict,
                                      lambda: store.delete_investigation(T1, inv.investigation_id, actor="u-1")),
             "cancel of an unknown id": (NotFound,
@@ -1263,6 +1270,7 @@ async def test_o5_finish_ends_a_running_row_once_and_returns_it(dsn):
     stored = row(dsn, inv.investigation_id)
     assert (stored["stage"], stored["disposition"], stored["failure_reason"], stored["finished_at"]) == (
         "completed", "benign", None, NOW)
+    assert accounting_written(dsn, inv.investigation_id) is not None, "A's finish carries the final accounting (B4)"
 
 
 async def test_o5_finish_of_a_queued_row_changes_nothing(dsn):
@@ -1863,3 +1871,813 @@ async def test_1345_m3_a_replace_never_fails_on_one_alerts_stored_content_and_de
 
     got = {name: dict(zip(("title", "description"), _display(dsn, ids[name]), strict=True)) for name in planted}
     assert {name: {e: got[name][e] for e in entries} for name in planted} == {name: want for name, (_, want) in planted.items()}
+# --- #1343 piece B: lease, renewal, end writes, hand-back, take-over, cancel of running ------------------------------
+# Unratified seams (r5 item 11 names only the first three): `JobStore(dsn, clock=, lease=)` (seconds, database clock);
+# columns `lease_expires_at` / `accounting_written_at`; `take_over(held=)` (one pass of B6, every lapsed running row
+# not in `held`); and, named by this contract from the writes table:
+#   `renew(held, *, costs=None)`            one statement; ids it covered; `costs` = {id: figure} copied this tick
+#   `write_accounting(tenant, id, *, cost_usd, knowledge)`   B4's final accounting; the record, or None if refused
+#   `hand_back(tenant, id, *, cost_usd, knowledge)`          B11; the record, or None if refused
+
+KNOWLEDGE = {"status": "current", "commit": "abc123", "stale_kind": None}
+
+
+def _plant_running(dsn: str, *, alert_id: str, key: str, attempt: int, lapsed: bool, tenant: str = T1,
+                   marked: bool = False) -> str:
+    """A `running` row (cost 1.25) with a lease by the database clock: lapsed a minute ago, or 30 s ahead;
+    optionally with the final-accounting mark already set."""
+    investigation_id = str(uuid.uuid4())
+    when = "now() - interval '1 minute'" if lapsed else "now() + interval '30 seconds'"
+    mark = "now()" if marked else "NULL"
+    execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, "
+                 "created_at, started_at, cost_usd, lease_expires_at, accounting_written_at) VALUES "
+                 f"(%s, %s, %s, %s, %s, 'running', %s, %s, 1.25, {when}, {mark})",  # noqa: S608
+            (investigation_id, tenant, alert_id, key, attempt, NOW, NOW))
+    return investigation_id
+
+
+def _snap(dsn: str, investigation_id: str) -> dict[str, Any]:
+    """Every column of the row, by the database's own JSON (so a new column is compared too)."""
+    return execute(dsn, "SELECT to_jsonb(x) FROM jobs.investigations x WHERE id = %s", (investigation_id,))[0][0]
+
+
+def _changed(before: dict[str, Any], after: dict[str, Any]) -> set[str]:
+    return {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
+
+
+def _retries_of(dsn: str, investigation_id: str) -> list[str]:
+    return [r[0] for r in execute(
+        dsn, "SELECT r.id FROM jobs.investigations r, jobs.investigations o WHERE o.id = %s AND r.tenant_id = o.tenant_id "
+             "AND r.alert_id = o.alert_id AND r.request_key = o.request_key AND r.attempt > o.attempt "
+             "ORDER BY r.attempt", (investigation_id,))]
+
+
+def _ended_with_cost(dsn: str, stage: str, ticket: str) -> str:
+    """A terminal row carrying every field a final accounting must leave alone."""
+    inv = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket=ticket), key="k", attempt=1, stage=stage)
+    execute(dsn, "UPDATE jobs.investigations SET started_at = %s, finished_at = %s, disposition = 'benign', "
+                 "cost_usd = 1.25, failure_reason = 'no_report', failure_message = 'exited 7' WHERE id = %s",
+            (NOW, NOW, inv))
+    return inv
+
+
+# --- B1: the lease at claim ---------------------------------------------------------------------------------------
+
+async def test_b1_a_claim_gives_the_row_a_thirty_second_lease_by_the_database_clock(dsn):
+    """The claimed row's lease ends 30 s after the database's now, not the store's injected clock. (B1, Clock)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        assert lease_left(dsn, inv.investigation_id) is None, "a queued row has no lease"
+        await store.claim()
+    left = lease_left(dsn, inv.investigation_id)
+    assert left is not None
+    assert 28 <= left <= 30, left  # NOW is days in the past: an injected-clock lease reads lapsed
+    assert accounting_written(dsn, inv.investigation_id) is None
+
+
+@pytest.mark.parametrize("seconds", [5.0, 90.0])
+async def test_b1_the_lease_length_is_the_stores_own(dsn, seconds):
+    """`JobStore(lease=n)` sets the length a claim gives; nothing else holds a copy. (B1, r5 item 11)"""
+    async with job_store(dsn, lease=seconds) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        await store.claim()
+    assert seconds - 2 <= lease_left(dsn, inv.investigation_id) <= seconds
+
+
+# --- B1/B2: renewal ------------------------------------------------------------------------------------------------
+
+async def test_b1_a_renewal_extends_the_held_running_rows_and_only_those(dsn, caplog):
+    """Two held lapsed rows get a fresh lease (store-owned length) and change nothing else; a third, not held, stays lapsed; no audit. (B1, B-P3)"""
+    audit = JobsAudit(caplog)
+    a, b, c = (_plant_running(dsn, alert_id=_plant_alert(dsn, ticket=f"P-{n}"), key="k", attempt=1, lapsed=True)
+               for n in range(3))
+    before = {i: _snap(dsn, i) for i in (a, b, c)}
+    async with job_store(dsn, lease=20.0) as store:
+        covered = await store.renew({a, b})
+    assert set(covered) == {a, b}
+    assert all(18 <= lease_left(dsn, i) <= 20 for i in (a, b))
+    assert lease_left(dsn, c) < 0, "a row the caller does not hold was renewed"
+    assert [_changed(before[i], _snap(dsn, i)) for i in (a, b, c)] == [{"lease_expires_at"}, {"lease_expires_at"}, set()]
+    assert audit.events() == []
+
+
+async def test_b1_a_renewal_with_nothing_held_touches_nothing(dsn):
+    """An empty held set covers nothing and renews no row. (B1)"""
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
+    before = _snap(dsn, lapsed)
+    async with job_store(dsn) as store:
+        assert set(await store.renew(set())) == set()
+        assert set(await store.renew({str(uuid.uuid4())})) == set(), "an id no row has is not covered"
+    assert _snap(dsn, lapsed) == before
+
+
+@pytest.mark.parametrize("stage", ["queued", *TERMINAL])
+async def test_b1_a_renewal_leaves_a_row_that_is_not_running_alone(dsn, stage):
+    """Renewal is conditional on `running`: a held id whose row is queued or ended is not covered or changed; a running one beside it is. (B1, B3)"""
+    other = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket="O"), key="k", attempt=1, stage=stage)
+    if stage != "queued":
+        execute(dsn, "UPDATE jobs.investigations SET lease_expires_at = now() - interval '1 minute' WHERE id = %s", (other,))
+    control = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="C"), key="k", attempt=1, lapsed=True)
+    before = _snap(dsn, other)
+    async with job_store(dsn) as store:
+        covered = await store.renew({other, control})
+    assert set(covered) == {control}
+    assert _snap(dsn, other) == before
+
+
+async def test_b1_a_late_renewal_of_a_row_nobody_took_over_succeeds(dsn):
+    """A lapsed lease that no take-over has acted on is renewed: the row stays `running` with a fresh lease. (B1)"""
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
+    async with job_store(dsn) as store:
+        assert set(await store.renew({lapsed})) == {lapsed}
+    assert row(dsn, lapsed)["stage"] == "running"
+    assert 28 <= lease_left(dsn, lapsed) <= 30
+
+
+async def test_b1_a_renewal_after_a_take_over_omits_the_row_and_leaves_it_failed(dsn):
+    """Once taken over the row is no longer covered (the holder learns to end its child) and is not revived. (B1, B3, B6)"""
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
+    async with job_store(dsn) as store:
+        await store.take_over(held=frozenset())
+        after_take_over = _snap(dsn, lapsed)
+        assert set(await store.renew({lapsed})) == set()
+    assert _snap(dsn, lapsed) == after_take_over
+    assert after_take_over["stage"] == "failed"
+
+
+@pytest.mark.parametrize("marked", [False, True], ids=["no mark: renewed", "mark set: not re-freshened"])
+async def test_b1_a_renewal_never_reopens_a_handed_back_lease(dsn, marked):
+    """Renewal is conditional on `running` AND the accounting mark null: a row carrying the mark keeps its lapsed lease. (B1, B11, r5 item 1)"""
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True, marked=marked)
+    before = _snap(dsn, lapsed)
+    async with job_store(dsn) as store:
+        covered = set(await store.renew({lapsed}))
+    assert covered == (set() if marked else {lapsed})
+    if marked:
+        assert _snap(dsn, lapsed) == before
+        assert lease_left(dsn, lapsed) < 0
+
+
+async def test_b2_a_renewal_copies_the_cost_it_is_given_to_the_rows_it_covers(dsn):
+    """`costs` lands on the held rows it names; a held row without a figure keeps its cost; a figure for a row not held is ignored; no `costs` leaves every cost. (B2, r5 item 4)"""
+    a, b, c = (_plant_running(dsn, alert_id=_plant_alert(dsn, ticket=f"P-{n}"), key="k", attempt=1, lapsed=False)
+               for n in range(3))
+    async with job_store(dsn) as store:
+        await store.renew({a, b, c})
+        assert [row(dsn, i)["cost_usd"] for i in (a, b, c)] == [1.25, 1.25, 1.25], "a renewal without costs moved a cost"
+        await store.renew({a, b}, costs={a: 3.5, c: 9.0})
+    assert [row(dsn, i)["cost_usd"] for i in (a, b, c)] == [3.5, 1.25, 1.25]
+
+
+# --- B4/B11: the end writes -------------------------------------------------------------------------------------------
+
+async def test_b4_a_finish_with_an_unreadable_cost_writes_null_not_the_cost_so_far(dsn):
+    """Finish writes the cost it is given, null included (R2): a failed final read does not keep the copied figure. (B4, r5 R2)"""
+    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        done = await store.finish(T1, running, stage="completed", disposition="benign", cost_usd=None)
+    assert done.cost_usd is None
+    assert row(dsn, running)["cost_usd"] is None
+    assert accounting_written(dsn, running) is not None
+
+
+@pytest.mark.parametrize("stage", TERMINAL)
+async def test_b4_a_final_accounting_writes_cost_knowledge_and_the_mark_and_nothing_else(dsn, stage):
+    """On an ended row with no mark: cost, knowledge and mark change; stage, times, disposition and failure detail do not. (B4, Writes table)"""
+    inv = _ended_with_cost(dsn, stage, "A")
+    before = _snap(dsn, inv)
+    async with job_store(dsn) as store:
+        got = await store.write_accounting(T1, inv, cost_usd=4.5, knowledge=KNOWLEDGE)
+    assert got is not None
+    assert (got.stage, got.cost_usd, got.knowledge) == (stage, 4.5, KNOWLEDGE)
+    assert _changed(before, _snap(dsn, inv)) == {"cost_usd", "knowledge", "accounting_written_at"}
+    assert accounting_written(dsn, inv) is not None
+
+
+async def test_b4_a_final_accounting_is_written_once(dsn):
+    """A second final accounting is refused and changes nothing, whatever it carries; so is one after a finish, which set the mark. (B4)"""
+    inv = _ended_with_cost(dsn, "failed", "A")
+    finished = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="F"), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        assert await store.write_accounting(T1, inv, cost_usd=4.5, knowledge=KNOWLEDGE) is not None
+        first = _snap(dsn, inv)
+        assert await store.write_accounting(T1, inv, cost_usd=99.0, knowledge=None) is None
+        await store.finish(T1, finished, stage="completed", disposition="benign", cost_usd=2.0, knowledge=KNOWLEDGE)
+        after_finish = _snap(dsn, finished)
+        assert await store.write_accounting(T1, finished, cost_usd=99.0, knowledge=None) is None
+    assert _snap(dsn, inv) == first
+    assert _snap(dsn, finished) == after_finish
+
+
+@pytest.mark.parametrize("target", ["running", "queued", "other tenant", "unknown"])
+async def test_b4_a_final_accounting_is_refused_for_a_row_that_is_not_an_ended_one_of_this_tenant(dsn, target):
+    """Only a terminal row of the caller's tenant takes it: running and queued rows, another tenant's, a deleted id are unchanged. (B4, Writes table)"""
+    inv = {"running": lambda: _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False),
+           "queued": lambda: _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn), key="k", attempt=1, stage="queued"),
+           "other tenant": lambda: _ended_with_cost(dsn, "failed", "A"),
+           "unknown": lambda: str(uuid.uuid4())}[target]()
+    ended = _ended_with_cost(dsn, "failed", "Z")  # positive control: the same call accepts this one
+    before = _snap(dsn, inv) if target != "unknown" else None
+    async with job_store(dsn) as store:
+        tenant = T2 if target == "other tenant" else T1
+        assert await store.write_accounting(tenant, inv, cost_usd=4.5, knowledge=KNOWLEDGE) is None
+        assert await store.write_accounting(T1, ended, cost_usd=4.5, knowledge=KNOWLEDGE) is not None
+    if before is not None:
+        assert _snap(dsn, inv) == before
+
+
+async def test_b4_a_final_accounting_with_an_unreadable_cost_writes_null(dsn):
+    """Null cost replaces the copied figure on the ended row; the mark is still set. (B4, r5 R2)"""
+    inv = _ended_with_cost(dsn, "failed", "A")
+    async with job_store(dsn) as store:
+        await store.write_accounting(T1, inv, cost_usd=None, knowledge=None)
+    assert row(dsn, inv)["cost_usd"] is None
+    assert accounting_written(dsn, inv) is not None
+
+
+async def test_b4_a_taken_over_row_accepts_its_holders_final_accounting(dsn):
+    """Take-over writes no accounting; the cut-off holder's later write lands on the old row, leaves its `failed`/`lease_lapsed` and its retry alone. (B-P2, B6)"""
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
+    async with job_store(dsn) as store:
+        await store.take_over(held=frozenset())
+        assert accounting_written(dsn, lapsed) is None
+        [retry] = _retries_of(dsn, lapsed)
+        retry_before = _snap(dsn, retry)
+        got = await store.write_accounting(T1, lapsed, cost_usd=7.0, knowledge=KNOWLEDGE)
+    assert got is not None
+    stored = row(dsn, lapsed)
+    assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], stored["knowledge"]) == (
+        "failed", "lease_lapsed", 7.0, KNOWLEDGE)
+    assert _snap(dsn, retry) == retry_before
+
+
+async def test_b4_a_cancelled_running_row_accepts_its_holders_final_accounting(dsn):
+    """Cancel writes no accounting either: the holder's final cost and knowledge land on the `aborted` row. (B-P2, B9)"""
+    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        await store.cancel_investigation(T1, running, actor="u-1")
+        assert accounting_written(dsn, running) is None
+        await store.write_accounting(T1, running, cost_usd=2.0, knowledge=KNOWLEDGE)
+    stored = row(dsn, running)
+    assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], stored["knowledge"]) == (
+        "aborted", "cancelled", 2.0, KNOWLEDGE)
+
+
+async def test_b11_a_hand_back_lapses_the_lease_keeps_the_row_running_and_copies_cost_knowledge_and_the_mark(dsn, caplog):
+    """A running row with a fresh lease: lease lapsed, final cost and knowledge written, mark set, still `running`, nothing else changed. (B11, Writes table)"""
+    audit = JobsAudit(caplog)
+    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    before = _snap(dsn, running)
+    async with job_store(dsn) as store:
+        got = await store.hand_back(T1, running, cost_usd=3.0, knowledge=KNOWLEDGE)
+    assert got is not None
+    assert (got.stage, got.cost_usd, got.knowledge) == ("running", 3.0, KNOWLEDGE)
+    assert lease_left(dsn, running) < 0
+    assert accounting_written(dsn, running) is not None
+    assert _changed(before, _snap(dsn, running)) == {"lease_expires_at", "cost_usd", "knowledge", "accounting_written_at"}
+    assert audit.events() == []
+
+
+async def test_b11_a_hand_back_with_an_unreadable_cost_writes_null(dsn):
+    """Null cost replaces the copied figure in the hand-back too. (B11, r5 R2)"""
+    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        await store.hand_back(T1, running, cost_usd=None, knowledge=None)
+    assert row(dsn, running)["cost_usd"] is None
+
+
+@pytest.mark.parametrize("stage", ["queued", *TERMINAL])
+async def test_b11_a_hand_back_is_conditional_on_running(dsn, stage):
+    """A queued or ended row is refused and unchanged; a running one beside it is handed back. (B11, Writes table)"""
+    other = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket="O"), key="k", attempt=1, stage=stage)
+    control = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="C"), key="k", attempt=1, lapsed=False)
+    before = _snap(dsn, other)
+    async with job_store(dsn) as store:
+        assert await store.hand_back(T1, other, cost_usd=3.0, knowledge=None) is None
+        assert await store.hand_back(T1, control, cost_usd=3.0, knowledge=None) is not None
+    assert _snap(dsn, other) == before
+
+
+async def test_b11_a_handed_back_row_is_not_renewed_not_reclaimed_and_is_taken_over_with_its_cost(dsn):
+    """After the hand-back a renewal omits it, claim ignores it, and a take-over fails it `lease_lapsed` with a queued retry, keeping the handed-back cost and mark. (B11, B6, r4 item 2)"""
+    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        await store.hand_back(T1, running, cost_usd=3.0, knowledge=KNOWLEDGE)
+        mark = accounting_written(dsn, running)
+        assert set(await store.renew({running})) == set()
+        assert lease_left(dsn, running) < 0
+        assert await store.claim() is None
+        await store.take_over(held=frozenset())
+    stored = row(dsn, running)
+    assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], stored["knowledge"]) == (
+        "failed", "lease_lapsed", 3.0, KNOWLEDGE)
+    assert accounting_written(dsn, running) == mark
+    [retry] = _retries_of(dsn, running)
+    assert (row(dsn, retry)["stage"], row(dsn, retry)["attempt"]) == ("queued", 2)
+
+
+
+@pytest.mark.parametrize("attempt", [1, 3], ids=["retried", "capped"])
+async def test_b11_take_over_tells_a_handed_back_row_from_a_lost_workers_in_its_message(dsn, attempt):
+    """A handed-back row's take-over message says its worker stopped and handed it back; a lapsed row beside it, whose worker was lost, says its worker stopped renewing. Reasons are unchanged. (#1343 review, B6, B11)"""
+    handed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="H"), key="kh", attempt=attempt, lapsed=False)
+    lost = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="L"), key="kl", attempt=attempt, lapsed=True)
+    async with job_store(dsn) as store:
+        await store.hand_back(T1, handed, cost_usd=1.0, knowledge=None)
+        await store.take_over(held=frozenset())
+    reason = "lease_lapsed" if attempt == 1 else "retry_cap"
+    got_handed, got_lost = row(dsn, handed), row(dsn, lost)
+    assert (got_handed["failure_reason"], got_lost["failure_reason"]) == (reason, reason)
+    assert "handed it back" in got_handed["failure_message"], got_handed["failure_message"]
+    assert "stopped renewing" not in got_handed["failure_message"]
+    assert "stopped renewing its lease" in got_lost["failure_message"], got_lost["failure_message"]
+
+
+async def test_o6_the_store_tells_a_value_it_refuses_from_a_read_only_database_on_real_faults(dsn):
+    """Against real PostgreSQL: a value JSONB cannot hold (NUL) is a refusal, not an outage; a read-only transaction, as a standby answers during a failover, is an outage, not a refusal. (#1343 review, B5)"""
+    from sqlalchemy import text
+
+    from defender.jobs import is_outage, is_refusal
+
+    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        with pytest.raises(Exception) as refused:  # noqa: PT011 — the classification is what is under test
+            await store.finish(T1, running, stage="completed", knowledge={"bad": "\u0000"})
+    assert is_refusal(refused.value), repr(refused.value)
+    assert not is_outage(refused.value), repr(refused.value)
+    async with job_store(dsn) as store:
+        async def write_read_only() -> None:
+            async with store._tx() as s:
+                await s.execute(text("SET TRANSACTION READ ONLY"))
+                await s.execute(text("UPDATE jobs.investigations SET cost_usd = 0"))
+
+        with pytest.raises(Exception) as read_only:  # noqa: PT011 — the classification is what is under test
+            await write_read_only()
+    assert is_outage(read_only.value), repr(read_only.value)
+    assert not is_refusal(read_only.value), repr(read_only.value)
+
+# --- B6/B7/B8: take-over -------------------------------------------------------------------------------------------
+
+async def test_b6_a_lapsed_running_row_is_failed_and_retried_in_one_take_over_and_audited(dsn, caplog):
+    """Lapsed attempt 1: `failed`/`lease_lapsed`, no accounting, + queued attempt 2 (same key, created now, cost 0, no lease or mark); a fresh or held lease is left. (B6, B8, B-P3)"""
+    audit = JobsAudit(caplog)
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="P-1"), key="k1", attempt=1, lapsed=True)
+    fresh = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="P-2"), key="k2", attempt=1, lapsed=False)
+    held = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="P-3"), key="k3", attempt=1, lapsed=True)
+    fresh_before, held_before = _snap(dsn, fresh), _snap(dsn, held)
+    async with job_store(dsn) as store:
+        await store.take_over(held=frozenset({held}))
+
+    old = row(dsn, lapsed)
+    assert (old["stage"], old["failure_reason"], old["finished_at"]) == ("failed", "lease_lapsed", NOW)
+    assert old["cost_usd"] == 1.25, "a take-over writes no accounting"
+    assert accounting_written(dsn, lapsed) is None
+    retries = execute(dsn, "SELECT id, tenant_id, request_key, attempt, stage, created_at, cost_usd, started_at, "
+                           "lease_expires_at, accounting_written_at, knowledge IS NULL FROM jobs.investigations "
+                           "WHERE alert_id = (SELECT alert_id FROM jobs.investigations WHERE id = %s) AND id <> %s",
+                      (lapsed, lapsed))
+    assert [r[1:] for r in retries] == [(T1, "k1", 2, "queued", NOW, 0.0, None, None, None, True)]
+    assert _snap(dsn, fresh) == fresh_before, "a row whose lease is fresh was taken over (B8)"
+    assert _snap(dsn, held) == held_before, "a row in the caller's held set was taken over (B-P3)"
+    events = [(e.action, e.actor, e.tenant_id, e.target) for e in audit.events() if e.action.startswith("investigation.")]
+    assert events == [("investigation.takeover", "system", T1, lapsed), ("investigation.retry", "system", T1, retries[0][0])]
+    assert "lease_lapsed" in next(e.detail for e in audit.events() if e.action == "investigation.takeover")
+
+
+async def test_b6_a_lapsed_second_attempt_is_retried_as_attempt_three(dsn):
+    """Below the cap every lapsed attempt queues the next one; attempt 2 → `lease_lapsed` + attempt 3. (B6)"""
+    alert_id = _plant_alert(dsn)
+    _plant_investigation(dsn, tenant=T1, alert_id=alert_id, key="k1", attempt=1, stage="failed")
+    second = _plant_running(dsn, alert_id=alert_id, key="k1", attempt=2, lapsed=True)
+    async with job_store(dsn) as store:
+        await store.take_over(held=frozenset())
+    assert row(dsn, second)["failure_reason"] == "lease_lapsed"
+    [retry] = _retries_of(dsn, second)
+    assert (row(dsn, retry)["attempt"], row(dsn, retry)["stage"]) == (3, "queued")
+
+
+async def test_b6_a_lapsed_third_attempt_ends_retry_cap_with_no_retry(dsn, caplog):
+    """Attempt 3 lapsed: `failed`/`retry_cap`, nothing inserted, the alert is free, one takeover event naming the reason. (B6)"""
+    audit = JobsAudit(caplog)
+    alert_id = _plant_alert(dsn)
+    third = _plant_running(dsn, alert_id=alert_id, key="k1", attempt=3, lapsed=True)
+    async with job_store(dsn) as store:
+        await store.take_over(held=frozenset())
+
+    assert (row(dsn, third)["stage"], row(dsn, third)["failure_reason"]) == ("failed", "retry_cap")
+    assert _count(dsn, "investigations") == 1
+    assert [e.action for e in audit.events() if e.action.startswith("investigation.")] == ["investigation.takeover"]
+    assert "retry_cap" in audit.events()[-1].detail
+
+
+async def test_b6_one_pass_takes_over_every_lapsed_row_each_in_its_own_tenant(dsn, caplog):
+    """Four lapsed rows (two tenants, attempts 1, 2, 3, 1): all ended in one pass, retries in the row's tenant, one takeover event each. (B6, B7)"""
+    audit = JobsAudit(caplog)
+    rows = [(T1, 1), (T2, 2), (T1, 3), (T2, 1)]
+    ids = [_plant_running(dsn, alert_id=_plant_alert(dsn, tenant=tenant, ticket=f"P-{n}"), key="k", attempt=attempt,
+                          lapsed=True, tenant=tenant) for n, (tenant, attempt) in enumerate(rows)]
+    async with job_store(dsn) as store:
+        await store.take_over(held=frozenset())
+    assert [row(dsn, i)["failure_reason"] for i in ids] == ["lease_lapsed", "lease_lapsed", "retry_cap", "lease_lapsed"]
+    assert [[(row(dsn, r)["attempt"]) for r in _retries_of(dsn, i)] for i in ids] == [[2], [3], [], [2]]
+    takeovers = sorted((e.tenant_id, e.target) for e in audit.events() if e.action == "investigation.takeover")
+    assert takeovers == sorted((tenant, i) for (tenant, _), i in zip(rows, ids, strict=True))
+    retry_tenants = {execute(dsn, "SELECT tenant_id FROM jobs.investigations WHERE id = %s", (e.target,))[0][0] == e.tenant_id
+                     for e in audit.events() if e.action == "investigation.retry"}
+    assert retry_tenants == {True}
+
+
+async def test_b8_only_a_running_row_with_a_lapsed_lease_is_retried(dsn, caplog):
+    """A queued row, a finished row and a cancelled row, each with a lease in the past, are left; no retry, no event; the lapsed running row beside them is taken over. (B8)"""
+    audit = JobsAudit(caplog)
+    queued = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket="Q"), key="k", attempt=1, stage="queued")
+    async with job_store(dsn) as store:
+        finished = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="F"), key="k", attempt=1, lapsed=False)
+        await store.finish(T1, finished, stage="completed", disposition="benign", cost_usd=1.0)
+        cancelled = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="X"), key="k", attempt=1, lapsed=False)
+        await store.cancel_investigation(T1, cancelled, actor="u-1")
+        for i in (finished, cancelled):
+            lapse_lease(dsn, i)
+        control = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="C"), key="k", attempt=1, lapsed=True)
+        before = {i: _snap(dsn, i) for i in (queued, finished, cancelled)}
+        await store.take_over(held=frozenset())
+    assert {i: _snap(dsn, i) for i in before} == before
+    assert row(dsn, control)["failure_reason"] == "lease_lapsed"
+    assert _count(dsn, "investigations") == 5, "only the control row was retried"
+    assert [e.target for e in audit.events() if e.action == "investigation.takeover"] == [control]
+
+
+async def test_b6_the_audit_events_leave_after_the_commit(dsn, caplog):
+    """When each takeover/retry event is emitted another connection already sees `failed` / `queued`. (B6, O13)"""
+    audit = JobsAudit(caplog)
+    seen = VisibleAtEmit(dsn)
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
+    async with job_store(dsn) as store:
+        logging.getLogger(JOBS_AUDIT).addHandler(seen)
+        try:
+            await store.take_over(held=frozenset())
+        finally:
+            logging.getLogger(JOBS_AUDIT).removeHandler(seen)
+    assert seen.seen == [("investigation.takeover", "failed"), ("investigation.retry", "queued")]
+    assert audit.events()[0].target == lapsed
+
+
+async def test_b6_a_take_over_that_fails_at_commit_changes_and_emits_nothing(dsn, caplog):
+    """A real commit-time fault: no row moves, no retry exists, no event leaves; without the fault the same pass commits. (B6, O13)"""
+    audit = JobsAudit(caplog)
+    execute(dsn, "CREATE FUNCTION public.boom_1342() RETURNS trigger LANGUAGE plpgsql AS "
+                 "$$ BEGIN RAISE EXCEPTION 'boom 1342'; END $$")
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
+    before = execute(dsn, "SELECT id, stage FROM jobs.investigations ORDER BY id")
+    async with job_store(dsn) as store:
+        execute(dsn, _BOOM)
+        with contextlib.suppress(Exception):  # whether the pass raises or logs and carries on is the worker's seam, not the contract's
+            await store.take_over(held=frozenset())
+        assert execute(dsn, "SELECT id, stage FROM jobs.investigations ORDER BY id") == before
+        assert [e for e in audit.events() if e.action.startswith("investigation.")] == []
+        execute(dsn, "DROP TRIGGER boom_1342 ON jobs.investigations")
+        await store.take_over(held=frozenset())  # control
+    assert row(dsn, lapsed)["stage"] == "failed"
+    assert len([e for e in audit.events() if e.action.startswith("investigation.")]) == 2
+
+
+async def test_b7_a_take_over_skips_a_row_another_transaction_holds_and_takes_it_later(dsn):
+    """`SKIP LOCKED`: a locked lapsed row is passed over at once while an unlocked one is taken; once released the next pass takes it. (B7)"""
+    import psycopg
+
+    locked = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="L"), key="k", attempt=1, lapsed=True)
+    free = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="F"), key="k", attempt=1, lapsed=True)
+    async with job_store(dsn) as store:
+        async with await psycopg.AsyncConnection.connect(dsn) as conn:
+            await conn.execute("SELECT id FROM jobs.investigations WHERE id = %s FOR UPDATE", (locked,))
+            await asyncio.wait_for(store.take_over(held=frozenset()), timeout=5)
+            assert (row(dsn, locked)["stage"], row(dsn, free)["stage"]) == ("running", "failed")
+            assert _retries_of(dsn, locked) == []
+            await conn.commit()
+        await store.take_over(held=frozenset())
+    assert row(dsn, locked)["failure_reason"] == "lease_lapsed"
+    assert len(_retries_of(dsn, locked)) == 1
+
+
+async def test_b7_two_take_over_passes_at_once_take_each_row_once(dsn, caplog):
+    """Six lapsed rows, two workers' passes together: exactly one retry and one takeover event per row, no pass fails. (B7, B6)"""
+    audit = JobsAudit(caplog)
+    ids = [_plant_running(dsn, alert_id=_plant_alert(dsn, ticket=f"P-{n}"), key="k", attempt=1, lapsed=True) for n in range(6)]
+    async with job_store(dsn) as a, job_store(dsn) as b:
+        results = await asyncio.gather(a.take_over(held=frozenset()), b.take_over(held=frozenset()), return_exceptions=True)
+    assert [r for r in results if isinstance(r, BaseException)] == []
+    assert [len(_retries_of(dsn, i)) for i in ids] == [1] * 6
+    assert _count(dsn, "investigations") == 12
+    assert sorted(e.target for e in audit.events() if e.action == "investigation.takeover") == sorted(ids)
+    assert len([e for e in audit.events() if e.action == "investigation.retry"]) == 6
+
+
+async def test_r4_a_row_is_claimed_at_most_once(dsn):
+    """A running row, lapsed or not, is never claimed again and never goes back to `queued`; after a take-over only the retry is claimable. (r4 item 2, B6)"""
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        assert (await store.claim()).record.investigation_id == inv.investigation_id
+        lease = lease_left(dsn, inv.investigation_id)
+        assert await store.claim() is None
+        lapse_lease(dsn, inv.investigation_id)
+        assert await store.claim() is None, "a lapsed running row was claimed again"
+        assert lease_left(dsn, inv.investigation_id) < 0 <= lease, "a second claim re-leased the row"
+        await store.take_over(held=frozenset())
+        [retry] = _retries_of(dsn, inv.investigation_id)
+        claimed = await store.claim()
+        assert await store.claim() is None
+    assert claimed.record.investigation_id == retry
+    assert row(dsn, inv.investigation_id)["stage"] == "failed"
+    assert row(dsn, inv.investigation_id)["started_at"] == NOW
+
+
+# --- B6 interactions: create, delete, cancel, finish ----------------------------------------------------------------
+
+async def test_b6_a_create_after_a_take_over_answers_the_live_retry_and_inserts_nothing(dsn):
+    """Same key or a new one, a create finds the retry (live) and inserts nothing. (B6, Interactions)"""
+    alert_id = _plant_alert(dsn)
+    lapsed = _plant_running(dsn, alert_id=alert_id, key="k1", attempt=1, lapsed=True)
+    async with job_store(dsn) as store:
+        await store.take_over(held=frozenset())
+        [retry] = _retries_of(dsn, lapsed)
+        same, same_created = await store.create_investigation(T1, alert_id, "k1", actor="u-1")
+        other, other_created = await store.create_investigation(T1, alert_id, "k2", actor="u-1")
+    assert (same.investigation_id, same_created) == (retry, False)
+    assert (other.investigation_id, other_created) == (retry, False)
+    assert _count(dsn, "investigations") == 2
+
+
+async def test_b6_a_create_racing_a_take_over_always_finds_a_live_row(dsn):
+    """Fifteen rounds of take-over against a create of a new key: the create never inserts (it sees the running row or the retry), and exactly one live row remains. (B6, Interactions)"""
+    async with job_store(dsn) as a, job_store(dsn) as b:
+        for n in range(15):
+            alert_id = _plant_alert(dsn, ticket=f"R-{n}")
+            lapsed = _plant_running(dsn, alert_id=alert_id, key="k1", attempt=1, lapsed=True)
+            _, got = await asyncio.gather(a.take_over(held=frozenset()), b.create_investigation(T1, alert_id, "k2", actor="u-1"))
+            assert got[1] is False, "the create inserted beside a live row"
+            assert _count(dsn, "investigations", f"alert_id = '{alert_id}'") == 2
+            assert _count(dsn, "investigations", f"alert_id = '{alert_id}' AND stage IN ('queued', 'running')") == 1
+            assert row(dsn, lapsed)["failure_reason"] == "lease_lapsed"
+
+
+async def test_b6_delete_is_refused_while_a_take_over_left_a_live_retry_and_allowed_at_the_cap(dsn):
+    """After a take-over below the cap the retry is live, so delete through either attempt is a `Conflict` that removes nothing; after `retry_cap` nothing is live and delete removes the request. (B6, Interactions)"""
+    from defender.jobs import Conflict
+
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="A"), key="k", attempt=1, lapsed=True)
+    capped = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="B"), key="k", attempt=3, lapsed=True)
+    async with job_store(dsn) as store:
+        await store.take_over(held=frozenset())
+        [retry] = _retries_of(dsn, lapsed)
+        for named in (lapsed, retry):
+            with pytest.raises(Conflict):
+                await store.delete_investigation(T1, named, actor="u-1")
+        await store.delete_investigation(T1, capped, actor="u-1")
+    assert row(dsn, capped) is None
+    assert row(dsn, lapsed) is not None
+    assert row(dsn, retry) is not None
+
+
+async def test_b6_a_cancelled_row_is_not_taken_over(dsn, caplog):
+    """Cancel first: the lapsed running row is `aborted`; a take-over after it inserts no retry and emits no takeover. (B6, B9, Interactions)"""
+    audit = JobsAudit(caplog)
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
+    async with job_store(dsn) as store:
+        await store.cancel_investigation(T1, lapsed, actor="u-1")
+        await store.take_over(held=frozenset())
+    assert (row(dsn, lapsed)["stage"], row(dsn, lapsed)["failure_reason"]) == ("aborted", "cancelled")
+    assert _count(dsn, "investigations") == 1
+    assert [e.action for e in audit.events() if e.action.startswith("investigation.")] == ["investigation.cancel"]
+
+
+async def test_b9_cancel_racing_a_take_over_has_exactly_one_winner(dsn):
+    """Fifteen rounds on a lapsed running row: cancel won ⇒ `aborted`, no retry; take-over won ⇒ `failed`/`lease_lapsed`, a retry, and cancel's `Conflict` names it. (B9, B6, Interactions)"""
+    from defender.jobs import Conflict
+
+    outcomes = set()
+    async with job_store(dsn) as a, job_store(dsn) as b:
+        for n in range(15):
+            lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket=f"R-{n}"), key="k", attempt=1, lapsed=True)
+            cancelled, _ = await asyncio.gather(a.cancel_investigation(T1, lapsed, actor="u-1"),
+                                                b.take_over(held=frozenset()), return_exceptions=True)
+            retries = _retries_of(dsn, lapsed)
+            if isinstance(cancelled, Conflict):
+                assert row(dsn, lapsed)["failure_reason"] == "lease_lapsed"
+                assert len(retries) == 1
+                assert retries[0] in str(cancelled)
+                outcomes.add("take-over")
+            else:
+                assert not isinstance(cancelled, BaseException), cancelled
+                assert (row(dsn, lapsed)["stage"], retries) == ("aborted", [])
+                outcomes.add("cancel")
+    assert outcomes <= {"cancel", "take-over"}
+
+
+@pytest.mark.parametrize("first", ["finish", "take_over"])
+async def test_b4_finish_and_take_over_of_one_lapsed_row_have_one_winner(dsn, first):
+    """Whichever commits first decides: finish first ⇒ `completed` and no retry; take-over first ⇒ the late finish returns None and the row is `failed`/`lease_lapsed`. (B4, B6, Interactions)"""
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
+    async with job_store(dsn) as store:
+        if first == "finish":
+            assert await store.finish(T1, lapsed, stage="completed", disposition="benign", cost_usd=2.0) is not None
+            await store.take_over(held=frozenset())
+        else:
+            await store.take_over(held=frozenset())
+            assert await store.finish(T1, lapsed, stage="completed", disposition="benign", cost_usd=2.0) is None
+    stored = row(dsn, lapsed)
+    if first == "finish":
+        assert (stored["stage"], stored["cost_usd"], _retries_of(dsn, lapsed)) == ("completed", 2.0, [])
+    else:
+        assert (stored["stage"], stored["failure_reason"], stored["cost_usd"]) == ("failed", "lease_lapsed", 1.25)
+        assert len(_retries_of(dsn, lapsed)) == 1
+
+
+# --- B9: cancel of a running row, and what an ended row's cancel says ------------------------------------------------
+
+async def test_b9_cancel_of_a_running_row_aborts_it_at_once(dsn, caplog):
+    """`running` → `aborted`/`cancelled`, finished now, answered at once and audited with the caller. (B9)"""
+    audit = JobsAudit(caplog)
+    async with job_store(dsn) as store:
+        alert = await an_alert(store, T1)
+        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        await store.claim()
+        got = await store.cancel_investigation(T1, inv.investigation_id, actor="u-1")
+
+    assert (got.stage, got.failure_reason) == ("aborted", "cancelled")
+    stored = row(dsn, inv.investigation_id)
+    assert (stored["stage"], stored["failure_reason"], stored["finished_at"]) == ("aborted", "cancelled", NOW)
+    assert [(e.action, e.actor) for e in audit.events() if e.action == "investigation.cancel"] == [
+        ("investigation.cancel", "u-1")]
+
+
+async def test_b3_a_cancelled_row_drops_out_of_the_holders_renewal(dsn):
+    """The renewal that covered the row before the cancel no longer does: the signal for the holder to end its child. (B3, B9)"""
+    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        assert set(await store.renew({running})) == {running}
+        await store.cancel_investigation(T1, running, actor="u-1")
+        assert set(await store.renew({running})) == set()
+    assert row(dsn, running)["stage"] == "aborted"
+
+
+async def test_b9_cancel_racing_a_finish_has_exactly_one_winner(dsn):
+    """Fifteen rounds on a running row: cancel won ⇒ `aborted` and finish returns None; finish won ⇒ the stage it wrote and cancel's `Conflict` "already ended". (B9, B4, Interactions)"""
+    from defender.jobs import Conflict
+
+    outcomes = set()
+    async with job_store(dsn) as a, job_store(dsn) as b:
+        for n in range(15):
+            running = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket=f"R-{n}"), key="k", attempt=1, lapsed=False)
+            cancelled, finished = await asyncio.gather(
+                a.cancel_investigation(T1, running, actor="u-1"),
+                b.finish(T1, running, stage="completed", disposition="benign", cost_usd=2.0), return_exceptions=True)
+            assert not isinstance(finished, BaseException), finished
+            if finished is None:
+                assert not isinstance(cancelled, BaseException), cancelled
+                assert row(dsn, running)["stage"] == "aborted"
+                outcomes.add("cancel")
+            else:
+                assert isinstance(cancelled, Conflict)
+                assert "already ended" in str(cancelled)
+                assert row(dsn, running)["stage"] == "completed"
+                outcomes.add("finish")
+    assert outcomes <= {"cancel", "finish"}
+
+
+async def test_b9_cancel_of_a_taken_over_attempt_names_its_live_retry(dsn):
+    """Cancel of the failed attempt 1 whose retry is live: `Conflict` naming the retry's id; once the retry is cancelled, "already ended". (B9)"""
+    from defender.jobs import Conflict
+
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="P-1"), key="k1", attempt=1, lapsed=True)
+    async with job_store(dsn) as store:
+        await store.take_over(held=frozenset())
+        [retry] = _retries_of(dsn, lapsed)
+        with pytest.raises(Conflict) as named:
+            await store.cancel_investigation(T1, lapsed, actor="u-1")
+        await store.cancel_investigation(T1, retry, actor="u-1")
+        with pytest.raises(Conflict, match="already ended") as ended:
+            await store.cancel_investigation(T1, lapsed, actor="u-1")
+    assert retry in str(named.value)
+    assert retry not in str(ended.value)
+    assert row(dsn, lapsed)["failure_reason"] == "lease_lapsed", "a refused cancel changed the row"
+
+
+async def test_b9_a_cancel_names_a_retry_only_when_one_is_live_under_the_same_request(dsn):
+    """Named: a live higher attempt of the same tenant/alert/key, whichever earlier attempt is cancelled. Not named: an ended later attempt, a live row of another key, a live row of another alert. (B9, r5 item 11)"""
+    from defender.jobs import Conflict
+
+    chain = _plant_alert(dsn, ticket="A")
+    first = _plant_investigation(dsn, tenant=T1, alert_id=chain, key="k", attempt=1, stage="failed")
+    second = _plant_investigation(dsn, tenant=T1, alert_id=chain, key="k", attempt=2, stage="failed")
+    third = _plant_running(dsn, alert_id=chain, key="k", attempt=3, lapsed=False)
+
+    done = _plant_alert(dsn, ticket="B")
+    early = _plant_investigation(dsn, tenant=T1, alert_id=done, key="k", attempt=1, stage="failed")
+    _plant_investigation(dsn, tenant=T1, alert_id=done, key="k", attempt=2, stage="completed")
+
+    shared = _plant_alert(dsn, ticket="C")
+    old_key = _plant_investigation(dsn, tenant=T1, alert_id=shared, key="k", attempt=1, stage="failed")
+    other_key = _plant_running(dsn, alert_id=shared, key="other", attempt=1, lapsed=False)
+
+    elsewhere = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket="D"), key="k", attempt=1, stage="failed")
+    _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="E"), key="k", attempt=2, lapsed=False)
+
+    async def message(target: str) -> str:
+        with pytest.raises(Conflict) as refused:
+            await store.cancel_investigation(T1, target, actor="u-1")
+        return str(refused.value)
+
+    async with job_store(dsn) as store:
+        assert [third in await message(i) for i in (first, second)] == [True, True]
+        for unrelated, live in ((early, None), (old_key, other_key), (elsewhere, None)):
+            text = await message(unrelated)
+            assert "already ended" in text
+            assert live is None or live not in text
+    assert row(dsn, third)["stage"] == "running", "the refused cancels touched the live retry"
+
+
+@pytest.mark.parametrize("differs", ["tenant", "alert", "request key"])
+async def test_b9_a_cancel_never_names_a_live_higher_attempt_that_differs_in_tenant_alert_or_request_key(dsn, differs):
+    """A live higher attempt differing from the ended one in that field alone is not named ("already ended"); the control matching all three is. (B9, r5 item 11)"""
+    from defender.jobs import Conflict
+
+    chain = _plant_alert(dsn, ticket="E")
+    ended = _plant_investigation(dsn, tenant=T1, alert_id=chain, key="k", attempt=1, stage="failed")
+    # (the "tenant" variant necessarily differs in alert too: a tenant's alert belongs to it)
+    # a tenant's alert belongs to it, so the other tenant's row necessarily stands on an alert of its own
+    live = {"tenant": lambda: _plant_running(dsn, alert_id=_plant_alert(dsn, tenant=T2, ticket="X"), key="k", attempt=2,
+                                             lapsed=False, tenant=T2),
+            "alert": lambda: _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="Y"), key="k", attempt=2, lapsed=False),
+            "request key": lambda: _plant_running(dsn, alert_id=chain, key="other", attempt=2, lapsed=False)}[differs]()
+    control_chain = _plant_alert(dsn, ticket="C")
+    control_ended = _plant_investigation(dsn, tenant=T1, alert_id=control_chain, key="k", attempt=1, stage="failed")
+    control = _plant_running(dsn, alert_id=control_chain, key="k", attempt=2, lapsed=False)
+    async with job_store(dsn) as store:
+        with pytest.raises(Conflict) as refused:
+            await store.cancel_investigation(T1, ended, actor="u-1")
+        with pytest.raises(Conflict) as named:
+            await store.cancel_investigation(T1, control_ended, actor="u-1")
+    assert "already ended" in str(refused.value)
+    assert live not in str(refused.value), f"named a live row differing in {differs}"
+    assert control in str(named.value), "premise: the matching live retry was not named"
+    assert row(dsn, live)["stage"] == "running", "the refused cancel touched the live row"
+
+
+_FAR_PAST = dt.datetime(2001, 2, 3, 4, 5, 6, 123456, tzinfo=dt.UTC)
+_FAR_FUTURE = dt.datetime(2100, 2, 3, 4, 5, 6, 123456, tzinfo=dt.UTC)
+
+
+def _created_at(dsn: str, investigation_id: str) -> dt.datetime:
+    return execute(dsn, "SELECT created_at FROM jobs.investigations WHERE id = %s", (investigation_id,))[0][0]
+
+
+@pytest.mark.parametrize("instant", [_FAR_PAST, _FAR_FUTURE], ids=["clock-in-the-past", "clock-in-the-future"])
+async def test_b1_b11_every_store_write_dates_its_lease_by_the_database_clock_and_every_other_stamp_by_the_injected_one(dsn, instant):
+    """With the injected clock far from the planted rows and the database's now(): leases follow now() (a hand-back's is already lapsed), created_at, finished_at and the mark follow the clock. (B1, B11, B Clock)"""
+    clock = Clock(instant)
+    queued = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket="Q"), key="k", attempt=1, stage="queued")
+    renewed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="R"), key="k", attempt=1, lapsed=False)
+    execute(dsn, "UPDATE jobs.investigations SET lease_expires_at = now() + interval '5 seconds' WHERE id = %s", (renewed,))
+    handed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="H"), key="k", attempt=1, lapsed=False)
+    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="L"), key="k", attempt=1, lapsed=True)
+    cancelled = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="C"), key="k", attempt=1, lapsed=False)
+    finished = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="F"), key="k", attempt=1, lapsed=False)
+    accounted = _ended_with_cost(dsn, "failed", "A")
+    created_alert = _plant_alert(dsn, ticket="N")
+
+    async with store_with(dsn, clock) as store:
+        claimed = (await store.claim()).record.investigation_id
+        assert claimed == queued
+        assert 25 < lease_left(dsn, claimed) < 31, "a claim's lease is not 30 s from the database's now()"
+        assert row(dsn, claimed)["started_at"] == instant
+
+        assert set(await store.renew({renewed})) == {renewed}
+        assert 25 < lease_left(dsn, renewed) < 31, "a renewal's lease is not 30 s from the database's now()"
+
+        assert await store.hand_back(T1, handed, cost_usd=1.0, knowledge=None) is not None
+        assert lease_left(dsn, handed) < 0, "a hand-back's lease is not already lapsed by the database's clock"
+        assert accounting_written(dsn, handed) == instant
+        assert row(dsn, handed)["finished_at"] is None
+
+        await store.take_over(held={handed})  # the handed-back row's lease is lapsed too
+        assert row(dsn, lapsed)["stage"] == "failed"
+        assert row(dsn, lapsed)["finished_at"] == instant
+        [retry] = _retries_of(dsn, lapsed)
+        assert _created_at(dsn, retry) == instant, "a retry's created_at is not the clock"
+
+        await store.cancel_investigation(T1, cancelled, actor="u-1")
+        assert row(dsn, cancelled)["finished_at"] == instant
+
+        assert await store.finish(T1, finished, stage="completed", disposition="benign", cost_usd=1.0) is not None
+        assert row(dsn, finished)["finished_at"] == instant
+        assert accounting_written(dsn, finished) == instant
+
+        assert await store.write_accounting(T1, accounted, cost_usd=2.0, knowledge=None) is not None
+        assert accounting_written(dsn, accounted) == instant
+        assert row(dsn, accounted)["finished_at"] == NOW, "a final accounting restamped the end"
+
+        created, _ = await store.create_investigation(T1, created_alert, "k-new", actor="u-1")
+        assert _created_at(dsn, created.investigation_id) == instant

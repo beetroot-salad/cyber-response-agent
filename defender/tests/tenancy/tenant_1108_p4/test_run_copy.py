@@ -79,23 +79,35 @@ def _copy_root(t, out: B.Launch) -> Path:
 
 
 class _StageSnapshotDocker(RecordingDocker):
-    """`RecordingDocker` that, at `docker run` (create), lists every run copy's root and its
-    `stage/` — what the box is handed, as the daemon would see it. It judges nothing."""
+    """`RecordingDocker` that, at `docker create` (the run box's create, #1343 B10) and again at the
+    attached `docker start` (`.popen`), lists every run copy's root and its `stage/` — what the box
+    is handed, as the daemon would see it. Anything placed in `stage/` between the two shows in the
+    second. It judges nothing."""
 
     def __init__(self, copies: Path) -> None:
         super().__init__()
         self.copies = copies
         self.at_create: dict[str, dict[str, list[str]]] = {}
+        self.at_start: dict[str, dict[str, list[str]]] = {}
+
+    def _snapshot(self, into: dict[str, dict[str, list[str]]]) -> None:
+        if self.copies.is_dir():
+            for root in self.copies.iterdir():
+                stage = root / "stage"
+                into[root.name] = {
+                    "root": sorted(os.listdir(root)) if root.is_dir() else [],
+                    "stage": sorted(os.listdir(stage)) if stage.is_dir() else []}
 
     def __call__(self, argv, **kw):
         argv = list(argv)
-        if len(argv) > 1 and argv[1] == "run" and self.copies.is_dir():
-            for root in self.copies.iterdir():
-                stage = root / "stage"
-                self.at_create[root.name] = {
-                    "root": sorted(os.listdir(root)) if root.is_dir() else [],
-                    "stage": sorted(os.listdir(stage)) if stage.is_dir() else []}
+        if len(argv) > 1 and argv[1] == "create":
+            self._snapshot(self.at_create)
         return super().__call__(argv, **kw)
+
+    def popen(self, argv, **kw):
+        if list(argv)[1:2] == ["start"]:
+            self._snapshot(self.at_start)
+        return super().popen(argv, **kw)
 
 
 def _exec_cats(docker: RecordingDocker) -> list[Path]:
@@ -141,14 +153,16 @@ def test_o_a_the_run_box_mounts_its_copys_agent_and_token_only_and_reads_the_tok
         f"the box mounts a part of the run copy outside `stage/`: {in_copy}")
     assert T.exposes(sources, stage / "agent"), "control: the copy's stage/agent/ is mounted"
 
-    listed = docker.at_create.get(copy_root.name)
-    assert listed is not None, f"premise: the copy existed at box create: {docker.at_create}"
-    assert listed["root"] == ["owner", "settings", "stage"], (
-        f"the run copy is not {{owner, settings/, stage/}}: {listed['root']}")
+    for when, snaps in (("create", docker.at_create), ("attached start", docker.at_start)):
+        listed = snaps.get(copy_root.name)
+        assert listed is not None, f"premise: the copy existed at box {when}: {snaps}"
+        assert listed["root"] == ["owner", "settings", "stage"], (
+            f"the run copy is not {{owner, settings/, stage/}} at {when}: {listed['root']}")
+        assert "agent" in listed["stage"], (when, listed)
+        assert len([n for n in listed["stage"] if n != "agent"]) == 1, (
+            f"the box's `stage/` holds more (or less) than agent/ and one token at {when}: {listed['stage']}")
+    listed = docker.at_start[copy_root.name]
     tokens_staged = [name for name in listed["stage"] if name != "agent"]
-    assert "agent" in listed["stage"], listed
-    assert len(tokens_staged) == 1, (
-        f"the box's `stage/` holds more (or less) than agent/ and one token: {listed['stage']}")
 
     cats = _exec_cats(docker)
     tokens = [p for p in cats if p.resolve().is_relative_to(stage.resolve())

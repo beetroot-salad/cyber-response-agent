@@ -52,6 +52,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
 )
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
+from defender.tests.support.sandbox._box1343 import AttachedStartSeam
 
 pytestmark = pytest.mark.e2e
 
@@ -104,11 +105,15 @@ class _DockerCall:
         return self.argv[1] if len(self.argv) > 1 else ""
 
 
-class FakeDocker:
-    """The injected `docker` seam: records every argv and replies from a scripted table."""
+class FakeDocker(AttachedStartSeam):
+    """The injected `docker` seam: records every argv and replies from a scripted table. The run box's
+    attached start (#1343 B10) is its `.popen`; once a create succeeded and the start landed the
+    container reports `running`, until it is removed."""
 
     def __init__(self, reply=None, existing: str | None = None):
         self.calls: list[_DockerCall] = []
+        self.phase: str | None = None
+        self._attached_state()
         self._reply = reply
         #: The `.State.Status` of a container already holding the name, or `None` for the
         #: default — nothing in the way, which is what almost every test here wants.
@@ -123,14 +128,27 @@ class FakeDocker:
             rc, out, err = (
                 self._reply(call.verb) if self._reply is not None else self._all_succeed(call)
             )
+        if rc == 0 and call.verb == "create":
+            self.phase = "created"
+        elif call.verb in ("rm", "stop"):
+            self.phase = None
         return subprocess.CompletedProcess(list(argv), rc, out, err)
+
+    def _record(self, argv: list[str]) -> None:
+        self.calls.append(_DockerCall(argv))
+
+    def _landed(self, argv: list[str]) -> None:
+        if self.phase == "created":
+            self.phase = "running"
 
     def _inspect(self, argv: list[str]) -> tuple[int, str, str]:
         """box.py asks THREE different questions through `docker inspect`, and the format string
         is what separates them — on a real daemon and here."""
-        if self.existing is None:
-            return (1, "", "Error: No such object\n")
         fmt = argv[argv.index("-f") + 1] if "-f" in argv else ""
+        if self.existing is None:
+            if self.phase is not None and fmt and "Config.Labels" not in fmt:
+                return (0, f"{self.phase}\n", "")
+            return (1, "", "Error: No such object\n")
         if not fmt:
             # `--format`, not `-f`: the DooD shared-mounts query. A container that exists but
             # whose mount table we do not model answers with an empty table, never a state.
@@ -144,7 +162,7 @@ class FakeDocker:
         double saw (nested mounts winning), as a real daemon resolves it; unchanged when no bind
         covers it. The run box mounts each tree at a fixed model path (`/runs/current`, …),
         so an in-box path is not the host path it reads."""
-        creates = [c.argv for c in self.calls if c.verb == "run"]
+        creates = [c.argv for c in self.calls if c.verb in ("run", "create")]
         if not creates:
             return inside
         argv = creates[-1]
@@ -607,7 +625,7 @@ def test_a_taint_outranks_the_work_s_own_failure(tmp_path):
 
 def test_box_construction_failure_refuses_the_run(tmp_path):
     run = _clean_run_dir(tmp_path)
-    docker = FakeDocker(lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", ""))
+    docker = FakeDocker(lambda verb: C43B_NAME_COLLISION if verb in ("run", "create") else (0, "", ""))
 
     with pytest.raises(BoxFault):
         start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT)
@@ -641,8 +659,11 @@ def test_startup_attempts_a_box_rather_than_detecting_a_binary(tmp_path):
     ok = FakeDocker()
     box = start_box(run, DEFENDER, docker=ok, tenant_id=TEST_TENANT)
     assert box is not None
-    assert "run" in ok.verbs
-    assert "exec" in ok.verbs
+    # #1343 B10 (r5 item 8a): the run box is created (`docker create -i --rm`), then started by an
+    # attached `docker start`, and only then probed from inside; never a detached `docker run`.
+    verbs = ok.verbs
+    assert "run" not in verbs, verbs
+    assert verbs.index("create") < verbs.index("start") < verbs.index("exec"), verbs
 
 
 def test_path_identity_sentinel_fails_closed(tmp_path):
@@ -724,13 +745,22 @@ def test_no_box_failure_path_executes_in_process(tmp_path, gate_env):
     assert secret not in str(e.value)
 
 
+def _refused_at_create(docker: FakeDocker) -> None:
+    """The refusal came from the create itself (#1343 B10: the run box is `docker create`d): the box was
+    never started. A start that reached its later probes and failed there is another fault."""
+    assert "create" in docker.verbs, docker.verbs
+    assert "start" not in docker.verbs, f"the start went on past a refused create: {docker.verbs}"
+
+
 def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, capsys):
     run = _clean_run_dir(tmp_path)
-    broken = lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", "")  # noqa: E731
+    broken = lambda verb: C43B_NAME_COLLISION if verb == "create" else (0, "", "")  # noqa: E731
 
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    refused = FakeDocker(broken)
     with pytest.raises(BoxFault):
-        start_box(run, DEFENDER, docker=FakeDocker(broken), tenant_id=TEST_TENANT)
+        start_box(run, DEFENDER, docker=refused, tenant_id=TEST_TENANT)
+    _refused_at_create(refused)
 
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     box = start_box(run, DEFENDER, docker=FakeDocker(broken), tenant_id=TEST_TENANT)
@@ -739,8 +769,10 @@ def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, capsy
 
     for spelling in ("0", "true", "yes", "", "01"):
         monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", spelling)
+        refused = FakeDocker(broken)
         with pytest.raises(BoxFault):
-            start_box(run, DEFENDER, docker=FakeDocker(broken), tenant_id=TEST_TENANT)
+            start_box(run, DEFENDER, docker=refused, tenant_id=TEST_TENANT)
+        _refused_at_create(refused)
 
 
 def test_a_colliding_run_id_refuses_rather_than_reaping_a_live_sibling(tmp_path):
@@ -749,12 +781,13 @@ def test_a_colliding_run_id_refuses_rather_than_reaping_a_live_sibling(tmp_path)
     name = container_name(run.name)
 
     docker = FakeDocker(
-        lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", ""),
+        lambda verb: C43B_NAME_COLLISION if verb == "create" else (0, "", ""),
         existing="running",
     )
     with pytest.raises(BoxFault) as e:
         start_box(run, DEFENDER, docker=docker, tenant_id=TEST_TENANT)
     assert name in str(e.value) or run.name in str(e.value)
+    assert "start" not in docker.verbs, f"a box was started over a held name: {docker.verbs}"
     for call in docker.calls:
         assert not (call.verb in ("rm", "kill") and name in call.argv), \
             "a live sibling's box was reaped instead of refusing the colliding run"

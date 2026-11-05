@@ -74,24 +74,21 @@ def _fk_to_tenants(dsn: str) -> list[tuple[str, str]]:
 
 def test_the_history_is_the_baseline_and_five_revisions_on_it_in_a_line():
     """#1214 adds ONE revision on #1339's history, leaving the baseline as it was (O11); #1163 adds one more, the six
-    sign columns of the generation record (A24/r8.4); #1342 puts its jobs revision on #1163's, and #1382 its uuid ids
-    revision on that, and #1345's mapping revision on that (r5 Upgrade): a single line baseline -> #1214's -> #1163's ->
-    #1342's -> #1382's -> #1345's, no branch."""
+    sign columns of the generation record (A24/r8.4); #1342 puts its jobs revision on #1163's, #1382 its uuid ids
+    revision on that, #1343 its lease revision on that, and #1345 its mapping revision on that: a single line baseline
+    -> #1214's -> #1163's -> #1342's -> #1382's -> #1343's -> #1345's, no branch. (The name predates the later revisions;
+    the node id is kept.)"""
     from alembic.script import ScriptDirectory
 
     from defender.migrations import _config
 
     script = ScriptDirectory.from_config(_config())
     chain = [(r.revision, r.down_revision) for r in script.walk_revisions()]  # newest first
-    assert len(chain) == 6
-    [(head_revision, uuid_ids), (uuid_revision, jobs), (jobs_revision, sign), (sign_revision, middle), (middle_revision, down),
-     (base, base_down)] = chain
-    assert (uuid_ids, jobs, sign, middle, down, base, base_down) == (
-        uuid_revision, jobs_revision, sign_revision, middle_revision, BASELINE, BASELINE, None)
-    assert middle_revision == TENANCY, "#1214's revision keeps its id"
-    assert sign_revision == SIGN_LOGIN, "#1163's revision keeps its id"
-    assert len({head_revision, uuid_revision, jobs_revision, sign_revision, middle_revision, BASELINE}) == 6
-    assert script.get_heads() == [head_revision], "the history branches"
+    assert len(chain) == 7
+    assert [revision for revision, _ in chain] == [
+        "0007_alert_mapping", "0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE]
+    assert [down for _, down in chain] == ["0006_job_leases", "0005_uuid_ids", "0004_jobs", SIGN_LOGIN, TENANCY, BASELINE, None]
+    assert script.get_heads() == ["0007_alert_mapping"], "the history branches"
 
 @pytest.mark.postgres
 def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_database):

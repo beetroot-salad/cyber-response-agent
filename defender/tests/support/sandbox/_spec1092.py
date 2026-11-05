@@ -336,8 +336,8 @@ DAEMON_DOWN_STDERR = (
 class NoSuchImageDocker(RecordingDocker):
     """`RecordingDocker` whose preflight `docker image inspect` fails with the missing-image line
     for the image asked about (recorded in `inspected_images`). The create stays HEALTHY, so a
-    start that skipped the preflight shows up as a `run` call. With `daemon_down`, the inspect
-    and the liveness probe (`docker version`) both fail with `DAEMON_DOWN_STDERR`."""
+    start that skipped the preflight shows up as a `create` call (the run box's; the request
+    lane's is a `run`). With `daemon_down`, the inspect and the liveness probe (`docker version`) both fail with `DAEMON_DOWN_STDERR`."""
 
     def __init__(self, *, daemon_down: bool = False, **kw):
         super().__init__(**kw)
@@ -360,7 +360,11 @@ class NoSuchImageDocker(RecordingDocker):
 
 
 def image_token(argv: list[str]) -> str:
-    """The image a create argv names: the token before `sleep infinity` on both builders."""
+    """The image a create argv names: the token before the box's main process, which is `cat` for the
+    run box (`docker create -i --rm`, #1343 B10) and `sleep infinity` for the request builder."""
+    if argv[:2] == ["docker", "create"]:
+        assert argv[-3:] == ["sh", "-c", "exec cat >/dev/null 2>&1"], argv[-3:]
+        return argv[-4]
     assert argv[-2:] == ["sleep", "infinity"], argv[-3:]
     return argv[-3]
 

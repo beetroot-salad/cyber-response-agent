@@ -37,7 +37,7 @@ Load only the references relevant to the task. Historical explanations live in `
 ## Upgrade from before #1345
 
 The tenant's alert mapping lives in the database; nothing reads `settings/alert-mapping.yaml` any more. After migration
-`0006_alert_mapping`, investigations and runs for a tenant are refused until, once per tenant:
+`0007_alert_mapping`, investigations and runs for a tenant are refused until, once per tenant:
 
 1. Add `title` and `description` to the tenant's `settings/alert-mapping.yaml`, if its alerts should have them: the file
    does not name them, and an entry left out is unmapped, so its alerts would list with neither.

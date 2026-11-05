@@ -127,7 +127,7 @@ def test_real_box_startup_refusals_use_the_handed_verdict_backend(tmp_path, monk
         io.fail = ("rooted_write", record.path.name)
 
     def reply(verb):
-        refused = {"image": "image", "create": "run", "probe": "exec"}.get(phase)
+        refused = {"image": "image", "create": "create", "probe": "exec"}.get(phase)
         return (1, "", f"{phase} refused") if verb == refused else (0, "", "")
 
     docker = FakeDocker(reply, existing="unknown-state" if phase == "existing" else None)

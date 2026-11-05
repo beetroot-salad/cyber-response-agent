@@ -129,6 +129,8 @@ AuditAction = Literal[
     "investigation.delete",
     "investigation.claim",
     "investigation.finish",
+    "investigation.takeover",
+    "investigation.retry",
     "artifact.read",
     "learning_job.start",
     "system.update",
@@ -155,8 +157,11 @@ class WriteTransaction(Protocol):
         ...
 
     async def cancel_investigation(self, investigation_id: InvestigationId) -> Investigation:
-        """Abort a queued investigation. `NotFound`; `Conflict` if it is running (not supported
-        yet) or already ended."""
+        """Abort an investigation that is queued or running (`aborted`, reason `cancelled`); a
+        running one's worker tells its run to stop within about a second, and the run has ended within
+        the worker's stop grace (30 s) of that. `NotFound`; `Conflict` if it
+        already ended — and when it ended because its worker was lost and a retry of it is live,
+        the message names that retry's id."""
         ...
 
     async def delete_investigation(self, investigation_id: InvestigationId) -> None:

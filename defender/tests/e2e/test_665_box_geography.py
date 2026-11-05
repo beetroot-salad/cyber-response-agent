@@ -204,6 +204,7 @@ def _dies_after_create(rec, *subcommands):
         if rec.create_argv is not None and len(argv) > 1 and argv[1] in subcommands:
             raise OSError("daemon socket gone")
         return rec(argv, **kw)
+    docker.popen = rec.popen   # the attached-start capability the run lane asks of its docker seam (#1343 r5 item 15)
     return docker
 
 
@@ -400,7 +401,7 @@ def test_container_exits_between_create_and_sentinel(tmp_path):
     rec = RecordingDocker(sentinel=DockerFault(rc=137, stderr="container is not running", cite="po48"))
     with pytest.raises(box_mod.BoxFault, match="sentinel"):
         box_mod.start_box(run_dir, DEFENDER, docker=rec, tenant_id=TEST_TENANT)
-    assert any(len(c) > 1 and c[1] == "run" for c in rec.calls), \
+    assert any(len(c) > 1 and c[1] == "create" for c in rec.calls), \
         "the sentinel fault fired without a container create having been attempted"
 
 
@@ -415,7 +416,7 @@ def test_docker_binary_unavailable_at_box_startup(tmp_path):
     with pytest.raises(box_mod.BoxFault):  # the raw FileNotFoundError must be wrapped, not leaked
         box_mod.start_box(run_dir, DEFENDER, docker=no_docker, tenant_id=TEST_TENANT)
     assert calls, "box creation made no docker call at all"
-    assert not any(len(c) > 1 and c[1] == "run" for c in calls), \
+    assert not any(len(c) > 1 and c[1] in ("run", "create", "start") for c in calls), \
         "a container create was attempted despite the docker binary being unavailable at the first call"
 
 

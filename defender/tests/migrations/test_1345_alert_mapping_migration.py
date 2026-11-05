@@ -1,4 +1,4 @@
-"""#1345 upgrade: the revision after `0005_uuid_ids` creates the alert-mapping table (no rows) beside the tenant records
+"""#1345 upgrade: the revision after `0006_job_leases` creates the alert-mapping table (no rows) beside the tenant records
 in `tenancy` (r5 "Where it lives"), and makes `jobs.alerts.title` / `description` nullable and null (only development
 rows exist).
 
@@ -16,7 +16,7 @@ import pytest
 from defender.tests.migrations.test_1214_migrations import _upgrade_to
 from defender.tests.support.shared._postgres1339 import execute
 
-UUID_IDS = "0005_uuid_ids"
+JOB_LEASES = "0006_job_leases"
 CREATED = _dt.datetime(2026, 11, 1, 8, 0, tzinfo=_dt.UTC)
 TENANT = "a3000000-0000-4000-8000-000000000001"
 ALERT = "a3000000-0000-4000-8000-0000000000a1"
@@ -42,11 +42,11 @@ def test_at_head_the_mapping_table_has_a_nullable_text_column_per_entry_and_aler
 
 @pytest.mark.postgres
 def test_the_upgrade_creates_no_mapping_and_nulls_existing_alert_display(empty_database):
-    """From `0005_uuid_ids` with a tenant and a development alert: head has no mapping row and the alert's
+    """From `0006_job_leases` with a tenant and a development alert: head has no mapping row and the alert's
     title and description are null; its other columns are kept. (#1345 Upgrade)"""
     from defender.migrations import upgrade
 
-    _upgrade_to(empty_database, UUID_IDS)
+    _upgrade_to(empty_database, JOB_LEASES)
     execute(empty_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, %s, 'active')",
             (TENANT, CREATED))
     execute(empty_database, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, "
@@ -100,7 +100,7 @@ def test_the_upgrade_nulls_every_existing_alerts_display_and_gives_no_tenant_a_m
     null, whichever tenant, and no tenant has a mapping. (#1345 Upgrade)"""
     from defender.migrations import upgrade
 
-    _upgrade_to(empty_database, UUID_IDS)
+    _upgrade_to(empty_database, JOB_LEASES)
     other = "a3000000-0000-4000-8000-000000000002"
     for tenant in (TENANT, other):
         execute(empty_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, %s, 'active')",

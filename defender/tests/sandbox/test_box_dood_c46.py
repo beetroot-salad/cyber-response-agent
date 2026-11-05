@@ -263,12 +263,15 @@ class _CapturingDocker:
         self.create_argv: list[str] | None = None
 
     def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
-        if argv[:2] == ["docker", "run"]:
+        if argv[:2] in (["docker", "run"], ["docker", "create"]):   # run box: create (#1343 B10); request lane: run
             self.create_argv = argv
             return subprocess.CompletedProcess(argv, 1, "", "create refused by the fake")
         if argv[:2] == ["docker", "inspect"]:
             return subprocess.CompletedProcess(argv, 1, "", "No such object\n")
         return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def popen(self, argv, **_kw):
+        raise AssertionError(f"the attached start was reached after the create was refused: {argv}")
 
 
 def _runtime_of(monkeypatch, value: str | None) -> str:

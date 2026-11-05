@@ -4,14 +4,14 @@ nullable (the store derives them from the tenant's mapping) and every existing v
 inserted alerts yet, so only development rows exist (a departure from 0004/0005's refuse-first precedent, justified
 by that).
 
-Revision ID: 0006_alert_mapping
-Revises: 0005_uuid_ids
+Revision ID: 0007_alert_mapping
+Revises: 0006_job_leases
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0006_alert_mapping"
-down_revision = "0005_uuid_ids"
+revision = "0007_alert_mapping"
+down_revision = "0006_job_leases"
 
 #: The entries, as this revision knew them (a migration keeps its own copy: it must mean what it meant when written).
 _ENTRIES = ("signature", "event_time", "summary", "case_key", "title", "description")

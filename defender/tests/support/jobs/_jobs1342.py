@@ -13,8 +13,8 @@ import logging
 import os
 import sys
 import textwrap
-from collections.abc import AsyncIterator, Callable, Mapping
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -117,11 +117,12 @@ def fixed_clock() -> dt.datetime:
 
 
 @asynccontextmanager
-async def job_store(dsn: str) -> AsyncIterator[Any]:
-    """The store under test on `dsn`, closed after."""
+async def job_store(dsn: str, **knobs: Any) -> AsyncIterator[Any]:
+    """The store under test on `dsn`, closed after. `knobs` (#1343 sketch, unratified): `lease`,
+    the lease length in seconds a claim or renewal sets."""
     from defender.jobs import JobStore
 
-    store = JobStore(dsn, clock=fixed_clock)
+    store = JobStore(dsn, clock=fixed_clock, **knobs)
     try:
         yield store
     finally:
@@ -140,6 +141,27 @@ async def an_alert(store: Any, tenant_id: str, *, ticket: str = "T-1",
     return await store.insert_alert(
         tenant_id, vendor="elastic", vendor_ticket_id=ticket, fired_at=NOW, changed_at=NOW,
         received_at=NOW, raw=raw)
+
+
+def lease_left(dsn: str, investigation_id: str) -> float | None:
+    """Seconds from the database's `now()` to the row's lease expiry (negative: lapsed; None: no
+    lease). #1343 sketch: the column name `lease_expires_at` is unratified."""
+    found = execute(dsn, "SELECT EXTRACT(EPOCH FROM lease_expires_at - now()) FROM jobs.investigations "
+                         "WHERE id = %s", (investigation_id,))
+    return None if not found or found[0][0] is None else float(found[0][0])
+
+
+def lapse_lease(dsn: str, investigation_id: str) -> None:
+    """Set the row's lease to lapsed by the database's clock (B Clock: tests lapse it in SQL)."""
+    execute(dsn, "UPDATE jobs.investigations SET lease_expires_at = now() - interval '1 second' "
+                 "WHERE id = %s", (investigation_id,))
+
+
+def accounting_written(dsn: str, investigation_id: str) -> Any:
+    """The row's internal final-accounting mark (#1343 sketch: `accounting_written_at`, unratified)."""
+    found = execute(dsn, "SELECT accounting_written_at FROM jobs.investigations WHERE id = %s",
+                    (investigation_id,))
+    return found[0][0] if found else None
 
 
 def row(dsn: str, investigation_id: str) -> dict[str, Any] | None:
@@ -214,12 +236,43 @@ CHILD_SCRIPT = textwrap.dedent("""
         with open(spec["events"], "a", encoding="utf-8") as handle:
             handle.write(f"{kind} {run_id}\\n")
 
+    def leave_records():
+        for rel in spec.get("dirs", []):
+            (runs / fill(rel)).mkdir(parents=True, exist_ok=True)
+        for rel, text in spec.get("files", {}).items():
+            path = runs / fill(rel)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        for rel, hexbytes in spec.get("binary", {}).items():
+            path = runs / fill(rel)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(bytes.fromhex(hexbytes))
+        for rel, (head, size) in spec.get("padded", {}).items():
+            path = runs / fill(rel)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "wb") as handle:
+                handle.write(head.encode("utf-8"))
+                for _ in range(size // (1 << 20)):
+                    handle.write(b" " * (1 << 20))
+        for rel, (head, size) in spec.get("sparse", {}).items():
+            path = runs / fill(rel)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "wb") as handle:
+                handle.write(head.encode("utf-8"))
+                handle.truncate(size)
+        for rel, target in spec.get("links", {}).items():
+            path = runs / fill(rel)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.symlink_to(target)
+
     term = spec.get("term", "default")
     if term == "ignore":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    elif term == "mark":
+    elif term in ("mark", "finish"):
         def on_term(*_):
             Path(fill(spec["term_mark"])).touch()
+            if term == "finish":  # #1343 B11: a child that completes on its own as the SIGTERM lands
+                leave_records()
             event("end")
             os._exit(0)
         signal.signal(signal.SIGTERM, on_term)
@@ -249,37 +302,30 @@ CHILD_SCRIPT = textwrap.dedent("""
         planted = Path(box["dir"]) / f"defender-run-{run_id}"
         planted.parent.mkdir(parents=True, exist_ok=True)
         planted.write_text(f"{box['state']}\\n{stamp}" if box.get("state") else stamp, encoding="utf-8")
+    spend = spec.get("sessions")
+    if spend:  # #1343 B2/B6: the live child writes its session database while the worker reads it
+        sys.path.insert(0, spend["path"])
+        from defender.records.session_store._write import open_store
+        from defender.tests.support.jobs._jobs1342 import _paths, _response, session_pointer
+        import hashlib
+        case = hashlib.md5(run_id.encode()).hexdigest() if spend.get("per_run") else spend["case"]  # per run: a retry never shares its parent's database
+        (runs / f"{run_id}.session-pointer.json").write_text(session_pointer(case), encoding="utf-8")
+        marks = Path(spend["marks"])
+        marks.mkdir(parents=True, exist_ok=True)
+        with open_store(case_id=case, sessions=_paths(runs)) as handle:
+            session = handle.new_session("main")
+            for n, (model, usage) in enumerate(spend["steps"]):
+                began = time.monotonic()
+                handle.append(session, _response(model, usage), agent_id="main")
+                (marks / f"wrote-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")
+                until = time.monotonic() + 60
+                while not (marks / f"go-{n}").exists() and time.monotonic() < until:
+                    time.sleep(0.02)
     release = spec.get("wait_for")
     deadline = time.monotonic() + 60
     while release and not Path(release).exists() and time.monotonic() < deadline:
         time.sleep(0.02)
-    for rel in spec.get("dirs", []):
-        (runs / fill(rel)).mkdir(parents=True, exist_ok=True)
-    for rel, text in spec.get("files", {}).items():
-        path = runs / fill(rel)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-    for rel, hexbytes in spec.get("binary", {}).items():
-        path = runs / fill(rel)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(bytes.fromhex(hexbytes))
-    for rel, (head, size) in spec.get("padded", {}).items():
-        path = runs / fill(rel)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as handle:
-            handle.write(head.encode("utf-8"))
-            for _ in range(size // (1 << 20)):
-                handle.write(b" " * (1 << 20))
-    for rel, (head, size) in spec.get("sparse", {}).items():
-        path = runs / fill(rel)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as handle:
-            handle.write(head.encode("utf-8"))
-            handle.truncate(size)
-    for rel, target in spec.get("links", {}).items():
-        path = runs / fill(rel)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.symlink_to(target)
+    leave_records()
     event("end")
     sys.exit(spec.get("exit", 0))
 """)
@@ -292,7 +338,7 @@ class ScriptedChild:
     `files` (text), `binary` (hex), `sparse` (`{head, size}`), `links` (symlink targets) and `dirs`
     name what the child leaves in the runs container (`padded`: `{head, size}`, the head then spaces
     up to `size` bytes, so a document that stays valid however much of it is read); `term` is how it takes SIGTERM (`default`,
-    `ignore`, or `mark`: touch `term_mark` and exit); `grandchild` starts a `sleep` in its group."""
+    `ignore`, `mark`: touch `term_mark` and exit with nothing written, or `finish`: touch it, write its records, exit 0); `grandchild` starts a `sleep` in its group."""
 
     where: Path
     runs: Path
@@ -314,6 +360,11 @@ class ScriptedChild:
     box_dir: Path | str | None = None
     box_token: str = "launch"
     box_state: str | None = None
+    #: #1343 B2/B6: `{"case", "steps": [(model, usage)], "marks"}`: the child writes its session
+    #: pointer, holds its session database open and appends one priced response per step, touching
+    #: `marks/wrote-<n>` (its text: how long the append took) and waiting for `marks/go-<n>`. With
+    #: `"per_run": True` its case id (so database) is derived from its run id, so two runs never share one.
+    sessions: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         self.where.mkdir(parents=True, exist_ok=True)
@@ -332,6 +383,7 @@ class ScriptedChild:
             "box": None if self.box_dir is None else {"dir": str(self.box_dir), "token": self.box_token,
                                                      "state": self.box_state},
             "wait_for": None if self.wait_for is None else str(self.wait_for),
+            "sessions": None if self.sessions is None else {**self.sessions, "path": str(WORKTREE)},
         }
 
     def __call__(self, launch: Any) -> list[str]:
@@ -410,6 +462,92 @@ class FaultyContainers(StandInContainers):
         raise RuntimeError("the container daemon cannot be asked")
 
 
+class FaultableStore:
+    """The real store, except for faults the test switches on: `renew_down` makes every renewal raise
+    a connection error, `finish_fails` makes that many `finish` calls raise one (counted in
+    `finish_tries`). Counts renewals that raised (`renews_failed`) and that answered (`renews_ok`).
+    Notes the held ids each renewal that succeeded left out (`omitted`, and
+    `omitted_event` for a thread that waits for the worker to see a fence)."""
+
+    def __init__(self, store: Any) -> None:
+        import threading
+
+        self._store = store
+        self.renew_down = False
+        self.finish_fails = 0
+        self.finish_tries = 0
+        self.renews_failed = 0
+        self.renews_ok = 0
+        self.omitted: set[str] = set()
+        self.omitted_event = threading.Event()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+    async def renew(self, held: Any, **kw: Any) -> Any:
+        if self.renew_down:
+            self.renews_failed += 1
+            raise ConnectionError("the database is gone")
+        covered = await self._store.renew(held, **kw)
+        self.renews_ok += 1
+        left_out = set(held) - set(covered)
+        if left_out:
+            self.omitted |= left_out
+            self.omitted_event.set()
+        return covered
+
+    async def finish(self, *args: Any, **kw: Any) -> Any:
+        self.finish_tries += 1
+        if self.finish_fails > 0:
+            self.finish_fails -= 1
+            raise ConnectionError("the database is gone")
+        return await self._store.finish(*args, **kw)
+
+
+class LaneLanding:
+    """A job-lane door whose lanes are the real ones, except that the first launch write of the
+    worker runs `land()` (in the worker's thread): `moment="during"` just before the real
+    `write_launch`, `"after"` once it has returned and the lane closes. Nothing else changes."""
+
+    def __init__(self, land: Callable[[], None], moment: str) -> None:
+        assert moment in ("during", "after")
+        self._land, self._moment, self.landed = land, moment, False
+
+    def __call__(self, root: Any, tenant: str) -> Any:
+        from defender.records import job_lane
+
+        door = self
+        lane = job_lane.JobLane.open(root, tenant)
+
+        class _Lane:
+            wrote = False
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(lane, name)
+
+            def write_launch(self, launch: Any, raw: bytes) -> Any:
+                if door._moment == "during" and not door.landed:
+                    door.landed = True
+                    door._land()
+                done = lane.write_launch(launch, raw)
+                self.wrote = True
+                return done
+
+            def close(self) -> None:
+                lane.close()
+                if door._moment == "after" and self.wrote and not door.landed:
+                    door.landed = True
+                    door._land()
+
+            def __enter__(self) -> Any:
+                return self
+
+            def __exit__(self, *_exc: Any) -> None:
+                self.close()
+
+        return _Lane()
+
+
 def fd_identity(fd: int) -> list[int]:
     """`[device, inode]` of what `fd` is open on, comparable with a child's `seen()["stdio"]`."""
     found = os.fstat(fd)
@@ -418,7 +556,9 @@ def fd_identity(fd: int) -> list[int]:
 
 def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], *,
                 containers: Any = None, slots: int = 3, stop_grace: float | None = None,
-                open_lane: Any = None) -> Any:
+                open_lane: Any = None, **knobs: Any) -> Any:
+    """`knobs` (#1343 sketch, unratified): `renewal_interval`, `cost_interval`, `takeover_interval`
+    in seconds."""
     from defender.worker import Worker
 
     if containers is None:
@@ -430,7 +570,7 @@ def make_worker(store: Any, data_root: Path, child: Callable[[Any], list[str]], 
         if not beside.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()):
             raise ValueError(f"make_worker: {data_root} is not under the temp directory; pass containers=StandInContainers(tmp_path / ...)")
         containers = StandInContainers(beside / "containers")
-    extra: dict[str, Any] = {} if stop_grace is None else {"stop_grace": stop_grace}
+    extra = {**knobs, **({} if stop_grace is None else {"stop_grace": stop_grace})}
     if open_lane is not None:
         extra["open_lane"] = open_lane
     return Worker(store, data_root=data_root, child_argv=child,
@@ -549,3 +689,23 @@ def plant_fork(runs: Path, case_id: str, parent: tuple[str, list[int]], *, agent
         fork = handle.fork(parent[0], parent[1][-1])
         handle.append(fork, _response(model, usage), agent_id=agent_id)
     return fork
+
+
+@contextmanager
+def session_database_held_locked(runs: Path, case_id: str) -> Iterator[None]:
+    """#1343 B2: while the block runs, any read of `case_id`'s planted session database waits on a real
+    SQLite lock (its busy timeout is 30 s). The database is put in rollback-journal mode first, so a
+    held `BEGIN EXCLUSIVE` blocks readers (a WAL database's does not)."""
+    import sqlite3
+
+    path = session_db(runs, case_id)
+    plain = sqlite3.connect(path)
+    plain.execute("PRAGMA journal_mode=DELETE")
+    plain.close()
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN EXCLUSIVE")
+    try:
+        yield
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()

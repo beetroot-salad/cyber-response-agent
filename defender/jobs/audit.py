@@ -12,7 +12,7 @@ from defender.identity.audit import SYSTEM
 
 AuditAction = Literal[
     "investigation.start", "investigation.cancel", "investigation.delete", "investigation.claim",
-    "investigation.finish", "alert_mapping.update",
+    "investigation.finish", "investigation.takeover", "investigation.retry", "alert_mapping.update",
 ]
 
 __all__ = ["SYSTEM", "AuditAction", "announce"]

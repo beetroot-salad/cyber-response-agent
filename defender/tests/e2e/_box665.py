@@ -12,6 +12,7 @@ from defender import box as box_mod
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.tests.e2e._local_box_command import run_box_python_command
+from defender.tests.support.sandbox._box1343 import AttachedStartSeam
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -73,7 +74,7 @@ class DockerFault:
     cite: str = ""
 
 
-class RecordingDocker:
+class RecordingDocker(AttachedStartSeam):
     """Injectable `docker` fn for `start_box(..., docker=…)`.
 
     Records every argv and models a healthy daemon unless a declared fault is supplied:
@@ -99,12 +100,39 @@ class RecordingDocker:
         self.existing_token = existing_token
         # The container answers its state but the daemon fails the label read (rc 1, not "no such object").
         self.label_unreadable = label_unreadable
-        self.create = create            # DockerFault on `docker run` (create)
+        self.create = create            # DockerFault on `docker create` (the run box) or `docker run`
         self.sentinel = sentinel        # DockerFault on the sentinel exec readback
         self.reap = reap                # DockerFault on `docker rm -f`
         self._exec_replies = list(exec_replies or [])
         self.calls: list[list[str]] = []
         self.create_argv: list[str] | None = None
+        # #1343 B10: the run box is `docker create`d, then started by a held attached `docker start -a -i`
+        # asked of this object's `.popen` capability (r5 item 15). The daemon's phase for that name:
+        # None (none), "created", then "running" once the start landed, after `start_lag` status reads.
+        self.phase: str | None = None
+        self.start_lag = 0
+        self.starter_exit = None            # (rc, stderr): the starter dies before it ran
+        self.lands = True                   # False: the start never lands, the box never reports running
+        self.running_seen_at: int | None = None              # len(calls) when status first answered running
+        self._attached_state()
+
+    def _record(self, argv: list[str]) -> None:
+        self.calls.append(argv)
+
+    def _phase_word(self) -> str:
+        """The status the daemon answers for the created box: `created` for `start_lag` reads after the start landed."""
+        if self.phase == "starting":
+            if self.start_lag > 0:
+                self.start_lag -= 1
+                return "created"
+            self.phase = "running"
+        if self.phase == "running" and self.running_seen_at is None:
+            self.running_seen_at = len(self.calls)
+        return str(self.phase)
+
+    def _landed(self, argv: list[str]) -> None:
+        if self.phase == "created":
+            self.phase = "starting"
 
     def _inspect(self, argv: list[str]) -> subprocess.CompletedProcess:
         """`docker inspect` answers three questions, told apart by the format string as on a
@@ -118,6 +146,8 @@ class RecordingDocker:
         if "Config.Labels" not in fmt:
             if self.status is not None:
                 return _cp(0, f"{self.status}\n")
+            if self.phase is not None:
+                return _cp(0, f"{self._phase_word()}\n")
             return _cp(1, "", "No such object\n")
         if self.existing_token is None:
             return _cp(1, "", "No such object\n")
@@ -184,16 +214,20 @@ class RecordingDocker:
             return self._inspect(argv)
         if sub == "rm":
             f = self.reap
+            if f is None:
+                self.phase = None
             return _cp(f.rc, f.stdout, f.stderr) if f else _cp(0)
-        if sub == "run":
+        if sub in ("run", "create"):
             self.create_argv = argv
             f = self.create
+            if f is None and sub == "create":
+                self.phase = "created"
             return _cp(f.rc, f.stdout, f.stderr) if f else _cp(0, "container-id\n")
         if sub == "exec":
             return self._exec(argv)
         return _cp(0)
 
-    # argv readers (parse the captured `docker run` argv)
+    # argv readers (parse the captured create argv)
     def _argv(self) -> list[str]:
         assert self.create_argv is not None, "docker create was never invoked"
         return self.create_argv
@@ -253,9 +287,9 @@ class RecordingDocker:
 def reaped_after_create(calls) -> bool:
     """Whether the container the create asked for was reaped after the create."""
     create = next(
-        (i for i, c in enumerate(calls) if len(c) > 1 and c[1] == "run"), None
+        (i for i, c in enumerate(calls) if len(c) > 1 and c[1] in ("run", "create")), None
     )
-    assert create is not None, "no `docker run` was issued — the fault fired before create"
+    assert create is not None, "no `docker create` was issued — the fault fired before create"
     argv = calls[create]
     name = argv[argv.index("--name") + 1]
     return ["docker", "rm", "-f", name] in calls[create + 1:]

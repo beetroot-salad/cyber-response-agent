@@ -192,9 +192,7 @@ class InMemoryStore:
 
     async def cancel_investigation(self, tenant_id: TenantId, investigation_id: InvestigationId) -> Investigation:
         existing = await self._existing(tenant_id, investigation_id)
-        if existing.status == "running":
-            raise Conflict("cannot cancel a running investigation yet")
-        if existing.status != "queued":
+        if existing.status not in ("queued", "running"):
             raise Conflict("already ended")
         aborted = existing.model_copy(update={"status": "aborted", "failure_reason": "cancelled",
                                               "finished_at": self._clock()})
