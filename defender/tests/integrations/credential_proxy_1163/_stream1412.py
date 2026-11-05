@@ -31,9 +31,10 @@ def fmt() -> Any:
 
 
 def final_record(status: int | None = 200, **over: Any) -> Any:
-    """A `FinalRecord` (all six fields given): a clean 200 unless `over` says otherwise."""
+    """A `FinalRecord` (every field given): a clean 200 that reached the system unless `over`
+    says otherwise."""
     fields = {"status": status, "headers": {}, "fault": None, "detail": None, "system_side": False,
-              "body_whole": True} | over
+              "sent": True, "body_whole": True} | over
     return fmt().FinalRecord(**fields)
 
 
