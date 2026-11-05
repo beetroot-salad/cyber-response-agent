@@ -14,7 +14,7 @@ import functools
 import json
 import struct
 from collections.abc import Iterator, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from typing import TYPE_CHECKING
 
 import httpx
@@ -51,7 +51,7 @@ class FinalRecord:
     body_whole: bool
 
 
-_FIELDS = tuple(FinalRecord.__dataclass_fields__)
+_FIELDS = tuple(f.name for f in fields(FinalRecord))
 
 
 @dataclass(frozen=True)
