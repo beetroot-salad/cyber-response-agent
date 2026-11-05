@@ -68,8 +68,9 @@ SCORED = "# Held-out eval"
 
 def _preflight_context(ep: Path, source: Any, tenant: Any) -> Any:
     """The context pre-flight's host-side reads run in (`cli._preflight_context`), for the
-    opened source `Run` (the env's runs base is the source's own)."""
-    return H.branch_cli()._preflight_context(ep, source, tenant, _AS_OF)
+    opened source `Run` (the env's runs base is the source's own). It carries no branch point
+    (#1385 O1)."""
+    return H.branch_cli()._preflight_context(ep, source, tenant)
 
 
 def _tenant_source(root: Path) -> Any:
@@ -94,7 +95,7 @@ def test_d4_preflight_env_threaded(tmp_path, monkeypatch):
     assert ctx.run_dir == ep, "the replay context stopped being the episode dir"
 
     with pytest.raises(TypeError):
-        H.branch_cli()._preflight_context(ep, as_of=_AS_OF)
+        H.branch_cli()._preflight_context(ep)
 
 
 def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):

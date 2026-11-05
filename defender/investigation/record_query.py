@@ -152,6 +152,7 @@ QUERY_ROW_COLUMNS: tuple[str, ...] = (
     "payload_digest",
     "payload_sha256",
     "system_key",
+    "received_at",
 )
 
 #: The call join's columns (`RunPaths.call_join`, #1255 G4/G6), in writer order: the row's
@@ -217,6 +218,10 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
             "payload_sha256": payload_sha256(payload_text),
             # Passed in: the raw string it fingerprints must not be on the row.
             "system_key": system_key,
+            # The run clock's reading when the reply arrived (#1385 A6, O7): the platform's
+            # stamp, kept out of the payload's bytes. The model's stamp line is rendered from
+            # this value, so the two cannot disagree. Older tables have no such column.
+            "received_at": state.now_iso(),
         }
         # Compared as a tuple: the on-disk key order is part of the contract.
         if tuple(row) != QUERY_ROW_COLUMNS:

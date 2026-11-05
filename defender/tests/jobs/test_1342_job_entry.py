@@ -39,6 +39,7 @@ from defender.tests.support.jobs._jobs1342 import (
     TITLE,
     WORKTREE,
     register_tenant,
+    drop_tenant,
     restate_tenant,
     tree,
 )
@@ -490,9 +491,7 @@ def test_m1_a_tenant_acceptance_refusal_is_recorded_as_setup_refused(scene, monk
     if record == "records unreachable":
         monkeypatch.setenv("DEFENDER_DATABASE_DSN", "postgresql://nobody@127.0.0.1:1/none?connect_timeout=2")
     elif record == "no record":
-        execute(scene.dsn, "DELETE FROM tenancy.alert_mappings WHERE tenant_id = %s", (scene.t.tenant_id,))
-        execute(scene.dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (scene.t.tenant_id,))
-        execute(scene.dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (scene.t.tenant_id,))
+        drop_tenant(scene.dsn, scene.t.tenant_id)
     else:
         restate_tenant(scene.dsn, scene.t.tenant_id, state="active" if record == "no wiring" else record,
                        wiring=record != "no wiring", data_root=scene.root)
@@ -1680,6 +1679,11 @@ def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path, spe
 
 PROXY_ADDRESS = "http://proxy.invalid"
 SIGN_ROLE, SIGN_SECRET = "role-1342-sign", "secret-1342-sign"
+ELASTIC_NOT_PROXIED = (
+    'ELASTICSEARCH_URL="https://localhost:9200"\nKIBANA_URL="http://localhost:5601"\n'
+    'ELASTIC_EVENTS_INDEX="logs-*"\nELASTIC_ALERTS_INDEX=".internal.alerts-security.alerts-default-*"\n'
+    'ELASTIC_TRANSPORT="docker-exec"\nELASTIC_DOCKER_CONTEXT="soc-playground"\n'
+    'ELASTIC_ES_CONTAINER="elasticsearch"\nELASTIC_KIBANA_CONTAINER="kibana"\n')
 
 
 @pytest.fixture
@@ -1706,8 +1710,13 @@ def proxied_scene(tmp_path, monkeypatch, migrated_database):
         else:
             monkeypatch.delenv(PROXY_URL_ENV, raising=False)
         systems = {"identity": H.declaration("http://x.invalid/api")} if proxied else {}
-        t = stack.enter_context(A.published(tmp_path / "forge", root, systems))
-        register_tenant(migrated_database, t.tenant_id, data_root=root)
+        # The committed fixture tenant's elastic is itself `http-proxy` (#1391 D12): "no http-proxy system"
+        # takes elastic back to a non-proxied method (no declaration, no proxy method).
+        unproxied = None if proxied else {
+            "settings/systems/elastic/access.yaml": None,
+            "settings/systems/elastic/config.env": ELASTIC_NOT_PROXIED}
+        t = stack.enter_context(A.published(tmp_path / "forge", root, systems, extra_files=unproxied))
+        register_tenant(migrated_database, t.tenant_id, data_root=root, generations=())  # the case's own, below
         if sign:
             insert_generation(migrated_database, t.tenant_id, A.generation(
                 t.tenant_id, tmp_path / "secrets", sign_role_id=SIGN_ROLE, sign_secret=SIGN_SECRET))

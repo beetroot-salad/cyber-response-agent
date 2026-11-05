@@ -1,7 +1,6 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import re
 import subprocess
@@ -13,7 +12,6 @@ from pathlib import Path as _Path
 if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
-from defender import _clock
 from defender.kit.verbs import VerbContext
 from defender.integrations import _stub_transport as transport
 from defender.integrations.confinement import ConfinementFault
@@ -83,18 +81,6 @@ def _raise_on_docker_error(ctx: VerbContext, rc: int, stderr: str, host: str) ->
     raise UpstreamFault(f"docker exec on {host} (rc={rc}): {s or 'no stderr'}")
 
 
-def _captured_at(ctx: VerbContext) -> str:
-    """When this observation was taken, as the run reckons time: the run clock's reading
-    (#1255 "Time": capture stamps use the run clock), which on a branch arm continues from its
-    source's reading at the fork. Never the cut-off `ctx.as_of`: that bounds what a world
-    serves, and stamping it would freeze one visible time while every other one advances. A
-    context that belongs to no run (no run state: the CLI lane, pre-flight, a test stub) has
-    no run clock and stamps the wall clock (rev 5 C4)."""
-    state = getattr(ctx, "run_state", None)
-    at = state.now() if state is not None else datetime.datetime.now(datetime.UTC)
-    return _clock.z_seconds(at)
-
-
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
     """This system's settings check (#1256 O-5). Host-state holds no keys of its own: every verb
     reaches its hosts through the docker transport, so the one `ConfigFault` any of them can
@@ -147,7 +133,6 @@ def container_inspect(ctx: VerbContext, *, container_id: str) -> dict:
     image = json.loads(parts[1]) if len(parts) > 1 and parts[1] else ""
     return {
         "container_id": container_id,
-        "captured_at": _captured_at(ctx),
         "name": name,
         "image": image,
     }
@@ -157,7 +142,7 @@ def proc_tree(ctx: VerbContext, *, host: str) -> dict:
     confine_host_state_call("ps", host)
     rc, out, err = _exec(ctx, host, ["ps", "-eo", "pid,ppid,user,stat,etime,cmd", "--forest"])
     _raise_on_docker_error(ctx, rc, err, host)
-    return {"host": host, "captured_at": _captured_at(ctx), "ps_output": out}
+    return {"host": host, "ps_output": out}
 
 
 def passwd(ctx: VerbContext, *, host: str) -> dict:
@@ -165,7 +150,7 @@ def passwd(ctx: VerbContext, *, host: str) -> dict:
     rc, out, err = _exec(ctx, host, ["cat", "/etc/passwd"])
     _raise_on_docker_error(ctx, rc, err, host)
     entries = [line for line in out.splitlines() if line and not line.startswith("#")]
-    return {"host": host, "captured_at": _captured_at(ctx), "entries": entries}
+    return {"host": host, "entries": entries}
 
 
 def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
@@ -194,7 +179,6 @@ def authorized_keys(ctx: VerbContext, *, host: str, user: str = "root") -> dict:
         "host": host,
         "user": user,
         "path": ak_path,
-        "captured_at": _captured_at(ctx),
         "keys": keys,
     }
 
@@ -210,7 +194,7 @@ def fim_checksum(ctx: VerbContext, *, host: str, path: str) -> dict:
             raise UpstreamFault(f"{path!r} does not exist on {host}")
         _raise_on_docker_error(ctx, rc, err, host)
     digest = out.split()[0] if out.strip() else ""
-    return {"host": host, "path": path, "captured_at": _captured_at(ctx), "sha256": digest}
+    return {"host": host, "path": path, "sha256": digest}
 
 
 def package_list(ctx: VerbContext, *, host: str) -> dict:
@@ -219,7 +203,7 @@ def package_list(ctx: VerbContext, *, host: str) -> dict:
     rc, out, err = _exec(ctx, host, ["dpkg-query", "-W", "-f=" + fmt], timeout_sec=30)
     _raise_on_docker_error(ctx, rc, err, host)
     pkgs = [line for line in out.splitlines() if line.strip()]
-    return {"host": host, "captured_at": _captured_at(ctx), "packages": pkgs}
+    return {"host": host, "packages": pkgs}
 
 
 VERBS = {

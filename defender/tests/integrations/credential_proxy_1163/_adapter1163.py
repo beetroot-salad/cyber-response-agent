@@ -33,6 +33,7 @@ import httpx
 from defender.systems.verbs import VerbContext
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
+from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
 from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, PublishedTenant, published_tenant
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, seed_twin
 
@@ -48,10 +49,52 @@ def prefix_of(system: str) -> str:
     return system.upper().replace("-", "_")
 
 
+def transport_line(system: str) -> str:
+    """The config.env line putting `system` on `http-proxy`: the one place a case writes it."""
+    return f'{prefix_of(system)}_TRANSPORT="http-proxy"\n'
+
+
 def env_text(system: str, *, extra: str = "") -> str:
     """`system`'s config.env on `http-proxy`: an access method and a timeout, no base, no bastion."""
-    p = prefix_of(system)
-    return f'{p}_TRANSPORT="http-proxy"\n{p}_TIMEOUT_SEC="5"\n{extra}'
+    return f'{transport_line(system)}{prefix_of(system)}_TIMEOUT_SEC="5"\n{extra}'
+
+
+#: The two POST reads an Elastic declaration lists (#1391 O3); GET /_cluster/health is a read by method.
+ELASTIC_READS = (("POST", "/*/_search"), ("POST", "/_query"))
+ELASTIC_EVENTS = "logs-*"
+ELASTIC_ALERTS = "alerts-*"
+
+
+def elastic_files(base: str, *, ca: str | bytes | None = None, transport: str | None = "http-proxy",
+                  env_extra: str = "", scheme: dict[str, object] | None = None,
+                  declared: bool = True) -> dict[str, str | None]:
+    """Repo files making `elastic` a proxied system at `base`: a basic-auth declaration with
+    `ELASTIC_READS` (and `ca` when given), and a config.env holding the access method (`transport`;
+    None writes none), the two index keys and `env_extra` (no URL, Kibana or container key);
+    `declared=False` deletes the declaration from the placed fixture (the shipped
+    fixture tenant carries one, #1391 D12), as a `None` entry `files` applies after placement."""
+    decl = H.declaration(base, scheme=scheme or H.basic_scheme(), reads=ELASTIC_READS, ca=ca)
+    method = "" if transport is None else f'ELASTIC_TRANSPORT="{transport}"\n'
+    env = (f'{method}ELASTIC_EVENTS_INDEX="{ELASTIC_EVENTS}"\n'
+           f'ELASTIC_ALERTS_INDEX="{ELASTIC_ALERTS}"\n{env_extra}')
+    files: dict[str, str | None] = dict(H.access_files("elastic", decl, env=env))
+    if not declared:
+        files[ACCESS_FILE.format(system="elastic")] = None
+    return files
+
+
+@contextlib.contextmanager
+def elastic_proxied(tmp_path: Path, data_root: Path, base: str, *, ca: bytes | None = None,
+                    ctx_kw: Mapping[str, Any] | None = None, **files_kw: Any) -> Iterator[tuple[VerbContext, Tap]]:
+    """`elastic` declared at `base` (basic auth, the two POST reads, `ca` when given; `files_kw`
+    shape its files, see `elastic_files`) behind the real proxy over a stored basic credential;
+    yields the verb context (`ctx_kw`: more VerbContext fields) and the proxy's `Tap`."""
+    with published_tenant(tmp_path / "forge", root=data_root,
+                          files=elastic_files(base, ca=ca, **files_kw)) as t:
+        store = H.FakeStore({(t.tenant_id, "elastic"): T.basic_set()})
+        with proxy_for(t, store) as (url, tap):
+            yield ctx_for(tmp_path, T.run_record(t), url,
+                          T.token(t.tenant_id, {("elastic", "r")}), **(ctx_kw or {})), tap
 
 
 def system_files(system: str, decl: str, *, env_extra: str = "") -> dict[str, str]:
@@ -59,13 +102,15 @@ def system_files(system: str, decl: str, *, env_extra: str = "") -> dict[str, st
 
 
 @contextlib.contextmanager
-def published(scratch: Path, root: Path, systems: Mapping[str, str],
+def published(scratch: Path, root: Path, systems: Mapping[str, str], *,
+              extra_files: Mapping[str, str | None] | None = None,
               **kw: Any) -> Iterator[PublishedTenant]:
     """The fixture tenant published once with every `{system: declaration}` of `systems` on
-    `http-proxy`."""
-    files: dict[str, str] = {}
+    `http-proxy`, and `extra_files` (repo path to content, `None` deletes) applied after."""
+    files: dict[str, str | None] = {}
     for system, decl in systems.items():
         files.update(system_files(system, decl))
+    files.update(extra_files or {})
     with published_tenant(scratch, root=root, files=files, **kw) as t:
         yield t
 
@@ -307,19 +352,32 @@ def grant_of(claims: Mapping[str, Any]) -> list[tuple[str, str]]:
 
 
 class Tap:
-    """An ASGI wrapper that records every `Authorization` header value the proxy is sent. It
-    forwards unchanged and decides nothing."""
+    """An ASGI wrapper that records every `Authorization` header value the proxy is sent and
+    each request body (`bodies`: the adapter's call, `timeout_sec` included). It forwards
+    unchanged and decides nothing."""
 
     def __init__(self, app: Any) -> None:
         self.app = app
         self.tokens: list[str] = []
+        self.bodies: list[bytes] = []
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope["type"] == "http":
-            for key, value in scope["headers"]:
-                if key == b"authorization":
-                    self.tokens.append(value.decode().removeprefix("Bearer "))
-        await self.app(scope, receive, send)
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        for key, value in scope["headers"]:
+            if key == b"authorization":
+                self.tokens.append(value.decode().removeprefix("Bearer "))
+        chunks: list[bytes] = []
+
+        async def tapped() -> Any:
+            message = await receive()
+            if message["type"] == "http.request":
+                chunks.append(message.get("body", b""))
+                if not message.get("more_body"):
+                    self.bodies.append(b"".join(chunks))
+            return message
+
+        await self.app(scope, tapped, send)
 
 
 @contextlib.contextmanager

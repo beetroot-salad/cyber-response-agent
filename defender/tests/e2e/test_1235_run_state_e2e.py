@@ -16,6 +16,7 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender.investigation.run_state import RunState  # noqa: E402
+from defender.systems.verbs import CALL_RUN_STATE  # noqa: E402
 from defender.investigation.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.tests.support.runtime.state._1255_view import model_path  # noqa: E402
 from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
@@ -53,16 +54,17 @@ class Asked:
     def __init__(self, tag: str) -> None:
         self.tag = tag
         self.queries: list[str] = []
-        #: `ctx.run_state.lead_rows(LEAD)` at each call — the state as the call saw it.
+        #: `CALL_RUN_STATE.get().lead_rows(LEAD)` at each call — the state as the call saw it.
         self.inherited_seen: list[list[dict]] = []
-        #: The `RunState` object each call's context carried.
+        #: The `RunState` object each call carried (the platform's call-scoped value).
         self.states: list[Any] = []
 
     def registry(self, *, look: bool = False) -> FakeVerbs:
         def query(ctx, *, native_query: str, limit: int = 10) -> list[dict]:
             if look:
-                self.states.append(ctx.run_state)
-                self.inherited_seen.append(list(ctx.run_state.lead_rows(LEAD)))
+                state = CALL_RUN_STATE.get()
+                self.states.append(state)
+                self.inherited_seen.append(list(state.lead_rows(LEAD)))
             self.queries.append(native_query)
             return [{"run": self.tag, "q": native_query, "n": len(self.queries)}]
 
@@ -238,7 +240,7 @@ class Probe:
 
     def registry(self) -> FakeVerbs:
         def probe(ctx, *, native_query: str = "FROM hosts") -> list[dict]:
-            self.states.append(ctx.run_state)
+            self.states.append(CALL_RUN_STATE.get())
             return [{"host": "web-01", "query": native_query}]
 
         return FakeVerbs({"cmdb": {"probe": probe}})

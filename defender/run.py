@@ -391,7 +391,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
         # Declared up front: a world that serves nothing must still leave a ledger.
         ledger = Ledger.for_world(episode, world.world_id).declare()
         verbs: Any = WorldRegistry(
-            roster, tenant.grants.gather, world=world, ledger=ledger, as_of=world.as_of,
+            roster, tenant.grants.gather, world=world, ledger=ledger,
             serving=serving, oracle_dir=default_oracle_dir(world, ledger),
             # This sibling's one limiter, at its slice of the episode rate (S16).
             limiter=RateLimiter(serving.settings.rate),

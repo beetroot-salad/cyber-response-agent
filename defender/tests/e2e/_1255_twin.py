@@ -1118,6 +1118,8 @@ def _child_env(config: Mapping[str, Any]) -> dict[str, str]:
         "DEFENDER_LEARNING_STATE_DIR": str(config["learning_root"]),
         "DEFENDER_RUN_VISUALIZATIONS_DIR": str(config["pages_root"]),
         "DEFENDER_ALLOW_UNSANDBOXED": "1",
+        # The fixture tenant's elastic is proxied (#1391 D12): run start needs the proxy's address (nothing is sent to it).
+        "DEFENDER_CREDENTIAL_PROXY_URL": "http://proxy.invalid",
         "DEFENDER_LOG_LEVEL": "WARNING",
         "PYDANTIC_AI_NO_BANNER": "1",
     })

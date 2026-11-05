@@ -58,9 +58,8 @@ STAMPING_VERBS = [
 ]
 
 
-def test_n3_every_host_state_capture_on_a_natural_run_is_stamped_with_the_run_clock(
+def test_n3_every_host_state_capture_on_a_natural_run_is_stamped_by_the_platform_with_the_run_clock(
         tmp_path, monkeypatch):
-    from defender import _clock
     from defender._io import read_jsonl_rows
     from defender.tests.learning.branch.test_947_clock import DOCKER_LOG, fake_docker
 
@@ -84,15 +83,18 @@ def test_n3_every_host_state_capture_on_a_natural_run_is_stamped_with_the_run_cl
         assert row["exit_code"] == 0, f"a capture failed: {row}"
         assert row["payload_path"], f"a capture failed: {row}"
         payload = json.loads((run_dir / row["payload_path"]).read_text(encoding="utf-8"))
-        stamps.append(payload.get("captured_at"))
-    expected = [_clock.z_seconds(C.at(START, 10 + 7 * (k + 1))) for k in range(6)]
+        assert "captured_at" not in payload, (
+            f"the adapter stamped a time of its own (#1385 O7): {payload}")
+        stamps.append(C.instant(row.get("received_at")))
+    expected = [C.at(START, 10 + 7 * (k + 1)) for k in range(6)]
     assert stamps == expected, (
-        "a host-state capture is not stamped with the run clock's reading at its call — "
-        f"expected {expected}, got {stamps}")
+        "a host-state capture is not stamped by the platform with the run clock's reading at its "
+        f"call — expected {expected}, got {stamps}")
 
 
 def _channel_stamps(run_dir: Path, channel: str) -> list[dt.datetime | None]:
-    """Read denial timestamps or persisted host-state capture timestamps in call order."""
+    """Read denial timestamps or the platform's arrival stamps (`received_at`) of host-state
+    captures in call order."""
     if channel == "denials":
         return [C.instant(r.get("ts")) for r in C.denial_rows(run_dir) if r.get("verb") == "esql"]
     from defender._io import read_jsonl_rows
@@ -103,8 +105,7 @@ def _channel_stamps(run_dir: Path, channel: str) -> list[dt.datetime | None]:
             continue
         assert row.get("exit_code") == 0, f"a capture failed: {row}"
         assert row.get("payload_path"), f"a capture failed: {row}"
-        payload = json.loads((run_dir / row["payload_path"]).read_text(encoding="utf-8"))
-        stamps.append(C.instant(payload.get("captured_at")))
+        stamps.append(C.instant(row.get("received_at")))
     return stamps
 
 

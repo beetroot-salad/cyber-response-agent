@@ -143,6 +143,8 @@ def data_root(tmp_path_factory, monkeypatch, request) -> Iterator[Path]:
 
     root = tmp_path_factory.mktemp("data-root")
     monkeypatch.setenv(DATA_ROOT_ENV, str(root))
+    # The shared fixture tenant's elastic is proxied (#1391 P1/D12): a run needs the proxy's address.
+    monkeypatch.setenv("DEFENDER_CREDENTIAL_PROXY_URL", "http://proxy.invalid")
     yield root
     if request.node.stash.get(_CALL_PASSED, False):
         for entry in root.iterdir():

@@ -90,7 +90,6 @@ READ_ENDPOINT_ALLOWLIST = ReadEndpointAllowlist({
         ("/*/_search", "POST"),
         ("/_query", "POST"),
         ("/_cluster/health", "GET"),
-        ("/api/status", "GET"),
     ),
     "change-mgmt": (
         ("/health", "GET"),

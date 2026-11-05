@@ -5,17 +5,17 @@ and writes, so `systems` never imports it and `RunState` satisfies it by shape."
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
-
-from defender.kit.verbs import RunClock
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.systems.system_status import ReasonScope, StartCause
 
 
-class SystemsState(RunClock, Protocol):
-    """What the breaker and the system-status code need from a run's state, and the run clock an
-    adapter stamps a capture with: `VerbContext.run_state` carries both."""
+class SystemsState(Protocol):
+    """What the breaker and the system-status code need from a run's state, and the run clock the
+    platform stamps replies with and pauses for an oracle turn (`CALL_RUN_STATE` carries it; no
+    adapter sees it)."""
 
     reason_scope: ReasonScope | None
 
@@ -32,6 +32,10 @@ class SystemsState(RunClock, Protocol):
     @property
     def system_down(self) -> dict[str, StartCause]:
         """Each system down for the run for a cause the breaker does not count."""
+        ...
+
+    def now(self) -> datetime:
+        """The run clock's reading."""
         ...
 
     def now_iso(self) -> str:

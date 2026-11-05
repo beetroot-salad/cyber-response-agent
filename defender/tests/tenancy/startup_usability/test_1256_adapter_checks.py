@@ -208,7 +208,9 @@ def test_o5_settings_that_make_a_verb_raise_make_the_check_raise(
         f"{system}'s check does not name what is wrong (one of {family.names}): {fault}")
 
 
-@pytest.mark.parametrize("system", sorted(FAULTS))
+#: Elastic is complete only with an access declaration, which this config.env-only fixture does
+#: not write; its complete-settings control is `credential_proxy_1163/test_query_flow.py` (#1391 O3, D12).
+@pytest.mark.parametrize("system", sorted(set(FAULTS) - {"elastic"}))
 def test_o5_complete_settings_pass_every_verb_and_the_check(tmp_path, checkout_roster, system):
     module = _adapter(checkout_roster, system)
     root, folder = _plant(tmp_path, "okc")
@@ -226,29 +228,6 @@ def test_o5_complete_settings_pass_every_verb_and_the_check(tmp_path, checkout_r
     fault = _check_outcome(_declared_check(module, system), record)
     assert fault is None, (
         f"{system} is usable (no verb raises ConfigFault) but its check raised {fault!r}")
-
-
-def test_o5_elastic_without_a_kibana_container_stays_usable(tmp_path, checkout_roster):
-    module = _adapter(checkout_roster, "elastic")
-    root, folder = _plant(tmp_path, "kbn")
-    S.drop_key(folder, "elastic", "ELASTIC_KIBANA_CONTAINER")
-    record = S.resolve(root)
-    entry = record.systems.get("elastic")
-    assert isinstance(entry, SystemConfig), f"precondition: elastic is configured: {entry!r}"
-    assert "ELASTIC_KIBANA_CONTAINER" not in entry, f"precondition: elastic is configured: {entry!r}"
-    shim = S.DockerShim(tmp_path / "shim")
-    ctx = _ctx(record, tmp_path, shim)
-    outcomes = _every_verb(module, ctx)
-    assert outcomes == dict.fromkeys(outcomes), (
-        f"precondition: every elastic verb answers with no Kibana container: {outcomes}")
-    health = module.VERBS["health-check"](ctx)
-    assert "not configured" in str(health.get("kibana", "")), (
-        f"precondition: health-check reports Kibana as a result: {health}")
-
-    fault = _check_outcome(_declared_check(module, "elastic"), record)
-    assert fault is None, (
-        f"elastic answers every verb without a Kibana container, so its check must not raise: "
-        f"{fault!r}")
 
 
 def _no_systems(folder: Path, _system: str) -> None:

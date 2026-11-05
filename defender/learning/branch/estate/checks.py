@@ -5,6 +5,7 @@ import difflib
 import hashlib
 import json
 import re
+from collections import Counter
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -717,6 +718,27 @@ def _check_ids(matched: _Matched, claim: _Claim, store: CheckStore, real: RealDa
 
 
 @dataclass
+class ReAsked:
+    """A re-ask the host accepted and read (#1385): its question, the host's own answer to it,
+    and the rows of the live base that answer drops. Made once, by the oracle's `re_ask` tool
+    (`re_asked`), and carried from there: the answer is the attempt's base from then on, and the
+    check, the verifier, the label and the commit all read this one value."""
+
+    system: str
+    verb: str
+    params: dict
+    answer: Any
+    #: The live base's rows the re-asked answer lacks (`cut_rows`), computed once.
+    dropped: list[Any] = field(default_factory=list)
+
+
+def re_asked(live: Any, system: str, verb: str, params: Mapping[str, Any],
+             answer: Any) -> ReAsked:
+    """The accepted re-ask of `live` (the call's live base) that `answer` answers."""
+    return ReAsked(system, verb, dict(params), answer, cut_rows(live, answer)[0])
+
+
+@dataclass
 class Checked:
     """One submission's host-check outcome: its failures (`[]` passes) and what check 1 found,
     so the collision record reuses the structural diff instead of recomputing it."""
@@ -859,9 +881,39 @@ def _check_counts(claim: _Claim, store: CheckStore) -> list[str]:
     return failures
 
 
+def cut_rows(live: Any, re_asked: Any) -> tuple[list[Any], list[Any]]:
+    """`(dropped, brought_in)`: the rows the live base has that the re-asked answer lacks, and the
+    older rows the re-asked answer has that the live base lacks (#1385 A3)."""
+    out = _Diff()
+    _diff(live, re_asked, (), out, lambda _new, _names: True)
+    dropped = [row for _path, row, _names in out.removed]
+    brought_in = [row for _path, row, _names in out.added]
+    # A row the re-ask only reorders reads as removed at one place and added at another: it is
+    # neither dropped nor brought in. Cancel each such pair, one for one (a multiset).
+    kept = Counter(canonical_json(row) for row in dropped)
+    kept &= Counter(canonical_json(row) for row in brought_in)
+    if not kept:
+        return dropped, brought_in
+    return _less_reordered(dropped, Counter(kept)), _less_reordered(brought_in, Counter(kept))
+
+
+def _less_reordered(rows: list[Any], cancel: Counter[str]) -> list[Any]:
+    """`rows` less the first `cancel[text]` rows of each canonical spelling, order kept."""
+    out: list[Any] = []
+    for row in rows:
+        text = canonical_json(row)
+        if cancel[text] > 0:
+            cancel[text] -= 1
+        else:
+            out.append(row)
+    return out
+
+
 def run_checks(base: Any, served: Any, claim: Any, *, world: Any, store: CheckStore,
                real_data: RealData) -> Checked:
-    """Checks 1-5 for one submission, the structural diff computed once (`check_submission`)."""
+    """Checks 1-5 for one submission, the structural diff computed once (`check_submission`).
+    `base` is the answer the claim is made against: the call's base, or the answer of the
+    attempt's accepted re-ask (#1385)."""
     parsed, malformed = parse_claim(claim)
     if parsed is None:
         return Checked([f"check 1: the claim cannot be read: {malformed}"])

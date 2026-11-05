@@ -139,7 +139,11 @@ class OracleStore:
             self._append(self.paths.ledger, [{"actor": actor, "system": system, "verb": verb,
                                    "params": dict(params)}])
 
-    def keep_base(self, system: str, verb: str, params: Mapping[str, Any], text: str) -> None:
+    def keep_base(self, system: str, verb: str, params: Mapping[str, Any], text: str, *,
+                  indexed: bool = False) -> None:
+        """Keep a base answer of this world under its request key, once. `indexed`: this
+        process's real-data index already holds it, so it is not queued for indexing again (a
+        resume, which reads the file, indexes it then)."""
         with self._lock:
             key = request_key(system, verb, params)
             if key in self.base:
@@ -147,7 +151,8 @@ class OracleStore:
             self._append(self.paths.base, [{"system": system, "verb": verb, "params": dict(params),
                                  "payload_text": text}])
             self.base[key] = text
-            self.base_answers.append((system, text))
+            if not indexed:
+                self.base_answers.append((system, text))
 
     def charge(self, actor: str, model_name: str, usage: Mapping[str, Any], *,
                priced_as: str) -> float:
@@ -254,8 +259,9 @@ class LimiterWaits:
 
 @dataclass
 class QueryDoor:
-    """Grant-decided (read verbs only), at the branch-point clock, rate-limited, recorded in
-    the world's oracle-side ledger and nowhere else."""
+    """Grant-decided (read verbs only), rate-limited, recorded in the world's oracle-side ledger
+    and nowhere else. Reads are live: nothing cuts them at the branch point (#1385), so a host
+    check's or the verifier's side query can return rows after it."""
 
     decide: Callable[[str, str], Any]
     real_verbs: Callable[[str], Mapping[str, Any]]

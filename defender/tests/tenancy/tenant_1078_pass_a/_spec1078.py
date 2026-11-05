@@ -429,6 +429,11 @@ def drive_launch(source: Path, *, spawn: Any = None, tenant_id: str | None = Non
     seams.setdefault("preflight", no_preflight)
     argv = launch_argv(source, tenant_id=tenant_id)
     seams.setdefault("directory", directory_for_argv(argv))  # r10 A1/C9: the launcher admits through the tenant records
+    # The fixture tenant's elastic is proxied (#1391 D12): the launcher signs its read token through a port, here
+    # the harness's (never the tenant's sign login against a real OpenBao).
+    from defender.tests.integrations.credential_proxy_1163 import _harness as credential_harness
+
+    seams.setdefault("signer", credential_harness.FakeSigner())
     try:
         return branch_entry().main(argv, spawn=spawn, **seams)
     except SystemExit as refused:

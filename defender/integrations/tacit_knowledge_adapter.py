@@ -267,14 +267,11 @@ def find_entry(
     return None
 
 
-def _as_of_date(ctx: VerbContext) -> dt.date:
-    """The day this call is served as of: `ctx.as_of` on a branched run, else today.
-
-    `getattr` because duck-typed contexts reach this adapter, and an `AttributeError` in a verb
-    body is filed as an infra fault.
-    """
-    at = getattr(ctx, "as_of", None)
-    return (dt.datetime.now(dt.UTC) if at is None else at).date()
+def _today() -> dt.date:
+    """The day this call judges the registry against: today. A replay is judged the same way
+    until #1390 rehomes tacit-knowledge's branch-day judgement: the adapter is not told the
+    branch point (#1385 O1)."""
+    return dt.datetime.now(dt.UTC).date()
 
 
 def check_settings(tenant: TenantRecord) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
@@ -310,7 +307,7 @@ def lookup(  # lint-dup: ok — a verb name addressed as `<system>.lookup`; `thr
     entries = load_entries(registry_path(ctx.tenant.agent))
     return {
         "matched": find_entry(
-            entries, actor=actor, host=host, pattern=pattern, now=_as_of_date(ctx),
+            entries, actor=actor, host=host, pattern=pattern, now=_today(),
         ),
     }
 

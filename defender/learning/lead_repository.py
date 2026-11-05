@@ -91,6 +91,9 @@ class QueryRow:
     #: string the writer coarsened to `system=""`; `""` elsewhere. Coerced as the guard's `_trip`
     #: coerces it, so an older table replays exactly as it ran. For the guard, not a model.
     system_key: str = ""
+    #: The run clock's reading when the reply arrived (#1385 O7), as the writer spelled it; `""`
+    #: on a table written before the column existed.
+    received_at: str = ""
     #: The parsed JSON record this row was read from, by identity — see `record()`. Excluded
     #: from equality and repr; `SkipValidation` because validation would copy it.
     _record: Annotated[dict | None, SkipValidation] = field(
@@ -229,6 +232,7 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
                 # `as_str`: the guard's own coercion (absent / `None` / non-string -> `""`).
                 payload_sha256=as_str(rec.get("payload_sha256")),
                 system_key=as_str(rec.get("system_key")),
+                received_at=as_str(rec.get("received_at")),
                 _record=rec,
             )
         )

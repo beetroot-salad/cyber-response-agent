@@ -50,7 +50,7 @@ second one.
   function of the run's tenant record that raises `ConfigFault` for every
   settings fault any verb can raise (`_stub_transport.check_docker_curl_settings`
   for the docker-exec-curl stubs; `record_access_context` for host-state;
-  elastic adds its ES container). The run judges each granted system with it
+  elastic judges its access method, its declaration and its two index keys). The run judges each granted system with it
   once, at start: one that fails is down for the run with that reason, and no
   verb of it is called (#1256). A system needing no settings (tacit-knowledge)
   declares one that never raises.

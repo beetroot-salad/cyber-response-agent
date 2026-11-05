@@ -1,0 +1,13 @@
+# How the credential proxy reaches Elasticsearch for this tenant (#1391 O3, O4).
+# The proxy adds the basic-auth credential of the read-only defender user; the agent never holds it.
+# This is the committed test fixture: the replays that run as it never reach Elasticsearch, so it
+# carries no `ca`. The live lab tenant (its own repository) adds the lab's private CA as a `ca:`
+# block there, per the upgrade procedure in defender/CLAUDE.md. That CA is made per lab (when the
+# lab first starts), so it is not committed here.
+access: http-proxy
+base: https://elasticsearch:9200
+auth:
+  scheme: basic
+reads:
+  - {method: POST, path: "/*/_search"}
+  - {method: POST, path: "/_query"}

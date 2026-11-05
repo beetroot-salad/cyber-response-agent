@@ -1,6 +1,8 @@
 """#1163 learning preflight reaches an `http-proxy` system through the proxy with a read grant on
 the source run's http-proxy systems (H12), and a working-tree base that differs from `current`
-degrades to drift `unknown` with nothing sent outside the merged declaration (A3)."""
+is refused by the proxy with nothing sent outside the merged declaration (A3). Pre-flight reads
+live only a call the source run's capture holds no answer for (#1385 H6), so the idp call here is a
+captured failure."""
 from __future__ import annotations
 
 import json
@@ -14,6 +16,9 @@ from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE, proxy
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
+from defender.tests.learning.oracle.live_contracts.test_1224_preflight_and_outcome import (
+    _capture_row,
+)
 from defender.tests.tenancy.tenant_1108_p4._support import default_secrets_dir, published_tenant
 
 pytestmark = pytest.mark.e2e
@@ -75,8 +80,15 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env
     (est.adapters / "idp_adapter.py").write_text(IDP_ADAPTER, encoding="utf-8")
     idp = [c for c in S.default_calls() if c.system == "idp"][0]
     # Every call answers with the idp rows, so the one scripted submission is true of all three
-    # (calibrating edr or siem-x against another system's rows would fail the family).
-    calls = [S.Call(c.system, c.verb, c.params, idp.payload) for c in S.default_calls()]
+    # (calibrating edr or siem-x against another system's rows would fail the family). The idp
+    # call is a captured failure, so it has no recording and pre-flight reads it live (H6).
+    calls = [S.Call(c.system, c.verb, c.params, idp.payload) for c in S.default_calls()
+             if c.system != "idp"]
+
+    def capture_idp_failure(src) -> None:
+        _capture_row(src, system="idp", verb=idp.verb, params=idp.params, seq=60, exit_code=1,
+                     payload={"error": "upstream said no"})
+
     with H.upstream() as merged, H.upstream() as wt:
         merged.replies[f"{API}/events"] = (200, {"Content-Type": "application/json"},
                                            json.dumps(idp.payload).encode())
@@ -108,7 +120,7 @@ def _preflight(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool, env
                 run = S.launch(tmp_path, est, calls=calls, oracle=S.oracle(
                     then=S.submit(idp.payload, S.EMPTY_CLAIM)),
                     verifier=S.passing_verifier(), issuer_transport=bao, proxy_url=url if proxy_address else None,
-                    directory=records)
+                    directory=records, after_source=capture_idp_failure)
         outcome = S.read_outcome(run.ep)
     return run, outcome, bao, tap_holder["tap"], merged, wt
 
@@ -137,7 +149,7 @@ def test_p1_preflight_reads_idp_through_the_proxy_with_a_read_grant_on_http_prox
     assert claims["exp"] > finished, "positive control: the expiry is a time still to come"
     assert tap.tokens
     assert all(A.SIGNATURE_CANARY in tok for tok in tap.tokens)
-    assert [d for d in outcome["drift"] if d["system"] == "idp"] == []
+    assert "drift" not in outcome
     assert wt.seen == []
     # O10: curators and the author carry no token or signature in argv or env.
     assert run.spawn.launches, "positive control: children were spawned"
@@ -164,14 +176,14 @@ def test_p1b_preflight_signs_with_the_sign_login_whatever_the_environment_holds(
     assert all(A.SIGNATURE_CANARY in tok for tok in tap.tokens)
 
 
-def test_p2_a_working_tree_base_that_differs_from_current_is_drift_unknown_and_sent_nowhere(
+def test_p2_a_working_tree_base_that_differs_from_current_is_refused_and_sent_nowhere(
         tmp_path, monkeypatch, data_root):
-    """The proxy refuses the working tree's base (it applies `current`); preflight records the
-    idp call as drift `unknown`, and neither upstream is reached. A3, O2."""
+    """The proxy refuses the working tree's base (it applies `current`); the idp call's live read
+    fails without making a world unservable, and neither upstream is reached. A3, O2."""
     run, outcome, bao, tap, merged, wt = _preflight(
         tmp_path, monkeypatch, data_root, working_tree_edit=True)
     assert outcome is not None, run.message  # the outcome is written before any sibling
-    assert [d["status"] for d in outcome["drift"] if d["system"] == "idp"] == ["unknown"]
+    assert outcome["unservable_worlds"] == [], "the failed live read made a world unservable"
     assert tap.tokens, "positive control: the proxy was asked"
     assert merged.seen == []
     assert wt.seen == []

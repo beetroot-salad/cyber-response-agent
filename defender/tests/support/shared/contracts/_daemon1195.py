@@ -1,12 +1,15 @@
 """A docker daemon faked over one folder, for the #1195 rows. NOT a test module."""
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import sys
 from pathlib import Path
 
 STATE = "state.json"
+LOCK = ".state.lock"
 CALLS = "calls.jsonl"
 
 #: The probe's reply when every banned shape was refused (`box._alias`).
@@ -39,6 +42,17 @@ def load(here: Path) -> dict:
 
 def save(here: Path, state: dict) -> None:
     (here / STATE).write_text(json.dumps(state), encoding="utf-8")
+
+
+@contextlib.contextmanager
+def locked(here: Path):
+    """Hold the daemon's lock across one read, change and save of its state, so two docker calls
+    (a `docker` program each, or the test's own edit) cannot erase each other's change. This
+    module runs as a bare script, so it spells the lock itself rather than importing the test
+    helper (`_handoff.updating`)."""
+    with open(here / LOCK, "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)  # released when the handle closes
+        yield
 
 
 def log(here: Path, entry: list[str]) -> None:
@@ -206,8 +220,13 @@ def _create(here: Path, state: dict, argv: list[str]) -> tuple[int, str, str]:
     return 0, "f" * 64 + "\n", ""
 
 
-def handle(here: Path, argv: list[str]) -> tuple[int, str, str]:  # noqa: PLR0911 — one daemon, one arm per verb
+def handle(here: Path, argv: list[str]) -> tuple[int, str, str]:
     """Answer one docker argv (`["docker", verb, ...]`): `(rc, stdout, stderr)`."""
+    with locked(here):
+        return _handle(here, argv)
+
+
+def _handle(here: Path, argv: list[str]) -> tuple[int, str, str]:  # noqa: PLR0911 — one daemon, one arm per verb
     log(here, argv)
     state = load(here)
     verb = argv[1] if len(argv) > 1 else ""

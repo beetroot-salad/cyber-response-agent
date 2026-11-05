@@ -220,9 +220,7 @@ def check_settings(*_a, **_k):
 
 
 def _answer(ctx: VerbContext, name: str, params: dict):
-    as_of = getattr(ctx, "as_of", None)
     row = {{"system": SYSTEM, "verb": name, "params": params,
-           "as_of": None if as_of is None else as_of.isoformat(),
            "world_id": getattr(ctx, "world_id", None),
            "run_dir": str(getattr(ctx, "run_dir", "")), "t": time.time()}}
     with (_STATE / "calls.jsonl").open("a", encoding="utf-8") as fh:
@@ -483,6 +481,98 @@ def test_1224_unchanged_answer_in_a_fact_world_still_passes_the_verifier(tmp_pat
     assert not oracle.overrun
 
 
+#: #1385: a live base capped at two rows, one after the branch point, and its bounded re-ask.
+#: World b's fact names `alice` and `db-1`; nobody else.
+def _event(user: str, event_id: str, ts: str, host: str = "web-1") -> dict:
+    return {"action": "logon", "event_id": event_id, "user": user, "host": host, "ts": ts}
+
+
+_KEPT = _event("dan", "e-100", "2026-07-28T15:00:00Z")
+_OLDER = _event("dan", "e-099", "2026-07-28T14:00:00Z")
+_FACT_ROW = _event("alice", "e-9001", "2026-07-28T15:22:00Z", "db-1")
+_CAPPED = S.query_params("host:web-1", limit=2)
+_BOUNDED = S.query_params("host:web-1", end=S.AS_OF, limit=2)
+_RE_ASK = S.re_asked(system="idp", verb="query", params=_BOUNDED)
+
+
+_LATE = "2026-07-28T17:05:00Z"
+_NESTED = {"action": "logon", "event_id": "e-300", "ts": _LATE,
+           "detail": {"session": {"actor": ["x", {"name": "alice"}]}}}
+
+
+@pytest.mark.parametrize(("label", "dropped", "older", "forge", "expected"), [
+    ("b", _event("carol", "e-300", _LATE), _OLDER, False, "reconstructed"),
+    ("b", _event("alice", "e-300", _LATE), _OLDER, False, S.ORACLE_DECISION),
+    ("b", _event("carol", "e-300", _LATE), _OLDER, True, S.ORACLE_DECISION),
+    ("a", _event("alice", "e-300", _LATE), _OLDER, False, "reconstructed"),
+    ("b", _NESTED, _OLDER, False, S.ORACLE_DECISION),
+    ("b", _event("alice-admin", "e-300", _LATE), _OLDER, False, "reconstructed"),
+    ("b", _event("carol", "e-300", _LATE), _event("alice", "e-099", "2026-07-28T14:00:00Z"),
+     False, "reconstructed"),
+], ids=["cut-drops-no-fact-entity", "cut-drops-a-fact-entity-row", "cut-plus-forged-row",
+        "world-without-facts", "dropped-row-names-it-nested", "near-miss-value",
+        "re-ask-brings-in-a-fact-entity-row"])
+def test_1385_a_cut_is_oracle_only_for_what_it_shows_of_the_worlds_facts(
+        tmp_path, label, dropped, older, forge, expected):
+    """A re-asked answer is `oracle` when a dropped row has a string equal to a fact entity at any
+    depth, or it carries a forged row, else `reconstructed`; no facts, never (T2, O4)."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", _CAPPED, {"rows": [dropped, _KEPT]})
+    at_branch = {"rows": [_KEPT, older]}
+    est.answer("idp", "query", _BOUNDED, at_branch)
+    served, claim = at_branch, S.claim()
+    moves = [S.re_ask(_RE_ASK)]
+    if forge:
+        served = {"rows": [*at_branch["rows"], _FACT_ROW]}
+        claim = S.claim(added=[S.added("fg-1", "f1")])
+        moves.append(S.forge("fg-1", "f1", "idp", _FACT_ROW))
+    ep = _episode(tmp_path, captured=[])
+    oracle = S.oracle(*moves, S.submit(served, claim))
+    reg = S.sandboxed_registry(ep, label, est, oracle=oracle, verifier=S.passing_verifier())
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), **_CAPPED) == served
+    assert oracle.submissions() == 1, "the re-asked answer was refused"
+    assert _decisions(ep, label) == [expected]
+
+
+@pytest.mark.parametrize(("entity", "expected"), [("alice", S.ORACLE_DECISION),
+                                                  ("bob", "reconstructed")],
+                         ids=["fact-entity", "other-entity"])
+def test_1385_a_changed_entry_is_oracle_only_on_a_fact_entity(tmp_path, entity, expected):
+    """A `changed` entry on an entity a fact names labels the answer `oracle`; on any other
+    entity it is `reconstructed` (T2, O4)."""
+    est = S.estate(tmp_path)
+    record = {"entity": entity, "risk": "low", "record_id": "r-0001"}
+    est.answer("siem-x", "lookup", {"entity": entity}, record)
+    served = {**record, "risk": "high"}
+    ep = _episode(tmp_path, captured=[])
+    oracle = S.oracle(S.submit(served, S.claim(changed=[S.changed(entity, "risk", "low",
+                                                                  "high")])))
+    reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
+
+    assert S.call(reg, "siem-x", "lookup", est.ctx(tmp_path / "run"), entity=entity) == served
+    assert oracle.submissions() == 1, "the change was refused"
+    assert _decisions(ep, "b") == [expected]
+
+
+def test_1385_a_fact_the_oracle_records_on_an_undeclared_entity_does_not_make_a_change_oracle(
+        tmp_path):
+    """The label reads the family's declared facts: a `record_fact` on `bob`, a name no fact
+    declares, and a `changed` entry on him leave the answer `reconstructed` (A1)."""
+    est = S.estate(tmp_path)
+    record = {"entity": "bob", "risk": "low", "record_id": "r-0001"}
+    est.answer("siem-x", "lookup", {"entity": "bob"}, record)
+    served = {**record, "risk": "high"}
+    ep = _episode(tmp_path, captured=[])
+    oracle = S.oracle(S.record_fact("bob", "risk", "high"),
+                      S.submit(served, S.claim(changed=[S.changed("bob", "risk", "low", "high")])))
+    reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
+
+    assert S.call(reg, "siem-x", "lookup", est.ctx(tmp_path / "run"), entity="bob") == served
+    assert oracle.submissions() == 1, "the change was refused"
+    assert _decisions(ep, "b") == ["reconstructed"]
+
+
 def test_1224_served_answer_is_recorded_and_screened_as_real_data(tmp_path):
     """A served answer reaches the investigator as real data: one exit-0 evidence row with the whole served payload."""
     est = _TicketEstate(tmp_path / "estate")
@@ -534,7 +624,13 @@ def test_1224_two_worlds_asking_one_call_get_their_own_served_answers(tmp_path):
 def test_1224_fact_names_an_entity_no_real_answer_contains(tmp_path):
     """An invented entity reads the same on every system: each call takes a verified turn; check 4 refuses a contradiction."""
     est = S.estate(tmp_path)
-    ep = _episode(tmp_path, captured=[])
+    # The world's fact names the invented entity: a `changed` entry on it is shown (#1385 A1).
+    doc = S.family_v2(worlds=[
+        S.control_world("a"),
+        S.world_v2("b", facts=[S.fact("f1", "ghost-7 exists on every system", ("ghost-7",))]),
+        S.world_v2("c", role="C", facts=[S.fact("f2", "bob reset carol's password from 10.0.0.9",
+                                                ("bob", "carol", "10.0.0.9"))])])
+    ep = _episode(tmp_path, doc=doc, captured=[])
     ghost = {"entity": "ghost-7"}
     est.answer("idp", "lookup", ghost, {"entity": "ghost-7", "found": False})
     est.answer("edr", "lookup", ghost, {"entity": "ghost-7", "found": False})

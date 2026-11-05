@@ -51,7 +51,7 @@ BROKEN_MARK = "FD1256-PLANTED-ADAPTER-IMPORT-FAILURE"
 
 def _names_system(text: str, system: str) -> bool:
     """`text` names `system` as a word of its own — not as the head of a key that merely starts
-    with it (`ELASTICSEARCH_URL`, `CMDB_URL_BASE`), so the check is independent of the reason's."""
+    with it (`ELASTIC_EVENTS_INDEX`, `CMDB_URL_BASE`), so the check is independent of the reason's."""
     return re.search(rf"(?<![\w-]){re.escape(system)}(?![\w-])", text, re.IGNORECASE) is not None
 
 
@@ -59,6 +59,11 @@ def _drop(scene: _Scene, system: str, key: str) -> None:
     """`system`'s `config.env` loses `key` — a key its own adapter requires (the planted tenant
     starts complete, so this one edit is the only thing down)."""
     S7.drop_key(scene.tenant.knowledge, system, key)
+
+
+def _no_access(scene: _Scene, system: str) -> None:
+    """`system` loses its access declaration — the cause that survives the Docker keys (#1391 P1/D12)."""
+    S7.drop_access(scene.tenant.knowledge, system)
 
 
 def _down_lead() -> dict[str, Any]:
@@ -79,11 +84,10 @@ def _breaker_references(scene: _Scene) -> tuple[S.Drive, S.Drive]:
 
 
 def _unconfigured(tmp_path: Path) -> _Scene:
-    """A tenant whose elastic misses ELASTICSEARCH_URL (one of
-    `elastic_adapter.REQUIRED_CONFIG_KEYS`); cmdb stays complete, so gather keeps a usable
-    system and the run is not refused."""
+    """A tenant whose elastic has no access.yaml (#1391 P1); cmdb stays complete, so gather keeps
+    a usable system and the run is not refused."""
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down-url"))
-    _drop(scene, "elastic", "ELASTICSEARCH_URL")
+    _no_access(scene, "elastic")
     return scene
 
 
@@ -171,7 +175,7 @@ def test_o6_lead_on_an_unconfigured_system_ends_before_its_claim_naming_the_caus
         assert _section(down) != _section(ref), (
             f"MAIN's correlation section for a system down at start is the {label!r} one")
     _assert_names_not_configured(down, control, "down at start (not configured)",
-                                 "ELASTICSEARCH_URL")
+                                 "access.yaml")
     _assert_never_started(down, "down at start (not configured)")
     # Never a run refusal: the run proceeds, MAIN runs, report.md is written.
     _assert_continued(down, "down at start (not configured)", requests=3)
@@ -179,15 +183,16 @@ def test_o6_lead_on_an_unconfigured_system_ends_before_its_claim_naming_the_caus
 
 
 def test_o6_every_start_time_settings_fault_is_down_at_start(tmp_path: Path) -> None:
-    """No config.env at all, or a missing ES container key (which `load_config` never checks): either way l-00c ends down at start naming 'not configured', with nothing run or charged."""
+    """No config.env at all, or no access.yaml (elastic's base comes from the declaration `load_config` reads): either way l-00c ends down at start naming 'not configured'.
+    Nothing is run or charged."""
     scene = _Scene(tmp_path)
     control = scene.control()
     no_file = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-no-file"), omit_systems=("elastic",))
-    container = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-no-container"))
-    _drop(container, "elastic", "ELASTIC_ES_CONTAINER")
+    container = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-no-access"))
+    _no_access(container, "elastic")
 
     for label, sc, tokens in (("no config.env", no_file, ()),
-                              ("no ES container", container, ("ELASTIC_ES_CONTAINER",))):
+                              ("no access.yaml", container, ("access.yaml",))):
         d = sc.run(label.replace(" ", "-").replace(".", "").lower(), **_down_lead())
         _named(d, control, f"down at start ({label})")
         _assert_names_not_configured(d, control, f"down at start ({label})", *tokens)
@@ -555,12 +560,12 @@ def test_o8_every_granted_system_down_at_start_refuses_the_run_naming_each(
     """Refused at start — before the run folder, any model call or any adapter call — naming each down system with its reason, never the breaker's words."""
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-all-down"))
     _drop(scene, "cmdb", "CMDB_URL_BASE")
-    _drop(scene, "elastic", "ELASTICSEARCH_URL")
+    _no_access(scene, "elastic")
     before = _runs_entries(scene.tenant)
     d = scene.run("all-down", **_down_lead())
 
     text = _refusal_text(d, scene.tenant)
-    _assert_names_each(text, (("cmdb", "CMDB_URL_BASE"), ("elastic", "ELASTICSEARCH_URL")),
+    _assert_names_each(text, (("cmdb", "CMDB_URL_BASE"), ("elastic", "access.yaml")),
                        "every granted system down")
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
     _assert_refused_before_anything(d, scene.tenant, before, "every granted system down")
@@ -574,13 +579,13 @@ def test_o8_a_system_up_with_only_its_health_check_granted_does_not_save_the_run
     _assert_continued(ran, "premise: the health-check-only table with elastic configured")
 
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-hc-down"), table=TABLE_CMDB_HEALTH_ONLY)
-    _drop(scene, "elastic", "ELASTICSEARCH_URL")
+    _no_access(scene, "elastic")
     before = _runs_entries(scene.tenant)
     d = scene.run("hc-elastic-down", **_down_lead())
 
     text = _refusal_text(d, scene.tenant)
     assert _names_system(text, "elastic"), f"the refusal does not name the down system: {text!r}"
-    assert "ELASTICSEARCH_URL" in text, f"the refusal does not name elastic's reason: {text!r}"
+    assert "access.yaml" in text, f"the refusal does not name elastic's reason: {text!r}"
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
     _assert_refused_before_anything(d, scene.tenant, before, "only a health check up")
 
@@ -588,7 +593,7 @@ def test_o8_a_system_up_with_only_its_health_check_granted_does_not_save_the_run
 def test_o8_one_usable_system_among_several_down_runs(tmp_path: Path) -> None:
     """Control: with elastic and identity down at start and cmdb up (a query verb granted), the run proceeds to its close."""
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-one-up"), table=TABLE_THREE)
-    _drop(scene, "elastic", "ELASTICSEARCH_URL")
+    _no_access(scene, "elastic")
     _drop(scene, "identity", "IDENTITY_URL_BASE")
     d = scene.run("one-up", main=S.closing_main_turns("inconclusive"), **_down_lead())
 
@@ -618,21 +623,22 @@ def _drop_present(scene: _Scene, system: str, key: str) -> None:
 
 
 def test_o8_all_down_through_settings_load_config_never_reads(tmp_path: Path) -> None:
-    """Every granted system down for a key no `load_config` reads (cmdb's docker context, elastic's ES container) is refused at start naming each key: the refusal comes from the adapters' declared checks, not a `load_config` pre-check. Repairing cmdb lets the tenant run."""
+    """Every granted system down, elastic through its declaration on the `load_config` path and cmdb through CMDB_DOCKER_CONTEXT, beyond `load_config`, is refused at start naming each key,
+    from the adapters' declared checks, not a pre-check. Repairing cmdb lets the tenant run."""
     repaired = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-access-repaired"))
-    _drop_present(repaired, "elastic", "ELASTIC_ES_CONTAINER")
+    _no_access(repaired, "elastic")
     ran = repaired.run("cmdb-repaired")
     _assert_continued(ran, "control: cmdb repaired, elastic still down")
 
     scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-access-down"))
     _drop_present(scene, "cmdb", "CMDB_DOCKER_CONTEXT")
-    _drop_present(scene, "elastic", "ELASTIC_ES_CONTAINER")
+    _no_access(scene, "elastic")
     before = _runs_entries(scene.tenant)
     d = scene.run("access-down", **_down_lead())
 
     text = _refusal_text(d, scene.tenant)
     _assert_names_each(text, (("cmdb", "CMDB_DOCKER_CONTEXT"),
-                              ("elastic", "ELASTIC_ES_CONTAINER")), "down beyond load_config")
+                              ("elastic", "access.yaml")), "down beyond load_config")
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
     _assert_refused_before_anything(d, scene.tenant, before, "down beyond load_config")
 
@@ -793,7 +799,7 @@ def test_o8_d4_acceptance_adopts_an_all_down_tenant_whose_runs_are_refused(
     authored = S.plant_tenant(tenant_id, root=tmp_path / "authored",
                               alert_mapping=S.DEFAULT_MAPPING, table=S.TABLE_ELASTIC)
     S7.drop_key(authored.knowledge, "cmdb", "CMDB_URL_BASE")
-    S7.drop_key(authored.knowledge, "elastic", "ELASTICSEARCH_URL")
+    S7.drop_access(authored.knowledge, "elastic")
     root = current_data_root()
     H20.place_knowledge(root, tenant_id, source=authored.knowledge)
 
@@ -817,7 +823,7 @@ def test_o8_d4_acceptance_adopts_an_all_down_tenant_whose_runs_are_refused(
     before = _runs_entries(tenant)
     d = S.run_alert(tmp_path / "run", alert=_alert(), tenant=tenant, **_down_lead())
     text = _refusal_text(d, tenant)
-    _assert_names_each(text, (("cmdb", "CMDB_URL_BASE"), ("elastic", "ELASTICSEARCH_URL")),
+    _assert_names_each(text, (("cmdb", "CMDB_URL_BASE"), ("elastic", "access.yaml")),
                        "an adopted all-down tenant")
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
     _assert_refused_before_anything(d, tenant, before, "an adopted all-down tenant")

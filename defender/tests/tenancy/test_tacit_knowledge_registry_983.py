@@ -176,21 +176,29 @@ def test_expired_entry_is_not_a_hit_at_lookup(tmp_path):
     )
 
 
-def _ctx(root: Path, tmp_path: Path, *, as_of: dt.datetime) -> VerbContext:
-    """A `VerbContext` pointing at a throwaway tree and a fixed moment. The registry is the
+def _ctx(root: Path, tmp_path: Path) -> VerbContext:
+    """A `VerbContext` pointing at a throwaway tree (no moment: an adapter is handed none, #1385
+    O1; the adapter judges against today, so a test dates its entries around `_today`). The registry is the
     run's agent knowledge (`<agent root>/skills/tacit-knowledge/registry.yaml`), so the
     throwaway tree is the run tenant's agent root — never `defender_dir`, which holds none."""
     return VerbContext(
-        defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, as_of=as_of,
+        defender_dir=DEFENDER, run_dir=tmp_path / "run", env={},
         tenant=_tenants1106.fixture_run_tenant(agent_root=root),
     )
 
 
+def _around_today(*, added: int, review: int) -> dict[str, str]:
+    """The `added_at` and `review_by` of an entry dated `added` and `review` days from today (the
+    day the adapter judges against, #1385 H5), so the test needs no pinned clock."""
+    today = dt.datetime.now(dt.UTC).date()
+    return {"added_at": (today + dt.timedelta(days=added)).isoformat(),
+            "review_by": (today + dt.timedelta(days=review)).isoformat()}
+
+
 def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
     root = tmp_path / "tree"
-    _write_registry(root, _entry(id="tk-fixture-only", added_at="2026-03-01",
-                                 review_by="2026-06-01"))
-    ctx = _ctx(root, tmp_path, as_of=dt.datetime(2026, 5, 5, 3, 42, 11, tzinfo=dt.UTC))
+    _write_registry(root, _entry(id="tk-fixture-only", **_around_today(added=-30, review=30)))
+    ctx = _ctx(root, tmp_path)
 
     hit = registry().lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
     assert isinstance(hit, dict)
@@ -212,10 +220,8 @@ def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
         "authorizes the whole estate through one verb call"
     )
 
-    expired = registry().lookup(
-        _ctx(root, tmp_path, as_of=dt.datetime(2026, 7, 1, tzinfo=dt.UTC)),
-        actor=ACTOR, host=HOST, pattern=PATTERN,
-    )
+    _write_registry(root, _entry(id="tk-fixture-only", **_around_today(added=-60, review=-30)))
+    expired = registry().lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
     assert expired["matched"] is None, (
         "the entry answered past its own `review_by` — expiry is applied by `find_entry` and "
         "the verb is not going through it"
