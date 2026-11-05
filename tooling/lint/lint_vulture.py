@@ -41,7 +41,8 @@ VULTURE_ARGS = [
     "evaluations",
     "--min-confidence", "60",
     "--exclude", "defender/.venv,defender/tests,defender/skills/invlang/schema.py",
-    "--ignore-names", "key_field,key_value",
+    # event_time is the alert mapping's entry in its wire model and its table: read through pydantic and SQLAlchemy.
+    "--ignore-names", "key_field,key_value,event_time",
     # pydantic calls its validators by decorator registration, never by name.
     "--ignore-decorators", "@field_validator,@model_validator",
 ]

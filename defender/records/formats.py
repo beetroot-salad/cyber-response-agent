@@ -10,22 +10,27 @@ from defender.lazy_door import lazy_door
 if TYPE_CHECKING:
     from defender.records._alert_input import (
         ALERT_BYTE_CAP as ALERT_BYTE_CAP,
+        ALERT_MAPPING_MISSING as ALERT_MAPPING_MISSING,
         AlertFacts as AlertFacts,
+        AlertMapping as AlertMapping,
         AlertMappingFault as AlertMappingFault,
         AlertRecord as AlertRecord,
         AlertRefused as AlertRefused,
         AlertReplaced as AlertReplaced,
         REFUSE_SIZE as REFUSE_SIZE,
+        MAPPING_KEYS as MAPPING_KEYS,
         admit as admit,
+        check_mapping as check_mapping,
+        DISPLAY_CAPS as DISPLAY_CAPS,
+        derive_display as derive_display,
+        derive_display_of_stored as derive_display_of_stored,
         derive_facts as derive_facts,
         digest_of as digest_of,
-        load_alert_mapping as load_alert_mapping,
         parse_alert_record as parse_alert_record,
         read_operator_alert as read_operator_alert,
         read_record as read_record,
         record_beside as record_beside,
         record_text as record_text,
-        settings_reasons as settings_reasons,
         verified_alert as verified_alert,
         verified_document as verified_document,
         verified_input as verified_input,
@@ -152,6 +157,9 @@ if TYPE_CHECKING:
         UserId as UserId,
         UuidId as UuidId,
     )
+    from defender.records._alert_mapping_file import (
+        parse_mapping as parse_mapping,
+    )
     from defender.records._tenant_id import (
         TenantId as TenantId,
         TenantRefused as TenantRefused,
@@ -162,7 +170,7 @@ if TYPE_CHECKING:
 
 #: Each name this door serves, and the submodule that defines it.
 _HOMES: dict[str, str] = {
-    **dict.fromkeys(("ALERT_BYTE_CAP", "AlertFacts", "AlertMappingFault", "AlertRecord", "AlertRefused", "AlertReplaced", "admit", "derive_facts", "digest_of", "load_alert_mapping", "parse_alert_record", "read_operator_alert", "read_record", "record_beside", "record_text", "settings_reasons", "verified_alert", "verified_document", "verified_input", "verify_input_bytes", "REFUSE_SIZE",), "_alert_input"),  # lint-run-records: ok — the submodule `records/_alert_input.py`, not the run folder of that name
+    **dict.fromkeys(("ALERT_BYTE_CAP", "ALERT_MAPPING_MISSING", "DISPLAY_CAPS", "AlertFacts", "AlertMapping", "AlertMappingFault", "AlertRecord", "AlertRefused", "AlertReplaced", "MAPPING_KEYS", "admit", "check_mapping", "derive_display", "derive_display_of_stored", "derive_facts", "digest_of", "parse_alert_record", "read_operator_alert", "read_record", "record_beside", "record_text", "verified_alert", "verified_document", "verified_input", "verify_input_bytes", "REFUSE_SIZE",), "_alert_input"),  # lint-run-records: ok — the submodule `records/_alert_input.py`, not the run folder of that name
     **dict.fromkeys(("REPORT_CLOSE_DELIMITER", "UNCHANGED_LEAD", "UNCHANGED_NOTICE", "artifact_names", "committed_investigation_reason", "encodable_or_reason", "needs_baseline", "register_invlang_validator", "render_diagnostic", "utf8_len", "validate_artifact", "validate_report",), "_artifact_schema"),
     **dict.fromkeys(("AppendRecord", "Episode", "EpisodeRefused", "refuse_bad_episode_id",), "_episode_handle"),
     **dict.fromkeys(("EpisodePaths", "LAYOUT", "OracleStorePaths", "WORLD_LEAVES", "WorldPaths",), "_episode_paths"),
@@ -174,6 +182,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("ReportRead", "ReportUnreadable", "UNKNOWN_DISPOSITION", "parse_report_text", "read_report", "repeats_disposition", "require_report",), "_report"),
     **dict.fromkeys(("OID", "RUN_ID_ALLOWED", "is_valid_run_id", "run_id_fault", "uuid_id_fault",), "_run_id"),
     **dict.fromkeys(("BranchError", "holds_content", "inherited_artifact_names", "lead_dirs", "refuse_seeded_run_dir",), "_seeded"),
+    **dict.fromkeys(("parse_mapping",), "_alert_mapping_file"),
     **dict.fromkeys(("TenantId", "TenantRefused",), "_tenant_id"),
     **dict.fromkeys(("UUID_PATTERN", "AlertId", "IdRefused", "InvestigationId", "LearningJobId", "MembershipId", "UserId",
                      "UuidId",), "_record_ids"),

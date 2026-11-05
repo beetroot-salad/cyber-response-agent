@@ -1,4 +1,5 @@
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -73,7 +74,7 @@ def test_materialize_takes_no_run_id_and_writes_nothing_for_one(tmp_path, monkey
                     "run_id": ((), {"run_id": S.SAMPLE_UUID}),
                     "pinned": ((), {"pinned": True})}[extra]
     with pytest.raises(TypeError):
-        run_common.materialize_run(alert, *args, tenant=tenant, **kwargs)
+        run_common.materialize_run(alert, *args, mapping=planted_mapping(), tenant=tenant, **kwargs)
 
     assert not runs_base.exists()
 
@@ -87,8 +88,8 @@ def test_materialize_mints_a_canonical_run_id_inside_the_runs_base(tmp_path, mon
     tenant = _set_up_tenant(tmp_path, monkeypatch)
     runs_base = location_path(tenant.runs)
 
-    first = run_common.materialize_run(alert, tenant=tenant).run_dir
-    second = run_common.materialize_run(alert, tenant=tenant).run_dir
+    first = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=tenant).run_dir
+    second = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=tenant).run_dir
 
     assert first != second
     for run_dir in (first, second):

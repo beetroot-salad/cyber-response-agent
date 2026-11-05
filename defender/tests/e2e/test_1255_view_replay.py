@@ -16,6 +16,7 @@ from defender.records import RUN_LAYOUT  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.box import BoxSpec  # noqa: E402
 from defender.tests.support.runtime.state import _1255_view as V
+from defender.tests.support.tenancy._mapping1345 import planted_mapping  # noqa: E402
 from defender.tests.support.shared.contracts._fold_936 import (  # noqa: E402
     CLASS_LESSON,
     CLASS_SELECTOR,
@@ -171,10 +172,8 @@ def test_b4_evidence_naming_this_runs_own_trees_is_shown_byte_for_byte(tmp_path,
 
     staged = location_path(layout.data_root).parent / "alert-view-evid-own-planted.json"
     staged.write_bytes(json.dumps(doc, indent=2).encode("utf-8"))
-    from defender.tenancy import _tenant
-
-    door = run_common._admit_input(staged, settings=_tenant.clone_halves(layout.tenant)[1],
-                                   world=None)
+    # r5 flow 4: `_admit_input` derives from the `mapping=` run setup read from the records, not the export's `settings/`.
+    door = run_common._admit_input(staged, mapping=planted_mapping(), world=None)
     for sealed in (run_dir / RUN_LAYOUT.alert, run_dir / RUN_LAYOUT.alert_record):
         sealed.chmod(0o644)  # setup seals the input read-only; a non-root runner cannot rewrite it
     (run_dir / RUN_LAYOUT.alert).write_bytes(door.raw)

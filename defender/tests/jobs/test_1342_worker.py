@@ -62,11 +62,13 @@ from defender.tests.support.jobs._jobs1342 import (
     register_tenant,
     restate_tenant,
     row,
+    seed_alert_mapping,
     session_db,
     session_pointer,
     tree,
 )
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._mapping1345 import mapping_value
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 _LINUX_ONLY = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc/<pid>")
@@ -267,6 +269,36 @@ async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_no
     assert {k: v for k, v in tree(world["root"]).items() if k in before} == before
     assert tree(world["other_runs"]) == other_before
 
+
+
+@pytest.mark.parametrize(("mapping", "label"), [
+    ({"title": "rule.description"}, TITLE),   # control: a mapped title is the label
+    ({"title": "a"}, "\u00e9"),                 # whatever the mapping derives, not a fixed string
+    ({"title": None, "description": "rule.id"}, "T-1"),   # title unmapped: the vendor ticket id
+    ({"title": "no.such.path"}, "T-1"),        # title absent from the alert
+    ({"title": "z"}, "T-1"),                   # title a float: no value
+    ({}, "T-1"),
+], ids=["mapped", "other-path", "unmapped", "absent", "float", "empty-mapping"])
+async def test_1345_o2_the_launch_label_is_the_alerts_title_or_its_vendor_ticket_id_when_the_title_is_null(
+        world, mapping, label):
+    """The launch record's label is the alert's stored title, else the vendor's ticket id (`T-1`). (#1345 O2, worker)"""
+    seed_alert_mapping(world["dsn"], T1, mapping)
+    inv, _ = await _run_one(world, _child(world))
+
+    launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
+    assert launch["label"] == label
+
+
+async def test_1345_o2_the_label_is_the_title_at_launch_not_at_queueing(world):
+    """A mapping saved after the investigation is queued and before it launches decides the label: the launch reads the
+    alert as it then is. (#1345 O2, M3)"""
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        await store.put_alert_mapping(T1, mapping_value({"title": "a"}), actor="u-1")
+        await _worker(world, store, _child(world)).drain()
+
+    launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
+    assert launch["label"] == "\u00e9"
 
 
 @pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES, ZWNBSP_ALERT_BYTES,

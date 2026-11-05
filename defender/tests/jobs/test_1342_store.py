@@ -12,6 +12,7 @@ import contextlib
 import dataclasses
 import datetime as dt
 import inspect
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -37,6 +38,7 @@ from defender.tests.support.jobs._jobs1342 import (
 )
 from defender.tests.support.shared._pglocks1339 import until_blocked
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._mapping1345 import assert_missing_wording_names_verb_and_route, mapping_value
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -48,8 +50,17 @@ JOBS_AUDIT = "defender.jobs.audit"
 
 @pytest.fixture
 def dsn(migrated_database: str) -> str:
+    """T1 and T2 registered, each holding the default alert mapping (#1345: a tenant without one is refused an investigation)."""
     register_tenant(migrated_database, T1)
     register_tenant(migrated_database, T2)
+    return migrated_database
+
+
+@pytest.fixture
+def unmapped_dsn(migrated_database: str) -> str:
+    """T1 and T2 registered with NO alert mapping saved (#1345 D2: the absence cases opt out of the default)."""
+    register_tenant(migrated_database, T1, alert_mapping=None)
+    register_tenant(migrated_database, T2, alert_mapping=None)
     return migrated_database
 
 
@@ -304,14 +315,16 @@ async def test_o2_an_admitted_alert_round_trips_its_exact_bytes(dsn, name):
     assert execute(dsn, "SELECT length(raw) FROM jobs.alerts WHERE id = %s", (inserted.alert_id,)) == [(len(raw),)]
 
 
-async def test_o2_title_and_description_are_the_callers_and_the_rest_of_the_row_is_read_back(dsn):
-    """Display fields and times come from the caller, untouched; the read row carries all of them. (O2)"""
-    title, description = "ünï \n 日本 'quoted' \"q\" %s", "line1\nline2 \t end"
+async def test_o2_the_display_is_what_the_default_mapping_derives_and_the_rest_of_the_row_is_read_back(dsn):
+    """Vendor, ticket id and times come from the caller, untouched; the display is not the caller's but the one the
+    seeded default mapping derives from `ALERT_BYTES` (hand-written literal). Rewritten in round 1 (repair 1):
+    `insert_alert` no longer takes title/description (design O2, M3). (O2)"""
+    title, description = "sketch", "r-1342"  # rule.description and rule.id of ALERT_BYTES, under the default mapping
     changed = NOW + HOUR
     async with job_store(dsn) as store:
         inserted = await store.insert_alert(
             T1, vendor="splunk", vendor_ticket_id="SPL-9", fired_at=NOW, changed_at=changed,
-            received_at=NOW + 2 * HOUR, title=title, description=description, raw=ALERT_BYTES)
+            received_at=NOW + 2 * HOUR, raw=ALERT_BYTES)
         read = await store.get_alert(T1, inserted.alert_id)
 
     assert (read.alert_id, read.vendor, read.vendor_ticket_id) == (inserted.alert_id, "splunk", "SPL-9")
@@ -382,11 +395,13 @@ UNSTORABLE = {"NUL": "a\x00b", "lone surrogate": "a\ud800b"}
 
 
 @pytest.mark.parametrize("text", list(UNSTORABLE.values()), ids=list(UNSTORABLE))
-@pytest.mark.parametrize("field", ["vendor", "vendor_ticket_id", "title", "description"])
+@pytest.mark.parametrize("field", ["vendor", "vendor_ticket_id"])
 async def test_1379_an_alert_field_postgresql_cannot_hold_is_refused_by_name_and_nothing_is_stored(
         dsn, field, text):
-    """The store's own typed refusal, naming the field, before any query; a good alert still goes in. (#1379 O1b)"""
-    fields = {"vendor": "splunk", "vendor_ticket_id": "SPL-9", "title": "t", "description": "d", field: text}
+    """The store's own typed refusal, naming the field, before any query; a good alert still goes in. (#1379 O1b)
+    The `title`/`description` cases are retired: the store derives them, and derived text it cannot hold becomes null
+    (design M3; pinned by the 1345 M3 tests below)."""
+    fields = {"vendor": "splunk", "vendor_ticket_id": "SPL-9", field: text}
     async with job_store(dsn) as store:
         with pytest.raises(ValueError, match=rf"\b{field}\b") as refused:
             await store.insert_alert(T1, fired_at=NOW, changed_at=NOW, received_at=NOW, raw=ALERT_BYTES,
@@ -1375,6 +1390,487 @@ async def test_o5_no_knowledge_is_sql_null_not_a_json_null(dsn):
     assert (queued, finished) == ([(True,)], [(True,)])
 
 
+# --- #1345: the alert mapping in the store (O1 store side, O2, M3, O4) -------------------------------------
+#
+# Names r5 gives (design "Where it lives"): `JobStore.put_alert_mapping(tenant_id, mapping, actor="u-1") -> created: bool` (the one
+# writer, M1), `JobStore.get_alert_mapping(tenant_id) -> mapping | None`, `insert_alert` without `title`/`description`.
+# `mapping` is `records`' mapping type: built by `mapping_value` (`.paths`: mapped entries only, an assumption).
+# Assumed, r5 names none: the store's own re-check of an invalid mapping raises `records`' `AlertMappingFault`, and
+# `records.formats.ALERT_MAPPING_MISSING` is the one refusal wording (O4, r5.1).
+
+#: Over `ALERT_BYTES`: `rule.description` is "sketch", `rule.id` "r-1342", `a` "é", `z` a float (not text).
+TITLE_ON_RULE = {"title": "rule.description", "description": "rule.id"}
+TITLE_ON_A = {"title": "a"}
+
+
+async def _insert(store: Any, tenant: str, *, ticket: str, raw: bytes = ALERT_BYTES) -> Any:
+    """The trusted insert as #1345 shapes it: no display fields (the store derives them)."""
+    return await store.insert_alert(tenant, vendor="elastic", vendor_ticket_id=ticket, fired_at=NOW,
+                                    changed_at=NOW, received_at=NOW, raw=raw)
+
+
+def _display(dsn: str, alert_id: str) -> tuple[Any, Any]:
+    [(title, description)] = execute(dsn, "SELECT title, description FROM jobs.alerts WHERE id = %s", (alert_id,))
+    return title, description
+
+
+@pytest.mark.parametrize("name", ["put_alert_mapping", "get_alert_mapping"])
+def test_1345_the_mapping_methods_are_coroutine_functions(name):
+    """The mapping's replace and read are store methods, awaited like the rest. (#1345 O1, M1)"""
+    from defender.jobs import JobStore
+
+    assert inspect.iscoroutinefunction(getattr(JobStore, name))
+
+
+async def test_1345_o1_a_mapping_is_absent_until_saved_then_replaced_whole_and_an_invalid_entry_writes_nothing(unmapped_dsn):
+    """None until the first replace (created); a second replaces it whole (not created); an invalid
+    entry is refused naming it and leaves the mapping and the alerts' display as they were. (#1345 O1, M2)"""
+    dsn = unmapped_dsn
+    from defender.records.formats import AlertMappingFault
+
+    async with job_store(dsn) as store:
+        assert await store.get_alert_mapping(T1) is None
+        created = await store.put_alert_mapping(T1, mapping_value({"signature": "rule.id", **TITLE_ON_RULE}), actor="u-1")
+        assert created is True
+        created = await store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1")
+        assert created is False
+        assert (await store.get_alert_mapping(T1)).paths == TITLE_ON_RULE, "a replace is whole: signature is gone"
+        alert = await _insert(store, T1, ticket="T-1")
+
+        with pytest.raises(AlertMappingFault) as refused:  # the store's re-check (unreachable from the API)
+            await store.put_alert_mapping(T1, mapping_value({"title": "a", "case_key": "rule..id"}), actor="u-1")
+        assert "case_key" in str(refused.value)
+        assert (await store.get_alert_mapping(T1)).paths == TITLE_ON_RULE
+    assert _display(dsn, alert.alert_id) == ("sketch", "r-1342")
+
+
+async def test_1345_o2_an_alert_is_stored_with_display_derived_through_its_tenants_current_mapping(unmapped_dsn):
+    """T1 has a mapping: the alert's title and description are derived at insert; T2 has none:
+    both are null. Read back alike through the store and the table. (#1345 O2, M3)"""
+    dsn = unmapped_dsn
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1")
+        mapped = await _insert(store, T1, ticket="T-1")
+        unmapped = await _insert(store, T2, ticket="T-1")
+        read_mapped = await store.get_alert(T1, mapped.alert_id)
+        read_unmapped = await store.get_alert(T2, unmapped.alert_id)
+
+    assert (mapped.title, mapped.description) == (read_mapped.title, read_mapped.description) == ("sketch", "r-1342")
+    assert (unmapped.title, unmapped.description) == (read_unmapped.title, read_unmapped.description) == (None, None)
+    assert _display(dsn, mapped.alert_id) == ("sketch", "r-1342")
+    assert _display(dsn, unmapped.alert_id) == (None, None)
+
+
+async def test_1345_o2_a_replace_re_derives_every_alert_of_its_tenant_and_no_other(dsn):
+    """After the replace commits, each of T1's alerts reads through the new mapping (an entry it
+    leaves out is null); T2's alert, under its own mapping, is untouched. (#1345 O2, M1, scenario 1)"""
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1")
+        await store.put_alert_mapping(T2, mapping_value(TITLE_ON_RULE), actor="u-1")
+        mine = [await _insert(store, T1, ticket=f"T-{n}") for n in (1, 2)]
+        theirs = await _insert(store, T2, ticket="T-1")
+
+        await store.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1")
+
+    assert [_display(dsn, a.alert_id) for a in mine] == [("é", None), ("é", None)]
+    assert _display(dsn, theirs.alert_id) == ("sketch", "r-1342")
+
+
+async def test_1345_m3_a_derived_value_postgresql_cannot_hold_is_null_and_the_replace_still_commits(dsn):
+    """An admitted alert whose mapped text holds a NUL: the replace commits; that field is null,
+    the other derived normally. (#1345 M3, O2)"""
+    raw = b'{"t": "x\\u0000y", "rule": {"id": "r-1"}}'
+    async with job_store(dsn) as store:
+        alert = await _insert(store, T1, ticket="T-1", raw=raw)
+        await store.put_alert_mapping(T1, mapping_value({"title": "t", "description": "rule.id"}), actor="u-1")
+        assert (await store.get_alert_mapping(T1)).paths == {"title": "t", "description": "rule.id"}
+    assert _display(dsn, alert.alert_id) == (None, "r-1")
+
+
+@pytest.mark.parametrize("saved_before", [True, False], ids=["replace", "first-save"])
+async def test_1345_m3_an_insert_during_a_replace_ends_with_the_new_mappings_display(unmapped_dsn, saved_before):
+    """The replace (or the tenant's first save) is held mid-recompute; an insert for the tenant started then must not
+    derive from the superseded mapping: once both commit, both alerts read through the new one. (#1345 M3, scenario 3)"""
+    from defender.tests.support.shared._pglocks1339 import blocked, until
+
+    dsn = unmapped_dsn
+    async with store_with(dsn, Clock()) as replacing, store_with(dsn, Clock()) as inserting:
+        if saved_before:
+            await replacing.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1")
+        old = await _insert(replacing, T1, ticket="T-1")
+        async with holding_alert(dsn, old.alert_id):
+            replace = asyncio.ensure_future(replacing.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1"))
+            await until_blocked(dsn, 1)  # the replace waits on the held alert, mid-transaction
+            insert = asyncio.ensure_future(_insert(inserting, T1, ticket="T-2"))
+
+            async def insert_waits_or_ended() -> bool:
+                return insert.done() or await blocked(dsn) == 2
+            await until(insert_waits_or_ended)
+        await asyncio.wait_for(replace, 10)
+        new = await asyncio.wait_for(insert, 10)
+
+    assert _display(dsn, old.alert_id) == ("é", None)
+    assert _display(dsn, new.alert_id) == ("é", None), "the insert derived from the mapping the replace superseded"
+
+
+async def test_1345_m3_a_replace_held_mid_recompute_does_not_hold_up_another_tenants_insert(dsn):
+    """Serialization is per tenant: while T1's replace waits on a held alert, T2's insert completes and derives through
+    T2's own mapping. (#1345 M3)"""
+    async with store_with(dsn, Clock()) as replacing, store_with(dsn, Clock()) as inserting:
+        await replacing.put_alert_mapping(T2, mapping_value(TITLE_ON_RULE), actor="u-1")
+        old = await _insert(replacing, T1, ticket="T-1")
+        async with holding_alert(dsn, old.alert_id):
+            replace = asyncio.ensure_future(replacing.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1"))
+            await until_blocked(dsn, 1)
+            other = await asyncio.wait_for(_insert(inserting, T2, ticket="T-1"), 10)
+            assert not replace.done(), "control: the replace was still held while T2's insert completed"
+        await asyncio.wait_for(replace, 10)
+
+    assert _display(dsn, other.alert_id) == ("sketch", "r-1342")
+
+
+async def test_1345_o4_create_for_a_tenant_without_a_mapping_is_a_conflict_naming_the_route(unmapped_dsn):
+    """T2 never saved a mapping: create is `Conflict` carrying the wording `records` owns (`ALERT_MAPPING_MISSING`, r5.1:
+    not `jobs`), which names the mapping and the route that sets it, and inserts nothing; T1, with one, creates (control). (#1345 O4, M2)"""
+    from defender.jobs import Conflict
+    from defender.records.formats import ALERT_MAPPING_MISSING
+
+    dsn = unmapped_dsn
+
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value({}), actor="u-1")  # an empty mapping is a mapping (M2)
+        theirs = await _insert(store, T2, ticket="T-1")
+        mine = await _insert(store, T1, ticket="T-1")
+        with pytest.raises(Conflict) as refused:
+            await store.create_investigation(T2, theirs.alert_id, "k1", actor="u-1")
+        assert _count(dsn, "investigations") == 0
+        created = await store.create_investigation(T1, mine.alert_id, "k1", actor="u-1")
+        await store.put_alert_mapping(T2, mapping_value({}), actor="u-1")  # the same tenant, once it has saved one
+        after_put = await store.create_investigation(T2, theirs.alert_id, "k1", actor="u-1")
+
+    assert (created[1], after_put[1]) == (True, True)  # `create_investigation` answers `(record, created)`
+    # The one wording `records` owns, beside `MAPPING_KEYS` (design-implied name; r5.1 O4): the store's refusal is exactly it, and it names the verb
+    # and the route (so the equality is not true of an empty constant).
+    assert str(refused.value) == ALERT_MAPPING_MISSING
+    assert_missing_wording_names_verb_and_route(ALERT_MAPPING_MISSING)
+
+
+async def test_1345_o2_insert_alert_takes_no_display_fields(dsn):
+    """The caller no longer supplies title or description; the store derives them. (#1345 O2)"""
+    from defender.jobs import JobStore
+
+    parameters = inspect.signature(JobStore.insert_alert).parameters
+    assert {"title", "description"}.isdisjoint(parameters)
+    async with job_store(dsn) as store:
+        with pytest.raises(TypeError):
+            await store.insert_alert(T1, vendor="elastic", vendor_ticket_id="T-1", fired_at=NOW, changed_at=NOW,
+                                     received_at=NOW, raw=ALERT_BYTES, title="given", description="given")
+        assert _count(dsn, "alerts") == 0
+        await _insert(store, T1, ticket="T-1")  # control: without them it stores
+        assert _count(dsn, "alerts") == 1
+
+
+#: (raw JSON value at `t`, the title it derives): today's fact text rule (O2): a non-empty string as it is, an integer
+#: (not a bool) as its decimal text; an empty string, bool, float, null, list or object is no value; text PostgreSQL
+#: cannot hold (a NUL) is none.
+TEXT_RULE = [
+    ('"plain"', "plain"), ('"  padded "', "  padded "), ('"\\u00e9"', "é"),
+    ('"\\u00fcn\\u00ef \\n \\u65e5\\u672c \'q\' \\"q\\" %s"', 'ünï \n 日本 \'q\' "q" %s'), ("42", "42"), ("-7", "-7"), ("0", "0"),
+    ("123456789012345678901234567890", "123456789012345678901234567890"),
+    ('""', None), ("true", None), ("false", None), ("1.5", None), ("2.0", None), ("1e3", None), ("null", None),
+    ("[1]", None), ('["x"]', None), ('{"s": "x"}', None), ('{}', None), ('"x\\u0000y"', None), ('"\\u0000"', None),
+]
+
+
+@pytest.mark.parametrize(("literal", "expected"), TEXT_RULE)
+async def test_1345_o2_the_title_is_the_value_at_its_path_only_when_it_is_usable_text(unmapped_dsn, literal, expected):
+    """Stored under a mapping and again after a replace through it, the title is the text rule's result for
+    that value and the description (an unusable value) is null. (#1345 O2, M3)"""
+    dsn = unmapped_dsn
+    raw = f'{{"t": {literal}, "d": {{"s": 1}}}}'.encode()
+    mapping = mapping_value({"title": "t", "description": "d"})
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping, actor="u-1")
+        alert = await _insert(store, T1, ticket="T-1", raw=raw)
+        stored = _display(dsn, alert.alert_id)
+        await store.put_alert_mapping(T1, mapping_value({"title": "t"}), actor="u-1")  # a replace re-derives the stored bytes alike
+        replaced = _display(dsn, alert.alert_id)
+    assert (alert.title, alert.description) == stored == (expected, None)
+    assert replaced == (expected, None)
+
+
+@pytest.mark.parametrize(("path", "expected"), [
+    ("a", "é"),             # control: a path that is there
+    ("rule.id", "r-1342"),  # nested
+    ("rule.missing", None), ("missing", None), ("a.b", None),  # absent; through a scalar
+    ("rule.id.x", None), ("rule.description.0", None),
+])
+async def test_1345_o2_a_path_absent_from_the_alert_or_through_a_non_object_derives_null(unmapped_dsn, path, expected):
+    """A path walks objects only; where it cannot, the title is null. (#1345 O2)"""
+    dsn = unmapped_dsn
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value({"title": path}), actor="u-1")
+        alert = await _insert(store, T1, ticket="T-1")
+    assert _display(dsn, alert.alert_id) == (expected, None)
+
+
+async def test_1345_o2_an_empty_mapping_derives_null_for_every_alert(unmapped_dsn):
+    """Saving `{}` is a mapping (so investigations run) whose display fields are all null. (#1345 O2, M2)"""
+    dsn = unmapped_dsn
+    async with job_store(dsn) as store:
+        alert = await _insert(store, T1, ticket="T-1")
+        await store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1")
+        assert _display(dsn, alert.alert_id) == ("sketch", "r-1342")
+        await store.put_alert_mapping(T1, mapping_value({}), actor="u-1")
+    assert _display(dsn, alert.alert_id) == (None, None)
+
+
+async def test_1345_o2_a_long_title_and_description_are_cut_when_stored_and_when_re_derived(unmapped_dsn):
+    """A display field is copied into the launch record, the run's stamp and the alert list, so it does not grow with
+    the alert: the mapped text is cut to the caps, on insert and on a replace alike; a shorter one is whole. A character
+    the column refuses, past the cut, is gone with the rest and does not null what was kept. (#1345 O2)"""
+    from defender.records.formats import DISPLAY_CAPS
+
+    dsn = unmapped_dsn
+    long_title, long_text = "é" * (DISPLAY_CAPS["title"] + 1), "d" * (DISPLAY_CAPS["description"] + 1)
+    raw = json.dumps({"t": long_title, "d": long_text, "n": "x" * DISPLAY_CAPS["title"] + "\u0000", "s": "short"}).encode()
+    both = {"title": "t", "description": "d"}
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value(both), actor="u-1")
+        alert = await _insert(store, T1, ticket="T-1", raw=raw)
+        assert _display(dsn, alert.alert_id) == (long_title[:-1], long_text[:-1])
+        await store.put_alert_mapping(T1, mapping_value({"title": "n", "description": "s"}), actor="u-1")
+        assert _display(dsn, alert.alert_id) == ("x" * DISPLAY_CAPS["title"], "short")
+        await store.put_alert_mapping(T1, mapping_value(both), actor="u-1")
+    assert _display(dsn, alert.alert_id) == (long_title[:-1], long_text[:-1])
+
+
+async def test_1345_o4_a_repeated_or_live_request_is_answered_even_without_a_mapping(unmapped_dsn):
+    """The refusal guards a new row only: a repeat of a request, and a request for an alert with a live investigation,
+    start nothing and answer what exists, mapping or not. A new attempt is what is refused. (#1345 O4, #1081 §4.1)"""
+    from defender.jobs import Conflict
+    from defender.tests.support.tenancy._mapping1345 import remove_postgres_mapping
+
+    dsn = unmapped_dsn
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value({}), actor="u-1")
+        alert = await _insert(store, T1, ticket="T-1")
+        first, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
+        remove_postgres_mapping(dsn, T1)
+        assert await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1") == (first, False)
+        assert await store.create_investigation(T1, alert.alert_id, "k2", actor="u-1") == (first, False)
+        execute(dsn, "DELETE FROM jobs.investigations WHERE id = %s", (first.investigation_id,))
+        with pytest.raises(Conflict):
+            await store.create_investigation(T1, alert.alert_id, "k3", actor="u-1")
+
+
+async def test_1345_o1_a_replace_is_audited_after_it_commits_and_a_refused_one_is_not(unmapped_dsn, caplog):
+    """The one writer announces itself, whoever called it, first save and later ones alike; a refused replace and a
+    tenant with no row announce nothing. (#1345 O1, M1)"""
+    from defender.jobs import UnknownReference
+    from defender.records.formats import AlertMappingFault
+
+    dsn = unmapped_dsn
+    audit = JobsAudit(caplog)
+    async with job_store(dsn) as store:
+        with pytest.raises(AlertMappingFault):
+            await store.put_alert_mapping(T1, mapping_value({"title": "a..b"}), actor="u-1")
+        with pytest.raises(UnknownReference):
+            await store.put_alert_mapping(str(uuid.uuid4()), mapping_value({}), actor="u-1")
+        assert [e for e in audit.events() if e.action == "alert_mapping.update"] == []
+        await store.put_alert_mapping(T1, mapping_value({}), actor="u-1")
+        await store.put_alert_mapping(T1, mapping_value({}), actor="u-2")
+    events = [e for e in audit.events() if e.action == "alert_mapping.update"]
+    assert [(e.actor, e.tenant_id, e.target) for e in events] == [("u-1", T1, T1), ("u-2", T1, T1)]
+
+
+def _plant_raw(dsn: str, tenant: str, ticket: str, raw: bytes) -> str:
+    """An alert whose bytes are exactly `raw`, put in by SQL (not through admission), with display fields set."""
+    alert_id = str(uuid.uuid4())
+    execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, "
+                 "title, description, raw) VALUES (%s, %s, 'elastic', %s, %s, %s, %s, 'old', 'old', %s)",
+            (alert_id, tenant, ticket, NOW, NOW, NOW, raw))
+    return alert_id
+
+
+async def test_1345_m3_a_replace_derives_from_the_stored_bytes_by_json_parse_only_and_never_fails_on_one_alert(dsn):
+    """Among stored alerts: bytes that no longer parse, valid JSON that is not an object, a lone-surrogate escape beside a
+    usable title (admission refuses it today), and a NUL: the replace commits, the unusable ones read null, the usable
+    ones derive. (#1345 M3, O2)"""
+    stored = {
+        "bad-bytes": (b"\xff\xfe not json", (None, None)),
+        "truncated": (b'{"t": "x"', (None, None)),
+        "array": (b'["t"]', (None, None)),
+        "scalar": (b"42", (None, None)),
+        "nul": (b'{"t": "x\\u0000y", "d": "kept"}', (None, "kept")),
+        "surrogate-beside": (b'{"t": "fine", "d": "\\ud800"}', ("fine", None)),
+        "plain": (ALERT_BYTES.replace(b'"a"', b'"t"'), ("é", None)),
+    }
+    ids = {ticket: _plant_raw(dsn, T1, ticket, raw) for ticket, (raw, _) in stored.items()}
+    async with job_store(dsn) as store:
+        created = await store.put_alert_mapping(T1, mapping_value({"title": "t", "description": "d"}), actor="u-1")
+    assert created is False  # the default seed was there: the replace over it succeeded
+
+    assert {ticket: _display(dsn, ids[ticket]) for ticket in stored} == {t: want for t, (_, want) in stored.items()}
+
+
+async def test_1345_m3_a_database_error_during_the_recompute_fails_the_whole_replace(dsn):
+    """A real fault on one alert's update (a trigger of the test's own) fails the replace and rolls the mapping and every
+    other alert's display back; once the fault is gone the same replace commits. (#1345 M3)"""
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1")
+        fine = await _insert(store, T1, ticket="T-1")
+        broken = await _insert(store, T1, ticket="T-2")
+        execute(dsn, """CREATE FUNCTION jobs.refuse_one() RETURNS trigger LANGUAGE plpgsql AS
+                        $$ BEGIN RAISE EXCEPTION 'ALERT-REFUSED-1345'; END $$""")
+        execute(dsn, "CREATE TRIGGER refuse_one BEFORE UPDATE ON jobs.alerts FOR EACH ROW "
+                     f"WHEN (OLD.id = '{broken.alert_id}') EXECUTE FUNCTION jobs.refuse_one()")  # noqa: S608
+
+        with pytest.raises(Exception, match="ALERT-REFUSED-1345"):
+            await store.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1")
+        assert (await store.get_alert_mapping(T1)).paths == TITLE_ON_RULE
+        assert (_display(dsn, fine.alert_id), _display(dsn, broken.alert_id)) == (("sketch", "r-1342"),) * 2
+
+        execute(dsn, "DROP TRIGGER refuse_one ON jobs.alerts")
+        await store.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1")
+    assert (_display(dsn, fine.alert_id), _display(dsn, broken.alert_id)) == (("é", None),) * 2
+
+
+async def test_1345_o2_the_wire_alert_reads_the_stored_display_fields_nullable(unmapped_dsn):
+    """The store's alert read carries null title and description for a tenant with no mapping (the wire model
+    accepts them) and the derived ones once it has one. (#1345 O2)"""
+    dsn = unmapped_dsn
+    async with job_store(dsn) as store:
+        alert = await _insert(store, T1, ticket="T-1")
+        before = await store.get_alert(T1, alert.alert_id)
+        await store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1")
+        after = await store.get_alert(T1, alert.alert_id)
+    assert ((before.title, before.description), (after.title, after.description)) == ((None, None), ("sketch", "r-1342"))
+
+
+# --- #1345 repairs: the lock's namespace, the first-save race, the recompute's whole range, stored content classes -----------------
+
+@asynccontextmanager
+async def holding_lifecycle_lock(dsn: str, tenant: str) -> AsyncIterator[None]:
+    """The lifecycle's per-tenant lock, `pg_advisory_lock(LOCK_NAMESPACE, hashtext(tenant))`, held on a connection of its own."""
+    import psycopg
+
+    from defender.tenancy.repository import LOCK_NAMESPACE
+
+    async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
+        await conn.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (LOCK_NAMESPACE, tenant))
+        try:
+            yield
+        finally:
+            await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", (LOCK_NAMESPACE, tenant))
+
+
+async def test_1345_m3_the_mapping_lock_and_the_lifecycles_lock_do_not_hold_each_other_up(dsn):
+    """With the lifecycle's tenant lock held, an alert insert and a mapping replace for that tenant still complete; while a
+    replace is held mid-recompute, the lifecycle can take its lock. (#1345 M3)"""
+    import psycopg
+
+    from defender.tenancy.repository import LOCK_NAMESPACE
+
+    async with store_with(dsn, Clock()) as store, store_with(dsn, Clock()) as other:
+        async with holding_lifecycle_lock(dsn, T1):
+            alert = await asyncio.wait_for(_insert(store, T1, ticket="T-1"), 5)
+            created = await asyncio.wait_for(store.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1"), 5)
+        assert created is False  # the default seed was there
+        assert _display(dsn, alert.alert_id) == ("sketch", "r-1342")
+
+        async with holding_alert(dsn, alert.alert_id):
+            replace = asyncio.ensure_future(other.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1"))
+            await until_blocked(dsn, 1)  # mid-recompute, holding whatever lock the replace takes
+            async with await psycopg.AsyncConnection.connect(dsn, autocommit=True) as conn:
+                cur = await conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s))", (LOCK_NAMESPACE, T1))
+                [(got,)] = await cur.fetchall()
+                if got:
+                    await conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", (LOCK_NAMESPACE, T1))
+            assert not replace.done(), "control: the replace was still held when the lifecycle's lock was tried"
+        await asyncio.wait_for(replace, 10)
+    assert got, "a replace in flight held the lifecycle's per-tenant lock"
+
+
+async def test_1345_m3_two_first_saves_for_one_tenant_both_return_and_exactly_one_creates(unmapped_dsn):
+    """Two first-save replaces race (the first held mid-recompute so the second starts under it): both return, the first
+    created and the second not, and the second's mapping stands. (#1345 M3, O1)"""
+    dsn = unmapped_dsn
+    async with store_with(dsn, Clock()) as first, store_with(dsn, Clock()) as second:
+        alert = await _insert(first, T1, ticket="T-1")  # unmapped: null display, so the first save has a row to update
+        async with holding_alert(dsn, alert.alert_id):
+            one = asyncio.ensure_future(first.put_alert_mapping(T1, mapping_value(TITLE_ON_RULE), actor="u-1"))
+            await until_blocked(dsn, 1)
+            two = asyncio.ensure_future(second.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1"))
+            await until_blocked(dsn, 2)  # the second waits on the first, whatever it waits on
+        results = await asyncio.wait_for(asyncio.gather(one, two, return_exceptions=True), 10)
+        assert results == [True, False]
+        assert (await first.get_alert_mapping(T1)).paths == TITLE_ON_A
+    assert _display(dsn, alert.alert_id) == ("é", None)
+
+
+def _plant_many(dsn: str, rows: list[tuple[str, str, str]], raw: bytes) -> None:
+    """Alerts with the given (id, tenant, ticket) and `raw`, titles 'old', put in by SQL in one transaction."""
+    import psycopg
+
+    with psycopg.connect(dsn) as conn:
+        conn.cursor().executemany(
+            "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, "
+            "title, description, raw) VALUES (%s, %s, 'elastic', %s, %s, %s, %s, 'old', 'old', %s)",
+            [(i, t, k, NOW, NOW, NOW, raw) for i, t, k in rows])
+
+
+async def test_1345_m3_a_replace_re_derives_a_tenants_alerts_beyond_the_recompute_batch_and_touches_no_other_tenants(dsn):
+    """With 1001 of T1's alerts (far past any one read a recompute makes), interleaved by id with T2's, every T1 alert is
+    re-derived and none of T2's changes. (#1345 O2, M3: \"every alert of the tenant\"; no batch size is pinned)"""
+    count = 1001
+    rows = [(str(uuid.UUID(int=2 * n + offset + 1)), tenant, f"P-{n}")
+            for n in range(count) for offset, tenant in enumerate((T1, T2))]
+    _plant_many(dsn, rows, ALERT_BYTES)
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value(TITLE_ON_A), actor="u-1")
+
+    shown = execute(dsn, "SELECT tenant_id, title, description, count(*) FROM jobs.alerts "
+                         "GROUP BY tenant_id, title, description")
+    assert sorted(shown) == sorted([(T1, "é", None, count), (T2, "old", "old", count)])
+
+
+#: The stored content a replace must survive beside a good alert (M3): text PostgreSQL cannot hold, bytes that are not
+#: JSON, and nesting at the JSON parser's limit (admission refuses it; stored bytes may predate tighter rules).
+UNHOLDABLE_TEXT = ["x\\u0000y", "\\u0000", "\\ud800", "ok\\udfffok", "\\ud83d"]
+NOT_JSON = [b"", b"\xff\xfe", b"not json", b'{"title": ', b"\x00"]
+DEEP = 100_000
+NESTED = [b"[" * DEEP + b"]" * DEEP, b'{"a":' * DEEP + b"1" + b"}" * DEEP, b'{"title":' + b"[" * DEEP + b"]" * DEEP + b"}"]
+
+
+async def test_1345_m3_a_replace_never_fails_on_one_alerts_stored_content_and_derives_the_good_alert_beside_it(dsn):
+    """For each display entry: unholdable text in it, non-JSON bytes and over-deep nesting stored beside a good alert: the
+    replace commits, the bad content reads null in that entry, the good alert derives. (#1345 M3, O2)"""
+    from defender.records._alert_input import FACT_KEYS, MAPPING_KEYS
+
+    entries = [key for key in MAPPING_KEYS if key not in FACT_KEYS]
+    assert len(entries) == 2, "premise: the display entries are the mapping's six less its four facts"
+
+    def document(**over: str) -> bytes:
+        return ("{" + ", ".join(f'"{e}": "{over.get(e, "ok-" + e)}"' for e in entries) + "}").encode()
+
+    planted: dict[str, tuple[bytes, dict[str, str | None]]] = {
+        "good": (document(), {e: f"ok-{e}" for e in entries})}
+    for entry in entries:
+        for n, text in enumerate(UNHOLDABLE_TEXT):
+            planted[f"{entry}-text-{n}"] = (document(**{entry: text}),
+                                            {e: None if e == entry else f"ok-{e}" for e in entries})
+    for n, raw in enumerate(NOT_JSON):
+        planted[f"not-json-{n}"] = (raw, dict.fromkeys(entries))
+    for n, raw in enumerate(NESTED):
+        planted[f"nested-{n}"] = (raw, dict.fromkeys(entries))
+    ids = {name: _plant_raw(dsn, T1, name, raw) for name, (raw, _) in planted.items()}
+
+    async with job_store(dsn) as store:
+        await store.put_alert_mapping(T1, mapping_value({e: e for e in entries}), actor="u-1")
+
+    got = {name: dict(zip(("title", "description"), _display(dsn, ids[name]), strict=True)) for name in planted}
+    assert {name: {e: got[name][e] for e in entries} for name in planted} == {name: want for name, (_, want) in planted.items()}
 # --- #1343 piece B: lease, renewal, end writes, hand-back, take-over, cancel of running ------------------------------
 # Unratified seams (r5 item 11 names only the first three): `JobStore(dsn, clock=, lease=)` (seconds, database clock);
 # columns `lease_expires_at` / `accounting_written_at`; `take_over(held=)` (one pass of B6, every lapsed running row

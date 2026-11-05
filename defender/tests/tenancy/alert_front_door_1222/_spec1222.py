@@ -478,10 +478,7 @@ def ticket_the_tenant(planted: Planted, mapping: Mapping[str, Any] | None = None
     """Make `planted`'s runs name their ticket and render their signature in the comment: its alert
     mapping becomes `mapping` (default: its current entries) plus `case_key`, and its case-record
     file the one with `SIGNED_COMMENT_BODY`. Pair with `ticketed_alert`."""
-    import yaml
-
-    current = (mapping if mapping is not None
-               else yaml.safe_load(planted.alert_mapping.read_text(encoding="utf-8")))
+    current = mapping if mapping is not None else (current_mapping(planted) or {})
     remap(planted, ticketed_mapping(current))
     (planted.settings / T6.CASE_RECORD_REL).write_text(
         T6.case_record_text("ticket", body=SIGNED_COMMENT_BODY), encoding="utf-8")
@@ -553,7 +550,7 @@ class Planted:
         """A `TenantDirectory` holding this tenant active with its forge wiring (#1214 Flow 4)."""
         from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
 
-        return tenant_directory(self.root, self.tenant_id)
+        return tenant_directory(self.root, self.tenant_id, alert_mapping=current_mapping(self))
 
     @property
     def settings(self) -> Path:
@@ -565,6 +562,7 @@ class Planted:
 
     @property
     def alert_mapping(self) -> Path:
+        """Where the retired mapping FILE would be (#1345 O5: nothing reads it; a test of a leftover plants one here)."""
         return self.settings / ALERT_MAPPING_REL
 
     @property
@@ -597,8 +595,9 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     lessons: Mapping[str, str] | None = None,
 ) -> Planted:
     """A set-up tenant under `root` (default: this test's data root, which `run.main` resolves
-    from the environment). `alert_mapping` is a dict (written by `alert_mapping_text`), raw text
-    (written verbatim — for a malformed file), or None (NOT written: the missing-file shape).
+    from the environment). `alert_mapping` is a dict (#1345: the mapping the tenant's directory holds, which
+    `planted.directory` seeds; entries left out are unmapped), raw text (a leftover FILE, written verbatim and
+    inert: the tenant then holds no mapping), or None (no mapping saved: a run is refused, O4).
     `case_body` is the comment template of the tenant's `settings/case-record.yaml` (`SIGNED_COMMENT_BODY`
     also renders the signature). The tenant's ticket system accepts keys of `TICKET_KEY_PATTERN`. `lead_zero`
     defaults to the template the table's correlation holder needs. `omit_systems` drops those
@@ -617,10 +616,9 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
                                 configs=texts, case_body=case_body)
     planted = Planted(root=root, tenant_id=tenant_id, knowledge=knowledge)
     (root / tenant_id / "learning").mkdir(exist_ok=True)  # setup provisions mutable state
-    if isinstance(alert_mapping, str):
+    _MAPPINGS[(str(root), tenant_id)] = None if isinstance(alert_mapping, str) else alert_mapping
+    if isinstance(alert_mapping, str):  # a malformed FILE: inert under #1345 O5 (the slices decide what is left of these cases)
         planted.alert_mapping.write_text(alert_mapping, encoding="utf-8")
-    elif alert_mapping is not None:
-        planted.alert_mapping.write_text(alert_mapping_text(alert_mapping), encoding="utf-8")
     for rel, text in TENANT_CATALOG.items():
         template = planted.agent / "skills" / "gather" / "queries" / rel
         template.parent.mkdir(parents=True, exist_ok=True)
@@ -631,11 +629,19 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     return planted
 
 
-def remap(planted: Planted, mapping: Mapping[str, Any]) -> Path:
-    """Rewrite `planted`'s alert mapping in place ("the operator edited the mapping"): between
-    runs, before a re-drive, or from a `before=` hook mid-run (a run reads it once, at its start)."""
-    planted.alert_mapping.write_text(alert_mapping_text(mapping), encoding="utf-8")
-    return planted.alert_mapping
+#: (data root, tenant id) -> the alert mapping `planted.directory` seeds (#1345: the mapping is a database row, not a
+#: file); `None` = none saved. Set by `plant_tenant`, replaced by `remap`.
+_MAPPINGS: dict[tuple[str, str], Mapping[str, Any] | None] = {}
+
+
+def current_mapping(planted: Planted) -> Mapping[str, Any] | None:
+    return _MAPPINGS.get((str(planted.root), planted.tenant_id))
+
+
+def remap(planted: Planted, mapping: Mapping[str, Any] | None) -> None:
+    """Replace `planted`'s alert mapping ("the operator edited the mapping"): between runs or before a re-drive;
+    the next `planted.directory` carries it (a run reads it once, at its start). `None`: no mapping saved (#1345 slice B)."""
+    _MAPPINGS[(str(planted.root), planted.tenant_id)] = mapping
 
 
 #: The faulty alert-mapping shapes (all but `valid` / `no_signature_key`), each a real file shape
@@ -1685,6 +1691,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     visualize: Callable[..., None] | None = None,
     router: LeadRouter | None = None,
     materialize: Callable[..., Any] | None = None,
+    directory: Any = None,
 ) -> Drive:
     """Drive one alert through the production front door (`run.main`) and return what happened.
 
@@ -1699,7 +1706,8 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     `roster` (the adapters roster whose checks judge each granted system at run start),
     `visualize` (default: none) and `materialize` (default: the real setup) are `run.main`'s
     seams; `review_stages` / `wrap_model` are `_replay_harness.drive`'s. `router` is a ready-made
-    gather double used instead of one built from `leads`/`lead_faults`."""
+    gather double used instead of one built from `leads`/`lead_faults`. `directory` (default `planted.directory`)
+    is the tenant records `run.main` reads: a test that changes them mid-run, or breaks one read, holds its own."""
     if router is not None and (leads is not None or lead_faults is not None):
         raise ValueError("run_alert(router=...) scripts the leads itself; leads=/lead_faults= "
                          "beside it would be silently ignored")
@@ -1755,7 +1763,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     if materialize is not None:
         seams["materialize"] = materialize  # run.main's setup seam (faults planted in setup)
     seams["publish"] = publish_double(d.published)
-    seams["directory"] = planted.directory
+    seams["directory"] = directory if directory is not None else planted.directory  # #1345 slice B: a test-held directory
     try:
         d.rc = run_main(
             argv, lifecycle=lifecycle_fn, preflight=lambda *_a, **_k: 0,

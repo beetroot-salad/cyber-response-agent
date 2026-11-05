@@ -581,7 +581,7 @@ class Worker:
             raise _WorkerFault("the job's alert is not in the store")
         launch = job_lane.LaunchRecord(
             investigation_id=record.investigation_id, tenant_id=record.tenant_id,
-            alert_id=record.alert_id, digest=digest_of(alert.raw), label=alert.title,
+            alert_id=record.alert_id, digest=digest_of(alert.raw), label=alert.title or alert.vendor_ticket_id,
             box_token=token)
         await asyncio.to_thread(self._write_launch_files, launch, alert.raw)
 

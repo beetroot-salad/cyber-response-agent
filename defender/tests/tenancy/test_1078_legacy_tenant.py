@@ -1,6 +1,7 @@
 """The run stamp's tenant and world fields and the family check over them (#1077), under
 #1078's tenant-on-the-request API."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -35,7 +36,7 @@ def _materialize(alert: Path, **kw):
     """`materialize_run` for T_ID, handed the `Tenant` the real `accept_tenant` returns over
     this test's data root."""
     tenant = T1106.accept(current_data_root(), T_ID)
-    return H.run_common().materialize_run(alert, tenant=tenant, **kw).run_dir
+    return H.run_common().materialize_run(alert, mapping=planted_mapping(), tenant=tenant, **kw).run_dir
 
 
 def _arm(alert: Path, world, ep: Path):

@@ -48,8 +48,9 @@ class AlertRow(Base, kw_only=True):
     fired_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     changed_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     received_at: Mapped[_dt.datetime] = mapped_column(_TIME)
-    title: Mapped[str] = mapped_column(Text)
-    description: Mapped[str] = mapped_column(Text)
+    #: Derived by the store from `raw` through the tenant's alert mapping (#1345 M3); null when unmapped or unusable.
+    title: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
     raw: Mapped[bytes] = mapped_column(LargeBinary)
 
 
@@ -98,8 +99,8 @@ class StoredAlert:
     fired_at: _dt.datetime
     changed_at: _dt.datetime
     received_at: _dt.datetime
-    title: str
-    description: str
+    title: str | None
+    description: str | None
     raw: bytes
 
 

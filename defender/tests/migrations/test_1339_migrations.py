@@ -19,8 +19,10 @@ from defender.tests.support.shared._postgres1339 import VERSION_TABLE, database,
 #: The schemas PostgreSQL itself owns; everything else in a database is ours to compare.
 _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
 IDENTITY_TABLES = {"users", "memberships", "sessions"}  # #1214: `tenants` moved to `tenancy`
-JOBS_TABLES = {"alerts", "investigations"}  # #1342
+JOBS_TABLES = {"alerts", "investigations"}  # #1342 (#1345 r5: the mapping table is a tenant record, in `tenancy`)
 UNKNOWN_REVISION = "f00dfeedbeef"
+#: #1345 r5 Upgrade: the migration after `0006_job_leases`. r5 names no id: this one is DESIGN-IMPLIED for the code stage.
+ALERT_MAPPING_REVISION = "0007_alert_mapping"
 ROOT = Path(__file__).resolve().parents[3]  # the checkout under test, put first on the child's path
 
 
@@ -326,19 +328,21 @@ def test_the_dev_command_without_a_database_refuses_loudly():
 
 def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
     """The history is the baseline, `0002_tenancy`, `0003_sign_login`, then `0004_jobs` (#1342 O1; r6: tenants are
-    #1214's records; jobs follows #1163's revision, so the history stays one line), then #1382's `0005_uuid_ids`
-    and #1343's `0006_job_leases` as head. (The name predates them; the node id is kept.)"""
+    #1214's records; jobs follows #1163's revision, so the history stays one line), then #1382's `0005_uuid_ids`,
+    #1343's `0006_job_leases` and #1345's `0007_alert_mapping` as head. (The name predates them; the node id is kept.)"""
     from defender.migrations import _scripts, head
 
     scripts = _scripts()
-    assert head() == "0006_job_leases"
+    assert head() == ALERT_MAPPING_REVISION
+    assert scripts.get_revision(ALERT_MAPPING_REVISION).down_revision == "0006_job_leases"
     assert scripts.get_revision("0006_job_leases").down_revision == "0005_uuid_ids"
     assert scripts.get_revision("0005_uuid_ids").down_revision == "0004_jobs"
     assert scripts.get_revision("0004_jobs").down_revision == "0003_sign_login"
     assert scripts.get_revision("0003_sign_login").down_revision == "0002_tenancy"
     assert scripts.get_revision("0002_tenancy").down_revision == "0001_baseline"
     assert [r.revision for r in scripts.walk_revisions()] == [
-        "0006_job_leases", "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy", "0001_baseline"]
+        ALERT_MAPPING_REVISION, "0006_job_leases", "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy",
+        "0001_baseline"]
 
 
 @pytest.mark.postgres
@@ -385,7 +389,7 @@ def _jobs_indexes(dsn: str, table: str) -> list[str]:
 
 @pytest.mark.postgres
 def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated_database):
-    """Both tables hold exactly the designed columns; required ones are NOT NULL; `cost_usd` is a nullable float; `raw` is bytea; no defaults (#1342 M10, R3)."""
+    """Both tables hold exactly the designed columns; required ones are NOT NULL (an alert's title and description, derived by the store, are nullable, #1345); `cost_usd` is a nullable float; `raw` is bytea; no defaults (#1342 M10, R3)."""
     alerts = _jobs_columns(migrated_database, "alerts")
     investigations = _jobs_columns(migrated_database, "investigations")
     assert set(alerts) == {"id", "tenant_id", "vendor", "vendor_ticket_id", "fired_at", "changed_at",
@@ -393,7 +397,8 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
     assert set(investigations) == {"id", "tenant_id", "alert_id", "request_key", "attempt", "stage", "created_at",
                                    "started_at", "finished_at", "disposition", "cost_usd", "knowledge",
                                    "failure_reason", "failure_message", "lease_expires_at", "accounting_written_at"}
-    assert [n for n, (_, nullable, _) in alerts.items() if nullable] == []
+    # #1345 (data model): the store derives an alert's title and description from the tenant's mapping, so both are nullable.
+    assert {n for n, (_, nullable, _) in alerts.items() if nullable} == {"title", "description"}
     nullable = {n for n, (_, can_be_null, _) in investigations.items() if can_be_null}
     assert nullable == {"started_at", "finished_at", "disposition", "cost_usd", "knowledge", "failure_reason",
                         "failure_message", "lease_expires_at", "accounting_written_at"}

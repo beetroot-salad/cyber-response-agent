@@ -245,7 +245,7 @@ _LAB = {
     "agent/skills/cmdb/SKILL.md": b"cmdb skill\n",
     "agent/skills/tacit-knowledge/registry.yaml": b"entries: []\n",
     "agent/skills/gather/queries/cmdb/q.yaml": b"query\n",
-    "settings/alert-mapping.yaml": b"x: 1\n",
+    "settings/verb-grants.yaml": b"x: 1\n",
 }
 
 

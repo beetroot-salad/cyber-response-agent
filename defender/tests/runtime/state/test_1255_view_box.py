@@ -1,5 +1,6 @@
 """Check model-view mounts, environment, host independence, and unboxed execution."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 import dataclasses
 
@@ -145,7 +146,7 @@ def test_b1_o2_an_arm_and_a_natural_run_get_the_same_create_command(tmp_path, mo
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     staged = tmp_path / "alert.json"
     staged.write_bytes(ALERT)
-    natural = run_common.materialize_run(staged, tenant=layout.tenant)
+    natural = run_common.materialize_run(staged, mapping=planted_mapping(), tenant=layout.tenant)
     arm = _arm_run(layout, tmp_path, monkeypatch)
 
     cn = _lifecycle_create(natural, layout)

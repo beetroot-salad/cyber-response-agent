@@ -1,5 +1,6 @@
 """#771 — lifecycle half: the scan-verdict marker (written on both reap arms, kept outside the tree it judges, unmarked tree reads unverified), fail-closed partial scans, guarded setup writers, and box-start / teardown fault handling."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 import contextlib
 import errno
@@ -210,7 +211,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
 
     # ARM 1: run-dir creation is exclusive; an existing run dir (a container from that run may
     # still mount it) is refused and left untouched.
-    first_run = run_common.materialize_run(alert, tenant=tenant)
+    first_run = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=tenant)
     first = first_run.run_dir
     (first / "report.md").write_text("FIRST RUN\n", encoding="utf-8")
     before = sorted(p.name for p in first.iterdir())
@@ -225,7 +226,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
         "the refused mint overwrote the earlier run's artifact"
     )
     # A fresh run under the same base still materializes, so the refusal is specific.
-    fresh = run_common.materialize_run(alert, tenant=tenant).run_dir
+    fresh = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=tenant).run_dir
     assert fresh.is_dir(), "no run dir can be minted at all under this base"
     assert fresh != first, "a fresh run minted the same directory the refusal was about"
 

@@ -13,6 +13,7 @@ from defender import run_common
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.records._tenant_id import TenantRefused
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 #: The fixture's run ids, named by their old handles.
 R1, R2 = fixture_uuid("spec-holes-r1"), fixture_uuid("spec-holes-r2")
@@ -48,9 +49,9 @@ def test_1105_run_setup_refuses_a_non_directory_runs_folder_before_creating_anyt
         H.make_fifo(runs)
     else:
         os.symlink(tmp_path / "nowhere", runs)
-    err = H.raised(run_common.materialize_run, alert, tenant=t)
+    err = H.raised(run_common.materialize_run, alert, mapping=planted_mapping(), tenant=t)
     assert isinstance(err, TenantRefused), f"{kind}: materialize_run raised {err!r}"
-    err = H.raised(run_py._materialize_run, alert, tenant=t, model=None)
+    err = H.raised(run_py._materialize_run, alert, mapping=planted_mapping(), tenant=t, model=None)
     assert H.message(err).startswith("[run.py] "), f"{kind}: run.py gave {err!r}"
     assert not isinstance(err, OSError), f"{kind}: a raw OSError escaped: {err!r}"
     assert os.path.lexists(runs), f"{kind}: run setup removed it"

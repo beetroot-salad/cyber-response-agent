@@ -1,5 +1,6 @@
 """#540 — the reap-time run_dir scrub (symlink/hardlink/special-file taint), the box lifecycle and its fail-closed edges, gate survival, and hostile run-id / filename handling. `docker=` is the lifecycle seam; every fs fault is built with the real primitive."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -874,7 +875,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
     try:
-        run = run_common.materialize_run(alert, tenant=tenant)
+        run = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=tenant)
     except SystemExit as refused:
         pytest.fail(f"the alert's filename stem still reaches the minted run id: {refused}")
     run_id = run.run_dir.name

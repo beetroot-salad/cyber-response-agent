@@ -9,11 +9,24 @@ for the AppRole login) and `check_tenant` (local state only), whose output is ca
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
+import uuid
 from typing import Any
 
 import pytest
 
+from defender.tests.support.jobs._jobs1342 import (
+    an_alert,
+    job_store,
+    register_tenant,
+    restate_tenant,
+    seed_alert_mapping,
+)
+from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — the fixture
+from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
+from defender.tests.support.tenancy._tenants1106 import ALERT_MAPPING_TEXT
 from defender.tests.tenancy.tenant_1108_delivery._identity import VaultHTTP
 from defender.tests.tenancy.tenant_1108_p4._support import (
     bind_forge,
@@ -241,3 +254,278 @@ def test_o_see_check_names_an_unprotected_main_met_at_drain_start(
     after = _new(_check(p4_tenant, capsys), before)
     assert any("protect" in entry.lower() for entry in after), (
         f"`check` does not name the refusal the drain-start publish met: {after}")
+
+
+# --- #1345 O6: `tenant.py set-alert-mapping <id> <file>` writes the database's mapping (D3) -----------------
+#
+# Entry: the CLI's own `main(argv)` with no `directory=`, as a production process: host acceptance and the store
+# both come from `DEFENDER_DATABASE_DSN` over a migrated database (Postgres-gated). The tenant is the published
+# fixture, registered `active` in the database; it starts with NO mapping unless a case seeds one.
+
+OTHER = str(uuid.UUID(int=0x1345A6))
+#: Over `ALERT_BYTES`: `rule.description` is "sketch", `rule.id` "r-1342", `a` "\u00e9".
+SIX_FILE = ("signature: rule.id\nevent_time: alert_timestamp\nsummary: rule.description\ncase_key: alert_id\n"
+            "title: rule.description\ndescription: rule.id\n")
+
+
+class _Verb:
+    """The fixture tenant on a migrated database, and the verb run against it."""
+
+    def __init__(self, p4: Any, dsn: str, tmp_path: Any, capsys: Any) -> None:
+        self.p4, self.dsn, self.tmp, self.capsys = p4, dsn, tmp_path, capsys
+        self.tid = p4.tenant_id
+        self.written = 0
+
+    def run(self, content: str | bytes, tid: str | None = None) -> tuple[int, str, str]:
+        self.written += 1
+        file = self.tmp / f"mapping-{self.written}.yaml"
+        file.write_bytes(content if isinstance(content, bytes) else content.encode())
+        return self.run_file(file, tid)
+
+    def run_file(self, file: Any, tid: str | None = None) -> tuple[int, str, str]:
+        self.capsys.readouterr()
+        rc = _cli().main(["set-alert-mapping", tid or self.tid, str(file)])
+        said = self.capsys.readouterr()
+        # The store's audit event reaches the process log, which is stderr; everything else there is still pinned.
+        return rc, said.out, "".join(line for line in said.err.splitlines(True) if " defender.jobs.audit " not in line)
+
+    def stored(self, tid: str | None = None) -> dict[str, str] | None:
+        async def read() -> dict[str, str] | None:
+            async with job_store(self.dsn) as store:
+                found = await store.get_alert_mapping(tid or self.tid)
+            return None if found is None else dict(found.paths)
+
+        return asyncio.run(read())
+
+    def alert(self, ticket: str, tid: str | None = None) -> str:
+        async def insert() -> str:
+            async with job_store(self.dsn) as store:
+                return (await an_alert(store, tid or self.tid, ticket=ticket)).alert_id
+
+        return asyncio.run(insert())
+
+    def display(self, tid: str | None = None) -> list[tuple[Any, Any]]:
+        return [tuple(r) for r in execute(self.dsn, "SELECT title, description FROM jobs.alerts WHERE tenant_id = %s "
+                                          "ORDER BY vendor_ticket_id", (tid or self.tid,))]
+
+    def mapping_rows(self) -> int:
+        return execute(self.dsn, "SELECT count(*) FROM tenancy.alert_mappings")[0][0]
+
+
+@pytest.fixture
+def verb(p4_tenant, migrated_database, tmp_path, capsys, monkeypatch):  # noqa: F811 — the imported fixture
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+    register_tenant(migrated_database, p4_tenant.tenant_id, data_root=p4_tenant.data_root, alert_mapping=None)
+    return _Verb(p4_tenant, migrated_database, tmp_path, capsys)
+
+
+def _lines(err: str) -> list[str]:
+    return [line for line in err.splitlines() if line.strip()]
+
+
+@pytest.mark.postgres
+def test_1345_o6_the_verb_stores_a_six_entry_file_prints_it_and_re_derives_the_tenants_titles(verb):
+    """A valid file becomes the tenant's mapping (created), the stored mapping is printed, and the tenant's alerts
+    now read through it. (#1345 O6, D3, O2)"""
+    verb.alert("T-1")
+    assert verb.display() == [(None, None)], "premise: no mapping, no display"
+
+    rc, out, err = verb.run(SIX_FILE)
+
+    assert (rc, err) == (0, "")
+    assert verb.stored() == {k: v for k, v in FIXTURE_ALERT_MAPPING.items()}
+    assert verb.display() == [("sketch", "r-1342")]
+    # "prints the stored mapping": each entry's name and path on one line (the layout is the code stage's).
+    for entry, path in FIXTURE_ALERT_MAPPING.items():
+        assert any(entry in line and path in line for line in out.splitlines()), (entry, out)
+
+
+@pytest.mark.postgres
+def test_1345_o6_a_four_entry_file_loads_with_title_and_description_unmapped(verb):
+    """Today's four-entry file loads: what the file leaves out is unmapped and the titles go null. (#1345 O6, D3)
+    D4's counterpart (the same four entries as an API PUT body are 422) is pinned in the API suite:
+    `test_api_stub.py::test_1345_the_mapping_body_names_exactly_the_records_entries_all_required` and the over-the-fake `missing-entry` case (round 1 repair 12; the API half left this test)."""
+    seed_alert_mapping(verb.dsn, verb.tid, FIXTURE_ALERT_MAPPING)
+    verb.alert("T-1")
+    assert verb.display() == [("sketch", "r-1342")], "control: the six-entry mapping derived a title"
+
+    rc, _, err = verb.run(ALERT_MAPPING_TEXT)
+
+    assert (rc, err) == (0, "")
+    assert verb.stored() == {"signature": "rule.id", "event_time": "timestamp", "summary": "rule.description",
+                             "case_key": "alert_id"}
+    assert verb.display() == [(None, None)]
+
+
+@pytest.mark.postgres
+def test_1345_o6_an_empty_mapping_file_is_a_valid_choice_that_unmaps_everything(verb):
+    """`{}` is saved as the tenant's mapping (M2), not refused as missing. (#1345 O6, M2)"""
+    seed_alert_mapping(verb.dsn, verb.tid, FIXTURE_ALERT_MAPPING)
+    verb.alert("T-1")
+
+    rc, _, err = verb.run("{}\n")
+
+    assert (rc, err) == (0, "")
+    assert (verb.stored(), verb.display()) == ({}, [(None, None)])
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize(("content", "names"), [
+    ("signature: [unclosed\n", None),                  # not YAML
+    ("- signature\n- title\n", None),                  # not a mapping of entries
+    ("signature: rule.id\nseverity: rule.level\n", "severity"),  # an entry that is not one of the six: named, as the API does (r5.1 O6)
+    ("", None),                                         # empty file: not a YAML mapping (r5.1 O6 file syntax)
+    ("  \n\t\n  ", None),                               # whitespace only: likewise
+    ("rule.id\n", None),                                # a scalar: likewise
+    ("title: rule..description\n", "title"),            # an empty segment
+    ("case_key: ' alert_id'\n", "case_key"),            # surrounding whitespace
+    ("description: 42\n", "description"),               # not a path
+    ("summary: ''\n", "summary"),                       # an empty path
+    (b"\xff\xfe\x00 not utf-8", None),
+], ids=["not-yaml", "not-a-mapping", "unknown-entry", "empty-file", "whitespace-only-file", "scalar-file", "empty-segment", "whitespace", "not-a-path", "empty-path", "not-utf8"])
+def test_1345_o6_a_malformed_file_or_invalid_entry_is_refused_and_writes_nothing(verb, content, names):
+    """The refusal is `[tenant.py] ...` on stderr, exit 1, nothing printed as stored; the mapping and the display
+    stay as they were (the valid file in the first case is the control). (#1345 O6, M2)"""
+    seed_alert_mapping(verb.dsn, verb.tid, FIXTURE_ALERT_MAPPING)
+    verb.alert("T-1")
+    before = (verb.stored(), verb.display())
+    assert before == (dict(FIXTURE_ALERT_MAPPING), [("sketch", "r-1342")])
+
+    rc, out, err = verb.run(content)
+
+    assert (rc, out) == (1, "")
+    assert _lines(err), err
+    assert all(line.startswith("[tenant.py] ") for line in _lines(err)), err  # no traceback
+    if names:
+        assert names in err
+    assert (verb.stored(), verb.display()) == before
+
+
+@pytest.mark.postgres
+def test_1345_o6_an_entry_given_as_null_in_the_file_is_unmapped_like_one_left_out(verb):
+    """`description: null` is stored as unmapped (absent from the stored paths) and the display is re-derived with no
+    description, while the mapped `title` still derives; with a path in its place the description derives (control, the six-entry
+    test above). (r5.1 O6 file syntax)"""
+    seed_alert_mapping(verb.dsn, verb.tid, FIXTURE_ALERT_MAPPING)
+    verb.alert("T-1")
+    assert verb.display() == [("sketch", "r-1342")], "control: with a path the description derives"
+
+    rc, _, err = verb.run("signature: rule.id\ntitle: rule.description\ndescription: null\ncase_key: ~\n")
+
+    assert (rc, err) == (0, "")
+    assert verb.stored() == {"signature": "rule.id", "title": "rule.description"}
+    assert verb.display() == [("sketch", None)]
+
+
+@pytest.mark.postgres
+def test_1345_o6_a_missing_file_is_refused_and_writes_nothing(verb):
+    """A path that names no file: `[tenant.py] ...`, exit 1, no mapping created. (#1345 O6)"""
+    rc, out, err = verb.run_file(verb.tmp / "nowhere.yaml")
+
+    assert (rc, out) == (1, "")
+    assert _lines(err), err
+    assert all(line.startswith("[tenant.py] ") for line in _lines(err)), err
+    assert (verb.stored(), verb.mapping_rows()) == (None, 0)
+
+
+@pytest.mark.postgres
+def test_1345_o6_a_second_run_replaces_whole_like_a_put_and_touches_no_other_tenant(verb):
+    """The same outcome as a PUT: the file replaces the mapping whole (an entry it leaves out is gone), every alert of the
+    tenant is re-derived, another tenant's mapping and display are untouched. (#1345 O6, M1, O2)"""
+    register_tenant(verb.dsn, OTHER, alert_mapping={"title": "a"})
+    verb.alert("T-1")
+    verb.alert("T-2")
+    verb.alert("T-1", OTHER)
+
+    rc, _, err = verb.run("signature: rule.id\ntitle: rule.description\ndescription: rule.id\n")
+    assert (rc, err) == (0, "")
+    assert verb.display() == [("sketch", "r-1342")] * 2
+
+    rc, _, err = verb.run("title: a\n")
+
+    assert (rc, err) == (0, "")
+    assert verb.stored() == {"title": "a"}, "a replace is whole: the earlier entries are gone"
+    assert verb.display() == [("\u00e9", None)] * 2
+    assert (verb.stored(OTHER), verb.display(OTHER)) == ({"title": "a"}, [("\u00e9", None)])
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
+def test_1345_o6_a_tenant_that_is_not_active_is_refused_by_host_acceptance_and_writes_nothing(verb, state):
+    """As `update` and `propose` are: a non-`active` tenant is refused `[tenant.py] ...` naming its state, exit 1; the same tenant active takes the file (control). (#1345 O6, D3)"""
+    restate_tenant(verb.dsn, verb.tid, state=state, data_root=verb.p4.data_root)
+
+    rc, out, err = verb.run(SIX_FILE)
+
+    assert (rc, out) == (1, "")
+    assert all(line.startswith("[tenant.py] ") for line in _lines(err)), err
+    assert state in err, err
+    assert verb.mapping_rows() == 0
+
+    restate_tenant(verb.dsn, verb.tid, state="active", data_root=verb.p4.data_root)
+    rc, _, err = verb.run(SIX_FILE)
+    assert (rc, err) == (0, "")
+    assert verb.stored() == dict(FIXTURE_ALERT_MAPPING)
+
+
+@pytest.mark.postgres
+def test_1345_o6_an_unknown_tenant_is_refused_and_writes_nothing(verb):
+    """A tenant id the database does not hold: refused at acceptance, no mapping row of any tenant. (#1345 O6, D3)"""
+    rc, out, err = verb.run(SIX_FILE, tid=str(uuid.UUID(int=0x1345EE)))
+
+    assert (rc, out) == (1, "")
+    assert _lines(err), err
+    assert all(line.startswith("[tenant.py] ") for line in _lines(err)), err
+    assert verb.mapping_rows() == 0
+
+
+def test_1345_o6_without_a_database_address_the_verb_is_refused_not_crashed(p4_tenant, tmp_path, capsys, monkeypatch):
+    """No `DEFENDER_DATABASE_DSN`: `[tenant.py] ...`, exit 1, no traceback (the verb has no other store). (#1345 O6)"""
+    monkeypatch.delenv("DEFENDER_DATABASE_DSN", raising=False)
+    file = tmp_path / "m.yaml"
+    file.write_text(SIX_FILE, encoding="utf-8")
+    capsys.readouterr()
+
+    rc = _cli().main(["set-alert-mapping", p4_tenant.tenant_id, str(file)])
+
+    said = capsys.readouterr()
+    assert rc == 1
+    assert _lines(said.err), said.err
+    assert all(line.startswith("[tenant.py] ") for line in _lines(said.err)), said.err
+
+
+@pytest.mark.postgres
+def test_1345_o4_check_reports_a_tenant_with_no_mapping_until_one_is_saved(verb, capsys):
+    """Every run of a tenant with no mapping is refused, so the readiness command says so, in the refusal's own words;
+    saving one clears the finding. (#1345 O4)"""
+    from defender.records.formats import ALERT_MAPPING_MISSING
+
+    capsys.readouterr()
+    rc = _cli().main(["check", verb.tid])
+    said = capsys.readouterr()
+    assert rc == 1
+    assert ALERT_MAPPING_MISSING in said.out + said.err
+
+    assert verb.run(SIX_FILE)[0] == 0
+    capsys.readouterr()
+    _cli().main(["check", verb.tid])
+    said = capsys.readouterr()
+    assert ALERT_MAPPING_MISSING not in said.out + said.err
+
+
+@pytest.mark.postgres
+def test_1345_o6_the_verb_records_who_replaced_the_mapping_on_the_job_stores_audit_log_only(verb, caplog):
+    """The store's replace announces itself, so a verb run leaves one job-store audit event naming the verb and the
+    tenant. The API's own audit sink stays the API's: no other audit logger hears of it. (#1345 O6, O1)"""
+    with caplog.at_level(logging.DEBUG):
+        rc, _, err = verb.run(SIX_FILE)
+
+    # Control: the replace happened. stderr is not pinned empty: at DEBUG, acceptance's own alembic and asyncio log lines
+    # reach it; a refusal would be a `[tenant.py]` line and a non-zero exit.
+    assert rc == 0, err
+    assert "[tenant.py]" not in err, err
+    assert verb.stored() == dict(FIXTURE_ALERT_MAPPING), "control: the replace happened"
+    audit = [r for r in caplog.records if hasattr(r, "action") or r.name.rsplit(".", 1)[-1] == "audit"]
+    about = [r for r in audit if "alert_mapping" in str(getattr(r, "action", "")) + r.getMessage()]
+    assert [(r.name, r.action, r.actor, r.tenant_id, r.target) for r in about] == [
+        ("defender.jobs.audit", "alert_mapping.update", "tenant.py set-alert-mapping", verb.tid, verb.tid)]

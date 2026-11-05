@@ -32,7 +32,8 @@ case; a person closes it.
   imported by product code. The ready-made `jira` and `servicenow` adapters carry no verbs
   (`VERBS = {}`); the playground's `ticket` adapter has the action beside its read verbs.
 
-- **The ticket is the one the alert names (#1359 P3).** The tenant's `alert-mapping.yaml` maps a
+- **The ticket is the one the alert names (#1359 P3).** The tenant's alert mapping (stored in the database
+  since #1345; set by `tenant.py set-alert-mapping` or the API) maps a
   fourth optional fact, `case_key`, onto a field the alerting system sets (the alert's own id, or
   a key its automation writes), never one copied from the logged activity. It is read once at run
   start and recorded; at most 128 printable ASCII characters, no `/`, `\`, `;` or whitespace, not

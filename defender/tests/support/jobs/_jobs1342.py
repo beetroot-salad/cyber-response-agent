@@ -13,13 +13,19 @@ import logging
 import os
 import sys
 import textwrap
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._mapping1345 import (
+    ALERT_BYTES_DESCRIPTION,
+    ALERT_BYTES_TITLE,
+    FIXTURE_ALERT_MAPPING,
+    seed_postgres,
+)
 from defender.tests.support.shared.filesystem._handoff import write_whole
 
 WORKTREE = Path(__file__).resolve().parents[4]
@@ -53,13 +59,18 @@ ZWNBSP_ALERT_BYTES = '{"rule": {"id": "r-1342"}, "text": "a\ufeffb"}\n'.encode()
 FEFF_RICH_ALERT_BYTES = ('{"rule": {"id": "r-1342"}, "lead": "\ufeffx", "tail": "y\ufeff", "pair": "p\ufeff\ufeffq", '
                          '"apart": "\ufeffm\ufeffn", "k\ufeffey": 1}\n').encode()
 
-TITLE = "SSH success after failures"
-DESCRIPTION = "Three failures then a success from one source."
+#: #1345: the store derives an alert's display (`insert_alert` takes no title or description), so these are what the
+#: default mapping (`_mapping1345.FIXTURE_ALERT_MAPPING`: title `rule.description`, description `rule.id`) derives from
+#: `ALERT_BYTES`; they were free-standing strings (#1342) that `an_alert` passed in.
+TITLE = ALERT_BYTES_TITLE
+DESCRIPTION = ALERT_BYTES_DESCRIPTION
 
 
 def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: bool = True,
-                    data_root: Path | None = None, generations: Any = None) -> None:
-    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6).
+                    data_root: Path | None = None, generations: Any = None,
+                    alert_mapping: Mapping[str, str | None] | None = FIXTURE_ALERT_MAPPING) -> None:
+    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6), and #1345's
+    default alert mapping saved through the store (`alert_mapping=None`: a tenant with none, for a test of absence).
 
     An active tenant gets one live generation with a sign login (the fixture tenant's elastic is proxied,
     #1391 P1/D12: run start signs request tokens), unless `generations` says otherwise (`()` for none)."""
@@ -68,20 +79,28 @@ def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: 
 
     if generations is None:
         generations = [sign_generation(tenant_id)] if state == "active" else ()
-    insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root, generations=generations)
+    insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root, generations=generations,
+                         alert_mapping=alert_mapping)
 
 
 def drop_tenant(dsn: str, tenant_id: str) -> None:
-    """Delete `tenant_id`'s record and the tenancy rows that reference it (generations, publish status, forge wiring)."""
-    for table in ("generations", "publish_status", "forge_wiring"):
+    """Delete `tenant_id`'s record and the tenancy rows that reference it (alert mapping, generations, publish status,
+    forge wiring)."""
+    for table in ("alert_mappings", "generations", "publish_status", "forge_wiring"):
         execute(dsn, f'DELETE FROM tenancy."{table}" WHERE tenant_id = %s', (tenant_id,))  # noqa: S608
     execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
 
 
 def restate_tenant(dsn: str, tenant_id: str, *, state: str, wiring: bool = True, data_root: Path | None = None) -> None:
-    """Replace `tenant_id`'s record by one in `state` (a case's premise: do it before any alert names the tenant)."""
+    """Replace `tenant_id`'s record by one in `state` (a case's premise: do it before any alert names the tenant).
+    The tenant's alert mapping is not part of the record being replaced: it is read first, taken away with the row it
+    refers to, and saved again as it was (no mapping stays none). (#1345 repair)"""
+    entries = tuple(FIXTURE_ALERT_MAPPING)
+    saved = execute(dsn, f"SELECT {', '.join(entries)} FROM tenancy.alert_mappings WHERE tenant_id = %s",  # noqa: S608
+                    (tenant_id,))
     drop_tenant(dsn, tenant_id)
-    register_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
+    register_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root,
+                    alert_mapping=dict(zip(entries, saved[0], strict=True)) if saved else None)
 
 
 def move_tenant(dsn: str, tenant_id: str, *, state: str) -> None:
@@ -110,12 +129,18 @@ async def job_store(dsn: str, **knobs: Any) -> AsyncIterator[Any]:
         await store.close()
 
 
+def seed_alert_mapping(dsn: str, tenant_id: str, paths: Mapping[str, str | None]) -> None:
+    """Replace `tenant_id`'s alert mapping with `paths` (entries not named are unmapped) through the store's own
+    replace (#1345 O1), from sync code. The row's shape is the store's: this names no table or column."""
+    seed_postgres(dsn, tenant_id, paths)
+
+
 async def an_alert(store: Any, tenant_id: str, *, ticket: str = "T-1",
                    raw: bytes = ALERT_BYTES) -> Any:
-    """Insert one alert through the trusted insert with this module's display fields."""
+    """Insert one alert through the trusted insert; the store derives its title and description (#1345 O2)."""
     return await store.insert_alert(
         tenant_id, vendor="elastic", vendor_ticket_id=ticket, fired_at=NOW, changed_at=NOW,
-        received_at=NOW, title=TITLE, description=DESCRIPTION, raw=raw)
+        received_at=NOW, raw=raw)
 
 
 def lease_left(dsn: str, investigation_id: str) -> float | None:

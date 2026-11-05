@@ -507,6 +507,7 @@ def records_with(root: Path | str, states: dict[str, str]) -> Any:
                                 origin=_active1214._origin_of(Path(root), tenant, None))
         if inspect.isawaitable(added):
             _active1214.run_sync(_active1214._await(added))
+        _active1214.seed_twin(twin, tenant, _active1214.PLANTED_ALERT_MAPPING)  # #1345: today's mapping
     return TenantDirectory(lambda: twin)
 
 
