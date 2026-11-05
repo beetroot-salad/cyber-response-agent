@@ -860,3 +860,26 @@ def test_1390_plain_check_by_tenant_id_names_a_reserved_adapter_name_with_its_re
 
     assert "reserved" in out, f"the refusal gives no reason:\n{out}"
     assert "anomalous adapter name" not in out, f"the refusal reads as a malformed name:\n{out}"
+
+
+def _non_regular(path: Path, kind: str) -> None:
+    path.unlink()
+    if kind == "directory":
+        path.mkdir()
+    elif kind == "dangling-symlink":
+        path.symlink_to("nowhere-1390.yaml")
+    else:
+        path.symlink_to(path.name)
+
+
+@pytest.mark.parametrize("kind", ["directory", "dangling-symlink", "symlink-loop"])
+def test_1390_check_folder_fails_a_non_regular_thing_at_the_registry_path_with_the_clis_words(
+        tmp_path: Path, kind: str) -> None:
+    """A directory, a dangling symlink or a symlink loop at the registry path is not an absent registry: `check --folder` fails naming tacit-knowledge with the reason the author's CLI prints (exit 1). P4."""
+    folder = _folder(tmp_path, "tenant")
+    _non_regular(folder.joinpath(*TACIT_REGISTRY_REL), kind)
+
+    text = H.assert_refused(_check_folder(folder), TACIT)
+
+    for reason in _cli_failures(folder / "agent"):
+        assert reason in text, f"`check` does not carry the CLI's reason {reason!r}:\n{text}"

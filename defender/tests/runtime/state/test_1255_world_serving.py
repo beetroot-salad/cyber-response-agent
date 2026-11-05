@@ -664,3 +664,53 @@ def test_1390_health_check_of_the_registry_is_never_oracle_served_either(tmp_pat
         assert oracle.requests == 0, f"world {label}: a registry health-check took an oracle turn"
         assert [(r.get("system"), r.get("source")) for r in S24.ledger_rows(ep, label)] == [
             ("tacit-knowledge", PASSTHROUGH)], f"world {label}: not one pass-through ledger row"
+
+
+class _Boom1390(Exception):
+    """A test-defined failure a platform verb raises."""
+
+
+_PLATFORM_ASKS_1390 = {"lookup": SANCTIONED, "health-check": {}}
+
+
+def _platform_pairs_1390() -> list[tuple[str, str]]:
+    from defender.systems.verbs import PLATFORM_SERVED
+    return [(s, v) for s, verbs in PLATFORM_SERVED.items() for v in sorted(verbs)]
+
+
+@pytest.mark.parametrize("raises", [False, True], ids=["success", "raise"])
+@pytest.mark.parametrize(("system", "verb"), _platform_pairs_1390())
+def test_1390_a_platform_served_verb_is_always_run_never_answered_from_the_worlds_store(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, system: str, verb: str, raises: bool) -> None:
+    """For every roster-marked platform-served (system, verb), a seeded store answer at its request key is never served: the verb's own answer (or its raise) is, with exactly one ledger row (pass-through, or real-error on a raise). O3."""
+    from defender.systems import verbs as verbs_mod
+
+    est = S24.TacitEstate(tmp_path / "estate")
+    est.write_registry(json.dumps({"entries": [TACIT_ENTRY]}))
+    ep = S24.episode_v2(tmp_path, base_rows=[])
+    oracle = S24.oracle(then=S24.submit({}, S24.EMPTY_CLAIM))
+    world = S24.sandboxed_registry(ep, "a", est, oracle=oracle, verifier=S24.passing_verifier())
+    asked = _PLATFORM_ASKS_1390[verb]
+    seeded = {"served": {"seeded": "SEEDED-1390"}, "decision": PASSTHROUGH}
+    world.store.answers[request_key(system, verb, dict(asked))] = seeded
+    if raises:
+        def boom(ctx: Any, **_: Any) -> Any:
+            raise _Boom1390("platform verb failed")
+        monkeypatch.setattr(verbs_mod, "PLATFORM_SERVED", {
+            **verbs_mod.PLATFORM_SERVED,
+            system: {**verbs_mod.PLATFORM_SERVED[system], verb: boom}})
+    ctx = est.ctx(tmp_path / "run")
+
+    if raises:
+        with pytest.raises(_Boom1390):
+            S24.call(world, system, verb, ctx, **asked)
+    else:
+        served = S24.call(world, system, verb, ctx, **asked)
+        assert "SEEDED-1390" not in json.dumps(served), "the world's stored answer was served"
+        assert served == ({"matched": TACIT_ENTRY} if verb == "lookup"
+                          else served | {"entries": 1}), f"not the verb's own answer: {served}"
+
+    rows = S24.ledger_rows(ep, "a")
+    assert [(r.get("system"), r.get("verb"), r.get("source")) for r in rows] == [
+        (system, verb, "real-error" if raises else PASSTHROUGH)], f"not one right ledger row: {rows}"
+    assert oracle.requests == 0

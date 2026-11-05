@@ -638,3 +638,40 @@ def test_1390_an_adapter_named_tacit_knowledge_is_refused_with_its_reason_and_no
         _clocked_ctx(root, tmp_path), actor=ACTOR, host=HOST, pattern=PATTERN)
     assert (served["matched"] or {}).get("id") == scene.ENTRY_ID, (
         "the lookup was served by the planted adapter, not the platform")
+
+
+@pytest.mark.parametrize("kind", ["directory", "dangling-symlink", "symlink-loop"])
+def test_1390_a_non_regular_thing_at_the_registry_path_is_refused_whole_in_both_answers(tmp_path, kind):
+    """A directory, dangling symlink or symlink loop at the registry path answers lookup and health-check with `registry_problems` (the reader's reason, no host path), never as an absent registry. P4, O9."""
+    root = tmp_path / "tree"
+    path = registry().registry_path(root)
+    path.parent.mkdir(parents=True)
+    if kind == "directory":
+        path.mkdir()
+    elif kind == "dangling-symlink":
+        path.symlink_to("nowhere-1390.yaml")
+    else:
+        path.symlink_to(path.name)
+    ctx = _clocked_ctx(root, tmp_path)
+
+    lookup = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
+    health = _verbs()["health-check"](ctx)
+
+    assert lookup["matched"] is None and lookup.get("registry_problems"), f"not refused: {lookup}"
+    assert health.get("registry_problems") and health["connected"] is True, f"not refused: {health}"
+    assert str(root) not in str(lookup) + str(health), "a model-visible answer names a host path"
+
+
+@pytest.mark.parametrize("field", ["actor_scope", "host_scope"])
+@pytest.mark.parametrize("make", [
+    lambda n: "x" * n + "*", lambda n: "*" + "x" * n, lambda n: "x" * (n // 2) + "*" + "x" * (n - n // 2),
+    lambda n: "x" * n + "?*", lambda n: "[ab]" + "x" * n + "*"], ids=["trail", "lead", "mid", "q", "bracket"])
+def test_1390_a_wildcard_scope_loads_iff_it_has_the_minimum_literal_characters(tmp_path, field, make):
+    """A wildcard scope with MIN-1 literal characters is refused and one with MIN loads, for both scope fields and several placements."""
+    minimum = registry().TACIT_KNOWLEDGE_MIN_LITERAL_SCOPE_CHARS
+    for n in (minimum - 1, minimum):
+        value = make(n)
+        assert registry().literal_chars(value) == n, f"premise: {value!r}"
+        entry = _entry(id=f"tk-lit-{n}", **{field: value})
+        loaded = _ids(_load(tmp_path / f"n{n}", entry))
+        assert (loaded == [entry["id"]]) == (n >= minimum), f"{field}={value!r} ({n} literal chars): {loaded}"
