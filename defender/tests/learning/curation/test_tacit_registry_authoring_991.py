@@ -7,7 +7,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from defender.cli import tacit_cli
-from defender.integrations import tacit_knowledge_adapter as tk
+from defender.systems import tacit_registry as tk
 
 from defender.tests.support.shared import _pre_p4_shipped
 from defender.tests.support.shared.contracts import _tacit983 as scene
@@ -157,6 +157,21 @@ def test_show_answers_what_is_in_force_rather_than_what_parses(tmp_path) -> None
     assert "sre-platform@example.invalid" in out, (
         "`show` omits who authored the sanction — the field a reviewer judges it by"
     )
+
+
+def test_1390_the_author_cli_judges_by_the_wall_clock_unless_told_a_day(tmp_path) -> None:
+    """Without `--as-of` `show` and `check` judge by today's wall time; with it, by the day named. O2."""
+    assert dt.date.today() > dt.date(2026, 7, 1), "premise: the entry below has expired by today"
+    tree = _tree(tmp_path, scene.registry_entry(added_at="2026-04-01", review_by="2026-07-01"))
+
+    rc, out = _run("show", "--defender-dir", str(tree))
+    assert (rc, "No sanction is in force" in out) == (0, True), (
+        f"without --as-of the CLI judged by a day other than today: {out}")
+    rc, out = _run("check", "--defender-dir", str(tree))
+    assert (rc, "EXPIRED" in out) == (0, True), f"check did not judge by today: {out}"
+
+    rc, out = _run("show", "--defender-dir", str(tree), "--as-of", "2026-05-01")
+    assert scene.ENTRY_ID in out, f"positive control: the same entry is in force on 2026-05-01: {out}"
 
 
 def test_the_shipped_registry_passes_its_own_gate() -> None:

@@ -254,17 +254,24 @@ def test_the_commit_gate_refuses_an_id_that_disagrees_with_its_directory(tmp_pat
 
 #: The tacit-knowledge registry as a tenant repo carries it (#1390): data beside a markdown page.
 TACIT_REGISTRY_REL = "agent/skills/tacit-knowledge/registry.yaml"
+TACIT_PAGE_REL = "agent/skills/tacit-knowledge/SKILL.md"
 
 
-def test_1390_the_lane_cannot_commit_a_change_to_the_tacit_knowledge_registry(tmp_path):
-    """The lead-author lane's commit gate refuses an edited `registry.yaml`; an entry lands only by a human merge. Lead-author lane."""
+def test_1390_the_lane_edits_the_registrys_description_page_but_cannot_commit_the_registry(tmp_path):
+    """Against the checkout's real declared systems the lane's gate admits an edited `tacit-knowledge` SKILL.md and refuses an edited `registry.yaml`; an entry lands only by a human merge. A2."""
+    from defender._git import REPO_ROOT
+    from defender.learning.leads.declared_systems import declared_systems
+
+    declared = declared_systems(REPO_ROOT)
+    assert {"elastic", "tacit-knowledge"} <= declared, (
+        f"the real declared systems leave out the registry's system: {sorted(declared)}")
     files = {**_gate_files(),
              "skills/tacit-knowledge/SKILL.md": _skill("tacit-knowledge"),
              "skills/tacit-knowledge/registry.yaml": "entries: []\n"}
     control = C.draft_lane(tmp_path / "control", lanes=C.LEAD_LANES, files=files)
-    _write(control, "agent/skills/elastic/SKILL.md", _skill("elastic") + "edited by the lane\n")
-    assert _composed(control, DECLARED | {"tacit-knowledge"}) == ["agent/skills/elastic/SKILL.md"], (
-        "positive control: the same lane admits an edited system skill")
+    _write(control, TACIT_PAGE_REL, _skill("tacit-knowledge") + "edited by the lane\n")
+    assert _composed(control, declared) == [TACIT_PAGE_REL], (
+        "positive control: the same lane admits an edited description page for the registry's system")
 
     lane = C.draft_lane(tmp_path / "lane", lanes=C.LEAD_LANES, files=files)
     _write(lane, TACIT_REGISTRY_REL, (
@@ -273,6 +280,6 @@ def test_1390_the_lane_cannot_commit_a_change_to_the_tacit_knowledge_registry(tm
         "    added_at: '2026-11-01'\n    review_by: '2026-12-01'\n    justification: seen often\n"))
 
     with pytest.raises(LeadAuthorError) as refused:
-        _composed(lane, DECLARED | {"tacit-knowledge"})
+        _composed(lane, declared)
     assert TACIT_REGISTRY_REL in str(refused.value)
     assert lane.landed() == []

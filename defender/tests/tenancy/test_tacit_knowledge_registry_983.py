@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 
 import pytest
@@ -39,14 +40,14 @@ NOW = dt.date(2026, 5, 5)
 
 
 def registry():
-    """The tacit-knowledge adapter module."""
-    from defender.integrations import tacit_knowledge_adapter
+    """The platform registry module (#1390: `systems/tacit_registry.py`, what the adapter was)."""
+    from defender.systems import tacit_registry
 
-    return tacit_knowledge_adapter
+    return tacit_registry
 
 
 #: The entry builder and the fixture writer live in `tests/support/shared/contracts/_tacit983.py`,
-#: shared with the e2e that drives the real adapter against a fixture tree.
+#: shared with the e2e that drives the real lookup against a fixture tree.
 _entry = scene.registry_entry
 _write_registry = scene.write_registry
 
@@ -192,7 +193,7 @@ def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
                                  review_by="2026-06-01"))
     ctx = _ctx(root, tmp_path, as_of=dt.datetime(2026, 5, 5, 3, 42, 11, tzinfo=dt.UTC))
 
-    hit = registry().lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
+    hit = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
     assert isinstance(hit, dict)
     assert hit["matched"] is not None, (
         "the verb came back empty for the actor, host and pattern its own fixture entry "
@@ -206,13 +207,13 @@ def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
         "reviews and the row a `:R consultations` cites have to be the same record"
     )
 
-    miss = registry().lookup(ctx, actor=ACTOR, host="web-frontend-02.prod", pattern=PATTERN)
+    miss = _platform_lookup(ctx, actor=ACTOR, host="web-frontend-02.prod", pattern=PATTERN)
     assert miss["matched"] is None, (
         "a host outside every entry's `host_scope` was a hit — an unconditional-hit lookup "
         "authorizes the whole estate through one verb call"
     )
 
-    expired = registry().lookup(
+    expired = _platform_lookup(
         _ctx(root, tmp_path, as_of=dt.datetime(2026, 7, 1, tzinfo=dt.UTC)),
         actor=ACTOR, host=HOST, pattern=PATTERN,
     )
@@ -254,14 +255,14 @@ def test_no_authz_grounding_from_a_past_ai_verdict(tmp_path):
 def test_registry_lookup_is_a_rostered_gather_verb():
     assert is_system_name(SYSTEM)
     assert registry().SYSTEM == SYSTEM
-    assert LOOKUP in registry().VERBS
-    assert registry().VERBS[LOOKUP] is registry().lookup
-    assert "health-check" in registry().VERBS, (
-        "every rostered system answers `health-check` (skills/connect's merge bar)"
+    roster = read_roster(ADAPTERS)
+    assert SYSTEM in roster.verbs, "the roster's systems do not include the platform-served registry"
+    assert roster.verbs[SYSTEM] == {LOOKUP, "health-check"}, (
+        "every rostered system answers `health-check` (skills/connect's merge bar), and the "
+        "registry offers the lead one more verb, a read"
     )
-    assert LOOKUP in read_roster(ADAPTERS).declared_verbs(SYSTEM), (
-        "`VERBS` is read COLD off the AST — it has to be a dict literal with literal keys"
-    )
+    assert SYSTEM not in roster.adapter_files, "the registry is dispatched from an adapter file"
+    assert LOOKUP in roster.declared_verbs(SYSTEM)
 
     grant: VerbGrant = _tenants1106.fixture_grants().gather
     assert (SYSTEM, LOOKUP, "r") in grant.entries, (
@@ -271,7 +272,7 @@ def test_registry_lookup_is_a_rostered_gather_verb():
         entry[2] == "r" for entry in grant.entries if entry[0] == SYSTEM
     ), "the registry is a READ — no run-path verb may write it"
 
-    assert ModuleVerbRegistry(read_roster(ADAPTERS), grant).decide(SYSTEM, LOOKUP).outcome == GRANTED
+    assert ModuleVerbRegistry(roster, grant).decide(SYSTEM, LOOKUP).outcome == GRANTED
 
 
 def test_the_shipped_registry_file_is_human_authored_and_loads(tmp_path):
@@ -331,10 +332,9 @@ _MUTATING_STEMS = (
 )
 
 
-def test_the_adapter_module_exports_nothing_that_writes():
-    """The tacit-knowledge adapter's own public surface carries no write-capable function, and
-    its source performs no filesystem mutation (the source half is
-    `tooling/lint/lint_isolated_modules.py`)."""
+def test_the_registry_module_exports_nothing_that_writes():
+    """The registry module's own public surface and served verbs carry no write-capable name; the
+    source half is `tooling/lint/lint_isolated_modules.py`."""
 
     mod = registry()
     public = [n for n in dir(mod) if not n.startswith("_")]
@@ -347,22 +347,25 @@ def test_the_adapter_module_exports_nothing_that_writes():
 
     offenders = [n for n in own if n.split("_")[0].lower() in _MUTATING_STEMS]
     assert offenders == [], (
-        f"the registry adapter exports {offenders} — a write-capable name on the one system "
+        f"the registry module exports {offenders} — a write-capable name on the one system "
         f"whose entire safety argument is that every entry traces to a human commit"
     )
-    verb_offenders = [v for v in mod.VERBS if v.split("-")[0].lower() in _MUTATING_STEMS]
+    served = ModuleVerbRegistry(
+        read_roster(ADAPTERS), _tenants1106.fixture_grants().gather).verbs(SYSTEM)
+    verb_offenders = [v for v in served if v.split("-")[0].lower() in _MUTATING_STEMS]
     assert verb_offenders == [], (
         f"the roster would advertise {verb_offenders} to a lead — a mutating verb on a "
         f"read-only system of record"
     )
 
 
-
 @pytest.mark.parametrize("verb", ["health-check", LOOKUP])
 def test_every_registry_verb_takes_a_verb_context_first(verb):
     import inspect
 
-    params = list(inspect.signature(registry().VERBS[verb]).parameters.values())
+    served = ModuleVerbRegistry(
+        read_roster(ADAPTERS), _tenants1106.fixture_grants().gather).verbs(SYSTEM)
+    params = list(inspect.signature(served[verb]).parameters.values())
     assert params[0].name == "ctx"
     assert params[0].annotation in (VerbContext, "VerbContext")
     assert all(p.kind is p.KEYWORD_ONLY and p.annotation is not p.empty for p in params[1:])
@@ -371,18 +374,22 @@ def test_every_registry_verb_takes_a_verb_context_first(verb):
 # ---------------------------------------------------------------- #1390: a platform-served system
 
 
-def _platform_lookup(ctx: VerbContext, **params: str) -> dict:
-    """`tacit-knowledge.lookup` as the gather registry over the checkout's adapters resolves it
+def _verbs(roster=None) -> dict:
+    """`tacit-knowledge`'s verbs as the gather registry over the checkout's adapters serves them
     (the frame the query tool calls), never through an adapter module."""
-    verbs = ModuleVerbRegistry(
-        read_roster(ADAPTERS), _tenants1106.fixture_grants().gather).verbs(SYSTEM)
-    return verbs[LOOKUP](ctx, **params)
+    return ModuleVerbRegistry(
+        read_roster(ADAPTERS) if roster is None else roster,
+        _tenants1106.fixture_grants().gather).verbs(SYSTEM)
 
 
-def _clocked_ctx(root: Path, tmp_path: Path, *, run_state=None) -> VerbContext:
-    """A `VerbContext` with no `as_of`: the day comes from the run's clock, or the wall clock."""
+def _platform_lookup(ctx: VerbContext, **params: str) -> dict:
+    return _verbs()[LOOKUP](ctx, **params)
+
+
+def _clocked_ctx(root: Path, tmp_path: Path, *, run_state=None, as_of=None) -> VerbContext:
+    """A `VerbContext` over the throwaway agent root `root`; the day comes from what it carries."""
     return VerbContext(
-        defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, run_state=run_state,
+        defender_dir=DEFENDER, run_dir=tmp_path / "run", env={}, run_state=run_state, as_of=as_of,
         tenant=_tenants1106.fixture_run_tenant(agent_root=root),
     )
 
@@ -410,26 +417,156 @@ def test_1390_lookup_is_answered_with_no_adapter_module(tmp_path):
         "the tacit-knowledge adapter module still ships in the adapters folder")
 
 
-def test_1390_lookup_is_judged_against_the_runs_own_clock(tmp_path):
-    """A replay sibling's clock resumed at the branch point hits an entry expired by today; a live run's clock misses it. O2."""
+def test_1390_a_tenant_without_a_registry_answers_every_lookup_with_a_plain_miss(tmp_path):
+    """No registry file: every lookup is exactly `{matched: None}`, and `health-check` says it is not connected. P4."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    ctx = _clocked_ctx(root, tmp_path)
+
+    assert _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN) == {"matched": None}
+    health = _verbs()["health-check"](ctx)
+    assert (health["connected"], health["entries"]) == (False, 0)
+    assert "registry_problems" not in health
+
+    _write_registry(root, _current_entry())
+    assert _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)["matched"] is not None, (
+        "positive control: the same context answers a hit once the file exists")
+
+
+def test_1390_health_check_names_the_registry_relative_to_the_agent_root(tmp_path):
+    """`health-check` reports the registry by its agent-relative path and the count of entries that load, never a host path. Registry path."""
+    root = tmp_path / "tree"
+    _write_registry(root, _entry(id="tk-1390-a"), _entry(id="tk-1390-b"))
+
+    health = _verbs()["health-check"](_clocked_ctx(root, tmp_path))
+
+    assert health["system"] == SYSTEM
+    assert (health["connected"], health["entries"]) == (True, 2)
+    assert health["registry"] == "/".join(scene.REGISTRY_RELPATH)
+    assert str(root) not in json.dumps(health), "health-check leaks the host path of the registry"
+
+
+# The day a lookup is judged against (O2). The entry is in force from 2026-04-01 to 2026-07-01:
+# valid at the replay's branch point, expired by today.
+_BRANCH_ENTRY = dict(id="tk-1390-branch", added_at="2026-04-01", review_by="2026-07-01")
+_IN_WINDOW = dt.datetime(2026, 5, 1, 12, 0, tzinfo=dt.UTC)
+_OUT_OF_WINDOW = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.UTC)
+
+
+def _ask(root: Path, tmp_path: Path, **clock) -> dict | None:
+    return _platform_lookup(_clocked_ctx(root, tmp_path, **clock),
+                            actor=ACTOR, host=HOST, pattern=PATTERN)["matched"]
+
+
+def test_1390_lookup_is_judged_against_the_runs_own_clock_whatever_as_of_says(tmp_path):
+    """A replay sibling's clock (resumed at the branch point) hits and a live run's clock misses, each against a contradicting `as_of`. O2."""
     from defender.investigation.run_state import RunState
 
     root = tmp_path / "tree"
-    _write_registry(root, _entry(id="tk-1390-branch", added_at="2026-04-01",
-                                 review_by="2026-07-01"))
+    _write_registry(root, _entry(**_BRANCH_ENTRY))
     live = RunState(tmp_path / "live", "r-live")
     assert live.now().date() > dt.date(2026, 7, 1), "premise: the entry has expired by today"
     sibling = RunState(tmp_path / "sibling", "r-sibling")
-    sibling.resume_clock(dt.datetime(2026, 5, 1, 12, 0, tzinfo=dt.UTC), 0.0)
+    sibling.resume_clock(_IN_WINDOW, 0.0)
 
-    replayed = _platform_lookup(_clocked_ctx(root, tmp_path, run_state=sibling),
-                                actor=ACTOR, host=HOST, pattern=PATTERN)
-    today = _platform_lookup(_clocked_ctx(root, tmp_path, run_state=live),
-                             actor=ACTOR, host=HOST, pattern=PATTERN)
+    hit = _ask(root, tmp_path, run_state=sibling, as_of=_OUT_OF_WINDOW)
+    miss = _ask(root, tmp_path, run_state=live, as_of=_IN_WINDOW)
 
-    assert (replayed["matched"] or {}).get("id") == "tk-1390-branch", (
-        "the replay was not judged at its branch point")
-    assert today == {"matched": None}, "a live run was judged at a day other than its own"
+    assert (hit or {}).get("id") == "tk-1390-branch", (
+        "the replay was judged at the `as_of` it carried, not at its own clock")
+    assert miss is None, "a live run was judged at the `as_of` it carried, not at its own clock"
+
+
+def test_1390_without_a_run_state_the_worlds_as_of_is_the_day_and_without_either_wall_time(tmp_path):
+    """No run state: `as_of` decides (pre-flight, the oracle's side queries); neither: today's wall time. O2."""
+    root = tmp_path / "tree"
+    _write_registry(root, _entry(**_BRANCH_ENTRY))
+    assert dt.datetime.now(dt.UTC).date() > dt.date(2026, 7, 1), "premise: expired by today"
+
+    assert (_ask(root, tmp_path, as_of=_IN_WINDOW) or {}).get("id") == "tk-1390-branch"
+    assert _ask(root, tmp_path, as_of=_OUT_OF_WINDOW) is None
+    assert _ask(root, tmp_path) is None, "with no clock at all the entry was not judged by today"
+
+    _write_registry(root, _current_entry(id="tk-1390-today"))
+    assert (_ask(root, tmp_path) or {}).get("id") == "tk-1390-today", (
+        "positive control: an entry in force today answers on wall time")
+
+
+# What a lookup says about a registry it could not read whole (O9, H8): `registry_problems`,
+# the reader's own refusal texts, beside an unchanged `matched`.
+_NOT_YAML = b"entries: [unclosed\n"
+_NOT_UTF8 = b"\xff\xfe entries:\n"
+_WHOLE_FILE_FAULTS = {
+    "no-entries-list": b"sanctions:\n  - id: tk-misfiled\n",
+    "top-level-list": b"- id: tk-1\n",
+    "not-yaml": _NOT_YAML,
+    "not-utf8": _NOT_UTF8,
+}
+
+
+@pytest.mark.parametrize("fault", sorted(_WHOLE_FILE_FAULTS))
+def test_1390_a_registry_refused_whole_answers_a_miss_carrying_the_readers_reason(tmp_path, fault):
+    """A registry refused whole answers `matched: None` plus `registry_problems` equal to the reader's refusal text. O9."""
+    root = tmp_path / "tree"
+    path = registry().registry_path(root)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(_WHOLE_FILE_FAULTS[fault])
+    reason = registry().read_registry(path).fatal
+    assert reason and str(path) in reason, f"premise: the reader refuses a {fault} file whole, naming it"
+
+    answer = _platform_lookup(_clocked_ctx(root, tmp_path), actor=ACTOR, host=HOST, pattern=PATTERN)
+
+    relative = "/".join(scene.REGISTRY_RELPATH)
+    assert answer == {"matched": None, "registry_problems": [reason.replace(str(path), relative)]}
+    assert str(root) not in str(answer), "the model-visible answer names a host path"
+
+
+def test_1390_dropped_entries_ride_the_answer_beside_a_hit_and_a_miss(tmp_path):
+    """Dropped entries are listed as the reader's refusal texts on a hit and on a miss; a clean file carries no key. O9."""
+    good = _current_entry(id="tk-1390-good")
+    blanket = _current_entry(id="tk-1390-blanket", actor_scope="*")
+    root = tmp_path / "tree"
+    _write_registry(root, good, blanket)
+    dropped = list(registry().read_registry(registry().registry_path(root)).refusals)
+    assert len(dropped) == 1 and "tk-1390-blanket" in dropped[0], (
+        f"premise: the reader drops exactly the blanket entry: {dropped}")
+    ctx = _clocked_ctx(root, tmp_path)
+
+    hit = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
+    miss = _platform_lookup(ctx, actor=ACTOR, host="web-frontend-02.prod", pattern=PATTERN)
+
+    assert hit == {"matched": good, "registry_problems": dropped}
+    assert miss == {"matched": None, "registry_problems": dropped}
+
+    clean = tmp_path / "clean"
+    _write_registry(clean, good)
+    assert _platform_lookup(_clocked_ctx(clean, tmp_path), actor=ACTOR, host=HOST,
+                            pattern=PATTERN) == {"matched": good}, (
+        "positive control: a clean file answers `matched` alone")
+
+
+def test_1390_health_check_carries_the_same_registry_problems(tmp_path):
+    """`health-check` lists the reader's refusal texts for a dropped entry and for a whole-file refusal, and none for a clean file. O9."""
+    root = tmp_path / "tree"
+    _write_registry(root, _current_entry(id="tk-1390-ok"), _current_entry(id="tk-1390-x", host_scope="*"))
+    reader = registry().read_registry(registry().registry_path(root))
+    ctx = _clocked_ctx(root, tmp_path)
+    assert _verbs()["health-check"](ctx)["registry_problems"] == list(reader.refusals)
+
+    whole = tmp_path / "whole"
+    path = registry().registry_path(whole)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(_WHOLE_FILE_FAULTS["no-entries-list"])
+    health = _verbs()["health-check"](_clocked_ctx(whole, tmp_path))
+    relative = "/".join(scene.REGISTRY_RELPATH)
+    assert health["registry_problems"] == [
+        registry().read_registry(path).fatal.replace(str(path), relative)]
+    assert health["registry"] == relative
+
+    clean = tmp_path / "clean"
+    _write_registry(clean, _current_entry())
+    assert "registry_problems" not in _verbs()["health-check"](_clocked_ctx(clean, tmp_path)), (
+        "positive control: a clean registry reports no problems")
 
 
 _PLANTED_TACIT = '''\
@@ -459,8 +596,8 @@ VERBS = {"health-check": health_check}
 '''
 
 
-def test_1390_an_adapter_named_tacit_knowledge_is_refused_not_served(tmp_path):
-    """An adapter file claiming the reserved name is refused by the roster read, and a lookup is still the platform's. Reserved name."""
+def test_1390_an_adapter_named_tacit_knowledge_is_refused_with_its_reason_and_not_served(tmp_path):
+    """An adapter file claiming the reserved name is refused with a reason, other adapters keep working, and a lookup is still the platform's. A5."""
     adapters = tmp_path / "integrations"
     adapters.mkdir()
     (adapters / "tacit_knowledge_adapter.py").write_text(_PLANTED_TACIT, encoding="utf-8")
@@ -468,13 +605,15 @@ def test_1390_an_adapter_named_tacit_knowledge_is_refused_not_served(tmp_path):
 
     roster = read_roster(adapters)
 
-    assert "cmdb" in roster.accepted, "positive control: an ordinary adapter is accepted"
-    assert "tacit-knowledge" not in roster.accepted
-    assert "tacit-knowledge" in roster.refused, "the reserved name was dropped silently"
+    assert "cmdb" in roster.adapter_files, "positive control: an ordinary adapter is accepted"
+    assert "cmdb" in roster.verbs and "cmdb" not in roster.refused
+    assert SYSTEM not in roster.adapter_files, "the reserved name was dispatched from a file"
+    assert SYSTEM in roster.refused, "the reserved name was dropped silently"
+    assert "reserved" in roster.refused[SYSTEM], (
+        f"the refusal does not say why: {roster.refused[SYSTEM]!r}")
     root = tmp_path / "tree"
     _write_registry(root, _current_entry())
-    grant = VerbGrant("gather", ((SYSTEM, LOOKUP, "r"),))
-    served = ModuleVerbRegistry(roster, grant).verbs(SYSTEM)[LOOKUP](
+    served = _verbs(roster)[LOOKUP](
         _clocked_ctx(root, tmp_path), actor=ACTOR, host=HOST, pattern=PATTERN)
     assert (served["matched"] or {}).get("id") == scene.ENTRY_ID, (
         "the lookup was served by the planted adapter, not the platform")

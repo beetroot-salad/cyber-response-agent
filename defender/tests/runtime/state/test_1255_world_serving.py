@@ -602,3 +602,42 @@ def test_1390_no_world_serves_the_registry_through_its_oracle(tmp_path: Path) ->
         assert oracle.requests == 0, f"world {label}: a registry lookup took an oracle turn"
         assert [(r.get("system"), r.get("source")) for r in S24.ledger_rows(ep, label)] == [
             ("tacit-knowledge", PASSTHROUGH)], f"world {label}: not one pass-through ledger row"
+
+
+def test_1390_a_lookup_the_source_run_recorded_is_rerun_against_the_pinned_registry(
+        tmp_path: Path) -> None:
+    """A recorded `tacit-knowledge` lookup in a fact-free world is answered from the sibling's pinned registry copy, not the record and not a registry changed outside it; one pass-through row each. O3, A6."""
+    import shutil
+    from defender.systems.verbs import VerbContext
+    from defender.tests.support.tenancy import _tenants1106
+
+    est = S24.TacitEstate(tmp_path / "estate")
+    est.write_registry(json.dumps({"entries": [TACIT_ENTRY]}))
+    pinned_agent = tmp_path / "pinned-agent"
+    shutil.copytree(Path(est.run_tenant().agent), pinned_agent, symlinks=True)
+    pinned = _tenants1106.run_tenant(est.place(), agent_root=pinned_agent)
+    # The tenant's own registry changes after the pin: it now sanctions the unsanctioned lookup.
+    est.write_registry(json.dumps({"entries": [
+        TACIT_ENTRY, {**TACIT_ENTRY, "id": "tk-changed-after-the-pin", "host_scope": "db-2.corp"}]}))
+    stale = {"matched": {**TACIT_ENTRY, "id": "tk-recorded-by-the-source-run"}}
+    ep = S24.episode_v2(tmp_path, base_rows=[
+        S24.captured("tacit-knowledge", "lookup", SANCTIONED, stale),
+        S24.captured("tacit-knowledge", "lookup", UNSANCTIONED, stale),
+        S24.captured("idp", "query", ALICE, ALICE_ANSWER)])
+    est.answer("idp", "query", ALICE, {"rows": ["not what the record says"]})
+    oracle = S24.oracle(then=S24.submit(stale, S24.EMPTY_CLAIM))
+    world = S24.sandboxed_registry(ep, "a", est, oracle=oracle, verifier=S24.passing_verifier(),
+                                   tenant=pinned)
+    ctx = VerbContext(defender_dir=est.defender_dir, run_dir=tmp_path / "run", env={}, tenant=pinned)
+    (tmp_path / "run").mkdir()
+
+    assert S24.call(world, "idp", "query", ctx, **ALICE) == ALICE_ANSWER, (
+        "positive control: an ordinary recorded call in this world is served from the record")
+    assert S24.call(world, "tacit-knowledge", "lookup", ctx, **SANCTIONED) == {
+        "matched": TACIT_ENTRY}, "the recorded answer was served, not the pinned registry's"
+    assert S24.call(world, "tacit-knowledge", "lookup", ctx, **UNSANCTIONED) == {
+        "matched": None}, "the answer came from outside the pinned registry copy"
+
+    assert oracle.requests == 0, "a recorded registry lookup took an oracle turn"
+    assert [(r.get("system"), r.get("source")) for r in S24.ledger_rows(ep, "a")] == [
+        ("idp", PASSTHROUGH), ("tacit-knowledge", PASSTHROUGH), ("tacit-knowledge", PASSTHROUGH)]

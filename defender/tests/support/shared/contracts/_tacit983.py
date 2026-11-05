@@ -151,7 +151,7 @@ REGISTRY_RELPATH = ("skills", REGISTRY_SYSTEM, "registry.yaml")
 def registry_entry(**overrides) -> dict[str, str]:
     """One well-formed registry entry: seven fields plus the `id` an `:R authz` row cites as
     `anchor_id` (without it a citation names a `pattern` string, which any edit silently
-    re-identifies). Shared because the e2e drives the real adapter over the same entry."""
+    re-identifies). Shared because the e2e drives the real lookup over the same entry."""
     base = {
         "id": ENTRY_ID,
         "pattern": PATTERN,

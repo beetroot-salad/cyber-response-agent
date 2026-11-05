@@ -151,18 +151,15 @@ def _confined_estate(tmp_path: Path, **kw: Any) -> _Estate:
                                      ("search", "health-check")),), **kw)
 
 
-def _tacit_estate(tmp_path: Path) -> _Estate:
-    """The fixture estate plus the REAL tacit_knowledge adapter and a registry in the estate
-    TENANT's agent half (`tacit_knowledge_adapter.registry_path`: the registry is the run's agent
-    knowledge, never a defender tree's)."""
-    source = (S.DEFENDER / "integrations" / "tacit_knowledge_adapter.py").read_text(
-        encoding="utf-8")
-    # The checkout adapter puts its repo root on sys.path; a planted copy must not.
-    source = source.replace("_sys.path.insert(0, _root)", "pass")
-    est = _estate(tmp_path, extra=(("tacit-knowledge", source, ("lookup", "health-check")),))
-    registry = Path(est.run_tenant().agent) / "skills" / "tacit-knowledge" / "registry.yaml"
-    registry.parent.mkdir(parents=True, exist_ok=True)
-    registry.write_text(_yaml.safe_dump({"entries": [TACIT_ENTRY]}), encoding="utf-8")
+def _tacit_estate(tmp_path: Path) -> S.Estate:
+    """The fixture estate plus the platform-served `tacit-knowledge` (granted through the table,
+    no adapter planted) and a registry in the estate TENANT's agent half (#1390: the registry is
+    the run's agent knowledge, never a defender tree's)."""
+    est = S.TacitEstate(tmp_path / "estate")
+    est.answer("idp", "query", ALICE, BASE)
+    est.answer("edr", "query", EXPLORE, EXPLORE_ANSWER)
+    est.answer("siem-x", "lookup", VERIFY, VERIFY_ANSWER)
+    est.write_registry(_yaml.safe_dump({"entries": [TACIT_ENTRY]}))
     return est
 
 
@@ -680,17 +677,17 @@ def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path):
 
 
 def test_1224_tacit_knowledge_run_query_reads_the_state_at_the_branch_date(tmp_path):
-    """the oracle's run_query on tacit_knowledge answers with the registry as it stood on the branch date: an entry valid then and expired now matches."""
+    """the oracle's own side query on tacit-knowledge (no run clock, a host-side as_of) answers with the registry as it stood on the branch date: valid then, expired now, matches. O2."""
     est = _tacit_estate(tmp_path)
-    tacit_knowledge_adapter = _plain_registry(est).verbs("tacit-knowledge")
+    tacit_verbs = _plain_registry(est).verbs("tacit-knowledge")
     today: VerbContext = est.ctx(tmp_path / "today")
     branch: VerbContext = est.ctx(tmp_path / "branch", as_of=S.AS_OF_DT)
-    unbranched = tacit_knowledge_adapter["lookup"](today, **TACIT_LOOKUP)
-    at_branch = tacit_knowledge_adapter["lookup"](branch, **TACIT_LOOKUP)
+    unbranched = tacit_verbs["lookup"](today, **TACIT_LOOKUP)
+    at_branch = tacit_verbs["lookup"](branch, **TACIT_LOOKUP)
     assert today.as_of is None
     assert unbranched == {"matched": None}, "premise: the entry has expired by today"
     assert (at_branch["matched"] or {}).get("id") == TACIT_ENTRY["id"], (
-        "premise: the adapter reads the registry as of the clock it is handed")
+        "premise: the lookup reads the registry as of the `as_of` it is handed when the call has no run clock")
     oracle = S.oracle(S.run_query("tacit-knowledge", "lookup", TACIT_LOOKUP), S.submit(BASE))
     _e, _ep, reg = _scene(tmp_path, oracle, est=est)
 

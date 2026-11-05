@@ -724,3 +724,23 @@ def test_1390_a_platform_served_system_is_never_a_served_system():
     tacit = (("tacit-knowledge", "lookup", "r"), ("tacit-knowledge", "health-check", "r"))
     assert served_systems(VerbGrant("gather", (*tacit, ("idp", "query", "r")))) == ["idp"]
     assert served_systems(VerbGrant("gather", tacit)) == []
+
+
+def test_1390_the_launcher_records_no_platform_served_system_and_refuses_a_tenant_granting_only_it(
+        tmp_path, monkeypatch):
+    """A launch over a tenant that also grants `tacit-knowledge` records it in no `served_systems`; a tenant granting only it is refused as having no servable system. O5."""
+    where = _isolated(tmp_path, monkeypatch, "ordinary")
+    ordinary = S.TacitEstate(where / "estate")
+    launch = _launch(where, monkeypatch, ordinary,
+                     questioner=S.questioner_for(S.family_v2(served_systems=("cmdb", "elastic"))))
+    family = _manifest(launch.ep)
+    assert family is not None, f"no family.yaml was written (rc={launch.rc}, {launch.message!r})"
+    assert "tacit-knowledge" in ordinary.grant().systems, "premise: the tenant grants the registry"
+    assert sorted(family["served_systems"]) == sorted(set(ordinary.grant().systems) - {"tacit-knowledge"})
+
+    where = _isolated(tmp_path, monkeypatch, "only")
+    only = S.TacitEstate(where / "estate",
+                         withheld=tuple((s, v) for s in S.SYSTEMS for v in S.READ_VERBS))
+    refused = _launch(where, monkeypatch, only)
+    assert refused.rc != 0 and "serves no system" in refused.message, (
+        f"a tenant granting only the registry was not refused as unservable: {refused}")

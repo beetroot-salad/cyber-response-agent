@@ -50,21 +50,27 @@ def _run(tmp_path: Path, doc: str, disposition: str, *, run_id: str):
 
 
 def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
-    """A gather registry whose `tacit-knowledge.lookup` IS the shipped adapter's, repointed at
-    the fixture tree under `root` and at `AS_OF`. The registry is the run's agent knowledge, so
-    `root` is handed as the run tenant's agent root, not as `defender_dir`."""
-    from defender.systems.verbs import VerbContext
+    """A gather registry whose `tacit-knowledge.lookup` IS the platform's (the one a real run's
+    registry serves, #1390), repointed at the fixture tree under `root` and at `AS_OF`: the
+    shim drops the run state so the alerted instant, not the suite's wall time, is the day. The
+    registry is the run's agent knowledge, so `root` is handed as the run tenant's agent root."""
+    from defender._git import REPO_ROOT
     from defender.kit.verbs import declared_params
-    from defender.integrations import tacit_knowledge_adapter
+    from defender.systems.verbs import ModuleVerbRegistry, VerbContext, read_roster
+    from defender.tests.support.tenancy import _tenants1106
+
+    shipped = ModuleVerbRegistry(
+        read_roster(REPO_ROOT / "defender" / "integrations"),
+        _tenants1106.fixture_grants().gather).verbs(SYSTEM)[LOOKUP]
 
     def lookup(ctx: VerbContext, *, actor: str, host: str, pattern: str) -> dict:
         rec.record(LOOKUP, ctx, {"actor": actor, "host": host, "pattern": pattern})
-        return tacit_knowledge_adapter.lookup(
-            replace(ctx, tenant=replace(ctx.tenant, agent_root=root), as_of=AS_OF),
+        return shipped(
+            replace(ctx, tenant=replace(ctx.tenant, agent_root=root), as_of=AS_OF, run_state=None),
             actor=actor, host=host, pattern=pattern,
         )
 
-    assert declared_params(lookup) == declared_params(tacit_knowledge_adapter.lookup), (
+    assert declared_params(lookup) == declared_params(shipped), (
         "the harness shim's params are not the shipped verb's"
     )
     return FakeVerbs({SYSTEM: {LOOKUP: lookup}})
@@ -106,10 +112,10 @@ def _run_with_lookup(
 
 
 def _payload(run_dir: Path, seq: int = 0) -> dict:
-    """What the REAL adapter handed back, off the run's own by-ref payload file."""
+    """What the REAL lookup handed back, off the run's own by-ref payload file."""
     path = run_dir / "gather_raw" / scene.LEAD / f"{seq}.json"
     assert path.is_file(), (
-        f"the lookup persisted no payload at {path} — the lead never reached the adapter"
+        f"the lookup persisted no payload at {path} — the lead never reached the lookup"
     )
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -349,14 +355,14 @@ def _current_entry(**overrides: str) -> dict:
                                 review_by=str(today + dt.timedelta(days=30)), **overrides)
 
 
-def _gather_lookups(tmp_path: Path, est, *turns) -> tuple[Path, list[dict]]:
-    """One live investigation whose gather lead on `tacit-knowledge` runs `turns`, over the
-    estate's real gather registry; returns the run dir and the lead's tacit-knowledge rows."""
+def _gather_lookups(tmp_path: Path, est, *turns, system: str = SYSTEM) -> tuple[Path, list[dict], object]:
+    """One live investigation whose gather lead (on `system`) runs `turns`, over the estate's real
+    registry; returns the run dir, the lead's `tacit-knowledge` rows and the gather replay."""
     S = _spec()
-    run_dir, _gather = S.drive_gather(
-        tmp_path / "run", verbs=S.plain_registry(est), tenant=est.place(), system=SYSTEM,
+    run_dir, gather = S.drive_gather(
+        tmp_path / "run", verbs=S.plain_registry(est), tenant=est.place(), system=system,
         gather_turns=[*turns, S.done_turn()])
-    return run_dir, [r for r in S.lead_rows(run_dir) if r["system"] == SYSTEM]
+    return run_dir, [r for r in S.lead_rows(run_dir) if r["system"] == SYSTEM], gather
 
 
 def _payload(run_dir: Path, row: dict) -> dict:
@@ -372,7 +378,7 @@ def test_1390_a_granted_lookup_runs_through_the_query_tool_and_is_recorded(tmp_p
     entry = _current_entry()
     est.write_registry(json.dumps({"entries": [entry]}))
 
-    run_dir, rows = _gather_lookups(tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS))
+    run_dir, rows, _gather = _gather_lookups(tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS))
 
     assert [(r["verb"], r["params"], r["exit_code"]) for r in rows] == [
         (LOOKUP, LOOKUP_PARAMS, 0)]
@@ -383,49 +389,97 @@ def test_1390_a_granted_lookup_runs_through_the_query_tool_and_is_recorded(tmp_p
         assert needle in listed, f"list_verbs does not describe {needle!r}:\n{listed}"
 
 
-def test_1390_a_withheld_lookup_is_refused_and_recorded_as_denied(tmp_path):
-    """A table row granting `lookup` to no role refuses the call through the query tool's grant check, recorded as a denial. O4."""
+def _lookup_after_a_witness(tmp_path: Path, est) -> tuple[Path, list[dict], list[dict], list[dict], str]:
+    """A lead on `idp` that first reads idp (the witness that the lead is live and asking), then
+    asks `tacit-knowledge.lookup`. Returns the run dir, the idp rows, the tacit rows, the lookup's denial records and what the
+    investigator was told after the lookup."""
+    from defender.records import RunPaths
+    from defender._io import read_jsonl_rows
+
+    S = _spec()
+    asked = S.query_params("user:alice")
+    est.answer("idp", "query", asked, {"rows": []})
+    run_dir, tacit, gather = _gather_lookups(
+        tmp_path, est, S.query_turn("idp", "query", asked),
+        S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS), system="idp")
+    idp = [r for r in S.lead_rows(run_dir) if r["system"] == "idp"]
+    paths = RunPaths(run_dir)
+    denials = [d for d in read_jsonl_rows(paths.policy_denials)
+               if (d.get("system"), d.get("verb")) == (SYSTEM, LOOKUP)] if paths.policy_denials.is_file() else []
+    return run_dir, idp, tacit, denials, gather.seen[-1]
+
+
+@pytest.mark.parametrize("rows", [
+    pytest.param((("lookup", ()), ("health-check", ("gather",))), id="row-with-no-role"),
+    pytest.param((), id="rows-deleted"),
+])
+def test_1390_a_withheld_or_row_less_lookup_is_denied_and_recorded_not_undeclared(tmp_path, rows):
+    """Whether the table withholds `lookup` or has no `tacit-knowledge` rows, the lead's call is denied with a denial record and wording that does not send the model to add rows. O4, A3, O10."""
     from defender.systems.circuit_breaker import DENIED_EXIT_CODE
 
     S = _spec()
-    est = S.TacitEstate(tmp_path / "estate",
-                        tacit_roles=(("lookup", ()), ("health-check", ("gather",))))
+    est = S.TacitEstate(tmp_path / "estate", tacit_roles=rows)
     est.write_registry(json.dumps({"entries": [_current_entry()]}))
 
-    _run_dir, rows = _gather_lookups(tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS))
+    _run_dir, idp, tacit, denials, told = _lookup_after_a_witness(tmp_path, est)
 
-    assert [(r["verb"], r["exit_code"]) for r in rows] == [(LOOKUP, DENIED_EXIT_CODE)]
+    assert [r["exit_code"] for r in idp] == [0], "witness: the lead really asked, and idp answered"
+    assert [(r["verb"], r["exit_code"]) for r in tacit] == [(LOOKUP, DENIED_EXIT_CODE)], (
+        f"the lookup was not recorded as a denial: {tacit}")
+    assert len(denials) == 1, f"a denial leaves one policy-denial record, found {denials}"
+    assert "withheld" in told.lower(), f"the refusal does not say the verb is withheld:\n{told}"
+    for add_rows in ("needs rows", "just connected"):
+        assert add_rows not in told.lower(), (
+            f"the refusal tells the model to add table rows ({add_rows!r}):\n{told}")
 
 
-def test_1390_deleted_rows_withhold_both_verbs(tmp_path):
-    """A table with no `tacit-knowledge` rows withholds the lookup: never run, and `list_verbs` offers nothing. O10."""
+def test_1390_with_no_rows_list_verbs_offers_the_lead_nothing_on_the_registry(tmp_path):
+    """A table with no `tacit-knowledge` rows leaves `list_verbs` offering no verb on it, and the same registry with rows offers both. O10."""
     from defender.investigation.query_catalog import _tool_list_verbs
 
     S = _spec()
-    est = S.TacitEstate(tmp_path / "estate", tacit_roles=())
-    est.write_registry(json.dumps({"entries": [_current_entry()]}))
+    granted = S.TacitEstate(tmp_path / "granted")
+    assert "the 2 verb(s) your grant admits" in _tool_list_verbs(S.plain_registry(granted), SYSTEM), (
+        "positive control: with rows the registry's verbs are listed")
+    bare = S.TacitEstate(tmp_path / "bare", tacit_roles=())
 
-    _run_dir, rows = _gather_lookups(tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS))
-
-    assert [r for r in rows if r["exit_code"] == 0] == [], f"a lookup with no grant row ran: {rows}"
-    assert "your grant reaches no verb" in _tool_list_verbs(S.plain_registry(est), SYSTEM)
+    assert "your grant reaches no verb" in _tool_list_verbs(S.plain_registry(bare), SYSTEM)
 
 
-def test_1390_a_broken_registry_is_a_miss_whose_reason_is_on_the_call(tmp_path):
-    """A registry with no `entries:` list answers a miss, and its whole-file refusal is on the lookup's queries row and in `health-check`. O9."""
+def test_1390_a_registry_refused_whole_is_a_miss_whose_reason_is_in_the_stored_answer(tmp_path):
+    """A registry with no `entries:` list answers a miss; the stored answers of `lookup` and `health-check` carry the reader's refusal. O9."""
+    from defender.systems import tacit_registry
+
     S = _spec()
     est = S.TacitEstate(tmp_path / "estate")
-    est.write_registry("sanctions:\n  - id: tk-misfiled\n")
-    reason = "declares no `entries:` list"
+    path = est.write_registry("sanctions:\n  - id: tk-misfiled\n")
+    reason = tacit_registry.read_registry(path).fatal
+    assert reason and "entries:" in reason, f"premise: the reader refuses the file whole: {reason!r}"
 
-    run_dir, rows = _gather_lookups(
-        tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS),
-        S.query_turn(SYSTEM, "health-check", {}))
+    run_dir, rows, _g = _gather_lookups(
+        tmp_path, est, _spec().query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS),
+        _spec().query_turn(SYSTEM, "health-check", {}))
 
     assert [(r["verb"], r["exit_code"]) for r in rows] == [(LOOKUP, 0), ("health-check", 0)]
-    assert _payload(run_dir, rows[0]) == {"matched": None}
-    assert reason in json.dumps(rows[0]), f"the lookup's queries row does not carry the refusal: {rows[0]}"
+    visible = reason.replace(str(path), "skills/tacit-knowledge/registry.yaml")
+    assert _payload(run_dir, rows[0]) == {"matched": None, "registry_problems": [visible]}
     health = _payload(run_dir, rows[1])
-    assert reason in json.dumps(health), f"health-check does not report the refusal: {health}"
-    assert not str(health.get("registry", "")).startswith("/"), (
-        "health-check names the registry by a host path")
+    assert health["registry_problems"] == [visible]
+    assert not str(health["registry"]).startswith("/"), "health-check names the registry by a host path"
+
+
+def test_1390_a_dropped_entry_rides_a_hit_in_the_stored_answer(tmp_path):
+    """A hit from a registry that also dropped an entry is stored with `matched` unchanged and the reader's refusal beside it. O9."""
+    from defender.systems import tacit_registry
+
+    S = _spec()
+    est = S.TacitEstate(tmp_path / "estate")
+    good = _current_entry()
+    path = est.write_registry(json.dumps({"entries": [
+        good, {**_current_entry(id="tk-1390-blanket"), "actor_scope": "*"}]}))
+    dropped = list(tacit_registry.read_registry(path).refusals)
+    assert len(dropped) == 1, f"premise: the reader drops the blanket entry: {dropped}"
+
+    run_dir, rows, _g = _gather_lookups(tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS))
+
+    assert _payload(run_dir, rows[0]) == {"matched": good, "registry_problems": dropped}

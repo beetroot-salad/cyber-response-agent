@@ -639,6 +639,8 @@ def test_1159_check_says_this_machines_git_failed_and_exits_1(
 
 TACIT = "tacit-knowledge"
 TACIT_REGISTRY_REL = ("agent", "skills", TACIT, "registry.yaml")
+#: Declares verbs the cold reader can see, and claims the platform's reserved name.
+RESERVED_ADAPTER = 'VERBS = {"lookup": None, "health-check": None}\n'
 
 
 def _without_tacit_rows(folder: Path, *verbs: str) -> None:
@@ -653,38 +655,156 @@ def _without_tacit_rows(folder: Path, *verbs: str) -> None:
     _write_table(settings, doc)
 
 
-def test_1390_check_folder_refuses_a_registry_with_a_dropped_entry(tmp_path: Path) -> None:
-    """A registry entry whose span breaks the 180-day bound fails `check --folder`, naming the entry and the rule. O7."""
+def _withhold_tacit(folder: Path, *verbs: str) -> None:
+    """Keep the `tacit-knowledge` rows named, granted to no role, with a reason."""
+    settings = folder / "settings"
+    doc = _table(settings)
+    for verb in verbs:
+        doc["dispositions"][TACIT][verb] = {"roles": [], "reason": "this tenant keeps no sanctions"}
+    _write_table(settings, doc)
+
+
+def _cli_check(agent: Path, *extra: str) -> tuple[int, str]:
+    """`tacit_cli check` over the registry under the agent root `agent`, as a human would see it."""
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    from defender.cli import tacit_cli
+
+    out = io.StringIO()
+    with redirect_stdout(out), redirect_stderr(out):
+        rc = tacit_cli.main(["check", "--defender-dir", str(agent), *extra])
+    return rc, out.getvalue()
+
+
+def _cli_failures(agent: Path) -> list[str]:
+    """What `tacit_cli check` prints as a failure for this registry: the text after each `[✗]`
+    marker, without the DROPPED label. Exits 1 by premise."""
+    rc, said = _cli_check(agent)
+    assert rc == 1, f"premise: the CLI fails this registry:\n{said}"
+    texts = [ln.split("[✗]", 1)[1].strip().removeprefix("DROPPED — ")
+             for ln in said.splitlines() if "[✗]" in ln]
+    assert texts, f"premise: the CLI printed a failure:\n{said}"
+    return texts
+
+
+def _registry_faults() -> dict[str, tuple]:
+    """Registries `tenant check` must fail on: a dropped entry, and a file refused whole."""
     from defender.tests.support.shared.contracts import _tacit983 as scene
 
+    return {
+        "dropped-entry": (scene.registry_entry(id="tk-1390-200-days", added_at="2026-03-01",
+                                               review_by="2026-09-17"),),
+        "refused-whole": (),
+    }
+
+
+def _plant_registry_fault(folder: Path, kind: str) -> None:
+    from defender.tests.support.shared.contracts import _tacit983 as scene
+
+    entries = _registry_faults()[kind]
+    if kind == "refused-whole":
+        path = folder.joinpath(*TACIT_REGISTRY_REL)
+        path.write_text("sanctions:\n  - id: tk-misfiled\n", encoding="utf-8")
+        return
+    scene.write_registry(folder / "agent", *entries)
+
+
+@pytest.mark.parametrize("kind", ["dropped-entry", "refused-whole"])
+def test_1390_check_folder_fails_on_what_the_authors_cli_fails_on_with_the_clis_words(
+        tmp_path: Path, kind: str) -> None:
+    """A registry with a dropped entry or refused whole fails `check --folder`, and the output carries each reason the author's CLI prints for the same file. O7, A8."""
     H.assert_clean(_check_folder(_folder(tmp_path, "control")))
     folder = _folder(tmp_path, "tenant")
-    scene.write_registry(folder / "agent", scene.registry_entry(
-        id="tk-1390-200-days", added_at="2026-03-01", review_by="2026-09-17"))
+    _plant_registry_fault(folder, kind)
 
-    H.assert_refused(_check_folder(folder), "tk-1390-200-days", "review_by", "200 days", "180")
+    text = H.assert_refused(_check_folder(folder), TACIT)
+
+    for reason in _cli_failures(folder / "agent"):
+        assert reason in text, f"`check` does not carry the CLI's reason {reason!r}:\n{text}"
 
 
-def test_1390_no_tacit_rows_and_no_registry_is_clean(tmp_path: Path) -> None:
-    """A tenant that deleted both `tacit-knowledge` rows and holds no registry gets no census finding for it. O10."""
+def test_1390_check_does_not_fail_on_what_only_the_calendar_changed(tmp_path: Path) -> None:
+    """An entry past its `review_by` (a note in the author's CLI, never a failure there) leaves `check --folder` at exit 0. A8."""
+    from defender.tests.support.shared.contracts import _tacit983 as scene
+
     folder = _folder(tmp_path, "tenant")
-    _without_tacit_rows(folder, "lookup", "health-check")
+    scene.write_registry(folder / "agent", scene.registry_entry(
+        added_at="2025-11-01", review_by="2026-01-01"))
+    rc, said = _cli_check(folder / "agent", "--as-of", "2026-11-05")
+    assert (rc, "EXPIRED" in said) == (0, True), (
+        f"premise: the author's CLI only notes an expired entry:\n{said}")
+
+    H.assert_clean(_check_folder(folder))
+
+
+def test_1390_check_still_reports_a_broken_registry_when_the_grant_table_does_not_load(
+        tmp_path: Path) -> None:
+    """A grant table that fails to parse and a registry with a dropped entry are both reported by one `check --folder`. A8."""
+    folder = _folder(tmp_path, "tenant")
+    _plant_registry_fault(folder, "dropped-entry")
+    table = folder / "settings" / "verb-grants.yaml"
+    text = table.read_text(encoding="utf-8")
+    table.write_text(text.replace("  cmdb:", "<<<<<<< HEAD\n  cmdb:", 1), encoding="utf-8")
+
+    out = H.assert_refused(_check_folder(folder), "verb-grants.yaml", TACIT)
+
+    for reason in _cli_failures(folder / "agent"):
+        assert reason in out, f"the registry's reason {reason!r} is lost behind the table:\n{out}"
+
+
+def test_1390_a_tenant_with_no_registry_file_is_clean(tmp_path: Path) -> None:
+    """A tenant whose repo holds no registry file at all passes `check --folder` with the registry rows still granted. P4."""
+    folder = _folder(tmp_path, "tenant")
     folder.joinpath(*TACIT_REGISTRY_REL).unlink()
 
-    out = H.assert_clean(_check_folder(folder))
-    assert TACIT not in out, f"check reported on a system the tenant chose not to grant:\n{out}"
+    H.assert_clean(_check_folder(folder))
 
 
-def test_1390_a_registry_with_lookup_ungranted_is_warned_about(tmp_path: Path) -> None:
-    """A registry file present while `lookup` is not granted to gather draws a warning naming both. O10."""
+@pytest.mark.parametrize("how", ["rows-deleted", "lookup-withheld", "both-rows-withheld"])
+def test_1390_a_registry_the_grant_table_does_not_reach_is_no_finding(tmp_path: Path, how: str) -> None:
+    """With the registry file present and `lookup` unreached by the table (rows deleted or withheld), `check --folder` exits 0 with no tacit line. H7, O10."""
     control = H.assert_clean(_check_folder(_folder(tmp_path, "control")))
     assert "registry.yaml" not in control, "positive control: a granted lookup draws no warning"
     folder = _folder(tmp_path, "tenant")
-    _without_tacit_rows(folder, "lookup")
+    assert folder.joinpath(*TACIT_REGISTRY_REL).is_file(), "premise: the registry file is kept"
+    if how == "rows-deleted":
+        _without_tacit_rows(folder, "lookup", "health-check")
+    elif how == "lookup-withheld":
+        _withhold_tacit(folder, "lookup")
+    else:
+        _withhold_tacit(folder, "lookup", "health-check")
 
-    proc = _check_folder(folder)
+    out = H.assert_clean(_check_folder(folder))
 
-    H.assert_ran(proc)
-    out = H.output(proc)
-    for needle in ("registry.yaml", "lookup", "gather"):
-        assert needle in out, f"the warning does not name {needle!r}:\n{out}"
+    assert TACIT not in out, f"check reported on a system the tenant chose not to grant:\n{out}"
+    assert folder.joinpath(*TACIT_REGISTRY_REL).is_file(), "the file was kept through the check"
+
+
+def test_1390_a_broken_registry_fails_check_even_when_the_grant_table_does_not_reach_it(
+        tmp_path: Path) -> None:
+    """A dropped entry fails `check --folder` with the tacit rows deleted too: the check judges the file, not the grant. A10."""
+    folder = _folder(tmp_path, "tenant")
+    _plant_registry_fault(folder, "dropped-entry")
+    _without_tacit_rows(folder, "lookup", "health-check")
+
+    text = H.assert_refused(_check_folder(folder), TACIT)
+
+    for reason in _cli_failures(folder / "agent"):
+        assert reason in text, f"`check` does not carry the CLI's reason {reason!r}:\n{text}"
+
+
+def test_1390_check_names_a_reserved_adapter_name_with_its_reason_and_keeps_the_other_adapters(
+        tmp_path: Path) -> None:
+    """An adapter file named for `tacit-knowledge` shows up in `check`'s census output with the reserved-name reason, not as an anomalous name, and the census of the other adapters is still taken. A5."""
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    folder = _folder(tmp_path, "tenant")
+    script = _copy_script(checkout)
+    H.assert_clean(H.run_script(script, "check", "--folder", str(folder), root=None))
+
+    H.add_adapter(checkout, TACIT, RESERVED_ADAPTER)
+    out = H.assert_refused(H.run_script(script, "check", "--folder", str(folder), root=None), TACIT)
+
+    assert TACIT in out and "reserved" in out, f"the refusal is not named with its reason:\n{out}"
+    assert "anomalous adapter name" not in out, f"the refusal reads as a malformed name:\n{out}"
+    assert CENSUS_NOT_TAKEN not in out, f"the other adapters' census was lost:\n{out}"
