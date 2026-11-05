@@ -45,10 +45,11 @@ class Deadline:
         """The timeout for one network call of `what`: what is left, at most `per_wait`."""
         return min(self.per_wait, self.left(what))
 
-    def run(self, what: str, leg: Callable[[], Awaitable[_T]]) -> _T:
+    def run(self, what: str, leg: Callable[[], Awaitable[_T]], *, system_side: bool = False) -> _T:
         """`leg()` run on the event loop from this worker thread, cut when the deadline passes
-        (`Refused`, `TransportFault`). Called only from a thread anyio started (the proxy's
-        requests run on one)."""
+        (`Refused`, `TransportFault`; `system_side` when `leg` is the target system's own call,
+        #1404: only the cut is, not a deadline spent before the leg began). Called only from a
+        thread anyio started (the proxy's requests run on one)."""
         left = self.left(what)
 
         async def bounded() -> _T:
@@ -58,7 +59,8 @@ class Deadline:
         try:
             return anyio.from_thread.run(bounded)
         except TimeoutError:
-            raise Refused(TRANSPORT, f"the request ran out of time during {what}") from None
+            raise Refused(TRANSPORT, f"the request ran out of time during {what}",
+                          system_side=system_side) from None
 
 
 _CURRENT: contextvars.ContextVar[Deadline | None] = contextvars.ContextVar(

@@ -371,13 +371,15 @@ def test_what_the_child_left_running_dies_with_it(p4_tenant, tmp_path):
     left = int(pid_file.read_text(encoding="utf-8"))
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
+        # One observation, not a chain: the process can be reaped between any two of these
+        # steps (the signal, opening its stat, reading it), and each says so its own way.
         try:
             os.kill(left, 0)
-        except ProcessLookupError:
-            break
-        with open(f"/proc/{left}/stat", encoding="utf-8") as stat:
-            if stat.read().split(")")[-1].split()[0] == "Z":
-                break
+            with open(f"/proc/{left}/stat", encoding="utf-8") as stat:
+                if stat.read().split(")")[-1].split()[0] == "Z":
+                    break
+        except (ProcessLookupError, FileNotFoundError):
+            break  # gone, as wanted
         time.sleep(0.05)
     else:
         raise AssertionError("a process the child started outlived the publish")

@@ -404,13 +404,21 @@ def write_outcome(episode_dir: Path, outcome: str = "accepted", *,
     """Pre-flight's `outcome.yaml` through the production writer (`outcome.write_outcome`),
     replacing any record already there (a fixture restating the outcome is not a second
     pre-flight), read back through `outcome.read_outcome`. `lists` are the writer's
-    `unservable_worlds` / `not_replayable` / `drift`. An `accepted` record also gets the family
-    stamp (`J.comparable_family_stamp`) unless one is there or `family_stamp=False`."""
+    `unservable_worlds` / `not_replayable`, and `drift`: the writer no longer writes it
+    (#1385 H6), so an archive from before it is spelled out by hand after the write, for the
+    readers that tolerate it. An `accepted` record also gets the family stamp
+    (`J.comparable_family_stamp`) unless one is there or `family_stamp=False`."""
     outcome_mod = J.mod("learning.branch.outcome")
     path = Path(episode_dir) / "outcome.yaml"
     path.unlink(missing_ok=True)
+    drift = lists.pop("drift", None)
     with _EpisodeHandle.open(Path(episode_dir)) as episode:
         outcome_mod.write_outcome(episode, outcome, reason=reason, **lists)
+    if drift is not None:
+        from defender import _yaml
+        record = _yaml.safe_load(path.read_text(encoding="utf-8"))
+        record["drift"] = drift
+        path.write_text(_yaml.safe_dump(record), encoding="utf-8")
     with bind(Path(episode_dir)) as bound:
         assert outcome_mod.read_outcome(bound)["outcome"] == outcome
     if family_stamp and outcome == "accepted":

@@ -20,6 +20,7 @@ from typing import Any
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.shared.filesystem._handoff import write_whole
 
 WORKTREE = Path(__file__).resolve().parents[4]
 DEFENDER = WORKTREE / "defender"
@@ -57,17 +58,29 @@ DESCRIPTION = "Three failures then a success from one source."
 
 
 def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: bool = True,
-                    data_root: Path | None = None) -> None:
-    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6)."""
-    from defender.tests.support.tenancy._active1214 import insert_active_tenant
+                    data_root: Path | None = None, generations: Any = None) -> None:
+    """A `tenancy.tenants` row (default: active, forge wiring recorded) by main's #1214 helper (r6).
 
-    insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
+    An active tenant gets one live generation with a sign login (the fixture tenant's elastic is proxied,
+    #1391 P1/D12: run start signs request tokens), unless `generations` says otherwise (`()` for none)."""
+    from defender.tests.support.tenancy._active1214 import insert_active_tenant
+    from defender.tests.support.tenancy._proxied1391 import sign_generation
+
+    if generations is None:
+        generations = [sign_generation(tenant_id)] if state == "active" else ()
+    insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root, generations=generations)
+
+
+def drop_tenant(dsn: str, tenant_id: str) -> None:
+    """Delete `tenant_id`'s record and the tenancy rows that reference it (generations, publish status, forge wiring)."""
+    for table in ("generations", "publish_status", "forge_wiring"):
+        execute(dsn, f'DELETE FROM tenancy."{table}" WHERE tenant_id = %s', (tenant_id,))  # noqa: S608
+    execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
 
 
 def restate_tenant(dsn: str, tenant_id: str, *, state: str, wiring: bool = True, data_root: Path | None = None) -> None:
     """Replace `tenant_id`'s record by one in `state` (a case's premise: do it before any alert names the tenant)."""
-    execute(dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant_id,))
-    execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
+    drop_tenant(dsn, tenant_id)
     register_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root)
 
 
@@ -243,13 +256,17 @@ CHILD_SCRIPT = textwrap.dedent("""
         grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"]).pid
     seen_dir = Path(spec["seen_dir"])
     seen_dir.mkdir(parents=True, exist_ok=True)
-    (seen_dir / f"{run_id}.json").write_text(json.dumps({
+    # Written whole, then renamed into place: `seen_all` polls this folder and must never read
+    # a half-written record.
+    part = seen_dir / f"{run_id}.json.part"
+    part.write_text(json.dumps({
         "argv": argv, "pid": os.getpid(), "pgid": os.getpgid(0), "sid": os.getsid(0),
         "data_root": os.environ.get("DEFENDER_DATA_ROOT"), "grandchild": grandchild,
         "launch_at_start": (runs / f"{run_id}.launch.json").is_file(),
         "alert_at_start": (runs / f"{run_id}.alert.json").is_file(),
         "stdio": [[os.fstat(fd).st_dev, os.fstat(fd).st_ino] for fd in (1, 2)],
     }), encoding="utf-8")
+    os.replace(part, seen_dir / f"{run_id}.json")
     event("start")
     if spec.get("print"):
         print(spec["print"]); print(spec["print"], file=sys.stderr)
@@ -345,7 +362,9 @@ class ScriptedChild:
         }
 
     def __call__(self, launch: Any) -> list[str]:
-        self.spec.write_text(json.dumps(self.spec_dict()), encoding="utf-8")
+        # A child launched a moment ago (another worker's, in the same test) may be reading the
+        # spec right now, and must never see it half-written.
+        write_whole(self.spec, json.dumps(self.spec_dict()))
         return [sys.executable, str(self.script), str(self.spec), "--job", launch.investigation_id,
                 "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 

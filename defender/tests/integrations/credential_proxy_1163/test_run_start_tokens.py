@@ -200,7 +200,7 @@ def test_r2_a_docker_exec_ticket_system_gets_no_write_back_token(tmp_path, data_
 
 
 def test_r3_a_run_with_no_http_proxy_system_never_contacts_the_signer(tmp_path, data_root):
-    """No system is `http-proxy`: nothing is signed even by a sealed OpenBao, so existing
+    """No granted system is `http-proxy`: nothing is signed even by a sealed OpenBao, so existing
     replays need none. A7."""
     _plant(data_root, proxy=())
     signer = A.RaisingSigner(ConfigFault("OpenBao is sealed"))
@@ -474,6 +474,7 @@ def test_r5_the_signing_login_is_never_taken_from_the_environment(
     run start refuses and nothing is sent to the address the environment names; a run's
     children still get no login variable. A1, A24."""
     from defender.box import run_env
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
     from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER
 
     _plant(data_root, proxy=("identity",))
@@ -485,9 +486,11 @@ def test_r5_the_signing_login_is_never_taken_from_the_environment(
             monkeypatch.setenv(name, value)
         rec = S.RunRecorder(tmp_path / "run")
         alert = S.plant_alert(tmp_path / "in")
+        argv = S.run_argv(alert, data_root)
+        # No live generation: the shared fixture's default sign login (#1391 _proxied1391) is withheld.
         try:
-            rc, refused = S.drive_run(S.run_argv(alert, data_root), rec,
-                                      proxy_url="http://proxy.invalid")
+            rc, refused = S.drive_run(argv, rec, proxy_url="http://proxy.invalid",
+                                      directory=directory_for_argv(argv, generations=()))
         except ConfigFault as fault:
             rc, refused = None, fault
         env = run_env(DEFENDER, tmp_path / "run")
@@ -604,8 +607,8 @@ def test_r7_an_http_proxy_tenant_with_no_usable_sign_login_refuses_run_start(
 
 
 def test_r7b_a_tenant_with_no_http_proxy_system_needs_no_sign_login(tmp_path, data_root):
-    """Control for R7: the same records without a generation do not stop a run whose systems are
-    none `http-proxy`. A20, A24."""
+    """Control for R7: the same records without a generation do not stop a run whose granted systems
+    are none `http-proxy`. A20, A24."""
     _plant(data_root, proxy=())
     records = _no_generation(data_root, tmp_path)
     rec, _tickets, rc, refused, _ = _drive(tmp_path, data_root, directory=records.directory)

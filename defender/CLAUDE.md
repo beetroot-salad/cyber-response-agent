@@ -34,6 +34,27 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1391
+
+Elastic is reached only through the credential proxy; its Docker access is gone. <!-- lint-shippable: ok — the vendor-specific product integration. -->
+A tenant's `systems/elastic/` needs, in one commit: <!-- lint-shippable: ok — the vendor-specific product integration. -->
+
+1. `config.env` with `ELASTIC_TRANSPORT="http-proxy"` and the two index keys
+   (`ELASTIC_EVENTS_INDEX`, `ELASTIC_ALERTS_INDEX`); delete `ELASTICSEARCH_URL`, `KIBANA_URL` (a
+   leftover is refused by name) and, as they now do nothing, `ELASTIC_DOCKER_CONTEXT`,
+   `ELASTIC_ES_CONTAINER`, `ELASTIC_KIBANA_CONTAINER` and `ELASTIC_SSL_VERIFY`.
+2. `access.yaml`: `base` (the cluster URL, a path allowed), basic `auth`, `reads` of
+   `POST /*/_search` and `POST /_query`, and `ca:` (inline PEM certificates, nothing else) when the
+   cluster's certificate comes from a private CA. `ca` is then the only trust for that system, the
+   OAuth token URL included, and refuses an `http://` base or token URL.
+3. A stored `basic` credential for a read-only user: `read` on the events and alerts indexes plus
+   the cluster `monitor` privilege (without it `health-check` answers a settings fault naming it).
+
+`health-check` no longer reports Kibana. Fault classes now follow the proxy's: 401 settings, 403
+the agent's, 5xx transport. The exceptions: a 403 on `health-check`, `query` or `alerts` is a
+settings fault naming the missing privilege (`monitor`, or `read` on the configured indexes); only
+`esql`, which names its own indexes, keeps a 403 as the agent's.
+
 ## Upgrade from before #1382
 
 Record ids (tenant, user, membership, alert, investigation) are PostgreSQL `uuid`. Run migrations

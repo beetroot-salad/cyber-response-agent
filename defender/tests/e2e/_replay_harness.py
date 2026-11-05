@@ -167,6 +167,9 @@ class VerbCall:
     verb: str
     ctx: Any
     params: dict
+    #: The run's state as the platform held it around the call (`CALL_RUN_STATE`, #1385 O1: the
+    #: verb context carries none).
+    run_state: Any = None
 
 
 class VerbRecorder:
@@ -177,7 +180,10 @@ class VerbRecorder:
         self.calls: list[VerbCall] = []
 
     def record(self, verb: str, ctx: Any, params: dict) -> None:
-        self.calls.append(VerbCall(verb=verb, ctx=ctx, params=dict(params)))
+        from defender.systems.verbs import CALL_RUN_STATE
+
+        self.calls.append(VerbCall(verb=verb, ctx=ctx, params=dict(params),
+                                   run_state=CALL_RUN_STATE.get()))
 
     @property
     def verbs(self) -> list[str]:

@@ -180,14 +180,12 @@ These are deployment-specific facts every adapter SKILL should put in
   adapter and SKILL drift point will be here.
 - **host-state**: outputs are point-in-time. Two calls 60s apart can
   legitimately disagree on, e.g., process tables. Declare in
-  `read_guidance` that host-state observations carry a
-  `captured_at` and the agent should not cross-time-window them.
-  A branched run takes `captured_at` off the episode rather than off
-  the sibling's own clock (#920): a key the source run captured is
-  replayed byte-for-byte, carrying that run's capture time, and a key
-  it never asked is stamped at the branch point. Neither is the
-  moment the sibling executed, which is what lets two siblings'
-  payloads be compared at all.
+  `read_guidance` that a host-state observation is as of when its reply arrived: the platform
+  stamps every reply with the run's clock reading beside the payload (#1385), and the agent
+  should not cross-time-window two replies. The adapter itself stamps no time and is not told
+  the run's clock or a branch point; a key the source run captured is replayed byte-for-byte
+  (recordings made before #1385 may still carry a `captured_at` inside their bytes), and a
+  sibling's own call carries the sibling's stamp.
 
 ## Batching and implementation order
 

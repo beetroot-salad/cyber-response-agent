@@ -27,6 +27,7 @@ import httpx
 import pytest
 
 from defender.tests.support.tenancy import _tenants1106 as tenants
+from defender.tests.support.shared.filesystem._handoff import updating, write_whole
 
 ORIGIN = "http://forge.invalid:3000/tenants/blue.git"
 from ._identity import TOKEN, identity as fixture_identity
@@ -139,10 +140,14 @@ def forge_pulls(remote):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
 
 
+def _pulls_updating(remote):
+    """Hold the pull list's lock across a read, change and save: a test and a process it
+    launches share this fake forge, and every request rewrites the list."""
+    return updating(Path(remote) / _PULLS)
+
+
 def _save_pulls(remote, rows):
-    path = Path(remote) / _PULLS
-    path.with_suffix(".tmp").write_text(json.dumps(rows), encoding="utf-8")
-    os.replace(path.with_suffix(".tmp"), path)
+    write_whole(Path(remote) / _PULLS, json.dumps(rows))
 
 
 def _remote_tip(remote, branch):
@@ -152,14 +157,15 @@ def _remote_tip(remote, branch):
 
 def _sync_open_pulls(remote):
     """As Forgejo does: an open PR's head follows its branch, and `refs/pull/N/head` with it."""
-    rows = forge_pulls(remote)
-    for row in rows:
-        if row["state"] == "open" and row["head"].get("repo_id") == OURS["id"]:
-            tip = _remote_tip(remote, row["head"]["ref"])
-            if tip is not None and tip != row["head"]["sha"]:
-                row["head"]["sha"] = tip
-                git(remote, "update-ref", f"refs/pull/{row['number']}/head", tip)
-    _save_pulls(remote, rows)
+    with _pulls_updating(remote):
+        rows = forge_pulls(remote)
+        for row in rows:
+            if row["state"] == "open" and row["head"].get("repo_id") == OURS["id"]:
+                tip = _remote_tip(remote, row["head"]["ref"])
+                if tip is not None and tip != row["head"]["sha"]:
+                    row["head"]["sha"] = tip
+                    git(remote, "update-ref", f"refs/pull/{row['number']}/head", tip)
+        _save_pulls(remote, rows)
     return rows
 
 
@@ -168,16 +174,17 @@ def set_pull_state(remote, branch, *, merged, delete_branch=False):
     (raising when there is none, so no case passes on a PR that never existed). Deleting the
     branch leaves the row as Forgejo 15 lists it: `head.ref` `refs/pull/N/head`, no label,
     `head.sha` kept."""
-    rows = _sync_open_pulls(remote)
-    mine = [row for row in rows if row["state"] == "open" and row["head"]["ref"] == branch
-            and row["head"].get("repo_id") == OURS["id"]]
-    assert mine, f"no open PR of ours has the head {branch!r}: {rows}"
-    for row in mine:
-        row.update(state="closed", merged=merged,
-                   merged_at="2026-10-16T00:00:00Z" if merged else None)
-        if delete_branch:
-            row["head"].update(ref=f"refs/pull/{row['number']}/head", label="")
-    _save_pulls(remote, rows)
+    with _pulls_updating(remote):
+        rows = _sync_open_pulls(remote)
+        mine = [row for row in rows if row["state"] == "open" and row["head"]["ref"] == branch
+                and row["head"].get("repo_id") == OURS["id"]]
+        assert mine, f"no open PR of ours has the head {branch!r}: {rows}"
+        for row in mine:
+            row.update(state="closed", merged=merged,
+                       merged_at="2026-10-16T00:00:00Z" if merged else None)
+            if delete_branch:
+                row["head"].update(ref=f"refs/pull/{row['number']}/head", label="")
+        _save_pulls(remote, rows)
     if delete_branch:
         git(remote, "update-ref", "-d", f"refs/heads/{branch}")
     return mine
@@ -245,9 +252,10 @@ class ForgeHTTP:
         if self.remote is None:
             self._rows.append(row)
             return row
-        _save_pulls(self.remote, [*forge_pulls(self.remote), row])
-        if row["head"].get("sha"):
-            git(self.remote, "update-ref", f"refs/pull/{row['number']}/head", row["head"]["sha"])
+        with _pulls_updating(self.remote):
+            _save_pulls(self.remote, [*forge_pulls(self.remote), row])
+            if row["head"].get("sha"):
+                git(self.remote, "update-ref", f"refs/pull/{row['number']}/head", row["head"]["sha"])
         return row
 
     def listed(self, method="GET"):
@@ -276,9 +284,14 @@ class ForgeHTTP:
         if not self._ours(request) or not (path == api or path.startswith(api + "/")):
             self.foreign.append(request)
             return httpx.Response(404, json={"message": "not this forge's repository"})
-        if self.remote is not None:
+        if self.remote is None:
+            return self._answer(request, path[len(api):])
+        # One request is one update: a create's number and its row land under the same lock.
+        with _pulls_updating(self.remote):
             _sync_open_pulls(self.remote)
-        rest = path[len(api):]
+            return self._answer(request, path[len(api):])
+
+    def _answer(self, request, rest):
         if rest == "" and request.method == "GET":
             return httpx.Response(200, json=self.repository)
         if rest == "/branches/main":

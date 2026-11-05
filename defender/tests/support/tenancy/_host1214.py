@@ -9,6 +9,7 @@ contract's choice. Where the implementer spells them otherwise, only this module
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import importlib
 import inspect
@@ -247,11 +248,12 @@ class watch_folder:
 class Calls:
     """How many times each watched function was called inside a `counting_calls` block, by the label given, and the arguments
     of each call by name (`locals[label][n]`: the values themselves, so a test can ask whether a callee was handed the very
-    object another call built)."""
+    object another call built), and whether each ran on a thread with a running event loop (`on_loop[label][n]`)."""
 
     def __init__(self, labels: list[str]) -> None:
         self.counts = dict.fromkeys(labels, 0)
         self.locals: dict[str, list[dict[str, Any]]] = {label: [] for label in labels}
+        self.on_loop: dict[str, list[bool]] = {label: [] for label in labels}
 
     def __getitem__(self, label: str) -> int:
         return self.counts[label]
@@ -271,6 +273,7 @@ def counting_calls(**functions: Callable[..., Any]) -> Iterator[Calls]:
             label = labels[frame.f_code]
             calls.counts[label] += 1
             calls.locals[label].append(dict(frame.f_locals))
+            calls.on_loop[label].append(asyncio.events._get_running_loop() is not None)
 
     previous, previous_threads = sys.getprofile(), threading.getprofile()
     threading.setprofile(hook)

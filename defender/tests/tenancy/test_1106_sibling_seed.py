@@ -20,6 +20,9 @@ from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.support.learning.branch import _triplet_947 as P
 from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV, current_data_root
 from defender.tests.learning.oracle.live_contracts import _spec1224 as O
+from defender.tests.learning.oracle.live_contracts.test_1224_preflight_and_outcome import (
+    _capture_row,
+)
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 from defender.records import RunPaths
 
@@ -172,13 +175,21 @@ def _episodes_made() -> list[str]:
 _BASE = {"rows": [{"user": "alice", "event_id": "e-100", "host": "web-1"}]}
 
 
-def _estate_launch(tmp_path: Path) -> tuple[Any, SpawnRecorder, Any]:
+def _estate_launch(tmp_path: Path, *, failed: Any = None) -> tuple[Any, SpawnRecorder, Any]:
     """One accepted episode over `_spec1224`'s estate tenant (`acme`, with systems the
-    checkout's fixture lacks), stamped `acme`. Returns `(outcome, spawn, estate)`."""
+    checkout's fixture lacks), stamped `acme`. Returns `(outcome, spawn, estate)`. `failed`, a
+    call, is also in the source run as a captured failure, which pre-flight reads live (H6)."""
     est = O.estate(tmp_path)
+
+    def plant_failure(src: Path) -> None:
+        est.answer(failed.system, failed.verb, failed.params, failed.payload)
+        _capture_row(src, system=failed.system, verb=failed.verb, params=failed.params, seq=60,
+                     exit_code=1, payload={"error": "upstream said no"})
+
     _base, src = O.source_run(tmp_path, est, calls=[
         O.Call("idp", "query", O.query_params("user:alice"), _BASE),
-        O.Call("edr", "query", O.query_params("host:web-1"), _BASE)])
+        O.Call("edr", "query", O.query_params("host:web-1"), _BASE)],
+        after_source=None if failed is None else plant_failure)
     outcome, spawn = _main(src, stamp_tenant=fixture_uuid("tenant:acme"), roster=est.roster())
     return outcome, spawn, est
 
@@ -248,7 +259,8 @@ def test_a_source_stamp_with_no_usable_tenant_refuses_the_episode_before_any_sib
 
 def test_the_launcher_judges_and_records_the_episode_tenants_own_served_systems(tmp_path):
     checkout = T.fixture_run_tenant().grants.gather
-    outcome, spawn, est = _estate_launch(tmp_path)
+    failed = O.Call("edr", "query", O.query_params("host:db-1"), _BASE)
+    outcome, spawn, est = _estate_launch(tmp_path, failed=failed)
     assert spawn.launches, f"no sibling was started: {outcome!r}"
     served = sorted(est.served_systems())
     assert not set(served) & {s for s, _v, _c in checkout.entries}, (
@@ -258,7 +270,10 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_served_systems(
     manifest = Path(made[0]) / "family.yaml"
     doc = T.mod("_yaml").safe_load(manifest.read_text(encoding="utf-8"))
     assert doc["served_systems"] == served, doc["served_systems"]
-    assert {c["system"] for c in est.calls()} == {"idp", "edr"}, est.calls()
+    # Recorded calls are never read live (#1385 H6); the captured failure is, on the episode
+    # tenant's own estate (the acme integrations the checkout's copy lacks).
+    assert [(c["system"], c["verb"], c["params"]) for c in est.calls()] == [
+        ("edr", "query", dict(failed.params))], est.calls()
 
 
 def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any_sibling(

@@ -56,7 +56,7 @@ def test_d_one_parser_quote_rule(tmp_path):
     # A stub system's load_config and elastic's load_config read the same value from the same parse.
     assert transport.load_config(ctx, "cmdb", "CMDB")["URL_BASE"] == "abc'"
     elastic_adapter = S.mod("integrations.elastic_adapter")
-    assert elastic_adapter.load_config(ctx)["ELASTIC_EVENTS_INDEX"] == "abc'"
+    assert elastic_adapter.load_config(ctx)["EVENTS_INDEX"] == "abc'"
     cmdb = rec.systems["cmdb"]
     assert cmdb["CMDB_URL_BASE"] == "abc'", dict(cmdb)
     assert rec.systems["elastic"]["ELASTIC_EVENTS_INDEX"] == "abc'"
@@ -98,8 +98,8 @@ def test_s7_nf15_one_parser_line_rules(tmp_path):
     assert not any(v.endswith("\r") for v in cmdb.values()), dict(cmdb)
     assert transport.load_config(ctx, "cmdb", "CMDB") == {
         "URL_BASE": "http://cmdb-p15:8080", "BASTION_HOST": "bastion-p15", "TIMEOUT_SEC": "10"}
-    assert rec.systems["elastic"]["ELASTICSEARCH_URL"] == "https://es-p15:9200"
-    assert rec.systems["elastic"]["ELASTIC_SSL_VERIFY"] == "true"
+    assert rec.systems["elastic"]["ELASTIC_TRANSPORT"] == "http-proxy"
+    assert rec.systems["elastic"]["ELASTIC_ALERTS_INDEX"] == "p15-alerts-*"
 
     # export / no-`=` lines: skipped, not keys, and the file is not faulted for them.
     identity = rec.systems["identity"]

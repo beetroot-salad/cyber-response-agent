@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.tests.support.tenancy import _tenants1106 as T1106
+from defender.tests.support.shared.filesystem._handoff import write_whole
 from defender.tests.support.shared.contracts._by_path import LINT_DIR, load_module
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 from defender.records import SessionPaths
@@ -100,8 +101,6 @@ def settings_pointer() -> str:
 PREFIX = T1106.PREFIX
 
 context_name = T1106.context_name
-es_container = T1106.es_container
-kibana_container = T1106.kibana_container
 
 
 def config_texts(marker: str, *, events_index: str | None = None,
@@ -190,6 +189,14 @@ def drop_key(folder: Path, system: str, key: str) -> Path:
     return path
 
 
+def drop_access(folder: Path, system: str) -> Path:
+    """Remove `system`'s access declaration (`access.yaml`): a proxied system with none (#1391 P1/D12)."""
+    path = settings_of(folder) / "systems" / system / "access.yaml"
+    assert path.is_file(), f"premise: {system} carries no access.yaml to drop"
+    path.unlink()
+    return path
+
+
 def render_env(entries: str | Mapping[str, str]) -> str:
     if isinstance(entries, str):
         return entries
@@ -201,13 +208,7 @@ def write_secrets(folder: Path, entries: str | bytes | Mapping[str, str]) -> Pat
     operator guide rotates one."""
     path = secrets_path(folder)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{SECRETS_ENV}.{uuid.uuid4().hex}")
-    if isinstance(entries, bytes):
-        tmp.write_bytes(entries)
-    else:
-        tmp.write_text(render_env(entries), encoding="utf-8")
-    os.replace(tmp, path)
-    return path
+    return write_whole(path, entries if isinstance(entries, bytes) else render_env(entries))
 
 
 def resolve(root: Path, tenant_id: str = PLAYGROUND_ID, *, dispatches_lead_zero: bool = False,

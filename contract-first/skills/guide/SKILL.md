@@ -15,10 +15,10 @@ Answer questions about the pipeline; don't start any stage yourself. The design 
 Ask what the change does to what the system promises, and recommend one lane with the reason:
 
 - **Adds or changes a promise** (new behavior, a changed flow or data model, a new surface): `discuss-issue`, then `write-tests`, `write-code-from-tests`, and `finalize` or `/code-review`.
-- **Code disagrees with intent that's already settled**, and the intended behavior fits in one sentence: `proven-fix`.
+- **Code disagrees with intent that's already settled, or a small behavior change** whose intended behavior the human states in one sentence, staying inside one owner and one surface with no lifecycle: `proven-fix`.
 - **Only structure changes**, and no assertion needs to change: `refactor`.
 
-If the intent has two reasonable readings, or you can't state it in a sentence, it's a design question: recommend `discuss-issue`. Size is not the test.
+If the intent has two reasonable readings, or you can't state it in a sentence, it's a design question: recommend `discuss-issue`. Line count is not the test; owners, surfaces and lifecycle are.
 
 ## Where does this run stand?
 

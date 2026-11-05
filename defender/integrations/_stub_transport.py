@@ -42,6 +42,7 @@ __all__ = [
     "http_get",
     "http_get_obj",
     "http_post",
+    "http_timed",
     "load_config",
     "raise_proxy_fault",
     "record_access",
@@ -119,27 +120,37 @@ def _child_env(ctx: VerbContext) -> dict[str, str]:
     return dict(ctx.env)
 
 
-def load_config(
+def load_config(  # noqa: PLR0913 — the loader's options, passed through
     ctx: VerbContext, system: str, prefix: str,
-    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
+    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE, *,
+    retired: tuple[str, ...] = (), proxy_only: bool = False,
 ) -> dict[str, str]:
     """`record_config` over the call's run record (`ctx.tenant`): the loader every verb calls,
     under the signature the case-comment writer and the connect example keep."""
-    return record_config(ctx.tenant, system, prefix, required)
+    return record_config(ctx.tenant, system, prefix, required, retired=retired,
+                         proxy_only=proxy_only)
 
 
-def record_config(
+def record_config(  # noqa: PLR0913 — the loader's options
     tenant: TenantRecord, system: str, prefix: str,
-    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
+    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE, *,
+    retired: tuple[str, ...] = (), proxy_only: bool = False,
 ) -> dict[str, str]:
     """`system`'s settings from the run's record: its `config.env`, prefix stripped.
 
     For an `http-proxy` system the declaration holds the only base (A2), so `URL_BASE` and
-    `BASTION_HOST` are not config keys: either one in `config.env` is a `ConfigFault`, and the
-    returned `URL_BASE` is the declaration's base."""
+    `BASTION_HOST` are not config keys: either one in `config.env` is a `ConfigFault`, as is any
+    of the system's own `retired` keys (full names), and the returned `URL_BASE` is the
+    declaration's base. A `proxy_only` system on any other access method is a `ConfigFault`
+    naming its transport key."""
     entry = record_entry(tenant, system)
-    if entry.get(f"{prefix}_TRANSPORT") == HTTP_PROXY:
-        return _proxy_config(tenant, system, prefix, entry, required)
+    method = entry.get(f"{prefix}_TRANSPORT")
+    if method == HTTP_PROXY:
+        return _proxy_config(tenant, system, prefix, entry, required, retired)
+    if proxy_only:
+        raise ConfigFault(
+            f"{prefix}_TRANSPORT={method!r} in {config_pointer(system)}: {system} is reached only "
+            f"through the credential proxy — set {prefix}_TRANSPORT to {HTTP_PROXY!r}")
     cfg: dict[str, str] = {}
     for key in required:
         val = entry.get(f"{prefix}_{key}")
@@ -162,15 +173,16 @@ def _check_timeout(prefix: str, timeout: str | None) -> None:
             f"{prefix}_TIMEOUT_SEC must be a whole number of seconds above zero, got {timeout!r}")
 
 
-def _proxy_config(
+def _proxy_config(  # noqa: PLR0913 — the loader's state
     tenant: TenantRecord, system: str, prefix: str, entry: SystemConfig,
-    required: tuple[str, ...],
+    required: tuple[str, ...], retired: tuple[str, ...],
 ) -> dict[str, str]:
-    for key in ("URL_BASE", "BASTION_HOST"):
-        if f"{prefix}_{key}" in entry:
+    for key in (f"{prefix}_URL_BASE", f"{prefix}_BASTION_HOST", *retired):
+        if key in entry:
             raise ConfigFault(
-                f"{prefix}_{key} is set in {config_pointer(system)}, but this system's access "
-                f"method is {HTTP_PROXY!r}: its base is declared in its access.yaml alone")
+                f"{key} is set in {config_pointer(system)}, but this system's access "
+                f"method is {HTTP_PROXY!r}: its base is declared in its access.yaml alone — "
+                "remove it")
     declaration = record_access(tenant, system)
     cfg = {"URL_BASE": declaration.base}
     for key in required:
@@ -302,6 +314,17 @@ def http_post(
     return _request(ctx, config, url, system=system, method="POST", body=body)
 
 
+def http_timed(  # noqa: PLR0913 — one request's per-call state
+    ctx: VerbContext, config: dict[str, str], method: str, path: str, body: dict | None, *,
+    system: str, timeout_sec: int,
+) -> dict | list:
+    """`method` <URL_BASE><path> as `http_get`/`http_post` send it, under the adapter's own
+    timeout constant rather than a `TIMEOUT_SEC` setting (Elastic's, #1391 O3)."""
+    url = f"{config['URL_BASE'].rstrip('/')}{path}"
+    return _perform(ctx, config, url, system=system, method=method, body=body,
+                    timeout_sec=timeout_sec)
+
+
 def http_write(
     ctx: VerbContext, config: dict[str, str], method: str, path: str, body: dict | None, *,
     system: str,
@@ -397,13 +420,39 @@ def _judge_write(code: int, body_text: str, where: str) -> None:
     raise UpstreamFault(f"HTTP {code} from {where}: {_vendor_detail(body_text)}", status=code)
 
 
+#: The most characters of an error body that has no reason to pick out reach a fault.
+VENDOR_DETAIL_CAP = 2000
+
+
 def _vendor_detail(body_text: str) -> object:
-    """The vendor's own `detail` from an error body (the whole body when it names none)."""
+    """The vendor's own reason from an error body: its `detail` (verbatim), or Elasticsearch's
+    `error` when it is text, else its `error.root_cause` reasons (else `error.reason`), each with
+    its type. A body that names none
+    is handed on whole, cut at `VENDOR_DETAIL_CAP` characters."""
     try:
         payload = json.loads(body_text) if body_text else {}
     except json.JSONDecodeError:
-        payload = {"detail": body_text}
-    return payload.get("detail", payload) if isinstance(payload, dict) else payload
+        payload = {"detail": _capped_detail(body_text)}
+    if not isinstance(payload, dict):
+        return _capped_detail(payload)
+    if "detail" in payload:
+        return payload["detail"]
+    error = payload.get("error")
+    if isinstance(error, str):  # Elasticsearch's plain form, e.g. "no handler found for uri […]"
+        return _capped_detail(error)
+    if isinstance(error, dict):
+        causes = [c for c in error.get("root_cause") or [] if isinstance(c, dict)] or [error]
+        reasons = [f"{c.get('type')}: {c['reason']}" if c.get("type") else c["reason"]
+                   for c in causes if isinstance(c.get("reason"), str)]
+        if reasons:
+            return _capped_detail("; ".join(dict.fromkeys(reasons)))
+    return _capped_detail(payload)
+
+
+def _capped_detail(value: object) -> object:
+    """`value` as it is when its text is within `VENDOR_DETAIL_CAP`, else that text cut there."""
+    text = value if isinstance(value, str) else str(value)
+    return value if len(text) <= VENDOR_DETAIL_CAP else text[:VENDOR_DETAIL_CAP] + " [cut]"
 
 
 def _request(
@@ -415,18 +464,19 @@ def _request(
 
 def _perform(  # noqa: PLR0913 — one request's per-call state
     ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
-    body: dict | None = None, write: bool = False,
+    body: dict | None = None, write: bool = False, timeout_sec: int | None = None,
 ) -> dict | list:
+    timeout = timeout_sec if timeout_sec is not None else int(config.get("TIMEOUT_SEC", "10"))
     if uses_proxy(ctx.tenant, system):
-        # The proxy's route check is the only guard for this system (A6); the capture is kept.
+        # The proxy's route check is the only guard for this system (A6), bar a vendor
+        # adapter's own confinement before it calls here (P3); the capture is kept.
         record_outbound(ctx, system, url, method=method)
-        return _proxy_request(ctx, config, url, system=system, method=method, body=body,
-                              write=write)
+        return _proxy_request(ctx, url, system=system, method=method, body=body, write=write,
+                              timeout_sec=timeout)
     # Confinement before any transport; every HTTP stub funnels through here.
     guard_outbound(ctx, system, url, method=method, verb_class=WRITE_CLASS if write else "r")
 
     bastion = config["BASTION_HOST"]
-    timeout = int(config.get("TIMEOUT_SEC", "10"))
     rc, stdout, stderr = docker_exec_curl(
         ctx, bastion, url, method=method, body=body, timeout_sec=timeout, system=system
     )
@@ -446,9 +496,11 @@ def _perform(  # noqa: PLR0913 — one request's per-call state
         raise TransportFault(f"non-JSON response from {url}: {e} (body: {body_text!r})") from e
 
 
-def raise_proxy_fault(fault: str, detail: str, status: int | None = None) -> None:
-    """Raise the fault class the proxy named, with its detail (A9), marked `from_proxy`; an
-    `UpstreamFault` carries the store's `status` when the proxy relayed one."""
+def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
+                      from_system: bool = False) -> None:
+    """Raise the fault class the proxy named, with its detail (A9); an `UpstreamFault` carries
+    the store's `status` when the proxy relayed one. The proxy's own (`proxy_own`) unless the
+    system answered (`status`) or the proxy saw its call fail (`from_system`, #1404)."""
     raised: AdapterFault
     if fault == "UpstreamFault":
         raised = UpstreamFault(detail or fault, status=status or None)
@@ -456,30 +508,34 @@ def raise_proxy_fault(fault: str, detail: str, status: int | None = None) -> Non
         classes = {"ConfigFault": ConfigFault, "ConfinementFault": ConfinementFault,
                    "TransportFault": TransportFault}
         raised = classes.get(fault, TransportFault)(detail or fault)
-    raised.from_proxy = True
+    raised.proxy_own = not (from_system or status)
     raise raised
 
 
 def _proxy_request(  # noqa: PLR0913 — one request's per-call state
-    ctx: VerbContext, config: dict[str, str], url: str, *, system: str, method: str,
-    body: dict | None, write: bool = False,
+    ctx: VerbContext, url: str, *, system: str, method: str, body: dict | None,
+    timeout_sec: int, write: bool = False,
 ) -> dict | list:
+    """One request through the proxy, its faults raised as the proxy classified them. The
+    capture is `_perform`'s."""
     answer = proxy_exchange(ctx, system=system, method=method, url=url, body=body,
-                            timeout_sec=int(config.get("TIMEOUT_SEC", "10")))
+                            timeout_sec=timeout_sec)
     if write:
         if answer.status:
             # The store answered: its status alone decides, whatever the proxy made of the body.
             _judge_write(answer.status, answer.body, system)
             return {}
-        raise_proxy_fault(answer.fault or "TransportFault", answer.detail)
+        raise_proxy_fault(answer.fault or "TransportFault", answer.detail,
+                          from_system=answer.from_system)
     if answer.fault in ("UpstreamFault", "TransportFault") and answer.status:
         # The system answered: its own reason (scrubbed by the proxy) reaches the model and
         # curation, as on the docker path (`_raise_on_http_error`).
-        raise_proxy_fault(answer.fault,
-                          f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
-                          answer.status)
+        # With no body to hand on (withheld, or the reply broke) the proxy's reason says why.
+        why = _vendor_detail(answer.body) if answer.body else answer.detail
+        raise_proxy_fault(answer.fault, f"HTTP {answer.status} from {system}: {why}",
+                          answer.status, from_system=True)
     if answer.fault is not None:
-        raise_proxy_fault(answer.fault, answer.detail)
+        raise_proxy_fault(answer.fault, answer.detail, from_system=answer.from_system)
     if answer.status >= 400:
         raise UpstreamFault(f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
                             status=answer.status)

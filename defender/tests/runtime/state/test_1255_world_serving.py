@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +103,14 @@ def _assert_reconstructed(decision: Any, where: str) -> None:
         f"else)")
     assert normalized_source(decision) == decision, (
         f"{where}: {decision!r} is not a decision word of the ledger's own vocabulary")
+
+
+_STAMP_LINE = re.compile(r"^.*\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d.*\n?", re.M)
+
+
+def _without_stamp(text: str) -> str:
+    """`text` less the platform's time-stamp line (#1385 A6): the two runs' clocks differ by design."""
+    return _STAMP_LINE.sub("", text)
 
 
 def _rows_asking(rows: list[dict], params: dict) -> list[dict]:
@@ -218,8 +227,8 @@ def test_1255_the_control_world_answers_a_question_the_source_never_asked_throug
 
     served = S24.call(control, "idp", "query", ctx, **BOB)
     live = est.calls("idp", "query")[reads_before:]
-    assert [c["as_of"] for c in live] == [S24.AS_OF_DT.isoformat()], (
-        "the control's base read was not one live read bounded by the fork time")
+    assert len(live) == 1, (
+        "the control's base read was not one live read (#1385 O1: the oracle cuts, not the adapter)")
     assert oracle.requests >= 1, (
         "the control world served a question the source never asked as a raw live read")
     inbound = oracle.all_seen()
@@ -249,8 +258,8 @@ def test_1255_the_control_world_serves_its_oracles_changed_answer_never_the_base
     control = S24.sandboxed_registry(ep, "a", est, oracle=oracle,
                                      verifier=S24.passing_verifier())
     arm_dir, arm = W.drive_lead(tmp_path / "arm", verbs=control, est=est, turns=list(turns))
-    assert [c["as_of"] for c in est.calls("idp", "query")[reads_before:]] == [
-        S24.AS_OF_DT.isoformat()], "fixture: the control's base was not one fork-time live read"
+    assert len(est.calls("idp", "query")[reads_before:]) == 1, (
+        "fixture: the control's base was not one live read (#1385 O1)")
     assert oracle.requests >= 1, "the control world's new question took no oracle turn"
 
     handed = "\n".join(arm.handed_back())
@@ -344,8 +353,7 @@ def test_1255_a_pre_fork_question_with_no_recording_is_reconstructed_at_the_fork
                     "only recorded answers unchanged")
 
     live = est.calls("siem-x", "lookup")[reads_before:]
-    assert [c["as_of"] for c in live] == [S24.AS_OF_DT.isoformat()], (
-        "the base was not one live read bounded by the fork time")
+    assert len(live) == 1, "the base was not one live read (#1385 O1)"
     assert oracle.requests >= 1, (
         f"world {label} served a pre-fork question with no recording as a raw live read")
     inbound = oracle.all_seen()
@@ -491,6 +499,43 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
     assert marker in inbound, "the oracle was not told what the source's closing comment says"
 
 
+@pytest.mark.parametrize(("gone", "expected"), [
+    ({"comment_id": "c-2", "author": "defender", "body": "SOURCE-CLOSING"}, "reconstructed"),
+    ({"comment_id": "c-2", "author": "alice", "body": "SOURCE-CLOSING"}, ORACLE),
+    ({"comment_id": "c-3", "author": "alice", "body": "I did not do this"}, ORACLE),
+    ({"comment_id": "c-4", "author": "bob", "body": "checked the queue"}, "reconstructed"),
+], ids=["source-write-on-a-ticket-no-fact-names", "source-write-naming-a-fact-entity",
+        "comment-naming-a-fact-entity", "other-comment-naming-no-fact-entity"])
+def test_1385_a_removed_comment_is_oracle_only_when_it_names_a_fact_entity(
+        tmp_path: Path, gone: dict, expected: str) -> None:
+    """World b serving its ticket without a comment is `reconstructed`, unless a string in the
+    comment equals a fact's entity (`alice`), then `oracle`; a source write is no rule (T2, A1)."""
+    from defender.tests.support.runtime.engine import _spec767 as S767
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+    source_dir = S767.make_run(tmp_path / "runs", name=S24.SOURCE_RUN_ID,
+                               disposition="malicious", body=CLOSING_MARKER)
+    store = S767.FakeStore(tmp_path / "store")
+    S767.record(source_dir, store)
+    if gone["body"] == "SOURCE-CLOSING":
+        gone = {**gone, "body": store.wire_body()}
+    est = S24.estate(tmp_path)
+    est.answer("siem-x", "lookup", CASE, {**TICKET_AT_FORK, "comments": [ANALYST_NOTE, gone]})
+    side = S24.query_params(f"comment_id:{gone['comment_id']}")
+    est.answer("siem-x", "query", side, {"rows": [gone]})
+    served = TICKET_AT_FORK
+    oracle = S24.oracle(S24.submit(served, S24.claim(removed=[S24.removed(
+        gone, system="siem-x", verb="query", params=side, count=1)])))
+    ep = S24.episode_v2(tmp_path, base_rows=[])
+    world = W.world_registry_with_source(ep, "b", est, source_run=fixture_run(source_dir),
+                                         oracle=oracle, verifier=S24.passing_verifier())
+
+    assert S24.call(world, "siem-x", "lookup", est.ctx(tmp_path / "run"), **CASE) == served
+    assert oracle.submissions() == 1, "the removal was refused"
+    rows = _rows_asking(S24.ledger_rows(ep, "b"), CASE)
+    assert [r.get("source") for r in rows] == [expected], rows
+
+
 @pytest.mark.parametrize("post", ["post-failed", "never-posted"])
 @pytest.mark.parametrize("label", ["a", "b"], ids=["control-world", "world-with-facts"])
 def test_1255_a_worlds_oracle_is_not_told_a_closing_comment_the_source_never_posted(
@@ -555,8 +600,8 @@ def test_1255_every_refusal_the_control_world_can_give_reads_as_a_natural_runs(
                                      verifier=S24.passing_verifier())
     arm_dir, arm = W.drive_lead(tmp_path / "arm", verbs=control, est=est, turns=list(turns))
 
-    expected = [W.normalized(t, natural_dir) for t in natural.handed_back()]
-    handed = [W.normalized(t, arm_dir) for t in arm.handed_back()]
+    expected = [_without_stamp(W.normalized(t, natural_dir, stamps=None)) for t in natural.handed_back()]
+    handed = [_without_stamp(W.normalized(t, arm_dir, stamps=None)) for t in arm.handed_back()]
     assert len(expected) == 6, f"fixture: six refusals reached the natural run's model: {expected}"
     assert all(t.strip() for t in expected), f"fixture: a refusal text was empty: {expected}"
     assert len(set(expected)) == 6, "fixture: the six refusal classes read alike"
