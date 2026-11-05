@@ -528,9 +528,16 @@ until its last write lands: it writes the terminal stage, or — if cancel or a 
 row — its own final cost and knowledge, once. `cost_usd` is cost so far (copied about every 15 s) until
 then. A stopping worker hands its rows back (lease lapsed, final cost) so they are retried within seconds,
 except a row whose run had already decided its ending (a report committed, or setup refused): that ending
-is recorded. A last write the database refuses outright is written again with less (the knowledge as
-unreadable, then a bare `worker_error`), never dropped into a re-run.
-A cancelled or taken-over row's worker finds out at its next renewal and ends its child.
+is recorded. A last write whose value the database refuses is written again with less (the knowledge as
+unreadable, then a bare `worker_error`), rather than dropped into a re-run.
+A cancelled or taken-over row's worker finds out at its next renewal and ends its child. Until that child
+has ended, a new run of the same alert can already be working beside it: accepted, since a repeat is safe.
+
+A worker also counts each lease by its own clock, because a database it cannot reach can tell it nothing.
+A renewal that takes over 10 s has failed. A lease that runs out with no renewal landing stops the row's
+child, and the row is handed back when the database answers, so any database outage over 30 s stops every
+running investigation and uses one attempt of each. A worker whose own database calls hit an outage within
+the last lease takes nothing over: other workers' leases lapsed in the same outage.
 
 > **A repeat is unconditionally safe here: defender is recommend-only.** No `act` verbs → no external
 > side-effect to double-apply. _If act-mode graduates, recovery safety must be revisited — a

@@ -7,7 +7,6 @@ import inspect
 import os
 import shutil
 import signal
-import stat
 import subprocess
 import sys
 import textwrap
@@ -61,15 +60,15 @@ def _index(calls: list[list[str]], pred: Callable[[list[str]], bool]) -> int:
 
 
 def test_b10_the_run_box_is_created_for_an_attached_start_with_its_hardening_unchanged(tmp_path: Path):
-    """Run-box create = `docker create -i --rm … <image> cat`, same name, labels, runtime and limits. (B10, r5 8a)"""
+    """CONFLICT-UPDATED (#1343 review; was a bare `cat`): run-box create = `docker create -i --rm … <image> sh -c 'exec cat >/dev/null 2>&1'`, same name, labels, runtime and limits. (B10, r5 8a)"""
     rec = RecordingDocker()
     _start(rec, make_run_dir(tmp_path))
     argv = rec.create_argv or []
     assert argv[:2] == ["docker", "create"], argv[:3]
-    assert argv[-1] == "cat", argv[-4:]
+    assert argv[-3:] == ["sh", "-c", "exec cat >/dev/null 2>&1"], argv[-4:]
     assert "sleep" not in argv, argv[-4:]
     assert "--detach" not in argv, argv[-4:]
-    image_at = len(argv) - 2
+    image_at = len(argv) - 4
     assert argv.index("-i") < image_at, "-i must be an option, before the image"
     assert argv.index("--rm") < image_at, "--rm must be an option, before the image"
     name = argv[argv.index("--name") + 1]
@@ -323,24 +322,10 @@ def test_b10_the_output_limit_stop_of_a_stop_start_box_still_reports_an_unconfir
 
 
 
-# ---- review follow-ups: the attached start's error output, and removal of a box removing itself ----
+# ---- review follow-ups: the attached start's own error text, and removal of a box removing itself ----
 
-def test_b10_the_attached_starts_error_output_is_a_file_never_an_unread_pipe(tmp_path: Path):
-    """`docker start -a` forwards the box's main-process error output whatever the flags, so a pipe nobody reads for the run's life could fill and stall the box: it goes to a file. (#1343 review, B10)"""
-    rec = RecordingDocker()
-    box = _start(rec, make_run_dir(tmp_path))
-    try:
-        [ask] = rec.asks
-        err = ask.kwargs.get("stderr")
-        assert err is not subprocess.PIPE, "the attached start's error output is a pipe nobody reads"
-        assert hasattr(err, "fileno"), f"the attached start's error output is not a file: {err!r}"
-        assert stat.S_ISREG(os.fstat(err.fileno()).st_mode), f"the attached start's error output is not a file: {err!r}"
-    finally:
-        box_mod.stop_box(box)
-
-
-def test_b10_a_start_fault_still_reports_the_attached_starts_own_error_text_from_its_file():
-    """Through a real process: the start's error text, written to its file, reaches the fault's text, and the file is closed after. (#1343 review, B10)"""
+def test_b10_a_start_fault_reports_the_attached_starts_own_error_text():
+    """Through a real process: what the start itself says on its error output reaches the fault's text. (#1343 review, B10)"""
     from defender.box import _lifecycle
 
     class ShellStart:
@@ -349,11 +334,7 @@ def test_b10_a_start_fault_still_reports_the_attached_starts_own_error_text_from
 
     starter = _lifecycle._attach(ShellStart(), "box-x")  # type: ignore[arg-type]
     starter.wait(timeout=10)
-    held = _lifecycle._STARTER_ERRS.get(starter)
-    assert held is not None, "the start's error file is not kept for its fault"
-    rc, err = _lifecycle._end_starter(starter)
-    assert (rc, err) == (3, "the start was refused")
-    assert held.closed, "the start's error file was left open"
+    assert _lifecycle._end_starter(starter) == (3, "the start was refused")
 
 
 class _RemovingItself:
@@ -518,6 +499,22 @@ def test_b10_commands_run_one_at_a_time_and_the_normal_teardown_still_stops_then
 
 @requires_real_box
 @pytest.mark.box
+def test_b10_what_a_program_writes_to_the_main_processs_output_never_reaches_the_host(live: tuple[Any, Path]):
+    """A program in the box writes 2 MB into PID 1's output, more than an unread pipe holds: it goes nowhere, the box stays up, and the attached start's error output stays empty. (#1343 review, B10)"""
+    from defender.box import _lifecycle
+
+    box, _ = live
+    wrote = box_mod.run_docker(["docker", "exec", box.name, "sh", "-c",
+                                "head -c 2000000 /dev/zero > /proc/1/fd/2 && head -c 2000000 /dev/zero > /proc/1/fd/1"])
+    assert wrote.returncode == 0, wrote.stderr
+    assert box.starter.poll() is None, "the box's attached start ended"
+    time.sleep(1)  # anything forwarded would have reached the start's pipe by now
+    _, err = _lifecycle._end_starter(box.starter)
+    assert err == "", f"the box's output reached the host: {err[:200]!r}"
+
+
+@requires_real_box
+@pytest.mark.box
 def test_b10_output_past_the_limit_stops_and_removes_the_run_box_with_the_plain_overflow(live: tuple[Any, Path]):
     """Overflow on a live run box: the box is gone and no 'could not confirm' note is attached. (B10 output-limit path)"""
     from defender.execution import bash_exec
@@ -536,7 +533,7 @@ _CREATE_THEN_START = textwrap.dedent("""
     import subprocess, sys, time
     name, image, runtime = sys.argv[1:4]
     subprocess.run(["docker", "create", "-i", "--rm", "--pull=never", "--runtime", runtime, "--network", "none", "--name", name,
-                    image, "cat"], check=True, stdout=subprocess.DEVNULL)
+                    image, "sh", "-c", "exec cat >/dev/null 2>&1"], check=True, stdout=subprocess.DEVNULL)
     print("created", flush=True)
     held = subprocess.Popen(["docker", "start", "-a", "-i", name], stdin=subprocess.PIPE,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

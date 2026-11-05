@@ -16,7 +16,14 @@ A row belongs to the worker that keeps renewing its lease (B-P1) and stays its w
 last write for it lands (B-P2): the one end write (B4) is the terminal stage, or, if someone else
 already ended the row, its final cost and knowledge; a deliberate stop ends the children and hands
 their rows back (B11). A write that fails as an outage is retried each second and nothing new is
-claimed meanwhile (B5)."""
+claimed meanwhile (B5).
+
+A worker keeps its own count of each lease (#1343 review), since a database it cannot reach cannot
+tell it anything. A store call that extends a lease counts from the moment it began. A renewal
+that outlives `store_call_limit` has failed. A row whose lease has run out with no renewal landing
+has its child stopped and is handed back when the store answers. A worker whose own store calls
+hit an outage within the last lease takes nothing over: other workers' leases lapsed in the same
+outage, and their next renewal has not had its chance."""
 from __future__ import annotations
 
 import asyncio
@@ -29,12 +36,13 @@ import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from defender import _log
+from defender.jobs import is_outage, is_refusal
 from defender.box import Reaped, container_name
 from defender.execution import kill_group
 from defender.records import job_facts, job_lane
@@ -42,7 +50,7 @@ from defender.records.formats import DataRoot, digest_of
 from defender.tenancy import data_root_for_child, data_root_from_path
 
 from ._containers import Containers, DockerContainers
-from ._held import End, Ending, Held, is_outage
+from ._held import End, Ending, Held
 
 if TYPE_CHECKING:
     from defender.jobs import Claim
@@ -152,6 +160,8 @@ class Worker:
         clock: Callable[[], _dt.datetime], stop_grace: float = 30,
         renewal_interval: float = 1.0, cost_interval: float = 15.0, takeover_interval: float = 5.0,
         open_lane: Callable[[DataRoot, object], job_lane.JobLane] = job_lane.JobLane.open,
+        store_call_limit: float = 10.0,
+        spawn: Callable[..., Awaitable[asyncio.subprocess.Process]] = asyncio.create_subprocess_exec,
     ) -> None:
         if slots < 1:
             raise ValueError(f"a worker needs at least one slot, not {slots!r}")
@@ -166,6 +176,10 @@ class Worker:
         self._cost_interval = cost_interval
         self._takeover_interval = takeover_interval
         self._open_lane = open_lane  # the job lane's door; a test hands in one that faults
+        self._store_call_limit = store_call_limit  # how long one renewal or take-over call may take
+        self._create_process = spawn  # the process door; a test lands an event inside it
+        self._lease = float(store.lease_seconds)
+        self._store_outage_at: float | None = None  # this worker's last store call that hit an outage
         self._tasks: set[asyncio.Task[None]] = set()
         self._held: dict[str, Held] = {}
         self._stopping = False
@@ -255,7 +269,8 @@ class Worker:
             return await self._claim_one(on_done=on_done)
         try:
             return await self._claim_one(on_done=on_done)
-        except Exception:  # noqa: BLE001 — a store fault is waited out, never ends serving
+        except Exception as fault:  # noqa: BLE001 — a store fault is waited out, never ends serving
+            self._note_store_fault(fault)
             _logger.exception("the worker could not claim an investigation; retrying")
             return False
 
@@ -277,10 +292,11 @@ class Worker:
         """Claim one queued row into a task; False when nothing is queued."""
         if self._stopping:
             return False
+        began = time.monotonic()
         claim = await self._store.claim()
         if claim is None:
             return False
-        held = Held(claim.record)
+        held = Held(claim.record, lease_until=began + self._lease)
         self._held[claim.record.investigation_id] = held
         task = asyncio.create_task(self._run_row(claim, held))
         self._tasks.add(task)
@@ -308,8 +324,9 @@ class Worker:
     async def _leave(self) -> None:
         """The loop is leaving by an exception: it stops as a deliberate stop does (r5 item 3). A
         cancel that lands during that stop's wait means leave now: every child's group is killed
-        at once, so no child outlives its row's lease, and each row task is cancelled (a cancelled
-        row writes nothing; its lease lapses into a take-over)."""
+        at once, so no child outlives its row's lease, and each row task is cancelled and waited
+        for, so its cleanup has run when the worker leaves (a cancelled row writes nothing; its
+        lease lapses into a take-over)."""
         try:
             await self._stop()
         except asyncio.CancelledError:
@@ -318,8 +335,7 @@ class Worker:
             for held in self._children():
                 if held.proc is not None:
                     kill_group(held.proc.pid)
-            for task in self._tasks:
-                task.cancel()
+            await _end_tasks(list(self._tasks))
             raise
 
     async def _end_child(self, held: Held, *, by_stop: bool = False) -> None:
@@ -356,18 +372,39 @@ class Worker:
             self._renewal_failing = False
             return
         costs = self._costs_due(held)
+        began = time.monotonic()
         try:
-            covered = set(await self._store.renew(set(held), costs=costs))
-        except Exception:  # noqa: BLE001 — a failed renewal is waited out, never ends the worker
+            covered = set(await asyncio.wait_for(self._store.renew(set(held), costs=costs),
+                                                 timeout=self._store_call_limit))
+        except Exception as fault:  # noqa: BLE001 — a failed renewal is waited out, never ends the worker
             self._renewal_failing = True
+            self._note_store_fault(fault)
             _logger.warning("the worker could not renew its leases; retrying", exc_info=True)
+            self._stop_lapsed(held)
             return
         self._renewal_failing = False
+        for inv in covered & held.keys():
+            held[inv].lease_until = began + self._lease
         if costs is not None:
             self._last_cost_copy = time.monotonic()
         for inv, row in held.items():
             if inv not in covered:
                 self._fence(inv, row)
+
+    def _note_store_fault(self, fault: BaseException) -> None:
+        if is_outage(fault):
+            self._store_outage_at = time.monotonic()
+
+    def _stop_lapsed(self, held: dict[str, Held]) -> None:
+        """Stop the child of every row whose lease has run out by this worker's clock: another
+        worker may be running its retry. Its row is handed back once the store answers (B11)."""
+        now = time.monotonic()
+        for inv, row in held.items():
+            if row.lease_lost or now < row.lease_until:
+                continue
+            row.lease_lost = True
+            _logger.warning("investigation %s: its lease ran out with no renewal landing; stopping its child", inv)
+            row.enders.append(asyncio.create_task(self._end_child(row, by_stop=True)))
 
     def _costs_due(self, held: dict[str, Held]) -> dict[str, float] | None:
         """The figures this renewal copies (B2), or None between cost ticks."""
@@ -386,14 +423,21 @@ class Worker:
         held.enders.append(asyncio.create_task(self._end_child(held)))
 
     async def _takeover_loop(self) -> None:
-        """Every `takeover_interval`, take over every lapsed row this worker does not hold (B7).
-        A pass that raises is logged; the next tick tries again."""
+        """Every `takeover_interval`, take over every lapsed row this worker does not hold (B7),
+        unless this worker's own store calls hit an outage within the last lease. A pass that
+        raises is logged; the next tick tries again."""
         while True:
-            try:
-                await self._store.take_over(held=frozenset(self._held))
-            except Exception:  # noqa: BLE001 — one failed pass never ends the task
-                _logger.exception("the worker's take-over pass failed; retrying")
+            if self._store_settled():
+                try:
+                    await asyncio.wait_for(self._store.take_over(held=frozenset(self._held)),
+                                           timeout=self._store_call_limit)
+                except Exception as fault:  # noqa: BLE001 — one failed pass never ends the task
+                    self._note_store_fault(fault)
+                    _logger.exception("the worker's take-over pass failed; retrying")
             await asyncio.sleep(self._takeover_interval)
+
+    def _store_settled(self) -> bool:
+        return self._store_outage_at is None or time.monotonic() - self._store_outage_at >= self._lease
 
     async def _cost_loop(self, held: Held) -> None:
         """Every `cost_interval`, read the row's cost so far into `held.cost_so_far`, in a thread
@@ -431,15 +475,18 @@ class Worker:
         inv = held.record.investigation_id
         try:
             return await self._run_claimed(held, tenant_state)
-        except Exception:  # noqa: BLE001 — one row's fault never ends the worker
+        except Exception as fault:  # noqa: BLE001 — one row's fault never ends the worker
             _logger.exception("investigation %s: the worker failed while running it", inv)
+            if is_outage(fault) or held.signalled or held.lease_lost:
+                # Nothing about the job failed: it is handed back, with what it had spent.
+                return End(None, 0.0 if held.proc is None else held.cost_so_far, None)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR,
                               failure_message="the worker failed while running the job"), None, None)
 
     async def _run_claimed(self, held: Held, tenant_state: str) -> End:
         record = held.record
         inv, tenant = record.investigation_id, record.tenant_id
-        if self._stopping:  # claimed as the stop landed: handed back with nothing launched or spent
+        if self._stopping or held.lease_lost:  # claimed as the stop landed: handed back with nothing launched or spent
             return End(None, 0.0, None)
         started = self._clock()
         # This claim's box token (#1342 r5 C1): the child's box is stamped with it, and the
@@ -450,7 +497,7 @@ class Worker:
         except _WorkerFault as fault:
             _logger.error("investigation %s: %s", inv, fault)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message=str(fault)), 0.0, None)
-        if self._stopping:  # claimed but not started when the stop landed: handed back, nothing spent
+        if self._stopping or held.lease_lost:  # claimed but not started when the stop landed: handed back, nothing spent
             return End(None, 0.0, None)
         if held.fenced:  # B3: ended before its child exists; the write that follows is final accounting
             _logger.info("investigation %s: it was fenced before its child started; not launched", inv)
@@ -505,8 +552,8 @@ class Worker:
 
     async def _wait_for_child(self, held: Held, proc: asyncio.subprocess.Process) -> None:
         try:
-            if self._stopping or held.fenced:  # spawned while the stop was ending the others, or fenced mid-spawn
-                await self._end_child(held, by_stop=self._stopping)
+            if self._stopping or held.fenced or held.lease_lost:  # spawned as the stop, a fence or the lease's end landed
+                await self._end_child(held, by_stop=self._stopping or held.lease_lost)
             await proc.wait()
         except asyncio.CancelledError:
             # The task owns its child: cancelled (the loop itself was cancelled), it ends the
@@ -518,7 +565,7 @@ class Worker:
 
     async def _spawn(self, launch: Launch) -> asyncio.subprocess.Process:
         """The job's child, in a session of its own (its group id is its pid), output inherited."""
-        return await asyncio.create_subprocess_exec(
+        return await self._create_process(
             *self._child_argv(launch),
             stdin=subprocess.DEVNULL, stdout=None, stderr=None, start_new_session=True,
             env={**os.environ, "DEFENDER_DATA_ROOT": str(data_root_for_child(self._data_root))})
@@ -616,11 +663,12 @@ class Worker:
 
     async def _write_end(self, held: Held, end: End) -> None:
         """The row's one end write (B4), made until it lands or there is nothing left to write.
-        A failure that is an outage is retried each second while claims wait (B5). A write the
-        store refuses outright never drops the decided ending, since a dropped one would lapse into
-        a take-over that re-runs the job: it is written again with less (`_lesser_ends`), and only
-        when even the barest end is refused is the row left to lapse. During a deliberate stop an
-        outage gets one try: the stop gives up on it (B11)."""
+        A failure that is an outage is retried each second while claims wait (B5). A value the
+        store refuses never drops the decided ending, since a dropped one would lapse into a
+        take-over that re-runs the job: it is written again with less (`_lesser_ends`). Any other
+        failure decides nothing about the job: it is logged and the row left to lapse, as it is
+        when even the barest end is refused. During a deliberate stop an outage gets one try: the
+        stop gives up on it (B11)."""
         inv = held.record.investigation_id
         for attempt in _lesser_ends(end):
             if attempt is not end:
@@ -632,10 +680,15 @@ class Worker:
                     await self._end_once(held, attempt)
                     return
                 except Exception as fault:  # noqa: BLE001 — classified below
-                    if not is_outage(fault):
+                    if is_refusal(fault):
                         _logger.error("investigation %s: the store refused its end (%s)", inv, _what_end(attempt),
                                       exc_info=True)
                         break
+                    if not is_outage(fault):
+                        _logger.exception("investigation %s: its end could not be recorded and is dropped; its "
+                                          "lease will lapse and it will be taken over", inv)
+                        return
+                    self._note_store_fault(fault)
                     if tried_stopping:
                         _logger.warning("investigation %s: its end could not be recorded while stopping; "
                                         "its lease will lapse on its own", inv, exc_info=True)

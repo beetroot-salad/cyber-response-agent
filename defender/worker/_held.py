@@ -1,22 +1,9 @@
-"""What a worker keeps for each row it holds, and how it tells a database outage from a bug (#1343)."""
+"""What a worker keeps for each row it holds, and what it writes last (#1343)."""
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
 from typing import Any
-
-from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
-from sqlalchemy.exc import TimeoutError as PoolTimeout
-
-
-def is_outage(fault: BaseException) -> bool:
-    """Whether a failed store write is the environment's fault (B5, r5 item 13): the database
-    could not be reached, or answered with a transient condition. Waiting can cure these. Anything
-    else (integrity, data, programming, anything unplanned) is ours or the value's, and waiting
-    never cures it."""
-    if isinstance(fault, DBAPIError) and fault.connection_invalidated:
-        return True
-    return isinstance(fault, OperationalError | InterfaceError | PoolTimeout | OSError)
 
 
 @dataclass
@@ -25,12 +12,17 @@ class Held:
 
     `fenced`: a renewal that succeeded omitted the row, so it was cancelled, taken over or
     deleted. `signalled`: a deliberate stop signalled this row's child while it was alive.
-    `cost_so_far`: the last figure the cost task read for the row; the renewal copies it."""
+    `cost_so_far`: the last figure the cost task read for the row; the renewal copies it.
+    `lease_until`: when the row's lease runs out by this worker's own clock, counted from the start
+    of the last store call that extended it. `lease_lost`: that time passed with no renewal landing,
+    so the row's child was stopped; its row is handed back once the store answers."""
 
     record: Any
+    lease_until: float = 0.0
     proc: asyncio.subprocess.Process | None = None
     fenced: bool = False
     signalled: bool = False
+    lease_lost: bool = False
     cost_so_far: float | None = None
     #: The fence's ender tasks, held so the event loop's weak reference is not their only one.
     enders: list[asyncio.Task[None]] = field(default_factory=list)

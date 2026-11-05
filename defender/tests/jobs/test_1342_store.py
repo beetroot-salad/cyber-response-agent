@@ -1698,6 +1698,30 @@ async def test_b11_take_over_tells_a_handed_back_row_from_a_lost_workers_in_its_
     assert "stopped renewing" not in got_handed["failure_message"]
     assert "stopped renewing its lease" in got_lost["failure_message"], got_lost["failure_message"]
 
+
+async def test_o6_the_store_tells_a_value_it_refuses_from_a_read_only_database_on_real_faults(dsn):
+    """Against real PostgreSQL: a value JSONB cannot hold (NUL) is a refusal, not an outage; a read-only transaction, as a standby answers during a failover, is an outage, not a refusal. (#1343 review, B5)"""
+    from sqlalchemy import text
+
+    from defender.jobs import is_outage, is_refusal
+
+    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+    async with job_store(dsn) as store:
+        with pytest.raises(Exception) as refused:  # noqa: PT011 — the classification is what is under test
+            await store.finish(T1, running, stage="completed", knowledge={"bad": "\u0000"})
+    assert is_refusal(refused.value), repr(refused.value)
+    assert not is_outage(refused.value), repr(refused.value)
+    async with job_store(dsn) as store:
+        async def write_read_only() -> None:
+            async with store._tx() as s:
+                await s.execute(text("SET TRANSACTION READ ONLY"))
+                await s.execute(text("UPDATE jobs.investigations SET cost_usd = 0"))
+
+        with pytest.raises(Exception) as read_only:  # noqa: PT011 — the classification is what is under test
+            await write_read_only()
+    assert is_outage(read_only.value), repr(read_only.value)
+    assert not is_refusal(read_only.value), repr(read_only.value)
+
 # --- B6/B7/B8: take-over -------------------------------------------------------------------------------------------
 
 async def test_b6_a_lapsed_running_row_is_failed_and_retried_in_one_take_over_and_audited(dsn, caplog):

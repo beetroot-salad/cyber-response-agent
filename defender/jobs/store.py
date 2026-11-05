@@ -16,7 +16,8 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import case, delete, func, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender._text import postgres_can_hold
@@ -69,6 +70,22 @@ class _Refused(Exception):
         self.sqlstate = sqlstate
 
 
+def is_refusal(fault: BaseException) -> bool:
+    """Whether a failed store call means the database will never take this value (data or
+    constraint): waiting cannot cure it, and writing less can."""
+    return isinstance(fault, _Refused | DataError | IntegrityError)
+
+
+def is_outage(fault: BaseException) -> bool:
+    """Whether a failed store call is the environment's fault (B5, r5 item 13): the database could
+    not be reached, or answered with a condition of its own, such as a standby's read-only refusal
+    during a failover. Waiting can cure these. Anything else (a refusal, a bug, anything unplanned)
+    is not cured by waiting."""
+    if isinstance(fault, DBAPIError) and fault.connection_invalidated:
+        return True
+    return isinstance(fault, OperationalError | InterfaceError | InternalError | PoolTimeout | OSError)
+
+
 def _refuse_unstorable_text(**fields: str) -> None:
     """`UnstorableText` naming the first field PostgreSQL text cannot hold, before any query."""
     for name, text in fields.items():
@@ -84,6 +101,11 @@ class JobStore:
         self._sessions = sessions(self._engine)
         self._clock = clock
         self._lease = _dt.timedelta(seconds=lease)
+
+    @property
+    def lease_seconds(self) -> float:
+        """How long a claim's lease runs; a holder's own clock counts the same span."""
+        return self._lease.total_seconds()
 
     def _lease_end(self) -> Any:
         """A fresh lease's end, by the database's clock, so workers on different machines agree (B1)."""

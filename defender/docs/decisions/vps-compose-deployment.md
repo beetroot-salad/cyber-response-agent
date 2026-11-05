@@ -304,8 +304,9 @@ ends when the worker does, and a run's box ends when its starter does (its main
 process reads an input the starter holds open; the box is removed when it stops).
 So a lease that lapses means the old run is gone or ends within seconds, and the
 database step that takes the row over needs nothing from the machine. A worker
-whose renewals stall but which is alive learns of a take-over from its next
-successful renewal and ends its child. Cancellation updates the row; the holder's
+whose renewals stall but which is alive stops its child when its own count of
+the lease runs out (any database outage over 30 s therefore stops every running
+investigation), and hands the row back when the database answers. Cancellation updates the row; the holder's
 next renewal (within about a second) tells the child to stop, and the child has
 ended within `stop_grace` (30 s) of that.
 
