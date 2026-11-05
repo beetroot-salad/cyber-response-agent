@@ -2,7 +2,8 @@
 the proxy's, plus a fixed allowance for the proxy's own calls. Every network leg the request
 makes runs under it as one whole (`Deadline.run`): a leg still going when the deadline passes is
 cut, so the proxy answers by its deadline whatever an upstream or OpenBao does, and the caller
-waits only that deadline plus a grace (`kit.access.caller_wait_sec`). No single wait is longer
+waits at most that deadline plus a grace (`kit.access.caller_wait_sec`) for each stretch of the
+reply, not for all of it (#1412). No single wait is longer
 than the system's timeout either (`per_wait`)."""
 from __future__ import annotations
 
