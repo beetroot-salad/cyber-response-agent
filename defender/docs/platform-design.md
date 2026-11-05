@@ -197,7 +197,7 @@ owns, replacing the dev-era FS-presence heuristic). **`disposition`** is the out
 | `completed`   | Terminal success: blobs uploaded, frontmatter parsed, metadata committed.                                    |
 | `unparseable` | Terminal: container exited cleanly but `report.md` frontmatter failed to parse — null disposition + note, artifacts kept. **Blocks learning**; recovery is a fresh investigation (§4.6). |
 | `failed`      | Terminal playground-v2/infra/runtime failure, including a lapsed lease taken over by a retry; retry is a new investigation (a new attempt under the same request key). |
-| `aborted`     | Terminal intentional stop/cancel or timeout; cancelling a running investigation aborts it at once and its worker ends the run within about a second. Supersession by a retry is `failed`, not `aborted`. |
+| `aborted`     | Terminal intentional stop/cancel or timeout; cancelling a running investigation aborts it at once; its worker tells the run to stop within about a second, and the run has ended within 30 s of that (the stop grace). Supersession by a retry is `failed`, not `aborted`. |
 
 **`disposition`** (`malicious` / `benign` / `inconclusive`) is the outcome. Defender's `report.md`
 frontmatter is exactly `{case_id, disposition, confidence}` — free-form YAML with **no write-time

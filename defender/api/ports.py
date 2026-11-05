@@ -150,7 +150,8 @@ class WriteTransaction(Protocol):
 
     async def cancel_investigation(self, investigation_id: InvestigationId) -> Investigation:
         """Abort an investigation that is queued or running (`aborted`, reason `cancelled`); a
-        running one's worker stops its run within about a second. `NotFound`; `Conflict` if it
+        running one's worker tells its run to stop within about a second, and the run has ended within
+        the worker's stop grace (30 s) of that. `NotFound`; `Conflict` if it
         already ended — and when it ended because its worker was lost and a retry of it is live,
         the message names that retry's id."""
         ...

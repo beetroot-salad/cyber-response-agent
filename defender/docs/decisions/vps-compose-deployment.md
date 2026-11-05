@@ -306,7 +306,8 @@ So a lease that lapses means the old run is gone or ends within seconds, and the
 database step that takes the row over needs nothing from the machine. A worker
 whose renewals stall but which is alive learns of a take-over from its next
 successful renewal and ends its child. Cancellation updates the row; the holder's
-next renewal (within about a second) ends the child.
+next renewal (within about a second) tells the child to stop, and the child has
+ended within `stop_grace` (30 s) of that.
 
 Workers are not tied to hosts: any number run on any number of machines, and
 nothing in the database names a worker or machine. There is no restart
