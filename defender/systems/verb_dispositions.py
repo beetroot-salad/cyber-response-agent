@@ -293,7 +293,10 @@ def _warn_unhealth_checkable(path: Path, rows: tuple[Disposition, ...]) -> None:
     gather = AgentRole.GATHER.value
     reached = {d.system for d in rows if gather in d.roles}
     checkable = {d.system for d in rows if gather in d.roles and d.verb == HEALTH_CHECK}
-    for system in sorted(reached - checkable):
+    # A platform-served system's rows are optional (#1390 H4): no health-check row is a choice.
+    from defender.systems.verbs import PLATFORM_SERVED
+
+    for system in sorted(reached - checkable - PLATFORM_SERVED.keys()):
         warnings.warn(
             f"{path}: system {system!r} grants gather no {HEALTH_CHECK!r}. Gather can query "
             f"it and cannot check whether it is up, so `/connect`'s test step and the "
