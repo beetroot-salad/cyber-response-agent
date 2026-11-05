@@ -198,10 +198,11 @@ def parse_mapping(text: str) -> AlertMapping:
     """The alert mapping in `text` (the file format of `tenant.py set-alert-mapping`: YAML, an entry left out or
     `null` is unmapped), or `AlertMappingFault` carrying a fixed reason."""
     try:
-        doc: object = _yaml.safe_load(text)
+        loaded: object = _yaml.safe_load(text)
     except (yaml.YAMLError, RecursionError):
         raise AlertMappingFault(_reasons("yaml")) from None
-    return check_mapping(doc)
+    mapping: AlertMapping = check_mapping(loaded)
+    return mapping
 
 
 # =============================================================================================
