@@ -77,7 +77,8 @@ case; a person closes it.
 - `systems/case_system.py` — the shared judgement of the case system and its legacy-folder finding.
 - `investigation/ticket_writer.py` — I/O: `record_case_ticket` (at most one comment, a receipt on
   every branch that called out), `clear_receipt`.
-- `integrations/{ticket,jira,servicenow}_adapter.py` — the adapters' `add_case_comment`.
+- `integrations/{ticket,jira,servicenow}_adapter.py` — the adapters' `add_case_comment`, and the
+  optional `read_case_comments` (never a verb; `kit.verbs.CaseComments` holds its contract).
 - `run.py` — `--update-ticket`: clear the receipt at run start; at run end judge the case
   settings, mint the write-back token, call `record_case_ticket`.
 
@@ -85,3 +86,12 @@ The receipt (`{key, status, url, ok, reason}`) is a sidecar beside the run dir,
 `<runs_base>/<run id>.ticket-write.json`, out of the box's reach. `key` is the ticket key (empty
 when the alert names none); `url` is the ticket's web link when the adapter gives one, null on
 every error receipt. Its one reader is the run page's ticket line.
+
+**A lost answer (#1374).** When the write fails and may have reached the store
+(`TransportFault.maybe_delivered`, decided from data; the credential proxy's answer says it in
+`sent`), the host reads the case once and never writes again. A read can only prove a comment is
+there, since a store still applying the write can commit it afterwards. So this run's tag line on a
+comment is a success and is recorded; anything else (none found, a failed read, a connector with no
+read) is `unknown` (`ok` false, `url` null, not recorded), and the reason names the ticket and tag
+to check. `error` comes only from the write itself: the store refused, or the request provably
+never left.

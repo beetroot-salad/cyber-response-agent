@@ -13,6 +13,7 @@ from pathlib import Path
 
 from defender.kit.faults import AdapterFault, ConfigFault, TransportFault, UpstreamFault
 from defender.kit.settings import config_pointer
+from defender.kit.verbs import CaseComments
 from defender.records import Run, RunPaths, formats, run_end
 from defender.systems import case_system
 from defender.systems.run_tenant import RunTenant
@@ -35,12 +36,16 @@ def _verb_context(tenant: RunTenant, defender_dir: Path, run_dir: Path,
 
 
 #: The receipt words: `commented` (the record) and `escalated` (the cut-short note) are the two
-#: comments the host can make; `error` is a failed call. There is no `closed`: the host never
-#: transitions a case.
+#: comments the host can make; `error` is a failed call; `unknown` is a comment whose answer was
+#: lost after it may have reached the store and which the read-back could not settle (#1374).
+#: There is no `closed`: the host never transitions a case.
 RECEIPT_COMMENTED = "commented"
 RECEIPT_ESCALATED = "escalated"
 RECEIPT_ERROR = "error"
+RECEIPT_UNKNOWN = "unknown"
 _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
+#: How much of a fault's detail the receipt keeps.
+_DETAIL_CAP = 300
 
 #: Receipt reasons whose wording the product owns (O5).
 REASON_NO_TICKET = (
@@ -94,7 +99,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     """Record the investigation into the case, never close it: at most one comment on the ticket
     the alert names, no transition. Closing is a person's act, which is what lets the store's
     `closed` mean "a person reviewed this". Every path that meant to call out but did not leaves
-    a warning and an `error` receipt.
+    a warning and an `error` or `unknown` receipt.
 
     `case` is the case system's verdict run start made (`case_system.case_verdict`), the one the
     write-back token was minted on; without it (a direct caller) the step judges the record."""
@@ -146,18 +151,36 @@ def _leg_refused(run: Run, key: str, reason: str) -> None:
     _write_receipt(run, None, key, RECEIPT_ERROR, reason)
 
 
+def _fault_detail(fault: AdapterFault, tenant: RunTenant) -> str:
+    """A fault's detail as a receipt may hold it: redacted, and bounded, since it can carry the
+    store's whole reply and so other people's comments."""
+    detail = redact_settings_path(fault.detail, tenant.settings)
+    return detail[:_DETAIL_CAP] + " [cut]" if len(detail) > _DETAIL_CAP else detail
+
+
+def _proxy_reason(fault: AdapterFault, detail: str) -> str:
+    """The proxy's own fault (#1404): it failed (perhaps after the store took the comment: no
+    claim of non-delivery) or it refused the call (#1398)."""
+    if isinstance(fault, TransportFault):
+        return f"the credential proxy failed: {detail}"
+    return f"the credential proxy refused the call: {detail}"
+
+
+def _unsettled_reason(fault: AdapterFault, tenant: RunTenant) -> str:
+    """A fault that settles nothing about the comment: its detail, with the proxy named when the
+    fault is its own, and no claim that the store was or was not reached."""
+    detail = _fault_detail(fault, tenant)
+    return _proxy_reason(fault, detail) if fault.proxy_own else detail
+
+
 def _fault_reason(fault: AdapterFault, *, tenant: RunTenant, system: str) -> str:
     """The receipt reason for a fault the case system's comment action raised (O5): its subject
     is the credential proxy when the fault is the proxy's own (`proxy_own`, #1404), else the
     store or the settings, chosen by class; from the fault's data, never the route or its text.
-    The fault's own detail follows, redacted."""
-    detail = redact_settings_path(fault.detail, tenant.settings)
+    The fault's own detail follows (`_fault_detail`)."""
+    detail = _fault_detail(fault, tenant)
     if fault.proxy_own:
-        # It failed (perhaps after the store took the comment: no claim of non-delivery) or it
-        # refused the call (#1398).
-        if isinstance(fault, TransportFault):
-            return f"the credential proxy failed: {detail}"
-        return f"the credential proxy refused the call: {detail}"
+        return _proxy_reason(fault, detail)
     if isinstance(fault, UpstreamFault):
         status = fault.status
         shown = "" if status is None else f" (HTTP {status}{', not found' if status == 404 else ''})"
@@ -222,13 +245,63 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     try:
         link = target.add_case_comment(ctx, key=key, body=posted)
     except AdapterFault as fault:
+        if isinstance(fault, TransportFault) and fault.maybe_delivered:
+            _settle_lost_answer(run, target, key, posted, word, ctx, _unsettled_reason(fault, ctx.tenant))
+            return
         reason = _fault_reason(fault, tenant=ctx.tenant, system=target.system)
         _logger.warning(f"record {key}: {reason}")
         _write_receipt(run, None, key, RECEIPT_ERROR, reason)
         return
     _logger.info(f"record {key}: comment posted ({word}); run_dir={run.run_dir}")
+    _commented(run, key, posted, word, link)
+
+
+def _commented(run: Run, key: str, posted: str, word: str, link: object) -> None:
+    """The store holds the comment: record it and write the success receipt."""
     _record_posted_comment(run, key, posted)
     _write_receipt(run, link if isinstance(link, str) and link else None, key, word, None)
+
+
+def _settle_lost_answer(  # noqa: PLR0913 — the write's own context, threaded not re-derived
+    run: Run, target: case_system.CaseTarget, key: str, posted: str, word: str, ctx: VerbContext,
+    lost: str,
+) -> None:
+    """The comment's answer was lost after it may have reached the store (#1374 P1): read the case
+    back once (P4) and decide here, for every connector, from what it read. This run's tagged
+    comment (P3) is a success. A read can only prove a comment is there, since a store still
+    applying the write can commit it afterwards (r4), so anything else (no read, none found, any
+    exception) is `unknown`, which names the ticket and the tag to look for. Never a second write."""
+    run_id = str(run.id)
+    lost = f"the comment may have reached the store ({lost})"
+    look = f"check ticket {key} for a comment tagged {case_ticket.agent_comment_tag(run_id)}"
+    read_back = target.read_case_comments
+    if read_back is None:
+        _unknown(run, key, f"{lost}, and {target.system}'s connector cannot read the case back: {look}")
+        return
+    try:
+        read = read_back(ctx, key=key)
+        if not isinstance(read, CaseComments):
+            raise TypeError(f"the read answered {type(read).__name__}, not CaseComments")
+        found = any(case_ticket.carries_agent_tag(text, run_id) for text in read.texts)
+    except AdapterFault as fault:
+        why = _unsettled_reason(fault, ctx.tenant)
+        _unknown(run, key, f"{lost}, and reading the case back failed ({why}): {look}")
+        return
+    except Exception as e:  # noqa: BLE001 — once the write may have landed, only a completed read decides
+        _logger.warning(f"record {key}: the read-back raised: {e!r}")
+        # Only the type reaches the receipt, as in the record step's own catch-all.
+        _unknown(run, key, f"{lost}, and reading the case back failed ({type(e).__name__}): {look}")
+        return
+    if found:
+        _logger.info(f"record {key}: the answer was lost; the read-back found the comment ({word})")
+        _commented(run, key, posted, word, read.link)
+        return
+    _unknown(run, key, f"{lost}, and reading the case back found no comment from this run: {look}")
+
+
+def _unknown(run: Run, key: str, reason: str) -> None:
+    _logger.warning(f"record {key}: {reason}")
+    _write_receipt(run, None, key, RECEIPT_UNKNOWN, reason)
 
 
 def _record_posted_comment(run: Run, key: str, body: str) -> None:

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender import box as box_mod
-from defender.box import _image
+from defender.box import _image, _lifecycle
 from defender.box import image_tag as image_tag
 from defender.box._image import box_closure as box_closure
 from defender.execution.bash_exec import parse
@@ -361,12 +361,12 @@ class NoSuchImageDocker(RecordingDocker):
 
 def image_token(argv: list[str]) -> str:
     """The image a create argv names: the token before the box's main process, which is `cat` for the
-    run box (`docker create -i --rm`, #1343 B10) and `sleep infinity` for the request builder."""
+    run box (`docker create -i --rm`, #1343 B10) and the waiting shell for the request builder."""
     if argv[:2] == ["docker", "create"]:
-        assert argv[-3:] == ["sh", "-c", "exec cat >/dev/null 2>&1"], argv[-3:]
+        assert argv[-3:] == ["sh", "-c", _lifecycle._RUN_BOX_MAIN], argv[-3:]
         return argv[-4]
-    assert argv[-2:] == ["sleep", "infinity"], argv[-3:]
-    return argv[-3]
+    assert argv[-3:] == ["sh", "-c", _lifecycle._LANE_BOX_MAIN], argv[-3:]
+    return argv[-4]
 
 
 def inspected_image(calls: list[list[str]]) -> str | None:

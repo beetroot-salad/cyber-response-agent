@@ -37,6 +37,10 @@ class ProxyAnswer:
     detail: str
     #: The proxy marked a status-less refusal as the target system's call failing (#1404).
     system_side: bool = False
+    #: May the request have reached the target system (#1374)? False only when the proxy says it
+    #: never began the system's call or never connected to it; an older proxy that does not say is
+    #: taken as "may".
+    sent: bool = True
 
     @property
     def from_system(self) -> bool:
@@ -55,6 +59,17 @@ def _the_proxys_own() -> Iterator[None]:
         raise
 
 
+@contextlib.contextmanager
+def _before_sending() -> Iterator[None]:
+    """Every transport fault raised inside happened before the request left the run, so it never
+    reached the system (`maybe_delivered` false, #1374)."""
+    try:
+        yield
+    except TransportFault as fault:
+        fault.maybe_delivered = False
+        raise
+
+
 @_the_proxys_own()
 def proxy_call(  # noqa: PLR0913 — one request's per-call state
     proxy_url: str | None, token: str | None, *, system: str, method: str, url: str,
@@ -65,7 +80,8 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
     `TransportFault`, the proxy's own (`proxy_own`), when no address or token was handed to the
     caller, the proxy cannot be reached, or its answer is not the proxy's."""
     if not proxy_url or not token:
-        raise TransportFault("no credential proxy address or request token was handed to this call")
+        raise TransportFault("no credential proxy address or request token was handed to this call",
+                             maybe_delivered=False)
     try:
         response = _client().post(
             proxy_url.rstrip("/") + PROXY_PATH, headers={"Authorization": f"Bearer {token}"},
@@ -73,13 +89,19 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
                   "headers": dict(headers or {}), "body": body, "timeout_sec": timeout_sec},
             timeout=caller_wait_sec(timeout_sec))
     except httpx.HTTPError as e:
-        raise TransportFault(f"credential proxy unreachable: {type(e).__name__}") from None
+        # Never connected to the proxy: the request went nowhere (#1374). Any later failure may
+        # follow the proxy's call to the system.
+        raise TransportFault(
+            f"credential proxy unreachable: {type(e).__name__}",
+            maybe_delivered=not isinstance(e, httpx.ConnectError | httpx.ConnectTimeout),
+        ) from None
     try:
         data = response.json()
         answer = ProxyAnswer(
             status=int(data["status"] or 0), headers=dict(data.get("headers") or {}),
             body=str(data.get("body") or ""), fault=data.get("fault"),
-            detail=str(data.get("detail") or ""), system_side=data.get("system_side") is True)
+            detail=str(data.get("detail") or ""), system_side=data.get("system_side") is True,
+            sent=data.get("sent") is not False)
     except (ValueError, KeyError, TypeError):
         raise TransportFault(
             f"credential proxy answered HTTP {response.status_code} with no usable answer"
@@ -122,7 +144,7 @@ def proxy_exchange(
     """One JSON request to `system` through the credential proxy, with the token `ctx` presents;
     the proxy's answer as it came. A fault raised before the answer (no token minted, the proxy
     not reached) is the proxy's own (`proxy_own`)."""
-    with _the_proxys_own():
+    with _the_proxys_own(), _before_sending():
         token = token_of(ctx)
     return proxy_call(
         ctx.proxy_url, token, system=system, method=method, url=url,

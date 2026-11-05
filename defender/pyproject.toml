@@ -121,8 +121,8 @@ dev = [
     "pytest-xdist>=3.5",
     "pytest-cov",
     # Local test selection for working changes: `pytest --testmon` reruns only the tests whose
-    # recorded code paths a change touched. Opt-in by flag; CI and the pre-ship local run do
-    # not pass it and run the full suite. It tracks Python code only, see CLAUDE.md.
+    # recorded code paths a change touched. Opt-in by flag; CI does not pass it and runs the
+    # full suite. It tracks Python code only, see CLAUDE.md.
     "pytest-testmon",
     # tests/integrations/test_sql_idioms.py reads the doc's fences with a CommonMark parse. The `runtime`
     # extra happens to carry it (fastmcp -> rich -> markdown-it-py); a dev-only sync does not.

@@ -268,7 +268,7 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec + 10,
                               encoding="utf-8", errors="replace", env=_child_env(ctx))
     except FileNotFoundError as e:
-        raise TransportFault("docker CLI not found on PATH") from e
+        raise TransportFault("docker CLI not found on PATH", maybe_delivered=False) from e
     except subprocess.TimeoutExpired as e:
         raise TransportFault(
             f"docker exec curl timed out after {timeout_sec + 10}s (target: {url})"
@@ -353,24 +353,41 @@ def http_get_obj(
     return payload
 
 
+#: curl's exits for a connection never made (6: the host did not resolve; 7: it refused):
+#: nothing was sent (#1374).
+_CURL_NEVER_CONNECTED = frozenset({6, 7})
+#: `docker exec`'s own exits for a command it could not start. Not 1, which a command's own failure
+#: or a lost connection to the daemon can also produce (#1374 r4).
+_DOCKER_OWN_FAILURES = frozenset({125, 126, 127})
+
+
 def _raise_on_transport_failure(
-    ctx: VerbContext, bastion: str, rc: int, stderr: str, system: str,
+    ctx: VerbContext, bastion: str, rc: int, stdout: str, stderr: str, system: str,
 ) -> None:
     """Raise `TransportFault` (exit 2) when curl did not exit cleanly, so the queries row and
     the circuit breaker see a down system. Covers a missing/stopped bastion and curl's own
     failures.
 
-    Decided by the return code alone: `-w "\\n%{http_code}"` makes stdout `"\\n000"` even when
-    no request completed, so an empty-stdout check would let an outage return `{}` as success."""
+    Whether to raise is decided by the return code alone: `-w "\\n%{http_code}"` makes stdout `"\\n000"` even when
+    no request completed, so an empty-stdout check would let an outage return `{}` as success.
+
+    `maybe_delivered` (#1374) is decided from data: false when curl never connected
+    (`_CURL_NEVER_CONNECTED`) or docker failed before running it: one of docker's own exit codes
+    with no status line on stdout, which curl's own failures always print. Exit 1 is not one: a
+    docker client that lost its daemon after curl started can end that way too. A curl killed part
+    way (137, 143) prints no status line either, and may have sent."""
     if rc == 0:
         return
+    never_sent = rc in _CURL_NEVER_CONNECTED or (
+        rc in _DOCKER_OWN_FAILURES and not split_status(stdout)[1])
     hint = stderr.strip() or "no stderr"
     if "No such container" in hint or "is not running" in hint:
         raise TransportFault(
             f"bastion container {bastion!r} unreachable: {hint} — confirm "
-            f"`docker --context {docker_context(ctx, system)} ps` lists {bastion} as running."
+            f"`docker --context {docker_context(ctx, system)} ps` lists {bastion} as running.",
+            maybe_delivered=not never_sent,
         )
-    raise TransportFault(f"docker exec failed (rc={rc}): {hint}")
+    raise TransportFault(f"docker exec failed (rc={rc}): {hint}", maybe_delivered=not never_sent)
 
 
 def _parse_status_code(stdout: str, stderr: str, url: str, rc: int) -> tuple[str, int]:
@@ -481,7 +498,7 @@ def _perform(  # noqa: PLR0913 — one request's per-call state
         ctx, bastion, url, method=method, body=body, timeout_sec=timeout, system=system
     )
 
-    _raise_on_transport_failure(ctx, bastion, rc, stderr, system)
+    _raise_on_transport_failure(ctx, bastion, rc, stdout, stderr, system)
     body_text, code = _parse_status_code(stdout, stderr, url, rc)
     if write:
         _judge_write(code, body_text, url)
@@ -497,10 +514,11 @@ def _perform(  # noqa: PLR0913 — one request's per-call state
 
 
 def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
-                      from_system: bool = False) -> None:
+                      from_system: bool = False, sent: bool = True) -> None:
     """Raise the fault class the proxy named, with its detail (A9); an `UpstreamFault` carries
     the store's `status` when the proxy relayed one. The proxy's own (`proxy_own`) unless the
-    system answered (`status`) or the proxy saw its call fail (`from_system`, #1404)."""
+    system answered (`status`) or the proxy saw its call fail (`from_system`, #1404). A
+    `TransportFault` may have reached the system unless the proxy said it was not `sent` (#1374)."""
     raised: AdapterFault
     if fault == "UpstreamFault":
         raised = UpstreamFault(detail or fault, status=status or None)
@@ -508,6 +526,8 @@ def raise_proxy_fault(fault: str, detail: str, status: int | None = None, *,
         classes = {"ConfigFault": ConfigFault, "ConfinementFault": ConfinementFault,
                    "TransportFault": TransportFault}
         raised = classes.get(fault, TransportFault)(detail or fault)
+    if isinstance(raised, TransportFault):
+        raised.maybe_delivered = sent
     raised.proxy_own = not (from_system or status)
     raise raised
 
@@ -526,7 +546,7 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
             _judge_write(answer.status, answer.body, system)
             return {}
         raise_proxy_fault(answer.fault or "TransportFault", answer.detail,
-                          from_system=answer.from_system)
+                          from_system=answer.from_system, sent=answer.sent)
     if answer.fault in ("UpstreamFault", "TransportFault") and answer.status:
         # The system answered: its own reason (scrubbed by the proxy) reaches the model and
         # curation, as on the docker path (`_raise_on_http_error`).
@@ -535,7 +555,8 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
         raise_proxy_fault(answer.fault, f"HTTP {answer.status} from {system}: {why}",
                           answer.status, from_system=True)
     if answer.fault is not None:
-        raise_proxy_fault(answer.fault, answer.detail, from_system=answer.from_system)
+        raise_proxy_fault(answer.fault, answer.detail, from_system=answer.from_system,
+                          sent=answer.sent)
     if answer.status >= 400:
         raise UpstreamFault(f"HTTP {answer.status} from {system}: {_vendor_detail(answer.body)}",
                             status=answer.status)

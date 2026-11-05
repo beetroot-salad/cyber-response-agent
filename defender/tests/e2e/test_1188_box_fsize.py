@@ -20,6 +20,7 @@ from defender.tenancy._tenant import tenant_id_file_text
 from defender.records._tenant_id import TenantId
 from defender.execution import bash_exec
 from defender import box as box_mod
+from defender.box import _lifecycle
 from defender.box._image import HASH_INPUTS
 from defender.tests.support.runtime.state._1255_view import MODEL_RUN
 from defender.tests.support.storage._alert_plant import plant_alert
@@ -81,8 +82,8 @@ def _assert_one_ulimit(argv: list[str], resource: str, want: str, lane: str) -> 
         f"{lane}: the create argv carries {resource} ulimit(s) {got}, expected exactly "
         f"[{want!r}] — argv: {argv}"
     )
-    # The run box is `docker create … <image> sh -c 'exec cat …'` (#1343 B10); the lane (request) box `docker run … <image> sleep infinity`.
-    tail = ["sh", "-c", "exec cat >/dev/null 2>&1"] if argv[:2] == ["docker", "create"] else ["sleep", "infinity"]
+    # The run box is `docker create` (#1343 B10), the lane (request) box `docker run`; each ends `<image> sh -c <main>`.
+    tail = ["sh", "-c", _lifecycle._RUN_BOX_MAIN if argv[:2] == ["docker", "create"] else _lifecycle._LANE_BOX_MAIN]
     assert argv[-len(tail):] == tail, f"{lane}: unexpected argv tail {argv[-3:]}"
     image_at = len(argv) - len(tail) - 1
     at = argv.index(want) - 1    # the `--ulimit` token `_ulimits` read the value after

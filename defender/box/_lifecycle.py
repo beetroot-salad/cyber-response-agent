@@ -60,6 +60,23 @@ _BOX_ULIMITS: tuple[str, ...] = (
 )
 
 
+def _box_flags(spec: BoxSpec) -> tuple[str, ...]:
+    """What confines every box, whichever path starts it. `--memory-swap` equal to `--memory`
+    grants no swap: left out, docker adds the memory cap again as swap."""
+    return (
+        "--runtime", spec.runtime,
+        "--network", "none",
+        "--read-only",
+        "--pull=never",
+        "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
+        *_BOX_ULIMITS,
+        "--memory", spec.memory,
+        "--memory-swap", spec.memory,
+        "--cpus", spec.cpus,
+        "--pids-limit", str(spec.pids_limit),
+    )
+
+
 def _input_dir_source(run_dir: Path) -> Path:
     """The run's input directory (the alert and its record), checked to be a real, populated
     directory before it is bound read-only over the writable run folder. A missing, empty or
@@ -155,8 +172,20 @@ def _tenant_label(tenant_id: str | None) -> list[str]:
     return [] if tenant_id is None else ["--label", f"{TENANT_LABEL}={tenant_id}"]
 
 
-#: The run box's main process: `cat`, reading the held input, with its output discarded.
-_RUN_BOX_MAIN = "exec cat >/dev/null 2>&1"
+def _reaping_main(command: str) -> str:
+    """A box's main process: a shell that runs `command` and stays PID 1, its output discarded.
+    Waiting on `command`, the shell also collects every orphan the box's PID 1 inherits; left as
+    zombies they count against `--pids-limit`, and a box at its limit can never run another
+    command. The trailing `:` stops the shell replacing itself with `command`. Docker's `--init`
+    would reap too, but its own output is the stream attached to the host, so a program in a run
+    box could write there through `/proc/1/fd/1`."""
+    return f"exec >/dev/null 2>&1; {command}; :"
+
+
+#: The run box's main process: `cat` reads the held input, so the box ends when its starter does.
+_RUN_BOX_MAIN = _reaping_main("cat")
+#: The request-lane box's main process: nothing holds it open, so it waits to be stopped.
+_LANE_BOX_MAIN = _reaping_main("sleep infinity")
 
 
 def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
@@ -195,12 +224,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "docker", "create", "-i", "--rm", "--name", name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
         *_tenant_label(tenant_id),
-        "--runtime", spec.runtime,
-        "--network", "none",
-        "--read-only",
-        "--pull=never",
-        "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
-        *_BOX_ULIMITS,
+        *_box_flags(spec),
     ]
     for m in lane:
         bind = f"type=bind,source={_daemon_source(m.source, mounts)},target={m.target}"
@@ -662,12 +686,7 @@ def _render_argv(
         "docker", "run", "--detach", "--name", request.name,
         "--label", f"{START_TOKEN_LABEL}={start_token}",
         *_tenant_label(request.tenant_id),
-        "--runtime", request.spec.runtime,
-        "--network", "none",
-        "--read-only",
-        "--pull=never",
-        "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
-        *_BOX_ULIMITS,
+        *_box_flags(request.spec),
     ]
     for m in request.mounts:
         if mounts and not _covered(Path(m.source), mounts):
@@ -687,7 +706,7 @@ def _render_argv(
         argv += ["--env", f"{key}={env[key]}"]
     # Resolved here, never at BoxRequest construction.
     rootfs = resolve_rootfs(request.spec.rootfs, request.code_dir)
-    argv += [rootfs.image, "sleep", "infinity"]
+    argv += [rootfs.image, "sh", "-c", _LANE_BOX_MAIN]
     return Create(argv, rootfs)
 
 

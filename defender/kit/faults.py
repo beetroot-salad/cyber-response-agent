@@ -25,8 +25,15 @@ class ConfigFault(AdapterFault):
 
 
 class TransportFault(AdapterFault):
+    """No usable answer. `maybe_delivered` (#1374): may the request have reached the system? True
+    unless the transport proved it did not (it was never sent, or the connection to the system was
+    never made), from data, never from a message's text."""
 
     exit_code = 2
+
+    def __init__(self, detail: str, *, maybe_delivered: bool = True):
+        super().__init__(detail)
+        self.maybe_delivered = maybe_delivered
 
 
 class UpstreamFault(AdapterFault):
