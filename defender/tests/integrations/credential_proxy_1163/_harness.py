@@ -129,6 +129,13 @@ def borrowed_threads() -> int:
     return anyio.to_thread.current_default_thread_limiter().borrowed_tokens
 
 
+def thread_limit() -> int:
+    """The default limiter's total (call inside the loop): the cap on simultaneous worker threads."""
+    import anyio.to_thread
+
+    return int(anyio.to_thread.current_default_thread_limiter().total_tokens)
+
+
 async def answer_gauge(send: Any, readings: Mapping[str, int]) -> None:
     """Answer a gauge request with `readings` as JSON."""
     await send({"type": "http.response.start", "status": 200,

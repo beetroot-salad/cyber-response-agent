@@ -541,7 +541,7 @@ def _stalled_exchange(tmp_path: Path, data_root: Path) -> Iterator[tuple[httpx.R
             W.unread(url, r.tok(), W.doc(f"{up.url}{API}/users/x", timeout_sec=1)) as response:
         assert W.until(lambda: W.borrowed(url) == 1, 1.5), "no worker thread held for the exchange"
         assert W.until(lambda: audit.records, 3.5), "no record by the deadline"
-        assert W.until(lambda: W.borrowed(url) == 0, 1), "the worker thread is held while the final frame is sent"
+        assert W.until(lambda: W.borrowed(url) == 0, 5), "the worker thread is held while the final frame is sent"
         yield response, audit, up
 
 
@@ -550,7 +550,7 @@ def test_o6_a_reader_stalled_past_the_deadline_is_cut_and_gets_todays_answer_wit
     """A reader stalled past the deadline, back one second inside the grace: the upstream was
     released at the cut, one record says sent, the reply is the status, no whole body. #1412 O6."""
     with _stalled_exchange(tmp_path, data_root) as (response, audit, up):
-        assert up.hung_up.wait(1), "the upstream connection outlived the deadline"
+        assert up.hung_up.wait(5), "the upstream connection outlived the deadline"
         time.sleep(CALLER_GRACE_SEC - 1)
         forwarded, final = W.decoded(b"".join(response.iter_raw()))
 

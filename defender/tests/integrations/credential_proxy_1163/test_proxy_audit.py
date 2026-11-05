@@ -239,6 +239,7 @@ def test_o4_the_body_arrives_before_the_record_and_the_final_frame_after_it(tmp_
         try:
             assert audit.entered.wait(10), "no audit record was started"
             assert W.until(lambda: marker in bytes(arrived), 5), "the body never arrived"
+            time.sleep(0.3)  # a negative needs time to happen: a final frame sent early lands now
             before = bytes(arrived)
             lent = W.borrowed(url)
         finally:

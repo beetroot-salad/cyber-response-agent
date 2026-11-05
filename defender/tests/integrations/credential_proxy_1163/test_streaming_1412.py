@@ -124,6 +124,7 @@ def test_o1_forty_8_mib_replies_at_once_keep_the_process_under_256_mib(tmp_path,
 
     assert gauge["live_peak"] == 40, gauge
     assert gauge["borrowed_peak"] == 40, f"worker threads lent out at the peak: {gauge}"
+    assert gauge["total_tokens"] == 40, f"P3's limit of 40 simultaneous requests: {gauge}"
     assert gauge["audited"] == 40, gauge
     assert all(size > W.DEFAULT_LIMIT for size in sizes), sizes
 

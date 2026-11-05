@@ -50,7 +50,8 @@ class _Gauged:
         now, peak = tracemalloc.get_traced_memory()
         await H.answer_gauge(send, {
             "traced_now": now, "traced_peak": peak, "live_peak": self.live_peak,
-            "borrowed": H.borrowed_threads(), "borrowed_peak": self.borrowed_peak,
+            "borrowed": H.borrowed_threads(), "total_tokens": H.thread_limit(),
+            "borrowed_peak": self.borrowed_peak,
             "audited": len(self.audit.records)})
 
 

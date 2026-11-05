@@ -366,6 +366,17 @@ def test_o3_the_run_adds_no_limit_to_a_reply_of_exactly_the_proxys_limit():
     assert (answer.status, answer.fault, len(answer.body)) == (200, None, W.DEFAULT_LIMIT)
 
 
+def test_o3_the_run_adds_no_limit_to_a_reply_well_over_the_default():
+    """The proxy's limit is configurable, so the run must not assume 8 MiB: a 12 MiB whole body
+    is the answer. O3."""
+    size = 12 * W.MIB
+    f = W.fmt()
+    with W.fake_proxy(f.encode_body(b"x" * size) + f.encode_final(W.final_record()), ended=True) as url:
+        answer = W.call(url, "tok", f"{url}/x")
+
+    assert (answer.status, answer.fault, len(answer.body)) == (200, None, size)
+
+
 @pytest.mark.parametrize(("over", "kept"), [
     pytest.param({}, True, id="whole"),
     pytest.param({"status": 500, "fault": "TransportFault", "detail": "d", "body_whole": False}, False,

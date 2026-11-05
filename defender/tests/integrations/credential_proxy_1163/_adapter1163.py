@@ -360,7 +360,7 @@ class Tap:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         if scope["path"] == H.GAUGE_PATH:
-            return await H.answer_gauge(send, {"borrowed": H.borrowed_threads()})
+            return await H.answer_gauge(send, {"borrowed": H.borrowed_threads(), "total_tokens": H.thread_limit()})
         for key, value in scope["headers"]:
             if key == b"authorization":
                 self.tokens.append(value.decode().removeprefix("Bearer "))
