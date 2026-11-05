@@ -153,6 +153,24 @@ def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  #
     return f"{config['URL_BASE'].rstrip('/')}/tickets/{quoted}"
 
 
+def find_case_comment(ctx: VerbContext, *, key: str, tag: str) -> tuple[bool, str | None]:  # lint-dup: ok — every case-recording adapter's read-back goes by this one name (#1374)
+    """The host's read-back after a comment whose answer was lost (#1374): is a comment whose
+    lines include `tag` (the run's tag line) on ticket `key`? `(True, link)` or `(False, None)`.
+    The lab store's ticket read holds every comment, so a read that lacks the tag saw them all.
+    Not a verb (never in `VERBS`). A read with no comment list is a `TransportFault`: it cannot
+    tell."""
+    config = _config(ctx)
+    quoted = urllib.parse.quote(key, safe="")
+    payload = transport.http_get_obj(ctx, config, f"/tickets/{quoted}", system=SYSTEM)
+    comments = payload.get("comments")
+    if not isinstance(comments, list):
+        raise TransportFault(f"ticket {key}'s read carries no comment list")
+    found = any(isinstance(c, dict) and isinstance(c.get("body"), str)
+                and tag in (line.strip() for line in c["body"].splitlines())
+                for c in comments)
+    return found, (f"{config['URL_BASE'].rstrip('/')}/tickets/{quoted}" if found else None)
+
+
 VERBS = {
     "health-check": health_check,
     "list-tickets": list_tickets,

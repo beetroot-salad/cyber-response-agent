@@ -71,7 +71,8 @@ def test_767_record_posts_one_comment_on_the_alerts_ticket_and_receipts(tmp_path
     failed_dir = make_run(tmp_path, name="20260917t000001z-sshd")
     record(failed_dir, _store(tmp_path, answers=[S.curl_timed_out()]))
     bad = receipt(failed_dir)
-    assert (bad["key"], bad["ok"], bad["status"]) == (CASE_KEY, False, ticket_writer.RECEIPT_ERROR), bad
+    # The write timed out after it may have reached the store and the read-back timed out too (#1374).
+    assert (bad["key"], bad["ok"], bad["status"]) == (CASE_KEY, False, ticket_writer.RECEIPT_UNKNOWN), bad
 
 
 def test_767_the_comment_is_the_templates_body_under_the_agent_tag(tmp_path, monkeypatch):

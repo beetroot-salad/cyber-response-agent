@@ -21,7 +21,7 @@ from defender._paths import adapters_under
 from defender.kit.access import AccessDeclaration
 from defender.kit.faults import ConfigFault
 from defender.kit.settings import config_pointer, pointer_to
-from defender.kit.verbs import COMMENT_ACTION
+from defender.kit.verbs import COMMENT_ACTION, HOST_ACTIONS, READBACK_ACTION
 from defender.systems.run_tenant import RunTenant
 from defender.systems.system_status import AdapterBroken, NotConfigured, ReasonScope, judge_adapter
 from defender.systems.verbs import RegistryError, RosterRead, fresh_adapter_module, read_roster
@@ -59,6 +59,12 @@ class CaseTarget:
     def add_case_comment(self) -> Callable[..., str | None]:
         return getattr(self.module, COMMENT_ACTION)
 
+    @property
+    def find_case_comment(self) -> Callable[..., tuple[bool, str | None]] | None:
+        """The adapter's optional read-back (#1374), or None when it exports none."""
+        action = getattr(self.module, READBACK_ACTION, None)
+        return action if callable(action) else None
+
 
 def legacy_folder_finding(settings: Path) -> str | None:
     """The finding for a tenant still holding the retired system folder for case recording, naming the
@@ -85,7 +91,7 @@ def _adapter_of(system: str, *, defender_dir: Path, roster: RosterRead | None) -
                                 f"names the system `{system}`, which has no adapter")
     if system in roster.unparsed:
         why = roster.unparsed[system]
-        shown = why if COMMENT_ACTION in why or COMMENT_ACTION.replace("_", "-") in why \
+        shown = why if any(a in why or a.replace("_", "-") in why for a in HOST_ACTIONS) \
             else "it could not be read"
         raise CaseSettingsFault(
             CASE_RECORD_POINTER,

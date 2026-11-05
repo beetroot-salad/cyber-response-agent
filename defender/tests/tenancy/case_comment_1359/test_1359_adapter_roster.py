@@ -175,3 +175,39 @@ def test_r1_the_agents_verb_listing_offers_nothing_for_an_empty_verbs_adapter_an
     assert "UNAVAILABLE" not in catalog._tool_list_verbs(
         _registry(_tree(tmp_path / "whole", _source("{}"))), "casesys"), (
         "the tool's whole answer for a granted-nothing empty-VERBS system says UNAVAILABLE")
+
+
+READBACK = C.READBACK_ACTION
+READBACK_HOLDING = {
+    "dashed key": f'{{"health-check": health_check, "{READBACK.replace("_", "-")}": {READBACK}}}',
+    "underscored key": f'{{"health-check": health_check, "{READBACK}": health_check}}',
+    "bare-name value": f'{{"health-check": health_check, "other": {READBACK}}}',
+}
+
+
+def _readback_source(verbs_body: str, *, tail: str = "") -> str:
+    head, table = _source(verbs_body).rsplit("\n\nVERBS = ", 1)
+    return (head + f"\n\ndef {READBACK}(ctx: VerbContext, *, key: str, tag: str):\n"
+            "    return False, None\n\n\nVERBS = " + table + tail)
+
+
+def test_1374_the_read_back_action_is_never_a_verb(tmp_path):
+    """#1374: the read-back is a host action like the comment: an adapter whose `VERBS` lists it
+    in any spelling is refused whole by the cold read and by `/connect`'s scaffold check, and one
+    whose table holds it by identity (filled in after the literal) is served no verbs. Control: an
+    adapter exporting it outside `VERBS` reads clean."""
+    clean = _tree(tmp_path / "clean", _readback_source(CLEAN))
+    assert "health-check" in _roster(clean).declared_verbs("casesys"), "positive control"
+    assert "health-check" in _registry(clean).verbs("casesys"), "positive control"
+    for label, body in READBACK_HOLDING.items():
+        where = tmp_path / label.replace(" ", "-")
+        roster = _roster(_tree(where, _readback_source(body)))
+        reason = roster.unparsed.get("casesys", "")
+        assert READBACK in reason or READBACK.replace("_", "-") in reason, (label, dict(roster.unparsed))
+        assert roster.declared_verbs("casesys") == frozenset(), label
+        failed = _check_registry_failures(tmp_path / f"s-{label.replace(' ', '-')}",
+                                          _readback_source(body))
+        assert any(READBACK in m or READBACK.replace("_", "-") in m for m in failed), (label, failed)
+    hidden = _tree(tmp_path / "hidden",
+                   _readback_source(CLEAN, tail=f'\nVERBS["other"] = {READBACK}\n'))
+    assert dict(_registry(hidden).verbs("casesys")) == {}, "the identity check let it through"

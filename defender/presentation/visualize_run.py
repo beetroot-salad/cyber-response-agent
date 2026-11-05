@@ -374,6 +374,8 @@ def _render_policy_denials_section(run_dir: Path) -> str:
 
 
 RECEIPT_UNREADABLE = "receipt unreadable"
+#: = ticket_writer.RECEIPT_UNKNOWN: a comment whose outcome the read-back could not settle (#1374).
+RECEIPT_UNKNOWN = "unknown"
 
 
 def render_ticket_line(run_dir: Path) -> str:
@@ -396,7 +398,12 @@ def render_ticket_line(run_dir: Path) -> str:
     )
     if not well_formed or not isinstance(receipt, dict):
         return f'<p class="ticket-line ticket-unreadable">ticket: {esc(RECEIPT_UNREADABLE)}</p>'
-    cls = "ticket-ok" if receipt["ok"] else "ticket-error"
+    if receipt["ok"]:
+        cls = "ticket-ok"
+    elif receipt["status"] == RECEIPT_UNKNOWN:
+        cls = "ticket-unknown"  # neither done nor failed: someone must look (#1374 O4)
+    else:
+        cls = "ticket-error"
     parts = [f'ticket <code>{esc(receipt["key"])}</code>', esc(receipt["status"])]
     if receipt.get("url"):
         parts.append(f'<code>{esc(receipt["url"])}</code>')

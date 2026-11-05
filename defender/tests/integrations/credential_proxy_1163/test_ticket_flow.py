@@ -22,6 +22,15 @@ KEY_PATTERN = 'TICKET_KEY_PATTERN="[A-Za-z0-9-]+"\n'
 COMMENT = f"{STORE}/tickets/{KEY}/comments"
 #: The receipt's subject for a fault the credential proxy itself caused (#1404 r2, O1).
 PROXY_FAILED = "the credential proxy failed: "
+#: How an `unknown` receipt's reason frames the write's own fault (#1374): "...was lost (<it>), and".
+LOST = "the store's answer to the comment was lost ("
+
+
+def write_fault(receipt: dict) -> str:
+    """The reason the write's own fault gave: the whole reason, or the part an `unknown` receipt
+    frames after a read-back (#1374), so subject checks apply to that fault and not to the frame."""
+    reason = receipt.get("reason") or ""
+    return reason[len(LOST):].split("), and ", 1)[0] if reason.startswith(LOST) else reason
 
 
 def _decl(up, writes=WRITES):
@@ -182,7 +191,9 @@ def test_t10_a_proxy_the_leg_cannot_use_is_the_proxys_failure_not_the_stores(tmp
     """#1404 O1: a proxy that is down, answers a non-200 status (readable or not), or whose
     address was never handed to the call leaves "the credential proxy failed: <cause>", never the
     store's wording, and the cause is said once. Controls for the store side are in
-    `test_ticket_flow_proxy_side.py` (t7, t12)."""
+    `test_ticket_flow_proxy_side.py` (t7, t12). A non-200 from the proxy follows a request that
+    reached it, so it may have reached the store: the case is read back (#1374), and the read
+    meeting the same proxy, the receipt is `unknown`."""
     with H.upstream() as up, H.upstream() as broken, _published(
             tmp_path / "forge", data_root, _decl(up)) as t:
         tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
@@ -204,9 +215,10 @@ def test_t10_a_proxy_the_leg_cannot_use_is_the_proxys_failure_not_the_stores(tmp
             rec, run = _run(tmp_path / name)
             receipt = _leg(t, run, rec, url, tok)
             assert receipt is not None, name
-            assert (receipt["ok"], receipt["status"]) == (False, "error"), (name, receipt)
-            reason = receipt.get("reason") or ""
+            expected = "unknown" if name.startswith(("proxy-502", "proxy-503")) else "error"
+            assert (receipt["ok"], receipt["status"]) == (False, expected), (name, receipt)
+            reason = write_fault(receipt)
             assert reason.startswith(PROXY_FAILED), (name, reason)
             assert cause in reason, (name, reason)
             assert "store" not in reason, (name, reason)
-        assert len(broken.seen) == 2, "positive control: the broken proxy was called twice"
+        assert len(broken.seen) == 4, "positive control: a write and a read at each broken proxy"

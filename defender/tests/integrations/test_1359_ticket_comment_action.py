@@ -75,3 +75,41 @@ def test_p2_the_agent_facing_post_entry_cannot_write_a_comment(tmp_path, monkeyp
     assert store.calls == [], "the read-class POST reached the store"
     ticket_adapter.add_case_comment(ctx, key="SOC-1", body="b")
     assert len(store.writes()) == 1, "positive control: the host action reaches it"
+
+
+#: The fact a `TransportFault` carries (#1374 r2): may the request have reached the store?
+MAYBE_DELIVERED = "maybe_delivered"
+
+
+@pytest.mark.parametrize(("answer", "maybe"), [
+    (S.answer("", "000", rc=7, stderr="curl: (7) Failed to connect to ticket port 80"), False),
+    (S.answer("", "000", rc=6, stderr="curl: (6) Could not resolve host: ticket"), False),
+    (S.no_such_container("bastion"), False),
+    (S.container_not_running(), False),
+    (S.curl_timed_out(), True),
+    (S.answer("", "000", rc=52, stderr="curl: (52) Empty reply from server"), True),
+    (S.answer("", "000", rc=56, stderr="curl: (56) Recv failure: Connection reset by peer"), True),
+    (S.answer(json.dumps({"detail": "down"}), "503"), True),
+], ids=["refused", "dns", "no-container", "container-stopped", "timeout", "empty-reply", "reset",
+        "store-503"])
+def test_1374_a_curl_route_write_fault_says_whether_it_may_have_reached_the_store(
+        tmp_path, monkeypatch, answer, maybe):
+    """#1374 P1/P2 on the docker route: "did not reach the store" only where proven from data —
+    curl's exit 6/7, or a docker exec that never ran curl (non-zero, no status line); every other
+    failure, a 5xx included, may have reached it."""
+    ctx, store = _ctx(tmp_path, monkeypatch, answer)
+    with pytest.raises(TransportFault) as raised:
+        ticket_adapter.add_case_comment(ctx, key="SOC-1", body="x")
+    assert getattr(raised.value, MAYBE_DELIVERED) is maybe, raised.value
+
+
+def test_1374_a_missing_docker_cli_did_not_reach_the_store(tmp_path, monkeypatch):
+    """#1374: with no docker on the PATH nothing was sent."""
+    M.use_case_record(monkeypatch, tmp_path / "dfn")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    ctx = S.verb_context(M.current_record(), tmp_path / "run", {"PATH": str(empty)})
+    with pytest.raises(TransportFault) as raised:
+        ticket_adapter.add_case_comment(ctx, key="SOC-1", body="x")
+    assert "docker CLI not found" in raised.value.detail, "positive control: the CLI was missing"
+    assert getattr(raised.value, MAYBE_DELIVERED) is False, raised.value

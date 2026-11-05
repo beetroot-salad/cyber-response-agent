@@ -405,7 +405,9 @@ def _alert_without_key(where: Path) -> Path:
 
 def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch, caplog):
     """An HTTP 4xx or 5xx from the store on the record step is a transport fault: ticket_write.json
-    with ok false and a reason, a warning log line, a page line, and the exit code unchanged."""
+    with ok false and a reason, a warning log line, a page line, and the exit code unchanged. A 4xx
+    is the store refusing (`error`); a 5xx may follow a store that took the comment, so the case is
+    read back once (#1374) and, the read meeting the same 5xx, the receipt is `unknown`."""
     caplog.set_level(logging.INFO)
     root, _folder, alert = _world(tmp_path)
     _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-ok")
@@ -432,7 +434,8 @@ def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch,
         assert page, f"HTTP {status}: the run page did not render"
         got = S.receipt(run_dir)
         assert got is not None, f"HTTP {status}: {got}"
-        assert (got.get("key"), got.get("status"), got.get("ok")) == (KEY, "error", False), got
+        expected = "unknown" if status.startswith("5") else "error"
+        assert (got.get("key"), got.get("status"), got.get("ok")) == (KEY, expected, False), got
         assert got.get("url") is None, f"HTTP {status}: an error receipt carries a link: {got}"
         reason = (got.get("reason") or "")
         assert all(w in reason.lower() for w in words), f"HTTP {status}: reason {reason!r}"

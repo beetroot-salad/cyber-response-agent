@@ -35,11 +35,13 @@ def _verb_context(tenant: RunTenant, defender_dir: Path, run_dir: Path,
 
 
 #: The receipt words: `commented` (the record) and `escalated` (the cut-short note) are the two
-#: comments the host can make; `error` is a failed call. There is no `closed`: the host never
-#: transitions a case.
+#: comments the host can make; `error` is a failed call; `unknown` is a comment whose answer was
+#: lost after it may have reached the store and which the read-back could not settle (#1374).
+#: There is no `closed`: the host never transitions a case.
 RECEIPT_COMMENTED = "commented"
 RECEIPT_ESCALATED = "escalated"
 RECEIPT_ERROR = "error"
+RECEIPT_UNKNOWN = "unknown"
 _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
 
 #: Receipt reasons whose wording the product owns (O5).
@@ -223,12 +225,62 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
         link = target.add_case_comment(ctx, key=key, body=posted)
     except AdapterFault as fault:
         reason = _fault_reason(fault, tenant=ctx.tenant, system=target.system)
+        if isinstance(fault, TransportFault) and fault.maybe_delivered:
+            _settle_lost_answer(run, target, key, posted, word, ctx, reason)
+            return
         _logger.warning(f"record {key}: {reason}")
         _write_receipt(run, None, key, RECEIPT_ERROR, reason)
         return
     _logger.info(f"record {key}: comment posted ({word}); run_dir={run.run_dir}")
+    _commented(run, key, posted, word, link)
+
+
+def _commented(run: Run, key: str, posted: str, word: str, link: object) -> None:
+    """The store holds the comment: record it and write the success receipt."""
     _record_posted_comment(run, key, posted)
     _write_receipt(run, link if isinstance(link, str) and link else None, key, word, None)
+
+
+def _settle_lost_answer(  # noqa: PLR0913 — the write's own context, threaded not re-derived
+    run: Run, target: case_system.CaseTarget, key: str, posted: str, word: str, ctx: VerbContext,
+    lost: str,
+) -> None:
+    """The comment's answer was lost after it may have reached the store (#1374 P1): read the case
+    back once (P4) and decide from this run's tag line (P3). Found is a success; a read that saw
+    no such comment is an error; anything else (no read-back, any exception) is `unknown`, which
+    names the ticket and the tag to look for. Never a second write."""
+    tag = case_ticket.agent_comment_tag(str(run.id))
+    lost = f"the store's answer to the comment was lost ({lost})"
+    look = f"check ticket {key} for a comment tagged {tag}"
+    read_back = target.find_case_comment
+    if read_back is None:
+        _unknown(run, key, f"{lost}, and {target.system}'s connector cannot read the case back: {look}")
+        return
+    try:
+        found, link = read_back(ctx, key=key, tag=tag)
+        if not isinstance(found, bool):
+            raise TypeError(f"the read-back answered {type(found).__name__}, not a bool")
+    except AdapterFault as fault:
+        why = redact_settings_path(fault.detail, ctx.tenant.settings)
+        _unknown(run, key, f"{lost}, and reading the case back failed ({why}): {look}")
+        return
+    except Exception as e:  # noqa: BLE001 — once the write may have landed, only a completed read decides
+        _logger.warning(f"record {key}: the read-back raised: {e!r}")
+        # Only the type reaches the receipt, as in the record step's own catch-all.
+        _unknown(run, key, f"{lost}, and reading the case back failed ({type(e).__name__}): {look}")
+        return
+    if found:
+        _logger.info(f"record {key}: the answer was lost; the read-back found the comment ({word})")
+        _commented(run, key, posted, word, link)
+        return
+    reason = f"{lost}, and reading the case back found no comment from this run: it was not posted"
+    _logger.warning(f"record {key}: {reason}")
+    _write_receipt(run, None, key, RECEIPT_ERROR, reason)
+
+
+def _unknown(run: Run, key: str, reason: str) -> None:
+    _logger.warning(f"record {key}: {reason}")
+    _write_receipt(run, None, key, RECEIPT_UNKNOWN, reason)
 
 
 def _record_posted_comment(run: Run, key: str, body: str) -> None:

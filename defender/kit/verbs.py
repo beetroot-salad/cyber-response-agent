@@ -22,6 +22,12 @@ from defender.kit.settings import SystemConfig
 #: verb, so no grant, query tool or model can reach it. `systems.verbs` refuses an adapter whose
 #: `VERBS` exposes it in either spelling.
 COMMENT_ACTION = "add_case_comment"
+#: The optional read-back beside it (#1374): `find_case_comment(ctx, *, key, tag)` answers
+#: `(found, link)` for this run's tagged comment on the case, or raises `AdapterFault` when it
+#: cannot tell. A host action too, never a verb.
+READBACK_ACTION = "find_case_comment"
+#: Every host-only action an adapter may export; `systems.verbs` refuses a `VERBS` holding any.
+HOST_ACTIONS = (COMMENT_ACTION, READBACK_ACTION)
 
 #: The alphabet of a system name, unanchored, for scanners that find a name inside text. A
 #: fragment rather than a compiled pattern so nobody matches with it and skips the length bound

@@ -19,6 +19,7 @@ from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163.test_ticket_flow import (
+    write_fault,
     COMMENT,
     KEY,
     PROXY_FAILED,
@@ -62,12 +63,17 @@ def _comment_leg(tmp_path, data_root, status: int, caplog):
 def test_t4_a_store_refusing_the_comment_is_reported_by_class_and_status(
         tmp_path, data_root, caplog, status, words):
     """A 4xx leaves an error receipt "the store refused" with the status (a 404 also "not found");
-    a 5xx is "the store could not be reached". O5, UpstreamFault status."""
+    a 5xx is "the store could not be reached". O5, UpstreamFault status. A 5xx may follow a store
+    that took the comment, so the case is read back once (#1374); the read meets the same 5xx, so
+    the receipt is `unknown`."""
     receipt, up = _comment_leg(tmp_path, data_root, status, caplog)
 
-    assert [s.method for s in up.seen] == ["POST"], "control: the store was asked"
+    read_back = status >= 500
+    assert [s.method for s in up.seen] == (["POST", "GET"] if read_back else ["POST"]), (
+        "control: the store was asked, and read back only after a 5xx")
     assert receipt is not None, "the refusal left no receipt"
     assert (receipt["ok"], receipt["key"]) == (False, KEY)
+    assert receipt["status"] == ("unknown" if read_back else "error"), receipt
     assert all(w in receipt["reason"].lower() for w in words), receipt
     assert H.CANARY_KEY not in json.dumps(receipt)
 
@@ -199,7 +205,8 @@ def test_t11_a_failure_inside_the_proxy_is_the_proxys_not_the_stores(tmp_path, d
     """#1404 O1: the proxy is reached but fails itself (its credential store unreachable, an
     exception nobody foresaw, its deadline spent before the store is called, its audit record
     unwritable): "the credential proxy failed: <cause>", never the store's wording. The audit case
-    may follow a store that accepted the comment, so the subject claims no non-delivery."""
+    may follow a store that accepted the comment, so the subject claims no non-delivery, and the
+    case is read back (#1374): the read meets the same unwritable audit, so it is `unknown`."""
     stores = {
         "openbao-unreachable": _DownOnce,
         "unforeseen": _BrokenStore,
@@ -215,13 +222,15 @@ def test_t11_a_failure_inside_the_proxy_is_the_proxys_not_the_stores(tmp_path, d
     receipt, tap, up = _proxied_leg(tmp_path, data_root, stores[kind], **deps_kw)
     assert tap.tokens, "positive control: the proxy was reached"
     assert receipt is not None, kind
-    assert (receipt["ok"], receipt["status"]) == (False, "error"), receipt
-    reason = receipt["reason"]
+    expected = "unknown" if kind == "audit-unwritable" else "error"
+    assert (receipt["ok"], receipt["status"]) == (False, expected), receipt
+    reason = write_fault(receipt)
     assert reason.startswith(PROXY_FAILED), (kind, reason)
     assert causes[kind] in reason, (kind, reason)
     assert not reason.startswith("the store"), (kind, reason)
     if kind == "audit-unwritable":
-        assert [s.path for s in up.seen] == [COMMENT], "positive control: the store was called"
+        assert [s.method for s in up.seen] == ["POST", "GET"], "one write, then one read (#1374)"
+        assert up.seen[0].path == COMMENT, "positive control: the store was called"
     else:
         assert up.seen == [], f"{kind}: the store was called"
 
@@ -231,7 +240,8 @@ def test_t12_a_store_the_proxy_saw_fail_keeps_the_store_wording(tmp_path, data_r
     """#1404 O2, control for t11: where the proxy's call to the store itself failed (nothing
     listening; the deadline cutting the call after the proxy's own legs spent part of it) the
     receipt's subject is the store and the proxy is not blamed. The subject is checked, not a
-    substring the cause could carry."""
+    substring the cause could carry. A deadline cut may follow a store that took the comment, so
+    its subject is read inside the `unknown` receipt's framing (#1374)."""
     if kind == "store-not-listening":
         dead = H.declaration(f"http://127.0.0.1:{H.free_port()}{STORE}", writes=WRITES)
         receipt, tap, _up = _proxied_leg(tmp_path, data_root, H.FakeStore, decl=dead)
@@ -246,7 +256,9 @@ def test_t12_a_store_the_proxy_saw_fail_keeps_the_store_wording(tmp_path, data_r
             upstream_timeout_sec=2.5, proxy_overhead_sec=0.5)
     assert tap.tokens, "positive control: the proxy was reached"
     assert receipt is not None, kind
-    reason = receipt["reason"]
+    assert receipt["status"] == ("unknown" if kind == "store-cut-by-the-deadline" else "error"), (
+        kind, receipt)
+    reason = write_fault(receipt)
     assert reason.startswith("the store could not be reached: "), (kind, reason)
     assert "credential proxy" not in reason, (kind, reason)
 
@@ -281,3 +293,94 @@ def test_t14_a_store_that_accepted_the_comment_and_then_dropped_the_reply_has_it
     assert tap.tokens, "positive control: the proxy was reached"
     assert receipt is not None
     assert (receipt["ok"], receipt["status"], receipt["key"]) == (True, "commented", KEY), receipt
+
+
+#: The fact a `TransportFault` carries (#1374 r2): may the request have reached the store?
+MAYBE_DELIVERED = "maybe_delivered"
+
+
+def _cannot_mint() -> str:
+    raise TransportFault("the token source could not mint a request token")
+
+
+def _write_fault(tmp_path, data_root, kind):
+    """The fault `ticket`'s comment write raises through the proxy in situation `kind`, and the
+    store calls the upstream saw."""
+    from defender.integrations import ticket_adapter
+
+    stores = {"openbao-unreachable": _DownOnce, "unforeseen": _BrokenStore,
+              "out-of-time-before-call": lambda sets: _Slow(sets, 0.5)}
+    deps_kw = {"out-of-time-before-call": {"upstream_timeout_sec": 0.2, "proxy_overhead_sec": 0.1},
+               "audit-unwritable": {"audit": H.FailingAudit()},
+               "store-cut-by-the-deadline": {"upstream_timeout_sec": 1.0,
+                                             "proxy_overhead_sec": 0.5}}.get(kind, {})
+    with H.upstream() as up:
+        decl = (H.declaration(f"http://127.0.0.1:{H.free_port()}{STORE}", writes=WRITES)
+                if kind == "store-not-listening" else _decl(up))
+        if kind == "store-cut-by-the-deadline":
+            up.replies[COMMENT] = lambda _seen: (time.sleep(3.0), (201, {}, b"{}"))[1]
+        elif kind == "store-503":
+            up.replies[COMMENT] = (503, {}, b'{"detail": "down"}')
+        else:
+            up.replies[COMMENT] = (201, {}, b"{}")
+        with _published(tmp_path / "forge", data_root, decl) as t:
+            store = stores.get(kind, H.FakeStore)({(t.tenant_id, SYSTEM): T.static_set()})
+            tok = T.token(t.tenant_id, {(SYSTEM, "rw")})
+            with A.proxy_for(t, store, **deps_kw) as (url, _tap):
+                if kind == "no-proxy-address":
+                    url = None
+                elif kind == "proxy-not-listening":
+                    url = f"http://127.0.0.1:{H.free_port()}"
+                kw = {}
+                if kind == "no-token-minted":
+                    tok, kw = None, {"token_source": _cannot_mint}
+                ctx = A.ctx_for(tmp_path / "ctx", T.run_record(t), url, tok, **kw)
+                with pytest.raises(TransportFault) as raised:
+                    ticket_adapter.add_case_comment(ctx, key=KEY, body="findings")
+        return raised.value, [s.path for s in up.seen]
+
+
+@pytest.mark.parametrize("kind", ["openbao-unreachable", "unforeseen", "out-of-time-before-call",
+                                  "store-not-listening", "no-proxy-address",
+                                  "proxy-not-listening", "no-token-minted"])
+def test_t15_a_write_that_never_reached_the_store_says_so(tmp_path, data_root, kind):
+    """#1374 r2: the proxy failing before it began the store call (its credential store down, an
+    unforeseen error, its deadline spent first), the store refusing the connection, or the run never
+    getting the request to the proxy: the fault says the write did not reach the store."""
+    fault, seen = _write_fault(tmp_path, data_root, kind)
+    assert seen == [], f"{kind}: the store was called"
+    assert getattr(fault, MAYBE_DELIVERED) is False, (kind, fault)
+
+
+@pytest.mark.parametrize("kind", ["audit-unwritable", "store-cut-by-the-deadline", "store-503"])
+def test_t16_a_write_that_may_have_reached_the_store_says_so(tmp_path, data_root, kind):
+    """#1374 r2, control for t15: once the proxy began the store call the write may have landed —
+    the answer withheld because the audit failed after the store took it, the store's reply cut by
+    the deadline, a 5xx — and the fault says so."""
+    fault, seen = _write_fault(tmp_path, data_root, kind)
+    assert seen == [COMMENT], f"positive control: {kind} called the store"
+    assert getattr(fault, MAYBE_DELIVERED) is True, (kind, fault)
+
+
+@pytest.mark.parametrize(("field", "maybe"), [({}, True), ({"sent": True}, True),
+                                              ({"sent": False}, False)])
+def test_t17_a_proxy_answer_that_does_not_say_whether_it_sent_may_have_reached_the_store(
+        field, maybe):
+    """#1374 P1: an answer from a proxy that predates the `sent` field says nothing about the
+    send, so the fault it carries may have reached the store; only an explicit false proves not.
+    The answer comes over real HTTP from a stand-in proxy giving that shape."""
+    from fastapi import FastAPI
+
+    from defender import _proxy_client
+
+    answer = {"status": 0, "headers": {}, "body": "", "fault": "TransportFault",
+              "detail": "the store's call failed", **field}
+    old_proxy = FastAPI()
+    old_proxy.post(_proxy_client.PROXY_PATH)(lambda: answer)
+    with H.serve_asgi(old_proxy) as base:
+        got = _proxy_client.proxy_call(base, "tok", system="case", method="POST",
+                                       url="http://store.invalid/c")
+    assert got.sent is maybe, (field, got)
+    with pytest.raises(TransportFault) as raised:
+        raise_proxy_fault(got.fault, got.detail, from_system=got.from_system, sent=got.sent)
+    assert getattr(raised.value, MAYBE_DELIVERED) is maybe, (field, raised.value)
