@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unicodedata
 
-from defender._io import json_safe, use_utf8_stdio
+from defender._io import READ_LIMIT, json_safe, use_utf8_stdio
 
 EXIT_OK = 0
 EXIT_QUERY_ERROR = 1
@@ -21,6 +21,12 @@ EXIT_INPUT_ERROR = 2
 EXIT_NO_RUNTIME = 69
 
 _MAX_OBJECT_SIZE = 1 << 30
+
+#: The engine's `maximum_object_size`. It reserves buffers of twice this up front and counts them
+#: against a memory limit it derives from the box's cap, used or not, so 1 GiB here refuses every
+#: query in a capped box, however small the payload. `READ_LIMIT` is the most a box can write to
+#: a file.
+_ENGINE_OBJECT_SIZE = READ_LIMIT
 
 #: The form that binds `h` to the unnested struct on the search-hits shape, shared by
 #: `--help`'s epilog and the query-error hint.
@@ -504,7 +510,7 @@ def _load_rows(con, rows: list, names: list[str], types: list[tuple[str, bool]],
     columns = "{" + ", ".join(f"'c{k}': '{typ}'" for k, (typ, _) in enumerate(types)) + "}"
     con.execute(
         "CREATE TABLE _rows AS SELECT * FROM read_json(?, format='newline_delimited', "
-        f"columns={columns}, maximum_object_size={_MAX_OBJECT_SIZE})",
+        f"columns={columns}, maximum_object_size={_ENGINE_OBJECT_SIZE})",
         [ndjson],
     )
     _lock(con)
@@ -523,7 +529,7 @@ def _inferred_load(con, raw: bytes, scratch: str) -> None:
     try:
         con.execute(
             "CREATE TABLE data AS SELECT * FROM "
-            f"read_json_auto(?, maximum_object_size={_MAX_OBJECT_SIZE})",
+            f"read_json_auto(?, maximum_object_size={_ENGINE_OBJECT_SIZE})",
             [payload_path],
         )
     except duckdb.Error as exc:

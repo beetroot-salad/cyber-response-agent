@@ -116,6 +116,11 @@ class Rig:
         ctx = A.ctx_for(self.tmp, self.record(), self.url, self.token())
         return self.module(roster).add_case_comment(ctx, key=key, body=body)
 
+    def read(self, roster: Any, key: str) -> Any:
+        """The adapter's read of a case's comments called straight, as the record leg calls it."""
+        ctx = A.ctx_for(self.tmp, self.record(), self.url, self.token())
+        return getattr(self.module(roster), C.READBACK_ACTION)(ctx, key=key)
+
     def leg(self, name: str, key: str | None = C.TICKET_KEY) -> dict[str, Any] | None:
         """The record leg at run end over a run whose record names `key`; its receipt."""
         rec = C.CaseRunRecorder(self.tmp / name)
@@ -133,7 +138,7 @@ class Rig:
 def files_for(v: Vendor, base: str, *, env: str | None = None,
               access: bool = True, leg: bool = False) -> dict[str, str]:
     """Repo files `/connect` leaves for `v`: config.env, access.yaml with the one write route,
-    the case-record file and the alert mapping carrying `case_key`."""
+    the case-record file (#1345 O5: the alert mapping is a database row, not a repo file; the record leg reads the run's record)."""
     decl = H.declaration(base, scheme=H.basic_scheme(), writes=(v.write,))
     files = A.system_files(v.system, decl, env_extra=v.env)
     if env is not None:
@@ -142,15 +147,14 @@ def files_for(v: Vendor, base: str, *, env: str | None = None,
         files.pop(ACCESS_FILE.format(system=v.system))
     if leg:
         files[f"settings/{C.CASE_RECORD_REL}"] = C.case_record_text(v.system)
-        files["settings/alert-mapping.yaml"] = C.alert_mapping_text()
     return files
 
 
 @contextlib.contextmanager
 def planted(tmp: Path, data_root: Path, v: Vendor, *, env: str | None = None,
             access: bool = True, leg: bool = False) -> Iterator[Rig]:
-    """`v` configured as `/connect` leaves it (with `leg`, also its case-record file and the
-    alert mapping's `case_key`, which only the record-leg tests need), the real proxy served in front of a fake upstream
+    """`v` configured as `/connect` leaves it (with `leg`, also its case-record file,
+    which only the record-leg tests need), the real proxy served in front of a fake upstream
     holding the stored basic credential. Unless a test says otherwise the upstream answers 200."""
     from defender.tests.integrations.credential_proxy_1163._target import proxy
 

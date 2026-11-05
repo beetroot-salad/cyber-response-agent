@@ -141,6 +141,7 @@ def _seed(twin: Any, root: Path, tenant: str, state: str, origin: str | None) ->
                             origin=_active1214._origin_of(root, tenant, origin))
     if inspect.isawaitable(added):
         asyncio.run(_active1214._await(added))
+    _active1214.seed_twin(twin, tenant, _active1214.PLANTED_ALERT_MAPPING)  # #1345: today's mapping, as a seeded row
 
 
 def main(argv: Sequence[str] | None = None, *, entries: Mapping[str, Callable[..., int]] | None = None) -> int:

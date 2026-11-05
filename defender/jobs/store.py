@@ -16,17 +16,28 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import text as sql
 from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender._text import postgres_can_hold
 from defender.database import async_engine, sessions
-from defender.records.formats import AlertId, InvestigationId, TenantId, admit
+from defender.records.formats import (
+    ALERT_MAPPING_MISSING,
+    AlertId,
+    AlertMapping,
+    InvestigationId,
+    TenantId,
+    admit,
+    check_mapping,
+    derive_display,
+    derive_display_of_stored,
+)
 
 from .audit import SYSTEM, announce
 from .errors import Conflict, NotFound, UnknownReference, UnstorableText
-from defender.tenancy.models import TenantRecord
+from defender.tenancy.models import AlertMappingRow, TenantRecord
 
 from .models import (
     LIVE,
@@ -40,6 +51,11 @@ from .models import (
     stored_alert,
 )
 
+#: The first key of the per-tenant lock that serializes storing an alert with replacing its tenant's alert mapping
+#: (#1345 M3): a fixed int4 of its own, not the lifecycle's `LOCK_NAMESPACE`, which the lifecycle holds for whole steps.
+MAPPING_LOCK_NAMESPACE = 1345
+#: Alerts re-derived per read of a replace's recompute.
+_RECOMPUTE_BATCH = 200
 #: How long a claim's lease runs before it lapses unless its holder renews it (#1343 B1).
 LEASE_SECONDS = 30.0
 #: Attempts of one request: the third attempt that lapses is not retried (#1343 B6).
@@ -125,22 +141,34 @@ class JobStore:
 
     # --- alerts -------------------------------------------------------------------------
 
+    @staticmethod
+    async def _lock_mappings_of(s: AsyncSession, tenant_id: TenantId) -> None:
+        """Hold the tenant's mapping lock until this transaction ends (#1345 M3): taken by the alert insert and by the
+        replace before either reads or writes the mapping or touches an alert row, so an alert never keeps a
+        value derived from a mapping the replace has superseded. Another tenant is never held up."""
+        await s.execute(sql("SELECT pg_advisory_xact_lock(:ns, hashtext(CAST(:tenant AS text)))"),
+                        {"ns": MAPPING_LOCK_NAMESPACE, "tenant": str(tenant_id)})
+
     async def insert_alert(  # noqa: PLR0913 — the ratified signature
         self, tenant_id: TenantId, *, vendor: str, vendor_ticket_id: str, fired_at: _dt.datetime,
-        changed_at: _dt.datetime, received_at: _dt.datetime, title: str, description: str, raw: bytes,
+        changed_at: _dt.datetime, received_at: _dt.datetime, raw: bytes,
     ) -> StoredAlert:
-        """Store an alert's exact bytes. `AlertRefused` for anything alert admission refuses; `Conflict`
+        """Store an alert's exact bytes, with the title and description its tenant's mapping derives from them
+        (null while the tenant has no mapping). `AlertRefused` for anything alert admission refuses; `Conflict`
         for a second alert with this vendor's ticket id; `UnknownReference` for a tenant with no row;
         `UnstorableText` for a text field PostgreSQL cannot hold."""
-        _refuse_unstorable_text(vendor=vendor, vendor_ticket_id=vendor_ticket_id, title=title,
-                                description=description)
-        admit(raw)
+        _refuse_unstorable_text(vendor=vendor, vendor_ticket_id=vendor_ticket_id)
+        admitted = admit(raw)
         row = AlertRow(
             id=AlertId.mint(), tenant_id=tenant_id, vendor=vendor, vendor_ticket_id=vendor_ticket_id,
-            fired_at=fired_at, changed_at=changed_at, received_at=received_at, title=title,
-            description=description, raw=raw)
+            fired_at=fired_at, changed_at=changed_at, received_at=received_at, title=None,
+            description=None, raw=raw)
         try:
             async with self._tx() as s:
+                await self._lock_mappings_of(s, tenant_id)
+                mapping = await self._mapping_in(s, tenant_id)
+                if mapping is not None:
+                    row.title, row.description = derive_display(admitted.document, mapping)
                 s.add(row)
         except _Refused as refused:
             if refused.sqlstate == _FOREIGN_KEY_VIOLATION:
@@ -155,6 +183,58 @@ class JobStore:
             row = (await s.execute(select(AlertRow).where(
                 AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id))).scalars().first()
         return None if row is None else stored_alert(row)
+
+    # --- the alert mapping (#1345) ------------------------------------------------------
+
+    @staticmethod
+    async def _mapping_in(s: AsyncSession, tenant_id: TenantId) -> AlertMapping | None:
+        row = (await s.execute(select(AlertMappingRow).where(AlertMappingRow.tenant_id == tenant_id))).scalars().first()
+        return None if row is None else row.as_mapping()
+
+    async def get_alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
+        """The tenant's alert mapping, `None` until one is saved."""
+        async with self._tx() as s:
+            return await self._mapping_in(s, tenant_id)
+
+    async def put_alert_mapping(self, tenant_id: TenantId, mapping: AlertMapping, *, actor: str) -> bool:
+        """Replace the tenant's alert mapping whole and re-derive the title and description of every alert of the
+        tenant in the same transaction (M1, M3): the one writer. `created` when this is the tenant's first save.
+        `AlertMappingFault` naming the entry for an invalid mapping (a re-check for callers that are not the API),
+        `UnknownReference` for a tenant with no row. A database error fails the whole replace."""
+        check_mapping(dict(mapping.paths))
+        try:
+            async with self._tx() as s:
+                await self._lock_mappings_of(s, tenant_id)
+                created = await s.get(AlertMappingRow, tenant_id) is None
+                await s.merge(AlertMappingRow.of(tenant_id, mapping))
+                await s.flush()
+                await self._re_derive(s, tenant_id, mapping)
+        except _Refused as refused:
+            if refused.sqlstate == _FOREIGN_KEY_VIOLATION:
+                raise UnknownReference(f"no tenant {tenant_id!r}") from None
+            raise
+        announce("alert_mapping.update", actor=actor, tenant_id=tenant_id, target=tenant_id)
+        return created
+
+    @staticmethod
+    async def _re_derive(s: AsyncSession, tenant_id: TenantId, mapping: AlertMapping) -> None:
+        """Every alert of the tenant, from its stored bytes through `mapping` (by JSON parse only, so one alert's
+        content never fails the replace), a batch at a time; a row already right is not written."""
+        after = None
+        while True:
+            query = select(AlertRow.id, AlertRow.title, AlertRow.description, AlertRow.raw).where(
+                AlertRow.tenant_id == tenant_id).order_by(AlertRow.id).limit(_RECOMPUTE_BATCH)
+            if after is not None:
+                query = query.where(AlertRow.id > after)
+            batch = (await s.execute(query)).all()
+            for alert_id, title, description, raw in batch:
+                derived = derive_display_of_stored(bytes(raw), mapping)
+                if derived != (title, description):
+                    await s.execute(update(AlertRow).where(AlertRow.id == alert_id).values(
+                        title=derived[0], description=derived[1]).execution_options(synchronize_session=False))
+            if len(batch) < _RECOMPUTE_BATCH:
+                return
+            after = batch[-1][0]
 
     # --- reads --------------------------------------------------------------------------
 
@@ -177,7 +257,8 @@ class JobStore:
         """Start an investigation of the alert, or answer the one this request already has (#1081
         §4.1): the latest attempt under the key; else the alert's live investigation, without
         recording this key; else a new attempt 1. `created` only when this call inserted the row.
-        `UnknownReference` for an alert this tenant lacks."""
+        `UnknownReference` for an alert this tenant lacks; `Conflict` naming the missing mapping when a new attempt is
+        due and the tenant has saved no alert mapping (#1345 O4)."""
         _refuse_unstorable_text(request_key=request_key)
         async with self._tx() as s:
             locked = (await s.execute(select(AlertRow.id).where(
@@ -195,6 +276,8 @@ class JobStore:
                 InvestigationRow.stage.in_(LIVE)))).scalars().first()
             if live is not None:
                 return investigation_record(live), False
+            if await self._mapping_in(s, tenant_id) is None:  # never deleted, so no lock (#1345 O4)
+                raise Conflict(ALERT_MAPPING_MISSING)
             row = InvestigationRow(
                 id=InvestigationId.mint(), tenant_id=tenant_id, alert_id=alert_id, request_key=request_key,
                 attempt=1, stage="queued", created_at=self._clock(), cost_usd=0.0)

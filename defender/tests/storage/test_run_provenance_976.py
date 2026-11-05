@@ -1,5 +1,6 @@
 """A run records the commit it was made against, against real throwaway repos; the record never says something false."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -324,7 +325,7 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
         planted.append(run_dir)
 
     run = run_common.materialize_run(
-        alert, tenant=tenant_with_runs_io(tenant, PlantAfterRunDirIo(obstruct)))
+        alert, mapping=planted_mapping(), tenant=tenant_with_runs_io(tenant, PlantAfterRunDirIo(obstruct)))
 
     assert planted, "the obstruction was never planted: setup made no run dir through the seam"
     assert "could not stamp" in capsys.readouterr().err
@@ -341,7 +342,7 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     runs = location_path(tenant.runs)
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
-    run_dir = run_common.materialize_run(alert, tenant=tenant).run_dir
+    run_dir = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=tenant).run_dir
     rec = _provenance.read_provenance(RunPaths(run_dir).provenance)
     assert rec is not None
     # The suite runs inside this repo, so the capture is a real one: a sha, or an explicit
@@ -352,7 +353,7 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
     before = sorted(p.name for p in runs.iterdir())
     with pytest.raises(TypeError):
-        run_common.materialize_run(alert, tenant=tenant, provenance=handed)
+        run_common.materialize_run(alert, mapping=planted_mapping(), tenant=tenant, provenance=handed)
     assert sorted(p.name for p in runs.iterdir()) == before
 
 

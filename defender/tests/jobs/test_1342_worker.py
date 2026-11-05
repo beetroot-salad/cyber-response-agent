@@ -62,11 +62,13 @@ from defender.tests.support.jobs._jobs1342 import (
     register_tenant,
     restate_tenant,
     row,
+    seed_alert_mapping,
     session_db,
     session_pointer,
     tree,
 )
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._mapping1345 import mapping_value
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 _LINUX_ONLY = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc/<pid>")
@@ -267,6 +269,36 @@ async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_no
     assert {k: v for k, v in tree(world["root"]).items() if k in before} == before
     assert tree(world["other_runs"]) == other_before
 
+
+
+@pytest.mark.parametrize(("mapping", "label"), [
+    ({"title": "rule.description"}, TITLE),   # control: a mapped title is the label
+    ({"title": "a"}, "\u00e9"),                 # whatever the mapping derives, not a fixed string
+    ({"title": None, "description": "rule.id"}, "T-1"),   # title unmapped: the vendor ticket id
+    ({"title": "no.such.path"}, "T-1"),        # title absent from the alert
+    ({"title": "z"}, "T-1"),                   # title a float: no value
+    ({}, "T-1"),
+], ids=["mapped", "other-path", "unmapped", "absent", "float", "empty-mapping"])
+async def test_1345_o2_the_launch_label_is_the_alerts_title_or_its_vendor_ticket_id_when_the_title_is_null(
+        world, mapping, label):
+    """The launch record's label is the alert's stored title, else the vendor's ticket id (`T-1`). (#1345 O2, worker)"""
+    seed_alert_mapping(world["dsn"], T1, mapping)
+    inv, _ = await _run_one(world, _child(world))
+
+    launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
+    assert launch["label"] == label
+
+
+async def test_1345_o2_the_label_is_the_title_at_launch_not_at_queueing(world):
+    """A mapping saved after the investigation is queued and before it launches decides the label: the launch reads the
+    alert as it then is. (#1345 O2, M3)"""
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        await store.put_alert_mapping(T1, mapping_value({"title": "a"}), actor="u-1")
+        await _worker(world, store, _child(world)).drain()
+
+    launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
+    assert launch["label"] == "\u00e9"
 
 
 @pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES, ZWNBSP_ALERT_BYTES,
@@ -4038,11 +4070,11 @@ async def test_b7_a_worker_whose_store_calls_hit_an_outage_takes_nothing_over_fo
     assert store.passes[2] - store.passes[1] < lease, "passes did not resume at their own cadence"
 
 
-async def test_b1_a_worker_cut_off_from_the_store_stops_its_child_when_the_lease_runs_out_and_hands_the_row_back(world):
-    """Renewals fail from the child's start: the child is told to stop about one lease after the last extension, not before, though no store answered; the row is handed back once it can be. (#1343 review, B1, B11)"""
+async def test_b1_t2_a_worker_cut_off_past_the_lease_keeps_its_child_and_the_next_renewal_revives_the_row(world):
+    """CONFLICT-UPDATED: renewals fail for longer than the lease: the child is not told to stop and the row is not handed back, so an outage uses no attempt; when the store answers, the late renewal covers the row (nobody took it over) and the run ends as its own. (T2, r5 item 14, B1)"""
     lease = 2.0
     release = world["tmp"] / "release"
-    child = _child(world, files=_committed(), wait_for=release)
+    child = _child(world, files=_committed(), wait_for=release, term="mark", term_mark=_term_mark(world))
     dsn = world["dsn"]
     async with job_store(dsn, lease=lease) as inner:
         store = FaultableStore(inner)
@@ -4051,20 +4083,21 @@ async def test_b1_a_worker_cut_off_from_the_store_stops_its_child_when_the_lease
         try:
             await _until(lambda: child.seen(inv), "the child")
             store.renew_down = True
-            downed = time.monotonic()
-            pid = child.seen(inv)["pid"]
-            await _until(lambda: _gone(pid), "the cut-off worker to stop its child", timeout=15)
-            took = time.monotonic() - downed
-            await _until(lambda: accounting_written(dsn, inv) is not None, "the hand-back")
+            await _until(lambda: lease_left(dsn, inv) < -0.5, "the lease to lapse with renewals failing", timeout=15)
+            assert not _termed(world, inv), "a lapsed lease stopped the child"
+            assert not _gone(child.seen(inv)["pid"]), "a lapsed lease ended the child"
+            assert accounting_written(dsn, inv) is None, "the row was handed back"
+            store.renew_down = False
+            await _until(lambda: lease_left(dsn, inv) > 0, "the late renewal to land")
+            release.touch()
+            await _until(lambda: row(dsn, inv)["stage"] == "completed", "the run to complete", timeout=15)
+            assert not _termed(world, inv), "the child was stopped after the store came back"
         finally:
             release.touch()
             _kill_whatever_remains(child.seen(inv))
             if not serving.done():
                 os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
-    assert took >= lease / 2, f"the child was stopped {took:.2f} s after renewals failed, well inside its lease"
-    assert row(dsn, inv)["stage"] in ("running", "failed"), "the row was given an ending of its own"
-    assert row(dsn, inv)["failure_reason"] in (None, "lease_lapsed"), "the row was given an ending of its own"
 
 
 class _RenewalThatHangs:
@@ -4085,11 +4118,11 @@ class _RenewalThatHangs:
         return await self._store.renew(held, **kw)
 
 
-async def test_b1_a_renewal_that_hangs_counts_as_failed_so_claims_wait_and_the_child_is_stopped_at_the_leases_end(world):
-    """One store call that never answers does not stall the worker's count: it fails at `store_call_limit`, so nothing new is claimed, the next renewal is tried, and the child stops when the lease runs out. (#1343 review, B1, B5)"""
+async def test_b1_t2_a_renewal_that_hangs_counts_as_failed_so_claims_wait_and_the_child_keeps_running(world):
+    """CONFLICT-UPDATED: one store call that never answers fails at `store_call_limit`, so nothing new is claimed and the next renewal is tried; the child carries on past the lease, and when renewals answer again the queued row runs. (T2, B1, B5)"""
     lease = 2.0
     release = world["tmp"] / "release"
-    child = _child(world, files=_committed(), wait_for=release)
+    child = _child(world, files=_committed(), wait_for=release, term="mark", term_mark=_term_mark(world))
     dsn = world["dsn"]
     async with job_store(dsn, lease=lease) as inner:
         store = _RenewalThatHangs(inner)
@@ -4100,9 +4133,12 @@ async def test_b1_a_renewal_that_hangs_counts_as_failed_so_claims_wait_and_the_c
             store.hang = True
             await _until(lambda: store.hung >= 2, "a hung renewal to fail and the next to be tried", timeout=10)
             later = await _queued(inner, ticket="T-2", key="k2")
-            pid = child.seen(inv)["pid"]
-            await _until(lambda: _gone(pid), "the child to be stopped at the lease's end", timeout=15)
+            await _until(lambda: lease_left(dsn, inv) < -0.5, "the lease to lapse with renewals hanging", timeout=15)
+            assert not _termed(world, inv), "a lapsed lease stopped the child"
             assert row(dsn, later)["stage"] == "queued", "a row was claimed while renewals were failing"
+            store.hang = False
+            await _until(lambda: child.seen(later), "the queued row to run once renewals answer", timeout=15)
+            assert not _termed(world, inv), "the child was stopped after the store came back"
         finally:
             release.touch()
             _kill_whatever_remains(child.seen(inv))
@@ -4177,7 +4213,7 @@ async def test_b11_a_service_cancelled_as_its_store_call_finishes_still_ends_so_
     async with job_store(world["dsn"]) as inner:
         store = _CallFinishingAsItIsCancelled(inner)
         worker = _worker(world, store, _child(world))
-        worker._held["x"] = Held(SimpleNamespace(investigation_id="x"), lease_until=time.monotonic() + 30)
+        worker._held["x"] = Held(SimpleNamespace(investigation_id="x"))
         task = asyncio.create_task(worker._renewal_loop() if service == "renewal" else worker._takeover_loop())
         await asyncio.wait_for(store.entered.wait(), timeout=10)
         store.release.set()

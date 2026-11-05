@@ -39,15 +39,17 @@ _HEAD = struct.Struct(">cI")
 
 @dataclass(frozen=True)
 class FinalRecord:
-    """The proxy's one record of how a request ended, last in the reply. All six fields are
+    """The proxy's one record of how a request ended, last in the reply. Every field is
     required: no arm of the proxy and no fake of it can leave one out. `body_whole` is true if
-    and only if the body frames carry the complete body (an empty one included)."""
+    and only if the body frames carry the complete body (an empty one included). `sent` is false
+    only when the proxy never began the system's call or never connected to it (#1374)."""
 
     status: int | None
     headers: Mapping[str, str]
     fault: str | None
     detail: str | None
     system_side: bool
+    sent: bool
     body_whole: bool
 
 
@@ -76,7 +78,7 @@ def encode_final(record: FinalRecord) -> bytes:
 def decode_reply(raw: bytes) -> DecodedReply:
     """The frames of the whole reply `raw`. `ValueError` for anything malformed: a frame cut
     short, an unknown tag, no final frame, anything after it, a final record that is not exactly
-    the six fields. Nothing is allocated from a length prefix."""
+    its fields. Nothing is allocated from a length prefix."""
     chunks: list[bytes] = []
     at, end = 0, len(raw)
     while at < end:
@@ -104,14 +106,14 @@ def _record_of(payload: bytes) -> FinalRecord:
     except (UnicodeDecodeError, ValueError, RecursionError):
         raise ValueError("the final frame is not JSON") from None
     if not isinstance(doc, dict) or set(doc) != set(_FIELDS):
-        raise ValueError("the final record is not exactly its six fields")
+        raise ValueError("the final record is not exactly its fields")
     status, headers, detail = doc["status"], doc["headers"], doc["detail"]
     if (isinstance(status, bool) or not (status is None or isinstance(status, int))
             or not isinstance(headers, dict) or not all(
                 isinstance(k, str) and isinstance(v, str) for k, v in headers.items())
             or not (doc["fault"] is None or isinstance(doc["fault"], str))
             or not (detail is None or isinstance(detail, str))
-            or not isinstance(doc["system_side"], bool) or not isinstance(doc["body_whole"], bool)):
+            or not all(isinstance(doc[k], bool) for k in ("system_side", "sent", "body_whole"))):
         raise ValueError("a field of the final record has the wrong type")
     return FinalRecord(**doc)
 
@@ -128,6 +130,10 @@ class ProxyAnswer:
     detail: str
     #: The proxy marked a status-less refusal as the target system's call failing (#1404).
     system_side: bool = False
+    #: May the request have reached the target system (#1374)? False only when the proxy says it
+    #: never began the system's call or never connected to it; an older proxy that does not say is
+    #: taken as "may".
+    sent: bool = True
 
     @property
     def from_system(self) -> bool:
@@ -146,6 +152,17 @@ def _the_proxys_own() -> Iterator[None]:
         raise
 
 
+@contextlib.contextmanager
+def _before_sending() -> Iterator[None]:
+    """Every transport fault raised inside happened before the request left the run, so it never
+    reached the system (`maybe_delivered` false, #1374)."""
+    try:
+        yield
+    except TransportFault as fault:
+        fault.maybe_delivered = False
+        raise
+
+
 @_the_proxys_own()
 def proxy_call(  # noqa: PLR0913 — one request's per-call state
     proxy_url: str | None, token: str | None, *, system: str, method: str, url: str,
@@ -158,7 +175,8 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
     the proxy's own (`proxy_own`), when no address or token was handed to the caller, the proxy
     cannot be reached, its reply breaks, or its answer is not the proxy's."""
     if not proxy_url or not token:
-        raise TransportFault("no credential proxy address or request token was handed to this call")
+        raise TransportFault("no credential proxy address or request token was handed to this call",
+                             maybe_delivered=False)
     status_code, kind, raw = _post(proxy_url, token, {
         "system": system, "method": method, "url": url, "headers": dict(headers or {}),
         "body": body, "timeout_sec": timeout_sec}, caller_wait_sec(timeout_sec))
@@ -174,7 +192,8 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
     return ProxyAnswer(
         status=final.status or 0, headers=dict(final.headers),
         body=b"".join(reply.chunks).decode("utf-8", "replace") if final.body_whole else "",
-        fault=final.fault, detail=final.detail or "", system_side=final.system_side)
+        fault=final.fault, detail=final.detail or "", system_side=final.system_side,
+        sent=final.sent)
 
 
 def _post(proxy_url: str, token: str, doc: Mapping[str, object],
@@ -187,7 +206,12 @@ def _post(proxy_url: str, token: str, doc: Mapping[str, object],
             headers={"Authorization": f"Bearer {token}"}, json=doc, timeout=timeout)
         response = stream.__enter__()
     except httpx.HTTPError as e:
-        raise TransportFault(f"credential proxy unreachable: {type(e).__name__}") from None
+        # Never connected to the proxy: the request went nowhere (#1374). Any later failure may
+        # follow the proxy's call to the system.
+        raise TransportFault(
+            f"credential proxy unreachable: {type(e).__name__}",
+            maybe_delivered=not isinstance(e, httpx.ConnectError | httpx.ConnectTimeout),
+        ) from None
     try:
         kind = response.headers.get("content-type", "").split(";")[0].strip().lower()
         return response.status_code, kind, b"".join(response.iter_raw())
@@ -231,7 +255,7 @@ def proxy_exchange(
     """One JSON request to `system` through the credential proxy, with the token `ctx` presents;
     the proxy's answer as it came. A fault raised before the answer (no token minted, the proxy
     not reached) is the proxy's own (`proxy_own`)."""
-    with _the_proxys_own():
+    with _the_proxys_own(), _before_sending():
         token = token_of(ctx)
     return proxy_call(
         ctx.proxy_url, token, system=system, method=method, url=url,

@@ -85,7 +85,8 @@ class KnowledgeFolder(type(Path())):  # type: ignore[misc]
 
     @property
     def directory(self) -> Any:
-        return tenant_directory(self.parent.parent, self.parent.name)
+        mapping = {"alert_mapping": self.alert_mapping} if hasattr(self, "alert_mapping") else {}  # #1345 (place_tenant)
+        return tenant_directory(self.parent.parent, self.parent.name, **mapping)
 
 
 def ensure_d9_tenant(tenant_id: str = D9_TENANT_ID) -> str:

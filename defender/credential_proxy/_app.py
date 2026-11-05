@@ -4,10 +4,10 @@
 `{system, method, url, headers, body}` (`headers` a name -> value object, `body` text or null).
 The answer is always HTTP 200 in the reply format of `defender._proxy_client` (#1412): the
 upstream's body as body frames, passed on as it arrives, then one final record `{status, headers,
-fault, detail, system_side, body_whole}`. `status` is the upstream's status (null when nothing was
+fault, detail, system_side, sent, body_whole}`. `status` is the upstream's status (null when nothing was
 sent), `headers` its headers, `body_whole` whether the frames carried its whole body; `fault` is
 null or the fault class the adapter raises (`ConfigFault`, `ConfinementFault`, `UpstreamFault`,
-`TransportFault`); `detail` says why and never holds a secret value. Nothing is an answer until
+`TransportFault`); `detail` says why and never holds a secret value; `system_side` marks a status-less failure of the system's own call (#1404); `sent` is false only when the proxy never began the system's call or never connected to it, so the request cannot have reached it (#1374). Nothing is an answer until
 the final record: the run discards the frames unless it says they are whole. The proxy does not
 search or alter a reply for credentials; an upstream's echo reaches the run.
 
@@ -26,6 +26,7 @@ For each request (design "Proxy", in order, nothing sent or read before its chec
 7. audit, before the final record: if it cannot be written the answer is withheld (A13)."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import math
@@ -64,7 +65,7 @@ from defender.credential_proxy._credentials import (
 from defender.credential_proxy._deadline import Deadline, answering
 from defender.credential_proxy._openbao import OpenBaoStore, TransitVerifier
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, UPSTREAM, Refused
-from defender.credential_proxy._reply import public_trust, stream_reply
+from defender.credential_proxy._reply import StreamedReply, public_trust, stream_reply
 from defender.credential_proxy._scope import Target, check_route, locate
 from defender.credential_proxy._tokens import Claims, TokenVerifier, split_token
 
@@ -160,6 +161,9 @@ class _Trail:
     method: str | None = None
     path: str | None = None
     outcome: str | None = None
+    #: The proxy began the target system's call and did not see its connect fail: the request may
+    #: have reached the system (#1374). Not audited; stamped on every final record as `sent`.
+    sent: bool = False
 
     def entry(self, fault: str | None) -> dict[str, Any]:
         record = {key: getattr(self, key) for key in AUDIT_KEYS}
@@ -172,7 +176,7 @@ def _refused_answer(fault: str, detail: str, *, system_side: bool = False) -> Fi
     that is the target system's (its call failed, #1404); unmarked, the refusal is the proxy's
     own."""
     return FinalRecord(status=None, headers={}, fault=fault, detail=detail,
-                       system_side=system_side, body_whole=False)
+                       system_side=system_side, sent=False, body_whole=False)
 
 
 class _Proxy:
@@ -215,9 +219,10 @@ class _Proxy:
         except Exception as e:  # noqa: BLE001 — A13: any failure to audit fails the request closed
             _logger.error("the audit record could not be written (%s: %s); the answer is "
                           "withheld", type(e).__name__, e)
-            return _refused_answer(TRANSPORT, "the proxy's audit could not be written; the "
-                                              "answer is withheld")
-        return answer
+            answer = _refused_answer(TRANSPORT, "the proxy's audit could not be written; the "
+                                                "answer is withheld")
+        # Decided once, at the one send boundary (`_sent`), whatever answer follows (#1374).
+        return dataclasses.replace(answer, sent=trail.sent)
 
     def _proxied(self, authorization: str | None, raw: bytes | None, send: Send,
                  trail: _Trail, began: float) -> FinalRecord:
@@ -312,10 +317,14 @@ class _Proxy:
             trail.outcome = f"sent {status}"
             answered.append(status)
 
-        try:
-            reply = deadline.run(what, lambda: stream_reply(
+        async def call() -> Any:
+            trail.sent = True  # here, past the deadline's own check before the leg
+            return await stream_reply(
                 trust, asked.method, target.url, cap=cap, timeout=timeout, sink=send,
-                on_status=sent, headers=headers, content=content), system_side=True)
+                on_status=sent, headers=headers, content=content)
+
+        try:
+            reply = deadline.run(what, call, system_side=True)
         except Refused as cut:
             if answered:
                 return _broken_reply(asked.system, answered[0], cut.detail)
@@ -323,31 +332,39 @@ class _Proxy:
         except httpx.TransportError as e:
             if answered:
                 return _broken_reply(asked.system, answered[0], type(e).__name__)
+            # Never connected: nothing reached the system.
+            trail.sent = not isinstance(e, httpx.ConnectError | httpx.ConnectTimeout)
             raise Refused(TRANSPORT, f"{asked.system} could not be reached or did not answer "
                                      f"({type(e).__name__})", system_side=True) from None
-        status, withheld = reply.status, reply.withheld
-        fault = _fault_of(status)
-        if fault is None:
-            detail = None if withheld is None else f"{asked.system} answered {withheld}"
-            fault = None if withheld is None else UPSTREAM
-        else:
-            detail = f"{asked.system} answered {status}" + (
-                "" if withheld is None else f" with {withheld}, withheld")
-        if reply.too_large and fault == UPSTREAM and status < 300:
-            detail = f"{detail}; narrow the query so its reply is smaller"
-        shown: dict[str, str] = {}
-        for name, value in reply.headers:
-            if name.lower() in _REPLY_HOP_HEADERS:
-                continue
-            shown[name] = f"{shown[name]}, {value}" if name in shown else value
-        return FinalRecord(status=status, headers=shown, fault=fault, detail=detail,
-                           system_side=False, body_whole=withheld is None)
+        return _record_of_reply(asked.system, reply)
+
+
+def _record_of_reply(system: str, reply: StreamedReply) -> FinalRecord:
+    """The final record of a reply that came to its end or was withheld: the upstream's status,
+    its headers less the hop's, the fault its status makes, and whether the body went whole."""
+    status, withheld = reply.status, reply.withheld
+    fault = _fault_of(status)
+    if fault is None:
+        detail = None if withheld is None else f"{system} answered {withheld}"
+        fault = None if withheld is None else UPSTREAM
+    else:
+        detail = f"{system} answered {status}" + (
+            "" if withheld is None else f" with {withheld}, withheld")
+    if reply.too_large and fault == UPSTREAM and status < 300:
+        detail = f"{detail}; narrow the query so its reply is smaller"
+    shown: dict[str, str] = {}
+    for name, value in reply.headers:
+        if name.lower() in _REPLY_HOP_HEADERS:
+            continue
+        shown[name] = f"{shown[name]}, {value}" if name in shown else value
+    return FinalRecord(status=status, headers=shown, fault=fault, detail=detail,
+                       system_side=False, sent=True, body_whole=withheld is None)
 
 
 def _broken_reply(system: str, status: int, why: str) -> FinalRecord:
     """The system answered `status` and then its reply broke (#1404): the status stands, so a
     write it accepted is not reported as never made; no body counts."""
-    return FinalRecord(status=status, headers={}, fault=TRANSPORT, system_side=False,
+    return FinalRecord(status=status, headers={}, fault=TRANSPORT, system_side=False, sent=True,
                        detail=f"{system} answered {status} but its reply did not arrive whole ({why})",
                        body_whole=False)
 

@@ -240,6 +240,13 @@ def agent_comment_tag(run_id: str) -> str:
     return f"{AGENT_TAG_PREFIX}{run_id}]"
 
 
+def carries_agent_tag(text: str, run_id: str) -> bool:
+    """Is `text` the comment `run_id` wrote (#1374 P3)? One of its lines is that run's tag line,
+    which stores keep whatever they do to a body; the tag quoted inside a sentence is not."""
+    tag = agent_comment_tag(run_id)
+    return any(line.strip() == tag for line in text.splitlines())
+
+
 def posted_comment(body: str, *, run_id: str) -> str:
     """@owns comment body — the body as it reaches the store: the agent tag line naming
     `run_id`, then the comment the template rendered, the whole bounded to `WIRE_BOUND_BYTES`.

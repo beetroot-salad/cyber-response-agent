@@ -804,6 +804,7 @@ def test_o8_d4_acceptance_adopts_an_all_down_tenant_whose_runs_are_refused(
     H20.place_knowledge(root, tenant_id, source=authored.knowledge)
 
     tenant = S.Planted(root=root, tenant_id=tenant_id, knowledge=H20.knowledge_dir(root, tenant_id))
+    S.remap(tenant, S.DEFAULT_MAPPING)  # the adopted tenant has the mapping the authored one had (#1345: a run needs one, O4)
     tenant.accept()  # acceptance adopts the folder: it judges structure, so no refusal here
 
     # The operator's policy audit over the adopted tenant (`defender-policy show gather`).

@@ -107,7 +107,7 @@ def test_decode_refuses_a_stream_with_no_final_frame():
 
 @pytest.mark.parametrize("name", FIELDS)
 def test_decode_refuses_a_final_record_missing_a_field(name):
-    """The record with one of its six fields renamed (same length, so the framing stays valid) is
+    """The record with one of its fields renamed (same length, so the framing stays valid) is
     refused; the untouched record decodes. O2."""
     raw = fmt().encode_final(final_record(200))
     needle = f'"{name}"'.encode()
@@ -119,19 +119,19 @@ def test_decode_refuses_a_final_record_missing_a_field(name):
 
 def test_decode_refuses_a_body_whole_that_is_not_a_boolean():
     """`body_whole` decides whether the bytes count, so a string in its place is refused. O2."""
-    raw = fmt().encode_final(final_record(200, system_side=False, body_whole=True))
+    raw = fmt().encode_final(final_record(200, system_side=False, sent=False, body_whole=True))
     assert raw.count(b"true") == 1, "the fixture reaches the field"
     with pytest.raises(ValueError):  # noqa: PT011 — the one error type the design names
         fmt().decode_reply(raw.replace(b"true", b'"ab"'))
 
 
 @pytest.mark.parametrize("name", FIELDS)
-def test_a_final_record_cannot_be_built_without_all_six_fields(name):
+def test_a_final_record_cannot_be_built_without_all_its_fields(name):
     """`FinalRecord` is the only constructor and takes every field, so no proxy arm or fake proxy
     can omit one. O2."""
     given: dict[str, Any] = {"status": 200, "headers": {}, "fault": None, "detail": None,
-                             "system_side": False, "body_whole": True}
-    assert fmt().FinalRecord(**given), "positive control: all six build one"
+                             "system_side": False, "sent": True, "body_whole": True}
+    assert fmt().FinalRecord(**given), "positive control: all of them build one"
     del given[name]
     with pytest.raises(TypeError):
         fmt().FinalRecord(**given)

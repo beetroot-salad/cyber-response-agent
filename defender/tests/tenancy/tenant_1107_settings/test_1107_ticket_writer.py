@@ -314,14 +314,14 @@ def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     got = S.receipt(run_dir)
     assert got is not None, "no ticket_write.json for a transport fault"
     assert got.get("ok") is False, got
-    assert got.get("status") == "error", got
+    # #1374 r4: docker's exit 1 does not prove curl never ran, so this settles nothing. The failing
+    # check's own detail (docker's 'context not found', the context's name) stays in the reason.
+    assert got.get("status") == "unknown", got
     assert got.get("url") is None, got
     reason = got.get("reason") or ""
     assert reason.strip(), f"no reason on the transport-fault receipt: {got}"
-    # O5 (r4): a request that never got an answer is "the store could not be reached"; the
-    # failing check's own detail (docker's 'context not found', the context's name) may follow.
-    assert "the store could not be reached" in reason, (
-        f"the reason does not say the store could not be reached: {reason!r}")
+    assert "may have reached the store" in reason, reason
+    assert "docker exec failed" in reason, reason
     assert _warnings(caplog), "a transport fault logged no warning"
 
 
@@ -405,7 +405,9 @@ def _alert_without_key(where: Path) -> Path:
 
 def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch, caplog):
     """An HTTP 4xx or 5xx from the store on the record step is a transport fault: ticket_write.json
-    with ok false and a reason, a warning log line, a page line, and the exit code unchanged."""
+    with ok false and a reason, a warning log line, a page line, and the exit code unchanged. A 4xx
+    is the store refusing (`error`); a 5xx may follow a store that took the comment, so the case is
+    read back once (#1374) and, the read meeting the same 5xx, the receipt is `unknown`."""
     caplog.set_level(logging.INFO)
     root, _folder, alert = _world(tmp_path)
     _shim(tmp_path, monkeypatch, *S.store_answers_ok(), name="docker-ok")
@@ -417,8 +419,8 @@ def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch,
     for status, words in (("403", ("the store refused", "403")),
                           ("422", ("the store refused", "422")),
                           ("404", ("the store refused", "404", "not found")),
-                          ("500", ("the store could not be reached",)),
-                          ("503", ("the store could not be reached",))):
+                          ("500", ("may have reached the store",)),
+                          ("503", ("may have reached the store",))):
         run_id = f"r-http-{status}"
         shim = _shim(tmp_path, monkeypatch,
                      S.answer(json.dumps({"detail": f"store said {status}"}), status),
@@ -432,7 +434,8 @@ def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch,
         assert page, f"HTTP {status}: the run page did not render"
         got = S.receipt(run_dir)
         assert got is not None, f"HTTP {status}: {got}"
-        assert (got.get("key"), got.get("status"), got.get("ok")) == (KEY, "error", False), got
+        expected = "unknown" if status.startswith("5") else "error"
+        assert (got.get("key"), got.get("status"), got.get("ok")) == (KEY, expected, False), got
         assert got.get("url") is None, f"HTTP {status}: an error receipt carries a link: {got}"
         reason = (got.get("reason") or "")
         assert all(w in reason.lower() for w in words), f"HTTP {status}: reason {reason!r}"

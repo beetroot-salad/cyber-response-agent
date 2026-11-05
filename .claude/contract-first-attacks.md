@@ -112,3 +112,28 @@ This repo's record of exploit shapes that carried real bugs past a committed sui
 - **violated**: #1379 design r2, O1b — "The job store refuses such text in every text argument it is handed" (https://github.com/beetroot-salad/cyber-response-agent/issues/1379#issuecomment-6600348956); enforced by `test_1379_an_alert_field_postgresql_cannot_hold_is_refused_by_name_and_nothing_is_stored`, parametrised over `["vendor", "vendor_ticket_id", "title", "description"]`.
 - **exploit**: the guard call names its fields by hand, the test's parametrize list copies the guard's list, and every case uses a valid value for the remaining string parameter (`tenant_id`), which still reached the driver as a `DataError`. Mutants over the guard's lines cannot reveal a parameter it never names. Generic replay: for an "every argument of type X" obligation, build the case list from the callable's signature, one case per parameter of that type, and treat any parameter left out as a decision to justify.
 - **killed by**: `test_1379_an_alert_for_a_tenant_id_postgresql_cannot_hold_is_for_an_unknown_tenant`.
+
+## 2026-11-04 · PR #1345 (impl) — a recompute is tested below its batch size, so a version that stops after the first batch passes
+- **violated**: any "recompute over all alerts" obligation; the tests plant fewer alerts than one batch.
+- **exploit**: the recompute handles the first batch and stops. Generic replay: plant more alerts than the batch size (and exactly one batch, and one over) and assert every one is recomputed.
+- **killed by**: contract repair rounds (tags contract-1345-v2..v6).
+
+## 2026-11-04 · PR #1345 (impl) — a lock namespace equal to another subsystem's is raced only against the one pair the tests name
+- **violated**: lock-isolation obligations; tests race the new lock against its intended peer only.
+- **exploit**: the new lock key shares a namespace with another subsystem's, so unrelated work blocks or is blocked. Generic replay: for each lock the change takes, hold every other lock namespace in the repo and assert neither side waits.
+- **killed by**: a distinct namespace plus a cross-subsystem race test.
+
+## 2026-11-04 · PR #1345 (impl) — an empty-but-saved value is read as absent in the second read path
+- **violated**: "saved empty means empty, not unset"; tested at the store only.
+- **exploit**: the repository or run-start read treats the empty value as missing and falls back to a default. Generic replay: save the empty value, then read it through every reader (store, repository, run start) and assert it stays empty.
+- **killed by**: tests of each read path with a saved empty value.
+
+## 2026-11-04 · PR #1345 (impl) — a validator is pinned by the example in the test only (whitespace on one side)
+- **violated**: validator refusal obligations.
+- **exploit**: the validator refuses the tested spelling but accepts the mirror (leading vs trailing whitespace). Generic replay: for each refusal, plant the mirrored and combined variants of the tested spelling.
+- **killed by**: both-sides whitespace cases.
+
+## 2026-11-04 · PR #1345 (impl) — one unknown key with a null value is accepted
+- **violated**: "unknown keys are refused".
+- **exploit**: the check skips keys whose value is null, so an unknown key set to null passes. Generic replay: for every unknown-key refusal, add an unknown key with a null, empty and false value.
+- **killed by**: null-valued unknown-key cases.

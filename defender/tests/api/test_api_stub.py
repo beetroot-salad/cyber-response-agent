@@ -61,6 +61,7 @@ from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from defender.records.formats import AlertId  # noqa: E402
+from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
@@ -109,6 +110,34 @@ SIGNED = "https://blobs.invalid/signed?sig=1"
 #: A credential value long enough for any kind's secret-field minimum (#1163 A4).
 LONG = "v" * 40
 
+#: #1345: the six entries (D4: a PUT names all of them, an unmapped one as an explicit null; a GET answers the same shape).
+MAPPING_ENTRIES = ("signature", "event_time", "summary", "case_key", "title", "description")
+#: A PUT body that maps two of the six; the other four are explicit nulls.
+MAPPING_BODY = {**dict.fromkeys(MAPPING_ENTRIES), "signature": "rule.id", "title": "rule.description"}
+
+
+def _alert_mapping_wire(entries: dict[str, str | None]) -> Any:
+    """The wire model a mapping read answers (design-implied name `api.models.AlertMapping`: r5 says only "the wire
+    model"; one model for the PUT body and the answer). Imported at call time: it does not exist before #1345."""
+    from defender.api.models import AlertMapping
+
+    return AlertMapping(**entries)
+
+
+class _Answer:
+    """A scripted port answer computed per call, with a stable repr: `HAPPY`'s ids are `str()` of
+    its rows, and a lambda's repr carries its address, which differs between xdist workers."""
+
+    def __init__(self, name: str, answer: Callable[..., Any]) -> None:
+        self._name, self._answer = name, answer
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._answer(*args, **kwargs)
+
+    def __repr__(self) -> str:
+        return f"<{self._name}>"
+
+
 #: #1131's "API" section as (method, path), under `/tenants/{tenant_id}`.
 EXISTING_ROUTES = {
     ("GET", "/tenants/{tenant_id}/alerts"),
@@ -127,6 +156,9 @@ EXISTING_ROUTES = {
     ("PUT", "/tenants/{tenant_id}/systems/{system_id}"),
     ("PUT", "/tenants/{tenant_id}/systems/{system_id}/credentials"),
     ("POST", "/tenants/{tenant_id}/systems/{system_id}/check"),
+    # #1345 O1: the tenant's alert mapping, read and replaced whole (sketch: invented path)
+    ("GET", ALERT_MAPPING_ROUTE),
+    ("PUT", ALERT_MAPPING_ROUTE),
 }
 #: What #1306 adds (design "Endpoints"; param names pinned by this suite).
 IDENTITY_ROUTES = {
@@ -183,12 +215,16 @@ HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] 
     (("POST", "/tenants/{tenant_id}/systems/{system_id}/check"), f"{T}/systems/tix/check", None,
      {"get_system": SETTINGS, "has_credentials": True,
       "check": SystemCheck(ok=True, detail="fine")}),
+    (("GET", ALERT_MAPPING_ROUTE), alert_mapping_url(A), None,
+     {"get_alert_mapping": _Answer("saved mapping", lambda _tenant: _alert_mapping_wire(MAPPING_BODY))}),
+    (("PUT", ALERT_MAPPING_ROUTE), alert_mapping_url(A), MAPPING_BODY,
+     {"put_alert_mapping": _Answer("created from the body", lambda body: (body, True))}),
 ]
 
 
 #: The writes a route makes through a transaction; they carry no tenant — the transaction does.
 TX_WRITES = {"create_investigation", "cancel_investigation", "delete_investigation",
-             "create_learning_job", "put_system"}
+             "create_learning_job", "put_system", "put_alert_mapping"}
 
 
 class Scripted:
@@ -571,6 +607,151 @@ def test_put_system_without_a_field_is_refused(missing: str) -> None:
     del body[missing]
     assert api.client.put(f"{T}/systems/tix", headers=AUTH, json=body).status_code == 422
     assert api.ports.calls == []
+
+
+# --- #1345 O1: the alert mapping's routes (shape over the scripted ports; the rules are the store's) -------
+
+
+def test_1345_put_alert_mapping_is_201_at_its_own_url_then_200_and_each_is_audited_after_commit() -> None:
+    """The first save creates (201, Location), a later one replaces (200); the port gets the body as sent; the
+    answer has all six entries, unmapped ones null; one `alert_mapping.update` event each. (#1345 O1)"""
+    created = Api(put_alert_mapping=lambda body: (body, True))
+    response = created.client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
+    assert (response.status_code, response.headers["Location"]) == (201, BASE + alert_mapping_url(A))
+    assert response.json() == {entry: MAPPING_BODY.get(entry) for entry in MAPPING_ENTRIES}
+    ((sent,), kwargs), = created.ports.called("put_alert_mapping")
+    assert (sent.model_dump(), kwargs) == (MAPPING_BODY, {})  # r5: the port gets the validated wire model's `model_dump()`
+
+    replaced = Api(put_alert_mapping=lambda body: (body, False))
+    response = replaced.client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
+    assert response.status_code == 200
+    assert "Location" not in response.headers
+    # r5 O1: the action `alert_mapping.update`, target the tenant id.
+    assert created.audited() == replaced.audited() == [("alert_mapping.update", A, "")]
+
+
+def test_1345_the_audit_vocabulary_has_the_mapping_update() -> None:
+    """`alert_mapping.update` is a new audit action. (#1345 O1)"""
+    import typing
+
+    assert "alert_mapping.update" in typing.get_args(ports_module.AuditAction)
+
+
+def test_1345_get_alert_mapping_answers_all_six_entries_or_404_when_none_was_saved() -> None:
+    """A saved mapping reads with every entry, unmapped ones null; a tenant with none is a not-found problem. (#1345 O1)"""
+    saved = Api(get_alert_mapping=lambda _tenant: _alert_mapping_wire(MAPPING_BODY))
+    response = saved.client.get(alert_mapping_url(A), headers=AUTH)
+    assert response.status_code == 200
+    assert response.json() == {entry: MAPPING_BODY.get(entry) for entry in MAPPING_ENTRIES}
+
+    none = Api(get_alert_mapping=None)
+    response = none.client.get(alert_mapping_url(A), headers=AUTH)
+    assert response.status_code == 404
+    assert response.headers["Content-Type"] == "application/problem+json"
+
+
+@pytest.mark.parametrize(("body", "entry"), [
+    ({**MAPPING_BODY, "case_key": " rule.id"}, "case_key"),  # surrounding whitespace
+    ({**MAPPING_BODY, "summary": "rule..id"}, "summary"),  # an empty segment
+    ({**MAPPING_BODY, "severity": "rule.level"}, "severity"),  # not one of the six
+    ({k: v for k, v in MAPPING_BODY.items() if k != "event_time"}, "event_time"),  # D4: all six must be named
+], ids=["invalid-path", "empty-segment", "unknown-entry", "missing-entry"])
+def test_1345_an_invalid_or_incomplete_mapping_is_a_422_naming_the_entry_before_any_port_call(body: dict[str, str], entry: str) -> None:
+    """The wire model refuses it (r5: validated through `records`' `check_mapping`; D4: all six named): 422 naming the
+    entry, no port call, no audit. (#1345 O1, M2)"""
+    api = Api()
+    response = api.client.put(alert_mapping_url(A), headers=AUTH, json=body)
+    assert response.status_code == 422, response.text
+    assert entry in response.text
+    assert (api.ports.calls, api.ports.audits) == ([], [])
+
+
+def _over_the_fake() -> tuple[TestClient, InMemoryStore]:
+    """The real app over the stub's own `InMemoryStore` (rule-free: it keeps what the wire model let through)."""
+    store = InMemoryStore(lambda: NOW)
+    identity, _, tenants = _identity()
+    return TestClient(create_app(ApiDeps(
+        identity=identity, tenants=tenants, frontend_origin=ORIGIN,
+        alerts=store, investigations=store, learning_jobs=store, lessons=store, systems=store,
+        writes=store, secrets=InMemorySecrets(), checker=StubSystemChecker(),
+        artifact_links=StubArtifactLinks(),
+    )), base_url=BASE), store
+
+
+def test_1345_over_the_fake_a_mapping_is_404_then_201_then_200_and_reads_back_as_put() -> None:
+    """GET is 404 until the first PUT (201, Location); a later PUT replaces whole (200); GET answers exactly the six
+    entries the PUT named; each save is audited `alert_mapping.update` for the tenant. (#1345 O1)"""
+    client, store = _over_the_fake()
+    assert client.get(alert_mapping_url(A), headers=AUTH).status_code == 404
+
+    first = client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY)
+    assert (first.status_code, first.headers["Location"]) == (201, BASE + alert_mapping_url(A))
+    assert client.get(alert_mapping_url(A), headers=AUTH).json() == MAPPING_BODY
+
+    other = {**dict.fromkeys(MAPPING_ENTRIES), "case_key": "ticket.key"}
+    second = client.put(alert_mapping_url(A), headers=AUTH, json=other)
+    assert (second.status_code, "Location" in second.headers) == (200, False)
+    assert client.get(alert_mapping_url(A), headers=AUTH).json() == other, "a replace is whole: the earlier entries are gone"
+    assert [(e.action, e.tenant_id, e.target) for e in store.audit_events] == [("alert_mapping.update", A, A)] * 2
+
+
+@pytest.mark.parametrize(("body", "entry"), [
+    ({**MAPPING_BODY, "case_key": " rule.id"}, "case_key"),
+    ({**MAPPING_BODY, "summary": "rule..id"}, "summary"),
+    ({**MAPPING_BODY, "summary": ""}, "summary"),
+    ({**MAPPING_BODY, "summary": 7}, "summary"),
+    ({**MAPPING_BODY, "severity": "rule.level"}, "severity"),
+    ({k: v for k, v in MAPPING_BODY.items() if k != "description"}, "description"),
+    ({}, "signature"),
+], ids=["whitespace", "empty-segment", "empty-path", "not-a-string", "unknown-entry", "missing-entry", "empty-body"])
+def test_1345_over_the_fake_an_invalid_or_incomplete_mapping_is_refused_alike_and_writes_nothing(
+        body: dict[str, Any], entry: str) -> None:
+    """The fake refuses exactly as the scripted ports do (the wire model applies the rules before any port): 422 naming
+    the entry, no audit, the saved mapping untouched; a valid PUT right after is 201 (control). (#1345 O1, M2)"""
+    client, store = _over_the_fake()
+    scripted = Api()
+    refused = client.put(alert_mapping_url(A), headers=AUTH, json=body)
+    assert refused.status_code == 422, refused.text
+    assert entry in refused.text, refused.text
+    assert (scripted.client.put(alert_mapping_url(A), headers=AUTH, json=body).json()
+            == refused.json()), "the fake and the scripted ports must give one 422"
+    assert client.get(alert_mapping_url(A), headers=AUTH).status_code == 404
+    assert store.audit_events == []
+
+    assert client.put(alert_mapping_url(A), headers=AUTH, json=MAPPING_BODY).status_code == 201
+    saved = {**MAPPING_BODY, "title": "data.title"}
+    assert client.put(alert_mapping_url(A), headers=AUTH, json=saved).status_code == 200
+    assert client.put(alert_mapping_url(A), headers=AUTH, json={**saved, "title": "a..b"}).status_code == 422
+    assert client.get(alert_mapping_url(A), headers=AUTH).json() == saved, "a refused replace left the saved mapping"
+
+
+def test_1345_an_alert_with_no_title_or_description_is_served_with_nulls() -> None:
+    """The wire alert's title and description are nullable (a tenant with no mapping lists such alerts); a titled one
+    is served as it is (control). (#1345 O2)"""
+    untitled = SUMMARY.model_copy(update={"title": None, "description": None, "alert_id": "a1000000-0000-4000-8000-000000000002"})
+    api = Api(list_alerts=[untitled, SUMMARY])
+    items = api.client.get(f"{T}/alerts", headers=AUTH).json()["items"]
+    assert [(i["title"], i["description"]) for i in items] == [(None, None), ("t", "d")]
+
+
+def test_1345_the_wire_alert_validates_with_null_title_and_description() -> None:
+    """Constructing (so validating; `model_copy` above skips validation) an `AlertSummary` with null title and description
+    is accepted and keeps them null; the fields stay required (r5.1: required, may be null). (#1345 O2, r5.1)"""
+    fields = SUMMARY.model_dump()
+    built = AlertSummary(**{**fields, "title": None, "description": None})
+    assert (built.title, built.description) == (None, None)
+    for field in ("title", "description"):
+        with pytest.raises(ValidationError):
+            AlertSummary(**{k: v for k, v in fields.items() if k != field})
+
+
+def test_1345_the_mapping_body_names_exactly_the_records_entries_all_required() -> None:
+    """The wire model's fields are `records`' `MAPPING_KEYS`, none defaulted (a PUT replaces whole, D4). (#1345 O1)"""
+    from defender.api.models import AlertMapping
+    from defender.records._alert_input import MAPPING_KEYS
+
+    assert list(AlertMapping.model_fields) == list(MAPPING_KEYS) == list(MAPPING_ENTRIES)
+    assert [name for name, field in AlertMapping.model_fields.items() if not field.is_required()] == []
 
 
 @pytest.mark.parametrize(("method", "path", "port", "answer", "action"), [

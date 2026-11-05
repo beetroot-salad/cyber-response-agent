@@ -172,7 +172,7 @@ def test_two_trees_with_identical_inputs_name_the_same_image_wherever_they_sit(t
 
 # ---- d10 (an input that is missing or cannot be read) ------------------------------------------
 @pytest.mark.parametrize("lane", ["run-dir", "request"])
-@pytest.mark.parametrize(("unreadable", "first_named"), [
+@pytest.mark.parametrize(("unreadable", "first_named"), [  # lint-stale-ref: ok — this test's own parameter, not the removed helper
     ("all-missing", "box.Dockerfile"),
     ("uv.lock-missing", "uv.lock"),
     ("uv.lock-and-pyproject.toml-missing", "uv.lock"),
@@ -183,7 +183,7 @@ def test_two_trees_with_identical_inputs_name_the_same_image_wherever_they_sit(t
     ("uv.lock-holds-an-integer-past-the-digit-limit", "uv.lock"),
 ])
 def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree_before_any_docker_call(
-    tmp_path, monkeypatch, lane, unreadable, first_named,
+    tmp_path, monkeypatch, lane, unreadable, first_named,  # lint-stale-ref: ok — this test's own parameter, not the removed helper
 ):
     _no_unsandboxed(monkeypatch)
     root = tmp_path / "tree"
@@ -226,8 +226,8 @@ def test_a_mounted_tree_without_the_three_inputs_raises_boxfault_naming_the_tree
         start()
     message = str(e.value)
     assert str(defender_dir) in message, message
-    assert first_named in message, message
-    for later in HASH_INPUTS[HASH_INPUTS.index(first_named) + 1:]:
+    assert first_named in message, message  # lint-stale-ref: ok — this test's own parameter, not the removed helper
+    for later in HASH_INPUTS[HASH_INPUTS.index(first_named) + 1:]:  # lint-stale-ref: ok — this test's own parameter, not the removed helper
         assert later not in message, (later, message)
     malformed = unreadable.startswith("uv.lock-") and unreadable not in (
         "uv.lock-missing", "uv.lock-and-pyproject.toml-missing")

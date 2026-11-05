@@ -15,6 +15,7 @@ from defender.records.formats import AlertId, InvestigationId, LearningJobId, Te
 
 from .models import (
     Alert,
+    AlertMapping,
     AlertSummary,
     Investigation,
     InvestigationKnowledge,
@@ -85,6 +86,7 @@ class InMemoryStore:
         self.audit_events: list[AuditEvent] = []
         self._ids = itertools.count(1)
         self._alerts: _Table[Alert] = _Table()
+        self._alert_mappings: dict[TenantId, AlertMapping] = {}
         self._investigations: _Table[Investigation] = _Table()
         self._learning_jobs: _Table[LearningJob] = _Table()
         self._lessons: _Table[Lesson] = _Table()
@@ -245,6 +247,16 @@ class InMemoryStore:
     async def get_system(self, tenant_id: TenantId, system_id: str) -> SystemSettings | None:
         return self._systems.get((tenant_id, system_id))
 
+    async def get_alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
+        return self._alert_mappings.get(tenant_id)
+
+    async def put_alert_mapping(self, tenant_id: TenantId, body: AlertMapping) -> tuple[AlertMapping, bool]:
+        """Rule-free like the rest of the fake: the wire model has applied the path rules, and nothing here derives
+        alert titles (the real store does, in the same transaction)."""
+        created = tenant_id not in self._alert_mappings
+        self._alert_mappings[tenant_id] = body
+        return body, created
+
     async def put_system(
         self, tenant_id: TenantId, system_id: str, body: SystemPut
     ) -> tuple[SystemSettings, bool]:
@@ -286,6 +298,9 @@ class _InMemoryTransaction:
 
     async def put_system(self, system_id: str, body: SystemPut) -> tuple[SystemSettings, bool]:
         return await self._store.put_system(self._tenant_id, system_id, body)
+
+    async def put_alert_mapping(self, body: AlertMapping) -> tuple[AlertMapping, bool]:
+        return await self._store.put_alert_mapping(self._tenant_id, body)
 
     async def audit(self, action: AuditAction, target: str, detail: str = "") -> None:
         self._pending.append(AuditEvent(

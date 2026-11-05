@@ -1,5 +1,6 @@
 """Run pages display stamped labels and start times without treating them as identity."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -40,7 +41,7 @@ def _setup(tmp_path: Path, data_root: Path, alert_name: str, folder: str) -> tup
     t = H.tenant(data_root, H.T_ID)
     alert = H.alert_file(tmp_path / folder, alert_name)
     before = _dt.datetime.now(_dt.UTC)
-    run = run_common.materialize_run(alert, tenant=t)
+    run = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=t)
     after = _dt.datetime.now(_dt.UTC)
     return run, before, after
 

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from defender.database import Base, IdColumn
-from defender.records.formats import TenantId
+from defender.records.formats import MAPPING_KEYS, AlertMapping, TenantId
 
 SCHEMA = "tenancy"
 
@@ -162,3 +162,30 @@ class PublishStatus(Base, kw_only=True):
         else:
             out.update(refused=self.refused or "", kind=self.kind or "")
         return out
+
+
+class AlertMappingRow(Base, kw_only=True):
+    """The tenant's alert mapping (#1345): at most one row, absent until the first save, replaced whole and never
+    deleted. One nullable text column per entry, named as the entry (`records.formats.MAPPING_KEYS`); null is an
+    unmapped entry. Declared with the tenant records and read through them; written only by the jobs store's replace,
+    in one transaction with the recompute of the tenant's alerts (M1)."""
+
+    __tablename__ = "alert_mappings"
+    __table_args__ = {"schema": SCHEMA}
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    signature: Mapped[str | None] = mapped_column(Text, default=None)
+    event_time: Mapped[str | None] = mapped_column(Text, default=None)
+    summary: Mapped[str | None] = mapped_column(Text, default=None)
+    case_key: Mapped[str | None] = mapped_column(Text, default=None)
+    title: Mapped[str | None] = mapped_column(Text, default=None)
+    description: Mapped[str | None] = mapped_column(Text, default=None)
+
+    def as_mapping(self) -> AlertMapping:
+        """The mapping the row holds: its mapped entries only."""
+        return AlertMapping(paths={k: v for k in MAPPING_KEYS if (v := getattr(self, k)) is not None})
+
+    @classmethod
+    def of(cls, tenant_id: TenantId, mapping: AlertMapping) -> AlertMappingRow:
+        """The row for `mapping` (entries it does not map are null)."""
+        return cls(tenant_id=tenant_id, **{k: mapping.path_of(k) for k in MAPPING_KEYS})

@@ -3,6 +3,7 @@
 Test names keep the old vocabulary (`open_run`, `list_run_ids`, record readers) because archived
 spec graphs cite them; the lookups are `RunsRepository.open` / `.list` / `.all_runs`."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
@@ -526,7 +527,7 @@ def test_1105_no_lookup_or_record_reader_writes_anything(tmp_path):
         assert H.tree_state(root) == before, f"a reader wrote over the {state} folder"
     u = H.tenant(root, H.U_ID)
     alert = H.alert_file(tmp_path / "alerts")
-    made = run_common.materialize_run(alert, tenant=u)
+    made = run_common.materialize_run(alert, mapping=planted_mapping(), tenant=u)
     assert made.run_dir.parent == location_path(u.runs)
     assert made.run_dir.is_dir(), "run setup creates the runs folder and the run"
     assert not (location_path(u.runs) / "_tenant.json").exists(), "run setup wrote the retired tenant record"
@@ -544,7 +545,7 @@ def test_1105_a_run_setup_made_for_t_opens_for_t_and_no_other_tenant_reaches_it(
     root = tmp_path / "data"
     root.mkdir()
     t = H.tenant(root, H.T_ID)
-    rid = run_common.materialize_run(H.alert_file(tmp_path / "alerts"), tenant=t).run_dir.name
+    rid = run_common.materialize_run(H.alert_file(tmp_path / "alerts"), mapping=planted_mapping(), tenant=t).run_dir.name
     assert t.runs_repository().open(RunId.parse(rid)).run_dir == location_path(t.runs) / rid, "T's run opens for T"
     u = H.tenant(root, H.U_ID)
     err = H.raised(u.runs_repository().open, RunId.parse(rid))
@@ -753,7 +754,7 @@ def test_1105_an_absent_runs_folder_answers_empty_and_creates_nothing(tmp_path):
     assert H.is_a(err, RunAbsent), f"runs.open over an absent folder gave {err!r}"
     assert H.tree_state(root) == before, "something was created"
     assert not location_path(t.runs).exists(), "something was created"
-    rid = run_common.materialize_run(H.alert_file(tmp_path / "alerts"), tenant=t).run_dir.name
+    rid = run_common.materialize_run(H.alert_file(tmp_path / "alerts"), mapping=planted_mapping(), tenant=t).run_dir.name
     assert (location_path(t.runs) / rid).is_dir(), "run setup made the folder and the run"
     assert not (location_path(t.runs) / "_tenant.json").exists(), "run setup wrote the retired tenant record"
     assert t.runs_repository().open(RunId.parse(rid)).run_dir == location_path(t.runs) / rid, "the run opens"

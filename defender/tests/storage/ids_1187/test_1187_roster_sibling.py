@@ -1,5 +1,6 @@
 """Arm creation and sibling admission trust only complete, validated tenant-scoped rosters."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 import hashlib
 import json
@@ -819,7 +820,7 @@ def test_natural_and_arm_stamps_carry_no_world_lineage(
 
     scene = _Scene(tmp_path, data_root, B_ID)
     t = S.tenant(data_root, B_ID)
-    natural = run_common.materialize_run(H5.alert_file(tmp_path / "in"), tenant=t)
+    natural = run_common.materialize_run(H5.alert_file(tmp_path / "in"), mapping=planted_mapping(), tenant=t)
     natural_stamp = json.loads(
         (Path(natural.run_dir) / "provenance.json").read_text(encoding="utf-8"))
     assert natural_stamp.get("world_id") is None, (

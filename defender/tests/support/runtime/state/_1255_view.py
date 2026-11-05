@@ -1,5 +1,6 @@
 """Independent model-path literals, host layouts, argv recording, and model response observations."""
 from __future__ import annotations
+from defender.tests.support.tenancy._mapping1345 import planted_mapping
 
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -115,7 +116,7 @@ def natural_run(layout: Layout, alert_bytes: bytes, label: str) -> Path:
 
     staged = location_path(layout.data_root).parent / f"alert-{label}.json"
     staged.write_bytes(alert_bytes)
-    run = run_common.materialize_run(staged, tenant=layout.tenant)
+    run = run_common.materialize_run(staged, mapping=planted_mapping(), tenant=layout.tenant)
     return Path(run.run_dir)
 
 

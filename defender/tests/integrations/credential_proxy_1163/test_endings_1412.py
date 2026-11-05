@@ -43,10 +43,12 @@ def test_o4_every_ending_is_one_record_before_the_final_frame_and_a_failed_one_w
     if mode == "failing":
         assert (final["status"], final["body_whole"]) == (None, False), final
         assert "withheld" in final["detail"], final
+        assert final["sent"] is (ending.how is None), "a withheld answer still says whether the call began (#1374)"
         return
     (record,) = audit.records
     assert record["outcome"] == ("sent 200" if ending.status_arrives else final["fault"]), record
     assert record["fault"] == final["fault"], (record, final)
+    assert final["sent"] is (ending.how is None), "sent: true iff the proxy began the system's call (#1374)"
     if mode == "held":
         with pytest.raises(ValueError):  # noqa: PT011 — the one error type the design names
             W.fmt().decode_reply(got.before)

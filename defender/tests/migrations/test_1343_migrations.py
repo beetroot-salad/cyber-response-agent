@@ -23,16 +23,16 @@ def _inv(name: str) -> str:
 
 
 def test_b_the_history_stays_one_line_with_the_new_revision_on_the_uuid_ids_revision():
-    """One head, `0006_job_leases`, directly on `0005_uuid_ids`, which sits on `0004_jobs`; both keep their id and place. (B Data model: one migration on A's; renumbered after #1382)"""
+    """One head (#1345's `0007_alert_mapping` since), with `0006_job_leases` directly on `0005_uuid_ids`, which sits on `0004_jobs`; both keep their id and place. (B Data model: one migration on A's; renumbered after #1382)"""
     from defender.migrations import _scripts, head, heads
 
     scripts = _scripts()
     assert heads() == (head(),)
-    assert head() == "0006_job_leases"
-    assert scripts.get_revision(head()).down_revision == "0005_uuid_ids"
+    assert scripts.get_revision(head()).down_revision == "0006_job_leases"
+    assert scripts.get_revision("0006_job_leases").down_revision == "0005_uuid_ids"
     assert scripts.get_revision("0005_uuid_ids").down_revision == "0004_jobs"
     assert scripts.get_revision("0004_jobs").down_revision == "0003_sign_login"
-    assert [r.revision for r in scripts.walk_revisions()][1:] == [
+    assert [r.revision for r in scripts.walk_revisions()][2:] == [
         "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy", "0001_baseline"]
 
 

@@ -71,7 +71,8 @@ def test_767_record_posts_one_comment_on_the_alerts_ticket_and_receipts(tmp_path
     failed_dir = make_run(tmp_path, name="20260917t000001z-sshd")
     record(failed_dir, _store(tmp_path, answers=[S.curl_timed_out()]))
     bad = receipt(failed_dir)
-    assert (bad["key"], bad["ok"], bad["status"]) == (CASE_KEY, False, ticket_writer.RECEIPT_ERROR), bad
+    # The write timed out after it may have reached the store and the read-back timed out too (#1374).
+    assert (bad["key"], bad["ok"], bad["status"]) == (CASE_KEY, False, ticket_writer.RECEIPT_UNKNOWN), bad
 
 
 def test_767_the_comment_is_the_templates_body_under_the_agent_tag(tmp_path, monkeypatch):
@@ -402,18 +403,18 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(("arm", "answer", "reasons"), [
-    ("an unreachable bastion (curl timed out)", S.curl_timed_out(), ("could not be reached",)),
+    ("an unreachable bastion (curl timed out)", S.curl_timed_out(), ("may have reached the store",)),
     ("no parseable response at all", S.answer("", None, rc=1, stderr="docker: unavailable"),
-     ("could not be reached",)),
+     ("may have reached the store",)),
     ("a key the store does not hold (404)", S.answer('{"detail": "no such ticket"}', "404"),
      ("the store refused", "404", "not found")),
-    ("a 5xx", S.answer('{"detail": "down"}', "503"), ("could not be reached",)),
+    ("a 5xx", S.answer('{"detail": "down"}', "503"), ("may have reached the store",)),
 ])
 def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch, capsys,
                                                           arm, answer, reasons):
     """Every store fault is caught, warned once, never retried, and leaves the run's exit code
     what it would have been; the receipt's reason tells the store refused (with its status) from
-    the store could not be reached (unreachable, timeout, 5xx alike). O1, O5."""
+    a comment that may have reached the store (unreachable, timeout, 5xx alike). O1, O5."""
     _setup(monkeypatch, tmp_path)
     run_dir = make_run(tmp_path)
     store = _store(tmp_path, answers=[answer])
@@ -432,7 +433,7 @@ def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatc
     lost = make_run(tmp_path, name="run-unreachable")
     assert record(lost, _store(tmp_path, answers=[S.curl_timed_out()])) is None
     assert receipt(lost)["ok"] is False
-    assert "could not be reached" in receipt(lost)["reason"], receipt(lost)
+    assert "may have reached the store" in receipt(lost)["reason"], receipt(lost)
 
     unconfigured = make_run(tmp_path, name="run-unconfigured")
     no_config = _store(tmp_path)

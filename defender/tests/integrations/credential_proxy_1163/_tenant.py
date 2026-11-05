@@ -118,11 +118,11 @@ def post(client: Any, tok: str, system: str, method: str, url: str,
     return response
 
 
-FINAL_FIELDS = ("status", "headers", "fault", "detail", "system_side", "body_whole")
+FINAL_FIELDS = ("status", "headers", "fault", "detail", "system_side", "sent", "body_whole")
 
 
 def fields_of(final: Any) -> dict[str, Any]:
-    """A `FinalRecord`'s six fields, read by attribute as the design says."""
+    """A `FinalRecord`'s fields, read by attribute as the design says."""
     return {name: getattr(final, name) for name in FINAL_FIELDS}
 
 
