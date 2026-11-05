@@ -6,6 +6,7 @@ never an adapter module. One reading of the file serves the verbs, `tacit_cli` a
 from __future__ import annotations
 
 import datetime as dt
+import os
 import re
 import sys
 from fnmatch import fnmatchcase
@@ -229,12 +230,19 @@ def load_entries(path: Path) -> list[dict[str, str]]:
     return list(read.entries)
 
 
+def present(path: Path) -> bool:
+    """Whether anything is at the registry's path: the one owner of "is there a registry?".
+    Only a path with nothing at it is an absent registry (P4); a directory, or a dangling or
+    looping symlink, is read and fails as the whole-file refusal, for every reader alike."""
+    return os.path.lexists(path)
+
+
 def failures(path: Path) -> list[str]:
     """What an author is told is wrong with the registry at `path`: the whole-file refusal, or
     each dropped entry, in the reader's own words. Empty for a clean file and for no file. The
     one formatter `tacit_cli check` and `tenant check` share (P3), so a drop the author is told
     about is exactly the drop a run makes."""
-    if not Path(path).is_file():
+    if not present(path):
         return []
     read = read_registry(path)
     return [read.fatal] if read.fatal is not None else list(read.refusals)
@@ -305,14 +313,14 @@ def health_check(ctx: VerbContext) -> dict:
     does it hold. Returns data rather than printing, so the queries table records a payload."""
     agent_root = Path(ctx.tenant.agent)
     path = registry_path(agent_root)
-    present = path.is_file()
+    here = present(path)
     out: dict[str, Any] = {
         "system": SYSTEM,
-        "connected": present,
+        "connected": here,
         "registry": _relative(agent_root, path),
         "entries": 0,
     }
-    if present:
+    if here:
         read = read_registry(path)
         out["entries"] = len(read.entries)
         problems = _problems(read, path, agent_root)
@@ -337,7 +345,7 @@ def lookup(  # lint-dup: ok — a verb name addressed as `<system>.lookup`; `thr
     """
     agent_root = Path(ctx.tenant.agent)
     path = registry_path(agent_root)
-    read = read_registry(path) if path.is_file() else RegistryRead((), ())
+    read = read_registry(path) if present(path) else RegistryRead((), ())
     answer: dict[str, Any] = {
         "matched": find_entry(
             list(read.entries), actor=actor, host=host, pattern=pattern, now=_day(ctx),
