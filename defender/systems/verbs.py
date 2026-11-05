@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 from pydantic import SkipValidation, field_validator
 
 from defender.systems._state import SystemsState
+from . import tacit_registry
 from .verb_grant import GrantError, VerbGrant
 from defender._io import read_bytes_capped
 from defender._paths import name_roots, root_spellings
@@ -81,6 +82,15 @@ class ServingAbort(Exception):
     process it ends records why."""
 
 ADAPTER_SUFFIX = "_adapter.py"
+
+#: The platform-served systems (#1390): name -> verbs, product code the platform runs itself.
+#: Their names are reserved; every roster holds them, whatever the adapters folder says.
+PLATFORM_SERVED: Mapping[str, Mapping[str, Verb]] = types.MappingProxyType({
+    tacit_registry.SYSTEM: types.MappingProxyType(dict(tacit_registry.PLATFORM_VERBS)),
+})
+
+RESERVED_REASON = "reserved for the platform-served system of that name (an adapter may not use it)"
+ANOMALOUS_REASON = "anomalous adapter name: not a name the dispatch seam resolves"
 
 #: A refusal's pointer at the verb-disposition table when no run supplied its tenant's pointer.
 TABLE_POINTER = f"{SETTINGS_POINTER}verb-grants.yaml"
@@ -291,7 +301,7 @@ def fresh_adapter_module(roster: RosterRead, system: str) -> Any:
     process on success, retried on every call after a failure — and this read neither primes
     nor consults it. `KeyError` for a system the roster does not accept; an import that fails
     raises its own exception."""
-    path = roster.accepted.get(system)
+    path = roster.adapter_files.get(system)
     if path is None:
         raise KeyError(system)
     resolved = path.resolve()
@@ -367,25 +377,33 @@ UNDECLARED = "UNDECLARED"
 class RosterRead:
     """One complete read of an adapters directory, shared as a value by every consumer.
 
-    `accepted` maps each system to the adapter file that dispatches it; `verbs` maps it to the
-    verb names its adapter declares (read cold); `unparsed` maps systems whose source did not
-    parse to the parser's reason (their `verbs` entry is empty); `refused` lists, sorted and
-    deduplicated, derived names the dispatch seam would not resolve. The maps are read-only
-    views so no consumer can mutate the registry's roster."""
+    A roster's *systems* are the keys of `verbs`: the adapter files plus the platform-served
+    systems (#1390), whose verbs are product code. `adapter_files` maps each system dispatched
+    from a file to that file, and nothing else: a consumer that reads a file uses it, a consumer
+    that reads a name uses the systems. `verbs` maps each system to the verb names it declares
+    (an adapter's read cold); `unparsed` maps systems whose source did not parse to the parser's
+    reason (their `verbs` entry is empty); `refused` maps, sorted, each derived name the dispatch
+    seam would not resolve to why. The maps are read-only views so no consumer can mutate the
+    registry's roster."""
 
     root: Path
     # The concrete view class, not `Mapping`: pydantic would copy a `Mapping` into a writable dict.
-    accepted: types.MappingProxyType[str, Path]
+    adapter_files: types.MappingProxyType[str, Path]
     verbs: types.MappingProxyType[str, frozenset[str]]
     unparsed: types.MappingProxyType[str, str]
-    refused: tuple[str, ...]
+    refused: types.MappingProxyType[str, str]
     #: Systems whose `VERBS` is an empty dict literal: adapters with no agent actions (#1359 R1),
     #: valid, as against one whose `VERBS` cannot be read.
     no_verbs: frozenset[str] = frozenset()
 
     def declared_verbs(self, system: str) -> frozenset[str]:
-        """The verb names `system`'s adapter declares; empty if not accepted or unparsed."""
+        """The verb names `system` declares; empty if not in the roster or unparsed."""
         return self.verbs.get(system, frozenset())
+
+    @property
+    def systems(self) -> tuple[str, ...]:
+        """Every system of the roster, sorted: adapter files and platform-served systems."""
+        return tuple(sorted(self.verbs))
 
 
 def _cannot_read(adapters_dir: Path, e: BaseException, *, blame_entry: bool = True) -> str:
@@ -399,6 +417,13 @@ def _cannot_read(adapters_dir: Path, e: BaseException, *, blame_entry: bool = Tr
     if filename and Path(filename) != Path(adapters_dir):
         text += f" at {filename}"
     return text
+
+
+def _refusal_of(name: str, path: Path | None) -> str | None:
+    """Why the dispatch seam would not resolve the adapter file named for `name`, or `None`."""
+    if name in PLATFORM_SERVED:
+        return RESERVED_REASON
+    return ANOMALOUS_REASON if path is None else None
 
 
 def read_roster(adapters_dir: Path) -> RosterRead:
@@ -417,11 +442,11 @@ def read_roster(adapters_dir: Path) -> RosterRead:
         resolved = adapters_dir.resolve()
         accepted: dict[str, Path] = {}
         sources: dict[str, bytes] = {}
-        refused: list[str] = []
+        refused: dict[str, str] = {}
         for name in sorted({_system_of(Path(entry.name)) for entry in entries}):
             path = _adapter_path_under(resolved, name)
-            if path is None:
-                refused.append(name)
+            if (why := _refusal_of(name, path)) is not None:
+                refused[name] = why
             else:
                 accepted[name] = path
                 sources[name] = read_bytes_capped(path)
@@ -436,12 +461,14 @@ def read_roster(adapters_dir: Path) -> RosterRead:
             unparsed[name] = why
         elif none_declared:
             empty.add(name)
+    for name, platform_verbs in PLATFORM_SERVED.items():
+        declared[name] = frozenset(platform_verbs)
     return RosterRead(
         root=adapters_dir,
-        accepted=types.MappingProxyType(accepted),
-        verbs=types.MappingProxyType(declared),
+        adapter_files=types.MappingProxyType(accepted),
+        verbs=types.MappingProxyType(dict(sorted(declared.items()))),
         unparsed=types.MappingProxyType(unparsed),
-        refused=tuple(refused),
+        refused=types.MappingProxyType(refused),
         no_verbs=frozenset(empty),
     )
 
@@ -506,6 +533,16 @@ class VerbRegistry:
         never names a verb the caller did not already name.
         """
         if not self.grant.allows(system, verb):
+            if system in PLATFORM_SERVED and verb in self._cold_verb_names(system):
+                # A platform-served system is in every roster, so a call to it is never "a
+                # system just connected": a verb the role does not hold is withheld, whether
+                # its row says so, is missing, or the whole system has none (#1390 A3).
+                where = f" ({self.grant_home})" if self.grant_home is not None else ""
+                return VerbDecision(
+                    DENIED, None,
+                    f"{system}.{verb} is not granted to role {self.grant.role!r}: the "
+                    f"verb-disposition table{where} has no row granting it, so it is withheld.",
+                )
             if system in self.grant.systems:
                 real = verb in self._cold_verb_names(system)
                 if real:
@@ -593,7 +630,7 @@ class ModuleVerbRegistry(VerbRegistry):
                 "process starts and hand the value down"
             )
         self.roster = roster
-        self._systems: tuple[str, ...] = tuple(sorted(roster.accepted))
+        self._systems: tuple[str, ...] = roster.systems
         # The run's tenant's table pointer when supplied, else the generic one; every grant
         # this class serves a model is a table projection.
         self.grant_home = grant_home
@@ -608,7 +645,7 @@ class ModuleVerbRegistry(VerbRegistry):
             )
 
     def systems(self) -> tuple[str, ...]:
-        """The accepted systems of the roster this registry was built over."""
+        """The systems of the roster this registry was built over: adapter files and platform-served."""
         return self._systems
 
     def _cold_verb_names(self, system: str) -> frozenset[str]:
@@ -620,7 +657,10 @@ class ModuleVerbRegistry(VerbRegistry):
         # From the roster, so `verbs()` and `systems()` cannot disagree. A tree removed under a
         # live registry surfaces here as the import's `OSError` (a host fault), never as
         # "unknown system".
-        path = self.roster.accepted.get(system)
+        # Platform-served systems first (#1390): product code, never a file, never a world's.
+        if system in PLATFORM_SERVED:
+            return dict(PLATFORM_SERVED[system])
+        path = self.roster.adapter_files.get(system)
         if path is None:
             raise KeyError(system)
         module = _load_adapter_module(path)
@@ -638,6 +678,7 @@ class ModuleVerbRegistry(VerbRegistry):
 
 __all__ = [
     "ADAPTER_SUFFIX",
+    "PLATFORM_SERVED",
     "fresh_adapter_module",
     "DENIED",
     "GRANTED",

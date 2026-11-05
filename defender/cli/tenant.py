@@ -76,7 +76,9 @@ if __name__ == "__main__":
 from defender import _git
 from defender import tenancy  # noqa: E402
 from defender._io import read_plain_bytes  # noqa: E402
-from defender.tenancy import SETTINGS_HALF, TENANT_ID_FILE  # noqa: E402
+from defender.tenancy import AGENT_HALF, SETTINGS_HALF, TENANT_ID_FILE  # noqa: E402
+from defender.systems import tacit_registry  # noqa: E402
+from defender.systems.verbs import PLATFORM_SERVED  # noqa: E402
 from defender.systems import run_tenant  # noqa: E402
 from defender.systems.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
 from defender.systems import case_system  # noqa: E402
@@ -288,6 +290,9 @@ def check_folder(folder: Path) -> int:
         tenancy.check_knowledge_folder(folder, tenant_id=None)
     except TenantRefused as refused:
         _say(refused)
+        # The registry file is judged apart from the folder's acceptance (#1390 A8).
+        for finding in _registry_findings(folder):
+            _say(finding)
         return 1
     return _report(_findings(folder))
 
@@ -313,6 +318,10 @@ def _findings(knowledge: Path) -> list[str]:
         findings.append(
             f"{table} was not checked against the running checkout's adapters (for verbs nobody "
             f"decides, or rows no adapter declares): the grant census could not be taken — {blind}")
+    if census is not None:
+        findings += [f"adapter `{name}` refused: {why}" for name, why in census.refused.items()
+                     if name in PLATFORM_SERVED]
+    findings += _registry_findings(knowledge)
     try:
         findings += (_tenant_census.table_findings(settings, census).lines(table)
                      if census is not None
@@ -323,6 +332,14 @@ def _findings(knowledge: Path) -> list[str]:
     if committed is not None:
         findings.append(committed)
     return findings
+
+
+def _registry_findings(knowledge: Path) -> list[str]:
+    """The tacit-knowledge registry file judged by what `tacit_cli check` fails on (a whole-file
+    refusal or a dropped entry, #1390 O7), whether or not the grant table reaches `lookup`
+    (A10). Date-dependent notes stay advisory, so a tenant's CI does not go red by the calendar."""
+    path = tacit_registry.registry_path(knowledge / AGENT_HALF)
+    return [f"{tacit_registry.SYSTEM} registry: {why}" for why in tacit_registry.failures(path)]
 
 
 def _report(findings: list[str]) -> int:

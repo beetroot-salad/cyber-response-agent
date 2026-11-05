@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from defender._paths import PATHS
-from defender.integrations.tacit_knowledge_adapter import (
+from defender.systems.tacit_registry import (
     literal_chars,
     parse_date,
     read_registry,

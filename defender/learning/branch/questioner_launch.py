@@ -71,11 +71,14 @@ def served_systems(grant: Any) -> list[str]:
     @owns served_systems — the manifest's `served_systems`, written by `_author` from this and
     nowhere else. M20: a system is served when the grant admits at least one read verb on it
     other than `health-check` (which reaches no data). The live grant still decides every query
-    at query time (M21); this list governs the judge, lessons and the question-writer."""
+    at query time (M21); this list governs the judge, lessons and the question-writer.
+    A platform-served system (#1390) is never one: a replay cannot vary what it answers."""
     from defender.systems.verb_dispositions import HEALTH_CHECK
+    from defender.systems.verbs import PLATFORM_SERVED
 
     return sorted({system for system, verb, verb_class in grant.entries
-                   if verb_class == "r" and verb != HEALTH_CHECK})
+                   if verb_class == "r" and verb != HEALTH_CHECK
+                   and system not in PLATFORM_SERVED})
 
 
 

@@ -781,9 +781,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
                 return stopped
         prompt = _opening_prompt(
             resume, run_dir, alert_path, defender_dir,
-            systems=tuple(roster.accepted), correlation_section=correlation_section,
+            systems=roster.systems, correlation_section=correlation_section,
             # The systems down NOW — after the correlation lead, which can take one down (O-5b).
-            down=system_status.down_notes(state, roster.accepted),
+            down=system_status.down_notes(state, roster.systems),
             orient_shim=orient_shim, tenant_agent=tenant.agent,
         )
 

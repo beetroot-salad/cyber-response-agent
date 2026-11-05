@@ -46,17 +46,16 @@ def read_adapters(adapters_dir: Path) -> RosterRead:
             f"declared_systems: {adapters_dir} is not a directory this process can read "
             f"({reason})"
         ) from e
-    for name in roster.refused:
+    for name, why in roster.refused.items():
         _logger.warning(
-            f"declared_systems: refused anomalous adapter name {name!r} "
-            f"from {adapters_dir} — it is not a name the dispatch seam resolves"
+            f"declared_systems: refused adapter name {name!r} from {adapters_dir} — {why}"
         )
     return roster
 
 
 def _adapter_names(adapters_dir: Path) -> frozenset[str]:
     """The adapter half as a set of names — `read_adapters`, indexed."""
-    return frozenset(read_adapters(adapters_dir).accepted)
+    return frozenset(read_adapters(adapters_dir).verbs)
 
 
 def _marker_names(agent: Mapping[str, object]) -> frozenset[str]:
@@ -98,7 +97,7 @@ def declared_systems_over(
 ) -> frozenset[str]:
     """`declared_systems` for a caller that already read the adapter half (the disposition
     census lint), so it needn't read twice."""
-    union = frozenset(roster.accepted) | (_marker_names(agent) if agent is not None else frozenset())
+    union = frozenset(roster.verbs) | (_marker_names(agent) if agent is not None else frozenset())
     if not union:
         _logger.warning(
             f"declared_systems: no systems declared by either source "

@@ -38,7 +38,7 @@ from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.author.version_control import DeliveryRefused
 from defender.learning.leads import lead_render
 from defender import box as _box
-from defender.systems.verbs import engine_for
+from defender.systems.verbs import PLATFORM_SERVED, engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
     CATALOG_PREFIX,
@@ -304,7 +304,8 @@ def _run_locked(
         _logger.info("already processed (done sentinel exists) — nothing to do")
         return 0
 
-    if not deps.systems:
+    # A platform-served system admits paths but is not a system the tenant declared (#1390 A14).
+    if not deps.systems - PLATFORM_SERVED.keys():
         # An empty declared set would refuse every path one by one and report a clean no-op;
         # refuse loudly before spawning instead.
         raise LeadAuthorError(

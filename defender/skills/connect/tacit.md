@@ -1,11 +1,14 @@
 # `connect` — recording a tacit-knowledge sanction
 
 Read this when a human wants to record that **someone has signed off on a
-particular actor doing a particular thing on particular hosts**, and the
-tacit-knowledge system is already connected.
+particular actor doing a particular thing on particular hosts**. The
+tacit-knowledge system is built into the platform, so there is nothing to
+connect; but a registry is unused until the tenant's grant table
+(`settings/verb-grants.yaml`) grants `lookup` to the gather role, so check
+that row exists before telling the human the sanction will take effect.
 
 This is **not** the onboarding workflow. `SKILL.md`'s six steps connect a
-new system of record; this adds *data* to one that is already connected.
+new system of record; this adds *data* to a system the platform already serves.
 Two different jobs in the same skill because the shape of the work is the
 same — interview a maintainer, write files, validate, leave a proposal for review — and
 because a maintainer who has run `/connect` once already knows where to

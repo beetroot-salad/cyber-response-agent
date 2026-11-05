@@ -50,7 +50,7 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
         except RegistryError as e:
             sys.stderr.write(f"workspace_map: {e}\n")
             return 2
-        print(workspace_map(Path(run.run_dir), systems=tuple(roster.accepted),
+        print(workspace_map(Path(run.run_dir), systems=roster.systems,
                             agent_root=_stamped_agent_root(admitted.tenant, Path(run.run_dir))), end="")
     return 0
 

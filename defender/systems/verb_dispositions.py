@@ -192,9 +192,10 @@ def load_dispositions(path: Path) -> tuple[Disposition, ...]:
     path = Path(path)
     out = _validated_rows(path, _yaml.read_reviewed_text(path, what=_TABLE_WHAT,
                                                          error=DispositionError))
-    # Outside the cache: the warning is owed on every load, a cached one included.
+    # Outside the cache: the warning is owed on every load, a cached one included. It reads the
+    # rows the operator wrote: an implied withholding is no choice of theirs to be warned of.
     _warn_unhealth_checkable(path, out)
-    return out
+    return _with_implied_rows(out)
 
 
 @functools.lru_cache(maxsize=64)
@@ -223,6 +224,27 @@ def _validated_rows(path: Path, text: str) -> tuple[Disposition, ...]:
     out = tuple(rows)
     _refuse_incoherent_narrowing(path, out)
     return out
+
+
+#: Why a platform-served verb with no row in the table is withheld (#1390 A3).
+IMPLIED_REASON = "no row in this table: a platform-served system's rows are optional, and an absent row withholds the verb"
+
+
+def _with_implied_rows(rows: tuple[Disposition, ...]) -> tuple[Disposition, ...]:
+    """`rows` plus an implied withheld row (no roles, a product-supplied reason) for each verb of
+    a platform-served system the table does not name, so a deleted row is a decided withholding
+    to the census and the grant, never an undecided verb (#1390 H4, A3). Present rows are
+    judged as any row."""
+    from defender.systems.verbs import PLATFORM_SERVED
+
+    decided = {d.pair for d in rows}
+    implied = tuple(
+        Disposition(system=system, verb=verb, roles=frozenset(), reason=IMPLIED_REASON)
+        for system, verbs in PLATFORM_SERVED.items()
+        for verb in sorted(verbs)
+        if (system, verb) not in decided
+    )
+    return rows + implied
 
 
 def _refuse_incoherent_narrowing(path: Path, rows: tuple[Disposition, ...]) -> None:
