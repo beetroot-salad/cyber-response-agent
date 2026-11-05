@@ -2,7 +2,7 @@
 
 Adapters reach an `http-proxy` system by posting to the proxy with a request token; the proxy
 checks the token, the tenant's merged access declaration and the route, applies the stored
-credential, sends, scrubs and audits. The OpenBao store and transit signer/verifier, the token
+credential, sends, passes the reply on as it arrives and audits. The OpenBao store and transit signer/verifier, the token
 mint, the request signer (`request_signer`) and the audit sink live here too. Run it with `python -m defender.credential_proxy`."""
 from __future__ import annotations
 

@@ -34,6 +34,15 @@ Alert-triage product: an in-process PydanticAI investigation runtime plus an off
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.
 
+## Upgrade from before #1412
+
+The credential proxy streams each upstream reply to the run in its own frame format (content
+type `application/vnd.defender.proxy-reply`) instead of one JSON document, and no longer scrubs
+credentials an upstream echoes. Upgrade the proxy and every run image together: an old run
+refuses the new reply, and a new run refuses an old one, both as the proxy's own transport fault.
+A reply over `max_response_bytes` (8 MiB) is still refused; the fault now tells the model to
+narrow the query.
+
 ## Upgrade from before #1391
 
 Elastic is reached only through the credential proxy; its Docker access is gone. <!-- lint-shippable: ok — the vendor-specific product integration. -->

@@ -528,8 +528,8 @@ def _proxy_request(  # noqa: PLR0913 — one request's per-call state
         raise_proxy_fault(answer.fault or "TransportFault", answer.detail,
                           from_system=answer.from_system)
     if answer.fault in ("UpstreamFault", "TransportFault") and answer.status:
-        # The system answered: its own reason (scrubbed by the proxy) reaches the model and
-        # curation, as on the docker path (`_raise_on_http_error`).
+        # The system answered: its own reason, unaltered by the proxy (#1412), reaches the model
+        # and curation, as on the docker path (`_raise_on_http_error`).
         # With no body to hand on (withheld, or the reply broke) the proxy's reason says why.
         why = _vendor_detail(answer.body) if answer.body else answer.detail
         raise_proxy_fault(answer.fault, f"HTTP {answer.status} from {system}: {why}",

@@ -30,7 +30,7 @@ So **a run, its driver and its adapters never hold a customer credential value.*
 that needs one is reached over HTTP through the **credential proxy**, a separate program: the
 run presents a signed, short-lived request token and the request; the proxy checks the
 destination, route and grant against the tenant's merged access declaration, adds the
-credential from OpenBao, sends, scrubs the reply, and audits. This is the broker this record
+credential from OpenBao, sends, passes the reply on as it arrives (it does not search it for credentials, #1412), and audits. This is the broker this record
 once did without, now reintroduced for customer credentials only; the design is in #1163.
 `docker exec` stays for credential-free systems and never carries a credential of ours.
 
