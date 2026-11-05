@@ -185,6 +185,74 @@ def test_f1_a_compressed_reply_over_the_limit_is_refused_as_compressed_not_as_to
     assert "narrow" not in answer["detail"]
 
 
+_BODY_STATUSES = [s for s in range(200, 600) if s not in (204, 205, 304)]
+_FAULT_BY_CLASS = {2: "UpstreamFault", 3: "UpstreamFault", 4: "UpstreamFault", 5: "TransportFault"}
+
+
+def test_o3_every_over_limit_reply_is_withheld_whatever_its_status_and_narrows_only_a_2xx(
+        tmp_path, data_root):
+    """For statuses drawn from every one that carries a body, declared or not, an over-limit reply
+    forwards nothing; declared, the upstream is hung up on at its first byte; the status stands,
+    the fault is the status's, 'narrow' only on a 2xx. #1412 O3."""
+    rng = random.Random(1412)
+    fixed = [200, 201, 203, 206, 226, 299, 300, 301, 302, 303, 307, 308, 399, 400, 401, 403, 404, 429,
+             499, 500, 502, 503, 599]
+    statuses = fixed + rng.sample([s for s in _BODY_STATUSES if s not in fixed], 12)
+    declared_sizes = [CAP + 1, CAP * 2, 10 ** 9, 10 ** 17]
+    state: dict[str, Any] = {}
+
+    def script(conn: socket.socket) -> None:
+        if state["declared"] is not None:
+            conn.sendall(W.head(state["status"], state["declared"]) + b"a")
+        else:
+            conn.sendall(b"HTTP/1.1 %d X\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n"
+                         % state["status"] + W.chunked(b"a" * (CAP + 1)))
+
+    with W.scripted(script) as up, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + BASE),
+            max_response_bytes=CAP) as r:
+        for status in statuses:
+            for declared in (rng.choice(declared_sizes), None):
+                state.update(status=status, declared=declared)
+                up.hung_up.clear()
+                forwarded, final = W.decoded(r.post(url=f"{up.url}{PATH}", timeout_sec=5).content)
+                case = (status, declared)
+                assert forwarded == b"", case
+                assert final["status"] == status, case
+                want = "ConfigFault" if status == 401 else _FAULT_BY_CLASS[status // 100]
+                assert (final["fault"], final["body_whole"]) == (want, False), (case, final)
+                assert ("narrow" in final["detail"]) == (status < 300), (case, final["detail"])
+                if declared is not None:
+                    assert up.hung_up.wait(2), f"upstream kept after the first body byte: {case}"
+
+
+_REFUSED_CODINGS = ["gzip", "x-gzip", "deflate", "br", "zstd", "compress", "unknown-token", "GZIP",
+                    " Gzip ", "gzip, br", "br,identity", "identity, gzip", "IDENTITY, zstd",
+                    "identity,compress", "Deflate , identity", "x-weird"]
+_PLAIN_CODINGS = ["identity", "IDENTITY", "Identity", "identity, ", " identity", "", "identity,identity"]
+
+
+def test_o3_any_content_coding_but_identity_is_refused_as_compressed_at_the_first_byte(
+        tmp_path, data_root):
+    """A Content-Encoding listing any coding but identity (any case, any list, known or not) is
+    refused as a compressed body, nothing forwarded and no 'narrow'; identity or none arrives
+    whole. #1412 O3, #1383."""
+    plain = b'{"ok": true}'
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=CAP) as r:
+        for coding in _REFUSED_CODINGS + _PLAIN_CODINGS:
+            r.up.replies[PATH] = (200, {"Content-Type": "application/json",
+                                        "Content-Encoding": coding}, plain)
+            answer = r.ask()
+            if coding in _PLAIN_CODINGS:
+                assert (answer["fault"], answer["body"], answer["body_whole"]) == (
+                    None, plain.decode(), True), coding
+            else:
+                assert (answer["fault"], answer["status"], answer["body"], answer["body_whole"]) == (
+                    "UpstreamFault", 200, "", False), (coding, answer)
+                assert "a compressed body" in answer["detail"], (coding, answer)
+                assert "narrow" not in answer["detail"], coding
+
+
 # --- A9 a request that cannot be processed is classified and audited --------------------------
 
 def _raw(r, doc: dict, *, text: str | None = None):
