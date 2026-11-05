@@ -50,14 +50,29 @@ def test_o14_every_investigation_names_its_request_key_and_attempt(field):
         models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="queued", created_at=NOW, **fields)
 
 
-def test_o14_cost_is_nullable_and_no_longer_described_as_so_far():
-    """`cost_usd=None` (unknown, R3) validates and serves null; the field's text says final/unknown. (O14, M11)"""
+def test_o14_cost_is_nullable_and_described_as_so_far_while_live():
+    """`cost_usd=None` (unknown, R3) validates and serves null; the text says "so far" while live and final once ended, and null for unknown. (O14, M11, B12: conflict updated)"""
     inv = _investigation(cost_usd=None)
     assert inv.model_dump(mode="json")["cost_usd"] is None
     assert _investigation(cost_usd=1.25).cost_usd == 1.25  # control: a number still validates
     description = models.Investigation.model_fields["cost_usd"].description.lower()
-    assert "so far" not in description
+    assert "so far" in description
+    assert "final" in description
     assert "unknown" in description or "null" in description
+
+
+def test_b12_failure_reason_names_the_two_take_over_reasons_beside_the_old_ones():
+    """The `failure_reason` text lists `lease_lapsed` and `retry_cap` and still `cancelled` and `worker_error`. (B12)"""
+    description = models.Investigation.model_fields["failure_reason"].description
+    assert all(f"`{reason}`" in description for reason in ("lease_lapsed", "retry_cap", "cancelled", "worker_error"))
+
+
+def test_b12_the_cancel_port_says_it_aborts_a_running_investigation_and_names_a_live_retry():
+    """The cancel docstring no longer says running is unsupported; it says queued or running is aborted and an ended attempt's `Conflict` names its live retry. (B12, B9)"""
+    doc = " ".join(inspect.getdoc(ports.WriteTransaction.cancel_investigation).split()).lower()
+    assert "not supported" not in doc
+    assert "queued or running" in doc or "running or queued" in doc
+    assert "retry" in doc
 
 
 def test_o14_alert_raw_is_the_exact_text_and_a_parsed_object_is_refused():
@@ -126,12 +141,12 @@ def test_o9_the_fake_cancels_a_queued_investigation_as_aborted_with_reason_cance
     assert (got.status, got.failure_reason, got.finished_at) == ("aborted", "cancelled", NOW)
 
 
-def test_o9_the_fake_refuses_to_cancel_a_running_investigation_and_leaves_it_running():
-    """Running is a `Conflict` ("cannot cancel a running investigation yet"); the stored row is unchanged. (O9, O14)"""
+def test_o9_the_fake_cancels_a_running_investigation_as_aborted_with_reason_cancelled():
+    """Running becomes `aborted`/`cancelled` with a finish time, as the job store's cancel does; no "not yet". (O9, O14, B9: conflict updated; the fake follows the port, which the design amends)"""
     store, got = _cancel("running")
-    assert isinstance(got, ports.Conflict), got
-    assert "running investigation yet" in str(got)
-    assert anyio.run(store.get_investigation, "t", "b1000000-0000-4000-8000-000000000001").status == "running"
+    assert not isinstance(got, BaseException), got
+    assert (got.status, got.failure_reason, got.finished_at) == ("aborted", "cancelled", NOW)
+    assert anyio.run(store.get_investigation, "t", "b1000000-0000-4000-8000-000000000001").status == "aborted"
 
 
 @pytest.mark.parametrize("status", ["completed", "unparseable", "failed", "aborted"])
@@ -185,3 +200,14 @@ def test_o13_the_audit_vocabulary_has_claim_and_finish():
     """The API's list of audit actions gains `investigation.claim` and `investigation.finish`. (O13)"""
     actions = set(typing.get_args(ports.AuditAction))
     assert {"investigation.claim", "investigation.finish"} <= actions
+
+
+def test_b12_every_audit_vocabulary_gains_takeover_and_retry():
+    """The API's list and the job store's own list both carry `investigation.takeover` and `investigation.retry`. (B12, B6)"""
+    from defender.jobs.audit import AuditAction as JobsAuditAction
+
+    new = {"investigation.takeover", "investigation.retry"}
+    jobs = set(typing.get_args(JobsAuditAction))
+    assert new <= set(typing.get_args(ports.AuditAction))
+    assert new <= jobs
+    assert jobs <= set(typing.get_args(ports.AuditAction)), "the job store emits an action the API's vocabulary lacks"

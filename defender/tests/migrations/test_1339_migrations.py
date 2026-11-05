@@ -325,18 +325,20 @@ def test_the_dev_command_without_a_database_refuses_loudly():
 
 
 def test_the_jobs_revision_sits_directly_on_the_sign_login_revision():
-    """The history is the baseline, `0002_tenancy`, `0003_sign_login`, `0004_jobs`, then #1382's `0005_uuid_ids` as head
-    (#1342 O1; r6: tenants are #1214's records; jobs follows #1163's revision, so the history stays one line)."""
+    """The history is the baseline, `0002_tenancy`, `0003_sign_login`, then `0004_jobs` (#1342 O1; r6: tenants are
+    #1214's records; jobs follows #1163's revision, so the history stays one line), then #1382's `0005_uuid_ids`
+    and #1343's `0006_job_leases` as head. (The name predates them; the node id is kept.)"""
     from defender.migrations import _scripts, head
 
     scripts = _scripts()
-    assert head() == "0005_uuid_ids"
-    assert scripts.get_revision(head()).down_revision == "0004_jobs"
+    assert head() == "0006_job_leases"
+    assert scripts.get_revision("0006_job_leases").down_revision == "0005_uuid_ids"
+    assert scripts.get_revision("0005_uuid_ids").down_revision == "0004_jobs"
     assert scripts.get_revision("0004_jobs").down_revision == "0003_sign_login"
     assert scripts.get_revision("0003_sign_login").down_revision == "0002_tenancy"
     assert scripts.get_revision("0002_tenancy").down_revision == "0001_baseline"
-    assert [r.revision for r in scripts.walk_revisions()] == ["0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy",
-                                                           "0001_baseline"]
+    assert [r.revision for r in scripts.walk_revisions()] == [
+        "0006_job_leases", "0005_uuid_ids", "0004_jobs", "0003_sign_login", "0002_tenancy", "0001_baseline"]
 
 
 @pytest.mark.postgres
@@ -390,11 +392,11 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
                            "received_at", "title", "description", "raw"}
     assert set(investigations) == {"id", "tenant_id", "alert_id", "request_key", "attempt", "stage", "created_at",
                                    "started_at", "finished_at", "disposition", "cost_usd", "knowledge",
-                                   "failure_reason", "failure_message"}
+                                   "failure_reason", "failure_message", "lease_expires_at", "accounting_written_at"}
     assert [n for n, (_, nullable, _) in alerts.items() if nullable] == []
     nullable = {n for n, (_, can_be_null, _) in investigations.items() if can_be_null}
     assert nullable == {"started_at", "finished_at", "disposition", "cost_usd", "knowledge", "failure_reason",
-                        "failure_message"}
+                        "failure_message", "lease_expires_at", "accounting_written_at"}
     assert alerts["raw"][0] == "bytea"
     assert investigations["cost_usd"][0] == "double precision"
     assert [c for cols in (alerts, investigations) for c, (_, _, default) in cols.items() if default is not None] == []
@@ -417,9 +419,14 @@ def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
     foreign = next(d for k, _, d in investigations if k == "f")
     assert foreign == "FOREIGN KEY (tenant_id, alert_id) REFERENCES jobs.alerts(tenant_id, id)", \
         "no ON DELETE / ON UPDATE action: delete and cascade are the store's, under the alert lock (M10, O10)"
-    [check] = [d for k, _, d in investigations if k == "c"]
+    checks = [d for k, _, d in investigations if k == "c"]
+    assert len(checks) == 2, "the stage CHECK and #1343's running-has-a-lease CHECK, no other"
+    [check] = [d for d in checks if "completed" in d]
     for stage in ("queued", "running", "completed", "unparseable", "failed", "aborted"):
         assert f"'{stage}'" in check
+    [lease] = [d for d in checks if "completed" not in d]
+    assert "lease_expires_at" in lease
+    assert "'running'" in lease  # (#1343: second CHECK; conflict updated)
 
 
 @pytest.mark.postgres

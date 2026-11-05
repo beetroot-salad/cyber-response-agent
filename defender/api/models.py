@@ -118,7 +118,8 @@ class Investigation(BaseModel):
         json_schema_extra={"enum": [*DISPOSITION_VALUES, None]},
     )
     cost_usd: float | None = Field(
-        description="Model cost: 0 until the run ends, final once the status is terminal; "
+        description="Model cost so far while the investigation is live (0 until its first update), "
+                    "final once the status is terminal and its worker has written its last figure; "
                     "null when the run ended but its cost could not be read (unknown).")
     created_at: Instant
     started_at: Instant | None = None
@@ -126,7 +127,8 @@ class Investigation(BaseModel):
     failure_reason: str | None = Field(
         default=None,
         description="Set when the investigation failed or was aborted: a fixed reason such as "
-                    "`setup_refused`, `no_report`, `worker_error` or `cancelled`.")
+                    "`setup_refused`, `no_report`, `worker_error`, `cancelled`, `lease_lapsed` (its worker "
+                    "was lost; a retry follows) or `retry_cap` (lost on the last of its attempts).")
     failure_message: str | None = Field(
         default=None, description="Our own words on why it failed; never model or run output.")
     artifacts: list[str] = Field(

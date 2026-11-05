@@ -601,6 +601,7 @@ def test_a_clock_mount_must_round_trip_before_the_box_is_returned(tmp_path, monk
                 stderr="missing clock bind" if fault == "missing" else "")
         return docker(args, **kwargs)
 
+    faulty_clock_mount.popen = docker.popen   # the run box's attached start (#1343 r5 item 15)
     with pytest.raises(box_mod.BoxFault):
         box_mod.start_box(run_dir, C.DEFENDER, docker=faulty_clock_mount,
                           spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS), tenant_id=TEST_TENANT)
