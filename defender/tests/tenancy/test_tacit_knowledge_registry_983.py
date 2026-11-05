@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -585,7 +586,7 @@ def test_1390_the_connect_page_no_longer_says_the_registry_is_already_connected_
     text = " ".join((DEFENDER / "skills" / "connect" / "tacit.md").read_text(encoding="utf-8").lower().split())
 
     assert "already connected" not in text, "the page still presents the registry as a connected system"
-    assert "lookup" in text and "grant" in text, "the page does not say lookup must be granted"
+    assert re.search(r"lookup.{0,80}grant|grant.{0,80}lookup", text), "the page does not say lookup must be granted"
 
 
 _PLANTED_TACIT = '''\

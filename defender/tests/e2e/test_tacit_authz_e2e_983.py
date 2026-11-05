@@ -365,6 +365,12 @@ def _gather_lookups(tmp_path: Path, est, *turns, system: str = SYSTEM, **drive) 
     return run_dir, [r for r in S.lead_rows(run_dir) if r["system"] == SYSTEM], gather
 
 
+def _state_of_driven_run(arm: Path) -> object:
+    """A `RunState` for the run `_gather_lookups(arm, ...)` drives: the driver refuses another run's."""
+    S = _spec()
+    return S.run_state(arm / "run" / S.RUN_ID / S.RUN_ID)
+
+
 def _stored_answer(run_dir: Path, row: dict) -> dict:
     return json.loads((run_dir / row["payload_path"]).read_text(encoding="utf-8"))
 
@@ -497,19 +503,19 @@ def test_1390_a_dropped_entry_rides_a_hit_in_the_stored_answer(tmp_path):
 
 def test_1390_the_repeat_guard_applies_to_the_registry(tmp_path):
     """The third identical lookup in one lead is stopped by the repeat guard and never reaches the registry; the first two are answered. O4."""
-    from defender.investigation.record_query import REPEAT_ESCAPE
+    from defender.knowledge import REPEAT_TRIP_QUERY_ID
 
     S = _spec()
     est = S.TacitEstate(tmp_path / "estate")
     est.write_registry(json.dumps({"entries": [_current_entry()]}))
     ask = S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS)
 
-    _run_dir, rows, gather = _gather_lookups(tmp_path, est, ask, ask, ask)
+    _run_dir, rows, _gather = _gather_lookups(tmp_path, est, ask, ask, ask)
 
     codes = [r["exit_code"] for r in rows]
     assert codes[:2] == [0, 0] and len(codes) == 3 and codes[2] != 0, (
         f"the third identical lookup was not stopped: {codes}")
-    assert REPEAT_ESCAPE in gather.seen[-1], f"the lead was not told to move on:\n{gather.seen[-1]}"
+    assert rows[2]["query_id"] == REPEAT_TRIP_QUERY_ID, f"the stop is not the repeat guard's: {rows[2]}"
 
 
 def test_1390_a_tripped_circuit_breaker_refuses_a_lead_on_the_registry(tmp_path):
@@ -522,7 +528,7 @@ def test_1390_a_tripped_circuit_breaker_refuses_a_lead_on_the_registry(tmp_path)
     ask = S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS)
     _d, control, _g = _gather_lookups(tmp_path / "control", est, ask)
     assert [r["exit_code"] for r in control] == [0], "positive control: the untripped lead is answered"
-    state = S.run_state(tmp_path / "breaker-run")
+    state = _state_of_driven_run(tmp_path / "tripped")
     for _ in range(circuit_breaker.PER_SYSTEM_FAIL_LIMIT):
         circuit_breaker.record_outcome(state, SYSTEM, 124)
     assert circuit_breaker.is_tripped(state, SYSTEM), "premise: the breaker is tripped"
@@ -539,9 +545,9 @@ def test_1390_a_resumed_run_clock_is_the_day_a_lookup_through_the_query_tool_is_
     entry = scene.registry_entry(added_at="2026-04-01", review_by="2026-07-01")
     est.write_registry(json.dumps({"entries": [entry]}))
     assert dt.datetime.now(dt.UTC).date() > dt.date(2026, 7, 1), "premise: the entry has expired by today"
-    sibling = S.run_state(tmp_path / "sibling-clock")
+    sibling = _state_of_driven_run(tmp_path / "sibling")
     sibling.resume_clock(dt.datetime(2026, 5, 1, 12, tzinfo=dt.UTC), 0.0)
-    live = S.run_state(tmp_path / "live-clock")
+    live = _state_of_driven_run(tmp_path / "live")
 
     answers = []
     for name, state in (("sibling", sibling), ("live", live)):
