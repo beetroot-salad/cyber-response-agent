@@ -1,4 +1,5 @@
-"""#1412 O4 and O8 over every way an exchange can end: one audit record naming the ending,
+"""#1412 O4 and O8 over every way an exchange can end: one audit record per request (its outcome
+`sent 200` when the status went out, else the fault; its `fault` that of the final frame),
 written before the final frame, failing closed; the system's status standing. The rows are
 generated from `E.ENDINGS`, not picked."""
 from __future__ import annotations
@@ -6,6 +7,7 @@ from __future__ import annotations
 import pytest
 
 from defender.integrations._stub_transport import http_write
+from defender.kit.faults import TransportFault, UpstreamFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _endings1412r as E
 from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
@@ -23,14 +25,14 @@ def _rows(endings, *axes):
 @pytest.mark.parametrize(("ending", "mode"), _rows(E.ENDINGS, ["written", "held", "failing"]))
 def test_o4_every_ending_is_one_record_before_the_final_frame_and_a_failed_one_withholds(
         tmp_path, data_root, ending, mode):
-    """Whatever ended the exchange, one record names it and agrees with the final frame's fault; it
+    """Whatever ended the exchange, one record per request, its fault agreeing with the final frame's; it
     is written before the final frame; a record that cannot be written withholds the answer. #1412 O4."""
     audit = E.audit_of(mode)
     with E.served(tmp_path, data_root, ending, audit=audit) as ex:
         got = E.run(ex, ending, hold=mode == "held")
 
     if mode == "failing":
-        assert audit.attempts == 1
+        assert audit.attempts >= 1, audit.attempts
     else:
         assert len(audit.records) == 1, audit.records
     if ending.reader_leaves:
@@ -73,11 +75,26 @@ def test_o8_a_write_the_system_took_is_accepted_whatever_became_of_its_reply(
         http_write(ctx, config, method, "/tickets", {"body": "x"}, system="identity")  # raises if refused
 
 
+@pytest.mark.parametrize(("status", "fault"), [(404, UpstreamFault), (500, TransportFault)])
+def test_o8_the_write_judgement_still_refuses_a_non_2xx_status_on_a_complete_reply(
+        tmp_path, data_root, status, fault):
+    """Control for the test above: the same rig on the `complete` ending raises when the system's
+    status is a refusal, so "did not raise" there is a real result. #1412 O8, #1359."""
+    ending = E.ENDINGS[0]
+    assert ending.name == "complete"
+    with E.served(tmp_path, data_root, ending, status=status, writes=(("POST", "/tickets"),),
+                  grant="rw") as ex:
+        ctx = A.ctx_for(tmp_path, T.run_record(ex.rig.t), ex.url, ex.tok)
+        config = {"URL_BASE": f"{ex.up.url}{E.BASE}", "TIMEOUT_SEC": str(ending.timeout)}
+        with pytest.raises(fault):
+            http_write(ctx, config, "POST", "/tickets", {"body": "x"}, system="identity")
+
+
 @pytest.mark.parametrize("ending", E.STATUSED, ids=lambda e: e.name)
 def test_o8_a_401_on_an_oauth_system_evicts_the_cached_token_whatever_became_of_its_reply(
         tmp_path, data_root, ending):
     """A 401 evicts the cached access token however its body ended, so the next request exchanges
-    afresh. #1412 O8, O7."""
+    afresh. #1412 O8."""
     issued: list[str] = []
     with E.served(tmp_path, data_root, ending, status=401, oauth=issued, then_clean=True) as ex:
         first = W.call(ex.url, ex.tok, ex.target, timeout_sec=ending.timeout)

@@ -582,8 +582,11 @@ def test_o6_a_reader_making_steady_progress_is_still_cut_at_the_deadline(tmp_pat
     with W.scripted(_endless_8_mib) as up, T.rig(
             tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + API)) as r, \
             A.proxy_for(r.t, r.store, audit=audit, proxy_overhead_sec=1) as (url, _tap), \
-            W.unread(url, r.tok(), W.doc(f"{up.url}{API}/users/x", timeout_sec=1)) as response:
-        def read() -> None:
+            httpx.Client(trust_env=False, timeout=60, transport=httpx.HTTPTransport(socket_options=[
+                (socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)])) as client, \
+            client.stream("POST", url + PROXY_PATH, headers={"Authorization": f"Bearer {r.tok()}"},
+                          json=W.doc(f"{up.url}{API}/users/x", timeout_sec=1)) as response:
+        def read() -> None:  # a small receive buffer: the proxy's sends wait on this reader
             for chunk in response.iter_raw(64 * 1024):
                 raw.append(chunk)
                 time.sleep(0.04)  # 128 reads: 5 s in all, a deadline of 2 s
@@ -592,6 +595,7 @@ def test_o6_a_reader_making_steady_progress_is_still_cut_at_the_deadline(tmp_pat
         reader.start()
         assert W.until(lambda: audit.records, 4), "no record near the deadline"
         assert W.until(lambda: W.borrowed(url) == 0, 5), "the worker thread is held past the cut"
+        assert reader.is_alive(), "the reader finished first: the cut was not made while it still read"
         assert up.hung_up.wait(5), "the upstream connection outlived the deadline"
         reader.join(60)
         forwarded, final = W.decoded(b"".join(raw))

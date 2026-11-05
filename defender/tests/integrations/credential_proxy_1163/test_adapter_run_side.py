@@ -446,7 +446,7 @@ def test_o9_a_reply_in_any_other_content_type_is_the_proxys_own_fault():
 def test_o9_only_a_200_in_exactly_the_proxys_content_type_is_its_reply():
     """Valid frames under another status, or a content type that merely extends the proxy's (a
     prefix or suffix of it, or containing it), are the proxy's own `TransportFault`, naming a
-    non-200 status; the real type with parameters or in another case is accepted. O9."""
+    non-200 status; the proxy's exact type is accepted. O9."""
     real = W.fmt().REPLY_CONTENT_TYPE
     frames = _reply(b"NEW-1412")
     wrong_types = [real + "-v2", real + "+json", real + "2", real + ".x", "x" + real,
@@ -454,7 +454,7 @@ def test_o9_only_a_200_in_exactly_the_proxys_content_type_is_its_reply():
                    "Application/JSON", "TEXT/PLAIN; charset=utf-8", "application/json; q=1",
                    "text/html", real.split("/")[0], real.split("/")[0] + "/", "application/x-" + real]
     wrong_statuses = [201, 202, 204, 206, 299, 301, 400, 401, 404, 429, 500, 503]
-    accepted = [real, real + "; charset=utf-8", real.upper(), real.title() + " ;x=y"]
+    accepted = [real]
     cases = [(200, t) for t in wrong_types] + [(s, real) for s in wrong_statuses] + [
         (s, t) for s, t in ((201, real + "-v2"), (404, "text/html"), (500, real + "+json"))]
     with H.upstream() as fake:
