@@ -302,11 +302,12 @@ Fenced writes reject stale claims, but do not stop model spend or adapter calls.
 A run's processes are tied to the worker that started them: a worker's child
 ends when the worker does, and a run's box ends when its starter does (its main
 process reads an input the starter holds open; the box is removed when it stops).
-So a lease that lapses means the old run is gone or ends within seconds, and the
-database step that takes the row over needs nothing from the machine. A worker
-whose renewals stall but which is alive stops its child when its own count of
-the lease runs out (any database outage over 30 s therefore stops every running
-investigation), and hands the row back when the database answers. Cancellation updates the row; the holder's
+So a lease that lapses because a worker died means the old run is gone or ends
+within seconds, and the database step that takes the row over needs nothing from
+the machine. A worker that is alive but cannot reach the database keeps its child
+running, however long that lasts, and uses no attempt. If another worker takes the
+row over meanwhile, the old child runs beside the retry until its next renewal
+lands or it ends. Cancellation updates the row; the holder's
 next renewal (within about a second) tells the child to stop, and the child has
 ended within `stop_grace` (30 s) of that.
 

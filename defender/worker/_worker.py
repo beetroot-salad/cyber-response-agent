@@ -18,12 +18,10 @@ already ended the row, its final cost and knowledge; a deliberate stop ends the 
 their rows back (B11). A write that fails as an outage is retried each second and nothing new is
 claimed meanwhile (B5).
 
-A worker keeps its own count of each lease (#1343 review), since a database it cannot reach cannot
-tell it anything. A store call that extends a lease counts from the moment it began. A renewal
-that outlives `store_call_limit` has failed. A row whose lease has run out with no renewal landing
-has its child stopped and is handed back when the store answers. A worker whose own store calls
-hit an outage within the last lease takes nothing over: other workers' leases lapsed in the same
-outage, and their next renewal has not had its chance."""
+A database outage ends no child, however long it lasts (T2): a renewal that fails, or outlives
+`store_call_limit`, is tried again, and a late renewal revives a row nobody took over. A worker whose
+own store calls hit an outage within the last lease takes nothing over: other workers' leases lapsed
+in the same outage, and their next renewal has not had its chance."""
 from __future__ import annotations
 
 import asyncio
@@ -292,11 +290,10 @@ class Worker:
         """Claim one queued row into a task; False when nothing is queued."""
         if self._stopping:
             return False
-        began = time.monotonic()
         claim = await self._store.claim()
         if claim is None:
             return False
-        held = Held(claim.record, lease_until=began + self._lease)
+        held = Held(claim.record)
         self._held[claim.record.investigation_id] = held
         task = asyncio.create_task(self._run_row(claim, held))
         self._tasks.add(task)
@@ -372,7 +369,6 @@ class Worker:
             self._renewal_failing = False
             return
         costs = self._costs_due(held)
-        began = time.monotonic()
         try:
             async with asyncio.timeout(self._store_call_limit):  # not `wait_for`: on 3.11 it can lose a cancel
                 covered = set(await self._store.renew(set(held), costs=costs))
@@ -380,11 +376,8 @@ class Worker:
             self._renewal_failing = True
             self._note_store_fault(fault)
             _logger.warning("the worker could not renew its leases; retrying", exc_info=True)
-            self._stop_lapsed(held)
             return
         self._renewal_failing = False
-        for inv in covered & held.keys():
-            held[inv].lease_until = began + self._lease
         if costs is not None:
             self._last_cost_copy = time.monotonic()
         for inv, row in held.items():
@@ -394,17 +387,6 @@ class Worker:
     def _note_store_fault(self, fault: BaseException) -> None:
         if is_outage(fault):
             self._store_outage_at = time.monotonic()
-
-    def _stop_lapsed(self, held: dict[str, Held]) -> None:
-        """Stop the child of every row whose lease has run out by this worker's clock: another
-        worker may be running its retry. Its row is handed back once the store answers (B11)."""
-        now = time.monotonic()
-        for inv, row in held.items():
-            if row.lease_lost or now < row.lease_until:
-                continue
-            row.lease_lost = True
-            _logger.warning("investigation %s: its lease ran out with no renewal landing; stopping its child", inv)
-            row.enders.append(asyncio.create_task(self._end_child(row, by_stop=True)))
 
     def _costs_due(self, held: dict[str, Held]) -> dict[str, float] | None:
         """The figures this renewal copies (B2), or None between cost ticks."""
@@ -477,7 +459,7 @@ class Worker:
             return await self._run_claimed(held, tenant_state)
         except Exception as fault:  # noqa: BLE001 — one row's fault never ends the worker
             _logger.exception("investigation %s: the worker failed while running it", inv)
-            if is_outage(fault) or held.signalled or held.lease_lost:
+            if is_outage(fault) or held.signalled:
                 # Nothing about the job failed: it is handed back, with what it had spent.
                 return End(None, 0.0 if held.proc is None else held.cost_so_far, None)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR,
@@ -486,7 +468,7 @@ class Worker:
     async def _run_claimed(self, held: Held, tenant_state: str) -> End:
         record = held.record
         inv, tenant = record.investigation_id, record.tenant_id
-        if self._stopping or held.lease_lost:  # claimed as the stop landed: handed back with nothing launched or spent
+        if self._stopping:  # claimed as the stop landed: handed back with nothing launched or spent
             return End(None, 0.0, None)
         started = self._clock()
         # This claim's box token (#1342 r5 C1): the child's box is stamped with it, and the
@@ -497,7 +479,7 @@ class Worker:
         except _WorkerFault as fault:
             _logger.error("investigation %s: %s", inv, fault)
             return End(Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message=str(fault)), 0.0, None)
-        if self._stopping or held.lease_lost:  # claimed but not started when the stop landed: handed back, nothing spent
+        if self._stopping:  # claimed but not started when the stop landed: handed back, nothing spent
             return End(None, 0.0, None)
         if held.fenced:  # B3: ended before its child exists; the write that follows is final accounting
             _logger.info("investigation %s: it was fenced before its child started; not launched", inv)
@@ -552,8 +534,8 @@ class Worker:
 
     async def _wait_for_child(self, held: Held, proc: asyncio.subprocess.Process) -> None:
         try:
-            if self._stopping or held.fenced or held.lease_lost:  # spawned as the stop, a fence or the lease's end landed
-                await self._end_child(held, by_stop=self._stopping or held.lease_lost)
+            if self._stopping or held.fenced:  # spawned as the stop or a fence landed
+                await self._end_child(held, by_stop=self._stopping)
             await proc.wait()
         except asyncio.CancelledError:
             # The task owns its child: cancelled (the loop itself was cancelled), it ends the

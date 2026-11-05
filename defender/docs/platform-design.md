@@ -533,11 +533,12 @@ unreadable, then a bare `worker_error`), rather than dropped into a re-run.
 A cancelled or taken-over row's worker finds out at its next renewal and ends its child. Until that child
 has ended, a new run of the same alert can already be working beside it: accepted, since a repeat is safe.
 
-A worker also counts each lease by its own clock, because a database it cannot reach can tell it nothing.
-A renewal that takes over 10 s has failed. A lease that runs out with no renewal landing stops the row's
-child, and the row is handed back when the database answers, so any database outage over 30 s stops every
-running investigation and uses one attempt of each. A worker whose own database calls hit an outage within
-the last lease takes nothing over: other workers' leases lapsed in the same outage.
+A database outage ends no running investigation, however long it lasts, and uses no attempt: a renewal that
+fails or takes over 10 s is tried again, nothing new starts meanwhile, and a late renewal revives a row nobody
+took over. A worker whose own database calls hit an outage within the last lease takes nothing over: other
+workers' leases lapsed in the same outage. A worker cut off alone can therefore run beside its row's retry
+until its next renewal lands or its child ends, and both attempts can comment on the ticket: accepted, since
+a repeat is safe.
 
 > **A repeat is unconditionally safe here: defender is recommend-only.** No `act` verbs → no external
 > side-effect to double-apply. _If act-mode graduates, recovery safety must be revisited — a
