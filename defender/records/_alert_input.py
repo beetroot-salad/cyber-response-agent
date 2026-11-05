@@ -174,7 +174,7 @@ class AlertMapping:
 
 
 def check_mapping(doc: object) -> AlertMapping:
-    """@owns alert mapping rules — the mapping in `doc` (entry name -> dotted path, or `None` for an unmapped
+    """@owns alert-mapping rules — the mapping in `doc` (entry name -> dotted path, or `None` for an unmapped
     entry; an entry left out is unmapped too), or `AlertMappingFault` naming the entry. The one validator: the
     file parser, the API's wire model and the store's re-check all go through it."""
     if not isinstance(doc, dict):
