@@ -155,9 +155,11 @@ finding. Then each group is routed by kind:
 | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | A factual question                                           | A probe. The human doesn't decide what existing code does                               |
 | Code is wrong under the settled design                       | Fixed in the code stage                                                                 |
-| A test omits, misstates or fails to enforce settled behavior | write-tests' repair author                                                              |
-| An existing test goes red because it pins replaced behavior  | write-tests' stale-test repair: update, retire, or route as a design gap                 |
+| A test omits, misstates or fails to enforce settled behavior, or pins a detail nobody decided | write-tests' repair author                                                              |
+| An existing test goes red because it pins replaced behavior  | write-tests' stale-test repair: update, retire, rewrite as incidental, or route as a design gap                 |
 | The design is wrong or leaves a consequential choice open    | discuss-issue's amendment, put to the human as "this is a bug; here are the trade-offs" |
+
+In the code stage, test repairs wait for one dispatch over whatever gaps remain at the end, not one per finding.
 
 Human attention goes to consequential design choices, never to one question per edge case.
 

@@ -32,7 +32,7 @@ A test that passes before the change is the finding, not a formality. Either it 
 
 Make the smallest change that turns the test green, at every site the sweep found. Run the touched test files, the tests that cover the changed code, the relevant e2e replay, and CI's lint and type checks. Leave the full suite to CI.
 
-Never edit an existing test to make the change pass. If one contradicts it, stop and say what it pins and why the change disagrees: that is an intent question.
+Never edit an existing test to make the change pass. If one contradicts it, dispatch one fresh reader with the test, its history and the one-sentence intended behavior, not your reasoning. It rules the test incidental only if nothing decided what the test pins and nothing relies on it; mixed evidence is not incidental. If so, it makes the change and your report lists it. Otherwise stop and say what the test pins and why the change disagrees: that is an intent question.
 
 ## 4. Mutate the deciding lines
 
@@ -46,7 +46,7 @@ Mutants only reach the lines the change touched. Dispatch one fresh agent to rev
 
 ## Report
 
-Where the intent is recorded; the sweep's sites and how each is covered; the step-2 failure, quoted; surviving mutants or `none survived over N mutants on M lines`; any can't-fail shape; the review's findings and what became of each; check results.
+Where the intent is recorded; the sweep's sites and how each is covered; the step-2 failure, quoted; surviving mutants or `none survived over N mutants on M lines`; any can't-fail shape; any existing test ruled incidental, with the evidence; the review's findings and what became of each; check results.
 
 ## Cache
 
