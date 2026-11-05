@@ -154,8 +154,10 @@ jobs:
           # BoxSpec anchors (runsc), and the parity test self-skips a runtime the daemon does
           # not register — so a silently-degraded install here would leave the boundary
           # "pinned" by a green run that started no gVisor box at all.
+          # No `grep -q`: it exits at its first match, and under pipefail the broken pipe `tr` can
+          # then hit fails this step with runsc installed (6 of 500 CI runs).
           docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \
-            | tr ' ' '\n' | grep -qx runsc
+            | tr ' ' '\n' | grep -x runsc > /dev/null
 
       # #1306: the identity repository's contract runs over PostgreSQL as well as in memory
       # (`postgres`-marked tests; every test uses its own schema). Started here, not as a job
@@ -329,8 +331,10 @@ jobs:
           # Hard-fail rather than print — same reason as the `test` job: the suite self-skips
           # a runtime the daemon does not register, so a degraded install would leave this
           # job green having started no gVisor box at all.
+          # No `grep -q`: it exits at its first match, and under pipefail the broken pipe `tr` can
+          # then hit fails this step with runsc installed (6 of 500 CI runs).
           docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \
-            | tr ' ' '\n' | grep -qx runsc
+            | tr ' ' '\n' | grep -x runsc > /dev/null
 
       - name: "Run the #540 boundary suite natively"
         working-directory: defender
@@ -434,8 +438,10 @@ jobs:
           sudo timeout 120 apt-get "${APT_BOUNDED[@]}" install -y runsc
           sudo runsc install -- --oci-seccomp
           sudo timeout 30 systemctl restart docker
+          # No `grep -q`: it exits at its first match, and under pipefail the broken pipe `tr` can
+          # then hit fails this step with runsc installed (6 of 500 CI runs).
           docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' \
-            | tr ' ' '\n' | grep -qx runsc
+            | tr ' ' '\n' | grep -x runsc > /dev/null
 
       - name: Pre-pull the box rootfs
         run: docker pull python:3.11-slim
