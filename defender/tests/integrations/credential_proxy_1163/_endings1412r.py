@@ -171,7 +171,7 @@ def served(  # noqa: PLR0913 — one keyword per thing a case varies
            grant: str = "r", then_clean: bool = False) -> Iterator[Exchange]:
     """The proxy served over a tenant whose `identity` is the ending's upstream (with an OAuth
     scheme when `oauth` is a list, which collects the issued access tokens), nothing read yet."""
-    audit = H.AuditRecorder() if audit is None else audit
+    audit = H.AuditRecorder() if audit is None else audit  # lint-default: ok — a fresh recorder per call; a shared default instance would leak records across cases
     script = None if ending.script is None else ending.script(status)
     script = _then_clean(script) if then_clean and script is not None else script
     with contextlib.ExitStack() as stack:
