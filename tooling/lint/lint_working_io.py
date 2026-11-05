@@ -214,6 +214,8 @@ RESIDUE = {
     ("investigation.driver._build", "_fold_decision", "read_text_utf8"): (1, "m_read"),
     ("hooks.inject_system_skill_description", "read_description", "read_text_soft"): (1, "nonrecord", ('skill_path',)),
     ("investigation.bash_policy", "_load_policy", "read_text_utf8"): (1, "nonrecord", ('path',)),
+    # #1390: the tacit registry is read-only tenant config, not a run record.
+    ("systems.tacit_registry", "read_registry", "read_text_utf8"): (1, "nonrecord", ("Path(path)",)),
     ("box._docker", "_own_container_ids", "read_text_soft"): (2, "nonrecord", ('hostname_path', 'mountinfo_path')),
     # #1205: send the request frame to the Docker client's stdin pipe, not a run record.
     ("box._output", "_send", "os.write"): (1, "nonrecord", ("fd",)),
