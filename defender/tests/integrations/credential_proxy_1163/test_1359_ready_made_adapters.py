@@ -260,7 +260,7 @@ def _text(value: str) -> dict[str, Any]:
 
 
 def _page(vendor: Vendor, *texts: str) -> dict[str, Any]:
-    """A complete page holding `texts` as `vendor` sends comments."""
+    """A page holding `texts` as `vendor` sends comments."""
     if vendor is JIRA_NO:
         return {"startAt": 0, "maxResults": 100, "total": len(texts), "comments": [
             _adf_comment(*[[_text(line)] if line else [] for line in t.split("\n")]) for t in texts]}
@@ -299,43 +299,6 @@ def test_1374_the_read_is_one_get_that_returns_each_comment_as_text(
     assert got.link == vendor.link(base, KEY), got
 
 
-@pytest.mark.parametrize(("vendor", "shape", "complete"), [
-    (JIRA_NO, {"startAt": 0, "total": 1}, True),
-    (JIRA_NO, {"startAt": 0, "total": 2}, False),
-    (JIRA_NO, {"startAt": 0}, False),
-    (JIRA_NO, {"startAt": 0, "total": "1"}, False),
-    (JIRA_NO, {"startAt": 1, "total": 1}, False),
-    (JIRA_YES, {"start": 0, "isLastPage": True}, True),
-    (JIRA_YES, {"start": 0, "isLastPage": False}, False),
-    (JIRA_YES, {"start": 0}, False),
-    (JIRA_YES, {"start": 0, "isLastPage": "true"}, False),
-    (JIRA_YES, {"start": 1, "isLastPage": True}, False),
-], ids=["total-matches", "more-than-the-page", "no-total", "total-not-a-number", "not-first-page",
-        "last-page", "more-pages", "no-last-page-mark", "mark-not-a-bool", "desk-not-first-page"])
-def test_1374_jira_says_complete_only_when_the_page_proves_it(
-        vendor, shape, complete, tmp_path, data_root, checkout_roster):
-    """Jira claims it read every comment only from the page's own count or last-page mark; a page
-    that does not say so is partial. A wrong claim would turn a lost answer into a false `error`."""
-    with R.planted(tmp_path, data_root, vendor) as rig:
-        items = "comments" if vendor is JIRA_NO else "values"
-        one = _page(vendor, "a note")[items]
-        _serve(rig, vendor, {**shape, items: one})
-        got = rig.read(checkout_roster, KEY)
-    assert got.complete is complete, (shape, got)
-
-
-@pytest.mark.parametrize("page", [{"result": []}, {"result": [{"value": "a note"}]}],
-                         ids=["empty", "some-notes"])
-def test_1374_servicenow_never_says_complete(page, tmp_path, data_root, checkout_roster):
-    """An account without journal access reportedly gets an empty list, not a refusal, so no read
-    proves a work note is absent there."""
-    with R.planted(tmp_path, data_root, SERVICENOW) as rig:
-        _serve(rig, SERVICENOW, page)
-        got = rig.read(checkout_roster, KEY)
-    assert got.complete is False, got
-    assert got.texts == tuple(r["value"] for r in page["result"]), got
-
-
 def test_1374_jira_cloud_reads_its_document_format_as_lines(tmp_path, data_root, checkout_roster):
     """Paragraphs and hard breaks are line breaks, text split by marks rejoins, and a nested block
     keeps its text: the tag line stays a line whatever the store did to the rest."""
@@ -352,24 +315,44 @@ def test_1374_jira_cloud_reads_its_document_format_as_lines(tmp_path, data_root,
 
 
 @pytest.mark.parametrize(("vendor", "page"), [
-    (JIRA_NO, {"startAt": 0, "total": 0}),
-    (JIRA_NO, {"startAt": 0, "total": 1, "comments": [{"id": "1", "body": "plain"}]}),
-    (JIRA_NO, {"startAt": 0, "total": 1, "comments": [{"id": "1"}]}),
-    (JIRA_NO, {"startAt": 0, "total": 1, "comments": [
-        {"id": "1", "body": {"type": "doc", "content": [{"type": "text"}]}}]}),
-    (JIRA_YES, {"start": 0, "isLastPage": True}),
-    (JIRA_YES, {"start": 0, "isLastPage": True, "values": [{"id": "1", "body": {"x": 1}}]}),
-    (SERVICENOW, {}),
-    (SERVICENOW, {"result": [{"value": None}]}),
-], ids=["cloud-no-list", "cloud-body-not-a-document", "cloud-no-body", "cloud-text-with-no-text",
-        "desk-no-list", "desk-body-not-text", "journal-no-list", "journal-value-not-text"])
-def test_1374_a_read_it_cannot_understand_raises(vendor, page, tmp_path, data_root, checkout_roster):
-    """A reply with no comment list, or with one comment it cannot read, raises rather than skip
-    it, so a changed reply is `unknown` and never counts as absent."""
+    (JIRA_NO, {"startAt": 0}), (JIRA_YES, {"start": 0}), (SERVICENOW, {}),
+], ids=["cloud", "desk", "journal"])
+def test_1374_a_reply_with_no_comment_list_raises(vendor, page, tmp_path, data_root, checkout_roster):
+    """A reply that is not a list of comments at all is a failed read, so it is reported as one."""
     with R.planted(tmp_path, data_root, vendor) as rig:
         _serve(rig, vendor, page)
         with pytest.raises(TransportFault):
             rig.read(checkout_roster, KEY)
+
+
+@pytest.mark.parametrize(("vendor", "page"), [
+    (JIRA_NO, {"comments": [{"id": "1", "body": "plain"}, {"id": "2"}, "not a comment",
+                            _adf_comment([_text("good")])]}),
+    (JIRA_YES, {"values": [{"id": "1", "body": {"x": 1}}, {"id": "2"}, "not a comment",
+                           {"id": "3", "body": "good"}]}),
+    (SERVICENOW, {"result": [{"value": None}, {}, "not a note", {"value": "good"}]}),
+], ids=["cloud", "desk", "journal"])
+def test_1374_a_comment_it_cannot_read_is_left_out(vendor, page, tmp_path, data_root, checkout_roster):
+    """One unreadable comment from anyone must not hide this run's comment. Leaving it out cannot
+    cause a wrong outcome, because a read only ever proves a comment is there (r4)."""
+    with R.planted(tmp_path, data_root, vendor) as rig:
+        _serve(rig, vendor, page)
+        got = rig.read(checkout_roster, KEY)
+    assert got.texts == ("good",), got
+
+
+def test_1374_a_damaged_document_keeps_the_lines_it_can_read(tmp_path, data_root, checkout_roster):
+    """Damage inside a Jira document costs only the damaged part."""
+    body = {"type": "doc", "content": [
+        {"type": "paragraph", "content": [{"type": "text"}]},
+        {"type": "paragraph", "content": [_text("good")]},
+        {"type": "panel", "content": 5},
+        "not a node"]}
+    with R.planted(tmp_path, data_root, JIRA_NO) as rig:
+        _serve(rig, JIRA_NO, {"comments": [{"id": "1", "body": body}]})
+        got = rig.read(checkout_roster, KEY)
+    (text,) = got.texts
+    assert "good" in text.splitlines(), text
 
 
 @readers
@@ -404,15 +387,15 @@ def _lost_write_then(rig: Any, vendor: Vendor, read: Any) -> None:
 
 
 @pytest.mark.parametrize(("vendor", "found", "status"), [
-    (JIRA_NO, True, C.COMMENTED), (JIRA_NO, False, C.ERROR),
-    (JIRA_YES, True, C.COMMENTED), (JIRA_YES, False, C.ERROR),
+    (JIRA_NO, True, C.COMMENTED), (JIRA_NO, False, C.UNKNOWN),
+    (JIRA_YES, True, C.COMMENTED), (JIRA_YES, False, C.UNKNOWN),
     (SERVICENOW, True, C.COMMENTED), (SERVICENOW, False, C.UNKNOWN),
 ], ids=["cloud-found", "cloud-absent", "desk-found", "desk-absent", "journal-found", "journal-none"])
 def test_1374_a_lost_answer_is_settled_through_the_real_proxy(
         vendor, found, status, tmp_path, data_root):
     """The record leg on a write that may have landed: one write and one read through the real
-    proxy with the write-back token, settled from this run's tag line. Jira can prove absence;
-    ServiceNow cannot, so none found there stays `unknown`."""
+    proxy with the write-back token, settled from this run's tag line. None found is `unknown` on
+    every vendor: a read cannot prove a comment will not appear (r4)."""
     from defender.tenancy.case_ticket import agent_comment_tag
 
     with R.planted(tmp_path, data_root, vendor, leg=True) as rig:

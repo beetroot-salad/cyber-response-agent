@@ -88,11 +88,9 @@ every error receipt. Its one reader is the run page's ticket line.
 
 **A lost answer (#1374).** When the write fails and may have reached the store
 (`TransportFault.maybe_delivered`, decided from data; the credential proxy's answer says it in
-`sent`), the host reads the case once and never writes again. It decides from the connector's read:
-this run's tag line on a comment is a success and is recorded; none in a read of every comment is
-`error`; a partial read, a failed read or a connector with no read is `unknown` (`ok` false, `url`
-null, not recorded), and the reason names the ticket and tag to check. A store still applying the
-write can commit it after the read, so `error` here does not prove the comment never lands.
-Jira claims a complete read from the first page's own count or last-page mark. ServiceNow never
-does: an account without journal access reportedly gets an empty list and no refusal, so a note
-not found there stays `unknown`.
+`sent`), the host reads the case once and never writes again. A read can only prove a comment is
+there, since a store still applying the write can commit it afterwards. So this run's tag line on a
+comment is a success and is recorded; anything else (none found, a failed read, a connector with no
+read) is `unknown` (`ok` false, `url` null, not recorded), and the reason names the ticket and tag
+to check. `error` comes only from the write itself: the store refused, or the request provably
+never left.

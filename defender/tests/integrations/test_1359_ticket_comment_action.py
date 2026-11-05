@@ -84,20 +84,23 @@ MAYBE_DELIVERED = "maybe_delivered"
 @pytest.mark.parametrize(("answer", "maybe"), [
     (S.answer("", "000", rc=7, stderr="curl: (7) Failed to connect to ticket port 80"), False),
     (S.answer("", "000", rc=6, stderr="curl: (6) Could not resolve host: ticket"), False),
-    (S.no_such_container("bastion"), False),
-    (S.container_not_running(), False),
+    (S.answer("", None, rc=125, stderr="docker: invalid flag"), False),
+    (S.answer("", None, rc=127, stderr="curl: not found"), False),
+    (S.no_such_container("bastion"), True),
+    (S.container_not_running(), True),
     (S.curl_timed_out(), True),
     (S.answer("", "000", rc=52, stderr="curl: (52) Empty reply from server"), True),
     (S.answer("", "000", rc=56, stderr="curl: (56) Recv failure: Connection reset by peer"), True),
     (S.answer(json.dumps({"detail": "down"}), "503"), True),
     (S.answer("", None, rc=137), True),
-], ids=["refused", "dns", "no-container", "container-stopped", "timeout", "empty-reply", "reset",
+], ids=["refused", "dns", "docker-125", "no-curl-in-the-box", "no-container", "container-stopped", "timeout", "empty-reply", "reset",
         "store-503", "curl-killed-with-no-status-line"])
 def test_1374_a_curl_route_write_fault_says_whether_it_may_have_reached_the_store(
         tmp_path, monkeypatch, answer, maybe):
     """#1374 P1/P2 on the docker route: "did not reach the store" only where proven from data —
-    curl's exit 6/7, or a docker exec that never ran curl (non-zero, no status line); every other
-    failure, a 5xx included, may have reached it."""
+    curl's exit 6/7, or docker's own 125-127 with no status line. Docker's exit 1 also follows a
+    client that lost its daemon after curl started, so it proves nothing; every other failure, a
+    5xx included, may have reached it."""
     ctx, store = _ctx(tmp_path, monkeypatch, answer)
     with pytest.raises(TransportFault) as raised:
         ticket_adapter.add_case_comment(ctx, key="SOC-1", body="x")

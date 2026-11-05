@@ -356,8 +356,9 @@ def http_get_obj(
 #: curl's exits for a connection never made (6: the host did not resolve; 7: it refused):
 #: nothing was sent (#1374).
 _CURL_NEVER_CONNECTED = frozenset({6, 7})
-#: `docker exec`'s own exits: 1 (no such container, not running), 125-127 (it could not start the command).
-_DOCKER_OWN_FAILURES = frozenset({1, 125, 126, 127})
+#: `docker exec`'s own exits for a command it could not start. Not 1, which a command's own failure
+#: or a lost connection to the daemon can also produce (#1374 r4).
+_DOCKER_OWN_FAILURES = frozenset({125, 126, 127})
 
 
 def _raise_on_transport_failure(
@@ -367,13 +368,14 @@ def _raise_on_transport_failure(
     the circuit breaker see a down system. Covers a missing/stopped bastion and curl's own
     failures.
 
-    Decided by the return code alone: `-w "\\n%{http_code}"` makes stdout `"\\n000"` even when
+    Whether to raise is decided by the return code alone: `-w "\\n%{http_code}"` makes stdout `"\\n000"` even when
     no request completed, so an empty-stdout check would let an outage return `{}` as success.
 
     `maybe_delivered` (#1374) is decided from data: false when curl never connected
     (`_CURL_NEVER_CONNECTED`) or docker failed before running it: one of docker's own exit codes
-    with no status line on stdout, which curl's own failures always print. A curl killed part way
-    (137, 143) prints no status line either, and may have sent."""
+    with no status line on stdout, which curl's own failures always print. Exit 1 is not one: a
+    docker client that lost its daemon after curl started can end that way too. A curl killed part
+    way (137, 143) prints no status line either, and may have sent."""
     if rc == 0:
         return
     never_sent = rc in _CURL_NEVER_CONNECTED or (

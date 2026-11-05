@@ -57,14 +57,14 @@ def _comment_leg(tmp_path, data_root, status: int, caplog):
     (404, ("the store refused", "404", "not found")),
     (409, ("the store refused", "409")),
     (422, ("the store refused", "422")),
-    (500, ("the store could not be reached",)),
-    (503, ("the store could not be reached",)),
+    (500, ("may have reached the store", "500")),
+    (503, ("may have reached the store", "503")),
 ])
 def test_t4_a_store_refusing_the_comment_is_reported_by_class_and_status(
         tmp_path, data_root, caplog, status, words):
     """A 4xx leaves an error receipt "the store refused" with the status (a 404 also "not found");
-    a 5xx is "the store could not be reached". O5, UpstreamFault status. A 5xx may follow a store
-    that took the comment, so the case is read back once (#1374); the read meets the same 5xx, so
+    a 5xx "may have reached the store", with the status. O5, UpstreamFault status. A 5xx may follow
+    a store that took the comment, so the case is read back once (#1374); the read meets the same 5xx, so
     the receipt is `unknown`."""
     receipt, up = _comment_leg(tmp_path, data_root, status, caplog)
 
@@ -259,7 +259,10 @@ def test_t12_a_store_the_proxy_saw_fail_keeps_the_store_wording(tmp_path, data_r
     assert receipt["status"] == ("unknown" if kind == "store-cut-by-the-deadline" else "error"), (
         kind, receipt)
     reason = write_fault(receipt)
-    assert reason.startswith("the store could not be reached: "), (kind, reason)
+    if kind == "store-cut-by-the-deadline":
+        assert "could not be reached" not in reason, (kind, reason)
+    else:
+        assert reason.startswith("the store could not be reached: "), (kind, reason)
     assert "credential proxy" not in reason, (kind, reason)
 
 

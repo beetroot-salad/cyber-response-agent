@@ -24,7 +24,7 @@ from defender.kit.settings import SystemConfig
 #: `VERBS` exposes it in either spelling.
 COMMENT_ACTION = "add_case_comment"
 #: The optional read beside it (#1374): `read_case_comments(ctx, *, key)` answers `CaseComments`,
-#: or raises `AdapterFault` when it cannot read them. The host decides from that answer. A host
+#: or raises `AdapterFault` when the reply as a whole cannot be read. The host decides from that answer. A host
 #: action too, never a verb.
 READBACK_ACTION = "read_case_comments"
 #: Every host-only action an adapter may export; `systems.verbs` refuses a `VERBS` holding any.
@@ -33,14 +33,11 @@ HOST_ACTIONS = (COMMENT_ACTION, READBACK_ACTION)
 
 @dataclasses.dataclass(frozen=True)
 class CaseComments:
-    """What one read of a case's comments saw (#1374). `texts` is each comment as plain text, with
-    its line breaks. `complete` says the read covered every comment on the case: the host treats
-    a read without this run's comment as proof of absence only then, so a connector sets it only
-    when it knows, and raises rather than skip a comment it cannot read. `link` is the ticket's
-    web link, as `add_case_comment` returns it."""
+    """What one read of a case's comments saw (#1374). `texts` is each comment it could read, as
+    plain text with its line breaks; a comment it cannot read is left out, since a read only ever
+    proves a comment is there. `link` is the ticket's web link, as `add_case_comment` returns it."""
 
     texts: tuple[str, ...]
-    complete: bool
     link: str | None = None
 
 

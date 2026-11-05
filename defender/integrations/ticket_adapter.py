@@ -159,15 +159,13 @@ def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  #
 
 def read_case_comments(ctx: VerbContext, *, key: str) -> CaseComments:  # lint-dup: ok — every case-recording adapter's read goes by this one name (#1374)
     """The case's comments, for the host's read-back after a comment whose answer was lost. Not a
-    verb (never in `VERBS`). The lab store's ticket read holds every comment, so it is complete.
-    A read with no comment list, or with a comment it cannot read, is a `TransportFault`."""
+    verb (never in `VERBS`). A comment it cannot read is left out. A read with no comment list is
+    a `TransportFault`."""
     comments = get_ticket(ctx, key=key).get("comments")
     if not isinstance(comments, list):
         raise TransportFault(f"ticket {key}'s read carries no comment list")
-    if not all(isinstance(c, dict) and isinstance(c.get("body"), str) for c in comments):
-        raise TransportFault(f"ticket {key}'s read holds a comment with no readable body")
-    return CaseComments(texts=tuple(c["body"] for c in comments), complete=True,
-                        link=_ticket_link(_config(ctx), key))
+    texts = tuple(c["body"] for c in comments if isinstance(c, dict) and isinstance(c.get("body"), str))
+    return CaseComments(texts=texts, link=_ticket_link(_config(ctx), key))
 
 
 VERBS = {

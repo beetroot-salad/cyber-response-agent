@@ -22,8 +22,8 @@ KEY_PATTERN = 'TICKET_KEY_PATTERN="[A-Za-z0-9-]+"\n'
 COMMENT = f"{STORE}/tickets/{KEY}/comments"
 #: The receipt's subject for a fault the credential proxy itself caused (#1404 r2, O1).
 PROXY_FAILED = "the credential proxy failed: "
-#: How an `unknown` receipt's reason frames the write's own fault (#1374): "...was lost (<it>), and".
-LOST = "the store's answer to the comment was lost ("
+#: How an `unknown` receipt's reason frames the write's own fault (#1374): "...store (<it>), and".
+LOST = "the comment may have reached the store ("
 
 
 def write_fault(receipt: dict) -> str:

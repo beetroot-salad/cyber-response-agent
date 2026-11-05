@@ -625,7 +625,7 @@ class ModuleVerbRegistry(VerbRegistry):
             return {}
         actions = [a for a in (getattr(module, n, None) for n in HOST_ACTIONS) if a is not None]
         if any(fn is a for fn in verbs.values() for a in actions):
-            # The cold read refuses a table that names the host-only comment action; this is the
+            # The cold read refuses a table that names a host-only action; this is the
             # same refusal by identity, for a table whose literal hides it (an alias, a table
             # filled in after its literal): none of the adapter's verbs is served (#1359 O4).
             return {}

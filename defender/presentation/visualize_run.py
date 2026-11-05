@@ -396,14 +396,7 @@ def render_ticket_line(run_dir: Path) -> str:
     )
     if not well_formed or not isinstance(receipt, dict):
         return f'<p class="ticket-line ticket-unreadable">ticket: {esc(RECEIPT_UNREADABLE)}</p>'
-    from defender.investigation.ticket_writer import RECEIPT_UNKNOWN
-
-    if receipt["ok"]:
-        cls = "ticket-ok"
-    elif receipt["status"] == RECEIPT_UNKNOWN:
-        cls = "ticket-unknown"  # neither done nor failed: someone must look (#1374 O4)
-    else:
-        cls = "ticket-error"
+    cls = "ticket-ok" if receipt["ok"] else "ticket-error"
     parts = [f'ticket <code>{esc(receipt["key"])}</code>', esc(receipt["status"])]
     if receipt.get("url"):
         parts.append(f'<code>{esc(receipt["url"])}</code>')

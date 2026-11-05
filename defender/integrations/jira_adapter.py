@@ -101,68 +101,46 @@ def _issue_link(config: dict[str, str], quoted: str) -> str:
 
 def _adf_text(node: object) -> str:
     """An Atlassian Document Format node as plain text, with paragraphs and hard breaks as line
-    breaks. `TransportFault` for a node it cannot read."""
+    breaks. A part it cannot read is left out."""
     if not isinstance(node, dict):
-        raise TransportFault(f"a comment holds a document node that is {type(node).__name__}")
+        return ""
     kind = node.get("type")
     if kind == "hardBreak":
         return "\n"
     if kind == "text":
         text = node.get("text")
-        if not isinstance(text, str):
-            raise TransportFault("a comment holds a text node with no text")
-        return text
-    content = node.get("content", [])
+        return text if isinstance(text, str) else ""
+    content = node.get("content")
     if not isinstance(content, list):
-        raise TransportFault(f"a comment's {kind} node has content that is not a list")
+        return ""
     return ("" if kind in _ADF_LINES else "\n").join(_adf_text(child) for child in content)
 
 
-def _rows(page: dict, field: str, key: str) -> list:
-    rows = page.get(field)
-    if not isinstance(rows, list):
-        raise TransportFault(f"the read of {key} carries no `{field}` list")
-    return rows
-
-
-def _desk_text(comment: object) -> str:
-    body = comment.get("body") if isinstance(comment, dict) else None
-    if not isinstance(body, str):
-        raise TransportFault("a request comment has no text body")
-    return body
-
-
-def _cloud_text(comment: object) -> str:
-    body = comment.get("body") if isinstance(comment, dict) else None
-    if not isinstance(body, dict):
-        raise TransportFault("a comment has no document body")
-    return _adf_text(body)
+def _body(comment: object) -> object:
+    return comment.get("body") if isinstance(comment, dict) else None
 
 
 def read_case_comments(ctx: VerbContext, *, key: str) -> CaseComments:  # lint-dup: ok — every case-recording adapter's read goes by this one name (#1374)
     """The case's comments, for the host's read-back after a comment whose answer was lost: one
     request for one bounded page, on the API `add_case_comment` writes through. Not a verb (never
-    in `VERBS`). Complete only when the first page's own count or last-page mark proves it. The
-    service-desk API has no sort, so a long request can end partial. A reply it cannot read raises
-    `TransportFault`."""
+    in `VERBS`). The service-desk API has no sort, so a long request's page can miss the newest. A
+    comment it cannot read is left out; a reply with no comment list raises `TransportFault`."""
     config, service_desk = _jira_settings(ctx.tenant)
     quoted = urllib.parse.quote(key, safe="")
     if service_desk:
-        page = transport.http_get_obj(
-            ctx, config, f"/rest/servicedeskapi/request/{quoted}/comment", system=SYSTEM,
-            params={"start": 0, "limit": _READ_PAGE})
-        rows = _rows(page, "values", key)
-        texts = tuple(_desk_text(c) for c in rows)
-        complete = page.get("start") == 0 and page.get("isLastPage") is True
+        path, field = f"/rest/servicedeskapi/request/{quoted}/comment", "values"
+        params: dict = {"start": 0, "limit": _READ_PAGE}
     else:
-        page = transport.http_get_obj(
-            ctx, config, f"/rest/api/3/issue/{quoted}/comment", system=SYSTEM,
-            params={"startAt": 0, "maxResults": _READ_PAGE, "orderBy": "-created"})
-        rows = _rows(page, "comments", key)
-        texts = tuple(_cloud_text(c) for c in rows)
-        total = page.get("total")
-        complete = page.get("startAt") == 0 and type(total) is int and total <= len(rows)
-    return CaseComments(texts=texts, complete=complete, link=_issue_link(config, quoted))
+        path, field = f"/rest/api/3/issue/{quoted}/comment", "comments"
+        params = {"startAt": 0, "maxResults": _READ_PAGE, "orderBy": "-created"}
+    rows = transport.http_get_obj(ctx, config, path, system=SYSTEM, params=params).get(field)
+    if not isinstance(rows, list):
+        raise TransportFault(f"the read of {key} carries no `{field}` list")
+    bodies = [_body(comment) for comment in rows]
+    # A document is a dict and a service-desk body is text: each API's own, and nothing else.
+    texts = (b for b in bodies if isinstance(b, str)) if service_desk else (
+        _adf_text(b) for b in bodies if isinstance(b, dict))
+    return CaseComments(texts=tuple(texts), link=_issue_link(config, quoted))
 
 
 #: A ready-made adapter grants the agent nothing.

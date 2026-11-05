@@ -83,20 +83,11 @@ def add_case_comment(ctx: VerbContext, *, key: str, body: str) -> str | None:  #
     return None
 
 
-def _note_text(row: object, key: str) -> str:
-    value = row.get("value") if isinstance(row, dict) else None
-    if not isinstance(value, str):
-        raise TransportFault(f"the journal read of {key} holds a note with no text")
-    return value
-
-
 def read_case_comments(ctx: VerbContext, *, key: str) -> CaseComments:  # lint-dup: ok — every case-recording adapter's read goes by this one name (#1374)
     """The record's work notes from the journal, newest first, for the host's read-back after a
     comment whose answer was lost: one request for one bounded page. Not a verb (never in `VERBS`).
-    Never complete: an account without journal access reportedly gets an empty list and no refusal,
-    so finding this run's note settles the outcome and not finding it proves nothing. A key
-    holding `^` would add conditions to the query, so it is refused here. A reply it cannot read
-    raises `TransportFault`."""
+    A key holding `^` would add conditions to the query, so it is refused here. A note it cannot
+    read is left out; a reply with no list raises `TransportFault`."""
     config = _servicenow_settings(ctx.tenant)
     if "^" in key:
         raise TransportFault("the record's key holds `^`, so its journal cannot be queried")
@@ -107,7 +98,8 @@ def read_case_comments(ctx: VerbContext, *, key: str) -> CaseComments:  # lint-d
     rows = page.get("result")
     if not isinstance(rows, list):
         raise TransportFault(f"the journal read of {key} carries no `result` list")
-    return CaseComments(texts=tuple(_note_text(row, key) for row in rows), complete=False, link=None)
+    notes = (row.get("value") for row in rows if isinstance(row, dict))
+    return CaseComments(texts=tuple(n for n in notes if isinstance(n, str)), link=None)
 
 
 #: A ready-made adapter grants the agent nothing.
