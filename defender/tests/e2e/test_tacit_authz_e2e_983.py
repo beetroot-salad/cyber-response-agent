@@ -6,7 +6,6 @@ import json
 import re
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -33,8 +32,9 @@ LOOKUP = "lookup"
 #: same scene the document is written against.
 LOOKUP_PARAMS = {"actor": scene.ACTOR, "host": scene.HOST, "pattern": scene.PATTERN}
 
-#: The moment every driven lookup is served AS OF — the alerted instant, so a scenario's
-#: expiry outcome is a property of its fixture entry and not of the day the suite runs.
+#: The reading the run clock every driven lookup is judged on stands at: the alerted instant,
+#: so a scenario's expiry outcome is a property of its fixture entry and not of the day the
+#: suite runs.
 AS_OF = dt.datetime(2026, 5, 5, 3, 42, 11, tzinfo=dt.UTC)
 
 
@@ -53,10 +53,12 @@ def _run(tmp_path: Path, doc: str, disposition: str, *, run_id: str):
 def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
     """A gather registry whose `tacit-knowledge.lookup` IS the platform's (the one a real run's
     registry serves, #1390), repointed at the fixture tree under `root` and at `AS_OF`: the
-    shim masks the run clock and holds `AS_OF` as the call's branch point (the call-scoped day,
-    #1390 amendment 4), so the alerted instant, not the suite's wall time, is the day. The
-    registry is the run's agent knowledge, so `root` is handed as the run tenant's agent root."""
+    shim holds, as the call's run clock (`CALL_RUN_STATE`, the only call-scoped day, #1390
+    amendment 4), a run state resumed at `AS_OF` the way a replay sibling's resumes at its
+    branch point, so the alerted instant, not the suite's wall time, is the day. The registry
+    is the run's agent knowledge, so `root` is handed as the run tenant's agent root."""
     from defender._git import REPO_ROOT
+    from defender.investigation.run_state import RunState
     from defender.kit.verbs import declared_params
     from defender.systems.verbs import ModuleVerbRegistry, VerbContext, read_roster
     from defender.tests.support.tenancy import _tenants1106
@@ -64,10 +66,12 @@ def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
     shipped = ModuleVerbRegistry(
         read_roster(REPO_ROOT / "defender" / "integrations"),
         _tenants1106.fixture_grants().gather).verbs(SYSTEM)[LOOKUP]
+    at_alert = RunState(root.parent / "as-of-clock", "r-as-of")
+    at_alert.resume_clock(AS_OF, 0.0)
 
     def lookup(ctx: VerbContext, *, actor: str, host: str, pattern: str) -> dict:
         rec.record(LOOKUP, ctx, {"actor": actor, "host": host, "pattern": pattern})
-        with scene.judged_on(branch_point=AS_OF):
+        with scene.judged_on(run_state=at_alert):
             return shipped(
                 replace(ctx, tenant=replace(ctx.tenant, agent_root=root)),
                 actor=actor, host=host, pattern=pattern,

@@ -1,6 +1,7 @@
 """World serving preserves recorded bytes and reconstructs live answers at the fork."""
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 from pathlib import Path
@@ -614,11 +615,13 @@ def test_1255_every_refusal_the_control_world_can_give_reads_as_a_natural_runs(
 
 # ---------------------------------------------------------------- #1390: never oracle-served
 
-#: Valid on the branch date (`S24.AS_OF_DT`, 2026-07-28) and on no date near today.
+#: In force today: a call with no run clock (as a world's pass-through here) is judged on wall
+#: time (#1390 amendment 4), never on the world's branch date.
+_TODAY = dt.datetime.now(dt.UTC).date()
 TACIT_ENTRY = {
-    "id": "tk-1390-branch-window", "pattern": "ssh-root-login",
+    "id": "tk-1390-in-force", "pattern": "ssh-root-login",
     "actor_scope": "svc-deploy-01", "host_scope": "db-1.corp", "added_by": "secops",
-    "added_at": "2026-07-01", "review_by": "2026-07-31",
+    "added_at": str(_TODAY - dt.timedelta(days=10)), "review_by": str(_TODAY + dt.timedelta(days=30)),
     "justification": "the nightly deploy logs in as root on db-1",
 }
 SANCTIONED = {"actor": "svc-deploy-01", "host": "db-1.corp", "pattern": "ssh-root-login"}

@@ -84,14 +84,6 @@ CALL_RUN_STATE: contextvars.ContextVar[Any] = contextvars.ContextVar(
     "verb_call_run_state", default=None)
 
 
-#: The branch point of the world serving a call (#1390 amendment 4): set by the world's registry
-#: around a platform-served verb and around an oracle turn, so a pre-flight replay's and an
-#: oracle-side read are judged on the branch day (a run has its own clock, `CALL_RUN_STATE`).
-#: Not on the verb's context (#1385 O1); `None` outside a world.
-CALL_BRANCH_POINT: contextvars.ContextVar[Any] = contextvars.ContextVar(
-    "verb_call_branch_point", default=None)
-
-
 class ServingAbort(Exception):
     """A served verb that will not answer at all: the registry serving it has given up on the
     world it serves (#1224: `estate.oracle.OracleUnservable`). The query tool re-raises it as

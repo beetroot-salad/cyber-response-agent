@@ -27,7 +27,6 @@ from defender.tenancy.case_ticket import read_posted_comments
 from defender.systems.verbs import (
     CALL_DELIVERY,
     CALL_ID,
-    CALL_BRANCH_POINT,
     CALL_RUN_STATE,
     DENIED,
     PLATFORM_SERVED,
@@ -101,7 +100,6 @@ def _serve_platform(registry: WorldRegistry, system: str, verb: str, fn: Any, ct
     without facts, whether or not the source run made the call. The platform verb runs against
     the world's pinned knowledge and is delivered as a pass-through, one ledger row per call.
     The source's recorded answer is not read: a repeat is asked of the pinned registry again."""
-    token = CALL_BRANCH_POINT.set(registry.branch_point)
     try:
         answer = fn(ctx, **asked)
     except Exception as failure:
@@ -110,8 +108,6 @@ def _serve_platform(registry: WorldRegistry, system: str, verb: str, fn: Any, ct
             payload_text=str(failure) or type(failure).__name__, source=REAL_ERROR,
             world_id=registry.world.world_id, call_id=CALL_ID.get()))
         raise
-    finally:
-        CALL_BRANCH_POINT.reset(token)
     return registry._deliver(ServedCall(
         system=system, verb=verb, params=asked, payload_text=payload_text_of(answer),
         source=PASSTHROUGH, world_id=registry.world.world_id, call_id=CALL_ID.get()))
@@ -378,9 +374,6 @@ class WorldRegistry(ModuleVerbRegistry):
         if (fault := uuid_id_fault(world_id, "world")) is not None:
             raise EstateError(fault)
         self.world = world
-        #: The branch point this world is served at (its family's `as_of`), or None where the
-        #: world carries none; handed to platform-served verbs call-scoped (amendment 4).
-        self.branch_point = getattr(getattr(world, "family", None), "as_of", None)
         self.ledger = ledger
         self.tenant = tenant
         self.world_facts = tuple(getattr(world, "facts", ()) or ())
@@ -566,7 +559,6 @@ class WorldRegistry(ModuleVerbRegistry):
         query tool sets around the call (`CALL_RUN_STATE`, #1235, #1385 O8); pre-flight's replay
         sets none and has no clock."""
         state = CALL_RUN_STATE.get() if pauses_clock else None
-        branch_token = CALL_BRANCH_POINT.set(self.branch_point)
         with self._turn_lock:
             self._turn_ctx = ctx
             if state is not None:
@@ -577,7 +569,6 @@ class WorldRegistry(ModuleVerbRegistry):
                 ended = True
             finally:
                 self._turn_ctx = None
-                CALL_BRANCH_POINT.reset(branch_token)
                 if state is not None:
                     try:
                         oracle_turn_closed(state)

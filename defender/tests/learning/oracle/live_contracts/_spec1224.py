@@ -1330,20 +1330,6 @@ def run_state_carried(state: Any) -> Iterator[None]:
         carrier.reset(token)
 
 
-@contextlib.contextmanager
-def branch_point_carried(at: Any) -> Iterator[None]:
-    """Hold `at` as the call-scoped branch point (`CALL_BRANCH_POINT`, #1390 amendment 4) the way
-    a world's registry does around a platform-served verb and an oracle turn, with no run state
-    held, so a platform verb called directly is judged on `at`."""
-    carrier = sym(VERBS, "CALL_BRANCH_POINT")
-    token = carrier.set(at)
-    try:
-        with run_state_carried(None):
-            yield
-    finally:
-        carrier.reset(token)
-
-
 def tap_run_states(registry: Any) -> list[Any]:
     """Every `RunState` the investigator's calls through `registry` carried
     (`CALL_RUN_STATE`, #1385 O8), in call order.

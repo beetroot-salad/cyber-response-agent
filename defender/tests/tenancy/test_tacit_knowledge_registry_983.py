@@ -397,7 +397,7 @@ def _platform_lookup(ctx: VerbContext, **params: str) -> dict:
 
 def _clocked_ctx(root: Path, tmp_path: Path) -> VerbContext:
     """A `VerbContext` over the throwaway agent root `root`. It carries no day (#1385 O1): the
-    day comes from the call-scoped run clock and branch point (`scene.judged_on`)."""
+    day comes from the call-scoped run clock (`scene.judged_on`), else wall time."""
     return VerbContext(
         defender_dir=DEFENDER, run_dir=tmp_path / "run", env={},
         tenant=_tenants1106.fixture_run_tenant(agent_root=root),
@@ -457,21 +457,20 @@ def test_1390_health_check_names_the_registry_relative_to_the_agent_root(tmp_pat
 
 
 # The day a lookup is judged against (O2). The entry is in force from 2026-04-01 to 2026-07-01:
-# valid at the replay's branch point, expired by today.
+# valid at a replay's branch point, expired by today.
 _BRANCH_ENTRY = dict(id="tk-1390-branch", added_at="2026-04-01", review_by="2026-07-01")
 _IN_WINDOW = dt.datetime(2026, 5, 1, 12, 0, tzinfo=dt.UTC)
-_OUT_OF_WINDOW = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.UTC)
 
 
-def _ask(root: Path, tmp_path: Path, **clock) -> dict | None:
-    """The lookup's match with the call-scoped clock `clock` (`run_state=`, `branch_point=`) held."""
-    with scene.judged_on(**clock):
+def _ask(root: Path, tmp_path: Path, *, run_state=None) -> dict | None:
+    """The lookup's match with `run_state` held as the call-scoped run clock (`None`: no run)."""
+    with scene.judged_on(run_state=run_state):
         return _platform_lookup(_clocked_ctx(root, tmp_path),
                                 actor=ACTOR, host=HOST, pattern=PATTERN)["matched"]
 
 
-def test_1390_lookup_is_judged_against_the_runs_own_clock_whatever_as_of_says(tmp_path):
-    """A replay sibling's clock (resumed at the branch point) hits and a live run's clock misses, each against a contradicting world branch point (`CALL_BRANCH_POINT`, the world's `as_of`). O2."""
+def test_1390_lookup_is_judged_against_the_runs_own_clock_not_wall_time(tmp_path):
+    """A replay sibling's clock (resumed at the branch point) hits an entry expired by today, which wall time would miss; a live run's clock misses it. O2."""
     from defender.investigation.run_state import RunState
 
     root = tmp_path / "tree"
@@ -481,23 +480,26 @@ def test_1390_lookup_is_judged_against_the_runs_own_clock_whatever_as_of_says(tm
     sibling = RunState(tmp_path / "sibling", "r-sibling")
     sibling.resume_clock(_IN_WINDOW, 0.0)
 
-    hit = _ask(root, tmp_path, run_state=sibling, branch_point=_OUT_OF_WINDOW)
-    miss = _ask(root, tmp_path, run_state=live, branch_point=_IN_WINDOW)
+    hit = _ask(root, tmp_path, run_state=sibling)
+    miss = _ask(root, tmp_path, run_state=live)
 
     assert (hit or {}).get("id") == "tk-1390-branch", (
-        "the replay was judged at the branch point held, not at its own clock")
-    assert miss is None, "a live run was judged at the branch point held, not at its own clock"
+        "the replay was judged on wall time, not at its own clock")
+    assert miss is None, "a live run was not judged at its own clock"
 
 
-def test_1390_without_a_run_state_the_worlds_as_of_is_the_day_and_without_either_wall_time(tmp_path):
-    """No run state: the serving world's branch point (`CALL_BRANCH_POINT`, its `as_of`) decides (pre-flight, the oracle's side queries); neither: today's wall time. O2."""
+def test_1390_without_a_run_state_the_day_is_wall_time(tmp_path):
+    """No run state (pre-flight, the oracle's side queries): today's wall time decides, so an entry in force only at a past branch point misses, one not yet in force misses, and one in force today hits. O2."""
     root = tmp_path / "tree"
     _write_registry(root, _entry(**_BRANCH_ENTRY))
     assert dt.datetime.now(dt.UTC).date() > dt.date(2026, 7, 1), "premise: expired by today"
 
-    assert (_ask(root, tmp_path, branch_point=_IN_WINDOW) or {}).get("id") == "tk-1390-branch"
-    assert _ask(root, tmp_path, branch_point=_OUT_OF_WINDOW) is None
-    assert _ask(root, tmp_path) is None, "with no clock at all the entry was not judged by today"
+    assert _ask(root, tmp_path) is None, "with no run clock the entry was not judged by today"
+
+    today = dt.datetime.now(dt.UTC).date()
+    _write_registry(root, _entry(id="tk-1390-not-yet", added_at=str(today + dt.timedelta(days=2)),
+                                 review_by=str(today + dt.timedelta(days=30))))
+    assert _ask(root, tmp_path) is None, "an entry not yet in force today answered on wall time"
 
     _write_registry(root, _current_entry(id="tk-1390-today"))
     assert (_ask(root, tmp_path) or {}).get("id") == "tk-1390-today", (

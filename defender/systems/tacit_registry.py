@@ -279,19 +279,15 @@ def find_entry(
 
 
 def _day(ctx: VerbContext) -> dt.date:
-    """The day this call is judged against (P2): the run's own clock where the run has one (a
-    replay sibling's resumes at the branch point), else the branch point of the world serving the
-    call (pre-flight calibration and the oracle's own side queries have no run; amendment 4),
-    else wall time (the CLI). Both are call-scoped, set by the platform: an adapter's context
-    carries neither (#1385 O1)."""
-    from defender.systems.verbs import CALL_BRANCH_POINT, CALL_RUN_STATE  # verbs imports this module
+    """The day this call is judged against (P2, amendment 4): the run's own clock where the run
+    has one (a replay sibling's resumes at the branch point), else wall time. Pre-flight and the
+    oracle's own side queries have no run and are judged on wall time: the platform hands a verb
+    no branch point (#1385 O1)."""
+    from defender.systems.verbs import CALL_RUN_STATE  # verbs imports this module
 
     del ctx  # the day is never read off the context
     state = CALL_RUN_STATE.get()
-    if state is not None:
-        return state.now().date()
-    at = CALL_BRANCH_POINT.get()
-    return (dt.datetime.now(dt.UTC) if at is None else at).date()
+    return (state.now() if state is not None else dt.datetime.now(dt.UTC)).date()
 
 
 def _relative(agent_root: Path, path: Path) -> str:
