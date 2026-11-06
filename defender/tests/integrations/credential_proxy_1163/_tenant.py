@@ -118,7 +118,7 @@ def post(client: Any, tok: str, system: str, method: str, url: str,
     return response
 
 
-FINAL_FIELDS = ("status", "headers", "fault", "detail", "system_side", "sent", "body_whole")
+FINAL_FIELDS = ("status", "headers", "fault", "detail", "system_side", "sent", "body_whole", "reader_fault")
 
 
 def fields_of(final: Any) -> dict[str, Any]:

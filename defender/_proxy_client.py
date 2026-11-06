@@ -42,7 +42,9 @@ class FinalRecord:
     """The proxy's one record of how a request ended, last in the reply. Every field is
     required: no arm of the proxy and no fake of it can leave one out. `body_whole` is true if
     and only if the body frames carry the complete body (an empty one included). `sent` is false
-    only when the proxy never began the system's call or never connected to it (#1374)."""
+    only when the proxy never began the system's call or never connected to it (#1374).
+    `reader_fault` says the run itself cut the reply, by reading too slowly or leaving; the status,
+    if any, still stands, but the fault is not the system's."""
 
     status: int | None
     headers: Mapping[str, str]
@@ -51,6 +53,7 @@ class FinalRecord:
     system_side: bool
     sent: bool
     body_whole: bool
+    reader_fault: bool
 
 
 _FIELDS = tuple(f.name for f in fields(FinalRecord))
@@ -78,7 +81,7 @@ def encode_final(record: FinalRecord) -> bytes:
 def decode_reply(raw: bytes) -> DecodedReply:
     """The frames of the whole reply `raw`. `ValueError` for anything malformed: a frame cut
     short, an unknown tag, no final frame, anything after it, a final record that is not exactly
-    its fields. Nothing is allocated from a length prefix."""
+    its fields or that names no fault without a status and a whole body. Nothing is allocated from a length prefix."""
     chunks: list[bytes] = []
     at, end = 0, len(raw)
     while at < end:
@@ -113,8 +116,10 @@ def _record_of(payload: bytes) -> FinalRecord:
                 isinstance(k, str) and isinstance(v, str) for k, v in headers.items())
             or not (doc["fault"] is None or isinstance(doc["fault"], str))
             or not (detail is None or isinstance(detail, str))
-            or not all(isinstance(doc[k], bool) for k in ("system_side", "sent", "body_whole"))):
+            or not all(isinstance(doc[k], bool) for k in ("system_side", "sent", "body_whole", "reader_fault"))):
         raise ValueError("a field of the final record has the wrong type")
+    if doc["fault"] is None and (status is None or not doc["body_whole"]):
+        raise ValueError("a final record with no fault is not a whole answer")
     return FinalRecord(**doc)
 
 
@@ -134,11 +139,14 @@ class ProxyAnswer:
     #: never began the system's call or never connected to it; an older proxy that does not say is
     #: taken as "may".
     sent: bool = True
+    #: The run itself cut the reply (`FinalRecord.reader_fault`).
+    reader_fault: bool = False
 
     @property
     def from_system(self) -> bool:
-        """The system's own answer or failure: it answered (any status) or the proxy marked it."""
-        return bool(self.status) or self.system_side
+        """The system's own answer or failure: it answered (any status) or the proxy marked it,
+        unless the run itself cut the reply."""
+        return (bool(self.status) or self.system_side) and not self.reader_fault
 
 
 @contextlib.contextmanager
@@ -170,20 +178,16 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
 ) -> ProxyAnswer:
     """POST the request to the proxy with `token` and the system's `timeout_sec`, which the proxy
     runs the request inside (r7 A21); `caller_wait_sec` bounds each wait for the proxy's bytes, and
-    the proxy's own deadline bounds a healthy exchange. The whole reply is read, then decoded
-    once; the body is kept only when the proxy's final record says it is whole. `TransportFault`,
+    the proxy's own deadline bounds a healthy exchange. An answer whose head is not the proxy's is
+    refused there; otherwise the whole reply is read, then decoded once; the body is kept only when the proxy's final record says it is whole. `TransportFault`,
     the proxy's own (`proxy_own`), when no address or token was handed to the caller, the proxy
     cannot be reached, its reply breaks, or its answer is not the proxy's."""
     if not proxy_url or not token:
         raise TransportFault("no credential proxy address or request token was handed to this call",
                              maybe_delivered=False)
-    status_code, kind, raw = _post(proxy_url, token, {
+    raw = _post(proxy_url, token, {
         "system": system, "method": method, "url": url, "headers": dict(headers or {}),
         "body": body, "timeout_sec": timeout_sec}, caller_wait_sec(timeout_sec))
-    if status_code != 200:
-        raise TransportFault(f"credential proxy answered HTTP {status_code}")
-    if kind != REPLY_CONTENT_TYPE:
-        raise TransportFault("credential proxy answered in a format that is not the proxy's reply")
     try:
         reply = decode_reply(raw)
     except ValueError:
@@ -193,18 +197,21 @@ def proxy_call(  # noqa: PLR0913 — one request's per-call state
         status=final.status or 0, headers=dict(final.headers),
         body=b"".join(reply.chunks).decode("utf-8", "replace") if final.body_whole else "",
         fault=final.fault, detail=final.detail or "", system_side=final.system_side,
-        sent=final.sent)
+        sent=final.sent, reader_fault=final.reader_fault)
 
 
-def _post(proxy_url: str, token: str, doc: Mapping[str, object],
-          timeout: float) -> tuple[int, str, bytes]:
-    """(HTTP status, media type, whole body) of one POST. Failing before the response head is
-    "unreachable"; failing after it is the reply breaking."""
+def _post(proxy_url: str, token: str, doc: Mapping[str, object], timeout: float) -> bytes:
+    """The whole body of one POST whose head is the proxy's. A failure while the body is read is
+    the reply breaking; any other is "unreachable"."""
     try:
-        stream = _client().stream(
-            "POST", proxy_url.rstrip("/") + PROXY_PATH,
-            headers={"Authorization": f"Bearer {token}"}, json=doc, timeout=timeout)
-        response = stream.__enter__()
+        with _client().stream(
+                "POST", proxy_url.rstrip("/") + PROXY_PATH,
+                headers={"Authorization": f"Bearer {token}"}, json=doc, timeout=timeout) as response:
+            _check_head(response)
+            try:
+                return b"".join(response.iter_raw())
+            except httpx.HTTPError as e:
+                raise TransportFault(f"credential proxy's reply broke: {type(e).__name__}") from None
     except httpx.HTTPError as e:
         # Never connected to the proxy: the request went nowhere (#1374). Any later failure may
         # follow the proxy's call to the system.
@@ -212,14 +219,15 @@ def _post(proxy_url: str, token: str, doc: Mapping[str, object],
             f"credential proxy unreachable: {type(e).__name__}",
             maybe_delivered=not isinstance(e, httpx.ConnectError | httpx.ConnectTimeout),
         ) from None
-    try:
-        kind = response.headers.get("content-type", "").split(";")[0].strip().lower()
-        return response.status_code, kind, b"".join(response.iter_raw())
-    except httpx.HTTPError as e:
-        raise TransportFault(
-            f"credential proxy's reply broke: {type(e).__name__}") from None
-    finally:
-        stream.__exit__(None, None, None)
+
+
+def _check_head(response: httpx.Response) -> None:
+    """`TransportFault` for an answer that is not the proxy's reply, before any of its body is read."""
+    if response.status_code != 200:
+        raise TransportFault(f"credential proxy answered HTTP {response.status_code}")
+    kind = response.headers.get("content-type", "").split(";")[0].strip().lower()
+    if kind != REPLY_CONTENT_TYPE:
+        raise TransportFault("credential proxy answered in a format that is not the proxy's reply")
 
 
 @functools.cache

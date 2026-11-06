@@ -34,7 +34,7 @@ def final_record(status: int | None = 200, **over: Any) -> Any:
     """A `FinalRecord` (every field given): a clean 200 that reached the system unless `over`
     says otherwise."""
     fields = {"status": status, "headers": {}, "fault": None, "detail": None, "system_side": False,
-              "sent": True, "body_whole": True} | over
+              "sent": True, "body_whole": True, "reader_fault": False} | over
     return fmt().FinalRecord(**fields)
 
 

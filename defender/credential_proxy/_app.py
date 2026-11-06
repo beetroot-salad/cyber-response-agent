@@ -4,10 +4,10 @@
 `{system, method, url, headers, body}` (`headers` a name -> value object, `body` text or null).
 The answer is always HTTP 200 in the reply format of `defender._proxy_client` (#1412): the
 upstream's body as body frames, passed on as it arrives, then one final record `{status, headers,
-fault, detail, system_side, sent, body_whole}`. `status` is the upstream's status (null when nothing was
+fault, detail, system_side, sent, body_whole, reader_fault}`. `status` is the upstream's status (null when nothing was
 sent), `headers` its headers, `body_whole` whether the frames carried its whole body; `fault` is
 null or the fault class the adapter raises (`ConfigFault`, `ConfinementFault`, `UpstreamFault`,
-`TransportFault`); `detail` says why and never holds a secret value; `system_side` marks a status-less failure of the system's own call (#1404); `sent` is false only when the proxy never began the system's call or never connected to it, so the request cannot have reached it (#1374). Nothing is an answer until
+`TransportFault`); `detail` says why and never holds a secret value; `system_side` marks a status-less failure of the system's own call (#1404); `sent` is false only when the proxy never began the system's call or never connected to it, so the request cannot have reached it (#1374); `reader_fault` that the run itself cut the reply. Nothing is an answer until
 the final record: the run discards the frames unless it says they are whole. The proxy does not
 search or alter a reply for credentials; an upstream's echo reaches the run.
 
@@ -23,7 +23,13 @@ For each request (design "Proxy", in order, nothing sent or read before its chec
    none is held (A8, A12);
 6. send, following no redirect, passing the body on as it arrives, capped and never inflated
    (O7, #1383, #1412);
-7. audit, before the final record: if it cannot be written the answer is withheld (A13)."""
+7. audit, before the final record: if it cannot be written the answer is withheld (A13). Withheld
+   means the run is told to discard it: body frames have already gone, so this holds for the
+   proxy's own client, not against something else reading the raw reply with the token (owner,
+   #1412).
+
+A run is waited on only so long: a body frame it has not taken within `CALLER_GRACE_SEC`, or a
+departure, ends the read of the system (`_ReaderLeft`), whatever is left of the deadline."""
 from __future__ import annotations
 
 import dataclasses
@@ -33,7 +39,7 @@ import math
 import re
 import ssl
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -47,7 +53,7 @@ from starlette.types import Receive, Scope
 from starlette.types import Send as AsgiSend
 
 from defender import _clock, _io, tenancy
-from defender._proxy_client import REPLY_CONTENT_TYPE, FinalRecord, encode_body, encode_final
+from defender._proxy_client import PROXY_PATH, REPLY_CONTENT_TYPE, FinalRecord, encode_body, encode_final
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
 from defender.kit.access import (
     CALLER_GRACE_SEC, HEADER, OAUTH_CLIENT_CREDENTIALS, PROXY_OVERHEAD_SEC, AccessDeclaration, Auth)
@@ -65,17 +71,17 @@ from defender.credential_proxy._credentials import (
 from defender.credential_proxy._deadline import Deadline, answering
 from defender.credential_proxy._openbao import OpenBaoStore, TransitVerifier
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, UPSTREAM, Refused
-from defender.credential_proxy._reply import StreamedReply, public_trust, stream_reply
+from defender.credential_proxy._reply import Sink, StreamedReply, public_trust, stream_reply
 from defender.credential_proxy._scope import Target, check_route, locate
 from defender.credential_proxy._tokens import Claims, TokenVerifier, split_token
 
 _logger = logging.getLogger(__name__)
 
-#: The proxy's one endpoint.
-PROXY_PATH = "/v1/request"
-#: Hands one chunk of upstream body to the run; returns once it is on its way (it waits on the
-#: reader). Required all the way down from the route, the only place a reply can be sent from.
-Send = Callable[[bytes], Awaitable[None]]
+
+class _ReaderLeft(Exception):
+    """The run stopped taking the reply, or went away: why ends the sentence "... (`why`)"."""
+
+
 #: The default cap on an upstream response body (decoded), in bytes; over it is `UpstreamFault`.
 DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 #: The most time, in seconds, a request may ask for its upstream call (r7 A21), and what it gets
@@ -176,7 +182,7 @@ def _refused_answer(fault: str, detail: str, *, system_side: bool = False) -> Fi
     that is the target system's (its call failed, #1404); unmarked, the refusal is the proxy's
     own."""
     return FinalRecord(status=None, headers={}, fault=fault, detail=detail,
-                       system_side=system_side, sent=False, body_whole=False)
+                       system_side=system_side, sent=False, body_whole=False, reader_fault=False)
 
 
 class _Proxy:
@@ -193,7 +199,7 @@ class _Proxy:
         self._trust = public_trust(None if ca_file is None else str(ca_file))
         self.access_tokens = AccessTokens()
 
-    def handle(self, authorization: str | None, raw: bytes | None, send: Send,
+    def handle(self, authorization: str | None, raw: bytes | None, send: Sink,
                arrived: float | None = None) -> FinalRecord:
         """The final record of one request, audited before it is returned (A13); the upstream's
         body went to `send` meanwhile, on this thread's behalf, which stays with the request until
@@ -224,7 +230,7 @@ class _Proxy:
         # Decided once, at the one send boundary (`_sent`), whatever answer follows (#1374).
         return dataclasses.replace(answer, sent=trail.sent)
 
-    def _proxied(self, authorization: str | None, raw: bytes | None, send: Send,
+    def _proxied(self, authorization: str | None, raw: bytes | None, send: Sink,
                  trail: _Trail, began: float) -> FinalRecord:
         asked = _parse_request(raw)
         trail.system, trail.method = asked.system[:80], asked.method[:20]
@@ -234,7 +240,7 @@ class _Proxy:
         with answering(deadline):
             return self._within(authorization, asked, send, trail, deadline)
 
-    def _within(self, authorization: str | None, asked: _Asked, send: Send, trail: _Trail,
+    def _within(self, authorization: str | None, asked: _Asked, send: Sink, trail: _Trail,
                 deadline: Deadline) -> FinalRecord:
         claims = self._verified(authorization)
         trail.tenant, trail.investigation = claims.tenant, claims.investigation
@@ -304,7 +310,7 @@ class _Proxy:
             raise Refused(CONFIG, f"tenant {tenant_id} has no published export to apply") from None
 
     def _sent(self, asked: _Asked, target: Target,  # noqa: PLR0913 — one call's state
-              headers: dict[str, str], send: Send,
+              headers: dict[str, str], send: Sink,
               trail: _Trail, deadline: Deadline, trust: ssl.SSLContext) -> FinalRecord:
         cap = self.deps.max_response_bytes
         content = asked.body.encode("utf-8") if asked.body is not None else None
@@ -312,20 +318,32 @@ class _Proxy:
         timeout = deadline.wait(what)
 
         answered: list[int] = []
+        on_reader = False  # the leg is waiting for the run, not for the system
 
         def sent(status: int) -> None:
             trail.outcome = f"sent {status}"
             answered.append(status)
 
+        async def passed_on(chunk: bytes) -> None:
+            nonlocal on_reader
+            on_reader = True
+            await send(chunk)
+            on_reader = False
+
         async def call() -> Any:
             trail.sent = True  # here, past the deadline's own check before the leg
             return await stream_reply(
-                trust, asked.method, target.url, cap=cap, timeout=timeout, sink=send,
+                trust, asked.method, target.url, cap=cap, timeout=timeout, sink=passed_on,
                 on_status=sent, headers=headers, content=content)
 
         try:
             reply = deadline.run(what, call, system_side=True)
+        except _ReaderLeft as left:
+            return _broken_reply(asked.system, answered[0], str(left), reader_fault=True)
         except Refused as cut:
+            if on_reader:
+                return _broken_reply(asked.system, answered[0], "the run was too slow reading it",
+                                     reader_fault=True)
             if answered:
                 return _broken_reply(asked.system, answered[0], cut.detail)
             raise
@@ -358,15 +376,16 @@ def _record_of_reply(system: str, reply: StreamedReply) -> FinalRecord:
             continue
         shown[name] = f"{shown[name]}, {value}" if name in shown else value
     return FinalRecord(status=status, headers=shown, fault=fault, detail=detail,
-                       system_side=False, sent=True, body_whole=withheld is None)
+                       system_side=False, sent=True, body_whole=withheld is None, reader_fault=False)
 
 
-def _broken_reply(system: str, status: int, why: str) -> FinalRecord:
-    """The system answered `status` and then its reply broke (#1404): the status stands, so a
-    write it accepted is not reported as never made; no body counts."""
+def _broken_reply(system: str, status: int, why: str, *, reader_fault: bool = False) -> FinalRecord:
+    """The system answered `status` and then its reply broke (#1404), or the run cut it
+    (`reader_fault`): the status stands, so a write it accepted is not reported as never made; no
+    body counts."""
     return FinalRecord(status=status, headers={}, fault=TRANSPORT, system_side=False, sent=True,
                        detail=f"{system} answered {status} but its reply did not arrive whole ({why})",
-                       body_whole=False)
+                       body_whole=False, reader_fault=reader_fault)
 
 
 def _fault_of(status: int) -> str | None:
@@ -452,10 +471,13 @@ async def _body_of(request: Request) -> bytes | None:
 class _Framed(Response):
     """The reply in the proxy's format. The response start goes first (the proxy's HTTP status is
     always 200, so it can precede every outcome); `handle` then runs on a worker thread with a
-    send for each upstream chunk; the final record goes last, under `CALLER_GRACE_SEC`. A reader
-    still stalled then gets the connection closed unfinished (the timeout is not caught)."""
+    send for each upstream chunk, which gives up on a run that left or takes none of it within
+    `CALLER_GRACE_SEC` (`_ReaderLeft`); the final record goes last, under the same bound. A reader
+    still stalled then sees the connection closed unfinished once it resumes (the timeout is not
+    caught). Until it resumes or dies the socket and its unsent bytes stay: a server closes only
+    after flushing, and the ASGI interface offers no abort."""
 
-    def __init__(self, work: Callable[[Send], FinalRecord]) -> None:
+    def __init__(self, work: Callable[[Sink], FinalRecord]) -> None:
         super().__init__(content=None, media_type=REPLY_CONTENT_TYPE)
         self._work = work
 
@@ -463,9 +485,17 @@ class _Framed(Response):
         await send({"type": "http.response.start", "status": 200,
                     "headers": [(b"content-type", REPLY_CONTENT_TYPE.encode("ascii"))]})
 
+        request = Request(scope, receive)
+
         async def body(chunk: bytes) -> None:
-            await send({"type": "http.response.body", "body": encode_body(chunk),
-                        "more_body": True})
+            if await request.is_disconnected():  # a send to a departed run would do nothing
+                raise _ReaderLeft("the run went away")
+            try:
+                with anyio.fail_after(CALLER_GRACE_SEC):
+                    await send({"type": "http.response.body", "body": encode_body(chunk),
+                                "more_body": True})
+            except TimeoutError:
+                raise _ReaderLeft(f"the run took none of it for {CALLER_GRACE_SEC} s") from None
 
         final = await run_in_threadpool(self._work, body)
         with anyio.fail_after(CALLER_GRACE_SEC):

@@ -24,6 +24,8 @@ def public_trust(cafile: str | None = None) -> ssl.SSLContext:
     return client_trust(cafile=cafile if cafile is not None else certifi.where())
 
 
+#: Statuses whose reply has no body, whatever its headers declare.
+_NO_BODY_STATUSES = (204, 304)
 #: Takes one chunk of reply body; returns once the chunk is on its way (it waits on a slow reader).
 Sink = Callable[[bytes], Awaitable[None]]
 
@@ -56,14 +58,18 @@ def _declared(reply: httpx.Response) -> int | None:
     return int(value) if value.isascii() and value.isdigit() else None
 
 
-def _refusal_at_first_byte(reply: httpx.Response, cap: int) -> StreamedReply | None:
-    """Why the body is not passed on, known once its first byte arrives: it came compressed
-    (decoding would inflate a chunk whole before any cap, #1383), or declares more than `cap`."""
+def _declares_over(reply: httpx.Response, cap: int) -> bool:
+    declared = _declared(reply)
+    return declared is not None and declared > cap
+
+
+def _refusal_of_body(reply: httpx.Response, cap: int) -> StreamedReply | None:
+    """Why a body is not passed on, whole or at all: it came compressed (decoding would inflate a
+    chunk whole before any cap, #1383), or declares more than `cap`."""
     coding = reply.headers.get("Content-Encoding", "")
     if any(c.strip().lower() not in ("", "identity") for c in coding.split(",")):
         return _withheld(reply, f"a compressed body ({coding.strip()})")
-    declared = _declared(reply)
-    if declared is not None and declared > cap:
+    if _declares_over(reply, cap):
         return _withheld(reply, f"more than {cap} bytes", too_large=True)
     return None
 
@@ -75,19 +81,23 @@ async def stream_reply(trust: ssl.SSLContext, method: str, url: str, *, cap: int
     following no redirect and taking nothing from the environment. The reply is asked for
     uncompressed, whatever `send`'s headers ask. Its body is read as it arrives on the wire, never
     decoded, and each chunk is handed to `sink` before the next is read, so no more than a chunk
-    is held. At the first body byte a compressed reply, or one declaring more than `cap`, is
-    withheld; later, so is a reply whose bytes would pass `cap`: that chunk and the rest are never
-    handed on. A reply with no body has nothing to withhold. `on_status` hears the status before
-    the body is read. `httpx.HTTPError` as raised."""
+    is held. A reply that can have a body and declares more than `cap` is withheld at its headers,
+    with no wait for a body that would be refused; a compressed one at its first body byte (an
+    empty one has nothing to withhold); later, so is a reply whose bytes would pass `cap`: that
+    chunk and the rest are never handed on. `on_status` hears the status before the body is read.
+    `httpx.HTTPError` as raised, and whatever `sink` raises."""
     headers = httpx.Headers(send.pop("headers", None))
     headers["Accept-Encoding"] = "identity"
     async with httpx.AsyncClient(verify=trust, follow_redirects=False, trust_env=False) as client, \
             client.stream(method, url, timeout=timeout, headers=headers, **send) as reply:
         if on_status is not None:
             on_status(reply.status_code)
+        if (method.upper() != "HEAD" and reply.status_code not in _NO_BODY_STATUSES
+                and _declares_over(reply, cap) and (refused := _refusal_of_body(reply, cap)) is not None):
+            return refused
         count = 0
         async for chunk in reply.aiter_raw():
-            if count == 0 and (refused := _refusal_at_first_byte(reply, cap)) is not None:
+            if count == 0 and (refused := _refusal_of_body(reply, cap)) is not None:
                 return refused
             count += len(chunk)
             if count > cap:
