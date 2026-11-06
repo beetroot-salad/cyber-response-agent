@@ -152,11 +152,7 @@ class _StagedHostTransport:
             pipelines, command="", env=self.env, cwd=Path(self.tree.place(str(cwd))),
             timeout=timeout,
         )
-        return RawExec(rc=rc, stdout=encode_response(BoxResult(
-            rc=rc,
-            out=out.encode("utf-8", "replace"),
-            err=err.encode("utf-8", "replace"),
-        )), stderr=b"")
+        return RawExec(rc=rc, stdout=encode_response(BoxResult(rc=rc, out=out, err=err)), stderr=b"")
 
 
 def staged_executor(

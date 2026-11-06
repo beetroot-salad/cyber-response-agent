@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import resource
 import shutil
 import sys
 import tempfile
@@ -20,13 +21,139 @@ EXIT_INPUT_ERROR = 2
 #: this one would fill the queue with identical un-actionable records.
 EXIT_NO_RUNTIME = 69
 
-_MAX_OBJECT_SIZE = 1 << 30
+#: The most a payload may hold: what a box can write to a file (`READ_LIMIT`, 64 MiB).
+_MAX_PAYLOAD = READ_LIMIT
 
-#: The engine's `maximum_object_size`. It reserves buffers of twice this up front and counts them
-#: against a memory limit it derives from the box's cap, used or not, so 1 GiB here refuses every
-#: query in a capped box, however small the payload. `READ_LIMIT` is the most a box can write to
-#: a file.
-_ENGINE_OBJECT_SIZE = READ_LIMIT
+#: The most a result may hold. Below the in-box helper's own budget (64 MiB for the whole
+#: command), so this tool's better message wins.
+_RESULT_BUDGET = 32 << 20
+
+#: Rows taken from the engine at a time, so a result is counted as it arrives, not after it has
+#: all been held.
+_FETCH_ROWS = 2048
+
+#: The refusals of a size failure. Fixed text, at most 160 characters, no variable part: the
+#: queries table keeps those 160 characters as the pitfall's merge key. The three that follow
+#: a memory error say what the model can shrink, and the one for a full disk does not say
+#: "memory", which would name a cause the model cannot fix.
+_PAYLOAD_TOO_BIG = (
+    "defender-sql: the payload is over 64 MiB, so nothing was queried. "
+    "Narrow the source query (fewer rows or fields) and run it again."
+)
+_LOAD_OUT_OF_MEMORY = (
+    "defender-sql: the payload ran out of memory while loading, so nothing was queried. "
+    "Narrow the source query (fewer rows or fields)."
+)
+_QUERY_OUT_OF_MEMORY = (
+    "defender-sql: the query ran out of memory, so nothing was answered. "
+    "Ask for less: filter earlier, aggregate, or add a LIMIT."
+)
+_NO_ROOM = (
+    "defender-sql: no room to hold the payload, so nothing was queried. "
+    "Narrow the source query (fewer rows or fields)."
+)
+_RESULT_TOO_BIG = (
+    "defender-sql: the result is over 32 MiB, so nothing is printed. "
+    "Return fewer rows or columns: aggregate, add a LIMIT, or select less."
+)
+
+#: The share of the box's memory cap this process may address. The kernel kills a process that
+#: reaches the cap; a limit below it turns the same overrun into an allocation error the tool
+#: can catch and refuse.
+_ADDRESS_SPACE_SHARE = 0.8
+_BOX_MEMORY = re.compile(r"(\d+)([bkmg]?)b?", re.IGNORECASE)
+_UNITS = {"": 1, "b": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
+_ENGINE_FIGURE = re.compile(r"([\d.]+)\s*(\w+)")
+_ENGINE_UNITS = {"bytes": 1, "KiB": 1 << 10, "MiB": 1 << 20, "GiB": 1 << 30, "TiB": 1 << 40,
+                 "KB": 10**3, "MB": 10**6, "GB": 10**9, "TB": 10**12}
+
+
+class _SizeRefusal(Exception):
+    """A size failure the tool refuses with one fixed line (exit 2). Raised out of `_run`;
+    `main()` prints it and leaves at once, because unwinding the engine's connection after an
+    allocation failure is where the process sometimes crashes."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class _Phase:
+    """Whether the run is still loading the payload, which decides what a size failure tells
+    the model to shrink."""
+
+    loading = True
+
+
+def _is_memory_error(exc: BaseException) -> bool:
+    """Whether `exc` is the engine's or Python's allocation failure. By class name for the
+    engine's, which is a `duckdb.Error`: every handler that would turn one into a query or load
+    error must let it through to the one catch in `_run`."""
+    return isinstance(exc, MemoryError) or any(
+        cls.__name__ == "OutOfMemoryException" for cls in type(exc).__mro__)
+
+
+def _box_memory_bytes(text: str) -> int | None:
+    """`BoxSpec.memory` as written (`512m`, `2g`, plain bytes) in bytes, or None when unreadable
+    or not above zero."""
+    match = _BOX_MEMORY.fullmatch(text.strip())
+    if match is None:
+        return None
+    size = int(match.group(1)) * _UNITS[match.group(2).lower()]
+    return size or None
+
+
+def _engine_figure() -> int | None:
+    """The engine's own default memory limit, in bytes: what an unsandboxed run, which has no
+    box cap, is held to."""
+    try:
+        import duckdb
+
+        row = duckdb.sql("SELECT current_setting('memory_limit')").fetchone()
+        match = _ENGINE_FIGURE.fullmatch(row[0].strip()) if row else None
+        if match is None:
+            return None
+        return int(float(match.group(1)) * _ENGINE_UNITS[match.group(2)])
+    except Exception:  # noqa: BLE001 — no limit is set when the engine will not say
+        return None
+
+
+def _share_one_malloc_arena() -> None:
+    """Every thread the engine starts gets a 64 MiB arena of its own reserved in the address
+    space (`M_ARENA_MAX` = -8), which counts against the limit below though it is rarely used;
+    one shared arena keeps a small box's limit for the payload."""
+    try:
+        import ctypes
+
+        ctypes.CDLL(None).mallopt(-8, 1)
+    except (OSError, AttributeError):
+        return
+
+
+def _limit_address_space() -> None:
+    """Limit this whole process's address space: about 80% of the box's cap
+    (`DEFENDER_BOX_MEMORY`), or the engine's figure when there is none or it cannot be read;
+    never above a lower hard limit. Done at the start of `main()` and nowhere else: tests call
+    `_run` in their own process."""
+    cap = _box_memory_bytes(os.environ.get("DEFENDER_BOX_MEMORY", ""))
+    _share_one_malloc_arena()
+    want = int(cap * _ADDRESS_SPACE_SHARE) if cap else _engine_figure()
+    if want is None:
+        return
+    _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    if hard != resource.RLIM_INFINITY:
+        want = min(want, hard)
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (want, hard))
+    except (ValueError, OSError):
+        return
+
+
+def _object_size(payload_bytes: int) -> int:
+    """The engine's `maximum_object_size`, from the payload it will read. The engine reserves
+    buffers of twice this up front and counts them against the memory it may use, used or not,
+    so a fixed size refuses every query in a small box however small the payload."""
+    return max(3 * payload_bytes + 1024, 1 << 20)
 
 #: The form that binds `h` to the unnested struct on the search-hits shape, shared by
 #: `--help`'s epilog and the query-error hint.
@@ -38,7 +165,9 @@ def _describe(con) -> list[tuple[str, str]]:
     is advisory, and a broken introspection must not mask the answer or the real error."""
     try:
         return [(row[0], row[1]) for row in con.execute("DESCRIBE data").fetchall()]
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        if _is_memory_error(exc):
+            raise
         return []
 
 
@@ -102,7 +231,9 @@ def _arrow_refusal(con, sql: str) -> str | None:
         return None
     try:
         tree = json.loads(con.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0])
-    except Exception:  # noqa: BLE001 — advisory only; the query itself reports what is wrong with it
+    except Exception as exc:  # noqa: BLE001 — advisory only; the query itself reports what is wrong with it
+        if _is_memory_error(exc):
+            raise
         return None
     if tree.get("error"):
         # Only a statement duckdb parsed but will not describe is unchecked; a syntax error is
@@ -220,7 +351,9 @@ def _truncation_note(con, described: list[tuple[str, str]]) -> str:
         return ""
     try:
         values = [row[0] for row in con.execute("SELECT truncated FROM data").fetchall()]
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        if _is_memory_error(exc):
+            raise
         return ""
     if not any(_is_truncated(value) for value in values):
         return ""
@@ -468,8 +601,6 @@ def _declared_load(con, raw: bytes, rows_path: str, names_path: str, scratch: st
     """
     import duckdb
 
-    if len(raw) > _MAX_OBJECT_SIZE:
-        raise _Refused(f"stdin is over the {_MAX_OBJECT_SIZE}-byte cap.", EXIT_INPUT_ERROR)
     try:
         payload = json.loads(raw)
     except (ValueError, RecursionError) as exc:
@@ -488,6 +619,8 @@ def _declared_load(con, raw: bytes, rows_path: str, names_path: str, scratch: st
     try:
         _load_rows(con, rows, names, types, scratch)
     except (duckdb.Error, UnicodeError) as exc:
+        if _is_memory_error(exc):
+            raise
         # Python's JSON reader accepts what the engine's refuses (a lone surrogate), so a
         # payload can parse above and still fail here.
         # First line only: the rest names the tool's own scratch file and statement.
@@ -508,9 +641,10 @@ def _load_rows(con, rows: list, names: list[str], types: list[tuple[str, bool]],
             }))
             handle.write("\n")
     columns = "{" + ", ".join(f"'c{k}': '{typ}'" for k, (typ, _) in enumerate(types)) + "}"
+    object_size = _object_size(os.path.getsize(ndjson))
     con.execute(
         "CREATE TABLE _rows AS SELECT * FROM read_json(?, format='newline_delimited', "
-        f"columns={columns}, maximum_object_size={_ENGINE_OBJECT_SIZE})",
+        f"columns={columns}, maximum_object_size={object_size})",
         [ndjson],
     )
     _lock(con)
@@ -529,10 +663,12 @@ def _inferred_load(con, raw: bytes, scratch: str) -> None:
     try:
         con.execute(
             "CREATE TABLE data AS SELECT * FROM "
-            f"read_json_auto(?, maximum_object_size={_ENGINE_OBJECT_SIZE})",
+            f"read_json_auto(?, maximum_object_size={_object_size(len(raw))})",
             [payload_path],
         )
     except duckdb.Error as exc:
+        if _is_memory_error(exc):
+            raise
         raise _Refused(f"stdin is not valid JSON or NDJSON: {exc}", EXIT_INPUT_ERROR) from None
     _lock(con)
 
@@ -582,13 +718,16 @@ def _no_runtime(module: str) -> int:
 _MISSING_MODULE = re.compile(r"Required module '([^']+)' failed to import")
 
 
-def _read_stdin(declared: bool) -> bytes:
-    """The payload bytes. A closed stdin (`sys.stdin` is None) carries none, so it reads as
-    empty and is refused like an empty one. Under the flag the payload is parsed in Python, so
-    the cap is checked before that; one byte over is enough to know."""
+def _read_stdin() -> bytes:
+    """The payload bytes, read one byte past the maximum so an over-size payload is known to be
+    one and refused before anything parses it. A closed stdin (`sys.stdin` is None) carries
+    none, so it reads as empty and is refused like an empty one."""
     if sys.stdin is None:
         return b""
-    return sys.stdin.buffer.read(_MAX_OBJECT_SIZE + 1) if declared else sys.stdin.buffer.read()
+    raw = sys.stdin.buffer.read(_MAX_PAYLOAD + 1)
+    if len(raw) > _MAX_PAYLOAD:
+        raise _SizeRefusal(_PAYLOAD_TOO_BIG)
+    return raw
 
 
 def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) -> int:
@@ -597,14 +736,13 @@ def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) 
               "rows are, --names where their column names are. Pass both, or neither.",
               file=sys.stderr)
         return EXIT_QUERY_ERROR
-    declared = rows_path is not None
 
     try:
         import duckdb
     except ImportError:
         return _no_runtime("duckdb")
 
-    raw = _read_stdin(declared)
+    raw = _read_stdin()
     if not raw.strip():
         print(
             "defender-sql: no input on stdin — the payload is empty. This is NOT an "
@@ -614,67 +752,119 @@ def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) 
         )
         return EXIT_INPUT_ERROR
 
-    scratch = tempfile.mkdtemp(prefix="defender-sql-")
+    phase = _Phase()
+    scratch: str | None = None
     try:
-        con = duckdb.connect(":memory:")
-        try:
-            truncated, declaration = _load_payload(con, raw, rows_path, names_path, scratch)
-        except _Refused as exc:
-            print(f"defender-sql: {exc}", file=sys.stderr)
-            return exc.code
-
-        described = _describe(con)
-
-        def hint(message: str) -> str:
-            return (_declared_hint(described, message) if declared
-                    else _shape_hint(described, message, declaration))
-
-        # Printed on every run past the load, success or error: each says something the
-        # answer alone would hide.
-        shape_notes = ([_list_column_note(described), _json_column_note(described)] if declared
-                       else [_positional_rows_note(declaration)])
-        shape_notes = [note for note in shape_notes if note]
-
-        if refusal := _arrow_refusal(con, sql):
-            print(f"{refusal}{hint(refusal)}", *shape_notes, sep="\n", file=sys.stderr)
-            return EXIT_QUERY_ERROR
-
-        # The fetch is inside: handing a value to Python can fail in the engine too (#1126).
-        try:
-            cursor = con.execute(sql)
-            records = cursor.fetchall()
-        except duckdb.Error as exc:
-            if missing := _MISSING_MODULE.search(str(exc)):
-                return _no_runtime(missing.group(1))
-            print(f"defender-sql: query error: {exc}{hint(str(exc))}", *shape_notes,
-                  sep="\n", file=sys.stderr)
-            return EXIT_QUERY_ERROR
-
-        columns = [col[0] for col in cursor.description] if cursor.description else []
-        columns, renamed = _disambiguate_columns(columns)
-        # `null` for a non-finite float: the model computes over these rows, and a column that
-        # is number-or-null reads as one type where `"NaN"` would be a string among numbers.
-        # Zone-less timestamps are UTC: the engine converts an offset to UTC when it loads one,
-        # and the session's zone is UTC.
-        rows = [json_safe(dict(zip(columns, record, strict=True)), non_finite="null",
-                          naive_is_utc=True)
-                for record in records]
-        json.dump(rows, sys.stdout, allow_nan=False)
-        sys.stdout.write("\n")
-        notes = [_collision_note(renamed) if renamed else "", *shape_notes,
-                 _declared_truncation_note(truncated) if declared
-                 else _truncation_note(con, described)]
-        for note in filter(None, notes):
-            print(note, file=sys.stderr)
-        return EXIT_OK
+        scratch = tempfile.mkdtemp(prefix="defender-sql-")
+        return _answer_query(duckdb, sql, raw, rows_path, names_path, scratch, phase)
+    except Exception as exc:
+        # The one catch for a size failure anywhere in the run. The refusal leaves `_run` with
+        # the failed connection still alive in its traceback; `main()` exits without unwinding it.
+        if _is_memory_error(exc):
+            raise _SizeRefusal(_LOAD_OUT_OF_MEMORY if phase.loading
+                               else _QUERY_OUT_OF_MEMORY) from None
+        if isinstance(exc, OSError) and phase.loading:
+            raise _SizeRefusal(_NO_ROOM) from None
+        raise
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _fetch_result(cursor) -> tuple[list[str], str]:
+    """The query's rows as JSON text and the renamed columns, taken a batch at a time into the
+    result budget: a result over it prints nothing."""
+    batch = cursor.fetchmany(_FETCH_ROWS)
+    columns = [col[0] for col in cursor.description] if cursor.description else []
+    columns, renamed = _disambiguate_columns(columns)
+    parts: list[str] = []
+    size = 2
+    while batch:
+        for record in batch:
+            # `null` for a non-finite float: the model computes over these rows, and a column
+            # that is number-or-null reads as one type where `"NaN"` would be a string among
+            # numbers. Zone-less timestamps are UTC: the engine converts an offset to UTC when it
+            # loads one, and the session's zone is UTC.
+            row = json.dumps(json_safe(dict(zip(columns, record, strict=True)),
+                                       non_finite="null", naive_is_utc=True), allow_nan=False)
+            size += len(row) + 2
+            if size > _RESULT_BUDGET:
+                raise _SizeRefusal(_RESULT_TOO_BIG)
+            parts.append(row)
+        batch = cursor.fetchmany(_FETCH_ROWS)
+    return renamed, "[" + ", ".join(parts) + "]"
+
+
+def _answer_query(duckdb, sql: str, raw: bytes, rows_path: str | None, names_path: str | None,
+            scratch: str, phase: _Phase) -> int:
+    declared = rows_path is not None
+    # Two threads: the box's CPU cap, and the strongest guard against a crash under the address
+    # limit (each thread the engine starts reserves address space of its own, so the count is
+    # fixed when it starts). No spill: a query that would need it stays an out-of-memory error.
+    con = duckdb.connect(":memory:", config={"threads": 2, "max_temp_directory_size": "0KiB"})
+    try:
+        truncated, declaration = _load_payload(con, raw, rows_path, names_path, scratch)
+    except _Refused as exc:
+        print(f"defender-sql: {exc}", file=sys.stderr)
+        return exc.code
+    # Nothing after the load reads the scratch files: the tables are materialized.
+    shutil.rmtree(scratch, ignore_errors=True)
+    phase.loading = False
+
+    described = _describe(con)
+
+    def hint(message: str) -> str:
+        return (_declared_hint(described, message) if declared
+                else _shape_hint(described, message, declaration))
+
+    # Printed on every run past the load, success or error: each says something the
+    # answer alone would hide.
+    shape_notes = ([_list_column_note(described), _json_column_note(described)] if declared
+                   else [_positional_rows_note(declaration)])
+    shape_notes = [note for note in shape_notes if note]
+
+    if refusal := _arrow_refusal(con, sql):
+        print(f"{refusal}{hint(refusal)}", *shape_notes, sep="\n", file=sys.stderr)
+        return EXIT_QUERY_ERROR
+
+    # The fetch is inside: handing a value to Python can fail in the engine too (#1126).
+    try:
+        renamed, text = _fetch_result(con.execute(sql))
+    except duckdb.Error as exc:
+        if _is_memory_error(exc):
+            raise
+        if missing := _MISSING_MODULE.search(str(exc)):
+            return _no_runtime(missing.group(1))
+        print(f"defender-sql: query error: {exc}{hint(str(exc))}", *shape_notes,
+              sep="\n", file=sys.stderr)
+        return EXIT_QUERY_ERROR
+
+    # Every step that can fail on memory is done before anything is printed.
+    notes = [_collision_note(renamed) if renamed else "", *shape_notes,
+             _declared_truncation_note(truncated) if declared
+             else _truncation_note(con, described)]
+    sys.stdout.write(text)
+    sys.stdout.write("\n")
+    for note in filter(None, notes):
+        print(note, file=sys.stderr)
+    return EXIT_OK
+
+
+def _refuse_and_leave(refusal: _SizeRefusal) -> None:
+    """Print the refusal and leave at once, without unwinding the engine's connection: the
+    process sometimes crashes there after an allocation failure, and a crash would read as a
+    kill. Scratch is already gone (`_run` removes it on the way out)."""
+    print(refusal.message, file=sys.stderr)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(EXIT_INPUT_ERROR)
 
 
 def main() -> int:
     # The help and hints contain an em-dash and a lead's shell may be the `C` locale. Done
     # here, not at import, so in-process imports leave the host's streams alone.
     use_utf8_stdio()
+    _limit_address_space()
     parser = argparse.ArgumentParser(
         prog="defender-sql",
         description="Sandboxed SQL aggregation over a JSON/NDJSON payload on stdin, "
@@ -703,7 +893,11 @@ def main() -> int:
         help="A read-only SQL query over the `data` table (the parsed stdin payload).",
     )
     args = parser.parse_args()
-    return _run(args.sql, args.rows, args.names)
+    try:
+        return _run(args.sql, args.rows, args.names)
+    except _SizeRefusal as refusal:
+        _refuse_and_leave(refusal)
+        return EXIT_INPUT_ERROR  # unreachable: the process has left
 
 if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text
     raise SystemExit(main())
