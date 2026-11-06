@@ -753,18 +753,21 @@ def test_1390_check_still_reports_a_broken_registry_when_the_grant_table_does_no
         assert reason in out, f"the registry's reason {reason!r} is lost behind the table:\n{out}"
 
 
-def test_1390_a_tenant_with_no_registry_file_is_clean(tmp_path: Path) -> None:
-    """A tenant whose repo holds no registry file at all passes `check --folder` with the registry rows still granted. P4."""
+def test_1390_a_tenant_granting_lookup_with_no_registry_file_fails(tmp_path: Path) -> None:
+    """`lookup` granted with no registry file fails `check --folder`, naming the fault. Amendment 8."""
     folder = _folder(tmp_path, "tenant")
     folder.joinpath(*TACIT_REGISTRY_REL).unlink()
 
-    H.assert_clean(_check_folder(folder))
+    proc = _check_folder(folder)
+
+    assert proc.returncode == 1, proc
+    assert "no registry file" in proc.stderr, proc.stderr
 
 
 @pytest.mark.parametrize("how", [
     "rows-deleted", "lookup-withheld", "both-rows-withheld", "lookup-row-deleted", "health-check-row-deleted"])
 def test_1390_a_registry_the_grant_table_does_not_reach_is_no_finding(tmp_path: Path, how: str) -> None:
-    """With the registry file present and `lookup` unreached by the table (any row, or all, deleted or `roles: []`), `check --folder` exits 0 with no tacit line. H7, O10, A3."""
+    """With an empty registry file present and `lookup` unreached by the table (any row, or all, deleted or `roles: []`), `check --folder` exits 0 with no tacit line. H7, O10, A3."""
     control = H.assert_clean(_check_folder(_folder(tmp_path, "control")))
     assert "registry.yaml" not in control, "positive control: a granted lookup draws no warning"
     folder = _folder(tmp_path, "tenant")

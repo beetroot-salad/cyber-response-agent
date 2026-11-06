@@ -100,7 +100,11 @@ from defender.tenancy import AGENT_HALF, SETTINGS_HALF, TENANT_ID_FILE  # noqa: 
 from defender.systems import tacit_registry  # noqa: E402
 from defender.systems.verbs import is_platform_served  # noqa: E402
 from defender.systems import run_tenant  # noqa: E402
-from defender.systems.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
+from defender.systems.verb_dispositions import (  # noqa: E402
+    DispositionError,
+    dispositions_path,
+    run_grants,
+)
 from defender.systems import case_system  # noqa: E402
 from defender.records.formats import TenantRefused
 
@@ -412,6 +416,7 @@ def _findings(knowledge: Path) -> list[str]:
         findings += [f"adapter `{name}` refused: {why}" for name, why in census.refused.items()
                      if is_platform_served(name)]
     findings += _registry_findings(knowledge)
+    findings += _registry_grant_findings(knowledge)
     try:
         findings += (_tenant_census.table_findings(settings, census).lines(table)
                      if census is not None
@@ -431,6 +436,27 @@ def _registry_findings(knowledge: Path) -> list[str]:
     path = tacit_registry.registry_path(knowledge / AGENT_HALF)
     return [f"{tacit_registry.SYSTEM} registry: {why}"
             for why in tacit_registry.read_registry(path).problems]
+
+
+def _registry_grant_findings(knowledge: Path) -> list[str]:
+    """The registry file against the grant table, which only this check holds together: `lookup`
+    granted with no file behind it fails. Entries with no `lookup` grant only earn a note, since
+    a tenant may write them before it grants the verb. An unloadable table is reported where the
+    table is judged, so it costs only this comparison."""
+    try:
+        gather = run_grants(knowledge / SETTINGS_HALF).gather
+    except DispositionError:
+        return []
+    granted = any(system == tacit_registry.SYSTEM and verb == "lookup"
+                  for system, verb, _ in gather.entries)
+    read = tacit_registry.read_registry(tacit_registry.registry_path(knowledge / AGENT_HALF))
+    if granted and read.absent:
+        return [f"{tacit_registry.SYSTEM} registry: gather is granted `lookup`, but there is no "
+                "registry file for it to read"]
+    if read.entries and not granted:
+        _say(f"note: {tacit_registry.SYSTEM} registry holds {len(read.entries)} entr(ies), but "
+             "gather is not granted `lookup`, so none of them is consulted yet")
+    return []
 
 
 def _report(findings: list[str]) -> int:

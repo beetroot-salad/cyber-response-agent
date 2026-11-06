@@ -302,7 +302,8 @@ Then stop. `/ship` can open the PR.
   (plus `pyproject.toml` / `uv.lock` if a dep was added). Never `hooks/`,
   `learning/`, `agent/lessons/`, the runtime `defender/SKILL.md`, the invlang
   skill, or another system's files. On the `tacit.md` route the lane is
-  narrower still: the staged `skills/tacit-knowledge/registry.yaml` and nothing else.
+  narrower still: the staged `skills/tacit-knowledge/registry.yaml`, plus the
+  template's `SKILL.md` beside it for a tenant that has none, and nothing else.
 - **Never author a sanction.** On the `tacit.md` route you transcribe what
   a human states and record them as its author. An entry written under
   your name, or with a scope you inferred, is the system vouching for

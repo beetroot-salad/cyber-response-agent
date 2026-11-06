@@ -336,6 +336,15 @@ def _ask(reg: Any, est: S.Estate, run_dir: Path, system: str = "idp", verb: str 
     return S.call(reg, system, verb, est.ctx(run_dir), **params)
 
 
+def _running_state(run_dir: Path, branch_point: Any) -> Any:
+    """A sibling's run state with its clock on `branch_point`."""
+    from defender.investigation.run_state import RunState
+
+    state = RunState(run_dir, "r-sibling")
+    state.resume_clock(branch_point, 0.0)
+    return state
+
+
 def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.ScriptedModel,
             verifier: S.ScriptedModel | None = None, calls: Iterable[S.Call] = (CALL_IDP,),
             rate: float = FAST, after_source: Any = None) -> S.Launch:
@@ -829,7 +838,11 @@ def test_1224_tacit_knowledge_run_query_is_judged_on_wall_time(tmp_path):
     oracle = S.oracle(S.run_query("tacit-knowledge", "lookup", TACIT_LOOKUP), S.submit(BASE))
     _e, _ep, reg = _scene(tmp_path, oracle, est=est)
 
-    _ask(reg, est, tmp_path / "run")
+    # The side query runs during a sibling's call, whose run clock stands on the branch date. It
+    # must not inherit that clock.
+    sibling = _running_state(tmp_path / "sibling", S.AS_OF_DT)
+    with S.run_state_carried(sibling):
+        _ask(reg, est, tmp_path / "run")
 
     returned = _returned(oracle, 1)
     assert TACIT_ENTRY_TODAY["id"] in returned, (

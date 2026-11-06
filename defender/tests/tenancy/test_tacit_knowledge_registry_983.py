@@ -427,13 +427,15 @@ def test_1390_lookup_is_answered_with_no_adapter_module(tmp_path):
         "the tacit-knowledge adapter module still ships in the adapters folder")
 
 
-def test_1390_a_tenant_without_a_registry_answers_every_lookup_with_a_plain_miss(tmp_path):
-    """No registry file: every lookup is exactly `{matched: None}`, and `health-check` says it is not connected. P4."""
+def test_1390_a_tenant_without_a_registry_answers_every_lookup_with_a_miss_that_says_so(tmp_path):
+    """No registry file: every lookup misses and says a miss proves nothing, and `health-check` says it is not connected. P4, amendment 8."""
     root = tmp_path / "tree"
     root.mkdir()
     ctx = _clocked_ctx(root, tmp_path)
 
-    assert _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN) == {"matched": None}
+    lookup = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
+    assert lookup["matched"] is None, lookup
+    assert lookup.get("registry_problems"), lookup
     health = _verbs()["health-check"](ctx)
     assert (health["connected"], health["entries"]) == (False, 0)
     assert "registry_problems" not in health
@@ -592,16 +594,15 @@ def test_1390_health_check_carries_the_same_registry_problems(tmp_path):
         "positive control: a clean registry reports no problems")
 
 
-def test_1390_health_check_says_an_existing_registry_is_unused_until_lookup_is_granted(tmp_path):
-    """`health-check`'s visible text, for a registry that exists, tells the lead it is unused until `lookup` is granted. H7."""
+def test_1390_health_check_says_nothing_about_a_grant_it_cannot_see(tmp_path):
+    """`health-check` reports the file alone: it cannot see the grant, so a note that a registry may be unused would be false wherever `lookup` is granted. Amendment 8."""
     root = tmp_path / "tree"
     _write_registry(root, _current_entry())
 
     health = _verbs()["health-check"](_clocked_ctx(root, tmp_path))
 
-    text = json.dumps(health).lower()
-    assert "lookup" in text, f"health-check does not say lookup must be granted: {health}"
-    assert "grant" in text, f"health-check does not say lookup must be granted: {health}"
+    assert "grant" not in json.dumps(health).lower(), f"health-check talks about the grant: {health}"
+    assert (health["connected"], health["entries"]) == (True, 1), health
 
 
 def test_1390_the_connect_page_no_longer_says_the_registry_is_already_connected_and_says_lookup_needs_a_grant():
@@ -705,8 +706,52 @@ def test_1390_a_path_that_cannot_be_looked_at_is_refused_never_absent(tmp_path):
     assert _verbs()["health-check"](ctx)["connected"] is True
 
 
-def test_1390_nothing_at_the_path_is_absent_to_every_reader_but_the_authors_check(tmp_path, capsys):
-    """No registry file is clean to a lookup, `health-check` and the shared problem list, and a failure, saying so, to `tacit_cli check`: someone asking to check a file that is not there is probably in the wrong tree. P4."""
+def test_1390_a_pipe_at_the_registry_path_is_refused_without_hanging(tmp_path):
+    """A named pipe at the registry path is refused whole. An ordinary open would block forever waiting for a writer, so the read runs on a thread that a failing test abandons rather than holding the suite. P4."""
+    import os
+    import threading
+
+    path = registry().registry_path(tmp_path / "tree")
+    path.parent.mkdir(parents=True)
+    os.mkfifo(path)
+    answers = []
+    reader = threading.Thread(target=lambda: answers.append(registry().read_registry(path)), daemon=True)
+
+    reader.start()
+    reader.join(timeout=10)
+
+    assert answers, "read_registry blocked on a named pipe"
+    assert answers[0].fatal, answers[0]
+    assert not answers[0].absent, answers[0]
+
+
+def test_1390_a_regular_file_where_a_parent_folder_belongs_is_refused_not_absent(tmp_path):
+    """A parent of the registry path that is not a folder is a broken tree, not a tenant with no registry. P4."""
+    path = registry().registry_path(tmp_path / "tree")
+    path.parent.parent.mkdir(parents=True)
+    path.parent.write_text("not a folder\n", encoding="utf-8")
+
+    read = registry().read_registry(path)
+
+    assert read.fatal, read
+    assert not read.absent, read
+
+
+def test_1390_a_dangling_link_as_a_parent_folder_still_warns_a_lookup(tmp_path):
+    """A dangling link in a parent reports "not found", so it reads as absent. The `lookup` still says a miss proves nothing, which is the harm a broken tree would otherwise do. P4, amendment 8."""
+    root = tmp_path / "tree"
+    path = registry().registry_path(root)
+    path.parent.parent.mkdir(parents=True)
+    path.parent.symlink_to("nowhere-1390")
+
+    lookup = _platform_lookup(_clocked_ctx(root, tmp_path), actor=ACTOR, host=HOST, pattern=PATTERN)
+
+    assert lookup["matched"] is None, lookup
+    assert lookup.get("registry_problems"), lookup
+
+
+def test_1390_nothing_at_the_path_is_a_notice_to_a_lookup_and_a_failure_to_the_authors_check(tmp_path, capsys):
+    """No registry file is no problem to `health-check` or the shared problem list. To a `lookup`, which runs only under a grant, it is a notice that a miss proves nothing. To `tacit_cli check` it is a failure: someone checking a file that is not there is probably in the wrong tree. P4, amendment 8."""
     from defender.cli import tacit_cli
 
     root = tmp_path / "tree"
@@ -715,8 +760,12 @@ def test_1390_nothing_at_the_path_is_absent_to_every_reader_but_the_authors_chec
     assert read.absent, read
     assert read.problems == []
     ctx = _clocked_ctx(root, tmp_path)
-    assert _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN) == {"matched": None}
-    assert _verbs()["health-check"](ctx)["connected"] is False
+    lookup = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
+    assert lookup["matched"] is None, lookup
+    assert "does not show that nobody sanctioned" in lookup.get("registry_problems", ""), lookup
+    health = _verbs()["health-check"](ctx)
+    assert health["connected"] is False, health
+    assert "registry_problems" not in health, health
 
     assert tacit_cli.main(["check", "--defender-dir", str(root)]) == 1
     assert "no registry at this path" in capsys.readouterr().out

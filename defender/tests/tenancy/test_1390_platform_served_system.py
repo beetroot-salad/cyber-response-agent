@@ -105,6 +105,33 @@ def test_1390_the_workspace_map_command_lists_the_registry(tmp_path, data_root, 
     assert any(line.startswith(f"- {SYSTEM} ") for line in listed), f"the map leaves out {SYSTEM}: {listed}"
 
 
+def test_1390_the_workspace_map_command_lists_the_registry_whatever_today_grants(tmp_path, data_root, capsys):
+    """The operator's map of a past run lists the registry with all of it withheld today: no record says what that run was granted, so today's table must not hide it. Amendment 6."""
+    from defender import _yaml, tenancy
+    from defender.cli import workspace_map
+    from defender.systems.run_tenant import host_tenant
+    from defender.systems.verb_dispositions import dispositions_path
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    with B.run_tenant(tmp_path, data_root) as t:
+        out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit))
+        assert out.rc == 0, out.text()
+        with host_tenant(tenancy.resolve_data_root(), t.tenant_id, directory=t.directory) as admitted:
+            table = dispositions_path(admitted.tenant.settings)
+            doc = _yaml.safe_load(table.read_text(encoding="utf-8"))
+            assert doc["dispositions"][SYSTEM]["lookup"]["roles"], "premise: the fixture grants it"
+            for verb in doc["dispositions"][SYSTEM]:
+                doc["dispositions"][SYSTEM][verb] = {"roles": [], "reason": "withheld today"}
+            table.write_text(_yaml.safe_dump(doc), encoding="utf-8")
+        capsys.readouterr()
+        rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name], directory=t.directory)
+        captured = capsys.readouterr()
+
+    assert rc == 0, captured.err
+    # The skills section lists the page too: only the adapters section's line counts.
+    assert f"- {SYSTEM}  (a system dispatched via the query tool" in captured.out, captured.out
+
+
 def test_1390_the_map_lists_the_registry_only_for_a_grant_that_holds_it():
     """A role holding any verb of the registry is shown it and a role holding none is not; adapters are listed either way, so an ungranted one still gets its "not granted" answer. A3, O-map."""
     from defender.systems.verb_grant import VerbGrant
@@ -131,7 +158,9 @@ def test_1390_a_declared_set_of_only_platform_names_declares_nothing():
     assert "cmdb" in adapter_systems_under(ADAPTERS)
     assert declares_no_system(frozenset({SYSTEM}))
     assert not declares_no_system(frozenset({SYSTEM, "cmdb"}))
-    assert SYSTEM in with_platform_systems(frozenset({"cmdb"}))
+    widened = with_platform_systems(frozenset({"cmdb"}))
+    assert SYSTEM in widened
+    assert isinstance(widened, frozenset), "the widened set can be changed by whoever holds it"
 
 
 def test_1390_the_pitfalls_and_write_lanes_refuse_an_empty_adapters_tree(tmp_path):
@@ -185,3 +214,83 @@ def test_1390_connect_check_registry_names_the_reserved_adapter_with_its_reason(
     assert "reserved" in said, f"the reserved name is not refused with its reason: {said!r}"
     assert SYSTEM in said, f"the reserved name is not refused with its reason: {said!r}"
     assert "anomalous adapter name" not in said, f"the refusal reads as a malformed name: {said!r}"
+
+
+def _tenant_folder(tmp_path, *, granted: bool, registry: str | None):
+    """A knowledge folder holding only what the registry-against-grant comparison reads."""
+    from defender.systems import tacit_registry
+
+    knowledge = tmp_path / "knowledge"
+    table = knowledge / "settings" / "verb-grants.yaml"
+    table.parent.mkdir(parents=True)
+    roles = "[gather]" if granted else "[]"
+    table.write_text(
+        "dispositions:\n  tacit-knowledge:\n"
+        f"    lookup: {{roles: {roles}, reason: test}}\n", encoding="utf-8")
+    if registry is not None:
+        path = tacit_registry.registry_path(knowledge / "agent")
+        path.parent.mkdir(parents=True)
+        path.write_text(registry, encoding="utf-8")
+    return knowledge
+
+
+ONE_ENTRY = """entries:
+  - id: tk-1390-note
+    pattern: rewrite /etc/ssl/certs/ca-bundle.crt
+    actor_scope: uid-0
+    host_scope: build-runner-*.prod
+    added_by: sre-platform@example.invalid
+    added_at: 2026-03-01
+    review_by: 2026-08-01
+    justification: the image build's own ca-trust step
+"""
+
+
+def test_1390_tenant_check_fails_lookup_granted_with_no_registry(tmp_path):
+    """`lookup` granted with no file behind it fails `tenant check`, the one check holding both. Amendment 8."""
+    from defender.cli.tenant import _registry_grant_findings
+
+    found = _registry_grant_findings(_tenant_folder(tmp_path, granted=True, registry=None))
+
+    assert len(found) == 1, found
+    assert "no registry file" in found[0], found
+
+
+def test_1390_tenant_check_only_notes_entries_with_no_lookup_grant(tmp_path, capsys):
+    """Entries nothing consults earn a note, not a failure: a tenant may write them before granting. Amendment 8."""
+    from defender.cli.tenant import _registry_grant_findings
+
+    found = _registry_grant_findings(_tenant_folder(tmp_path, granted=False, registry=ONE_ENTRY))
+
+    assert found == []
+    assert "not granted `lookup`" in capsys.readouterr().err
+
+
+def test_1390_tenant_check_is_quiet_when_grant_and_registry_agree(tmp_path, capsys):
+    """Positive controls: a granted registry, and an ungranted tenant with an empty one (the template's state), say nothing."""
+    from defender.cli.tenant import _registry_grant_findings
+
+    assert _registry_grant_findings(
+        _tenant_folder(tmp_path / "a", granted=True, registry=ONE_ENTRY)) == []
+    assert _registry_grant_findings(
+        _tenant_folder(tmp_path / "b", granted=False, registry="entries: []\n")) == []
+    assert capsys.readouterr().err == ""
+
+
+def test_1390_a_new_tenant_gets_the_registry_and_its_index_line(tmp_path):
+    """The template seeds a clean, empty registry and the page gather's index reads, so granting `lookup` is all a new tenant needs for the system to appear. Amendment 8."""
+    from defender.hooks.inject_system_skill_description import descriptor_index
+    from defender.systems import tacit_registry
+    from defender.systems.verb_grant import VerbGrant
+    from defender._paths import adapters_under
+
+    agent = REPO_ROOT / "knowledge" / "tenant-template" / "agent"
+    read = tacit_registry.read_registry(tacit_registry.registry_path(agent))
+    assert not read.absent, read
+    assert not read.problems, read
+    assert read.entries == (), read
+
+    roster = read_roster(adapters_under(REPO_ROOT / "defender"))
+    grant = VerbGrant("gather", ((SYSTEM, "lookup", "r"),))
+    index = descriptor_index(agent / "skills", roster, grant).render()
+    assert f"`{SYSTEM}`" in (index or ""), index

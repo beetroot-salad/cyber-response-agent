@@ -31,7 +31,6 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
     ns = p.parse_args(argv[1:])
     from defender import tenancy
     from defender.systems.run_tenant import host_tenant
-    from defender.systems.verb_dispositions import DispositionError, run_grants
     from defender.systems.verbs import RegistryError, read_roster
 
     try:
@@ -51,12 +50,9 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
         except RegistryError as e:
             sys.stderr.write(f"workspace_map: {e}\n")
             return 2
-        try:
-            gather = run_grants(admitted.tenant.settings).gather
-        except DispositionError as e:
-            sys.stderr.write(f"workspace_map: {e}\n")
-            return 2
-        print(workspace_map(Path(run.run_dir), systems=roster.systems_shown_to(gather),
+        # Every system this checkout serves, not the ones a grant shows: this is an operator's
+        # view drawn today, and no record says what the mapped run was granted.
+        print(workspace_map(Path(run.run_dir), systems=roster.systems,
                             agent_root=_stamped_agent_root(admitted.tenant, Path(run.run_dir))), end="")
     return 0
 

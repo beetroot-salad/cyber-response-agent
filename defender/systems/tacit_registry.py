@@ -6,7 +6,6 @@ never an adapter module. One reading of the file serves the verbs, `tacit_cli` a
 from __future__ import annotations
 
 import datetime as dt
-import os
 import re
 from fnmatch import fnmatchcase
 from collections.abc import Callable
@@ -17,7 +16,7 @@ from pathlib import Path
 import yaml
 
 from defender import _yaml
-from defender._io import TEXT_READ_ERRORS, read_text_utf8
+from defender._io import TEXT_READ_ERRORS, read_plain
 from defender.knowledge import KnowledgePaths
 from defender.kit.verbs import VerbContext
 
@@ -190,18 +189,16 @@ def read_registry(path: Path) -> RegistryRead:
     `defender.cli.tacit_cli` reports them and CI runs it. Printed during a run, a dropped
     entry is indistinguishable from an absent one and the run escalates a sanctioned case.
 
-    Only a path with nothing at it is absent. A directory, a dangling or looping symlink, or a
-    path this process may not look at is refused whole, which is why the path itself is looked
-    at first: opening a dangling symlink reports "not found" too.
+    Read as a plain file (`read_plain`), so only a path with nothing at it is absent. A link, a
+    directory, a pipe (which would block an ordinary open forever), or a parent that is not a
+    directory is refused whole. A dangling link in a parent folder also reports "not found" and
+    so reads as absent; a `lookup` says that too is no evidence (`_model_notice`), so nothing
+    has to tell the two apart.
     """
     try:
-        os.lstat(path)
-    except (FileNotFoundError, NotADirectoryError):
+        loaded = _yaml.safe_load(read_plain(Path(path)))
+    except FileNotFoundError:
         return RegistryRead((), (), absent=True)
-    except OSError as e:
-        return RegistryRead((), (), f"registry at {path} could not be read ({e})")
-    try:
-        loaded = _yaml.safe_load(read_text_utf8(Path(path)))
     except (*TEXT_READ_ERRORS, yaml.YAMLError) as e:
         return RegistryRead((), (), f"registry at {path} could not be read ({e})")
     rows = loaded.get("entries") if isinstance(loaded, dict) else None
@@ -263,9 +260,9 @@ def find_entry(
 
 def _day() -> dt.date:
     """The day this call is judged against (P2, amendment 4): the run's own clock where the run
-    has one (a replay sibling's resumes at the branch point), else wall time. Pre-flight and the
-    oracle's own side queries have no run and are judged on wall time: the platform hands a verb
-    no branch point (#1385 O1)."""
+    has one (a replay sibling's resumes at the branch point), else wall time. Pre-flight has no
+    run, and the oracle's and verifier's side queries run with none (`_oracle_store`), so they
+    are judged on wall time: the platform hands a verb no branch point (#1385 O1)."""
     from defender.systems.verbs import CALL_RUN_STATE  # verbs imports this module
 
     state = CALL_RUN_STATE.get()
@@ -277,21 +274,29 @@ def _model_notice(read: RegistryRead) -> str | None:
 
     A count, never the refusal texts: those name refused entries' ids and scopes, and the
     citation gate reads only the model's own `:R consultations` rows, so an id seen here could be
-    cited as a sanction the loader refused. The reasons are for the author (`tacit_cli check`,
-    `tenant check`)."""
-    if read.fatal is not None:
+    cited as a sanction the loader refused. The reasons depend only on the file, so `tacit_cli
+    check` over the run's knowledge commit gives them again; nothing here has to record them.
+
+    An absent file is named too. A `lookup` runs only under a grant, so a registry granted and
+    not there is a fault, whatever is broken on the way to it."""
+    if read.absent:
+        what = "No registry file was found, so nothing answers a lookup"
+    elif read.fatal is not None:
         what = "The registry file was refused whole, so nothing in it answers a lookup"
     elif read.refusals:
         what = f"{len(read.refusals)} registry entr(ies) were refused and answer no lookup"
     else:
         return None
     return (f"{what}: a miss does not show that nobody sanctioned this. The tenant's operator "
-            "can see why with `tenant check`.")
+            "can see why by checking the registry at the knowledge commit this run used.")
 
 
 def health_check(ctx: VerbContext) -> dict:
     """Liveness for a system with no service: does the registry exist, and how many entries
-    does it hold. Returns data rather than printing, so the queries table records a payload."""
+    does it hold. Returns data rather than printing, so the queries table records a payload.
+
+    It reports the file alone. Whether `lookup` is granted is `tenant check`'s to say: this verb
+    cannot see the grant."""
     agent_root = Path(ctx.tenant.agent)
     path = registry_path(agent_root)
     read = read_registry(path)
@@ -301,13 +306,8 @@ def health_check(ctx: VerbContext) -> dict:
         "registry": path.relative_to(agent_root).as_posix(),
         "entries": len(read.entries),
     }
-    if not read.absent:
-        if (notice := _model_notice(read)) is not None:
-            out["registry_problems"] = notice
-        out["note"] = (
-            "A registry is consulted only when `lookup` is granted to the role in the tenant's "
-            "verb-disposition table; until then it is unused."
-        )
+    if not read.absent and (notice := _model_notice(read)) is not None:
+        out["registry_problems"] = notice
     return out
 
 
@@ -318,8 +318,8 @@ def lookup(  # lint-dup: ok — a verb name addressed as `<system>.lookup`; `thr
 
     `matched` is the entry (what a `:R consultations` row cites) or `None`. A miss
     names nothing — not a near match, not an expired entry — since an almost-hit's id would be a
-    citation waiting to be written. `registry_problems` appears only when the file was refused
-    whole or entries were dropped, so a broken registry is not mistaken for an empty one, and it
+    citation waiting to be written. `registry_problems` appears only when the file is missing,
+    was refused whole or lost entries, so a broken registry is not mistaken for an empty one, and it
     names no entry, for the same reason a miss does not.
     """
     read = read_registry(registry_path(Path(ctx.tenant.agent)))

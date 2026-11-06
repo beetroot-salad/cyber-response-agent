@@ -61,7 +61,7 @@ def _adapter_names(adapters_dir: Path) -> frozenset[str]:
 
 def with_platform_systems(systems: frozenset[str]) -> frozenset[str]:
     """`systems` plus the platform-served names, which admit paths on every tree (#1390 A14)."""
-    return systems | PLATFORM_SERVED.keys()
+    return systems.union(PLATFORM_SERVED)
 
 
 def declares_no_system(systems: frozenset[str]) -> bool:
