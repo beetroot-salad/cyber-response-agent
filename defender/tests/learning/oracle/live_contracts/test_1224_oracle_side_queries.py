@@ -6,7 +6,6 @@ import contextlib
 import dataclasses
 import gc
 import importlib
-import inspect
 import json
 import math
 import re
@@ -126,6 +125,12 @@ TACIT_ENTRY = {
     "added_at": "2026-07-01", "review_by": "2026-07-31",
     "justification": "the nightly backup job requests a TGT for db-1",
 }
+#: The same scope in force today. It follows `TACIT_ENTRY` in the registry, so a lookup judged
+#: on the branch date would answer `TACIT_ENTRY` and one judged on wall time answers this.
+_TODAY = datetime.now(UTC).date()
+TACIT_ENTRY_TODAY = {**TACIT_ENTRY, "id": "tk-1224-in-force-today",
+                     "added_at": str(_TODAY - timedelta(days=10)),
+                     "review_by": str(_TODAY + timedelta(days=30))}
 TACIT_LOOKUP = {"actor": "svc-backup-01", "host": "db-1.corp", "pattern": "kerberos-tgt-request"}
 
 
@@ -176,17 +181,14 @@ def _confined_estate(tmp_path: Path, **kw: Any) -> _Estate:
 
 
 def _tacit_estate(tmp_path: Path) -> S.Estate:
-    """The fixture estate plus the REAL tacit_knowledge adapter and a registry in the estate
-    TENANT's agent half (`tacit_knowledge_adapter.registry_path`: the registry is the run's agent
-    knowledge, never a defender tree's)."""
-    source = (S.DEFENDER / "integrations" / "tacit_knowledge_adapter.py").read_text(
-        encoding="utf-8")
-    # The checkout adapter puts its repo root on sys.path; a planted copy must not.
-    source = source.replace("_sys.path.insert(0, _root)", "pass")
-    est = _estate(tmp_path, extra=(("tacit-knowledge", source, ("lookup", "health-check")),))
-    registry = Path(est.run_tenant().agent) / "skills" / "tacit-knowledge" / "registry.yaml"
-    registry.parent.mkdir(parents=True, exist_ok=True)
-    registry.write_text(_yaml.safe_dump({"entries": [TACIT_ENTRY]}), encoding="utf-8")
+    """The fixture estate plus the platform-served `tacit-knowledge` (granted through the table,
+    no adapter planted) and a registry in the estate TENANT's agent half (#1390: the registry is
+    the run's agent knowledge, never a defender tree's)."""
+    est = S.TacitEstate(tmp_path / "estate")
+    est.answer("idp", "query", ALICE, BASE)
+    est.answer("edr", "query", EXPLORE, EXPLORE_ANSWER)
+    est.answer("siem-x", "lookup", VERIFY, VERIFY_ANSWER)
+    est.write_registry(_yaml.safe_dump({"entries": [TACIT_ENTRY, TACIT_ENTRY_TODAY]}))
     return est
 
 
@@ -332,6 +334,15 @@ def _ask(reg: Any, est: S.Estate, run_dir: Path, system: str = "idp", verb: str 
     if not params and (system, verb) == ("idp", "query"):
         params = {"q": "user:alice"}
     return S.call(reg, system, verb, est.ctx(run_dir), **params)
+
+
+def _running_state(run_dir: Path, branch_point: Any) -> Any:
+    """A sibling's run state with its clock on `branch_point`."""
+    from defender.investigation.run_state import RunState
+
+    state = RunState(run_dir, "r-sibling")
+    state.resume_clock(branch_point, 0.0)
+    return state
 
 
 def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.ScriptedModel,
@@ -812,27 +823,32 @@ def test_sibling_starts_long_after_the_branch_point_clock_was_set(tmp_path, monk
         assert not shown, f"an adapter was handed {name} ({shown}): {text}"
 
 
-def test_1224_tacit_knowledge_run_query_reaches_the_real_adapter_on_the_day_it_judges(
-        tmp_path):
-    """The oracle's run_query on tacit_knowledge reaches the planted real adapter, which judges
-    the registry against its own `_today` (#1385 H5: the adapter is told no branch point). With
-    that day pinned to the branch date, an entry valid then and expired by today matches."""
+def test_1224_tacit_knowledge_run_query_is_judged_on_wall_time(tmp_path):
+    """the oracle's own side query on tacit-knowledge has no run clock, so it is judged on wall time, never the world's branch date: the entry valid on the branch date and expired now is passed over for the same-scope entry in force today. O2."""
+    assert TACIT_ENTRY["added_at"] <= S.AS_OF_DT.date().isoformat() <= TACIT_ENTRY["review_by"], (
+        "premise: the first entry is in force on the world's branch date")
+    assert _TODAY.isoformat() > TACIT_ENTRY["review_by"], "premise: the first entry has expired by today"
     est = _tacit_estate(tmp_path)
     tacit_verbs = _plain_registry(est).verbs("tacit-knowledge")
-    lookup = tacit_verbs["lookup"]
-    adapter_globals = inspect.unwrap(lookup).__globals__
-    ctx = est.ctx(tmp_path / "today")
-    assert lookup(ctx, **TACIT_LOOKUP) == {"matched": None}, "premise: the entry has expired by today"
-    adapter_globals["_today"] = lambda: S.AS_OF_DT.date()  # the adapter's own clock, pinned
-    assert (lookup(ctx, **TACIT_LOOKUP)["matched"] or {}).get("id") == TACIT_ENTRY["id"], (
-        "premise: the adapter judges the registry against the day it is pinned to")
+    ctx: VerbContext = est.ctx(tmp_path / "plain")
+    with S.run_state_carried(None):
+        plain = tacit_verbs["lookup"](ctx, **TACIT_LOOKUP)
+    assert (plain["matched"] or {}).get("id") == TACIT_ENTRY_TODAY["id"], (
+        "premise: with no run clock the lookup reads the registry on wall time")
     oracle = S.oracle(S.run_query("tacit-knowledge", "lookup", TACIT_LOOKUP), S.submit(BASE))
     _e, _ep, reg = _scene(tmp_path, oracle, est=est)
 
-    _ask(reg, est, tmp_path / "run")
+    # The side query runs during a sibling's call, whose run clock stands on the branch date. It
+    # must not inherit that clock.
+    sibling = _running_state(tmp_path / "sibling", S.AS_OF_DT)
+    with S.run_state_carried(sibling):
+        _ask(reg, est, tmp_path / "run")
 
-    assert TACIT_ENTRY["id"] in _returned(oracle, 1), (
-        "the oracle's run_query did not reach the real tacit adapter's answer")
+    returned = _returned(oracle, 1)
+    assert TACIT_ENTRY_TODAY["id"] in returned, (
+        "the oracle's run_query did not reach the real tacit registry's wall-time answer")
+    assert TACIT_ENTRY["id"] not in returned, (
+        "the oracle's run_query was judged on the world's branch date, not wall time")
 
 
 def test_1224_oracle_side_queries_land_in_no_sibling_record(tmp_path):
@@ -1205,3 +1221,24 @@ def test_p006_base_answer_text_asks_the_oracle_to_explore_without_end(tmp_path):
     with pytest.raises(S.unservable_cls()) as caught:
         _ask(poor, est, tmp_path / "run-c")
     assert caught.value.reason == S.REASON_BUDGET
+
+
+def test_1390_preflight_never_calibrates_a_platform_served_call(tmp_path):
+    """A source run that consulted the registry pays no oracle turn for that call, and the call is not listed as one pre-flight could not replay; the ordinary call beside it is calibrated. O3."""
+    est = _tacit_estate(tmp_path)
+    tacit_call = S.Call("tacit-knowledge", "lookup", dict(TACIT_LOOKUP), {"matched": None})
+    _base, src = S.source_run(tmp_path, est, calls=[CALL_IDP, tacit_call])
+    ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)),
+                      base_rows=[S.captured("idp", "query", ALICE, BASE)])
+    oracle = S.oracle(then=S.submit(BASE))
+
+    with J.walked_view(ep) as view:
+        S.sym(S.CLI, S.COINED["fn.preflight"])(
+            view.episode, source=T.open_source(src), roster=est.roster(), tenant=est.run_tenant(),
+            oracle=oracle.model, verifier=S.passing_verifier().model)
+
+    seen = oracle.all_seen()
+    assert "user:alice" in seen, "positive control: the ordinary call was calibrated"
+    assert TACIT_LOOKUP["actor"] not in seen, "pre-flight paid an oracle turn on a registry call"
+    outcome = S.read_outcome(ep) or {}
+    assert outcome.get("not_replayable", []) == [], f"listed as a replay failure: {outcome}"

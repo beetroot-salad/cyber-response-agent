@@ -65,17 +65,29 @@ _logger = logging.getLogger(__name__)
 
 
 
-def served_systems(grant: Any) -> list[str]:
-    """The systems a branch over this gather grant serves, sorted and once each.
+def reachable_systems(grant: Any) -> list[str]:
+    """The systems this gather grant lets an investigator read data from, sorted and once each.
 
-    @owns served_systems — the manifest's `served_systems`, written by `_author` from this and
-    nowhere else. M20: a system is served when the grant admits at least one read verb on it
-    other than `health-check` (which reaches no data). The live grant still decides every query
-    at query time (M21); this list governs the judge, lessons and the question-writer."""
+    @owns reachable_systems — the manifest's `reachable_systems`, written by `_author` from this
+    and nowhere else. M20: a system is reachable when the grant admits at least one read verb on
+    it other than `health-check` (which reaches no data). It answers the judge's question, could
+    the investigator have looked? (`judge.run._world_verdict`)."""
     from defender.systems.verb_dispositions import HEALTH_CHECK
 
     return sorted({system for system, verb, verb_class in grant.entries
                    if verb_class == "r" and verb != HEALTH_CHECK})
+
+
+def served_systems(grant: Any) -> list[str]:
+    """The reachable systems a world can vary, sorted and once each.
+
+    @owns served_systems — the manifest's `served_systems`, written by `_author` from this and
+    nowhere else. The live grant still decides every query at query time (M21); this list
+    governs lessons, samples and the question-writer. A platform-served system (#1390) is never
+    one: a replay cannot vary what it answers."""
+    from defender.systems.verbs import is_platform_served
+
+    return [system for system in reachable_systems(grant) if not is_platform_served(system)]
 
 
 
@@ -184,7 +196,7 @@ def _sample_text(source_answer: Path | None) -> str | None:
 
 def _author(  # noqa: PLR0913 — the step's inputs
     ns: argparse.Namespace, *, source: Run, episode: Episode, questioner: Any,
-    lessons_dir: Path, served: Sequence[str],
+    lessons_dir: Path, served: Sequence[str], reachable: Sequence[str],
 ) -> Family:
     """`Step.QUESTIONER`: the questioner authors the family, and it is validated before anything
     reads it.
@@ -231,6 +243,8 @@ def _author(  # noqa: PLR0913 — the step's inputs
         # The tenant's served systems as this launch's grant decided them (`served_systems`):
         # the judge, lessons and question-writer read them from here (M21).
         "served_systems": list(served),
+        # What the same grant let an investigator read, which the judge asks of a `lead-set`.
+        "reachable_systems": list(reachable),
     })
     document, family = formats.accept_family(document)
     formats.write_family(episode, document)

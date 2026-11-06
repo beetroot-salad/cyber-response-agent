@@ -29,6 +29,7 @@ from defender.systems.verbs import (
     CALL_ID,
     CALL_RUN_STATE,
     DENIED,
+    is_platform_served,
     TABLE_POINTER,
     ModuleVerbRegistry,
     VerbDecision,
@@ -73,6 +74,8 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
     """Serve one investigator call for `registry`'s world: the single definition of the serve
     order (#1224, #1255 D3/D5/D6)."""
     asked = dict(params)
+    if is_platform_served(system):
+        return _serve_platform(registry, system, verb, fn, ctx, asked)
     key = request_key(system, verb, asked)
     hit = registry.store.answers.get(key)
     if hit is not None:
@@ -89,6 +92,25 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
                                   fixed=registry.fixes(key, recorded=recorded),
                                   live=not recorded)
     return registry._record_answer(system, verb, asked, hit)
+
+
+def _serve_platform(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any,
+                    asked: dict) -> Any:
+    """A platform-served system's call (#1390): never an oracle turn, in any world, with or
+    without facts, whether or not the source run made the call. The platform verb runs against
+    the world's pinned knowledge and is delivered as a pass-through, one ledger row per call.
+    The source's recorded answer is not read: a repeat is asked of the pinned registry again."""
+    try:
+        answer = fn(ctx, **asked)
+    except Exception as failure:
+        _record_beside(registry.ledger, ServedCall(
+            system=system, verb=verb, params=dict(asked),
+            payload_text=str(failure) or type(failure).__name__, source=REAL_ERROR,
+            world_id=registry.world.world_id, call_id=CALL_ID.get()))
+        raise
+    return registry._deliver(ServedCall(
+        system=system, verb=verb, params=asked, payload_text=payload_text_of(answer),
+        source=PASSTHROUGH, world_id=registry.world.world_id, call_id=CALL_ID.get()))
 
 
 def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict,  # noqa: PLR0913 — the call, its base and the turn's two framings

@@ -66,7 +66,6 @@ FILE_FAMILIES: tuple[Family, ...] = (
 FAULTS: dict[str, tuple[Family, ...]] = {
     **{system: FILE_FAMILIES for system in (
         "cmdb", "identity", "change-mgmt", "threat-intel", "ticket", "elastic", "host-state")},
-    "tacit-knowledge": (),
 }
 
 _PARAM_VALUES: dict[str, str] = {
@@ -85,9 +84,9 @@ def _cases() -> list[Any]:
 def _adapter(roster: Any, system: str) -> Any:
     """`system`'s adapter module, found through the roster (the file it dispatches from) and
     imported as the package module of that file."""
-    path = roster.accepted.get(system)
+    path = roster.adapter_files.get(system)
     assert path is not None, (
-        f"the checkout's roster has no adapter for {system!r} (it has {sorted(roster.accepted)}) — "
+        f"the checkout's roster has no adapter for {system!r} (it has {sorted(roster.adapter_files)}) — "
         "this contract's fault table names a system the tree no longer ships")
     module = importlib.import_module(f"defender.integrations.{path.stem}")
     assert Path(module.__file__).resolve() == Path(path).resolve(), (
@@ -158,7 +157,7 @@ NO_AGENT_ACTIONS = {"jira", "servicenow"}
 
 
 def test_o5_every_roster_adapter_declares_a_settings_check(checkout_roster):
-    systems = set(checkout_roster.accepted)
+    systems = set(checkout_roster.adapter_files)
     assert len(systems) >= 8, f"precondition: the roster was read: {sorted(systems)}"
     # #1359 r4: the ready-made case adapters have no agent actions, so no verb can raise a ConfigFault
     # to hold their check to: they are judged by the check declaration alone (and by slice C's tests).
@@ -251,32 +250,69 @@ def _own_folder_broken(folder: Path, system: str) -> None:
     S.write_config(folder, system, b"\xff\xfe not text \x80\n")
 
 
-def test_o5_tacit_knowledge_needs_no_settings_and_its_check_never_raises(tmp_path, checkout_roster):
-    module = _adapter(checkout_roster, "tacit-knowledge")
-    check = _declared_check(module, "tacit-knowledge")
-    for label, mutate in (("complete", None), ("no-system-configured", _no_systems),
-                          ("own-folder-not-utf8", _own_folder_broken)):
-        where = tmp_path / label
-        root, folder = _plant(where, "tkn")
-        if mutate is not None:
-            mutate(folder, "tacit-knowledge")
-        record = S.resolve(root)
-        if label == "no-system-configured":
-            configured = sorted(s for s, e in record.systems.items() if isinstance(e, SystemConfig))
-            assert configured == [], (
-                f"precondition: the record configures no system at all: {configured}")
-        if label == "own-folder-not-utf8":
-            assert isinstance(record.systems.get("tacit-knowledge"), ConfigFault), (
-                f"precondition: the record holds tacit-knowledge's stored fault: "
-                f"{record.systems.get('tacit-knowledge')!r}")
-        shim = S.DockerShim(where / "shim")
-        outcomes = _every_verb(module, _ctx(record, where, shim))
-        assert not [e for e in outcomes.values() if isinstance(e, ConfigFault)], (
-            f"premise ({label}): no tacit-knowledge verb raises ConfigFault: {outcomes}")
-        assert outcomes.get("health-check") is None, (
-            f"premise ({label}): tacit-knowledge's health-check answers: {outcomes}")
-        fault = _check_outcome(check, record)
-        assert fault is None, f"tacit-knowledge's check must never raise ({label}): {fault!r}"
+def _registry_malformed(folder: Path, _system: str) -> None:
+    path = Path(folder) / "agent" / "skills" / "tacit-knowledge" / "registry.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("sanctions:\n  - id: tk-misfiled\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize(("label", "mutate"), [
+    pytest.param("complete", None, id="complete"),
+    pytest.param("no-system-configured", _no_systems, id="no-system-configured"),
+    pytest.param("own-folder-not-utf8", _own_folder_broken, id="own-folder-not-utf8"),
+    pytest.param("registry-malformed", _registry_malformed, id="registry-malformed"),
+])
+def test_1390_judge_run_never_marks_the_platform_served_registry_down(
+        tmp_path, checkout_roster, label, mutate):
+    """A run granting `tacit-knowledge` starts with it up whatever the tenant's settings or its registry file hold, with no adapter file to load. A4."""
+    from defender.systems import system_status
+
+    root = tmp_path / "tenants"
+    folder = S.plant(root, marker="tkn", table=T6.TABLE_A + (
+        "  tacit-knowledge:\n    health-check: {roles: [gather]}\n    lookup: {roles: [gather]}\n"))
+    if mutate is not None:
+        mutate(folder, "tacit-knowledge")
+    record = S.resolve(root)
+    assert "tacit-knowledge" in record.grants.gather.systems, "premise: the tenant grants the registry"
+    assert "tacit-knowledge" not in checkout_roster.adapter_files, "premise: no file serves it"
+    if label == "own-folder-not-utf8":
+        assert isinstance(record.systems.get("tacit-knowledge"), ConfigFault), (
+            f"premise: the record holds the stored fault: {record.systems.get('tacit-knowledge')!r}")
+
+    judged = system_status.judge_run(checkout_roster, record, defender_dir=S.DEFENDER)
+
+    assert "tacit-knowledge" not in judged.down, (
+        f"the registry is down at the start ({label}): {judged.down.get('tacit-knowledge')!r}")
+    if label == "no-system-configured":
+        assert judged.down, "positive control: settings that break adapters take them down"
+
+
+def test_1390_the_platform_verbs_answer_over_a_record_holding_a_stored_config_fault(tmp_path, checkout_roster):
+    """With the record holding a stored ConfigFault for `tacit-knowledge`, neither `lookup` nor `health-check` raises one, and `health-check` answers. A4."""
+    from defender.systems.verbs import ModuleVerbRegistry
+
+    root = tmp_path / "tenants"
+    folder = S.plant(root, marker="tkn", table=T6.TABLE_A + (
+        "  tacit-knowledge:\n    health-check: {roles: [gather]}\n    lookup: {roles: [gather]}\n"))
+    _own_folder_broken(folder, "tacit-knowledge")
+    record = S.resolve(root)
+    assert isinstance(record.systems.get("tacit-knowledge"), ConfigFault), (
+        f"premise: the record holds the stored fault: {record.systems.get('tacit-knowledge')!r}")
+    shim = S.DockerShim(tmp_path / "shim")
+    verbs = ModuleVerbRegistry(checkout_roster, record.grants.gather).verbs("tacit-knowledge")
+    ctx = _ctx(record, tmp_path, shim)
+
+    outcomes: dict[str, Any] = {}
+    for name, params in (("lookup", {"actor": "a", "host": "h", "pattern": "p"}), ("health-check", {})):
+        try:
+            outcomes[name] = verbs[name](ctx, **params)
+        except Exception as exc:  # noqa: BLE001 — the test reads whatever the verb raised
+            outcomes[name] = exc
+
+    assert not [e for e in outcomes.values() if isinstance(e, ConfigFault)], (
+        f"a platform verb raised the stored ConfigFault: {outcomes}")
+    assert isinstance(outcomes["health-check"], dict), (
+        f"health-check did not answer over the faulted record: {outcomes['health-check']!r}")
 
 
 #: Not mirrored into the planted tree: nothing a run reads (and the first two are large).
@@ -413,7 +449,7 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
     pytest.importorskip("pydantic_ai")
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, Turn, drive, materialize
 
-    assert set(_PLANTED) <= set(checkout_roster.accepted), (
+    assert set(_PLANTED) <= set(checkout_roster.adapter_files), (
         f"precondition: each planted system is a real one (its skill and catalog exist): {sorted(_PLANTED)}")
     probe = tmp_path / "probe"
     probe.mkdir()

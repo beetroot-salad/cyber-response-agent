@@ -215,7 +215,7 @@ def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d
     runs = location_path(P.data_root)() / d9_tenant / "runs"
     run = H.make_run(runs, str(uuid.uuid4()))
     expected = wm.workspace_map(
-        run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
+        run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).verbs))
     argv = ["workspace_map.py", "--tenant", d9_tenant, run.name]
     ok = P.drive_cli(wm.main, argv)
     assert ok.rc == 0, ok.said
@@ -298,7 +298,7 @@ def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     runs = location_path(P.data_root)() / d9_tenant / "runs"
     run = H.make_run(runs, str(uuid.uuid4()))
     expected = wm.workspace_map(
-        run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
+        run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).verbs))
     ok = _launched_process("workspace_map", d9_tenant, "--tenant", d9_tenant, run.name)
     assert ok.returncode == 0, ok.stderr[-600:]
     assert ok.stdout == expected

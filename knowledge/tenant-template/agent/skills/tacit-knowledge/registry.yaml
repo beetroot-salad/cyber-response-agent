@@ -1,0 +1,52 @@
+# The tacit-knowledge registry: the estate's authored record of sanctioned patterns.
+#
+# HUMAN-EDITED ONLY. Nothing an investigation can reach writes this file. The commit or pull
+# request that adds an entry IS the sign-off, and `git log` on this file is the audit trail. A
+# registry populated from the agent's own closes would be the system vouching for itself.
+#
+# Nothing here is consulted until the tenant's `settings/verb-grants.yaml` grants `lookup` to
+# gather.
+#
+# One entry per sanctioned pattern. Eight fields, all required:
+#
+#   id             the stable name a `:R authz` row cites as its `anchor_id`. Never re-use one
+#                  for a different sanction; an edit to `pattern` under a kept `id` silently
+#                  re-identifies it. A second entry claiming an `id` is dropped.
+#   pattern        the action being sanctioned, matched EXACTLY (no wildcards: a glob here would
+#                  let one entry sanction everything).
+#   actor_scope    the identity or identity glob this covers.
+#   host_scope     the host or host-group glob this covers. Both scopes are refused if they are
+#                  blank, `*`, `all`/`any`, or fewer than four literal (non-wildcard) characters.
+#   added_by       who authored it: a person or a team address, not a service.
+#   added_at       ISO date, the day it was committed. An entry does not answer before this date.
+#   review_by      ISO date, at most 180 days past `added_at`. Past that date the entry stops
+#                  answering, and a lookup is a plain miss.
+#   justification  why this is sanctioned, in a sentence a reviewer can act on.
+#
+# An entry that breaks any of those rules is dropped; the rest of the file still loads. Refresh
+# an entry by moving its `added_at` and `review_by` in a fresh commit, which re-attests it.
+#
+# CHECK YOUR EDIT BEFORE YOU COMMIT IT, from a checkout of the product, with `<agent>` as this
+# file's `agent/` folder:
+#
+#   defender/.venv/bin/python -m defender.cli.tacit_cli --defender-dir <agent> check
+#
+# It prints every entry the runtime will drop and why. Without it a mistake here is invisible: a
+# dropped entry stops answering, which looks exactly like a sanction nobody wrote. `show` in place
+# of `check` prints what is in force today.
+#
+# A WORKED EXAMPLE, commented out. Copy it and replace every field. No identity system holds a
+# record for container UID 0, so an `iam-policy` contract about it dead-ends however the activity
+# looks; this is the case the registry exists for.
+#
+# entries:
+#   - id: tk-ca-bundle-build-runner
+#     pattern: rewrite /etc/ssl/certs/ca-bundle.crt   # matched EXACTLY, no wildcards
+#     actor_scope: uid-0                              # glob; this one names a single actor
+#     host_scope: build-runner-*.prod                 # glob; covers the build fleet
+#     added_by: sre-platform@example.invalid          # a person or team address, never a service
+#     added_at: 2026-03-01
+#     review_by: 2026-08-01                           # at most 180 days after added_at
+#     justification: the image build's own ca-trust step; no identity system holds UID 0
+
+entries: []

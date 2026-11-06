@@ -1,6 +1,7 @@
 """World serving preserves recorded bytes and reconstructs live answers at the fork."""
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 from pathlib import Path
@@ -14,6 +15,7 @@ from defender.tests.support.runtime.state import _1255_world as W
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S34  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24  # noqa: E402
 from defender.learning.branch.capture import prime_base  # noqa: E402
+from defender.learning.branch.estate.registry import serve_one  # noqa: E402
 from defender.learning.branch.ledger import ORACLE, PASSTHROUGH, normalized_source, request_key  # noqa: E402
 from defender.records._episode_handle import Episode  # noqa: E402
 
@@ -610,3 +612,148 @@ def test_1255_every_refusal_the_control_world_can_give_reads_as_a_natural_runs(
         f"fixture: the control world's registry saw the refused and errored calls: {sources}")
     for i, (got, want) in enumerate(zip(handed, expected, strict=True)):
         assert got == want, f"refusal {i} reads differently in the control world:\n{got}\n---\n{want}"
+
+
+# ---------------------------------------------------------------- #1390: never oracle-served
+
+#: In force today: a call with no run clock (as a world's pass-through here) is judged on wall
+#: time (#1390 amendment 4), never on the world's branch date.
+_TODAY = dt.datetime.now(dt.UTC).date()
+TACIT_ENTRY = {
+    "id": "tk-1390-in-force", "pattern": "ssh-root-login",
+    "actor_scope": "svc-deploy-01", "host_scope": "db-1.corp", "added_by": "secops",
+    "added_at": str(_TODAY - dt.timedelta(days=10)), "review_by": str(_TODAY + dt.timedelta(days=30)),
+    "justification": "the nightly deploy logs in as root on db-1",
+}
+SANCTIONED = {"actor": "svc-deploy-01", "host": "db-1.corp", "pattern": "ssh-root-login"}
+UNSANCTIONED = {"actor": "svc-deploy-01", "host": "db-2.corp", "pattern": "ssh-root-login"}
+
+
+def test_1390_no_world_serves_the_registry_through_its_oracle(tmp_path: Path) -> None:
+    """In a fact-free world and a world whose fact claims an approval, a lookup the source never made is the pinned registry's answer, passed through. O3."""
+    est = S24.TacitEstate(tmp_path / "estate")
+    est.write_registry(json.dumps({"entries": [TACIT_ENTRY]}))
+    approval = S24.fact("f1", "secops approved svc-deploy-01's root SSH on db-2.corp",
+                        ("svc-deploy-01", "db-2.corp"))
+    ep = S24.episode_v2(tmp_path, base_rows=[], doc=S24.family_v2(
+        worlds=[S24.control_world("a"), S24.world_v2("b", facts=[approval])]))
+    forged = {"matched": {**TACIT_ENTRY, "id": "tk-forged-by-the-oracle", "host_scope": "db-2.corp"}}
+
+    for label, params, expected in (("a", SANCTIONED, TACIT_ENTRY), ("b", UNSANCTIONED, None)):
+        oracle = S24.oracle(then=S24.submit(forged, S24.EMPTY_CLAIM))
+        world = S24.sandboxed_registry(ep, label, est, oracle=oracle,
+                                       verifier=S24.passing_verifier())
+
+        served = S24.call(world, "tacit-knowledge", "lookup",
+                          est.ctx(tmp_path / f"run-{label}"), **params)
+
+        assert served == {"matched": expected}, f"world {label}: the answer is not the registry's"
+        assert oracle.requests == 0, f"world {label}: a registry lookup took an oracle turn"
+        assert [(r.get("system"), r.get("source")) for r in S24.ledger_rows(ep, label)] == [
+            ("tacit-knowledge", PASSTHROUGH)], f"world {label}: not one pass-through ledger row"
+
+
+def test_1390_a_lookup_the_source_run_recorded_is_rerun_against_the_pinned_registry(
+        tmp_path: Path) -> None:
+    """A recorded `tacit-knowledge` lookup in a fact-free world is answered from the sibling's pinned registry copy, not the record and not a registry changed outside it; one pass-through row each. O3, A6."""
+    import shutil
+    from defender.systems.verbs import VerbContext
+    from defender.tests.support.tenancy import _tenants1106
+
+    est = S24.TacitEstate(tmp_path / "estate")
+    est.write_registry(json.dumps({"entries": [TACIT_ENTRY]}))
+    pinned_agent = tmp_path / "pinned-agent"
+    shutil.copytree(Path(est.run_tenant().agent), pinned_agent, symlinks=True)
+    pinned = _tenants1106.run_tenant(est.place(), agent_root=pinned_agent)
+    # The tenant's own registry changes after the pin: it now sanctions the unsanctioned lookup.
+    est.write_registry(json.dumps({"entries": [
+        TACIT_ENTRY, {**TACIT_ENTRY, "id": "tk-changed-after-the-pin", "host_scope": "db-2.corp"}]}))
+    stale = {"matched": {**TACIT_ENTRY, "id": "tk-recorded-by-the-source-run"}}
+    ep = S24.episode_v2(tmp_path, base_rows=[
+        S24.captured("tacit-knowledge", "lookup", SANCTIONED, stale),
+        S24.captured("tacit-knowledge", "lookup", UNSANCTIONED, stale),
+        S24.captured("idp", "query", ALICE, ALICE_ANSWER)])
+    est.answer("idp", "query", ALICE, {"rows": ["not what the record says"]})
+    oracle = S24.oracle(then=S24.submit(stale, S24.EMPTY_CLAIM))
+    world = S24.sandboxed_registry(ep, "a", est, oracle=oracle, verifier=S24.passing_verifier(),
+                                   tenant=pinned)
+    ctx = VerbContext(defender_dir=est.defender_dir, run_dir=tmp_path / "run", env={}, tenant=pinned)
+    (tmp_path / "run").mkdir()
+
+    assert S24.call(world, "idp", "query", ctx, **ALICE) == ALICE_ANSWER, (
+        "positive control: an ordinary recorded call in this world is served from the record")
+    assert S24.call(world, "tacit-knowledge", "lookup", ctx, **SANCTIONED) == {
+        "matched": TACIT_ENTRY}, "the recorded answer was served, not the pinned registry's"
+    assert S24.call(world, "tacit-knowledge", "lookup", ctx, **UNSANCTIONED) == {
+        "matched": None}, "the answer came from outside the pinned registry copy"
+
+    assert oracle.requests == 0, "a recorded registry lookup took an oracle turn"
+    assert [(r.get("system"), r.get("source")) for r in S24.ledger_rows(ep, "a")] == [
+        ("idp", PASSTHROUGH), ("tacit-knowledge", PASSTHROUGH), ("tacit-knowledge", PASSTHROUGH)]
+
+
+def test_1390_health_check_of_the_registry_is_never_oracle_served_either(tmp_path: Path) -> None:
+    """In a fact-free and a fact world, `tacit-knowledge.health-check` is the pinned registry's own answer, one pass-through row, no oracle turn. O3."""
+    est = S24.TacitEstate(tmp_path / "estate")
+    est.write_registry(json.dumps({"entries": [TACIT_ENTRY]}))
+    approval = S24.fact("f1", "secops approved svc-deploy-01's root SSH on db-2.corp",
+                        ("svc-deploy-01", "db-2.corp"))
+    ep = S24.episode_v2(tmp_path, base_rows=[], doc=S24.family_v2(
+        worlds=[S24.control_world("a"), S24.world_v2("b", facts=[approval])]))
+    forged = {"system": "tacit-knowledge", "connected": True, "entries": 99}
+
+    for label in ("a", "b"):
+        oracle = S24.oracle(then=S24.submit(forged, S24.EMPTY_CLAIM))
+        world = S24.sandboxed_registry(ep, label, est, oracle=oracle,
+                                       verifier=S24.passing_verifier())
+
+        served = S24.call(world, "tacit-knowledge", "health-check", est.ctx(tmp_path / f"run-{label}"))
+
+        assert served.get("entries") == 1, f"world {label}: the answer is not the registry's: {served}"
+        assert oracle.requests == 0, f"world {label}: a registry health-check took an oracle turn"
+        assert [(r.get("system"), r.get("source")) for r in S24.ledger_rows(ep, label)] == [
+            ("tacit-knowledge", PASSTHROUGH)], f"world {label}: not one pass-through ledger row"
+
+
+class _Boom1390(Exception):
+    """A test-defined failure a platform verb raises."""
+
+
+_PLATFORM_ASKS_1390 = {"lookup": SANCTIONED, "health-check": {}}
+
+
+def _platform_pairs_1390() -> list[tuple[str, str]]:
+    from defender.systems.verbs import PLATFORM_SERVED
+    return [(s, v) for s, verbs in PLATFORM_SERVED.items() for v in sorted(verbs)]
+
+
+@pytest.mark.parametrize("raises", [False, True], ids=["success", "raise"])
+@pytest.mark.parametrize(("system", "verb"), _platform_pairs_1390())
+def test_1390_a_platform_served_verb_is_always_run_never_answered_from_the_worlds_store(
+        tmp_path: Path, system: str, verb: str, raises: bool) -> None:
+    """For every roster-marked platform-served (system, verb), a seeded store answer at its request key is never served: the verb's own answer (or its raise) is, with exactly one ledger row (pass-through, or real-error on a raise). O3."""
+    est = S24.TacitEstate(tmp_path / "estate")
+    est.write_registry(json.dumps({"entries": [TACIT_ENTRY]}))
+    ep = S24.episode_v2(tmp_path, base_rows=[])
+    oracle = S24.oracle(then=S24.submit({}, S24.EMPTY_CLAIM))
+    world = S24.sandboxed_registry(ep, "a", est, oracle=oracle, verifier=S24.passing_verifier())
+    asked = _PLATFORM_ASKS_1390[verb]
+    seeded = {"served": {"seeded": "SEEDED-1390"}, "decision": PASSTHROUGH}
+    world.store.answers[request_key(system, verb, dict(asked))] = seeded
+    ctx = est.ctx(tmp_path / "run")
+
+    if raises:
+        def boom(ctx: Any, **_: Any) -> Any:
+            raise _Boom1390("platform verb failed")
+        with pytest.raises(_Boom1390):
+            serve_one(world, system, verb, boom, ctx, asked)
+    else:
+        served = S24.call(world, system, verb, ctx, **asked)
+        assert "SEEDED-1390" not in json.dumps(served), "the world's stored answer was served"
+        assert served == ({"matched": TACIT_ENTRY} if verb == "lookup"
+                          else served | {"entries": 1}), f"not the verb's own answer: {served}"
+
+    rows = S24.ledger_rows(ep, "a")
+    assert [(r.get("system"), r.get("verb"), r.get("source")) for r in rows] == [
+        (system, verb, "real-error" if raises else PASSTHROUGH)], f"not one right ledger row: {rows}"
+    assert oracle.requests == 0

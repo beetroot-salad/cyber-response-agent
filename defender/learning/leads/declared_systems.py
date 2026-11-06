@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from defender._paths import DefenderPaths
 from defender.learning.leads._errors import LeadAuthorError
 from defender.learning.leads.path_validation import SKILLS_PREFIX
-from defender.systems.verbs import RegistryError, RosterRead, read_roster
+from defender.systems.verbs import PLATFORM_SERVED, RegistryError, RosterRead, read_roster
 from defender.kit.verbs import is_system_name
 
 #: From `DefenderPaths` rather than re-spelled, so the resolver and the gates agree on where
@@ -46,17 +46,28 @@ def read_adapters(adapters_dir: Path) -> RosterRead:
             f"declared_systems: {adapters_dir} is not a directory this process can read "
             f"({reason})"
         ) from e
-    for name in roster.refused:
+    for name, why in roster.refused.items():
         _logger.warning(
-            f"declared_systems: refused anomalous adapter name {name!r} "
-            f"from {adapters_dir} — it is not a name the dispatch seam resolves"
+            f"declared_systems: refused adapter name {name!r} from {adapters_dir} — {why}"
         )
     return roster
 
 
 def _adapter_names(adapters_dir: Path) -> frozenset[str]:
-    """The adapter half as a set of names — `read_adapters`, indexed."""
-    return frozenset(read_adapters(adapters_dir).accepted)
+    """The adapter half as a set of names: the systems with an adapter file, never the
+    platform-served ones. A caller that admits by name adds those with `with_platform_systems`."""
+    return frozenset(read_adapters(adapters_dir).adapter_files)
+
+
+def with_platform_systems(systems: frozenset[str]) -> frozenset[str]:
+    """`systems` plus the platform-served names, which admit paths on every tree (#1390 A14)."""
+    return systems.union(PLATFORM_SERVED)
+
+
+def declares_no_system(systems: frozenset[str]) -> bool:
+    """Whether a declared set holds nothing but the platform-served names, which every tree has
+    and so say nothing about what this one declares (#1390 A14)."""
+    return not systems - PLATFORM_SERVED.keys()
 
 
 def _marker_names(agent: Mapping[str, object]) -> frozenset[str]:
@@ -98,8 +109,8 @@ def declared_systems_over(
 ) -> frozenset[str]:
     """`declared_systems` for a caller that already read the adapter half (the disposition
     census lint), so it needn't read twice."""
-    union = frozenset(roster.accepted) | (_marker_names(agent) if agent is not None else frozenset())
-    if not union:
+    union = frozenset(roster.verbs) | (_marker_names(agent) if agent is not None else frozenset())
+    if declares_no_system(union):
         _logger.warning(
             f"declared_systems: no systems declared by either source "
             f"({roster.root} or the tenant's {SKILLS_PREFIX}<system>/execution.md)"

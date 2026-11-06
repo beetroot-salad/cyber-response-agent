@@ -33,6 +33,7 @@ from defender.configuration import usage_cost
 
 
 from defender.learning.branch.ledger import request_key
+from defender.systems.verbs import CALL_RUN_STATE
 
 
 
@@ -300,12 +301,17 @@ class QueryDoor:
                 # limiter's text (an OS error) is not shown.
                 raise _AttemptFailed("the rate limiter could not admit a query (it failed "
                                      "closed)") from None
+        # A side query is not part of the sibling's run, though it happens during the sibling's
+        # call and inherits its context: without this it would read the run's clock.
+        outside_the_run = CALL_RUN_STATE.set(None)
         try:
             answer = fn(self.context(), **dict(params))
         except Exception as exc:  # noqa: BLE001 — a tenant error is the oracle's to see
             self._log(actor, system, verb, params)
             raise Refused(f"run_query {system}.{verb} failed at the tenant: "
                           f"{type(exc).__name__}: {exc}") from None
+        finally:
+            CALL_RUN_STATE.reset(outside_the_run)
         self._log(actor, system, verb, params)
         # One spelling, as every served payload: the adapter's own answer, round-tripped.
         return json.loads(json.dumps(answer, sort_keys=True, default=str))

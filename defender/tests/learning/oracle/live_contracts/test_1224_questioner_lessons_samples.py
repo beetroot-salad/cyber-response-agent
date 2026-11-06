@@ -714,3 +714,36 @@ def test_1224_question_writer_prompt_when_configured_and_granted_systems_differ(
     assert samples is not None, "no samples.yaml was written"
     assert set(samples) == set(served), (
         f"samples.yaml keys {sorted(samples)} do not follow served_systems {served}")
+
+
+def test_1390_a_platform_served_system_is_never_a_served_system():
+    """The question-writer's served systems leave out `tacit-knowledge`, and a grant of only it serves no branch. O5."""
+    from defender.learning.branch.questioner_launch import served_systems
+    from defender.systems.verb_grant import VerbGrant
+
+    tacit = (("tacit-knowledge", "lookup", "r"), ("tacit-knowledge", "health-check", "r"))
+    assert served_systems(VerbGrant("gather", (*tacit, ("idp", "query", "r")))) == ["idp"]
+    assert served_systems(VerbGrant("gather", tacit)) == []
+
+
+def test_1390_the_launcher_records_no_platform_served_system_and_refuses_a_tenant_granting_only_it(
+        tmp_path, monkeypatch):
+    """A launch over a tenant that also grants `tacit-knowledge` records it in no `served_systems`; a tenant granting only it is refused as having no servable system. O5."""
+    where = _isolated(tmp_path, monkeypatch, "ordinary")
+    ordinary = S.TacitEstate(where / "estate")
+    launch = _launch(where, monkeypatch, ordinary,
+                     questioner=S.questioner_for(S.family_v2(served_systems=("cmdb", "elastic"))))
+    family = _manifest(launch.ep)
+    assert family is not None, f"no family.yaml was written (rc={launch.rc}, {launch.message!r})"
+    assert "tacit-knowledge" in ordinary.grant().systems, "premise: the tenant grants the registry"
+    assert sorted(family["served_systems"]) == sorted(set(ordinary.grant().systems) - {"tacit-knowledge"})
+    assert "tacit-knowledge" in family["reachable_systems"], (
+        "the judge cannot tell the investigator could have consulted a registry it holds `lookup` on")
+    assert set(family["served_systems"]) <= set(family["reachable_systems"])
+
+    where = _isolated(tmp_path, monkeypatch, "only")
+    only = S.TacitEstate(where / "estate",
+                         withheld=tuple((s, v) for s in S.SYSTEMS for v in S.READ_VERBS))
+    refused = _launch(where, monkeypatch, only)
+    assert refused.rc != 0, f"a tenant granting only the registry was not refused as unservable: {refused}"
+    assert "serves no system a world can vary" in refused.message, f"a tenant granting only the registry was not refused as unservable: {refused}"

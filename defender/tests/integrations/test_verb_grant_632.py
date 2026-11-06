@@ -117,7 +117,11 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
         ModuleVerbRegistry(read_roster(ADAPTERS_DIR), wrong_system)
 
     roster = read_roster(ADAPTERS_DIR)
-    for system in SYSTEMS:
+    # Platform-served systems have no adapter module to import (#1390); the cold reader's answer
+    # for them is the roster's own, so only the adapter-file systems are compared.
+    platform_served = set(SYSTEMS) & (set(roster.verbs) - set(roster.adapter_files))
+    assert platform_served <= {"tacit-knowledge"}, platform_served
+    for system in (s for s in SYSTEMS if s not in platform_served):
         module = importlib.import_module(f"defender.integrations.{system.replace('-', '_')}_adapter")
         assert set(roster.declared_verbs(system)) == set(module.VERBS), (
             f"the cold reader and the real {system} adapter disagree on which verbs exist — "

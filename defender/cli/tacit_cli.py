@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from defender._paths import PATHS
-from defender.integrations.tacit_knowledge_adapter import (
+from defender.systems.tacit_registry import (
     literal_chars,
     parse_date,
     read_registry,
@@ -70,6 +70,11 @@ def _report_drops(path: Path, today: dt.date) -> int:
     read = read_registry(path)
     print(f"tacit-knowledge registry: {path}")
 
+    if read.absent:
+        # A run and `tenant check` read this as a tenant with no registry. Someone asking to
+        # check one has probably got the wrong tree, so here it fails.
+        print("\n  [✗] no registry at this path, so there is nothing to check")
+        return 1
     if read.fatal is not None:
         print(f"\n  [✗] {read.fatal}")
         print(
@@ -114,6 +119,9 @@ def _report_in_force(path: Path, today: dt.date) -> int:
     nothing once every entry has aged past its review date.
     """
     read = read_registry(path)
+    if read.absent:
+        print(f"[✗] no registry at {path}", file=sys.stderr)
+        return 1
     if read.fatal is not None:
         print(f"[✗] {read.fatal}", file=sys.stderr)
         return 1

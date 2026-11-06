@@ -426,7 +426,8 @@ class QueryCapture(AbstractCapability[Any]):
         """Write the `∅.denied` sentinel row, so the refused attempt is in the lead's table.
 
         It charges nothing: not an infra exit code (no breaker), and outside both guards'
-        domains. `system_key=""` because DENIED only occurs for a system the grant names.
+        domains. `system_key=""` because a denied system is never charged, whether the grant names
+        it or it is a platform-served system the grant leaves out.
 
         A failed row write is logged and dropped rather than raised: the denial is a business
         outcome the model must see and continue past, and the audit record already holds it."""

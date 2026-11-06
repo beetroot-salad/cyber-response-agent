@@ -34,6 +34,10 @@ from defender.tests.support.learning.core import _state1135
 from defender.learning.core.state import PITFALLS
 
 
+#: The system the platform serves on every roster, with no adapter file (#1390).
+PLATFORM_SERVED = "tacit-knowledge"
+
+
 def _adapter_half_of(repo: Path) -> set[str]:
     """The adapter half, computed here from the working tree: an independent oracle, never a call
     into the resolver."""
@@ -41,7 +45,7 @@ def _adapter_half_of(repo: Path) -> set[str]:
     return {
         verbs._system_of(p)
         for p in d.glob("*" + verbs.ADAPTER_SUFFIX)
-    } if d.is_dir() else set()
+    } | {PLATFORM_SERVED} if d.is_dir() else set()
 
 
 def _committed_agent_paths(lane: C.DraftLane) -> list[str]:
@@ -90,7 +94,7 @@ def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
     assert set(base) == set(_committed_agent_paths(lane)), "base() is not the committed tree"
     got = declared_systems(product, agent=base)
 
-    assert got == frozenset({"elastic", "cmdb", "mcpsys"})
+    assert got == frozenset({"elastic", "cmdb", "mcpsys", PLATFORM_SERVED})
     assert type(got) is frozenset
     assert set(got) == _adapter_half_of(product) | _marker_half_of(base)
     assert _adapter_half_of(product) < set(got)
@@ -98,7 +102,7 @@ def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
 
     other, lane2 = lead_lane(tmp_path, adapters=("ticket",), markers=("ticket",),
                              name="other-product")
-    assert declared_systems(other, agent=lane2.batch.base()) == frozenset({"ticket"})
+    assert declared_systems(other, agent=lane2.batch.base()) == frozenset({"ticket", PLATFORM_SERVED})
 
 
 def test_the_marker_half_reads_the_committed_tree_and_the_adapter_half_does_not(tmp_path):
@@ -146,7 +150,7 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
         f"a nested execution.md declared {NESTED_MARKER_PARENT!r}: the marker read is "
         f"recursive, and every path in {list(AGENT_NESTED_MARKER_RELS)} is agent-committable"
     )
-    assert got == frozenset({"elastic", "cmdb"})
+    assert got == frozenset({"elastic", "cmdb", PLATFORM_SERVED})
     assert "cmdb" in got, "the depth-1 marker-only control is not declared either"
 
 
@@ -156,7 +160,7 @@ def test_declared_systems_raises_when_the_adapter_half_is_unresolvable(tmp_path)
     `test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft`."""
     product, lane = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic",))
     base = lane.batch.base()
-    assert declared_systems(product, agent=base) == frozenset({"elastic"})   # the control
+    assert declared_systems(product, agent=base) == frozenset({"elastic", PLATFORM_SERVED})   # the control
 
     no_adapters, lane2 = lead_lane(tmp_path, adapters=(), markers=("elastic",), skills=("elastic",),
                                    name="no-adapters")

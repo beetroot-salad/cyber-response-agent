@@ -101,17 +101,20 @@ def test_read_roster_accepts_what_dispatches_and_reports_what_it_refused(tmp_pat
     adapters = _anomaly_adapters(tmp_path / "adapters")
 
     roster = read_roster(adapters)
-    for view in (roster.accepted, roster.verbs):
+    for view in (roster.adapter_files, roster.verbs):
         with pytest.raises(TypeError):
             view["ghost"] = None  # type: ignore[index]
 
-    assert roster.accepted == {"cmdb": (adapters / "cmdb_adapter.py").resolve()}, roster.accepted
-    assert roster.accepted["cmdb"].is_file()
-    assert roster.verbs == {"cmdb": frozenset({"query"})}, roster.verbs
-    assert roster.refused == tuple(sorted(ANOMALY_NAMES)), roster.refused
+    assert roster.adapter_files == {"cmdb": (adapters / "cmdb_adapter.py").resolve()}, roster.adapter_files
+    assert roster.adapter_files["cmdb"].is_file()
+    assert set(roster.verbs) == {"cmdb", "tacit-knowledge"}, roster.verbs
+    assert roster.verbs["cmdb"] == frozenset({"query"}), roster.verbs
+    assert set(roster.refused) == ANOMALY_NAMES, roster.refused
+    assert list(roster.refused) == sorted(ANOMALY_NAMES), roster.refused
+    assert all(isinstance(why, str) and why for why in roster.refused.values()), roster.refused
     assert "read_roster" in verbs.__all__, "the primitive is not exported"
-    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == tuple(sorted(roster.accepted))
-    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("cmdb",)
+    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == tuple(sorted(roster.verbs))
+    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("cmdb", "tacit-knowledge")
 
 
 def test_read_roster_refuses_a_directory_it_cannot_read_naming_it(tmp_path):
@@ -135,9 +138,9 @@ def test_read_roster_refuses_a_directory_it_cannot_read_naming_it(tmp_path):
             read_roster(adapters)
         assert str(adapters) in str(exc.value), f"does not name the directory: {exc.value}"
     else:
-        assert set(read_roster(adapters).accepted) == {"cmdb"}
+        assert set(read_roster(adapters).adapter_files) == {"cmdb"}
     (adapters / "loop_adapter.py").unlink()
-    assert set(read_roster(adapters).accepted) == {"cmdb"}
+    assert set(read_roster(adapters).adapter_files) == {"cmdb"}
 
 
 def test_read_roster_refuses_an_unsearchable_directory_as_nobody(tmp_path):
@@ -146,7 +149,7 @@ def test_read_roster_refuses_an_unsearchable_directory_as_nobody(tmp_path):
     write(adapters / "cmdb_adapter.py", ADAPTER_BODY)
 
     def probe():
-        return set(read_roster(adapters).accepted)
+        return set(read_roster(adapters).adapter_files)
 
     with handed_to_nobody(root, adapters, 0o755):
         _expect_returned(run_as_nobody(probe, expected=RegistryError), {"cmdb"})
@@ -162,7 +165,7 @@ def test_read_roster_refuses_an_unsearchable_directory_as_nobody(tmp_path):
     write(shape_only / ".hidden_adapter.py", ADAPTER_BODY)
 
     def probe_shape_only():
-        return set(read_roster(shape_only).accepted)
+        return set(read_roster(shape_only).adapter_files)
 
     with handed_to_nobody(root, shape_only, 0o755):
         _expect_returned(run_as_nobody(probe_shape_only, expected=RegistryError), set())
@@ -228,7 +231,7 @@ def test_a_symlink_loop_named_like_an_adapter_never_escapes_the_resolver_untyped
             f"the resolver's error does not name the directory: {outcome}"
         )
     else:
-        assert outcome == frozenset({"cmdb"}), (
+        assert outcome == frozenset({"cmdb", "tacit-knowledge"}), (
             f"the loop arm answered {outcome!r}, not the control's set"
         )
 
@@ -401,14 +404,15 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
     adapters = _anomaly_adapters(_repo_adapters(root))
     capsys.readouterr()
     expected = ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems()
-    assert expected == ("cmdb",), "the anchor is not the filtered roster, so the equalities are vacuous"
-    assert read_roster(adapters).refused == tuple(sorted(ANOMALY_NAMES))
+    assert expected == ("cmdb", "tacit-knowledge"), "the anchor is not the filtered roster, so the equalities are vacuous"
+    assert set(read_roster(adapters).refused) == ANOMALY_NAMES
     silent = capsys.readouterr()
     assert silent.err + silent.out == "", (
         f"the registry / the primitive logged on their own: {silent.err!r} {silent.out!r}"
     )
 
-    assert declared_systems.adapter_systems_under(adapters) == frozenset(expected)
+    assert declared_systems.with_platform_systems(
+        declared_systems.adapter_systems_under(adapters)) == frozenset(expected)
     log = capsys.readouterr().err
     for name in ANOMALY_NAMES:
         assert sum(repr(name) in ln and str(adapters) in ln for ln in log.splitlines()) == 1, (
@@ -426,7 +430,7 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
         "a DIRECTORY named like an adapter counts as a capability"
     )
 
-    assert set(read_roster(adapters).accepted) == set(expected)
+    assert set(read_roster(adapters).adapter_files) == {"cmdb"}
 
 
 def _seed_pitfalls_queue(tmp_path: Path, monkeypatch) -> tuple[Path, LoopPaths]:
@@ -512,10 +516,10 @@ def test_an_unreadable_adapter_file_is_the_hosts_fault_not_an_empty_declaration(
     adapter = adapters / "cmdb_adapter.py"
 
     def probe():
-        return {s: set(v) for s, v in read_roster(adapters).verbs.items()}
+        return {s: sorted(v) for s, v in read_roster(adapters).verbs.items()}
 
     with handed_to_nobody(root, adapter, 0o644):
-        _expect_returned(run_as_nobody(probe, expected=RegistryError), {"cmdb": {"query"}})
+        _expect_returned(run_as_nobody(probe, expected=RegistryError), {"cmdb": ["query"], "tacit-knowledge": ["health-check", "lookup"]})
     with handed_to_nobody(root, adapter, 0o000):
         verdict = run_as_nobody(probe, expected=RegistryError)
     _expect_raised(verdict, RegistryError)
@@ -542,8 +546,8 @@ def test_an_adapter_that_does_not_parse_is_recorded_on_the_roster_not_raised_or_
     (adapters / "comment_adapter.py").write_bytes(b"# caf\xe9\nVERBS = {'query': 1}\n")
 
     roster = read_roster(adapters)
-    assert set(roster.accepted) == {"cmdb", "latin", "nul", "broken", "declared", "comment"}
-    assert roster.refused == ()
+    assert set(roster.adapter_files) == {"cmdb", "latin", "nul", "broken", "declared", "comment"}
+    assert dict(roster.refused) == {}
     assert set(roster.verbs["cmdb"]) == {"query"}
     for parses in ("declared", "comment"):
         assert set(roster.verbs[parses]) == {"query"}, (

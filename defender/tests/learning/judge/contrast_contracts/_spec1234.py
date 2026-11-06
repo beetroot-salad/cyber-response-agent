@@ -1099,11 +1099,11 @@ QUIET = world_reply(NO_BUCKET, [])
 QUIET_FAMILY = family_reply()
 
 
-def validate(doc: Any, *, scope: str = "world", served_systems: Any = SYSTEMS, **kw: Any) -> Any:
-    """`run.validate_reply(text, scope=, served_systems=)` over a reply document — the unit
+def validate(doc: Any, *, scope: str = "world", reachable_systems: Any = SYSTEMS, **kw: Any) -> Any:
+    """`run.validate_reply(text, scope=, reachable_systems=)` over a reply document — the unit
     door for reply-shape demands (the pass's own re-ask is pinned through `grade`)."""
     return sym(JUDGE_RUN, "validate_reply")(as_text(doc), scope=scope,
-                                            served_systems=served_systems, **kw)
+                                            reachable_systems=reachable_systems, **kw)
 
 
 def validate_refused(doc: Any, **kw: Any) -> BaseException:

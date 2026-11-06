@@ -4,7 +4,7 @@ or call.
 
 * The box image scripts (`box/_image.py`, `box/image_cli.py`) run before the package can be
   imported, so they import only the standard library and use no package-relative import.
-* The tacit-knowledge registry adapter (`integrations/tacit_knowledge_adapter.py`) is a read-only
+* The tacit-knowledge registry module (`systems/tacit_registry.py`) is a read-only
   lane over a human-authored file: it makes no filesystem mutation (`write_text`, `write_bytes`,
   `mkdir`, `unlink`, `rmdir`, `rename`, `touch`, `yaml` dumps, `shutil`, `os.remove`/`os.replace`)
   and opens no file for writing or appending.
@@ -37,7 +37,7 @@ import _astlib
 DEFENDER = Path(__file__).resolve().parents[2] / "defender"
 
 _IMAGE_SCRIPTS = ("box/_image.py", "box/image_cli.py")
-_REGISTRY = "integrations/tacit_knowledge_adapter.py"
+_REGISTRY = "systems/tacit_registry.py"
 _MUTATING_ATTRS = frozenset({"write_text", "write_bytes", "mkdir", "unlink", "rmdir", "rename",
                              "touch", "safe_dump", "dump", "remove", "replace"})
 _MUTATING_MODULES = frozenset({"shutil"})

@@ -37,6 +37,10 @@ SETTINGS = T1106.FIXTURE_SETTINGS
 OK = {"roles": ["gather"]}
 
 
+#: The census walk always holds the platform-served system, whose rows the loader implies (#1390).
+PLATFORM_WALK = {"tacit-knowledge": frozenset({"lookup", "health-check"})}
+
+
 def _walk(defender_dir: Path, systems: tuple[str, ...]) -> dict[str, frozenset[str]]:
     """The walked census as `census_gaps` takes it: system -> declared verb names, read cold."""
     roster = read_roster(adapters_under(defender_dir))
@@ -47,7 +51,7 @@ def test_a_planted_system_with_no_disposition_turns_the_gate_red():
     """A walked verb the table is silent about is residue, and residue is a finding naming the
     exact pair."""
     planted = ("newsystem", "health-check")
-    walked = {"newsystem": frozenset({"lookup", "health-check"})}
+    walked = {"newsystem": frozenset({"lookup", "health-check"})} | PLATFORM_WALK
     # A table that decides one of the planted system's two verbs and is silent about the
     # other. Both the silence and its exact identity must be reported.
     table = write_table(_tmp(), {("newsystem", "lookup"): OK})
@@ -62,7 +66,7 @@ def test_a_planted_system_with_no_disposition_turns_the_gate_red():
 def test_the_gate_is_clean_on_a_table_that_decides_every_walked_verb():
     """The positive control on the demand above. Without it, `census_gaps` returning a
     finding for everything would satisfy the red test and be useless."""
-    walked = {"newsystem": frozenset({"lookup", "health-check"})}
+    walked = {"newsystem": frozenset({"lookup", "health-check"})} | PLATFORM_WALK
     table = write_table(_tmp(), {
         ("newsystem", "lookup"): {"roles": ["gather"]},
         ("newsystem", "health-check"): {"roles": ["gather"]},
@@ -74,7 +78,7 @@ def test_the_gate_is_clean_on_a_table_that_decides_every_walked_verb():
 
 
 def test_a_disposition_naming_a_verb_no_adapter_declares_is_a_phantom():
-    walked = {"newsystem": frozenset({"lookup", "health-check"})}
+    walked = {"newsystem": frozenset({"lookup", "health-check"})} | PLATFORM_WALK
     table = write_table(_tmp(), {
         ("newsystem", "lookup"): OK,
         ("newsystem", "health-check"): OK,
@@ -88,7 +92,7 @@ def test_a_disposition_naming_a_verb_no_adapter_declares_is_a_phantom():
 def test_a_whole_system_absent_from_the_table_reports_every_one_of_its_verbs():
     """The reported case, at system granularity. The gate must not stop at "system unknown" —
     the maintainer's next action is to write a row per verb, so every verb is named."""
-    walked = {"solo": frozenset({"a", "b", "health-check"})}
+    walked = {"solo": frozenset({"a", "b", "health-check"})} | PLATFORM_WALK
     table = write_table(_tmp(), {("other", "x"): OK})
     gaps = census_gaps(walked, load_dispositions(table))
     assert {("solo", "a"), ("solo", "b"), ("solo", "health-check")} <= set(gaps.undecided)
@@ -178,8 +182,8 @@ def test_a_hostile_system_directory_name_does_not_blind_the_gate():
         f"the gate was not clean over hostile names that declare nothing\n"
         f"stdout={proc.stdout}\nstderr={proc.stderr}"
     )
-    assert "1 system" in proc.stdout, (
-        f"the gate covered a system count that is not just `alpha`: {proc.stdout}"
+    assert "2 system" in proc.stdout, (
+        f"the gate covered a system count that is not just `alpha` and the platform-served one: {proc.stdout}"
     )
 
 
@@ -204,9 +208,11 @@ def test_a_withheld_pair_with_a_reason_loads():
     rows = load_dispositions(write_table(_tmp(), {
         ("cmdb", "list-roles"): {"roles": [], "reason": "in the registry, exercised by nothing"},
     }))
-    assert len(rows) == 1
-    assert rows[0].roles == frozenset()
-    assert "exercised" in (rows[0].reason or "")
+    own = [r for r in rows if r.system == "cmdb"]
+    assert len(own) == 1
+    assert own[0].roles == frozenset()
+    assert "exercised" in (own[0].reason or "")
+    assert {r.system for r in rows} - {"cmdb"} <= {"tacit-knowledge"}, "an implied row for any but the platform-served system"
 
 
 def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():

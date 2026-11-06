@@ -11,7 +11,7 @@ from defender._model import model
 from defender._paths import adapters_under, process_defender_dir
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
-from defender.learning.leads.declared_systems import adapter_systems_under
+from defender.learning.leads.declared_systems import adapter_systems_under, with_platform_systems
 from defender.learning._pydantic_stage import run_stage as _run_stage_fn
 from defender import providers
 from defender.investigation.agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
@@ -45,14 +45,14 @@ def _systems_or_raise(defender_dir: Path) -> tuple[str, ...]:
     # Rooted on the bound tree itself: `.parent / "defender"` would read a sibling tree's
     # adapters whenever the directory isn't literally named `defender`.
     adapters_dir = adapters_under(defender_dir)
-    systems = tuple(sorted(adapter_systems_under(adapters_dir)))
+    systems = adapter_systems_under(adapters_dir)
     if not systems:
         raise ValueError(
             f"lead-author write scope is empty: {adapters_dir} declares no system, so no "
             "per-system write lane compiles and the spawned agent could not write the edits "
             "its own handoff asks for"
         )
-    return systems
+    return tuple(sorted(with_platform_systems(systems)))
 
 
 #: The catalog's tail under `<skills>/`, derived so the write and `rm` lanes name the same

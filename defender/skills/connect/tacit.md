@@ -1,11 +1,14 @@
 # `connect` — recording a tacit-knowledge sanction
 
 Read this when a human wants to record that **someone has signed off on a
-particular actor doing a particular thing on particular hosts**, and the
-tacit-knowledge system is already connected.
+particular actor doing a particular thing on particular hosts**. The
+tacit-knowledge system is built into the platform, so there is nothing to
+connect; but a registry is unused until the tenant's grant table
+(`settings/verb-grants.yaml`) grants `lookup` to the gather role, so check
+that row exists before telling the human the sanction will take effect.
 
 This is **not** the onboarding workflow. `SKILL.md`'s six steps connect a
-new system of record; this adds *data* to one that is already connected.
+new system of record; this adds *data* to a system the platform already serves.
 Two different jobs in the same skill because the shape of the work is the
 same — interview a maintainer, write files, validate, leave a proposal for review — and
 because a maintainer who has run `/connect` once already knows where to
@@ -76,7 +79,11 @@ across an edited `pattern` silently re-points every existing citation.
    tenant's published registry into it: from
    `$DEFENDER_DATA_ROOT/{tenant}/exports/current/agent/skills/tacit-knowledge/registry.yaml`
    to `<staged>/skills/tacit-knowledge/registry.yaml` (run
-   `python3 defender/cli/tenant.py update {tenant}` first so `current` is the merged `main`).
+   `python3 defender/cli/tenant.py update {tenant}` first so `current` is the merged `main`). A
+   tenant copied from the template has one, with no entries in it. A tenant from before then may
+   not: start from `knowledge/tenant-template/agent/skills/tacit-knowledge/registry.yaml`, and
+   propose that template's `SKILL.md` beside it, because without that page the system is missing
+   from gather's index.
 
    ```bash
    defender/.venv/bin/python -m defender.cli.tacit_cli --defender-dir <staged> check
@@ -133,7 +140,7 @@ flags it for exactly that reason.
 
 ## What this route never does
 
-- Write any file but `registry.yaml`.
+- Write any file but `registry.yaml`, and the template's `SKILL.md` for a tenant that has none.
 - Author an entry the human did not state in full.
 - Merge, push, or treat its own proposal as approval.
 - Add an entry because an investigation concluded something. A run's own

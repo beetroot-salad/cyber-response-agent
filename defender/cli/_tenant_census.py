@@ -7,6 +7,7 @@ more finding, exit 1, and still judges everything that needs no census (`folder_
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
 from pathlib import Path
 
 from defender.knowledge import QueryTemplate, is_established
@@ -42,11 +43,13 @@ class Census:
 
     systems: frozenset[str]
     walked: dict[str, frozenset[str]]
+    #: Adapter names the roster refused, with why (a reserved name is a finding, #1390 A11).
+    refused: Mapping[str, str] = dataclasses.field(default_factory=dict)
 
 
 def take_census(defender_dir: Path) -> Census:
     """The census of the code tree at `defender_dir` (its adapters, read cold), or
-    `CensusUnavailable`. The system set is the adapters alone: the committed system markers it
+    `CensusUnavailable`. The system set is the roster's (adapters and platform-served): the committed system markers it
     once also read were the product tree's system skills, which #1108 P4 moved into the tenant,
     so taking it starts no git. One roster read serves both the system set and the verb walk, so
     a tree changing between two reads cannot score one read's systems against the other's
@@ -68,7 +71,7 @@ def take_census(defender_dir: Path) -> Census:
             "literal — an annotated assignment (`VERBS: dict[str, Verb] = {...}`) or a table "
             "built in a loop declares nothing to the reader. Fix the adapter"
             + (f" ({detail})" if detail else ""))
-    return Census(systems=systems, walked=walked)
+    return Census(systems=systems, walked=walked, refused=dict(roster.refused))
 
 
 def _unreadable_adapters(
@@ -79,10 +82,10 @@ def _unreadable_adapters(
     The roster's cold read answers `frozenset()` for an adapter it cannot see into. That is
     right for `ModuleVerbRegistry`, where an unreadable table refuses every grant, but here an
     empty walk yields no `undecided` and would print "clean" over an undecided system. Adapter
-    presence (`roster.accepted`) separates this from an MCP-path system, which is declared by
+    presence (`roster.adapter_files`) separates this from an MCP-path system, which is declared by
     its committed `execution.md` marker and has no adapter module by design."""
     return tuple(s for s in sorted(walked)
-                 if not walked[s] and s in roster.accepted and s not in roster.no_verbs)
+                 if not walked[s] and s in roster.adapter_files and s not in roster.no_verbs)
 
 
 @dataclasses.dataclass(frozen=True)
