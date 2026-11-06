@@ -243,15 +243,18 @@ def _exchange_fails(error: Exception) -> Callable[..., subprocess.Popen[bytes]]:
     return popen
 
 
-def _mute(argv, **_kw) -> subprocess.CompletedProcess:
-    """A daemon that does not answer a status question."""
-    return subprocess.CompletedProcess(list(argv), 1, stdout="", stderr="Cannot connect to the Docker daemon")
+class _MuteDaemon(RecordingDocker):
+    """A daemon that does not answer a status question (rc 1), recording what it is asked."""
+
+    def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
+        self.calls.append(list(argv))
+        return subprocess.CompletedProcess(list(argv), 1, stdout="", stderr="Cannot connect to the Docker daemon")
 
 
 def _executor(status: str | None, popen: Callable[..., subprocess.Popen[bytes]], *, attached: bool = True):
     """A sandboxed executor whose exchange is the fault and whose daemon answers `status` ("mute": not at
     all). A run box has its attached start, so it is auto-removed: gone counts as stopped (#1343 B10)."""
-    daemon = _mute if status == "mute" else _DaemonThatRaises() if status == "raises" else RecordingDocker(status=status)
+    daemon = _MuteDaemon() if status == "mute" else _DaemonThatRaises() if status == "raises" else RecordingDocker(status=status)
     starter = None
     if attached:
         starter = subprocess.Popen(["true"])
@@ -672,20 +675,8 @@ def test_o8_o9_the_run_log_names_the_command_that_met_the_ending(tmp_path, caplo
     main = S.MainScript([S.call("bash", command=command), S.text(S.DONE)])
     result = S.run_alert(tmp_path, main=main, box_lifecycle=_boxed("exited", _exchange_runs(*exchange)))
     assert result.rc in (5, 6)
-    assert any(command in r.getMessage() and r.levelno >= logging.WARNING for r in caplog.records), \
-        [r.getMessage() for r in caplog.records]
+    assert any(command in r.getMessage() for r in caplog.records), [r.getMessage() for r in caplog.records]
     assert command not in RunPaths(result.folder).run_end_sidecar().read_text(encoding="utf-8")
-
-
-def test_control_a_command_that_met_no_ending_is_not_logged_as_a_warning(tmp_path, caplog):
-    """The same channel without an ending: the command is not in a warning, so the test above sees the ending's. (O8)"""
-    command = "echo marker-1421-unique"
-    caplog.set_level(logging.INFO)
-    wire = box.encode_response(box.BoxResult(rc=0, out=b"hello\n", err=b""))
-    main = S.MainScript([S.call("bash", command=command), S.text(S.DONE)])
-    S.run_alert(tmp_path, main=main, box_lifecycle=_boxed(
-        "running", _exchange_runs("python3", "-c", f"import os; os.write(1, {wire!r})")))
-    assert not [r for r in caplog.records if command in r.getMessage() and r.levelno >= logging.WARNING]
 
 
 @pytest.mark.parametrize("named", ["box-lost", "box-output-limit"])

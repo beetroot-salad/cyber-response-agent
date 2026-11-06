@@ -411,11 +411,18 @@ def test_o2_a_load_that_runs_out_of_room_below_the_maximum_is_a_size_refusal(box
     (next(base.glob("run-limits-*")) / "payload.json").write_text(payload, encoding="utf-8")
     kill_line = _kill_line(box)
     tries = O3_TRIES if room == "memory" else 1  # near the edge a try flips between answer and refusal
-    results = [_sh(box, f"cat {MODEL_RUN}/payload.json | defender-sql {args} 'SELECT 1 AS x'") for _ in range(tries)]
+    results = []
+    for _ in range(tries):
+        # A try killed mid-load leaves its scratch behind; clear it so the next cannot meet a full disk.
+        assert _sh(box, "find /tmp -maxdepth 1 -name 'defender-sql-*' -exec rm -rf {} +").rc == 0
+        results.append(_sh(box, f"cat {MODEL_RUN}/payload.json | defender-sql {args} 'SELECT 1 AS x'"))
     for res in results:
         _size_failure_at_the_box_boundary(res, kill_line)
     if room == "memory":  # else the O6 line alone would pass with no load protection at all
-        assert any(res.rc == EXIT_INPUT_ERROR for res in results), f"every try crashed: {[r.rc for r in results]}"
+        refusals = [res for res in results if res.rc == EXIT_INPUT_ERROR]
+        assert refusals, f"every try crashed: {[r.rc for r in results]}"
+        for res in refusals:  # a no-space exit 2 would also be a refusal, but of the wrong thing
+            assert "memory" in res.err.decode().lower(), res.err[-400:]
     assert _sh(box, "echo alive").rc == 0
 
 

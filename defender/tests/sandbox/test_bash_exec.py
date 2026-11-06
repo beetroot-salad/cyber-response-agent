@@ -387,27 +387,38 @@ def test_o6_control_a_stage_exiting_137_on_its_own_is_not_a_kill(tmp_path):
 
 
 def test_o5_the_stderr_of_every_stage_shares_one_pipe_in_the_order_it_was_written(tmp_path):
-    """Interleaving across stages is kept when stderr leaves the temp file. (O5)"""
-    def turn(waits_for: str | None, writes: str, then: str) -> str:
-        """Writes `writes` once `waits_for` exists, then creates `then`: the order is the handshake's."""
-        wait = (f"any(os.path.exists({str(tmp_path / waits_for)!r}) or time.sleep(0.01) for _ in range(2000)); "
-                if waits_for else "")
-        return _py(f"import os, sys, time; {wait}"
-                   f"sys.stderr.write({writes!r}); sys.stderr.flush(); open({str(tmp_path / then)!r}, 'w').close()")
+    """Interleaving across stages is kept when stderr leaves the temp file: one stage writes before and
+    after the other, so a buffer per stage, joined in stage order, would read 132. (O5)"""
+    def stage(*steps: str) -> str:
+        """Each step is ("say", text), ("mark", name) or ("wait", name), run in order by one process."""
+        where = str(tmp_path)
+        code = {"say": "sys.stderr.write({a!r}); sys.stderr.flush()",
+                "mark": "open(os.path.join({w!r}, {a!r}), 'w').close()",
+                "wait": "any(os.path.exists(os.path.join({w!r}, {a!r})) or time.sleep(0.01) for _ in range(2000))"}
+        body = "; ".join(code[kind].format(a=arg, w=where) for kind, arg in (step.split(":") for step in steps))
+        return _py(f"import os, sys, time; {body}")
 
-    first = turn(None, "1", "one")
-    second = turn("one", "2", "two")
-    third = turn("two", "3", "three")
-    rc, out, err = _run_raw(f"{first} | {second} | {third}")
+    first = stage("say:1", "mark:one", "wait:two", "say:3")
+    second = stage("wait:one", "say:2", "mark:two")
+    rc, out, err = _run_raw(f"{first} | {second}")
     assert err == b"123", err
 
 
+#: What the producer test below may hold in memory: the helper's own buffering past this is the fault it
+#: exposes, as a MemoryError here instead of gigabytes on a shared machine.
+PRODUCER_TEST_ADDRESS_SPACE = 1 << 30
+
+
 def test_o5_a_producer_that_never_stops_is_stopped_at_the_budget_not_the_deadline(tmp_path):
-    """`yes` has no end: the helper's own budget ends it, well inside its deadline, and nothing after it runs. (O5)"""
+    """`yes` has no end: the helper's own budget ends it, well inside its deadline, and nothing after it runs.
+    The helper runs under an address-space limit, so a helper that buffers without a cap fails fast here. (O5)"""
+    def limited():
+        resource.setrlimit(resource.RLIMIT_AS, (PRODUCER_TEST_ADDRESS_SPACE, PRODUCER_TEST_ADDRESS_SPACE))
+
     started = time.monotonic()
-    status, frame, _ = _entrypoint("yes ; touch later", cwd=tmp_path, timeout=30)
+    status, frame, err = _entrypoint("yes ; touch later", cwd=tmp_path, preexec=limited, timeout=30)
     elapsed = time.monotonic() - started
-    assert frame is not None, "no frame: the helper ran to its deadline"
+    assert frame is not None, f"no frame (the helper died or ran to its deadline): {err[-300:]!r}"
     assert (frame.rc, frame.out) == (OVER_BUDGET_RC, b"")
     assert elapsed < 20, elapsed
     assert not (tmp_path / "later").exists()
@@ -439,7 +450,7 @@ def test_a_stage_that_cannot_start_for_any_other_reason_is_rc_126_with_the_syste
 
 
 def test_a_stage_that_cannot_start_for_want_of_a_process_names_the_process_cap(tmp_path):
-    """EAGAIN from a real per-user process limit: rc 126 and one fixed line naming the cap, not the system's text. (O6)"""
+    """EAGAIN from a real per-user process limit: rc 126 and one fixed line naming the cap. (O6)"""
     def capped():
         if os.geteuid() == 0:
             os.setgid(65534)
@@ -452,6 +463,36 @@ def test_a_stage_that_cannot_start_for_want_of_a_process_names_the_process_cap(t
     status, frame, err = _entrypoint("echo hi", cwd=tmp_path, preexec=capped)
     assert frame is not None, err[-400:]
     assert (frame.rc, frame.out) == (126, b"")
+    line = _one_line(frame.err).decode().lower()
+    assert "process" in line, line
+
+
+_ENOMEM_ON_START = """\
+import errno, subprocess, sys
+
+def refuse(*args, **kwargs):
+    raise OSError(errno.ENOMEM, "Cannot allocate memory")
+
+subprocess.Popen = refuse
+from defender.execution import bash_exec
+sys.exit(bash_exec._run_box_entrypoint())
+"""
+
+
+def test_a_stage_that_cannot_start_for_want_of_memory_names_the_process_cap(tmp_path):
+    """ENOMEM from the start of a stage, injected in a wrapper process (no real fault reaches it: RLIMIT_AS stops
+    python first, and fork/exec is not governed by it): rc 126, nothing on stdout, one line naming the cap. (O6)"""
+    proc = subprocess.run(
+        [sys.executable, "-P", "-c", _ENOMEM_ON_START], input=box_codec.encode_request(bash_exec.parse("echo hi")),
+        capture_output=True, cwd=tmp_path, timeout=60,
+        env=_env(DEFENDER_BOX_TIMEOUT="30", PYTHONPATH=str(DEFENDER.parent)))
+    try:
+        frame = box_codec.decode_response(proc.stdout)
+    except box_codec.BoxFault:
+        frame = None
+    assert frame is not None, (proc.returncode, proc.stdout[:100], proc.stderr[-300:])
+    assert frame.rc == 126, (frame.rc, frame.err)
+    assert frame.out == b""
     line = _one_line(frame.err).decode().lower()
     assert "process" in line, line
 

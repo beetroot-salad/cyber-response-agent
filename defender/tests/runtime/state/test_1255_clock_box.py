@@ -251,8 +251,9 @@ def _clock_file_after_a_command(argv: list[str], clock: C.FakeClock, *,
     start = functools.partial(box_mod.start_box, docker=docker, spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS))
 
     def start_answering(*args: Any, **kw: Any) -> box_mod.BoxExecutor:
-        """Its commands answer with a frame, as the in-box helper does (#1421: a command with no
-        frame on a box that is not running ends the run); the clock file is written before each."""
+        """Its commands answer with a frame, as the in-box helper does; the clock file is written before each.
+        The scripted transport also makes the box unsandboxed (only a docker transport is confining), which
+        puts it outside #1421's rule 4 (no frame ends the run), so this is for a frame's sake, not that rule's."""
         executor = start(*args, **kw)
         executor.transport = ScriptedTransport(framed(0, b"ok\n"))
         return executor
