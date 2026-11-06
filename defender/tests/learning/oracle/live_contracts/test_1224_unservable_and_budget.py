@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.e2e._box665 import RecordingDocker
 from defender.configuration._env import FatalConfigError
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
@@ -329,8 +330,10 @@ def _timing_box(out: bytes, *, cut_off: int = 0) -> tuple[Any, list[dict]]:
 
     def factory() -> Any:
         transport = _Recording(name="oracle-box-1224", spec=spec_mod.BoxSpec())
+        # A sandboxed box always carries its daemon; one that answers "running" keeps a timeout a
+        # timeout (design-r5 executor rule 3) rather than a lost box.
         return spec_mod.BoxExecutor(spec=spec_mod.BoxSpec(), transport=transport,
-                                    name=transport.name)
+                                    name=transport.name, docker=RecordingDocker(status="running"))
 
     return factory, seen
 
