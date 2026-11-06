@@ -126,6 +126,9 @@ EXCLUDED_GREP_DIRS = (
     # same-prefixed sibling directory; these are listed explicitly rather than relaxing the
     # match to a bare prefix, which would swallow any future `defender/tests-*` sibling.
     "defender/tests/fixtures/e2e",
+    # A verbatim copy of what the product shipped before #1380 P4, kept so a tenant's old tree is
+    # tested as it was; rewriting it to today's names would defeat its purpose.
+    "defender/tests/fixtures/pre-p4-shipped",
     # Judge-alignment dataset: human-labelled samples whose text quotes the code of its
     # moment. Rewriting them to today's vocabulary would falsify the labels.
     "evaluations/judge_alignment",

@@ -277,11 +277,8 @@ def test_d_catalog_survival():
     # The gather grant is a run's (the playground tenant's).
     grant = T1106.fixture_grants().gather
     out = SI.index_text(hook, skills, read_roster(hook.ADAPTERS_DIR), grant)
-    adapters_dir = DEFENDER / "integrations"
-    adapters = {
-        p.name[: -len("_adapter.py")].replace("_", "-")
-        for p in adapters_dir.glob("*_adapter.py")
-    }
+    # The roster's systems: the adapter files and the platform-served system (#1390).
+    adapters = set(read_roster(hook.ADAPTERS_DIR).verbs)
     granted = {system for system, _verb, _mode in grant.entries}
     systems = sorted(p.parent.name for p in skills.glob("*/SKILL.md")
                      if p.parent.name in adapters & granted)

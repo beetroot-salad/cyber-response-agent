@@ -6,14 +6,19 @@ import contextlib
 import gzip
 import http.server
 import json
+import random
+import socket
 import threading
+import time
 import uuid
+from typing import Any
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
+from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.kit.faults import ConfigFault
 from defender.configuration.issuer import DEPLOYMENT_ISSUER
@@ -32,9 +37,9 @@ CAP = 1024
 
 
 @contextlib.contextmanager
-def _chunked_upstream(chunks: list[bytes]):
+def _chunked_upstream(chunks: list[bytes], pause: float = 0.0):
     """A loopback HTTP/1.1 server answering every GET with `chunks` as a chunked body and no
-    Content-Length. Yields its base URL."""
+    Content-Length, `pause` seconds apart. Yields its base URL."""
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -45,6 +50,8 @@ def _chunked_upstream(chunks: list[bytes]):
             self.end_headers()
             for chunk in chunks:
                 self.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
+                self.wfile.flush()
+                time.sleep(pause)
             self.wfile.write(b"0\r\n\r\n")
 
         def log_message(self, *_) -> None:
@@ -59,24 +66,93 @@ def _chunked_upstream(chunks: list[bytes]):
         server.server_close()
 
 
-@pytest.mark.parametrize(("chunks", "fault"), [
-    pytest.param([b"a" * 512, b"a" * 512], None, id="chunked-at-the-cap"),
-    pytest.param([b"a" * 512, b"a" * 512, b"a"], "UpstreamFault", id="chunked-over-the-cap"),
-    pytest.param([b"a" * 400] * 20, "UpstreamFault", id="chunked-many-small-over-the-cap"),
+def _pieces(sizes: list[int]) -> list[bytes]:
+    """Chunks of the given sizes, each filled with its own letter so a prefix is recognisable."""
+    return [bytes([97 + i % 26]) * size for i, size in enumerate(sizes)]
+
+
+@pytest.mark.parametrize(("sizes", "over"), [
+    pytest.param([CAP], False, id="one-chunk-at-the-limit"),
+    pytest.param([512, 512], False, id="two-chunks-at-the-limit"),
+    pytest.param([1, CAP - 1], False, id="small-then-large-at-the-limit"),
+    pytest.param([CAP - 1, 1], False, id="large-then-one-at-the-limit"),
+    pytest.param([400, 400, 224], False, id="three-chunks-at-the-limit"),
+    pytest.param([CAP + 1], True, id="one-chunk-over"),
+    pytest.param([CAP, 1], True, id="limit-then-one"),
+    pytest.param([CAP - 1, 2], True, id="chunk-crossing-the-limit"),
+    pytest.param([600, 600], True, id="two-chunks-crossing-the-limit"),
+    pytest.param([400] * 20, True, id="many-small-over"),
 ])
-def test_f1_a_chunked_response_is_capped_like_any_other(tmp_path, data_root, chunks, fault):
-    """A chunked reply (no Content-Length) up to the cap passes; one byte over is an
-    `UpstreamFault` with no body. O7."""
-    with _chunked_upstream(chunks) as base, T.rig(
+def test_f1_a_chunked_reply_is_whole_at_the_limit_and_withheld_past_it(
+        tmp_path, data_root, sizes, over):
+    """At the limit a chunked reply (no Content-Length) is complete; one byte past, nothing past the
+    limit is forwarded, a chunk crossing it not at all, the status stands, `UpstreamFault` says to
+    narrow the query. #1412 O3."""
+    chunks = _pieces(sizes)
+    with _chunked_upstream(chunks, pause=0.02) as base, T.rig(
             tmp_path / "forge", data_root, lambda _u: H.declaration(base + BASE),
             max_response_bytes=CAP) as r:
-        answer = r.ask(url=f"{base}{PATH}")
+        forwarded, final = W.decoded(r.post(url=f"{base}{PATH}").content)
 
-    assert answer["fault"] == fault, answer["fault"]
-    if fault is None:
-        assert len(answer["body"]) == CAP
+    sent = b"".join(chunks)
+    assert final["status"] == 200
+    if over:
+        assert (final["fault"], final["body_whole"]) == ("UpstreamFault", False)
+        assert "narrow" in final["detail"]
+        whole_chunks = {sum(sizes[:k]) for k in range(len(sizes) + 1) if sum(sizes[:k]) <= CAP}
+        assert len(forwarded) in whole_chunks, f"{len(forwarded)} bytes is not a run of whole chunks"
+        assert sent.startswith(forwarded)
     else:
-        assert answer["body"] == ""
+        assert (final["fault"], final["body_whole"], forwarded) == (None, True, sent)
+
+
+@pytest.mark.parametrize(("declared", "sends", "whole"), [
+    pytest.param(CAP, CAP, True, id="declared-at-the-limit"),
+    pytest.param(CAP + 1, 1, False, id="declared-one-over"),
+    pytest.param(CAP * 2, 1, False, id="declared-double"),
+])
+def test_o3_a_declared_size_over_the_limit_forwards_nothing_and_stops_at_its_first_byte(
+        tmp_path, data_root, declared, sends, whole):
+    """A reply declaring more than the limit is hung up on at its first body byte (this upstream
+    sends no other) and forwards nothing; one declaring exactly the limit is whole. #1412 O3."""
+    def script(conn: socket.socket) -> None:
+        conn.sendall(W.head(200, declared) + b"a" * sends)
+
+    with W.scripted(script) as up, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + BASE),
+            max_response_bytes=CAP) as r:
+        forwarded, final = W.decoded(r.post(url=f"{up.url}{PATH}", timeout_sec=5).content)
+        hung_up = up.hung_up.wait(2)
+
+    assert final["status"] == 200
+    if whole:
+        assert (final["fault"], final["body_whole"], forwarded) == (None, True, b"a" * CAP)
+    else:
+        assert (forwarded, final["fault"], final["body_whole"]) == (b"", "UpstreamFault", False)
+        assert "narrow" in final["detail"]
+        assert hung_up, "the proxy kept the upstream connection after the first body byte"
+
+
+@pytest.mark.parametrize(("method", "status", "reason", "fault"), [
+    pytest.param("HEAD", 200, "OK", None, id="head"),
+    pytest.param("GET", 304, "Not Modified", "UpstreamFault", id="not-modified"),
+])
+def test_o3_a_reply_with_no_body_declaring_an_oversize_has_nothing_to_withhold(
+        tmp_path, data_root, method, status, reason, fault):
+    """HEAD and 304 declaring more than the limit: status and headers stand, an empty body counts
+    as whole, and no over-limit fault. #1412 O3."""
+    def script(conn: socket.socket) -> None:
+        conn.sendall(W.head(status, CAP * 2, reason, b"X-Kept: yes\r\n"))
+
+    with W.scripted(script) as up, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + BASE),
+            max_response_bytes=CAP) as r:
+        answer = r.ask(method, url=f"{up.url}{PATH}", timeout_sec=5)
+
+    assert (answer["status"], answer["fault"], answer["body"], answer["body_whole"]) == (
+        status, fault, "", True)
+    assert answer["headers"]["x-kept"] == "yes"
+    assert "narrow" not in (answer["detail"] or "")
 
 
 @pytest.mark.parametrize("size", [1, CAP, CAP + 1, 50_000])
@@ -91,6 +167,104 @@ def test_f1_a_compressed_response_is_refused_whatever_it_expands_to(tmp_path, da
     assert answer["fault"] == "UpstreamFault", answer
     assert "compressed body (gzip)" in answer["detail"], answer
     assert answer["body"] == ""
+    assert "narrow" not in answer["detail"], "compressed is checked before the limit"
+
+
+def test_f1_a_compressed_reply_over_the_limit_is_refused_as_compressed_not_as_too_large(
+        tmp_path, data_root):
+    """A gzip body that is itself over the limit, declared as such, is the compressed refusal:
+    the compressed check comes first and does not say to narrow. #1412 O3, O8."""
+    packed = gzip.compress(random.Random(1412).randbytes(3 * CAP))
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=CAP) as r:
+        r.up.replies[PATH] = (200, {"Content-Type": "text/plain", "Content-Encoding": "gzip"}, packed)
+        answer = r.ask()
+
+    assert len(packed) > CAP, "the fixture is over the limit as sent"
+    assert (answer["status"], answer["fault"], answer["body_whole"]) == (200, "UpstreamFault", False)
+    assert "compressed body (gzip)" in answer["detail"]
+    assert "narrow" not in answer["detail"]
+
+
+_BODY_STATUSES = [s for s in range(200, 600) if s not in (204, 205, 304)]
+def test_o3_every_over_limit_reply_is_withheld_whatever_its_status_and_narrows_only_a_2xx(
+        tmp_path, data_root):
+    """For statuses drawn from every one that carries a body, declared or not, an over-limit reply
+    forwards nothing (declared) or no more than the limit, and the declared upstream is hung up
+    on; the status stands, the fault is that status's own, 'narrow' only on a 2xx. #1412 O3."""
+    rng = random.Random(1412)
+    fixed = [200, 201, 203, 206, 226, 299, 300, 301, 302, 303, 307, 308, 399, 400, 401, 403, 404, 429,
+             499, 500, 502, 503, 599]
+    statuses = fixed + rng.sample([s for s in _BODY_STATUSES if s not in fixed], 12)
+    declared_sizes = [CAP + 1, CAP * 2, 10 ** 9, 10 ** 17]
+    state: dict[str, Any] = {}
+
+    def script(conn: socket.socket) -> None:
+        gone = state["gone"] = threading.Event()  # this connection's own hang-up
+        if state["declared"] == 0:
+            conn.sendall(W.head(state["status"], 2) + b"{}")
+        elif state["declared"] is not None:
+            conn.sendall(W.head(state["status"], state["declared"]) + b"a")
+        else:
+            conn.sendall(b"HTTP/1.1 %d X\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n"
+                         % state["status"] + W.chunked(b"a" * (CAP + 1)))
+        try:
+            while conn.recv(65536):
+                pass
+        except OSError:
+            pass
+        gone.set()
+
+    with W.scripted(script) as up, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + BASE),
+            max_response_bytes=CAP) as r:
+        for status in statuses:
+            state.update(status=status, declared=0)  # a reply within the limit: this status's own fault
+            within = W.decoded(r.post(url=f"{up.url}{PATH}", timeout_sec=5).content)[1]
+            want = within["fault"] or "UpstreamFault"
+            for declared in (rng.choice(declared_sizes), None):
+                state.update(status=status, declared=declared)
+                forwarded, final = W.decoded(r.post(url=f"{up.url}{PATH}", timeout_sec=5).content)
+                case = (status, declared)
+                if declared is None:
+                    assert len(forwarded) <= CAP, case
+                    assert (b"a" * (CAP + 1)).startswith(forwarded), case
+                else:
+                    assert forwarded == b"", case
+                assert final["status"] == status, case
+                assert (final["fault"], final["body_whole"]) == (want, False), (case, final)
+                assert ("narrow" in final["detail"]) == (status < 300), (case, final["detail"])
+                if declared is not None:
+                    assert state["gone"].wait(2), f"upstream kept after the first body byte: {case}"
+
+
+_REFUSED_CODINGS = ["gzip", "x-gzip", "deflate", "br", "zstd", "compress", "unknown-token", "GZIP",
+                    " Gzip ", "gzip, br", "br,identity", "identity, gzip", "IDENTITY, zstd",
+                    "identity,compress", "Deflate , identity", "x-weird"]
+_PLAIN_CODINGS = ["identity", "Identity", "identity, identity"]
+
+
+def test_o3_any_content_coding_but_identity_is_refused_as_compressed_and_forwarded_nowhere(
+        tmp_path, data_root):
+    """A Content-Encoding listing any coding but identity (any case, any list, known or not) is
+    refused as a compressed body, no body bytes forwarded and no 'narrow'; identity arrives
+    whole. #1412 O3, #1383."""
+    plain = b'{"ok": true}'
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=CAP) as r:
+        for coding in _REFUSED_CODINGS + _PLAIN_CODINGS:
+            r.up.replies[PATH] = (200, {"Content-Type": "application/json",
+                                        "Content-Encoding": coding}, plain)
+            content = r.post().content
+            forwarded = W.decoded(content)[0]
+            answer = T.answer_of(content)
+            if coding in _PLAIN_CODINGS:
+                assert (answer["fault"], answer["body"], answer["body_whole"]) == (
+                    None, plain.decode(), True), coding
+            else:
+                assert forwarded == b"", (coding, forwarded)
+                assert (answer["fault"], answer["status"], answer["body_whole"]) == (
+                    "UpstreamFault", 200, False), (coding, answer)
+                assert "a compressed body" in answer["detail"], (coding, answer)
+                assert "narrow" not in answer["detail"], coding
 
 
 # --- A9 a request that cannot be processed is classified and audited --------------------------
@@ -133,7 +307,7 @@ def test_f4_a_lone_surrogate_in_a_request_is_classified_and_audited(
         control = r.ask()
 
     assert response.status_code == 200, response.text
-    answer = response.json()
+    answer = T.answer_of(response.content)
     assert answer["fault"] in ("ConfigFault", "ConfinementFault"), answer
     assert r.up.paths() == [PATH], "only the control request was sent"
     assert control["fault"] is None
@@ -157,7 +331,7 @@ def test_f4_deeply_nested_json_is_classified_and_audited(tmp_path, data_root, sh
         control = r.ask()
 
     assert response.status_code == 200, response.status_code
-    answer = response.json()
+    answer = T.answer_of(response.content)
     assert answer["fault"] in ("ConfigFault", "ConfinementFault"), answer
     assert (control["fault"], r.up.paths()) == (None, [PATH])
     records = r.audit.records
@@ -198,9 +372,9 @@ def test_f6_the_remaining_config_builds_the_proxy(tmp_path):
 
 
 @pytest.mark.parametrize("bad", [{"upstream_timeout_sec": "30"}, {"audit_path": 5},
-                                 {"audit_path": "audit\0.jsonl"}, {"max_response_bytes": None},
+                                 {"audit_path": "audit\0.jsonl"},
                                  {"data_root": 5}, {"data_root": "root\0dir"}],
-                         ids=["quoted-number", "path-not-text", "nul-in-path", "null-cap",
+                         ids=["quoted-number", "path-not-text", "nul-in-path",
                               "root-not-text", "nul-in-root"])
 def test_f6_an_operator_config_value_of_the_wrong_type_is_a_config_fault(tmp_path, bad):
     """A configuration value of the wrong type or shape stops the proxy with `ConfigFault`
@@ -211,11 +385,19 @@ def test_f6_an_operator_config_value_of_the_wrong_type_is_a_config_fault(tmp_pat
 
 @pytest.mark.parametrize("key", [*REMOVED_CONFIG_KEYS, "bogus_key"])
 def test_a26_a_removed_or_unknown_config_key_is_a_config_fault(tmp_path, key):
-    """`tenant_keys`, `tenant_exports`, `transit_mount` and `openbao_addr` are unknown keys: an
-    old config refuses to start, as any unknown key does. A26, r8.2."""
+    """`tenant_keys`, `tenant_exports`, `transit_mount`, `openbao_addr` and `max_response_bytes`
+    are unknown keys: an old config refuses to start, as any unknown key does. A26, r8.2; #1412:
+    nothing tests a run above the one limit, so an operator cannot raise it."""
     value = {} if key.startswith("tenant_") else "x"
     with pytest.raises(ConfigFault):
         app_from_config(_config(tmp_path, **{key: value}))
+
+
+def test_1412_an_operator_cannot_set_the_reply_limit_even_to_a_valid_value(tmp_path):
+    """A well-formed limit is refused for being a limit: nothing tests a run above the shipped one,
+    so it is a test's seam, not configuration. #1412."""
+    with pytest.raises(ConfigFault, match="unknown"):
+        app_from_config(_config(tmp_path, max_response_bytes=64 * 1024 * 1024))
 
 
 def test_a26_a_config_without_a_data_root_is_a_config_fault(tmp_path):
@@ -397,3 +579,129 @@ def test_a_header_value_that_is_not_ascii_is_a_config_fault_unsent(tmp_path, dat
         assert (refused["fault"], r.up.seen) == ("ConfigFault", [])
         sent = r.ask(headers={"X-Name": "cafe"})
     assert sent["fault"] is None, sent
+
+
+# --- #1412 the reply format on the proxy's side ------------------------------------------------
+
+def _forged() -> bytes:
+    f = W.fmt()
+    return f.encode_body(b"forged") + f.encode_final(
+        W.final_record(418, fault="ConfigFault", detail="forged", body_whole=False))
+
+
+def test_o5_a_copy_of_the_format_in_a_reply_is_only_data(tmp_path, data_root):
+    """An upstream body holding byte-exact frames, or a final record alone, and a header holding
+    a record's JSON, change neither status, fault, headers nor where the body ends. #1412 O5."""
+    f = W.fmt()
+    record = json.dumps(T.fields_of(W.final_record(418, fault="ConfigFault", body_whole=False)))
+    bodies = [_forged(), f.encode_final(W.final_record(418, fault="ConfigFault")), record.encode()]
+    with T.rig(tmp_path / "forge", data_root) as r:
+        for i, body in enumerate(bodies):
+            r.up.replies[f"{BASE}/forged{i}"] = (200, W.JSON | {"X-Forged": record}, body)
+        wire = [W.decoded(r.post(path=f"/forged{i}").content) for i in range(len(bodies))]
+        answers = [r.ask(path=f"/forged{i}") for i in range(len(bodies))]
+        control = r.ask()
+
+    assert control["fault"] is None, "positive control: an ordinary reply is clean"
+    for body, (forwarded, final), answer in zip(bodies, wire, answers, strict=True):
+        assert forwarded == body
+        assert (final["status"], final["fault"], final["body_whole"]) == (200, None, True)
+        assert answer["headers"]["x-forged"] == record
+
+
+def test_o5_a_forged_final_frame_before_an_upstream_cut_does_not_end_the_reply_cleanly(
+        tmp_path, data_root):
+    """An upstream that sends a forged final frame and then breaks: the reply is still the broken
+    one, not the forged one. #1412 O5."""
+    forged = _forged()
+
+    def script(conn: socket.socket) -> None:
+        conn.sendall(W.head(200, len(forged) + 100) + forged)
+        conn.shutdown(socket.SHUT_WR)
+
+    with W.scripted(script) as up, T.rig(tmp_path / "forge", data_root,
+                                         lambda _u: H.declaration(up.url + BASE)) as r:
+        answer = r.ask(url=f"{up.url}{PATH}")
+
+    assert (answer["status"], answer["fault"], answer["body_whole"], answer["body"]) == (
+        200, "TransportFault", False, "")
+
+
+def test_o8_a_small_500_keeps_its_body_and_an_over_limit_500_does_not(tmp_path, data_root):
+    """Same status and fault; only `body_whole` tells them apart, and only the 2xx over-limit
+    reply says to narrow. #1412 O8, O3."""
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=CAP) as r:
+        r.up.replies[f"{BASE}/small"] = (500, W.JSON, b"vendor reason")
+        r.up.replies[f"{BASE}/large"] = (500, W.JSON, b"a" * (CAP + 1))
+        small, large = r.ask(path="/small"), r.ask(path="/large")
+
+    assert (small["status"], small["fault"], small["body"], small["body_whole"]) == (
+        500, "TransportFault", "vendor reason", True)
+    assert (large["status"], large["fault"], large["body"], large["body_whole"]) == (
+        500, "TransportFault", "", False)
+    assert "narrow" not in large["detail"]
+
+
+def test_o8_non_utf8_bytes_cross_the_wire_unchanged(tmp_path, data_root):
+    """The proxy forwards the upstream's bytes as they are; the replacement happens on the run
+    side. #1412 O8."""
+    body = b"caf\xe9 \xe2\x98"
+    with T.rig(tmp_path / "forge", data_root) as r:
+        r.up.replies[PATH] = (200, {"Content-Type": "text/plain"}, body)
+        forwarded, final = W.decoded(r.post().content)
+
+    assert (forwarded, final["body_whole"]) == (body, True)
+
+
+def test_o8_the_upstream_hop_headers_are_dropped_and_other_headers_kept(tmp_path, data_root):
+    """A chunked reply with connection headers: the record's headers lack all of them and keep
+    the upstream's own. #1412 O8."""
+    def script(conn: socket.socket) -> None:
+        conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n"
+                     b"Keep-Alive: timeout=5\r\nX-Kept: yes\r\n\r\n" + W.chunked(b"ok") + b"0\r\n\r\n")
+
+    with W.scripted(script) as up, T.rig(tmp_path / "forge", data_root,
+                                         lambda _u: H.declaration(up.url + BASE)) as r:
+        answer = r.ask(url=f"{up.url}{PATH}")
+
+    assert (answer["body"], answer["headers"].get("x-kept")) == ("ok", "yes")
+    assert not {"transfer-encoding", "connection", "keep-alive", "content-length"} & set(answer["headers"])
+
+
+def _media(response: Any) -> str:
+    return response.headers["content-type"].split(";")[0].strip()
+
+
+def test_o9_every_reply_carries_the_formats_content_type_and_is_no_old_json(tmp_path, data_root):
+    """An answer, an over-limit reply, a refusal and the audit-withheld refusal all carry the
+    proxy's content type, and none parses as the old JSON reply. #1412 O9."""
+    kind = W.fmt().REPLY_CONTENT_TYPE.split(";")[0].strip()
+    with T.rig(tmp_path / "forge", data_root, max_response_bytes=CAP) as r:
+        r.up.replies[f"{BASE}/big"] = (200, W.JSON, b"a" * (CAP + 1))
+        replies = [r.post(), r.post(path="/big"), r.post(grant=set())]
+        r.audit = H.FailingAudit()
+        r.rebuild()
+        replies.append(r.post())
+
+    for response in replies:
+        assert _media(response) == kind
+        with pytest.raises(ValueError):  # noqa: PT011 — json's decode error is a ValueError
+            json.loads(response.content)
+        assert W.fmt().decode_reply(response.content) is not None
+
+
+def test_p3_the_pipeline_cannot_run_without_the_routes_send(tmp_path, data_root):
+    """`handle` called with no send function raises `TypeError` before anything is sent or
+    audited, while the route answers the same request. #1412 P3."""
+    from defender.credential_proxy._app import _Proxy
+
+    with T.rig(tmp_path / "forge", data_root) as r:
+        proxy = _Proxy(T.deps(r.data_root, r.store, verifier=r.verifier, audit=r.audit))
+        request = json.dumps({"system": "identity", "method": "GET", "url": f"{r.up.url}{PATH}",
+                              "headers": {}, "body": None}).encode()
+        assert r.ask()["fault"] is None, "positive control: the route answers it"
+        before = (len(r.up.seen), len(r.audit.records))
+        with pytest.raises(TypeError):
+            proxy.handle(f"Bearer {r.tok()}", request)
+
+    assert (len(r.up.seen), len(r.audit.records)) == before

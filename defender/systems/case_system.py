@@ -86,7 +86,7 @@ def _adapter_of(system: str, *, defender_dir: Path, roster: RosterRead | None) -
         except RegistryError as e:
             raise CaseSettingsFault(CASE_RECORD_POINTER,
                                     f"cannot be judged: the adapters cannot be read ({e})") from None
-    if system not in roster.accepted:
+    if system not in roster.adapter_files:
         raise CaseSettingsFault(CASE_RECORD_POINTER,
                                 f"names the system `{system}`, which has no adapter")
     if system in roster.unparsed:

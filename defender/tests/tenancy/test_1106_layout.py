@@ -44,15 +44,17 @@ def test_every_template_row_grants_nobody_and_says_why():
 
 
 def test_the_template_table_is_total_over_the_real_adapters():
-    """The template's table is total over the product's adapters (adapters stay in the
-    product; system skills are the tenant's, and the template's own `agent/` declares none)."""
+    """The template's table is total over the roster's systems: the product's adapters and
+    the platform-served ones (adapters stay in the product; system skills are the tenant's,
+    and the template's own `agent/` declares none)."""
     from defender._paths import adapters_under
     from defender.systems.verbs import read_roster
 
     vd = T.mod("systems.verb_dispositions")
     roster = read_roster(adapters_under(T.DEFENDER))
-    assert roster.accepted, "no adapter read: the census would be vacuous"
-    walked = {s: roster.declared_verbs(s) for s in sorted(roster.accepted)}
+    assert roster.adapter_files, "no adapter read: the census would be vacuous"
+    assert set(roster.adapter_files) < set(roster.verbs), "no platform-served system on the roster"
+    walked = {s: roster.declared_verbs(s) for s in sorted(roster.verbs)}
     gaps = vd.census_gaps(walked, vd.load_dispositions(T.TEMPLATE_SETTINGS / "verb-grants.yaml"))
     assert not gaps, gaps
 

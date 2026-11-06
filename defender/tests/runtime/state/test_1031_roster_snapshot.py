@@ -53,7 +53,7 @@ def test_the_roster_is_the_construction_time_one_after_the_directory_is_removed(
     write(adapters / "host-state_adapter.py", ADAPTER_BODY)     # derives `host-state` again
     write(adapters / "change-mgmt_adapter.py", ADAPTER_BODY)    # derives a name that resolves to nothing
     (adapters / "foo_adapter.py").mkdir()                      # the glob yields it; is_file refuses it
-    expected = ("cmdb", "elastic", "host-state")
+    expected = ("cmdb", "elastic", "host-state", "tacit-knowledge")
 
     registry = ModuleVerbRegistry(read_roster(adapters), DENY_ALL)
     assert registry.systems() == expected, "the roster before the removal is not the filtered one"
@@ -95,12 +95,12 @@ def test_an_adapter_added_after_construction_is_not_on_the_roster(tmp_path):
     undeclared to that registry for its lifetime."""
     adapters = _adapters(tmp_path, "elastic")
     before = ModuleVerbRegistry(read_roster(adapters), DENY_ALL)
-    assert before.systems() == ("elastic",)
+    assert before.systems() == ("elastic", "tacit-knowledge")
 
     write(adapters / "cmdb_adapter.py", ADAPTER_BODY)
-    assert before.systems() == ("elastic",), \
+    assert before.systems() == ("elastic", "tacit-knowledge"), \
         "the roster grew after construction: it is read from the disk per call"
-    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("cmdb", "elastic"), \
+    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("cmdb", "elastic", "tacit-knowledge"), \
         "a fresh registry does not see the new adapter, so the control above is vacuous"
 
 
@@ -115,7 +115,7 @@ def test_a_missing_directory_fails_at_construction_under_deny_all(tmp_path):
     assert str(missing) in str(exc.value), \
         f"the registry error does not name the directory: {exc.value}"
 
-    assert ModuleVerbRegistry(read_roster(_adapters(tmp_path, "elastic")), DENY_ALL).systems() == ("elastic",)
+    assert ModuleVerbRegistry(read_roster(_adapters(tmp_path, "elastic")), DENY_ALL).systems() == ("elastic", "tacit-knowledge")
 
 
 def test_a_regular_file_at_the_adapters_path_fails_at_construction(tmp_path):
@@ -138,7 +138,7 @@ def test_an_unreadable_directory_fails_at_construction(tmp_path):
         assert str(adapters) in str(exc.value)
     finally:
         adapters.chmod(0o700)
-    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic",)
+    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic", "tacit-knowledge")
 
 
 def test_a_symlink_loop_named_like_an_adapter_is_the_registrys_own_error(tmp_path):
@@ -156,11 +156,11 @@ def test_a_symlink_loop_named_like_an_adapter_is_the_registrys_own_error(tmp_pat
         with pytest.raises(_scaffold_rules.ScaffoldRuleError):
             _scaffold_rules.VerbResolver(tmp_path / "defender")
     else:
-        assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic",)
+        assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic", "tacit-knowledge")
         assert _scaffold_rules.VerbResolver(tmp_path / "defender").is_system("elastic")
 
     (adapters / "loop_adapter.py").unlink()
-    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic",)
+    assert ModuleVerbRegistry(read_roster(adapters), DENY_ALL).systems() == ("elastic", "tacit-knowledge")
 
 
 def test_decide_and_verbs_read_the_roster_not_the_disk(tmp_path):
@@ -181,7 +181,7 @@ def test_decide_and_verbs_read_the_roster_not_the_disk(tmp_path):
     assert after.outcome == verbs.GRANTED, \
         f"a granted call on a declared system was refused once the directory went: {after!r}"
     assert after.fn is before.fn, "the dispatch resolved a different function after the removal"
-    assert registry.systems() == ("elastic",)
+    assert registry.systems() == ("elastic", "tacit-knowledge")
     unknown_verb = registry.decide("elastic", "nope")
     assert unknown_verb == unknown_verb_before, \
         f"a declared system's unknown-verb refusal changed after the removal: {unknown_verb!r}"
@@ -193,7 +193,7 @@ def test_decide_and_verbs_read_the_roster_not_the_disk(tmp_path):
     write(fresh_dir / "elastic_adapter.py", QUERY_ADAPTER)
     fresh = ModuleVerbRegistry(read_roster(fresh_dir), GRANT)
     shutil.rmtree(fresh_dir)
-    assert fresh.systems() == ("elastic",)
+    assert fresh.systems() == ("elastic", "tacit-knowledge")
     with pytest.raises(FileNotFoundError):
         fresh.decide("elastic", "query")
 
@@ -208,9 +208,9 @@ def test_the_world_registry_inherits_the_snapshot_and_the_construction_time_chec
     adapters = _adapters(tmp_path, "elastic")
     world = build_registry(read_roster(adapters), DENY_ALL, world=World("w1"),
                           ledger=fresh_ledger(tmp_path / "real" / SERVED_FILE))
-    assert world.systems() == ("elastic",)
+    assert world.systems() == ("elastic", "tacit-knowledge")
     shutil.rmtree(adapters)
-    assert world.systems() == ("elastic",), "the subclass re-reads the roster from the disk"
+    assert world.systems() == ("elastic", "tacit-knowledge"), "the subclass re-reads the roster from the disk"
 
 
 # the same through `_scaffold_rules.VerbResolver`

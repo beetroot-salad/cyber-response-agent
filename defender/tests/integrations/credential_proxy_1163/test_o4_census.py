@@ -1,6 +1,7 @@
 """#1163 O4 canary census after a real run: `run.main` with production's lifecycle and driver
 over replay models, the real identity adapter, the real proxy on loopback and a fake upstream
-that echoes the Authorization header. Also the static scan of adapter code."""
+that echoes nothing (#1412 O7: a canary found in the run came through one of our own channels).
+Also the static scan of adapter code."""
 from __future__ import annotations
 
 import functools
@@ -61,6 +62,8 @@ def test_o4_no_canary_reaches_any_channel_of_a_real_run(tmp_path, data_root, mon
     monkeypatch.setenv("DEFENDER_CENSUS_1163", ENV_MARKER)
     configs = {**T6.config_texts(TENANT), "identity": A.env_text("identity")}
     with H.upstream() as up:
+        up.replies[f"{API}/users/dev.dana"] = (200, {"Content-Type": "application/json"},
+                                               f'{{"path": "{API}/users/dev.dana"}}'.encode())
         planted = S.plant_tenant(TENANT, alert_mapping=S.DEFAULT_MAPPING, table=T6.TABLE_B,
                                  configs=configs)
         for rel, text in H.access_files("identity", H.declaration(up.url + API)).items():

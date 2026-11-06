@@ -304,7 +304,9 @@ def _run_locked(
         _logger.info("already processed (done sentinel exists) — nothing to do")
         return 0
 
-    if not deps.systems:
+    from defender.learning.leads.declared_systems import declares_no_system
+
+    if declares_no_system(deps.systems):
         # An empty declared set would refuse every path one by one and report a clean no-op;
         # refuse loudly before spawning instead.
         raise LeadAuthorError(

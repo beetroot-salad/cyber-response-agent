@@ -78,7 +78,7 @@ def test_o4_the_census_fails_naming_an_adapter_that_exposes_the_comment_action(t
 def test_o4_no_checkout_adapter_exposes_the_comment_action(checkout_roster):
     """No adapter in the checkout lists the comment action; the playground ticket adapter exports it. O4."""
     assert checkout_roster.declared_verbs("ticket"), "positive control: verbs were read"
-    held = sorted(s for s in checkout_roster.accepted
+    held = sorted(s for s in checkout_roster.verbs
                   if {DASHED, ACTION} & checkout_roster.declared_verbs(s))
     assert held == [], held
     assert checkout_roster.unparsed == {}, dict(checkout_roster.unparsed)
@@ -89,7 +89,7 @@ def test_o4_no_checkout_adapter_exposes_the_comment_action(checkout_roster):
 def test_r1_an_empty_verbs_literal_is_a_valid_adapter_with_no_verbs(tmp_path):
     """`VERBS = {}` reads as an accepted adapter with no grantable verb (a regression guard: base already does; the no-readable-VERBS half is the census and resolver arms below). r4."""
     roster = _roster(_tree(tmp_path / "empty", _source("{}")))
-    assert "casesys" in roster.accepted
+    assert "casesys" in roster.adapter_files
     assert "casesys" not in roster.unparsed
     assert roster.declared_verbs("casesys") == frozenset()
 

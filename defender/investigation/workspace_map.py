@@ -96,7 +96,7 @@ def workspace_map(
     agent_root: Path | None = None,
 ) -> str:
     """The model's directory view of the run. `systems` (the Adapters section) is the run's
-    roster (`read_roster(...).accepted`), never a directory listing, so the map cannot name a
+    roster (`read_roster(...).systems`), never a directory listing, so the map cannot name a
     system that `query` would reject as unknown.
 
     `view` is the run's model view (#1255 P1): every root and tree the map names is the model

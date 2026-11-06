@@ -119,6 +119,30 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+GAUGE_PATH = "/__gauge"
+
+
+def borrowed_threads() -> int:
+    """Worker threads the running event loop's default limiter has lent out (call inside the loop)."""
+    import anyio.to_thread
+
+    return anyio.to_thread.current_default_thread_limiter().borrowed_tokens
+
+
+def thread_limit() -> int:
+    """The default limiter's total (call inside the loop): the cap on simultaneous worker threads."""
+    import anyio.to_thread
+
+    return int(anyio.to_thread.current_default_thread_limiter().total_tokens)
+
+
+async def answer_gauge(send: Any, readings: Mapping[str, int]) -> None:
+    """Answer a gauge request with `readings` as JSON."""
+    await send({"type": "http.response.start", "status": 200,
+                "headers": [(b"content-type", b"application/json")]})
+    await send({"type": "http.response.body", "body": json.dumps(dict(readings)).encode()})
+
+
 @contextlib.contextmanager
 def serve_asgi(app: Any) -> Iterator[str]:
     """`app` served by uvicorn on a loopback port in a thread, for a caller that must reach it

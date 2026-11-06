@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 #: The alerted event's own timestamp. A `:R consultations` window is judged against this:
 #: a baseline that does not END before the alert began is a pattern that starts with the
@@ -151,7 +154,7 @@ REGISTRY_RELPATH = ("skills", REGISTRY_SYSTEM, "registry.yaml")
 def registry_entry(**overrides) -> dict[str, str]:
     """One well-formed registry entry: seven fields plus the `id` an `:R authz` row cites as
     `anchor_id` (without it a citation names a `pattern` string, which any edit silently
-    re-identifies). Shared because the e2e drives the real adapter over the same entry."""
+    re-identifies). Shared because the e2e drives the real lookup over the same entry."""
     base = {
         "id": ENTRY_ID,
         "pattern": PATTERN,
@@ -349,3 +352,18 @@ def authorized_rows(
     return consult_block(*consultations) + authz_block(
         authz_row(anchor_id=ENTRY_ID if cited_id is None else cited_id, **authz_kwargs)
     )
+
+
+@contextlib.contextmanager
+def judged_on(*, run_state: Any = None) -> Iterator[None]:
+    """Hold the day a platform `tacit-knowledge.lookup` is judged on, through the call-scoped
+    carrier the platform sets (#1390 amendment 4; it never rides the verb context, #1385 O1):
+    `run_state` as `CALL_RUN_STATE` (the run's own clock, as the query tool holds it). It is set
+    for the block, so an outer run state is masked by `None` and the call is judged on wall time."""
+    from defender.systems.verbs import CALL_RUN_STATE
+
+    run_token = CALL_RUN_STATE.set(run_state)
+    try:
+        yield
+    finally:
+        CALL_RUN_STATE.reset(run_token)

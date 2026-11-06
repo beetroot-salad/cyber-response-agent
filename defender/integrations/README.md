@@ -52,7 +52,7 @@ second one.
   for the docker-exec-curl stubs; `record_access_context` for host-state;
   elastic judges its access method, its declaration and its two index keys). The run judges each granted system with it
   once, at start: one that fails is down for the run with that reason, and no
-  verb of it is called (#1256). A system needing no settings (tacit-knowledge)
+  verb of it is called (#1256). A system needing no settings
   declares one that never raises.
 - **Exit codes — `0` ok / `1` query rejected / `2`
   unreachable / `64` bad invocation.** The circuit breaker counts only genuine

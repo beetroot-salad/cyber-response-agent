@@ -250,3 +250,36 @@ def test_the_commit_gate_refuses_an_id_that_disagrees_with_its_directory(tmp_pat
         lead_author._skills_path_rule(
             _root(lane), "A ", "agent/skills/gather/queries/SCHEMA.md", systems=DECLARED,
             tree_for=_tree_for(lane))
+
+
+#: The tacit-knowledge registry as a tenant repo carries it (#1390): data beside a markdown page.
+TACIT_REGISTRY_REL = "agent/skills/tacit-knowledge/registry.yaml"
+TACIT_PAGE_REL = "agent/skills/tacit-knowledge/SKILL.md"
+
+
+def test_1390_the_lane_edits_the_registrys_description_page_but_cannot_commit_the_registry(tmp_path):
+    """Against the checkout's real declared systems the lane's gate admits an edited `tacit-knowledge` SKILL.md and refuses an edited `registry.yaml`; an entry lands only by a human merge. A2."""
+    from defender._git import REPO_ROOT
+    from defender.learning.leads.declared_systems import declared_systems
+
+    declared = declared_systems(REPO_ROOT)
+    assert {"elastic", "tacit-knowledge"} <= declared, (
+        f"the real declared systems leave out the registry's system: {sorted(declared)}")
+    files = {**_gate_files(),
+             "skills/tacit-knowledge/SKILL.md": _skill("tacit-knowledge"),
+             "skills/tacit-knowledge/registry.yaml": "entries: []\n"}
+    control = C.draft_lane(tmp_path / "control", lanes=C.LEAD_LANES, files=files)
+    _write(control, TACIT_PAGE_REL, _skill("tacit-knowledge") + "edited by the lane\n")
+    assert _composed(control, declared) == [TACIT_PAGE_REL], (
+        "positive control: the same lane admits an edited description page for the registry's system")
+
+    lane = C.draft_lane(tmp_path / "lane", lanes=C.LEAD_LANES, files=files)
+    _write(lane, TACIT_REGISTRY_REL, (
+        "entries:\n  - id: tk-lane-forged\n    pattern: ssh-root-login\n"
+        "    actor_scope: svc-deploy-01\n    host_scope: db-1.corp\n    added_by: agent\n"
+        "    added_at: '2026-11-01'\n    review_by: '2026-12-01'\n    justification: seen often\n"))
+
+    with pytest.raises(LeadAuthorError) as refused:
+        _composed(lane, declared)
+    assert TACIT_REGISTRY_REL in str(refused.value)
+    assert lane.landed() == []

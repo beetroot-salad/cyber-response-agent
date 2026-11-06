@@ -215,15 +215,18 @@ class _Original:
 
 def _originals(source_run_dir: Path) -> list[_Original]:
     """The source run's calls, first occurrence of each key, in capture order. Sentinels (a
-    `∅.` row never reached a system) are not calls (N15)."""
+    `∅.` row never reached a system) are not calls (N15). Nor are a platform-served system's: a
+    world re-runs that verb against its pinned knowledge and never takes an oracle's answer for
+    it (`_serve_platform`), so there is nothing to calibrate, and it is no failure to replay."""
     from defender.learning.branch.ledger import request_key
     from defender.learning.lead_repository import load_queries_report
+    from defender.systems.verbs import is_platform_served
 
     rows, _unreadable = load_queries_report(Path(source_run_dir))
     seen: set[str] = set()
     out: list[_Original] = []
     for row in rows:
-        if row.is_sentinel or not row.system or not row.verb:
+        if row.is_sentinel or not row.system or not row.verb or is_platform_served(row.system):
             continue
         key = request_key(row.system, row.verb, row.params)
         if key in seen:
@@ -359,8 +362,8 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one pass: adm
         return record(REFUSED, "no world of the family carries a fact, so there is no world "
                                "change to calibrate and nothing a sibling could measure")
     if not originals:
-        return record(REFUSED, "the source run made no call that reached a system, so there "
-                               "is no original call to replay")
+        return record(REFUSED, "the source run made no call that reached a system a world "
+                               "can vary, so there is no original call to replay")
     if not replayable:
         return record(REFUSED, f"none of the source run's {len(originals)} call(s) can be "
                                "replayed: the live gather grant admits none of them (see "

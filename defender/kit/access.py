@@ -18,9 +18,9 @@ CALLER_GRACE_SEC = 5
 
 
 def caller_wait_sec(timeout_sec: float) -> float:
-    """How long a caller waits for the proxy's answer to a request with `timeout_sec`: the
-    proxy's deadline (`timeout_sec` + `PROXY_OVERHEAD_SEC`), which it answers by, and
-    `CALLER_GRACE_SEC`."""
+    """How long a caller waits for each stretch of the proxy's reply to a request with
+    `timeout_sec`: the proxy's deadline (`timeout_sec` + `PROXY_OVERHEAD_SEC`), which it answers
+    by, and `CALLER_GRACE_SEC`. A wait per read, not for the whole reply (#1412)."""
     return timeout_sec + PROXY_OVERHEAD_SEC + CALLER_GRACE_SEC
 
 #: The access method (D2) of a system reached through the credential proxy.
@@ -45,7 +45,7 @@ PUBLIC_FIELD = {STATIC: USERNAME, OAUTH_CLIENT_CREDENTIALS: CLIENT_ID}
 
 def secret_fields(kind: str, names: Iterable[str]) -> tuple[str, ...]:
     """Which of a `kind` set's field `names` are secret (r7 A19): all but the kind's public
-    field. The write API's minimum length and the proxy's scrub both ask this, so they agree."""
+    field. The write API's minimum length asks this."""
     return tuple(n for n in names if n != PUBLIC_FIELD.get(kind))
 
 

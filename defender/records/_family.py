@@ -51,7 +51,8 @@ FACT_ID_MAX_LEN = 64
 #: manifest's prompt loads and is never read.
 _FAMILY_FIELDS = (
     "episode_id", "source_run_dir", "source_run_id", "branch_message_id", "fences_at",
-    "as_of", "continuation_prompt", "served_systems", "base_story", "discriminator", "worlds",
+    "as_of", "continuation_prompt", "served_systems", "reachable_systems", "base_story", "discriminator",
+    "worlds",
 )
 
 #: Every field a world entry declares.
@@ -533,6 +534,8 @@ def parse_family(doc: Any) -> Family:
             "edited after review must not load as if the edit were part of the contract")
     _check_scalars(doc)
     served_systems = _parse_served_systems(doc.get("served_systems"))
+    if "reachable_systems" in doc:  # absent from a manifest older than the field (#1390)
+        _parse_served_systems(doc["reachable_systems"])
     discriminator = _parse_discriminator(doc.get("discriminator"))
     as_of = parse_as_of(doc.get("as_of"))
     worlds = _parse_worlds(doc.get("worlds"))

@@ -14,7 +14,7 @@ from defender._redaction import redact_model_visible
 from defender.systems import circuit_breaker
 from defender.systems.verb_dispositions import HEALTH_CHECK, gather_query_systems
 from defender.systems.verb_grant import GrantError
-from defender.systems.verbs import fresh_adapter_module, redact_settings_path
+from defender.systems.verbs import PLATFORM_SERVED, fresh_adapter_module, redact_settings_path
 # The run record's fault type, through the record's own module: the import edge into
 # `scripts/` stays `run_tenant`'s (#1080 O1's named pair, retired by #1172/#1121).
 from defender.systems.run_tenant import ConfigFault
@@ -182,12 +182,14 @@ def judge_run(roster: RosterRead, tenant: RunTenant, *, defender_dir: Path,
                         adapters_root=Path(roster.root), known_ids=frozenset(known_ids))
     down: dict[str, StartCause] = {}
     systems = granted_systems(tenant.grants)
-    missing = systems - set(roster.accepted)
+    missing = systems - set(roster.verbs)
     if missing:
         raise GrantError(
             f"{tenant.table_pointer}: gather grants system(s) absent from the adapters roster "
             f"under {roster.root}: {', '.join(sorted(missing))}")
-    for system in sorted(systems):
+    for system in sorted(systems - set(PLATFORM_SERVED)):
+        # A platform-served system is product code and never a tenant setting: it has no
+        # settings check and is never down at start (a broken registry is met at call time).
         cause = judge_adapter(
             functools.partial(fresh_adapter_module, roster, system), tenant=tenant, scope=scope)
         if cause is not None:

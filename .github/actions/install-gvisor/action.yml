@@ -1,0 +1,84 @@
+name: Install gVisor (runsc)
+description: Install runsc, register it with the Docker daemon, and fail unless the daemon lists it.
+
+# The caller sets the step's bound with `timeout-minutes: 5`: an action's own steps cannot carry
+# one. The bound reaches the script below, because the runner hands an action's steps whatever
+# time the calling step has left.
+runs:
+  using: composite
+  steps:
+    - name: Install and register runsc
+      # BOUNDED, every command that waits on a host or the daemon (#937). This step talks to two
+      # hosts the runner does not control, and `set -e` fails fast on an ERROR but not on a STALL — so an
+      # unresponsive gvisor apt repo hung box-dood for 15 minutes on run 32278695386 and
+      # would have run to the 6-hour job default. It normally finishes in 12-31s.
+      #
+      # The per-command bounds NEST inside the caller's: 60 + 60 + 120 + 30 + 15 + 10 = 295s against
+      # a 300s step. The curl term is 60 and not 20, because --retry-max-time is the last
+      # instant a new attempt may START and that attempt still gets a full --max-time. That ordering is the whole point of having both — whichever command
+      # stalls, its own `timeout` exits 124 and names itself in the log, and the step bound
+      # stays a backstop for a stall no per-command bound covers. Bounds that summed ABOVE
+      # 300s would hand every multi-stall run back to GitHub's generic step cancel, which
+      # says only that the step was too slow. The step normally finishes in 12-31s. The two
+      # `docker info` bounds are the tightest, because the budget leaves no more: 30s each would
+      # sum to 330s. The slowest call seen right after the restart took 3.9s.
+      shell: bash
+      run: |
+          # `pipefail` on top of `set -eux`: curl feeds a pipe, so without it the pipeline
+          # reports gpg's status and a curl that hit its own bound reads as "no valid
+          # OpenPGP data found" — the bounded command's failure hidden behind its reader's.
+          set -euxo pipefail
+          # --retry-max-time bounds the retry SERIES; --max-time bounds one attempt, and
+          # curl resets it per retry, so without the series bound this line alone could
+          # spend 4 * 60s + delays and blow past the step bound.
+          curl -fsSL --max-time 20 --retry 3 --retry-delay 2 --retry-max-time 40 \
+            --retry-connrefused https://gvisor.dev/archive.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+            | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
+          # Split rather than `&&`-chained: under `set -e` the chain adds nothing, and one
+          # `timeout` per command is what tells an update stall from an install stall.
+          # Acquire::Retries because the gvisor apt host is the one that was observed
+          # stalling and the stall cleared on a re-run inside 20s: a bound with no retry
+          # converts that transient into a red build across three jobs, where curl — a
+          # different host, and not the one that failed — already retries.
+          #
+          # http::Timeout is what makes that retry SAFE to have. Retries apply to every
+          # source, not just gvisor's, and the runner's azure.archive.ubuntu.com mirror goes
+          # unreachable often: on run 32294123321 the default 30s connect timeout x 4
+          # attempts put a 120s floor under `update` and blew a 60s kill, with the gvisor
+          # host itself answering in under a second. Capping the per-connection wait at 10s
+          # makes the worst case 10 + 2*10 = 30s of dead-mirror stall.
+          APT_BOUNDED=(-o Acquire::Retries=2 -o Acquire::http::Timeout=10
+                       -o Acquire::https::Timeout=10)
+          # ...and `update` is SCOPED to the one source this step added, which is what makes
+          # the bound honest rather than a guess that keeps losing. The default `update`
+          # refreshes every mirror on the runner to install a package that needs none of
+          # them: `runsc` resolves to "1 newly installed, 0 to remove". On run 32294715524
+          # the capped timeout worked — azure Ign'd at 10s intervals instead of 30 — and the
+          # step still died at 124, because apt then failed over to archive.ubuntu.com and
+          # spent 76s pulling indices for repositories nothing here installs from. Raising
+          # the number again would just move the next stall; not fetching what we do not use
+          # removes it. sourceparts=/dev/null suppresses the OTHER .list.d entries, and
+          # List-Cleanup=0 keeps the image's existing lists on disk for anything downstream.
+          GVISOR_ONLY=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/gvisor.list
+                       -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0)
+          sudo timeout 60 apt-get "${APT_BOUNDED[@]}" "${GVISOR_ONLY[@]}" update
+          # install keeps the full source list (it resolves against the image's lists) and a
+          # roomier bound: the runsc deb is 168 MB, ~20s on a healthy runner.
+          sudo timeout 120 apt-get "${APT_BOUNDED[@]}" install -y runsc
+          # --oci-seccomp: #771's alias ban faults every box on arrival unless the daemon records it
+          # as a runtimeArg. This only writes daemon.json, so it waits on nothing and has no bound.
+          sudo runsc install -- --oci-seccomp
+          sudo timeout 30 systemctl restart docker
+          # Printed before the check so a failed check shows what the daemon did register.
+          timeout 15 docker info --format '{{.Runtimes}}'
+          # Hard-fail rather than print. Every box in the #540 suite starts at the runtime
+          # BoxSpec anchors (runsc), and the parity test self-skips a runtime the daemon does
+          # not register — so a silently-degraded install here would leave the boundary
+          # "pinned" by a green run that started no gVisor box at all.
+          # Read into a variable first: `set -e` ignores a failure inside `[[ ... ]]`, so a stall
+          # there would read as "runsc is missing" and not as this bound's exit 124.
+          # No pipeline: under pipefail, a reader that stops early fails this step with runsc installed.
+          runtimes=$(timeout 10 docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}')
+          [[ " $runtimes " == *" runsc "* ]]

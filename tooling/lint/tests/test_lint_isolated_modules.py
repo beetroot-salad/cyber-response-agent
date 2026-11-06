@@ -1,5 +1,5 @@
 """Tests for the lint_isolated_modules gate: the box image scripts import only the standard library,
-the tacit-knowledge registry adapter never writes, and the budget enforcer reads no environment."""
+the tacit-knowledge registry module never writes, and the budget enforcer reads no environment."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,7 +13,7 @@ _GATE = load_lint_gate("lint_isolated_modules")
 _CLEAN = {
     "box/_image.py": "import json, hashlib\nfrom pathlib import Path\n",
     "box/image_cli.py": "from __future__ import annotations\nimport sys\n",
-    "integrations/tacit_knowledge_adapter.py":
+    "systems/tacit_registry.py":
         "import yaml\nfrom pathlib import Path\n"
         "def load(p):\n    return yaml.safe_load(Path(p).read_text())\n",
     "investigation/ticket_writer.py": "def write(env):\n    return env['X']\n",
@@ -62,14 +62,14 @@ def test_an_image_script_importing_beyond_the_stdlib_is_found(tmp_path, src):
 def test_a_registry_write_is_found(tmp_path, body):
     src = ("import os, shutil, yaml\nfrom pathlib import Path\n"
            f"def f(p, a, b, f):\n    {body}\n")
-    found = _GATE.scan(_tree(tmp_path, **{"integrations__tacit_knowledge_adapter.py": src}))
-    assert len(found) >= 1 and all("tacit_knowledge_adapter" in f for f in found), found
+    found = _GATE.scan(_tree(tmp_path, **{"systems__tacit_registry.py": src}))
+    assert len(found) >= 1 and all("tacit_registry" in f for f in found), found
 
 
 def test_registry_reads_are_not_writes(tmp_path):
     src = ("import yaml\ndef f(p, d):\n    d.get('x')\n    d.update({})\n"
            "    return open(p).read(), open(p, 'r').read()\n")
-    assert _GATE.scan(_tree(tmp_path, **{"integrations__tacit_knowledge_adapter.py": src})) == []
+    assert _GATE.scan(_tree(tmp_path, **{"systems__tacit_registry.py": src})) == []
 
 
 @pytest.mark.parametrize("body", [
@@ -121,3 +121,19 @@ def test_a_missing_correlation_module_is_a_finding(tmp_path):
 def test_a_file_that_does_not_parse_is_exit_2(tmp_path):
     root = _tree(tmp_path, **{"box___image.py": "def (:\n"})
     assert _GATE.main(["--root", str(root)]) == 2
+
+
+def test_1390_the_registry_rule_is_sited_on_the_platform_module_not_the_retired_adapter(tmp_path):
+    """The registry's never-writes rule holds `systems/tacit_registry.py` in the shipped tree and reports a tree that lacks it. #1390."""
+    from pathlib import Path
+
+    real = Path(__file__).resolve().parents[3] / "defender"
+    assert (real / "systems" / "tacit_registry.py").is_file(), "the platform module is not where the rule looks"
+    assert not (real / "integrations" / "tacit_knowledge_adapter.py").exists()
+    assert _GATE.scan(real) == [], "the shipped tree breaks an isolated-module rule"
+
+    root = _tree(tmp_path)
+    (root / "systems" / "tacit_registry.py").unlink()
+    found = _GATE.scan(root)
+    assert any("tacit_registry" in f and "missing" in f for f in found), (
+        f"a tree with no registry module passed the rule: {found}")

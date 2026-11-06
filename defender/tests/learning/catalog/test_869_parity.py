@@ -106,8 +106,9 @@ def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkey
 
 
 def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatch):
-    """No adapter in the product checkout and no marker in the draft refuse the lane before any
-    spawn; the batch commits nothing."""
+    """A tenant declaring no system of its own (no adapter in the product checkout, no marker in
+    the draft; the platform-served system admits paths but does not count, #1390 A14) is refused
+    before any spawn; the batch commits nothing."""
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
     product = tmp_path / "product"
     (product / "defender" / "integrations").mkdir(parents=True)
@@ -123,7 +124,7 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
             paths, state=C.open_state(paths), trees=C.draft_trees(lane), batch=lane.batch),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
     )
-    assert deps.systems == frozenset()
+    assert deps.systems == frozenset({"tacit-knowledge"})
 
     run_dir = curation_run_dir("run-x")
     (run_dir / "gather_raw").mkdir()

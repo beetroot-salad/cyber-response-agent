@@ -320,9 +320,38 @@ def test_1234_lead_set_refused_when_world_systems_include_no_served_system(
     assert [r.get("type") for r in _queued(built, "b")] == ["lead-quality"]
 
     # At the validator: refused, naming the bucket; lead-set on a served system admitted.
-    S.validate(S.world_reply("lead-set", ["idp"]), served_systems=served)  # the control
-    message = _refusal(S.world_reply("lead-set", ["siem-x"]), served_systems=served)
+    S.validate(S.world_reply("lead-set", ["idp"]), reachable_systems=served)  # the control
+    message = _refusal(S.world_reply("lead-set", ["siem-x"]), reachable_systems=served)
     assert _names(message, "lead-set"), message
+
+
+def test_1390_lead_set_asks_what_the_grant_reached_not_what_a_world_can_vary(tmp_path: Path) -> None:
+    """A world reply bucketed lead-set naming a registry the investigator could read, though no world varies it, reaches the verdict; a manifest older than `reachable_systems` still means its one list. M20."""
+    reachable = ["idp", "tacit-knowledge"]
+    built = S.family(tmp_path, served_systems=["idp"], manifest_over={"reachable_systems": reachable})
+    seam = S.judge({"b": [
+        S.world_reply("lead-set", ["tacit-knowledge"], investigator=[_inv("b", "lead-set")])]})
+
+    S.grade(built, seam)
+
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0"], "the reply was refused and re-asked"
+    assert S.row(built, "b").get(BUCKET) == "lead-set"
+
+    from defender.learning.judge.run import reachable_systems_of
+    assert reachable_systems_of({"served_systems": ["idp"], "reachable_systems": reachable}) == reachable
+    assert reachable_systems_of({"served_systems": ["idp"]}) == ["idp"]
+
+
+def test_1390_the_judge_is_told_what_else_the_investigator_could_read() -> None:
+    """The family block names a system the investigator could read that no world varies, and adds no line when there is none, so an older manifest renders as it did. M20."""
+    from defender.learning.judge.layout import _family_block
+
+    def text(doc: dict) -> str:
+        return "".join(str(part) for part in _family_block(doc)[1])
+
+    assert "tacit-knowledge" in text({"served_systems": ["idp"], "reachable_systems": ["idp", "tacit-knowledge"]})
+    assert "also readable" not in text({"served_systems": ["idp"], "reachable_systems": ["idp"]})
+    assert "also readable" not in text({"served_systems": ["idp"]})
 
 
 def test_1234_discipline_bucket_for_a_world_never_shown_its_facts(tmp_path: Path) -> None:

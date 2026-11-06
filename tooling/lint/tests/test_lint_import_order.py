@@ -225,3 +225,13 @@ def test_an_unparseable_file_cannot_be_cleared(tmp_path):
 def test_the_order_names_every_package_of_this_checkout():
     rels = _GATE._files(_GATE.DEFENDER).values()
     assert {_GATE.node_of(rel) for rel in rels} <= set(_GATE.ORDER)
+
+
+def test_1390_the_baseline_no_longer_excuses_the_tacit_cli_reaching_into_an_adapter():
+    """The shipped baseline holds no entry for `cli/tacit_cli.py`, and the shipped tree passes it. #1390."""
+    baseline_path = Path(__file__).resolve().parents[1] / "lint_import_order_baseline.json"
+    entries = json.loads(baseline_path.read_text(encoding="utf-8"))["entries"]
+
+    assert [k for k in entries if "tacit" in k] == [], "the tacit CLI import entry is still excused"
+    root = Path(__file__).resolve().parents[3] / "defender"
+    assert _GATE.main(["--root", str(root), "--baseline", str(baseline_path)]) == 0

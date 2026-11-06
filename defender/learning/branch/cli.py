@@ -90,6 +90,7 @@ from defender.learning.branch.questioner_launch import (
     _logger as _logger,
     _sample_text as _sample_text,
     branch_point_clock as branch_point_clock,
+    reachable_systems as reachable_systems,
     served_systems as served_systems,
     system_samples as system_samples,
     write_questioner_samples as write_questioner_samples,
@@ -552,14 +553,16 @@ def _launch(  # noqa: PLR0913 — see `main`
         runs = tenant.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
         _source_stamp_agrees(source, tenant.tenant_id)
-        # N05 / O-20: a tenant whose gather grant serves no system has nothing a world could
-        # change. Refused here, before the question-writer or anything else is spent.
+        # N05 / O-20: a tenant whose gather grant serves no variable system has nothing a world
+        # could change. Refused here, before the question-writer or anything else is spent.
         served = served_systems(tenant.grants.gather)
         if not served:
             raise LauncherRefused(
-                f"[branch] tenant {tenant.tenant_id!r}: its gather grant serves no system (no read "
-                "verb other than health-check is granted), so no world of a branch could be served "
-                "— grant gather a read verb on at least one system before branching this tenant")
+                f"[branch] tenant {tenant.tenant_id!r}: its gather grant serves no system a world "
+                "can vary (no read verb other than health-check on any system but the "
+                "platform-served ones, which answer the same in every world), so no world of a "
+                "branch could be served — grant gather a read verb on at least one other system "
+                "before branching this tenant")
         # O1: any tenant branches. No system of the lab's is assumed, so a tenant with no
         # corpus-engine part (or one whose part does not resolve) launches like any other.
         # SAME RULE, #1007 M8/O7: production's questioner-lessons root is `PATHS.lessons_
@@ -641,7 +644,8 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     with clock.step(Step.QUESTIONER):
         try:
             family = _author(ns, source=source, episode=episode, questioner=questioner,
-                             lessons_dir=lessons_dir, served=served)
+                             lessons_dir=lessons_dir, served=served,
+                             reachable=reachable_systems(tenant.grants.gather))
         except (FamilyError, branch.BranchError) as unparsed:
             # N05 / M05=A: nothing to calibrate, for a reason that belongs to no world.
             outcome_mod.write_outcome(

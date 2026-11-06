@@ -1,5 +1,5 @@
 """#1163 repair (proxy side): the OAuth access-token cache keyed per tenant and system and
-expiring, the adapter's headers refused or stripped, the Basic echo scrub."""
+expiring, the adapter's headers refused or stripped, the Basic echo passing through."""
 from __future__ import annotations
 
 import base64
@@ -236,10 +236,10 @@ def _decl(scheme):
 
 # --- O4 the whole injected Authorization header -------------------------------------------
 
-def test_c2_an_upstream_echoing_the_whole_basic_authorization_header_returns_no_encoded_password(
+def test_c2_an_upstream_echoing_the_whole_basic_authorization_header_is_passed_through(
         tmp_path, data_root):
-    """An upstream that echoes the received `Authorization` header (`Basic <base64>`) in body
-    and header returns neither the base64 of `user:password` nor the password. O4, N6."""
+    """An upstream's echo of the received `Basic <base64>` header reaches the run as sent, in
+    body and header. #1412 O7."""
     packed = base64.b64encode(f"svc-reader:{H.CANARY_KEY}".encode()).decode()
     with T.rig(tmp_path / "forge", data_root, _decl(H.basic_scheme()),
                creds=T.basic_set("svc-reader", H.CANARY_KEY)) as r:
@@ -248,8 +248,5 @@ def test_c2_an_upstream_echoing_the_whole_basic_authorization_header_returns_no_
 
     assert answer["fault"] is None
     assert r.up.seen[0].header("Authorization") == f"Basic {packed}", "control: Basic was sent"
-    shown = json.dumps(answer)
-    assert packed not in shown
-    assert H.CANARY_KEY not in shown
-    assert answer["body"].startswith("before-")
-    assert answer["body"].endswith("-after")
+    assert answer["body"] == f"before-Basic {packed}-after"
+    assert answer["headers"]["x-echo"] == f"hdr-Basic {packed}-end"

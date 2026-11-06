@@ -45,6 +45,16 @@ The tenant's alert mapping lives in the database; nothing reads `settings/alert-
    describes the six entries.
 3. Delete the file from the tenant's repository.
 
+## Upgrade from before #1412
+
+The credential proxy streams each upstream reply to the run in its own frame format (content
+type `application/vnd.defender.proxy-reply`) instead of one JSON document, and no longer scrubs
+credentials an upstream echoes. Upgrade the proxy and every run image together: an old run
+refuses the new reply, and a new run refuses an old one, both as the proxy's own transport fault.
+A reply over 8 MiB is still refused; the fault now tells the model to narrow the query. That
+limit is no longer configurable: remove `max_response_bytes` from the proxy's config file before
+upgrading, or the proxy refuses to start.
+
 ## Upgrade from before #1391
 
 Elastic is reached only through the credential proxy; its Docker access is gone. <!-- lint-shippable: ok — the vendor-specific product integration. -->
