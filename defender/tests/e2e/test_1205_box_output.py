@@ -318,10 +318,11 @@ class _DaemonThatRaises(RecordingDocker):
 
 EXEC_KILLED = ("sh", "-c", "exit 137")  # C4, C5: exec rc 137 and no bytes, whether the box or the helper died
 EXEC_KILLED_WITH_BYTES = ("sh", "-c", "printf 'partial output'; exit 137")  # C4: bytes arrived before the kill
+# Half of a real frame, with the frame built here: the child needs no import of `defender`, which a
+# subprocess started from CI's working directory cannot do.
+_HALF_FRAME = box.encode_response(box.BoxResult(rc=0, out=b"x" * 99, err=b""))
 EXEC_KILLED_MID_FRAME = (sys.executable, "-c", "import os, sys\n"
-                         "from defender import box\n"
-                         "w = box.encode_response(box.BoxResult(rc=0, out=b'x' * 99, err=b''))\n"
-                         "os.write(1, w[:len(w) // 2]); sys.exit(137)")
+                         f"os.write(1, {_HALF_FRAME[:len(_HALF_FRAME) // 2]!r}); sys.exit(137)")
 EXEC_SAYS_NO_SUCH_BOX = ("sh", "-c", "echo 'No such container' >&2; exit 1")  # C5, the next exec
 NOT_A_FRAME = ("sh", "-c", "printf 'wrong magic, a bypassing writer'")  # C13
 EXEC_REFUSED_REQUEST = ("sh", "-c", "exit 2")  # the helper could not decode the request: rule 4
