@@ -742,19 +742,19 @@ def _run(sql: str, rows_path: str | None = None, names_path: str | None = None) 
     except ImportError:
         return _no_runtime("duckdb")
 
-    raw = _read_stdin()
-    if not raw.strip():
-        print(
-            "defender-sql: no input on stdin — the payload is empty. This is NOT an "
-            "empty result set: the query that produced it recorded no observation at "
-            "all, so nothing here supports a claim about what is present or absent.",
-            file=sys.stderr,
-        )
-        return EXIT_INPUT_ERROR
-
     phase = _Phase()
     scratch: str | None = None
     try:
+        # The read is inside the one catch: at a small cap even the bounded read can run out.
+        raw = _read_stdin()
+        if not raw.strip():
+            print(
+                "defender-sql: no input on stdin — the payload is empty. This is NOT an "
+                "empty result set: the query that produced it recorded no observation at "
+                "all, so nothing here supports a claim about what is present or absent.",
+                file=sys.stderr,
+            )
+            return EXIT_INPUT_ERROR
         scratch = tempfile.mkdtemp(prefix="defender-sql-")
         return _answer_query(duckdb, sql, raw, rows_path, names_path, scratch, phase)
     except Exception as exc:
