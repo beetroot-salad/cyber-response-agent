@@ -2,8 +2,7 @@
 
 A set's kind must fit the scheme (`bearer`/`basic`/`header` need `static`, OAuth needs
 `oauth-client-credentials`) and every field the scheme reads must be present, or nothing is
-sent. `secret_values` names the values the answer is scrubbed of (every field but the kind's
-public one, r7 A19; the pipeline adds the access token). OAuth access tokens live only in this
+sent. OAuth access tokens live only in this
 process, keyed by (tenant, system, set version, digest of the whole declaration, #1364 O2); a
 token is reused only while it is unexpired by a margin."""
 from __future__ import annotations
@@ -32,15 +31,12 @@ from defender.kit.access import (
     USERNAME,
     AccessDeclaration,
     Auth,
-    secret_fields,
 )
 from defender.kit.faults import ConfigFault
 from defender.credential_proxy._deadline import Deadline
 from defender.credential_proxy._refusal import CONFIG, TRANSPORT, Refused
 from defender.credential_proxy._reply import capped_reply
 
-#: What replaces a secret value the upstream echoed (N6: literal echoes only).
-MARKER = "[credential removed]"
 #: A cached access token is not reused within this many seconds of its stated expiry.
 REFRESH_MARGIN_SEC = 30
 #: The most a token endpoint's answer may hold.
@@ -77,11 +73,6 @@ def _needed(creds: CredentialSet, name: str | None, system: str) -> str:
     return value
 
 
-def secret_values(creds: CredentialSet) -> tuple[str, ...]:
-    """The secret values of `creds`, by the rule the write API checks too (r7 A19)."""
-    return tuple(v for k in secret_fields(creds.kind, creds.fields) if (v := creds.fields[k]))
-
-
 def check_fit(auth: Auth, creds: CredentialSet, system: str) -> None:
     """`Refused` unless `creds` is the kind `auth` needs (A4)."""
     if creds.kind != auth.kind:
@@ -108,21 +99,6 @@ def static_headers(auth: Auth, creds: CredentialSet, system: str) -> dict[str, s
         packed = f"{user}:{_needed(creds, PASSWORD, system)}".encode()
         return {"Authorization": f"Basic {base64.b64encode(packed).decode('ascii')}"}
     raise AssertionError(f"not a static scheme: {auth.scheme}")
-
-
-def scrub_secrets(text: str, secrets: tuple[str, ...]) -> str:
-    """`text` with every literal occurrence of each secret replaced by `MARKER`, longest
-    first so a secret holding another is removed whole."""
-    for secret in sorted(secrets, key=len, reverse=True):
-        text = text.replace(secret, MARKER)
-    return text
-
-
-def scrub_secret_bytes(data: bytes, secrets: tuple[str, ...]) -> bytes:
-    """`scrub_secrets` over bytes, each secret as its UTF-8 bytes."""
-    for secret in sorted(secrets, key=len, reverse=True):
-        data = data.replace(secret.encode("utf-8"), MARKER.encode("utf-8"))
-    return data
 
 
 @dataclass
@@ -255,5 +231,4 @@ def _lifetime(stated: object) -> int | None:
     return None
 
 
-__all__ = ["MARKER", "AccessTokens", "CredentialSet", "check_fit", "scrub_secrets",
-           "scrub_secret_bytes", "secret_values", "static_headers"]
+__all__ = ["AccessTokens", "CredentialSet", "check_fit", "static_headers"]

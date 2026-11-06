@@ -80,10 +80,10 @@ def test_m1_the_served_proxy_started_from_a_token_file_prints_no_token(tmp_path)
     try:
         assert _await_listening(proc, port), "the program did not start serving"
         tok = T.token(fixture_uuid("tenant:1163-main"), {("identity", "r")})
-        answer = httpx.post(f"http://127.0.0.1:{port}/v1/request", json={
+        reply = httpx.post(f"http://127.0.0.1:{port}/v1/request", json={
             "system": "identity", "method": "GET", "url": "http://x.invalid/a",
-            "headers": {}, "body": None}, headers={"Authorization": f"Bearer {tok}"},
-            timeout=40).json()
+            "headers": {}, "body": None}, headers={"Authorization": f"Bearer {tok}"}, timeout=40)
+        answer = T.answer_of(reply.content)
     finally:
         out = _stop(proc)
 

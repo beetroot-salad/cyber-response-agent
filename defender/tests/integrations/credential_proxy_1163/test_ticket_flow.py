@@ -105,18 +105,18 @@ def test_t2_the_docker_exec_case_system_still_uses_docker(tmp_path, data_root):
 
 
 def test_t3_failures_are_text_in_the_receipt_and_carry_no_credential(tmp_path, data_root, caplog):
-    """An upstream 401 whose body echoes the key, a missing credential, an unreachable proxy and a
+    """An upstream 401, a missing credential, an unreachable proxy and a
     read-only token each leave an error receipt (no raise), the key absent, and nothing sent where
     the proxy refused; proxy refusals say "the credential proxy refused". O5, O4, O3."""
     caplog.set_level(logging.DEBUG)
     with H.upstream() as up, _published(tmp_path / "forge", data_root, _decl(up)) as t:
         cases = {
-            "401-echo": (T.token(t.tenant_id, {(SYSTEM, "rw")}), True, True, True),
+            "401": (T.token(t.tenant_id, {(SYSTEM, "rw")}), True, True, True),
             "no-credential": (T.token(t.tenant_id, {(SYSTEM, "rw")}), False, True, False),
             "proxy-down": (T.token(t.tenant_id, {(SYSTEM, "rw")}), True, False, False),
             "read-only-token": (T.token(t.tenant_id, {(SYSTEM, "r")}), True, True, False),
         }
-        up.replies[COMMENT] = (401, {}, json.dumps({"detail": f"bad key {H.CANARY_KEY}"}).encode())
+        up.replies[COMMENT] = (401, {}, json.dumps({"detail": "bad key"}).encode())
         for name, (tok, has_set, proxy_up, reaches) in cases.items():
             before = len(up.seen)
             store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()} if has_set else {})
@@ -130,7 +130,7 @@ def test_t3_failures_are_text_in_the_receipt_and_carry_no_credential(tmp_path, d
             assert reason.strip()
             assert H.CANARY_KEY not in json.dumps(receipt), name
             assert (len(up.seen) > before) is reaches, name
-            if name == "401-echo":
+            if name == "401":
                 assert "the store refused" in reason
                 assert "401" in reason
             elif name == "proxy-down":

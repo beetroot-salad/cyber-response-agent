@@ -102,10 +102,10 @@ def token(tenant_id: str, grant: set[tuple[str, str]], *, signer: Any = None,
         investigation=investigation, grant=grant, expires_at=datetime.now(UTC) + expires_in)
 
 
-def ask(client: Any, tok: str, system: str, method: str, url: str,
-        body: Any = None, headers: Mapping[str, str] | None = None,
-        timeout_sec: float | None = None) -> dict[str, Any]:
-    """One request to the proxy as the http-proxy transport makes it; the proxy's JSON answer.
+def post(client: Any, tok: str, system: str, method: str, url: str,
+         body: Any = None, headers: Mapping[str, str] | None = None,
+         timeout_sec: float | None = None) -> Any:
+    """One request to the proxy as the http-proxy transport makes it; the HTTP response.
     `body` is the request body text (or None); `timeout_sec` the system's own timeout (r7 A21),
     left out when None."""
     from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH
@@ -115,7 +115,33 @@ def ask(client: Any, tok: str, system: str, method: str, url: str,
                                  "headers": dict(headers or {}), "body": body}
                            | ({} if timeout_sec is None else {"timeout_sec": timeout_sec}))
     assert response.status_code == 200, response.text
-    return response.json()
+    return response
+
+
+FINAL_FIELDS = ("status", "headers", "fault", "detail", "system_side", "sent", "body_whole", "reader_fault")
+
+
+def fields_of(final: Any) -> dict[str, Any]:
+    """A `FinalRecord`'s fields, read by attribute as the design says."""
+    return {name: getattr(final, name) for name in FINAL_FIELDS}
+
+
+def answer_of(raw: bytes) -> dict[str, Any]:
+    """The final record of the proxy's framed reply `raw` as a dict, with `body` added as the run
+    reads it: the body frames' text when the record says the body counts, else empty (#1412)."""
+    from defender._proxy_client import decode_reply
+
+    reply = decode_reply(raw)
+    final = fields_of(reply.final)
+    whole = final["body_whole"] is True
+    return {**final, "body": b"".join(reply.chunks).decode("utf-8", "replace") if whole else ""}
+
+
+def ask(client: Any, tok: str, system: str, method: str, url: str,
+        body: Any = None, headers: Mapping[str, str] | None = None,
+        timeout_sec: float | None = None) -> dict[str, Any]:
+    """`post`, read as `answer_of`."""
+    return answer_of(post(client, tok, system, method, url, body, headers, timeout_sec).content)
 
 
 GRANT_R = {("identity", "r")}
@@ -142,16 +168,21 @@ class Rig:
         return token(self.t.tenant_id, GRANT_R if grant is None else grant,
                      signer=self.signer, **kw)
 
-    def ask(self, method: str = "GET", path: str = "/users/x", *, system: str = "identity",  # noqa: PLR0913 — one request's parts
-            grant: set[tuple[str, str]] | None = None, tok: str | None = None,
-            url: str | None = None, body: str | None = None,
-            headers: Mapping[str, str] | None = None,
-            timeout_sec: float | None = None) -> dict[str, Any]:
+    def post(self, method: str = "GET", path: str = "/users/x", *, system: str = "identity",  # noqa: PLR0913 — one request's parts
+             grant: set[tuple[str, str]] | None = None, tok: str | None = None,
+             url: str | None = None, body: str | None = None,
+             headers: Mapping[str, str] | None = None,
+             timeout_sec: float | None = None) -> Any:
         """`method` on `path` relative to the declared base (or the absolute `url`), with a
-        token granting `grant` (read on identity unless given) unless `tok` is given."""
-        return ask(self.client, self.tok(grant) if tok is None else tok, system, method,
-                   url if url is not None else f"{self.up.url}{BASE_PATH}{path}", body, headers,
-                   timeout_sec)
+        token granting `grant` (read on identity unless given) unless `tok` is given; the HTTP
+        response."""
+        return post(self.client, self.tok(grant) if tok is None else tok, system, method,
+                    url if url is not None else f"{self.up.url}{BASE_PATH}{path}", body, headers,
+                    timeout_sec)
+
+    def ask(self, *args: Any, **kw: Any) -> dict[str, Any]:
+        """`post`, read as `answer_of`."""
+        return answer_of(self.post(*args, **kw).content)
 
     def rebuild(self, **deps_kw: Any) -> None:
         """A new proxy app over the same fakes with other `ProxyDeps` options."""

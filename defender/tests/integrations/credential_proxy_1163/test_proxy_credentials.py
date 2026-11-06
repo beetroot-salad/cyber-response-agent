@@ -1,4 +1,4 @@
-"""#1163 how the proxy applies a credential: the declared scheme, the echo scrub, OAuth exchange
+"""#1163 how the proxy applies a credential: the declared scheme, echoes passing through, OAuth exchange
 and cache, rotation. Fakes inject and record; the proxy judges."""
 from __future__ import annotations
 
@@ -92,17 +92,11 @@ def test_c1_a_field_the_scheme_needs_being_missing_is_a_config_fault(
     assert r.up.seen == []
 
 
-# --- O4 echo scrub ---------------------------------------------------------------------------
+# --- O7 an echo passes through ---------------------------------------------------------------
 
-def _assert_scrubbed(answer, secret, *, body=("before-", "-after"), header=("hdr-", "-end")):
-    assert secret not in json.dumps(answer), "a secret value came back"
-    assert answer["body"].startswith(body[0]), answer["body"]
-    assert answer["body"].endswith(body[1]), answer["body"]
-    assert len(answer["body"]) > len(body[0]) + len(body[1]), "nothing marks the removed value"
-    echoes = [v for v in answer["headers"].values() if v.startswith(header[0])]
-    assert echoes, answer["headers"]
-    assert echoes[0].endswith(header[1]), echoes
-    assert len(echoes[0]) > len(header[0]) + len(header[1]), "nothing marks the removed value"
+def _assert_unaltered(answer, value):
+    assert answer["body"] == f"before-{value}-after", answer["body"]
+    assert answer["headers"]["x-echo"] == f"hdr-{value}-end", answer["headers"]
 
 
 @pytest.mark.parametrize(("scheme", "creds", "secret_of", "secret"), [
@@ -114,55 +108,33 @@ def _assert_scrubbed(answer, secret, *, body=("before-", "-after"), header=("hdr
     pytest.param(H.header_scheme("X-Api-Key"), T.static_set,
                  lambda s: s.header("X-Api-Key"), H.CANARY_KEY, id="custom-header-value"),
 ])
-def test_c2_an_echoed_static_credential_comes_back_as_a_marker(
+def test_c2_an_echoed_static_credential_reaches_the_run_unaltered(
         tmp_path, data_root, scheme, creds, secret_of, secret):
-    """An upstream that echoes the credential in its body and a header returns a marker in
-    both, with the surrounding text intact. O4, N6."""
+    """An upstream that echoes the credential in its body and a header is passed through as
+    sent, not marked. #1412 O7."""
     with T.rig(tmp_path / "forge", data_root, _decl(scheme), creds=creds()) as r:
         r.up.replies[f"{BASE}/users/x"] = H.echo_secret(secret_of)
         answer = r.ask()
 
     assert answer["fault"] is None
-    _assert_scrubbed(answer, secret)
+    _assert_unaltered(answer, secret)
 
 
-def test_c2_the_basic_username_is_not_a_secret_and_survives_the_scrub(tmp_path, data_root):
-    """Echoing username and password returns the username and a marker for the password.
-    O4, A4."""
-    with T.rig(tmp_path / "forge", data_root, _decl(H.basic_scheme()),
-               creds=T.basic_set("svc-reader", H.CANARY_KEY)) as r:
-        r.up.replies[f"{BASE}/users/x"] = H.echo_secret(
-            lambda s: "{}-and-{}".format(*H.basic_parts(s)))
-        answer = r.ask()
-
-    assert "svc-reader-and-" in answer["body"]
-    assert H.CANARY_KEY not in json.dumps(answer)
-
-
-def test_c2_a_static_sets_username_is_public_under_every_scheme(tmp_path, data_root):
-    """The scrub and the write API share one rule of what is secret (r7 A19): a static set's
-    `username` is not, whatever the declared scheme; its other fields are."""
-    with T.rig(tmp_path / "forge", data_root, _decl({"scheme": "bearer", "field": "api_key"}),
-               creds=T.custom_set({"api_key": H.CANARY_KEY, "username": "svc-reader"})) as r:
-        r.up.replies[f"{BASE}/users/x"] = H.echo_secret(
-            lambda s: "svc-reader-and-" + s.header("Authorization").removeprefix("Bearer "))
-        answer = r.ask()
-
-    assert answer["fault"] is None
-    assert "svc-reader-and-" in answer["body"]
-    assert H.CANARY_KEY not in json.dumps(answer)
-
-
-def test_c2_an_error_reply_does_not_carry_the_credential_either(tmp_path, data_root):
-    """A 403 whose body and header echo the key yields a fault answer without it anywhere.
-    O4, O7."""
+@pytest.mark.parametrize(("status", "fault"), [(403, "UpstreamFault"), (500, "TransportFault")])
+def test_c2_an_error_reply_echoing_the_key_passes_through_but_never_the_proxys_detail(
+        tmp_path, data_root, status, fault):
+    """An error reply's echo of the key reaches the run as sent; the proxy's own detail on it
+    holds no credential. #1412 O7."""
     with T.rig(tmp_path / "forge", data_root) as r:
         r.up.replies[f"{BASE}/users/x"] = (
-            403, {"X-Why": f"key {H.CANARY_KEY} refused"}, f"bad {H.CANARY_KEY}".encode())
+            status, {"X-Why": f"key {H.CANARY_KEY} refused"}, f"bad {H.CANARY_KEY}".encode())
         answer = r.ask()
 
-    assert answer["fault"] == "UpstreamFault"
-    assert H.CANARY_KEY not in json.dumps(answer)
+    assert answer["fault"] == fault, answer
+    assert answer["body"] == f"bad {H.CANARY_KEY}"
+    assert answer["headers"]["x-why"] == f"key {H.CANARY_KEY} refused"
+    assert answer["detail"].strip(), "positive control: the reply has a detail"
+    assert H.CANARY_KEY not in answer["detail"]
 
 
 # --- OAuth client credentials ----------------------------------------------------------------
@@ -192,9 +164,9 @@ def test_c3_the_client_secret_goes_only_to_the_token_url_and_the_access_token_on
         assert tok not in seen.blob()
 
 
-def test_c3_an_echoed_client_secret_and_access_token_come_back_as_markers(tmp_path, data_root):
-    """An upstream naming both in its reply gets markers for both and the client id intact.
-    O4."""
+def test_c3_an_echoed_client_secret_and_access_token_reach_the_run_unaltered(tmp_path, data_root):
+    """An upstream naming the client secret and access token in its reply is passed through as
+    sent. #1412 O7."""
     issued: list[str] = []
     with H.upstream() as auth:
         auth.replies["/token"] = H.token_endpoint(issued)
@@ -206,10 +178,8 @@ def test_c3_an_echoed_client_secret_and_access_token_come_back_as_markers(tmp_pa
             answer = r.ask()
 
     assert answer["fault"] is None
-    assert H.CANARY_SECRET not in json.dumps(answer)
-    assert issued[0] not in json.dumps(answer)
-    assert f"id-{H.CLIENT_ID}-cs-" in answer["body"]
-    assert any(v.startswith("hdr-") and v.endswith("-end") for v in answer["headers"].values())
+    assert answer["body"] == f"id-{H.CLIENT_ID}-cs-{H.CANARY_SECRET}-at-{issued[0]}-end"
+    assert answer["headers"]["x-echo"] == f"hdr-{H.CANARY_SECRET}-{issued[0]}-end"
 
 
 def test_c3_the_request_token_is_never_sent_upstream(tmp_path, data_root):

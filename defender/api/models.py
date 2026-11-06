@@ -241,7 +241,7 @@ SECRET_MIN_LENGTH = 16
 
 class CredentialsPut(_Request):
     """The whole credential set, replaced; no field has a default. `kind` says which fields are
-    secret, by the rule the credential proxy scrubs by (r7 A19): all but `username` in a
+    secret, by the rule `secret_fields` states (r7 A19): all but `username` in a
     `static` set, all but `client_id` in an `oauth-client-credentials` set."""
 
     kind: Literal["static", "oauth-client-credentials"]

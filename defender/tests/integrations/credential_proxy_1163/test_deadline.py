@@ -1,6 +1,6 @@
 """#1163 r7 A21: the system's own timeout travels with the request, the proxy runs the whole
-request inside one deadline built from it, and the caller waits past that deadline, so the proxy
-has given up before the caller does."""
+request inside one deadline built from it, and the caller's wait (deadline plus a grace) is the
+horizon it was told: it bounds the gap between bytes of the reply, not the whole (#1412 O6)."""
 from __future__ import annotations
 
 import contextlib
@@ -9,13 +9,17 @@ import socket
 import threading
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 
+import httpx
 import pytest
 
 from defender.integrations import identity_adapter
+from defender.kit.access import CALLER_GRACE_SEC
 from defender.kit.faults import TransportFault
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
+from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163._target import PROXY_PATH, proxy
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
@@ -85,13 +89,12 @@ def test_t21_a_timeout_that_is_not_a_positive_number_is_refused_unsent(
 def test_t21_the_caller_sends_its_timeout_and_waits_out_the_proxys_deadline(
         tmp_path, data_root):
     """The adapter's transport sends the system's `TIMEOUT_SEC` to the proxy and waits longer
-    than that timeout: a proxy answering after it still gets its answer through. r7 A21."""
-    answer = {"status": 200, "headers": {}, "body": json.dumps({"user": "dev.dana"}),
-              "fault": None, "detail": None}
+    than that timeout for the reply to begin: a proxy answering after it still gets through. r7 A21."""
+    f = W.fmt()
+    reply = f.encode_body(json.dumps({"user": "dev.dana"}).encode()) + f.encode_final(W.final_record())
     with H.upstream() as up, _identity_with_timeout(tmp_path / "forge", data_root, up, "1") as t, \
             H.upstream() as fake_proxy:
-        fake_proxy.replies[PROXY_PATH] = _slow(
-            (200, {"Content-Type": "application/json"}, json.dumps(answer).encode()))
+        fake_proxy.replies[PROXY_PATH] = _slow((200, {"Content-Type": f.REPLY_CONTENT_TYPE}, reply))
         ctx = A.ctx_for(tmp_path, T.run_record(t), fake_proxy.url,
                         T.token(t.tenant_id, T.GRANT_R))
         result = identity_adapter.get_user(ctx, user="dev.dana")
@@ -267,13 +270,14 @@ def test_o1_a_request_waiting_on_another_requests_exchange_answers_by_its_own_de
 
 def test_o1_the_caller_waits_out_the_deadline_plus_a_grace_and_no_more():
     """#1364 O1: with the deadline absolute, the caller's wait is the proxy's deadline plus a
-    grace longer than the proxy's slack; it no longer adds a second timeout."""
+    grace longer than the proxy's slack, the grace the final frame's send is bound by (#1412 O6)."""
     from defender.kit import access
 
     graces = {access.caller_wait_sec(t) - t - access.PROXY_OVERHEAD_SEC for t in (1, 10, 30)}
     assert len(graces) == 1, f"the wait past the deadline grows with the timeout: {graces}"
     grace = graces.pop()
     assert SLACK_SEC < grace <= 10, grace
+    assert grace == access.CALLER_GRACE_SEC
 
 
 def test_o1_openbao_gets_the_proxys_own_allowance_not_the_systems_timeout(tmp_path, data_root):
@@ -309,16 +313,15 @@ def test_o1_the_deadline_runs_from_when_the_request_arrives(tmp_path, data_root)
                            "timeout_sec": 1}).encode()
         host, port = url.removeprefix("http://").split(":")
         with socket.create_connection((host, int(port)), timeout=10) as conn:
-            conn.sendall(b"POST %s HTTP/1.1\r\nHost: proxy\r\nAuthorization: Bearer %s\r\n"
-                         b"Content-Type: application/json\r\nContent-Length: %d\r\n"
-                         b"Connection: close\r\n\r\n"
+            conn.sendall(b"POST %s HTTP/1.0\r\nAuthorization: Bearer %s\r\n"  # 1.0: the reply is not chunked
+                         b"Content-Type: application/json\r\nContent-Length: %d\r\n\r\n"
                          % (PROXY_PATH.encode(), r.tok().encode(), len(body)))
             time.sleep(1 + OVERHEAD_SEC + 0.3)
             conn.sendall(body)
             raw = b""
             while chunk := conn.recv(65536):
                 raw += chunk
-        answer = json.loads(raw.split(b"\r\n\r\n", 1)[1])
+        answer = T.answer_of(raw.split(b"\r\n\r\n", 1)[1])
 
     assert answer["fault"] == "TransportFault", answer
     assert "ran out of time" in (answer["detail"] or ""), answer
@@ -504,3 +507,100 @@ def test_1404_a_deadline_cut_is_the_systems_only_on_the_systems_own_call(tmp_pat
     _on_time(answer, took)
     assert "during" in answer["detail"], ("positive control: the leg itself was cut", answer)
     assert answer["system_side"] is (leg == "system call"), (leg, answer)
+
+
+# --- #1412 O6: the deadline covers the last byte ----------------------------------------------
+
+def test_o6_a_deadline_cut_after_the_system_answered_keeps_its_status_and_blames_it(
+        tmp_path, data_root):
+    """The system's 200 and then a body trickling past the deadline: the status stands, no body,
+    `TransportFault`, the system's through its status with `system_side` unset. #1412 O6, #1404."""
+    with H.breaks_after_status(200, trickle=True) as base, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(base + API)) as r, \
+            A.proxy_for(r.t, r.store, proxy_overhead_sec=OVERHEAD_SEC) as (url, _tap):
+        answer = W.call(url, r.tok(), f"{base}{API}/users/x", timeout_sec=1)
+
+    assert (answer.status, answer.fault, answer.body) == (200, "TransportFault", "")
+    assert (answer.from_system, answer.system_side) == (True, False)
+
+
+def _endless_8_mib(conn: socket.socket) -> None:
+    conn.sendall(W.head(200, W.DEFAULT_LIMIT))
+    conn.sendall(b"x" * W.DEFAULT_LIMIT)
+
+
+@contextlib.contextmanager
+def _stalled_exchange(tmp_path: Path, data_root: Path) -> Iterator[tuple[httpx.Response, H.AuditRecorder, W.Scripted]]:
+    """An 8 MiB reply (past the socket buffers) to a reader that reads nothing, under a deadline
+    2 s away: yields the unread response once the audit record is written. One worker thread is
+    lent out while the exchange is stalled and none once the record is written, final send pending."""
+    audit = H.AuditRecorder()
+    with W.scripted(_endless_8_mib) as up, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + API)) as r, \
+            A.proxy_for(r.t, r.store, audit=audit, proxy_overhead_sec=1) as (url, _tap), \
+            W.unread(url, r.tok(), W.doc(f"{up.url}{API}/users/x", timeout_sec=1)) as response:
+        assert W.until(lambda: W.borrowed(url) == 1, 1.5), "no worker thread held for the exchange"
+        assert W.until(lambda: audit.records, 3.5), "no record by the deadline"
+        assert W.until(lambda: W.borrowed(url) == 0, 5), "the worker thread is held while the final frame is sent"
+        yield response, audit, up
+
+
+def test_o6_a_reader_stalled_past_the_deadline_is_cut_and_gets_todays_answer_within_the_grace(
+        tmp_path, data_root):
+    """A reader stalled past the deadline, back one second inside the grace: the upstream was
+    released at the cut, one record says sent, the reply is the status, no whole body. #1412 O6."""
+    with _stalled_exchange(tmp_path, data_root) as (response, audit, up):
+        assert up.hung_up.wait(5), "the upstream connection outlived the deadline"
+        time.sleep(CALLER_GRACE_SEC - 1)
+        forwarded, final = W.decoded(b"".join(response.iter_raw()))
+
+    assert (final["status"], final["fault"], final["body_whole"], final["system_side"]) == (
+        200, "TransportFault", False, False)
+    assert len(forwarded) < W.DEFAULT_LIMIT, "the stall cut nothing"
+    assert [record["outcome"] for record in audit.records] == ["sent 200"]
+
+
+def test_o6_a_reader_stalled_past_the_grace_gets_the_connection_closed_unfinished(
+        tmp_path, data_root):
+    """A reader still stalled `CALLER_GRACE_SEC` after the cut sees a broken stream when it
+    resumes, and the audit still says the call was sent. #1412 O6."""
+    with _stalled_exchange(tmp_path, data_root) as (response, audit, _up):
+        time.sleep(CALLER_GRACE_SEC + 1)
+        with pytest.raises(httpx.RemoteProtocolError):
+            for _chunk in response.iter_raw():
+                pass
+
+    assert [record["outcome"] for record in audit.records] == ["sent 200"]
+
+
+def test_o6_a_reader_making_steady_progress_is_still_cut_at_the_deadline(tmp_path, data_root):
+    """A reader taking an 8 MiB reply in steady small reads, every gap far under the per-send wait
+    but the total past the deadline, is cut at it: status stands, `TransportFault`, no whole
+    body, upstream released and worker thread freed while it still reads. #1412 O6."""
+    audit = H.AuditRecorder()
+    raw: list[bytes] = []
+    with W.scripted(_endless_8_mib) as up, T.rig(
+            tmp_path / "forge", data_root, lambda _u: H.declaration(up.url + API)) as r, \
+            A.proxy_for(r.t, r.store, audit=audit, proxy_overhead_sec=1) as (url, _tap), \
+            httpx.Client(trust_env=False, timeout=60, transport=httpx.HTTPTransport(socket_options=[
+                (socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)])) as client, \
+            client.stream("POST", url + PROXY_PATH, headers={"Authorization": f"Bearer {r.tok()}"},
+                          json=W.doc(f"{up.url}{API}/users/x", timeout_sec=1)) as response:
+        def read() -> None:  # a small receive buffer: the proxy's sends wait on this reader
+            for chunk in response.iter_raw(64 * 1024):
+                raw.append(chunk)
+                time.sleep(0.04)  # 128 reads: 5 s in all, a deadline of 2 s
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        assert W.until(lambda: audit.records, 4), "no record near the deadline"
+        assert W.until(lambda: W.borrowed(url) == 0, 5), "the worker thread is held past the cut"
+        assert reader.is_alive(), "the reader finished first: the cut was not made while it still read"
+        assert up.hung_up.wait(5), "the upstream connection outlived the deadline"
+        reader.join(60)
+        forwarded, final = W.decoded(b"".join(raw))
+
+    assert (final["status"], final["fault"], final["body_whole"], final["system_side"]) == (
+        200, "TransportFault", False, False)
+    assert len(forwarded) < W.DEFAULT_LIMIT, "the moving reader was never cut"
+    assert [record["outcome"] for record in audit.records] == ["sent 200"]

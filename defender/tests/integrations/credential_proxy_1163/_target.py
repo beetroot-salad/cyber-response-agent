@@ -39,8 +39,9 @@ def request_signer(tenant_id: str, *, directory: Any, transport: Any = None) -> 
 #: and a transport, not its spelling): a WORKING CHOICE, a gap in the contract map.
 SEAM_ADDR = "openbao_addr"
 SEAM_TRANSPORT = "transport"
-#: The config keys r8.2 A26 removes: unknown keys now.
-REMOVED_CONFIG_KEYS = ("tenant_keys", "tenant_exports", "transit_mount", "openbao_addr")
+#: The config keys r8.2 A26 and #1412 remove: unknown keys now.
+REMOVED_CONFIG_KEYS = ("tenant_keys", "tenant_exports", "transit_mount", "openbao_addr",
+                       "max_response_bytes")
 
 
 def app_from_config(config: Any, *, addr: str | None = None, transport: Any = None) -> Any:

@@ -17,6 +17,7 @@ from defender.kit.settings import config_pointer
 from defender.systems import case_system
 from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
+from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.integrations.credential_proxy_1163.test_ticket_flow import (
     write_fault,
@@ -365,13 +366,27 @@ def test_t16_a_write_that_may_have_reached_the_store_says_so(tmp_path, data_root
     assert getattr(fault, MAYBE_DELIVERED) is True, (kind, fault)
 
 
-@pytest.mark.parametrize(("field", "maybe"), [({}, True), ({"sent": True}, True),
-                                              ({"sent": False}, False)])
-def test_t17_a_proxy_answer_that_does_not_say_whether_it_sent_may_have_reached_the_store(
-        field, maybe):
-    """#1374 P1: an answer from a proxy that predates the `sent` field says nothing about the
-    send, so the fault it carries may have reached the store; only an explicit false proves not.
-    The answer comes over real HTTP from a stand-in proxy giving that shape."""
+@pytest.mark.parametrize("sent", [True, False])
+def test_t17_the_final_record_says_whether_the_proxy_sent_and_only_a_false_proves_not(sent):
+    """#1374 P1: the proxy's final record carries `sent`; the fault the run raises may have reached
+    the store unless the record says the proxy never sent. #1412: `sent` is one of its fields."""
+    from defender import _proxy_client
+
+    record = W.final_record(None, fault="TransportFault", detail="the store's call failed",
+                            sent=sent, body_whole=False)
+    with W.fake_proxy(_proxy_client.encode_final(record), ended=True) as base:
+        got = _proxy_client.proxy_call(base, "tok", system="case", method="POST",
+                                       url="http://store.invalid/c")
+    assert got.sent is sent, got
+    with pytest.raises(TransportFault) as raised:
+        raise_proxy_fault(got.fault, got.detail, from_system=got.from_system, sent=got.sent)
+    assert getattr(raised.value, MAYBE_DELIVERED) is sent, (sent, raised.value)
+
+
+@pytest.mark.parametrize("field", [{}, {"sent": True}, {"sent": False}])
+def test_t17_an_answer_in_a_format_that_is_not_the_proxys_may_have_reached_the_store(field):
+    """#1374 P1, #1412 O9: a proxy that still answers the old JSON says nothing the run can read,
+    not even its `sent`, so the proxy's-own fault the run raises may have reached the store."""
     from fastapi import FastAPI
 
     from defender import _proxy_client
@@ -380,10 +395,7 @@ def test_t17_a_proxy_answer_that_does_not_say_whether_it_sent_may_have_reached_t
               "detail": "the store's call failed", **field}
     old_proxy = FastAPI()
     old_proxy.post(_proxy_client.PROXY_PATH)(lambda: answer)
-    with H.serve_asgi(old_proxy) as base:
-        got = _proxy_client.proxy_call(base, "tok", system="case", method="POST",
-                                       url="http://store.invalid/c")
-    assert got.sent is maybe, (field, got)
-    with pytest.raises(TransportFault) as raised:
-        raise_proxy_fault(got.fault, got.detail, from_system=got.from_system, sent=got.sent)
-    assert getattr(raised.value, MAYBE_DELIVERED) is maybe, (field, raised.value)
+    with H.serve_asgi(old_proxy) as base, pytest.raises(TransportFault) as raised:
+        _proxy_client.proxy_call(base, "tok", system="case", method="POST",
+                                 url="http://store.invalid/c")
+    assert getattr(raised.value, MAYBE_DELIVERED) is True, (field, raised.value)
