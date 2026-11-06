@@ -187,7 +187,7 @@ def test_the_resolver_reports_an_unreadable_directory_as_its_own_fault_as_nobody
         return declared_systems.adapter_systems_under(adapters)
 
     with handed_to_nobody(root, adapters, 0o755):
-        _expect_returned(run_as_nobody(probe, expected=LeadAuthorError), frozenset({"cmdb", "tacit-knowledge"}))
+        _expect_returned(run_as_nobody(probe, expected=LeadAuthorError), frozenset({"cmdb"}))
     for mode in (0o400, 0o000):
         with handed_to_nobody(root, adapters, mode):
             verdict = run_as_nobody(probe, expected=LeadAuthorError)
@@ -236,7 +236,7 @@ def test_a_symlink_loop_named_like_an_adapter_never_escapes_the_resolver_untyped
         )
 
     (adapters / "loop_adapter.py").unlink()
-    assert declared_systems.adapter_systems_under(adapters) == frozenset({"cmdb", "tacit-knowledge"})
+    assert declared_systems.adapter_systems_under(adapters) == frozenset({"cmdb"})
 
 
 # The drain seam
@@ -411,7 +411,8 @@ def test_every_consumer_declares_the_registrys_set_over_the_anomaly_fixture(
         f"the registry / the primitive logged on their own: {silent.err!r} {silent.out!r}"
     )
 
-    assert declared_systems.adapter_systems_under(adapters) == frozenset(expected)
+    assert declared_systems.with_platform_systems(
+        declared_systems.adapter_systems_under(adapters)) == frozenset(expected)
     log = capsys.readouterr().err
     for name in ANOMALY_NAMES:
         assert sum(repr(name) in ln and str(adapters) in ln for ln in log.splitlines()) == 1, (

@@ -90,6 +90,7 @@ from defender.learning.branch.questioner_launch import (
     _logger as _logger,
     _sample_text as _sample_text,
     branch_point_clock as branch_point_clock,
+    reachable_systems as reachable_systems,
     served_systems as served_systems,
     system_samples as system_samples,
     write_questioner_samples as write_questioner_samples,
@@ -641,7 +642,8 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     with clock.step(Step.QUESTIONER):
         try:
             family = _author(ns, source=source, episode=episode, questioner=questioner,
-                             lessons_dir=lessons_dir, served=served)
+                             lessons_dir=lessons_dir, served=served,
+                             reachable=reachable_systems(tenant.grants.gather))
         except (FamilyError, branch.BranchError) as unparsed:
             # N05 / M05=A: nothing to calibrate, for a reason that belongs to no world.
             outcome_mod.write_outcome(

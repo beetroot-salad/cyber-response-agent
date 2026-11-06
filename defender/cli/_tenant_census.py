@@ -49,7 +49,7 @@ class Census:
 
 def take_census(defender_dir: Path) -> Census:
     """The census of the code tree at `defender_dir` (its adapters, read cold), or
-    `CensusUnavailable`. The system set is the adapters alone: the committed system markers it
+    `CensusUnavailable`. The system set is the roster's (adapters and platform-served): the committed system markers it
     once also read were the product tree's system skills, which #1108 P4 moved into the tenant,
     so taking it starts no git. One roster read serves both the system set and the verb walk, so
     a tree changing between two reads cannot score one read's systems against the other's
@@ -82,7 +82,7 @@ def _unreadable_adapters(
     The roster's cold read answers `frozenset()` for an adapter it cannot see into. That is
     right for `ModuleVerbRegistry`, where an unreadable table refuses every grant, but here an
     empty walk yields no `undecided` and would print "clean" over an undecided system. Adapter
-    presence (`roster.accepted`) separates this from an MCP-path system, which is declared by
+    presence (`roster.adapter_files`) separates this from an MCP-path system, which is declared by
     its committed `execution.md` marker and has no adapter module by design."""
     return tuple(s for s in sorted(walked)
                  if not walked[s] and s in roster.adapter_files and s not in roster.no_verbs)

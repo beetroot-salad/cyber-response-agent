@@ -46,6 +46,19 @@ def test_1390_the_opening_prompt_lists_the_registry_among_the_systems_and_not_as
     assert "DOWN for this run" not in opening, "a system was reported down at the run's start"
 
 
+def test_1390_the_opening_prompt_leaves_out_a_registry_the_tenant_did_not_grant(tmp_path):
+    """A tenant whose table grants no verb of the registry is not told about it in the run's opening prompt, while its adapters are listed. A3."""
+    H = S.replay_harness()
+    est = S.Estate(tmp_path / "estate")
+    run_dir = H.materialize(tmp_path / "run", H.GOLDEN_AB3, run_id=S.RUN_ID)
+    main = H.ReplayFn([H.Turn(text="Investigation complete.")])
+
+    H.drive(run_dir, run_id=S.RUN_ID, main=main, verbs=S.plain_registry(est), tenant=est.place())
+
+    assert "- idp  (a system dispatched via the query tool" in main.seen[0], "control: an adapter is listed"
+    assert f"- {SYSTEM}  (a system dispatched" not in main.seen[0], "the map invites a call that can only be denied"
+
+
 def test_1390_a_case_record_naming_the_registry_is_refused_as_having_no_adapter():
     """A case mapping that names `tacit-knowledge` is refused in `case_system` as a system with no adapter, not as an adapter lacking the comment action. A1."""
     from types import SimpleNamespace
@@ -90,6 +103,52 @@ def test_1390_the_workspace_map_command_lists_the_registry(tmp_path, data_root, 
     listed = [line for line in text.splitlines() if line.startswith("- ") and "dispatched via the query tool" in line]
     assert any(line.startswith("- cmdb ") for line in listed), f"control: an adapter system is listed: {listed}"
     assert any(line.startswith(f"- {SYSTEM} ") for line in listed), f"the map leaves out {SYSTEM}: {listed}"
+
+
+def test_1390_the_map_lists_the_registry_only_for_a_grant_that_holds_it():
+    """A role holding any verb of the registry is shown it and a role holding none is not; adapters are listed either way, so an ungranted one still gets its "not granted" answer. A3, O-map."""
+    from defender.systems.verb_grant import VerbGrant
+
+    roster = read_roster(ADAPTERS)
+    holds = VerbGrant("gather", ((SYSTEM, "lookup", "r"),))
+    without = VerbGrant("gather", (("cmdb", "query", "r"),))
+
+    assert SYSTEM in roster.systems_shown_to(holds)
+    assert SYSTEM not in roster.systems_shown_to(without)
+    assert "cmdb" in roster.systems_shown_to(holds), "an adapter the grant leaves out is still listed"
+    assert SYSTEM in roster.systems, "the roster itself still names the registry (A1)"
+
+
+def test_1390_a_declared_set_of_only_platform_names_declares_nothing():
+    """Every lead-author and pitfalls guard refuses a tree with no real system, though the registry's name is in every roster; each still admits the registry's paths once a real one exists. A14."""
+    from defender.learning.leads.declared_systems import (
+        adapter_systems_under,
+        declares_no_system,
+        with_platform_systems,
+    )
+
+    assert SYSTEM not in adapter_systems_under(ADAPTERS), "the adapter half names a system with no adapter"
+    assert "cmdb" in adapter_systems_under(ADAPTERS)
+    assert declares_no_system(frozenset({SYSTEM}))
+    assert not declares_no_system(frozenset({SYSTEM, "cmdb"}))
+    assert SYSTEM in with_platform_systems(frozenset({"cmdb"}))
+
+
+def test_1390_the_pitfalls_and_write_lanes_refuse_an_empty_adapters_tree(tmp_path):
+    """With no adapter file, the pitfalls lane and the lead author's write scope refuse instead of running with only the registry's name; with one, both also admit the registry. A14."""
+    from defender.learning.leads.declared_systems import ADAPTERS_REL, LeadAuthorError
+    from defender.learning.leads.lead_author_engine import _systems_or_raise
+    from defender.learning.leads.pitfalls_curator import _require_adapter_declared_systems
+
+    empty = tmp_path / "empty"
+    (empty / ADAPTERS_REL).mkdir(parents=True)
+    with pytest.raises(LeadAuthorError, match="declares no systems"):
+        _require_adapter_declared_systems(empty)
+    with pytest.raises(ValueError, match="write scope is empty"):
+        _systems_or_raise(empty / "defender")
+
+    assert {"cmdb", SYSTEM} <= _require_adapter_declared_systems(REPO_ROOT)
+    assert {"cmdb", SYSTEM} <= set(_systems_or_raise(REPO_ROOT / "defender"))
 
 
 _ADAPTER = '''\

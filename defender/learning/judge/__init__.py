@@ -130,7 +130,7 @@ def _gate(bound: Bound, manifest: dict[str, Any]) -> tuple[str, str, dict[str, A
 
 def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their bounded re-asks
     episode: Episode, label: str, *, world_id: str | None, judge: Any, draws: int, model: str, effort: str,
-    prompt: str, scope: str = "world", served_systems: list[str] | None = None,
+    prompt: str, scope: str = "world", reachable_systems: list[str] | None = None,
     shown_its_facts: bool | None = None,
 ) -> tuple[int, dict[int, dict[str, Any]], int, str | None]:
     """Call the judge `draws` times over `prompt`, writing one `worlds/<X>/judge/<n>.yaml` per
@@ -182,7 +182,7 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
                             reply=reply_text, failure=None)
             try:
                 reply = run_mod.validate_reply(reply_text, scope=scope,
-                                               served_systems=served_systems,
+                                               reachable_systems=reachable_systems,
                                                shown_its_facts=shown_its_facts)
             except JudgeRefused as refused:
                 malformed += 1
@@ -532,6 +532,7 @@ class _Pass:
             raise JudgeRefused(enqueue_mod.no_record_reason())
         self.alert_identity = alert_record
         self.served_systems = run_mod.served_systems_of(manifest)
+        self.reachable_systems = run_mod.reachable_systems_of(manifest)
         self.samples = family_mod.read_samples_record(bound)
         # The noise context: pre-flight's record (its failed worlds named there once), then
         # every other excluded world and why.
@@ -598,7 +599,7 @@ class _Pass:
             return
         completed, documents, malformed, refusal = _run_world_draws(
             self.episode, label, world_id=self.run_set.usable[label].token, judge=self.judge, draws=self.draws, model=self.model,
-            effort=self.effort, prompt=prompt, served_systems=self.served_systems,
+            effort=self.effort, prompt=prompt, reachable_systems=self.reachable_systems,
             shown_its_facts=ctx.shown_its_facts)
         # g18: a `samples.yaml#<system>` pointer resolves exactly when this prompt showed that
         # system's section whole (the cap may have cut it), in the resolver and in O16 alike.
@@ -745,7 +746,7 @@ class _Pass:
             completed, documents, malformed, refusal = _run_world_draws(
                 episode, FAMILY_LABEL, world_id=None, judge=self.judge, draws=self.draws,
                 model=self.model, effort=self.effort, prompt=prompt, scope="family",
-                served_systems=self.served_systems)
+                reachable_systems=self.reachable_systems)
         except Exception as family_failed:  # noqa: BLE001 — the family call's own fault costs only itself, never the already-committed worlds
             family["draws_failed_reason"] = f"{type(family_failed).__name__}: {family_failed}"
             return

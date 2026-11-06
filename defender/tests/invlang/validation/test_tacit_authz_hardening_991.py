@@ -255,7 +255,7 @@ def _entries(*entries: dict) -> list[dict[str, str]]:
     import tempfile
 
     root = Path(tempfile.mkdtemp())
-    return tk.load_entries(scene.write_registry(root, *entries))
+    return list(tk.read_registry(scene.write_registry(root, *entries)).entries)
 
 
 def test_an_entry_dated_into_the_future_is_not_a_hit_today() -> None:
@@ -289,7 +289,7 @@ def test_a_yaml_resolved_timestamp_keeps_the_entry_it_was_meant_to_keep() -> Non
         lines.append(f"{'  - ' if i == 0 else '    '}{key}: {raw}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    loaded = tk.load_entries(path)
+    loaded = tk.read_registry(path).entries
     assert len(loaded) == 1, (
         "an entry whose `added_at` YAML resolved to a datetime was dropped — by the branch that "
         "exists to keep unquoted dates"
@@ -435,13 +435,9 @@ def test_a_registry_that_declares_no_entries_says_so() -> None:
         path = Path(tempfile.mkdtemp()).joinpath(*scene.REGISTRY_RELPATH)
         path.parent.mkdir(parents=True)
         path.write_text(body, encoding="utf-8")
-        import contextlib
-        import io
-
-        buf = io.StringIO()
-        with contextlib.redirect_stderr(buf):
-            assert tk.load_entries(path) == []
-        return buf.getvalue()
+        read = tk.read_registry(path)
+        assert read.entries == ()
+        return read.fatal or ""
 
     assert "no `entries:` list" in warnings_for("entires: []\n"), (
         "a typo in the `entries:` key disabled every sanction in the estate in silence"

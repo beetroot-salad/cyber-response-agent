@@ -1208,3 +1208,24 @@ def test_p006_base_answer_text_asks_the_oracle_to_explore_without_end(tmp_path):
     with pytest.raises(S.unservable_cls()) as caught:
         _ask(poor, est, tmp_path / "run-c")
     assert caught.value.reason == S.REASON_BUDGET
+
+
+def test_1390_preflight_never_calibrates_a_platform_served_call(tmp_path):
+    """A source run that consulted the registry pays no oracle turn for that call, and the call is not listed as one pre-flight could not replay; the ordinary call beside it is calibrated. O3."""
+    est = _tacit_estate(tmp_path)
+    tacit_call = S.Call("tacit-knowledge", "lookup", dict(TACIT_LOOKUP), {"matched": None})
+    _base, src = S.source_run(tmp_path, est, calls=[CALL_IDP, tacit_call])
+    ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)),
+                      base_rows=[S.captured("idp", "query", ALICE, BASE)])
+    oracle = S.oracle(then=S.submit(BASE))
+
+    with J.walked_view(ep) as view:
+        S.sym(S.CLI, S.COINED["fn.preflight"])(
+            view.episode, source=T.open_source(src), roster=est.roster(), tenant=est.run_tenant(),
+            oracle=oracle.model, verifier=S.passing_verifier().model)
+
+    seen = oracle.all_seen()
+    assert "user:alice" in seen, "positive control: the ordinary call was calibrated"
+    assert TACIT_LOOKUP["actor"] not in seen, "pre-flight paid an oracle turn on a registry call"
+    outcome = S.read_outcome(ep) or {}
+    assert outcome.get("not_replayable", []) == [], f"listed as a replay failure: {outcome}"

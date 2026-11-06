@@ -401,6 +401,13 @@ class RosterRead:
         """Every system of the roster, sorted: adapter files and platform-served systems."""
         return tuple(sorted(self.verbs))
 
+    def systems_shown_to(self, grant: VerbGrant) -> tuple[str, ...]:
+        """The systems a run holding `grant` is told about: every adapter's, and a
+        platform-served one only where the grant holds a verb of it. A platform-served system is
+        in every tenant's roster, so listing it regardless would invite calls that can only be
+        denied (#1390 A3)."""
+        return tuple(s for s in self.systems if not is_platform_served(s) or s in grant.systems)
+
 
 def _cannot_read(adapters_dir: Path, e: BaseException, *, blame_entry: bool = True) -> str:
     """`RegistryError`'s text: always the directory, plus the file when the fault was one entry's.
@@ -420,11 +427,20 @@ def is_platform_served(system: str) -> bool:
     return system in PLATFORM_SERVED
 
 
-def _refusal_of(name: str, path: Path | None) -> str | None:
-    """Why the dispatch seam would not resolve the adapter file named for `name`, or `None`."""
-    if is_platform_served(name):
-        return RESERVED_REASON
-    return ANOMALOUS_REASON if path is None else None
+def _sorted_adapter_names(resolved: Path, names: list[str]) -> tuple[dict[str, Path], dict[str, str]]:
+    """`names` split into the adapter files the dispatch seam resolves, and why it refuses each
+    of the others."""
+    accepted: dict[str, Path] = {}
+    refused: dict[str, str] = {}
+    for name in names:
+        path = _adapter_path_under(resolved, name)
+        if is_platform_served(name):
+            refused[name] = RESERVED_REASON
+        elif path is None:
+            refused[name] = ANOMALOUS_REASON
+        else:
+            accepted[name] = path
+    return accepted, refused
 
 
 def read_roster(adapters_dir: Path) -> RosterRead:
@@ -441,17 +457,9 @@ def read_roster(adapters_dir: Path) -> RosterRead:
                 # the entry; don't blame the entry.
                 raise RegistryError(_cannot_read(adapters_dir, e, blame_entry=False)) from e
         resolved = adapters_dir.resolve()
-        accepted: dict[str, Path] = {}
-        sources: dict[str, bytes] = {}
-        refused: dict[str, str] = {}
-        for name in sorted({_system_of(Path(entry.name)) for entry in entries}):
-            path = _adapter_path_under(resolved, name)
-            if (why := _refusal_of(name, path)) is not None:
-                refused[name] = why
-            else:
-                assert path is not None  # a refusal covers the anomalous (None) path
-                accepted[name] = path
-                sources[name] = read_bytes_capped(path)
+        accepted, refused = _sorted_adapter_names(
+            resolved, sorted({_system_of(Path(entry.name)) for entry in entries}))
+        sources = {name: read_bytes_capped(path) for name, path in accepted.items()}
     except (OSError, RuntimeError) as e:
         raise RegistryError(_cannot_read(adapters_dir, e)) from e
     declared: dict[str, frozenset[str]] = {}
@@ -528,7 +536,8 @@ class VerbRegistry:
         Decided from grants and cold declared names; no adapter callable is resolved.
         A verb the system does not declare (including near-misses) is UNDECLARED; DENIED is
         only for a real, withheld verb. A wholly ungranted system is also UNDECLARED, which
-        carries agent-visible retry semantics (no denial record, agent-fixable).
+        carries agent-visible retry semantics (no denial record, agent-fixable), except a
+        platform-served one, whose verbs are real in every roster and so are DENIED.
 
         The UNDECLARED message distinguishes a typo from a declared verb on an ungranted
         system, so a freshly connected system is not mistaken for a spelling error. A refusal

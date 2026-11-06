@@ -39,6 +39,7 @@ from defender.learning.leads._lead_spine import (
 from defender.learning.leads.declared_systems import (
     ADAPTERS_REL,
     adapter_declared_systems,
+    with_platform_systems,
 )
 from defender import box as _box
 from defender.kit.verbs import is_system_name
@@ -422,8 +423,9 @@ def _pitfalls_commit_message(changed: list[str]) -> str:
 
 
 def _require_adapter_declared_systems(repo_root: Path) -> frozenset[str]:
-    """The adapter half alone, resolved once at the pitfalls lane's own boundary — refusing
-    loudly rather than spending an empty set as an ordinary per-row membership "no"."""
+    """The systems the pitfalls lane admits: the adapter half alone, resolved once at the lane's
+    own boundary — refusing loudly rather than spending an empty set as an ordinary per-row
+    membership "no" — plus the platform-served names."""
     systems = adapter_declared_systems(repo_root)
     if not systems:
         message = (
@@ -432,7 +434,7 @@ def _require_adapter_declared_systems(repo_root: Path) -> frozenset[str]:
         )
         _logger.error(message)
         raise LeadAuthorError(message)
-    return systems
+    return with_platform_systems(systems)
 
 
 def _split_batch_by_membership(

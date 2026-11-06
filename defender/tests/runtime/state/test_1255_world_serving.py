@@ -15,6 +15,7 @@ from defender.tests.support.runtime.state import _1255_world as W
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S34  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S24  # noqa: E402
 from defender.learning.branch.capture import prime_base  # noqa: E402
+from defender.learning.branch.estate.registry import serve_one  # noqa: E402
 from defender.learning.branch.ledger import ORACLE, PASSTHROUGH, normalized_source, request_key  # noqa: E402
 from defender.records._episode_handle import Episode  # noqa: E402
 
@@ -729,10 +730,8 @@ def _platform_pairs_1390() -> list[tuple[str, str]]:
 @pytest.mark.parametrize("raises", [False, True], ids=["success", "raise"])
 @pytest.mark.parametrize(("system", "verb"), _platform_pairs_1390())
 def test_1390_a_platform_served_verb_is_always_run_never_answered_from_the_worlds_store(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, system: str, verb: str, raises: bool) -> None:
+        tmp_path: Path, system: str, verb: str, raises: bool) -> None:
     """For every roster-marked platform-served (system, verb), a seeded store answer at its request key is never served: the verb's own answer (or its raise) is, with exactly one ledger row (pass-through, or real-error on a raise). O3."""
-    from defender.systems import verbs as verbs_mod
-
     est = S24.TacitEstate(tmp_path / "estate")
     est.write_registry(json.dumps({"entries": [TACIT_ENTRY]}))
     ep = S24.episode_v2(tmp_path, base_rows=[])
@@ -741,17 +740,13 @@ def test_1390_a_platform_served_verb_is_always_run_never_answered_from_the_world
     asked = _PLATFORM_ASKS_1390[verb]
     seeded = {"served": {"seeded": "SEEDED-1390"}, "decision": PASSTHROUGH}
     world.store.answers[request_key(system, verb, dict(asked))] = seeded
-    if raises:
-        def boom(ctx: Any, **_: Any) -> Any:
-            raise _Boom1390("platform verb failed")
-        monkeypatch.setattr(verbs_mod, "PLATFORM_SERVED", {
-            **verbs_mod.PLATFORM_SERVED,
-            system: {**verbs_mod.PLATFORM_SERVED[system], verb: boom}})
     ctx = est.ctx(tmp_path / "run")
 
     if raises:
+        def boom(ctx: Any, **_: Any) -> Any:
+            raise _Boom1390("platform verb failed")
         with pytest.raises(_Boom1390):
-            S24.call(world, system, verb, ctx, **asked)
+            serve_one(world, system, verb, boom, ctx, asked)
     else:
         served = S24.call(world, system, verb, ctx, **asked)
         assert "SEEDED-1390" not in json.dumps(served), "the world's stored answer was served"

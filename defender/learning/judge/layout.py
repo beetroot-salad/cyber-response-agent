@@ -144,7 +144,13 @@ def _entry(run: RunView) -> dict[str, Any]:
 def _family_block(doc: dict[str, Any]) -> Block:
     discriminator = doc.get("discriminator")
     predicate = discriminator.get("predicate") if isinstance(discriminator, dict) else None
-    return (None, ["served systems: ", _run(doc.get("served_systems")),
+    served = doc.get("served_systems")
+    reachable = doc.get("reachable_systems")
+    also = [s for s in reachable if s not in served] if isinstance(reachable, list) \
+        and isinstance(served, list) else []
+    readable = (["\nalso readable by the investigator, the same in every world: ", _run(also)]
+                if also else [])
+    return (None, ["served systems: ", _run(served), *readable,
                    "\ndiscriminator predicate: ", _run(predicate),
                    "\nbase story: ", _run(doc.get("base_story")), "\n"])
 

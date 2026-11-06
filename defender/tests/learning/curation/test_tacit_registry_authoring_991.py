@@ -55,12 +55,6 @@ def test_the_validator_and_the_verb_read_the_same_walk(tmp_path) -> None:
     )
     assert len(read.refusals) == 2, "the walk did not report both drops"
 
-    with redirect_stderr(io.StringIO()):
-        served = tk.load_entries(path)
-    assert served == list(read.entries), (
-        "the loader and the validator's walk disagree about what loads"
-    )
-
 
 def test_a_drop_names_the_field_and_the_rule(tmp_path) -> None:
     """Every refusal is actionable text, because the person who can repair the row is the human

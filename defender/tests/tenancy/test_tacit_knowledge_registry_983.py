@@ -54,7 +54,7 @@ _write_registry = scene.write_registry
 
 
 def _load(root: Path, *entries: dict):
-    return registry().load_entries(_write_registry(root, *entries))
+    return list(registry().read_registry(_write_registry(root, *entries)).entries)
 
 
 def _ids(entries) -> list[str]:
@@ -296,7 +296,7 @@ def test_the_shipped_registry_file_is_human_authored_and_loads(tmp_path):
     assert not registry().registry_path(DEFENDER).exists(), (
         "the product tree still carries a tacit-knowledge registry")
 
-    entries = registry().load_entries(path)
+    entries = registry().read_registry(path).entries
     assert all(set(e) == set(registry().ENTRY_FIELDS) for e in entries)
 
 
@@ -506,8 +506,8 @@ def test_1390_without_a_run_state_the_day_is_wall_time(tmp_path):
         "positive control: an entry in force today answers on wall time")
 
 
-# What a lookup says about a registry it could not read whole (O9, H8): `registry_problems`,
-# the reader's own refusal texts, beside an unchanged `matched`.
+# What a lookup says about a registry it could not read whole (O9 as amended, H8):
+# `registry_problems`, a notice naming no entry, beside an unchanged `matched`.
 _NOT_YAML = b"entries: [unclosed\n"
 _NOT_UTF8 = b"\xff\xfe entries:\n"
 _WHOLE_FILE_FAULTS = {
@@ -519,8 +519,8 @@ _WHOLE_FILE_FAULTS = {
 
 
 @pytest.mark.parametrize("fault", sorted(_WHOLE_FILE_FAULTS))
-def test_1390_a_registry_refused_whole_answers_a_miss_carrying_the_readers_reason(tmp_path, fault):
-    """A registry refused whole answers `matched: None` plus `registry_problems` equal to the reader's refusal text. O9."""
+def test_1390_a_registry_refused_whole_answers_a_miss_carrying_a_notice(tmp_path, fault):
+    """A registry refused whole answers `matched: None` plus a `registry_problems` notice that is not the reader's refusal text and names no host path. O9."""
     root = tmp_path / "tree"
     path = registry().registry_path(root)
     path.parent.mkdir(parents=True)
@@ -531,13 +531,16 @@ def test_1390_a_registry_refused_whole_answers_a_miss_carrying_the_readers_reaso
 
     answer = _platform_lookup(_clocked_ctx(root, tmp_path), actor=ACTOR, host=HOST, pattern=PATTERN)
 
-    relative = "/".join(scene.REGISTRY_RELPATH)
-    assert answer == {"matched": None, "registry_problems": [reason.replace(str(path), relative)]}
+    assert set(answer) == {"matched", "registry_problems"}, answer
+    assert answer["matched"] is None, answer
+    assert "refused whole" in answer["registry_problems"], answer
+    assert reason not in answer["registry_problems"], "the model was shown the author's refusal text"
+    assert "tk-misfiled" not in str(answer), "the model was shown an id from a refused file"
     assert str(root) not in str(answer), "the model-visible answer names a host path"
 
 
-def test_1390_dropped_entries_ride_the_answer_beside_a_hit_and_a_miss(tmp_path):
-    """Dropped entries are listed as the reader's refusal texts on a hit and on a miss; a clean file carries no key. O9."""
+def test_1390_dropped_entries_are_counted_beside_a_hit_and_a_miss_and_never_named(tmp_path):
+    """Dropped entries are counted on a hit and on a miss, with no id or scope of theirs in the answer, so a refused entry cannot be cited; a clean file carries no key. O9."""
     good = _current_entry(id="tk-1390-good")
     blanket = _current_entry(id="tk-1390-blanket", actor_scope="*")
     root = tmp_path / "tree"
@@ -550,8 +553,12 @@ def test_1390_dropped_entries_ride_the_answer_beside_a_hit_and_a_miss(tmp_path):
     hit = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
     miss = _platform_lookup(ctx, actor=ACTOR, host="web-frontend-02.prod", pattern=PATTERN)
 
-    assert hit == {"matched": good, "registry_problems": dropped}
-    assert miss == {"matched": None, "registry_problems": dropped}
+    assert hit["matched"] == good, hit
+    assert miss["matched"] is None, miss
+    for answer in (hit, miss):
+        assert "1 registry entr(ies) were refused" in answer["registry_problems"], answer
+        assert "tk-1390-blanket" not in str(answer), "the model was shown a refused entry's id"
+        assert "blanket scope" not in str(answer), "the model was shown the author's refusal text"
 
     clean = tmp_path / "clean"
     _write_registry(clean, good)
@@ -561,12 +568,14 @@ def test_1390_dropped_entries_ride_the_answer_beside_a_hit_and_a_miss(tmp_path):
 
 
 def test_1390_health_check_carries_the_same_registry_problems(tmp_path):
-    """`health-check` lists the reader's refusal texts for a dropped entry and for a whole-file refusal, and none for a clean file. O9."""
+    """`health-check` carries the lookup's notice for a dropped entry and for a whole-file refusal, and none for a clean file. O9."""
     root = tmp_path / "tree"
     _write_registry(root, _current_entry(id="tk-1390-ok"), _current_entry(id="tk-1390-x", host_scope="*"))
-    reader = registry().read_registry(registry().registry_path(root))
     ctx = _clocked_ctx(root, tmp_path)
-    assert _verbs()["health-check"](ctx)["registry_problems"] == list(reader.refusals)
+    health = _verbs()["health-check"](ctx)
+    assert health["registry_problems"] == _platform_lookup(
+        ctx, actor=ACTOR, host=HOST, pattern=PATTERN)["registry_problems"]
+    assert "tk-1390-x" not in str(health), "the model was shown a refused entry's id"
 
     whole = tmp_path / "whole"
     path = registry().registry_path(whole)
@@ -574,8 +583,7 @@ def test_1390_health_check_carries_the_same_registry_problems(tmp_path):
     path.write_bytes(_WHOLE_FILE_FAULTS["no-entries-list"])
     health = _verbs()["health-check"](_clocked_ctx(whole, tmp_path))
     relative = "/".join(scene.REGISTRY_RELPATH)
-    assert health["registry_problems"] == [
-        registry().read_registry(path).fatal.replace(str(path), relative)]
+    assert "refused whole" in health["registry_problems"], health
     assert health["registry"] == relative
 
     clean = tmp_path / "clean"
@@ -678,6 +686,40 @@ def test_1390_a_non_regular_thing_at_the_registry_path_is_refused_whole_in_both_
     assert health.get("registry_problems"), f"not refused: {health}"
     assert health["connected"] is True, f"not refused: {health}"
     assert str(root) not in str(lookup) + str(health), "a model-visible answer names a host path"
+
+
+def test_1390_a_path_that_cannot_be_looked_at_is_refused_never_absent(tmp_path):
+    """A registry path whose look-up fails for any reason but "nothing there" (here a looping parent directory, which also fails as root, unlike a permission bit) is refused whole in the reader and both answers: a broken registry never reads as an empty one. P4."""
+    root = tmp_path / "tree"
+    path = registry().registry_path(root)
+    path.parent.parent.mkdir(parents=True)
+    path.parent.symlink_to(path.parent.name)
+
+    read = registry().read_registry(path)
+    assert not read.absent, read
+    assert read.problems, read
+    ctx = _clocked_ctx(root, tmp_path)
+    lookup = _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN)
+    assert lookup["matched"] is None, lookup
+    assert lookup.get("registry_problems"), lookup
+    assert _verbs()["health-check"](ctx)["connected"] is True
+
+
+def test_1390_nothing_at_the_path_is_absent_to_every_reader_but_the_authors_check(tmp_path, capsys):
+    """No registry file is clean to a lookup, `health-check` and the shared problem list, and a failure, saying so, to `tacit_cli check`: someone asking to check a file that is not there is probably in the wrong tree. P4."""
+    from defender.cli import tacit_cli
+
+    root = tmp_path / "tree"
+    path = registry().registry_path(root)
+    read = registry().read_registry(path)
+    assert read.absent, read
+    assert read.problems == []
+    ctx = _clocked_ctx(root, tmp_path)
+    assert _platform_lookup(ctx, actor=ACTOR, host=HOST, pattern=PATTERN) == {"matched": None}
+    assert _verbs()["health-check"](ctx)["connected"] is False
+
+    assert tacit_cli.main(["check", "--defender-dir", str(root)]) == 1
+    assert "no registry at this path" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("field", ["actor_scope", "host_scope"])

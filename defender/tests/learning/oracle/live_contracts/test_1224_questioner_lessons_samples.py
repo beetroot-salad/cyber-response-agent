@@ -737,6 +737,9 @@ def test_1390_the_launcher_records_no_platform_served_system_and_refuses_a_tenan
     assert family is not None, f"no family.yaml was written (rc={launch.rc}, {launch.message!r})"
     assert "tacit-knowledge" in ordinary.grant().systems, "premise: the tenant grants the registry"
     assert sorted(family["served_systems"]) == sorted(set(ordinary.grant().systems) - {"tacit-knowledge"})
+    assert "tacit-knowledge" in family["reachable_systems"], (
+        "the judge cannot tell the investigator could have consulted a registry it holds `lookup` on")
+    assert set(family["served_systems"]) <= set(family["reachable_systems"])
 
     where = _isolated(tmp_path, monkeypatch, "only")
     only = S.TacitEstate(where / "estate",

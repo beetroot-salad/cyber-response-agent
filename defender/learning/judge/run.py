@@ -316,12 +316,12 @@ def _parse_gap(raw: Any, index: int) -> Gap:
                kept_facts_from_investigator=raw[KEPT_FACTS])
 
 
-def _world_verdict(doc: dict[str, Any], *, served_systems: Any,
+def _world_verdict(doc: dict[str, Any], *, reachable_systems: Any,
                    shown_its_facts: bool | None) -> tuple[str, list[str]]:
     """A world reply's own `bucket` and `systems`, exactly as written, or `JudgeRefused`.
 
     The host's rules on the bucket refuse; they never substitute one: `lead-set` when the
-    systems share nothing with `served_systems` (M20=A), a discipline bucket when the world was
+    systems share nothing with `reachable_systems` (M20=A), a discipline bucket when the world was
     never shown its facts (A5). `None` for either input (a bare validation) skips its rule."""
     if "bucket" not in doc:
         raise JudgeRefused("the judge's reply carries no bucket for its world")
@@ -331,11 +331,11 @@ def _world_verdict(doc: dict[str, Any], *, served_systems: Any,
             f"the judge's reply's bucket={bucket!r} is not one of {sorted(WORLD_BUCKETS)} — a "
             "lookalike is rejected, never coerced to the nearest member")
     systems = _systems(doc.get("systems"), "the judge's reply", empty_ok=True)
-    if bucket == LEAD_SET and served_systems is not None \
-            and not set(systems) & {str(s) for s in served_systems}:
+    if bucket == LEAD_SET and reachable_systems is not None \
+            and not set(systems) & {str(s) for s in reachable_systems}:
         raise JudgeRefused(
             f"the judge's reply says bucket={LEAD_SET!r} for a world whose systems {systems!r} "
-            f"share nothing with the served systems {sorted(served_systems)!r} — the "
+            f"share nothing with the systems its grant reached {sorted(reachable_systems)!r} — the "
             "investigator could not have looked, so the lead set cannot have missed it (M20)")
     _refuse_discipline(bucket, "the judge's reply", shown_its_facts)
     return bucket, systems
@@ -345,7 +345,7 @@ def _world_verdict(doc: dict[str, Any], *, served_systems: Any,
 _WORLD_ONLY_KEYS = ("bucket", "systems", INVESTIGATOR_FINDINGS, GAPS)
 
 
-def validate_reply(text: str, *, scope: str = "world", served_systems: Any = None,
+def validate_reply(text: str, *, scope: str = "world", reachable_systems: Any = None,
                    shown_its_facts: bool | None = None) -> JudgeReply:
     """Read `text` as one bare document and validate strictly — the one enforcement point (A5):
     nothing is read off the reply before this returns, and a reply it refuses is asked again
@@ -399,7 +399,7 @@ def validate_reply(text: str, *, scope: str = "world", served_systems: Any = Non
             noise_floor_note=str(noise) if noise is not None else "", correlations=tables[0],
             scope_checks=tables[1], derivations=tables[2], investigator_findings=[],
             world_findings=world, gaps=[])
-    bucket, systems = _world_verdict(doc, served_systems=served_systems,
+    bucket, systems = _world_verdict(doc, reachable_systems=reachable_systems,
                                      shown_its_facts=shown_its_facts)
     investigator = [_parse_investigator(f, i, shown_its_facts=shown_its_facts)
                     for i, f in enumerate(_require_list(doc, INVESTIGATOR_FINDINGS))]
@@ -573,6 +573,13 @@ def served_systems_of(manifest: dict[str, Any]) -> list[str]:
     return [str(s) for s in raw] if isinstance(raw, list) else []
 
 
+def reachable_systems_of(manifest: dict[str, Any]) -> list[str]:
+    """The manifest's recorded `reachable_systems`, recorded like `served_systems` (M21=A). A
+    manifest older than the field recorded the one list, which meant this."""
+    raw = manifest.get("reachable_systems")
+    return [str(s) for s in raw] if isinstance(raw, list) else served_systems_of(manifest)
+
+
 __all__ = [
     "CONTRAST_EVIDENCE", "EVIDENCE", "FILED_LISTS", "GAPS", "Gap", "INVESTIGATOR_BUCKETS",
     "INVESTIGATOR_FINDINGS", "InvestigatorFinding", "JUDGE_DEF", "JudgeDeps", "JudgeReply",
@@ -580,5 +587,5 @@ __all__ = [
     "ON_VERDICT_PATH", "SUBJECT_DEFENDER", "SUBJECT_WORLD", "WORLD_BUCKETS", "WORLD_FINDINGS",
     "WORLD_FINDING_BUCKETS", "WorldFinding", "_build_family_prompt", "_build_prompt",
     "draw_document", "family_predicate", "is_world_finding_bucket",
-    "served_systems_of", "validate_reply",
+    "reachable_systems_of", "served_systems_of", "validate_reply",
 ]

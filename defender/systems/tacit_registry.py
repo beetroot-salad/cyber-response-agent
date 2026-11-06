@@ -8,7 +8,6 @@ from __future__ import annotations
 import datetime as dt
 import os
 import re
-import sys
 from fnmatch import fnmatchcase
 from collections.abc import Callable
 from typing import Any, NamedTuple
@@ -167,7 +166,8 @@ class RegistryRead(NamedTuple):
 
     The verb and the validating CLI share this reading, so a drop the human is told about is
     exactly the drop a run makes. `fatal` is a whole-file refusal (unreadable, or no `entries:`
-    list), meaning nothing answers.
+    list), meaning nothing answers. `absent` means nothing is at the path: a tenant with no
+    registry, which is not a problem to a run or `tenant check`.
 
     A plain `NamedTuple`: an immutable value with nothing to resolve at import.
     """
@@ -175,6 +175,12 @@ class RegistryRead(NamedTuple):
     entries: tuple[dict[str, str], ...]
     refusals: tuple[str, ...]
     fatal: str | None = None
+    absent: bool = False
+
+    @property
+    def problems(self) -> list[str]:
+        """What an author is told is wrong: the whole-file refusal, or each dropped entry."""
+        return [self.fatal] if self.fatal is not None else list(self.refusals)
 
 
 def read_registry(path: Path) -> RegistryRead:
@@ -183,7 +189,17 @@ def read_registry(path: Path) -> RegistryRead:
     Returns the refusals rather than printing them so a human can see them:
     `defender.cli.tacit_cli` reports them and CI runs it. Printed during a run, a dropped
     entry is indistinguishable from an absent one and the run escalates a sanctioned case.
+
+    Only a path with nothing at it is absent. A directory, a dangling or looping symlink, or a
+    path this process may not look at is refused whole, which is why the path itself is looked
+    at first: opening a dangling symlink reports "not found" too.
     """
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return RegistryRead((), (), absent=True)
+    except OSError as e:
+        return RegistryRead((), (), f"registry at {path} could not be read ({e})")
     try:
         loaded = _yaml.safe_load(read_text_utf8(Path(path)))
     except (*TEXT_READ_ERRORS, yaml.YAMLError) as e:
@@ -213,40 +229,6 @@ def read_registry(path: Path) -> RegistryRead:
         claimed.add(entry["id"])
         entries.append(entry)
     return RegistryRead(tuple(entries), tuple(refusals))
-
-
-def load_entries(path: Path) -> list[dict[str, str]]:
-    """Every well-formed entry in the registry at `path`, in file order — the surface over
-    `read_registry` for a caller that wants only the entries.
-
-    One bad entry is dropped, never the file; a repeated `id` is dropped too (the first keeps
-    answering). A malformed file shape is announced on stderr as well, since otherwise it would
-    look exactly like an empty registry. A run's own channel for this is the answer's
-    `registry_problems` (`lookup`)."""
-    read = read_registry(path)
-    if read.fatal is not None:
-        print(f"warn: tacit-knowledge {read.fatal}", file=sys.stderr)
-    for refusal in read.refusals:
-        print(f"warn: skipping tacit-knowledge entry ({refusal})", file=sys.stderr)
-    return list(read.entries)
-
-
-def present(path: Path) -> bool:
-    """Whether anything is at the registry's path: the one owner of "is there a registry?".
-    Only a path with nothing at it is an absent registry (P4); a directory, or a dangling or
-    looping symlink, is read and fails as the whole-file refusal, for every reader alike."""
-    return os.path.lexists(path)
-
-
-def failures(path: Path) -> list[str]:
-    """What an author is told is wrong with the registry at `path`: the whole-file refusal, or
-    each dropped entry, in the reader's own words. Empty for a clean file and for no file. The
-    one formatter `tacit_cli check` and `tenant check` share (P3), so a drop the author is told
-    about is exactly the drop a run makes."""
-    if not present(path):
-        return []
-    read = read_registry(path)
-    return [read.fatal] if read.fatal is not None else list(read.refusals)
 
 
 def find_entry(
@@ -279,32 +261,32 @@ def find_entry(
     return None
 
 
-def _day(ctx: VerbContext) -> dt.date:
+def _day() -> dt.date:
     """The day this call is judged against (P2, amendment 4): the run's own clock where the run
     has one (a replay sibling's resumes at the branch point), else wall time. Pre-flight and the
     oracle's own side queries have no run and are judged on wall time: the platform hands a verb
     no branch point (#1385 O1)."""
     from defender.systems.verbs import CALL_RUN_STATE  # verbs imports this module
 
-    del ctx  # the day is never read off the context
     state = CALL_RUN_STATE.get()
     return (state.now() if state is not None else dt.datetime.now(dt.UTC)).date()
 
 
-def _relative(agent_root: Path, path: Path) -> str:
-    """`path` spelled from the agent root, so no model-visible text names a host path."""
-    try:
-        return path.relative_to(agent_root).as_posix()
-    except ValueError:
-        return path.name
+def _model_notice(read: RegistryRead) -> str | None:
+    """What the model is told about a registry that is not whole, or `None` when it is.
 
-
-def _problems(read: RegistryRead, path: Path, agent_root: Path) -> list[str]:
-    """The reader's refusal texts for the model-visible answer: a whole-file refusal, or every
-    dropped entry, with the file spelled from the agent root."""
-    texts = [read.fatal] if read.fatal is not None else list(read.refusals)
-    shown = _relative(agent_root, path)
-    return [t.replace(str(path), shown) for t in texts]
+    A count, never the refusal texts: those name refused entries' ids and scopes, and the
+    citation gate reads only the model's own `:R consultations` rows, so an id seen here could be
+    cited as a sanction the loader refused. The reasons are for the author (`tacit_cli check`,
+    `tenant check`)."""
+    if read.fatal is not None:
+        what = "The registry file was refused whole, so nothing in it answers a lookup"
+    elif read.refusals:
+        what = f"{len(read.refusals)} registry entr(ies) were refused and answer no lookup"
+    else:
+        return None
+    return (f"{what}: a miss does not show that nobody sanctioned this. The tenant's operator "
+            "can see why with `tenant check`.")
 
 
 def health_check(ctx: VerbContext) -> dict:
@@ -312,19 +294,16 @@ def health_check(ctx: VerbContext) -> dict:
     does it hold. Returns data rather than printing, so the queries table records a payload."""
     agent_root = Path(ctx.tenant.agent)
     path = registry_path(agent_root)
-    here = present(path)
+    read = read_registry(path)
     out: dict[str, Any] = {
         "system": SYSTEM,
-        "connected": here,
-        "registry": _relative(agent_root, path),
-        "entries": 0,
+        "connected": not read.absent,
+        "registry": path.relative_to(agent_root).as_posix(),
+        "entries": len(read.entries),
     }
-    if here:
-        read = read_registry(path)
-        out["entries"] = len(read.entries)
-        problems = _problems(read, path, agent_root)
-        if problems:
-            out["registry_problems"] = problems
+    if not read.absent:
+        if (notice := _model_notice(read)) is not None:
+            out["registry_problems"] = notice
         out["note"] = (
             "A registry is consulted only when `lookup` is granted to the role in the tenant's "
             "verb-disposition table; until then it is unused."
@@ -340,19 +319,17 @@ def lookup(  # lint-dup: ok — a verb name addressed as `<system>.lookup`; `thr
     `matched` is the entry (what a `:R consultations` row cites) or `None`. A miss
     names nothing — not a near match, not an expired entry — since an almost-hit's id would be a
     citation waiting to be written. `registry_problems` appears only when the file was refused
-    whole or entries were dropped, so a broken registry is not mistaken for an empty one.
+    whole or entries were dropped, so a broken registry is not mistaken for an empty one, and it
+    names no entry, for the same reason a miss does not.
     """
-    agent_root = Path(ctx.tenant.agent)
-    path = registry_path(agent_root)
-    read = read_registry(path) if present(path) else RegistryRead((), ())
+    read = read_registry(registry_path(Path(ctx.tenant.agent)))
     answer: dict[str, Any] = {
         "matched": find_entry(
-            list(read.entries), actor=actor, host=host, pattern=pattern, now=_day(ctx),
+            list(read.entries), actor=actor, host=host, pattern=pattern, now=_day(),
         ),
     }
-    problems = _problems(read, path, agent_root)
-    if problems:
-        answer["registry_problems"] = problems
+    if (notice := _model_notice(read)) is not None:
+        answer["registry_problems"] = notice
     return answer
 
 
@@ -361,4 +338,3 @@ PLATFORM_VERBS: dict[str, Callable[..., Any]] = {
     "health-check": health_check,
     "lookup": lookup,
 }
-VERBS = PLATFORM_VERBS

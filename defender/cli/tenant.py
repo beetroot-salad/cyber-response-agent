@@ -429,7 +429,8 @@ def _registry_findings(knowledge: Path) -> list[str]:
     refusal or a dropped entry, #1390 O7), whether or not the grant table reaches `lookup`
     (A10). Date-dependent notes stay advisory, so a tenant's CI does not go red by the calendar."""
     path = tacit_registry.registry_path(knowledge / AGENT_HALF)
-    return [f"{tacit_registry.SYSTEM} registry: {why}" for why in tacit_registry.failures(path)]
+    return [f"{tacit_registry.SYSTEM} registry: {why}"
+            for why in tacit_registry.read_registry(path).problems]
 
 
 def _report(findings: list[str]) -> int:

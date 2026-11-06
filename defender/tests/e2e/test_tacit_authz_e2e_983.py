@@ -489,15 +489,17 @@ def test_1390_a_registry_refused_whole_is_a_miss_whose_reason_is_in_the_stored_a
         _spec().query_turn(SYSTEM, "health-check", {}))
 
     assert [(r["verb"], r["exit_code"]) for r in rows] == [(LOOKUP, 0), ("health-check", 0)]
-    visible = reason.replace(str(path), "skills/tacit-knowledge/registry.yaml")
-    assert _stored_answer(run_dir, rows[0]) == {"matched": None, "registry_problems": [visible]}
+    stored = _stored_answer(run_dir, rows[0])
+    assert stored["matched"] is None, stored
+    assert "refused whole" in stored["registry_problems"], stored
+    assert "tk-misfiled" not in str(stored), "the stored answer names an id from a refused file"
     health = _stored_answer(run_dir, rows[1])
-    assert health["registry_problems"] == [visible]
+    assert health["registry_problems"] == stored["registry_problems"]
     assert not str(health["registry"]).startswith("/"), "health-check names the registry by a host path"
 
 
 def test_1390_a_dropped_entry_rides_a_hit_in_the_stored_answer(tmp_path):
-    """A hit from a registry that also dropped an entry is stored with `matched` unchanged and the reader's refusal beside it. O9."""
+    """A hit from a registry that also dropped an entry is stored with `matched` unchanged and a count of the drops beside it, naming no refused entry. O9."""
     from defender.systems import tacit_registry
 
     S = _spec()
@@ -510,7 +512,10 @@ def test_1390_a_dropped_entry_rides_a_hit_in_the_stored_answer(tmp_path):
 
     run_dir, rows, _g = _gather_lookups(tmp_path, est, S.query_turn(SYSTEM, LOOKUP, LOOKUP_PARAMS))
 
-    assert _stored_answer(run_dir, rows[0]) == {"matched": good, "registry_problems": dropped}
+    stored = _stored_answer(run_dir, rows[0])
+    assert stored["matched"] == good, stored
+    assert "1 registry entr(ies) were refused" in stored["registry_problems"], stored
+    assert "tk-1390-blanket" not in str(stored), "the stored answer names a refused entry's id"
 
 
 def test_1390_the_repeat_guard_applies_to_the_registry(tmp_path):
