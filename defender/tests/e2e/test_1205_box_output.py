@@ -3,32 +3,50 @@ correlation-lead boundaries; a command printing too much does not."""
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
+import sys
 import uuid
+from datetime import UTC, datetime
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from defender import box, run_common
+from defender._exception_groups import carried
+from defender.hooks.budget_enforcer import BudgetKill
+from defender.systems.circuit_breaker import RunAborted
+from defender.systems.verbs import ServingAbort
 from defender.execution import bash_exec
 from defender.investigation import ticket_writer
 from defender.providers import ProviderDown
 from defender.records import RunPaths
+from defender.records import run_end
 from defender.records.run_end import CALL_RECORDS, CallRecordWriteFailed, parse_record
 from defender.tests.e2e._box665 import RecordingDocker
 from defender.tests.support.tenancy._host1214 import counting_calls
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 from defender.tests.support.sandbox._spec1092 import make_run_dir
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+from defender.tests.runtime.providers import _spec1243 as P
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 pytestmark = pytest.mark.e2e
 
 
-def _fault(shape):
-    overflow = box.BoxOutputLimitExceeded()
+def _lost() -> box.BoxLost:
+    # GAP G12: `BoxLost`'s constructor is unfixed; it is built as `BoxFault` is, from one message.
+    return box.BoxLost("the box is unusable")
+
+
+#: The two endings: how each is raised, the exit it gives, the word it leaves on the record.
+ENDINGS = {"box-lost": (_lost, 5), "box-output-limit": (box.BoxOutputLimitExceeded, 6)}
+
+
+def _fault(shape, ending):
+    overflow = ENDINGS[ending][0]()
     if shape == "bare":
         return overflow
     if shape == "nested":
@@ -43,22 +61,148 @@ def _run_end(result: S.Drive):
     return parse_record(json.loads(RunPaths(result.folder).run_end_sidecar().read_text(encoding="utf-8")))
 
 
-# Reverses #1205: the run ends in one place, returning its exit code, rather than the fault escaping.
+def _named(result: S.Drive) -> str | None:
+    """The class a run's record names, or None when it left no record."""
+    path = RunPaths(result.folder).run_end_sidecar()
+    return _run_end(result).truncated_by if path.is_file() else None
+
+
+def test_the_run_end_vocabulary_knows_both_endings_and_forces_no_close_for_them():
+    """Without both in the vocabulary `comments_on` normalizes the value away and the sidecar reads as no record. (O8, O9)"""
+    for word in ENDINGS:
+        assert word in run_end.TRUNCATED_BY_VALUES
+        assert run_end.normalized_truncated_by(word) == word
+        assert word not in run_end.FORCED_CLOSE_EXITS
+
+
 @pytest.mark.parametrize("shape", ["bare", "nested", "mixed", "call-record"])
 @pytest.mark.parametrize("where", ["main", "correlation"])
-def test_o9_a_fence_trip_ends_the_run_by_name_instead_of_a_retry_or_fallback(tmp_path, shape, where):
-    """Named on the run-end record and exit 6, over provider-down and call-record faults. (O9)"""
-    fault = _fault(shape)
+@pytest.mark.parametrize("ending", list(ENDINGS))
+def test_o8_o9_a_box_ending_ends_the_run_by_name_instead_of_a_retry_or_fallback(tmp_path, shape, where, ending):
+    """Named on the run-end record and its exit (5, 6), over provider-down and call-record faults. (O8, O9)"""
+    fault = _fault(shape, ending)
     injected = S.LeadFault(raise_on=1, exc=lambda: fault)
     main = S.MainScript([S.text(S.DONE)], fault=injected if where == "main" else S.CLEAN)
     result = S.run_alert(tmp_path, main=main,
                          lead_faults={S.L3: injected} if where == "correlation" else None)
     assert result.raised is None, result.raised
-    assert result.rc == 6
-    assert _run_end(result).truncated_by == "box-output-limit"
+    assert result.rc == ENDINGS[ending][1]
+    assert _run_end(result).truncated_by == ending
     assert main.requests == (1 if where == "main" else 0)
     assert result.report is None
-    # GAP G8: "worded as a process bypassing the helper" names no surface, so no wording is asserted.
+
+
+def test_o9_the_fences_wording_is_its_exceptions_text_logged_once_at_the_ending(tmp_path, caplog):
+    """A process bypassing the helper: the text says so, the log carries it once, the records only the class. (O9)"""
+    fault = box.BoxOutputLimitExceeded()
+    assert "helper" in str(fault).lower(), "the fence's text does not word a bypass of the helper"
+    caplog.set_level(logging.INFO)
+    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=lambda: fault))
+    result = S.run_alert(tmp_path, main=main)
+    assert result.rc == 6
+    logged = [r for r in caplog.records if str(fault) in r.getMessage()]
+    assert len(logged) == 1, [r.getMessage() for r in caplog.records]
+    assert str(fault) not in RunPaths(result.folder).run_end_sidecar().read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("ending", list(ENDINGS))
+def test_o8_o9_the_lead_that_met_the_ending_is_stamped_and_so_is_main(tmp_path, ending):
+    """The lead's session reads the class, beside the provider-down and call-record stamps. (O8, O9)"""
+    stores: list = []
+    lead = "l-001"
+    fault = S.LeadFault(raise_on=1, exc=ENDINGS[ending][0])
+    result = S.run_alert(tmp_path, main=[S.gather(lead, "cmdb"), S.text(S.DONE)],
+                         leads={S.L3: [S.text("corr")], lead: [S.text("x")]}, lead_faults={lead: fault},
+                         store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
+    assert result.rc == ENDINGS[ending][1]
+    ended = P.sessions(stores[-1].path)
+    assert ended.get(P.gather_agent(lead)) == ending, ended
+    assert ended.get("main") == ending, ended
+
+
+@pytest.mark.parametrize("ending", list(ENDINGS))
+def test_o8_o9_the_correlation_lead_that_met_the_ending_is_stamped(tmp_path, ending):
+    """Same at the correlation site, which stops before MAIN. (O8, O9)"""
+    stores: list = []
+    result = S.run_alert(tmp_path, main=S.MainScript([S.text(S.DONE)]), leads={S.L3: [S.text("corr")]},
+                         lead_faults={S.L3: S.LeadFault(raise_on=1, exc=ENDINGS[ending][0])},
+                         store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
+    assert result.rc == ENDINGS[ending][1]
+    assert result.main.requests == 0
+    assert P.sessions(stores[-1].path).get(P.gather_agent(S.L3)) == ending
+
+
+KILLS = {"budget": lambda: BudgetKill("run budget spent"), "aborted": lambda: RunAborted(5, ["cmdb"])}
+
+
+@pytest.mark.parametrize("ending", list(ENDINGS))
+@pytest.mark.parametrize("kill", list(KILLS))
+def test_o8_o9_a_group_with_a_budget_or_abort_propagates_first_and_is_not_named_for_the_box(tmp_path, kill, ending):
+    """The kill's own ending wins; the record names it or nothing, never the box. (O8, O9, group precedence)"""
+    group = ExceptionGroup("g", [KILLS[kill](), ENDINGS[ending][0]()])
+    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=lambda: group))
+    result = S.run_alert(tmp_path, main=main)
+    assert result.rc not in (5, 6), result.rc
+    assert _named(result) in (None, kill), _named(result)
+    assert result.raised is not None or _named(result) == kill, "the group vanished without an ending"
+
+
+@pytest.mark.parametrize("order", ["lost-first", "fence-first"])
+def test_o8_o9_a_group_holding_both_box_endings_names_the_fence(tmp_path, order):
+    """Both in one group: the fence is named and exits 6, whichever was raised first. (O9, Run ending)"""
+    leaves = [_lost(), box.BoxOutputLimitExceeded()]
+    group = ExceptionGroup("g", leaves if order == "lost-first" else leaves[::-1])
+    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=lambda: group))
+    result = S.run_alert(tmp_path, main=main)
+    assert result.raised is None, result.raised
+    assert result.rc == 6
+    assert _run_end(result).truncated_by == "box-output-limit"
+
+
+@pytest.mark.parametrize("ending", list(ENDINGS))
+def test_o8_o9_a_group_with_an_interrupt_propagates_first(tmp_path, ending):
+    """An interrupt beside a box ending is never turned into the ending. (O8, O9)"""
+    group = BaseExceptionGroup("g", [KeyboardInterrupt(), ENDINGS[ending][0]()])
+    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=lambda: group))
+    with pytest.raises(BaseExceptionGroup) as caught:
+        S.run_alert(tmp_path, main=main)
+    assert carried(caught.value, KeyboardInterrupt) is not None
+
+
+@pytest.mark.parametrize("ending", [None, *ENDINGS])
+def test_o8_o9_a_serving_abort_in_a_group_still_exits_3_for_an_unservable_world(tmp_path, monkeypatch, ending):
+    """The unservable sibling world's exit 3 wins over a box ending in the same group; bare is the control. (O8, O9)"""
+
+    leaves = [ServingAbort("the oracle gave up on the world")] + ([ENDINGS[ending][0]()] if ending else [])
+    raised = leaves[0] if len(leaves) == 1 else ExceptionGroup("g", leaves)
+    ep = P.sibling_episode(tmp_path, monkeypatch)
+    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=lambda: raised))
+    result = P.run_sibling(tmp_path / "sibling", ep, main)
+    assert result.raised is None, result.raised
+    assert result.rc == 3, result.rc
+
+
+@pytest.mark.parametrize("ending", list(ENDINGS))
+def test_o8_o9_a_sibling_world_exiting_5_or_6_did_not_finish(tmp_path, monkeypatch, ending):
+    """The exit is new (not 0, 2, 3, 4) and the branched world is recorded as unfinished. (O8, O9)"""
+    from defender.learning.branch import cli
+    from defender.learning.branch.outcome import DID_NOT_FINISH
+    from defender.records._episode_handle import Episode
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
+    code = ENDINGS[ending][1]
+    assert code not in P.TAKEN_EXITS | {P.PROVIDER_DOWN_EXIT}
+    _base, src, _root = T.configured_layout(tmp_path, monkeypatch)
+    spawn = T.FakeSpawn(exits={"b": code})
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src.resolve())))
+    with Episode.open(ep) as episode:
+        T.episode_view(episode)
+        exits = cli.start_family(
+            episode, [T.world_id(ep, label) for label in ("a", "b")], spawn=spawn, tenant_id=T.SOURCE_TENANT)
+    assert exits.get(T.world_id(ep, "b")) == code
+    records = {p.stem: p.read_text(encoding="utf-8") for p in ep.rglob("world_records/*.yaml")}
+    assert DID_NOT_FINISH in records[T.world_id(ep, "b")]
+    assert T.world_id(ep, "a") not in records
 
 
 NAME = "defender-1421-box"
@@ -70,13 +214,34 @@ def _exchange_runs(*argv: str) -> Callable[..., subprocess.Popen[bytes]]:
     return lambda _argv, **kw: subprocess.Popen(list(argv), **kw)
 
 
-def _boxed(daemon: RecordingDocker, popen: Callable[..., subprocess.Popen[bytes]]) -> dict:
-    """The real lifecycle over a sandboxed executor whose exchange and daemon are the fault. A run
-    box has its attached start, so it is auto-removed: gone counts as stopped (#1343 B10)."""
-    attached = subprocess.Popen(["true"])
-    attached.wait()
-    executor = box.BoxExecutor(name=NAME, docker=daemon, starter=attached,
-                               transport=box._DockerTransport(NAME, box.BoxSpec(), popen=popen))
+def _exchange_fails(error: Exception) -> Callable[..., subprocess.Popen[bytes]]:
+    """A docker client that cannot be run at all: the transport itself raises."""
+    def popen(_argv, **_kw):
+        raise error
+
+    return popen
+
+
+def _mute(argv, **_kw) -> subprocess.CompletedProcess:
+    """A daemon that does not answer a status question."""
+    return subprocess.CompletedProcess(list(argv), 1, stdout="", stderr="Cannot connect to the Docker daemon")
+
+
+def _executor(status: str | None, popen: Callable[..., subprocess.Popen[bytes]], *, attached: bool = True):
+    """A sandboxed executor whose exchange is the fault and whose daemon answers `status` ("mute": not at
+    all). A run box has its attached start, so it is auto-removed: gone counts as stopped (#1343 B10)."""
+    daemon = _mute if status == "mute" else RecordingDocker(status=status)
+    starter = None
+    if attached:
+        starter = subprocess.Popen(["true"])
+        starter.wait()
+    return box.BoxExecutor(name=NAME, docker=daemon, starter=starter,
+                           transport=box._DockerTransport(NAME, box.BoxSpec(), popen=popen)), daemon
+
+
+def _boxed(status: str | None, popen: Callable[..., subprocess.Popen[bytes]]) -> dict:
+    """The real lifecycle over that executor."""
+    executor, _daemon = _executor(status, popen)
 
     def scrub(_tree: Path, *, write_verdict) -> None:
         write_verdict({"ran": True, "reason": "walk completed"})
@@ -84,23 +249,39 @@ def _boxed(daemon: RecordingDocker, popen: Callable[..., subprocess.Popen[bytes]
     return {"start_box": lambda *_a, **_k: executor, "stop_box": lambda *_a, **_k: None, "scrub": scrub}
 
 
+def _asks(executor: box.BoxExecutor, command: str = COMMAND):
+    return executor.run_parsed(bash_exec.parse(command), command=command, cwd=Path("/runs/current"), timeout=5)
+
+
 EXEC_KILLED = ("sh", "-c", "exit 137")  # C4, C5: exec rc 137 and no bytes, whether the box or the helper died
+EXEC_KILLED_WITH_BYTES = ("sh", "-c", "printf 'partial output'; exit 137")  # C4: bytes arrived before the kill
+EXEC_KILLED_MID_FRAME = (sys.executable, "-c", "import os, sys\n"
+                         "from defender import box\n"
+                         "w = box.encode_response(box.BoxResult(rc=0, out=b'x' * 99, err=b''))\n"
+                         "os.write(1, w[:len(w) // 2]); sys.exit(137)")
 EXEC_SAYS_NO_SUCH_BOX = ("sh", "-c", "echo 'No such container' >&2; exit 1")  # C5, the next exec
 NOT_A_FRAME = ("sh", "-c", "printf 'wrong magic, a bypassing writer'")  # C13
+EXEC_REFUSED_REQUEST = ("sh", "-c", "exit 2")  # the helper could not decode the request: rule 4
+EXEC_HELPER_DEADLINE = ("sh", "-c", "exit 3")  # the helper's own deadline: rule 3
 OVER_THE_FENCE = ("head", "-c", str(box.BOX_OUTPUT_LIMIT + 1), "/dev/zero")
 
 
 @pytest.mark.parametrize(("status", "exchange", "code", "named"), [
-    ("exited", EXEC_KILLED, 5, "box-lost"),  # rule 1, box dead
-    (None, EXEC_SAYS_NO_SUCH_BOX, 5, "box-lost"),  # rule 1, box gone
-    ("running", NOT_A_FRAME, 5, "box-lost"),  # rule 4
-    ("exited", OVER_THE_FENCE, 6, "box-output-limit"),
-], ids=["box-exited", "box-gone", "running-no-frame", "fence"])
+    ("exited", _exchange_runs(*EXEC_KILLED), 5, "box-lost"),  # rule 1, box dead
+    (None, _exchange_runs(*EXEC_SAYS_NO_SUCH_BOX), 5, "box-lost"),  # rule 1, box gone
+    ("mute", _exchange_runs(*EXEC_KILLED), 5, "box-lost"),  # rule 1, no answer
+    ("exited", _exchange_fails(OSError("docker client")), 5, "box-lost"),  # rule 1, transport exception
+    ("running", _exchange_runs(*NOT_A_FRAME), 5, "box-lost"),  # rule 4
+    ("running", _exchange_runs(*EXEC_REFUSED_REQUEST), 5, "box-lost"),  # rule 4: rc 2 is not rule 3
+    ("running", _exchange_fails(OSError("docker client")), 5, "box-lost"),  # rule 4, transport exception
+    ("exited", _exchange_runs(*OVER_THE_FENCE), 6, "box-output-limit"),
+    ("running", _exchange_runs(*OVER_THE_FENCE), 6, "box-output-limit"),  # the stop cannot be proven: still the fence
+], ids=["box-exited", "box-gone", "daemon-mute", "exited-transport-exception", "running-no-frame",
+        "running-exec-rc-2", "running-transport-exception", "fence", "fence-unprovable-stop"])
 def test_o8_o9_the_first_command_that_finds_the_box_unusable_ends_the_run(tmp_path, status, exchange, code, named):
     """From the bash tool: no retry prompt, no forced close, the class on the record and in the exit code. (O8, O9)"""
     main = S.MainScript([S.call("bash", command=COMMAND), S.text(S.DONE)])
-    result = S.run_alert(tmp_path, main=main,
-                         box_lifecycle=_boxed(RecordingDocker(status=status), _exchange_runs(*exchange)))
+    result = S.run_alert(tmp_path, main=main, box_lifecycle=_boxed(status, exchange))
     assert result.raised is None, result.raised
     assert result.rc == code
     assert _run_end(result).truncated_by == named
@@ -109,19 +290,212 @@ def test_o8_o9_the_first_command_that_finds_the_box_unusable_ends_the_run(tmp_pa
     assert result.report is None
 
 
-def test_o6_exec_137_with_the_box_running_is_a_result_and_the_run_continues(tmp_path):
-    """Rule 2: the helper was killed, the box lives; the model gets the reason line and goes on. (O6)"""
+@pytest.mark.parametrize("exchange", [EXEC_KILLED, EXEC_KILLED_WITH_BYTES, EXEC_KILLED_MID_FRAME],
+                         ids=["no-bytes", "partial-bytes", "half-a-frame"])
+def test_o6_exec_137_with_the_box_running_is_a_result_and_the_run_continues(tmp_path, exchange):
+    """Rule 2, whatever bytes arrived: the helper was killed, the box lives; the model gets the reason line and goes on. (O6)"""
     main = S.MainScript([S.call("bash", command=COMMAND), S.text(S.DONE)])
-    result = S.run_alert(tmp_path, main=main,
-                         box_lifecycle=_boxed(RecordingDocker(status="running"), _exchange_runs(*EXEC_KILLED)))
+    result = S.run_alert(tmp_path, main=main, box_lifecycle=_boxed("running", _exchange_runs(*exchange)))
     assert result.raised is None, result.raised
     assert result.rc == 0
     assert _run_end(result).truncated_by is None
     assert main.requests == 2
     said = "\n".join(main.seen[1].tool_returns)
     assert "memory" in said, said
+    assert "exit=-9" in said, said
+    assert "partial output" not in said, "bytes of a killed exchange reached the model"
+    assert "x" * 20 not in said, "bytes of a killed exchange reached the model"
     assert "could not run this command" not in said, f"reached the model as a retry: {said}"
-    # GAP G1: the design gives this result no code when no stage died; a code is not asserted here.
+
+
+@pytest.mark.parametrize("exchange", [EXEC_HELPER_DEADLINE, ("sleep", "30")], ids=["helper-deadline-rc-3", "host-timeout"])
+def test_o6_rule_3_a_timeout_keeps_the_existing_timeout_message_and_the_run_goes_on(tmp_path, monkeypatch, exchange):
+    """With the box running, the helper's own deadline and the host's timeout are the model's timeout, not a lost box. (O6)"""
+    from defender.investigation.tools import _bash
+
+    monkeypatch.setattr(_bash, "_BASH_TIMEOUT_S", 1)
+    main = S.MainScript([S.call("bash", command=COMMAND), S.text(S.DONE)])
+    result = S.run_alert(tmp_path, main=main, box_lifecycle=_boxed("running", _exchange_runs(*exchange)))
+    assert result.raised is None, result.raised
+    assert result.rc == 0
+    assert _run_end(result).truncated_by is None
+    assert main.requests == 2
+    said = "\n".join(main.seen[1].tool_returns)
+    assert "timed out" in said, said
+
+
+def test_o6_the_killed_helpers_result_is_a_fixed_one_line_reason_whatever_arrived(tmp_path):
+    """Executor: rc -9, empty stdout, one fixed line of at most 160 characters naming memory, byte-identical across triggers. (O6, P1)"""
+    results = []
+    for exchange in (EXEC_KILLED, EXEC_KILLED_WITH_BYTES, EXEC_KILLED_MID_FRAME):
+        executor, _daemon = _executor("running", _exchange_runs(*exchange))
+        results.append(_asks(executor))
+    first = results[0]
+    assert first.rc == -9
+    assert first.out == b""
+    line = first.err.decode("utf-8")
+    assert len(line.strip().splitlines()) == 1, line
+    assert len(line.strip()) <= 160, line
+    assert "memory" in line
+    assert all(r == first for r in results), results
+
+
+def test_o6_rule_2_leaves_the_box_usable_and_stops_nothing(tmp_path):
+    """A result, not a loss: nothing is stopped and the next command is executed. (O6)"""
+    executor, daemon = _executor("running", _exchange_runs(*EXEC_KILLED))
+    _asks(executor)
+    _asks(executor)
+    assert [c for c in daemon.calls if c[1] in {"stop", "kill", "rm"}] == []
+    assert len([c for c in daemon.calls if c[1] == "inspect"]) >= 1, "no status was asked, so rule 2 was guessed"
+
+
+@pytest.mark.parametrize("rc", [137, -9, 75, 2, 3])
+def test_o6_a_clean_frame_is_returned_untouched_and_no_status_is_asked(rc):
+    """A command's own 137 or 75 inside a good frame is the command's, not a rule's. Control for the rules. (O6)"""
+    wire = box.encode_response(box.BoxResult(rc=rc, out=b"o\n", err=b"e\n"))
+    executor, daemon = _executor("running", _exchange_runs(sys.executable, "-c", f"import os; os.write(1, {wire!r})"))
+    assert _asks(executor) == box.BoxResult(rc=rc, out=b"o\n", err=b"e\n")
+    assert daemon.calls == []
+
+
+def test_o6_a_host_timeout_with_the_box_running_stays_a_timeout_and_the_box_is_usable():
+    """Rule 3 at the executor: `TimeoutExpired`, no loss, no stop. (O6)"""
+    executor, daemon = _executor("running", _exchange_runs("sleep", "30"))
+    with pytest.raises(subprocess.TimeoutExpired):
+        executor.run_parsed(bash_exec.parse(COMMAND), command=COMMAND, cwd=Path("/"), timeout=0.5)
+    assert [c for c in daemon.calls if c[1] == "stop"] == []
+    with pytest.raises(subprocess.TimeoutExpired):  # not sticky: the next command is executed again
+        executor.run_parsed(bash_exec.parse(COMMAND), command=COMMAND, cwd=Path("/"), timeout=0.5)
+
+
+@pytest.mark.parametrize("status", ["exited", "running"], ids=["stop-proven", "stop-unprovable"])
+def test_o8_box_lost_stops_the_box_goes_sticky_and_keeps_its_identity_when_the_stop_faults(status):
+    """The refusal stays for every later command, with no new exchange; an unprovable stop adds a note. (O8)"""
+    attempts: list[int] = []
+
+    def popen(argv, **kw):
+        attempts.append(1)
+        return subprocess.Popen(list(NOT_A_FRAME), **kw)
+
+    executor, daemon = _executor(status, popen)
+    with pytest.raises(box.BoxLost) as first:
+        _asks(executor)
+    assert ["docker", "stop", "-t", "0", NAME] in daemon.calls
+    assert bool(getattr(first.value, "__notes__", [])) is (status == "running"), first.value.__notes__
+    with pytest.raises(box.BoxLost):
+        _asks(executor)
+    assert len(attempts) == 1, "a refused box was asked to run another command"
+
+
+def test_o8_a_box_with_no_container_attached_is_outside_the_rule():
+    """The unattached default executor keeps its plain `BoxFault` (a retry), not a loss. (O8)"""
+    with pytest.raises(box.BoxFault) as caught:
+        _asks(box.BoxExecutor())
+    assert not isinstance(caught.value, box.BoxLost)
+
+
+def test_o8_an_unsandboxed_transport_is_outside_the_rule_and_asks_no_daemon():
+    """A fallback transport with no frame stays a `BoxFault`; the daemon is never asked. (O8)"""
+    from defender.tests.e2e._box665 import ScriptedTransport
+
+    daemon = RecordingDocker(status="exited")
+    executor = box.BoxExecutor(name=NAME, docker=daemon, transport=ScriptedTransport(box.RawExec(137, b"", b"")))
+    assert not executor.sandboxed
+    with pytest.raises(box.BoxFault) as caught:
+        _asks(executor)
+    assert not isinstance(caught.value, box.BoxLost)
+    assert daemon.calls == []
+
+
+def test_o8_a_clock_write_fault_is_outside_the_rule(tmp_path):
+    """A box whose clock file cannot be written fails with its own `BoxFault`, before any exchange. (O8)"""
+    executor, daemon = _executor("exited", _exchange_runs(*EXEC_KILLED))
+    executor.clock_file = tmp_path / "no-such-dir" / "clock"
+    executor.follow_clock(lambda: datetime.now(UTC))
+    with pytest.raises(box.BoxFault) as caught:
+        _asks(executor)
+    assert not isinstance(caught.value, box.BoxLost)
+    assert daemon.calls == []
+
+
+def _reducer_run(root: Path, executor: box.BoxExecutor | None, sql: str = "'SELECT 1'", payload_size: int | None = None):
+    """A real run whose gather lead reduces its payload through `defender-sql <sql>` on `executor` (None: the
+    unboxed one), the payload made a sparse `payload_size` bytes when given; returns its queries rows."""
+    from defender.records import RunPaths as Paths
+    from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, VerbRecorder, drive, materialize
+    from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q
+    from defender.tests.support.runtime.state._1255_view import model_path
+    from defender._io import read_jsonl_rows
+
+    run_dir = materialize(root, GOLDEN_AB3)
+    payload = run_dir / "gather_raw" / "l-001" / "0.json"
+    if payload_size is not None:
+        payload.parent.mkdir(parents=True, exist_ok=True)
+        with payload.open("wb") as big:
+            big.truncate(payload_size)
+    reduce = Turn(tool_calls=[("bash", {"command": f"cat {model_path(payload, run_dir=run_dir)} | defender-sql {sql}"})])
+    main = ReplayFn([Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic", "goal": "reduce",
+                                                   "what_to_summarize": ["events"]})]), Turn(text="Investigation complete.")])
+    # A planted payload stands in for the query's: the query would overwrite it.
+    gather = ReplayFn([*([] if payload_size is not None else [q("elastic", "query", {"native_query": "FROM logs"})]), reduce, DONE])
+    drive(run_dir, run_id="d1421-rows", main=main, gather=gather, verbs=elastic_ok(VerbRecorder()), box=executor)
+    return [r for r in read_jsonl_rows(Paths(run_dir).executed_queries) if r.get("lead_id") == "l-001"], gather
+
+
+def test_o6_a_killed_reducer_stage_is_recorded_as_a_row_with_the_same_digest_whatever_arrived(tmp_path):
+    """Rule 2 is a result, so the queries table gets its shim row; the digest (the pitfall's merge key) is fixed. (O6, P1, O7)"""
+    digests = []
+    for n, exchange in enumerate((EXEC_KILLED, EXEC_KILLED_WITH_BYTES)):
+        root = tmp_path / str(n)
+        root.mkdir()
+        executor, _daemon = _executor("running", _exchange_runs(*exchange))
+        rows, gather = _reducer_run(root, executor)
+        shim = [r for r in rows if r["verb"] == "bash"]
+        assert len(shim) == 1, f"the killed exchange left no row: {rows}"
+        assert shim[0]["error_class"] == "agent-fixable"
+        assert shim[0]["payload_digest"].startswith("exit=-9; ")
+        assert "memory" in shim[0]["payload_digest"]
+        assert "memory" in gather.seen[-1]
+        digests.append(shim[0]["payload_digest"])
+    assert digests[0] == digests[1]
+
+
+def _merge_key_of(row: dict) -> tuple[str, str]:
+    """The pitfall key of a shim row as the curator's queue carries it: the row's digest is the queue's `stderr_digest`."""
+    from defender.learning.core.persist import pitfall_key
+
+    return pitfall_key({"query_id": row["query_id"], "system": "", "pitfall_id": f"r:{row['lead_id']}:{row['seq']}",
+                        "stderr_digest": row["payload_digest"]})
+
+
+def _two_triggers_one_key(tmp_path: Path, runs: list[dict], start: str) -> None:
+    keys = []
+    for n, kw in enumerate(runs):
+        root = tmp_path / str(n)
+        root.mkdir()
+        rows, _gather = _reducer_run(root, **kw)
+        shim = [r for r in rows if r["verb"] == "bash"]
+        assert len(shim) == 1, f"trigger {n} left no shim row: {rows}"
+        assert shim[0]["payload_digest"].startswith(start), shim[0]["payload_digest"]
+        keys.append(_merge_key_of(shim[0]))
+    assert keys[0] == keys[1] == keys[-1], keys
+    assert not keys[0][1].startswith("\x00"), "a digest read as content-less never merges"
+
+
+def test_p1_the_kill_line_gives_one_pitfall_key_whatever_arrived_before_it(tmp_path):
+    """Three triggers of one kill (nothing, partial bytes, half a frame) merge into one pitfall. (P1, O6)"""
+    runs = [{"executor": _executor("running", _exchange_runs(*x))[0]}
+            for x in (EXEC_KILLED, EXEC_KILLED_WITH_BYTES, EXEC_KILLED_MID_FRAME)]
+    _two_triggers_one_key(tmp_path, runs, "exit=-9; ")
+
+
+def test_p1_the_size_refusal_gives_one_pitfall_key_on_both_load_paths_and_at_any_size(tmp_path):
+    """The payload-maximum refusal through the real bash tool: undeclared, declared and larger merge. (P1, O1)"""
+    over = 64 << 20
+    declared = "--rows values --names columns 'SELECT 1'"
+    runs = [{"executor": None, "payload_size": over + 1}, {"executor": None, "sql": declared, "payload_size": over + 1},
+            {"executor": None, "payload_size": over + (1 << 20)}]
+    _two_triggers_one_key(tmp_path, runs, "exit=2; ")
 
 
 def test_o5_a_command_printing_too_much_keeps_the_run_alive(tmp_path):
@@ -142,7 +516,7 @@ def test_o5_a_command_printing_too_much_keeps_the_run_alive(tmp_path):
 
 
 def _torn_down(exchange: tuple[str, ...], *, teardown_faults: bool, seen: list[str]) -> dict:
-    seams = _boxed(RecordingDocker(status="exited"), _exchange_runs(*exchange))
+    seams = _boxed("exited", _exchange_runs(*exchange))
 
     def stop(*_a, **_k) -> None:
         seen.append("stop")
@@ -152,22 +526,24 @@ def _torn_down(exchange: tuple[str, ...], *, teardown_faults: bool, seen: list[s
     return {**seams, "stop_box": stop}
 
 
+@pytest.mark.parametrize(("exchange", "code", "named"), [
+    (EXEC_KILLED, 5, "box-lost"), (OVER_THE_FENCE, 6, "box-output-limit")], ids=["box-lost", "fence"])
 @pytest.mark.parametrize(("teardown_faults", "pages", "checks"), [(True, 0, 0), (False, 1, 1)],
                          ids=["teardown-fault", "control-clean-teardown"])
 def test_o8_a_teardown_fault_cannot_replace_the_ending_and_skips_the_post_steps(
-        tmp_path, teardown_faults, pages, checks):
-    """A box that may be alive: exit 5 still returned, nothing read or published from its tree. (O8)"""
+        tmp_path, teardown_faults, pages, checks, exchange, code, named):
+    """A box that may be alive: its exit still returned, nothing read or published from its tree; a proven stop runs them. (O8, O9)"""
     stops: list[str] = []
     rendered: list[object] = []
     with counting_calls(cross_check=run_common.cross_check_tables) as calls:
         result = S.run_alert(
             tmp_path, main=S.MainScript([S.call("bash", command=COMMAND), S.text(S.DONE)]),
             visualize=lambda *a, **_k: rendered.append(a),
-            box_lifecycle=_torn_down(EXEC_KILLED, teardown_faults=teardown_faults, seen=stops))
+            box_lifecycle=_torn_down(exchange, teardown_faults=teardown_faults, seen=stops))
     assert stops, "the lifecycle never tore the box down, so the fault proves nothing"
     assert result.raised is None, result.raised
-    assert result.rc == 5
-    assert _run_end(result).truncated_by == "box-lost"
+    assert result.rc == code
+    assert _run_end(result).truncated_by == named
     assert len(rendered) == pages
     assert calls.counts["cross_check"] == checks
 
@@ -179,7 +555,7 @@ def test_control_a_clean_run_through_the_real_lifecycle_reads_its_tree_and_exits
     main = S.MainScript([S.call("bash", command=COMMAND), S.text(S.DONE)])
     with counting_calls(cross_check=run_common.cross_check_tables) as calls:
         result = S.run_alert(tmp_path, main=main, visualize=lambda *a, **_k: rendered.append(a),
-                             box_lifecycle=_boxed(RecordingDocker(status="running"),
+                             box_lifecycle=_boxed("running",
                                                   _exchange_runs("python3", "-c", f"import os; os.write(1, {wire!r})")))
     assert result.raised is None, result.raised
     assert result.rc == 0
@@ -188,18 +564,49 @@ def test_control_a_clean_run_through_the_real_lifecycle_reads_its_tree_and_exits
     assert calls.counts["cross_check"] == 1
 
 
-def test_o8_a_run_the_model_had_closed_keeps_its_report_and_its_case_comment(tmp_path):
-    """Closed, then the box is lost: `closed_before_cut` stands and the case is still commented on. (O8, decision 3)"""
+@pytest.mark.parametrize(("exchange", "code", "named"), [
+    (EXEC_KILLED, 5, "box-lost"), (OVER_THE_FENCE, 6, "box-output-limit")], ids=["box-lost", "fence"])
+def test_o8_o9_a_run_the_model_had_closed_keeps_its_report_and_its_case_comment_and_still_exits_by_class(
+        tmp_path, exchange, code, named):
+    """Closed, then the ending: `closed_before_cut` stands, the case is commented on, the exit is 5 or 6. (O8, O9, decision 3)"""
     main = S.MainScript([*S.closing_main_turns()[:2], S.call("bash", command=COMMAND), S.text(S.DONE)])
-    result = S.run_alert(tmp_path, main=main,
-                         box_lifecycle=_boxed(RecordingDocker(status="exited"), _exchange_runs(*EXEC_KILLED)))
+    result = S.run_alert(tmp_path, main=main, box_lifecycle=_boxed("exited", _exchange_runs(*exchange)))
     assert result.raised is None, result.raised
     end = _run_end(result)
-    assert end.truncated_by == "box-lost"
+    assert end.truncated_by == named
     assert end.closed_before_cut is True
     assert result.report is not None
     assert ticket_writer.comments_on(end.truncated_by, end.closed_before_cut) is True
-    # GAP G2: the design does not say whether this run exits 5 or 0; `result.rc` is not asserted here.
+    assert result.rc == code
+
+
+@pytest.mark.parametrize(("exchange", "code", "named"), [
+    (EXEC_KILLED, 5, "box-lost"), (OVER_THE_FENCE, 6, "box-output-limit")], ids=["box-lost", "fence"])
+@pytest.mark.parametrize("closed", [True, False], ids=["model-closed", "not-closed"])
+def test_o8_o9_the_case_is_commented_on_only_when_the_model_had_closed_before_the_ending(
+        tmp_path, exchange, code, named, closed):
+    """Through the ticketed run: one comment for a model-closed run, none for an unclosed one. (O8, O9, decision 3)"""
+    store = S.TicketStore(tmp_path)
+    main = S.MainScript([*(S.closing_main_turns()[:2] if closed else []),
+                         S.call("bash", command=COMMAND), S.text(S.DONE)])
+    result = S.run_alert(tmp_path, main=main, alert=S.ticketed_alert(),
+                         tenant=S.ticket_the_tenant(S.plant_tenant()), tickets=S.ticket_writer(store),
+                         update_ticket=True, box_lifecycle=_boxed("exited", _exchange_runs(*exchange)))
+    assert result.raised is None, result.raised
+    assert result.rc == code
+    assert _run_end(result).truncated_by == named
+    assert (result.report is not None) is closed
+    assert len(store.comment_payloads) == (1 if closed else 0), store.calls
+
+
+def test_control_a_closed_run_with_no_ending_comments_on_the_case_through_the_same_harness(tmp_path):
+    """The ticketed harness above does see a comment when one is due. (O8)"""
+    store = S.TicketStore(tmp_path)
+    result = S.run_alert(tmp_path, main=S.MainScript(S.closing_main_turns()), alert=S.ticketed_alert(),
+                         tenant=S.ticket_the_tenant(S.plant_tenant()), tickets=S.ticket_writer(store),
+                         update_ticket=True)
+    assert result.rc == 0
+    assert len(store.comment_payloads) == 1, store.calls
 
 
 @pytest.mark.parametrize("named", ["box-lost", "box-output-limit"])

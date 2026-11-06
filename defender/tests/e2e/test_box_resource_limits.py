@@ -122,6 +122,26 @@ def test_every_launch_path_caps_memory_cpu_and_processes(argv_of, tmp_path):
     assert "--init" not in argv, "docker's init has the attached stream as its output"
 
 
+@pytest.mark.parametrize("memory", ["512m", "2g", "1073741824"])
+@pytest.mark.parametrize("builder", ["create", "render"])
+def test_both_builders_hand_the_box_its_cap_in_the_environment(builder, memory, tmp_path):
+    """`DEFENDER_BOX_MEMORY` carries `BoxSpec.memory` as written, once, from both launch builders. (P5)"""
+    from defender.box._lifecycle import _create_argv, _render_argv, _run_lane_mounts
+
+    spec = box_mod.BoxSpec(memory=memory, rootfs="defender-box:cap")
+    if builder == "create":
+        run_dir = _run_dir(tmp_path)
+        argv = _create_argv("defender-run-cap", run_dir, DEFENDER, spec,
+                            lane=_run_lane_mounts(run_dir, DEFENDER, None)).argv
+    else:
+        request = box_mod.BoxRequest(name="defender-lane-cap", workdir=tmp_path, defender_dir=DEFENDER,
+                                     spec=spec, tenant_id=TEST_TENANT)
+        argv = _render_argv(request).argv
+    assert _flag(argv, "--memory") == memory, "control: the cap itself reaches docker"
+    given = [argv[i + 1] for i, word in enumerate(argv) if word == "--env" and argv[i + 1].startswith("DEFENDER_BOX_MEMORY=")]
+    assert given == [f"DEFENDER_BOX_MEMORY={memory}"]
+
+
 @pytest.mark.parametrize("payload", [
     json.dumps({"a": "x" * (20 << 20)}),
     "\n".join(json.dumps({"a": "x" * 100}) for _ in range(250_000)),
@@ -149,8 +169,7 @@ def _reason_lines(err: bytes | str) -> list[str]:
 def _refusal_without_a_traceback(res) -> None:
     assert res.stdout == "", "a size failure is never an observation"
     assert "Traceback" not in res.stderr, res.stderr[-400:]
-    # GAP G4: "all exit 2" is stated for the catch around the run, not for O1's check or O4's budget.
-    assert res.returncode != EXIT_OK
+    assert res.returncode == EXIT_INPUT_ERROR, "O1-O4 all exit 2"
     assert error_class_for_exit(tools._shim_exit_code(res.returncode)) == "agent-fixable", res.returncode
 
 
@@ -162,8 +181,9 @@ def test_o1_a_payload_over_the_maximum_is_refused_before_parsing_on_both_load_pa
     for res in (undeclared, declared):
         _refusal_without_a_traceback(res)
         assert "not valid JSON" not in res.stderr, "the payload was parsed before its size was checked"
-        # GAP G3: the design fixes no text, though P1 makes it the merge key; "narrow" is its own verb.
         assert "narrow" in res.stderr.lower(), res.stderr
+        assert len(_reason_lines(res.stderr)) == 1
+        assert len(res.stderr.strip()) <= 160, "P1: the digest keeps 160 characters"
     assert undeclared.stderr == declared.stderr, "one message, whichever load path"
 
 
@@ -187,7 +207,7 @@ def _writes(fd: int, mib: int, byte: str = "x") -> str:
 
 
 @pytest.mark.parametrize("printing", [
-    f"head -c {box_mod.BOX_OUTPUT_LIMIT + 1} /dev/zero",
+    _writes(1, (box_mod.BOX_OUTPUT_LIMIT >> 20) + 1),
     f"{_writes(2, 40)} ; {_writes(2, 30)}",  # C13: neither pipeline is over alone
     f"{_writes(1, 40)} ; {_writes(2, 30)}",
 ], ids=["stdout", "stderr-across-pipelines", "both-streams"])
@@ -201,9 +221,10 @@ def test_o5_the_budget_spans_the_whole_command_and_stops_it_with_exit_75(tmp_pat
     assert res.rc == 75, res.err[-400:]
     assert res.out == b""
     assert not (tmp_path / "later").exists(), "a pipeline ran after the budget stopped the command"
-    # GAP G5: is stderr already captured kept beside the reason, and on which side of it?
     assert len(_reason_lines(res.err)) == 1, res.err[:400]
-    assert b"output" in res.err.lower(), res.err[:400]  # GAP G3: no fixed text to pin
+    assert len(res.err.strip()) <= 160, "P1: the digest keeps 160 characters"
+    assert b"output" in res.err.lower(), res.err[:400]
+    assert "exit=" not in res.err.decode(), "the digest already carries the code"
 
 
 def test_o5_output_that_is_not_utf8_crosses_as_its_own_bytes(tmp_path):
@@ -224,8 +245,9 @@ def test_o6_a_stage_dying_on_a_signal_gives_its_signal_a_reason_and_no_partial_o
     res = _unboxed(tmp_path, f"{stage} | {last} ; touch later")
     assert res.rc == -int(sig), res
     assert res.out == b""
-    # GAP G9: this transport has no memory cap for the line to name; the design applies the helper here too.
-    assert "memory" in res.err.decode(), res.err
+    assert len(_reason_lines(res.err)) == 1, res.err
+    assert len(res.err.strip()) <= 160, "P1: the digest keeps 160 characters"
+    assert "memory" in res.err.decode().lower(), res.err
     assert not (tmp_path / "later").exists()
 
 
@@ -239,7 +261,7 @@ def test_o6_control_sigpipe_is_the_normal_head_case_and_keeps_its_output(tmp_pat
 def test_o10_the_sql_skill_states_the_ceilings_the_exit_codes_and_the_dense_payload_caveat():
     """The model's own instructions carry what it needs to shrink a query. (O10)"""
     text = (DEFENDER / "skills" / "gather" / "defender-sql.md").read_text(encoding="utf-8")
-    for needle in ("64 MiB", "32 MiB", "75", "dense"):
+    for needle in ("64 MiB", "32 MiB", "`75`", "dense"):
         assert needle in text, needle
 
 
@@ -334,11 +356,30 @@ def test_a_process_past_the_memory_cap_is_stopped_at_the_cap(boxed, base, runtim
         assert _sh(box, "echo alive").rc == 0
 
 
-def _refused_for_size(res: box_mod.BoxResult) -> None:
-    assert res.rc == EXIT_INPUT_ERROR, res
+KILL_LINE_PROGRAM = "sh -c 'kill -9 $$'"
+
+
+def _kill_line(box: box_mod.BoxExecutor) -> bytes:
+    """The O6 line as this box gives it, for a size failure that arrives as a crash to match."""
+    res = _sh(box, KILL_LINE_PROGRAM)
+    assert (res.rc, res.out) == (-9, b""), res
+    return res.err
+
+
+def _size_failure_at_the_box_boundary(res: box_mod.BoxResult, kill_line: bytes) -> None:
+    """P5: no stdout, no traceback, one line naming memory or room; exit 2 with the size text,
+    or a crash signal with exactly the O6 line (the occasional crash under the limit, C16)."""
     assert res.out == b"", "a size failure is never an observation (P2)"
     assert b"Traceback" not in res.err, res.err[-400:]
     assert b"not valid JSON" not in res.err, res.err[-400:]
+    lines = _reason_lines(res.err)
+    assert len(lines) == 1, res.err[-400:]
+    assert len(res.err.strip()) <= 160, "P1: the digest keeps 160 characters"
+    assert any(word in lines[0].lower() for word in ("memory", "room")), lines[0]
+    if res.rc == EXIT_INPUT_ERROR:
+        return
+    assert res.rc in (-int(sig) for sig in KILL_OR_CRASH), res
+    assert res.err == kill_line, "a crash must read as every other kill"
 
 
 #: C19: shapes far past the edge, where both sides of the near-edge flip are behind them (O2).
@@ -361,34 +402,87 @@ def test_o2_a_load_that_runs_out_of_room_below_the_maximum_is_a_size_refusal(box
     box = boxed(memory=memory)
     (next(base.glob("run-limits-*")) / "payload.json").write_text(payload, encoding="utf-8")
     res = _sh(box, f"cat {MODEL_RUN}/payload.json | defender-sql {args} 'SELECT 1 AS x'")
-    _refused_for_size(res)
+    _size_failure_at_the_box_boundary(res, _kill_line(box))
+    assert _sh(box, "echo alive").rc == 0
+
+
+O3_QUERY = "SELECT * FROM range(1000000000) t ORDER BY random()"
+O3_TRIES = 4
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o3_a_query_needing_too_much_memory_is_a_size_failure_and_is_sometimes_the_refusal(boxed):
+    """Over N real tries every one is a size failure at the box boundary, no engine advice, the
+    box carries on, and at least one is the tool's own refusal naming memory. (O3, P5)"""
+    box = boxed(memory="512m")
+    kill_line = _kill_line(box)
+    results = [_sh(box, f"""echo '{{"a":1}}' | defender-sql '{O3_QUERY}'""") for _ in range(O3_TRIES)]
+    for res in results:
+        _size_failure_at_the_box_boundary(res, kill_line)
+        for engine_advice in (b"SET ", b"PRAGMA", b"duckdb.org", b"threads"):
+            assert engine_advice not in res.err, res.err[-400:]
+    refusals = [res for res in results if res.rc == EXIT_INPUT_ERROR]
+    assert refusals, f"every try crashed: {[res.rc for res in results]}"
+    assert len({res.err for res in refusals}) == 1, "P1: one text for every refusal"
+    assert "memory" in refusals[0].err.decode().lower()
     assert _sh(box, "echo alive").rc == 0
 
 
 @requires_box_daemon
 @RUNTIMES
-def test_o3_a_query_needing_too_much_memory_is_one_refusal_without_engine_advice(boxed):
-    """Names memory and how to shrink; advice about engine settings the model cannot act on is gone. (O3)"""
+def test_o3_a_query_that_fits_still_answers_after_a_refusal_in_the_same_box(boxed):
+    """The control on the same channel: the refusal leaves the box and the tool usable. (O3)"""
     box = boxed(memory="512m")
-    res = _sh(box, """echo '{"a":1}' | defender-sql 'SELECT * FROM range(1000000000) t ORDER BY random()'""")
-    _refused_for_size(res)
-    assert "memory" in res.err.decode().lower(), res
-    for engine_advice in (b"SET ", b"PRAGMA", b"duckdb.org", b"threads"):
-        assert engine_advice not in res.err, res.err[-400:]
-    assert len(_reason_lines(res.err)) == 1, res.err[-400:]
+    _sh(box, f"""echo '{{"a":1}}' | defender-sql '{O3_QUERY}'""")
+    res = _sh(box, """echo '{"a":1}' | defender-sql 'SELECT 41 + 1 AS x'""")
+    assert (res.rc, b'"x": 42' in res.out) == (0, True), res
 
 
 @requires_box_daemon
 @RUNTIMES
-def test_o6_the_helper_killed_with_the_box_running_is_a_result_and_the_box_carries_on(boxed):
+@pytest.mark.parametrize("sig", KILL_OR_CRASH, ids=[s.name for s in KILL_OR_CRASH])
+def test_o6_a_stage_dying_on_a_signal_in_a_live_box_is_a_result_with_the_one_line(boxed, sig):
+    """The same frame as the unsandboxed transport, through the real `docker exec`. (O6)"""
+    box = boxed()
+    res = _sh(box, f"sh -c 'echo partial; kill -{int(sig)} $$' | cat")
+    assert res.rc == -int(sig), res
+    assert res.out == b""
+    assert res.err == _kill_line(box), res
+    assert "memory" in res.err.decode().lower()
+    assert _sh(box, "echo alive").rc == 0
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o6_control_sigpipe_in_a_live_box_keeps_the_output(boxed):
+    """`yes | head` ends -13 upstream and is no kill. (O6)"""
+    res = _sh(boxed(), "yes | head -n 1")
+    assert (res.rc, res.out) == (0, b"y\n"), res
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o5_a_command_printing_too_much_in_a_live_box_is_a_result_with_exit_75_and_the_box_carries_on(boxed):
+    """Stopped by the helper, below the host fence: the run would continue. (O5)"""
+    box = boxed()
+    res = _sh(box, f"{_writes(1, 40)} ; {_writes(2, 30)}")
+    assert res.rc == 75, res.err[-300:]
+    assert res.out == b""
+    assert len(_reason_lines(res.err)) == 1
+    assert _sh(box, "echo alive").rc == 0
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o6_the_helper_killed_with_the_box_running_is_a_result_with_minus_9_and_the_box_carries_on(boxed):
     """A real exec 137 with no frame: the stage kills its parent, the helper. Rule 2, not a fault. (O6)"""
     box = boxed()
     source = "import os, signal; os.kill(os.getppid(), signal.SIGKILL)"
     res = _sh(box, f"python3 -c {shlex.quote(source)}")
-    # GAP G1: -9 or 137? "that stage's signal" has no referent when the helper itself was killed.
-    assert res.rc != 0, res
+    assert res.rc == -9, res
     assert res.out == b""
-    assert "memory" in res.err.decode(), res
+    assert res.err == _kill_line(box)
     assert _sh(box, "echo alive").rc == 0
 
 

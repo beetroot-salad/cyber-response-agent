@@ -95,7 +95,8 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         assert (runs / f"{inv.investigation_id}.job-end.json").is_file()
         assert Path(runs / f"{inv.investigation_id}.launch.json").is_file()
         assert json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8")) == {
-            "setup": "done", "box": "started", "report_committed": True, "scrub_verified": True}
+            "setup": "done", "box": "started", "report_committed": True, "scrub_verified": True,
+            "cut_short": None}
         from defender.records import RunPaths
 
         launch = json.loads((runs / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))

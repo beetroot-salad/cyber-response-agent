@@ -64,7 +64,7 @@
    ],
    [
     "stderr",
-    "Traceback (most recent call last): <frames elided>\nAttributeError: 'NoneType' object has no attribute 'fetchall'\n"
+    "Traceback (most recent call last): <frames elided>\nAttributeError: 'NoneType' object has no attribute 'fetchmany'\n"
    ]
   ]
  },
@@ -144,7 +144,7 @@
    ],
    [
     "stderr",
-    "Traceback (most recent call last): <frames elided>\nAttributeError: 'NoneType' object has no attribute 'fetchall'\n"
+    "Traceback (most recent call last): <frames elided>\nAttributeError: 'NoneType' object has no attribute 'fetchmany'\n"
    ]
   ]
  },

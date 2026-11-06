@@ -48,7 +48,7 @@ from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
 ENTRY = DEFENDER / "tests" / "support" / "jobs" / "_job_entry1342.py"
 OTHER_TENANT = str(uuid.UUID(int=0x1342))
-SETTLED = {"setup": "done", "box": "started", "report_committed": True, "scrub_verified": True}
+SETTLED = {"setup": "done", "box": "started", "report_committed": True, "scrub_verified": True, "cut_short": None}
 
 
 pytestmark = [pytest.mark.postgres, pytest.mark.skipif(
@@ -480,7 +480,8 @@ def test_o6_an_alert_that_admission_refuses_is_refused_and_recorded_even_with_a_
     assert scene.job_end(run_id)["setup"] == "refused"
 
 
-REFUSED = {"setup": "refused", "box": "not_started", "report_committed": False, "scrub_verified": False}
+REFUSED = {"setup": "refused", "box": "not_started", "report_committed": False, "scrub_verified": False,
+           "cut_short": None}
 
 
 @pytest.mark.parametrize("record", ["creating", "offboarding", "offboarded", "no wiring", "no record", "records unreachable"])
@@ -643,7 +644,7 @@ def test_o8_a_setup_that_raises_otherwise_is_crashed_and_the_exception_reaches_t
     assert ran.raised is boom, ran
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "crashed", "box": "not_started",
-                                     "report_committed": False, "scrub_verified": False}
+                                     "report_committed": False, "scrub_verified": False, "cut_short": None}
 
 
 def test_o6_the_run_folder_is_still_made_exclusively(scene):
@@ -660,7 +661,7 @@ def test_o6_the_run_folder_is_still_made_exclusively(scene):
     assert first.calls["lifecycle"] == second.calls["lifecycle"] == 0
     assert first.raised is None, first.raised
     assert scene.job_end(taken) == {"setup": "refused", "box": "not_started",
-                                    "report_committed": False, "scrub_verified": False}
+                                    "report_committed": False, "scrub_verified": False, "cut_short": None}
     assert (scene.runs / taken / "mark").read_text(encoding="utf-8") == "theirs"
     assert sorted(p.name for p in (scene.runs / taken).iterdir()) == ["mark"]
     assert not (scene.runs / used).exists()
@@ -1015,24 +1016,27 @@ def test_c2_a_driver_raise_after_a_clean_close_and_a_clean_teardown_leaves_both_
     assert scene.job_end(run_id) == SETTLED
 
 
-def _lost_box_lifecycle(*, stop: Any = None, scrub: Any = None):
+def _lost_box_lifecycle(*, stop: Any = None, scrub: Any = None, main: Any = None,
+                        exchange: tuple[str, ...] = ("sh", "-c", "exit 137"), status: str = "exited"):
     """The real lifecycle and the real driver, its bash tool on a sandboxed box that has died (C5):
-    the exec ends 137 with no bytes and the daemon answers `exited`."""
+    the exec ends 137 with no bytes and the daemon answers `exited`. `main` scripts another ending."""
     from defender import box as box_mod
     from defender.tests.e2e import _replay_harness as H
     from defender.tests.e2e._box665 import RecordingDocker
     from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
     name = "defender-1421-job-box"
+    attached = subprocess.Popen(["true"])
+    attached.wait()
     dead = box_mod.BoxExecutor(
-        name=name, docker=RecordingDocker(status="exited"),
+        name=name, docker=RecordingDocker(status=status), starter=attached,
         transport=box_mod._DockerTransport(name, box_mod.BoxSpec(),
-                                           popen=lambda _argv, **kw: subprocess.Popen(["sh", "-c", "exit 137"], **kw)))
+                                           popen=lambda _argv, **kw: subprocess.Popen(list(exchange), **kw)))
 
     def investigate(*, run: Any, tenant: Any, box: Any, job_facts: Any = None, **_kw: Any) -> dict[str, Any]:
         # GAP G7: the driver gets only the holder's review state here; a fact set inside the driver would not arrive.
-        main = S.MainScript([S.call("bash", command="echo hello"), S.text(S.DONE)])
-        return H.driver_summary(run.run_dir, run_id=run.run_dir.name, main=main, box=box, tenant=tenant.tenant,
+        script = main if main is not None else S.MainScript([S.call("bash", command="echo hello"), S.text(S.DONE)])
+        return H.driver_summary(run.run_dir, run_id=run.run_dir.name, main=script, box=box, tenant=tenant.tenant,
                                 review_state=job_facts.review_state)
 
     return _lifecycle(None, investigate=investigate, start_box=lambda *a, **k: dead, stop_box=stop, scrub=scrub)
@@ -1057,14 +1061,62 @@ def test_o8_a_box_lost_at_the_bash_tool_reaches_the_exit_code_and_the_job_record
     assert got.raised is None, got
     assert got.rc == 5
     record = scene.job_end(run_id)
-    # The fact's key is the implementation's: its value is what the promise is about.
-    assert "box-lost" in record.values(), record
-    assert {k: record[k] for k in SETTLED} == {**SETTLED, "report_committed": False}
+    assert record == {**SETTLED, "report_committed": False, "cut_short": "box-lost"}
     ending = _ending_from(job_lane.JobEnd.parse(json.dumps(record)), got.rc, lambda: None)
     assert ending.failure_reason == "no_report"
     assert "box-lost" in ending.failure_message
     assert "committed no report" in ending.failure_message
     assert ending.decided_by_run is False
+
+
+def _ends_with(fault: Any):
+    from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+
+    return S.MainScript([S.text("done")], fault=S.LeadFault(raise_on=1, exc=lambda: fault))
+
+
+def _fence_exchange() -> tuple[str, ...]:
+    from defender import box as box_mod
+
+    return ("head", "-c", str(box_mod.BOX_OUTPUT_LIMIT + 1), "/dev/zero")
+
+
+@pytest.mark.parametrize(("ending", "word", "rc"), [
+    ("fence", "box-output-limit", 6), ("provider-down", "provider-down", 4), ("budget", "budget", 0),
+], ids=["fence", "provider-down", "budget"])
+def test_o8_o9_the_fifth_fact_carries_the_whole_run_end_vocabulary_not_only_the_box_words(scene, ending, word, rc):
+    """The fact is the summary's `truncated_by`, set when the driver returns; the fence also exits 6. (O9, decision 3)"""
+    from defender.hooks.budget_enforcer import BudgetKill
+    from defender.providers import ProviderDown
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    lifecycle = {
+        "fence": lambda: _lost_box_lifecycle(exchange=_fence_exchange()),
+        "provider-down": lambda: _lost_box_lifecycle(main=_ends_with(ProviderDown(model="t", status=503, attempts=4))),
+        "budget": lambda: _lost_box_lifecycle(main=_ends_with(BudgetKill("spent"))),
+    }[ending]()
+
+    got = run_job(scene, run_id, lifecycle=lifecycle)
+
+    assert got.raised is None, got
+    assert got.rc == rc
+    assert scene.job_end(run_id)["cut_short"] == word
+
+
+def test_o8_a_group_the_driver_lets_propagate_leaves_the_fifth_fact_null(scene):
+    """A budget kill beside a box ending is not named for the box, and the fact is not set from it. (O8, group precedence)"""
+    from defender import box as box_mod
+    from defender.hooks.budget_enforcer import BudgetKill
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    group = ExceptionGroup("g", [BudgetKill("spent"), box_mod.BoxLost("the box is unusable")])
+
+    got = run_job(scene, run_id, lifecycle=_lost_box_lifecycle(main=_ends_with(group)))
+
+    assert got.raised is not None or got.rc not in (5, 6), got
+    assert scene.job_end(run_id)["cut_short"] is None
 
 
 def test_o8_a_teardown_fault_on_a_lost_box_skips_the_post_steps_and_still_exits_5(scene, monkeypatch):
@@ -1080,7 +1132,7 @@ def test_o8_a_teardown_fault_on_a_lost_box_skips_the_post_steps_and_still_exits_
     assert spies.seam_calls == 0, "the page was rendered from a tree a live box may still write"
     assert "cross-check" not in spies.events, spies.events
     record = scene.job_end(run_id)
-    assert "box-lost" in record.values(), record
+    assert record["cut_short"] == "box-lost", record
     assert record["scrub_verified"] is False
 
 
@@ -1098,7 +1150,7 @@ def test_o8_a_tainted_tree_still_raises_with_the_cut_short_fact_already_set(scen
     got = run_job(scene, run_id, lifecycle=_lost_box_lifecycle(scrub=taint))
 
     assert isinstance(got.raised, RunTainted), got
-    assert "box-lost" in scene.job_end(run_id).values(), scene.job_end(run_id)
+    assert scene.job_end(run_id)["cut_short"] == "box-lost", scene.job_end(run_id)
 
 
 @pytest.mark.parametrize("scrub_ends", ["returns", "raises"])
@@ -1230,7 +1282,7 @@ def test_m3_a_box_start_fault_is_start_failed_and_nothing_ran(scene):
 
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
-                                     "report_committed": False, "scrub_verified": False}
+                                     "report_committed": False, "scrub_verified": False, "cut_short": None}
 
 
 @pytest.mark.parametrize("fault", [OSError("could not write the did-not-run verdict"), RuntimeError("the start blew up"),
@@ -1250,7 +1302,7 @@ def test_d_ad_a_fault_other_than_a_box_start_fault_while_the_box_is_starting_is_
     assert got.raised is fault, got
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == {"setup": "done", "box": "start_failed",
-                                     "report_committed": False, "scrub_verified": False}
+                                     "report_committed": False, "scrub_verified": False, "cut_short": None}
 
 
 def test_d_ad_control_a_fault_after_the_box_started_stays_started(scene):
@@ -1644,7 +1696,7 @@ def test_o7_a_sigterm_is_one_keyboard_interrupt_and_later_ones_do_not_interrupt_
     assert (marks / "stop-box-done").exists(), "a second SIGTERM interrupted the teardown"
     assert (marks / "start-token").read_text(encoding="utf-8") == scene.token, "the box start was not handed the launch token"
     assert scene.job_end(run_id) == {"setup": "done", "box": "started", "report_committed": committed,
-                                     "scrub_verified": False}, "an interrupted run still leaves its job-end record"
+                                     "scrub_verified": False, "cut_short": None}, "an interrupted run still leaves its job-end record"
 
 
 _INTERMEDIATE = """
@@ -1757,7 +1809,7 @@ def test_o6_the_real_run_py_refuses_a_job_id_with_no_launch_record(tmp_path, spe
         assert not (runs / run_id).exists()
         record = json.loads((runs / f"{run_id}.job-end.json").read_text(encoding="utf-8"))
         assert record == {"setup": "refused", "box": "not_started", "report_committed": False,
-                          "scrub_verified": False}
+                          "scrub_verified": False, "cut_short": None}
 
 
 
