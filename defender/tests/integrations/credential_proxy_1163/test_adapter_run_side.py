@@ -367,8 +367,8 @@ def test_o3_the_run_adds_no_limit_to_a_reply_of_exactly_the_proxys_limit():
 
 
 def test_o3_the_run_adds_no_limit_to_a_reply_well_over_the_default():
-    """The proxy's limit is configurable, so the run must not assume 8 MiB: a 12 MiB whole body
-    is the answer. O3."""
+    """The proxy holds the one limit, and the run adds none of its own: a 12 MiB whole body is the
+    answer. O3."""
     size = 12 * W.MIB
     f = W.fmt()
     with W.fake_proxy(f.encode_body(b"x" * size) + f.encode_final(W.final_record()), ended=True) as url:

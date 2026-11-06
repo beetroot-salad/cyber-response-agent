@@ -372,9 +372,9 @@ def test_f6_the_remaining_config_builds_the_proxy(tmp_path):
 
 
 @pytest.mark.parametrize("bad", [{"upstream_timeout_sec": "30"}, {"audit_path": 5},
-                                 {"audit_path": "audit\0.jsonl"}, {"max_response_bytes": None},
+                                 {"audit_path": "audit\0.jsonl"},
                                  {"data_root": 5}, {"data_root": "root\0dir"}],
-                         ids=["quoted-number", "path-not-text", "nul-in-path", "null-cap",
+                         ids=["quoted-number", "path-not-text", "nul-in-path",
                               "root-not-text", "nul-in-root"])
 def test_f6_an_operator_config_value_of_the_wrong_type_is_a_config_fault(tmp_path, bad):
     """A configuration value of the wrong type or shape stops the proxy with `ConfigFault`
@@ -385,11 +385,19 @@ def test_f6_an_operator_config_value_of_the_wrong_type_is_a_config_fault(tmp_pat
 
 @pytest.mark.parametrize("key", [*REMOVED_CONFIG_KEYS, "bogus_key"])
 def test_a26_a_removed_or_unknown_config_key_is_a_config_fault(tmp_path, key):
-    """`tenant_keys`, `tenant_exports`, `transit_mount` and `openbao_addr` are unknown keys: an
-    old config refuses to start, as any unknown key does. A26, r8.2."""
+    """`tenant_keys`, `tenant_exports`, `transit_mount`, `openbao_addr` and `max_response_bytes`
+    are unknown keys: an old config refuses to start, as any unknown key does. A26, r8.2; #1412:
+    nothing tests a run above the one limit, so an operator cannot raise it."""
     value = {} if key.startswith("tenant_") else "x"
     with pytest.raises(ConfigFault):
         app_from_config(_config(tmp_path, **{key: value}))
+
+
+def test_1412_an_operator_cannot_set_the_reply_limit_even_to_a_valid_value(tmp_path):
+    """A well-formed limit is refused for being a limit: nothing tests a run above the shipped one,
+    so it is a test's seam, not configuration. #1412."""
+    with pytest.raises(ConfigFault, match="unknown"):
+        app_from_config(_config(tmp_path, max_response_bytes=64 * 1024 * 1024))
 
 
 def test_a26_a_config_without_a_data_root_is_a_config_fault(tmp_path):

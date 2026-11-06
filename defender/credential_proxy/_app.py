@@ -117,7 +117,8 @@ class CredentialStore(Protocol):
 class ProxyDeps:
     """What the proxy runs over: the data root whose `<tenant id>/exports/` folders it reads (read
     only; it keeps no tenant list, A26), the credential store, the token verifier, the audit
-    sink, the response cap and upstream timeout, and the public trust's bundle."""
+    sink, the response cap (a test's seam, never configuration: the run is proven up to the
+    shipped value, #1412) and upstream timeout, and the public trust's bundle."""
 
     data_root: Path
     store: CredentialStore
@@ -526,7 +527,7 @@ def create_app(deps: ProxyDeps) -> FastAPI:  # lint-dup: ok — the proxy's own 
 #: `openbao_token` and `openbao_token_file`, and every key of `CONFIG_KEYS`; the others optional.
 CONFIG_KEYS = ("kv_mount", "data_root", "audit_path")
 TOKEN_KEYS = ("openbao_token", "openbao_token_file")
-OPTIONAL_CONFIG_KEYS = ("max_response_bytes", "upstream_timeout_sec")
+OPTIONAL_CONFIG_KEYS = ("upstream_timeout_sec",)
 
 
 def _openbao_token(config: Mapping[str, Any]) -> str:
@@ -553,7 +554,8 @@ def create_app_from_config(config: Mapping[str, Any], *, openbao_addr: str | Non
     (`data_root`, read only) and the append-only audit file (`audit_path`). OpenBao is the
     deployment's (`DEPLOYMENT_ISSUER`, https) on the fixed transit mount; `openbao_addr` and
     `transport` are a test's seam, never configuration. A missing or unknown key (the retired
-    `tenant_keys`, `tenant_exports`, `transit_mount` and `openbao_addr` included) or a value of
+    `tenant_keys`, `tenant_exports`, `transit_mount`, `openbao_addr` and `max_response_bytes`
+    included) or a value of
     the wrong type is `ConfigFault`."""
     missing = [k for k in CONFIG_KEYS if k not in config]
     unknown = sorted(set(config) - set(CONFIG_KEYS) - set(TOKEN_KEYS) - set(OPTIONAL_CONFIG_KEYS))
