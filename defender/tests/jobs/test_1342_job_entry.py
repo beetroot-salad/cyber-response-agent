@@ -1015,6 +1015,92 @@ def test_c2_a_driver_raise_after_a_clean_close_and_a_clean_teardown_leaves_both_
     assert scene.job_end(run_id) == SETTLED
 
 
+def _lost_box_lifecycle(*, stop: Any = None, scrub: Any = None):
+    """The real lifecycle and the real driver, its bash tool on a sandboxed box that has died (C5):
+    the exec ends 137 with no bytes and the daemon answers `exited`."""
+    from defender import box as box_mod
+    from defender.tests.e2e import _replay_harness as H
+    from defender.tests.e2e._box665 import RecordingDocker
+    from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+
+    name = "defender-1421-job-box"
+    dead = box_mod.BoxExecutor(
+        name=name, docker=RecordingDocker(status="exited"),
+        transport=box_mod._DockerTransport(name, box_mod.BoxSpec(),
+                                           popen=lambda _argv, **kw: subprocess.Popen(["sh", "-c", "exit 137"], **kw)))
+
+    def investigate(*, run: Any, tenant: Any, box: Any, job_facts: Any = None, **_kw: Any) -> dict[str, Any]:
+        # GAP G7: the driver gets only the holder's review state here; a fact set inside the driver would not arrive.
+        main = S.MainScript([S.call("bash", command="echo hello"), S.text(S.DONE)])
+        return H.driver_summary(run.run_dir, run_id=run.run_dir.name, main=main, box=box, tenant=tenant.tenant,
+                                review_state=job_facts.review_state)
+
+    return _lifecycle(None, investigate=investigate, start_box=lambda *a, **k: dead, stop_box=stop, scrub=scrub)
+
+
+def _teardown_fault(*_a: Any, **_k: Any) -> None:
+    from defender.box import BoxFault
+
+    raise BoxFault("could not tear down the box")
+
+
+def test_o8_a_box_lost_at_the_bash_tool_reaches_the_exit_code_and_the_job_record(scene):
+    """Bash tool to exit 5, the fifth fact, and the worker's failed `no_report` naming the class. (O8)"""
+    from defender.records import job_lane
+    from defender.worker._worker import _ending_from
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+
+    got = run_job(scene, run_id, lifecycle=_lost_box_lifecycle())
+
+    assert got.raised is None, got
+    assert got.rc == 5
+    record = scene.job_end(run_id)
+    # The fact's key is the implementation's: its value is what the promise is about.
+    assert "box-lost" in record.values(), record
+    assert {k: record[k] for k in SETTLED} == {**SETTLED, "report_committed": False}
+    ending = _ending_from(job_lane.JobEnd.parse(json.dumps(record)), got.rc, lambda: None)
+    assert ending.failure_reason == "no_report"
+    assert "box-lost" in ending.failure_message
+    assert "committed no report" in ending.failure_message
+    assert ending.decided_by_run is False
+
+
+def test_o8_a_teardown_fault_on_a_lost_box_skips_the_post_steps_and_still_exits_5(scene, monkeypatch):
+    """The ending stands, the tree is not read, and the job record says what the scrub could not. (O8)"""
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    spies = ReaderSpies(monkeypatch, scene.runs / run_id)
+
+    got = run_job(scene, run_id, visualize=spies.seam, lifecycle=_lost_box_lifecycle(stop=_teardown_fault))
+
+    assert got.raised is None, got
+    assert got.rc == 5
+    assert spies.seam_calls == 0, "the page was rendered from a tree a live box may still write"
+    assert "cross-check" not in spies.events, spies.events
+    record = scene.job_end(run_id)
+    assert "box-lost" in record.values(), record
+    assert record["scrub_verified"] is False
+
+
+def test_o8_a_tainted_tree_still_raises_with_the_cut_short_fact_already_set(scene):
+    """`RunTainted` raises by design, so the fact must be set before teardown. (O8)"""
+    from defender.box import RunTainted
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+
+    def taint(_tree: Path, *, write_verdict: Any) -> None:
+        write_verdict({"ran": True, "reason": "walk completed"})
+        raise RunTainted("a planted link")
+
+    got = run_job(scene, run_id, lifecycle=_lost_box_lifecycle(scrub=taint))
+
+    assert isinstance(got.raised, RunTainted), got
+    assert "box-lost" in scene.job_end(run_id).values(), scene.job_end(run_id)
+
+
 @pytest.mark.parametrize("scrub_ends", ["returns", "raises"])
 def test_c2_the_lifecycle_sets_scrub_verified_only_when_stop_and_scrub_returns(scene, scrub_ends):
     """On the holder the job entry handed it, `scrub_verified` is still false while the scrub runs, true after a clean return, and false after a raise even though the verdict says `ran: true`. (C2, O8)"""

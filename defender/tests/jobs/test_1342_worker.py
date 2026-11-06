@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import hashlib
 import inspect
 import json
@@ -25,6 +26,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from defender.records import job_lane
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     ALERT_DIGEST,
@@ -600,6 +602,45 @@ async def test_o8_the_stage_comes_from_the_job_end_record_and_the_report(world, 
     assert stored["started_at"] == NOW
     _no_run_text(stored)
     assert inv
+
+
+def _job_end_cut_short(cut_short: str, *, report_committed: bool, scrub_verified: bool) -> str:
+    """The real record's own text with the fifth fact set, whatever the record calls it (#1421)."""
+    # GAP G6: the key and the "none" form are unfixed, so `job_end()` and the four-key fixtures stay as they are.
+    four = {"setup", "box", "report_committed", "scrub_verified"}
+    fifth = [f.name for f in dataclasses.fields(job_lane.JobEnd) if f.name not in four]
+    assert len(fifth) == 1, f"the job-end record's facts past the four: {fifth}"
+    return job_lane.JobEnd(setup="done", box="started", report_committed=report_committed,
+                           scrub_verified=scrub_verified, **{fifth[0]: cut_short}).text()
+
+
+@pytest.mark.parametrize(("cut_short", "verified"), [
+    ("box-lost", True), ("box-output-limit", True), ("provider-down", True), ("budget", True), ("store", True),
+    ("box-lost", False),  # the scrub also did not verify
+])
+async def test_o8_o9_a_failed_jobs_message_names_its_class_beside_the_existing_words(world, cut_short, verified):
+    """Fixed words, `no_report`, not decided by the run, so a worker stop re-queues. (O8, O9)"""
+    record = _job_end_cut_short(cut_short, report_committed=False, scrub_verified=verified)
+    _inv, stored = await _run_one(world, _child(world, exit=5, printed=MARKER, files={"{id}.job-end.json": record}))
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
+    assert cut_short in stored["failure_message"], stored["failure_message"]
+    assert "the host committed no report" in stored["failure_message"], stored["failure_message"]
+    _no_run_text(stored)
+
+
+async def test_o8_a_committed_and_verified_report_still_completes_when_the_box_was_lost_after(world):
+    """The model had closed: the job reads as completed whatever the run's exit was. (O8)"""
+    record = _job_end_cut_short("box-lost", report_committed=True, scrub_verified=True)
+    _inv, stored = await _run_one(world, _child(world, exit=5, files=_committed(**{"{id}.job-end.json": record})))
+    assert (stored["stage"], stored["failure_reason"]) == ("completed", None)
+
+
+async def test_o8_a_model_closed_run_whose_teardown_faulted_reads_as_failed_and_names_the_class(world):
+    """The accepted cost: closed, then no proof the box died, so a failed job naming the class. (O8)"""
+    record = _job_end_cut_short("box-lost", report_committed=True, scrub_verified=False)
+    _inv, stored = await _run_one(world, _child(world, exit=5, files=_committed(**{"{id}.job-end.json": record})))
+    assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
+    assert "box-lost" in stored["failure_message"]
 
 
 def _job_end_junk_characters() -> list[str]:

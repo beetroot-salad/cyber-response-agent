@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,7 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 
 from pydantic_ai.messages import (  # noqa: E402
     ModelResponse,
+    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -462,3 +465,68 @@ def test_box_output_overflow_is_not_an_unprocessable_learning_stage(tmp_path, gr
             deps=deps, make_model=_fake_model(fail),
         )
     assert carried(caught.value, BoxOutputLimitExceeded) is overflow
+
+
+class _LaneDaemon:
+    """A lane box's daemon, as words: `exited` until started, and whatever a fault leaves it after."""
+
+    def __init__(self) -> None:
+        self.status = "exited"
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
+        argv = list(argv)
+        self.calls.append(argv)
+        if argv[1] == "start":
+            self.status = "running"
+        elif argv[1] == "stop":
+            self.status = "exited"
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{self.status}\n", stderr="")
+
+
+def test_o8_a_lost_lane_box_fails_the_item_and_the_next_items_window_runs(tmp_path):
+    """Decision 4: the item is an ordinary failure, not a halt, and a proven start clears the loss for the next. (O8)"""
+    from defender import box as box_mod
+
+    daemon, exchanges = _LaneDaemon(), []
+    wire = box_mod.encode_response(box_mod.BoxResult(rc=0, out=b"answer\n", err=b""))
+
+    def exec_in_box(_argv, **kw):
+        """The first item's command finds the box dead (C5); the next item's is answered."""
+        exchanges.append(daemon.status)
+        if len(exchanges) == 1:
+            daemon.status = "exited"
+            return subprocess.Popen(["sh", "-c", "exit 137"], **kw)
+        return subprocess.Popen([sys.executable, "-c", f"import os; os.write(1, {wire!r})"], **kw)
+
+    name = "defender-lane-1421"
+    lane_box = box_mod.BoxExecutor(name=name, docker=daemon,
+                                   transport=box_mod._DockerTransport(name, box_mod.BoxSpec(), popen=exec_in_box))
+    wt = _worktree(tmp_path)
+    run_dir = _run_dir(tmp_path)
+
+    def calls_bash(messages, _info):
+        """One command; any answer to it, a retry prompt included, ends the item."""
+        answered = any(isinstance(part, (ToolReturnPart, RetryPromptPart))
+                       for message in messages for part in getattr(message, "parts", []))
+        return ModelResponse(parts=[TextPart(content="done")] if answered else
+                             [ToolCallPart(tool_name="bash", args={"command": "echo hello"})])
+
+    def one_item(trace: str, box) -> str:
+        deps = bind(LEAD_AUTHOR_DEF, run_dir, defender_dir=wt / "defender",
+                    scope=RunScope(tenant_agent=_agent(wt)), box=box)
+        return run_stage(
+            stage="lead_author",
+            wiring=StageWiring(prompt_path=_prompt(tmp_path), model="m", effort=None, trace_name=trace, label="la"),
+            ctx=StageContext(learning_run_dir=run_dir, user="u", request_limit=4,
+                             wall_clock_timeout=config.subagent_timeout()),
+            deps=deps, make_model=_fake_model(calls_bash),
+        )
+
+    runs = box_mod.BoxRuns(lane_box)
+    with pytest.raises(RunUnprocessable), runs.run() as box:
+        one_item("first-item.jsonl", box)
+    with runs.run() as box:
+        assert one_item("next-item.jsonl", box) == "done"
+    assert exchanges == ["running", "running"], "an item's command did not reach its box"
+    assert daemon.status == "exited", "the lane left its box running"

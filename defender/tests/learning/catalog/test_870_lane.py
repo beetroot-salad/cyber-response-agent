@@ -68,7 +68,7 @@ def test_an_infra_shim_failure_never_reaches_the_queue():
     assert infra == "infra"
     assert _collect(shim_lead(error_class=infra)) == [], "an infra-classed reduce enqueued a row"
 
-    for rc in (defender_sql.EXIT_INPUT_ERROR, 1):
+    for rc in (defender_sql.EXIT_INPUT_ERROR, 1, 75, -9, -11):  # #1421 O7
         klass = error_class_for_exit(tools._shim_exit_code(rc))
         assert klass == "agent-fixable", rc
         assert len(_collect(shim_lead(error_class=klass))) == 1, rc

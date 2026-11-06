@@ -4,7 +4,9 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import shlex
 import shutil
+import signal
 import time
 import uuid
 from collections.abc import Iterator
@@ -14,8 +16,10 @@ import pytest
 
 from defender import box as box_mod
 from defender.execution import bash_exec
+from defender.systems.circuit_breaker import error_class_for_exit
 from defender.tests.e2e._spec771 import AliasProbeDocker
-from defender.tests.support.integrations._defender_sql import EXIT_OK, run_sql_py
+from defender.investigation import tools
+from defender.tests.support.integrations._defender_sql import EXIT_INPUT_ERROR, EXIT_OK, run_sql_py
 from defender.tests.support.runtime.state._1255_view import MODEL_RUN
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 from defender.tests.support.storage._alert_plant import plant_alert
@@ -129,6 +133,116 @@ def test_a_payload_past_the_engines_default_object_size_still_loads(payload):
     assert res.returncode == EXIT_OK, res.stderr
 
 
+# ---- the SQL tool's and the helper's own limits, on the unsandboxed fallback ----------------
+
+PAYLOAD_MAX = 64 << 20
+#: Far over the result budget, on rows small enough that base code still prints them all.
+OVERSIZED_RESULT_SQL = "SELECT repeat('x', 1024) AS s FROM range(64 * 1024)"
+DECLARED = ("--rows", "values", "--names", "columns")
+
+
+def _reason_lines(err: bytes | str) -> list[str]:
+    text = err.decode("utf-8", "replace") if isinstance(err, bytes) else err
+    return [line for line in text.splitlines() if line.strip()]
+
+
+def _refusal_without_a_traceback(res) -> None:
+    assert res.stdout == "", "a size failure is never an observation"
+    assert "Traceback" not in res.stderr, res.stderr[-400:]
+    # GAP G4: "all exit 2" is stated for the catch around the run, not for O1's check or O4's budget.
+    assert res.returncode != EXIT_OK
+    assert error_class_for_exit(tools._shim_exit_code(res.returncode)) == "agent-fixable", res.returncode
+
+
+def test_o1_a_payload_over_the_maximum_is_refused_before_parsing_on_both_load_paths():
+    """Bytes no parser accepts, so only a check before parsing can give the size message; one message. (O1)"""
+    junk = "x" * (PAYLOAD_MAX + 1)
+    undeclared = run_sql_py("SELECT 1 AS x", stdin=junk)
+    declared = run_sql_py(*DECLARED, "SELECT 1 AS x", stdin=junk)
+    for res in (undeclared, declared):
+        _refusal_without_a_traceback(res)
+        assert "not valid JSON" not in res.stderr, "the payload was parsed before its size was checked"
+        # GAP G3: the design fixes no text, though P1 makes it the merge key; "narrow" is its own verb.
+        assert "narrow" in res.stderr.lower(), res.stderr
+    assert undeclared.stderr == declared.stderr, "one message, whichever load path"
+
+
+def test_o4_a_result_over_the_budget_prints_nothing_and_the_tool_refuses():
+    """Nothing partial on stdout; the refusal is the model's to fix. A small result still prints. (O4, O7)"""
+    control = run_sql_py("SELECT repeat('x', 1024) AS s", stdin='{"a":1}')
+    assert control.returncode == EXIT_OK, control.stderr
+    assert "xxx" in control.stdout
+
+    _refusal_without_a_traceback(run_sql_py(OVERSIZED_RESULT_SQL, stdin='{"a":1}'))
+
+
+def _unboxed(tmp_path: Path, command: str) -> box_mod.BoxResult:
+    return box_mod.unboxed_executor(env=dict(os.environ)).run_parsed(
+        bash_exec.parse(command), command=command, cwd=tmp_path, timeout=EXEC_TIMEOUT)
+
+
+def _writes(fd: int, mib: int, byte: str = "x") -> str:
+    source = f"import os; [os.write({fd}, b'{byte}' * (1 << 20)) for _ in range({mib})]"
+    return f"python3 -c {shlex.quote(source)}"
+
+
+@pytest.mark.parametrize("printing", [
+    f"head -c {box_mod.BOX_OUTPUT_LIMIT + 1} /dev/zero",
+    f"{_writes(2, 40)} ; {_writes(2, 30)}",  # C13: neither pipeline is over alone
+    f"{_writes(1, 40)} ; {_writes(2, 30)}",
+], ids=["stdout", "stderr-across-pipelines", "both-streams"])
+def test_o5_the_budget_spans_the_whole_command_and_stops_it_with_exit_75(tmp_path, printing):
+    """No partial stdout, one reason line, no later pipeline; a smaller command is untouched. (O5)"""
+    control = _unboxed(tmp_path, f"{_writes(1, 1)} ; touch ran-control")
+    assert (control.rc, len(control.out)) == (0, 1 << 20), control.err
+    assert (tmp_path / "ran-control").exists()
+
+    res = _unboxed(tmp_path, f"{printing} ; touch later")
+    assert res.rc == 75, res.err[-400:]
+    assert res.out == b""
+    assert not (tmp_path / "later").exists(), "a pipeline ran after the budget stopped the command"
+    # GAP G5: is stderr already captured kept beside the reason, and on which side of it?
+    assert len(_reason_lines(res.err)) == 1, res.err[:400]
+    assert b"output" in res.err.lower(), res.err[:400]  # GAP G3: no fixed text to pin
+
+
+def test_o5_output_that_is_not_utf8_crosses_as_its_own_bytes(tmp_path):
+    """Raw bytes: no decode and re-encode, which expanded invalid UTF-8 threefold (C13). (O5)"""
+    res = _unboxed(tmp_path, f"{_writes(1, 1, byte=chr(92) + 'xff')}")
+    assert res.rc == 0, res.err
+    assert res.out == b"\xff" * (1 << 20)
+
+
+KILL_OR_CRASH = (signal.SIGKILL, signal.SIGSEGV, signal.SIGABRT, signal.SIGBUS)
+
+
+@pytest.mark.parametrize("sig", KILL_OR_CRASH, ids=[s.name for s in KILL_OR_CRASH])
+@pytest.mark.parametrize("last", ["cat", "head -c 3"], ids=["last-stage-cat", "last-stage-head"])
+def test_o6_a_stage_dying_on_a_signal_gives_its_signal_a_reason_and_no_partial_output(tmp_path, sig, last):
+    """Upstream of `head`, whose exit is 0, included; no later pipeline runs. (O6)"""
+    stage = f"sh -c {shlex.quote(f'echo partial; kill -{int(sig)} $$')}"
+    res = _unboxed(tmp_path, f"{stage} | {last} ; touch later")
+    assert res.rc == -int(sig), res
+    assert res.out == b""
+    # GAP G9: this transport has no memory cap for the line to name; the design applies the helper here too.
+    assert "memory" in res.err.decode(), res.err
+    assert not (tmp_path / "later").exists()
+
+
+def test_o6_control_sigpipe_is_the_normal_head_case_and_keeps_its_output(tmp_path):
+    """`-13` upstream of `head` is not a kill: output kept, exit 0, the next pipeline runs. (O6)"""
+    res = _unboxed(tmp_path, "yes | head -n 1 ; touch later")
+    assert (res.rc, res.out) == (0, b"y\n"), res
+    assert (tmp_path / "later").exists()
+
+
+def test_o10_the_sql_skill_states_the_ceilings_the_exit_codes_and_the_dense_payload_caveat():
+    """The model's own instructions carry what it needs to shrink a query. (O10)"""
+    text = (DEFENDER / "skills" / "gather" / "defender-sql.md").read_text(encoding="utf-8")
+    for needle in ("64 MiB", "32 MiB", "75", "dense"):
+        assert needle in text, needle
+
+
 # ---- live boxes ----------------------------------------------------------------------------
 
 _NO_DAEMON = not daemon_reachable()
@@ -216,7 +330,66 @@ def test_a_process_past_the_memory_cap_is_stopped_at_the_cap(boxed, base, runtim
     if runtime == "runc":
         assert res is not None
         assert res.rc == -9, f"expected the kernel's kill: {res}"
+        assert "memory" in res.err.decode(), f"no reason line naming the cap (O6): {res}"
         assert _sh(box, "echo alive").rc == 0
+
+
+def _refused_for_size(res: box_mod.BoxResult) -> None:
+    assert res.rc == EXIT_INPUT_ERROR, res
+    assert res.out == b"", "a size failure is never an observation (P2)"
+    assert b"Traceback" not in res.err, res.err[-400:]
+    assert b"not valid JSON" not in res.err, res.err[-400:]
+
+
+#: C19: shapes far past the edge, where both sides of the near-edge flip are behind them (O2).
+LOADS_OUT_OF_ROOM = {
+    "memory": ("512m", lambda: "[{}" + ",{}" * ((21 << 20) - 1) + "]", ""),
+    "scratch": (box_mod.BoxSpec().memory,
+                lambda: '{"columns":["a","b","c","d"],"values":[[1,2,3,4]' + ",[1,2,3,4]" * (2 << 20) + "]}",
+                " ".join(DECLARED)),
+}
+
+
+@requires_box_daemon
+@RUNTIMES
+@pytest.mark.parametrize("room", list(LOADS_OUT_OF_ROOM))
+def test_o2_a_load_that_runs_out_of_room_below_the_maximum_is_a_size_refusal(boxed, base, room):
+    """Under the maximum, over what the box can hold: a refusal, and the box carries on. (O2)"""
+    memory, shape, args = LOADS_OUT_OF_ROOM[room]
+    payload = shape()
+    assert len(payload) < PAYLOAD_MAX, "this shape is for O1 past the maximum"
+    box = boxed(memory=memory)
+    (next(base.glob("run-limits-*")) / "payload.json").write_text(payload, encoding="utf-8")
+    res = _sh(box, f"cat {MODEL_RUN}/payload.json | defender-sql {args} 'SELECT 1 AS x'")
+    _refused_for_size(res)
+    assert _sh(box, "echo alive").rc == 0
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o3_a_query_needing_too_much_memory_is_one_refusal_without_engine_advice(boxed):
+    """Names memory and how to shrink; advice about engine settings the model cannot act on is gone. (O3)"""
+    box = boxed(memory="512m")
+    res = _sh(box, """echo '{"a":1}' | defender-sql 'SELECT * FROM range(1000000000) t ORDER BY random()'""")
+    _refused_for_size(res)
+    assert "memory" in res.err.decode().lower(), res
+    for engine_advice in (b"SET ", b"PRAGMA", b"duckdb.org", b"threads"):
+        assert engine_advice not in res.err, res.err[-400:]
+    assert len(_reason_lines(res.err)) == 1, res.err[-400:]
+
+
+@requires_box_daemon
+@RUNTIMES
+def test_o6_the_helper_killed_with_the_box_running_is_a_result_and_the_box_carries_on(boxed):
+    """A real exec 137 with no frame: the stage kills its parent, the helper. Rule 2, not a fault. (O6)"""
+    box = boxed()
+    source = "import os, signal; os.kill(os.getppid(), signal.SIGKILL)"
+    res = _sh(box, f"python3 -c {shlex.quote(source)}")
+    # GAP G1: -9 or 137? "that stage's signal" has no referent when the helper itself was killed.
+    assert res.rc != 0, res
+    assert res.out == b""
+    assert "memory" in res.err.decode(), res
+    assert _sh(box, "echo alive").rc == 0
 
 
 @requires_box_daemon
