@@ -240,6 +240,8 @@ def test_the_shims_exit_codes_are_translated_to_the_tables_dialect(tmp_path):
         (75, "agent-fixable", 1, "the helper stopped a command that printed too much"),
         (-9, "agent-fixable", 1, "the tool was killed at the memory cap"),
         (-11, "agent-fixable", 1, "a crash under the limit cannot be told from running out (decision 5)"),
+        (-6, "agent-fixable", 1, "an abort is in the kill set"),
+        (-7, "agent-fixable", 1, "a bus error is in the kill set"),
     ]
     for rc, want_class, want_records, why in cases:
         root = tmp_path / f"rc{rc}"

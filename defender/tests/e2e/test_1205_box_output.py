@@ -135,37 +135,46 @@ def test_o8_o9_the_correlation_lead_that_met_the_ending_is_stamped(tmp_path, end
 KILLS = {"budget": lambda: BudgetKill("run budget spent"), "aborted": lambda: RunAborted(5, ["cmdb"])}
 
 
+def _group_run(tmp_path: Path, group: BaseException, where: str, **kw):
+    """`group` raised by MAIN's lead, or by the correlation lead, which stops before MAIN."""
+    injected = S.LeadFault(raise_on=1, exc=lambda: group)
+    main = S.MainScript([S.text(S.DONE)], fault=injected if where == "main" else S.CLEAN)
+    return S.run_alert(tmp_path, main=main, lead_faults={S.L3: injected} if where == "correlation" else None, **kw)
+
+
+WHERE = pytest.mark.parametrize("where", ["main", "correlation"])
+
+
+@WHERE
 @pytest.mark.parametrize("ending", list(ENDINGS))
 @pytest.mark.parametrize("kill", list(KILLS))
-def test_o8_o9_a_group_with_a_budget_or_abort_propagates_first_and_is_not_named_for_the_box(tmp_path, kill, ending):
+def test_o8_o9_a_group_with_a_budget_or_abort_propagates_first_and_is_not_named_for_the_box(tmp_path, kill, ending, where):
     """The kill's own ending wins; the record names it or nothing, never the box. (O8, O9, group precedence)"""
     group = ExceptionGroup("g", [KILLS[kill](), ENDINGS[ending][0]()])
-    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=lambda: group))
-    result = S.run_alert(tmp_path, main=main)
+    result = _group_run(tmp_path, group, where)
     assert result.rc not in (5, 6), result.rc
     assert _named(result) in (None, kill), _named(result)
     assert result.raised is not None or _named(result) == kill, "the group vanished without an ending"
 
 
+@WHERE
 @pytest.mark.parametrize("order", ["lost-first", "fence-first"])
-def test_o8_o9_a_group_holding_both_box_endings_names_the_fence(tmp_path, order):
+def test_o8_o9_a_group_holding_both_box_endings_names_the_fence(tmp_path, order, where):
     """Both in one group: the fence is named and exits 6, whichever was raised first. (O9, Run ending)"""
     leaves = [_lost(), box.BoxOutputLimitExceeded()]
-    group = ExceptionGroup("g", leaves if order == "lost-first" else leaves[::-1])
-    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=lambda: group))
-    result = S.run_alert(tmp_path, main=main)
+    result = _group_run(tmp_path, ExceptionGroup("g", leaves if order == "lost-first" else leaves[::-1]), where)
     assert result.raised is None, result.raised
     assert result.rc == 6
     assert _run_end(result).truncated_by == "box-output-limit"
 
 
+@WHERE
 @pytest.mark.parametrize("ending", list(ENDINGS))
-def test_o8_o9_a_group_with_an_interrupt_propagates_first(tmp_path, ending):
+def test_o8_o9_a_group_with_an_interrupt_propagates_first(tmp_path, ending, where):
     """An interrupt beside a box ending is never turned into the ending. (O8, O9)"""
     group = BaseExceptionGroup("g", [KeyboardInterrupt(), ENDINGS[ending][0]()])
-    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=lambda: group))
     with pytest.raises(BaseExceptionGroup) as caught:
-        S.run_alert(tmp_path, main=main)
+        _group_run(tmp_path, group, where, catch=False)
     assert carried(caught.value, KeyboardInterrupt) is not None
 
 
@@ -184,7 +193,7 @@ def test_o8_o9_a_serving_abort_in_a_group_still_exits_3_for_an_unservable_world(
 
 @pytest.mark.parametrize("ending", list(ENDINGS))
 def test_o8_o9_a_sibling_world_exiting_5_or_6_did_not_finish(tmp_path, monkeypatch, ending):
-    """The exit is new (not 0, 2, 3, 4) and the branched world is recorded as unfinished. (O8, O9)"""
+    """The exit (a fixture's here) is new, not 0, 2, 3, 4, and the branched world is recorded as unfinished. (O8, O9)"""
     from defender.learning.branch import cli
     from defender.learning.branch.outcome import DID_NOT_FINISH
     from defender.records._episode_handle import Episode
@@ -203,6 +212,18 @@ def test_o8_o9_a_sibling_world_exiting_5_or_6_did_not_finish(tmp_path, monkeypat
     records = {p.stem: p.read_text(encoding="utf-8") for p in ep.rglob("world_records/*.yaml")}
     assert DID_NOT_FINISH in records[T.world_id(ep, "b")]
     assert T.world_id(ep, "a") not in records
+
+
+@pytest.mark.parametrize("ending", list(ENDINGS))
+def test_o8_o9_a_sibling_world_that_meets_the_ending_exits_5_or_6_by_its_own_door(tmp_path, monkeypatch, ending):
+    """The sibling's real run ends by class, so the exit the family records is the run's, not a fixture's. (O8, O9)"""
+    ep = P.sibling_episode(tmp_path, monkeypatch)
+    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=ENDINGS[ending][0]))
+    d = P.run_sibling(tmp_path / "sibling", ep, main)
+    assert d.run_dir is not None, (d.rc, d.refusal, d.raised)
+    assert d.raised is None, d.raised
+    assert (d.summary or {}).get("truncated_by") == ending, d.summary
+    assert d.rc == ENDINGS[ending][1]
 
 
 NAME = "defender-1421-box"
@@ -230,7 +251,7 @@ def _mute(argv, **_kw) -> subprocess.CompletedProcess:
 def _executor(status: str | None, popen: Callable[..., subprocess.Popen[bytes]], *, attached: bool = True):
     """A sandboxed executor whose exchange is the fault and whose daemon answers `status` ("mute": not at
     all). A run box has its attached start, so it is auto-removed: gone counts as stopped (#1343 B10)."""
-    daemon = _mute if status == "mute" else RecordingDocker(status=status)
+    daemon = _mute if status == "mute" else _DaemonThatRaises() if status == "raises" else RecordingDocker(status=status)
     starter = None
     if attached:
         starter = subprocess.Popen(["true"])
@@ -249,8 +270,16 @@ def _boxed(status: str | None, popen: Callable[..., subprocess.Popen[bytes]]) ->
     return {"start_box": lambda *_a, **_k: executor, "stop_box": lambda *_a, **_k: None, "scrub": scrub}
 
 
-def _asks(executor: box.BoxExecutor, command: str = COMMAND):
-    return executor.run_parsed(bash_exec.parse(command), command=command, cwd=Path("/runs/current"), timeout=5)
+def _asks(executor: box.BoxExecutor, command: str = COMMAND, timeout: float = 5):
+    return executor.run_parsed(bash_exec.parse(command), command=command, cwd=Path("/runs/current"), timeout=timeout)
+
+
+class _DaemonThatRaises(RecordingDocker):
+    """A docker client that cannot be run when asked anything (a real `TimeoutExpired`, as `_call` maps)."""
+
+    def __call__(self, argv, **_kw):
+        self.calls.append(list(argv))
+        raise subprocess.TimeoutExpired(list(argv), 1)
 
 
 EXEC_KILLED = ("sh", "-c", "exit 137")  # C4, C5: exec rc 137 and no bytes, whether the box or the helper died
@@ -301,21 +330,17 @@ def test_o6_exec_137_with_the_box_running_is_a_result_and_the_run_continues(tmp_
     assert _run_end(result).truncated_by is None
     assert main.requests == 2
     said = "\n".join(main.seen[1].tool_returns)
-    assert "memory" in said, said
+    assert "memory" in said.lower(), said
     assert "exit=-9" in said, said
     assert "partial output" not in said, "bytes of a killed exchange reached the model"
     assert "x" * 20 not in said, "bytes of a killed exchange reached the model"
     assert "could not run this command" not in said, f"reached the model as a retry: {said}"
 
 
-@pytest.mark.parametrize("exchange", [EXEC_HELPER_DEADLINE, ("sleep", "30")], ids=["helper-deadline-rc-3", "host-timeout"])
-def test_o6_rule_3_a_timeout_keeps_the_existing_timeout_message_and_the_run_goes_on(tmp_path, monkeypatch, exchange):
-    """With the box running, the helper's own deadline and the host's timeout are the model's timeout, not a lost box. (O6)"""
-    from defender.investigation.tools import _bash
-
-    monkeypatch.setattr(_bash, "_BASH_TIMEOUT_S", 1)
+def test_o6_rule_3_the_helpers_own_deadline_keeps_the_existing_timeout_message_and_the_run_goes_on(tmp_path):
+    """With the box running, exec rc 3 is the model's timeout, not a lost box; the host-timeout arm is the executor's, below. (O6)"""
     main = S.MainScript([S.call("bash", command=COMMAND), S.text(S.DONE)])
-    result = S.run_alert(tmp_path, main=main, box_lifecycle=_boxed("running", _exchange_runs(*exchange)))
+    result = S.run_alert(tmp_path, main=main, box_lifecycle=_boxed("running", _exchange_runs(*EXEC_HELPER_DEADLINE)))
     assert result.raised is None, result.raised
     assert result.rc == 0
     assert _run_end(result).truncated_by is None
@@ -336,7 +361,7 @@ def test_o6_the_killed_helpers_result_is_a_fixed_one_line_reason_whatever_arrive
     line = first.err.decode("utf-8")
     assert len(line.strip().splitlines()) == 1, line
     assert len(line.strip()) <= 160, line
-    assert "memory" in line
+    assert "memory" in line.lower()
     assert all(r == first for r in results), results
 
 
@@ -347,6 +372,17 @@ def test_o6_rule_2_leaves_the_box_usable_and_stops_nothing(tmp_path):
     _asks(executor)
     assert [c for c in daemon.calls if c[1] in {"stop", "kill", "rm"}] == []
     assert len([c for c in daemon.calls if c[1] == "inspect"]) >= 1, "no status was asked, so rule 2 was guessed"
+
+
+@pytest.mark.parametrize("status", ["exited", "mute", "raises"], ids=["exited", "no-answer", "status-call-raises"])
+@pytest.mark.parametrize("exchange", [EXEC_HELPER_DEADLINE, EXEC_KILLED, ("sleep", "30")],
+                         ids=["helper-deadline-rc-3", "exec-137", "host-timeout"])
+def test_o8_rule_1_any_exchange_without_a_frame_on_a_box_not_running_is_a_lost_box(status, exchange):
+    """Not running, no answer, or a fault asking: `BoxLost`, even for the exchanges rule 3 would excuse on a running box. (O8, O6)"""
+    executor, daemon = _executor(status, _exchange_runs(*exchange))
+    with pytest.raises(box.BoxLost):
+        _asks(executor, timeout=0.5)
+    assert any(c[1] == "inspect" for c in daemon.calls), "the box was judged lost without asking its status"
 
 
 @pytest.mark.parametrize("rc", [137, -9, 75, 2, 3])
@@ -454,8 +490,8 @@ def test_o6_a_killed_reducer_stage_is_recorded_as_a_row_with_the_same_digest_wha
         assert len(shim) == 1, f"the killed exchange left no row: {rows}"
         assert shim[0]["error_class"] == "agent-fixable"
         assert shim[0]["payload_digest"].startswith("exit=-9; ")
-        assert "memory" in shim[0]["payload_digest"]
-        assert "memory" in gather.seen[-1]
+        assert "memory" in shim[0]["payload_digest"].lower()
+        assert "memory" in gather.seen[-1].lower()
         digests.append(shim[0]["payload_digest"])
     assert digests[0] == digests[1]
 
@@ -600,13 +636,56 @@ def test_o8_o9_the_case_is_commented_on_only_when_the_model_had_closed_before_th
 
 
 def test_control_a_closed_run_with_no_ending_comments_on_the_case_through_the_same_harness(tmp_path):
-    """The ticketed harness above does see a comment when one is due. (O8)"""
+    """The ticketed, learn-enabled harness does see a comment and a curation enqueue when due. (O8)"""
     store = S.TicketStore(tmp_path)
     result = S.run_alert(tmp_path, main=S.MainScript(S.closing_main_turns()), alert=S.ticketed_alert(),
                          tenant=S.ticket_the_tenant(S.plant_tenant()), tickets=S.ticket_writer(store),
-                         update_ticket=True)
+                         update_ticket=True, no_learn=False)
     assert result.rc == 0
     assert len(store.comment_payloads) == 1, store.calls
+    assert len(result.enqueued) == 1, result.enqueued
+
+
+@pytest.mark.parametrize(("exchange", "code", "named"), [
+    (EXEC_KILLED, 5, "box-lost"), (OVER_THE_FENCE, 6, "box-output-limit")], ids=["box-lost", "fence"])
+def test_o8_o9_a_model_closed_run_whose_stop_faulted_is_not_commented_or_curated(tmp_path, exchange, code, named):
+    """The box may be alive, so the closed run's case gets no comment and its tree no curation; the ending's exit stands. (O8, O9)"""
+    store = S.TicketStore(tmp_path)
+    stops: list[str] = []
+    main = S.MainScript([*S.closing_main_turns()[:2], S.call("bash", command=COMMAND), S.text(S.DONE)])
+    result = S.run_alert(tmp_path, main=main, alert=S.ticketed_alert(), tenant=S.ticket_the_tenant(S.plant_tenant()),
+                         tickets=S.ticket_writer(store), update_ticket=True, no_learn=False,
+                         box_lifecycle=_torn_down(exchange, teardown_faults=True, seen=stops))
+    assert stops, "the lifecycle never tore the box down, so the fault proves nothing"
+    assert result.raised is None, result.raised
+    assert result.rc == code
+    assert _run_end(result).truncated_by == named
+    assert store.comment_payloads == [], store.calls
+    assert result.enqueued == [], result.enqueued
+
+
+@pytest.mark.parametrize("exchange", [EXEC_KILLED, OVER_THE_FENCE], ids=["box-lost", "fence"])
+def test_o8_o9_the_run_log_names_the_command_that_met_the_ending(tmp_path, caplog, exchange):
+    """The records and the job text carry only the class; the log is where an operator finds the command. (O8, O9)"""
+    command = "echo marker-1421-unique"
+    caplog.set_level(logging.INFO)
+    main = S.MainScript([S.call("bash", command=command), S.text(S.DONE)])
+    result = S.run_alert(tmp_path, main=main, box_lifecycle=_boxed("exited", _exchange_runs(*exchange)))
+    assert result.rc in (5, 6)
+    assert any(command in r.getMessage() and r.levelno >= logging.WARNING for r in caplog.records), \
+        [r.getMessage() for r in caplog.records]
+    assert command not in RunPaths(result.folder).run_end_sidecar().read_text(encoding="utf-8")
+
+
+def test_control_a_command_that_met_no_ending_is_not_logged_as_a_warning(tmp_path, caplog):
+    """The same channel without an ending: the command is not in a warning, so the test above sees the ending's. (O8)"""
+    command = "echo marker-1421-unique"
+    caplog.set_level(logging.INFO)
+    wire = box.encode_response(box.BoxResult(rc=0, out=b"hello\n", err=b""))
+    main = S.MainScript([S.call("bash", command=command), S.text(S.DONE)])
+    S.run_alert(tmp_path, main=main, box_lifecycle=_boxed(
+        "running", _exchange_runs("python3", "-c", f"import os; os.write(1, {wire!r})")))
+    assert not [r for r in caplog.records if command in r.getMessage() and r.levelno >= logging.WARNING]
 
 
 @pytest.mark.parametrize("named", ["box-lost", "box-output-limit"])

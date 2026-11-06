@@ -19,7 +19,9 @@ from defender.tests.support.runtime.state import _1255_view as V
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.sandbox._spec1092 import STOCK_ROOTFS
-from defender.tests.e2e._box665 import RecordingDocker, reaped_after_create, requires_live_box
+from defender.tests.e2e._box665 import (
+    RecordingDocker, ScriptedTransport, framed, reaped_after_create, requires_live_box,
+)
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 
 pytestmark = pytest.mark.e2e
@@ -246,11 +248,19 @@ def _clock_file_after_a_command(argv: list[str], clock: C.FakeClock, *,
     """Run scripted box commands, then collect the clock mount and its file readings."""
     docker = RecordingDocker()
     seen: dict[str, Any] = {}
+    start = functools.partial(box_mod.start_box, docker=docker, spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS))
+
+    def start_answering(*args: Any, **kw: Any) -> box_mod.BoxExecutor:
+        """Its commands answer with a frame, as the in-box helper does (#1421: a command with no
+        frame on a box that is not running ends the run); the clock file is written before each."""
+        executor = start(*args, **kw)
+        executor.transport = ScriptedTransport(framed(0, b"ok\n"))
+        return executor
+
     out = C.run_main(argv, clock=clock,
                      main=C.script(clock, *((s, C.bash(command)) for s in seconds_before),
                                    (0, _clock_file_probe(docker, seen))),
-                     start_box=functools.partial(box_mod.start_box, docker=docker,
-                                                 spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS)))
+                     start_box=start_answering)
     return seen, out, docker
 
 

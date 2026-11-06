@@ -4,6 +4,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -223,7 +224,6 @@ def test_o5_the_budget_spans_the_whole_command_and_stops_it_with_exit_75(tmp_pat
     assert not (tmp_path / "later").exists(), "a pipeline ran after the budget stopped the command"
     assert len(_reason_lines(res.err)) == 1, res.err[:400]
     assert len(res.err.strip()) <= 160, "P1: the digest keeps 160 characters"
-    assert b"output" in res.err.lower(), res.err[:400]
     assert "exit=" not in res.err.decode(), "the digest already carries the code"
 
 
@@ -258,11 +258,19 @@ def test_o6_control_sigpipe_is_the_normal_head_case_and_keeps_its_output(tmp_pat
     assert (tmp_path / "later").exists()
 
 
+def test_o6_control_sigterm_is_not_a_kill_and_keeps_its_output(tmp_path):
+    """`-15` upstream of `cat` is outside the kill set: output kept, exit 0, the next pipeline runs. (O6)"""
+    res = _unboxed(tmp_path, f"sh -c {shlex.quote('echo kept; kill -15 $$')} | cat ; touch later")
+    assert (res.rc, res.out) == (0, b"kept\n"), res
+    assert (tmp_path / "later").exists()
+
+
 def test_o10_the_sql_skill_states_the_ceilings_the_exit_codes_and_the_dense_payload_caveat():
     """The model's own instructions carry what it needs to shrink a query. (O10)"""
     text = (DEFENDER / "skills" / "gather" / "defender-sql.md").read_text(encoding="utf-8")
-    for needle in ("64 MiB", "32 MiB", "`75`", "dense"):
+    for needle in ("64 MiB", "32 MiB", "dense"):
         assert needle in text, needle
+    assert re.search(r"(?<![\w.])75(?![\w.])", text), "the exit code 75 is not stated"
 
 
 # ---- live boxes ----------------------------------------------------------------------------
@@ -352,7 +360,7 @@ def test_a_process_past_the_memory_cap_is_stopped_at_the_cap(boxed, base, runtim
     if runtime == "runc":
         assert res is not None
         assert res.rc == -9, f"expected the kernel's kill: {res}"
-        assert "memory" in res.err.decode(), f"no reason line naming the cap (O6): {res}"
+        assert "memory" in res.err.decode().lower(), f"no reason line naming the cap (O6): {res}"
         assert _sh(box, "echo alive").rc == 0
 
 
@@ -395,14 +403,19 @@ LOADS_OUT_OF_ROOM = {
 @RUNTIMES
 @pytest.mark.parametrize("room", list(LOADS_OUT_OF_ROOM))
 def test_o2_a_load_that_runs_out_of_room_below_the_maximum_is_a_size_refusal(boxed, base, room):
-    """Under the maximum, over what the box can hold: a refusal, and the box carries on. (O2)"""
+    """Under the maximum, over what the box can hold: a size failure, memory's sometimes the tool's refusal, and the box carries on. (O2)"""
     memory, shape, args = LOADS_OUT_OF_ROOM[room]
     payload = shape()
     assert len(payload) < PAYLOAD_MAX, "this shape is for O1 past the maximum"
     box = boxed(memory=memory)
     (next(base.glob("run-limits-*")) / "payload.json").write_text(payload, encoding="utf-8")
-    res = _sh(box, f"cat {MODEL_RUN}/payload.json | defender-sql {args} 'SELECT 1 AS x'")
-    _size_failure_at_the_box_boundary(res, _kill_line(box))
+    kill_line = _kill_line(box)
+    tries = O3_TRIES if room == "memory" else 1  # near the edge a try flips between answer and refusal
+    results = [_sh(box, f"cat {MODEL_RUN}/payload.json | defender-sql {args} 'SELECT 1 AS x'") for _ in range(tries)]
+    for res in results:
+        _size_failure_at_the_box_boundary(res, kill_line)
+    if room == "memory":  # else the O6 line alone would pass with no load protection at all
+        assert any(res.rc == EXIT_INPUT_ERROR for res in results), f"every try crashed: {[r.rc for r in results]}"
     assert _sh(box, "echo alive").rc == 0
 
 

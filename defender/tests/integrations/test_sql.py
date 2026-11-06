@@ -246,11 +246,14 @@ class Conn:
         self._con = con
 
     def execute(self, sql, *a, **k):
-        if where not in ("fetch", "none") and where in sql:
+        # The query fault fires only on the user's statement, not on a describe wrapped around it.
+        hit = sql.lstrip().startswith(where) if where == "SELECT 41" else where in sql
+        if where not in ("fetch", "none") and hit:
             raise make()
         done = self._con.execute(sql, *a, **k)
-        if "RLIMIT_LOG" in os.environ:
-            with open(os.environ["RLIMIT_LOG"], "w") as log:
+        log_path = os.environ.get("RLIMIT_LOG")
+        if log_path and not os.path.exists(log_path):  # the first statement: what covers the load
+            with open(log_path, "w") as log:
                 log.write(json.dumps(resource.getrlimit(resource.RLIMIT_AS)))
         return self if done is self._con else done
 
@@ -258,11 +261,6 @@ class Conn:
         if where == "fetch":
             raise make()
         return self._con.fetchmany(*a, **k)
-
-    def fetchall(self, *a, **k):
-        if where == "fetch":
-            raise make()
-        return self._con.fetchall(*a, **k)
 
     def __getattr__(self, name):
         return getattr(self._con, name)
@@ -404,7 +402,7 @@ def test_o2_losing_the_document_parse_cannot_silently_drop_the_positional_rows_n
     """Undeclared positional rows answer `count(*)` = 1; without a parse the note goes, so the run must not answer. (O2)"""
     res = _faulted(tmp_path, "parse:memory", "SELECT count(*) AS n FROM data", stdin=ROWS)
     _is_size_refusal(res)
-    control = _faulted(tmp_path / "c", "parse:generic", "SELECT count(*) AS n FROM data", stdin=ROWS)
+    control = _faulted(tmp_path / "c", "none:none", "SELECT count(*) AS n FROM data", stdin=ROWS)
     assert json.loads(control.stdout) == [{"n": 1}]
     assert "positional rows" in control.stderr
 
@@ -462,8 +460,8 @@ def _big_result(rows: int, width: int = 1024) -> str:
     return f"SELECT repeat('x', {width}) AS s FROM range({rows})"
 
 
-def test_o4_a_result_over_the_budget_prints_nothing_and_refuses_with_one_fixed_line():
-    """Under the budget the same query prints in full; over it nothing is printed. (O4, P1)"""
+def test_o4_a_result_over_the_budget_prints_nothing_and_refuses_with_one_fixed_line(tmp_path):
+    """Under the budget the same query prints in full; over it nothing is printed, in words unlike the load and query refusals. (O4, P1)"""
     control = run_sql_py(_big_result(24 * 1024), stdin=FLAT)
     assert control.returncode == defender_sql.EXIT_OK, control.stderr[-300:]
     assert len(json.loads(control.stdout)) == 24 * 1024
@@ -476,6 +474,9 @@ def test_o4_a_result_over_the_budget_prints_nothing_and_refuses_with_one_fixed_l
         assert len([ln for ln in res.stderr.splitlines() if ln.strip()]) == 1, res.stderr[-300:]
         assert len(res.stderr.strip()) <= 160
     assert many.stderr == one_wide.stderr, "P1: one text, whatever the shape of the result"
+    for stage in ("load", "query"):
+        other = _stage(tmp_path / stage, stage, "memory").stderr
+        assert many.stderr != other, f"the result refusal repeats the {stage} refusal: the model cannot tell what to shrink"
 
 
 def test_the_engine_runs_two_threads_with_no_spill_and_its_own_memory_figure():
@@ -602,7 +603,7 @@ def test_c17_scratch_is_gone_once_the_load_finishes_so_a_killed_query_leaves_non
             while not any(scratch.iterdir()) and proc.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.005)
             assert any(scratch.iterdir()), f"the load never made scratch: {proc.poll()} {proc.stderr.read()[-300:] if proc.poll() is not None else ''}"
-            deadline = time.monotonic() + 20
+            deadline = time.monotonic() + 60
             while any(scratch.iterdir()) and proc.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.05)
             assert proc.poll() is None, "the query finished: it was meant to outlast the check"

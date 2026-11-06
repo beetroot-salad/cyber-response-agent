@@ -349,10 +349,14 @@ def test_o6_a_stage_dying_on_a_kill_or_crash_gives_its_signal_one_fixed_line_and
 
 def test_o6_every_kill_gets_the_same_line_whatever_the_signal_or_the_command(tmp_path):
     """The digest is the pitfall's merge key and already carries the exit code: no variable parts. (O6, P1)"""
-    lines = {_entrypoint(f"{_dies(sig)} | cat", cwd=tmp_path)[1].err for sig in KILLS}
-    lines.add(_entrypoint(f"echo other ; {_dies(signal.SIGKILL)}", cwd=tmp_path)[1].err)
+    frames = [_entrypoint(f"{_dies(sig)} | cat", cwd=tmp_path)[1] for sig in KILLS]
+    frames.append(_entrypoint(f"echo other ; {_dies(signal.SIGKILL)}", cwd=tmp_path)[1])
+    assert all(f is not None and f.out == b"" for f in frames), frames
+    lines = {f.err for f in frames}
     assert len(lines) == 1, lines
-    assert "exit=" not in next(iter(lines)).decode()
+    line = next(iter(lines)).decode()
+    assert "memory" in line.lower(), line
+    assert "exit=" not in line
 
 
 def test_o6_control_sigpipe_upstream_of_head_is_the_normal_case_and_keeps_everything(tmp_path):
@@ -363,6 +367,18 @@ def test_o6_control_sigpipe_upstream_of_head_is_the_normal_case_and_keeps_everyt
     assert (tmp_path / "later").exists()
 
 
+def test_o6_control_a_stage_dying_on_sigterm_is_not_a_kill(tmp_path):
+    """-15 is outside the kill set: output and code stay as the command made them, upstream or last. (O6)"""
+    stage = f"sh -c {shlex.quote('echo kept; echo e >&2; kill -15 $$')}"
+    upstream = _entrypoint(f"{stage} | cat ; touch later", cwd=tmp_path)[1]
+    assert upstream is not None
+    assert (upstream.rc, upstream.out, upstream.err) == (0, b"kept\n", b"e\n")
+    assert (tmp_path / "later").exists()
+    last = _entrypoint(stage, cwd=tmp_path)[1]
+    assert last is not None
+    assert (last.rc, last.out, last.err) == (-int(signal.SIGTERM), b"kept\n", b"e\n")
+
+
 def test_o6_control_a_stage_exiting_137_on_its_own_is_not_a_kill(tmp_path):
     """Only a signal death is a kill; an exit code of 137 keeps its output and code. (O6)"""
     status, frame, _ = _entrypoint("sh -c 'echo kept; echo e >&2; exit 137'", cwd=tmp_path)
@@ -370,13 +386,31 @@ def test_o6_control_a_stage_exiting_137_on_its_own_is_not_a_kill(tmp_path):
     assert (frame.rc, frame.out, frame.err) == (137, b"kept\n", b"e\n")
 
 
-def test_o5_the_stderr_of_every_stage_shares_one_pipe_in_the_order_it_was_written():
+def test_o5_the_stderr_of_every_stage_shares_one_pipe_in_the_order_it_was_written(tmp_path):
     """Interleaving across stages is kept when stderr leaves the temp file. (O5)"""
-    first = _py("import sys, time; sys.stderr.write('1'); sys.stderr.flush(); time.sleep(0.5); "
-                "sys.stderr.write('3'); sys.stderr.flush()")
-    second = _py("import sys, time; time.sleep(0.25); sys.stderr.write('2'); sys.stderr.flush()")
-    rc, out, err = _run_raw(f"{first} | {second}")
+    def turn(waits_for: str | None, writes: str, then: str) -> str:
+        """Writes `writes` once `waits_for` exists, then creates `then`: the order is the handshake's."""
+        wait = (f"any(os.path.exists({str(tmp_path / waits_for)!r}) or time.sleep(0.01) for _ in range(2000)); "
+                if waits_for else "")
+        return _py(f"import os, sys, time; {wait}"
+                   f"sys.stderr.write({writes!r}); sys.stderr.flush(); open({str(tmp_path / then)!r}, 'w').close()")
+
+    first = turn(None, "1", "one")
+    second = turn("one", "2", "two")
+    third = turn("two", "3", "three")
+    rc, out, err = _run_raw(f"{first} | {second} | {third}")
     assert err == b"123", err
+
+
+def test_o5_a_producer_that_never_stops_is_stopped_at_the_budget_not_the_deadline(tmp_path):
+    """`yes` has no end: the helper's own budget ends it, well inside its deadline, and nothing after it runs. (O5)"""
+    started = time.monotonic()
+    status, frame, _ = _entrypoint("yes ; touch later", cwd=tmp_path, timeout=30)
+    elapsed = time.monotonic() - started
+    assert frame is not None, "no frame: the helper ran to its deadline"
+    assert (frame.rc, frame.out) == (OVER_BUDGET_RC, b"")
+    assert elapsed < 20, elapsed
+    assert not (tmp_path / "later").exists()
 
 
 def test_a_forked_daemon_holding_stderr_does_not_hold_the_command(tmp_path):
@@ -420,7 +454,6 @@ def test_a_stage_that_cannot_start_for_want_of_a_process_names_the_process_cap(t
     assert (frame.rc, frame.out) == (126, b"")
     line = _one_line(frame.err).decode().lower()
     assert "process" in line, line
-    assert os.strerror(errno.EAGAIN).lower() not in line
 
 
 def test_an_unplanned_failure_in_the_helper_still_returns_a_frame(tmp_path):

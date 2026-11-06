@@ -381,8 +381,7 @@ def test_m5_a_file_that_changes_before_the_admission_read_is_refused_whatever_an
     assert ran.raised is None, ran
     assert ran.calls["lifecycle"] == 0, "the run went ahead on bytes its launch record does not name"
     assert not (scene.runs / run_id).exists()
-    assert scene.job_end(run_id) == {"setup": "refused", "box": "not_started",
-                                     "report_committed": False, "scrub_verified": False}
+    assert scene.job_end(run_id) == REFUSED  # #1421: the record carries a fifth fact, null here
 
 
 _REFUSALS = {
@@ -457,8 +456,7 @@ def test_o6_setup_refuses_an_id_without_a_launch_record_that_names_this_tenant_a
     assert ran.calls["lifecycle"] == 0
     assert not (scene.runs / run_id).exists(), "a run folder was made past a refused launch"
     assert "run_id=" not in ran.out
-    assert scene.job_end(run_id) == {"setup": "refused", "box": "not_started",
-                                     "report_committed": False, "scrub_verified": False}
+    assert scene.job_end(run_id) == REFUSED  # #1421: the record carries a fifth fact, null here
     after = sorted(p.name for p in scene.runs.iterdir())
     assert after == sorted([*before, f"{run_id}.job-end.json"]), f"{kind}: runs changed: {after}"
     if kind != "digest-mismatch-on-the-admitted-bytes":
