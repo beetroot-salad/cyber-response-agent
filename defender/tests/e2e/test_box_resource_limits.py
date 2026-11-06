@@ -124,19 +124,31 @@ def test_every_launch_path_caps_memory_cpu_and_processes(argv_of, tmp_path):
 
 
 @pytest.mark.parametrize("memory", ["512m", "2g", "1073741824"])
-@pytest.mark.parametrize("builder", ["create", "render"])
-def test_both_builders_hand_the_box_its_cap_in_the_environment(builder, memory, tmp_path):
-    """`DEFENDER_BOX_MEMORY` carries `BoxSpec.memory` as written, once, from both launch builders. (P5)"""
-    from defender.box._lifecycle import _create_argv, _render_argv, _run_lane_mounts
+@pytest.mark.parametrize("builder", ["create", "render", "host-run", "host-fallback"])
+def test_both_builders_hand_the_box_its_cap_in_the_environment(builder, memory, tmp_path, monkeypatch):
+    """`DEFENDER_BOX_MEMORY` is `BoxSpec.memory` as written, once, from both box builders whatever the request names; the host builders carry it and `DEFENDER_BOX` never. (P5)"""
+    from defender.box import _host_env
+    from defender.box._lifecycle import _create_argv, _host_fallback_env, _render_argv, _run_lane_mounts
 
     spec = box_mod.BoxSpec(memory=memory, rootfs="defender-box:cap")
+    named = {"DEFENDER_BOX": "1", box_mod.BoxSpec.MEMORY_ENV: "1k"}
+    for var, value in named.items():
+        monkeypatch.setenv(var, value)
+    if builder in ("host-run", "host-fallback"):
+        request = box_mod.BoxRequest(name="defender-lane-cap", workdir=tmp_path, defender_dir=DEFENDER, spec=spec,
+                                     tenant_id=TEST_TENANT, env=named)
+        env = (_host_env.run_env(DEFENDER, _run_dir(tmp_path)) if builder == "host-run"
+               else _host_fallback_env(request))
+        assert "DEFENDER_DIR" in env, "control: the builder ran"
+        assert not set(named) & set(env)
+        return
     if builder == "create":
         run_dir = _run_dir(tmp_path)
         argv = _create_argv("defender-run-cap", run_dir, DEFENDER, spec,
                             lane=_run_lane_mounts(run_dir, DEFENDER, None)).argv
     else:
         request = box_mod.BoxRequest(name="defender-lane-cap", workdir=tmp_path, defender_dir=DEFENDER,
-                                     spec=spec, tenant_id=TEST_TENANT)
+                                     spec=spec, tenant_id=TEST_TENANT, env=named)
         argv = _render_argv(request).argv
     assert _flag(argv, "--memory") == memory, "control: the cap itself reaches docker"
     given = [argv[i + 1] for i, word in enumerate(argv) if word == "--env" and argv[i + 1].startswith("DEFENDER_BOX_MEMORY=")]
@@ -266,11 +278,35 @@ def test_o6_control_sigterm_is_not_a_kill_and_keeps_its_output(tmp_path):
 
 
 def test_o10_the_sql_skill_states_the_ceilings_the_exit_codes_and_the_dense_payload_caveat():
-    """The model's own instructions carry what it needs to shrink a query. (O10)"""
+    """Each ceiling bullet of the model's instructions names its own subject with its constant's figure and exit code. (O10)"""
+    from defender.execution import box_codec
+    from defender.investigation.sql_engine import sql as defender_sql
+
     text = (DEFENDER / "skills" / "gather" / "defender-sql.md").read_text(encoding="utf-8")
-    for needle in ("64 MiB", "32 MiB", "dense"):
-        assert needle in text, needle
-    assert re.search(r"(?<![\w.])75(?![\w.])", text), "the exit code 75 is not stated"
+    section = text.split("\n## Ceilings\n", 1)[1].split("\n## ", 1)[0]
+    bullets = {}
+    for bullet in re.split(r"\n(?=- \*\*)", section):
+        found = re.match(r"- \*\*(?P<subject>.+?)\*\*(?P<body>.*)", bullet.strip(), re.S)
+        if found:
+            bullets[found["subject"]] = found["body"]
+
+    def pick(keyword: str) -> tuple[str, str]:
+        hits = [(k, v) for k, v in bullets.items() if keyword in k.lower()]
+        assert len(hits) == 1, (keyword, list(bullets))
+        return hits[0]
+
+    def exit_of(body: str) -> int:
+        return int(re.search(r"exit `(-?\d+)`", body)[1])
+
+    for keyword, constant, code in (("payload is at most", defender_sql._MAX_PAYLOAD, defender_sql.EXIT_INPUT_ERROR),
+                                    ("result is at most", defender_sql._RESULT_BUDGET, defender_sql.EXIT_INPUT_ERROR),
+                                    ("prints more than", box_codec.BOX_OUTPUT_LIMIT, box_codec.OVER_BUDGET_RC)):
+        subject, body = pick(keyword)
+        assert int(re.search(r"(\d+) MiB", subject)[1]) << 20 == constant, subject
+        assert exit_of(body) == code, (subject, body)
+    assert "dense" in pick("memory")[1]
+    assert {int(c) for c in re.findall(r"`(-\d+)`", pick("memory")[1])} == {-9, -11}
+    assert all(bash_exec.is_kill_or_crash(rc) for rc in (-9, -11))
 
 
 # ---- live boxes ----------------------------------------------------------------------------

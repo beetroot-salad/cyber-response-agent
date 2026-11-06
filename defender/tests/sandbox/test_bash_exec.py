@@ -218,6 +218,7 @@ def test_run_parsed_empty_is_noop():
 # ---- #1421: one output budget, kills named, start failures framed, raw bytes ----------------
 
 import errno  # noqa: E402
+import random  # noqa: E402
 import resource  # noqa: E402
 import shlex  # noqa: E402
 import signal  # noqa: E402
@@ -386,6 +387,18 @@ def test_o6_control_a_stage_exiting_137_on_its_own_is_not_a_kill(tmp_path):
     assert (frame.rc, frame.out, frame.err) == (137, b"kept\n", b"e\n")
 
 
+def test_o5_the_frame_carries_every_byte_value_on_both_streams_unchanged(tmp_path):
+    """All 256 byte values in a shuffled order come back byte for byte on stdout and stderr; the frame never re-encodes text. (O5)"""
+    order = list(range(256))
+    random.Random(1421).shuffle(order)
+    shuffled = bytes(order)
+    cmd = _py(f"import os; b = bytes.fromhex({shuffled.hex()!r}); os.write(1, b); os.write(2, b[::-1])")
+    status, frame, _ = _entrypoint(cmd, cwd=tmp_path)
+    assert status == 0
+    assert frame is not None
+    assert (frame.rc, frame.out, frame.err) == (0, shuffled, shuffled[::-1])
+
+
 def test_o5_the_stderr_of_every_stage_shares_one_pipe_in_the_order_it_was_written(tmp_path):
     """Interleaving across stages is kept when stderr leaves the temp file: one stage writes before and
     after the other, so a buffer per stage, joined in stage order, would read 132. (O5)"""
@@ -467,25 +480,35 @@ def test_a_stage_that_cannot_start_for_want_of_a_process_names_the_process_cap(t
     assert "process" in line, line
 
 
-_ENOMEM_ON_START = """\
-import errno, subprocess, sys
+_REFUSES_ONE_START = """\
+import os, subprocess, sys
+
+real, seen = subprocess.Popen, []
 
 def refuse(*args, **kwargs):
-    raise OSError(errno.ENOMEM, "Cannot allocate memory")
+    seen.append(args)
+    if len(seen) - 1 == int(os.environ["REFUSE_AT"]):
+        raise OSError(int(os.environ["REFUSE_ERRNO"]), "refused")
+    return real(*args, **kwargs)
 
 subprocess.Popen = refuse
 from defender.execution import bash_exec
 sys.exit(bash_exec._run_box_entrypoint())
 """
 
+#: Two pipelines of three and four stages: seven starts, each a place the system can refuse one.
+_SEVEN_STAGES = "echo a | cat | cat ; echo b | cat | cat | cat"
 
-def test_a_stage_that_cannot_start_for_want_of_memory_names_the_process_cap(tmp_path):
-    """ENOMEM from the start of a stage, injected in a wrapper process (no real fault reaches it: RLIMIT_AS stops
-    python first, and fork/exec is not governed by it): rc 126, nothing on stdout, one line naming the cap. (O6)"""
+
+@pytest.mark.parametrize("code", [errno.EAGAIN, errno.ENOMEM], ids=["EAGAIN", "ENOMEM"])
+@pytest.mark.parametrize("at", range(7))
+def test_a_stage_that_cannot_start_for_want_of_a_process_or_memory_names_the_process_cap_at_any_stage(tmp_path, at, code):
+    """Whichever of the seven starts is refused (injected in a wrapper process, as no real fault reaches it): rc 126,
+    nothing on stdout, one line naming the cap. (O6)"""
     proc = subprocess.run(
-        [sys.executable, "-P", "-c", _ENOMEM_ON_START], input=box_codec.encode_request(bash_exec.parse("echo hi")),
+        [sys.executable, "-P", "-c", _REFUSES_ONE_START], input=box_codec.encode_request(bash_exec.parse(_SEVEN_STAGES)),
         capture_output=True, cwd=tmp_path, timeout=60,
-        env=_env(DEFENDER_BOX_TIMEOUT="30", PYTHONPATH=str(DEFENDER.parent)))
+        env=_env(DEFENDER_BOX_TIMEOUT="30", PYTHONPATH=str(DEFENDER.parent), REFUSE_AT=str(at), REFUSE_ERRNO=str(code)))
     try:
         frame = box_codec.decode_response(proc.stdout)
     except box_codec.BoxFault:
@@ -493,8 +516,7 @@ def test_a_stage_that_cannot_start_for_want_of_memory_names_the_process_cap(tmp_
     assert frame is not None, (proc.returncode, proc.stdout[:100], proc.stderr[-300:])
     assert frame.rc == 126, (frame.rc, frame.err)
     assert frame.out == b""
-    line = _one_line(frame.err).decode().lower()
-    assert "process" in line, line
+    assert frame.err == box_codec.PROCESS_CAP_LINE
 
 
 def test_an_unplanned_failure_in_the_helper_still_returns_a_frame(tmp_path):

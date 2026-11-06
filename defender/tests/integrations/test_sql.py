@@ -208,11 +208,13 @@ def test_sandbox_blocks_file_write(monkeypatch, capsys, tmp_path):
 # Each runs the tool's `main()` as a process, since the limit is set there and a refusal exits
 # at once. Faults are injected under it by `_FAULTING_MAIN`, a test-owned wrapper.
 
+import contextlib  # noqa: E402
 import os  # noqa: E402
 import resource  # noqa: E402
 import signal  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
+import threading  # noqa: E402
 import time  # noqa: E402
 from pathlib import Path  # noqa: E402
 
@@ -450,6 +452,34 @@ def test_o1_a_payload_over_the_maximum_is_refused_before_parsing(args, junk_over
         assert res.stderr != over.stderr, "the maximum itself was refused as over it"
 
 
+@pytest.mark.parametrize(("cap", "size", "too_big"), [("512m", 700 << 20, True), ("256m", PAYLOAD_MAX + (1 << 20), False)],
+                         ids=["stream-past-the-cap", "small-cap"])
+def test_o1_a_payload_past_the_maximum_under_a_box_cap_is_refused_in_one_line_never_a_crash(cap, size, too_big):
+    """Streamed bytes beyond the cap: exit 2, nothing printed, one refusal line (the payload-too-big one where the cap holds the maximum) and no traceback, so the payload is never read whole. (O1)"""
+    reader, writer = os.pipe()
+    proc = subprocess.Popen([*SQL_ARGV, "SELECT 1 AS x"], stdin=reader, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            env=sql_env({**os.environ, "DEFENDER_BOX_MEMORY": cap}))
+    os.close(reader)
+
+    def feed() -> None:
+        chunk = b"x" * (1 << 20)
+        with contextlib.suppress(BrokenPipeError), os.fdopen(writer, "wb") as pipe:
+            for _ in range(size >> 20):
+                pipe.write(chunk)
+
+    feeder = threading.Thread(target=feed)
+    feeder.start()
+    out, err = proc.communicate(timeout=120)
+    feeder.join(timeout=60)
+    text = err.decode("utf-8", "replace")
+    assert proc.returncode == defender_sql.EXIT_INPUT_ERROR, text[-300:]
+    assert out == b""
+    assert "Traceback" not in text
+    assert len([ln for ln in text.splitlines() if ln.strip()]) == 1, text[-300:]
+    if too_big:  # a cap too small to hold the maximum may refuse in the memory words instead
+        assert text == run_sql_py("SELECT 1 AS x", stdin="x" * (PAYLOAD_MAX + 1)).stderr, "not the payload-too-big line"
+
+
 def test_o1_the_same_message_on_both_load_paths():
     """One message, whichever load path. (O1)"""
     junk = "x" * (PAYLOAD_MAX + 1)
@@ -477,6 +507,21 @@ def test_o4_a_result_over_the_budget_prints_nothing_and_refuses_with_one_fixed_l
     for stage in ("load", "query"):
         other = _stage(tmp_path / stage, stage, "memory").stderr
         assert many.stderr != other, f"the result refusal repeats the {stage} refusal: the model cannot tell what to shrink"
+
+
+@pytest.mark.parametrize("width", [1 << 10, 16 << 10, 256 << 10, 1 << 20])
+def test_o4_the_result_budget_falls_within_one_row_of_32_mib_whatever_the_row_width(width):
+    """A result one row below 32 MiB is answered in full and one row above it is refused with nothing printed. (O4)"""
+    each = len(json.dumps({"s": "x" * width})) + 2  # a row and its ", "; the printed result is `each * rows`
+    under, over = (RESULT_BUDGET - 2) // each, RESULT_BUDGET // each + 1
+    assert RESULT_BUDGET - under * each < 2 * each
+    assert over * each - RESULT_BUDGET < each
+    answered = run_sql_py(_big_result(under, width), stdin=FLAT)
+    assert answered.returncode == defender_sql.EXIT_OK, answered.stderr[-300:]
+    assert len(json.loads(answered.stdout)) == under
+    refused = run_sql_py(_big_result(over, width), stdin=FLAT)
+    assert refused.returncode == defender_sql.EXIT_INPUT_ERROR, refused.stderr[-300:]
+    assert refused.stdout == ""
 
 
 def test_the_engine_runs_two_threads_with_no_spill_and_its_own_memory_figure():

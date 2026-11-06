@@ -22,6 +22,7 @@ from defender.tests.support.runtime.state._1255_view import model_path
 pytest.importorskip("pydantic_ai")
 
 from defender import run_common  # noqa: E402
+from defender.records import run_end  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead  # noqa: E402
 from defender.investigation import permission  # noqa: E402
@@ -541,6 +542,40 @@ def test_o8_the_summary_gains_a_key_only_when_the_teardown_of_a_box_ending_fault
     assert {k: v for k, v in summary.items() if k in ended} == ended
     assert bool(set(summary) - set(ended)) is stop_faults, summary
     assert bool(rec.scrubbed) is not stop_faults, "the scrub walked a tree whose box was not provably dead"
+
+
+@pytest.mark.parametrize("word", [*run_end.TRUNCATED_BY_VALUES, None])
+def test_o8_every_run_end_word_reaches_the_job_fact_and_only_the_two_box_words_swallow_a_teardown_fault(tmp_path, word):
+    """The job fact is the driver's word whole; a faulting teardown is swallowed and flagged for 'box-lost' and 'box-output-limit' alone, and the worker names the word. (O8, O9)"""
+    from defender import run as run_py
+    from defender.records import job_facts, job_lane
+    from defender.worker._worker import _ending_from
+
+    box_words = {"box-lost", "box-output-limit"}
+    rec = BoxLifecycleRecorder()
+    held = run_py._JobEndFacts()
+
+    def stop(*_a, **_k):
+        raise BoxFault("could not stop the box")
+
+    def drive():
+        return run_py._run_investigation_lifecycle(
+            run=fixture_run(_clean_run_dir(tmp_path / "lifecycle")), model="m-741", model_override=None,
+            defender_dir=DEFENDER, tenant=_tenants1106.fixture_run_tenant(), job_facts=held,
+            investigate=lambda **_kw: {"output": "done", "requests": 1, "truncated_by": word},
+            start_box=rec.start_box, stop_box=stop, scrub=rec.scrub)
+
+    if word in box_words:
+        assert drive().get(run_py.TEARDOWN_FAULTED) is True
+    else:
+        with pytest.raises(BoxFault):
+            drive()
+    assert held.cut_short == word
+    end = job_lane.JobEnd(setup=job_facts.SETUP_DONE, box=job_facts.BOX_STARTED, report_committed=False,
+                          scrub_verified=False, cut_short=word)
+    ending = _ending_from(end, 5, lambda: None)
+    assert word is None or word in ending.failure_message
+    assert ending.decided_by_run is False
 
 
 def test_no_consumer_runs_when_the_scrub_raises(tmp_path):

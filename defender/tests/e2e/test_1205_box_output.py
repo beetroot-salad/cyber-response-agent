@@ -2,6 +2,7 @@
 correlation-lead boundaries; a command printing too much does not."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import shutil
@@ -136,8 +137,13 @@ KILLS = {"budget": lambda: BudgetKill("run budget spent"), "aborted": lambda: Ru
 
 
 def _group_run(tmp_path: Path, group: BaseException, where: str, **kw):
-    """`group` raised by MAIN's lead, or by the correlation lead, which stops before MAIN."""
+    """`group` raised by MAIN's lead, by the correlation lead (which stops before MAIN), or by a gather lead (`gather`; pass `stores=[]`)."""
     injected = S.LeadFault(raise_on=1, exc=lambda: group)
+    if where == "gather":
+        lead = "l-001"
+        return S.run_alert(tmp_path, main=[S.gather(lead, "cmdb"), S.text(S.DONE)],
+                           leads={S.L3: [S.text("corr")], lead: [S.text("x")]}, lead_faults={lead: injected},
+                           store_factory=S.store_factory(tmp_path, sink=kw["stores"]), **kw)
     main = S.MainScript([S.text(S.DONE)], fault=injected if where == "main" else S.CLEAN)
     return S.run_alert(tmp_path, main=main, lead_faults={S.L3: injected} if where == "correlation" else None, **kw)
 
@@ -155,6 +161,31 @@ def test_o8_o9_a_group_with_a_budget_or_abort_propagates_first_and_is_not_named_
     assert result.rc not in (5, 6), result.rc
     assert _named(result) in (None, kill), _named(result)
     assert result.raised is not None or _named(result) == kill, "the group vanished without an ending"
+
+
+PROPAGATES_FIRST = {
+    "interrupt": KeyboardInterrupt, "cancelled": asyncio.CancelledError, "budget": lambda: BudgetKill("run budget spent"),
+    "aborted": lambda: RunAborted(5, ["cmdb"]), "serving-abort": lambda: ServingAbort("the oracle gave up on the world"),
+}
+
+
+@pytest.mark.parametrize("where", ["main", "correlation", "gather"])
+@pytest.mark.parametrize("ending", list(ENDINGS))
+@pytest.mark.parametrize("first", list(PROPAGATES_FIRST))
+def test_o8_o9_a_group_holding_anything_that_propagates_first_is_named_for_no_box_ending_at_any_site(tmp_path, first, ending, where):
+    """At the driver's two sites and the gather stamp, the group goes up as itself and no box ending is returned, named or stamped. (O8, O9, group precedence)"""
+    stores: list = []
+    group = BaseExceptionGroup("g", [PROPAGATES_FIRST[first](), ENDINGS[ending][0]()])
+    if first in ("interrupt", "cancelled"):
+        with pytest.raises(BaseExceptionGroup) as caught:
+            _group_run(tmp_path, group, where, stores=stores, catch=False)
+        assert carried(caught.value, type(group.exceptions[0])) is not None
+    else:
+        result = _group_run(tmp_path, group, where, stores=stores)
+        assert result.rc not in (5, 6), result.rc
+        assert _named(result) not in ENDINGS, _named(result)
+    if where == "gather":
+        assert P.sessions(stores[-1].path).get(P.gather_agent("l-001")) not in ENDINGS
 
 
 @WHERE
