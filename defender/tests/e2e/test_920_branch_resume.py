@@ -9,11 +9,14 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.records import RunPaths  # noqa: E402
 from defender.investigation.lead_zero import CORRELATION_HEADING  # noqa: E402
 from defender.tests.support.runtime.state import _1255_snapshot as S
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.learning.branch._branch_947 import spec_at  # noqa: E402
 from defender.tests.support.storage._session_head_754 import message_ids  # noqa: E402
 from defender.tests.support.storage._session_store_705 import sql, store_factory, store_mod  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
+    ALERTS_INDEX,
     CORRELATION_SUMMARY,
+    SHELL_DEFAULT,
     L3,
     VerbRecorder,
     alert_doc,
@@ -25,10 +28,12 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN,
+    Priced,
     ReplayFn,
     Turn,
     _split_at_fences,
     drive,
+    named_models,
 )
 from defender.tests.support.storage._store_owner import reread
 
@@ -125,6 +130,43 @@ def test_a_finished_run_resumes_at_one_of_its_own_messages(tmp_path):
         "the child owns rows from before its branch point: the prefix was copied, not inherited")
     assert message_ids(store, child), (
         "the resumed run appended nothing at all, so 'it appended no duplicates' is vacuous")
+
+
+def test_s5_a_branch_arm_sharing_the_database_totals_only_its_own_run(tmp_path):
+    """The arm and its source share one database; the arm's run file totals the arm's own responses, the source's stays its own. (S1, S5)"""
+    import json
+    from types import SimpleNamespace
+
+    def total(run_dir) -> float:
+        rows = [json.loads(line) for line in RunPaths(run_dir).tool_trace.read_text(encoding="utf-8").splitlines()]
+        return [r for r in rows if r.get("type") == "result"][-1]["total_cost_usd"]
+
+    sink: list = []
+    source_dir = materialize_alert(tmp_path / "source", alert_doc())
+    chunks = _split_at_fences((GOLDEN / "investigation.md").read_text(encoding="utf-8"), FENCES)
+    source_turns = [Turn(tool_calls=[("append_block", {"text": chunk})]) for chunk in chunks] + [Turn(text="Holding here.")]
+    lead_zero = Priced(ReplayFn([Turn(tool_calls=[("query", {"system": "elastic", "verb": "alerts",
+                                                              "params": {"native_query": "user.name:dev.dana"}})]),
+                                 Turn(text=CORRELATION_SUMMARY)]))
+    lead_zero.serves_correlation = True
+    verbs = elastic_backend(VerbRecorder(), answer_hits(NO_DOCS), shell=SHELL_DEFAULT, signal_index=ALERTS_INDEX)
+    source = drive(source_dir, run_id="branch-1377-source", main=Priced(ReplayFn(source_turns)), gather=lead_zero, verbs=verbs,
+                   wrap_model=named_models(main="claude-sonnet-4-6", gather="claude-haiku-4-5"),
+                   store_factory=store_factory(tmp_path, sink=sink))
+    assert source["truncated_by"] is None, ("premise: the source run finished", source)
+    store = reread(sink[0])
+    spec, _ = _spec(SimpleNamespace(run_dir=source_dir), store)
+    sibling_dir = materialize_alert(tmp_path / "sibling", alert_doc())
+    sibling_dir = sibling_dir.rename(sibling_dir.with_name(fixture_uuid("arm")))  # its own run id
+    assert sibling_dir.name != source_dir.name, "premise: the arm is a different run"
+
+    arm = drive(sibling_dir, run_id="branch-1377-sibling", resume=spec,
+                main=Priced(ReplayFn([S.echo("resumed"), Turn(text="Resumed and stopping.")])),
+                wrap_model=named_models(main="claude-sonnet-4-6"))
+
+    assert str(arm.get("store_path")) == str(source.get("store_path")), "premise: one database holds both runs"
+    assert total(source_dir) == pytest.approx(3.0 * len(source_turns) + 2 * 1.0)
+    assert total(sibling_dir) == pytest.approx(3.0 * 2), "the arm's total includes its source's responses"
 
 
 def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):

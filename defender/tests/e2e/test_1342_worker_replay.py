@@ -97,7 +97,7 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         assert Path(runs / f"{inv.investigation_id}.launch.json").is_file()
         assert json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8")) == {
             "setup": "done", "box": "started", "report_committed": True, "scrub_verified": True,
-            "cut_short": None}
+            "cut_short": None, "spend_write_failed": False}
         from defender.records import RunPaths
 
         launch = json.loads((runs / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
@@ -246,6 +246,12 @@ def _calls(marks: Path) -> dict[str, int]:
             if (marks / f"calls-{name}").is_file() else 0 for name in PRICED_CALLS}
 
 
+def _spend_errors(stderr: Path) -> list[str]:
+    """The child's log lines at ERROR that name spend (the job entry configures logging as run.py's `__main__` does: JSON lines)."""
+    lines = stderr.read_text(encoding="utf-8").splitlines() if stderr.is_file() else []
+    return [line for line in lines if '"ERROR"' in line and "spend" in line.lower()]
+
+
 def _run_result(run: Path) -> dict:
     lines = (run / "tool_trace.jsonl").read_text(encoding="utf-8").splitlines()
     return [e for e in map(json.loads, lines) if e.get("type") == "result"][-1]
@@ -285,13 +291,13 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
         result = _run_result(runs / inv.investigation_id)
         assert result["total_cost_usd"] == pytest.approx(spent)
         assert result["total_cost_is_lower_limit"] is False
+        assert result["usage"]["input_tokens"] == 10_000_000, "usage counts every response, as the total does"
         assert result["num_turns"] == 4, "num_turns stays MAIN's turns (run health reads it)"
 
 
 async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_report_and_marks_the_sum(
         migrated_database, tmp_path, monkeypatch):  # noqa: F811
-    """Inserts refused during the review (a real SQLite fault): same ending, disposition and report as the unfaulted control;
-    the sum lacks the review and is marked, and the child logs it at ERROR. (S3, S2, S5)"""
+    """Ledger inserts refused during the review (a real SQLite fault): same ending and report as the control; the sum lacks the review, is marked, and the child logs ERROR. (S3, S2, S5)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     root = tmp_path / "data"
@@ -328,6 +334,7 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
             "completed", "inconclusive", None), "a forced verdict reads `unresolved`"
         report = {i: (runs / i / "report.md").read_text(encoding="utf-8").replace(i, "<id>") for i in ids}
         assert report[faulted] == report[control]
+        assert "outcome: stands" in report[faulted], "premise: the review's own outcome reached the report (a forced verdict reads `unresolved`)"
         assert got[faulted]["cost_usd"] == pytest.approx(4 * MAIN_IN + 3 * GATHER_IN)  # the review's 2.85 is lost
         assert lower_limit(migrated_database, faulted) is True
         assert lower_limit(migrated_database, control) is False
@@ -335,5 +342,6 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
         assert (end["report_committed"], end["spend_write_failed"]) == (True, True), end
         result = _run_result(runs / faulted)
         assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(15.0), True)
-        assert any("ERROR" in line and "spend" in line.lower()
-                   for line in err_file.read_text(encoding="utf-8").splitlines()), "the failed write was not logged at ERROR"
+        assert (result["usage"]["input_tokens"], result["num_turns"]) == (7_000_000, 4)
+        assert _spend_errors(err_file), "the failed write was not logged at ERROR"
+        assert _spend_errors(tmp_path / "control.stderr") == [], "the unfaulted control logged a failed spend write"

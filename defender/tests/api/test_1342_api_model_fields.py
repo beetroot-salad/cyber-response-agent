@@ -19,7 +19,7 @@ FIELDS = ("request_key", "attempt", "failure_reason", "failure_message")
 
 
 def _investigation(**extra):
-    fields = {"cost_usd": 0.0, "request_key": "k1", "attempt": 1, **extra}
+    fields = {"cost_usd": 0.0, "cost_is_lower_limit": False, "request_key": "k1", "attempt": 1, **extra}
     return models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="failed",
                                 created_at=NOW, **fields)
 
@@ -44,7 +44,7 @@ def test_o14_an_investigation_carries_its_request_key_attempt_and_failure_detail
 @pytest.mark.parametrize("field", ["request_key", "attempt"])
 def test_o14_every_investigation_names_its_request_key_and_attempt(field):
     """A row always has its request key and attempt, so the wire model requires both. (O14)"""
-    fields = {"cost_usd": 0.0, "request_key": "k1", "attempt": 1}
+    fields = {"cost_usd": 0.0, "cost_is_lower_limit": False, "request_key": "k1", "attempt": 1}
     del fields[field]
     with pytest.raises(ValidationError, match=field):
         models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="queued", created_at=NOW, **fields)
@@ -71,6 +71,16 @@ def test_s2_cost_is_lower_limit_sits_beside_an_unchanged_cost_and_says_what_at_l
     description = models.Investigation.model_fields["cost_is_lower_limit"].description.lower()
     assert "lower limit" in description
     assert "at least" in description
+
+
+def test_s2_cost_is_lower_limit_is_required_on_the_wire_model_and_in_its_schema():
+    """No default: a repository that forgot the field cannot serve a row, and the schema lists it as required. (S2, r4 API field)"""
+    field = models.Investigation.model_fields["cost_is_lower_limit"]
+    assert field.is_required() and field.annotation is bool
+    assert "cost_is_lower_limit" in models.Investigation.model_json_schema()["required"]
+    fields = {"cost_usd": 0.0, "request_key": "k1", "attempt": 1}
+    with pytest.raises(ValidationError, match="cost_is_lower_limit"):
+        models.Investigation(investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="queued", created_at=NOW, **fields)
 
 
 def test_s2_the_fake_creates_an_investigation_whose_cost_is_not_a_lower_limit():
@@ -149,7 +159,7 @@ def _cancel(status):
         store = InMemoryStore(lambda: NOW)
         store.add_investigation("t", models.Investigation(
             investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status=status, created_at=NOW,
-            cost_usd=0.0, request_key="k1", attempt=1))
+            cost_usd=0.0, cost_is_lower_limit=False, request_key="k1", attempt=1))
         try:
             return store, await store.cancel_investigation("t", "b1000000-0000-4000-8000-000000000001")
         except ports.Conflict as conflict:
@@ -234,3 +244,21 @@ def test_b12_every_audit_vocabulary_gains_takeover_and_retry():
     assert new <= set(typing.get_args(ports.AuditAction))
     assert new <= jobs
     assert jobs <= set(typing.get_args(ports.AuditAction)), "the job store emits an action the API's vocabulary lacks"
+
+
+
+def test_s2_the_demo_investigations_carry_an_exact_mark_beside_a_number():
+    """Both seeded demo investigations are built with `cost_is_lower_limit` (false), each beside a number. (S2, S4)"""
+    from defender.api.demo import demo_deps, demo_id
+    from defender.records.formats import InvestigationId, TenantId
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    tenant = fixture_uuid("tenant:t-one")
+
+    async def run():
+        deps = await demo_deps((tenant,), lambda: NOW)
+        return [await deps.investigations.get_investigation(TenantId(tenant), demo_id(InvestigationId, tenant, name))
+                for name in ("inv-completed", "inv-running")]
+
+    seeded = anyio.run(run)
+    assert [(i.cost_is_lower_limit, i.cost_usd is not None) for i in seeded] == [(False, True)] * 2

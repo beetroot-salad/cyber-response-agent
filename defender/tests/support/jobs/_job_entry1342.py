@@ -13,7 +13,7 @@ lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `
   `start-token` (the token the box start was handed), `interrupted` (the exception type that reached the investigation), `stop-box-started`, then
   `stop-box-done` once `go-on` exists (a later signal during teardown would stop the wait).
 - `replay-priced` (#1377): MAIN, one gather lead and the live review stages as priced stand-ins;
-  `replay-priced-ledger-fault` also refuses ledger inserts during the review. Marks: `calls-<model>`."""
+  `replay-priced-ledger-fault` also refuses ledger inserts during the review. Both configure logging as run.py's `__main__` does. Marks: `calls-<model>`."""
 from __future__ import annotations
 
 import functools
@@ -195,6 +195,9 @@ def _priced_lifecycle(*, ledger_fault: bool):
 
 
 if mode.startswith("replay-priced"):
+    from defender import _log
+
+    _log.configure_from_env()  # the way run.py's __main__ does: the priced modes' stderr is read for the failed-write ERROR line
     lifecycle = _priced_lifecycle(ledger_fault=mode == "replay-priced-ledger-fault")
 elif mode.startswith("replay"):
     lifecycle = _replay_lifecycle(fault_after_close=mode == "replay-fault-after-close")

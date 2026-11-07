@@ -306,7 +306,7 @@ CHILD_SCRIPT = textwrap.dedent("""
     if spend:  # #1343 B2/B6: the live child writes its session database while the worker reads it
         sys.path.insert(0, spend["path"])
         from defender.records.session_store._write import open_store
-        from defender.tests.support.jobs._jobs1342 import _paths, _response, session_pointer
+        from defender.tests.support.jobs._jobs1342 import _paths, _response, insert_spend, session_db, session_pointer
         import hashlib
         case = hashlib.md5(run_id.encode()).hexdigest() if spend.get("per_run") else spend["case"]  # per run: a retry never shares its parent's database
         (runs / f"{run_id}.session-pointer.json").write_text(session_pointer(case), encoding="utf-8")
@@ -317,6 +317,7 @@ CHILD_SCRIPT = textwrap.dedent("""
             for n, (model, usage) in enumerate(spend["steps"]):
                 began = time.monotonic()
                 handle.append(session, _response(model, usage), agent_id="main")
+                insert_spend(session_db(runs, case), run_id, [(model, usage)])  # #1377: the ledger row cost is read from
                 (marks / f"wrote-{n}").write_text(str(time.monotonic() - began), encoding="utf-8")
                 until = time.monotonic() + 60
                 while not (marks / f"go-{n}").exists() and time.monotonic() < until:
@@ -610,10 +611,11 @@ def is_box_token(value: object) -> bool:
 
 
 def job_end(*, setup: str = "done", box: str = "started", report_committed: bool = True,
-            scrub_verified: bool = True, cut_short: str | None = None) -> str:
-    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its five facts (#1421)."""
+            scrub_verified: bool = True, cut_short: str | None = None, spend_write_failed: bool = False) -> str:
+    """The ratified job-end record (`<runs>/<id>.job-end.json`), exactly its six facts (#1421, #1377)."""
     return json.dumps({"setup": setup, "box": box, "report_committed": report_committed,
-                       "scrub_verified": scrub_verified, "cut_short": cut_short})
+                       "scrub_verified": scrub_verified, "cut_short": cut_short,
+                       "spend_write_failed": spend_write_failed})
 
 
 def scrub_verdict(*, ran: bool) -> str:
@@ -697,16 +699,11 @@ SPEND_COLUMNS = ("run_id", "model", "input_tokens", "output_tokens", "cache_read
                  "cache_creation_input_tokens")
 
 
-def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, dict[str, int]]]) -> None:
-    """#1377: `case_id`'s session database (made by the real store, so its own schema) holding one
-    ledger row per `(model, billed usage)` for `run_id`."""
+def insert_spend(database: Path, run_id: str, spend: list[tuple[str, dict[str, int]]]) -> None:
+    """#1377: one ledger row per `(model, billed usage)` for `run_id` in an existing session database."""
     import sqlite3
 
-    from defender.records.session_store._write import open_store
-
-    with open_store(case_id=case_id, sessions=_paths(runs)):
-        pass
-    conn = sqlite3.connect(session_db(runs, case_id))
+    conn = sqlite3.connect(database, timeout=30)
     try:
         for model, usage in spend:
             values = (run_id, model, *(usage.get(k, 0) for k in SPEND_COLUMNS[2:]))
@@ -715,6 +712,19 @@ def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, di
         conn.commit()
     finally:
         conn.close()
+
+
+def plant_spend(runs: Path, case_id: str, run_id: str, spend: list[tuple[str, dict[str, int]]]) -> None:
+    """#1377: `case_id`'s session database (made by the real store, so its own schema, and with a
+    `main` session when this call makes the file) holding one ledger row per `(model, billed usage)`
+    for `run_id`."""
+    from defender.records.session_store._write import open_store
+
+    fresh = not session_db(runs, case_id).exists()
+    with open_store(case_id=case_id, sessions=_paths(runs)) as handle:
+        if fresh:
+            handle.new_session("main")
+    insert_spend(session_db(runs, case_id), run_id, spend)
 
 
 def lower_limit(dsn: str, investigation_id: str) -> bool | None:

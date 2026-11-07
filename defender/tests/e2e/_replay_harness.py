@@ -413,6 +413,22 @@ def priced_make_model(by_name: Mapping[str, Any]):
     return make_model
 
 
+def named_models(**by_kind: str):
+    """`drive(wrap_model=...)` stamping each scripted model's responses with `by_kind`'s model name ("main", "gather"), so the
+    pricing table prices a `Priced` stand-in on the in-process driver as `priced_make_model` does for the job child."""
+    def wrap(kind: str, model: Any) -> Any:
+        return FunctionModel(model.function, model_name=by_kind[kind])
+
+    return wrap
+
+
+def priced_gather(fn, **kw) -> Priced:
+    """`fn` as a priced gather script that also answers the correlation lead (its own default summary), marked as serving it."""
+    priced = Priced(_with_default_correlation(fn, None), **kw)
+    priced.serves_correlation = True
+    return priced
+
+
 def _with_default_correlation(gather, main):
     """`gather` (or `main`, when none is given) as the gather model, except that the
     correlation lead's conversation is answered by its own default fake. A `gather` that routes

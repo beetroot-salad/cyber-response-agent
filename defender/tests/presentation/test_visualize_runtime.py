@@ -160,9 +160,7 @@ def test_gather_dispatch_phase_and_cost(tmp_path):
     gphase = d.gather_dispatch_phase(events, tags)
     assert gphase["l-001"].startswith("PLAN")
 
-    attr = d.phase_attribution(events, order)
-    main_total = sum(b["cost"] for b in attr.values())
-    by_phase, gather_total = d.gather_cost_by_phase(run, events, tags, order, main_total, 0.5)
+    by_phase, gather_total = d.gather_cost_by_phase(run, events, tags, order)
     assert gather_total > 0
     gather_phase = next(p for p in order if p.startswith("GATHER"))
     assert by_phase[gather_phase] > 0
@@ -194,9 +192,7 @@ def test_gather_cost_not_dropped_without_gather_phase(tmp_path):
     messages = [
         {"kind": "response", "agent_id": "gather:l-001", "model": "claude-haiku-4-5", "usage": _USAGE},
     ]
-    by_phase, gather_total = d.gather_cost_by_phase(
-        tmp_path, [], [], order, 0.0, 0.0, messages
-    )
+    by_phase, gather_total = d.gather_cost_by_phase(tmp_path, [], [], order, messages=messages)
     full = sum(d.gather_cost_by_model(tmp_path, messages).values())
     assert full > 0
     assert gather_total == full
@@ -312,7 +308,9 @@ def test_render_runtime_page_reconciles_and_renders(tmp_path, monkeypatch):
 
     headline = float(re.search(r'ts-cost">\$([0-9.]+)', html).group(1))
     segs = [float(x) for x in re.findall(r'cb-pct">\$([0-9.]+)', html)]
+    assert abs(headline - 0.5) < 0.002, f"the headline {headline} is not the run file's total (#1377 S5)"
     assert abs(headline - sum(segs)) < 0.002, f"{headline} != {sum(segs)}"
+    assert "unattributed" in _without_styles(html), "the part of the total no request-log bar explains is not shown (#1377 S5)"
     # Asked of the rendered SPAN, not of the class name: the stylesheet is inlined into every
     # page, so `"ts-review" in html` is true whether or not anything was rendered with it.
     assert re.search(r'ts-review">', html) is None, (
@@ -339,21 +337,20 @@ def _append_review_calls(run: Path) -> float:
 
 
 def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path, monkeypatch):
-    """The gate's calls are calls the run made, so they are IN the total — and named,
-    because an operator who cannot separate them cannot answer what the gate cost."""
+    """The gate's calls are calls the run made: the run file's total holds them once (the headline adds nothing), and the page names them. (S5)"""
     import re
 
     run = _build_run(tmp_path)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     review_total = _append_review_calls(run)
     assert review_total > 0.002, "fixture too cheap to discriminate against the tolerance"
+    _restate_the_run_total(run, 0.5 + review_total, lower_limit=False)
 
     html = render_runtime_page(run)
 
     headline = float(re.search(r'ts-cost">\$([0-9.]+)', html).group(1))
-    segs = [float(x) for x in re.findall(r'cb-pct">\$([0-9.]+)', html)]
-    assert abs(headline - (sum(segs) + review_total)) < 0.002, (
-        f"headline {headline} is not the phase bars {sum(segs)} plus the review {review_total}"
+    assert abs(headline - (0.5 + review_total)) < 0.002, (
+        f"headline {headline} is not the run file's total {0.5 + review_total}: the review was counted twice or dropped"
     )
 
     named = re.search(r'ts-review">\(incl review \$([0-9.]+)\)', html)
@@ -371,24 +368,59 @@ def _restate_the_run_total(run: Path, total: float, *, lower_limit: bool) -> Non
     path.write_text("".join(json.dumps(e) + "\n" for e in events))
 
 
+def _without_styles(html: str) -> str:
+    """The page minus its inlined stylesheet, which names every class whether or not anything was rendered with it."""
+    import re
+
+    return re.sub(r"<style.*?</style>", "", html, flags=re.S)
+
+
 @pytest.mark.parametrize("lower_limit", [False, True], ids=["exact", "at least"])
-def test_s5_the_headline_is_the_run_files_total_review_counted_once_and_marked_when_it_is_a_lower_limit(
-        tmp_path, monkeypatch, lower_limit):
-    """The run file's total already holds the review's calls: the headline is that total alone, "at least" when marked. (S5)"""
+def test_s5_the_headline_says_at_least_exactly_when_the_run_file_marks_its_total_a_lower_limit(tmp_path, monkeypatch, lower_limit):
+    """The headline is the run file's total, prefixed "at least" when `total_cost_is_lower_limit`. (S5)"""
     import re
 
     run = _build_run(tmp_path)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
-    review_total = _append_review_calls(run)
-    total = 0.5 + review_total
-    _restate_the_run_total(run, total, lower_limit=lower_limit)
+    _restate_the_run_total(run, 0.5, lower_limit=lower_limit)
+
+    headline = re.search(r'ts-cost">(at least )?\$([0-9.]+)', render_runtime_page(run))
+
+    assert headline is not None, "no headline cost"
+    assert float(headline.group(2)) == pytest.approx(0.5, abs=0.002)
+    assert (headline.group(1) is not None) is lower_limit
+
+
+def test_s5_a_total_below_what_the_bars_explain_stays_the_headline_and_no_unattributed_segment_goes_negative(tmp_path, monkeypatch):
+    """The unattributed segment is the headline minus the bars, floored at 0: a total under the bars is still the headline. (S5)"""
+    import re
+
+    run = _build_run(tmp_path)
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    _restate_the_run_total(run, 0.01, lower_limit=False)
 
     html = render_runtime_page(run)
 
-    headline = re.search(r'ts-cost">(at least )?\$([0-9.]+)', html)
-    assert headline is not None, "no headline cost"
-    assert float(headline.group(2)) == pytest.approx(total, abs=0.002), "the review was counted twice or dropped"
-    assert (headline.group(1) is not None) is lower_limit
+    assert float(re.search(r'ts-cost">\$([0-9.]+)', html).group(1)) == pytest.approx(0.01, abs=0.002)
+    assert "unattributed" not in _without_styles(html), "an unattributed segment was shown with nothing unattributed"
+    assert all(float(x) >= 0 for x in re.findall(r'cb-pct">\$(-?[0-9.]+)', html))
+
+
+def test_s5_without_gather_responses_in_the_request_log_the_total_over_main_is_not_called_gather(tmp_path):
+    """No lead response in the log means no gather cost on any phase; the run file's total minus MAIN's is not gather spend. (S5)"""
+    run = _build_run(tmp_path)
+    events = read_jsonl_rows(run / "tool_trace.jsonl")
+    order = _phase_order(run)
+    tags = d.tag_events_by_phase(events, order)
+    assert events[-1]["total_cost_usd"] == 0.5, "premise: a total far over what MAIN's responses cost"
+
+    main_only = [m for m in d.load_messages(run) if not str(m.get("agent_id", "")).startswith("gather")]
+    assert len(main_only) < len(d.load_messages(run)), "premise: the log did hold a lead response to leave out"
+
+    by_phase, gather_total = d.gather_cost_by_phase(run, events, tags, order, messages=main_only)
+
+    assert gather_total == 0, by_phase
+    assert not any(by_phase.values()), by_phase
 
 
 def _duplicate_the_gather_phase(run: Path) -> None:
