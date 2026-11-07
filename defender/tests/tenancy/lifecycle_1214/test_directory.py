@@ -5,6 +5,12 @@ imports tenancy).
 The import-rule cases live here, not in `tests/migrations/test_1339_migrations.py` (whose
 `test_importing_identity_loads_no_database_driver` is the nearest guard): that file is not in this slice's
 edit list beyond r8's changes. They reuse its `run_python` probe.
+
+#1214 attack-3 hole 15 (P3, Flow 4): a sibling run (`--tenant T --episode E --world W`) is admitted like an ordinary
+run: only while the tenant is `active`, and with no directory and no database address it refuses.
+
+#1214 attack-3 holes 1, 2, 4 (Flow 4, P3): the lead drain re-reads the tenant's state at each claim, fails
+closed on a directory error, treats offboarded and unknown as not active, and never counts a set-aside claim.
 """
 from __future__ import annotations
 
@@ -14,6 +20,10 @@ import datetime as dt
 import textwrap
 import types
 from typing import Any
+import contextlib
+import io
+import json
+from pathlib import Path
 
 import pytest
 
@@ -24,11 +34,34 @@ from defender.tests.support.shared._postgres1339 import (  # noqa: F401 — fixt
     execute,
     migrated_database,
 )
+from defender.tests.support.tenancy._active1214 import DSN_ENV, active_directory
+from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
+    NOT_A_REFUSAL_OF_STATE,
+    TENANT,
+    _Calls,
+    _has,
+    _tenant_placed,  # noqa: F401 — autouse fixture
+)
+from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
+    _FlipOnFirst,
+    _twin_directory,
+)
+from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: F401 — fixture
+
 
 NOW = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.UTC)
+
+
 T1 = fixture_uuid("tenant:1214-dir-1")
+
+
 T2 = fixture_uuid("tenant:1214-dir-2")
+
+
 ORIGIN = "http://forge.test/tenants/t1.git"
+
+
 #: (state, pending_action, step, step_actor): a row each state may hold (data model).
 JOB = {"creating": ("create", "names", "service"), "active": (None, None, None),
        "offboarding": ("offboard", "offboard", "service"), "offboarded": (None, None, None)}
@@ -349,3 +382,190 @@ def test_nothing_under_box_imports_tenancy():
     """)
     assert probe.returncode == 0, probe.stderr
     assert probe.stdout.split() == ["no-tenancy", "tenancy"]
+
+
+def _sibling_start(directory: Any = ...) -> str:
+    """`run.main` of a sibling up to its first refusal or fault: its text."""
+    from defender import run as run_py
+
+    calls = _Calls()
+    given = {} if directory is ... else {"directory": directory}
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            run_py.main(["--tenant", TENANT, "--episode", "ep-1214", "--world", "w-1214", "--no-learn"], **given,
+                        preflight=calls.hook("preflight", 0), visualize=calls.hook("visualize", None),
+                        enqueue=calls.hook("enqueue", False), publish=calls.hook("publish", ""),
+                        lifecycle=calls.hook("lifecycle", {"output": "", "requests": 0, "truncated_by": None}))
+    except SystemExit as refused:
+        return f"{refused.code}\n{err.getvalue()}"
+    except Exception as failed:  # noqa: BLE001 — past acceptance, the next real refusal
+        return f"{type(failed).__name__}: {failed}\n{err.getvalue()}"
+    return err.getvalue()
+
+
+@pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
+def test_a_sibling_run_refuses_a_tenant_that_is_not_active_naming_its_state(data_root, state):
+    """`--episode` runs refuse a non-`active` tenant naming its state, before the episode is looked up (Flow 4, P3)."""
+    refused = _sibling_start(active_directory(data_root, TENANT, state=state))
+    _has(refused, "[run.py]", state)
+    admitted = _sibling_start(active_directory(data_root, TENANT))
+    assert not any(word in admitted.lower() for word in NOT_A_REFUSAL_OF_STATE), f"control: {admitted}"
+
+
+def test_a_sibling_run_of_an_unknown_tenant_is_refused(data_root):
+    """A directory holding no row for the tenant refuses a sibling like an ordinary run (P3)."""
+    from defender.tenancy import InMemoryTenantRepository, TenantDirectory
+
+    twin: Any = InMemoryTenantRepository()
+    refused = _sibling_start(TenantDirectory(lambda: twin))
+    _has(refused, "[run.py]")
+    assert "no such tenant" in refused, refused
+
+
+def test_a_sibling_run_with_no_directory_and_no_database_address_refuses(data_root, monkeypatch):
+    """Fails closed: no directory, no address -> a refusal naming the address (Flow 4)."""
+    monkeypatch.delenv(DSN_ENV, raising=False)
+    _has(_sibling_start(), "[run.py]", DSN_ENV)
+
+
+#: What the directory answers after the first claim: a state, None (no row), or an error to raise.
+AFTER = ["offboarding", "offboarded", "creating", None]
+
+
+class _Failing(Exception):
+    pass
+
+
+def _scripted(directory: Any) -> tuple[Any, Any]:
+    """`directory` with a `state` that can be overridden from now on: (directory, set_answer)."""
+    box: dict[str, Any] = {}
+    real = directory.state
+
+    def state(tenant_id: Any) -> Any:
+        if "answer" in box:
+            answer = box["answer"]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        return real(tenant_id)
+
+    object.__setattr__(directory, "state", state)
+    return directory, lambda answer: box.update(answer=answer)
+
+
+def _drain(t: Any, tmp_path: Path, monkeypatch: Any, answer: Any) -> tuple[list[str], dict[str, str], Any, Any]:
+    """Two queued runs, then ticks of the lead drain with `answer` given after the first claim.
+    Returns (labels served over the ticks, run name -> label, paths, directory)."""
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+        BoxSpy,
+        LeadStep,
+        drain_paths,
+        executed_lead,
+        lead_author_drain,
+        product_repo,
+        queued_run,
+    )
+
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
+    directory, answer_with = _scripted(_twin_directory(t.tenant_id, t.origin)[0])
+    paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+    runs = {queued_run(t, paths, label).name: label for label in ("claim-1", "claim-2")}
+    inner = LeadStep(executed={r: [executed_lead("cmdb.owner-by-tag")] for r in runs}, edits={})
+    step = _FlipOnFirst(inner, lambda: answer_with(answer))
+    for _ in range(4):  # repeated ticks: a set-aside claim must not wear out
+        with contextlib.suppress(_Failing):
+            lead_author_drain(t, paths, box=BoxSpy(), run_lead_author=step, run_pitfalls=lambda *_a, **_k: 0,
+                              directory=directory)
+    return step.served, runs, paths, directory
+
+
+@pytest.mark.parametrize("answer", AFTER)
+def test_a_claim_of_a_tenant_no_longer_active_stays_queued_uncounted_across_ticks(p4_tenant, tmp_path, monkeypatch, answer):  # noqa: F811
+    """Whatever the tenant became after the first claim, the second is never served, keeps `attempts`, and survives repeated ticks (Flow 4)."""
+    t = p4_tenant
+    served, runs, paths, _ = _drain(t, tmp_path, monkeypatch, answer)
+    assert len(served) == 1, served
+    unserved = next(label for run, label in runs.items() if run != served[0])
+    queued = Path(location_path(paths.state_root)) / "author-queue" / f"case-{unserved}.json"
+    assert queued.is_file(), "the claim of a tenant no longer active must stay queued"
+    assert json.loads(queued.read_text(encoding="utf-8")).get("attempts", 0) == 0, "a set-aside claim was counted"
+
+
+def test_a_directory_that_fails_at_the_second_claim_does_not_serve_it(p4_tenant, tmp_path, monkeypatch):  # noqa: F811
+    """A state read that raises at the second claim: that claim is not served and is not lost (fails closed, deck PR #678)."""
+    t = p4_tenant
+    served, runs, paths, _ = _drain(t, tmp_path, monkeypatch, _Failing("database away"))
+    assert len(served) == 1, served
+    unserved = next(label for run, label in runs.items() if run != served[0])
+    root = Path(location_path(paths.state_root)) / "author-queue"
+    assert list(root.rglob(f"case-{unserved}.json")), "the unserved claim vanished"
+
+
+class _Blip:
+    """The tenant's repository, until `down` is set: then every read fails as a database that went away after the
+    drain started does (the driver's connection-class error)."""
+
+    def __init__(self, twin: Any) -> None:
+        self.twin, self.down = twin, False
+        self.failed: list[str] = []
+
+    def __getattr__(self, name: str) -> Any:
+        if not self.down or name == "close":
+            return getattr(self.twin, name)
+
+        async def unreachable(*_a: Any, **_k: Any) -> Any:
+            self.failed.append(name)
+            import sqlalchemy.exc
+
+            raise sqlalchemy.exc.OperationalError("SELECT", {}, Exception("connection failed: server closed the "
+                                                                          "connection unexpectedly"))
+        return unreachable
+
+
+def test_a_database_blip_mid_tick_leaves_the_claim_queued_uncounted_and_the_tick_ends_cleanly(p4_tenant, tmp_path, monkeypatch):  # noqa: F811
+    """The tenant records' database goes away after the first claim is served: the next claim is handed back exactly
+    as queued (no attempt counted, no failed letter) and no more are taken, the tick ends without a fault, and the
+    ticks that meet the outage at their delivery skip; once it is back the claims are served (PR #1350 review: repeated
+    blips must not walk a valid row into the "served N times" quarantine)."""
+    from defender.tenancy import TenantDirectory
+    from defender.tests.tenancy.tenant_1108_p4._drain_support import (
+        BoxSpy,
+        LeadStep,
+        drain_paths,
+        executed_lead,
+        lead_author_drain,
+        product_repo,
+        queued_run,
+    )
+
+    t = p4_tenant
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
+    blip = _Blip(_twin_directory(t.tenant_id, t.origin)[0]._open())  # noqa: SLF001 — the twin behind the directory
+    directory = TenantDirectory(lambda: blip)
+    paths = drain_paths(t, product_repo(tmp_path, adapters=("cmdb",)))
+    labels = ("claim-1", "claim-2", "claim-3")
+    runs = {queued_run(t, paths, label).name: label for label in labels}
+    inner = LeadStep(executed={r: [executed_lead("cmdb.owner-by-tag")] for r in runs}, edits={})
+    step = _FlipOnFirst(inner, lambda: setattr(blip, "down", True))
+    queue = Path(location_path(paths.state_root)) / "author-queue"
+    queued = {label: (queue / f"case-{label}.json").read_bytes() for label in labels}
+
+    def tick() -> int:
+        return lead_author_drain(t, paths, box=BoxSpy(), run_lead_author=step, run_pitfalls=lambda *_a, **_k: 0,
+                                 directory=directory)
+    for attempt in ("the tick the blip begins in", "a tick during the outage", "another tick during the outage"):
+        assert tick() == 0, f"{attempt}: the tick ended in a fault"
+        [served] = step.served
+        for unserved in (label for run, label in runs.items() if run != served):
+            assert (queue / f"case-{unserved}.json").read_bytes() == queued[unserved], (
+                f"{attempt}: a claim the outage met must stay exactly as queued (no attempt counted)")
+        if attempt == "the tick the blip begins in":
+            assert blip.failed.count("tenant") == 1, f"the tick kept taking claims after the outage: {blip.failed}"
+        assert list((queue / "failed").glob("*")) == [], f"{attempt}: a failed letter was written"
+        assert not list((queue / "inflight").glob("*")), f"{attempt}: a claim was left in flight"
+    blip.down = False
+    assert tick() == 0
+    assert sorted(step.served) == sorted(runs), "the claim the outage met was not served once the database was back"
